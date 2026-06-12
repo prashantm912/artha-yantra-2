@@ -30,10 +30,10 @@ as the verification pass — see README design-authority note.)*
 - [ ] A.1 — compose topology: pinned/healthchecked/capped timescaledb + redis, dev-tools profile, `ay` CLI, remote-access doc (Q3)
 - [ ] A.11 — db-backup sidecar: 00:30 IST `pg_dump -Fc` per schema, 14d+8w rotation, ntfy on failure
 - [ ] A.8 — Flyway one-shot init: admin + 3 per-service lineages from empty volume, idempotent
-- [ ] A.3 — Maven reactor + `common-web` (core / servlet adapter split)
-- [ ] A.4 — error-code taxonomy constants (COMMON §8.3 spellings)
-- [ ] A.5 — `market-calendar` (IST session, NSE 2026 holidays, Tuesday expiries)
-- [ ] A.6 — ECS JSON logging + `MaskingMessageConverter` (masking unit-tested)
+- [x] A.3 — Maven reactor + `common-web` (core / servlet adapter split)
+- [x] A.4 — error-code taxonomy constants (COMMON §8.3 spellings)
+- [x] A.5 — `market-calendar` (IST session, NSE 2026 holidays, Tuesday expiries)
+- [x] A.6 — ECS JSON logging + `MaskingMessageConverter` (masking unit-tested)
 - [ ] A.2 — edge-gateway: Argon2id login, Redis sessions, route table, headers, rate limits, hash-password tool
 - [ ] A.7 — tick pipeline (mock feed → normalizer → Redis) + gateway STOMP WS bridge with 20 Hz conflation
 - [ ] A.10 — CI: ci-java + ci-migrations, gitleaks step in every workflow

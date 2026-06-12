@@ -37,6 +37,7 @@ public class TickNormalizer {
                   key.tradingsymbol(),
                   raw.lastPrice(),
                   raw.cumulativeDayVolume(),
+                  raw.openInterest(),
                   raw.exchangeTimestamp().atOffset(Ist.OFFSET),
                   seq);
             });

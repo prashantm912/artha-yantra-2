@@ -12,8 +12,81 @@ subset is CI-enforced).
 
 ## Current phase
 
-**Stage A — COMPLETE (2026-06-12). Next: Stage B — Market-data spine
-(Phases 9–17), on a fresh `feat/stage-b-*` branch off `main`.**
+**Stage B — Market-data spine (Phases 9, 9A, 10–15, 15A, 15B, 16, 16A, 17) —
+IMPLEMENTATION + AUDIT COMPLETE on `feat/stage-b-market-data-spine`,
+phase-per-commit; exit gate walked 2026-06-13 (record below); pending push/PR/
+CI/merge. (Stage A completed 2026-06-12; its exit-gate record is below.)**
+
+*(How Stage B was walked: 13 phases implemented phase-per-commit with unit +
+Testcontainers ITs + WireMock for every live wire adapter + a compose demo
+through the gateway per phase; then a 39-agent spec-vs-implementation audit
+(one auditor per phase, adversarial verification of every serious finding)
+confirmed 3 CRITICAL + ~20 MAJOR gaps, all fixed and regression-tested in the
+audit commit — headline: post-close ticks re-opening the flushed session-close
+bar, continuous=1 on per-contract FUT fetches, CONT symbols reachable through
+POST /candles/refresh. 164 market-data + 20 gateway tests green.)*
+
+---
+
+## Stage-B exit gate (plan §15.2 Phase-1 row — walked 2026-06-13 against the running mock stack)
+
+- [x] **Live tick reaches Redis < 50 ms after Kite delivery.** Measured live:
+      tick generation → published-on-Redis = **3 ms** (mock feed, B-6
+      pipeline, same-tick comparison of the embedded producer timestamp vs the
+      `ticks:last-at` publish marker).
+- [x] **Historical fetch fills gaps idempotently at ≤ 3 req/s.** Cold fetch =
+      exactly one gateway call; warm read = zero gateway-port invocations
+      (asserted); partial coverage fetches only the missing sub-range; 50-burst
+      limiter test ≥ 15 s end-to-end and never > 3/s in any window.
+- [x] **The same flows pass on the mock profile** — every Stage-B phase is
+      mock-green with zero Kite credentials (the whole IT battery runs without
+      any Kite material; live impls are WireMock-pinned).
+- [x] **Snapshots accruing every 5 min in market hours** — the Phase-15
+      scheduler is calendar-gated; the IT drives a market-hours clock and the
+      off-hours degradation (stale:true, zeroed book, EOD OI) separately.
+- [x] **Raw quote rows persist from the first market day with IV gated on S1**
+      — every row carries LTP/bid/ask/spot/OI/oi_change + `forward_price` +
+      `risk_free_rate`; the 490-vector golden suite (S1, above) gates the
+      computed columns via `artha.options.iv-enabled`; null-IV rows persist
+      with reason codes, never skipped.
+- [x] **Contract canary runs on the first LIVE transition and surfaces on
+      `/auth/kite/status`** — WireMock-verified both drift directions + the
+      Redis daily-once marker; mock runs no canary by design. *(Result key is
+      `kite:contract:check` — documented deviation, parking list.)*
+- [x] **Contract-spec history accrues from the first sync** — FIRST_SEEN rows
+      on sync, as-of resolution at change boundaries, `spec_asof_estimated`
+      honesty flag (Phase 9A ITs).
+- [x] **Front/next/far FUT + INDIA VIX pinned; term structure from ONE batched
+      quote** — single-invocation assertion; basis fixture (120.0000 /
+      0.0608 @ 30d); CONTANGO/BACKWARDATION by near→next slope; per-bar FUT OI
+      through to the 1d cagg's `last(oi)`.
+- [x] **Continuous futures stitch deterministically** — exact 150.0000 fixture
+      gap, idempotent re-runs, `adjust=back|none` verified at the API,
+      roll-day divergence caveat documented in the roller javadoc + stage doc.
+- [x] **Corporate-action job detects the planted split and rebuilds** —
+      uniform-ratio guard rejects single-anchor and non-uniform noise;
+      re-backfill rides the rate-limited gateway; `fetched_at` bump asserted;
+      byte-stable post-rebuild series.
+
+**Stage-end deliverables roll-up:**
+
+- [x] Daily Kite contract canary (S2B) — fixture-derived manifests, recursive
+      field-set diff, first-party ntfy.
+- [x] Greeks golden-vector suite + S1 gating of IV persistence; raw quotes
+      captured from day one (S4).
+- [x] `docs/retention.md` (A2 ≥5y floor, 50 GB review trigger) +
+      `docs/runbook-notes.md` (A3 minute-depth probe, S2 Tuesday-expiry note).
+- [x] ~~Leaked-credential tripwire~~ — dropped per A6; the live fail-fast
+      (key + secret + master key files) remains and is tested.
+- [x] 2026-06-12 feature-selection additions all landed: 9A spec history, 15A
+      futures slice + INDIA VIX, 15B CONT + roll_events, 16A corporate
+      actions, `candles_1w`, `oi_buildup`/`rs_rank`.
+
+**Owner actions carried forward:** minute-depth probe in live mode (A3);
+NSE constituents CSV source verification before Phase 22 (S8); branch
+protection clicks. **Forward dependencies (by design):** `jobs:summary`
+zeros until Phase 28; `rs_rank` universe = active equities until Phase 22;
+1w/futures_of_underlying validate at the Phase 18 freeze.
 
 *(How Stage A was walked: Part 1 sections A.1–A.17 implemented
 section-per-commit; Part 2 Phases 1–8 then audited one-by-one against their
@@ -81,9 +154,66 @@ snapshots (Phases 9–17); Kite minute-depth probe (A3); NSE index-constituents
 CSV source verification (before Phase 22); `tools/hash-password` may gain a
 compose-escaped output mode (quality-of-life).
 
+## S1 gate — Black-76 golden-vector acceptance (Phase 14, walked 2026-06-13)
+
+The formal S1 record (B-10 / B-15): the Phase 15 snapshot job may enable its
+computed IV/Greeks columns **only while this suite stays green**; raw-quote
+capture is never blocked by it.
+
+- [x] Grid covered: F/K 0.85–1.15, T ∈ {0.5, 2, 7, 30, 90} d, σ 8–60 %, CE+PE —
+      **490 committed py_vollib vectors** (offline generator, A4 exception;
+      never generated at test runtime).
+- [x] Greeks vs reference: relative error ≤ 1e-6 across all vectors; absolute
+      ≤ 1e-9 where |reference| < 1e-3 (far-OTM gamma/vega corners included).
+- [x] IV solver round-trip: reprice |Black76(IV) − market price| ≤ ₹0.01 for
+      every vector carrying ≥ 1 tick of time value (324/490; the 0.5 d/2 d
+      far-OTM remainder has no recoverable vol by construction).
+- [x] Expiry-day: T from 5 minutes to 0 returns finite greeks via the
+      documented `T_MIN` clamp (5 calendar minutes, ACT/365).
+- [x] Edge corpus: at/below-discounted-intrinsic and zero-quote inputs → null
+      IV + reason code (`BELOW_INTRINSIC` / `ZERO_QUOTE` / `NO_CONVERGENCE`),
+      never NaN/Infinity.
+- [x] Model is Black-76 **on the forward** (PCP → monthly-futures-LTP →
+      `S·e^{rT}` precedence implemented and tested); no Black-Scholes-on-spot
+      shortcut anywhere.
+- [x] Deterministic across runs (same inputs ⇒ identical `BigDecimal` outputs).
+- [ ] Market sanity (informational, non-gating): solved IV within ±2 vol points
+      of the NSE chain page for liquid ATM±2 strikes on one live capture —
+      pends the first live-mode session with real Kite credentials.
+
 ## Parking list (deferred)
 
-*(empty — items deferred out of a section land here with their target)*
+**From the Stage-B audit (2026-06-13)** — accepted deviations + deferred work,
+each with its target:
+
+- **B-9 binary-frame guard production wiring** — `KiteBinaryFrameParser` is
+  fixture-pinned and registry-driven, but javakiteconnect's `KiteTicker`
+  exposes no raw-frame hook, so the guard cannot intercept live frames through
+  the SDK. Production coverage today = the daily contract canary + the
+  fixture-pinned envelope tests + no-tick alerting. Full wiring requires
+  replacing the SDK socket with a first-party WS client (revisit when Kite
+  changes its wire format or at the Stage-C hardening pass).
+- **`instruments.exchange_token` population** — column exists, never written
+  (dump record drops it). Wire through `InstrumentRecord` + both dump parsers
+  when anything consumes it (nothing in Stages B–D does).
+- **Canary result Redis key** — result lands in `kite:contract:check` (JSON) +
+  `GET /auth/kite/status`, not embedded in the plain-string
+  `kite:session:status` the spec names (would break that key's existing
+  readers). Documented deviation.
+- **Recorded Kite binary-frame capture** — the mixed-frame fixture is
+  synthesized from the documented envelope; commit one real capture during the
+  first live session (closes the shared-misreading risk).
+- **`candles_1h` IST alignment** — hourly cagg buckets align to UTC hours
+  (= :30 IST boundaries). Deciding to re-anchor means dropping/recreating the
+  cagg; revisit before the Stage-E chart page consumes 1h.
+- **`kite.rateBudget` on system status** — field present, null until
+  market-data-service publishes a budget key (limiter metrics exist; producer
+  pends Stage C status work).
+- **~5k-row mock dump fixture** — CD-14 names ~5k rows; the frozen fixture is
+  ~1.1k. The ≤5 s sync budget is asserted at the committed size; regenerate at
+  5k only as a deliberate fixture-freeze event.
+
+*(other items deferred out of a section land here with their target)*
 
 - Stage B seeds (recorded in the stage file, not deferred work): instruments
   table, candles hypertable, Kite OAuth/AES-GCM token store, live ticker,

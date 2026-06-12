@@ -12,7 +12,7 @@ import java.util.List;
  */
 public interface HistoricalCandleGateway {
 
-  /** One OHLCV bar; prices are exact decimals, bucket start is IST. */
+  /** One OHLCV bar; prices are exact decimals, bucket start is IST, OI for F&O. */
   record Candle(
       InstrumentKey key,
       String interval,
@@ -21,7 +21,8 @@ public interface HistoricalCandleGateway {
       BigDecimal high,
       BigDecimal low,
       BigDecimal close,
-      long volume) {}
+      long volume,
+      Long oi) {}
 
   /** Candles for {@code key} at {@code interval} within {@code [from, to)}. */
   List<Candle> fetch(InstrumentKey key, String interval, Instant from, Instant to);

@@ -31,6 +31,7 @@ public class FeedPipeline implements SmartLifecycle {
   private final RedisTickPublisher publisher;
   private final LastTickStore lastTickStore;
   private final StringRedisTemplate redis;
+  private final java.util.List<NormalizedTickListener> listeners;
   private final boolean autostart;
 
   private volatile boolean running;
@@ -44,6 +45,7 @@ public class FeedPipeline implements SmartLifecycle {
       RedisTickPublisher publisher,
       LastTickStore lastTickStore,
       StringRedisTemplate redis,
+      java.util.List<NormalizedTickListener> listeners,
       @Value("${artha.feed.autostart:true}") boolean autostart) {
     this.marketFeed = marketFeed;
     this.sessionGateway = sessionGateway;
@@ -52,21 +54,36 @@ public class FeedPipeline implements SmartLifecycle {
     this.publisher = publisher;
     this.lastTickStore = lastTickStore;
     this.redis = redis;
+    this.listeners = listeners;
     this.autostart = autostart;
   }
 
   @Override
   public void start() {
-    if (running || !autostart) {
+    if (!autostart) {
+      return;
+    }
+    startFeed();
+  }
+
+  /** Explicit start (the Phase-16 09:10 ticker schedule) — bypasses the autostart gate. */
+  public void startFeed() {
+    if (running) {
       return;
     }
     running = true;
     redis.opsForValue().set(SESSION_STATUS_KEY, sessionGateway.statusLabel());
+    redis.opsForValue().set("kite:ticker:status", "CONNECTED"); // B-13 ticker sub-field
     normalizerThread = new Thread(this::normalizerLoop, "tick-normalizer");
     normalizerThread.setDaemon(true);
     normalizerThread.start();
     marketFeed.start(ingressQueue);
     log.info("feed pipeline started (status={})", sessionGateway.statusLabel());
+  }
+
+  /** Explicit stop (the Phase-16 15:35 ticker schedule). */
+  public void stopFeed() {
+    stop();
   }
 
   private void normalizerLoop() {
@@ -82,6 +99,9 @@ public class FeedPipeline implements SmartLifecycle {
                 tick -> {
                   lastTickStore.update(tick);
                   publisher.publish(tick);
+                  for (NormalizedTickListener listener : listeners) {
+                    listener.onNormalizedTick(tick);
+                  }
                 });
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
@@ -96,6 +116,11 @@ public class FeedPipeline implements SmartLifecycle {
   public void stop() {
     running = false;
     marketFeed.stop();
+    try {
+      redis.opsForValue().set("kite:ticker:status", "DISCONNECTED");
+    } catch (RuntimeException redisGone) {
+      log.debug("ticker status write skipped on shutdown: {}", redisGone.getMessage());
+    }
     if (normalizerThread != null) {
       normalizerThread.interrupt();
     }

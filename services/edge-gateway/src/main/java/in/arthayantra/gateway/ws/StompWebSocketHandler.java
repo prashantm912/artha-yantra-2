@@ -225,13 +225,16 @@ public class StompWebSocketHandler implements WebSocketHandler {
     if (channel.startsWith("jobs/")) {
       return "jobs.progress";
     }
+    if (channel.equals("system")) {
+      // B-13: /topic/system deltas ride the kite.status channel (published on change)
+      return "kite.status";
+    }
     boolean allowed =
         channel.startsWith("ticks.")
             || channel.startsWith("candles.1m.")
             || channel.equals("signals")
             || channel.equals("options.chain")
-            || channel.equals("jobs.progress")
-            || channel.equals("system");
+            || channel.equals("jobs.progress");
     return allowed ? channel : null;
   }
 }

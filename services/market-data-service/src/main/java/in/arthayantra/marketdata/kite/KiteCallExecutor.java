@@ -1,0 +1,144 @@
+package in.arthayantra.marketdata.kite;
+
+import in.arthayantra.common.web.error.ApiException;
+import in.arthayantra.common.web.error.ErrorCodes;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
+import io.github.resilience4j.core.IntervalFunction;
+import io.github.resilience4j.ratelimiter.RateLimiter;
+import io.github.resilience4j.ratelimiter.RateLimiterRegistry;
+import io.github.resilience4j.ratelimiter.RequestNotPermitted;
+import io.github.resilience4j.retry.Retry;
+import io.github.resilience4j.retry.RetryConfig;
+import io.micrometer.core.instrument.MeterRegistry;
+import java.io.IOException;
+import java.time.Duration;
+import java.util.function.Supplier;
+import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.web.client.ResourceAccessException;
+
+/**
+ * The B-3 resilience stack composed once: {@code Retry( RateLimiter( CircuitBreaker( call ) ) )}.
+ * Every attempt re-acquires a limiter permit (strict pacing — retries never burst past the
+ * budget) and is recorded by the breaker. Retry: idempotent GETs only, max 4 attempts,
+ * exponential 500 ms ×2 capped 8 s with FULL JITTER, honoring Kite's {@code Retry-After} on 429;
+ * never on 4xx auth/validation. Limiter saturation (after the 5 s queue) maps to
+ * {@code 429 RATE_LIMIT_LOCAL} — surfaced distinctly from Kite's own 429.
+ */
+@Component
+public class KiteCallExecutor {
+
+  /** Endpoint families with their B-3 limiter instances. */
+  public enum Family {
+    HISTORICAL("kite-historical"),
+    QUOTE("kite-quote"),
+    DUMP("kite-dump"),
+    MISC("kite-misc");
+
+    final String limiterName;
+
+    Family(String limiterName) {
+      this.limiterName = limiterName;
+    }
+  }
+
+  private final RateLimiterRegistry rateLimiters;
+  private final CircuitBreakerRegistry circuitBreakers;
+  private final Retry retry;
+
+  /** Wires the registries (yml-configured instances) + the programmatic retry policy. */
+  public KiteCallExecutor(
+      RateLimiterRegistry rateLimiters,
+      CircuitBreakerRegistry circuitBreakers,
+      MeterRegistry meterRegistry) {
+    this.rateLimiters = rateLimiters;
+    this.circuitBreakers = circuitBreakers;
+    this.retry =
+        Retry.of(
+            "kite-rest",
+            RetryConfig.custom()
+                .maxAttempts(4)
+                .intervalBiFunction(
+                    (attempt, either) -> {
+                      // honor Kite's Retry-After on 429 (B-3)
+                      if (either.isLeft() && either.getLeft() instanceof KiteRateLimitedException kre
+                          && kre.retryAfterMs() > 0) {
+                        return kre.retryAfterMs();
+                      }
+                      long backoff =
+                          IntervalFunction.ofExponentialRandomBackoff(
+                                  Duration.ofMillis(500), 2.0, 1.0)
+                              .apply(attempt);
+                      return Math.min(backoff, 8_000);
+                    })
+                .retryOnException(KiteCallExecutor::isRetryable)
+                .build());
+    // ay_kite_rate_limiter_saturation: 1 - available/period on the historical bucket
+    RateLimiter historical = rateLimiters.rateLimiter(Family.HISTORICAL.limiterName);
+    meterRegistry.gauge(
+        "ay_kite_rate_limiter_saturation",
+        historical,
+        limiter -> {
+          int period = limiter.getRateLimiterConfig().getLimitForPeriod();
+          int available = limiter.getMetrics().getAvailablePermissions();
+          return period == 0 ? 0 : Math.max(0, (period - available) / (double) period);
+        });
+  }
+
+  /** Kite's own 429 with its Retry-After hint. */
+  public static class KiteRateLimitedException extends RuntimeException {
+    private final long retryAfterMs;
+
+    /** Wraps a Kite 429. */
+    public KiteRateLimitedException(long retryAfterMs) {
+      super("Kite rate limited (retry-after " + retryAfterMs + " ms)");
+      this.retryAfterMs = retryAfterMs;
+    }
+
+    /** Retry-After in ms; 0 when absent. */
+    public long retryAfterMs() {
+      return retryAfterMs;
+    }
+  }
+
+  static boolean isRetryable(Throwable t) {
+    if (t instanceof KiteRateLimitedException) {
+      return true;
+    }
+    if (t instanceof ResourceAccessException || t instanceof IOException) {
+      return true;
+    }
+    if (t instanceof HttpServerErrorException) {
+      return true; // 5xx
+    }
+    if (t instanceof HttpClientErrorException) {
+      return false; // 4xx auth/validation — never retried
+    }
+    return false;
+  }
+
+  /** Executes a Kite call under the family's limiter, the kite-rest breaker and retry. */
+  public <T> T execute(Family family, Supplier<T> call) {
+    RateLimiter limiter = rateLimiters.rateLimiter(family.limiterName);
+    CircuitBreaker breaker = circuitBreakers.circuitBreaker("kite-rest");
+    Supplier<T> attempt =
+        () -> RateLimiter.decorateSupplier(limiter, CircuitBreaker.decorateSupplier(breaker, call)).get();
+    try {
+      return Retry.decorateSupplier(retry, attempt).get();
+    } catch (RequestNotPermitted saturation) {
+      throw new ApiException(
+          429, ErrorCodes.RATE_LIMIT_LOCAL, "local Kite " + family + " budget saturated");
+    } catch (CallNotPermittedException open) {
+      throw new ApiException(
+          503, ErrorCodes.KITE_CIRCUIT_OPEN, "kite-rest circuit open; serving cached data");
+    }
+  }
+
+  /** The kite-rest breaker (status surfaces + tests). */
+  public CircuitBreaker kiteRestBreaker() {
+    return circuitBreakers.circuitBreaker("kite-rest");
+  }
+}

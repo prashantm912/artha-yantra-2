@@ -46,6 +46,8 @@ public class RedisTickPublisher {
             String channel = CHANNEL_PREFIX + tick.exchange() + "." + tick.tradingsymbol();
             redis.convertAndSend(channel, json);
             redis.opsForHash().put(LAST_TICK_HASH, tick.exchange() + ":" + tick.tradingsymbol(), json);
+            // B-13 kite.lastTickAgeMs source — one cheap SET per tick
+            redis.opsForValue().set("ticks:last-at", Long.toString(System.currentTimeMillis()));
           } catch (JsonProcessingException e) {
             log.error("tick serialization failed for {}:{}", tick.exchange(), tick.tradingsymbol(), e);
           }

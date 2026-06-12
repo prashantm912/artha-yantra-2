@@ -10,6 +10,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * {@code candles} / {@code options}.
  */
 @SpringBootApplication
+@org.springframework.scheduling.annotation.EnableScheduling
 public class MarketDataServiceApplication {
 
   /** Boot entry point. */

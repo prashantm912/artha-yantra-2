@@ -71,6 +71,7 @@ public class InstrumentSyncService {
   }
 
   /** 202-style async trigger; 409 {@code CONFLICT_SYNC_RUNNING} when one is in flight. */
+  @SuppressWarnings("FutureReturnValueIgnored") // outcome lands in status(), not the Future
   public String triggerAsync() {
     if (!running.compareAndSet(false, true)) {
       throw new ConflictException(ErrorCodes.CONFLICT_SYNC_RUNNING, "instrument sync already running");

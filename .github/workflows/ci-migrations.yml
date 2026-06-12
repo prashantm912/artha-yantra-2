@@ -1,0 +1,111 @@
+# ci-migrations (A.10): every change under deploy/flyway/** must (1) keep
+# applied migrations immutable — the TWO-STEP drift check migrates with the
+# merge-base's files first, then validates the PR's files against that
+# populated database (a fresh-volume-only run can never catch an edited
+# migration) — and (2) still build everything from an empty volume.
+name: ci-migrations
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deploy/flyway/**"
+      - ".github/workflows/ci-migrations.yml"
+  pull_request:
+    paths:
+      - "deploy/flyway/**"
+      - ".github/workflows/ci-migrations.yml"
+
+concurrency:
+  group: ci-migrations-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PGURL: jdbc:postgresql://localhost:5432/artha
+  LINEAGES: "admin marketdata strategy backtest"
+
+jobs:
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  flyway:
+    runs-on: ubuntu-latest
+    services:
+      timescaledb:
+        # pinned to the production compose tag (D16)
+        image: timescale/timescaledb:2.17.2-pg17
+        env:
+          POSTGRES_USER: artha
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: artha
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U artha"
+          --health-interval 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Define flyway runner
+        run: |
+          cat > /tmp/run-flyway.sh <<'EOF'
+          #!/bin/bash
+          # usage: run-flyway.sh <command> <flyway-dir-root>
+          set -euo pipefail
+          cmd="$1"; root="$2"
+          for lineage in admin marketdata strategy backtest; do
+            docker run --rm --network host -v "$root:/flyway/sql:ro" \
+              flyway/flyway:11-alpine \
+              -url="jdbc:postgresql://localhost:5432/artha" -user=artha -password=ci-only \
+              -schemas="$lineage" -locations="filesystem:/flyway/sql/$lineage" \
+              -connectRetries=10 "$cmd"
+          done
+          EOF
+          chmod +x /tmp/run-flyway.sh
+
+      # ---- step 1 of the drift check: migrate with the MERGE-BASE's files
+      - name: Checkout merge-base migrations
+        if: github.event_name == 'pull_request'
+        run: |
+          BASE=$(git merge-base origin/${{ github.base_ref }} HEAD)
+          echo "merge-base: $BASE"
+          git worktree add /tmp/base-checkout "$BASE"
+      - name: Migrate merge-base lineages
+        if: github.event_name == 'pull_request'
+        run: /tmp/run-flyway.sh migrate /tmp/base-checkout/deploy/flyway
+
+      # ---- step 2: validate the PR's files against that populated DB —
+      # an edited applied migration turns this red (checksum drift)
+      - name: Validate PR files against populated database
+        if: github.event_name == 'pull_request'
+        run: /tmp/run-flyway.sh validate "$GITHUB_WORKSPACE/deploy/flyway"
+
+      # ---- fresh-volume run: drop everything, migrate the PR's files from
+      # empty, then validate (D17 — a fresh volume reproduces the design)
+      - name: Reset database
+        run: |
+          docker run --rm --network host postgres:17-alpine \
+            psql "postgresql://artha:ci-only@localhost:5432/postgres" \
+            -c "DROP DATABASE artha WITH (FORCE);" -c "CREATE DATABASE artha OWNER artha;"
+      - name: Migrate from empty volume
+        run: /tmp/run-flyway.sh migrate "$GITHUB_WORKSPACE/deploy/flyway"
+      - name: Validate from empty volume
+        run: /tmp/run-flyway.sh validate "$GITHUB_WORKSPACE/deploy/flyway"
+      - name: Assert roles and the single cross-schema grant (CD-1)
+        run: |
+          docker run --rm --network host postgres:17-alpine \
+            psql "postgresql://artha:ci-only@localhost:5432/artha" -t -A \
+            -c "SELECT has_schema_privilege('ay_backtest','marketdata','USAGE')" \
+            -c "SELECT NOT has_schema_privilege('ay_strategy','marketdata','USAGE')" \
+            | tee /tmp/grants.txt
+          grep -cx t /tmp/grants.txt | grep -qx 2

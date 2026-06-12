@@ -108,8 +108,11 @@ public class MockQuoteGateway implements QuoteGateway {
       ask = tick(ltp.add(half));
     }
     long token = instrument.instrumentToken() == null ? 0 : instrument.instrumentToken();
-    long oi = 10_000 + Math.floorMod(token * 7_919L, 90_000L); // frozen == its EOD value
-    long volume = open ? Math.floorMod(token * 104_729L, 500_000L) : 0;
+    // B-11: OI/volume EVOLVE deterministically through the session and freeze to EOD off-hours
+    long minuteOfDay = open ? (now.atZone(in.arthayantra.common.web.time.Ist.ZONE).getHour() * 60L
+        + now.atZone(in.arthayantra.common.web.time.Ist.ZONE).getMinute()) : 930; // 15:30 EOD
+    long oi = 10_000 + Math.floorMod(token * 7_919L + minuteOfDay * 37L, 90_000L);
+    long volume = open ? Math.floorMod(token * 104_729L, 5_000L) * Math.max(1, minuteOfDay - 554) : 0;
     return Optional.of(
         new Quote(key, ltp, bid, ask, volume, oi, OffsetDateTime.ofInstant(now, ZoneOffset.UTC)));
   }

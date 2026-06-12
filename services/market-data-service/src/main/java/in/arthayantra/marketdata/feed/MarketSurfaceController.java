@@ -27,10 +27,25 @@ public class MarketSurfaceController {
     this.clock = clock;
   }
 
-  /** The conflated last-tick map. */
+  /** The conflated last-tick MAP, optionally filtered by a symbols CSV (B-1). */
   @GetMapping("/ticks/latest")
-  public Map<String, List<NormalizedTick>> latestTicks() {
-    return Map.of("items", List.copyOf(lastTickStore.snapshot().values()));
+  public Map<String, NormalizedTick> latestTicks(
+      @org.springframework.web.bind.annotation.RequestParam(required = false) String symbols) {
+    java.util.Set<String> wanted =
+        symbols == null || symbols.isBlank()
+            ? null
+            : java.util.Set.of(symbols.split(",", -1));
+    Map<String, NormalizedTick> out = new java.util.TreeMap<>();
+    lastTickStore
+        .snapshot()
+        .forEach(
+            (key, tick) -> {
+              String canonical = key.canonical();
+              if (wanted == null || wanted.contains(canonical)) {
+                out.put(canonical, tick);
+              }
+            });
+    return out;
   }
 
   /** Calendar status: session open/closed, trading day, next trading day. */

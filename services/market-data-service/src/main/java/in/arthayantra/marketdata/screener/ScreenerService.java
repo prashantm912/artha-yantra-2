@@ -23,14 +23,28 @@ import org.springframework.stereotype.Service;
 @Service
 public class ScreenerService {
 
-  /** One ranked row. */
+  /** One ranked row (B-1 shape: last close, period return, avg volume, 52-w-high distance). */
   public record Row(
       String exchange,
       String tradingsymbol,
       BigDecimal latestClose,
       BigDecimal pastClose,
       BigDecimal value,
+      BigDecimal avgVolume,
+      BigDecimal distanceFromHigh52w,
       String label) {}
+
+  /** The B-1 explicit-filter set (all optional). */
+  public record Filters(
+      BigDecimal minReturnPct,
+      BigDecimal minAvgVolume,
+      BigDecimal minPrice,
+      BigDecimal maxPrice,
+      String exchange) {
+
+    /** No filters. */
+    public static final Filters NONE = new Filters(null, null, null, null, null);
+  }
 
   private static final Map<String, String> VIEWS =
       Map.of("1d", "candles_1d", "1h", "candles_1h", "1w", "candles_1w");
@@ -42,63 +56,104 @@ public class ScreenerService {
     this.jdbc = jdbc;
   }
 
-  /** Runs a preset; 422 on unanswerable combinations. */
-  public List<Row> run(String preset, String window, Integer lookback, int limit) {
+  /** Runs a preset OR the explicit-filter mode (preset null); 422 on unanswerable combos. */
+  public List<Row> run(
+      String preset, String window, Integer lookback, Filters filters, int limit, int offset) {
     String view = VIEWS.get(window == null ? "1d" : window);
     if (view == null) {
       throw new ApiException(
           422, ErrorCodes.VALIDATION_FAILED, "window must be one of " + VIEWS.keySet());
     }
+    Filters f = filters == null ? Filters.NONE : filters;
+    if (preset == null || preset.isBlank()) {
+      // B-1 explicit-filter mode: return ranking constrained by the filter set
+      return page(returns(view, lookback == null ? 5 : lookback, f, false), limit, offset);
+    }
     return switch (preset) {
-      case "momentum" -> returns(view, lookback == null ? 5 : lookback, limit, false);
-      case "long_term" -> returns(view, lookback == null ? 126 : lookback, limit, false);
-      case "rs_rank" -> rsRank(view, lookback == null ? 63 : lookback, limit);
-      case "oi_buildup" -> oiBuildup(limit);
+      case "momentum" -> page(returns(view, lookback == null ? 5 : lookback, f, false), limit, offset);
+      case "long_term" ->
+          page(returns(view, lookback == null ? 126 : lookback, f, false), limit, offset);
+      case "rs_rank" -> page(rsRank(view, lookback == null ? 63 : lookback), limit, offset);
+      case "oi_buildup" -> page(oiBuildup(), limit, offset);
       default ->
           throw new ApiException(
               422,
               ErrorCodes.VALIDATION_FAILED,
-              "preset must be momentum|long_term|oi_buildup|rs_rank");
+              "preset must be momentum|long_term|oi_buildup|rs_rank (or omitted for filters)");
     };
   }
 
-  /** Return over the last {@code lookback} bars of the view, ranked descending. */
-  private List<Row> returns(String view, int lookback, int limit, boolean includeIndices) {
-    // nth-newest bucket per symbol via row_number — pure cagg SQL, no Kite port anywhere
+  private static List<Row> page(List<Row> rows, int limit, int offset) {
+    return rows.stream().skip(Math.max(0, offset)).limit(limit).toList();
+  }
+
+  /** Return over the last {@code lookback} bars of the view, filtered + ranked descending. */
+  private List<Row> returns(String view, int lookback, Filters f, boolean includeIndices) {
+    // per-symbol aggregates over the cagg — pure SQL, no Kite port anywhere
     List<Row> rows =
         jdbc.query(
             """
             WITH numbered AS (
-              SELECT exchange, tradingsymbol, bucket, close,
+              SELECT exchange, tradingsymbol, bucket, close, high, volume,
                      row_number() OVER (PARTITION BY exchange, tradingsymbol ORDER BY bucket DESC) AS rn
               FROM %s
             ),
-            latest AS (SELECT exchange, tradingsymbol, close FROM numbered WHERE rn = 1),
-            past AS (SELECT exchange, tradingsymbol, close FROM numbered WHERE rn = ?)
-            SELECT l.exchange, l.tradingsymbol, l.close AS latest_close, p.close AS past_close
-            FROM latest l JOIN past p USING (exchange, tradingsymbol)
-            WHERE p.close > 0
+            agg AS (
+              SELECT exchange, tradingsymbol,
+                     max(close) FILTER (WHERE rn = 1)  AS latest_close,
+                     max(close) FILTER (WHERE rn = ?)  AS past_close,
+                     avg(volume) FILTER (WHERE rn <= ?) AS avg_volume,
+                     max(high) FILTER (WHERE rn <= 252) AS high_52w
+              FROM numbered GROUP BY exchange, tradingsymbol
+            )
+            SELECT * FROM agg
+            WHERE past_close > 0
+              AND (?::text IS NULL OR exchange = ?)
+              AND (?::numeric IS NULL OR latest_close >= ?)
+              AND (?::numeric IS NULL OR latest_close <= ?)
+              AND (?::numeric IS NULL OR avg_volume >= ?)
             """
                 .formatted(view),
-            (rs, n) ->
-                new Row(
-                    rs.getString("exchange"),
-                    rs.getString("tradingsymbol"),
-                    rs.getBigDecimal("latest_close"),
-                    rs.getBigDecimal("past_close"),
-                    ret(rs.getBigDecimal("latest_close"), rs.getBigDecimal("past_close")),
-                    null),
-            lookback + 1);
+            (rs, n) -> {
+              BigDecimal latest = rs.getBigDecimal("latest_close");
+              BigDecimal past = rs.getBigDecimal("past_close");
+              BigDecimal high52 = rs.getBigDecimal("high_52w");
+              BigDecimal fromHigh =
+                  high52 == null || high52.signum() == 0
+                      ? null
+                      : latest.subtract(high52).divide(high52, 6, RoundingMode.HALF_UP);
+              return new Row(
+                  rs.getString("exchange"),
+                  rs.getString("tradingsymbol"),
+                  latest,
+                  past,
+                  ret(latest, past),
+                  rs.getBigDecimal("avg_volume"),
+                  fromHigh,
+                  null);
+            },
+            lookback + 1,
+            lookback,
+            f.exchange(), f.exchange(),
+            f.minPrice(), f.minPrice(),
+            f.maxPrice(), f.maxPrice(),
+            f.minAvgVolume(), f.minAvgVolume());
     return rows.stream()
         .filter(r -> includeIndices || !r.tradingsymbol().endsWith("-FUT-CONT"))
+        .filter(
+            r ->
+                f.minReturnPct() == null
+                    || r.value()
+                            .multiply(BigDecimal.valueOf(100))
+                            .compareTo(f.minReturnPct())
+                        >= 0)
         .sorted(Comparator.comparing(Row::value).reversed())
-        .limit(limit)
         .toList();
   }
 
   /** FP-20: stock-return percentile vs the NSE NIFTY 50 benchmark return. */
-  private List<Row> rsRank(String view, int lookback, int limit) {
-    List<Row> all = returns(view, lookback, Integer.MAX_VALUE, true);
+  private List<Row> rsRank(String view, int lookback) {
+    List<Row> all = returns(view, lookback, Filters.NONE, true);
     BigDecimal benchmark =
         all.stream()
             .filter(r -> r.exchange().equals("NSE") && r.tradingsymbol().equals("NIFTY 50"))
@@ -110,14 +165,23 @@ public class ScreenerService {
                         422,
                         ErrorCodes.VALIDATION_FAILED,
                         "rs_rank needs cached benchmark history for NSE:NIFTY 50 at this window"));
+    // the interim FP-20 universe: cached ACTIVE EQUITIES only — FUTs, indices and synthetic
+    // CONT rows must never enter the stock percentile (index_constituents arrives in Phase 22)
+    java.util.Set<String> equities = new java.util.HashSet<>();
+    jdbc.query(
+        "SELECT exchange, tradingsymbol FROM instruments WHERE is_active AND instrument_type = 'EQ'"
+            + " AND segment NOT IN ('INDICES','SYN-CONT')",
+        rs -> {
+          equities.add(rs.getString("exchange") + ":" + rs.getString("tradingsymbol"));
+        });
     List<Row> stocks =
         all.stream()
-            .filter(r -> !r.tradingsymbol().equals("NIFTY 50"))
+            .filter(r -> equities.contains(r.exchange() + ":" + r.tradingsymbol()))
             .map(
                 r ->
                     new Row(
                         r.exchange(), r.tradingsymbol(), r.latestClose(), r.pastClose(),
-                        r.value().subtract(benchmark), null))
+                        r.value().subtract(benchmark), r.avgVolume(), r.distanceFromHigh52w(), null))
             .sorted(Comparator.comparing(Row::value))
             .toList();
     int n = stocks.size();
@@ -129,13 +193,15 @@ public class ScreenerService {
               ? BigDecimal.ONE
               : BigDecimal.valueOf(i).divide(BigDecimal.valueOf(n - 1), 4, RoundingMode.HALF_UP);
       ranked.add(
-          new Row(r.exchange(), r.tradingsymbol(), r.latestClose(), r.pastClose(), percentile, null));
+          new Row(
+              r.exchange(), r.tradingsymbol(), r.latestClose(), r.pastClose(), percentile,
+              r.avgVolume(), r.distanceFromHigh52w(), null));
     }
-    return ranked.reversed().stream().limit(limit).toList();
+    return ranked.reversed();
   }
 
   /** FP-10: the four close/OI delta quadrants off the 1d cagg for FUT contracts. */
-  private List<Row> oiBuildup(int limit) {
+  private List<Row> oiBuildup() {
     record DayBar(BigDecimal close, Long oi) {}
     Map<String, List<DayBar>> bySymbol = new HashMap<>();
     Map<String, String> exchanges = new HashMap<>();
@@ -169,12 +235,9 @@ public class ScreenerService {
           rows.add(
               new Row(
                   exchanges.get(symbol), symbol, bars.get(0).close(), bars.get(1).close(),
-                  priceDelta, label));
+                  priceDelta, null, null, label));
         });
-    return rows.stream()
-        .sorted(Comparator.comparing(Row::tradingsymbol))
-        .limit(limit)
-        .toList();
+    return rows.stream().sorted(Comparator.comparing(Row::tradingsymbol)).toList();
   }
 
   private static BigDecimal ret(BigDecimal latest, BigDecimal past) {

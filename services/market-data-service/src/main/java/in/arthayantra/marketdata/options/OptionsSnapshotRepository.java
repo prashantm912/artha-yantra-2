@@ -31,6 +31,7 @@ public class OptionsSnapshotRepository {
       BigDecimal ask,
       Long volume,
       Long oi,
+      Long oiChange,
       BigDecimal spotPrice,
       BigDecimal iv,
       BigDecimal delta,
@@ -56,9 +57,9 @@ public class OptionsSnapshotRepository {
         """
         INSERT INTO options_chain_snapshots
           (ts, underlying, expiry, strike, option_type, tradingsymbol, ltp, bid, ask, volume, oi,
-           spot_price, iv, delta, gamma, theta, vega, rho, iv_reason, price_source, forward_price,
-           risk_free_rate)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           oi_change, spot_price, iv, delta, gamma, theta, vega, rho, iv_reason, price_source,
+           forward_price, risk_free_rate)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT (ts, underlying, expiry, strike, option_type) DO NOTHING
         """,
         rows,
@@ -75,17 +76,18 @@ public class OptionsSnapshotRepository {
           ps.setBigDecimal(9, row.ask());
           ps.setObject(10, row.volume());
           ps.setObject(11, row.oi());
-          ps.setBigDecimal(12, row.spotPrice());
-          ps.setBigDecimal(13, scale6(row.iv()));
-          ps.setBigDecimal(14, scale6(row.delta()));
-          ps.setBigDecimal(15, scale6(row.gamma()));
-          ps.setBigDecimal(16, scale6(row.theta()));
-          ps.setBigDecimal(17, scale6(row.vega()));
-          ps.setBigDecimal(18, scale6(row.rho()));
-          ps.setString(19, row.ivReason());
-          ps.setString(20, row.priceSource());
-          ps.setBigDecimal(21, row.forwardPrice());
-          ps.setBigDecimal(22, scale6(row.riskFreeRate()));
+          ps.setObject(12, row.oiChange());
+          ps.setBigDecimal(13, row.spotPrice());
+          ps.setBigDecimal(14, scale6(row.iv()));
+          ps.setBigDecimal(15, scale6(row.delta()));
+          ps.setBigDecimal(16, scale6(row.gamma()));
+          ps.setBigDecimal(17, scale6(row.theta()));
+          ps.setBigDecimal(18, scale6(row.vega()));
+          ps.setBigDecimal(19, scale6(row.rho()));
+          ps.setString(20, row.ivReason());
+          ps.setString(21, row.priceSource());
+          ps.setBigDecimal(22, row.forwardPrice());
+          ps.setBigDecimal(23, scale6(row.riskFreeRate()));
         });
   }
 
@@ -127,6 +129,7 @@ public class OptionsSnapshotRepository {
                 rs.getBigDecimal("ask"),
                 rs.getObject("volume", Long.class),
                 rs.getObject("oi", Long.class),
+                rs.getObject("oi_change", Long.class),
                 rs.getBigDecimal("spot_price"),
                 rs.getBigDecimal("iv"),
                 rs.getBigDecimal("delta"),

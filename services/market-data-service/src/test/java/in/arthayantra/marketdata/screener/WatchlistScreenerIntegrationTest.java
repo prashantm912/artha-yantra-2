@@ -181,7 +181,7 @@ class WatchlistScreenerIntegrationTest extends MarketDataIntegrationTestBase {
   void momentumRanksSeededReturnsWithoutTouchingAnyKitePort() {
     int before = GATEWAY_CALLS.get();
 
-    List<ScreenerService.Row> rows = screener.run("momentum", "1d", 5, 10);
+    List<ScreenerService.Row> rows = screener.run("momentum", "1d", 5, null, 10, 0);
 
     List<String> seededOrder =
         rows.stream()
@@ -201,7 +201,7 @@ class WatchlistScreenerIntegrationTest extends MarketDataIntegrationTestBase {
   void oiBuildupClassifiesAllFourQuadrants() {
     int before = GATEWAY_CALLS.get();
 
-    List<ScreenerService.Row> rows = screener.run("oi_buildup", "1d", null, 50);
+    List<ScreenerService.Row> rows = screener.run("oi_buildup", "1d", null, null, 50, 0);
 
     assertThat(rows)
         .extracting(ScreenerService.Row::tradingsymbol, ScreenerService.Row::label)
@@ -215,7 +215,7 @@ class WatchlistScreenerIntegrationTest extends MarketDataIntegrationTestBase {
 
   @Test
   void rsRankPercentileMatchesTheHandComputedFixture() {
-    List<ScreenerService.Row> rows = screener.run("rs_rank", "1d", 5, 10);
+    List<ScreenerService.Row> rows = screener.run("rs_rank", "1d", 5, null, 10, 0);
 
     var bySymbol = new java.util.HashMap<String, BigDecimal>();
     rows.forEach(r -> bySymbol.put(r.tradingsymbol(), r.value()));
@@ -257,6 +257,6 @@ class WatchlistScreenerIntegrationTest extends MarketDataIntegrationTestBase {
     mockMvc
         .perform(get("/api/v1/market/ticks/latest"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.items").isArray());
+        .andExpect(jsonPath("$").isMap()); // B-1: a keyed map, filterable by symbols CSV
   }
 }

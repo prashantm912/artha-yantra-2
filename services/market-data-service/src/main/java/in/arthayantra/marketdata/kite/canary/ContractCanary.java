@@ -150,16 +150,43 @@ public class ContractCanary {
         drift.add("TYPE:" + probe + "." + entry.getKey());
       }
     }
-    // newly added top-level keys are a warning, not a failure
-    for (Iterator<String> names = actual.fieldNames(); names.hasNext(); ) {
-      String name = names.next();
-      boolean known = false;
-      for (JsonNode k : manifest.path("knownTopLevel")) {
-        known |= k.asText().equals(name);
+    // newly added fields are a warning — RECURSIVE key-set walk (B-9), not top-level only
+    java.util.Set<String> knownPaths = new java.util.HashSet<>();
+    for (JsonNode k : manifest.path("knownTopLevel")) {
+      knownPaths.add(k.asText());
+    }
+    for (Iterator<String> it2 = expected.fieldNames(); it2.hasNext(); ) {
+      knownPaths.add(it2.next());
+    }
+    collectNewPaths(actual, "", probe, knownPaths, drift, 0);
+  }
+
+  /** Recursively flags actual paths (depth ≤ 3) the manifest does not know about. */
+  private static void collectNewPaths(
+      JsonNode node, String prefix, String probe, java.util.Set<String> known, List<String> drift, int depth) {
+    if (depth > 3 || !node.isObject()) {
+      return;
+    }
+    for (Iterator<Map.Entry<String, JsonNode>> it = node.fields(); it.hasNext(); ) {
+      Map.Entry<String, JsonNode> entry = it.next();
+      String path = prefix.isEmpty() ? entry.getKey() : prefix + "." + entry.getKey();
+      boolean covered =
+          known.stream()
+              .anyMatch(
+                  k -> {
+                    String normalized = path.replaceFirst("^data\\.[^.]+\\.", "data.*.");
+                    return k.equals(path)
+                        || k.equals(normalized)
+                        || k.startsWith(path + ".")
+                        || k.startsWith(normalized + ".")
+                        || path.startsWith(k + ".")
+                        || normalized.startsWith(k + ".");
+                  });
+      if (!covered) {
+        drift.add("NEW:" + probe + "." + path);
+        continue; // one entry per new subtree
       }
-      if (!known) {
-        drift.add("NEW:" + probe + "." + name);
-      }
+      collectNewPaths(entry.getValue(), path, probe, known, drift, depth + 1);
     }
   }
 

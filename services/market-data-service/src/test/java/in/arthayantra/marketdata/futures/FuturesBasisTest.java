@@ -25,7 +25,7 @@ class FuturesBasisTest {
 
     FuturesTermStructureService.ContractLeg leg =
         FuturesTermStructureService.leg(
-            contract, new BigDecimal("24120"), 100_000L, new BigDecimal("24000"), now);
+            contract, new BigDecimal("24120"), 100_000L, 500L, new BigDecimal("24000"), now);
 
     assertThat(leg.basisAbsolute()).isEqualByComparingTo("120.0000");
     // (24120/24000 − 1) × 365 / 30 = 0.005 × 12.1666… = 0.0608 at 4 dp
@@ -41,11 +41,34 @@ class FuturesBasisTest {
             fut("X", LocalDate.parse("2026-07-15")),
             new BigDecimal("23880"),
             null,
+            null,
             new BigDecimal("24000"),
             now);
 
     assertThat(leg.basisAbsolute()).isEqualByComparingTo("-120.0000");
     assertThat(leg.basisAnnualized().signum()).isNegative();
+  }
+
+  @Test
+  void stateIsDecidedByTheNearToNextSlopeBothDirections() {
+    OffsetDateTime now = OffsetDateTime.parse("2026-06-15T11:00:00+05:30");
+    var near =
+        FuturesTermStructureService.leg(
+            fut("NEAR", LocalDate.parse("2026-06-25")), new BigDecimal("24100"), null, null,
+            new BigDecimal("24000"), now);
+    var nextUp =
+        FuturesTermStructureService.leg(
+            fut("NEXT", LocalDate.parse("2026-07-28")), new BigDecimal("24200"), null, null,
+            new BigDecimal("24000"), now);
+    var nextDown =
+        FuturesTermStructureService.leg(
+            fut("NEXT", LocalDate.parse("2026-07-28")), new BigDecimal("23900"), null, null,
+            new BigDecimal("24000"), now);
+
+    assertThat(FuturesTermStructureService.classify(java.util.List.of(near, nextUp)))
+        .isEqualTo("CONTANGO");
+    assertThat(FuturesTermStructureService.classify(java.util.List.of(near, nextDown)))
+        .isEqualTo("BACKWARDATION");
   }
 
   @Test
@@ -56,6 +79,7 @@ class FuturesBasisTest {
         FuturesTermStructureService.leg(
             fut("X", LocalDate.parse("2026-07-15")),
             new BigDecimal("24010"),
+            null,
             null,
             new BigDecimal("24000"),
             now);

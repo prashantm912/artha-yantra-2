@@ -36,6 +36,7 @@ public class CandleBuilder implements NormalizedTickListener {
 
   private static final class Accumulator {
     OffsetDateTime bucket;
+    OffsetDateTime lastClosedBucket;
     BigDecimal open;
     BigDecimal high;
     BigDecimal low;
@@ -63,6 +64,12 @@ public class CandleBuilder implements NormalizedTickListener {
         return; // duplicate / reconnect-overlap (B-6: drop seq <= lastSeen)
       }
       OffsetDateTime bucket = bucketer.bucketFor(tick.timestamp());
+      // a flushed bar is CLOSED FOREVER (B-7 closed-bars-immutable): post-close prints clamp
+      // into the 15:29 bucket all evening — re-opening it would clobber the true session close
+      if (acc.lastClosedBucket != null && !bucket.isAfter(acc.lastClosedBucket)) {
+        acc.lastSeq = tick.seq();
+        return;
+      }
       if (acc.bucket == null) {
         startBar(acc, tick, bucket);
       } else if (bucket.isAfter(acc.bucket)) {
@@ -108,6 +115,7 @@ public class CandleBuilder implements NormalizedTickListener {
         new Candle(
             exchange, tradingsymbol, "1m", acc.bucket,
             acc.open, acc.high, acc.low, acc.close, volume, acc.oi, source));
+    acc.lastClosedBucket = acc.bucket;
   }
 
   /** Closes every bar whose minute has passed the late-tick grace (scheduled sweep). */

@@ -13,8 +13,9 @@ public class LiveKiteSessionService implements KiteSessionService {
   private final String loginUrlBase;
   private final String apiKey;
   private final ContractCanary canary;
+  private final java.util.function.BooleanSupplier tickerRunning;
 
-  /** Wires the ritual. */
+  /** Wires the ritual; {@code tickerRunning} reads the live feed state lazily (no bean cycle). */
   public LiveKiteSessionService(
       SessionWireClient wireClient,
       KiteSessionStore store,
@@ -22,7 +23,8 @@ public class LiveKiteSessionService implements KiteSessionService {
       KiteCallExecutor executor,
       String loginUrlBase,
       String apiKey,
-      ContractCanary canary) {
+      ContractCanary canary,
+      java.util.function.BooleanSupplier tickerRunning) {
     this.wireClient = wireClient;
     this.store = store;
     this.statusPublisher = statusPublisher;
@@ -30,6 +32,7 @@ public class LiveKiteSessionService implements KiteSessionService {
     this.loginUrlBase = loginUrlBase;
     this.apiKey = apiKey;
     this.canary = canary;
+    this.tickerRunning = tickerRunning;
   }
 
   @Override
@@ -56,7 +59,7 @@ public class LiveKiteSessionService implements KiteSessionService {
         store.kiteUserId(),
         store.tokenValidUntil(),
         store.lastValidatedAt(),
-        "NOT_CONNECTED", // ticker state surfaces once the live feed is started (Phase 13 wiring)
+        tickerRunning.getAsBoolean() ? "CONNECTED" : "DISCONNECTED",
         executor.kiteRestBreaker().getState().name(),
         canaryResult.map(ContractCanary.CanaryResult::lastContractCheck).orElse(null),
         canaryResult.map(ContractCanary.CanaryResult::drift).orElse(java.util.List.of()));

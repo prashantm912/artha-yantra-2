@@ -159,6 +159,13 @@ public class CandleQueryService {
           in.arthayantra.common.web.error.ErrorCodes.VALIDATION_INTERVAL_UNSUPPORTED,
           "1w is rolled locally, never fetched (B-21); refresh 1m or 1d instead");
     }
+    if (tradingsymbol.endsWith("-FUT-CONT")) {
+      // the stitch is local arithmetic — a CONT symbol must NEVER reach a Kite port (B-19)
+      throw new ApiException(
+          400,
+          in.arthayantra.common.web.error.ErrorCodes.VALIDATION_FAILED,
+          "CONT series are stitched locally and cannot be refreshed from Kite");
+    }
     String jobId = UUID.randomUUID().toString();
     String baseInterval = interval.equals("1d") ? "1d" : "1m";
     refreshExecutor.submit(

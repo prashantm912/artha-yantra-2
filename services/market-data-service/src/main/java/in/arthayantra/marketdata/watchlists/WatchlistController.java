@@ -29,8 +29,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/watchlists")
 public class WatchlistController {
 
-  /** Create/rename request. */
-  public record NameRequest(String name) {}
+  /** Create request; PUT also accepts {@code sortOrder} (B-1 rename/reorder). */
+  public record NameRequest(String name, Integer sortOrder) {}
 
   /** Item request. */
   public record ItemRequest(String exchange, String tradingsymbol) {}
@@ -83,6 +83,22 @@ public class WatchlistController {
     return withItems(id, find(id));
   }
 
+  /** Renames / reorders a watchlist (B-1 PUT row); 404 unknown, 409 duplicate name. */
+  @org.springframework.web.bind.annotation.PutMapping("/{id}")
+  public WatchlistView update(@PathVariable UUID id, @RequestBody NameRequest request) {
+    find(id);
+    try {
+      jdbc.update(
+          "UPDATE watchlists SET name = COALESCE(?, name), sort_order = COALESCE(?, sort_order)"
+              + " WHERE id = ?",
+          request.name(), request.sortOrder(), id);
+    } catch (DuplicateKeyException e) {
+      throw new ConflictException(
+          ErrorCodes.CONFLICT_WATCHLIST_NAME, "watchlist '" + request.name() + "' already exists");
+    }
+    return withItems(id, find(id));
+  }
+
   /** Deletes a watchlist (items cascade). */
   @DeleteMapping("/{id}")
   public ResponseEntity<Void> delete(@PathVariable UUID id) {
@@ -109,14 +125,20 @@ public class WatchlistController {
     return withItems(id, find(id));
   }
 
-  /** Removes one item. */
+  /** Removes one item; 404 when it was not in the list (B-1). */
   @DeleteMapping("/{id}/items")
   public ResponseEntity<Void> removeItem(
       @PathVariable UUID id, @RequestParam String exchange, @RequestParam String tradingsymbol) {
     find(id);
-    jdbc.update(
-        "DELETE FROM watchlist_items WHERE watchlist_id = ? AND exchange = ? AND tradingsymbol = ?",
-        id, exchange, tradingsymbol);
+    int removed =
+        jdbc.update(
+            "DELETE FROM watchlist_items WHERE watchlist_id = ? AND exchange = ? AND tradingsymbol = ?",
+            id, exchange, tradingsymbol);
+    if (removed == 0) {
+      throw new NotFoundException(
+          ErrorCodes.NOT_FOUND_INSTRUMENT,
+          exchange + ":" + tradingsymbol + " is not in this watchlist");
+    }
     return ResponseEntity.noContent().build();
   }
 

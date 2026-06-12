@@ -111,7 +111,37 @@ capture is never blocked by it.
 
 ## Parking list (deferred)
 
-*(empty — items deferred out of a section land here with their target)*
+**From the Stage-B audit (2026-06-13)** — accepted deviations + deferred work,
+each with its target:
+
+- **B-9 binary-frame guard production wiring** — `KiteBinaryFrameParser` is
+  fixture-pinned and registry-driven, but javakiteconnect's `KiteTicker`
+  exposes no raw-frame hook, so the guard cannot intercept live frames through
+  the SDK. Production coverage today = the daily contract canary + the
+  fixture-pinned envelope tests + no-tick alerting. Full wiring requires
+  replacing the SDK socket with a first-party WS client (revisit when Kite
+  changes its wire format or at the Stage-C hardening pass).
+- **`instruments.exchange_token` population** — column exists, never written
+  (dump record drops it). Wire through `InstrumentRecord` + both dump parsers
+  when anything consumes it (nothing in Stages B–D does).
+- **Canary result Redis key** — result lands in `kite:contract:check` (JSON) +
+  `GET /auth/kite/status`, not embedded in the plain-string
+  `kite:session:status` the spec names (would break that key's existing
+  readers). Documented deviation.
+- **Recorded Kite binary-frame capture** — the mixed-frame fixture is
+  synthesized from the documented envelope; commit one real capture during the
+  first live session (closes the shared-misreading risk).
+- **`candles_1h` IST alignment** — hourly cagg buckets align to UTC hours
+  (= :30 IST boundaries). Deciding to re-anchor means dropping/recreating the
+  cagg; revisit before the Stage-E chart page consumes 1h.
+- **`kite.rateBudget` on system status** — field present, null until
+  market-data-service publishes a budget key (limiter metrics exist; producer
+  pends Stage C status work).
+- **~5k-row mock dump fixture** — CD-14 names ~5k rows; the frozen fixture is
+  ~1.1k. The ≤5 s sync budget is asserted at the committed size; regenerate at
+  5k only as a deliberate fixture-freeze event.
+
+*(other items deferred out of a section land here with their target)*
 
 - Stage B seeds (recorded in the stage file, not deferred work): instruments
   table, candles hypertable, Kite OAuth/AES-GCM token store, live ticker,

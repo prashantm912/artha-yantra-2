@@ -53,9 +53,11 @@ public final class GapDetector {
     OffsetDateTime gapStart = null;
     OffsetDateTime previous = null;
     for (OffsetDateTime bucket : expected) {
+      // recency compares the bucket END: an in-progress bar (today's 1d bucket especially)
+      // must keep re-fetching until 2h after it CLOSES — start-based checks froze it mid-day
       boolean missing =
           !have.contains(bucket.toInstant().atOffset(java.time.ZoneOffset.UTC))
-              || !bucket.isBefore(recencyStart);
+              || bucket.plus(step).isAfter(recencyStart);
       if (missing && gapStart == null) {
         gapStart = bucket;
       } else if (!missing && gapStart != null) {

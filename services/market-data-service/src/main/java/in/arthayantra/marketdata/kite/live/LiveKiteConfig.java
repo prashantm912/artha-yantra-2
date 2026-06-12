@@ -127,10 +127,15 @@ public class LiveKiteConfig {
       in.arthayantra.marketdata.kite.session.SessionStatusPublisher statusPublisher,
       in.arthayantra.marketdata.kite.KiteCallExecutor executor,
       KiteHttpProperties properties,
-      in.arthayantra.marketdata.kite.canary.ContractCanary canary) {
+      in.arthayantra.marketdata.kite.canary.ContractCanary canary,
+      org.springframework.beans.factory.ObjectProvider<MarketFeed> marketFeed) {
     return new in.arthayantra.marketdata.kite.session.LiveKiteSessionService(
         wireClient, store, statusPublisher, executor,
-        properties.loginUrlBase(), properties.resolveApiKey(), canary);
+        properties.loginUrlBase(), properties.resolveApiKey(), canary,
+        () -> {
+          MarketFeed feed = marketFeed.getIfAvailable();
+          return feed != null && feed.running();
+        });
   }
 
   /** The 5-min health probe — also the canary's first-LIVE-of-the-day trigger (B-9). */
@@ -251,14 +256,15 @@ public class LiveKiteConfig {
         objectMapper);
   }
 
-  /** Live dump download over the Kite wire format (Phase 9; WireMock-tested). */
+  /** Live dump download over the Kite wire format, under the kite-dump budget (B-3). */
   @Bean
   public InstrumentDumpGateway liveInstrumentDumpGateway(
       org.springframework.web.client.RestClient.Builder restClientBuilder,
       KiteHttpProperties properties,
-      in.arthayantra.marketdata.kite.AccessTokenProvider tokenProvider) {
+      in.arthayantra.marketdata.kite.AccessTokenProvider tokenProvider,
+      in.arthayantra.marketdata.kite.KiteCallExecutor executor) {
     return new LiveInstrumentDumpGateway(
-        restClientBuilder, properties.baseUrl(), properties.resolveApiKey(), tokenProvider);
+        restClientBuilder, properties.baseUrl(), properties.resolveApiKey(), tokenProvider, executor);
   }
 
   // the Phase-12 KiteSessionStore bean above IS the live AccessTokenProvider (D13:

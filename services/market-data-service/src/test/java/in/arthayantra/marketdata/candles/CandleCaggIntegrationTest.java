@@ -99,6 +99,26 @@ class CandleCaggIntegrationTest extends MarketDataIntegrationTestBase {
   }
 
   @Test
+  void compressionPolicyCoexistsWithUpserts() {
+    // AUDIT GAP (Phase 10 Tests & Verification): upserts must keep working against a
+    // COMPRESSED chunk — backfills older than the 7-day compress_after hit this in production
+    String symbol = "COMPRESS1";
+    repository.upsert(bar(symbol, "2026-01-05T09:15:00", "100.00", "101.00", "99.00", "100.50", 10));
+    jdbc.execute(
+        "SELECT public.compress_chunk(c, true) FROM public.show_chunks('candles') c");
+
+    // ON CONFLICT DO UPDATE into the compressed chunk — the B-6 merge must still apply
+    repository.upsert(bar(symbol, "2026-01-05T09:15:00", "100.00", "105.00", "98.00", "102.25", 25));
+
+    List<Candle> rows =
+        repository.range("NSE", symbol, "1m", ist("2026-01-05T09:00:00"), ist("2026-01-05T10:00:00"));
+    assertThat(rows).hasSize(1);
+    assertThat(rows.get(0).high()).isEqualByComparingTo("105.00"); // GREATEST applied
+    assertThat(rows.get(0).low()).isEqualByComparingTo("98.00"); // LEAST applied
+    assertThat(rows.get(0).close()).isEqualByComparingTo("102.25");
+  }
+
+  @Test
   void weeklyAggregateUsesIstMondayBucketsIncludingHolidayWeeks() {
     String symbol = "CAGGW";
     // week of Mon 2026-01-26 (Republic Day) — trading days are Tue 27 + Wed 28

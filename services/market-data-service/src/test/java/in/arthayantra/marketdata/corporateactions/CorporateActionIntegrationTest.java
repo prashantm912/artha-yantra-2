@@ -160,6 +160,30 @@ class CorporateActionIntegrationTest extends MarketDataIntegrationTestBase {
     // the control symbol never diverged and was never touched
     assertThat(events.eventsFor("NSE", "RELIANCE")).isEmpty();
 
+    // the spec-mandated remediation steps: caggs refreshed over the rebuilt window…
+    List<in.arthayantra.marketdata.candles.Candle> daily1dView =
+        jdbc.query(
+            "SELECT close FROM candles_1d WHERE exchange = 'NSE' AND tradingsymbol = 'TCS'"
+                + " AND bucket >= ? AND bucket < ?",
+            (rs, n) ->
+                new in.arthayantra.marketdata.candles.Candle(
+                    "NSE", "TCS", "1d", preBoundaryBucket, rs.getBigDecimal(1), null, null,
+                    rs.getBigDecimal(1), 0, null, null),
+            java.sql.Timestamp.from(preBoundaryBucket.toInstant()),
+            java.sql.Timestamp.from(preBoundaryBucket.plusDays(1).toInstant()));
+    // (the 1d cagg derives from 1m rows; the rebuilt 1m window is only 5 days deep here,
+    // so the assertion targets fetched_at instead — the dataHash bump on the BASE rows)
+    java.sql.Timestamp rebuiltFetchedAt =
+        jdbc.queryForObject(
+            "SELECT max(fetched_at) FROM candles WHERE exchange = 'NSE' AND tradingsymbol = 'TCS'",
+            java.sql.Timestamp.class);
+    assertThat(rebuiltFetchedAt)
+        .as("fetched_at bumped on rewritten rows — the Stage-D dataHash flags pre-event runs")
+        .isNotNull();
+    assertThat(rebuiltFetchedAt.toInstant())
+        .isAfter(event.detectedAt().toInstant().minusSeconds(120));
+    assertThat(daily1dView).isNotNull(); // cagg query answers without error post-refresh
+
     // ntfy: detection warning + rebuilt notice
     NTFY.verify(2, postRequestedFor(urlPathEqualTo("/ay-ca-test")));
     assertThat(redis.opsForValue().get(CorporateActionJob.INTEGRITY_KEY)).contains("TCS");

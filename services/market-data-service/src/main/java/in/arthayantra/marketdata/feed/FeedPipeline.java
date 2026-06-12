@@ -73,6 +73,7 @@ public class FeedPipeline implements SmartLifecycle {
     }
     running = true;
     redis.opsForValue().set(SESSION_STATUS_KEY, sessionGateway.statusLabel());
+    redis.opsForValue().set("kite:ticker:status", "CONNECTED"); // B-13 ticker sub-field
     normalizerThread = new Thread(this::normalizerLoop, "tick-normalizer");
     normalizerThread.setDaemon(true);
     normalizerThread.start();
@@ -115,6 +116,11 @@ public class FeedPipeline implements SmartLifecycle {
   public void stop() {
     running = false;
     marketFeed.stop();
+    try {
+      redis.opsForValue().set("kite:ticker:status", "DISCONNECTED");
+    } catch (RuntimeException redisGone) {
+      log.debug("ticker status write skipped on shutdown: {}", redisGone.getMessage());
+    }
     if (normalizerThread != null) {
       normalizerThread.interrupt();
     }

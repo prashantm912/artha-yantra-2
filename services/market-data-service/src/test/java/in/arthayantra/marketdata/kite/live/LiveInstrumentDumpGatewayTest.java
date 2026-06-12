@@ -44,8 +44,21 @@ class LiveInstrumentDumpGatewayTest {
   }
 
   private LiveInstrumentDumpGateway gateway() {
+    var executor =
+        new in.arthayantra.marketdata.kite.KiteCallExecutor(
+            io.github.resilience4j.ratelimiter.RateLimiterRegistry.of(
+                io.github.resilience4j.ratelimiter.RateLimiterConfig.custom()
+                    .limitForPeriod(100)
+                    .limitRefreshPeriod(java.time.Duration.ofSeconds(1))
+                    .timeoutDuration(java.time.Duration.ofSeconds(5))
+                    .build()),
+            io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry.of(
+                io.github.resilience4j.circuitbreaker.CircuitBreakerConfig.custom()
+                    .minimumNumberOfCalls(1_000)
+                    .build()),
+            new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
     return new LiveInstrumentDumpGateway(
-        RestClient.builder(), wireMock.baseUrl(), "test-key", () -> Optional.of("test-token"));
+        RestClient.builder(), wireMock.baseUrl(), "test-key", () -> Optional.of("test-token"), executor);
   }
 
   @Test
@@ -84,7 +97,17 @@ class LiveInstrumentDumpGatewayTest {
   void missingTokenShortCircuitsWithTokenExpired() {
     var gateway =
         new LiveInstrumentDumpGateway(
-            RestClient.builder(), wireMock.baseUrl(), "test-key", Optional::empty);
+            RestClient.builder(),
+            wireMock.baseUrl(),
+            "test-key",
+            Optional::empty,
+            new in.arthayantra.marketdata.kite.KiteCallExecutor(
+                io.github.resilience4j.ratelimiter.RateLimiterRegistry.ofDefaults(),
+                io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry.of(
+                    io.github.resilience4j.circuitbreaker.CircuitBreakerConfig.custom()
+                        .minimumNumberOfCalls(1_000)
+                        .build()),
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
 
     assertThatThrownBy(gateway::fetchDump).hasMessageContaining("no live Kite session");
   }

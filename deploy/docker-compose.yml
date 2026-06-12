@@ -175,7 +175,7 @@ services:
 
   # ---- dev-tools profile (A.1.2 / S6 ports) -------------------------------
   adminer:
-    image: adminer:5.4.1
+    image: adminer:5.4.2
     container_name: ay-adminer
     profiles: [dev-tools]
     ports:

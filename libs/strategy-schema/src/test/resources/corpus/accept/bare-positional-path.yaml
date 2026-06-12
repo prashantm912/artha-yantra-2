@@ -1,0 +1,36 @@
+# Accepted-but-LINTED fixture: bare positional optimize-path selector
+# (indicators[0]) - valid per the closed grammar, surfaced as a warning
+# (C-2.4: "accepted but linted by the editor").
+schema: strategy-schema/v1
+id: positional-path-sample
+name: "Positional Path Sample"
+version: 1.0.0
+universe:
+  mode: explicit
+  instruments:
+    - { exchange: NSE, tradingsymbol: RELIANCE }
+timeframes: { primary: 1m }
+indicators:
+  - { name: EMA, alias: ema_fast, timeframe: 1m, params: { period: 9 }, weight: 1.0 }
+  - { name: EMA, alias: ema_slow, timeframe: 1m, params: { period: 21 }, weight: 1.0 }
+  - { name: RSI, alias: rsi_1m, timeframe: 1m, params: { period: 14 }, weight: 1.0,
+      normalize: { type: rsi_momentum } }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - crossover: { fast: ema_fast, slow: ema_slow }
+  scoring: { threshold: 0.5 }
+exit_rules:
+  - { type: signal_exit, params: { rule: "crossunder(ema_fast, ema_slow)" } }
+risk:
+  position_sizing: { method: fixed_quantity, params: { quantity: 1 } }
+  max_positions: 1
+  session: { style: intraday }
+backtest:
+  optimize:
+    parameters:
+      - { path: "indicators[0].params.period", range: [5, 13], step: 1 }
+    method: grid
+    max_trials: 9
+    objective: { metric: sharpe, direction: maximize }

@@ -1,0 +1,31 @@
+# expect: does not resolve
+schema: strategy-schema/v1
+id: reject-unresolved-path
+name: "Unresolved Optimize Path"
+version: 1.0.0
+universe:
+  mode: explicit
+  instruments:
+    - { exchange: NSE, tradingsymbol: RELIANCE }
+timeframes: { primary: 1m }
+indicators:
+  - { name: EMA, alias: ema_fast, timeframe: 1m, params: { period: 9 }, weight: 1.0 }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - "close > ema_fast"
+  scoring: { threshold: 0.5 }
+exit_rules:
+  - { type: stop_loss, params: { basis: r_multiple, value: 1.5 } }
+risk:
+  position_sizing: { method: fixed_quantity, params: { quantity: 1 } }
+  max_positions: 1
+  session: { style: intraday }
+backtest:
+  optimize:
+    parameters:
+      - { path: "indicators[alias=ghost].params.period", range: [5, 13] }   # no such alias
+    method: grid
+    max_trials: 9
+    objective: { metric: sharpe, direction: maximize }

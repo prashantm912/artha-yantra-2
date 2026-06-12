@@ -1,0 +1,27 @@
+# A7 fixture [FP-8]: 1w primary timeframe (served from candles_1w, never fetched)
+schema: strategy-schema/v1
+id: weekly-trend-follow
+name: "Weekly Trend Follower"
+version: 1.0.0
+universe:
+  mode: explicit
+  instruments:
+    - { exchange: NSE, tradingsymbol: RELIANCE }
+timeframes: { primary: 1w, additional: [1d] }
+indicators:
+  - { name: EMA, alias: ema10w, timeframe: 1w, params: { period: 10 }, weight: 1.0 }
+  - { name: EMA, alias: ema30w, timeframe: 1w, params: { period: 30 }, weight: 1.0 }
+  - { name: ADX, alias: adx_d, timeframe: 1d, params: { period: 14 }, weight: 1.0,
+      normalize: { type: linear, from: 15, to: 40 } }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - crossover: { fast: ema10w, slow: ema30w }
+  scoring: { threshold: 0.5 }
+exit_rules:
+  - { type: signal_exit, params: { rule: "crossunder(ema10w, ema30w)" } }
+risk:
+  position_sizing: { method: percent_equity, params: { percent: 20 } }
+  max_positions: 3
+  session: { style: positional, allow_overnight: true }

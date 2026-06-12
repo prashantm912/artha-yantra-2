@@ -1,24 +1,39 @@
-# Compiled class file
+# --- secrets & local config (never committed — A.9 / ADR D13) ---
+.env
+.env.*
+!.env.example
+deploy/secrets/*
+!deploy/secrets/.gitkeep
+!deploy/secrets/README.md
+**/application-local*.properties
+**/application-local*.yml
+
+# --- backups (nightly pg_dump bind mount — A.11) ---
+backups/
+
+# --- build output ---
+target/
+dist/
+build/
 *.class
 
-# Log file
+# --- node ---
+node_modules/
+npm-debug.log*
+
+# --- python ---
+.venv/
+__pycache__/
+*.pyc
+
+# --- IDE / OS ---
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db
+
+# --- logs & JVM crash dumps ---
 *.log
-
-# BlueJ files
-*.ctxt
-
-# Mobile Tools for Java (J2ME)
-.mtj.tmp/
-
-# Package Files #
-*.jar
-*.war
-*.nar
-*.ear
-*.zip
-*.tar.gz
-*.rar
-
-# virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
 replay_pid*

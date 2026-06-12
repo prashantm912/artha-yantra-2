@@ -1,0 +1,249 @@
+# ArthaYantra 2.0 — single compose file, three activation tiers (A.1 / D14, D16)
+#   default        : core stateful containers (+ app services as they land)
+#   --profile obs  : Prometheus/Grafana/Loki (Stage G)
+#   --profile dev-tools : Adminer, RedisInsight, loopback publishes for T2
+# Mock vs live is orthogonal: SPRING_PROFILES_ACTIVE in .env (D13).
+# Every container: pinned tag, mem_limit, healthcheck, json-file log caps.
+# Operate via ay.ps1 / ay.sh only — project-scoped compose, never docker kill.
+
+name: arthayantra
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+secrets:
+  postgres_password:
+    # generated locally by `ay up` if missing — never committed (A.9)
+    file: ./secrets/postgres_password
+
+volumes:
+  timescale-data:
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:2.17.2-pg17
+    container_name: ay-timescaledb
+    command: ["postgres", "-c", "shared_buffers=512MB"]
+    environment:
+      POSTGRES_USER: artha
+      POSTGRES_DB: artha
+      # file-mounted secret — never a plain env var (A.9 / T4)
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    ports:
+      - "127.0.0.1:5432:5432" # dev tooling only (D7); loopback, never 0.0.0.0
+    volumes:
+      - timescale-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "artha"]
+      interval: 5s
+      retries: 10
+    mem_limit: 1024m
+    restart: unless-stopped
+    logging: *default-logging
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: ay-redis
+    # CD-16: eviction is instance-wide, so volatile-lru + TTLs only on cache
+    # keys keeps sessions/Streams safe; pubsub buffer limit disconnects
+    # pathological subscribers instead of ballooning memory (A.7.2)
+    command:
+      - redis-server
+      - --maxmemory
+      - 48mb
+      - --maxmemory-policy
+      - volatile-lru
+      - --client-output-buffer-limit
+      - pubsub 16mb 8mb 60
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+    mem_limit: 64m
+    restart: unless-stopped
+    logging: *default-logging
+
+  # ---- one-shot DB init (A.8 / D17, CD-1, CD-7) ---------------------------
+  # Runs the four Flyway lineages (admin first) from an empty volume and
+  # exits 0; app services gate on service_completed_successfully. Every
+  # service runs ddl-auto=none — Flyway owns ALL schema.
+  flyway-init:
+    image: flyway/flyway:11-alpine
+    container_name: ay-flyway-init
+    secrets: [postgres_password]
+    volumes:
+      - ./flyway:/flyway/sql:ro
+    entrypoint: ["/bin/sh", "/flyway/sql/flyway-run.sh"]
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    mem_limit: 256m
+    restart: "no"
+    logging: *default-logging
+
+  # ---- always-on nightly backup sidecar (A.11 / D16) ----------------------
+  # 00:30 IST pg_dump -Fc per schema into the bind-mounted ./backups on the
+  # WINDOWS filesystem - outside the WSL2 VM and Docker volumes by design
+  # (write-once nightly traffic; survival outside the VM is the point).
+  # Rotation: 14 nightly + 8 weekly. Dump failure POSTs the ops ntfy topic
+  # directly (no-op when ARTHA_NTFY_TOPIC is unset).
+  db-backup:
+    image: postgres:17-alpine
+    container_name: ay-db-backup
+    environment:
+      TZ: Asia/Kolkata
+      PGHOST: timescaledb
+      PGUSER: artha
+      PGDATABASE: artha
+      ARTHA_NTFY_TOPIC: ${ARTHA_NTFY_TOPIC:-}
+      ARTHA_NTFY_URL: ${ARTHA_NTFY_URL:-https://ntfy.sh}
+    secrets: [postgres_password]
+    volumes:
+      - ../backups:/backups
+      - ./backup/backup.sh:/usr/local/bin/backup.sh:ro
+    entrypoint:
+      - /bin/sh
+      - -c
+      - "echo '30 0 * * * /usr/local/bin/backup.sh nightly' | crontab - && exec crond -f -l 8"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep crond"]
+      interval: 30s
+      retries: 3
+    mem_limit: 64m
+    restart: unless-stopped
+    logging: *default-logging
+
+  # ---- the single front door (A.2 / D7, D13) ------------------------------
+  # The ONLY published app port, hardcoded loopback by design (A.1.2) —
+  # never parameterized via env. Jar is host-built (mvnw package) before
+  # compose build; see services/edge-gateway/Dockerfile.
+  edge-gateway:
+    build:
+      context: ../services/edge-gateway
+    image: arthayantra/edge-gateway:dev
+    container_name: ay-edge-gateway
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-mock}
+      ARTHA_OWNER_PASSWORD_HASH: ${ARTHA_OWNER_PASSWORD_HASH:-}
+      GATEWAY_WS_FLUSH_HZ: ${GATEWAY_WS_FLUSH_HZ:-20}
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 10s
+      retries: 12
+      start_period: 40s
+    mem_limit: 384m
+    restart: unless-stopped
+    logging: *default-logging
+
+  # ---- market data: ticker + chain + cache hot path (A.7a / D7) -----------
+  # Internal port 8081 — never published in the default profile; the
+  # dev-tools profile forwards it on loopback for T2 (mds-publish below).
+  market-data-service:
+    build:
+      context: ../services/market-data-service
+    image: arthayantra/market-data-service:dev
+    container_name: ay-market-data-service
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-mock}
+      MOCK_TICKS_PER_SEC: ${MOCK_TICKS_PER_SEC:-1}
+      MOCK_SCENARIO: ${MOCK_SCENARIO:-trend-up}
+    depends_on:
+      flyway-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8081/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 10s
+      retries: 12
+      start_period: 40s
+    mem_limit: 640m
+    restart: unless-stopped
+    logging: *default-logging
+
+  # ---- dev-tools profile (A.1.2 / S6 ports) -------------------------------
+  adminer:
+    image: adminer:5.4.2
+    container_name: ay-adminer
+    profiles: [dev-tools]
+    ports:
+      - "127.0.0.1:8085:8080" # S6: moved off host 8080 (gateway's port)
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit(@fsockopen('127.0.0.1', 8080) ? 0 : 1);"]
+      interval: 10s
+      retries: 5
+    mem_limit: 128m
+    restart: unless-stopped
+    logging: *default-logging
+
+  redisinsight:
+    image: redis/redisinsight:2.70
+    container_name: ay-redisinsight
+    profiles: [dev-tools]
+    ports:
+      - "127.0.0.1:5540:5540" # RedisInsight current default port (S6)
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5540/api/health > /dev/null 2>&1 || exit 1"]
+      interval: 10s
+      retries: 5
+    mem_limit: 256m
+    restart: unless-stopped
+    logging: *default-logging
+
+  # dev-tools publishes the internal service ports on loopback for T2 (A.14)
+  mds-publish:
+    image: alpine/socat:1.8.0.3
+    container_name: ay-mds-publish
+    profiles: [dev-tools]
+    command: ["TCP-LISTEN:8081,fork,reuseaddr", "TCP:market-data-service:8081"]
+    ports:
+      - "127.0.0.1:8081:8081"
+    depends_on:
+      market-data-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "socat", "-V"]
+      interval: 30s
+      retries: 3
+    mem_limit: 16m
+    restart: unless-stopped
+    logging: *default-logging
+
+  # dev-tools publishes redis 6379 on loopback for T2 host-run services
+  # (A.14). Compose can't gate a port mapping behind a profile, so a tiny
+  # socat forwarder carries the publish for the profile.
+  redis-publish:
+    image: alpine/socat:1.8.0.3
+    container_name: ay-redis-publish
+    profiles: [dev-tools]
+    command: ["TCP-LISTEN:6379,fork,reuseaddr", "TCP:redis:6379"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "socat", "-V"]
+      interval: 30s
+      retries: 3
+    mem_limit: 16m
+    restart: unless-stopped
+    logging: *default-logging

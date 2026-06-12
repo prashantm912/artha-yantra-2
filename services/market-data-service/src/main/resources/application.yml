@@ -1,0 +1,45 @@
+# market-data-service (A.7a). Logging defaults (ECS JSON + masking) come from
+# common-web-core (A.6). Mock is the DEFAULT profile — bare starts are always
+# credential-free (D13); live must be selected explicitly and fails fast
+# without secrets.
+server:
+  port: 8081
+
+spring:
+  application:
+    name: market-data-service
+  profiles:
+    default: mock
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+
+artha:
+  feed:
+    autostart: ${ARTHA_FEED_AUTOSTART:true}
+  mock:
+    ticks-per-sec: ${MOCK_TICKS_PER_SEC:1}
+    scenario: ${MOCK_SCENARIO:trend-up}
+    seed: ${MOCK_SEED:42}
+    instrument-count: ${MOCK_INSTRUMENT_COUNT:10}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+---
+# T2 host-run inner loop: compose Redis published on loopback (dev-tools)
+spring:
+  config:
+    activate:
+      on-profile: dev
+  data:
+    redis:
+      host: 127.0.0.1

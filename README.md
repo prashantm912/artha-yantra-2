@@ -74,6 +74,20 @@ them.
 Nothing ever binds `0.0.0.0`. Phone access is Tailscale-serve-first; see
 [`docs/remote-access.md`](docs/remote-access.md).
 
+## CI & branch protection (A.10)
+
+CI is the mechanical reviewer: `ci-java.yml` (path-filtered Checkstyle/Error
+Prone → unit + Testcontainers IT on production-pinned images → Modulith
+verify → JaCoCo ≥ 60 % line on services → image build, GHCR push on `main`
+only) and `ci-migrations.yml` (two-step checksum-drift check against the
+merge-base, then a fresh-volume run of all four Flyway lineages +
+`flyway validate`). A **gitleaks** step runs in every workflow.
+
+> **Owner action (GitHub settings → Branches):** protect `main` — PRs
+> required, all path-filtered checks green, force-push and direct push
+> disabled (yes, even for the owner). Trunk-based, short-lived
+> `feat/|fix/|chore/|docs/` branches, squash-merge only.
+
 ## Development
 
 - [`docs/dev-setup.md`](docs/dev-setup.md) — host/container iteration tiers and port map.

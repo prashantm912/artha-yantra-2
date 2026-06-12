@@ -77,7 +77,10 @@ class TickPipelineIntegrationTest {
       listener.stop();
     }
 
-    Map<String, Long> lastSeqPerChannel = new HashMap<>();
+    // NOTE: the listener container dispatches each message on its own executor
+    // thread, so OUR list order is not bus order — per-instrument seq ORDERING
+    // is unit-tested at the normalizer; here we pin uniqueness + coverage.
+    Map<String, List<Long>> seqsByChannel = new HashMap<>();
     for (Frame frame : frames) {
       // D9 channel naming, verbatim: ticks.{exchange}.{tradingsymbol}
       assertThat(frame.channel()).matches("ticks\\.[A-Z]+\\..+");
@@ -86,12 +89,14 @@ class TickPipelineIntegrationTest {
       assertThat(frame.body().get("lastPrice").asText()).matches("\\d+\\.\\d{2}");
       // IST offset serialization
       assertThat(frame.body().get("timestamp").asText()).endsWith("+05:30");
-      // monotonic per-instrument seq
-      long seq = frame.body().get("seq").asLong();
-      Long previous = lastSeqPerChannel.put(frame.channel(), seq);
-      if (previous != null) {
-        assertThat(seq).isGreaterThan(previous);
-      }
+      seqsByChannel
+          .computeIfAbsent(frame.channel(), channel -> new java.util.ArrayList<>())
+          .add(frame.body().get("seq").asLong());
+    }
+    for (List<Long> seqs : seqsByChannel.values()) {
+      assertThat(seqs).doesNotHaveDuplicates();
+      assertThat(seqs.stream().mapToLong(Long::longValue).max().orElse(0))
+          .isGreaterThanOrEqualTo(seqs.size());
     }
 
     // canonical status key (COMMON §3) + last-tick hash

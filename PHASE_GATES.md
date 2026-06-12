@@ -36,7 +36,7 @@ as the verification pass — see README design-authority note.)*
 - [x] A.6 — ECS JSON logging + `MaskingMessageConverter` (masking unit-tested)
 - [x] A.2 — edge-gateway: Argon2id login, Redis sessions, route table, headers, rate limits, hash-password tool
 - [x] A.7 — tick pipeline (mock feed → normalizer → Redis) + gateway STOMP WS bridge with 20 Hz conflation
-- [ ] A.10 — CI: ci-java + ci-migrations, gitleaks step in every workflow
+- [x] A.10 — CI: ci-java + ci-migrations, gitleaks step in every workflow
 - [ ] A.17 — Stage-A exit-gate checklist recorded below and walked against the running mock stack
 
 ## Parking list (deferred)

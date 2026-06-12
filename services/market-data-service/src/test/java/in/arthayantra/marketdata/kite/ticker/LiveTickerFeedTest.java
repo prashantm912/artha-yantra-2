@@ -107,7 +107,18 @@ class LiveTickerFeedTest {
     Map<InstrumentKey, Instant> lastSeen = new HashMap<>();
     List<String> backfills = new ArrayList<>();
     LastSeenProvider seenProvider = key -> Optional.ofNullable(lastSeen.get(key));
-    GapBackfiller backfiller = (key, from, to) -> backfills.add(key.canonical());
+    GapBackfiller backfiller =
+        new GapBackfiller() {
+          @Override
+          public void backfill(InstrumentKey key, Instant from, Instant to) {
+            backfills.add(key.canonical());
+          }
+
+          @Override
+          public void prefetch(InstrumentKey key, String baseInterval, Instant from, Instant to) {
+            backfills.add("prefetch:" + key.canonical());
+          }
+        };
     CircuitBreaker breaker =
         CircuitBreakerRegistry.of(
                 CircuitBreakerConfig.custom()

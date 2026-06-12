@@ -174,6 +174,15 @@ public class CandleQueryService {
   }
 
   /**
+   * Gap-aware coverage pass for the Phase-15A EOD backfill: fetches only the buckets the cache
+   * misses at {@code baseInterval} — synchronous, caller owns scheduling.
+   */
+  public void prefetch(
+      String exchange, String tradingsymbol, String baseInterval, OffsetDateTime from, OffsetDateTime to) {
+    ensureCoverage(exchange, tradingsymbol, baseInterval, from, to);
+  }
+
+  /**
    * Phase-13 gap backfill: re-fetch 1m bars for a silent-through-reconnect window, async on the
    * refresh executor, stored with {@code source='BACKFILL'} (B-6 — replayed vs streamed bars).
    */

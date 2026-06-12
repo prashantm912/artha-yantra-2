@@ -11,4 +11,10 @@ public interface GapBackfiller {
 
   /** Backfills 1m bars for {@code [from, to)} asynchronously through the rate-limited gateway. */
   void backfill(InstrumentKey key, Instant from, Instant to);
+
+  /**
+   * Gap-aware coverage pass (Phase 15A EOD backfill): fetches only missing buckets at
+   * {@code baseInterval} (1m or 1d) — already-cached closed bars are never re-fetched.
+   */
+  void prefetch(InstrumentKey key, String baseInterval, Instant from, Instant to);
 }

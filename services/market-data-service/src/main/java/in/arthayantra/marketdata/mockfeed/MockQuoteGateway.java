@@ -61,6 +61,8 @@ public class MockQuoteGateway implements QuoteGateway {
           instruments.findByKey(key.exchange(), key.tradingsymbol());
       if (instrument.isPresent() && isOption(instrument.get())) {
         optionQuote(key, instrument.get(), now, open).ifPresent(q -> out.put(key, q));
+      } else if (instrument.isPresent() && "FUT".equals(instrument.get().instrumentType())) {
+        futQuote(key, instrument.get(), now, open).ifPresent(q -> out.put(key, q));
       } else {
         spotQuote(key, instrument.orElse(null), now).ifPresent(q -> out.put(key, q));
       }
@@ -108,6 +110,32 @@ public class MockQuoteGateway implements QuoteGateway {
     long token = instrument.instrumentToken() == null ? 0 : instrument.instrumentToken();
     long oi = 10_000 + Math.floorMod(token * 7_919L, 90_000L); // frozen == its EOD value
     long volume = open ? Math.floorMod(token * 104_729L, 500_000L) : 0;
+    return Optional.of(
+        new Quote(key, ltp, bid, ask, volume, oi, OffsetDateTime.ofInstant(now, ZoneOffset.UTC)));
+  }
+
+  /** FUT quotes carry the cost-of-carry off the chain-consistent index spot — clean contango. */
+  private Optional<Quote> futQuote(
+      InstrumentKey key, Instrument instrument, Instant now, boolean open) {
+    String underlying = instrument.underlyingTradingsymbol();
+    List<java.time.LocalDate> expiries =
+        underlying == null ? List.of() : instruments.expiries(underlying);
+    BigDecimal spot = expiries.isEmpty() ? null : ladderSpot(underlying, expiries.get(0));
+    if (spot == null) {
+      long token = instrument.instrumentToken() == null ? 0 : instrument.instrumentToken();
+      spot = MockTickGenerator.basePrice(token);
+    }
+    double t =
+        instrument.expiry() == null
+            ? Black76.T_MIN
+            : ExpiryClock.yearsToExpiry(now, instrument.expiry()).orElse(Black76.T_MIN);
+    BigDecimal ltp =
+        tick(spot.multiply(BigDecimal.valueOf(Math.exp(RISK_FREE.doubleValue() * t))));
+    BigDecimal bid = open ? tick(ltp.subtract(new BigDecimal("0.45"))) : BigDecimal.ZERO;
+    BigDecimal ask = open ? tick(ltp.add(new BigDecimal("0.45"))) : BigDecimal.ZERO;
+    long token = instrument.instrumentToken() == null ? 0 : instrument.instrumentToken();
+    long oi = 50_000 + Math.floorMod(token * 6_271L, 150_000L);
+    long volume = open ? Math.floorMod(token * 99_991L, 800_000L) : 0;
     return Optional.of(
         new Quote(key, ltp, bid, ask, volume, oi, OffsetDateTime.ofInstant(now, ZoneOffset.UTC)));
   }

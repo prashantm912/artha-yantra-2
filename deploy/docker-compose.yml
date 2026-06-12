@@ -67,6 +67,24 @@ services:
     restart: unless-stopped
     logging: *default-logging
 
+  # ---- one-shot DB init (A.8 / D17, CD-1, CD-7) ---------------------------
+  # Runs the four Flyway lineages (admin first) from an empty volume and
+  # exits 0; app services gate on service_completed_successfully. Every
+  # service runs ddl-auto=none — Flyway owns ALL schema.
+  flyway-init:
+    image: flyway/flyway:11-alpine
+    container_name: ay-flyway-init
+    secrets: [postgres_password]
+    volumes:
+      - ./flyway:/flyway/sql:ro
+    entrypoint: ["/bin/sh", "/flyway/sql/flyway-run.sh"]
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    mem_limit: 256m
+    restart: "no"
+    logging: *default-logging
+
   # ---- dev-tools profile (A.1.2 / S6 ports) -------------------------------
   adminer:
     image: adminer:5.4.1

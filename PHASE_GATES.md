@@ -29,7 +29,7 @@ as the verification pass — see README design-authority note.)*
 - [x] A.16 — `docs/LEGAL.md` attribution record (A13) + A6 credentials record
 - [x] A.1 — compose topology: pinned/healthchecked/capped timescaledb + redis, dev-tools profile, `ay` CLI, remote-access doc (Q3)
 - [ ] A.11 — db-backup sidecar: 00:30 IST `pg_dump -Fc` per schema, 14d+8w rotation, ntfy on failure
-- [ ] A.8 — Flyway one-shot init: admin + 3 per-service lineages from empty volume, idempotent
+- [x] A.8 — Flyway one-shot init: admin + 3 per-service lineages from empty volume, idempotent
 - [x] A.3 — Maven reactor + `common-web` (core / servlet adapter split)
 - [x] A.4 — error-code taxonomy constants (COMMON §8.3 spellings)
 - [x] A.5 — `market-calendar` (IST session, NSE 2026 holidays, Tuesday expiries)

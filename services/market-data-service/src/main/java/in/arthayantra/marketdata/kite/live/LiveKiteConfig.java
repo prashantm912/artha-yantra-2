@@ -25,6 +25,7 @@ import org.springframework.core.env.Environment;
  */
 @Configuration
 @Profile("live")
+@org.springframework.boot.context.properties.EnableConfigurationProperties(KiteHttpProperties.class)
 public class LiveKiteConfig {
 
   /**
@@ -116,11 +117,24 @@ public class LiveKiteConfig {
     };
   }
 
-  /** Stage-B stub. */
+  /** Live dump download over the Kite wire format (Phase 9; WireMock-tested). */
   @Bean
-  public InstrumentDumpGateway liveInstrumentDumpGateway() {
-    return () -> {
-      throw notConfigured("InstrumentDumpGateway");
-    };
+  public InstrumentDumpGateway liveInstrumentDumpGateway(
+      org.springframework.web.client.RestClient.Builder restClientBuilder,
+      KiteHttpProperties properties,
+      in.arthayantra.marketdata.kite.AccessTokenProvider tokenProvider) {
+    return new LiveInstrumentDumpGateway(
+        restClientBuilder, properties.baseUrl(), properties.resolveApiKey(), tokenProvider);
+  }
+
+  /**
+   * Placeholder token provider — the store-backed implementation lands with the OAuth lifecycle
+   * (Phase 12). Until then live adapters report an expired session rather than a missing bean.
+   */
+  @Bean
+  @org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean(
+      in.arthayantra.marketdata.kite.AccessTokenProvider.class)
+  public in.arthayantra.marketdata.kite.AccessTokenProvider liveAccessTokenProvider() {
+    return java.util.Optional::empty;
   }
 }

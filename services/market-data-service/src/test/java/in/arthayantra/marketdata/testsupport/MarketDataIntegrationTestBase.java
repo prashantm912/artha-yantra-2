@@ -19,7 +19,8 @@ import org.testcontainers.utility.DockerImageName;
  */
 public abstract class MarketDataIntegrationTestBase {
 
-  @ServiceConnection
+  // NOTE: no @ServiceConnection here — its ConnectionDetails would override the
+  // currentSchema=marketdata URL the service needs; explicit properties below.
   static final PostgreSQLContainer<?> TIMESCALE =
       new PostgreSQLContainer<>(
               DockerImageName.parse("timescale/timescaledb:2.17.2-pg17")
@@ -72,6 +73,8 @@ public abstract class MarketDataIntegrationTestBase {
           String url = TIMESCALE.getJdbcUrl();
           return url + (url.contains("?") ? "&" : "?") + "currentSchema=marketdata";
         });
+    registry.add("spring.datasource.username", TIMESCALE::getUsername);
+    registry.add("spring.datasource.password", TIMESCALE::getPassword);
     // migrations are applied above via the REAL deploy/flyway lineages; Boot's
     // Flyway auto-config (woken by the test-scoped flyway-core) must stay off
     registry.add("spring.flyway.enabled", () -> "false");
@@ -82,10 +85,12 @@ public abstract class MarketDataIntegrationTestBase {
     return TIMESCALE.getJdbcUrl();
   }
 
+  /** Admin user for raw-JDBC assertions. */
   protected static String dbUser() {
     return TIMESCALE.getUsername();
   }
 
+  /** Admin password for raw-JDBC assertions. */
   protected static String dbPassword() {
     return TIMESCALE.getPassword();
   }

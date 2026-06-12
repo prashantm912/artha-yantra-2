@@ -31,9 +31,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # pinned CLI (same version as the local pre-commit hook); full-history
+      # scan, no GitHub-API permissions needed
+      - name: gitleaks full-history scan
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz | tar -xz gitleaks
+          ./gitleaks git --redact --no-banner .
 
   flyway:
     runs-on: ubuntu-latest
@@ -60,15 +63,15 @@ jobs:
         run: |
           cat > /tmp/run-flyway.sh <<'EOF'
           #!/bin/bash
-          # usage: run-flyway.sh <command> <flyway-dir-root>
+          # usage: run-flyway.sh <flyway-dir-root> <command> [extra -options...]
           set -euo pipefail
-          cmd="$1"; root="$2"
+          root="$1"; cmd="$2"; shift 2
           for lineage in admin marketdata strategy backtest; do
             docker run --rm --network host -v "$root:/flyway/sql:ro" \
               flyway/flyway:11-alpine \
               -url="jdbc:postgresql://localhost:5432/artha" -user=artha -password=ci-only \
               -schemas="$lineage" -locations="filesystem:/flyway/sql/$lineage" \
-              -connectRetries=10 "$cmd"
+              -connectRetries=10 "$@" "$cmd"
           done
           EOF
           chmod +x /tmp/run-flyway.sh
@@ -82,13 +85,19 @@ jobs:
           git worktree add /tmp/base-checkout "$BASE"
       - name: Migrate merge-base lineages
         if: github.event_name == 'pull_request'
-        run: /tmp/run-flyway.sh migrate /tmp/base-checkout/deploy/flyway
+        run: |
+          if [ -d /tmp/base-checkout/deploy/flyway ]; then
+            /tmp/run-flyway.sh /tmp/base-checkout/deploy/flyway migrate
+          else
+            echo "merge-base predates deploy/flyway — nothing applied, drift check degenerates to pending-only"
+          fi
 
       # ---- step 2: validate the PR's files against that populated DB —
-      # an edited applied migration turns this red (checksum drift)
+      # an EDITED applied migration turns this red (checksum drift); NEW
+      # not-yet-applied migrations are expected on a PR and are not drift
       - name: Validate PR files against populated database
         if: github.event_name == 'pull_request'
-        run: /tmp/run-flyway.sh validate "$GITHUB_WORKSPACE/deploy/flyway"
+        run: /tmp/run-flyway.sh "$GITHUB_WORKSPACE/deploy/flyway" validate "-ignoreMigrationPatterns=*:pending"
 
       # ---- fresh-volume run: drop everything, migrate the PR's files from
       # empty, then validate (D17 — a fresh volume reproduces the design)
@@ -98,9 +107,9 @@ jobs:
             psql "postgresql://artha:ci-only@localhost:5432/postgres" \
             -c "DROP DATABASE artha WITH (FORCE);" -c "CREATE DATABASE artha OWNER artha;"
       - name: Migrate from empty volume
-        run: /tmp/run-flyway.sh migrate "$GITHUB_WORKSPACE/deploy/flyway"
+        run: /tmp/run-flyway.sh "$GITHUB_WORKSPACE/deploy/flyway" migrate
       - name: Validate from empty volume
-        run: /tmp/run-flyway.sh validate "$GITHUB_WORKSPACE/deploy/flyway"
+        run: /tmp/run-flyway.sh "$GITHUB_WORKSPACE/deploy/flyway" validate
       - name: Assert roles and the single cross-schema grant (CD-1)
         run: |
           docker run --rm --network host postgres:17-alpine \

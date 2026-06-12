@@ -85,6 +85,41 @@ services:
     restart: "no"
     logging: *default-logging
 
+  # ---- always-on nightly backup sidecar (A.11 / D16) ----------------------
+  # 00:30 IST pg_dump -Fc per schema into the bind-mounted ./backups on the
+  # WINDOWS filesystem - outside the WSL2 VM and Docker volumes by design
+  # (write-once nightly traffic; survival outside the VM is the point).
+  # Rotation: 14 nightly + 8 weekly. Dump failure POSTs the ops ntfy topic
+  # directly (no-op when ARTHA_NTFY_TOPIC is unset).
+  db-backup:
+    image: postgres:17-alpine
+    container_name: ay-db-backup
+    environment:
+      TZ: Asia/Kolkata
+      PGHOST: timescaledb
+      PGUSER: artha
+      PGDATABASE: artha
+      ARTHA_NTFY_TOPIC: ${ARTHA_NTFY_TOPIC:-}
+      ARTHA_NTFY_URL: ${ARTHA_NTFY_URL:-https://ntfy.sh}
+    secrets: [postgres_password]
+    volumes:
+      - ../backups:/backups
+      - ./backup/backup.sh:/usr/local/bin/backup.sh:ro
+    entrypoint:
+      - /bin/sh
+      - -c
+      - "echo '30 0 * * * /usr/local/bin/backup.sh nightly' | crontab - && exec crond -f -l 8"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep crond"]
+      interval: 30s
+      retries: 3
+    mem_limit: 64m
+    restart: unless-stopped
+    logging: *default-logging
+
   # ---- dev-tools profile (A.1.2 / S6 ports) -------------------------------
   adminer:
     image: adminer:5.4.1

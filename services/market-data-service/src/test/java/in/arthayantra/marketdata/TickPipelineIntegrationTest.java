@@ -16,15 +16,10 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.listener.PatternTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
 
 /**
  * Phase-7 IT (A.7a) against pinned Redis: the mock feed publishes normalized JSON on the
@@ -37,12 +32,8 @@ import org.testcontainers.utility.DockerImageName;
       "artha.mock.ticks-per-sec=20",
       "artha.mock.instrument-count=3"
     })
-@Testcontainers
-class TickPipelineIntegrationTest {
-
-  @Container @ServiceConnection
-  static final GenericContainer<?> REDIS =
-      new GenericContainer<>(DockerImageName.parse("redis:7.4-alpine")).withExposedPorts(6379);
+class TickPipelineIntegrationTest
+    extends in.arthayantra.marketdata.testsupport.MarketDataIntegrationTestBase {
 
   @Autowired private StringRedisTemplate redis;
   @Autowired private RedisConnectionFactory connectionFactory;

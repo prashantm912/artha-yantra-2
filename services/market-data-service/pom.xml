@@ -19,6 +19,10 @@
 
   <properties>
     <spring-modulith.version>1.4.12</spring-modulith.version>
+    <resilience4j.version>2.3.0</resilience4j.version>
+    <kiteconnect.version>3.5.1</kiteconnect.version>
+    <wiremock.version>3.13.2</wiremock.version>
+    <commons-math3.version>3.6.1</commons-math3.version>
   </properties>
 
   <dependencyManagement>
@@ -29,6 +33,13 @@
         <version>${spring-modulith.version}</version>
         <type>pom</type>
         <scope>import</scope>
+      </dependency>
+      <!-- COMMON §3 stack pin: javakiteconnect's bundled Gson excluded,
+           Gson 2.13.2 pinned -->
+      <dependency>
+        <groupId>com.google.code.gson</groupId>
+        <artifactId>gson</artifactId>
+        <version>2.13.2</version>
       </dependency>
     </dependencies>
   </dependencyManagement>
@@ -56,6 +67,54 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-data-redis</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-jdbc</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-cache</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.github.ben-manes.caffeine</groupId>
+      <artifactId>caffeine</artifactId>
+    </dependency>
+    <!-- B-3: the ONE resilience dependency (limiters + retry + breakers) -->
+    <dependency>
+      <groupId>io.github.resilience4j</groupId>
+      <artifactId>resilience4j-spring-boot3</artifactId>
+      <version>${resilience4j.version}</version>
+    </dependency>
+    <!-- live KiteTicker WS adapter (B-6); REST live impls speak the Kite wire
+         format via RestClient so WireMock can verify them (the SDK pins its
+         base URL, making the per-phase WireMock acceptance criteria
+         unsatisfiable through it) -->
+    <dependency>
+      <groupId>com.zerodhatech.kiteconnect</groupId>
+      <artifactId>kiteconnect</artifactId>
+      <version>${kiteconnect.version}</version>
+      <exclusions>
+        <exclusion>
+          <groupId>com.google.code.gson</groupId>
+          <artifactId>gson</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
+      <groupId>com.google.code.gson</groupId>
+      <artifactId>gson</artifactId>
+    </dependency>
+    <!-- high-precision normal CDF for the Black-76 solver (Phase 14) -->
+    <dependency>
+      <groupId>org.apache.commons</groupId>
+      <artifactId>commons-math3</artifactId>
+      <version>${commons-math3.version}</version>
     </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
@@ -88,6 +147,30 @@
     <dependency>
       <groupId>org.testcontainers</groupId>
       <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- ITs apply the real deploy/flyway lineages against the pinned
+         Timescale container (runtime migrations stay with flyway-init, D17) -->
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-database-postgresql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- live-impl wire tests (B-6: WireMock 3.x stubs the Kite HTTP API) -->
+    <dependency>
+      <groupId>org.wiremock</groupId>
+      <artifactId>wiremock-standalone</artifactId>
+      <version>${wiremock.version}</version>
       <scope>test</scope>
     </dependency>
   </dependencies>

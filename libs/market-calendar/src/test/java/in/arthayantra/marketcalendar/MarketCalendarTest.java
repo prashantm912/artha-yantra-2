@@ -1,0 +1,118 @@
+package in.arthayantra.marketcalendar;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZonedDateTime;
+import org.junit.jupiter.api.Test;
+
+/** Phase-4 boundary table: holiday, weekend, 09:14/09:15/15:30/15:31, Tuesday expiry (A.5). */
+class MarketCalendarTest {
+
+  private final MarketCalendar calendar = MarketCalendar.nse();
+
+  // 2026-06-10 is a regular Wednesday trading day
+  private static Instant ist(String date, String time) {
+    return ZonedDateTime.parse(date + "T" + time + "+05:30[Asia/Kolkata]").toInstant();
+  }
+
+  @Test
+  void sessionBoundaryTable() {
+    assertThat(calendar.isOpen(ist("2026-06-10", "09:14:59"))).isFalse();
+    assertThat(calendar.isOpen(ist("2026-06-10", "09:15:00"))).isTrue();
+    assertThat(calendar.isOpen(ist("2026-06-10", "12:00:00"))).isTrue();
+    assertThat(calendar.isOpen(ist("2026-06-10", "15:29:59"))).isTrue();
+    assertThat(calendar.isOpen(ist("2026-06-10", "15:30:00"))).isFalse();
+    assertThat(calendar.isOpen(ist("2026-06-10", "15:31:00"))).isFalse();
+  }
+
+  @Test
+  void weekendsAndHolidaysAreClosed() {
+    assertThat(calendar.isTradingDay(LocalDate.parse("2026-06-13"))).isFalse(); // Saturday
+    assertThat(calendar.isTradingDay(LocalDate.parse("2026-06-14"))).isFalse(); // Sunday
+    assertThat(calendar.isTradingDay(LocalDate.parse("2026-01-26"))).isFalse(); // Republic Day
+    assertThat(calendar.isOpen(ist("2026-01-26", "10:00:00"))).isFalse();
+    assertThat(calendar.isTradingDay(LocalDate.parse("2026-06-10"))).isTrue();
+  }
+
+  @Test
+  void sessionBoundsAreIstInstants() {
+    MarketCalendar.SessionBounds bounds =
+        calendar.sessionBounds(LocalDate.parse("2026-06-10")).orElseThrow();
+
+    // 09:15 IST == 03:45 UTC
+    assertThat(bounds.open()).isEqualTo(Instant.parse("2026-06-10T03:45:00Z"));
+    assertThat(bounds.close()).isEqualTo(Instant.parse("2026-06-10T10:00:00Z"));
+    assertThat(calendar.sessionBounds(LocalDate.parse("2026-06-13"))).isEmpty();
+  }
+
+  @Test
+  void nextTradingDaySkipsWeekendsAndHolidays() {
+    // Friday -> Monday
+    assertThat(calendar.nextTradingDay(LocalDate.parse("2026-06-12")))
+        .isEqualTo(LocalDate.parse("2026-06-15"));
+    // Friday before Republic Day Monday -> Tuesday
+    assertThat(calendar.nextTradingDay(LocalDate.parse("2026-01-23")))
+        .isEqualTo(LocalDate.parse("2026-01-27"));
+  }
+
+  @Test
+  void expectedMinuteBucketsCountsSessionBuckets() {
+    // full trading day = 375 one-minute buckets (09:15 .. 15:29)
+    assertThat(
+            calendar.expectedMinuteBuckets(
+                ist("2026-06-10", "00:00:00"), ist("2026-06-10", "23:59:59")))
+        .isEqualTo(375);
+    // half-open range: [09:15, 09:20) = 5 buckets
+    assertThat(
+            calendar.expectedMinuteBuckets(ist("2026-06-10", "09:15:00"), ist("2026-06-10", "09:20:00")))
+        .isEqualTo(5);
+    // weekend range -> 0
+    assertThat(
+            calendar.expectedMinuteBuckets(
+                ist("2026-06-13", "00:00:00"), ist("2026-06-14", "23:59:59")))
+        .isEqualTo(0);
+    // two full days (Wed+Thu) = 750
+    assertThat(
+            calendar.expectedMinuteBuckets(
+                ist("2026-06-10", "00:00:00"), ist("2026-06-11", "23:59:59")))
+        .isEqualTo(750);
+  }
+
+  @Test
+  void weeklyIndexExpiryIsTuesday() {
+    // Wednesday -> next Tuesday
+    assertThat(calendar.nextWeeklyIndexExpiry(LocalDate.parse("2026-06-10")))
+        .isEqualTo(LocalDate.parse("2026-06-16"));
+    // a Tuesday is its own expiry
+    assertThat(calendar.nextWeeklyIndexExpiry(LocalDate.parse("2026-06-16")))
+        .isEqualTo(LocalDate.parse("2026-06-16"));
+    assertThat(calendar.isWeeklyIndexExpiryDay(LocalDate.parse("2026-06-16"))).isTrue();
+    assertThat(calendar.isWeeklyIndexExpiryDay(LocalDate.parse("2026-06-10"))).isFalse();
+  }
+
+  @Test
+  void holidayTuesdayExpiryPreponesToMonday() {
+    // 2026-10-20 (Tue) is Dussehra -> expiry prepones to Mon 2026-10-19
+    assertThat(calendar.nextWeeklyIndexExpiry(LocalDate.parse("2026-10-14")))
+        .isEqualTo(LocalDate.parse("2026-10-19"));
+    assertThat(calendar.isWeeklyIndexExpiryDay(LocalDate.parse("2026-10-19"))).isTrue();
+    // asking ON the holiday Tuesday rolls to next week's expiry (the prepone is in the past)
+    assertThat(calendar.nextWeeklyIndexExpiry(LocalDate.parse("2026-10-20")))
+        .isEqualTo(LocalDate.parse("2026-10-27"));
+  }
+
+  @Test
+  void uncoveredYearFailsLoudly() {
+    assertThatThrownBy(() -> calendar.isTradingDay(LocalDate.parse("2027-01-04")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("2027");
+  }
+
+  @Test
+  void holidayResourceCoversTheBuildYear() {
+    assertThat(calendar.coveredYears()).contains(2026);
+  }
+}

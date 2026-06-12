@@ -95,7 +95,7 @@ curl -s -b /tmp/ay.txt "http://127.0.0.1:8080/api/v1/market/candles?exchange=NSE
 bars), IST `+05:30` buckets. Watch a bar publish on the bus:
 
 ```powershell
-docker exec ay-redis redis-cli --timeout 70 subscribe "candles.1m.NSE.RELIANCE"
+timeout 70 docker exec ay-redis redis-cli subscribe "candles.1m.NSE.RELIANCE"
 ```
 
 **PASS when:** one JSON bar arrives within ~65 s.

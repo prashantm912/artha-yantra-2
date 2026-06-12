@@ -20,10 +20,12 @@ public final class ErrorCodes {
   public static final String VALIDATION_INTERVAL_UNSUPPORTED = "VALIDATION_INTERVAL_UNSUPPORTED";
   public static final String VALIDATION_RANGE_TOO_LARGE = "VALIDATION_RANGE_TOO_LARGE";
 
-  // ---- AUTH_* (401/403) ----
+  // ---- AUTH_* (401/403/429) ----
   public static final String AUTH_REQUIRED = "AUTH_REQUIRED";
   public static final String AUTH_BAD_CREDENTIALS = "AUTH_BAD_CREDENTIALS";
   public static final String AUTH_SESSION_EXPIRED = "AUTH_SESSION_EXPIRED";
+  public static final String AUTH_FORBIDDEN = "AUTH_FORBIDDEN";
+  public static final String AUTH_RATE_LIMITED = "AUTH_RATE_LIMITED";
 
   // ---- KITE_* (401/429/502/503) ----
   public static final String KITE_TOKEN_EXPIRED = "KITE_TOKEN_EXPIRED";
@@ -54,6 +56,9 @@ public final class ErrorCodes {
 
   // ---- service NOT_CONFIGURED (503) — live-port stubs in mock-built phases (A.7) ----
   public static final String NOT_CONFIGURED = "NOT_CONFIGURED";
+
+  // ---- gateway upstream absent/unreachable (503) — A.2.2 routing envelope ----
+  public static final String UPSTREAM_UNAVAILABLE = "UPSTREAM_UNAVAILABLE";
 
   // ---- INTERNAL_* (500) ----
   public static final String INTERNAL_ERROR = "INTERNAL_ERROR";

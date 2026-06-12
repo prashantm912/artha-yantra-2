@@ -23,6 +23,7 @@
     <module>libs/common-web</module>
     <module>libs/market-calendar</module>
     <module>services/edge-gateway</module>
+    <module>services/market-data-service</module>
     <module>tools/hash-password</module>
   </modules>
 

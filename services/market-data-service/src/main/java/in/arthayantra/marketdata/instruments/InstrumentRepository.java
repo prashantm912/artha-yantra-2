@@ -248,6 +248,19 @@ public class InstrumentRepository {
         Date.valueOf(expiry));
   }
 
+  /** Active FUT contracts of an underlying, expiry-sorted (Phase 15A / B-18). */
+  public List<Instrument> futures(String underlying) {
+    return jdbc.query(
+        """
+        SELECT * FROM instruments
+        WHERE is_active AND underlying_tradingsymbol = ? AND instrument_type = 'FUT'
+          AND expiry IS NOT NULL
+        ORDER BY expiry
+        """,
+        INSTRUMENT_MAPPER,
+        underlying);
+  }
+
   /** Active row count (startup bootstrap check). */
   public long countActive() {
     Long count = jdbc.queryForObject("SELECT count(*) FROM instruments WHERE is_active", Long.class);

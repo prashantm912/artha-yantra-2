@@ -37,4 +37,18 @@ public class GapBackfillService implements GapBackfiller {
       log.warn("gap backfill failed for {}: {}", key.canonical(), e.getMessage());
     }
   }
+
+  @Override
+  public void prefetch(InstrumentKey key, String baseInterval, Instant from, Instant to) {
+    try {
+      queryService.prefetch(
+          key.exchange(),
+          key.tradingsymbol(),
+          baseInterval,
+          from.atOffset(ZoneOffset.UTC),
+          to.atOffset(ZoneOffset.UTC));
+    } catch (Exception e) {
+      log.warn("EOD prefetch failed for {} {}: {}", key.canonical(), baseInterval, e.getMessage());
+    }
+  }
 }

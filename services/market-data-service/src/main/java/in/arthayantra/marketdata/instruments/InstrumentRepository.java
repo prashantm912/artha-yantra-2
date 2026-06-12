@@ -278,6 +278,18 @@ public class InstrumentRepository {
         exchange, tradingsymbol, name, underlyingExchange, underlying);
   }
 
+  /** Active cash equities (Phase 16A corporate-action sweep scope). */
+  public List<Instrument> activeEquities() {
+    return jdbc.query(
+        """
+        SELECT * FROM instruments
+        WHERE is_active AND instrument_type = 'EQ'
+          AND segment NOT IN ('INDICES','SYN-CONT')
+        ORDER BY exchange, tradingsymbol
+        """,
+        INSTRUMENT_MAPPER);
+  }
+
   /** Active row count (startup bootstrap check). */
   public long countActive() {
     Long count = jdbc.queryForObject("SELECT count(*) FROM instruments WHERE is_active", Long.class);

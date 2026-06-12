@@ -180,6 +180,15 @@ public class CandleRepository {
         Timestamp.from(from.toInstant()), Timestamp.from(to.toInstant()));
   }
 
+  /**
+   * Purges every cached bar of one symbol — ONLY the Phase-16A corporate-action remediation may
+   * call this (amendment A8, the single sanctioned exception to closed-bars-immutable).
+   */
+  public int purgeSymbol(String exchange, String tradingsymbol) {
+    return jdbc.update(
+        "DELETE FROM candles WHERE exchange = ? AND tradingsymbol = ?", exchange, tradingsymbol);
+  }
+
   /** Hypertable size in bytes (the ay_hypertable_bytes gauge). */
   public long hypertableBytes() {
     Long candlesBytes =

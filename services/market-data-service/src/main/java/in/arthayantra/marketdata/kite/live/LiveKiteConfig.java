@@ -126,21 +126,53 @@ public class LiveKiteConfig {
       in.arthayantra.marketdata.kite.session.KiteSessionStore store,
       in.arthayantra.marketdata.kite.session.SessionStatusPublisher statusPublisher,
       in.arthayantra.marketdata.kite.KiteCallExecutor executor,
-      KiteHttpProperties properties) {
+      KiteHttpProperties properties,
+      in.arthayantra.marketdata.kite.canary.ContractCanary canary) {
     return new in.arthayantra.marketdata.kite.session.LiveKiteSessionService(
         wireClient, store, statusPublisher, executor,
-        properties.loginUrlBase(), properties.resolveApiKey());
+        properties.loginUrlBase(), properties.resolveApiKey(), canary);
   }
 
-  /** The 5-min health probe. */
+  /** The 5-min health probe — also the canary's first-LIVE-of-the-day trigger (B-9). */
   @Bean
   public in.arthayantra.marketdata.kite.session.SessionHealthProbe sessionHealthProbe(
       in.arthayantra.marketdata.kite.session.SessionWireClient wireClient,
       in.arthayantra.marketdata.kite.session.KiteSessionStore store,
       in.arthayantra.marketdata.kite.session.SessionStatusPublisher statusPublisher,
+      io.micrometer.core.instrument.MeterRegistry meterRegistry,
+      in.arthayantra.marketdata.kite.canary.ContractCanary canary) {
+    var probe =
+        new in.arthayantra.marketdata.kite.session.SessionHealthProbe(
+            wireClient, store, statusPublisher, meterRegistry);
+    probe.setOnLiveHook(canary::maybeRunDaily);
+    return probe;
+  }
+
+  /** The daily contract canary (B-9) — lives HERE, never backtest-service. */
+  @Bean
+  public in.arthayantra.marketdata.kite.canary.ContractCanary contractCanary(
+      org.springframework.web.client.RestClient.Builder restClientBuilder,
+      KiteHttpProperties properties,
+      in.arthayantra.marketdata.kite.AccessTokenProvider tokenProvider,
+      in.arthayantra.marketdata.kite.KiteCallExecutor executor,
+      org.springframework.data.redis.core.StringRedisTemplate redis,
+      in.arthayantra.marketdata.alerts.NtfyClient ntfy,
+      in.arthayantra.marketcalendar.MarketCalendar calendar,
+      java.time.Clock clock,
+      com.fasterxml.jackson.databind.ObjectMapper objectMapper,
       io.micrometer.core.instrument.MeterRegistry meterRegistry) {
-    return new in.arthayantra.marketdata.kite.session.SessionHealthProbe(
-        wireClient, store, statusPublisher, meterRegistry);
+    return new in.arthayantra.marketdata.kite.canary.ContractCanary(
+        restClientBuilder,
+        properties.baseUrl(),
+        properties.resolveApiKey(),
+        tokenProvider,
+        executor,
+        redis,
+        ntfy,
+        calendar,
+        clock,
+        objectMapper,
+        meterRegistry);
   }
 
   /**

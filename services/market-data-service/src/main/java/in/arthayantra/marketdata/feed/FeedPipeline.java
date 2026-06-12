@@ -60,7 +60,15 @@ public class FeedPipeline implements SmartLifecycle {
 
   @Override
   public void start() {
-    if (running || !autostart) {
+    if (!autostart) {
+      return;
+    }
+    startFeed();
+  }
+
+  /** Explicit start (the Phase-16 09:10 ticker schedule) — bypasses the autostart gate. */
+  public void startFeed() {
+    if (running) {
       return;
     }
     running = true;
@@ -70,6 +78,11 @@ public class FeedPipeline implements SmartLifecycle {
     normalizerThread.start();
     marketFeed.start(ingressQueue);
     log.info("feed pipeline started (status={})", sessionGateway.statusLabel());
+  }
+
+  /** Explicit stop (the Phase-16 15:35 ticker schedule). */
+  public void stopFeed() {
+    stop();
   }
 
   private void normalizerLoop() {

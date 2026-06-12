@@ -1,6 +1,7 @@
 package in.arthayantra.marketdata.kite.session;
 
 import in.arthayantra.marketdata.kite.KiteCallExecutor;
+import in.arthayantra.marketdata.kite.canary.ContractCanary;
 
 /** Live OAuth ritual (B-2 / Flow 1): exchange → encrypt → persist → status CONNECTED. */
 public class LiveKiteSessionService implements KiteSessionService {
@@ -11,6 +12,7 @@ public class LiveKiteSessionService implements KiteSessionService {
   private final KiteCallExecutor executor;
   private final String loginUrlBase;
   private final String apiKey;
+  private final ContractCanary canary;
 
   /** Wires the ritual. */
   public LiveKiteSessionService(
@@ -19,13 +21,15 @@ public class LiveKiteSessionService implements KiteSessionService {
       SessionStatusPublisher statusPublisher,
       KiteCallExecutor executor,
       String loginUrlBase,
-      String apiKey) {
+      String apiKey,
+      ContractCanary canary) {
     this.wireClient = wireClient;
     this.store = store;
     this.statusPublisher = statusPublisher;
     this.executor = executor;
     this.loginUrlBase = loginUrlBase;
     this.apiKey = apiKey;
+    this.canary = canary;
   }
 
   @Override
@@ -44,6 +48,7 @@ public class LiveKiteSessionService implements KiteSessionService {
   @Override
   public KiteStatus status() {
     KiteSessionStore.State state = store.state();
+    var canaryResult = canary.lastResult();
     return new KiteStatus(
         state == KiteSessionStore.State.CONNECTED,
         "LIVE",
@@ -51,8 +56,10 @@ public class LiveKiteSessionService implements KiteSessionService {
         store.kiteUserId(),
         store.tokenValidUntil(),
         store.lastValidatedAt(),
-        "NOT_CONNECTED", // live KiteTicker lands in Phase 13
-        executor.kiteRestBreaker().getState().name());
+        "NOT_CONNECTED", // ticker state surfaces once the live feed is started (Phase 13 wiring)
+        executor.kiteRestBreaker().getState().name(),
+        canaryResult.map(ContractCanary.CanaryResult::lastContractCheck).orElse(null),
+        canaryResult.map(ContractCanary.CanaryResult::drift).orElse(java.util.List.of()));
   }
 
   @Override

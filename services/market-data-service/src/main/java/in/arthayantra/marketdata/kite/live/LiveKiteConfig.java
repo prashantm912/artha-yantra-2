@@ -7,7 +7,6 @@ import in.arthayantra.marketdata.kite.InstrumentDumpGateway;
 import in.arthayantra.marketdata.kite.MarketFeed;
 import in.arthayantra.marketdata.kite.QuoteGateway;
 import in.arthayantra.marketdata.kite.SessionGateway;
-import in.arthayantra.marketdata.kite.TickListener;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -151,23 +150,41 @@ public class LiveKiteConfig {
         wireClient, store, statusPublisher, meterRegistry);
   }
 
-  /** Stage-B stub. */
+  /**
+   * Live ticker feed (Phase 13): KiteTicker behind the TickerHandle seam, created lazily at
+   * start because the day's token cannot exist before the morning ritual.
+   */
   @Bean
-  public MarketFeed liveMarketFeed() {
-    return new MarketFeed() {
-      @Override
-      public void start(TickListener listener) {
-        throw notConfigured("MarketFeed");
-      }
-
-      @Override
-      public void stop() {}
-
-      @Override
-      public boolean running() {
-        return false;
-      }
-    };
+  public MarketFeed liveMarketFeed(
+      in.arthayantra.marketdata.kite.ticker.SubscriptionRegistry registry,
+      in.arthayantra.marketdata.kite.LastSeenProvider lastSeenProvider,
+      in.arthayantra.marketdata.kite.GapBackfiller gapBackfiller,
+      in.arthayantra.marketcalendar.MarketCalendar calendar,
+      io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry circuitBreakers,
+      java.time.Clock clock,
+      io.micrometer.core.instrument.MeterRegistry meterRegistry,
+      KiteHttpProperties properties,
+      in.arthayantra.marketdata.kite.AccessTokenProvider tokenProvider) {
+    java.util.function.Supplier<in.arthayantra.marketdata.kite.ticker.TickerHandle> factory =
+        () -> {
+          String token =
+              tokenProvider
+                  .currentToken()
+                  .orElseThrow(
+                      () ->
+                          new IllegalStateException(
+                              "no live Kite session yet — complete the morning ritual first"));
+          return new KiteTickerHandle(token, properties.resolveApiKey());
+        };
+    return new in.arthayantra.marketdata.kite.ticker.LiveTickerFeed(
+        factory,
+        registry,
+        lastSeenProvider,
+        gapBackfiller,
+        calendar,
+        circuitBreakers.circuitBreaker("kite-ticker"),
+        clock,
+        meterRegistry);
   }
 
   /** Stage-B stub. */

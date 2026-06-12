@@ -52,13 +52,13 @@ public class KiteAuthController {
         <p>Kite connected — you can close this window.</p>
         <script>
           if (window.opener) {
-            window.opener.postMessage({ type: 'kite-connected' }, '%s');
+            window.opener.postMessage({ type: 'kite-connected' }, '{origin}');
           }
           window.close();
         </script>
         </body></html>
         """;
-    return page.formatted(appOrigin);
+    return page.replace("{origin}", appOrigin);
   }
 
   /** Manual token exchange fallback. */

@@ -45,6 +45,7 @@ public class InstrumentSyncService {
   private final InstrumentRegistry registry;
   private final CacheManager cacheManager;
   private final ObjectProvider<SyncStep> syncSteps;
+  private final org.springframework.context.ApplicationEventPublisher eventPublisher;
   private final ExecutorService executor =
       Executors.newSingleThreadExecutor(
           r -> {
@@ -62,12 +63,14 @@ public class InstrumentSyncService {
       InstrumentRepository repository,
       InstrumentRegistry registry,
       CacheManager cacheManager,
-      ObjectProvider<SyncStep> syncSteps) {
+      ObjectProvider<SyncStep> syncSteps,
+      org.springframework.context.ApplicationEventPublisher eventPublisher) {
     this.dumpGateway = dumpGateway;
     this.repository = repository;
     this.registry = registry;
     this.cacheManager = cacheManager;
     this.syncSteps = syncSteps;
+    this.eventPublisher = eventPublisher;
   }
 
   /** 202-style async trigger; 409 {@code CONFLICT_SYNC_RUNNING} when one is in flight. */
@@ -102,6 +105,9 @@ public class InstrumentSyncService {
       registry.rebuildFromDatabase();
       evict("instruments");
       evict("expiries");
+      // kite-side consumers (pinned indices, 15A futures pins) re-resolve on this
+      eventPublisher.publishEvent(
+          new in.arthayantra.marketdata.kite.InstrumentMasterUpdated(repository.countActive()));
       Map<String, Long> perExchange =
           dump.stream()
               .collect(Collectors.groupingBy(InstrumentRecord::exchange, Collectors.counting()));

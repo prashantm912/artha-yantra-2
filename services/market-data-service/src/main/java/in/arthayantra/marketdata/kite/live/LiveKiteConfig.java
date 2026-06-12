@@ -8,16 +8,15 @@ import in.arthayantra.marketdata.kite.MarketFeed;
 import in.arthayantra.marketdata.kite.QuoteGateway;
 import in.arthayantra.marketdata.kite.SessionGateway;
 import in.arthayantra.marketdata.kite.TickListener;
-import jakarta.annotation.PostConstruct;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Collection;
 import java.util.List;
-import java.util.Map;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
+import org.springframework.core.env.Environment;
 
 /**
  * Live-profile wiring (A.7a): the context FAILS FAST at startup when Kite secrets are absent
@@ -28,22 +27,36 @@ import org.springframework.context.annotation.Profile;
 @Profile("live")
 public class LiveKiteConfig {
 
-  @Value("${artha.kite.api-key-file:/run/secrets/kite_api_key}")
-  private Path apiKeyFile;
+  /**
+   * D13: live without credentials is a startup error, not a degraded runtime. Implemented as a
+   * static {@link BeanFactoryPostProcessor} so it fires BEFORE any bean instantiation —
+   * deterministic ordering ahead of datasource/repository startup work.
+   */
+  @Bean
+  public static BeanFactoryPostProcessor liveCredentialsFailFast(Environment environment) {
+    return beanFactory -> {
+      Path apiKeyFile =
+          Path.of(environment.getProperty("artha.kite.api-key-file", "/run/secrets/kite_api_key"));
+      Path apiSecretFile =
+          Path.of(
+              environment.getProperty(
+                  "artha.kite.api-secret-file", "/run/secrets/kite_api_secret"));
+      if (!isNonBlankFile(apiKeyFile) || !isNonBlankFile(apiSecretFile)) {
+        throw new IllegalStateException(
+            "live profile requires Kite credentials as Docker secret files ("
+                + apiKeyFile
+                + ", "
+                + apiSecretFile
+                + ") — see deploy/secrets/README.md (D13); mock mode needs none");
+      }
+    };
+  }
 
-  @Value("${artha.kite.api-secret-file:/run/secrets/kite_api_secret}")
-  private Path apiSecretFile;
-
-  /** D13: live without credentials is a startup error, not a degraded runtime. */
-  @PostConstruct
-  void failFastWithoutCredentials() {
-    if (!Files.isReadable(apiKeyFile) || !Files.isReadable(apiSecretFile)) {
-      throw new IllegalStateException(
-          "live profile requires Kite credentials as Docker secret files ("
-              + apiKeyFile
-              + ", "
-              + apiSecretFile
-              + ") — see deploy/secrets/README.md (D13); mock mode needs none");
+  private static boolean isNonBlankFile(Path file) {
+    try {
+      return Files.isReadable(file) && !Files.readString(file).isBlank();
+    } catch (IOException e) {
+      return false;
     }
   }
 

@@ -159,6 +159,9 @@ services:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-mock}
       MOCK_TICKS_PER_SEC: ${MOCK_TICKS_PER_SEC:-1}
       MOCK_SCENARIO: ${MOCK_SCENARIO:-trend-up}
+      # Stage B: marketdata schema access — password via secret file, never env
+      ARTHA_DB_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
     depends_on:
       flyway-init:
         condition: service_completed_successfully

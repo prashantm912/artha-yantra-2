@@ -12,8 +12,9 @@ subset is CI-enforced).
 
 ## Current phase
 
-**Stage A — COMPLETE (2026-06-12). Next: Stage B — Market-data spine
-(Phases 9–17), on a fresh `feat/stage-b-*` branch off `main`.**
+**Stage B — Market-data spine (Phases 9, 9A, 10–15, 15A, 15B, 16, 16A, 17) —
+IN PROGRESS on `feat/stage-b-market-data-spine`, phase-per-commit.
+(Stage A completed 2026-06-12; its exit-gate record is below.)**
 
 *(How Stage A was walked: Part 1 sections A.1–A.17 implemented
 section-per-commit; Part 2 Phases 1–8 then audited one-by-one against their

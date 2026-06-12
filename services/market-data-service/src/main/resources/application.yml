@@ -10,12 +10,28 @@ spring:
     name: market-data-service
   profiles:
     default: mock
+  threads:
+    virtual:
+      enabled: true   # B-3: blocking on limiters is cheap on virtual threads
   data:
     redis:
       host: ${REDIS_HOST:redis}
       port: ${REDIS_PORT:6379}
+  datasource:
+    # schema-per-service: marketdata, written ONLY by this service (D10)
+    url: jdbc:postgresql://${DB_HOST:timescaledb}:${DB_PORT:5432}/artha?currentSchema=marketdata
+    username: artha
+    password: ${ARTHA_DB_PASSWORD:}   # secret-file override via artha.db.password-file
+    hikari:
+      maximum-pool-size: 5            # COMMON §9.6 single-user sizing
+      minimum-idle: 1
+  cache:
+    type: caffeine
 
 artha:
+  db:
+    # read into spring.datasource.password by SecretFilePasswordPostProcessor
+    password-file: ${ARTHA_DB_PASSWORD_FILE:/run/secrets/postgres_password}
   feed:
     autostart: ${ARTHA_FEED_AUTOSTART:true}
   mock:
@@ -35,7 +51,7 @@ management:
         enabled: true
 
 ---
-# T2 host-run inner loop: compose Redis published on loopback (dev-tools)
+# T2 host-run inner loop: compose Redis/Postgres published on loopback
 spring:
   config:
     activate:
@@ -43,3 +59,8 @@ spring:
   data:
     redis:
       host: 127.0.0.1
+  datasource:
+    url: jdbc:postgresql://127.0.0.1:5432/artha?currentSchema=marketdata
+artha:
+  db:
+    password-file: ${ARTHA_DB_PASSWORD_FILE:deploy/secrets/postgres_password}

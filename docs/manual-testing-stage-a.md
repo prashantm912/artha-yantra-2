@@ -345,6 +345,7 @@ error** instead of applying. Revert the edit afterwards (`git checkout -- deploy
 | Symptom | Cause / fix |
 |---|---|
 | `PKIX path building failed` in any Maven run | new terminal (MAVEN_OPTS user var), or set `$env:MAVEN_OPTS='-Djavax.net.ssl.trustStoreType=Windows-ROOT'` |
+| `gitleaks` not found / `gitleaks version` fails in section 0 | winget added it to the PATH of **new** shells only; the pre-commit hook resolves it regardless via `tools/precommit/run-gitleaks.py`. For the bare `gitleaks` CLI, open a new terminal or run `$env:Path=[Environment]::GetEnvironmentVariable('Path','User')+';'+$env:Path` |
 | Login always 401 with the right password | `$` in `.env` PHC not escaped as `$$` — check `docker exec ay-edge-gateway printenv ARTHA_OWNER_PASSWORD_HASH` starts with `$argon2id$` |
 | `429 AUTH_RATE_LIMITED` during testing | `docker exec ay-redis redis-cli del login:cooldown:<your-ip>` or wait 15 min |
 | Compose pull hangs forever | don't run two pulls of the same image concurrently; `Ctrl+C` and `docker pull <image>` once |

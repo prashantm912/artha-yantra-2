@@ -14,7 +14,9 @@ repos:
       - id: gitleaks
         name: gitleaks (staged changes)
         language: system
-        entry: gitleaks git --pre-commit --staged --redact
+        # python launcher resolves the gitleaks binary even when it is not on
+        # the current shell's PATH (winget puts it on NEW shells only)
+        entry: python tools/precommit/run-gitleaks.py
         pass_filenames: false
         always_run: true
       # Phase 4: Checkstyle (google_checks @ 120 col) on commits touching Java

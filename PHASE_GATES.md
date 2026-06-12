@@ -12,12 +12,17 @@ subset is CI-enforced).
 
 ## Current phase
 
-**Stage A — Foundations, Part 1 (design-reference sections A.1–A.17),
-implemented section-per-commit on `feat/stage-a-foundations`.**
+**Stage A — COMPLETE (2026-06-12). Next: Stage B — Market-data spine
+(Phases 9–17), on a fresh `feat/stage-b-*` branch off `main`.**
 
-*(Adaptation note: this build walks Stage A by Part 1 section rather than by
-Part 2 phase; Part 2 phases 1–8 map onto the same artifacts and will be walked
-as the verification pass — see README design-authority note.)*
+*(How Stage A was walked: Part 1 sections A.1–A.17 implemented
+section-per-commit; Part 2 Phases 1–8 then audited one-by-one against their
+Deliverables/Tests/Acceptance — Phases 1, 2, 3, 5, 6, 7 + the COMMON
+conventions sweep came back clean; Phase 4 was missing the lint pre-commit
+hook entry (fixed) and Phase 8 had a real `GATEWAY_WS_FLUSH_HZ` binding bug
+plus two missing IT cases (fixed, tested); Part 3 exit gate walked against
+the running mock stack, below. CI red→green iterations: mvnw exec bit,
+gitleaks-action→pinned CLI, drift-check pending-vs-checksum semantics.)*
 
 ## Acceptance checklist (Part 1 sections)
 
@@ -61,7 +66,20 @@ as the verification pass — see README design-authority note.)*
 - [x] Mock ticks visible on Redis `ticks.*` (string decimals, `+05:30`, monotonic seq, deterministic seed) and **end-to-end via `e2e/tools/stomp-probe.mjs`** (10 frames).
 - [x] Tier 2 verbatim: host-run market-data-service (`dev,mock`) connected to compose Redis published on loopback by `ay up dev-tools` — actuator health UP.
 
-**Parked for the Part 2 verification pass:** push branch + open PR per phase mapping; first CI run + branch protection; quarterly restore drill schedule.
+**Closed by the Part 2 verification pass (2026-06-12):** branch pushed; PR
+[#1](https://github.com/prashantm912/artha-yantra-2/pull/1) opened; CI runs on
+the PR; drift-check red path proven locally (edited applied migration →
+checksum mismatch, exit 1); restore drill executed once via `ay restore`.
+
+**Still owner-clickable:** branch protection on `main` (GitHub → Settings →
+Branches); optional OneDrive sync of `./backups`; quarterly restore-drill
+recurrence.
+
+**Stage B parking list (seeds for the next branch):** instruments table +
+candles hypertable + Kite OAuth/AES-GCM token store + live ticker + options
+snapshots (Phases 9–17); Kite minute-depth probe (A3); NSE index-constituents
+CSV source verification (before Phase 22); `tools/hash-password` may gain a
+compose-escaped output mode (quality-of-life).
 
 ## Parking list (deferred)
 

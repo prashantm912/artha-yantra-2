@@ -60,6 +60,9 @@ public final class ErrorCodes {
   // ---- gateway upstream absent/unreachable (503) — A.2.2 routing envelope ----
   public static final String UPSTREAM_UNAVAILABLE = "UPSTREAM_UNAVAILABLE";
 
+  // ---- local Resilience4j limiter saturation (429) — distinct from Kite's own 429 (B-3) ----
+  public static final String RATE_LIMIT_LOCAL = "RATE_LIMIT_LOCAL";
+
   // ---- INTERNAL_* (500) ----
   public static final String INTERNAL_ERROR = "INTERNAL_ERROR";
 

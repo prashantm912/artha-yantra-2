@@ -40,6 +40,46 @@ artha:
     seed: ${MOCK_SEED:42}
     instrument-count: ${MOCK_INSTRUMENT_COUNT:10}
 
+# B-3: the per-endpoint-family resilience stack — exactly one resilience
+# dependency. Limiter saturation queues up to 5s (virtual threads), then 429
+# RATE_LIMIT_LOCAL. Retry is built programmatically (full jitter +
+# Retry-After honoring) in KiteCallExecutor.
+resilience4j:
+  ratelimiter:
+    instances:
+      kite-historical:
+        limit-for-period: 3
+        limit-refresh-period: 1s
+        timeout-duration: 5s
+      kite-quote:
+        limit-for-period: 1
+        limit-refresh-period: 1s
+        timeout-duration: 5s
+      kite-dump:
+        limit-for-period: 1
+        limit-refresh-period: 30m
+        timeout-duration: 5s
+      kite-misc:
+        limit-for-period: 5
+        limit-refresh-period: 1s
+        timeout-duration: 5s
+  circuitbreaker:
+    instances:
+      kite-rest:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        minimum-number-of-calls: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 2
+      kite-ticker:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 5
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 100
+        wait-duration-in-open-state: 60s
+        permitted-number-of-calls-in-half-open-state: 1
+
 management:
   endpoints:
     web:

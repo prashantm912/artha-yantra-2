@@ -13,7 +13,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.listener.PatternTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -33,7 +32,6 @@ class CandleCaggIntegrationTest extends MarketDataIntegrationTestBase {
   @Autowired private CandleRepository repository;
   @Autowired private BarWriter barWriter;
   @Autowired private JdbcTemplate jdbc;
-  @Autowired private StringRedisTemplate redis;
   @Autowired private RedisConnectionFactory connectionFactory;
 
   private static OffsetDateTime ist(String text) {

@@ -11,6 +11,12 @@ public interface InstrumentTokenResolver {
   /** Token + type for a stable key, when the master knows it. */
   Optional<TokenInfo> resolve(InstrumentKey key);
 
-  /** Resolution result. */
-  record TokenInfo(long instrumentToken, String instrumentType) {}
+  /** Resolution result; {@code segment} distinguishes index instruments (B-9 packet sizes). */
+  record TokenInfo(long instrumentToken, String instrumentType, String segment) {
+
+    /** True for index instruments — they use the 28/32 B packet layouts, never 44/184 B. */
+    public boolean isIndex() {
+      return "INDICES".equals(segment);
+    }
+  }
 }

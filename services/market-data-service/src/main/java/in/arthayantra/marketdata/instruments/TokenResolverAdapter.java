@@ -21,6 +21,6 @@ public class TokenResolverAdapter implements InstrumentTokenResolver {
     return repository
         .findByKey(key.exchange(), key.tradingsymbol())
         .filter(i -> i.instrumentToken() != null)
-        .map(i -> new TokenInfo(i.instrumentToken(), i.instrumentType()));
+        .map(i -> new TokenInfo(i.instrumentToken(), i.instrumentType(), i.segment()));
   }
 }

@@ -78,7 +78,10 @@ class LiveHistoricalCandleGatewayTest {
 
   private static LiveHistoricalCandleGateway gateway(String instrumentType, AccessTokenProvider tokens) {
     InstrumentTokenResolver resolver =
-        key -> Optional.of(new InstrumentTokenResolver.TokenInfo(408_065, instrumentType));
+        key ->
+            Optional.of(
+                new InstrumentTokenResolver.TokenInfo(
+                    408_065, instrumentType, "FUT".equals(instrumentType) ? "NFO-FUT" : "NSE"));
     return new LiveHistoricalCandleGateway(
         RestClient.builder(),
         wireMock.baseUrl(),

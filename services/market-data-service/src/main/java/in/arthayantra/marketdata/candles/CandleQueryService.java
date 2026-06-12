@@ -164,29 +164,56 @@ public class CandleQueryService {
         () -> {
           try {
             // forced refresh ignores present coverage: fetch the whole range
-            InstrumentKey key = new InstrumentKey(exchange, tradingsymbol);
-            for (GapDetector.Gap page :
-                GapDetector.pages(new GapDetector.Gap(from, to))) {
-              List<HistoricalCandleGateway.Candle> fetched =
-                  gateway.fetch(key, baseInterval, page.from().toInstant(), page.to().toInstant());
-              repository.upsertAll(
-                  fetched.stream()
-                      .map(
-                          c ->
-                              new Candle(
-                                  exchange, tradingsymbol, baseInterval, c.bucketStart(),
-                                  c.open(), c.high(), c.low(), c.close(), c.volume(), c.oi(),
-                                  fetchSource))
-                      .toList());
-            }
-            if (baseInterval.equals("1m")) {
-              repository.refreshDerivedAggregates(from, to);
-            }
+            fetchAndStore(exchange, tradingsymbol, baseInterval, from, to, fetchSource);
             log.info("candle refresh {} done for {}:{}", jobId, exchange, tradingsymbol);
           } catch (Exception e) {
             log.error("candle refresh {} failed", jobId, e);
           }
         });
     return Map.of("jobId", jobId);
+  }
+
+  /**
+   * Phase-13 gap backfill: re-fetch 1m bars for a silent-through-reconnect window, async on the
+   * refresh executor, stored with {@code source='BACKFILL'} (B-6 — replayed vs streamed bars).
+   */
+  @SuppressWarnings("FutureReturnValueIgnored")
+  public void backfillRange(
+      String exchange, String tradingsymbol, OffsetDateTime from, OffsetDateTime to) {
+    refreshExecutor.submit(
+        () -> {
+          try {
+            fetchAndStore(exchange, tradingsymbol, "1m", from, to, "BACKFILL");
+            log.info("gap backfill done for {}:{} [{}, {})", exchange, tradingsymbol, from, to);
+          } catch (Exception e) {
+            log.error("gap backfill failed for {}:{}", exchange, tradingsymbol, e);
+          }
+        });
+  }
+
+  private void fetchAndStore(
+      String exchange,
+      String tradingsymbol,
+      String baseInterval,
+      OffsetDateTime from,
+      OffsetDateTime to,
+      String source) {
+    InstrumentKey key = new InstrumentKey(exchange, tradingsymbol);
+    for (GapDetector.Gap page : GapDetector.pages(new GapDetector.Gap(from, to))) {
+      List<HistoricalCandleGateway.Candle> fetched =
+          gateway.fetch(key, baseInterval, page.from().toInstant(), page.to().toInstant());
+      repository.upsertAll(
+          fetched.stream()
+              .map(
+                  c ->
+                      new Candle(
+                          exchange, tradingsymbol, baseInterval, c.bucketStart(),
+                          c.open(), c.high(), c.low(), c.close(), c.volume(), c.oi(),
+                          source))
+              .toList());
+    }
+    if (baseInterval.equals("1m")) {
+      repository.refreshDerivedAggregates(from, to);
+    }
   }
 }

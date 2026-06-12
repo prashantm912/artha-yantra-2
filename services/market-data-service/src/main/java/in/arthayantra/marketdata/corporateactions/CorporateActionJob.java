@@ -89,8 +89,10 @@ public class CorporateActionJob {
       ObjectMapper objectMapper,
       @Value("${artha.corporate-actions.tolerance:0.005}") double tolerance,
       @Value("${artha.corporate-actions.uniformity-epsilon:0.01}") double uniformityEpsilon,
-      @Value("${artha.corporate-actions.rebackfill-days-1m:3650}") int rebackfillDays1m,
-      @Value("${artha.corporate-actions.rebackfill-days-1d:3650}") int rebackfillDays1d,
+      // defaults exceed Kite's serving depth (~2015 for 1m) so the FULL purge is always
+      // matched by a full re-backfill — anything deeper cannot be re-fetched anyway
+      @Value("${artha.corporate-actions.rebackfill-days-1m:4400}") int rebackfillDays1m,
+      @Value("${artha.corporate-actions.rebackfill-days-1d:7300}") int rebackfillDays1d,
       @Value("${artha.corporate-actions.symbols:}") List<String> symbolOverride,
       MeterRegistry meterRegistry) {
     this.instruments = instruments;

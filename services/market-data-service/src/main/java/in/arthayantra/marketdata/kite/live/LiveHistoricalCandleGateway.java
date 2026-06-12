@@ -32,7 +32,9 @@ public class LiveHistoricalCandleGateway implements HistoricalCandleGateway {
       DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssZ");
   private static final DateTimeFormatter KITE_PARAM =
       DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-  private static final Set<String> DERIVATIVE_TYPES = Set.of("FUT", "CE", "PE");
+  // continuous=1 ONLY for options: for FUT it is Kite's roll-unaware stitched series, which
+  // B-18/B-19 explicitly forbid — per-contract FUT history must stay per-contract (15A/15B)
+  private static final Set<String> CONTINUOUS_TYPES = Set.of("CE", "PE");
 
   private final RestClient restClient;
   private final String apiKey;
@@ -80,7 +82,7 @@ public class LiveHistoricalCandleGateway implements HistoricalCandleGateway {
           case "1d" -> "day";
           default -> throw new IllegalArgumentException("only 1m and 1d are fetched from Kite");
         };
-    boolean derivative = DERIVATIVE_TYPES.contains(info.instrumentType());
+    boolean derivative = CONTINUOUS_TYPES.contains(info.instrumentType());
     String fromParam = KITE_PARAM.format(OffsetDateTime.ofInstant(from, in.arthayantra.common.web.time.Ist.ZONE));
     String toParam = KITE_PARAM.format(OffsetDateTime.ofInstant(to, in.arthayantra.common.web.time.Ist.ZONE));
 

@@ -35,17 +35,29 @@ public class LiveInstrumentDumpGateway implements InstrumentDumpGateway {
   private final RestClient restClient;
   private final String apiKey;
   private final AccessTokenProvider tokenProvider;
+  private final in.arthayantra.marketdata.kite.KiteCallExecutor executor;
 
-  /** Wires the wire client. */
+  /** Wires the wire client; the whole dump rides ONE kite-dump permit (1/30m, B-3). */
   public LiveInstrumentDumpGateway(
-      RestClient.Builder builder, String baseUrl, String apiKey, AccessTokenProvider tokenProvider) {
+      RestClient.Builder builder,
+      String baseUrl,
+      String apiKey,
+      AccessTokenProvider tokenProvider,
+      in.arthayantra.marketdata.kite.KiteCallExecutor executor) {
     this.restClient = builder.baseUrl(baseUrl).build();
     this.apiKey = apiKey;
     this.tokenProvider = tokenProvider;
+    this.executor = executor;
   }
 
   @Override
   public List<InstrumentRecord> fetchDump() {
+    // one DUMP permit covers the full three-exchange sweep — the 1/30m budget guards the
+    // manual sync trigger from hammering Kite; idempotent GETs, so executor retry is safe
+    return executor.execute(in.arthayantra.marketdata.kite.KiteCallExecutor.Family.DUMP, this::fetchAllExchanges);
+  }
+
+  private List<InstrumentRecord> fetchAllExchanges() {
     String token =
         tokenProvider
             .currentToken()

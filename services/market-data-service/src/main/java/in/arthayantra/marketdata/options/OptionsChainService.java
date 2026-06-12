@@ -163,11 +163,7 @@ public class OptionsChainService {
     List<StrikeRow> rows = new ArrayList<>(byStrike.size());
     byStrike.forEach((strike, pair) -> rows.add(new StrikeRow(strike, pair[0], pair[1])));
 
-    BigDecimal pcr =
-        ceOi == 0
-            ? null
-            : BigDecimal.valueOf(peOi)
-                .divide(BigDecimal.valueOf(ceOi), 4, RoundingMode.HALF_UP);
+    BigDecimal pcr = putCallRatio(ceOi, peOi);
     return new Chain(
         underlying,
         expiry,
@@ -247,8 +243,13 @@ public class OptionsChainService {
     } else if (zeroQuoted) {
       reason = IvSolver.Reason.ZERO_QUOTE.name(); // dead book: the LTP is stale by definition
     } else {
+      // the staleness guard needs the REAL quote age — a dead LTP must yield a null-IV row
+      Duration ltpAge =
+          quote.timestamp() == null
+              ? Duration.ofDays(1)
+              : Duration.between(quote.timestamp().toInstant(), OffsetDateTime.now(clock).toInstant());
       Optional<QuotePriceRule.PriceInput> input =
-          QuotePriceRule.choose(quote.bid(), quote.ask(), quote.lastPrice(), Duration.ZERO);
+          QuotePriceRule.choose(quote.bid(), quote.ask(), quote.lastPrice(), ltpAge);
       if (input.isEmpty()) {
         reason = IvSolver.Reason.ZERO_QUOTE.name();
       } else {
@@ -297,6 +298,13 @@ public class OptionsChainService {
         scale6(rho),
         reason,
         priceSource);
+  }
+
+  /** PCR = ΣPE OI / ΣCE OI at 4 dp; null when no CE OI exists (unit-tested per Phase 15). */
+  static BigDecimal putCallRatio(long ceOi, long peOi) {
+    return ceOi == 0
+        ? null
+        : BigDecimal.valueOf(peOi).divide(BigDecimal.valueOf(ceOi), 4, RoundingMode.HALF_UP);
   }
 
   /** The configured pinned rate (provenance). */

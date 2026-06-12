@@ -129,12 +129,14 @@ public class ContinuousFuturesRoller {
       LocalDate segmentStart = previousRoll == null ? STITCH_EPOCH : previousRoll.plusDays(1);
       LocalDate segmentEnd = roll.isBefore(today) ? roll : today;
       if (!segmentStart.isAfter(segmentEnd)) {
-        candles.stitchInto(
-            contSymbol,
-            exchange,
-            contract.tradingsymbol(),
-            segmentStart.atStartOfDay().atOffset(Ist.OFFSET),
-            segmentEnd.plusDays(1).atStartOfDay().atOffset(Ist.OFFSET));
+        OffsetDateTime from = segmentStart.atStartOfDay().atOffset(Ist.OFFSET);
+        OffsetDateTime to = segmentEnd.plusDays(1).atStartOfDay().atOffset(Ist.OFFSET);
+        int stitched = candles.stitchInto(contSymbol, exchange, contract.tradingsymbol(), from, to);
+        if (stitched > 0) {
+          // stitched 1m/1d rows behind a cagg watermark are invisible until refreshed —
+          // CONT mid-interval reads (5m/15m/1h/1w) must see the new segment
+          candles.refreshDerivedAggregates(from, to);
+        }
       }
       previousRoll = roll;
       if (!roll.isBefore(today)) {

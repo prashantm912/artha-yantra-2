@@ -44,6 +44,8 @@ public class OptionsSnapshotService {
   private final List<String> snapshotUnderlyings;
   private final Timer snapshotTimer;
   private final Counter snapshotRows;
+  // previous-pass OI per leg — oi_change = oi − previous snapshot's oi (null on the first pass)
+  private final Map<String, Long> previousOi = new java.util.concurrent.ConcurrentHashMap<>();
   private final ExecutorService executor =
       Executors.newSingleThreadExecutor(
           r -> {
@@ -147,10 +149,13 @@ public class OptionsSnapshotService {
     if (leg == null) {
       return;
     }
+    String oiKey = chain.underlying() + "|" + chain.expiry() + "|" + strike + "|" + optionType;
+    Long prev = leg.oi() == null ? null : previousOi.put(oiKey, leg.oi());
+    Long oiChange = leg.oi() == null || prev == null ? null : leg.oi() - prev;
     rows.add(
         new OptionsSnapshotRepository.SnapshotRow(
             ts, chain.underlying(), chain.expiry(), strike, optionType, leg.tradingsymbol(),
-            leg.ltp(), leg.bid(), leg.ask(), leg.volume(), leg.oi(), chain.spot(),
+            leg.ltp(), leg.bid(), leg.ask(), leg.volume(), leg.oi(), oiChange, chain.spot(),
             leg.iv(), leg.delta(), leg.gamma(), leg.theta(), leg.vega(), leg.rho(),
             leg.ivReason(), leg.priceSource(), chain.forward(), chain.riskFreeRate()));
   }

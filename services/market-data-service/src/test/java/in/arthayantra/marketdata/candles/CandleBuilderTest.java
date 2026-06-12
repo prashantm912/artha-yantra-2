@@ -53,6 +53,30 @@ class CandleBuilderTest {
   }
 
   @Test
+  void postCloseTicksNeverReopenTheFlushedSessionCloseBar() {
+    // AUDIT REGRESSION (B-6/B-7): every after-close print clamps into the 15:29 bucket;
+    // once the flush sweep closes that bar it must stay closed FOREVER — the mock feed
+    // free-runs all evening and used to clobber the true session close once per sweep
+    Run run = run();
+    run.builder.onNormalizedTick(tick("2026-06-10T15:29:10", "100.00", 1000, null, 1));
+    run.builder.onNormalizedTick(tick("2026-06-10T15:29:50", "101.00", 1500, null, 2));
+    now.set(Instant.parse("2026-06-10T10:00:06Z")); // 15:30:06 IST — past grace
+    run.builder.flush();
+    assertThat(run.bars).hasSize(1);
+    Candle close = run.bars.get(0);
+    assertThat(close.close()).isEqualByComparingTo("101.00");
+    assertThat(close.volume()).isEqualTo(500);
+
+    // evening prints (clamped to 15:29) and further sweeps must produce NOTHING new
+    run.builder.onNormalizedTick(tick("2026-06-10T18:00:00", "55.00", 9_000, null, 3));
+    run.builder.onNormalizedTick(tick("2026-06-10T21:00:00", "260.00", 12_000, null, 4));
+    now.set(Instant.parse("2026-06-10T16:30:00Z"));
+    run.builder.flush();
+    assertThat(run.bars).as("the session close bar is immutable").hasSize(1);
+    assertThat(run.bars.get(0).close()).isEqualByComparingTo("101.00");
+  }
+
+  @Test
   void singleMinuteBarOhlcAndVolumeDelta() {
     Run run = run();
     run.builder.onNormalizedTick(tick("2026-06-10T10:15:01", "100.00", 1000, null, 1));

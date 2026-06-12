@@ -121,18 +121,25 @@ class LiveHistoricalCandleGatewayTest {
   }
 
   @Test
-  void derivativesFetchWithContinuousFlag() {
+  void optionsFetchWithContinuousButFutNeverDoes() {
     wireMock.stubFor(
         get(urlPathEqualTo("/instruments/historical/408065/day"))
             .willReturn(aResponse().withBody("{\"status\":\"success\",\"data\":{\"candles\":[]}}")));
 
+    // FUT: per-contract history only — Kite's roll-unaware continuous series is FORBIDDEN
+    // for futures (B-18/B-19); the CONT stitch is built locally in Phase 15B
     gateway("FUT", () -> Optional.of("test-token"))
         .fetch(new InstrumentKey("NFO", "NIFTY26JUNFUT"), "1d", FROM, TO);
-
     wireMock.verify(
         getRequestedFor(urlPathEqualTo("/instruments/historical/408065/day"))
-            .withQueryParam("continuous", equalTo("1"))
+            .withQueryParam("continuous", equalTo("0"))
             .withQueryParam("oi", equalTo("1")));
+
+    gateway("CE", () -> Optional.of("test-token"))
+        .fetch(new InstrumentKey("NFO", "NIFTY2661624000CE"), "1d", FROM, TO);
+    wireMock.verify(
+        getRequestedFor(urlPathEqualTo("/instruments/historical/408065/day"))
+            .withQueryParam("continuous", equalTo("1")));
   }
 
   @Test

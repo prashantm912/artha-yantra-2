@@ -71,8 +71,11 @@ class SystemStatusIntegrationTest {
         .exchange()
         .expectStatus().isOk()
         .expectBody()
-        .jsonPath("$.status").isEqualTo("UP")
-        .jsonPath("$.kite").isEqualTo("MOCK")
+        .jsonPath("$.overall").isEqualTo("UP")
+        .jsonPath("$.kite.session").isEqualTo("VALID") // B-13 enum, mapped from MOCK
+        .jsonPath("$.kite.ticker").isNotEmpty()
+        .jsonPath("$.market.phase").isNotEmpty()
+        .jsonPath("$.services.length()").isEqualTo(2)
         .jsonPath("$.jobs.queued").isEqualTo(0); // jobs:summary absent until Phase 28
 
     redis.opsForValue().set("kite:session:status", "TOKEN_EXPIRED").block();
@@ -91,8 +94,8 @@ class SystemStatusIntegrationTest {
                             .expectBody(String.class)
                             .returnResult()
                             .getResponseBody())
-                    .contains("\"status\":\"DEGRADED\"")
-                    .contains("TOKEN_EXPIRED"));
+                    .contains("\"overall\":\"DEGRADED\"")
+                    .contains("\"session\":\"EXPIRED\""));
   }
 
   @Test

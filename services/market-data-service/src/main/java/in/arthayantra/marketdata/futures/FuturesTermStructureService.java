@@ -31,13 +31,14 @@ import org.springframework.stereotype.Service;
 @Service
 public class FuturesTermStructureService {
 
-  /** One contract leg. */
+  /** One contract leg (B-18 shape: incl. volume). */
   public record ContractLeg(
       String tradingsymbol,
       LocalDate expiry,
       long daysToExpiry,
       BigDecimal ltp,
       Long oi,
+      Long volume,
       BigDecimal basisAbsolute,
       BigDecimal basisAnnualized) {}
 
@@ -109,7 +110,7 @@ public class FuturesTermStructureService {
       if (quote == null) {
         continue;
       }
-      legs.add(leg(contract, quote.lastPrice(), quote.oi(), spot, now));
+      legs.add(leg(contract, quote.lastPrice(), quote.oi(), quote.volume(), spot, now));
     }
     if (legs.isEmpty()) {
       return staleFallback(underlying, now, "no contract quotes");
@@ -129,7 +130,7 @@ public class FuturesTermStructureService {
 
   /** Basis math (B-18): absolute F−S; annualized (F/S − 1) × 365/days, ACT/365 to 15:30 IST. */
   static ContractLeg leg(
-      Instrument contract, BigDecimal ltp, Long oi, BigDecimal spot, OffsetDateTime now) {
+      Instrument contract, BigDecimal ltp, Long oi, Long volume, BigDecimal spot, OffsetDateTime now) {
     OffsetDateTime cutoff =
         contract.expiry().atTime(15, 30).atOffset(Ist.OFFSET);
     long days =
@@ -146,25 +147,17 @@ public class FuturesTermStructureService {
         days,
         ltp,
         oi,
+        volume,
         basisAbsolute.setScale(4, RoundingMode.HALF_UP),
         basisAnnualized);
   }
 
-  private static String classify(List<ContractLeg> legs) {
-    boolean ascending = true;
-    boolean descending = true;
-    for (int i = 1; i < legs.size(); i++) {
-      int cmp = legs.get(i).ltp().compareTo(legs.get(i - 1).ltp());
-      ascending &= cmp >= 0;
-      descending &= cmp <= 0;
-    }
+  /** B-18 pins exactly two states, decided by the SIGN OF THE NEAR→NEXT SLOPE. */
+  static String classify(List<ContractLeg> legs) {
     if (legs.size() < 2) {
       return legs.get(0).basisAbsolute().signum() >= 0 ? "CONTANGO" : "BACKWARDATION";
     }
-    if (ascending) {
-      return "CONTANGO";
-    }
-    return descending ? "BACKWARDATION" : "MIXED";
+    return legs.get(1).ltp().compareTo(legs.get(0).ltp()) >= 0 ? "CONTANGO" : "BACKWARDATION";
   }
 
   private TermStructure staleFallback(String underlying, OffsetDateTime now, String why) {

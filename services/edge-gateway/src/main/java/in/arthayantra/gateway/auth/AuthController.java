@@ -42,6 +42,7 @@ public class AuthController {
   private final ObjectMapper objectMapper;
   private final Environment environment;
 
+  /** Wires the auth collaborators. */
   public AuthController(
       OwnerAuthService ownerAuth,
       LoginRateLimiter rateLimiter,
@@ -148,7 +149,9 @@ public class AuthController {
       return exchange
           .getRequest()
           .getBody()
-          .reduce(new StringBuilder(), (sb, buffer) -> sb.append(buffer.toString(java.nio.charset.StandardCharsets.UTF_8)))
+          .reduce(
+              new StringBuilder(),
+              (sb, buffer) -> sb.append(buffer.toString(java.nio.charset.StandardCharsets.UTF_8)))
           .map(
               sb -> {
                 try {

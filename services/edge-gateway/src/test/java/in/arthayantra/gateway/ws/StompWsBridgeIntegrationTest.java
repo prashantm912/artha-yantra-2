@@ -1,0 +1,189 @@
+package in.arthayantra.gateway.ws;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
+
+import in.arthayantra.gateway.auth.OwnerAuthService;
+import java.net.URI;
+import java.time.Duration;
+import java.util.List;
+import java.util.Objects;
+import java.util.concurrent.CopyOnWriteArrayList;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.web.reactive.server.WebTestClient;
+import org.springframework.web.reactive.socket.WebSocketMessage;
+import org.springframework.web.reactive.socket.client.ReactorNettyWebSocketClient;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+
+/**
+ * Phase-8 IT (A.7b): per-symbol isolation, conflation under burst, never-conflated signals, and
+ * 401 on unauthenticated upgrade — against a real Redis.
+ */
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@Testcontainers
+class StompWsBridgeIntegrationTest {
+
+  private static final String OWNER_PASSWORD = "ws-test-password";
+
+  @Container @ServiceConnection
+  static final GenericContainer<?> REDIS =
+      new GenericContainer<>(DockerImageName.parse("redis:7.4-alpine")).withExposedPorts(6379);
+
+  @DynamicPropertySource
+  static void ownerHash(DynamicPropertyRegistry registry) {
+    registry.add(
+        "artha.owner-password-hash", () -> OwnerAuthService.ENCODER.encode(OWNER_PASSWORD));
+  }
+
+  @LocalServerPort private int port;
+  @Autowired private WebTestClient webTestClient;
+  @Autowired private StringRedisTemplate redis;
+
+  private String login() {
+    return Objects.requireNonNull(
+            webTestClient
+                .post()
+                .uri("/api/v1/auth/login")
+                .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                .bodyValue("password=" + OWNER_PASSWORD)
+                .exchange()
+                .expectStatus().isNoContent()
+                .returnResult(Void.class)
+                .getResponseCookies()
+                .getFirst("SESSION"))
+        .getValue();
+  }
+
+  @Test
+  void bridgeDeliversOnlySubscribedSymbolsConflatesTicksAndNeverConflatesSignals() {
+    String session = login();
+    List<String> received = new CopyOnWriteArrayList<>();
+
+    HttpHeaders headers = new HttpHeaders();
+    headers.add(HttpHeaders.COOKIE, "SESSION=" + session);
+
+    ReactorNettyWebSocketClient client = new ReactorNettyWebSocketClient();
+    Mono<Void> sessionMono =
+        client.execute(
+            URI.create("ws://127.0.0.1:" + port + "/ws"),
+            headers,
+            wsSession -> {
+              Flux<WebSocketMessage> outbound =
+                  Flux.concat(
+                      Mono.just(
+                          wsSession.textMessage(
+                              StompFrame.of(
+                                      "CONNECT",
+                                      java.util.Map.of("accept-version", "1.2"),
+                                      "")
+                                  .serialize())),
+                      Mono.just(
+                          wsSession.textMessage(
+                              StompFrame.of(
+                                      "SUBSCRIBE",
+                                      java.util.Map.of(
+                                          "id", "sub-0",
+                                          "destination", "/topic/ticks.NSE.TEST"),
+                                      "")
+                                  .serialize())),
+                      Mono.just(
+                          wsSession.textMessage(
+                              StompFrame.of(
+                                      "SUBSCRIBE",
+                                      java.util.Map.of(
+                                          "id", "sub-1", "destination", "/topic/signals"),
+                                      "")
+                                  .serialize())));
+              return wsSession
+                  .send(outbound)
+                  .thenMany(
+                      wsSession
+                          .receive()
+                          .map(WebSocketMessage::getPayloadAsText)
+                          .doOnNext(received::add))
+                  .then();
+            });
+    sessionMono.subscribe();
+
+    // wait until CONNECTED arrives (subscriptions registered)
+    await()
+        .atMost(Duration.ofSeconds(10))
+        .until(() -> received.stream().anyMatch(f -> f.startsWith("CONNECTED")));
+
+    // give the Redis-side subscriptions a beat to attach
+    sleep(500);
+
+    // burst: 1000 ticks on the subscribed symbol + noise on another within ~1s
+    for (int i = 1; i <= 1000; i++) {
+      redis.convertAndSend("ticks.NSE.TEST", "{\"lastPrice\":\"" + i + ".00\",\"seq\":" + i + "}");
+      if (i % 20 == 0) {
+        redis.convertAndSend("ticks.NSE.OTHER", "{\"seq\":" + i + "}");
+      }
+    }
+    // 5 signals — every one must arrive
+    for (int i = 1; i <= 5; i++) {
+      redis.convertAndSend("signals", "{\"signal\":" + i + "}");
+    }
+
+    await()
+        .atMost(Duration.ofSeconds(10))
+        .until(() -> countBodies(received, "\"signal\":") >= 5);
+    sleep(500); // a final flush window
+
+    List<String> tickFrames =
+        received.stream()
+            .filter(f -> f.startsWith("MESSAGE") && f.contains("/topic/ticks.NSE.TEST"))
+            .toList();
+    long otherFrames =
+        received.stream().filter(f -> f.contains("ticks.NSE.OTHER")).count();
+    long signalFrames = countBodies(received, "\"signal\":");
+
+    // only the subscribed symbol — never the firehose
+    assertThat(otherFrames).isZero();
+    // conflation: a 1000-tick burst yields a bounded number of frames, latest price last
+    assertThat(tickFrames).isNotEmpty().hasSizeLessThanOrEqualTo(30);
+    assertThat(tickFrames.get(tickFrames.size() - 1)).contains("\"lastPrice\":\"1000.00\"");
+    // signals are never conflated
+    assertThat(signalFrames).isEqualTo(5);
+  }
+
+  @Test
+  void unauthenticatedUpgradeIsRejected() {
+    webTestClient
+        .get()
+        .uri("/ws")
+        .header(HttpHeaders.UPGRADE, "websocket")
+        .header(HttpHeaders.CONNECTION, "Upgrade")
+        // the public RFC 6455 sample nonce, not a credential
+        .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // gitleaks:allow
+        .header("Sec-WebSocket-Version", "13")
+        .exchange()
+        .expectStatus().isUnauthorized();
+  }
+
+  private static long countBodies(List<String> frames, String marker) {
+    return frames.stream().filter(f -> f.startsWith("MESSAGE") && f.contains(marker)).count();
+  }
+
+  private static void sleep(long millis) {
+    try {
+      Thread.sleep(millis);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+  }
+}

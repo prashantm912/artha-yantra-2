@@ -37,6 +37,7 @@ public class GatewayErrorWebExceptionHandler implements ErrorWebExceptionHandler
 
   private final ObjectMapper objectMapper;
 
+  /** Wires the envelope serializer. */
   public GatewayErrorWebExceptionHandler(ObjectMapper objectMapper) {
     this.objectMapper = objectMapper;
   }

@@ -119,9 +119,9 @@ class StompWsBridgeIntegrationTest {
             });
     sessionMono.subscribe();
 
-    // wait until CONNECTED arrives (subscriptions registered)
+    // wait until CONNECTED arrives (subscriptions registered) — generous for CI
     await()
-        .atMost(Duration.ofSeconds(10))
+        .atMost(Duration.ofSeconds(30))
         .until(() -> received.stream().anyMatch(f -> f.startsWith("CONNECTED")));
 
     // give the Redis-side subscriptions a beat to attach
@@ -161,19 +161,27 @@ class StompWsBridgeIntegrationTest {
     assertThat(signalFrames).isEqualTo(5);
   }
 
-  /** Opens an authenticated WS session driven by a sink, collecting every inbound frame. */
+  /**
+   * Opens an authenticated WS session driven by a sink, collecting every inbound frame. CONNECT
+   * is the guaranteed first frame of the send flux (emitted only after the handshake), and the
+   * CONNECTED wait is generous — CI runners are slow and 2-core.
+   */
   private reactor.core.publisher.Sinks.Many<String> openSession(String session, List<String> received) {
     reactor.core.publisher.Sinks.Many<String> outbound =
         reactor.core.publisher.Sinks.many().unicast().onBackpressureBuffer();
     HttpHeaders headers = new HttpHeaders();
     headers.add(HttpHeaders.COOKIE, "SESSION=" + session);
+    String connectFrame =
+        StompFrame.of("CONNECT", java.util.Map.of("accept-version", "1.2"), "").serialize();
     new ReactorNettyWebSocketClient()
         .execute(
             URI.create("ws://127.0.0.1:" + port + "/ws"),
             headers,
             wsSession ->
                 wsSession
-                    .send(outbound.asFlux().map(wsSession::textMessage))
+                    .send(
+                        Flux.concat(Mono.just(connectFrame), outbound.asFlux())
+                            .map(wsSession::textMessage))
                     .and(
                         wsSession
                             .receive()
@@ -181,10 +189,8 @@ class StompWsBridgeIntegrationTest {
                             .doOnNext(received::add)
                             .then()))
         .subscribe();
-    outbound.tryEmitNext(
-        StompFrame.of("CONNECT", java.util.Map.of("accept-version", "1.2"), "").serialize());
     await()
-        .atMost(Duration.ofSeconds(10))
+        .atMost(Duration.ofSeconds(30))
         .until(() -> received.stream().anyMatch(f -> f.startsWith("CONNECTED")));
     return outbound;
   }
@@ -204,7 +210,7 @@ class StompWsBridgeIntegrationTest {
 
     redis.convertAndSend("ticks.NSE.UNSUB", "{\"marker\":\"before\"}");
     await()
-        .atMost(Duration.ofSeconds(10))
+        .atMost(Duration.ofSeconds(20))
         .until(() -> countBodies(received, "\"marker\":\"before\"") >= 1);
 
     outbound.tryEmitNext(
@@ -246,7 +252,7 @@ class StompWsBridgeIntegrationTest {
             .serialize());
 
     await()
-        .atMost(Duration.ofSeconds(10))
+        .atMost(Duration.ofSeconds(20))
         .until(() -> received.stream().anyMatch(f -> f.startsWith("ERROR")));
     sleep(800); // silence window for the legal forms
 

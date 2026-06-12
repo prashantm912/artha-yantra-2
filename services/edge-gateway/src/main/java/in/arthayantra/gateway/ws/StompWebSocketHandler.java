@@ -52,6 +52,11 @@ public class StompWebSocketHandler implements WebSocketHandler {
     meterRegistry.gauge("ay_ws_sessions", openSessions);
   }
 
+  /** The resolved flush interval — exposed for the configuration-binding test. */
+  long flushIntervalMs() {
+    return flushIntervalMs;
+  }
+
   /** One message captured off Redis, waiting for the next flush. */
   private record Pending(String destination, String subscriptionId, String body, long receivedNanos) {}
 

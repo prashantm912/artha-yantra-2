@@ -161,6 +161,101 @@ class StompWsBridgeIntegrationTest {
     assertThat(signalFrames).isEqualTo(5);
   }
 
+  /** Opens an authenticated WS session driven by a sink, collecting every inbound frame. */
+  private reactor.core.publisher.Sinks.Many<String> openSession(String session, List<String> received) {
+    reactor.core.publisher.Sinks.Many<String> outbound =
+        reactor.core.publisher.Sinks.many().unicast().onBackpressureBuffer();
+    HttpHeaders headers = new HttpHeaders();
+    headers.add(HttpHeaders.COOKIE, "SESSION=" + session);
+    new ReactorNettyWebSocketClient()
+        .execute(
+            URI.create("ws://127.0.0.1:" + port + "/ws"),
+            headers,
+            wsSession ->
+                wsSession
+                    .send(outbound.asFlux().map(wsSession::textMessage))
+                    .and(
+                        wsSession
+                            .receive()
+                            .map(WebSocketMessage::getPayloadAsText)
+                            .doOnNext(received::add)
+                            .then()))
+        .subscribe();
+    outbound.tryEmitNext(
+        StompFrame.of("CONNECT", java.util.Map.of("accept-version", "1.2"), "").serialize());
+    await()
+        .atMost(Duration.ofSeconds(10))
+        .until(() -> received.stream().anyMatch(f -> f.startsWith("CONNECTED")));
+    return outbound;
+  }
+
+  @Test
+  void unsubscribeStopsDelivery() {
+    List<String> received = new CopyOnWriteArrayList<>();
+    var outbound = openSession(login(), received);
+
+    outbound.tryEmitNext(
+        StompFrame.of(
+                "SUBSCRIBE",
+                java.util.Map.of("id", "sub-u", "destination", "/topic/ticks.NSE.UNSUB"),
+                "")
+            .serialize());
+    sleep(500); // let the Redis-side subscription attach
+
+    redis.convertAndSend("ticks.NSE.UNSUB", "{\"marker\":\"before\"}");
+    await()
+        .atMost(Duration.ofSeconds(10))
+        .until(() -> countBodies(received, "\"marker\":\"before\"") >= 1);
+
+    outbound.tryEmitNext(
+        StompFrame.of("UNSUBSCRIBE", java.util.Map.of("id", "sub-u"), "").serialize());
+    sleep(500); // unsubscribe + one flush window
+
+    for (int i = 0; i < 10; i++) {
+      redis.convertAndSend("ticks.NSE.UNSUB", "{\"marker\":\"after\"}");
+    }
+    sleep(1000); // several flush windows — nothing may arrive
+
+    assertThat(countBodies(received, "\"marker\":\"after\"")).isZero();
+  }
+
+  @Test
+  void allRegisteredTopicFormsAcceptSubscriptionSilently() {
+    List<String> received = new CopyOnWriteArrayList<>();
+    var outbound = openSession(login(), received);
+
+    List<String> forms =
+        List.of(
+            "/topic/candles.1m.NSE.TEST",
+            "/topic/signals",
+            "/topic/jobs/job-42",
+            "/topic/system",
+            "/topic/options.chain");
+    for (int i = 0; i < forms.size(); i++) {
+      outbound.tryEmitNext(
+          StompFrame.of(
+                  "SUBSCRIBE",
+                  java.util.Map.of("id", "form-" + i, "destination", forms.get(i)),
+                  "")
+              .serialize());
+    }
+    // and one ILLEGAL form that must be rejected
+    outbound.tryEmitNext(
+        StompFrame.of(
+                "SUBSCRIBE", java.util.Map.of("id", "bad-0", "destination", "/topic/firehose"), "")
+            .serialize());
+
+    await()
+        .atMost(Duration.ofSeconds(10))
+        .until(() -> received.stream().anyMatch(f -> f.startsWith("ERROR")));
+    sleep(800); // silence window for the legal forms
+
+    long errors = received.stream().filter(f -> f.startsWith("ERROR")).count();
+    long messages = received.stream().filter(f -> f.startsWith("MESSAGE")).count();
+    assertThat(errors).as("only the illegal destination errors").isEqualTo(1);
+    assertThat(messages).as("producers do not exist yet — silence is fine (A.7.2)").isZero();
+  }
+
   @Test
   void unauthenticatedUpgradeIsRejected() {
     webTestClient

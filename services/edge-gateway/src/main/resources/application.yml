@@ -63,6 +63,9 @@ spring:
 
 artha:
   owner-password-hash: ${ARTHA_OWNER_PASSWORD_HASH:}
+  ws:
+    # A.7.2: conflated flush rate for tick topics, 10-20 Hz sane range
+    flush-hz: ${GATEWAY_WS_FLUSH_HZ:20}
 
 management:
   endpoints:

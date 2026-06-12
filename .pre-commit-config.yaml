@@ -1,0 +1,18 @@
+# Pre-commit hooks (A.9). Lint hooks are added as each stack appears
+# (Checkstyle/Error Prone run in Maven; ruff/ESLint arrive with their stacks).
+#
+# gitleaks runs as a SYSTEM hook against the pinned binary (8.30.1, installed
+# via `winget install Gitleaks.Gitleaks` / `brew install gitleaks`): Windows
+# Smart App Control blocks the unsigned binary the canonical golang-language
+# hook builds locally, so the upstream hook cannot run on the owner machine.
+# CI runs its own gitleaks step in every workflow (A.10) — the hook here is
+# the first line, not the only line.
+repos:
+  - repo: local
+    hooks:
+      - id: gitleaks
+        name: gitleaks (staged changes)
+        language: system
+        entry: gitleaks git --pre-commit --staged --redact
+        pass_filenames: false
+        always_run: true

@@ -15,6 +15,7 @@ public class SessionHealthProbe {
   private final SessionWireClient wireClient;
   private final KiteSessionStore store;
   private final SessionStatusPublisher statusPublisher;
+  private volatile Runnable onLiveHook = () -> {};
 
   /** Wires the probe + the validity gauge. */
   public SessionHealthProbe(
@@ -55,6 +56,14 @@ public class SessionHealthProbe {
       default -> store.markError();
     }
     statusPublisher.publish(store.state());
+    if (store.state() == KiteSessionStore.State.CONNECTED) {
+      onLiveHook.run(); // B-9: the contract canary rides the first LIVE transition of the day
+    }
     return store.state();
+  }
+
+  /** Registers the on-LIVE hook (the Phase-16 contract canary). */
+  public void setOnLiveHook(Runnable hook) {
+    this.onLiveHook = hook;
   }
 }

@@ -31,7 +31,8 @@ public class MockKiteSessionService implements KiteSessionService {
 
   @Override
   public KiteStatus status() {
-    return new KiteStatus(true, "MOCK", "CONNECTED", null, null, null, "MOCK", "CLOSED");
+    return new KiteStatus(
+        true, "MOCK", "CONNECTED", null, null, null, "MOCK", "CLOSED", null, java.util.List.of());
   }
 
   @Override

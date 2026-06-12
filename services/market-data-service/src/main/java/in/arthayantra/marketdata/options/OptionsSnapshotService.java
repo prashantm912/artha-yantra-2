@@ -88,6 +88,21 @@ public class OptionsSnapshotService {
     }
   }
 
+  /** 30 s live chain broadcast, market hours (B-12) — publish only, no persistence. */
+  @Scheduled(fixedDelay = 30_000, initialDelay = 45_000)
+  public void scheduledBroadcast() {
+    if (!isOpenSafe()) {
+      return;
+    }
+    for (String underlying : snapshotUnderlyings) {
+      try {
+        publish(chainService.chain(underlying, null));
+      } catch (Exception e) {
+        log.warn("chain broadcast failed for {}: {}", underlying, e.getMessage());
+      }
+    }
+  }
+
   /** 202-style manual trigger. */
   @SuppressWarnings("FutureReturnValueIgnored")
   public Map<String, String> triggerAsync(String underlying, LocalDate expiry) {

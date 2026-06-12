@@ -234,6 +234,20 @@ public class InstrumentRepository {
         expiry == null ? null : Date.valueOf(expiry));
   }
 
+  /** The CE/PE rows of one (underlying, expiry) chain, strike-ordered (Phase 15). */
+  public List<Instrument> optionChain(String underlying, LocalDate expiry) {
+    return jdbc.query(
+        """
+        SELECT * FROM instruments
+        WHERE is_active AND underlying_tradingsymbol = ? AND expiry = ?
+          AND instrument_type IN ('CE','PE') AND strike IS NOT NULL
+        ORDER BY strike, instrument_type
+        """,
+        INSTRUMENT_MAPPER,
+        underlying,
+        Date.valueOf(expiry));
+  }
+
   /** Active row count (startup bootstrap check). */
   public long countActive() {
     Long count = jdbc.queryForObject("SELECT count(*) FROM instruments WHERE is_active", Long.class);

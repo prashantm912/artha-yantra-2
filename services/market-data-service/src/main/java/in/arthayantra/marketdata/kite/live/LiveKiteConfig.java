@@ -1,7 +1,5 @@
 package in.arthayantra.marketdata.kite.live;
 
-import in.arthayantra.common.web.error.ApiException;
-import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.marketdata.kite.HistoricalCandleGateway;
 import in.arthayantra.marketdata.kite.InstrumentDumpGateway;
 import in.arthayantra.marketdata.kite.MarketFeed;
@@ -18,9 +16,9 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.core.env.Environment;
 
 /**
- * Live-profile wiring (A.7a): the context FAILS FAST at startup when Kite secrets are absent
- * (COMMON §10.3 — never a half-configured live stack), and every port is a stub throwing
- * 503 {@code NOT_CONFIGURED} until the real adapters land in Stage B (Phases 9–13).
+ * Live-profile wiring: the context FAILS FAST at startup when Kite secrets are absent
+ * (COMMON §10.3 — never a half-configured live stack). All five B-6 ports now bind their real
+ * wire adapters (Phases 9–15) — no stubs remain.
  */
 @Configuration
 @Profile("live")
@@ -67,11 +65,6 @@ public class LiveKiteConfig {
     } catch (IOException e) {
       return false;
     }
-  }
-
-  private static ApiException notConfigured(String port) {
-    return new ApiException(
-        503, ErrorCodes.NOT_CONFIGURED, "live " + port + " adapter lands in Stage B");
   }
 
   /** Live session port — backed by the Phase-12 token store. */
@@ -187,12 +180,24 @@ public class LiveKiteConfig {
         meterRegistry);
   }
 
-  /** Stage-B stub. */
+  /** Live batched quotes through the QUOTE limiter family (Phase 15; WireMock-tested). */
   @Bean
-  public QuoteGateway liveQuoteGateway() {
-    return keys -> {
-      throw notConfigured("QuoteGateway");
-    };
+  public QuoteGateway liveQuoteGateway(
+      org.springframework.web.client.RestClient.Builder restClientBuilder,
+      KiteHttpProperties properties,
+      in.arthayantra.marketdata.kite.AccessTokenProvider tokenProvider,
+      in.arthayantra.marketdata.kite.KiteCallExecutor executor,
+      com.fasterxml.jackson.databind.ObjectMapper objectMapper,
+      @org.springframework.beans.factory.annotation.Value("${artha.kite.quote-batch-size:250}")
+          int quoteBatchSize) {
+    return new LiveQuoteGateway(
+        restClientBuilder,
+        properties.baseUrl(),
+        properties.resolveApiKey(),
+        tokenProvider,
+        executor,
+        objectMapper,
+        quoteBatchSize);
   }
 
   /** Live historical fetch through the rate-limited executor (Phase 11; WireMock-tested). */

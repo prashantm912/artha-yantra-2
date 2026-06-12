@@ -37,6 +37,7 @@ class ArthaJacksonConventionsTest {
   @Test
   void offsetDateTimeSerializesAtIstOffset() throws Exception {
     record Event(OffsetDateTime at) {}
+
     OffsetDateTime utc = OffsetDateTime.of(2026, 1, 5, 4, 30, 0, 0, ZoneOffset.UTC);
 
     String json = mapper.writeValueAsString(new Event(utc));
@@ -47,6 +48,7 @@ class ArthaJacksonConventionsTest {
   @Test
   void millisSurviveWithoutTrailingZeros() throws Exception {
     record Event(OffsetDateTime at) {}
+
     OffsetDateTime withMillis = OffsetDateTime.of(2026, 1, 5, 4, 30, 0, 123_000_000, ZoneOffset.UTC);
 
     String json = mapper.writeValueAsString(new Event(withMillis));

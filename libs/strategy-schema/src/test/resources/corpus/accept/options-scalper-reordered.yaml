@@ -1,0 +1,81 @@
+# Same CONTENT as options-scalper.yaml with re-ordered keys and re-spelled
+# numbers (1.0 vs 1, 20 vs 20.0 ...) - the canonicalization golden: this file
+# must checksum IDENTICALLY to options-scalper.yaml (D18 stability).
+version: 1.2.0
+schema: strategy-schema/v1
+name: "NIFTY ATM Scalper"
+id: nifty-atm-scalper
+enabled: true
+tags: [options, scalping, intraday, nifty]
+author: owner
+description: "Momentum scalp on nearest-weekly ATM NIFTY options, long premium only"
+
+timeframes:
+  additional: [5m]
+  primary: 1m
+
+universe:
+  underlying: { tradingsymbol: "NIFTY 50", exchange: NSE }
+  mode: options_of_underlying
+  options:
+    option_types: [CE, PE]
+    strikes: { width: 2, selector: atm_window }
+    expiry: nearest_weekly
+
+indicators:
+  - { alias: ema_fast, name: EMA, params: { period: 9 }, timeframe: 1m, weight: 1 }
+  - { weight: 1.00, name: EMA, alias: ema_slow, timeframe: 1m, params: { period: 21 } }
+  - { name: VWAP, weight: 1, alias: vwap_1m, timeframe: 1m }
+  - { normalize: { type: rsi_momentum }, name: RSI, alias: rsi_1m, timeframe: 1m,
+      params: { period: 14 }, weight: 0.80 }
+  - { name: SUPERTREND, alias: st_5m, timeframe: 5m, params: { multiplier: 2, period: 10 },
+      weight: 1.2, normalize: { type: direction } }
+  - { name: VOLUME_RATIO, alias: vol_x, timeframe: 1m, params: { lookback: 20 }, weight: 0.6,
+      optional: true, normalize: { from: 1, to: 3, type: linear } }
+  - { name: OI_CHANGE_PCT, alias: oi_chg, timeframe: 5m, params: { lookback: 6 }, weight: 0.5,
+      optional: true, normalize: { type: linear, from: 0, to: 5.0 } }
+
+exit_rules:
+  - { type: stop_loss,    params: { basis: premium_pct, value: 20.0 } }
+  - { type: take_profit,  params: { value: 35, basis: premium_pct } }
+  - { type: trailing_stop, params: { basis: premium_pct, trail_by: 10, activate_at: 20 } }
+  - { type: time_stop,    params: { max_bars: 15 } }
+  - { type: signal_exit,  params: { rule: "crossunder(ema_fast, ema_slow)" } }
+
+entry_rules:
+  scoring:
+    optional_gate_margin: 0.15
+    threshold: 0.65
+    optional_min_score: 0.60
+  gate:
+    all:
+      - crossover: { slow: ema_slow, fast: ema_fast }
+      - "close > vwap_1m"
+      - not: "rsi_1m > 75"
+  direction: both
+
+risk:
+  session:
+    expiry_day: { window: { to: "14:30", from: "09:20" }, allowed: true }
+    square_off: "15:12"
+    window: { from: "09:20", to: "15:00" }
+    style: intraday
+  max_daily_loss_pct: 3
+  max_positions_per_underlying: 1
+  max_positions: 2
+  position_sizing: { params: { budget_inr: 15000.0 }, method: premium_budget }
+
+backtest:
+  optimize:
+    walk_forward: { anchored: false, step_days: 10, test_days: 10, train_days: 40 }
+    constraints: { min_trades: 40 }
+    objective: { direction: maximize, metric: sharpe }
+    max_trials: 300
+    method: tpe
+    parameters:
+      - { path: "indicators[alias=ema_fast].params.period", range: [5, 13], step: 1 }
+      - { path: "indicators[alias=ema_slow].params.period", range: [15, 34], step: 1 }
+      - { path: "entry_rules.scoring.threshold",            range: [0.55, 0.80] }
+      - { path: "exit_rules[type=stop_loss].params.value",  choices: [15, 20, 25, 30] }
+  defaults: { costs: { slippage_ticks: 1, per_lot_inr: 25 }, initial_capital: 200000,
+              lookback_days: 60, interval: 1m }

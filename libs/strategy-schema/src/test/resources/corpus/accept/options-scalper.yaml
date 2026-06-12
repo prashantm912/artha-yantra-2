@@ -1,0 +1,80 @@
+# Annotated example 1 (options scalping) - verbatim accept fixture from the
+# Stage C design doc C-2.7 (plan 7.1)
+schema: strategy-schema/v1
+id: nifty-atm-scalper          # stable slug; never changes across versions
+name: "NIFTY ATM Scalper"
+version: 1.2.0                  # semver; bumped automatically on save-as-draft
+description: "Momentum scalp on nearest-weekly ATM NIFTY options, long premium only"
+author: owner
+tags: [options, scalping, intraday, nifty]
+enabled: true
+
+universe:
+  mode: options_of_underlying
+  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }   # stable key, never token
+  options:
+    expiry: nearest_weekly      # nearest_weekly | nearest_monthly | offset: N (Nth expiry out)
+    strikes: { selector: atm_window, width: 2 }   # ATM +/- 2 strikes; step from instrument master
+    option_types: [CE, PE]      # engine buys CE on long bias, PE on short bias
+
+timeframes:
+  primary: 1m                   # signal evaluation clock
+  additional: [5m]              # confirmation indicators read the 5m continuous aggregate
+
+indicators:
+  - { name: EMA,        alias: ema_fast,   timeframe: 1m, params: { period: 9 },  weight: 1.0 }
+  - { name: EMA,        alias: ema_slow,   timeframe: 1m, params: { period: 21 }, weight: 1.0 }
+  - { name: VWAP,       alias: vwap_1m,    timeframe: 1m, weight: 1.0 }
+  - { name: RSI,        alias: rsi_1m,     timeframe: 1m, params: { period: 14 }, weight: 0.8,
+      normalize: { type: rsi_momentum } }          # built-in: 50->0, 70->1 long side
+  - { name: SUPERTREND, alias: st_5m,      timeframe: 5m, params: { period: 10, multiplier: 2.0 },
+      weight: 1.2, normalize: { type: direction } } # +1 if uptrend, mapped to 1/0
+  - { name: VOLUME_RATIO, alias: vol_x,    timeframe: 1m, params: { lookback: 20 }, weight: 0.6,
+      optional: true, normalize: { type: linear, from: 1.0, to: 3.0 } }
+  - { name: OI_CHANGE_PCT, alias: oi_chg,  timeframe: 5m, params: { lookback: 6 }, weight: 0.5,
+      optional: true, normalize: { type: linear, from: 0.0, to: 5.0 } }   # short-covering tell
+
+entry_rules:
+  direction: both               # long bias->buy CE, short bias->buy PE (premium-buying only)
+  gate:                         # all hard conditions must hold at bar close
+    all:
+      - crossover: { fast: ema_fast, slow: ema_slow }
+      - "close > vwap_1m"       # underlying trading above VWAP
+      - not: "rsi_1m > 75"      # don't chase exhaustion
+  scoring:
+    threshold: 0.65
+    optional_min_score: 0.6     # soft indicators count only when themselves convincing
+    optional_gate_margin: 0.15  # ...and only when required score is already near threshold
+
+exit_rules:
+  - { type: stop_loss,    params: { basis: premium_pct, value: 20 } }   # -20% of paid premium
+  - { type: take_profit,  params: { basis: premium_pct, value: 35 } }
+  - { type: trailing_stop, params: { basis: premium_pct, activate_at: 20, trail_by: 10 } }
+  - { type: time_stop,    params: { max_bars: 15 } }                    # scalp goes stale fast
+  - { type: signal_exit,  params: { rule: "crossunder(ema_fast, ema_slow)" } }
+
+risk:
+  position_sizing: { method: premium_budget, params: { budget_inr: 15000 } }  # lots = floor(budget/(premium*lot))
+  max_positions: 2
+  max_positions_per_underlying: 1
+  max_daily_loss_pct: 3.0       # of equity; engine stops emitting entries for the day
+  session:
+    style: intraday             # intraday | btst | expiry_day | positional
+    window: { from: "09:20", to: "15:00" }   # IST; first 5m skipped for opening noise
+    square_off: "15:12"         # forced exit before 15:30 close
+    expiry_day: { allowed: true, window: { from: "09:20", to: "14:30" } }
+
+backtest:
+  defaults: { interval: 1m, lookback_days: 60, initial_capital: 200000,
+              costs: { per_lot_inr: 25, slippage_ticks: 1 } }
+  optimize:
+    parameters:
+      - { path: "indicators[alias=ema_fast].params.period", range: [5, 13], step: 1 }
+      - { path: "indicators[alias=ema_slow].params.period", range: [15, 34], step: 1 }
+      - { path: "entry_rules.scoring.threshold",            range: [0.55, 0.80] }
+      - { path: "exit_rules[type=stop_loss].params.value",  choices: [15, 20, 25, 30] }
+    method: tpe                 # grid | random | tpe | nsga2  (ADR D18)
+    max_trials: 300
+    objective: { metric: sharpe, direction: maximize }
+    constraints: { min_trades: 40 }          # trials below this are marked invalid
+    walk_forward: { train_days: 40, test_days: 10, step_days: 10, anchored: false }

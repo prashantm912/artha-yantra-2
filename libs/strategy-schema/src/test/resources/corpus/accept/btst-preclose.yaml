@@ -1,0 +1,37 @@
+# A7 fixture [FP-6]: btst style with pre_close_at + fill_timing at_close
+schema: strategy-schema/v1
+id: btst-gap-capture
+name: "BTST Gap Capture"
+version: 1.0.0
+tags: [stocks, btst]
+universe:
+  mode: explicit
+  instruments:
+    - { exchange: NSE, tradingsymbol: RELIANCE }
+    - { exchange: NSE, tradingsymbol: TCS }
+timeframes: { primary: 1d, additional: [1m] }
+indicators:
+  - { name: EMA, alias: ema20, timeframe: 1d, params: { period: 20 }, weight: 1.0 }
+  - { name: RSI, alias: rsi14, timeframe: 1d, params: { period: 14 }, weight: 1.0,
+      normalize: { type: linear, from: 50, to: 70 } }
+  - { name: GAP_PCT, alias: gap, timeframe: 1d, weight: 0.5, optional: true,
+      normalize: { type: linear, from: 0.0, to: 2.0 } }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - "close > ema20"
+      - "rsi14 > 55"
+  scoring: { threshold: 0.6 }
+exit_rules:
+  - { type: stop_loss, params: { basis: atr_multiple, value: 1.5, atr_period: 14 } }
+  - { type: time_stop, params: { max_holding_days: 2 } }
+risk:
+  position_sizing: { method: percent_equity, params: { percent: 10 } }
+  max_positions: 2
+  max_daily_loss_pct: 2.0
+  session:
+    style: btst
+    pre_close_at: "15:15"      # A7: evaluated at this pre-close clock (IST)
+    fill_timing: at_close      # A7: fill references the signal bar close (captures the gap)
+    exit_intrabar: true        # A7: SL/TP evaluated on each closed 1m bar

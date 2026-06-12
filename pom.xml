@@ -22,6 +22,7 @@
   <modules>
     <module>libs/common-web</module>
     <module>libs/market-calendar</module>
+    <module>libs/strategy-schema</module>
     <module>services/edge-gateway</module>
     <module>services/market-data-service</module>
     <module>tools/hash-password</module>

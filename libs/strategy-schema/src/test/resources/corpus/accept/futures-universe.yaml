@@ -1,0 +1,28 @@
+# A7 fixture [FP-11a]: futures_of_underlying universe with futures{} roll knobs
+schema: strategy-schema/v1
+id: nifty-fut-trend
+name: "NIFTY Futures Trend"
+version: 1.0.0
+universe:
+  mode: futures_of_underlying
+  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  futures: { contract: front_month, roll_days_before_expiry: 2 }
+timeframes: { primary: 5m }
+indicators:
+  - { name: EMA, alias: ema_fast, timeframe: 5m, params: { period: 20 }, weight: 1.0 }
+  - { name: EMA, alias: ema_slow, timeframe: 5m, params: { period: 50 }, weight: 1.0 }
+  - { name: OI_CHANGE_PCT, alias: oi_chg, timeframe: 5m, params: { lookback: 12 }, weight: 0.6,
+      optional: true, normalize: { type: linear, from: 0.0, to: 4.0 } }
+entry_rules:
+  direction: both
+  gate:
+    all:
+      - crossover: { fast: ema_fast, slow: ema_slow }
+  scoring: { threshold: 0.5 }
+exit_rules:
+  - { type: stop_loss, params: { basis: atr_multiple, value: 2.0, atr_period: 14 } }
+  - { type: signal_exit, params: { rule: "crossunder(ema_fast, ema_slow)" } }
+risk:
+  position_sizing: { method: fixed_quantity, params: { quantity: 1 } }
+  max_positions: 1
+  session: { style: intraday, square_off: "15:12" }

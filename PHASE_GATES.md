@@ -26,7 +26,7 @@ as the verification pass — see README design-authority note.)*
 - [x] A.13 — golden-vector fixture-format freeze (`docs/golden-vectors.md`)
 - [x] A.14 — `docs/dev-setup.md` tier table + port map (S6 corrections)
 - [x] A.15 — this file: marker + checklist + parking list
-- [ ] A.16 — `docs/LEGAL.md` attribution record (A13) + A6 credentials record
+- [x] A.16 — `docs/LEGAL.md` attribution record (A13) + A6 credentials record
 - [ ] A.1 — compose topology: pinned/healthchecked/capped timescaledb + redis, dev-tools profile, `ay` CLI, remote-access doc (Q3)
 - [ ] A.11 — db-backup sidecar: 00:30 IST `pg_dump -Fc` per schema, 14d+8w rotation, ntfy on failure
 - [ ] A.8 — Flyway one-shot init: admin + 3 per-service lineages from empty volume, idempotent

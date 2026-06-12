@@ -147,6 +147,32 @@ services:
     restart: unless-stopped
     logging: *default-logging
 
+  # ---- market data: ticker + chain + cache hot path (A.7a / D7) -----------
+  # Internal port 8081 — never published in the default profile; the
+  # dev-tools profile forwards it on loopback for T2 (mds-publish below).
+  market-data-service:
+    build:
+      context: ../services/market-data-service
+    image: arthayantra/market-data-service:dev
+    container_name: ay-market-data-service
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-mock}
+      MOCK_TICKS_PER_SEC: ${MOCK_TICKS_PER_SEC:-1}
+      MOCK_SCENARIO: ${MOCK_SCENARIO:-trend-up}
+    depends_on:
+      flyway-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8081/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 10s
+      retries: 12
+      start_period: 40s
+    mem_limit: 640m
+    restart: unless-stopped
+    logging: *default-logging
+
   # ---- dev-tools profile (A.1.2 / S6 ports) -------------------------------
   adminer:
     image: adminer:5.4.1
@@ -179,6 +205,25 @@ services:
       interval: 10s
       retries: 5
     mem_limit: 256m
+    restart: unless-stopped
+    logging: *default-logging
+
+  # dev-tools publishes the internal service ports on loopback for T2 (A.14)
+  mds-publish:
+    image: alpine/socat:1.8.0.3
+    container_name: ay-mds-publish
+    profiles: [dev-tools]
+    command: ["TCP-LISTEN:8081,fork,reuseaddr", "TCP:market-data-service:8081"]
+    ports:
+      - "127.0.0.1:8081:8081"
+    depends_on:
+      market-data-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "socat", "-V"]
+      interval: 30s
+      retries: 3
+    mem_limit: 16m
     restart: unless-stopped
     logging: *default-logging
 

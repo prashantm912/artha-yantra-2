@@ -21,6 +21,7 @@
 
   <modules>
     <module>libs/common-web</module>
+    <module>libs/market-calendar</module>
   </modules>
 
   <properties>

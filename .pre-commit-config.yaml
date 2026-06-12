@@ -1,5 +1,6 @@
 # Pre-commit hooks (A.9). Lint hooks are added as each stack appears
-# (Checkstyle/Error Prone run in Maven; ruff/ESLint arrive with their stacks).
+# (Java checkstyle below per Phase 4 / COMMON 10.6; ruff/ESLint arrive with
+# their stacks).
 #
 # gitleaks runs as a SYSTEM hook against the pinned binary (8.30.1, installed
 # via `winget install Gitleaks.Gitleaks` / `brew install gitleaks`): Windows
@@ -16,3 +17,10 @@ repos:
         entry: gitleaks git --pre-commit --staged --redact
         pass_filenames: false
         always_run: true
+      # Phase 4: Checkstyle (google_checks @ 120 col) on commits touching Java
+      - id: maven-checkstyle
+        name: maven checkstyle (reactor)
+        language: system
+        entry: python tools/precommit/run-checkstyle.py
+        types: [java]
+        pass_filenames: false

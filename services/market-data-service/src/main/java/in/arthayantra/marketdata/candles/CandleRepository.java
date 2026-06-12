@@ -135,6 +135,30 @@ public class CandleRepository {
         Timestamp.from(from.toInstant()), Timestamp.from(to.toInstant()));
   }
 
+  /**
+   * Explicitly refreshes the derived aggregates over a backfilled window (B-17 step 3 applied to
+   * gap backfill): once a cagg's policy has run, its watermark sits near {@code now} and history
+   * inserted BEHIND it is neither in the materialization (policies only cover their
+   * {@code start_offset} window) nor in the real-time union — without this, backfilled bars
+   * vanish from 5m/15m/1h/1d/1w reads. Parents refresh before children (1d before 1w); the ±8-day
+   * pad guarantees every view sees at least one full bucket. Runs on autocommit — {@code CALL}
+   * refuses transactions.
+   */
+  public void refreshDerivedAggregates(OffsetDateTime from, OffsetDateTime to) {
+    String start = Timestamp.from(from.minusDays(8).toInstant()).toInstant().toString();
+    String end = Timestamp.from(to.plusDays(8).toInstant()).toInstant().toString();
+    for (String view : List.of("candles_5m", "candles_15m", "candles_1h", "candles_1d", "candles_1w")) {
+      jdbc.execute(
+          "CALL public.refresh_continuous_aggregate('"
+              + view
+              + "', '"
+              + start
+              + "'::timestamptz, '"
+              + end
+              + "'::timestamptz)");
+    }
+  }
+
   /** Hypertable size in bytes (the ay_hypertable_bytes gauge). */
   public long hypertableBytes() {
     Long candlesBytes =

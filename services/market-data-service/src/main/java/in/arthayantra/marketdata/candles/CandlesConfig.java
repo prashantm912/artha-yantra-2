@@ -36,6 +36,18 @@ public class CandlesConfig {
     return new CandleBuilder(bucketer, writer, clock, source);
   }
 
+  /** Calendar-driven expected-bucket enumerator (Phase 11 gap math + mock history). */
+  @Bean
+  public TradingBuckets tradingBuckets(MarketCalendar calendar) {
+    return new TradingBuckets(calendar);
+  }
+
+  /** Gap math for the cache-first read path. */
+  @Bean
+  public GapDetector gapDetector(TradingBuckets tradingBuckets) {
+    return new GapDetector(tradingBuckets);
+  }
+
   /** Sweeps bar closes past the 5 s grace + samples the hypertable size gauge. */
   @Component
   public static class CandleHousekeeping {

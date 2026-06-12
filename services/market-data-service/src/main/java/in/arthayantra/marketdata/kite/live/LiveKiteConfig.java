@@ -109,12 +109,23 @@ public class LiveKiteConfig {
     };
   }
 
-  /** Stage-B stub. */
+  /** Live historical fetch through the rate-limited executor (Phase 11; WireMock-tested). */
   @Bean
-  public HistoricalCandleGateway liveHistoricalCandleGateway() {
-    return (key, interval, from, to) -> {
-      throw notConfigured("HistoricalCandleGateway");
-    };
+  public HistoricalCandleGateway liveHistoricalCandleGateway(
+      org.springframework.web.client.RestClient.Builder restClientBuilder,
+      KiteHttpProperties properties,
+      in.arthayantra.marketdata.kite.AccessTokenProvider tokenProvider,
+      in.arthayantra.marketdata.kite.InstrumentTokenResolver tokenResolver,
+      in.arthayantra.marketdata.kite.KiteCallExecutor executor,
+      com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
+    return new LiveHistoricalCandleGateway(
+        restClientBuilder,
+        properties.baseUrl(),
+        properties.resolveApiKey(),
+        tokenProvider,
+        tokenResolver,
+        executor,
+        objectMapper);
   }
 
   /** Live dump download over the Kite wire format (Phase 9; WireMock-tested). */

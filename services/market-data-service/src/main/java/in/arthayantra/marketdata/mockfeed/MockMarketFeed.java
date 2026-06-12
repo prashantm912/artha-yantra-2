@@ -73,11 +73,16 @@ public class MockMarketFeed implements MarketFeed {
         () -> {
           for (InstrumentRecord record : subset) {
             MockTickGenerator.Step step = generator.next(record.instrumentToken());
+            boolean fno =
+                "FUT".equals(record.instrumentType())
+                    || "CE".equals(record.instrumentType())
+                    || "PE".equals(record.instrumentType());
             listener.onTick(
                 new RawTick(
                     record.instrumentToken(),
                     step.lastPrice(),
                     step.cumulativeDayVolume(),
+                    fno ? step.openInterest() : null,
                     Instant.now()));
           }
         },

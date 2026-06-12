@@ -24,6 +24,7 @@ public class MockTickGenerator {
     final Random random;
     BigDecimal price;
     long cumulativeVolume;
+    long openInterest = 100_000;
     boolean first = true;
 
     InstrumentState(Random random, BigDecimal price) {
@@ -74,11 +75,13 @@ public class MockTickGenerator {
     BigDecimal factor = BigDecimal.ONE.add(BigDecimal.valueOf(step));
     state.price = snap(state.price.multiply(factor)).max(TICK_SIZE);
     state.cumulativeVolume += 1 + state.random.nextInt(1000);
-    return new Step(state.price, state.cumulativeVolume);
+    // deterministic OI random walk for F&O consumers (callers decide applicability)
+    state.openInterest = Math.max(0, state.openInterest + state.random.nextInt(2001) - 1000);
+    return new Step(state.price, state.cumulativeVolume, state.openInterest);
   }
 
   /** One generated step. */
-  public record Step(BigDecimal lastPrice, long cumulativeDayVolume) {}
+  public record Step(BigDecimal lastPrice, long cumulativeDayVolume, long openInterest) {}
 
   /** Deterministic per-token base price in a plausible range. */
   static BigDecimal basePrice(long token) {

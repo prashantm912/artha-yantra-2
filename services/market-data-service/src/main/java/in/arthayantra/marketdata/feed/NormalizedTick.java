@@ -13,5 +13,6 @@ public record NormalizedTick(
     String tradingsymbol,
     BigDecimal lastPrice,
     long cumulativeDayVolume,
+    Long openInterest,
     OffsetDateTime timestamp,
     long seq) {}

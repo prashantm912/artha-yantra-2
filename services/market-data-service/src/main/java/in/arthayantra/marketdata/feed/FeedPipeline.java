@@ -31,6 +31,7 @@ public class FeedPipeline implements SmartLifecycle {
   private final RedisTickPublisher publisher;
   private final LastTickStore lastTickStore;
   private final StringRedisTemplate redis;
+  private final java.util.List<NormalizedTickListener> listeners;
   private final boolean autostart;
 
   private volatile boolean running;
@@ -44,6 +45,7 @@ public class FeedPipeline implements SmartLifecycle {
       RedisTickPublisher publisher,
       LastTickStore lastTickStore,
       StringRedisTemplate redis,
+      java.util.List<NormalizedTickListener> listeners,
       @Value("${artha.feed.autostart:true}") boolean autostart) {
     this.marketFeed = marketFeed;
     this.sessionGateway = sessionGateway;
@@ -52,6 +54,7 @@ public class FeedPipeline implements SmartLifecycle {
     this.publisher = publisher;
     this.lastTickStore = lastTickStore;
     this.redis = redis;
+    this.listeners = listeners;
     this.autostart = autostart;
   }
 
@@ -82,6 +85,9 @@ public class FeedPipeline implements SmartLifecycle {
                 tick -> {
                   lastTickStore.update(tick);
                   publisher.publish(tick);
+                  for (NormalizedTickListener listener : listeners) {
+                    listener.onNormalizedTick(tick);
+                  }
                 });
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();

@@ -102,7 +102,7 @@ The gateway verifies login against an Argon2id PHC string supplied via `.env`.
 Generate one with the helper (CD-13), once it lands with the gateway phase:
 
 ```
-.\mvnw.cmd -pl tools/hash-password -am -q exec:java "-Dexec.args=<your password>"
+.\mvnw.cmd -pl tools/hash-password -q compile exec:java "-Dexec.args=<your password>"
 ```
 
 Paste the printed PHC string into `.env` with **every `$` escaped as `$$`**

@@ -73,7 +73,7 @@ cookie, session probe, and that wrong passwords / brute force are rejected.
 First set your own password (skip if you already did):
 
 ```powershell
-.\mvnw.cmd -pl tools/hash-password -am -q exec:java "-Dexec.args=MyPassword123"
+.\mvnw.cmd -pl tools/hash-password -q compile exec:java "-Dexec.args=MyPassword123"
 ```
 
 Copy the printed `$argon2id$...` line into `.env` as

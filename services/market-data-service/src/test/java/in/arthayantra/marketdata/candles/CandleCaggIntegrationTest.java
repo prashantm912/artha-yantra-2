@@ -83,6 +83,9 @@ class CandleCaggIntegrationTest extends MarketDataIntegrationTestBase {
           bar(symbol, minute,
               (100 + i) + ".00", (100 + i) + ".50", (99 + i) + ".50", (100 + i) + ".25", 10));
     }
+    // other IT classes may have advanced the 5m watermark past this window (test order
+    // differs across OSes) — refresh explicitly so the seeded bars are visible
+    jdbc.execute("CALL public.refresh_continuous_aggregate('candles_5m', NULL, NULL)");
 
     List<Candle> fiveMin =
         repository.rangeFromAggregate(
@@ -104,8 +107,10 @@ class CandleCaggIntegrationTest extends MarketDataIntegrationTestBase {
     // COMPRESSED chunk — backfills older than the 7-day compress_after hit this in production
     String symbol = "COMPRESS1";
     repository.upsert(bar(symbol, "2026-01-05T09:15:00", "100.00", "101.00", "99.00", "100.50", 10));
+    // compress ONLY the seeded January chunk — never the chunks other tests write into
     jdbc.execute(
-        "SELECT public.compress_chunk(c, true) FROM public.show_chunks('candles') c");
+        "SELECT public.compress_chunk(c, true) FROM public.show_chunks('candles',"
+            + " older_than => '2026-02-01T00:00:00+05:30'::timestamptz) c");
 
     // ON CONFLICT DO UPDATE into the compressed chunk — the B-6 merge must still apply
     repository.upsert(bar(symbol, "2026-01-05T09:15:00", "100.00", "105.00", "98.00", "102.25", 25));

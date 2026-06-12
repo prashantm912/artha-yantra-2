@@ -41,6 +41,7 @@ public class SecurityConfig {
 
   private final ObjectMapper objectMapper;
 
+  /** Wires the envelope serializer. */
   public SecurityConfig(ObjectMapper objectMapper) {
     this.objectMapper = objectMapper;
   }

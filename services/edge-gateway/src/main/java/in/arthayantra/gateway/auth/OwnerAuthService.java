@@ -17,6 +17,7 @@ public class OwnerAuthService {
 
   private final String ownerPasswordHash;
 
+  /** Takes the PHC string from {@code ARTHA_OWNER_PASSWORD_HASH} (may be empty in mock dev). */
   public OwnerAuthService(@Value("${artha.owner-password-hash:}") String ownerPasswordHash) {
     this.ownerPasswordHash = ownerPasswordHash == null ? "" : ownerPasswordHash.trim();
   }

@@ -1,0 +1,10 @@
+{
+  "name": "arthayantra-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Scripted probes against the mock stack (A.7b); the full Playwright project arrives in Stage C (Phase 27).",
+  "dependencies": {
+    "@stomp/stompjs": "^7.1.1",
+    "ws": "^8.18.0"
+  }
+}

@@ -19,6 +19,7 @@ public class LoginRateLimiter {
 
   private final ReactiveStringRedisTemplate redis;
 
+  /** Wires the Redis counters. */
   public LoginRateLimiter(ReactiveStringRedisTemplate redis) {
     this.redis = redis;
   }

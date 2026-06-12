@@ -41,6 +41,12 @@
       <version>${project.version}</version>
     </dependency>
     <dependency>
+      <!-- B-13 market.phase on /api/v1/system/status (calendar math, no fan-out) -->
+      <groupId>in.arthayantra</groupId>
+      <artifactId>market-calendar</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
       <groupId>org.springframework.cloud</groupId>
       <artifactId>spring-cloud-starter-gateway-server-webflux</artifactId>
     </dependency>

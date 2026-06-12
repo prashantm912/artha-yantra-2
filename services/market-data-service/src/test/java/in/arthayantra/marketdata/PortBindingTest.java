@@ -20,7 +20,7 @@ import org.springframework.context.ApplicationContext;
  * The Phase-7 profile rule fixing the v1 startup trap: exactly one impl per port is always bound
  * — mock xor live — and live without credentials fails fast at startup (COMMON §10.3).
  */
-class PortBindingTest {
+class PortBindingTest extends in.arthayantra.marketdata.testsupport.MarketDataIntegrationTestBase {
 
   @Nested
   @SpringBootTest(
@@ -60,10 +60,13 @@ class PortBindingTest {
           java.util.Map.of(
               "artha.kite.api-key-file", "Z:/definitely/absent/kite_api_key",
               "artha.kite.api-secret-file", "Z:/definitely/absent/kite_api_secret",
-              "artha.feed.autostart", "false"));
+              "artha.feed.autostart", "false",
+              // the fail-fast is a BeanFactoryPostProcessor — it fires before any
+              // datasource/repository bean, so no real DB is needed here
+              "spring.datasource.url", "jdbc:postgresql://127.0.0.1:1/absent",
+              "spring.flyway.enabled", "false"));
 
       assertThatThrownBy(app::run)
-          .rootCause()
           .isInstanceOf(IllegalStateException.class)
           .hasMessageContaining("live profile requires Kite credentials");
     }

@@ -24,4 +24,9 @@ public class LastTickStore {
   public Optional<NormalizedTick> latest(InstrumentKey key) {
     return Optional.ofNullable(lastTicks.get(key));
   }
+
+  /** A copy of the whole map (the Phase-17 ticks/latest surface). */
+  public Map<InstrumentKey, NormalizedTick> snapshot() {
+    return Map.copyOf(lastTicks);
+  }
 }

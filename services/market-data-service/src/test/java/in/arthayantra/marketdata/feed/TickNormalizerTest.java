@@ -3,12 +3,11 @@ package in.arthayantra.marketdata.feed;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import in.arthayantra.marketdata.instruments.InstrumentRegistry;
-import in.arthayantra.marketdata.kite.InstrumentDumpGateway;
+import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.RawTick;
-import java.lang.reflect.Method;
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,20 +18,12 @@ class TickNormalizerTest {
   private TickNormalizer normalizer;
 
   @BeforeEach
-  void setUp() throws Exception {
-    InstrumentDumpGateway dump =
-        () ->
-            List.of(
-                new InstrumentDumpGateway.InstrumentRecord(
-                    256265, "NSE", "NIFTY 50", "NIFTY 50", "EQ", "INDICES", null, null, 1,
-                    new BigDecimal("0.05")),
-                new InstrumentDumpGateway.InstrumentRecord(
-                    100001, "NSE", "RELIANCE", "RELIANCE", "EQ", "NSE", null, null, 1,
-                    new BigDecimal("0.05")));
-    InstrumentRegistry registry = new InstrumentRegistry(dump);
-    Method load = InstrumentRegistry.class.getDeclaredMethod("load");
-    load.setAccessible(true);
-    load.invoke(registry);
+  void setUp() {
+    InstrumentRegistry registry =
+        InstrumentRegistry.fixedForTesting(
+            Map.of(
+                256265L, new InstrumentKey("NSE", "NIFTY 50"),
+                100001L, new InstrumentKey("NSE", "RELIANCE")));
     normalizer = new TickNormalizer(registry);
   }
 

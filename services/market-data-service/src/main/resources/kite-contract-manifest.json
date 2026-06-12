@@ -1,0 +1,35 @@
+{
+  "comment": "B-9 expected-field manifests, derived from the SAME recorded fixtures the WireMock tests replay - one source of truth, refreshed whenever fixtures are re-recorded.",
+  "profile": {
+    "status": "string",
+    "data.user_id": "string",
+    "data.user_name": "string",
+    "data.email": "string"
+  },
+  "quote": {
+    "status": "string",
+    "data.*.last_price": "number",
+    "data.*.volume": "number",
+    "data.*.oi": "number",
+    "data.*.depth": "object"
+  },
+  "historical": {
+    "status": "string",
+    "data.candles": "array"
+  },
+  "dumpHeader": [
+    "instrument_token",
+    "exchange_token",
+    "tradingsymbol",
+    "name",
+    "last_price",
+    "expiry",
+    "strike",
+    "lot_size",
+    "tick_size",
+    "instrument_type",
+    "segment",
+    "exchange"
+  ],
+  "knownTopLevel": ["status", "data"]
+}

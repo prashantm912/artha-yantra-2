@@ -5,10 +5,7 @@ import in.arthayantra.marketdata.kite.HistoricalCandleGateway;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.QuoteGateway;
 import in.arthayantra.marketdata.kite.SessionGateway;
-import java.util.Collection;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -39,26 +36,32 @@ public class MockKitePorts {
     };
   }
 
-  /** Quotes straight from the conflated last-tick map. */
+  /** B-11 deterministic chain synthesis + last-tick spot quotes (Phase 15). */
   @Bean
-  public QuoteGateway mockQuoteGateway(LastTickStore lastTickStore) {
-    return (Collection<InstrumentKey> keys) -> {
-      Map<InstrumentKey, QuoteGateway.Quote> quotes = new LinkedHashMap<>();
-      for (InstrumentKey key : keys) {
-        lastTickStore
-            .latest(key)
-            .ifPresent(
-                tick ->
-                    quotes.put(
-                        key, new QuoteGateway.Quote(key, tick.lastPrice(), tick.timestamp())));
-      }
-      return quotes;
-    };
+  public QuoteGateway mockQuoteGateway(
+      LastTickStore lastTickStore,
+      in.arthayantra.marketdata.instruments.InstrumentRepository instrumentRepository,
+      in.arthayantra.marketcalendar.MarketCalendar calendar,
+      java.time.Clock clock) {
+    return new MockQuoteGateway(lastTickStore, instrumentRepository, calendar, clock);
   }
 
-  /** No mock history in Stage A — the candle cache and its consumers land in Stage B. */
+  /** Deterministic seeded mock history (Phase 11) with the Phase-16A planted-split knobs. */
   @Bean
-  public HistoricalCandleGateway mockHistoricalCandleGateway() {
-    return (key, interval, from, to) -> List.of();
+  public HistoricalCandleGateway mockHistoricalCandleGateway(
+      in.arthayantra.marketdata.candles.TradingBuckets tradingBuckets,
+      @Value("${artha.mock.seed:42}") long seed,
+      @Value("${artha.mock.corporate-action.symbol:MOCK003}") String caSymbol,
+      @Value("${artha.mock.corporate-action.ratio:0.5}") java.math.BigDecimal caRatio,
+      @Value("${artha.mock.corporate-action.boundary:2026-06-01}") java.time.LocalDate caBoundary,
+      @Value("${artha.mock.corporate-action.active:false}") boolean caActive) {
+    return new MockHistoricalCandleGateway(
+        tradingBuckets, seed, caSymbol, caRatio, caBoundary, caActive);
+  }
+
+  /** Mock never holds a token (D13 — credential-free). */
+  @Bean
+  public in.arthayantra.marketdata.kite.AccessTokenProvider mockAccessTokenProvider() {
+    return java.util.Optional::empty;
   }
 }

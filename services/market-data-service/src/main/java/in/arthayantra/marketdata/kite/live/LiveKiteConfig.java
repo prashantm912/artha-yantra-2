@@ -31,7 +31,8 @@ public class LiveKiteConfig {
   /**
    * D13: live without credentials is a startup error, not a degraded runtime. Implemented as a
    * static {@link BeanFactoryPostProcessor} so it fires BEFORE any bean instantiation —
-   * deterministic ordering ahead of datasource/repository startup work.
+   * deterministic ordering ahead of datasource/repository startup work. Phase 12 adds the
+   * AES-GCM master key to the required set.
    */
   @Bean
   public static BeanFactoryPostProcessor liveCredentialsFailFast(Environment environment) {
@@ -42,12 +43,20 @@ public class LiveKiteConfig {
           Path.of(
               environment.getProperty(
                   "artha.kite.api-secret-file", "/run/secrets/kite_api_secret"));
-      if (!isNonBlankFile(apiKeyFile) || !isNonBlankFile(apiSecretFile)) {
+      Path masterKeyFile =
+          Path.of(
+              environment.getProperty(
+                  "artha.kite.master-key-file", "/run/secrets/artha_master_key"));
+      if (!isNonBlankFile(apiKeyFile)
+          || !isNonBlankFile(apiSecretFile)
+          || !isNonBlankFile(masterKeyFile)) {
         throw new IllegalStateException(
-            "live profile requires Kite credentials as Docker secret files ("
+            "live profile requires Kite credentials + master key as Docker secret files ("
                 + apiKeyFile
                 + ", "
                 + apiSecretFile
+                + ", "
+                + masterKeyFile
                 + ") — see deploy/secrets/README.md (D13); mock mode needs none");
       }
     };
@@ -66,13 +75,15 @@ public class LiveKiteConfig {
         503, ErrorCodes.NOT_CONFIGURED, "live " + port + " adapter lands in Stage B");
   }
 
-  /** Stage-B stub. */
+  /** Live session port — backed by the Phase-12 token store. */
   @Bean
-  public SessionGateway liveSessionGateway() {
+  public SessionGateway liveSessionGateway(
+      in.arthayantra.marketdata.kite.session.KiteSessionStore store) {
     return new SessionGateway() {
       @Override
       public boolean sessionActive() {
-        throw notConfigured("SessionGateway");
+        return store.currentToken().isPresent()
+            && store.state() == in.arthayantra.marketdata.kite.session.KiteSessionStore.State.CONNECTED;
       }
 
       @Override
@@ -80,6 +91,64 @@ public class LiveKiteConfig {
         return "LIVE";
       }
     };
+  }
+
+  /** AES-256-GCM under the ARTHA_MASTER_KEY secret (Phase 12). */
+  @Bean
+  public in.arthayantra.marketdata.kite.session.AesGcmTokenCipher tokenCipher(
+      KiteHttpProperties properties) {
+    return new in.arthayantra.marketdata.kite.session.AesGcmTokenCipher(
+        properties.resolveMasterKey());
+  }
+
+  /** The token store — decrypt-and-resume on startup (D13: restarts need no re-login). */
+  @Bean
+  public in.arthayantra.marketdata.kite.session.KiteSessionStore kiteSessionStore(
+      in.arthayantra.marketdata.kite.session.KiteSessionRepository repository,
+      in.arthayantra.marketdata.kite.session.AesGcmTokenCipher cipher) {
+    var store = new in.arthayantra.marketdata.kite.session.KiteSessionStore(repository, cipher);
+    store.loadFromDatabase();
+    return store;
+  }
+
+  /** Session wire calls (exchange + probe) over the WireMock-able base URL. */
+  @Bean
+  public in.arthayantra.marketdata.kite.session.SessionWireClient sessionWireClient(
+      org.springframework.web.client.RestClient.Builder restClientBuilder,
+      KiteHttpProperties properties,
+      com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
+    return new LiveSessionWireClient(restClientBuilder, properties, objectMapper);
+  }
+
+  /** Status key writer + change publisher. */
+  @Bean
+  public in.arthayantra.marketdata.kite.session.SessionStatusPublisher sessionStatusPublisher(
+      org.springframework.data.redis.core.StringRedisTemplate redis) {
+    return new in.arthayantra.marketdata.kite.session.SessionStatusPublisher(redis);
+  }
+
+  /** The OAuth ritual surface. */
+  @Bean
+  public in.arthayantra.marketdata.kite.session.KiteSessionService liveKiteSessionService(
+      in.arthayantra.marketdata.kite.session.SessionWireClient wireClient,
+      in.arthayantra.marketdata.kite.session.KiteSessionStore store,
+      in.arthayantra.marketdata.kite.session.SessionStatusPublisher statusPublisher,
+      in.arthayantra.marketdata.kite.KiteCallExecutor executor,
+      KiteHttpProperties properties) {
+    return new in.arthayantra.marketdata.kite.session.LiveKiteSessionService(
+        wireClient, store, statusPublisher, executor,
+        properties.loginUrlBase(), properties.resolveApiKey());
+  }
+
+  /** The 5-min health probe. */
+  @Bean
+  public in.arthayantra.marketdata.kite.session.SessionHealthProbe sessionHealthProbe(
+      in.arthayantra.marketdata.kite.session.SessionWireClient wireClient,
+      in.arthayantra.marketdata.kite.session.KiteSessionStore store,
+      in.arthayantra.marketdata.kite.session.SessionStatusPublisher statusPublisher,
+      io.micrometer.core.instrument.MeterRegistry meterRegistry) {
+    return new in.arthayantra.marketdata.kite.session.SessionHealthProbe(
+        wireClient, store, statusPublisher, meterRegistry);
   }
 
   /** Stage-B stub. */
@@ -138,14 +207,6 @@ public class LiveKiteConfig {
         restClientBuilder, properties.baseUrl(), properties.resolveApiKey(), tokenProvider);
   }
 
-  /**
-   * Placeholder token provider — the store-backed implementation lands with the OAuth lifecycle
-   * (Phase 12). Until then live adapters report an expired session rather than a missing bean.
-   */
-  @Bean
-  @org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean(
-      in.arthayantra.marketdata.kite.AccessTokenProvider.class)
-  public in.arthayantra.marketdata.kite.AccessTokenProvider liveAccessTokenProvider() {
-    return java.util.Optional::empty;
-  }
+  // the Phase-12 KiteSessionStore bean above IS the live AccessTokenProvider (D13:
+  // the token never leaves this service) — no placeholder provider remains
 }

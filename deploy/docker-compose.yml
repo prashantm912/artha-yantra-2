@@ -18,6 +18,15 @@ secrets:
   postgres_password:
     # generated locally by `ay up` if missing — never committed (A.9)
     file: ./secrets/postgres_password
+  # Phase 12 (B-2/D13): Kite material + AES-GCM master key as FILES, never env
+  # vars — `docker inspect` must show no secret values. `ay up` creates empty
+  # kite placeholders (mock needs none) and generates a real master key.
+  kite_api_key:
+    file: ./secrets/kite_api_key
+  kite_api_secret:
+    file: ./secrets/kite_api_secret
+  artha_master_key:
+    file: ./secrets/artha_master_key
 
 volumes:
   timescale-data:
@@ -161,7 +170,9 @@ services:
       MOCK_SCENARIO: ${MOCK_SCENARIO:-trend-up}
       # Stage B: marketdata schema access — password via secret file, never env
       ARTHA_DB_PASSWORD_FILE: /run/secrets/postgres_password
-    secrets: [postgres_password]
+    # kite_* + master key mount into THIS service only (B-2: the token and the
+    # credentials never reach any other container)
+    secrets: [postgres_password, kite_api_key, kite_api_secret, artha_master_key]
     depends_on:
       flyway-init:
         condition: service_completed_successfully

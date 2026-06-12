@@ -50,6 +50,24 @@ function Initialize-LocalConfig {
         Set-Content -Path $pwFile -Value $pw -NoNewline -Encoding ascii
         Write-Host '[ay] generated deploy/secrets/postgres_password (gitignored)'
     }
+    # Phase 12: 256-bit AES-GCM master key for the Kite token store (base64)
+    $mkFile = Join-Path $RepoRoot 'deploy\secrets\artha_master_key'
+    if (-not (Test-Path $mkFile)) {
+        $rng = New-Object System.Security.Cryptography.RNGCryptoServiceProvider
+        $key = New-Object byte[] 32
+        $rng.GetBytes($key)
+        Set-Content -Path $mkFile -Value ([Convert]::ToBase64String($key)) -NoNewline -Encoding ascii
+        Write-Host '[ay] generated deploy/secrets/artha_master_key (gitignored)'
+    }
+    # empty placeholders so compose can mount them; mock mode never reads them,
+    # live mode fails fast until the owner fills in real Kite credentials
+    foreach ($name in 'kite_api_key', 'kite_api_secret') {
+        $f = Join-Path $RepoRoot "deploy\secrets\$name"
+        if (-not (Test-Path $f)) {
+            New-Item -ItemType File -Path $f | Out-Null
+            Write-Host "[ay] created empty deploy/secrets/$name placeholder (fill for live mode)"
+        }
+    }
 }
 
 switch ($Verb) {

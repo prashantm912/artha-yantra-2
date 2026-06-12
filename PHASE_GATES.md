@@ -82,6 +82,33 @@ snapshots (Phases 9–17); Kite minute-depth probe (A3); NSE index-constituents
 CSV source verification (before Phase 22); `tools/hash-password` may gain a
 compose-escaped output mode (quality-of-life).
 
+## S1 gate — Black-76 golden-vector acceptance (Phase 14, walked 2026-06-13)
+
+The formal S1 record (B-10 / B-15): the Phase 15 snapshot job may enable its
+computed IV/Greeks columns **only while this suite stays green**; raw-quote
+capture is never blocked by it.
+
+- [x] Grid covered: F/K 0.85–1.15, T ∈ {0.5, 2, 7, 30, 90} d, σ 8–60 %, CE+PE —
+      **490 committed py_vollib vectors** (offline generator, A4 exception;
+      never generated at test runtime).
+- [x] Greeks vs reference: relative error ≤ 1e-6 across all vectors; absolute
+      ≤ 1e-9 where |reference| < 1e-3 (far-OTM gamma/vega corners included).
+- [x] IV solver round-trip: reprice |Black76(IV) − market price| ≤ ₹0.01 for
+      every vector carrying ≥ 1 tick of time value (324/490; the 0.5 d/2 d
+      far-OTM remainder has no recoverable vol by construction).
+- [x] Expiry-day: T from 5 minutes to 0 returns finite greeks via the
+      documented `T_MIN` clamp (5 calendar minutes, ACT/365).
+- [x] Edge corpus: at/below-discounted-intrinsic and zero-quote inputs → null
+      IV + reason code (`BELOW_INTRINSIC` / `ZERO_QUOTE` / `NO_CONVERGENCE`),
+      never NaN/Infinity.
+- [x] Model is Black-76 **on the forward** (PCP → monthly-futures-LTP →
+      `S·e^{rT}` precedence implemented and tested); no Black-Scholes-on-spot
+      shortcut anywhere.
+- [x] Deterministic across runs (same inputs ⇒ identical `BigDecimal` outputs).
+- [ ] Market sanity (informational, non-gating): solved IV within ±2 vol points
+      of the NSE chain page for liquid ATM±2 strikes on one live capture —
+      pends the first live-mode session with real Kite credentials.
+
 ## Parking list (deferred)
 
 *(empty — items deferred out of a section land here with their target)*

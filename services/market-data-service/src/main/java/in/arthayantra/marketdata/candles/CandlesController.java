@@ -27,10 +27,17 @@ public class CandlesController {
       String exchange, String tradingsymbol, String interval, OffsetDateTime from, OffsetDateTime to) {}
 
   private final CandleQueryService queryService;
+  private final ContBackAdjuster backAdjuster;
+  private final in.arthayantra.marketdata.instruments.InstrumentRepository instruments;
 
   /** Wires the read path. */
-  public CandlesController(CandleQueryService queryService) {
+  public CandlesController(
+      CandleQueryService queryService,
+      ContBackAdjuster backAdjuster,
+      in.arthayantra.marketdata.instruments.InstrumentRepository instruments) {
     this.queryService = queryService;
+    this.backAdjuster = backAdjuster;
+    this.instruments = instruments;
   }
 
   /** Cache-first OHLCV; prices serialize as decimal strings (platform Jackson). */
@@ -46,10 +53,21 @@ public class CandlesController {
       @RequestParam(defaultValue = "0") int offset) {
     CandleQueryService.CandleRead read =
         queryService.read(exchange, tradingsymbol, interval, from, to);
+    List<Candle> items = read.items();
+    // CONT series: back-adjustment is READ-TIME arithmetic over roll_events gaps (B-19)
+    if (tradingsymbol.endsWith("-FUT-CONT") && "back".equalsIgnoreCase(adjust)) {
+      String underlying =
+          instruments
+              .findByKey(exchange, tradingsymbol)
+              .map(in.arthayantra.marketdata.instruments.Instrument::underlyingTradingsymbol)
+              .orElse(null);
+      if (underlying != null) {
+        items = backAdjuster.backAdjust(underlying, items);
+      }
+    }
     int boundedLimit = Math.min(Math.max(limit, 1), 50_000);
     int boundedOffset = Math.max(offset, 0);
-    List<Candle> pageItems =
-        read.items().stream().skip(boundedOffset).limit(boundedLimit).toList();
+    List<Candle> pageItems = items.stream().skip(boundedOffset).limit(boundedLimit).toList();
     CandlesResponse body =
         new CandlesResponse(
             pageItems, read.stale(), read.asOf(), boundedLimit, boundedOffset, read.items().size());

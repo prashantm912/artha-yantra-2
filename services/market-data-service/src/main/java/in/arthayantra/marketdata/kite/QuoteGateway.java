@@ -11,8 +11,24 @@ import java.util.Map;
  */
 public interface QuoteGateway {
 
-  /** A spot quote. */
-  record Quote(InstrumentKey key, BigDecimal lastPrice, OffsetDateTime timestamp) {}
+  /**
+   * A batched quote. Phase 15 widens the Stage-A shape with the chain fields: best bid/ask,
+   * cumulative day volume and OI ({@code null} where the venue has none — e.g. indices).
+   */
+  record Quote(
+      InstrumentKey key,
+      BigDecimal lastPrice,
+      BigDecimal bid,
+      BigDecimal ask,
+      Long volume,
+      Long oi,
+      OffsetDateTime timestamp) {
+
+    /** The Stage-A LTP-only shape (spot quotes). */
+    public Quote(InstrumentKey key, BigDecimal lastPrice, OffsetDateTime timestamp) {
+      this(key, lastPrice, null, null, null, null, timestamp);
+    }
+  }
 
   /** Last-known quotes for the requested instruments; absent keys are omitted. */
   Map<InstrumentKey, Quote> quotes(Collection<InstrumentKey> keys);

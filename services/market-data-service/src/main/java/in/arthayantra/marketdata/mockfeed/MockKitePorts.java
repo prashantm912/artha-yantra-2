@@ -61,4 +61,10 @@ public class MockKitePorts {
   public HistoricalCandleGateway mockHistoricalCandleGateway() {
     return (key, interval, from, to) -> List.of();
   }
+
+  /** Mock never holds a token (D13 — credential-free). */
+  @Bean
+  public in.arthayantra.marketdata.kite.AccessTokenProvider mockAccessTokenProvider() {
+    return java.util.Optional::empty;
+  }
 }

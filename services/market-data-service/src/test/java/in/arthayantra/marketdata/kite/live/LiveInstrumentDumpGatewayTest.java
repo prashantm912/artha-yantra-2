@@ -1,0 +1,99 @@
+package in.arthayantra.marketdata.kite.live;
+
+import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.github.tomakehurst.wiremock.WireMockServer;
+import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.Optional;
+import java.util.zip.GZIPOutputStream;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.springframework.web.client.RestClient;
+
+/** Phase-9 WireMock test: live dump download (gzip CSV) + 5xx handling (B-6 wire fidelity). */
+class LiveInstrumentDumpGatewayTest {
+
+  private static final String CSV =
+      """
+      instrument_token,exchange_token,tradingsymbol,name,last_price,expiry,strike,lot_size,tick_size,instrument_type,segment,exchange
+      256265,1001,NIFTY 50,"NIFTY 50",0,,0,1,0.05,EQ,INDICES,NSE
+      100001,391,RELIANCE,"RELIANCE INDUSTRIES",0,,0,1,0.05,EQ,NSE,NSE
+      """;
+
+  private static WireMockServer wireMock;
+
+  @BeforeAll
+  static void start() {
+    wireMock = new WireMockServer(WireMockConfiguration.wireMockConfig().dynamicPort());
+    wireMock.start();
+  }
+
+  @AfterAll
+  static void stop() {
+    wireMock.stop();
+  }
+
+  private LiveInstrumentDumpGateway gateway() {
+    return new LiveInstrumentDumpGateway(
+        RestClient.builder(), wireMock.baseUrl(), "test-key", () -> Optional.of("test-token"));
+  }
+
+  @Test
+  void downloadsAndParsesGzippedCsvWithAuthHeaders() throws IOException {
+    wireMock.stubFor(
+        get(urlEqualTo("/instruments/NSE"))
+            .willReturn(
+                aResponse()
+                    .withHeader("Content-Type", "text/csv")
+                    .withBody(gzip(CSV))));
+    wireMock.stubFor(
+        get(urlEqualTo("/instruments/NFO")).willReturn(aResponse().withBody("instrument_token\n")));
+    wireMock.stubFor(
+        get(urlEqualTo("/instruments/BFO")).willReturn(aResponse().withBody("instrument_token\n")));
+
+    var rows = gateway().fetchDump();
+
+    assertThat(rows).hasSize(2);
+    assertThat(rows.get(0).tradingsymbol()).isEqualTo("NIFTY 50");
+    assertThat(rows.get(1).name()).isEqualTo("RELIANCE INDUSTRIES");
+    assertThat(rows.get(1).tickSize()).isEqualByComparingTo("0.05");
+    wireMock.verify(
+        getRequestedFor(urlEqualTo("/instruments/NSE"))
+            .withHeader("X-Kite-Version", equalTo("3"))
+            .withHeader("Authorization", equalTo("token test-key:test-token")));
+  }
+
+  @Test
+  void serverErrorsPropagate() {
+    wireMock.stubFor(get(urlEqualTo("/instruments/NSE")).willReturn(aResponse().withStatus(503)));
+
+    assertThatThrownBy(() -> gateway().fetchDump()).hasMessageContaining("503");
+  }
+
+  @Test
+  void missingTokenShortCircuitsWithTokenExpired() {
+    var gateway =
+        new LiveInstrumentDumpGateway(
+            RestClient.builder(), wireMock.baseUrl(), "test-key", Optional::empty);
+
+    assertThatThrownBy(gateway::fetchDump).hasMessageContaining("no live Kite session");
+  }
+
+  private static byte[] gzip(String text) throws IOException {
+    ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+    try (GZIPOutputStream gz = new GZIPOutputStream(bytes)) {
+      gz.write(text.getBytes(StandardCharsets.UTF_8));
+    }
+    return bytes.toByteArray();
+  }
+}

@@ -13,10 +13,12 @@ public class ApiException extends RuntimeException {
   private final String code;
   private final transient Map<String, Object> details;
 
+  /** Envelope exception without details. */
   public ApiException(int httpStatus, String code, String message) {
     this(httpStatus, code, message, Map.of());
   }
 
+  /** Envelope exception with details ({@code null} normalizes to empty). */
   public ApiException(int httpStatus, String code, String message, Map<String, Object> details) {
     super(message);
     this.httpStatus = httpStatus;
@@ -24,14 +26,17 @@ public class ApiException extends RuntimeException {
     this.details = details == null ? Map.of() : details;
   }
 
+  /** The HTTP status this maps to. */
   public int httpStatus() {
     return httpStatus;
   }
 
+  /** The taxonomy code. */
   public String code() {
     return code;
   }
 
+  /** Machine-readable context for the envelope. */
   public Map<String, Object> details() {
     return details;
   }

@@ -15,6 +15,7 @@ import java.util.Map;
  */
 public record ErrorResponse(String code, String message, Map<String, Object> details) {
 
+  /** Normalizes a {@code null} details map to an empty one. */
   public ErrorResponse {
     if (details == null) {
       details = Map.of();

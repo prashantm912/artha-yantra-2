@@ -159,6 +159,27 @@ public class CandleRepository {
     }
   }
 
+  /**
+   * Copies one contract's bars (1m + 1d) into a CONT synthetic symbol for a date window —
+   * UNADJUSTED, idempotent (B-19: the stitch is local arithmetic, never Kite's roll-unaware
+   * {@code continuous=true} concatenation).
+   */
+  public int stitchInto(
+      String contSymbol, String exchange, String fromSymbol, OffsetDateTime from, OffsetDateTime to) {
+    return jdbc.update(
+        """
+        INSERT INTO candles
+          (exchange, tradingsymbol, "interval", bucket, open, high, low, close, volume, oi, source, fetched_at)
+        SELECT exchange, ?, "interval", bucket, open, high, low, close, volume, oi, source, now()
+        FROM candles
+        WHERE exchange = ? AND tradingsymbol = ? AND "interval" IN ('1m','1d')
+          AND bucket >= ? AND bucket < ?
+        ON CONFLICT (exchange, tradingsymbol, "interval", bucket) DO NOTHING
+        """,
+        contSymbol, exchange, fromSymbol,
+        Timestamp.from(from.toInstant()), Timestamp.from(to.toInstant()));
+  }
+
   /** Hypertable size in bytes (the ay_hypertable_bytes gauge). */
   public long hypertableBytes() {
     Long candlesBytes =

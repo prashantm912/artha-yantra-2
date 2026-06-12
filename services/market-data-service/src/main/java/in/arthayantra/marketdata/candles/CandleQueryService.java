@@ -83,8 +83,9 @@ public class CandleQueryService {
           "interval must be one of " + INTERVALS);
     }
     boolean stale = false;
-    // 1w is only ever ROLLED from cached data, never fetched (B-21) — no coverage pass
-    if (!interval.equals("1w")) {
+    // 1w is only ever ROLLED from cached data, never fetched (B-21) — no coverage pass;
+    // CONT synthetic series are stitched locally and must NEVER reach a Kite port (B-19)
+    if (!interval.equals("1w") && !tradingsymbol.endsWith("-FUT-CONT")) {
       String baseInterval = interval.equals("1d") ? "1d" : "1m";
       try {
         ensureCoverage(exchange, tradingsymbol, baseInterval, from, to);

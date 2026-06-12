@@ -261,6 +261,23 @@ public class InstrumentRepository {
         underlying);
   }
 
+  /**
+   * Upserts the synthetic CONT row (segment {@code SYN-CONT}, B-19) so search/charts resolve the
+   * symbol; no token — it can never reach a Kite port or the subscription registry.
+   */
+  public void upsertSyntheticCont(
+      String exchange, String tradingsymbol, String name, String underlyingExchange, String underlying) {
+    jdbc.update(
+        """
+        INSERT INTO instruments
+          (exchange, tradingsymbol, instrument_token, name, segment, instrument_type,
+           underlying_exchange, underlying_tradingsymbol, is_active, first_seen_at, updated_at)
+        VALUES (?, ?, NULL, ?, 'SYN-CONT', 'FUT', ?, ?, TRUE, now(), now())
+        ON CONFLICT (exchange, tradingsymbol) DO UPDATE SET is_active = TRUE, updated_at = now()
+        """,
+        exchange, tradingsymbol, name, underlyingExchange, underlying);
+  }
+
   /** Active row count (startup bootstrap check). */
   public long countActive() {
     Long count = jdbc.queryForObject("SELECT count(*) FROM instruments WHERE is_active", Long.class);

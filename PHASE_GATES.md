@@ -13,8 +13,80 @@ subset is CI-enforced).
 ## Current phase
 
 **Stage B — Market-data spine (Phases 9, 9A, 10–15, 15A, 15B, 16, 16A, 17) —
-IN PROGRESS on `feat/stage-b-market-data-spine`, phase-per-commit.
-(Stage A completed 2026-06-12; its exit-gate record is below.)**
+IMPLEMENTATION + AUDIT COMPLETE on `feat/stage-b-market-data-spine`,
+phase-per-commit; exit gate walked 2026-06-13 (record below); pending push/PR/
+CI/merge. (Stage A completed 2026-06-12; its exit-gate record is below.)**
+
+*(How Stage B was walked: 13 phases implemented phase-per-commit with unit +
+Testcontainers ITs + WireMock for every live wire adapter + a compose demo
+through the gateway per phase; then a 39-agent spec-vs-implementation audit
+(one auditor per phase, adversarial verification of every serious finding)
+confirmed 3 CRITICAL + ~20 MAJOR gaps, all fixed and regression-tested in the
+audit commit — headline: post-close ticks re-opening the flushed session-close
+bar, continuous=1 on per-contract FUT fetches, CONT symbols reachable through
+POST /candles/refresh. 164 market-data + 20 gateway tests green.)*
+
+---
+
+## Stage-B exit gate (plan §15.2 Phase-1 row — walked 2026-06-13 against the running mock stack)
+
+- [x] **Live tick reaches Redis < 50 ms after Kite delivery.** Measured live:
+      tick generation → published-on-Redis = **3 ms** (mock feed, B-6
+      pipeline, same-tick comparison of the embedded producer timestamp vs the
+      `ticks:last-at` publish marker).
+- [x] **Historical fetch fills gaps idempotently at ≤ 3 req/s.** Cold fetch =
+      exactly one gateway call; warm read = zero gateway-port invocations
+      (asserted); partial coverage fetches only the missing sub-range; 50-burst
+      limiter test ≥ 15 s end-to-end and never > 3/s in any window.
+- [x] **The same flows pass on the mock profile** — every Stage-B phase is
+      mock-green with zero Kite credentials (the whole IT battery runs without
+      any Kite material; live impls are WireMock-pinned).
+- [x] **Snapshots accruing every 5 min in market hours** — the Phase-15
+      scheduler is calendar-gated; the IT drives a market-hours clock and the
+      off-hours degradation (stale:true, zeroed book, EOD OI) separately.
+- [x] **Raw quote rows persist from the first market day with IV gated on S1**
+      — every row carries LTP/bid/ask/spot/OI/oi_change + `forward_price` +
+      `risk_free_rate`; the 490-vector golden suite (S1, above) gates the
+      computed columns via `artha.options.iv-enabled`; null-IV rows persist
+      with reason codes, never skipped.
+- [x] **Contract canary runs on the first LIVE transition and surfaces on
+      `/auth/kite/status`** — WireMock-verified both drift directions + the
+      Redis daily-once marker; mock runs no canary by design. *(Result key is
+      `kite:contract:check` — documented deviation, parking list.)*
+- [x] **Contract-spec history accrues from the first sync** — FIRST_SEEN rows
+      on sync, as-of resolution at change boundaries, `spec_asof_estimated`
+      honesty flag (Phase 9A ITs).
+- [x] **Front/next/far FUT + INDIA VIX pinned; term structure from ONE batched
+      quote** — single-invocation assertion; basis fixture (120.0000 /
+      0.0608 @ 30d); CONTANGO/BACKWARDATION by near→next slope; per-bar FUT OI
+      through to the 1d cagg's `last(oi)`.
+- [x] **Continuous futures stitch deterministically** — exact 150.0000 fixture
+      gap, idempotent re-runs, `adjust=back|none` verified at the API,
+      roll-day divergence caveat documented in the roller javadoc + stage doc.
+- [x] **Corporate-action job detects the planted split and rebuilds** —
+      uniform-ratio guard rejects single-anchor and non-uniform noise;
+      re-backfill rides the rate-limited gateway; `fetched_at` bump asserted;
+      byte-stable post-rebuild series.
+
+**Stage-end deliverables roll-up:**
+
+- [x] Daily Kite contract canary (S2B) — fixture-derived manifests, recursive
+      field-set diff, first-party ntfy.
+- [x] Greeks golden-vector suite + S1 gating of IV persistence; raw quotes
+      captured from day one (S4).
+- [x] `docs/retention.md` (A2 ≥5y floor, 50 GB review trigger) +
+      `docs/runbook-notes.md` (A3 minute-depth probe, S2 Tuesday-expiry note).
+- [x] ~~Leaked-credential tripwire~~ — dropped per A6; the live fail-fast
+      (key + secret + master key files) remains and is tested.
+- [x] 2026-06-12 feature-selection additions all landed: 9A spec history, 15A
+      futures slice + INDIA VIX, 15B CONT + roll_events, 16A corporate
+      actions, `candles_1w`, `oi_buildup`/`rs_rank`.
+
+**Owner actions carried forward:** minute-depth probe in live mode (A3);
+NSE constituents CSV source verification before Phase 22 (S8); branch
+protection clicks. **Forward dependencies (by design):** `jobs:summary`
+zeros until Phase 28; `rs_rank` universe = active equities until Phase 22;
+1w/futures_of_underlying validate at the Phase 18 freeze.
 
 *(How Stage A was walked: Part 1 sections A.1–A.17 implemented
 section-per-commit; Part 2 Phases 1–8 then audited one-by-one against their

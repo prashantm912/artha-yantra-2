@@ -1,0 +1,86 @@
+# edge-gateway (A.2). Logging defaults (ECS JSON + masking) come from
+# common-web-core's ArthaLoggingDefaultsPostProcessor (A.6).
+server:
+  port: 8080
+  reactive:
+    session:
+      cookie:
+        name: SESSION
+        http-only: true     # A.2.3
+        same-site: strict   # A.2.3 (Secure added dynamically behind X-Forwarded-Proto: https)
+        path: /
+      timeout: 12h
+
+spring:
+  application:
+    name: edge-gateway
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+  session:
+    timeout: 12h            # covers a full trading day (A.2.3)
+    redis:
+      namespace: artha:session
+  cloud:
+    gateway:
+      server:
+        webflux:
+          default-filters:
+            # A.2.6: generous 50 req/s global valve on ROUTED traffic —
+            # catches runaway frontend loops, not humans
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 50
+                redis-rate-limiter.burstCapacity: 100
+                key-resolver: "#{@globalKeyResolver}"
+          routes:
+            # ---- D8 route table (A.2.2). In Stage A every target except
+            # market-data-service is absent -> 503 + envelope, never a trace.
+            - id: market-data
+              uri: ${ARTHA_ROUTE_MARKET_DATA:http://market-data-service:8081}
+              predicates:
+                - Path=/api/v1/market/**,/api/v1/instruments/**,/api/v1/watchlists/**,/api/v1/auth/kite/**
+            - id: strategy-signal
+              uri: ${ARTHA_ROUTE_STRATEGY:http://strategy-signal-service:8082}
+              predicates:
+                - Path=/api/v1/strategies/**,/api/v1/signals/**,/api/v1/paper/**
+            - id: backtest
+              uri: ${ARTHA_ROUTE_BACKTEST:http://backtest-service:8083}
+              predicates:
+                - Path=/api/v1/backtests/**
+            - id: optimizer
+              uri: ${ARTHA_ROUTE_OPTIMIZER:http://optimizer-service:8084}
+              predicates:
+                - Path=/api/v1/optimizations/**
+            # everything else -> frontend static files (gateway-local
+            # controllers and actuator mappings take precedence over routes)
+            - id: frontend-ui
+              uri: ${ARTHA_ROUTE_FRONTEND:http://frontend-ui:80}
+              order: 10000
+              predicates:
+                - Path=/**
+
+artha:
+  owner-password-hash: ${ARTHA_OWNER_PASSWORD_HASH:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+---
+# T2 host-run inner loop (docs/dev-setup.md): compose Redis published on
+# loopback by the dev-tools profile
+spring:
+  config:
+    activate:
+      on-profile: dev
+  data:
+    redis:
+      host: 127.0.0.1

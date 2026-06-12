@@ -120,6 +120,33 @@ services:
     restart: unless-stopped
     logging: *default-logging
 
+  # ---- the single front door (A.2 / D7, D13) ------------------------------
+  # The ONLY published app port, hardcoded loopback by design (A.1.2) —
+  # never parameterized via env. Jar is host-built (mvnw package) before
+  # compose build; see services/edge-gateway/Dockerfile.
+  edge-gateway:
+    build:
+      context: ../services/edge-gateway
+    image: arthayantra/edge-gateway:dev
+    container_name: ay-edge-gateway
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-mock}
+      ARTHA_OWNER_PASSWORD_HASH: ${ARTHA_OWNER_PASSWORD_HASH:-}
+      GATEWAY_WS_FLUSH_HZ: ${GATEWAY_WS_FLUSH_HZ:-20}
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 10s
+      retries: 12
+      start_period: 40s
+    mem_limit: 384m
+    restart: unless-stopped
+    logging: *default-logging
+
   # ---- dev-tools profile (A.1.2 / S6 ports) -------------------------------
   adminer:
     image: adminer:5.4.1

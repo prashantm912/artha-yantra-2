@@ -73,6 +73,12 @@ export const routes: Routes = [
         loadComponent: () => import('./pages/backtests/results-page').then((m) => m.ResultsPage),
       },
       {
+        path: 'optimizations/:sweepId',
+        title: 'Sweep explorer · ArthaYantra',
+        loadComponent: () =>
+          import('./pages/optimizations/sweep-detail-page').then((m) => m.SweepDetailPage),
+      },
+      {
         path: 'watchlists',
         title: 'Watchlists · ArthaYantra',
         loadComponent: () =>

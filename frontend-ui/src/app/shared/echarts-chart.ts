@@ -7,6 +7,7 @@ import {
   effect,
   inject,
   input,
+  output,
   viewChild,
 } from '@angular/core';
 import type { EChartsCoreOption, ECharts } from 'echarts/core';
@@ -32,6 +33,8 @@ import { echarts } from './echarts-bootstrap';
 })
 export class EChartsComponent {
   readonly option = input.required<EChartsCoreOption>();
+  /** Emits the ECharts instance after init so callers can attach events (e.g. brush filtering). */
+  readonly chartInit = output<ECharts>();
 
   private readonly host = viewChild.required<ElementRef<HTMLDivElement>>('host');
   private chart?: ECharts;
@@ -65,6 +68,7 @@ export class EChartsComponent {
     try {
       this.chart = echarts.init(el, undefined, { renderer: 'canvas' });
       this.chart.setOption(this.withBase(this.option()), true);
+      this.chartInit.emit(this.chart);
       this.resize = new ResizeObserver(() => this.chart?.resize());
       this.resize.observe(el);
     } catch {

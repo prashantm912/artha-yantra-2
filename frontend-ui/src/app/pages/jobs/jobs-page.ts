@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
 import { ProgressBarModule } from 'primeng/progressbar';
 import { SelectModule } from 'primeng/select';
@@ -15,7 +16,15 @@ import { JobsStore, type JobStatus } from '../../stores/jobs.store';
 @Component({
   selector: 'ay-jobs-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, TableModule, TagModule, ButtonModule, ProgressBarModule, SelectModule],
+  imports: [
+    FormsModule,
+    RouterLink,
+    TableModule,
+    TagModule,
+    ButtonModule,
+    ProgressBarModule,
+    SelectModule,
+  ],
   styles: `
     .filters {
       display: flex;
@@ -70,6 +79,15 @@ import { JobsStore, type JobStatus } from '../../stores/jobs.store';
           <td><p-progressbar class="bar" [value]="job.progress" [showValue]="true" /></td>
           <td>{{ job.createdAt?.slice(0, 19).replace('T', ' ') }}</td>
           <td>
+            @if (job.kind === 'OPTIMIZATION') {
+              <p-button
+                size="small"
+                [text]="true"
+                icon="pi pi-chart-bar"
+                [ariaLabel]="'Open sweep ' + job.jobId"
+                [routerLink]="['/optimizations', job.jobId]"
+              />
+            }
             <p-button
               size="small"
               [text]="true"

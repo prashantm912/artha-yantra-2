@@ -116,9 +116,13 @@ export async function publishE2eStrategy(request: APIRequestContext): Promise<vo
     id = ((await created.json()) as { id: string }).id;
   } else {
     const list = await request.get(`/api/v1/strategies?q=${E2E_STRATEGY_SLUG}`);
-    const items = ((await list.json()) as { items: { id: string; slug: string }[] }).items;
+    const body = (await list.json().catch(() => ({}))) as { items?: { id: string; slug: string }[] };
+    const items = body.items ?? [];
     const match = items.find((item) => item.slug === E2E_STRATEGY_SLUG);
-    expect(match, `create returned ${created.status()} but no ${E2E_STRATEGY_SLUG} exists`).toBeTruthy();
+    expect(
+      match,
+      `create=${created.status()} list=${list.status()} (${items.length} items) — ${E2E_STRATEGY_SLUG} not found`,
+    ).toBeTruthy();
     id = match!.id;
     // bring an existing (possibly older-config) strategy up to the current config as a new draft
     const updated = await request.put(`/api/v1/strategies/${id}`, {

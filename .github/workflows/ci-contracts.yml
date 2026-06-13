@@ -74,5 +74,5 @@ jobs:
           cd /tmp/tscheck
           npm init -y > /dev/null
           npm install --no-save typescript@5.9 > /dev/null
-          printf '{"compilerOptions":{"strict":true,"noEmit":true,"skipLibCheck":false}}' > tsconfig.json
-          npx tsc -p tsconfig.json *.d.ts
+          printf '{"compilerOptions":{"strict":true,"noEmit":true,"skipLibCheck":false},"include":["*.d.ts"]}' > tsconfig.json
+          npx tsc -p tsconfig.json

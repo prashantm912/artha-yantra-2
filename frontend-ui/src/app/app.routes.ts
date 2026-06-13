@@ -26,6 +26,22 @@ export const routes: Routes = [
         loadComponent: () => import('./pages/signals/signals-page').then((m) => m.SignalsPage),
       },
       {
+        path: 'strategies',
+        title: 'Strategies · ArthaYantra',
+        loadComponent: () =>
+          import('./pages/strategies/strategy-list-page').then((m) => m.StrategyListPage),
+      },
+      {
+        path: 'strategies/:id/edit',
+        title: 'Strategy editor · ArthaYantra',
+        loadComponent: () =>
+          import('./pages/strategies/strategy-editor-page').then((m) => m.StrategyEditorPage),
+        canDeactivate: [
+          (c: import('./pages/strategies/strategy-editor-page').StrategyEditorPage) =>
+            c.canDeactivate(),
+        ],
+      },
+      {
         path: 'backtests/jobs',
         title: 'Jobs · ArthaYantra',
         loadComponent: () => import('./pages/jobs/jobs-page').then((m) => m.JobsPage),

@@ -117,6 +117,7 @@ import { WsClientService } from '../core/ws-client.service';
       <nav [class.collapsed]="collapsed()">
         <a routerLink="/dashboard" routerLinkActive="active">Dashboard</a>
         <a routerLink="/signals" routerLinkActive="active">Signals</a>
+        <a routerLink="/strategies" routerLinkActive="active">Strategies</a>
         <a routerLink="/backtests/jobs" routerLinkActive="active">Jobs</a>
         <a routerLink="/watchlists" routerLinkActive="active">Watchlists</a>
         <a routerLink="/settings" routerLinkActive="active">Settings</a>

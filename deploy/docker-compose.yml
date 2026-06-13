@@ -217,6 +217,23 @@ services:
     restart: unless-stopped
     logging: *default-logging
 
+  # ---- SPA static server (Phase 25 / D1) ----------------------------------
+  # Internal-only; the gateway's catch-all route serves it on / (same origin,
+  # zero CORS anywhere - a Stage C acceptance criterion).
+  frontend-ui:
+    build:
+      context: ../frontend-ui
+    image: arthayantra/frontend-ui:dev
+    container_name: ay-frontend-ui
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/healthz | grep -q ok"]
+      interval: 10s
+      retries: 6
+      start_period: 5s
+    mem_limit: 64m
+    restart: unless-stopped
+    logging: *default-logging
+
   # ---- dev-tools profile (A.1.2 / S6 ports) -------------------------------
   adminer:
     image: adminer:5.4.2

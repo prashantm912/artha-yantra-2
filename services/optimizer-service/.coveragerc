@@ -1,0 +1,7 @@
+[run]
+source = app
+omit =
+    # thin I/O adapters exercised only on the live mock stack, not in unit tests
+    app/main.py
+    app/repos.py
+    app/settings.py

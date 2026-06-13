@@ -33,13 +33,13 @@ jobs:
         # reactor (a -pl install of leaf libs alone never installs the common-web / parent POMs).
         # Upstream modules run zero tests (no ContractCaptureTest + failIfNoSpecifiedTests=false).
         run: |
-          ./mvnw -ntp -pl services/edge-gateway,services/market-data-service,services/strategy-signal-service -am test \
+          ./mvnw -ntp -pl services/edge-gateway,services/market-data-service,services/strategy-signal-service,services/backtest-service -am test \
             -Dtest=ContractCaptureTest -Dsurefire.failIfNoSpecifiedTests=false
 
       - name: Diff committed vs regenerated (fail on BREAKING)
         run: |
           set -e
-          for svc in edge-gateway market-data-service strategy-signal-service; do
+          for svc in edge-gateway market-data-service strategy-signal-service backtest-service; do
             echo "=== $svc ==="
             docker run --rm \
               -v "$PWD/contracts:/committed:ro" \
@@ -52,7 +52,7 @@ jobs:
       - name: Warn on non-breaking drift (spec needs a refresh commit)
         run: |
           drift=0
-          for svc in edge-gateway market-data-service strategy-signal-service; do
+          for svc in edge-gateway market-data-service strategy-signal-service backtest-service; do
             if ! diff -q "contracts/$svc.openapi.json" "services/$svc/target/contracts/$svc.openapi.json" > /dev/null; then
               echo "::warning::contracts/$svc.openapi.json drifts from code (non-breaking) - refresh it with -Dcontracts.capture=true"
               drift=1
@@ -67,7 +67,7 @@ jobs:
       - name: Generated TS client compiles under tsc --strict
         run: |
           mkdir -p /tmp/tscheck
-          for svc in edge-gateway market-data-service strategy-signal-service; do
+          for svc in edge-gateway market-data-service strategy-signal-service backtest-service; do
             npx -y openapi-typescript@7 "contracts/$svc.openapi.json" -o "/tmp/tscheck/$svc.d.ts"
           done
           diff -r contracts/gen /tmp/tscheck || echo "::warning::contracts/gen drifts - regenerate with npx openapi-typescript"

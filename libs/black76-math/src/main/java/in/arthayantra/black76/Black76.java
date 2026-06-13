@@ -1,4 +1,4 @@
-package in.arthayantra.marketdata.options;
+package in.arthayantra.black76;
 
 import java.math.BigDecimal;
 import org.apache.commons.math3.distribution.NormalDistribution;

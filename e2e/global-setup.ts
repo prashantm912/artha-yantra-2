@@ -92,11 +92,19 @@ async function gatewayHealthy(): Promise<boolean> {
     if (!spa.ok || !(await spa.text()).includes('<app-root')) {
       return false;
     }
-    // ...and strategy-signal-service must be routable (401 = up; 5xx = absent)
-    const sss = await fetch('http://127.0.0.1:8080/api/v1/strategies', {
-      signal: AbortSignal.timeout(3_000),
-    });
-    return sss.status < 500;
+    // ...and the upstream services must actually be HEALTHY. /api/v1/strategies returns 401 from
+    // the GATEWAY's auth filter even when strategy-signal-service is down (the request never
+    // reaches the upstream), so it proves nothing — check the container healthchecks directly (the
+    // source of truth). Otherwise the first publish hits a 503 the instant the gateway is up.
+    for (const container of ['ay-strategy-signal-service', 'ay-market-data-service']) {
+      const status = execSync(`docker inspect -f "{{.State.Health.Status}}" ${container}`, {
+        encoding: 'utf8',
+      }).trim();
+      if (status !== 'healthy') {
+        return false;
+      }
+    }
+    return true;
   } catch {
     return false;
   }

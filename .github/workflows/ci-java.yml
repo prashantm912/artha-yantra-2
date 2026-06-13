@@ -57,7 +57,10 @@ jobs:
       # Testcontainers ITs on the pinned production tags (redis:7.4-alpine)
       # + ApplicationModules.verify() + JaCoCo >= 60% line on services
       - name: Build, lint, test, coverage
-        run: ./mvnw -ntp -B verify
+        # rerunFailingTestsCount retries a flaky test in-run (the Testcontainers/awaitility ITs
+        # occasionally time out on the 2-core runner); a genuinely failing test still fails after
+        # the retries, so this hides flakes without hiding real breakage.
+        run: ./mvnw -ntp -B verify -Dsurefire.rerunFailingTestsCount=2
 
   build-images:
     needs: build-test

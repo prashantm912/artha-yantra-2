@@ -36,6 +36,13 @@
       <version>${project.version}</version>
     </dependency>
     <dependency>
+      <!-- Phase 20: compiled configs arrive as canonical trees; the breakdown
+           serializes through the same canonical writer (one hash story) -->
+      <groupId>in.arthayantra</groupId>
+      <artifactId>strategy-schema</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
       <groupId>org.slf4j</groupId>
       <artifactId>slf4j-api</artifactId>
     </dependency>

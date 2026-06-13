@@ -254,7 +254,8 @@ services:
   # Internal :8084, mem_limit 256m. Reads the backtest schema as `artha`.
   optimizer-service:
     build:
-      context: ../services/optimizer-service
+      context: ..
+      dockerfile: services/optimizer-service/Dockerfile
     image: arthayantra/optimizer-service:dev
     container_name: ay-optimizer-service
     environment:

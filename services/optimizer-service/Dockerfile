@@ -1,12 +1,24 @@
 # optimizer-service (§D.1): Python 3.12 + FastAPI + Optuna, internal port 8084.
+# Build context is the repo root (see deploy/docker-compose.yml + ci-optimizer.yml)
+# so the conditional dev-machine CA-trust layer can read deploy/dev-certs/.
 FROM python:3.12-slim
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Dev-machine CA trust for pip (TLS-intercepting AV such as Avast Web Shield):
+# if deploy/dev-certs/ holds PEMs, pip verifies through the AV root; in CI and
+# prod the directory is empty so pip verifies normally against the default bundle.
+COPY deploy/dev-certs/ /tmp/dev-certs/
+COPY services/optimizer-service/requirements.txt .
+RUN set -e; \
+    CERT_OPT=""; \
+    if ls /tmp/dev-certs/*.pem >/dev/null 2>&1; then \
+      cat /tmp/dev-certs/*.pem > /tmp/devca.pem; CERT_OPT="--cert /tmp/devca.pem"; \
+    fi; \
+    pip install --no-cache-dir $CERT_OPT -r requirements.txt; \
+    rm -rf /tmp/dev-certs /tmp/devca.pem
 
-COPY app ./app
+COPY services/optimizer-service/app ./app
 
 RUN useradd --create-home --uid 10001 artha
 USER artha

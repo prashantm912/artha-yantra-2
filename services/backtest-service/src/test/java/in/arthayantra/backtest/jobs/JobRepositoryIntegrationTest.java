@@ -1,0 +1,118 @@
+package in.arthayantra.backtest.jobs;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import in.arthayantra.backtest.testsupport.BacktestIntegrationTestBase;
+import java.util.UUID;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+
+/**
+ * The conditional-claim contract is the heart of D12. These ITs hit a real TimescaleDB through the
+ * raw repository (no Spring context) so the SQL semantics — claim-once, re-queue, terminal guards —
+ * are asserted directly.
+ */
+class JobRepositoryIntegrationTest extends BacktestIntegrationTestBase {
+
+  private static JobRepository repo;
+  private static final ObjectMapper MAPPER = new ObjectMapper();
+
+  @BeforeAll
+  static void wire() {
+    DriverManagerDataSource ds =
+        new DriverManagerDataSource(jdbcUrl("backtest"), dbUser(), dbPassword());
+    repo = new JobRepository(new JdbcTemplate(ds), MAPPER);
+  }
+
+  private Job newQueuedBacktest() {
+    return repo.insertQueued(
+        JobKind.BACKTEST,
+        null,
+        UUID.randomUUID(),
+        MAPPER.createObjectNode().put("strategyId", "demo").put("from", "2026-01-05"),
+        UUID.randomUUID().toString());
+  }
+
+  @Test
+  void insertedJobIsQueuedWithZeroProgress() {
+    Job job = newQueuedBacktest();
+    assertThat(job.id()).isNotNull();
+    assertThat(job.status()).isEqualTo(JobStatus.QUEUED);
+    assertThat(job.progress()).isZero();
+    assertThat(job.createdAt()).isNotNull();
+    assertThat(job.request().path("strategyId").asText()).isEqualTo("demo");
+  }
+
+  @Test
+  void claimSucceedsOnceThenLosesTheRace() {
+    Job job = newQueuedBacktest();
+
+    boolean first = repo.claim(job.id(), "worker-A");
+    boolean second = repo.claim(job.id(), "worker-B");
+
+    assertThat(first).as("first claim wins").isTrue();
+    assertThat(second).as("second claim loses — already running").isFalse();
+    Job reread = repo.find(job.id()).orElseThrow();
+    assertThat(reread.status()).isEqualTo(JobStatus.RUNNING);
+    assertThat(reread.workerId()).isEqualTo("worker-A");
+    assertThat(reread.startedAt()).isNotNull();
+  }
+
+  @Test
+  void progressOnlyAdvancesWhileRunning() {
+    Job job = newQueuedBacktest();
+    repo.updateProgress(job.id(), 40); // queued — ignored
+    assertThat(repo.find(job.id()).orElseThrow().progress()).isZero();
+
+    repo.claim(job.id(), "w");
+    repo.updateProgress(job.id(), 40);
+    assertThat(repo.find(job.id()).orElseThrow().progress()).isEqualTo(40);
+
+    repo.updateProgress(job.id(), 250); // clamps to 100
+    assertThat(repo.find(job.id()).orElseThrow().progress()).isEqualTo(100);
+  }
+
+  @Test
+  void completeForcesProgressTo100AndIsTerminal() {
+    Job job = newQueuedBacktest();
+    repo.claim(job.id(), "w");
+    repo.markCompleted(job.id());
+
+    Job done = repo.find(job.id()).orElseThrow();
+    assertThat(done.status()).isEqualTo(JobStatus.COMPLETED);
+    assertThat(done.progress()).isEqualTo(100);
+    assertThat(done.finishedAt()).isNotNull();
+
+    // a late claim cannot revive a terminal job
+    assertThat(repo.claim(job.id(), "late")).isFalse();
+  }
+
+  @Test
+  void requeueStaleRunningResetsOrphansToQueued() {
+    Job job = newQueuedBacktest();
+    repo.claim(job.id(), "dead-worker");
+
+    int requeued = repo.requeueStaleRunning();
+
+    assertThat(requeued).isGreaterThanOrEqualTo(1);
+    Job reread = repo.find(job.id()).orElseThrow();
+    assertThat(reread.status()).isEqualTo(JobStatus.QUEUED);
+    assertThat(reread.workerId()).isNull();
+    assertThat(reread.startedAt()).isNull();
+    assertThat(repo.findQueuedIds()).contains(job.id());
+  }
+
+  @Test
+  void cancelIfQueuedOnlyWorksBeforeClaim() {
+    Job job = newQueuedBacktest();
+    assertThat(repo.cancelIfQueued(job.id())).isTrue();
+    assertThat(repo.find(job.id()).orElseThrow().status()).isEqualTo(JobStatus.CANCELLED);
+
+    Job running = newQueuedBacktest();
+    repo.claim(running.id(), "w");
+    assertThat(repo.cancelIfQueued(running.id())).as("running job cannot be queue-cancelled").isFalse();
+  }
+}

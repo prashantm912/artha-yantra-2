@@ -1,0 +1,73 @@
+# ci-optimizer (Phase 33 / CD-15): the mechanical reviewer for optimizer-service
+# (Python). Path-filtered so a JVM/frontend commit never runs it. Stages:
+# gitleaks -> ruff + pytest (>= 75% line) -> image build -> GHCR push on main only.
+name: ci-optimizer
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "services/optimizer-service/**"
+      - ".github/workflows/ci-optimizer.yml"
+  pull_request:
+    paths:
+      - "services/optimizer-service/**"
+      - ".github/workflows/ci-optimizer.yml"
+
+concurrency:
+  group: ci-optimizer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks full-history scan
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz | tar -xz gitleaks
+          ./gitleaks git --redact --no-banner .
+
+  lint-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/optimizer-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dev dependencies
+        run: pip install -r requirements-dev.txt
+      - name: ruff
+        run: ruff check .
+      - name: pytest (>= 75% line)
+        run: pytest -q --cov=app --cov-report=term-missing --cov-fail-under=75
+
+  build-image:
+    needs: lint-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        # repo-root context so the Dockerfile's conditional deploy/dev-certs/ CA layer resolves
+        run: docker build -t arthayantra/optimizer-service:ci -f services/optimizer-service/Dockerfile .
+      - name: Log in to GHCR
+        if: github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push to GHCR
+        if: github.ref == 'refs/heads/main'
+        run: |
+          docker tag arthayantra/optimizer-service:ci ghcr.io/${{ github.repository_owner }}/optimizer-service:latest
+          docker push ghcr.io/${{ github.repository_owner }}/optimizer-service:latest

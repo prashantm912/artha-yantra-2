@@ -12,10 +12,55 @@ subset is CI-enforced).
 
 ## Current phase
 
-**Stage C — Strategy engine MVP (Phases 18–27) — IMPLEMENTATION + AUDIT COMPLETE
-on `feat/stage-c-strategy-engine`, phase-per-commit; exit gate walked 2026-06-13
-(record below); pending push/PR/CI/merge. Stage B merged to main 2026-06-13 via
-PR #2; Stage A completed 2026-06-12. Earlier exit-gate records are below.**
+**Stage D — Backtesting + Optimization (Phases 28–34) — IMPLEMENTATION COMPLETE
+on `feat/stage-d-backtest-optimizer`, phase-per-commit (28,29,30,30A,31,32,32A,
+S3,33,34); exit checklist mirrored below, walked at the manual-testing / Friday
+ritual step against the running mock stack; pending PR (owner merges). Stage C
+implemented + audited on `feat/stage-c-strategy-engine` (exit gate below); Stage
+B merged to main 2026-06-13 via PR #2; Stage A completed 2026-06-12.**
+
+---
+
+## Stage-D exit gate (plan §15.2 Phase-3 row — mirrored at Phase 34; walk against the running mock stack)
+
+- [ ] `POST /api/v1/backtests/run` → **`202 {jobId}`** → progress via
+      `jobs.progress` WS (`/topic/jobs/{jobId}`). `[Phase 28]`
+- [ ] **Engine-parity test passes** — same YAML + candles ⇒ **identical trades
+      live vs. backtest** (byte-identical signal lists incl. per-indicator
+      breakdowns; the D15 headline gate). `[Phase 30]`
+- [ ] **A 200-trial sweep completes and ranks configs** (grid/random/TPE/NSGA-II
+      over `optimize.parameters`; leaderboard with **plateau-adjusted sort**;
+      winner **promotable to a draft**). `[Phases 33–34]`
+- [x] **S3 spike gate** (Phase 34 acceptance): pruner defaults
+      (`n_startup_trials=5` / `n_warmup_folds=3`, `n_min_trials=2`) **run, recorded
+      as a dated ADR amendment** (`docs/design/DECISIONS_LOG.md`, 2026-06-13) **and
+      configured** — fold-fed `MedianPruner` is **enabled** (the "or pruning
+      disabled" branch not taken). `[§D.13 / Phase 34]`
+- [ ] **A9 execution semantics green** [FP-5/6/7]: fill vectors pass for **futures
+      cost legs**, **`at_close` fills**, and the **intra-bar exit-touch rule** (1m
+      drill, worst-of/gap-through fallback; every closed trade records
+      `touch_basis`); the **BTST pre-close bar view** assembles byte-identically
+      live vs replay. `[Phases 29–30]`
+- [ ] **Extended pre-flight demonstrated** [FP-1/3/19]: context-instrument
+      coverage (422 `DATA_GAP` naming the context series), corporate-action window
+      warning, lot/tick **as-of trade date** with the pre-accrual honesty flag.
+      `[Phase 30]`
+- [ ] **Options fidelity contract live** [FP-4]: an options run on mock snapshots
+      records `premium_source=SNAPSHOT`; archive gap → 422 `DATA_GAP`; synthetic
+      mode completes flagged `SYNTHETIC_B76` (never masquerading as snapshot-grade);
+      market-data Greeks **byte-identical** after the `libs/black76-math` hoist.
+      `[Phase 30A]`
+- [ ] **Run analytics live** [FP-31/32]: results carry
+      alpha/beta/information-ratio/excess-CAGR + the benchmark buy-and-hold curve
+      beside `equityCurve`; `GET /api/v1/backtests/{id}/montecarlo` returns seeded,
+      reproducible bands and persists `montecarlo_summary`. `[Phase 32A]`
+
+**Stage-end notes:** Stage E's leaderboard UI consumes the per-regime OOS columns,
+the degradation badge, the "n folds excluded" flag and the fold-breakdown panel
+produced here; the advisory stress-test panel consumes the Phase 32 backend.
+Universe-pinning (`backtest_runs.universe_checksum`) and paper fill-audit columns
+land in Stage F (the `FillSimulator` JAR itself is complete at Phase 29). The
+optimizer (Phases 33–34) can overlap Stage E (different stack).
 
 *(How Stage C was walked: Phases 18–27 implemented phase-per-commit with unit +
 Testcontainers ITs + Vitest, then a full-stack Playwright E2E that drove the live

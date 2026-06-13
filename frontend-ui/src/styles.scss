@@ -62,3 +62,25 @@ body {
   white-space: nowrap;
   border: 0;
 }
+
+/* Price-flash pulse (E-3): a CSS-class pulse keyed off signal updates, NOT row re-creation.
+   Honors prefers-reduced-motion. */
+@keyframes ay-flash {
+  0% {
+    background-color: color-mix(in srgb, var(--ay-accent) 35%, transparent);
+  }
+
+  100% {
+    background-color: transparent;
+  }
+}
+
+.ay-pulse {
+  animation: ay-flash 0.5s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ay-pulse {
+    animation: none;
+  }
+}

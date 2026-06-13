@@ -31,4 +31,31 @@ module.exports = tseslint.config(
     extends: [...angular.configs.templateRecommended, ...angular.configs.templateAccessibility],
     rules: {},
   },
+  {
+    // E-9 chart containment (A13): lightweight-charts may be imported ONLY by the designated
+    // chart-wrapper components — the lazy /charts module PLUS the shared sparkline/equity-curve
+    // wrappers (dashboard sparklines + Phase 38 equity curves legitimately import LWC outside
+    // /charts; a naive "no LWC outside /charts" rule would be WRONG). CI-enforced.
+    files: ['src/**/*.ts'],
+    ignores: [
+      'src/app/pages/charts/**/*.ts',
+      'src/app/shared/sparkline.ts',
+      'src/app/shared/equity-curve.ts',
+    ],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'lightweight-charts',
+              message:
+                'lightweight-charts is confined to /charts + the shared sparkline/equity-curve wrappers (E-9 containment, A13).',
+            },
+          ],
+          patterns: ['lightweight-charts/*'],
+        },
+      ],
+    },
+  },
 );

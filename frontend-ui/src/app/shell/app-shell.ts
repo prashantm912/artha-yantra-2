@@ -14,7 +14,15 @@ import { WsClientService } from '../core/ws-client.service';
 @Component({
   selector: 'ay-shell',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, ButtonModule, TagModule, ToastModule, TooltipModule],
+  imports: [
+    RouterOutlet,
+    RouterLink,
+    RouterLinkActive,
+    ButtonModule,
+    TagModule,
+    ToastModule,
+    TooltipModule,
+  ],
   styles: `
     .shell {
       display: grid;
@@ -99,11 +107,22 @@ import { WsClientService } from '../core/ws-client.service';
           ariaLabel="Toggle theme"
           (onClick)="session.toggleTheme()"
         />
-        <p-button [text]="true" icon="pi pi-sign-out" ariaLabel="Log out" (onClick)="session.logout()" />
+        <p-button
+          [text]="true"
+          icon="pi pi-sign-out"
+          ariaLabel="Log out"
+          (onClick)="session.logout()"
+        />
       </header>
       <nav [class.collapsed]="collapsed()">
+        <a routerLink="/dashboard" routerLinkActive="active">Dashboard</a>
         <a routerLink="/signals" routerLinkActive="active">Signals</a>
-        <a routerLink="/home" routerLinkActive="active">Home</a>
+        <a routerLink="/charts" routerLinkActive="active">Charts</a>
+        <a routerLink="/strategies" routerLinkActive="active">Strategies</a>
+        <a routerLink="/backtests/run" routerLinkActive="active">Backtests</a>
+        <a routerLink="/backtests/jobs" routerLinkActive="active">Jobs</a>
+        <a routerLink="/watchlists" routerLinkActive="active">Watchlists</a>
+        <a routerLink="/settings" routerLinkActive="active">Settings</a>
       </nav>
       <main>
         <router-outlet />

@@ -37,6 +37,13 @@
   --ay-chart-grid: #e2e8f0;
   --ay-chart-crosshair: #94a3b8;
 
+  /* semantic colours RE-TUNED for the light surfaces: the dark-palette green/red/amber
+     fall below the WCAG 1.4.3 4.5:1 floor on near-white; these darker shades pass. */
+  --ay-bull: #166534;
+  --ay-bear: #b91c1c;
+  --ay-warn: #b45309;
+  --ay-accent: #0369a1;
+
   color-scheme: light;
 }
 
@@ -61,4 +68,32 @@ body {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+/* Price-flash pulse (E-3): a CSS-class pulse keyed off signal updates, NOT row re-creation.
+   Honors prefers-reduced-motion. */
+@keyframes ay-flash {
+  0% {
+    background-color: color-mix(in srgb, var(--ay-accent) 18%, transparent);
+  }
+
+  100% {
+    background-color: transparent;
+  }
+}
+
+.ay-pulse {
+  animation: ay-flash 0.5s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ay-pulse {
+    animation: none;
+  }
+}
+
+/* PrimeNG Aura's unselected toggle-button label (slate-500 on the light toggle surface) lands at
+   4.34:1 — just under the WCAG 1.4.3 4.5:1 floor; darken it in light mode (E-7). */
+:root.ay-light .p-togglebutton:not(.p-togglebutton-checked) .p-togglebutton-label {
+  color: #475569;
 }

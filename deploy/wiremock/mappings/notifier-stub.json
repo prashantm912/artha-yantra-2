@@ -1,0 +1,8 @@
+{
+  "mappings": [
+    {
+      "request": { "method": "POST", "urlPattern": ".*" },
+      "response": { "status": 200, "body": "ok" }
+    }
+  ]
+}

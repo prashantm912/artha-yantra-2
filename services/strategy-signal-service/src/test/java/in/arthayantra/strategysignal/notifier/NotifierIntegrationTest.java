@@ -53,7 +53,7 @@ class NotifierIntegrationTest extends StrategySignalIntegrationTestBase {
 
   @Test
   void togglingNotificationsDoesNotPerturbTheVersionChecksum() {
-    UUID id = create();
+    UUID id = create("notifier-it-checksum", "Notifier IT Checksum");
     registry.publish(id, null, null);
     String before = (String) registry.detail(id, null).get("checksum");
 
@@ -65,7 +65,7 @@ class NotifierIntegrationTest extends StrategySignalIntegrationTestBase {
 
   @Test
   void sendAuditsSentAndCooldownSuppressesTheRepeat() {
-    UUID id = create();
+    UUID id = create("notifier-it-send", "Notifier IT Send");
     registry.publish(id, null, null);
     registry.updateNotifications(id, true, "NTFY");
     UUID versionId = strategyRepo.latestVersion(id).orElseThrow().id();
@@ -95,8 +95,14 @@ class NotifierIntegrationTest extends StrategySignalIntegrationTestBase {
     assertThat(statuses).containsExactly("SENT", "SUPPRESSED");
   }
 
-  private UUID create() {
-    return (UUID) registry.create("Notifier IT", null, List.of("it"), CONFIG).get("id");
+  /**
+   * The IT DB is a shared singleton with no per-method cleanup, so each method needs its own
+   * slug + name — the registry slug is the config {@code id}, and both id and name are unique
+   * across strategies (a duplicate is a 409). Rewrite the constant config's id per call.
+   */
+  private UUID create(String slug, String name) {
+    String config = CONFIG.replace("id: notifier-it", "id: " + slug);
+    return (UUID) registry.create(name, null, List.of("it"), config).get("id");
   }
 
   private long insertSignal(UUID versionId) {

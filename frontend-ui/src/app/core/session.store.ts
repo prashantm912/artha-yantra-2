@@ -51,14 +51,19 @@ export const SessionStore = signalStore(
     authenticated: computed(() => store.auth() === 'authenticated'),
   })),
   withMethods((store, http = inject(HttpClient), router = inject(Router)) => ({
-    /** One-shot session probe (the auth guard's data source). */
+    /**
+     * One-shot session probe (the auth guard's data source). The gateway exposes
+     * /api/v1/auth/session as a PUBLIC endpoint that always answers 200 with an
+     * `authenticated` boolean — so a 200 alone does NOT mean signed in; the body decides.
+     */
     probe(): Promise<boolean> {
       patchState(store, { auth: 'checking' });
       return new Promise((resolve) => {
-        http.get('/api/v1/auth/session').subscribe({
-          next: () => {
-            patchState(store, { auth: 'authenticated' });
-            resolve(true);
+        http.get<{ authenticated?: boolean }>('/api/v1/auth/session').subscribe({
+          next: (session) => {
+            const ok = session?.authenticated === true;
+            patchState(store, { auth: ok ? 'authenticated' : 'anonymous' });
+            resolve(ok);
           },
           error: () => {
             patchState(store, { auth: 'anonymous' });

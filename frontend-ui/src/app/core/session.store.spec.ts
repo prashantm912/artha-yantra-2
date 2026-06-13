@@ -22,12 +22,20 @@ describe('SessionStore', () => {
 
   afterEach(() => http.verify());
 
-  it('probe transitions unknown -> checking -> authenticated on 200', async () => {
+  it('probe transitions unknown -> checking -> authenticated on { authenticated: true }', async () => {
     const probe = store.probe();
     expect(store.auth()).toBe('checking');
-    http.expectOne('/api/v1/auth/session').flush({});
+    http.expectOne('/api/v1/auth/session').flush({ authenticated: true });
     await expect(probe).resolves.toBe(true);
     expect(store.authenticated()).toBe(true);
+  });
+
+  it('probe stays anonymous on a 200 whose body says authenticated:false', async () => {
+    // the gateway answers 200 even when signed-out — the body, not the status, decides
+    const probe = store.probe();
+    http.expectOne('/api/v1/auth/session').flush({ authenticated: false });
+    await expect(probe).resolves.toBe(false);
+    expect(store.auth()).toBe('anonymous');
   });
 
   it('probe lands anonymous on 401 without toasting', async () => {

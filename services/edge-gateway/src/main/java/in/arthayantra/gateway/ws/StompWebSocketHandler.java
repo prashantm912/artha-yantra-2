@@ -57,6 +57,17 @@ public class StompWebSocketHandler implements WebSocketHandler {
     return flushIntervalMs;
   }
 
+  /**
+   * STOMP subprotocols offered by {@code @stomp/stompjs} (newest first). A browser sends these in
+   * {@code Sec-WebSocket-Protocol} and, per RFC 6455, FAILS the handshake unless the server echoes
+   * one back — so the gateway MUST advertise them here or no browser socket ever opens. The Java
+   * IT client does not enforce this echo, which is why only the Phase-27 browser run surfaced it.
+   */
+  @Override
+  public List<String> getSubProtocols() {
+    return List.of("v12.stomp", "v11.stomp", "v10.stomp");
+  }
+
   /** One message captured off Redis, waiting for the next flush. */
   private record Pending(String destination, String subscriptionId, String body, long receivedNanos) {}
 

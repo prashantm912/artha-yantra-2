@@ -68,7 +68,7 @@ import { JobsStore, type JobStatus } from '../../stores/jobs.store';
           <th>Status</th>
           <th>Progress</th>
           <th>Created</th>
-          <th></th>
+          <th><span class="ay-sr-only">Actions</span></th>
         </tr>
       </ng-template>
       <ng-template #body let-job>

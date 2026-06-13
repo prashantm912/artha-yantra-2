@@ -91,7 +91,7 @@ import { StressAdvisory } from './stress-advisory';
               <th>Status</th>
               <th>Checksum</th>
               <th>Created</th>
-              <th></th>
+              <th><span class="ay-sr-only">Actions</span></th>
             </tr>
           </ng-template>
           <ng-template #body let-v>

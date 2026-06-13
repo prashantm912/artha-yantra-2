@@ -26,7 +26,7 @@ entry_rules:
   direction: long
   gate:
     all:
-      - "crossover(ema_fast, ema_slow)"
+      - crossover: { fast: ema_fast, slow: ema_slow }
   scoring: { threshold: 0.5 }
 exit_rules:
   - { type: stop_loss, params: { basis: premium_pct, value: 50 } }
@@ -123,7 +123,7 @@ risk:
           <th>Tags</th>
           <th>Notify</th>
           <th>Updated</th>
-          <th></th>
+          <th><span class="ay-sr-only">Actions</span></th>
         </tr>
       </ng-template>
       <ng-template #body let-s>

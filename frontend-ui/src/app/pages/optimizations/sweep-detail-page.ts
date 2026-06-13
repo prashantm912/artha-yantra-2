@@ -90,7 +90,7 @@ import { SweepExplorer } from './sweep-explorer';
           <th>Objective ({{ store.metric() }})</th>
           <th>Plateau</th>
           <th>Params</th>
-          <th></th>
+          <th><span class="ay-sr-only">Actions</span></th>
         </tr>
       </ng-template>
       <ng-template #body let-row>

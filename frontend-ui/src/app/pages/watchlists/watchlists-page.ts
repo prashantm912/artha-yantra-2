@@ -114,7 +114,7 @@ interface ScreenerRow {
                   <th>Instrument</th>
                   <th>Last</th>
                   <th>Volume</th>
-                  <th></th>
+                  <th><span class="ay-sr-only">Actions</span></th>
                 </tr>
               </ng-template>
               <ng-template #body let-row>

@@ -107,6 +107,13 @@ public class BacktestRunner {
     }
 
     checkpoint(cancelled, job.id(), progress, 10);
+    // §D.6 optimizer loop: a TRIAL applies its sampled paramsOverride onto the pinned config via
+    // the closed path grammar (re-validated service-side, §D.12) — transient, never persisted as a
+    // version. Without this every trial would replay the identical base config.
+    JsonNode overrides = request.path("paramsOverride");
+    if (overrides.isObject() && !overrides.isEmpty()) {
+      config = TrialOverrides.apply(config, overrides);
+    }
     StrategyDefinition definition = StrategyCompiler.compile(config);
     SeriesKey signal = signalInstrument(config);
     OffsetDateTime from = OffsetDateTime.parse(dateTime(request.path("from").asText()));

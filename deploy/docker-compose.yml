@@ -218,6 +218,36 @@ services:
     restart: unless-stopped
     logging: *default-logging
 
+  # ---- backtest engine (Stage D Phase 28 / D1) ----------------------------
+  # Authoritative Postgres jobs spine + crash-safe Redis Streams dispatch +
+  # bounded worker pool. Reads `marketdata` read-only via the CD-1 grant;
+  # validates strategy versions over the strategy-signal REST API. Internal
+  # :8083, mem_limit 896m (sweep burst, D1).
+  backtest-service:
+    build:
+      context: ../services/backtest-service
+    image: arthayantra/backtest-service:dev
+    container_name: ay-backtest-service
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-mock}
+      ARTHA_DB_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    depends_on:
+      flyway-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      strategy-signal-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8083/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 10s
+      retries: 12
+      start_period: 40s
+    mem_limit: 896m
+    restart: unless-stopped
+    logging: *default-logging
+
   # ---- SPA static server (Phase 25 / D1) ----------------------------------
   # Internal-only; the gateway's catch-all route serves it on / (same origin,
   # zero CORS anywhere - a Stage C acceptance criterion).

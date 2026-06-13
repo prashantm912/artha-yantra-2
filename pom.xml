@@ -27,6 +27,7 @@
     <module>services/edge-gateway</module>
     <module>services/market-data-service</module>
     <module>services/strategy-signal-service</module>
+    <module>services/backtest-service</module>
     <module>tools/hash-password</module>
   </modules>
 

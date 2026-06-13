@@ -8,7 +8,7 @@
         "watch": "ng build --watch --configuration development",
         "test": "ng test",
         "lint": "eslint src && stylelint \"src/**/*.scss\"",
-        "gen:api": "openapi-typescript ../contracts/strategy-signal-service.openapi.json -o ../contracts/gen/strategy-signal-service.d.ts && openapi-typescript ../contracts/market-data-service.openapi.json -o ../contracts/gen/market-data-service.d.ts && openapi-typescript ../contracts/edge-gateway.openapi.json -o ../contracts/gen/edge-gateway.d.ts",
+        "gen:api": "openapi-typescript ../contracts/strategy-signal-service.openapi.json -o ../contracts/gen/strategy-signal-service.d.ts && openapi-typescript ../contracts/market-data-service.openapi.json -o ../contracts/gen/market-data-service.d.ts && openapi-typescript ../contracts/edge-gateway.openapi.json -o ../contracts/gen/edge-gateway.d.ts && openapi-typescript ../contracts/backtest-service.openapi.json -o ../contracts/gen/backtest-service.d.ts",
         "test:ci": "ng test --watch=false"
     },
     "private": true,

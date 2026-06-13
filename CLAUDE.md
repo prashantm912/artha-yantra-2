@@ -37,6 +37,11 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
   Postgres as `artha` (D10 single-writer by convention); per-schema roles like
   `ay_backtest` are read-only, asserted via SET ROLE grant tests.
 - JaCoCo gate ≥ 60% line on services; Modulith `verify` runs in CI.
+- **Mock-stack backtest testing:** candle data is real-time/rolling (accrues from
+  boot) — derive a recent covered window, never hardcode dates; every windowed run's
+  regime pre-flight needs ~272 daily benchmark sessions, so backfill `NIFTY 50` 1d
+  via cache-first GET `/api/v1/market/candles` first. Results/trades/folds/montecarlo
+  are keyed by the **run id** (the job's `resultRef`), not the jobId.
 
 ## Database / migrations
 - **Applied Flyway migrations are checksum-locked** in the dev stack and CI — editing
@@ -51,6 +56,12 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
   it. Project-scoped compose only — **never `docker kill`**.
 - Mock vs live is `SPRING_PROFILES_ACTIVE` in `.env`, orthogonal to compose profiles;
   mock needs zero secrets. PHC password hashes in `.env` need every `$` escaped `$$`.
+- **Image build context differs per service** — `market-data-service` and
+  `optimizer-service` Dockerfiles COPY repo-root paths (`deploy/dev-certs/`,
+  `services/*/target/`) so they build with **repo-root context + `-f <dockerfile>`**
+  (compose `context: ..`); edge-gateway/strategy-signal/backtest use a service-dir
+  context. Keep CI image-build context in lockstep with compose. `deploy/dev-certs/`
+  holds the AV CA (keytool/pip trust it); empty in CI/prod so the layer is a no-op.
 
 ## Git & line endings
 - `.gitattributes` pins **`*.json eol=lf`** — byte-identical schema/golden-vector
@@ -59,6 +70,9 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
 - Trunk-based: short-lived `feat/|fix/|chore/|docs/` branches, **Conventional Commits**
   (scope = service/lib name), **squash-merge only**, never push to `main`. A stage =
   one branch, one commit per phase, single final PR.
+- The **Bash tool is bash, not PowerShell** — PS here-strings (`@'…'@`) are taken
+  literally and corrupt commit subjects; pass multi-line commit messages via
+  `git commit -F -` with a heredoc.
 - CI runs on a **fresh compose stack + 2-core runner** — code green locally can still
   fail several CI iterations (cold start, constrained cores). Gate e2e readiness on
   container healthchecks, not gateway HTTP (a 401 is the gateway auth filter, not

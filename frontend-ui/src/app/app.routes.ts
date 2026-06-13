@@ -31,6 +31,11 @@ export const routes: Routes = [
         loadComponent: () => import('./pages/charts/charts-page').then((m) => m.ChartsPage),
       },
       {
+        path: 'options',
+        title: 'Options · ArthaYantra',
+        loadComponent: () => import('./pages/options/options-page').then((m) => m.OptionsPage),
+      },
+      {
         path: 'strategies',
         title: 'Strategies · ArthaYantra',
         loadComponent: () =>

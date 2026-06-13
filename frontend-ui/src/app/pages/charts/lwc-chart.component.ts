@@ -4,53 +4,157 @@ import {
   DestroyRef,
   ElementRef,
   afterNextRender,
+  computed,
   effect,
   inject,
   input,
+  signal,
   viewChild,
 } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { MarketStore } from '../../stores/market.store';
 import { ArthaYantraDatafeed, type Bar, type RawCandle } from './datafeed/datafeed-core';
-import { LwcChartBinding } from './lwc-chart-binding';
+import { LwcChartBinding, type CrosshairSnapshot } from './lwc-chart-binding';
+import { ChartIndicatorsService, type IndicatorMeta } from './chart-indicators.service';
+import { type OverlayConfig } from './chart-state.store';
 
 /**
- * `LwcChartComponent` (Phase 40, A13): the `/charts` main chart. Wires the library-agnostic
- * datafeed core + `LwcChartBinding` + the MarketStore live tick feed (refcounted track/untrack).
- * The component holds NO lightweight-charts types — those are confined to the binding (E-9). Initial
- * load → setData; live ticks → aggregate → updateLast; scroll-to-left-edge → page back → prepend.
+ * `LwcChartComponent` (Phases 40 + 40C, A13): the `/charts` main chart. Wires the library-agnostic
+ * datafeed core + `LwcChartBinding` + live ticks (refcounted MarketStore.track), plus 40C overlays
+ * (engine-computed series — never client-side math, S7), the crosshair OHLCV+overlay legend, and the
+ * accessible "View as table". The component holds NO lightweight-charts types (E-9).
  */
 @Component({
   selector: 'ay-lwc-chart',
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: `
-    .chart {
-      width: 100%;
+    .frame {
+      position: relative;
       height: 100%;
       min-height: 26rem;
     }
+    .chart {
+      width: 100%;
+      height: 100%;
+    }
+    .legend {
+      position: absolute;
+      top: 0.4rem;
+      left: 0.6rem;
+      z-index: 3;
+      font-variant-numeric: tabular-nums;
+      font-size: 0.78rem;
+      color: var(--ay-text-muted);
+      pointer-events: none;
+      background: color-mix(in srgb, var(--ay-surface-1) 70%, transparent);
+      padding: 0.2rem 0.4rem;
+      border-radius: 6px;
+    }
+    .legend .ovl {
+      color: var(--ay-accent);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-variant-numeric: tabular-nums;
+      font-size: 0.82rem;
+    }
+    th,
+    td {
+      border-bottom: 1px solid var(--ay-border);
+      padding: 0.2rem 0.5rem;
+      text-align: right;
+    }
+    th:first-child,
+    td:first-child {
+      text-align: left;
+    }
+    .tablewrap {
+      max-height: 100%;
+      overflow: auto;
+    }
   `,
-  template: `<div #host class="chart"></div>`,
+  template: `
+    @if (showTable()) {
+      <div class="tablewrap">
+        <table>
+          <caption class="ay-sr-only">
+            Chart data (OHLCV and overlay values)
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Time</th>
+              <th scope="col">Open</th>
+              <th scope="col">High</th>
+              <th scope="col">Low</th>
+              <th scope="col">Close</th>
+              <th scope="col">Volume</th>
+              @for (k of tableColumns(); track k) {
+                <th scope="col">{{ k }}</th>
+              }
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of tableSnapshot(); track row['time']) {
+              <tr>
+                <td>{{ row['time'].slice(0, 19).replace('T', ' ') }}</td>
+                <td>{{ row['open'] }}</td>
+                <td>{{ row['high'] }}</td>
+                <td>{{ row['low'] }}</td>
+                <td>{{ row['close'] }}</td>
+                <td>{{ row['volume'] }}</td>
+                @for (k of tableColumns(); track k) {
+                  <td>{{ row[k] }}</td>
+                }
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    } @else {
+      <div class="frame">
+        <div #host class="chart"></div>
+        @if (legend(); as l) {
+          <div class="legend" aria-hidden="true">
+            O {{ l.open }} H {{ l.high }} L {{ l.low }} C {{ l.close }} V {{ l.volume }}
+            @for (e of overlayEntries(l); track e.key) {
+              <span class="ovl"> · {{ e.key }} {{ e.value }}</span>
+            }
+          </div>
+        }
+      </div>
+    }
+  `,
 })
 export class LwcChartComponent {
   readonly symbol = input.required<string>(); // canonical EXCHANGE:TRADINGSYMBOL
   readonly interval = input<string>('1d');
+  readonly overlays = input<OverlayConfig[]>([]);
+  readonly showTable = input<boolean>(false);
 
   private readonly host = viewChild.required<ElementRef<HTMLDivElement>>('host');
   private readonly http = inject(HttpClient);
   private readonly market = inject(MarketStore);
+  private readonly indicators = inject(ChartIndicatorsService);
   private readonly datafeed = new ArthaYantraDatafeed(this.candleFetch());
 
+  protected readonly legend = signal<CrosshairSnapshot | null>(null);
+  protected readonly tableSnapshot = signal<Record<string, string>[]>([]);
+  protected readonly tableColumns = computed(() => this.overlays().map((o) => o.id));
+
   private binding?: LwcChartBinding;
+  private meta = new Map<string, IndicatorMeta>();
   private currentKey?: string;
   private lastBar: Bar | null = null;
   private loadingOlder = false;
+  private loadedFromMs = 0;
+  private loadedToMs = 0;
+  private overlayTimer?: ReturnType<typeof setTimeout>;
 
   constructor() {
     afterNextRender(() => this.init());
 
-    // reload on symbol/interval change (after the binding exists)
     effect(() => {
       const s = this.symbol();
       const i = this.interval();
@@ -59,12 +163,27 @@ export class LwcChartComponent {
       }
     });
 
-    // live tick → aggregate → update the in-progress bar
+    // overlay set changed → reconcile against the chart
+    effect(() => {
+      const configs = this.overlays();
+      if (this.binding && this.meta.size) {
+        this.reconcileOverlays(configs);
+      }
+    });
+
+    // accessible table snapshot when toggled on
+    effect(() => {
+      if (this.showTable()) {
+        this.tableSnapshot.set(this.binding?.tableRows() ?? []);
+      }
+    });
+
+    // live tick → aggregate → update; a bucket rollover refreshes overlays (closed-bar refresh)
     effect(() => {
       const key = this.symbol();
       const tick = this.market.ticks()[key];
       if (this.binding && tick && key === this.currentKey) {
-        const { bar } = this.datafeed.aggregate(
+        const { bar, rollover } = this.datafeed.aggregate(
           {
             lastPrice: tick.lastPrice,
             cumulativeDayVolume: tick.cumulativeDayVolume,
@@ -75,15 +194,24 @@ export class LwcChartComponent {
         );
         this.lastBar = bar;
         this.binding.updateLast(bar);
+        if (rollover) {
+          this.loadedToMs = Date.now();
+          this.scheduleOverlayRefresh();
+        }
       }
     });
 
     inject(DestroyRef).onDestroy(() => {
+      clearTimeout(this.overlayTimer);
       if (this.currentKey) {
         this.market.untrack([this.currentKey]);
       }
       this.binding?.remove();
     });
+  }
+
+  protected overlayEntries(l: CrosshairSnapshot): { key: string; value: number }[] {
+    return Object.entries(l.overlays).map(([key, value]) => ({ key, value }));
   }
 
   private init(): void {
@@ -93,6 +221,11 @@ export class LwcChartComponent {
         minMove: 0.01,
       });
       this.binding.onPageBack((oldestMs) => this.pageBack(oldestMs));
+      this.binding.subscribeCrosshair((snap) => this.legend.set(snap));
+      void this.indicators.registry().then((list) => {
+        this.meta = new Map(list.map((m) => [m.id, m]));
+        this.reconcileOverlays(this.overlays());
+      });
       this.reload(this.symbol(), this.interval());
     } catch {
       // no real canvas (jsdom) — the chart simply does not render
@@ -112,11 +245,14 @@ export class LwcChartComponent {
     }
     this.binding.setInterval(interval);
     const { exchange, tradingsymbol } = split(symbol);
+    this.loadedToMs = Date.now();
     void this.datafeed
-      .fetchBars(exchange, tradingsymbol, interval, Date.now(), 300)
+      .fetchBars(exchange, tradingsymbol, interval, this.loadedToMs, 300)
       .then((bars) => {
         this.lastBar = bars.length ? bars[bars.length - 1] : null;
+        this.loadedFromMs = bars.length ? bars[0].time : this.loadedToMs;
         this.binding?.setData(bars);
+        this.refreshOverlays();
       });
   }
 
@@ -130,9 +266,51 @@ export class LwcChartComponent {
       .fetchBars(exchange, tradingsymbol, this.interval(), oldestMs, 200)
       .then((older) => {
         this.binding?.prepend(older);
+        if (older.length) {
+          this.loadedFromMs = older[0].time;
+          this.refreshOverlays(); // overlay back-fill over the extended range
+        }
         this.loadingOlder = false;
       })
       .catch(() => (this.loadingOlder = false));
+  }
+
+  private reconcileOverlays(configs: OverlayConfig[]): void {
+    this.refreshOverlays(configs);
+  }
+
+  private scheduleOverlayRefresh(): void {
+    clearTimeout(this.overlayTimer);
+    this.overlayTimer = setTimeout(() => this.refreshOverlays(), 400);
+  }
+
+  /** Fetch every active overlay's engine series for the loaded range and (re)render it. */
+  private refreshOverlays(configs: OverlayConfig[] = this.overlays()): void {
+    if (!this.binding || !this.meta.size || !this.loadedFromMs) {
+      return;
+    }
+    for (const config of configs) {
+      const meta = this.meta.get(config.id);
+      if (!meta) {
+        continue;
+      }
+      void this.indicators
+        .series(
+          config.id,
+          this.symbol(),
+          this.interval(),
+          this.loadedFromMs,
+          this.loadedToMs,
+          config.params,
+        )
+        .then((series) => {
+          const first = series[0];
+          if (first) {
+            this.binding?.setOverlay(config.id, meta.render, meta.pane, first.points);
+          }
+        })
+        .catch(() => undefined);
+    }
   }
 
   private candleFetch() {

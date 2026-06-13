@@ -1,38 +1,51 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
+import { ChartStateStore } from './chart-state.store';
+import { ChartToolbar } from './chart-toolbar';
 import { LwcChartComponent } from './lwc-chart.component';
 
 /**
- * /charts (Phase 40, A13): the lightweight-charts main chart. The first-party toolbar (instrument
- * search, interval picker, overlays) lands in Phase 40C and trade/signal marks in 40A; this phase
- * ships the chart itself + the datafeed core + the containment boundary. Reads `?symbol=&interval=`
- * so deep links (Phase 40A) center the chart.
+ * /charts (Phases 40 / 40C, A13): lightweight-charts main chart + first-party toolbar (interval,
+ * instrument search, engine overlays) with localStorage-persisted chart state. Deep links
+ * (`?symbol=&interval=`, Phase 40A) override the persisted symbol/interval on load.
  */
 @Component({
   selector: 'ay-charts-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [LwcChartComponent],
+  imports: [ChartToolbar, LwcChartComponent],
   styles: `
     .wrap {
-      height: calc(100vh - 6rem);
+      height: calc(100vh - 9rem);
     }
   `,
   template: `
     <h1 class="ay-sr-only">Charts</h1>
+    <ay-chart-toolbar [(showTable)]="showTable" />
     <div class="wrap">
-      <ay-lwc-chart [symbol]="symbol()" [interval]="interval()" />
+      <ay-lwc-chart
+        [symbol]="state.symbol()"
+        [interval]="state.interval()"
+        [overlays]="state.overlays()"
+        [showTable]="showTable()"
+      />
     </div>
   `,
 })
 export class ChartsPage {
+  protected readonly state = inject(ChartStateStore);
+  protected readonly showTable = signal(false);
   private readonly route = inject(ActivatedRoute);
-  protected readonly symbol = signal('NSE:NIFTY 50');
-  protected readonly interval = signal('1d');
 
   constructor() {
     this.route.queryParamMap.subscribe((q) => {
-      this.symbol.set(q.get('symbol') ?? 'NSE:NIFTY 50');
-      this.interval.set(q.get('interval') ?? '1d');
+      const symbol = q.get('symbol');
+      const interval = q.get('interval');
+      if (symbol) {
+        this.state.setSymbol(symbol);
+      }
+      if (interval) {
+        this.state.setInterval(interval);
+      }
     });
   }
 }

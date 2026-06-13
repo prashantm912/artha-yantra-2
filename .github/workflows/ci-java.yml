@@ -70,7 +70,17 @@ jobs:
       packages: write
     strategy:
       matrix:
-        service: [edge-gateway, market-data-service]
+        # context/dockerfile mirror deploy/docker-compose.yml exactly: market-data-service's
+        # Dockerfile COPYs deploy/dev-certs/ + services/.../target (repo-root context), while
+        # edge-gateway's COPYs target/ (service-dir context). A uniform context breaks one or
+        # the other.
+        include:
+          - service: edge-gateway
+            context: services/edge-gateway
+            dockerfile: services/edge-gateway/Dockerfile
+          - service: market-data-service
+            context: .
+            dockerfile: services/market-data-service/Dockerfile
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -81,7 +91,7 @@ jobs:
       - name: Package ${{ matrix.service }}
         run: ./mvnw -ntp -B -pl services/${{ matrix.service }} -am package -DskipTests
       - name: Build image
-        run: docker build -t ghcr.io/${{ github.repository }}/${{ matrix.service }}:${{ github.sha }} services/${{ matrix.service }}
+        run: docker build -t ghcr.io/${{ github.repository }}/${{ matrix.service }}:${{ github.sha }} -f ${{ matrix.dockerfile }} ${{ matrix.context }}
       # GHCR push on main only (private registry BY CHOICE, A.16/A13)
       - name: Login to GHCR
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'

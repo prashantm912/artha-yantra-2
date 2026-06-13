@@ -1,0 +1,31 @@
+# Golden feature: A9/A7 [FP-5] exit_intrabar - 5m primary entries, level
+# exits (stop/trailing/target) evaluated on EVERY closed 1m bar.
+schema: strategy-schema/v1
+id: golden-exit-intrabar
+name: "Golden Exit Intrabar"
+version: 1.0.0
+universe:
+  mode: explicit
+  instruments:
+    - { exchange: NSE, tradingsymbol: "NIFTY 50" }
+timeframes: { primary: 5m, additional: [1m] }
+indicators:
+  - { name: EMA, alias: ema_fast, timeframe: 5m, params: { period: 6 }, weight: 1.0 }
+  - { name: EMA, alias: ema_slow, timeframe: 5m, params: { period: 18 }, weight: 1.0 }
+  - { name: RSI, alias: rsi_5m, timeframe: 5m, params: { period: 14 }, weight: 1.0,
+      normalize: { type: rsi_momentum } }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - crossover: { fast: ema_fast, slow: ema_slow }
+  scoring: { threshold: 0.1 }
+exit_rules:
+  - { type: stop_loss, params: { basis: premium_pct, value: 0.15 } }
+  - { type: take_profit, params: { basis: premium_pct, value: 0.3 } }
+risk:
+  position_sizing: { method: fixed_quantity, params: { quantity: 1 } }
+  max_positions: 1
+  session:
+    style: intraday
+    exit_intrabar: true

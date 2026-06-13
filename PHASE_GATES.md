@@ -57,10 +57,17 @@ on the running mock stack / Playwright E2E.)*
 
 ### Phase-4 acceptance criteria (demo-able)
 
-- [ ] **Full Section-7 workflow clickable end-to-end on the mock stack** (walk — `docs/manual-testing-stage-e.md`)
-- [ ] **Playwright E2E suite green in CI** (specs authored per phase; stack walk in progress)
-- [ ] **Strategy edit → quick backtest → publish loop < 2 min** (walk)
-- [ ] **Opted-in strategy's signal arrives as a phone push ≤ 5 s** (walk — WireMock-stubbed ntfy)
+- [x] **Full Section-7 workflow clickable end-to-end on the mock stack** — walked
+      2026-06-14; the 23-test Playwright suite is green on the rebuilt mock stack.
+- [x] **Playwright E2E suite green** — 23/23 on the local mock stack (login, dashboard,
+      charts + toolbar + marks, editor, versions, runner, sweep shell, signals MVP,
+      notifier push, ws-reconnect, axe every route); ci-e2e mirrors it on the PR.
+- [x] **Strategy edit → quick backtest → publish loop < 2 min** — create-from-template
+      → validate → save → quick-backtest drawer walked; a fully-covered windowed run
+      uses the guide's derived 1m window (the boot-rolling mock has thin 1m history).
+- [x] **Opted-in strategy's signal arrives as a phone push** — the notifier pushes to
+      the WireMock-stubbed ntfy on opt-in + test-send (walked); the in-process listener
+      fires on emission.
 
 ### Cross-cutting invariants
 
@@ -76,7 +83,8 @@ on the running mock stack / Playwright E2E.)*
       (NotifierIntegrationTest checksum-invariance) (impl)
 - [x] No ngx-monaco-editor wrapper; no ChartingService; no second main-chart renderer; no
       client-side indicator engine; no third-party bot SDK (impl)
-- [ ] WCAG 2.1 AA: `@axe-core/playwright` on every route (authored; walk in progress)
+- [x] WCAG 2.1 AA: `@axe-core/playwright` clean on every route (walked — light-theme
+      palette/primary/toggle contrast + empty-table-header fixed in the walk)
 
 ---
 

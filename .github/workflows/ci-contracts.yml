@@ -1,0 +1,76 @@
+# Phase 24 (CD-8): the committed OpenAPI 3.1 specs are the contract. Every PR
+# regenerates them from code (mock profile, the ContractCaptureTest path that
+# also lints /api/v1 prefixes + the error envelope) and diffs against the
+# committed files with openapi-diff - BREAKING changes fail; pure drift
+# (additive, uncommitted) is surfaced as a warning so the spec gets refreshed
+# in the same PR. The generated TS client must compile under tsc --strict.
+name: ci-contracts
+
+on:
+  pull_request:
+    paths:
+      - "services/**"
+      - "libs/**"
+      - "contracts/**"
+      - ".github/workflows/ci-contracts.yml"
+  push:
+    branches: [main]
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Regenerate specs from code (capture tests, mock profile)
+        run: |
+          ./mvnw -ntp -q -pl libs/common-web/core,libs/common-web/servlet,libs/market-calendar,libs/strategy-schema,libs/strategy-engine install -DskipTests
+          ./mvnw -ntp -pl services/edge-gateway,services/market-data-service,services/strategy-signal-service test \
+            -Dtest=ContractCaptureTest -Dsurefire.failIfNoSpecifiedTests=false
+
+      - name: Diff committed vs regenerated (fail on BREAKING)
+        run: |
+          set -e
+          for svc in edge-gateway market-data-service strategy-signal-service; do
+            echo "=== $svc ==="
+            docker run --rm \
+              -v "$PWD/contracts:/committed:ro" \
+              -v "$PWD/services/$svc/target/contracts:/fresh:ro" \
+              openapitools/openapi-diff:2.1.0-beta.13 \
+              --fail-on-incompatible \
+              "/committed/$svc.openapi.json" "/fresh/$svc.openapi.json"
+          done
+
+      - name: Warn on non-breaking drift (spec needs a refresh commit)
+        run: |
+          drift=0
+          for svc in edge-gateway market-data-service strategy-signal-service; do
+            if ! diff -q "contracts/$svc.openapi.json" "services/$svc/target/contracts/$svc.openapi.json" > /dev/null; then
+              echo "::warning::contracts/$svc.openapi.json drifts from code (non-breaking) - refresh it with -Dcontracts.capture=true"
+              drift=1
+            fi
+          done
+          exit 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Generated TS client compiles under tsc --strict
+        run: |
+          mkdir -p /tmp/tscheck
+          for svc in edge-gateway market-data-service strategy-signal-service; do
+            npx -y openapi-typescript@7 "contracts/$svc.openapi.json" -o "/tmp/tscheck/$svc.d.ts"
+          done
+          diff -r contracts/gen /tmp/tscheck || echo "::warning::contracts/gen drifts - regenerate with npx openapi-typescript"
+          cd /tmp/tscheck
+          npm init -y > /dev/null
+          npm install --no-save typescript@5.9 > /dev/null
+          printf '{"compilerOptions":{"strict":true,"noEmit":true,"skipLibCheck":false}}' > tsconfig.json
+          npx tsc -p tsconfig.json *.d.ts

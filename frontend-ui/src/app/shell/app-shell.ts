@@ -5,6 +5,7 @@ import { TagModule } from 'primeng/tag';
 import { ToastModule } from 'primeng/toast';
 import { TooltipModule } from 'primeng/tooltip';
 import { SessionStore } from '../core/session.store';
+import { WsClientService } from '../core/ws-client.service';
 
 /**
  * AppShell (C-2.24): TopBar (IST market clock, WS status placeholder until Phase 26, theme
@@ -87,7 +88,11 @@ import { SessionStore } from '../core/session.store';
           <p-tag severity="warn" value="MOCK MODE" pTooltip="Credential-free synthetic feed" />
         }
         <span class="clock" aria-label="IST market clock">{{ istClock() }} IST</span>
-        <p-tag severity="secondary" value="WS: Phase 26" pTooltip="Live socket lands with the signals page" />
+        <p-tag
+          [severity]="ws.state() === 'connected' ? 'success' : 'warn'"
+          [value]="'WS ' + ws.state()"
+          pTooltip="Gateway STOMP socket"
+        />
         <p-button
           [text]="true"
           [icon]="session.theme() === 'dark' ? 'pi pi-sun' : 'pi pi-moon'"
@@ -97,6 +102,7 @@ import { SessionStore } from '../core/session.store';
         <p-button [text]="true" icon="pi pi-sign-out" ariaLabel="Log out" (onClick)="session.logout()" />
       </header>
       <nav [class.collapsed]="collapsed()">
+        <a routerLink="/signals" routerLinkActive="active">Signals</a>
         <a routerLink="/home" routerLinkActive="active">Home</a>
       </nav>
       <main>
@@ -108,6 +114,7 @@ import { SessionStore } from '../core/session.store';
 })
 export class AppShell implements OnDestroy {
   protected readonly session = inject(SessionStore);
+  protected readonly ws = inject(WsClientService);
   protected readonly collapsed = signal(false);
   protected readonly istClock = signal(istNow());
 

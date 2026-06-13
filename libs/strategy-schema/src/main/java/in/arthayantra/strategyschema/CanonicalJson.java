@@ -67,7 +67,14 @@ public final class CanonicalJson {
       return BigIntegerNode.valueOf(bi);
     }
     if (value instanceof Double || value instanceof Float) {
-      return DecimalNode.valueOf(normalize(BigDecimal.valueOf(((Number) value).doubleValue())));
+      double d = ((Number) value).doubleValue();
+      if (!Double.isFinite(d)) {
+        // .nan/.inf/-.inf resolve to non-finite doubles; BigDecimal.valueOf would throw a raw
+        // NumberFormatException -> 500. Reject cleanly so /validate stays a 4xx, and so a
+        // non-finite scalar can never pollute the canonical tree or its checksum.
+        throw new StrategyParseException("non-finite numbers (NaN/Infinity) are not allowed");
+      }
+      return DecimalNode.valueOf(normalize(BigDecimal.valueOf(d)));
     }
     if (value instanceof BigDecimal bd) {
       return DecimalNode.valueOf(normalize(bd));
@@ -86,7 +93,7 @@ public final class CanonicalJson {
   }
 
   /** Normalized number form: trailing zeros stripped, never negative scale (no exponents). */
-  static BigDecimal normalize(BigDecimal value) {
+  public static BigDecimal normalize(BigDecimal value) {
     BigDecimal stripped = value.stripTrailingZeros();
     return stripped.scale() < 0 ? stripped.setScale(0) : stripped;
   }

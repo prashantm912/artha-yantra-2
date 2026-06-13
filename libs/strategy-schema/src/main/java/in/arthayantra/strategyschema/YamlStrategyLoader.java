@@ -30,6 +30,10 @@ public final class YamlStrategyLoader {
     LoaderOptions options = new LoaderOptions();
     options.setMaxAliasesForCollections(50);
     options.setAllowRecursiveKeys(false);
+    // a duplicate mapping key collapses last-wins at parse time, so the canonical tree + checksum
+    // would certify a value the author never saw. Reject it (DuplicateKeyException is a
+    // RuntimeException, caught and wrapped below).
+    options.setAllowDuplicateKeys(false);
     options.setCodePointLimit(MAX_BYTES);
     Object root;
     try {
@@ -40,7 +44,15 @@ public final class YamlStrategyLoader {
     if (!(root instanceof Map)) {
       throw new StrategyParseException("top level must be a mapping");
     }
-    return CanonicalJson.toJsonNode(root);
+    try {
+      return CanonicalJson.toJsonNode(root);
+    } catch (StrategyParseException e) {
+      throw e;
+    } catch (RuntimeException e) {
+      // toJsonNode runs OUTSIDE the load() guard above; a non-finite scalar (or any other
+      // construction surprise) must surface as a clean parse error, never an unhandled 500.
+      throw new StrategyParseException("unparseable YAML: " + firstLine(e.getMessage()), e);
+    }
   }
 
   private static String firstLine(String message) {

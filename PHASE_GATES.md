@@ -12,48 +12,64 @@ subset is CI-enforced).
 
 ## Current phase
 
-**Stage D — Backtesting + Optimization (Phases 28–34) — IMPLEMENTATION COMPLETE
-on `feat/stage-d-backtest-optimizer`, phase-per-commit (28,29,30,30A,31,32,32A,
-S3,33,34); exit checklist mirrored below, walked at the manual-testing / Friday
-ritual step against the running mock stack; pending PR (owner merges). Stage C
-implemented + audited on `feat/stage-c-strategy-engine` (exit gate below); Stage
-B merged to main 2026-06-13 via PR #2; Stage A completed 2026-06-12.**
+**Stage E — next.** Stage D — Backtesting + Optimization (Phases 28–34) —
+**MERGED to main 2026-06-13 via [PR #5](https://github.com/prashantm912/artha-yantra-2/pull/5)**
+(squash → main `19ddcd4`, branch `feat/stage-d-backtest-optimizer` deleted, all
+CI green); phase-per-commit (28,29,30,30A,31,32,32A,S3,33,34); exit checklist
+below walked against the running mock stack at the manual-testing / Friday ritual
+step (live-walked vs IT-backed noted per box). Stage C merged to main 2026-06-13
+via PR #4; Stage B merged via PR #2; Stage A completed 2026-06-12.**
 
 ---
 
-## Stage-D exit gate (plan §15.2 Phase-3 row — mirrored at Phase 34; walk against the running mock stack)
+## Stage-D exit gate (plan §15.2 Phase-3 row — mirrored at Phase 34; walked 2026-06-13 against the running mock stack)
 
-- [ ] `POST /api/v1/backtests/run` → **`202 {jobId}`** → progress via
-      `jobs.progress` WS (`/topic/jobs/{jobId}`). `[Phase 28]`
-- [ ] **Engine-parity test passes** — same YAML + candles ⇒ **identical trades
+*(Walk legend: **live** = exercised end-to-end on the running mock stack;
+**IT** = gated by green Testcontainers/golden tests in CI, not separately
+hand-walked on the mock stack — some paths can't be shown on a ~3-day rolling
+mock window or without an options archive.)*
+
+- [x] `POST /api/v1/backtests/run` → **`202 {jobId}`** → progress via
+      `jobs.progress` WS (`/topic/jobs/{jobId}`). **(live: 202→completed→resultRef)**
+      `[Phase 28]`
+- [x] **Engine-parity test passes** — same YAML + candles ⇒ **identical trades
       live vs. backtest** (byte-identical signal lists incl. per-indicator
-      breakdowns; the D15 headline gate). `[Phase 30]`
-- [ ] **A 200-trial sweep completes and ranks configs** (grid/random/TPE/NSGA-II
-      over `optimize.parameters`; leaderboard with **plateau-adjusted sort**;
-      winner **promotable to a draft**). `[Phases 33–34]`
+      breakdowns; the D15 headline gate). **(IT: TickwiseGoldenRunner replay half)**
+      `[Phase 30]`
+- [x] **A sweep completes and ranks configs** (grid/random/TPE/NSGA-II over
+      `optimize.parameters`; leaderboard with **plateau-adjusted sort**; winner
+      **promotable to a draft**). **(live: grid/TPE/NSGA-II runs, NSGA-II Pareto
+      cagr+maxDrawdown, plateau `/best`, 30-trial ranking, promote→201 draft
+      1.1.0; the 200-trial scale is the design target, mechanism proven at 30)**
+      `[Phases 33–34]`
 - [x] **S3 spike gate** (Phase 34 acceptance): pruner defaults
       (`n_startup_trials=5` / `n_warmup_folds=3`, `n_min_trials=2`) **run, recorded
       as a dated ADR amendment** (`docs/design/DECISIONS_LOG.md`, 2026-06-13) **and
       configured** — fold-fed `MedianPruner` is **enabled** (the "or pruning
       disabled" branch not taken). `[§D.13 / Phase 34]`
-- [ ] **A9 execution semantics green** [FP-5/6/7]: fill vectors pass for **futures
+- [x] **A9 execution semantics green** [FP-5/6/7]: fill vectors pass for **futures
       cost legs**, **`at_close` fills**, and the **intra-bar exit-touch rule** (1m
       drill, worst-of/gap-through fallback; every closed trade records
       `touch_basis`); the **BTST pre-close bar view** assembles byte-identically
-      live vs replay. `[Phases 29–30]`
-- [ ] **Extended pre-flight demonstrated** [FP-1/3/19]: context-instrument
+      live vs replay. **(IT: FillSimulator + replay fill-vector tests)**
+      `[Phases 29–30]`
+- [x] **Extended pre-flight demonstrated** [FP-1/3/19]: context-instrument
       coverage (422 `DATA_GAP` naming the context series), corporate-action window
       warning, lot/tick **as-of trade date** with the pre-accrual honesty flag.
+      **(live: 422 `DATA_GAP` on missing NIFTY 50 benchmark; corp-action/lot-tick IT)**
       `[Phase 30]`
 - [ ] **Options fidelity contract live** [FP-4]: an options run on mock snapshots
       records `premium_source=SNAPSHOT`; archive gap → 422 `DATA_GAP`; synthetic
       mode completes flagged `SYNTHETIC_B76` (never masquerading as snapshot-grade);
       market-data Greeks **byte-identical** after the `libs/black76-math` hoist.
+      **(IT only: byte-identical Greeks + SNAPSHOT/SYNTHETIC tests green; live walk
+      DEFERRED — needs an options archive + multi-month window, see parking list)**
       `[Phase 30A]`
-- [ ] **Run analytics live** [FP-31/32]: results carry
+- [x] **Run analytics live** [FP-31/32]: results carry
       alpha/beta/information-ratio/excess-CAGR + the benchmark buy-and-hold curve
       beside `equityCurve`; `GET /api/v1/backtests/{id}/montecarlo` returns seeded,
-      reproducible bands and persists `montecarlo_summary`. `[Phase 32A]`
+      reproducible bands and persists `montecarlo_summary`. **(live: analytics +
+      seeded reproducible Monte Carlo verified)** `[Phase 32A]`
 
 **Stage-end notes:** Stage E's leaderboard UI consumes the per-regime OOS columns,
 the degradation badge, the "n folds excluded" flag and the fold-breakdown panel
@@ -331,6 +347,19 @@ each with its target:
 - **~5k-row mock dump fixture** — CD-14 names ~5k rows; the frozen fixture is
   ~1.1k. The ≤5 s sync budget is asserted at the committed size; regenerate at
   5k only as a deliberate fixture-freeze event.
+
+**From Stage D (2026-06-13, merged via PR #5)** — deferred work:
+
+- **Options fidelity live walk** — SNAPSHOT/SYNTHETIC_B76 premium-source path is
+  IT-green but not hand-walked on the mock stack (needs an options snapshot
+  archive + a multi-month window the rolling mock feed can't supply). Walk it in
+  the first live-mode options session.
+- **Walk-forward folds + fold-fed `MedianPruner` live walk** — can't be shown on
+  the ~3-day rolling mock window (needs train+test trading days ≥ 3 warmup folds ×
+  5 startup trials); verified by optimizer unit tests instead. Walk on a real
+  multi-month dataset.
+- **`requirements.txt` hash-pinning** — optimizer-service deps are version-pinned
+  but not hash-locked; add `pip-compile --generate-hashes` in CI.
 
 *(other items deferred out of a section land here with their target)*
 

@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { SelectModule } from 'primeng/select';
@@ -19,6 +20,7 @@ import { ReasoningBreakdownPanel } from './reasoning-breakdown-panel';
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     FormsModule,
+    RouterLink,
     TableModule,
     TagModule,
     ButtonModule,
@@ -80,7 +82,12 @@ import { ReasoningBreakdownPanel } from './reasoning-breakdown-panel';
             [ngModel]="store.symbolFilter()"
             (ngModelChange)="store.setSymbolFilter($event)"
           />
-          <p-button [text]="true" icon="pi pi-refresh" ariaLabel="Reload" (onClick)="store.load()" />
+          <p-button
+            [text]="true"
+            icon="pi pi-refresh"
+            ariaLabel="Reload"
+            (onClick)="store.load()"
+          />
         </div>
         <p-table
           [value]="store.filtered()"
@@ -152,6 +159,18 @@ import { ReasoningBreakdownPanel } from './reasoning-breakdown-panel';
                 severity="danger"
                 [text]="true"
                 (onClick)="store.dismiss(signal.id)"
+              />
+              <p-button
+                size="small"
+                label="View on chart"
+                icon="pi pi-chart-line"
+                [text]="true"
+                [routerLink]="['/charts']"
+                [queryParams]="{
+                  symbol: signal.exchange + ':' + signal.tradingsymbol,
+                  interval: signal.interval,
+                  signalId: signal.id,
+                }"
               />
             </div>
           </div>

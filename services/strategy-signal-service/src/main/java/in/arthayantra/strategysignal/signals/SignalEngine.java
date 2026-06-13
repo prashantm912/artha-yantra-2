@@ -38,6 +38,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.ContextClosedEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
@@ -79,6 +80,7 @@ public class SignalEngine {
   private final StrategyRepository registry;
   private final SignalRepository signals;
   private final SignalPublisher publisher;
+  private final ApplicationEventPublisher events;
   private final LiveSeriesStore seriesStore;
   private final FuturesUniverseResolver futuresResolver;
   private final RedisConnectionFactory connectionFactory;
@@ -114,6 +116,7 @@ public class SignalEngine {
       StrategyRepository registry,
       SignalRepository signals,
       SignalPublisher publisher,
+      ApplicationEventPublisher events,
       LiveSeriesStore seriesStore,
       FuturesUniverseResolver futuresResolver,
       RedisConnectionFactory connectionFactory,
@@ -124,6 +127,7 @@ public class SignalEngine {
     this.registry = registry;
     this.signals = signals;
     this.publisher = publisher;
+    this.events = events;
     this.seriesStore = seriesStore;
     this.futuresResolver = futuresResolver;
     this.connectionFactory = connectionFactory;
@@ -515,6 +519,11 @@ public class SignalEngine {
         "ENTRY signal #{} {} {}:{} at {} (composite {})",
         id, strategy.slug(), exchange, tradingsymbol, entryPrice,
         evaluation.breakdown().composite());
+    // in-process trigger for the Phase-41 notifier (push only ENTRY signals)
+    events.publishEvent(
+        new SignalEmitted(
+            id, strategy.versionId(), exchange, tradingsymbol, side, entryPrice, stopLoss, target,
+            evaluation.breakdown().composite(), evaluation.breakdown().threshold()));
   }
 
   private void emit(

@@ -193,6 +193,22 @@ services:
   # dev-tools profile forwards it on loopback (sss-publish below). Holds NO
   # Kite secrets — only the DB password file (D10 single-writer, schema
   # `strategy`).
+  # ---- WireMock ntfy stub (Phase 41 / Q6) ---------------------------------
+  # Stubs the signal-notifier's ntfy POST under mock so the push path is testable
+  # without a real ntfy server (catch-all 200). Live mode points the notifier
+  # elsewhere via ARTHA_NOTIFIER_NTFY_URL. Reused by Stage G alert verification.
+  wiremock:
+    image: wiremock/wiremock:3.9.2
+    container_name: ay-wiremock
+    command: ["--port", "8080", "--disable-banner"]
+    volumes:
+      - ./wiremock:/home/wiremock:ro
+    ports:
+      - "127.0.0.1:9099:8080"
+    mem_limit: 128m
+    restart: unless-stopped
+    logging: *default-logging
+
   strategy-signal-service:
     build:
       context: ../services/strategy-signal-service
@@ -201,6 +217,10 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-mock}
       ARTHA_DB_PASSWORD_FILE: /run/secrets/postgres_password
+      # Phase 41 notifier (Q6): the signal-push ntfy endpoint + its OWN topic (distinct from the
+      # ops topic). Under mock this points at the WireMock stub; live mode overrides both.
+      ARTHA_NOTIFIER_NTFY_URL: ${ARTHA_NOTIFIER_NTFY_URL:-http://wiremock:8080}
+      ARTHA_NOTIFIER_NTFY_TOPIC: ${ARTHA_NOTIFIER_NTFY_TOPIC:-ay-signals-mock}
     secrets: [postgres_password]
     depends_on:
       flyway-init:
@@ -209,6 +229,8 @@ services:
         condition: service_healthy
       market-data-service:
         condition: service_healthy
+      wiremock:
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8082/actuator/health | grep -q '\"status\":\"UP\"'"]
       interval: 10s

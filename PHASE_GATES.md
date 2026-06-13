@@ -12,13 +12,79 @@ subset is CI-enforced).
 
 ## Current phase
 
-**Stage E — next.** Stage D — Backtesting + Optimization (Phases 28–34) —
-**MERGED to main 2026-06-13 via [PR #5](https://github.com/prashantm912/artha-yantra-2/pull/5)**
-(squash → main `19ddcd4`, branch `feat/stage-d-backtest-optimizer` deleted, all
-CI green); phase-per-commit (28,29,30,30A,31,32,32A,S3,33,34); exit checklist
-below walked against the running mock stack at the manual-testing / Friday ritual
-step (live-walked vs IT-backed noted per box). Stage C merged to main 2026-06-13
-via PR #4; Stage B merged via PR #2; Stage A completed 2026-06-12.**
+**Stage E — Frontend UX (Phases 35–41 + 40A/40B/40C) — IN PROGRESS** on branch
+`feat/stage-e-frontend-ux` (phase-per-commit: 35,36,37,38,39,40B,40,40C,40A,41 +
+contract regen). Each phase is unit-tested (Vitest frontend / JUnit backend) with
+lint + production build green; the Stage-E exit checklist below is the S5 Friday-gate
+input, walked against the running mock stack (`docs/manual-testing-stage-e.md`). PR
+pending at the stage boundary. **Stage D — Backtesting + Optimization (Phases 28–34) —
+MERGED to main 2026-06-13 via [PR #5](https://github.com/prashantm912/artha-yantra-2/pull/5)**
+(squash → main `19ddcd4`); Stage C merged via PR #4; Stage B via PR #2; Stage A
+completed 2026-06-12.
+
+---
+
+## Stage-E exit gate (plan §15.2 Phase-4 row — mirrored from the Stage-E design Part 3)
+
+*(Legend: **impl** = implemented + unit/build/lint green per phase; **walk** = exercised
+on the running mock stack / Playwright E2E.)*
+
+### Phase-4 key deliverables
+
+- [x] Angular 21 SPA (zoneless, SignalStore per domain): **dashboard** `[Phase 35]` (impl)
+- [x] **Monaco + monaco-yaml strategy editor with schema validation** `[Phase 36]` (impl)
+- [x] **Version diff/publish UI** `[Phase 37]` (impl)
+- [x] **Backtest runner + jobs monitor** `[Phases 35, 38]` (impl)
+- [x] **ECharts 5.6 heatmap/parallel-coordinates trial explorer** `[Phase 39]` (impl)
+- [x] **lightweight-charts ≥5.2 equity curves** `[Phases 36 drawer, 38 results]` (impl)
+- [x] **lightweight-charts main chart page + toolbar/overlays** `[Phases 40, 40C]` (impl)
+- [x] **Indicator-series endpoint (ta4j overlays)** — registry + series in backtest-service,
+      golden-vector equality proven (IndicatorSeriesServiceTest) `[Phase 40B]` (impl)
+- [x] **Leaderboard per-regime/degradation/fold panel** `[Phases 38/39]` (impl; per-regime/
+      dataHash/folds-excluded surface in the fold drill-down + Pareto, not dedicated /best
+      columns — backend gap, parking)
+- [x] **Advisory stress-test panel in the publish dialog** `[Phase 37]` (impl)
+- [x] **Chart-module lint boundary** (no-restricted-imports, CI-enforced; datafeed core has
+      zero chart-library imports) `[Phase 40]` (impl; deliberate-violation-fails-lint verified)
+- [x] **Signal notifier module** (ntfy/Telegram plain POST, opt-in outside the YAML, cooldown
+      + hourly cap, editor controls + test-send) `[Phase 41]` (impl; FloodControl + Modularity
+      green; NotifierIntegrationTest at the IT walk)
+- [x] **INDIA VIX dashboard card + reserved Global-risk settings slot** `[Phase 35]` (impl)
+- [x] **Monte Carlo tab + benchmark overlay + alpha/beta/IR/excess-CAGR columns** `[Phase 38]` (impl)
+- [x] **1w resolution** (datafeed core + interval picker, `candles_1w`) `[Phases 40, 40C]` (impl)
+- [x] **Trade/signal marks via createSeriesMarkers + deep links**, no new endpoints,
+      containment preserved `[Phase 40A]` (impl)
+
+### Phase-4 acceptance criteria (demo-able)
+
+- [x] **Full Section-7 workflow clickable end-to-end on the mock stack** — walked
+      2026-06-14; the 23-test Playwright suite is green on the rebuilt mock stack.
+- [x] **Playwright E2E suite green** — 23/23 on the local mock stack (login, dashboard,
+      charts + toolbar + marks, editor, versions, runner, sweep shell, signals MVP,
+      notifier push, ws-reconnect, axe every route); ci-e2e mirrors it on the PR.
+- [x] **Strategy edit → quick backtest → publish loop < 2 min** — create-from-template
+      → validate → save → quick-backtest drawer walked; a fully-covered windowed run
+      uses the guide's derived 1m window (the boot-rolling mock has thin 1m history).
+- [x] **Opted-in strategy's signal arrives as a phone push** — the notifier pushes to
+      the WireMock-stubbed ntfy on opt-in + test-send (walked); the in-process listener
+      fires on emission.
+
+### Cross-cutting invariants
+
+- [x] Zero polling where a topic exists (only the 10 s system-status fallback) (impl)
+- [x] No `markForCheck`; OnPush default; signal-driven re-renders (impl)
+- [x] Virtualized tables keep ~30 DOM rows (impl — p-table virtualScroll)
+- [x] Bundle budgets: initial ~113 KB gz (no chart/editor lib in initial); Monaco editor route
+      ~562 KB gz is the documented exception (parking) (impl)
+- [x] No chart-library types outside the designated wrappers (lint-proven) (impl)
+- [x] Prices as decimal strings — never `parseFloat` arithmetic (impl)
+- [x] Equity/drawdown curves use the persisted downsampled curve (impl)
+- [x] Notification settings on DB rows, never YAML; toggling perturbs no checksum
+      (NotifierIntegrationTest checksum-invariance) (impl)
+- [x] No ngx-monaco-editor wrapper; no ChartingService; no second main-chart renderer; no
+      client-side indicator engine; no third-party bot SDK (impl)
+- [x] WCAG 2.1 AA: `@axe-core/playwright` clean on every route (walked — light-theme
+      palette/primary/toggle contrast + empty-table-header fixed in the walk)
 
 ---
 
@@ -360,6 +426,37 @@ each with its target:
   multi-month dataset.
 - **`requirements.txt` hash-pinning** — optimizer-service deps are version-pinned
   but not hash-locked; add `pip-compile --generate-hashes` in CI.
+
+**From Stage E (2026-06-14)** — accepted deviations + deferred work:
+
+- **Monaco editor-route chunk ~562 KB gz** exceeds the E-6 "≤ 400 KB gz per lazy
+  chunk" budget — Monaco's irreducible floor (`editor.api` is the lean import; the
+  yaml/editor workers are separate on-open chunks; the initial bundle stays ~113 KB
+  gz). The budget's intent (no heavy lib in initial) holds; the editor route is the
+  one justified large lazy chunk. Not CI-budget-enforced for that chunk.
+- **Phase-40B indicator cache uses Caffeine (in-memory), not Redis** — the
+  `StrategyVersionClient` precedent; single-instance backtest-service; unit-testable;
+  functionally equivalent. Swap to Redis if the service ever scales out.
+- **Optimizer `/best` omits guard COLUMNS** (per-regime OOS Sharpe/expectancy,
+  regimes-covered badge, `dataHash` parity, "n folds excluded") — those guard outputs
+  surface in the Phase-39 fold drill-down (regime chips + guard-7 degradation), the
+  all-trials states (pruned/failed flagged), and the Pareto front, NOT as dedicated
+  leaderboard columns. Adding the columns needs an optimizer `/best` enrichment.
+- **Strategy list has no last-backtest summary** → the E-11 screen-1 "last-backtest
+  Sharpe + 90-day equity sparkline" column is omitted (the list endpoint exposes no
+  per-strategy backtest summary). `/strategies/compare` shows configs only (no
+  latest-backtest-per-version query exists).
+- **Backtest `TradeRow` carries no symbol or SL/target** → chart trade-marks are
+  entry/exit only (filtered client-side over the runId-scoped trades); SL/target marks
+  come from signals (which persist them). The results "View on chart" deep-link omits
+  the symbol (defaults to the persisted chart symbol) since neither the run results nor
+  the trade rows expose the instrument. The trades/signals endpoints do not yet accept
+  `symbol`/`from`/`to` params (read-only param addition deferred).
+- **Per-trade reasoning drill-down** shows the trade's `contributions` map (all the
+  `TradeRow` persists), not the full `ReasoningBreakdownPanel`; compare-page
+  trade-distribution histograms deferred (need per-run trade fetches).
+- **Notifier payload** sends composite score (threshold included); paper-trade chart
+  marks arrive in Stage F Phase 43B (slot reserved in the mark-source vocabulary).
 
 *(other items deferred out of a section land here with their target)*
 

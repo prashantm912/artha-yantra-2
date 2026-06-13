@@ -9,6 +9,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -36,6 +37,9 @@ public class RegistryController {
 
   /** Validate body. */
   public record ValidateRequest(String config) {}
+
+  /** Notification toggle body (Phase 41). */
+  public record NotificationRequest(Boolean enabled, String channel) {}
 
   private final RegistryService service;
 
@@ -126,6 +130,13 @@ public class RegistryController {
   @PostMapping("/{id}/archive")
   public Map<String, Object> archive(@PathVariable UUID id) {
     return service.archive(id);
+  }
+
+  /** Toggle notification opt-in (Phase 41) — strategy-level, never mints a version. */
+  @PatchMapping("/{id}/notifications")
+  public Map<String, Object> notifications(
+      @PathVariable UUID id, @RequestBody NotificationRequest request) {
+    return service.updateNotifications(id, Boolean.TRUE.equals(request.enabled()), request.channel());
   }
 
   /** Server-side structured diff. */

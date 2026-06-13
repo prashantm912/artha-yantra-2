@@ -118,6 +118,49 @@ class BacktestReplayIntegrationTest extends BacktestIntegrationTestBase {
   }
 
   @Test
+  void everyRunCarriesANonNullPremiumSource() throws Exception {
+    Job job =
+        jobs.insertQueued(
+            JobKind.BACKTEST,
+            null,
+            STRATEGY_ID,
+            objectMapper
+                .createObjectNode()
+                .put("strategyId", STRATEGY_ID.toString())
+                .put("from", "2026-01-05")
+                .put("to", "2026-01-10"),
+            "corr-premium");
+    runner.run(job, pct -> {}, () -> false);
+    UUID runId = runs.findRunIdByJobId(job.id()).orElseThrow();
+
+    // §D.15: provenance is written before results persist and is NEVER null.
+    String premiumSource =
+        jdbc.queryForObject(
+            "SELECT premium_source FROM backtest_runs WHERE id=?", String.class, runId);
+    assertThat(premiumSource).isNotNull();
+    // a non-options (ema-crossover) strategy on the candle path is NA.
+    assertThat(premiumSource).isEqualTo("NA");
+
+    // and the results endpoint echoes it (with the caveats array) at the top level.
+    String results =
+        mockMvc
+            .perform(get("/api/v1/backtests/" + runId + "/results"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.premiumSource").value("NA"))
+            .andExpect(jsonPath("$.caveats").isArray())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+    assertThat(objectMapper.readTree(results).path("caveats").isArray()).isTrue();
+
+    // the global no-NULL invariant across the table.
+    Long nullSources =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM backtest_runs WHERE premium_source IS NULL", Long.class);
+    assertThat(nullSources).isZero();
+  }
+
+  @Test
   void coverageGapSubmissionIs422DataGap() throws Exception {
     // a window with no seeded candles → DATA_GAP at submission
     mockMvc

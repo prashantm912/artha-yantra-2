@@ -6,6 +6,8 @@ import in.arthayantra.backtest.client.StrategyVersionClient.ResolvedVersion;
 import in.arthayantra.backtest.dispatch.JobCancelledException;
 import in.arthayantra.backtest.dispatch.ReplayStub;
 import in.arthayantra.backtest.jobs.Job;
+import in.arthayantra.backtest.replay.options.PremiumProvenance;
+import in.arthayantra.backtest.replay.options.PremiumSource;
 import in.arthayantra.strategyengine.config.StrategyCompiler;
 import in.arthayantra.strategyengine.config.StrategyDefinition;
 import in.arthayantra.strategyengine.series.EngineCandle;
@@ -41,6 +43,7 @@ public class BacktestRunner {
   private final RunRepository runs;
   private final TradeRepository trades;
   private final ReplayStub stub;
+  private final PremiumProvenance premiumProvenance;
 
   /** Wires the replay collaborators. */
   public BacktestRunner(
@@ -50,7 +53,8 @@ public class BacktestRunner {
       MetricsCalculator metrics,
       RunRepository runs,
       TradeRepository trades,
-      ReplayStub stub) {
+      ReplayStub stub,
+      PremiumProvenance premiumProvenance) {
     this.versions = versions;
     this.candleReader = candleReader;
     this.replayEngine = replayEngine;
@@ -58,6 +62,7 @@ public class BacktestRunner {
     this.runs = runs;
     this.trades = trades;
     this.stub = stub;
+    this.premiumProvenance = premiumProvenance;
   }
 
   /** Runs the job; throws {@link JobCancelledException} on cancel and other exceptions on failure. */
@@ -113,6 +118,9 @@ public class BacktestRunner {
             result.barsInPosition());
     m.full().put("strategyChecksum", resolved.checksum());
 
+    // §D.15 premium provenance: resolved BEFORE results persist, never defaulted/null.
+    PremiumSource premiumSource = premiumProvenance.forCandleReplay(config);
+
     String dataHash =
         DataHash.of(
             signal.exchange(),
@@ -137,7 +145,8 @@ public class BacktestRunner {
             request.has("paramsOverride") ? request.get("paramsOverride") : null,
             seed,
             dataHash,
-            engineVersion(resolved));
+            engineVersion(resolved),
+            premiumSource);
     trades.insertAll(runId, result.trades());
     progress.accept(100);
     log.info("backtest run {} completed: {} trades", runId, result.trades().size());

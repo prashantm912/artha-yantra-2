@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import in.arthayantra.backtest.replay.MetricsCalculator.Metrics;
+import in.arthayantra.backtest.replay.options.PremiumSource;
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -28,7 +29,11 @@ public class RunRepository {
     this.objectMapper = objectMapper;
   }
 
-  /** Inserts one completed run; returns the generated run id. */
+  /**
+   * Inserts one completed run; returns the generated run id. The {@code premiumSource} provenance
+   * (§D.15) is written before results persist and is NEVER null — a synthetic run can never
+   * masquerade as snapshot-grade.
+   */
   public UUID insert(
       UUID jobId,
       UUID strategyVersionId,
@@ -42,15 +47,16 @@ public class RunRepository {
       JsonNode paramsOverride,
       long seed,
       String dataHash,
-      String engineVersion) {
+      String engineVersion,
+      PremiumSource premiumSource) {
     return jdbc.queryForObject(
         """
         INSERT INTO backtest_runs (
           job_id, strategy_version_id, exchange, tradingsymbol, "interval", start_ts, end_ts,
           initial_equity, final_equity, params_override, seed, data_hash,
           total_return, sharpe, sortino, max_drawdown, win_rate, profit_factor, trade_count,
-          metrics, equity_curve, drawdown_curve, engine_version)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?)
+          metrics, equity_curve, drawdown_curve, engine_version, premium_source)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?, ?)
         RETURNING id
         """,
         (rs, n) -> UUID.fromString(rs.getString("id")),
@@ -76,7 +82,8 @@ public class RunRepository {
         json(metrics.full()),
         curveJson(result.equityCurve()),
         curveJson(result.drawdownCurve()),
-        engineVersion);
+        engineVersion,
+        premiumSource.name());
   }
 
   /** The run id produced by a job (for the {@code resultRef} on the job-status payload). */
@@ -98,18 +105,30 @@ public class RunRepository {
                 + "premium_source FROM backtest_runs WHERE id=?",
             (rs, n) -> {
               Map<String, Object> out = new LinkedHashMap<>();
-              out.put("metrics", parse(rs.getString("metrics")));
+              JsonNode metrics = parse(rs.getString("metrics"));
+              out.put("metrics", metrics);
               out.put("equityCurve", parse(rs.getString("equity_curve")));
               out.put("drawdownCurve", parse(rs.getString("drawdown_curve")));
               out.put("benchmarkCurve", parse(rs.getString("benchmark_curve")));
               out.put("dataHash", rs.getString("data_hash"));
               out.put("seed", rs.getLong("seed"));
               out.put("premiumSource", rs.getString("premium_source"));
+              // §D.15: surface synthetic-premium caveats at the top level, never buried.
+              out.put("caveats", caveats(metrics));
               return out;
             },
             runId)
         .stream()
         .findFirst();
+  }
+
+  /** Extracts the {@code caveats} array embedded in the metrics JSONB (empty when absent). */
+  private List<String> caveats(JsonNode metrics) {
+    List<String> out = new java.util.ArrayList<>();
+    if (metrics != null && metrics.has("caveats") && metrics.get("caveats").isArray()) {
+      metrics.get("caveats").forEach(node -> out.add(node.asText()));
+    }
+    return out;
   }
 
   private String json(JsonNode node) {

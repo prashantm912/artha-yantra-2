@@ -47,6 +47,13 @@
       <artifactId>market-calendar</artifactId>
       <version>${project.version}</version>
     </dependency>
+    <dependency>
+      <!-- Phase 30A: the dependency-free Black-76 pricing/IV math shared with
+           market-data-service — drives the SYNTHETIC_B76 premium reconstruction. -->
+      <groupId>in.arthayantra</groupId>
+      <artifactId>black76-math</artifactId>
+      <version>${project.version}</version>
+    </dependency>
 
     <dependency>
       <groupId>org.springframework.boot</groupId>

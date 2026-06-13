@@ -311,6 +311,8 @@ public class RegistryService {
       item.put("tags", row.tags());
       item.put("author", row.author());
       item.put("enabled", row.enabled());
+      item.put("notificationsEnabled", row.notificationsEnabled());
+      item.put("notificationChannel", row.notificationChannel());
       item.put("updatedAt", row.updatedAt());
       items.add(item);
     }
@@ -340,6 +342,26 @@ public class RegistryService {
     response.put("notes", row.notes());
     response.put("createdAt", row.createdAt());
     response.put("updatedAt", strategy.updatedAt());
+    response.put("notificationsEnabled", strategy.notificationsEnabled());
+    response.put("notificationChannel", strategy.notificationChannel());
+    return response;
+  }
+
+  /**
+   * Toggle notification opt-in (Phase 41 / E-14). Strategy-level metadata — NEVER mints a version
+   * or perturbs a D18 checksum (asserted by an IT). A valid channel is required when enabling.
+   */
+  public Map<String, Object> updateNotifications(UUID id, boolean enabled, String channel) {
+    strategyOrThrow(id);
+    if (enabled && channel != null && !channel.equals("NTFY") && !channel.equals("TELEGRAM")) {
+      throw new ApiException(
+          422, ErrorCodes.VALIDATION_FAILED, "notification_channel must be NTFY or TELEGRAM");
+    }
+    repository.updateNotifications(id, enabled, enabled ? channel : null);
+    Map<String, Object> response = new LinkedHashMap<>();
+    response.put("id", id);
+    response.put("notificationsEnabled", enabled);
+    response.put("notificationChannel", enabled ? channel : null);
     return response;
   }
 

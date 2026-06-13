@@ -123,6 +123,30 @@ describe('StrategiesStore', () => {
     expect(then).toHaveBeenCalledWith('1.1.0');
   });
 
+  it('setNotifications PATCHes and updates the list row', () => {
+    store.loadList();
+    http
+      .expectOne((r) => r.url === '/api/v1/strategies')
+      .flush({ items: [{ id: 'a', slug: 'ema', name: 'EMA', status: 'published', tags: [] }] });
+    store.setNotifications('a', true, 'NTFY');
+    const req = http.expectOne(
+      (r) => r.method === 'PATCH' && r.url === '/api/v1/strategies/a/notifications',
+    );
+    expect(req.request.body.enabled).toBe(true);
+    req.flush({ notificationsEnabled: true, notificationChannel: 'NTFY' });
+    expect(store.list()[0].notificationsEnabled).toBe(true);
+    expect(store.list()[0].notificationChannel).toBe('NTFY');
+  });
+
+  it('testNotification POSTs to the test-send route', () => {
+    const then = vi.fn();
+    store.testNotification('a', then);
+    http
+      .expectOne((r) => r.method === 'POST' && r.url === '/api/v1/strategies/a/notifications/test')
+      .flush({ status: 'SENT' });
+    expect(then).toHaveBeenCalled();
+  });
+
   it('rollback POSTs the source version and yields the new draft', () => {
     const then = vi.fn();
     store.rollback('a', { version: '1.0.0' }, then);

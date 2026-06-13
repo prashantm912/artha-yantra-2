@@ -32,7 +32,9 @@ public class StrategyRepository {
       boolean enabled,
       UUID publishedVersionId,
       OffsetDateTime createdAt,
-      OffsetDateTime updatedAt) {}
+      OffsetDateTime updatedAt,
+      boolean notificationsEnabled,
+      String notificationChannel) {}
 
   /** strategy_versions row. */
   public record VersionRow(
@@ -221,6 +223,17 @@ public class StrategyRepository {
     jdbc.update("UPDATE strategies SET updated_at = now() WHERE id = ?", strategyId);
   }
 
+  /**
+   * Toggles notification opt-in on the strategy IDENTITY row (Phase 41). This is orthogonal to the
+   * versioned config — it never touches strategy_versions, so no D18 checksum changes.
+   */
+  public void updateNotifications(UUID strategyId, boolean enabled, String channel) {
+    jdbc.update(
+        "UPDATE strategies SET notifications_enabled = ?, notification_channel = ?, updated_at = now() "
+            + "WHERE id = ?",
+        enabled, channel, strategyId);
+  }
+
   /** Hard delete (drafts-only path; cascades versions + audit). */
   public void deleteStrategy(UUID strategyId) {
     jdbc.update("DELETE FROM strategies WHERE id = ?", strategyId);
@@ -249,7 +262,9 @@ public class StrategyRepository {
         rs.getBoolean("enabled"),
         rs.getObject("published_version_id", UUID.class),
         rs.getObject("created_at", OffsetDateTime.class),
-        rs.getObject("updated_at", OffsetDateTime.class));
+        rs.getObject("updated_at", OffsetDateTime.class),
+        rs.getBoolean("notifications_enabled"),
+        rs.getString("notification_channel"));
   }
 
   private VersionRow versionRow(ResultSet rs, int rowNum) throws SQLException {

@@ -14,6 +14,8 @@ export interface StrategySummary {
   author?: string;
   enabled?: boolean;
   updatedAt?: string;
+  notificationsEnabled?: boolean;
+  notificationChannel?: string | null;
 }
 
 /** Full strategy detail (`GET /api/v1/strategies/{id}`) — `configYaml` is the Monaco buffer source. */
@@ -208,6 +210,36 @@ export const StrategiesStore = signalStore(
             }),
           error: () => patchState(store, { saving: false }),
         });
+    },
+
+    /** Toggle notification opt-in (Phase 41) — never mints a version; updates the list row. */
+    setNotifications(id: string, enabled: boolean, channel: string | null): void {
+      http
+        .patch<{
+          notificationsEnabled: boolean;
+          notificationChannel: string | null;
+        }>(`/api/v1/strategies/${id}/notifications`, { enabled, channel })
+        .subscribe({
+          next: (res) =>
+            patchState(store, {
+              list: store.list().map((s) =>
+                s.id === id
+                  ? {
+                      ...s,
+                      notificationsEnabled: res.notificationsEnabled,
+                      notificationChannel: res.notificationChannel,
+                    }
+                  : s,
+              ),
+            }),
+        });
+    },
+
+    /** Fire a test push (422 toasts via the interceptor when disabled/unconfigured). */
+    testNotification(id: string, then?: () => void): void {
+      http
+        .post(`/api/v1/strategies/${id}/notifications/test`, {})
+        .subscribe({ next: () => then?.() });
     },
 
     loadVersions(id: string): void {

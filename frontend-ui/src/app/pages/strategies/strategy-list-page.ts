@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/cor
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
+import { CheckboxModule } from 'primeng/checkbox';
 import { DialogModule } from 'primeng/dialog';
 import { InputTextModule } from 'primeng/inputtext';
 import { SelectModule } from 'primeng/select';
@@ -48,6 +49,7 @@ risk:
     TableModule,
     TagModule,
     ButtonModule,
+    CheckboxModule,
     InputTextModule,
     SelectModule,
     DialogModule,
@@ -67,6 +69,11 @@ risk:
       display: flex;
       gap: 0.3rem;
       flex-wrap: wrap;
+    }
+    .notify {
+      display: flex;
+      gap: 0.3rem;
+      align-items: center;
     }
     textarea {
       width: 100%;
@@ -114,6 +121,7 @@ risk:
           <th>Status</th>
           <th>Version</th>
           <th>Tags</th>
+          <th>Notify</th>
           <th>Updated</th>
           <th></th>
         </tr>
@@ -127,6 +135,33 @@ risk:
             <span class="tags">
               @for (t of s.tags; track t) {
                 <p-tag [value]="t" severity="secondary" />
+              }
+            </span>
+          </td>
+          <td>
+            <span class="notify">
+              <p-checkbox
+                [ngModel]="s.notificationsEnabled ?? false"
+                (ngModelChange)="
+                  store.setNotifications(s.id, $event, s.notificationChannel ?? 'NTFY')
+                "
+                [binary]="true"
+                [ariaLabel]="'Notifications for ' + s.name"
+              />
+              @if (s.notificationsEnabled) {
+                <p-select
+                  [options]="channels"
+                  [ngModel]="s.notificationChannel ?? 'NTFY'"
+                  (ngModelChange)="store.setNotifications(s.id, true, $event)"
+                  ariaLabel="Channel"
+                />
+                <p-button
+                  size="small"
+                  [text]="true"
+                  icon="pi pi-bell"
+                  ariaLabel="Send test notification"
+                  (onClick)="store.testNotification(s.id)"
+                />
               }
             </span>
           </td>
@@ -180,6 +215,7 @@ export class StrategyListPage {
   protected readonly store = inject(StrategiesStore);
   private readonly router = inject(Router);
   protected readonly statuses = ['draft', 'published', 'archived'];
+  protected readonly channels = ['NTFY', 'TELEGRAM'];
   protected readonly importOpen = signal(false);
   protected importText = '';
 

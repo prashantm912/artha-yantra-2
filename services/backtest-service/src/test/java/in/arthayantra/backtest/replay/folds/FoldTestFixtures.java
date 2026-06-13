@@ -30,7 +30,14 @@ final class FoldTestFixtures {
     Fold f =
         new Fold(
             index, base, base.plusDays(5), base.plusDays(5), base.plusDays(7));
+    // the aggregator tests do not exercise regime attribution; an empty OOS trade list + a default
+    // initial equity satisfy the FoldResult shape without affecting any aggregation assertion.
     return new FoldResult(
-        f, metricsWithSharpe(trainSharpe), metricsWithSharpe(oosSharpe), oosTradeCount);
+        f,
+        metricsWithSharpe(trainSharpe),
+        metricsWithSharpe(oosSharpe),
+        oosTradeCount,
+        java.util.List.of(),
+        new BigDecimal("1000000"));
   }
 }

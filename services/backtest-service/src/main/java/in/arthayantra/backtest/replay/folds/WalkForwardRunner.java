@@ -4,6 +4,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import in.arthayantra.backtest.regime.FoldRegimeAttributor;
+import in.arthayantra.backtest.regime.RegimeAttribution;
+import in.arthayantra.backtest.regime.RegimeAttribution.RegimeStat;
+import in.arthayantra.backtest.regime.RegimeAttribution.RegimeTradeTag;
+import in.arthayantra.backtest.regime.RegimeLabel;
 import in.arthayantra.backtest.replay.CostConfig;
 import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.strategyengine.config.StrategyDefinition;
@@ -63,10 +68,13 @@ public class WalkForwardRunner {
   }
 
   /**
-   * Builds + evaluates the folds and serializes the fold columns.
+   * Builds + evaluates the folds, attributes each OOS fold to its computed regime mix (guard 6) and
+   * serializes the fold columns under the chosen {@code fold_aggregation}.
    *
    * @param config the raw resolved config JSONB (carries {@code walk_forward}/{@code constraints}/
    *     {@code objective} — the compiled definition does not)
+   * @param regimeLabels the benchmark entry-day → regime label map (T−1 computed), used to fill each
+   *     fold's {@code regimeMix} + per-regime OOS aggregates + per-trade entry-day tags (guard 6)
    * @return the fold persistence bundle (never null; its {@code foldMetrics} array may be empty when
    *     every fold failed {@code min_trades})
    */
@@ -81,10 +89,13 @@ public class WalkForwardRunner {
       CostConfig costs,
       boolean oneMinuteCovered,
       OffsetDateTime from,
-      OffsetDateTime to) {
+      OffsetDateTime to,
+      Map<LocalDate, RegimeLabel> regimeLabels) {
     JsonNode optimize = config.path("backtest").path("optimize");
     int minTrades = optimize.path("constraints").path("min_trades").asInt(DEFAULT_MIN_TRADES);
     String objectiveMetric = optimize.path("objective").path("metric").asText("sharpe");
+    String aggregation =
+        optimize.path("objective").path("fold_aggregation").asText(DEFAULT_AGGREGATION);
 
     List<Fold> folds =
         hasWalkForward(config)
@@ -96,8 +107,9 @@ public class WalkForwardRunner {
             folds, definition, exchange, tradingsymbol, primary1m, contexts, initialEquity, costs,
             oneMinuteCovered);
 
-    FoldAggregate aggregate = aggregator.aggregate(results, objectiveMetric, minTrades);
-    ArrayNode foldMetrics = serialize(aggregate.validFolds());
+    FoldAggregate aggregate =
+        aggregator.aggregate(results, objectiveMetric, minTrades, aggregation, 0);
+    ArrayNode foldMetrics = serialize(aggregate.validFolds(), regimeLabels);
     return new FoldPersistence(
         foldMetrics,
         aggregate.oosFoldMean(),
@@ -105,6 +117,8 @@ public class WalkForwardRunner {
         aggregate.sharpeDegradation(),
         aggregate.excludedFoldCount());
   }
+
+  private static final String DEFAULT_AGGREGATION = ObjectiveAggregator.DEFAULT_AGGREGATION;
 
   private List<Fold> walkForwardFolds(JsonNode wf, OffsetDateTime from, OffsetDateTime to) {
     int trainDays = wf.path("train_days").asInt();
@@ -154,7 +168,8 @@ public class WalkForwardRunner {
     return out;
   }
 
-  private ArrayNode serialize(List<FoldResult> validFolds) {
+  private ArrayNode serialize(
+      List<FoldResult> validFolds, Map<LocalDate, RegimeLabel> regimeLabels) {
     ArrayNode array = objectMapper.createArrayNode();
     for (FoldResult fr : validFolds) {
       ObjectNode node = objectMapper.createObjectNode();
@@ -163,8 +178,66 @@ public class WalkForwardRunner {
       node.set("test", window(fr.fold().testFrom(), fr.fold().testTo()));
       node.set("trainMetrics", fr.trainMetrics().full());
       node.set("oosMetrics", fr.oosMetrics().full());
-      node.putNull("regimeMix"); // populated in Phase 32 (guard 6)
+
+      // §D.4 guard 6 — computed (never declared) regime attribution; fills the Phase-31 null seam.
+      RegimeAttribution attribution =
+          FoldRegimeAttributor.attribute(
+              fr.oosTrades(),
+              fr.fold().testFrom(),
+              fr.fold().testTo(),
+              fr.initialEquity(),
+              regimeLabels);
+      node.set("regimeMix", regimeMix(attribution.mix()));
+      node.set("regimeOos", regimeOos(attribution.perRegime()));
+      node.set("tradeRegimes", tradeRegimes(attribution.tradeTags()));
       array.add(node);
+    }
+    return array;
+  }
+
+  /** The OOS-test-day label distribution: an object keyed by the four labels (always all four). */
+  private ObjectNode regimeMix(Map<RegimeLabel, Integer> mix) {
+    ObjectNode node = objectMapper.createObjectNode();
+    for (RegimeLabel label : RegimeLabel.values()) {
+      node.put(label.name(), mix.getOrDefault(label, 0));
+    }
+    return node;
+  }
+
+  /** Per-regime OOS aggregates (Sharpe + ₹ expectancy + trade count), only labels that traded. */
+  private ObjectNode regimeOos(Map<RegimeLabel, RegimeStat> perRegime) {
+    ObjectNode node = objectMapper.createObjectNode();
+    perRegime.forEach(
+        (label, stat) -> {
+          ObjectNode s = objectMapper.createObjectNode();
+          if (stat.sharpe() == null) {
+            s.putNull("sharpe");
+          } else {
+            s.put("sharpe", stat.sharpe().toPlainString());
+          }
+          if (stat.expectancy() == null) {
+            s.putNull("expectancy");
+          } else {
+            s.put("expectancy", stat.expectancy().toPlainString());
+          }
+          s.put("tradeCount", stat.tradeCount());
+          node.set(label.name(), s);
+        });
+    return node;
+  }
+
+  /** Each closed OOS trade's entry-day regime tag, in seq order (persisted within fold_metrics). */
+  private ArrayNode tradeRegimes(List<RegimeTradeTag> tags) {
+    ArrayNode array = objectMapper.createArrayNode();
+    for (RegimeTradeTag tag : tags) {
+      ObjectNode t = objectMapper.createObjectNode();
+      t.put("seq", tag.seq());
+      if (tag.label() == null) {
+        t.putNull("regime");
+      } else {
+        t.put("regime", tag.label().name());
+      }
+      array.add(t);
     }
     return array;
   }

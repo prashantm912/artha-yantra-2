@@ -6,6 +6,10 @@ import in.arthayantra.backtest.client.StrategyVersionClient.ResolvedVersion;
 import in.arthayantra.backtest.dispatch.JobCancelledException;
 import in.arthayantra.backtest.dispatch.ReplayStub;
 import in.arthayantra.backtest.jobs.Job;
+import in.arthayantra.backtest.regime.BenchmarkSeries;
+import in.arthayantra.backtest.regime.RegimeLabel;
+import in.arthayantra.backtest.regime.RegimeLabeler;
+import in.arthayantra.backtest.regime.RegimePreflight;
 import in.arthayantra.backtest.replay.folds.FoldPersistence;
 import in.arthayantra.backtest.replay.folds.WalkForwardRunner;
 import in.arthayantra.backtest.replay.options.PremiumProvenance;
@@ -15,6 +19,7 @@ import in.arthayantra.strategyengine.config.StrategyDefinition;
 import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategyengine.series.SeriesKey;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -47,6 +52,8 @@ public class BacktestRunner {
   private final ReplayStub stub;
   private final PremiumProvenance premiumProvenance;
   private final WalkForwardRunner walkForward;
+  private final RegimeLabeler regimeLabeler;
+  private final RegimePreflight regimePreflight;
 
   /** Wires the replay collaborators. */
   public BacktestRunner(
@@ -58,7 +65,9 @@ public class BacktestRunner {
       TradeRepository trades,
       ReplayStub stub,
       PremiumProvenance premiumProvenance,
-      WalkForwardRunner walkForward) {
+      WalkForwardRunner walkForward,
+      RegimeLabeler regimeLabeler,
+      RegimePreflight regimePreflight) {
     this.versions = versions;
     this.candleReader = candleReader;
     this.replayEngine = replayEngine;
@@ -68,6 +77,8 @@ public class BacktestRunner {
     this.stub = stub;
     this.premiumProvenance = premiumProvenance;
     this.walkForward = walkForward;
+    this.regimeLabeler = regimeLabeler;
+    this.regimePreflight = regimePreflight;
   }
 
   /** Runs the job; throws {@link JobCancelledException} on cancel and other exceptions on failure. */
@@ -143,7 +154,8 @@ public class BacktestRunner {
                 CostConfig.defaults(),
                 true,
                 from,
-                to)
+                to,
+                regimeLabels(config, from, to))
             : null;
 
     // §D.4 guard 3/6: surface the min_trades exclusion count as a run-level flag on the metrics
@@ -187,6 +199,25 @@ public class BacktestRunner {
     trades.insertAll(runId, result.trades());
     progress.accept(100);
     log.info("backtest run {} completed: {} trades", runId, result.trades().size());
+  }
+
+  /**
+   * Resolves the benchmark + computes the T−1 regime labels over the run window for fold attribution
+   * (guard 6, §D.4). The benchmark warm-up coverage is re-checked here (the same gate {@code
+   * JobsService.submit} runs at submission) so a fold run never attributes against partial coverage.
+   */
+  private Map<LocalDate, RegimeLabel> regimeLabels(
+      JsonNode config, OffsetDateTime from, OffsetDateTime to) {
+    BenchmarkSeries benchmark = BenchmarkSeries.resolve(config);
+    regimePreflight.check(benchmark, from);
+    List<EngineCandle> dailyBenchmark =
+        candleReader.readDailyWithWarmup(
+            benchmark.exchange(),
+            benchmark.tradingsymbol(),
+            from,
+            to,
+            RegimeLabeler.WARMUP_SESSIONS);
+    return regimeLabeler.label(dailyBenchmark);
   }
 
   private Map<SeriesKey, List<EngineCandle>> contextSeries(

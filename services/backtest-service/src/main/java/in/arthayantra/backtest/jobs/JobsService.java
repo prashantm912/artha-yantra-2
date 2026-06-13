@@ -7,6 +7,8 @@ import in.arthayantra.backtest.client.StrategyVersionClient;
 import in.arthayantra.backtest.dispatch.JobStreamDispatcher;
 import in.arthayantra.backtest.dispatch.ProgressPublisher;
 import in.arthayantra.backtest.dispatch.Streams;
+import in.arthayantra.backtest.regime.BenchmarkSeries;
+import in.arthayantra.backtest.regime.RegimePreflight;
 import in.arthayantra.backtest.replay.PreflightCoverage;
 import java.time.OffsetDateTime;
 import in.arthayantra.common.web.error.ApiException;
@@ -28,6 +30,8 @@ public class JobsService {
   private final StrategyVersionClient versions;
   private final ProgressPublisher progress;
   private final PreflightCoverage preflight;
+  private final RegimePreflight regimePreflight;
+  private final StressGuard stressGuard;
   private final StringRedisTemplate redis;
   private final ObjectMapper objectMapper;
 
@@ -38,6 +42,8 @@ public class JobsService {
       StrategyVersionClient versions,
       ProgressPublisher progress,
       PreflightCoverage preflight,
+      RegimePreflight regimePreflight,
+      StressGuard stressGuard,
       StringRedisTemplate redis,
       ObjectMapper objectMapper) {
     this.repository = repository;
@@ -45,6 +51,8 @@ public class JobsService {
     this.versions = versions;
     this.progress = progress;
     this.preflight = preflight;
+    this.regimePreflight = regimePreflight;
+    this.stressGuard = stressGuard;
     this.redis = redis;
     this.objectMapper = objectMapper;
   }
@@ -60,6 +68,8 @@ public class JobsService {
     StrategyVersionClient.ResolvedVersion v =
         versions.resolve(req.strategyId(), req.strategyVersion());
     runPreflight(v.config(), req);
+
+    String purpose = req.purpose() == null || req.purpose().isBlank() ? "backtest" : req.purpose();
 
     ObjectNode request = objectMapper.createObjectNode();
     request.put("strategyId", req.strategyId());
@@ -80,7 +90,18 @@ public class JobsService {
     if (req.seed() != null) {
       request.put("seed", req.seed());
     }
-    request.put("purpose", req.purpose() == null || req.purpose().isBlank() ? "backtest" : req.purpose());
+    request.put("purpose", purpose);
+
+    // S1C stress guard (§D.6): a stress test's window must not overlap ANY prior lineage job
+    // (sweeps AND manual backtests both leak). The check runs BEFORE the row is inserted so a
+    // refused stress never appears in lineage. The reuse counter is recorded on a clean window.
+    if ("stress_test".equals(purpose) && req.from() != null && req.to() != null) {
+      OffsetDateTime from = OffsetDateTime.parse(toDateTime(req.from()));
+      OffsetDateTime to = OffsetDateTime.parse(toDateTime(req.to()));
+      stressGuard.validateWindow(req.strategyId(), from, to);
+      long reuse = stressGuard.recordReuse(req.strategyId(), from, to);
+      request.put("holdoutReuseCount", reuse);
+    }
 
     Job job =
         repository.insertQueued(JobKind.BACKTEST, null, v.strategyId(), request, correlationId);
@@ -116,21 +137,34 @@ public class JobsService {
     return CancelOutcome.CANCELLING;
   }
 
-  /** Coverage pre-flight (§D.6) for explicit single-instrument universes with a date window. */
+  /**
+   * Coverage pre-flight (§D.6) for explicit single-instrument universes with a date window — the
+   * primary 1m series AND (guard 6, §D.4) the regime-attribution benchmark series including warm-up
+   * depth, so a fold/stress run never attributes against partial benchmark coverage. The benchmark
+   * gate uses {@code backtest.defaults.benchmark} (default {@code NSE:NIFTY 50}); it is skipped only
+   * when the benchmark string is malformed (a schema concern, not a coverage one).
+   */
   private void runPreflight(JsonNode config, BacktestRunRequest req) {
     if (config == null || !config.has("universe") || req.from() == null || req.to() == null) {
       return;
     }
+    OffsetDateTime from = OffsetDateTime.parse(toDateTime(req.from()));
+    OffsetDateTime to = OffsetDateTime.parse(toDateTime(req.to()));
+
     JsonNode instruments = config.path("universe").path("instruments");
-    if (!instruments.isArray() || instruments.isEmpty()) {
-      return; // index/options/futures universes resolve at submission in Stage F
+    if (instruments.isArray() && !instruments.isEmpty()) {
+      JsonNode first = instruments.get(0);
+      preflight.check(
+          first.path("exchange").asText(), first.path("tradingsymbol").asText(), from, to);
     }
-    JsonNode first = instruments.get(0);
-    preflight.check(
-        first.path("exchange").asText(),
-        first.path("tradingsymbol").asText(),
-        OffsetDateTime.parse(toDateTime(req.from())),
-        OffsetDateTime.parse(toDateTime(req.to())));
+    // index/options/futures universes resolve at submission in Stage F (no primary check here), but
+    // the benchmark gate runs for every windowed run with a resolvable benchmark.
+    try {
+      regimePreflight.check(BenchmarkSeries.resolve(config), from);
+    } catch (IllegalArgumentException malformedBenchmark) {
+      // a malformed benchmark string is a schema-validation concern (rejected upstream), not a
+      // coverage failure — never block submission on it here.
+    }
   }
 
   private static String toDateTime(String value) {

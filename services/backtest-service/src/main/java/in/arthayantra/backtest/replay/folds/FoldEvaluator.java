@@ -83,7 +83,9 @@ public class FoldEvaluator {
               oosResult.totalBars(),
               oosResult.barsInPosition());
       int oosTradeCount = closedTrades(oosResult);
-      results.add(new FoldResult(fold, train, oos, oosTradeCount));
+      results.add(
+          new FoldResult(
+              fold, train, oos, oosTradeCount, oosResult.trades(), oosResult.initialEquity()));
     }
     return results;
   }

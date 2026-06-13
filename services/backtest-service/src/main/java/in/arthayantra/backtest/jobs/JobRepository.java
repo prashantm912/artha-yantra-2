@@ -198,4 +198,44 @@ public class JobRepository {
             "SELECT count(*) FROM jobs WHERE status=?", Long.class, status.db());
     return c == null ? 0L : c;
   }
+
+  /**
+   * One prior lineage job's tested window, for the S1C stress guard (§D.6): the job id plus its raw
+   * {@code request->>'from'} / {@code request->>'to'} strings (a plain date or a full offset
+   * date-time — normalized to IST in Java by the caller, the same {@code toDateTime} convention the
+   * rest of the service uses). Date ranges live in {@code jobs.request}; both BACKTEST and
+   * OPTIMIZATION/TRIAL jobs leak holdout information, so kind is NOT filtered here.
+   *
+   * @param id the job id
+   * @param fromRaw {@code request->>'from'} (may be {@code null}/blank for jobs without a window)
+   * @param toRaw {@code request->>'to'}
+   */
+  public record LineageWindow(UUID id, String fromRaw, String toRaw) {}
+
+  /**
+   * Every PRIOR job of a strategy lineage that carries a tested {@code [from, to]} window, in
+   * creation order — the overlap test is performed in Java (the {@code ?} JSONB operator collides
+   * with JDBC bind placeholders, and the date strings need the service's IST normalization anyway).
+   * Filtered to {@code request->>'strategyId'} = the lineage; excludes the given job id (the
+   * about-to-be-submitted stress job itself) when non-null.
+   */
+  public List<LineageWindow> findLineageWindows(String strategyId, UUID excludeJobId) {
+    String exclude = excludeJobId == null ? null : excludeJobId.toString();
+    return jdbc.query(
+        """
+        SELECT id, request->>'from' AS from_raw, request->>'to' AS to_raw
+        FROM jobs
+        WHERE request->>'strategyId' = ?
+          AND (?::uuid IS NULL OR id <> ?::uuid)
+        ORDER BY created_at
+        """,
+        (rs, n) ->
+            new LineageWindow(
+                UUID.fromString(rs.getString("id")),
+                rs.getString("from_raw"),
+                rs.getString("to_raw")),
+        strategyId,
+        exclude,
+        exclude);
+  }
 }

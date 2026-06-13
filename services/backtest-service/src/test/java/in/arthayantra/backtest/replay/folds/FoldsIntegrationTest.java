@@ -83,8 +83,12 @@ class FoldsIntegrationTest extends BacktestIntegrationTestBase {
     assertThat(fold0.path("test").path("to").asText()).startsWith("2026-01-08");
     assertThat(fold0.path("trainMetrics").has("sharpe")).isTrue();
     assertThat(fold0.path("oosMetrics").has("sharpe")).isTrue();
+    // Phase 32 (guard 6): regimeMix is now POPULATED (an object over the four labels), never null.
     assertThat(fold0.has("regimeMix")).isTrue();
-    assertThat(fold0.path("regimeMix").isNull()).isTrue(); // null until Phase 32
+    assertThat(fold0.path("regimeMix").isObject()).isTrue();
+    assertThat(fold0.path("regimeMix").size()).isEqualTo(4);
+    assertThat(fold0.has("regimeOos")).isTrue();
+    assertThat(fold0.has("tradeRegimes")).isTrue();
 
     // the across-fold columns are written for a fold run.
     assertThat(numeric(runId, "oos_fold_mean")).isNotNull();
@@ -280,6 +284,10 @@ class FoldsIntegrationTest extends BacktestIntegrationTestBase {
   }
 
   private void seedNiftyCandles() throws Exception {
+    // guard 6: the fold path now attributes regimes against a benchmark daily series with full
+    // warm-up depth — seed it (deterministic synthetic NIFTY 50 1d bars) before any fold run.
+    in.arthayantra.backtest.testsupport.BenchmarkSeeder.seedDefault(
+        jdbc, java.time.LocalDate.parse("2026-01-10"));
     Long existing =
         jdbc.queryForObject(
             "SELECT count(*) FROM marketdata.candles WHERE tradingsymbol='NIFTY 50' "

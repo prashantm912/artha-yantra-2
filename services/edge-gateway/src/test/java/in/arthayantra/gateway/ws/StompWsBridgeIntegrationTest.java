@@ -286,7 +286,7 @@ class StompWsBridgeIntegrationTest {
           public Mono<Void> handle(org.springframework.web.reactive.socket.WebSocketSession s) {
             negotiated.set(s.getHandshakeInfo().getSubProtocol());
             handled.countDown();
-            return s.receive().then();
+            return s.close(); // close immediately — never leak a server session into later tests
           }
         };
 

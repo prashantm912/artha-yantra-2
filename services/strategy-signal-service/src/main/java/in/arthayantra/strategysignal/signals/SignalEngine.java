@@ -560,6 +560,38 @@ public class SignalEngine {
     }
   }
 
+  /**
+   * Safety net behind the push-based hot-swap: every 20s reconcile the loaded set against the
+   * registry's published set and reload on drift. The strategy.changed event fires INSIDE the
+   * publish transaction (so a reload it triggers can race the commit) and a Redis subscription may
+   * not yet be established when the FIRST strategy is published on a fresh deployment — without
+   * this, that first publish could never take effect. Cheap: one indexed query on a single-owner
+   * registry, a reload only when the published-version set actually changed.
+   */
+  @Scheduled(fixedDelay = 20_000L, initialDelay = 20_000L)
+  public void reconcilePublishedStrategies() {
+    if (!publishedVersionSet().equals(loadedVersionSet())) {
+      log.info("reconcile: published-strategy set drifted from the engine — reloading");
+      reloadRequested.set(true);
+      evalExecutor.execute(this::drainReloadOnly);
+    }
+  }
+
+  private String publishedVersionSet() {
+    return registry.listAll().stream()
+        .filter(s -> s.enabled() && s.publishedVersionId() != null)
+        .map(s -> s.publishedVersionId().toString())
+        .sorted()
+        .collect(java.util.stream.Collectors.joining(","));
+  }
+
+  private String loadedVersionSet() {
+    return loaded.stream()
+        .map(l -> l.versionId().toString())
+        .sorted()
+        .collect(java.util.stream.Collectors.joining(","));
+  }
+
   private static boolean withinSessionWindow(StrategyDefinition definition, EngineCandle bar) {
     LocalTime barTime = bar.bucketStart().withOffsetSameInstant(Ist.OFFSET).toLocalTime();
     StrategyDefinition.Session session = definition.session();

@@ -43,6 +43,9 @@ test.describe('login journey (C-2.20)', () => {
 
   test('axe: the login page has no detectable violations', async ({ page }) => {
     await page.goto('/login');
+    // wait for Angular to hydrate the component before axe runs — on a slow CI runner analyzing the
+    // empty <app-root> shell reports spurious landmark/heading violations
+    await expect(page.locator('input[name="password"]')).toBeVisible();
     const results = await new AxeBuilder({ page }).analyze();
     expect(results.violations).toEqual([]);
   });

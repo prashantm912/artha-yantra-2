@@ -44,7 +44,7 @@ jobs:
             docker run --rm \
               -v "$PWD/contracts:/committed:ro" \
               -v "$PWD/services/$svc/target/contracts:/fresh:ro" \
-              openapitools/openapi-diff:2.1.0-beta.13 \
+              openapitools/openapi-diff:latest \
               --fail-on-incompatible \
               "/committed/$svc.openapi.json" "/fresh/$svc.openapi.json"
           done

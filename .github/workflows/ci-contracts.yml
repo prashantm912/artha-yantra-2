@@ -29,9 +29,11 @@ jobs:
           cache: maven
 
       - name: Regenerate specs from code (capture tests, mock profile)
+        # -am builds the three services PLUS every upstream module and the parent POMs in one
+        # reactor (a -pl install of leaf libs alone never installs the common-web / parent POMs).
+        # Upstream modules run zero tests (no ContractCaptureTest + failIfNoSpecifiedTests=false).
         run: |
-          ./mvnw -ntp -q -pl libs/common-web/core,libs/common-web/servlet,libs/market-calendar,libs/strategy-schema,libs/strategy-engine install -DskipTests
-          ./mvnw -ntp -pl services/edge-gateway,services/market-data-service,services/strategy-signal-service test \
+          ./mvnw -ntp -pl services/edge-gateway,services/market-data-service,services/strategy-signal-service -am test \
             -Dtest=ContractCaptureTest -Dsurefire.failIfNoSpecifiedTests=false
 
       - name: Diff committed vs regenerated (fail on BREAKING)

@@ -84,7 +84,7 @@ universe:
     - { exchange: NSE, tradingsymbol: RELIANCE }
 timeframes: { primary: 1m }
 indicators:
-  - { name: RSI, alias: rsi_1m, timeframe: 1m, params: { period: 14 }, weight: 1.0,
+  - { name: RSI, alias: rsi_1m, timeframe: 1m, params: { period: 2 }, weight: 1.0,
       normalize: { type: step, bands: [ { score: 1.0 } ] } }
 entry_rules:
   direction: long

@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process';
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -29,6 +29,8 @@ export default async function globalSetup(): Promise<void> {
     process.env['E2E_OWNER_PASSWORD'] = 'e2e-owner-password';
   }
 
+  ensureSecrets();
+
   if (await gatewayHealthy()) {
     console.log('[e2e] gateway already healthy — reusing the running stack');
     return;
@@ -47,6 +49,30 @@ export default async function globalSetup(): Promise<void> {
   }
   execSync(`${COMPOSE.join(' ')} ps`, { cwd: REPO, stdio: 'inherit' });
   throw new Error('gateway did not become healthy within 6 minutes');
+}
+
+/**
+ * The compose stack mounts deploy/secrets/* as Docker secrets; `ay up` seeds them, but the E2E
+ * boots compose directly, so CI (and a fresh local clone) has no secrets dir and the bind mount
+ * fails before anything starts. Seed the same files `ay` does — idempotent, mock-safe values: a
+ * fixed Postgres password (single source of truth for the DB and the services), a valid 32-byte
+ * AES-256 master key, and empty Kite placeholders (mock mode never reads them).
+ */
+function ensureSecrets(): void {
+  const dir = join(REPO, 'deploy', 'secrets');
+  mkdirSync(dir, { recursive: true });
+  const files: Record<string, string> = {
+    postgres_password: 'e2e-postgres-pw',
+    artha_master_key: Buffer.alloc(32).toString('base64'),
+    kite_api_key: '',
+    kite_api_secret: '',
+  };
+  for (const [name, value] of Object.entries(files)) {
+    const file = join(dir, name);
+    if (!existsSync(file)) {
+      writeFileSync(file, value);
+    }
+  }
 }
 
 async function gatewayHealthy(): Promise<boolean> {

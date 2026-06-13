@@ -356,10 +356,19 @@ The regression net that drives §4 + §6 automatically. It reuses a running stac
 
 ```powershell
 cd e2e
+npx playwright install chromium   # one-time: download the browser binary (or after a Playwright update)
 $env:E2E_OWNER_PASSWORD = 'MyPassword123'   # match your .env hash; CI uses the committed pair
 npx playwright test --reporter=list
 cd ..
 ```
+
+> **First run / after an upgrade:** if you skip the `install` step you'll see
+> seven instant failures `browserType.launch: Executable doesn't exist at
+> ...chrome-headless-shell-<n>...` with a "Please run `npx playwright install`"
+> banner — that is the missing browser binary, not a product failure (a Playwright
+> version bump changes the bundled-browser revision, so the previously-downloaded
+> binary no longer matches). Run `npx playwright install chromium` once and re-run.
+> (CI installs it in the `ci-e2e` workflow, so this only affects local runs.)
 
 **PASS when:** 7/7 green — login journey (deep-link, cookie flags, wrong/right
 password, axe), the MVP signal with its breakdown, signals-page axe, and the

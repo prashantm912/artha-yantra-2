@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- strategy-engine (Phases 19-20 / ADR D6/D7): the ONE shared evaluation JAR
+     embedded in strategy-signal-service (live) and backtest-service (replay)
+     so a backtest provably exercises the identical rule code that produces
+     live calls. Phase 19: ta4j indicator registry + normalizers pinned by
+     committed reference vectors. JaCoCo branch gate >= 70% starts here. -->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>in.arthayantra</groupId>
+    <artifactId>arthayantra-parent</artifactId>
+    <version>2.0.0-SNAPSHOT</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>strategy-engine</artifactId>
+  <name>strategy-engine</name>
+
+  <properties>
+    <!-- ADR canonical stack table: ta4j 0.22.x -->
+    <ta4j.version>0.22.0</ta4j.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.ta4j</groupId>
+      <artifactId>ta4j-core</artifactId>
+      <version>${ta4j.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>in.arthayantra</groupId>
+      <artifactId>market-calendar</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <!-- Phase 19 gate: >= 70% BRANCH coverage on the engine bundle -->
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>jacoco-check</id>
+            <configuration>
+              <rules>
+                <rule>
+                  <element>BUNDLE</element>
+                  <limits>
+                    <limit>
+                      <counter>BRANCH</counter>
+                      <value>COVEREDRATIO</value>
+                      <minimum>0.70</minimum>
+                    </limit>
+                  </limits>
+                </rule>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

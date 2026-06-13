@@ -110,11 +110,12 @@
       <groupId>com.google.code.gson</groupId>
       <artifactId>gson</artifactId>
     </dependency>
-    <!-- high-precision normal CDF for the Black-76 solver (Phase 14) -->
+    <!-- Black-76 pricing/IV math hoisted to libs/black76-math (Phase 30A / A10);
+         commons-math3 (normal CDF) arrives transitively through it -->
     <dependency>
-      <groupId>org.apache.commons</groupId>
-      <artifactId>commons-math3</artifactId>
-      <version>${commons-math3.version}</version>
+      <groupId>in.arthayantra</groupId>
+      <artifactId>black76-math</artifactId>
+      <version>${project.version}</version>
     </dependency>
         <dependency>
       <groupId>org.springdoc</groupId>

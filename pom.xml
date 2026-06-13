@@ -24,6 +24,7 @@
     <module>libs/market-calendar</module>
     <module>libs/strategy-schema</module>
     <module>libs/strategy-engine</module>
+    <module>libs/black76-math</module>
     <module>services/edge-gateway</module>
     <module>services/market-data-service</module>
     <module>services/strategy-signal-service</module>

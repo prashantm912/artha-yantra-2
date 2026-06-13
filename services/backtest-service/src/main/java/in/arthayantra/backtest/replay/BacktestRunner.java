@@ -6,6 +6,8 @@ import in.arthayantra.backtest.client.StrategyVersionClient.ResolvedVersion;
 import in.arthayantra.backtest.dispatch.JobCancelledException;
 import in.arthayantra.backtest.dispatch.ReplayStub;
 import in.arthayantra.backtest.jobs.Job;
+import in.arthayantra.backtest.replay.folds.FoldPersistence;
+import in.arthayantra.backtest.replay.folds.WalkForwardRunner;
 import in.arthayantra.backtest.replay.options.PremiumProvenance;
 import in.arthayantra.backtest.replay.options.PremiumSource;
 import in.arthayantra.strategyengine.config.StrategyCompiler;
@@ -44,6 +46,7 @@ public class BacktestRunner {
   private final TradeRepository trades;
   private final ReplayStub stub;
   private final PremiumProvenance premiumProvenance;
+  private final WalkForwardRunner walkForward;
 
   /** Wires the replay collaborators. */
   public BacktestRunner(
@@ -54,7 +57,8 @@ public class BacktestRunner {
       RunRepository runs,
       TradeRepository trades,
       ReplayStub stub,
-      PremiumProvenance premiumProvenance) {
+      PremiumProvenance premiumProvenance,
+      WalkForwardRunner walkForward) {
     this.versions = versions;
     this.candleReader = candleReader;
     this.replayEngine = replayEngine;
@@ -63,6 +67,7 @@ public class BacktestRunner {
     this.trades = trades;
     this.stub = stub;
     this.premiumProvenance = premiumProvenance;
+    this.walkForward = walkForward;
   }
 
   /** Runs the job; throws {@link JobCancelledException} on cancel and other exceptions on failure. */
@@ -118,6 +123,37 @@ public class BacktestRunner {
             result.barsInPosition());
     m.full().put("strategyChecksum", resolved.checksum());
 
+    // §D.4 fold-mode trigger (Phase 31): a plain /backtests/run job is FULL-WINDOW (folds == null,
+    // the four fold columns stay NULL). Fold-mode activates ONLY when the future optimizer/stress
+    // path sets request.foldContext == true. With a walk_forward config -> rolling/anchored folds
+    // (guard 2); without one but still fold-context -> the implicit 70/30 split (guard 1). The
+    // run-level headline Metrics/equity curve stay full-window (a meaningful /results payload); the
+    // OOS objective the optimizer ranks on lands in oos_fold_mean/oos_fold_std + sharpe_degradation.
+    boolean foldContext = request.path("foldContext").asBoolean(false);
+    FoldPersistence folds =
+        foldContext
+            ? walkForward.run(
+                config,
+                definition,
+                signal.exchange(),
+                signal.tradingsymbol(),
+                primary1m,
+                contexts,
+                initialEquity,
+                CostConfig.defaults(),
+                true,
+                from,
+                to)
+            : null;
+
+    // §D.4 guard 3/6: surface the min_trades exclusion count as a run-level flag on the metrics
+    // JSONB ("foldsExcluded"), never a silent drop — a consumer of /results or /folds can then tell
+    // "3 valid, 0 excluded" from "3 valid, 2 excluded under min_trades". Only on the fold path; a
+    // plain full-window run carries no such key.
+    if (folds != null) {
+      m.full().put("foldsExcluded", folds.excludedFoldCount());
+    }
+
     // §D.15 premium provenance: resolved BEFORE results persist, never defaulted/null.
     PremiumSource premiumSource = premiumProvenance.forCandleReplay(config);
 
@@ -146,7 +182,8 @@ public class BacktestRunner {
             seed,
             dataHash,
             engineVersion(resolved),
-            premiumSource);
+            premiumSource,
+            folds);
     trades.insertAll(runId, result.trades());
     progress.accept(100);
     log.info("backtest run {} completed: {} trades", runId, result.trades().size());

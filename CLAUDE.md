@@ -36,12 +36,22 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
   Flyway lineages, `@DynamicPropertySource` for `currentSchema`. Services connect to
   Postgres as `artha` (D10 single-writer by convention); per-schema roles like
   `ay_backtest` are read-only, asserted via SET ROLE grant tests.
+- **ITs share the singleton DB with NO per-method cleanup** — each test method needs a
+  unique slug+name; `RegistryService.create` 409s on a duplicate slug OR name. State
+  persists across methods *and* across surefire reruns.
 - JaCoCo gate ≥ 60% line on services; Modulith `verify` runs in CI.
 - **Mock-stack backtest testing:** candle data is real-time/rolling (accrues from
   boot) — derive a recent covered window, never hardcode dates; every windowed run's
   regime pre-flight needs ~272 daily benchmark sessions, so backfill `NIFTY 50` 1d
   via cache-first GET `/api/v1/market/candles` first. Results/trades/folds/montecarlo
   are keyed by the **run id** (the job's `resultRef`), not the jobId.
+- **Candle sources split by interval:** `CandleReader.read()` serves the `candles_<iv>`
+  caggs (5m/15m/1h/1d/1w), **sparse on a fresh boot**; native daily lives in `candles`@1d
+  (dense — `readDailyWithWarmup`). The two diverge for 1d (chart overlays hit this).
+- **Run the Playwright e2e vs a running mock stack:** `cd e2e &&
+  E2E_OWNER_PASSWORD=<your .env owner pw> npx playwright test` — global-setup reuses a
+  healthy stack and won't overwrite an existing `.env`; the helper password defaults to
+  `e2e-owner-password`, so override it to match your hash.
 
 ## Database / migrations
 - **Applied Flyway migrations are checksum-locked** in the dev stack and CI — editing
@@ -73,6 +83,9 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
 - The **Bash tool is bash, not PowerShell** — PS here-strings (`@'…'@`) are taken
   literally and corrupt commit subjects; pass multi-line commit messages via
   `git commit -F -` with a heredoc.
+- The **`guard-paths.py` PreToolUse hook resolves its path relative to the Bash cwd** —
+  a persisted `cd <subdir>` makes every later Edit/Write fail (`can't open
+  .../<subdir>/tools/claude/guard-paths.py`). Keep the Bash cwd at repo root, or subshell.
 - CI runs on a **fresh compose stack + 2-core runner** — code green locally can still
   fail several CI iterations (cold start, constrained cores). Gate e2e readiness on
   container healthchecks, not gateway HTTP (a 401 is the gateway auth filter, not

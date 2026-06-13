@@ -36,6 +36,89 @@ public final class ExitEvaluator {
 
   private ExitEvaluator() {}
 
+  /**
+   * A9 [FP-5] intrabar exits: when {@code exit_intrabar} is on and the primary timeframe is
+   * coarser than 1m, the LEVEL exits (stop_loss / trailing_stop / take_profit) are evaluated on
+   * each CLOSED 1m bar — the same rule replay applies at the 1m floor. time_stop/signal_exit
+   * stay primary-bar-close. ATR-based distances still read the ATR at the PRIMARY entry bar.
+   */
+  public static Optional<ExitDecision> evaluateIntrabarLevels(
+      StrategyDefinition definition,
+      EngineSeries primarySeries,
+      int entryPrimaryIndex,
+      EngineSeries oneMinute,
+      Direction direction,
+      BigDecimal entryPrice,
+      int entryOneMinuteIndex,
+      int oneMinuteIndex) {
+    BigDecimal close = oneMinute.candle(oneMinuteIndex).close();
+    Position primaryPosition = new Position(direction, entryPrice, entryPrimaryIndex);
+    Position oneMinutePosition = new Position(direction, entryPrice, entryOneMinuteIndex);
+    for (String type : new String[] {"stop_loss", "trailing_stop", "take_profit"}) {
+      for (StrategyDefinition.ExitRuleSpec rule : definition.exitRules()) {
+        if (!rule.type().equals(type)) {
+          continue;
+        }
+        Optional<ExitDecision> decision =
+            switch (type) {
+              case "stop_loss" ->
+                  levelOn(definition, primarySeries, primaryPosition, rule, close, true);
+              case "take_profit" ->
+                  levelOn(definition, primarySeries, primaryPosition, rule, close, false);
+              case "trailing_stop" ->
+                  trailingOn(
+                      primarySeries, primaryPosition, oneMinute, oneMinutePosition,
+                      oneMinuteIndex, rule, close);
+              default -> Optional.empty();
+            };
+        if (decision.isPresent()) {
+          return decision;
+        }
+      }
+    }
+    return Optional.empty();
+  }
+
+  private static Optional<ExitDecision> levelOn(
+      StrategyDefinition definition,
+      EngineSeries atrSeries,
+      Position atrPosition,
+      StrategyDefinition.ExitRuleSpec rule,
+      BigDecimal close,
+      boolean isStop) {
+    return level(definition, atrSeries, atrPosition, rule, close, isStop);
+  }
+
+  private static Optional<ExitDecision> trailingOn(
+      EngineSeries atrSeries,
+      Position atrPosition,
+      EngineSeries priceSeries,
+      Position pricePosition,
+      int priceIndex,
+      StrategyDefinition.ExitRuleSpec rule,
+      BigDecimal close) {
+    // peaks track the 1m series; ATR distances stay pinned to the primary entry bar
+    Map<String, Object> params = rule.params();
+    if ("atr_multiple".equals(String.valueOf(params.get("basis")))) {
+      BigDecimal value = decimal(params.get("value"));
+      BigDecimal atr = atrAtEntry(atrSeries, atrPosition, params);
+      if (value == null || atr == null) {
+        return Optional.empty();
+      }
+      BigDecimal peak = favorableExtreme(priceSeries, pricePosition, priceIndex);
+      BigDecimal trailDistance = atr.multiply(value, EngineMath.MC);
+      boolean isLong = pricePosition.direction() == Direction.LONG;
+      boolean hit =
+          isLong
+              ? close.compareTo(peak.subtract(trailDistance)) <= 0
+              : close.compareTo(peak.add(trailDistance)) >= 0;
+      return hit
+          ? Optional.of(new ExitDecision("trailing_stop", value + "x entry-ATR 1m trail off " + peak))
+          : Optional.empty();
+    }
+    return trailing(priceSeries, pricePosition, priceIndex, rule, close);
+  }
+
   /** Evaluates all exit rules at a bar; first match in precedence order wins. */
   public static Optional<ExitDecision> evaluate(
       StrategyDefinition definition,

@@ -50,8 +50,11 @@ public class MarketDataCandlesClient {
                           .queryParam("exchange", exchange)
                           .queryParam("tradingsymbol", tradingsymbol)
                           .queryParam("interval", interval)
-                          .queryParam("from", from.toString())
-                          .queryParam("to", to.toString())
+                          // UTC instants (…Z), NOT the +05:30 offset form: a literal '+' in a
+                          // query value is decoded as a space by the receiver (x-www-form rules),
+                          // mangling the timestamp into a 500. Same instant, no '+' to corrupt.
+                          .queryParam("from", from.toInstant().toString())
+                          .queryParam("to", to.toInstant().toString())
                           .queryParam("limit", 50_000)
                           .build())
               .retrieve()

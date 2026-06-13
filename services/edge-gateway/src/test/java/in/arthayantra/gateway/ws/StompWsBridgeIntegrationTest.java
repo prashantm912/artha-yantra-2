@@ -263,6 +263,42 @@ class StompWsBridgeIntegrationTest {
   }
 
   @Test
+  void browserStyleHandshakeNegotiatesTheStompSubprotocol() throws InterruptedException {
+    // RFC 6455: a real browser FAILS the upgrade unless the server echoes one of the
+    // Sec-WebSocket-Protocol values it offered. @stomp/stompjs always offers v12/v11/v10.stomp,
+    // so the gateway MUST advertise + select one or no browser socket ever opens. The Netty
+    // client here is lenient (it does not enforce the echo), which is why this needs an explicit
+    // assertion rather than a connection failure.
+    java.util.concurrent.atomic.AtomicReference<String> negotiated =
+        new java.util.concurrent.atomic.AtomicReference<>();
+    java.util.concurrent.CountDownLatch handled = new java.util.concurrent.CountDownLatch(1);
+    HttpHeaders headers = new HttpHeaders();
+    headers.add(HttpHeaders.COOKIE, "SESSION=" + login());
+
+    org.springframework.web.reactive.socket.WebSocketHandler clientHandler =
+        new org.springframework.web.reactive.socket.WebSocketHandler() {
+          @Override
+          public List<String> getSubProtocols() {
+            return List.of("v12.stomp", "v11.stomp", "v10.stomp");
+          }
+
+          @Override
+          public Mono<Void> handle(org.springframework.web.reactive.socket.WebSocketSession s) {
+            negotiated.set(s.getHandshakeInfo().getSubProtocol());
+            handled.countDown();
+            return s.receive().then();
+          }
+        };
+
+    new ReactorNettyWebSocketClient()
+        .execute(URI.create("ws://127.0.0.1:" + port + "/ws"), headers, clientHandler)
+        .subscribe();
+
+    assertThat(handled.await(20, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+    assertThat(negotiated.get()).isEqualTo("v12.stomp");
+  }
+
+  @Test
   void unauthenticatedUpgradeIsRejected() {
     webTestClient
         .get()

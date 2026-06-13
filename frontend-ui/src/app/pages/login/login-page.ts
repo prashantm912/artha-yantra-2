@@ -40,7 +40,7 @@ import { SessionStore } from '../../core/session.store';
     }
   `,
   template: `
-    <div class="login-wrap">
+    <main class="login-wrap">
       <form class="login-card" (ngSubmit)="submit()">
         <h1>ArthaYantra</h1>
         <p class="tagline">Owner sign-in</p>
@@ -63,7 +63,7 @@ import { SessionStore } from '../../core/session.store';
           [disabled]="!password()"
         />
       </form>
-    </div>
+    </main>
   `,
 })
 export class LoginPage {

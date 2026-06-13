@@ -65,6 +65,7 @@ import { ReasoningBreakdownPanel } from './reasoning-breakdown-panel';
   template: `
     <div class="layout">
       <section>
+        <h1 class="ay-sr-only">Live signals</h1>
         <div class="filters">
           <p-select
             [options]="statusOptions"

@@ -169,6 +169,9 @@ class BreakdownContractTest {
 
     assertThat(first).isEqualTo(second);
     assertThat(first).contains("\"activationReason\"").contains("\"weightDenominator\"");
+    // C-2.6 decimals are exact-decimal STRINGS (never JSON numbers the browser would round)
+    assertThat(first).contains("\"composite\":\"").contains("\"weightDenominator\":\"");
+    assertThat(first).doesNotContainPattern("\"composite\":[0-9]");
   }
 
   @Test

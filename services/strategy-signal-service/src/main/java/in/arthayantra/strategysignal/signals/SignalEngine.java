@@ -48,9 +48,9 @@ import org.springframework.stereotype.Component;
 
 /**
  * Flow 5 Part B — the live signal engine (Phase 23). Subscribes {@code candles.1m.*} for
- * PUBLISHED strategies' universes only (never a firehose); a per-symbol latest-value conflation
- * map + a single evaluation executor decouple evaluation from the Redis receive thread (the
- * stated FAIL criterion); bar-close evaluation through the shared engine JAR; engine pinning
+ * PUBLISHED strategies' universes only (never a firehose); an order-preserving bar queue + a
+ * single evaluation executor decouple evaluation from the Redis receive thread without dropping a
+ * bar (candles.1m.* are never conflated); bar-close evaluation through the shared engine JAR; engine pinning
  * {@code (strategy_id, version, checksum)} on every emitted signal; hot-swap at the NEXT bar
  * boundary on {@code strategy.changed}; session-window gating; the A7/A9 additions — pre-close
  * BTST clock, context-instrument subscriptions (series inputs, never signal emitters),
@@ -86,7 +86,12 @@ public class SignalEngine {
   private final Clock clock;
   private final int signalTtlMinutes;
 
-  private final Map<String, EngineCandle> conflation = new ConcurrentHashMap<>();
+  // candles.1m.* are NEVER conflated (A.7.2 bus contract — every closed bar matters). A FIFO
+  // queue preserves each distinct bar in arrival order; the single-threaded evalExecutor drains it
+  // in order. (A latest-value-wins map would drop a bar under a burst, leaving a permanent series
+  // gap and potentially skipping a stop-loss EXIT.)
+  private final java.util.Queue<Map.Entry<String, EngineCandle>> pending =
+      new java.util.concurrent.ConcurrentLinkedQueue<>();
   private final AtomicBoolean drainScheduled = new AtomicBoolean();
   private final AtomicBoolean reloadRequested = new AtomicBoolean(true);
   private final Map<String, LocalDate> preCloseDone = new ConcurrentHashMap<>();
@@ -147,7 +152,7 @@ public class SignalEngine {
   public synchronized void reload() {
     reloadRequested.set(false);
     List<Loaded> fresh = new ArrayList<>();
-    for (StrategyRepository.StrategyRow strategy : registry.list(500, 0)) {
+    for (StrategyRepository.StrategyRow strategy : registry.listAll()) {
       if (!strategy.enabled() || strategy.publishedVersionId() == null) {
         continue;
       }
@@ -284,13 +289,7 @@ public class SignalEngine {
               node.path("volume").asLong(),
               node.hasNonNull("oi") ? new BigDecimal(node.path("oi").asText()) : null);
       String symbolKey = node.path("exchange").asText() + ":" + node.path("tradingsymbol").asText();
-      conflation.merge(
-          symbolKey,
-          candle,
-          (old, fresh) ->
-              fresh.bucketStart().toInstant().isAfter(old.bucketStart().toInstant())
-                  ? fresh
-                  : old);
+      pending.add(Map.entry(symbolKey, candle)); // queue, never collapse — see the `pending` field
       if (drainScheduled.compareAndSet(false, true)) {
         evalExecutor.execute(this::drain);
       }
@@ -304,11 +303,11 @@ public class SignalEngine {
     if (reloadRequested.get()) {
       reload(); // hot-swap lands exactly at a bar boundary, never mid-bar
     }
-    List<Map.Entry<String, EngineCandle>> batch = new ArrayList<>(conflation.entrySet());
-    for (Map.Entry<String, EngineCandle> entry : batch) {
-      conflation.remove(entry.getKey(), entry.getValue());
-      String[] parts = entry.getKey().split(":", 2);
-      evalTimer.record(() -> onClosedBar(parts[0], parts[1], entry.getValue()));
+    Map.Entry<String, EngineCandle> head;
+    while ((head = pending.poll()) != null) {
+      String[] parts = head.getKey().split(":", 2);
+      EngineCandle bar = head.getValue();
+      evalTimer.record(() -> onClosedBar(parts[0], parts[1], bar));
     }
   }
 
@@ -489,13 +488,17 @@ public class SignalEngine {
     String side =
         strategy.definition().direction() == StrategyDefinition.Direction.SHORT ? "SELL" : "BUY";
     String breakdownJson = ScoreBreakdownJson.write(evaluation.breakdown());
-    OffsetDateTime generatedAt = OffsetDateTime.now(clock).withOffsetSameInstant(Ist.OFFSET);
+    // generated_at is the entry BAR's bucket instant, not wall-clock now(): it is persisted
+    // explicitly (so the row and the channel payload carry the IDENTICAL instant), and it makes
+    // the exit-side entry-index reconstruction (indexAtOrBefore) land exactly on the entry bar —
+    // deterministic and identical to the replay harness.
+    OffsetDateTime generatedAt = bar.bucketStart().withOffsetSameInstant(Ist.OFFSET);
     OffsetDateTime expiresAt = generatedAt.plusMinutes(signalTtlMinutes);
     long id =
         signals.insert(
             strategy.versionId(), exchange, tradingsymbol, interval, "ENTRY", side,
             entryPrice, stopLoss, target, evaluation.breakdown().composite(), breakdownJson,
-            expiresAt);
+            generatedAt, expiresAt);
     emitted.increment();
     // the channel carries EXACTLY the persisted canonical bytes (divergence = FAIL criterion)
     JsonNode canonicalBreakdown;
@@ -518,12 +521,13 @@ public class SignalEngine {
       Loaded strategy, String exchange, String tradingsymbol, String interval, String type,
       EngineCandle bar, SignalRepository.SignalRow anchor) {
     String side = "SELL".equals(anchor.side()) ? "BUY" : "SELL"; // the closing side
-    OffsetDateTime generatedAt = OffsetDateTime.now(clock).withOffsetSameInstant(Ist.OFFSET);
+    OffsetDateTime generatedAt = bar.bucketStart().withOffsetSameInstant(Ist.OFFSET);
     long id =
         signals.insert(
             strategy.versionId(), exchange, tradingsymbol, interval, type, side,
             bar.close(), null, null, anchor.compositeScore(),
-            anchor.scoreBreakdown().toString(), generatedAt.plusMinutes(signalTtlMinutes));
+            anchor.scoreBreakdown().toString(), generatedAt,
+            generatedAt.plusMinutes(signalTtlMinutes));
     signals.transition(anchor.id(), "EXPIRED"); // the entry resolved — the pair is closed
     emitted.increment();
     publisher.publish(

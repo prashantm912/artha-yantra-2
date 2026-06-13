@@ -335,6 +335,75 @@ class RegistryLifecycleIntegrationTest extends StrategySignalIntegrationTestBase
                     org.hamcrest.Matchers.containsString("PE_RATIO"))));
   }
 
+  @Test
+  @Order(11)
+  void filtersApplyBeforePaginationNotAfter() {
+    // three strategies share a unique tag; three NEWER untagged ones are created afterwards, so a
+    // naive LIMIT/OFFSET-then-filter (the bug) would page over the newest untagged rows and return
+    // an empty filtered page. Correct behaviour filters first, then paginates the matched set.
+    for (int i = 0; i < 3; i++) {
+      service.create(
+          "Pager Hit " + i, null, List.of("pgtest"),
+          BASE_YAML
+              .replace("id: lifecycle-walk", "id: pager-hit-" + i)
+              .replace("name: \"Lifecycle Walk\"", "name: \"Pager Hit " + i + "\""));
+    }
+    for (int i = 0; i < 3; i++) {
+      service.create(
+          "Pager Noise " + i, null, List.of("noise"),
+          BASE_YAML
+              .replace("id: lifecycle-walk", "id: pager-noise-" + i)
+              .replace("name: \"Lifecycle Walk\"", "name: \"Pager Noise " + i + "\""));
+    }
+
+    List<Map<String, Object>> page1 = service.list(null, "pgtest", null, 2, 0);
+    List<Map<String, Object>> page2 = service.list(null, "pgtest", null, 2, 2);
+
+    assertThat(page1).hasSize(2); // FILTERED page, not a pre-truncated unfiltered page (= 0 in the bug)
+    assertThat(page2).hasSize(1); // exactly three matched, paginated over the filtered set
+    assertThat(page1)
+        .allSatisfy(m -> assertThat(((List<?>) m.get("tags")).contains("pgtest")).isTrue());
+    java.util.Set<Object> ids = new java.util.HashSet<>();
+    page1.forEach(m -> ids.add(m.get("id")));
+    page2.forEach(m -> ids.add(m.get("id")));
+    assertThat(ids).as("no overlap; union covers all three matches").hasSize(3);
+  }
+
+  @Test
+  @Order(12)
+  void reDeletingAnArchivedStrategyWritesNoPhantomAudit() {
+    UUID id =
+        (UUID)
+            service
+                .create(
+                    "Archive Idem", null, null,
+                    BASE_YAML
+                        .replace("id: lifecycle-walk", "id: archive-idem")
+                        .replace("name: \"Lifecycle Walk\"", "name: \"Archive Idem\""))
+                .get("id");
+    service.publish(id, null, null);
+
+    // first delete demotes the published version (archived:true, 409)
+    assertThatThrownBy(() -> service.delete(id))
+        .isInstanceOfSatisfying(
+            ApiException.class, e -> assertThat(e.details()).containsEntry("archived", true));
+    long archivesAfterFirst =
+        repository.auditActions(id).stream().filter("ARCHIVE"::equals).count();
+
+    // re-delete: already archived (no published version) — no re-archive, accurate message
+    assertThatThrownBy(() -> service.delete(id))
+        .isInstanceOfSatisfying(
+            ApiException.class,
+            e -> {
+              assertThat(e.code()).isEqualTo(ErrorCodes.CONFLICT_HAS_PUBLISHED_HISTORY);
+              assertThat(e.details()).containsEntry("archived", false);
+            });
+
+    assertThat(repository.auditActions(id).stream().filter("ARCHIVE"::equals).count())
+        .as("re-delete must NOT append a phantom ARCHIVE row to the append-only log")
+        .isEqualTo(archivesAfterFirst);
+  }
+
   private static java.nio.file.Path locateSchemaResource() {
     Path dir = Path.of("").toAbsolutePath();
     while (dir != null) {

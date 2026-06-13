@@ -47,6 +47,26 @@ class LoaderGuardrailsTest {
   }
 
   @Test
+  void nonFiniteNumbersAreRejectedCleanlyNotAs500() {
+    // .nan/.inf/-.inf resolve to non-finite doubles; without the guard BigDecimal.valueOf throws a
+    // raw NumberFormatException (HTTP 500). They must surface as a clean StrategyParseException.
+    for (String bad : new String[] {"weight: .nan", "threshold: .inf", "x: -.inf"}) {
+      assertThatThrownBy(() -> YamlStrategyLoader.load(bad))
+          .as(bad)
+          .isInstanceOf(StrategyParseException.class)
+          .hasMessageContaining("non-finite");
+    }
+  }
+
+  @Test
+  void duplicateMappingKeysAreRejected() {
+    // last-wins would let the canonical tree + checksum certify a value the author never saw
+    assertThatThrownBy(() -> YamlStrategyLoader.load("threshold: 0.65\nthreshold: 0.99"))
+        .isInstanceOf(StrategyParseException.class)
+        .hasMessageContaining("unparseable YAML");
+  }
+
+  @Test
   void schemaDocumentIsServedByteIdentically() {
     String first = StrategySchemaV1.documentText();
     String second = StrategySchemaV1.documentText();

@@ -123,12 +123,14 @@ public class StrategyRepository {
     return count != null && count > 0;
   }
 
-  /** Paged listing with derived-status/tag/text filters applied in the service layer. */
-  public List<StrategyRow> list(int limit, int offset) {
+  /**
+   * Every strategy, newest-updated first. The service applies derived-status/tag/text filters and
+   * THEN paginates, so filtering happens before limit/offset (a single-owner registry is small;
+   * the cap is a defensive backstop, not a real page size).
+   */
+  public List<StrategyRow> listAll() {
     return jdbc.query(
-        "SELECT * FROM strategies ORDER BY updated_at DESC LIMIT ? OFFSET ?",
-        this::strategyRow,
-        limit, offset);
+        "SELECT * FROM strategies ORDER BY updated_at DESC LIMIT 10000", this::strategyRow);
   }
 
   /** All versions of a strategy, newest first. */

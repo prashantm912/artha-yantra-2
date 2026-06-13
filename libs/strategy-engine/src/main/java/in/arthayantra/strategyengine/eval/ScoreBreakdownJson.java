@@ -90,7 +90,10 @@ public final class ScoreBreakdownJson {
   }
 
   private static JsonNode decimal(BigDecimal value) {
-    // null-safe; the canonical writer normalizes number rendering at serialization
-    return value == null ? F.nullNode() : F.numberNode(value);
+    // Exact-decimal STRING, the end-to-end convention (decimal.ts / SignalPublisher prices). A JSON
+    // number would be rounded by the browser's JSON.parse before formatDecimal runs, and a sub-1e-6
+    // magnitude would arrive in exponential notation decimal.ts cannot parse. Normalize identically
+    // to CanonicalJson so the canonical write() form stays byte-stable (and quoted).
+    return value == null ? F.nullNode() : F.textNode(CanonicalJson.normalize(value).toPlainString());
   }
 }

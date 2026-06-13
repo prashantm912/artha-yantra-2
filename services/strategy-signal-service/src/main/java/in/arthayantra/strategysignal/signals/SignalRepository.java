@@ -57,18 +57,21 @@ public class SignalRepository {
       BigDecimal target,
       BigDecimal compositeScore,
       String scoreBreakdownJson,
+      OffsetDateTime generatedAt,
       OffsetDateTime expiresAt) {
     Long id =
         jdbc.queryForObject(
             """
             INSERT INTO signals
               (strategy_version_id, exchange, tradingsymbol, "interval", signal_type, side,
-               entry_price, stop_loss, target, composite_score, score_breakdown, expires_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?) RETURNING id
+               entry_price, stop_loss, target, composite_score, score_breakdown,
+               generated_at, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?) RETURNING id
             """,
             Long.class,
             strategyVersionId, exchange, tradingsymbol, interval, signalType, side,
-            entryPrice, stopLoss, target, compositeScore, scoreBreakdownJson, expiresAt);
+            entryPrice, stopLoss, target, compositeScore, scoreBreakdownJson,
+            generatedAt, expiresAt);
     return id == null ? -1 : id;
   }
 

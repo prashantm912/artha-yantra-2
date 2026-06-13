@@ -191,8 +191,13 @@ public class RegistryService {
       }
       repository.setPublishedVersion(id, null);
     }
-    repository.audit(id, "ARCHIVE", archivedVersion, null, "archived", "owner");
-    changedPublisher.publish(id, strategy.slug(), "ARCHIVE", archivedVersion);
+    // Only record the lifecycle transition when one actually happened (a published version was
+    // demoted). Archiving a strategy with nothing published is a no-op: writing an ARCHIVE row
+    // would permanently pollute the append-only audit log and emit a phantom version=null hot-swap.
+    if (archivedVersion != null) {
+      repository.audit(id, "ARCHIVE", archivedVersion, null, "archived", "owner");
+      changedPublisher.publish(id, strategy.slug(), "ARCHIVE", archivedVersion);
+    }
     return Map.of("id", id, "status", "archived");
   }
 
@@ -202,16 +207,23 @@ public class RegistryService {
    * a shared tx would roll the archive back).
    */
   public boolean delete(UUID id) {
-    strategyOrThrow(id);
+    StrategyRepository.StrategyRow strategy = strategyOrThrow(id);
     if (repository.allVersionsAreDrafts(id)) {
       repository.deleteStrategy(id);
       return true;
     }
-    archive(id);
+    // Demote a still-live version, but do NOT re-archive a strategy whose published version was
+    // already archived (publishedVersionId is null by then) — that re-runs archive() for nothing.
+    boolean archivedNow = strategy.publishedVersionId() != null;
+    if (archivedNow) {
+      archive(id);
+    }
     throw new ApiException(
         409, ErrorCodes.CONFLICT_HAS_PUBLISHED_HISTORY,
-        "strategy has published history — archived instead of deleted",
-        Map.of("archived", true));
+        archivedNow
+            ? "strategy has published history — archived instead of deleted"
+            : "strategy has non-draft (published/archived) history — cannot be hard-deleted",
+        Map.of("archived", archivedNow));
   }
 
   /** GET /{id}/diff?from=&to= — SERVER-side structured diff + raw YAML pair. */
@@ -252,21 +264,35 @@ public class RegistryService {
     return response;
   }
 
-  /** Listing with derived status + filters. */
+  /**
+   * Listing with derived status + filters. Filters (status/tag/q) are applied to the FULL ordered
+   * set BEFORE limit/offset, so pagination bounds the FILTERED result — applying LIMIT/OFFSET in
+   * SQL first would silently truncate matches and make filtered page boundaries meaningless.
+   */
   public List<Map<String, Object>> list(String status, String tag, String query, int limit, int offset) {
+    String tagLower = tag == null ? null : tag.toLowerCase(Locale.ROOT);
+    String queryLower = query == null ? null : query.toLowerCase(Locale.ROOT);
     List<Map<String, Object>> items = new ArrayList<>();
-    for (StrategyRepository.StrategyRow row : repository.list(limit, offset)) {
+    int skipped = 0;
+    for (StrategyRepository.StrategyRow row : repository.listAll()) {
       String derived = derivedStatus(row);
       if (status != null && !status.equalsIgnoreCase(derived)) {
         continue;
       }
-      if (tag != null && !row.tags().contains(tag.toLowerCase(Locale.ROOT))) {
+      if (tagLower != null && !row.tags().contains(tagLower)) {
         continue;
       }
-      if (query != null
-          && !row.name().toLowerCase(Locale.ROOT).contains(query.toLowerCase(Locale.ROOT))
-          && !row.slug().contains(query.toLowerCase(Locale.ROOT))) {
+      if (queryLower != null
+          && !row.name().toLowerCase(Locale.ROOT).contains(queryLower)
+          && !row.slug().contains(queryLower)) {
         continue;
+      }
+      if (skipped < offset) { // paginate over the FILTERED stream
+        skipped++;
+        continue;
+      }
+      if (items.size() >= limit) {
+        break;
       }
       Map<String, Object> item = new LinkedHashMap<>();
       item.put("id", row.id());

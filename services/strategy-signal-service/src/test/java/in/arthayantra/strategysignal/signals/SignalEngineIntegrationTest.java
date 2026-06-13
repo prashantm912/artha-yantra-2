@@ -193,6 +193,15 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
       assertThat(payload.path("strategyId").asText()).isEqualTo("engine-it-momentum");
       assertThat(payload.path("version").asText()).isEqualTo("1.0.0");
       assertThat(payload.path("checksum").asText()).hasSize(64); // engine pinning triple
+
+      // generated_at is the entry BAR's bucket instant — deterministic, in the live-bar window
+      // (NOT wall-clock now(), which is ~60 min ahead) — and the row and channel payload agree.
+      assertThat(row.generatedAt().toInstant())
+          .as("generated_at is bar-aligned, not wall-clock")
+          .isBetween(liveBase.toInstant(), liveBase.plusMinutes(8).toInstant());
+      assertThat(OffsetDateTime.parse(payload.path("generatedAt").asText()).toInstant())
+          .as("row and channel carry the identical generated_at instant")
+          .isEqualTo(row.generatedAt().toInstant());
     } finally {
       listener.stop();
     }

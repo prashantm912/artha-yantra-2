@@ -9,7 +9,9 @@ import in.arthayantra.backtest.client.StrategyVersionClient;
 import in.arthayantra.backtest.client.StrategyVersionClient.ResolvedVersion;
 import in.arthayantra.backtest.dispatch.JobCancelledException;
 import in.arthayantra.backtest.dispatch.ReplayStub;
+import in.arthayantra.backtest.dispatch.TrialResultPublisher;
 import in.arthayantra.backtest.jobs.Job;
+import in.arthayantra.backtest.jobs.JobKind;
 import in.arthayantra.backtest.regime.BenchmarkSeries;
 import in.arthayantra.backtest.regime.RegimeLabel;
 import in.arthayantra.backtest.regime.RegimeLabeler;
@@ -59,6 +61,7 @@ public class BacktestRunner {
   private final RegimeLabeler regimeLabeler;
   private final RegimePreflight regimePreflight;
   private final BenchmarkAnalyzer benchmarkAnalyzer;
+  private final TrialResultPublisher trialResults;
 
   /** Wires the replay collaborators. */
   public BacktestRunner(
@@ -73,7 +76,8 @@ public class BacktestRunner {
       WalkForwardRunner walkForward,
       RegimeLabeler regimeLabeler,
       RegimePreflight regimePreflight,
-      BenchmarkAnalyzer benchmarkAnalyzer) {
+      BenchmarkAnalyzer benchmarkAnalyzer,
+      TrialResultPublisher trialResults) {
     this.versions = versions;
     this.candleReader = candleReader;
     this.replayEngine = replayEngine;
@@ -86,6 +90,7 @@ public class BacktestRunner {
     this.regimeLabeler = regimeLabeler;
     this.regimePreflight = regimePreflight;
     this.benchmarkAnalyzer = benchmarkAnalyzer;
+    this.trialResults = trialResults;
   }
 
   /** Runs the job; throws {@link JobCancelledException} on cancel and other exceptions on failure. */
@@ -213,8 +218,35 @@ public class BacktestRunner {
             folds,
             benchmark);
     trades.insertAll(runId, result.trades());
+
+    // §D.7 ask/tell back-half: a TRIAL emits its metrics onto optimizations.results so the
+    // optimizer can study.tell() and (Phase 34) feed per-fold OOS objectives to the pruner.
+    if (job.kind() == JobKind.TRIAL) {
+      trialResults.publish(
+          job.id(),
+          job.parentJobId(),
+          runId,
+          m.full(),
+          folds == null ? null : folds.oosFoldMean(),
+          oosFoldObjectives(folds));
+    }
+
     progress.accept(100);
     log.info("backtest run {} completed: {} trades", runId, result.trades().size());
+  }
+
+  /** The per-fold OOS objective (OOS sharpe) array for the pruner; empty for a full-window trial. */
+  private ArrayNode oosFoldObjectives(FoldPersistence folds) {
+    ArrayNode out = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.arrayNode();
+    if (folds != null && folds.foldMetrics() != null) {
+      for (JsonNode fold : folds.foldMetrics()) {
+        JsonNode oosSharpe = fold.path("oosMetrics").path("sharpe");
+        if (oosSharpe.isValueNode() && !oosSharpe.isNull()) {
+          out.add(oosSharpe.asText());
+        }
+      }
+    }
+    return out;
   }
 
   /**

@@ -96,31 +96,54 @@ public class WorkerPool {
     log.info("backtest worker pool started: {} platform workers, consumer={}", n, consumer);
   }
 
+  /** A (stream, consumer-group) pair this pool consumes. */
+  private record StreamSource(String stream, String group) {}
+
+  /** Both dispatch streams: single runs (cg-backtest) and optimizer trial fan-out (cg-trials). A
+   * TRIAL run emits its result onto optimizations.results (§D.7); requeued jobs always re-dispatch
+   * onto jobs.backtest, so a single worker reading both covers crash recovery. */
+  private static final List<StreamSource> SOURCES =
+      List.of(
+          new StreamSource(Streams.BACKTEST, Streams.GROUP_BACKTEST),
+          new StreamSource(Streams.TRIALS, Streams.GROUP_TRIALS));
+
   private void loop() {
-    StreamReadOptions options = StreamReadOptions.empty().count(1).block(Duration.ofSeconds(2));
-    StreamOffset<String> offset = StreamOffset.create(Streams.BACKTEST, ReadOffset.lastConsumed());
+    StreamReadOptions options = StreamReadOptions.empty().count(1).block(Duration.ofSeconds(1));
     while (running && !Thread.currentThread().isInterrupted()) {
-      try {
-        List<MapRecord<String, Object, Object>> records =
-            redis
-                .opsForStream()
-                .read(Consumer.from(Streams.GROUP_BACKTEST, consumer), options, offset);
-        if (records != null) {
-          for (MapRecord<String, Object, Object> record : records) {
-            process(record);
-          }
+      for (StreamSource source : SOURCES) {
+        if (!running) {
+          break;
         }
-      } catch (Exception e) {
-        if (running) {
-          log.warn("worker read error: {}", e.getMessage());
-          sleepQuiet();
+        try {
+          List<MapRecord<String, Object, Object>> records =
+              redis
+                  .opsForStream()
+                  .read(
+                      Consumer.from(source.group(), consumer),
+                      options,
+                      StreamOffset.create(source.stream(), ReadOffset.lastConsumed()));
+          if (records != null) {
+            for (MapRecord<String, Object, Object> record : records) {
+              process(record, source);
+            }
+          }
+        } catch (Exception e) {
+          if (running) {
+            log.warn("worker read error on {}: {}", source.stream(), e.getMessage());
+            sleepQuiet();
+          }
         }
       }
     }
   }
 
-  /** Processes one record (also used by startup pending-drain). */
+  /** Processes a record off the backtest stream (startup pending-drain entry point). */
   public void process(MapRecord<String, Object, Object> record) {
+    process(record, SOURCES.get(0));
+  }
+
+  /** Processes one record off a given source, acking to that source's group. */
+  public void process(MapRecord<String, Object, Object> record, StreamSource source) {
     Object raw = record.getValue().get("jobId");
     UUID jobId = parseJobId(raw);
     try {
@@ -134,7 +157,7 @@ public class WorkerPool {
       }
       // else: not queued (duplicate / running elsewhere / terminal) -> drop
     } finally {
-      acknowledge(record);
+      acknowledge(record, source);
     }
   }
 
@@ -167,9 +190,9 @@ public class WorkerPool {
     return repository.find(jobId).map(Job::progress).orElse(0);
   }
 
-  private void acknowledge(MapRecord<String, Object, Object> record) {
+  private void acknowledge(MapRecord<String, Object, Object> record, StreamSource source) {
     try {
-      redis.opsForStream().acknowledge(Streams.BACKTEST, Streams.GROUP_BACKTEST, record.getId());
+      redis.opsForStream().acknowledge(source.stream(), source.group(), record.getId());
     } catch (Exception e) {
       log.debug("ack failed for {}: {}", record.getId(), e.getMessage());
     }

@@ -53,6 +53,9 @@ public class IndicatorSeriesService {
           "1d", Duration.ofDays(400),
           "1w", Duration.ofDays(1100));
 
+  /** Native daily warm-up depth — covers the longest indicator (200-day SMA territory) plus buffer. */
+  private static final int DAILY_WARMUP_SESSIONS = 300;
+
   private final CandleReader candleReader;
   private final Cache<String, List<NamedSeries>> cache =
       Caffeine.newBuilder().maximumSize(500).expireAfterWrite(Duration.ofMinutes(5)).build();
@@ -164,8 +167,17 @@ public class IndicatorSeriesService {
       return cached;
     }
 
-    OffsetDateTime fetchFrom = from.minus(LOOKBACK.getOrDefault(interval, Duration.ofDays(400)));
-    List<EngineCandle> candles = candleReader.read(exchange, tradingsymbol, interval, fetchFrom, to);
+    // The charts datafeed renders NATIVE daily bars (Kite's daily API → marketdata.candles at
+    // interval='1d'), not the 1m-rolled candles_1d cagg that read() serves. Read the same native
+    // source for a 1d overlay so its values land on the candles the chart draws — and the cagg is
+    // sparse until 1m history accrues. Intraday intervals stay on the caggs (the chart serves those).
+    List<EngineCandle> candles;
+    if ("1d".equals(interval)) {
+      candles = candleReader.readDailyWithWarmup(exchange, tradingsymbol, from, to, DAILY_WARMUP_SESSIONS);
+    } else {
+      OffsetDateTime fetchFrom = from.minus(LOOKBACK.getOrDefault(interval, Duration.ofDays(400)));
+      candles = candleReader.read(exchange, tradingsymbol, interval, fetchFrom, to);
+    }
     boolean anyInRange = candles.stream().anyMatch(c -> inRange(c.bucketStart(), from, to));
     if (!anyInRange) {
       throw new ApiException(

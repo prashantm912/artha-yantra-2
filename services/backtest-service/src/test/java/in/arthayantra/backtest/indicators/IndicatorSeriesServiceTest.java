@@ -2,6 +2,7 @@ package in.arthayantra.backtest.indicators;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import in.arthayantra.backtest.replay.CandleReader;
 import in.arthayantra.strategyengine.indicators.EngineIndicator;
 import in.arthayantra.strategyengine.indicators.IndicatorRegistry;
 import in.arthayantra.strategyengine.series.EngineCandle;
@@ -103,5 +104,69 @@ class IndicatorSeriesServiceTest {
     assertThat(base).isNotEqualTo(service.cacheKey("EMA", "NSE", "RELIANCE", "5m", from, to, Map.of("period", 9)));
     OffsetDateTime to2 = to.plusDays(1);
     assertThat(base).isNotEqualTo(service.cacheKey("EMA", "NSE", "RELIANCE", "1d", from, to2, Map.of("period", 9)));
+  }
+
+  /**
+   * The charts datafeed renders NATIVE daily bars (Kite's daily API → {@code marketdata.candles} at
+   * {@code interval='1d'}), not the 1m-rolled {@code candles_1d} cagg. The overlay must read the same
+   * native daily source so its values land on the candles the chart draws — and the cagg is sparse on
+   * a fresh boot. Intraday intervals stay on the caggs (the chart datafeed serves those too).
+   */
+  @Test
+  void dailySeriesReadsNativeDailyBarsNotTheRolledCagg() {
+    StubReader reader = new StubReader(ramp(), List.of()); // native has bars; cagg is empty (sparse)
+    IndicatorSeriesService svc = new IndicatorSeriesService(reader);
+    OffsetDateTime from = OffsetDateTime.of(2026, 2, 1, 0, 0, 0, 0, IST);
+    OffsetDateTime to = OffsetDateTime.of(2026, 3, 15, 0, 0, 0, 0, IST);
+
+    List<IndicatorSeriesService.NamedSeries> out =
+        svc.series("EMA", "NSE", "NIFTY 50", "1d", from, to, Map.of("period", 5));
+
+    assertThat(out.get(0).points()).isNotEmpty();
+    assertThat(reader.dailyCalls).isEqualTo(1);
+    assertThat(reader.readCalls).isZero();
+  }
+
+  @Test
+  void intradaySeriesReadsTheContinuousAggregate() {
+    StubReader reader = new StubReader(List.of(), ramp()); // native empty; the cagg carries the bars
+    IndicatorSeriesService svc = new IndicatorSeriesService(reader);
+    OffsetDateTime from = OffsetDateTime.of(2026, 2, 1, 0, 0, 0, 0, IST);
+    OffsetDateTime to = OffsetDateTime.of(2026, 3, 15, 0, 0, 0, 0, IST);
+
+    List<IndicatorSeriesService.NamedSeries> out =
+        svc.series("EMA", "NSE", "NIFTY 50", "5m", from, to, Map.of("period", 5));
+
+    assertThat(out.get(0).points()).isNotEmpty();
+    assertThat(reader.readCalls).isEqualTo(1);
+    assertThat(reader.dailyCalls).isZero();
+  }
+
+  /** A {@link CandleReader} that serves canned bars and records which read path the service took. */
+  private static final class StubReader extends CandleReader {
+    private final List<EngineCandle> daily;
+    private final List<EngineCandle> cagg;
+    int readCalls;
+    int dailyCalls;
+
+    StubReader(List<EngineCandle> daily, List<EngineCandle> cagg) {
+      super(null);
+      this.daily = daily;
+      this.cagg = cagg;
+    }
+
+    @Override
+    public List<EngineCandle> read(
+        String exchange, String tradingsymbol, String interval, OffsetDateTime from, OffsetDateTime to) {
+      readCalls++;
+      return cagg;
+    }
+
+    @Override
+    public List<EngineCandle> readDailyWithWarmup(
+        String exchange, String tradingsymbol, OffsetDateTime from, OffsetDateTime to, int warmupSessions) {
+      dailyCalls++;
+      return daily;
+    }
   }
 }

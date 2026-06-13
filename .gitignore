@@ -5,6 +5,10 @@
 deploy/secrets/*
 !deploy/secrets/.gitkeep
 !deploy/secrets/README.md
+# Machine-specific CA certs for TLS-intercepting AV (e.g. Avast Web/Mail Shield).
+# Generated once per dev box by a setup script; CI/prod dirs stay empty.
+deploy/dev-certs/*.pem
+deploy/dev-certs/*.cer
 **/application-local*.properties
 **/application-local*.yml
 

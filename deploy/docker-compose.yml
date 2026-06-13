@@ -161,7 +161,8 @@ services:
   # dev-tools profile forwards it on loopback for T2 (mds-publish below).
   market-data-service:
     build:
-      context: ../services/market-data-service
+      context: ..
+      dockerfile: services/market-data-service/Dockerfile
     image: arthayantra/market-data-service:dev
     container_name: ay-market-data-service
     environment:

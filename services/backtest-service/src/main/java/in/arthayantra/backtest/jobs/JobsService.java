@@ -2,10 +2,13 @@ package in.arthayantra.backtest.jobs;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.JsonNode;
 import in.arthayantra.backtest.client.StrategyVersionClient;
 import in.arthayantra.backtest.dispatch.JobStreamDispatcher;
 import in.arthayantra.backtest.dispatch.ProgressPublisher;
 import in.arthayantra.backtest.dispatch.Streams;
+import in.arthayantra.backtest.replay.PreflightCoverage;
+import java.time.OffsetDateTime;
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ConflictException;
 import in.arthayantra.common.web.error.ErrorCodes;
@@ -24,6 +27,7 @@ public class JobsService {
   private final JobStreamDispatcher dispatcher;
   private final StrategyVersionClient versions;
   private final ProgressPublisher progress;
+  private final PreflightCoverage preflight;
   private final StringRedisTemplate redis;
   private final ObjectMapper objectMapper;
 
@@ -33,12 +37,14 @@ public class JobsService {
       JobStreamDispatcher dispatcher,
       StrategyVersionClient versions,
       ProgressPublisher progress,
+      PreflightCoverage preflight,
       StringRedisTemplate redis,
       ObjectMapper objectMapper) {
     this.repository = repository;
     this.dispatcher = dispatcher;
     this.versions = versions;
     this.progress = progress;
+    this.preflight = preflight;
     this.redis = redis;
     this.objectMapper = objectMapper;
   }
@@ -53,6 +59,7 @@ public class JobsService {
   public Job submit(BacktestRunRequest req, String correlationId) {
     StrategyVersionClient.ResolvedVersion v =
         versions.resolve(req.strategyId(), req.strategyVersion());
+    runPreflight(v.config(), req);
 
     ObjectNode request = objectMapper.createObjectNode();
     request.put("strategyId", req.strategyId());
@@ -107,6 +114,27 @@ public class JobsService {
     }
     redis.opsForValue().set(Streams.cancelKey(id), "1", Duration.ofMinutes(30));
     return CancelOutcome.CANCELLING;
+  }
+
+  /** Coverage pre-flight (§D.6) for explicit single-instrument universes with a date window. */
+  private void runPreflight(JsonNode config, BacktestRunRequest req) {
+    if (config == null || !config.has("universe") || req.from() == null || req.to() == null) {
+      return;
+    }
+    JsonNode instruments = config.path("universe").path("instruments");
+    if (!instruments.isArray() || instruments.isEmpty()) {
+      return; // index/options/futures universes resolve at submission in Stage F
+    }
+    JsonNode first = instruments.get(0);
+    preflight.check(
+        first.path("exchange").asText(),
+        first.path("tradingsymbol").asText(),
+        OffsetDateTime.parse(toDateTime(req.from())),
+        OffsetDateTime.parse(toDateTime(req.to())));
+  }
+
+  private static String toDateTime(String value) {
+    return value.length() == 10 ? value + "T00:00:00+05:30" : value;
   }
 
   private static void putIfPresent(ObjectNode node, String field, String value) {

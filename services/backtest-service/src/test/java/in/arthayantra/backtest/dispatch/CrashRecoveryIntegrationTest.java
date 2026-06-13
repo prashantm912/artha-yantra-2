@@ -2,8 +2,12 @@ package in.arthayantra.backtest.dispatch;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import in.arthayantra.backtest.client.StrategyVersionClient;
+import in.arthayantra.backtest.client.StrategyVersionClient.ResolvedVersion;
 import in.arthayantra.backtest.jobs.Job;
 import in.arthayantra.backtest.jobs.JobKind;
 import in.arthayantra.backtest.jobs.JobStatus;
@@ -11,9 +15,11 @@ import in.arthayantra.backtest.jobs.JobRepository;
 import in.arthayantra.backtest.testsupport.BacktestIntegrationTestBase;
 import java.time.Duration;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 /**
  * The D12 crash-safety guarantee: a {@code running} job orphaned by a container kill (no terminal
@@ -32,6 +38,15 @@ class CrashRecoveryIntegrationTest extends BacktestIntegrationTestBase {
   @Autowired private JobRepository repository;
   @Autowired private StreamBootstrap bootstrap;
   @Autowired private ObjectMapper objectMapper;
+  @MockitoBean private StrategyVersionClient versions;
+
+  @BeforeEach
+  void stubVersions() {
+    // an empty config routes the orphan job through the progress stub (the spine path)
+    when(versions.resolve(any(), any()))
+        .thenReturn(
+            new ResolvedVersion(UUID.randomUUID(), "1.0.0", "chk", objectMapper.createObjectNode()));
+  }
 
   @Test
   void orphanedRunningJobIsRequeuedAndCompletes() {

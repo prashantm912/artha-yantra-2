@@ -39,7 +39,7 @@ public abstract class BacktestIntegrationTestBase {
 
   private static void migrate() {
     Path flywayRoot = locateFlywayRoot();
-    for (String lineage : new String[] {"admin", "backtest"}) {
+    for (String lineage : new String[] {"admin", "marketdata", "backtest"}) {
       Flyway.configure()
           .dataSource(TIMESCALE.getJdbcUrl(), TIMESCALE.getUsername(), TIMESCALE.getPassword())
           .schemas(lineage)

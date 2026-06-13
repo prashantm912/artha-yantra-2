@@ -2,6 +2,7 @@ package in.arthayantra.backtest.dispatch;
 
 import in.arthayantra.backtest.jobs.Job;
 import in.arthayantra.backtest.jobs.JobRepository;
+import in.arthayantra.backtest.replay.BacktestRunner;
 import jakarta.annotation.PreDestroy;
 import java.net.InetAddress;
 import java.time.Duration;
@@ -37,9 +38,10 @@ public class WorkerPool {
 
   private final StringRedisTemplate redis;
   private final JobRepository repository;
-  private final ReplayStub replay;
+  private final BacktestRunner runner;
   private final ProgressPublisher progress;
   private final int configuredWorkers;
+  private final boolean enabled;
   private final String consumer;
   private final AtomicInteger busy = new AtomicInteger();
 
@@ -50,14 +52,16 @@ public class WorkerPool {
   public WorkerPool(
       StringRedisTemplate redis,
       JobRepository repository,
-      ReplayStub replay,
+      BacktestRunner runner,
       ProgressPublisher progress,
-      @Value("${artha.backtest.workers:0}") int configuredWorkers) {
+      @Value("${artha.backtest.workers:0}") int configuredWorkers,
+      @Value("${artha.backtest.worker-pool-enabled:true}") boolean enabled) {
     this.redis = redis;
     this.repository = repository;
-    this.replay = replay;
+    this.runner = runner;
     this.progress = progress;
     this.configuredWorkers = configuredWorkers;
+    this.enabled = enabled;
     this.consumer = resolveConsumerName();
   }
 
@@ -80,7 +84,7 @@ public class WorkerPool {
 
   /** Starts the platform-thread pool reading the backtest stream. */
   public synchronized void start() {
-    if (running) {
+    if (running || !enabled) {
       return;
     }
     running = true;
@@ -135,8 +139,12 @@ public class WorkerPool {
   }
 
   private void runClaimed(UUID jobId) {
+    Job job = repository.find(jobId).orElse(null);
+    if (job == null) {
+      return;
+    }
     try {
-      replay.run(jobId, pct -> progress.publish(jobId, pct), () -> isCancelRequested(jobId));
+      runner.run(job, pct -> progress.publish(jobId, pct), () -> isCancelRequested(jobId));
       repository.markCompleted(jobId);
       progress.publishTerminal(jobId, "completed", 100);
     } catch (JobCancelledException ce) {

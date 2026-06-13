@@ -17,12 +17,11 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers;
 
-/** CD-8 contract capture (Phase 28) — same shape as the other services' capture. */
+/** CD-8 contract capture (Phase 28+30) — same shape as the other services' capture. */
 @SpringBootTest(
     properties = {
       "spring.profiles.active=mock",
-      "artha.backtest.workers=1",
-      "artha.backtest.stub-step-millis=120",
+      "artha.backtest.worker-pool-enabled=false",
       "artha.backtest.summary-refresh-ms=1000"
     })
 @AutoConfigureMockMvc

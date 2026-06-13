@@ -1,5 +1,6 @@
 package in.arthayantra.backtest.jobs;
 
+import in.arthayantra.backtest.replay.RunRepository;
 import in.arthayantra.common.web.http.ArthaHeaders;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -22,10 +23,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class JobsController {
 
   private final JobsService service;
+  private final RunRepository runs;
 
-  /** Wires the service. */
-  public JobsController(JobsService service) {
+  /** Wires the service + run repository (for the resultRef). */
+  public JobsController(JobsService service, RunRepository runs) {
     this.service = service;
+    this.runs = runs;
   }
 
   /** Submit a backtest → 202 with the jobId (§D.5). */
@@ -55,7 +58,8 @@ public class JobsController {
   /** Single job status/progress. */
   @GetMapping("/jobs/{jobId}")
   public Map<String, Object> job(@PathVariable UUID jobId) {
-    return detail(service.get(jobId));
+    Job job = service.get(jobId);
+    return detail(job, runs.findRunIdByJobId(jobId).map(UUID::toString).orElse(null));
   }
 
   /** Cancel: 204 if still queued, 202 {@code cancelling} if running (observed at a checkpoint). */
@@ -78,7 +82,7 @@ public class JobsController {
     return map;
   }
 
-  private static Map<String, Object> detail(Job job) {
+  private static Map<String, Object> detail(Job job, String resultRef) {
     Map<String, Object> map = new LinkedHashMap<>();
     map.put("jobId", job.id().toString());
     map.put("kind", job.kind().name());
@@ -87,7 +91,7 @@ public class JobsController {
     map.put("startedAt", job.startedAt());
     map.put("finishedAt", job.finishedAt());
     map.put("error", job.error());
-    map.put("resultRef", null); // backtest_runs ref lands in Phase 30
+    map.put("resultRef", resultRef);
     return map;
   }
 }

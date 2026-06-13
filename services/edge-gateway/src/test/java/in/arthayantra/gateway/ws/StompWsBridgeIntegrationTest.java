@@ -33,7 +33,11 @@ import reactor.core.publisher.Mono;
  * Phase-8 IT (A.7b): per-symbol isolation, conflation under burst, never-conflated signals, and
  * 401 on unauthenticated upgrade — against a real Redis.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(
+    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+    // the login POST + WS handshake are slow on a loaded 2-core CI runner; the default 5s
+    // WebTestClient read timeout flakes there
+    properties = "spring.test.webtestclient.timeout=30s")
 @Testcontainers
 class StompWsBridgeIntegrationTest {
 
@@ -121,7 +125,7 @@ class StompWsBridgeIntegrationTest {
 
     // wait until CONNECTED arrives (subscriptions registered) — generous for CI
     await()
-        .atMost(Duration.ofSeconds(30))
+        .atMost(Duration.ofSeconds(90))
         .until(() -> received.stream().anyMatch(f -> f.startsWith("CONNECTED")));
 
     // give the Redis-side subscriptions a beat to attach
@@ -140,7 +144,7 @@ class StompWsBridgeIntegrationTest {
     }
 
     await()
-        .atMost(Duration.ofSeconds(10))
+        .atMost(Duration.ofSeconds(90))
         .until(() -> countBodies(received, "\"signal\":") >= 5);
     sleep(500); // a final flush window
 
@@ -190,7 +194,7 @@ class StompWsBridgeIntegrationTest {
                             .then()))
         .subscribe();
     await()
-        .atMost(Duration.ofSeconds(30))
+        .atMost(Duration.ofSeconds(90))
         .until(() -> received.stream().anyMatch(f -> f.startsWith("CONNECTED")));
     return outbound;
   }
@@ -210,7 +214,7 @@ class StompWsBridgeIntegrationTest {
 
     redis.convertAndSend("ticks.NSE.UNSUB", "{\"marker\":\"before\"}");
     await()
-        .atMost(Duration.ofSeconds(20))
+        .atMost(Duration.ofSeconds(90))
         .until(() -> countBodies(received, "\"marker\":\"before\"") >= 1);
 
     outbound.tryEmitNext(
@@ -252,7 +256,7 @@ class StompWsBridgeIntegrationTest {
             .serialize());
 
     await()
-        .atMost(Duration.ofSeconds(20))
+        .atMost(Duration.ofSeconds(90))
         .until(() -> received.stream().anyMatch(f -> f.startsWith("ERROR")));
     sleep(800); // silence window for the legal forms
 

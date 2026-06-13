@@ -9,10 +9,11 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
-from app import path_grammar, sweep
+from app import config_patch, leaderboard, path_grammar, sweep
 from app.errors import ApiError
 
 _METHODS = {"grid", "random", "tpe", "nsga2"}
+_PROMOTABLE = "COMPLETE"
 
 
 def resolve_parameters(config: dict[str, Any], override: list[dict] | None) -> list[dict]:
@@ -33,9 +34,11 @@ class SweepService:
         jobs_factory: Callable[[], Any],
         trials_factory: Callable[[], Any],
         dispatcher: Any,
+        backtest_client: Any = None,
         runner: Callable[..., Any] = sweep.run_sweep,
     ) -> None:
         self._strategy = strategy_client
+        self._backtest = backtest_client
         self._jobs_factory = jobs_factory  # fresh repo (+ conn) per thread — psycopg isn't shared
         self._trials_factory = trials_factory
         self._dispatcher = dispatcher
@@ -86,6 +89,7 @@ class SweepService:
                 "seed": int(request.get("seed", 0)),
                 "walk_forward": request.get("walkForward"),
                 "request_base": request_base,
+                "early_stopping": _early_stopping(request),
             },
             daemon=True,
             name=f"sweep-{sweep_id[:8]}",
@@ -154,6 +158,87 @@ class SweepService:
             trials.close()
         return {"items": items, "limit": limit, "offset": offset}
 
+    def best(self, sweep_id: str, top: int, sort: str) -> dict[str, Any]:
+        """The plateau-adjusted leaderboard (§D.9); COMPLETE trials only (pruned/failed dropped)."""
+        jobs = self._jobs_factory()
+        trials = self._trials_factory()
+        try:
+            job = jobs.get(sweep_id)
+            if job is None:
+                raise ApiError(404, "NOT_FOUND_JOB", f"no such job: {sweep_id}")
+            request = job.get("request") or {}
+            parameters = request.get("parameters", [])
+            metric, direction = _primary_objective(request.get("objective", {}))
+            rows = trials.list_for_sweep(sweep_id, _PROMOTABLE, 1000, 0)
+        finally:
+            jobs.close()
+            trials.close()
+        items = []
+        for row in rows:
+            values = row.get("objectiveValues") or {}
+            if metric not in values:
+                continue
+            items.append(
+                {
+                    "trialNumber": row["trialNumber"],
+                    "params": row["params"],
+                    "objective": float(values[metric]),
+                    "objectiveValues": values,
+                    "backtestRunId": row.get("backtestRunId"),
+                }
+            )
+        ranked = leaderboard.best(items, parameters, top, direction, sort)
+        return {"metric": metric, "sort": "raw" if sort == "raw" else "plateau", "items": ranked}
+
+    def trial_folds(self, sweep_id: str, trial_number: int) -> Any:
+        """The per-fold metric array for one sweep trial, resolved via its ``backtest_run_id``."""
+        trials = self._trials_factory()
+        try:
+            row = trials.get_trial(sweep_id, trial_number)
+        finally:
+            trials.close()
+        if row is None:
+            raise ApiError(404, "NOT_FOUND_RESOURCE", f"no such trial: {trial_number}")
+        run_id = row.get("backtestRunId")
+        if run_id is None:
+            return []
+        return self._backtest.folds(run_id)
+
+    def promote(self, sweep_id: str, trial_number: int, notes: str | None) -> dict[str, Any]:
+        """Materializes a COMPLETE trial's params onto the source version and POSTs a new draft
+        (§D.9) — never published, provenance recorded in the notes. 409 for an invalid/failed
+        trial."""
+        jobs = self._jobs_factory()
+        trials = self._trials_factory()
+        try:
+            job = jobs.get(sweep_id)
+            if job is None:
+                raise ApiError(404, "NOT_FOUND_JOB", f"no such job: {sweep_id}")
+            request = job.get("request") or {}
+            row = trials.get_trial(sweep_id, trial_number)
+        finally:
+            jobs.close()
+            trials.close()
+        if row is None:
+            raise ApiError(404, "NOT_FOUND_RESOURCE", f"no such trial: {trial_number}")
+        if row.get("state") != _PROMOTABLE:
+            raise ApiError(
+                409,
+                "CONFLICT_JOB_TERMINAL",
+                f"trial {trial_number} is {row.get('state')}, not promotable",
+            )
+        strategy_id = request["strategyId"]
+        config = self._strategy.version_config(strategy_id, request["strategyVersion"])
+        patched = config_patch.apply_overrides(config, row["params"])
+        provenance = f"created_by=optimizer:{sweep_id}"
+        note = f"{provenance}; {notes}" if notes else provenance
+        result = self._strategy.create_draft(strategy_id, patched, note)
+        return {
+            "strategyId": strategy_id,
+            "newVersion": result.get("version") or result.get("currentVersion"),
+            "status": result.get("status", "draft"),
+        }
+
     def cancel(self, job_id: str) -> None:
         jobs = self._jobs_factory()
         try:
@@ -172,3 +257,21 @@ def _sweep_echo(request: dict[str, Any], parameters: list[dict]) -> dict[str, An
     echo = {k: request[k] for k in request if k != "parameters"}
     echo["parameters"] = parameters
     return echo
+
+
+def _primary_objective(objective: dict[str, Any]) -> tuple[str, str]:
+    """The scalar metric + direction the leaderboard ranks on (the first of an nsga2 ``objectives``
+    list, else the single-objective ``metric``)."""
+    objectives = objective.get("objectives")
+    if objectives:
+        first = objectives[0]
+        return first["metric"], first.get("direction", "maximize")
+    return objective.get("metric", "sharpe"), objective.get("direction", "maximize")
+
+
+def _early_stopping(request: dict[str, Any]) -> int | None:
+    """Trials-without-improvement window for early stopping, or None when disabled."""
+    window = request.get("earlyStopping")
+    if isinstance(window, bool):  # `earlyStopping: true` → a sensible default window
+        return 20 if window else None
+    return int(window) if window else None

@@ -25,6 +25,7 @@ class Settings:
     db_password: str
     redis_url: str
     strategy_signal_base: str
+    backtest_base: str
 
     @property
     def conninfo(self) -> str:
@@ -46,4 +47,5 @@ class Settings:
             strategy_signal_base=os.environ.get(
                 "STRATEGY_SIGNAL_BASE", "http://strategy-signal-service:8082"
             ),
+            backtest_base=os.environ.get("BACKTEST_BASE", "http://backtest-service:8083"),
         )

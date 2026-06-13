@@ -122,6 +122,24 @@ class TrialsRepo:
             )
         self._conn.commit()
 
+    def get_trial(self, sweep_id: str, trial_number: int) -> dict[str, Any] | None:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT trial_number, params, objective_values, state, backtest_run_id "
+                "FROM optimization_trials WHERE sweep_job_id=%s AND trial_number=%s",
+                (sweep_id, trial_number),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        return {
+            "trialNumber": row[0],
+            "params": row[1],
+            "objectiveValues": row[2],
+            "state": row[3],
+            "backtestRunId": str(row[4]) if row[4] else None,
+        }
+
     def list_for_sweep(
         self, sweep_id: str, state: str | None, limit: int, offset: int
     ) -> list[dict[str, Any]]:

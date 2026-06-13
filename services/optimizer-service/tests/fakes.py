@@ -70,6 +70,12 @@ class FakeTrials:
         items.sort(key=lambda r: r["trialNumber"])
         return items[offset:offset + limit]
 
+    def get_trial(self, sweep_id: str, trial_number: int) -> dict[str, Any] | None:
+        for r in self.rows.values():
+            if r["sweep"] == sweep_id and r["trialNumber"] == trial_number:
+                return r
+        return None
+
     def close(self) -> None:
         pass
 
@@ -103,10 +109,27 @@ class FakeDispatcher:
 
 
 class FakeStrategy:
-    """Returns a fixed version config (with an optimize block)."""
+    """Returns a fixed version config (with an optimize block) and records promote drafts."""
 
     def __init__(self, config: dict[str, Any]) -> None:
         self._config = config
+        self.drafts: list[dict[str, Any]] = []
 
     def version_config(self, strategy_id: str, version: str) -> dict[str, Any]:
         return self._config
+
+    def create_draft(self, strategy_id: str, config: dict[str, Any], notes: str) -> dict[str, Any]:
+        self.drafts.append({"strategyId": strategy_id, "config": config, "notes": notes})
+        return {"version": "1.1.0", "status": "draft"}
+
+
+class FakeBacktest:
+    """Returns a fixed fold array for any run id."""
+
+    def __init__(self, folds: Any) -> None:
+        self._folds = folds
+        self.calls: list[str] = []
+
+    def folds(self, run_id: str) -> Any:
+        self.calls.append(run_id)
+        return self._folds

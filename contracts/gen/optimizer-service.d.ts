@@ -68,6 +68,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/optimizations/{sweep_id}/best": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Best
+         * @description Top-N leaderboard; default sort is plateau-adjusted, ``sort=raw`` for raw objective.
+         */
+        get: operations["best_api_v1_optimizations__sweep_id__best_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/optimizations/{sweep_id}/trials/{trial_id}/folds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Trial Folds
+         * @description The per-fold metric array for one trial (resolved via its ``backtest_run_id``).
+         */
+        get: operations["trial_folds_api_v1_optimizations__sweep_id__trials__trial_id__folds_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/optimizations/{sweep_id}/promote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Promote
+         * @description Promote a COMPLETE trial's params to a new draft version (§D.9); 409 if not promotable.
+         */
+        post: operations["promote_api_v1_optimizations__sweep_id__promote_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -236,6 +296,113 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    best_api_v1_optimizations__sweep_id__best_get: {
+        parameters: {
+            query?: {
+                top?: number;
+                sort?: string;
+            };
+            header?: never;
+            path: {
+                sweep_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trial_folds_api_v1_optimizations__sweep_id__trials__trial_id__folds_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sweep_id: string;
+                trial_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    promote_api_v1_optimizations__sweep_id__promote_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sweep_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };

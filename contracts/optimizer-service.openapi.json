@@ -208,6 +208,171 @@
         }
       }
     },
+    "/api/v1/optimizations/{sweep_id}/best": {
+      "get": {
+        "summary": "Best",
+        "description": "Top-N leaderboard; default sort is plateau-adjusted, ``sort=raw`` for raw objective.",
+        "operationId": "best_api_v1_optimizations__sweep_id__best_get",
+        "parameters": [
+          {
+            "name": "sweep_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Sweep Id"
+            }
+          },
+          {
+            "name": "top",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 10,
+              "title": "Top"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "plateau",
+              "title": "Sort"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Best Api V1 Optimizations  Sweep Id  Best Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/optimizations/{sweep_id}/trials/{trial_id}/folds": {
+      "get": {
+        "summary": "Trial Folds",
+        "description": "The per-fold metric array for one trial (resolved via its ``backtest_run_id``).",
+        "operationId": "trial_folds_api_v1_optimizations__sweep_id__trials__trial_id__folds_get",
+        "parameters": [
+          {
+            "name": "sweep_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Sweep Id"
+            }
+          },
+          {
+            "name": "trial_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Trial Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Trial Folds Api V1 Optimizations  Sweep Id  Trials  Trial Id  Folds Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/optimizations/{sweep_id}/promote": {
+      "post": {
+        "summary": "Promote",
+        "description": "Promote a COMPLETE trial's params to a new draft version (\u00a7D.9); 409 if not promotable.",
+        "operationId": "promote_api_v1_optimizations__sweep_id__promote_post",
+        "parameters": [
+          {
+            "name": "sweep_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Sweep Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Promote Api V1 Optimizations  Sweep Id  Promote Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "summary": "Health",

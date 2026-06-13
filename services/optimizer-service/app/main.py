@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from app import api
+from app.backtest_client import BacktestClient
 from app.errors import ApiError, api_error_handler, invalid_path_handler
 from app.path_grammar import InvalidParameterPath
 from app.repos import JobsRepo, TrialsRepo
@@ -42,6 +43,7 @@ def build_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.sweeps = SweepService(
         strategy_client=StrategyClient(settings.strategy_signal_base),
+        backtest_client=BacktestClient(settings.backtest_base),
         jobs_factory=lambda: JobsRepo(open_conn()),
         trials_factory=lambda: TrialsRepo(open_conn()),
         dispatcher=dispatcher,

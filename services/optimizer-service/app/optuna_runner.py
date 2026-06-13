@@ -2,9 +2,10 @@
 
 The optimizer NEVER evaluates a strategy itself — it only proposes parameter
 vectors (D6). This module turns a strategy's ``optimize`` block into an Optuna
-study + per-trial suggestions. Phase 33 ships ``grid``/``random``; the
-``tpe``/``nsga2`` samplers + fold-fed pruning land in Phase 34 (defaults from the
-S3 spike: ``n_startup_trials=5``).
+study + per-trial suggestions. ``grid``/``random``/``tpe`` are single-objective;
+``nsga2`` is multi-objective (a Pareto front, never collapsed). Fold-fed
+``MedianPruner`` early stopping uses the S3-spike defaults
+(docs/design/DECISIONS_LOG.md, 2026-06-13).
 """
 
 from __future__ import annotations
@@ -19,6 +20,9 @@ GRID_CAP = 500  # §D.7: grid product is capped; max_trials truncates further
 
 # S3 spike defaults (docs/design/DECISIONS_LOG.md, 2026-06-13).
 TPE_STARTUP_TRIALS = 5
+PRUNER_STARTUP_TRIALS = 5  # no pruning until this many trials have completed
+PRUNER_WARMUP_FOLDS = 3  # no pruning before this many OOS folds reported (early-regime guard)
+PRUNER_MIN_TRIALS = 2  # need at least this many reported values at a step to form a median
 
 
 def grid_values(parameter: dict[str, Any]) -> list[Any]:
@@ -63,10 +67,28 @@ def make_sampler(
     if method == "random":
         return optuna.samplers.RandomSampler(seed=seed)
     if method == "tpe":
-        return optuna.samplers.TPESampler(seed=seed, n_startup_trials=TPE_STARTUP_TRIALS)
+        # constant_liar lets the sequential TPE model cooperate with the parallel trial pool:
+        # in-flight trials are temporarily told a pessimistic value so the next ask() doesn't
+        # re-propose the same region (§D.7, Phase 34).
+        return optuna.samplers.TPESampler(
+            seed=seed, n_startup_trials=TPE_STARTUP_TRIALS, constant_liar=True
+        )
     if method == "nsga2":
         return optuna.samplers.NSGAIISampler(seed=seed)
     raise ValueError(f"unsupported optimize method: {method!r}")
+
+
+def make_pruner() -> optuna.pruners.BasePruner:
+    """The fold-fed ``MedianPruner`` (CD-12) with the S3-calibrated defaults: it prunes a trial
+    whose running OOS-fold objective sits below the median of prior trials at the same fold — but
+    never during the first ``PRUNER_WARMUP_FOLDS`` folds (early-regime bias guard) nor before
+    ``PRUNER_STARTUP_TRIALS`` trials have completed. Fed by OOS fold medians only (guard 2),
+    never train/OOS divergence (the rejected S1B design)."""
+    return optuna.pruners.MedianPruner(
+        n_startup_trials=PRUNER_STARTUP_TRIALS,
+        n_warmup_steps=PRUNER_WARMUP_FOLDS,
+        n_min_trials=PRUNER_MIN_TRIALS,
+    )
 
 
 def suggest_params(trial: optuna.Trial, parameters: list[dict[str, Any]]) -> dict[str, Any]:

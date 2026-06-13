@@ -262,6 +262,7 @@ services:
       DB_HOST: timescaledb
       REDIS_URL: redis://redis:6379/0
       STRATEGY_SIGNAL_BASE: http://strategy-signal-service:8082
+      BACKTEST_BASE: http://backtest-service:8083
     secrets: [postgres_password]
     depends_on:
       flyway-init:

@@ -1,0 +1,62 @@
+# strategy-signal-service (Phase 21+). Internal :8082; PG schema `strategy`
+# (single writer, D10); password via Docker secret file (A.9). Mock is the
+# default profile (D13) - the registry is fully credential-free.
+server:
+  port: 8082
+
+spring:
+  application:
+    name: strategy-signal-service
+  profiles:
+    default: mock
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:timescaledb}:${DB_PORT:5432}/artha?currentSchema=strategy
+    username: artha
+    password: ${ARTHA_DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 1
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+
+artha:
+  db:
+    password-file: ${ARTHA_DB_PASSWORD_FILE:/run/secrets/postgres_password}
+  marketdata:
+    # D8: context-instrument existence checks resolve via market-data REST
+    # (strategy-signal-service holds NO marketdata grant)
+    base-url: ${ARTHA_MARKETDATA_BASE_URL:http://market-data-service:8081}
+  signals:
+    engine-enabled: ${ARTHA_SIGNAL_ENGINE_ENABLED:true}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+---
+# loopback overrides for bare-metal dev runs (T2)
+spring:
+  config:
+    activate:
+      on-profile: dev
+  data:
+    redis:
+      host: 127.0.0.1
+  datasource:
+    url: jdbc:postgresql://127.0.0.1:5432/artha?currentSchema=strategy
+artha:
+  db:
+    password-file: ${ARTHA_DB_PASSWORD_FILE:deploy/secrets/postgres_password}
+  marketdata:
+    base-url: ${ARTHA_MARKETDATA_BASE_URL:http://127.0.0.1:8081}

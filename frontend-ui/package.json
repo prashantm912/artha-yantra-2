@@ -24,6 +24,7 @@
     "@ngrx/signals": "^21.1.1",
     "@primeuix/themes": "^2.0.3",
     "@stomp/stompjs": "^7.3.0",
+    "echarts": "^5.6.0",
     "lightweight-charts": ">=5.2 <6",
     "monaco-editor": "^0.55.1",
     "monaco-yaml": "^5.5.1",

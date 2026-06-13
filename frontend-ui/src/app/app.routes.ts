@@ -53,9 +53,24 @@ export const routes: Routes = [
         loadComponent: () => import('./pages/strategies/versions-page').then((m) => m.VersionsPage),
       },
       {
+        path: 'backtests/run',
+        title: 'Backtest runner · ArthaYantra',
+        loadComponent: () => import('./pages/backtests/runner-page').then((m) => m.RunnerPage),
+      },
+      {
+        path: 'backtests/compare',
+        title: 'Compare runs · ArthaYantra',
+        loadComponent: () => import('./pages/backtests/compare-page').then((m) => m.ComparePage),
+      },
+      {
         path: 'backtests/jobs',
         title: 'Jobs · ArthaYantra',
         loadComponent: () => import('./pages/jobs/jobs-page').then((m) => m.JobsPage),
+      },
+      {
+        path: 'backtests/:id',
+        title: 'Backtest result · ArthaYantra',
+        loadComponent: () => import('./pages/backtests/results-page').then((m) => m.ResultsPage),
       },
       {
         path: 'watchlists',

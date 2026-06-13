@@ -3,7 +3,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { Subject } from 'rxjs';
 import { signal } from '@angular/core';
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { WsClientService } from '../core/ws-client.service';
 import { BacktestsStore } from './backtests.store';
 
@@ -80,6 +80,64 @@ describe('BacktestsStore (runner slice)', () => {
     ws.frames$.next(JSON.stringify({ jobId: 'other', status: 'completed', progress: 100 }));
     await flushed();
     expect(store.runProgress()).toBe(0);
+  });
+
+  it('loadResults populates the results-page slice', () => {
+    store.loadResults('run-1');
+    http
+      .expectOne((r) => r.url === '/api/v1/backtests/run-1/results')
+      .flush({ metrics: { sharpe: '1.2' }, equityCurve: [], dataHash: 'h' });
+    expect(store.viewResults()?.metrics['sharpe']).toBe('1.2');
+  });
+
+  it('loadFolds keeps a null regimeMix (BPC degrades cleanly)', () => {
+    store.loadFolds('run-1');
+    http
+      .expectOne((r) => r.url === '/api/v1/backtests/run-1/folds')
+      .flush([
+        {
+          fold: { index: 0, trainFrom: 'a', trainTo: 'b', testFrom: 'b', testTo: 'c' },
+          trainMetrics: { sharpe: '1.0' },
+          oosMetrics: { sharpe: '0.6' },
+          regimeMix: null,
+        },
+      ]);
+    expect(store.folds()[0].regimeMix).toBeNull();
+  });
+
+  it('loadCompare fetches each run (capped at 6)', () => {
+    store.loadCompare(['a', 'b']);
+    http
+      .expectOne((r) => r.url === '/api/v1/backtests/a/results')
+      .flush({ metrics: {}, equityCurve: [], dataHash: 'h1' });
+    http
+      .expectOne((r) => r.url === '/api/v1/backtests/b/results')
+      .flush({ metrics: {}, equityCurve: [], dataHash: 'h2' });
+    expect(
+      store
+        .compareResults()
+        .map((c) => c.id)
+        .sort(),
+    ).toEqual(['a', 'b']);
+  });
+
+  it('submitSweep posts to the optimizer and yields the sweep jobId', () => {
+    const then = vi.fn();
+    store.submitSweep(
+      {
+        strategyId: 's',
+        from: 'a',
+        to: 'b',
+        method: 'tpe',
+        maxTrials: 30,
+        objective: { metric: 'sharpe' },
+      },
+      then,
+    );
+    http
+      .expectOne((r) => r.method === 'POST' && r.url === '/api/v1/optimizations/run')
+      .flush({ jobId: 'sweep-1', status: 'queued' });
+    expect(then).toHaveBeenCalledWith('sweep-1');
   });
 });
 

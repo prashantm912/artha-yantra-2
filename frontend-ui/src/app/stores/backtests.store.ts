@@ -36,6 +36,63 @@ export interface BacktestResults {
   caveats?: string[];
 }
 
+/** One closed/open replay trade row (`GET /{id}/trades`). `contributions` is a per-indicator map. */
+export interface TradeRow {
+  seq: number;
+  side: 'LONG' | 'SHORT';
+  qty: number;
+  entryTs: string;
+  entryPrice: string;
+  exitTs?: string | null;
+  exitPrice?: string | null;
+  pnl: string;
+  pnlPct: string;
+  exitReason: string;
+  barsHeld: number;
+  touchBasis?: string | null;
+  contributions?: Record<string, unknown> | null;
+}
+
+/** One walk-forward fold (`GET /{id}/folds`); `regimeMix` is nullable (BPC degrades cleanly). */
+export interface FoldRow {
+  fold: { index: number; trainFrom: string; trainTo: string; testFrom: string; testTo: string };
+  trainMetrics: Record<string, string | number | null>;
+  oosMetrics: Record<string, string | number | null>;
+  regimeMix?: Record<string, number> | null;
+}
+
+/** Monte Carlo summary (`GET /{id}/montecarlo`). */
+export interface MonteCarloSummary {
+  mcSeed?: number;
+  n: number;
+  trades: number;
+  insufficientSample: boolean;
+  equityBands: { step: number[]; p5: string[]; p50: string[]; p95: string[] };
+  drawdownDistribution: { p5: string; p50: string; p95: string; mean: string };
+  riskOfRuin: string;
+  ci?: { cagr?: Record<string, string>; sharpe?: Record<string, string> };
+}
+
+/** A backtest-run request for the optimizer sweep (`POST /api/v1/optimizations/run`). */
+export interface SweepRunRequest {
+  strategyId: string;
+  strategyVersion?: string | null;
+  from: string;
+  to: string;
+  interval?: string;
+  initialCapital?: string;
+  method: 'grid' | 'random' | 'tpe' | 'nsga2';
+  maxTrials: number;
+  objective: {
+    metric?: string;
+    direction?: 'maximize' | 'minimize';
+    fold_aggregation?: 'mean' | 'min' | 'mean_minus_std';
+    objectives?: { metric: string; direction: string }[];
+  };
+  constraints?: { min_trades?: number };
+  seed?: number;
+}
+
 interface JobProgressFrame {
   jobId: string;
   status: JobStatus;
@@ -49,6 +106,13 @@ interface BacktestsState {
   results: BacktestResults | null;
   resultsLoading: boolean;
   runError: string | null;
+  // results-page slice
+  viewResults: BacktestResults | null;
+  trades: TradeRow[];
+  folds: FoldRow[];
+  montecarlo: MonteCarloSummary | null;
+  // comparison slice (up to 6 runs — §7.7 screen 5)
+  compareResults: { id: string; results: BacktestResults }[];
 }
 
 const JOBS_TOPIC = '/topic/jobs/stream';
@@ -67,6 +131,11 @@ export const BacktestsStore = signalStore(
     results: null,
     resultsLoading: false,
     runError: null,
+    viewResults: null,
+    trades: [],
+    folds: [],
+    montecarlo: null,
+    compareResults: [],
   }),
   withMethods((store, http = inject(HttpClient)) => ({
     /** Submit a backtest against the given request; tracks the returned jobId. */
@@ -108,6 +177,62 @@ export const BacktestsStore = signalStore(
           });
         },
         error: () => patchState(store, { resultsLoading: false }),
+      });
+    },
+
+    // --- results page slice ---
+    loadResults(id: string): void {
+      patchState(store, { resultsLoading: true });
+      http.get<BacktestResults>(`/api/v1/backtests/${id}/results`).subscribe({
+        next: (viewResults) => patchState(store, { viewResults, resultsLoading: false }),
+        error: () => patchState(store, { resultsLoading: false }),
+      });
+    },
+
+    loadTrades(id: string): void {
+      http.get<{ items: TradeRow[] }>(`/api/v1/backtests/${id}/trades`).subscribe({
+        next: (page) => patchState(store, { trades: page.items ?? [] }),
+        error: () => patchState(store, { trades: [] }),
+      });
+    },
+
+    loadFolds(id: string): void {
+      http.get<FoldRow[]>(`/api/v1/backtests/${id}/folds`).subscribe({
+        next: (folds) => patchState(store, { folds: folds ?? [] }),
+        error: () => patchState(store, { folds: [] }),
+      });
+    },
+
+    loadMonteCarlo(id: string): void {
+      http.get<MonteCarloSummary>(`/api/v1/backtests/${id}/montecarlo`).subscribe({
+        next: (montecarlo) => patchState(store, { montecarlo }),
+        error: () => patchState(store, { montecarlo: null }),
+      });
+    },
+
+    /** Load up to 6 runs' results for the comparison matrix. */
+    loadCompare(ids: string[]): void {
+      patchState(store, { compareResults: [] });
+      for (const id of ids.slice(0, 6)) {
+        http.get<BacktestResults>(`/api/v1/backtests/${id}/results`).subscribe({
+          next: (results) =>
+            patchState(store, { compareResults: [...store.compareResults(), { id, results }] }),
+          error: () => undefined,
+        });
+      }
+    },
+
+    /** Fire a full backtest from the runner; yields the jobId (the runner navigates to the monitor). */
+    submitRun(req: BacktestRunRequest, then?: (jobId: string) => void): void {
+      http.post<{ jobId: string }>('/api/v1/backtests/run', req).subscribe({
+        next: (res) => then?.(res.jobId),
+      });
+    },
+
+    /** Fire a sweep from the runner; yields the sweep jobId. */
+    submitSweep(req: SweepRunRequest, then?: (jobId: string) => void): void {
+      http.post<{ jobId: string }>('/api/v1/optimizations/run', req).subscribe({
+        next: (res) => then?.(res.jobId),
       });
     },
 

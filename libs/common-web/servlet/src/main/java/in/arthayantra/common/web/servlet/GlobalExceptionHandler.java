@@ -16,6 +16,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
@@ -45,6 +46,16 @@ public class GlobalExceptionHandler {
         .body(
             new ErrorResponse(
                 ErrorCodes.VALIDATION_FAILED, "Request validation failed", Map.of("fields", fields)));
+  }
+
+  /** Path/query param type conversion failures (e.g. non-UUID id): 400 VALIDATION_FAILED. */
+  @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+  public ResponseEntity<ErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
+    Map<String, Object> fields = Map.of(ex.getName(), "invalid value: " + ex.getValue());
+    return ResponseEntity.badRequest()
+        .body(
+            new ErrorResponse(
+                ErrorCodes.VALIDATION_FAILED, "Invalid parameter value", Map.of("fields", fields)));
   }
 
   /** Unreadable/malformed request bodies are validation failures, not 500s. */

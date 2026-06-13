@@ -118,15 +118,24 @@ have, or wait it out / `docker exec ay-redis redis-cli del login:cooldown:<ip>`.
 `Referrer-Policy: no-referrer`, `Content-Security-Policy: default-src 'self'...`,
 and an `X-Request-Id` UUID are all present.
 
-**Routing skeleton:** an authenticated call to a not-yet-built service must
-return a clean 503 envelope, never a stack trace:
+**Routing skeleton:** an authenticated call to an upstream that is down must
+return a clean 503 envelope, never a stack trace. Stop the strategy service,
+hit its route, then restart:
 
 ```powershell
-try { Invoke-WebRequest -UseBasicParsing -Uri http://127.0.0.1:8080/api/v1/strategies/x -WebSession $web } catch { $r=$_.Exception.Response; [int]$r.StatusCode }
+docker stop ay-strategy-signal-service
+try { Invoke-WebRequest -UseBasicParsing -Uri http://127.0.0.1:8080/api/v1/strategies -WebSession $web } catch { $r=$_.Exception.Response; [int]$r.StatusCode }
+docker start ay-strategy-signal-service
 ```
 
 **PASS when:** `503` (body code `UPSTREAM_UNAVAILABLE`). Unauthenticated, the
 same URL gives `401` with `AUTH_REQUIRED`.
+
+> **Stage C note:** from Stage C onward all services (`strategy-signal-service`,
+> `market-data-service`) are deployed, so `/api/v1/strategies/x` routes to the
+> live service rather than returning 503. Non-UUID path params (like `x`) now
+> return `400 VALIDATION_FAILED` instead. Unknown paths not covered by any
+> service route are caught by the Angular SPA router (200 + SPA HTML).
 
 ---
 
@@ -232,15 +241,19 @@ docker rm -f ntfy-stub
 and the stub log shows `POST /test-topic` with
 `Title: ArthaYantra backup FAILED`.
 
-**Restore drill:**
+**Restore drill:** restore is designed for disaster-recovery onto a
+fresh-schema database (Flyway recreates structure, then data is loaded).
+Reset the DB first, then restore:
 
 ```powershell
+.\ay.ps1 reset-db
 $dump = (Get-ChildItem backups\manual -Recurse -Filter marketdata.dump | Select-Object -First 1).FullName
 .\ay.ps1 restore $dump
 ```
 
-**PASS when:** it ends with `[ay] restore complete` (the Stage-A schemas are
-near-empty, so this is fast — the drill is about the procedure working).
+**PASS when:** it ends with `[ay] restore complete`. (`reset-db` ensures the
+schema is freshly created by Flyway with no existing data, so the
+`--data-only` restore has no duplicate-key conflicts.)
 
 ---
 
@@ -351,3 +364,4 @@ error** instead of applying. Revert the edit afterwards (`git checkout -- deploy
 | Compose pull hangs forever | don't run two pulls of the same image concurrently; `Ctrl+C` and `docker pull <image>` once |
 | Probe `timeout: 0 frames` | is `ay-market-data-service` healthy? `.\ay.ps1 logs market-data-service` |
 | `ay backup` says schemas absent | flyway-init hasn't run on this volume — `.\ay.ps1 reset-db` |
+| `ay restore` fails / `market-data-service` logs `invalid INSERT on root table of hypertable "_hyper_1_X_chunk"` after a restore attempt | failed `--clean` restore leaves `ts_insert_blocker` on chunk tables. Fix: `docker exec ay-timescaledb psql -U artha -d artha -c "SELECT c.schema_name\|\|'.'||c.table_name FROM _timescaledb_catalog.chunk c"` to list chunks, then `DROP TRIGGER IF EXISTS ts_insert_blocker ON _timescaledb_internal._hyper_X_Y_chunk;` for each affected chunk. Use `.\ay.ps1 restore` (which now wraps with `timescaledb_pre_restore()`) to avoid recurrence. |

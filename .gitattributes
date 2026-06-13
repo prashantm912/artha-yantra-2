@@ -15,6 +15,10 @@ mvnw text eol=lf
 # SQL migrations are checksummed by Flyway — keep them byte-stable as LF.
 *.sql text eol=lf
 
+# JSON (schema files, OpenAPI contracts, fixtures) — byte-stable as LF so the
+# Maven JAR resource and the on-disk file are identical on all platforms.
+*.json text eol=lf
+
 # Binary
 *.png binary
 *.jpg binary

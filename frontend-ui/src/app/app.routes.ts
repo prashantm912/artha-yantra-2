@@ -13,7 +13,11 @@ export const routes: Routes = [
     canActivate: [authGuard],
     loadComponent: () => import('./shell/app-shell').then((m) => m.AppShell),
     children: [
-      { path: '', pathMatch: 'full', redirectTo: 'home' },
+      { path: '', pathMatch: 'full', redirectTo: 'signals' },
+      {
+        path: 'signals',
+        loadComponent: () => import('./pages/signals/signals-page').then((m) => m.SignalsPage),
+      },
       {
         path: 'home',
         loadComponent: () => import('./pages/home/home-page').then((m) => m.HomePage),

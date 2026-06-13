@@ -47,6 +47,29 @@ export interface ValidationResult {
 
 export type VersionBump = 'patch' | 'minor' | 'major';
 
+/** One row of the immutable version timeline (`GET /{id}/versions`). */
+export interface VersionRow {
+  version: string;
+  status: string;
+  checksum: string;
+  author?: string;
+  notes?: string | null;
+  createdAt?: string;
+}
+
+/** One structured diff op (`GET /{id}/diff`): `path: before → after`. */
+export interface DiffOp {
+  path: string;
+  op: 'add' | 'change' | 'remove';
+  before: string | null;
+  after: string | null;
+}
+export interface DiffResult {
+  structured: DiffOp[];
+  yamlFrom: string;
+  yamlTo: string;
+}
+
 interface StrategiesState {
   list: StrategySummary[];
   loading: boolean;
@@ -61,6 +84,8 @@ interface StrategiesState {
   saving: boolean;
   lastSaved: { version: string; checksum?: string } | null;
   createdId: string | null;
+  versions: VersionRow[];
+  diff: DiffResult | null;
 }
 
 /**
@@ -84,6 +109,8 @@ export const StrategiesStore = signalStore(
     saving: false,
     lastSaved: null,
     createdId: null,
+    versions: [],
+    diff: null,
   }),
   withMethods((store, http = inject(HttpClient)) => ({
     loadList(): void {
@@ -180,6 +207,57 @@ export const StrategiesStore = signalStore(
                 : store.current(),
             }),
           error: () => patchState(store, { saving: false }),
+        });
+    },
+
+    loadVersions(id: string): void {
+      http.get<{ items: VersionRow[] }>(`/api/v1/strategies/${id}/versions`).subscribe({
+        next: (page) => patchState(store, { versions: page.items ?? [] }),
+        error: () => undefined,
+      });
+    },
+
+    loadDiff(id: string, from: string, to: string): void {
+      const params = new HttpParams().set('from', from).set('to', to);
+      http.get<DiffResult>(`/api/v1/strategies/${id}/diff`, { params }).subscribe({
+        next: (diff) => patchState(store, { diff }),
+        error: () => patchState(store, { diff: null }),
+      });
+    },
+
+    /** Publish a draft (advisory stress state never blocks — E-13); yields the published version. */
+    publish(
+      id: string,
+      body: { targetVersion?: string; notes?: string },
+      then?: (version: string) => void,
+    ): void {
+      http
+        .post<{ version: string; status: string }>(`/api/v1/strategies/${id}/publish`, body)
+        .subscribe({
+          next: (res) => {
+            this.loadVersions(id);
+            then?.(res.version);
+          },
+        });
+    },
+
+    /** Roll back to a prior version (copy-forward draft); yields the new draft version. */
+    rollback(
+      id: string,
+      body: { version: string; andPublish?: boolean },
+      then?: (newVersion: string) => void,
+    ): void {
+      http
+        .post<{
+          newVersion: string;
+          copiedFrom: string;
+          status: string;
+        }>(`/api/v1/strategies/${id}/rollback`, body)
+        .subscribe({
+          next: (res) => {
+            this.loadVersions(id);
+            then?.(res.newVersion);
+          },
         });
     },
 

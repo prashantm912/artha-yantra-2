@@ -32,6 +32,12 @@ export const routes: Routes = [
           import('./pages/strategies/strategy-list-page').then((m) => m.StrategyListPage),
       },
       {
+        path: 'strategies/compare',
+        title: 'Compare strategies · ArthaYantra',
+        loadComponent: () =>
+          import('./pages/strategies/strategy-compare-page').then((m) => m.StrategyComparePage),
+      },
+      {
         path: 'strategies/:id/edit',
         title: 'Strategy editor · ArthaYantra',
         loadComponent: () =>
@@ -40,6 +46,11 @@ export const routes: Routes = [
           (c: import('./pages/strategies/strategy-editor-page').StrategyEditorPage) =>
             c.canDeactivate(),
         ],
+      },
+      {
+        path: 'strategies/:id/versions',
+        title: 'Strategy versions · ArthaYantra',
+        loadComponent: () => import('./pages/strategies/versions-page').then((m) => m.VersionsPage),
       },
       {
         path: 'backtests/jobs',

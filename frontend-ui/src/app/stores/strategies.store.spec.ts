@@ -85,4 +85,53 @@ describe('StrategiesStore', () => {
     http.expectOne((r) => r.url === '/api/v1/strategies/schema/v1').flush({ type: 'object' });
     expect(store.schema()).toEqual({ type: 'object' });
   });
+
+  it('loadVersions populates the version timeline', () => {
+    store.loadVersions('a');
+    http
+      .expectOne((r) => r.url === '/api/v1/strategies/a/versions')
+      .flush({
+        items: [
+          { version: '1.1.0', status: 'draft', checksum: 'x' },
+          { version: '1.0.0', status: 'published', checksum: 'y' },
+        ],
+      });
+    expect(store.versions().map((v) => v.version)).toEqual(['1.1.0', '1.0.0']);
+  });
+
+  it('loadDiff stores the structured diff and both YAMLs', () => {
+    store.loadDiff('a', '1.0.0', '1.1.0');
+    const req = http.expectOne((r) => r.url === '/api/v1/strategies/a/diff');
+    expect(req.request.params.get('from')).toBe('1.0.0');
+    req.flush({
+      structured: [{ path: 'scoring.threshold', op: 'change', before: '0.5', after: '0.6' }],
+      yamlFrom: 'a: 1',
+      yamlTo: 'a: 2',
+    });
+    expect(store.diff()?.structured[0].op).toBe('change');
+    expect(store.diff()?.yamlTo).toBe('a: 2');
+  });
+
+  it('publish POSTs and yields the published version to the callback', () => {
+    const then = vi.fn();
+    store.publish('a', { notes: 'go live' }, then);
+    http
+      .expectOne((r) => r.method === 'POST' && r.url === '/api/v1/strategies/a/publish')
+      .flush({ id: 'a', version: '1.1.0', status: 'published' });
+    // publish refreshes the timeline
+    http.expectOne((r) => r.url === '/api/v1/strategies/a/versions').flush({ items: [] });
+    expect(then).toHaveBeenCalledWith('1.1.0');
+  });
+
+  it('rollback POSTs the source version and yields the new draft', () => {
+    const then = vi.fn();
+    store.rollback('a', { version: '1.0.0' }, then);
+    const req = http.expectOne(
+      (r) => r.method === 'POST' && r.url === '/api/v1/strategies/a/rollback',
+    );
+    expect(req.request.body.version).toBe('1.0.0');
+    req.flush({ id: 'a', newVersion: '1.2.0', copiedFrom: '1.0.0', status: 'draft' });
+    http.expectOne((r) => r.url === '/api/v1/strategies/a/versions').flush({ items: [] });
+    expect(then).toHaveBeenCalledWith('1.2.0');
+  });
 });

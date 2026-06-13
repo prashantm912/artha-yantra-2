@@ -99,7 +99,11 @@ switch ($Verb) {
         $dump = Resolve-Path $Rest[0]
         Write-Host "[ay] restoring $dump into database 'artha' (per-schema -Fc dump)"
         Invoke-Compose @('cp', "$dump", 'timescaledb:/tmp/ay-restore.dump')
-        Invoke-Compose @('exec', '-T', 'timescaledb', 'pg_restore', '-U', 'artha', '-d', 'artha', '--clean', '--if-exists', '--no-owner', '/tmp/ay-restore.dump')
+        # timescaledb_pre_restore disables chunk routing checks so pg_restore can write
+        # directly to chunk tables; timescaledb_post_restore re-enables them.
+        Invoke-Compose @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', 'artha', '-c', 'SELECT timescaledb_pre_restore()')
+        Invoke-Compose @('exec', '-T', 'timescaledb', 'pg_restore', '-U', 'artha', '-d', 'artha', '--data-only', '--no-owner', '/tmp/ay-restore.dump')
+        Invoke-Compose @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', 'artha', '-c', 'SELECT timescaledb_post_restore()')
         Invoke-Compose @('exec', '-T', 'timescaledb', 'rm', '-f', '/tmp/ay-restore.dump')
         Write-Host '[ay] restore complete'
     }

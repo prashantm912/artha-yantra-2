@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compareDecimal, formatDecimal, isNegative } from './decimal';
+import { compareDecimal, formatDecimal, isNegative, subtractDecimal } from './decimal';
 
 describe('decimal utility (exact strings, never parseFloat)', () => {
   it('compares beyond double precision', () => {
@@ -21,5 +21,13 @@ describe('decimal utility (exact strings, never parseFloat)', () => {
   it('detects sign', () => {
     expect(isNegative('-0.0001')).toBe(true);
     expect(isNegative('0')).toBe(false);
+  });
+
+  it('subtracts exactly via BigInt scaling', () => {
+    expect(subtractDecimal('18100.0000', '18050.5000')).toBe('49.5');
+    expect(subtractDecimal('100', '40')).toBe('60');
+    expect(subtractDecimal('18050.50', '18100.00')).toBe('-49.5');
+    expect(subtractDecimal('0.10', '0.10')).toBe('0');
+    expect(subtractDecimal('21750.05000000001', '21750.05')).toBe('0.00000000001');
   });
 });

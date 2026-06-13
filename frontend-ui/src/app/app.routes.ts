@@ -36,6 +36,11 @@ export const routes: Routes = [
         loadComponent: () => import('./pages/options/options-page').then((m) => m.OptionsPage),
       },
       {
+        path: 'futures',
+        title: 'Futures · ArthaYantra',
+        loadComponent: () => import('./pages/futures/futures-page').then((m) => m.FuturesPage),
+      },
+      {
         path: 'strategies',
         title: 'Strategies · ArthaYantra',
         loadComponent: () =>

@@ -1,10 +1,19 @@
 {
   "name": "arthayantra-e2e",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "Scripted probes against the mock stack (A.7b); the full Playwright project arrives in Stage C (Phase 27).",
+  "description": "Playwright smoke suite against the full mock compose stack (Phase 27 / C-2.20) + the Stage-A STOMP probe under tools/.",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed"
+  },
   "dependencies": {
     "@stomp/stompjs": "^7.1.1",
     "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.11.3",
+    "@playwright/test": "^1.60.0"
   }
 }

@@ -1,0 +1,25 @@
+# expect: duplicate alias
+schema: strategy-schema/v1
+id: reject-duplicate-alias
+name: "Duplicate Alias"
+version: 1.0.0
+universe:
+  mode: explicit
+  instruments:
+    - { exchange: NSE, tradingsymbol: RELIANCE }
+timeframes: { primary: 1m }
+indicators:
+  - { name: EMA, alias: ema_x, timeframe: 1m, params: { period: 9 }, weight: 1.0 }
+  - { name: SMA, alias: ema_x, timeframe: 1m, params: { period: 21 }, weight: 1.0 }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - "close > ema_x"
+  scoring: { threshold: 0.5 }
+exit_rules:
+  - { type: stop_loss, params: { basis: r_multiple, value: 1.5 } }
+risk:
+  position_sizing: { method: fixed_quantity, params: { quantity: 1 } }
+  max_positions: 1
+  session: { style: intraday }

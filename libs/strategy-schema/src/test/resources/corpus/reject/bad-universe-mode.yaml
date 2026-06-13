@@ -1,0 +1,25 @@
+# expect: /universe
+schema: strategy-schema/v1
+id: reject-bad-universe-mode
+name: "Bad Universe Mode"
+version: 1.0.0
+universe:
+  mode: watchlist
+  instruments:
+    - { exchange: NSE, tradingsymbol: RELIANCE }
+timeframes: { primary: 1m }
+indicators:
+  - { name: EMA, alias: ema_fast, timeframe: 1m, params: { period: 9 }, weight: 1.0 }
+  - { name: EMA, alias: ema_slow, timeframe: 1m, params: { period: 21 }, weight: 1.0 }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - crossover: { fast: ema_fast, slow: ema_slow }
+  scoring: { threshold: 0.5 }
+exit_rules:
+  - { type: signal_exit, params: { rule: "crossunder(ema_fast, ema_slow)" } }
+risk:
+  position_sizing: { method: fixed_quantity, params: { quantity: 1 } }
+  max_positions: 1
+  session: { style: intraday }

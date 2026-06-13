@@ -39,16 +39,26 @@ public final class ErrorCodes {
   public static final String NOT_FOUND_SIGNAL = "NOT_FOUND_SIGNAL";
   public static final String NOT_FOUND_JOB = "NOT_FOUND_JOB";
   public static final String NOT_FOUND_WATCHLIST = "NOT_FOUND_WATCHLIST";
+  public static final String NOT_FOUND_VERSION = "NOT_FOUND_VERSION";
 
   // ---- CONFLICT_* (409) ----
   public static final String CONFLICT_JOB_TERMINAL = "CONFLICT_JOB_TERMINAL";
   public static final String CONFLICT_VERSION_IMMUTABLE = "CONFLICT_VERSION_IMMUTABLE";
   public static final String CONFLICT_SYNC_RUNNING = "CONFLICT_SYNC_RUNNING";
   public static final String CONFLICT_WATCHLIST_NAME = "CONFLICT_WATCHLIST_NAME";
+  public static final String CONFLICT_SLUG_EXISTS = "CONFLICT_SLUG_EXISTS";
+  public static final String CONFLICT_NO_CONTENT_CHANGE = "CONFLICT_NO_CONTENT_CHANGE";
+  public static final String CONFLICT_NOT_A_DRAFT = "CONFLICT_NOT_A_DRAFT";
+  public static final String CONFLICT_HAS_PUBLISHED_HISTORY = "CONFLICT_HAS_PUBLISHED_HISTORY";
 
   // ---- STRATEGY_* (400/422) ----
   public static final String STRATEGY_SCHEMA_INVALID = "STRATEGY_SCHEMA_INVALID";
   public static final String STRATEGY_NOT_PUBLISHED = "STRATEGY_NOT_PUBLISHED";
+  public static final String STRATEGY_SCHEMA_UNSUPPORTED = "STRATEGY_SCHEMA_UNSUPPORTED";
+  public static final String STRATEGY_UNIVERSE_UNSUPPORTED = "STRATEGY_UNIVERSE_UNSUPPORTED";
+
+  // ---- closed optimizer parameter-path grammar (400) — COMMON 12.5 ----
+  public static final String INVALID_PARAMETER_PATH = "INVALID_PARAMETER_PATH";
 
   // ---- DATA_* (422/503) ----
   public static final String DATA_GAP = "DATA_GAP";

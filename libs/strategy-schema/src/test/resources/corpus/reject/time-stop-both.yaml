@@ -1,0 +1,24 @@
+# expect: /exit_rules/0/params
+schema: strategy-schema/v1
+id: reject-time-stop-both
+name: "Time Stop Both Forms"
+version: 1.0.0
+universe:
+  mode: explicit
+  instruments:
+    - { exchange: NSE, tradingsymbol: RELIANCE }
+timeframes: { primary: 1m }
+indicators:
+  - { name: EMA, alias: ema_fast, timeframe: 1m, params: { period: 9 }, weight: 1.0 }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - "close > ema_fast"
+  scoring: { threshold: 0.5 }
+exit_rules:
+  - { type: time_stop, params: { max_bars: 10, max_holding_days: 5 } }   # exactly ONE of the two
+risk:
+  position_sizing: { method: fixed_quantity, params: { quantity: 1 } }
+  max_positions: 1
+  session: { style: intraday }

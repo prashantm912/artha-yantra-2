@@ -1,0 +1,71 @@
+# Annotated example 2 (stock swing) - verbatim accept fixture from the
+# Stage C design doc C-2.11 (plan 7.1)
+schema: strategy-schema/v1
+id: n100-swing-pullback
+name: "NIFTY100 Swing Pullback"
+version: 2.0.1
+description: "Daily-bar trend-following swing entries on NIFTY 100 constituents, 5-30 day holds"
+author: owner
+tags: [stocks, swing, positional]
+enabled: true
+
+universe:
+  mode: index_constituents
+  index: "NIFTY 100"                      # resolved via market-data-service's constituents endpoint
+                                          # - NSE Indices CSV feed; Kite's dump has no membership data
+  filters: { min_avg_daily_volume: 500000, min_price: 50, exclude: ["NSE:IDEA"] }
+  # mode: explicit would instead take instruments: [{exchange: NSE, tradingsymbol: RELIANCE}, ...]
+
+timeframes: { primary: 1d, additional: [1h] }
+
+indicators:
+  - { name: EMA, alias: ema20, timeframe: 1d, params: { period: 20 }, weight: 1.0 }
+  - { name: EMA, alias: ema50, timeframe: 1d, params: { period: 50 }, weight: 1.0 }
+  - { name: RSI, alias: rsi14, timeframe: 1d, params: { period: 14 }, weight: 1.0,
+      normalize: { type: linear, from: 40, to: 65 } }       # reward recovering momentum
+  - { name: ADX, alias: adx14, timeframe: 1d, params: { period: 14 }, weight: 1.0,
+      normalize: { type: linear, from: 15, to: 40 } }       # trend quality
+  - { name: MACD_HIST, alias: macd_h, timeframe: 1d, params: { fast: 12, slow: 26, signal: 9 },
+      weight: 0.7, optional: true, normalize: { type: direction } }
+  - { name: VOLUME_RATIO, alias: vol_x, timeframe: 1d, params: { lookback: 20 },
+      weight: 0.5, optional: true, normalize: { type: linear, from: 1.0, to: 2.5 } }
+
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - "ema20 > ema50"                   # established uptrend
+      - "close > ema20"                   # price reclaimed the fast EMA after pullback
+      - any:                              # at least one momentum confirmation
+          - "rsi14 > 45"
+          - crossover: { fast: ema20, slow: ema50 }
+  scoring: { threshold: 0.60 }
+
+exit_rules:
+  - { type: stop_loss,     params: { basis: atr_multiple, value: 2.0, atr_period: 14 } }
+  - { type: take_profit,   params: { basis: r_multiple, value: 2.5 } }   # 2.5x initial risk
+  - { type: trailing_stop, params: { basis: atr_multiple, value: 3.0 } }
+  - { type: time_stop,     params: { max_holding_days: 30 } }
+  - { type: signal_exit,   params: { rule: "crossunder(ema20, ema50)" } }
+
+risk:
+  position_sizing: { method: atr_risk, params: { risk_pct_equity: 1.0 } }  # qty = (1% equity)/stop distance
+  max_positions: 5
+  max_daily_loss_pct: 4.0
+  session: { style: positional, allow_overnight: true }    # btst style would force next-day exit window
+
+backtest:
+  defaults: { interval: 1d, lookback_days: 730, initial_capital: 1000000,
+              costs: { pct_per_side: 0.05, slippage_ticks: 1 } }
+  optimize:
+    parameters:
+      - { path: "indicators[alias=ema20].params.period", range: [10, 30], step: 2 }
+      - { path: "indicators[alias=ema50].params.period", range: [40, 100], step: 5 }
+      - { path: "exit_rules[type=stop_loss].params.value", range: [1.5, 3.0] }
+    method: nsga2
+    max_trials: 400
+    objective:                              # NSGA-II is multi-objective (Optuna NSGAIISampler)
+      - { metric: annualized_return, direction: maximize }
+      - { metric: max_drawdown,      direction: minimize }
+    constraints: { min_trades: 30 }
+    walk_forward: { train_days: 360, test_days: 120, step_days: 120, anchored: true }

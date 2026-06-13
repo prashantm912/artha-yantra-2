@@ -162,6 +162,26 @@ class GatewayIntegrationTest {
   }
 
   @Test
+  void t05b_spaShellIsPublicReachesRouterNotAuthGated() {
+    // The Angular shell is served through the SOLE ingress (catch-all -> frontend-ui).
+    // Unauthenticated SPA paths must NOT be 401 — the login page is the only way to obtain
+    // a session, so it has to load before any auth exists. In this IT the frontend-ui
+    // upstream is absent, so a permitted path reaches the router and yields the 503 envelope
+    // (proof it passed the security filter rather than being blocked at 401).
+    WebTestClient routerClient =
+        client.mutate().responseTimeout(java.time.Duration.ofSeconds(30)).build();
+    for (String spaPath : new String[] {"/", "/login", "/signals", "/main-abc123.js"}) {
+      routerClient
+          .get()
+          .uri(spaPath)
+          .exchange()
+          .expectStatus().isEqualTo(503)
+          .expectBody()
+          .jsonPath("$.code").isEqualTo("UPSTREAM_UNAVAILABLE");
+    }
+  }
+
+  @Test
   void t06_absentUpstreamGets503EnvelopeNeverTraces() {
     ResponseCookie session = login();
 

@@ -1,0 +1,1957 @@
+{
+  "openapi" : "3.1.0",
+  "info" : {
+    "title" : "market-data-service",
+    "description" : "Market-data spine (Stage B): instruments, candles, options, futures, watchlists, screener, system status",
+    "version" : "v1"
+  },
+  "paths" : {
+    "/api/v1/watchlists/{id}" : {
+      "get" : {
+        "tags" : [ "watchlist-controller" ],
+        "operationId" : "get",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/WatchlistView"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put" : {
+        "tags" : [ "watchlist-controller" ],
+        "operationId" : "update",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/NameRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/WatchlistView"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete" : {
+        "tags" : [ "watchlist-controller" ],
+        "operationId" : "delete",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK"
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/watchlists" : {
+      "get" : {
+        "tags" : [ "watchlist-controller" ],
+        "operationId" : "list",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : {
+                    "type" : "array",
+                    "items" : {
+                      "$ref" : "#/components/schemas/WatchlistView"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post" : {
+        "tags" : [ "watchlist-controller" ],
+        "operationId" : "create",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/NameRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/watchlists/{id}/items" : {
+      "post" : {
+        "tags" : [ "watchlist-controller" ],
+        "operationId" : "addItem",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ItemRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/WatchlistView"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete" : {
+        "tags" : [ "watchlist-controller" ],
+        "operationId" : "removeItem",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "exchange",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "tradingsymbol",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK"
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/subscriptions" : {
+      "get" : {
+        "tags" : [ "subscriptions-controller" ],
+        "operationId" : "list_1",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : {
+                    "type" : "array",
+                    "items" : {
+                      "$ref" : "#/components/schemas/SubscriptionView"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post" : {
+        "tags" : [ "subscriptions-controller" ],
+        "operationId" : "subscribe",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SubscribeRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete" : {
+        "tags" : [ "subscriptions-controller" ],
+        "operationId" : "unsubscribe",
+        "parameters" : [ {
+          "name" : "exchange",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "tradingsymbol",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "subscriber",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "default" : "ui"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK"
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/options/snapshot" : {
+      "post" : {
+        "tags" : [ "options-chain-controller" ],
+        "operationId" : "snapshot",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SnapshotRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : {
+                    "type" : "string"
+                  }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/candles/refresh" : {
+      "post" : {
+        "tags" : [ "candles-controller" ],
+        "operationId" : "refresh",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RefreshRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : {
+                    "type" : "string"
+                  }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/instruments/sync" : {
+      "post" : {
+        "tags" : [ "instruments-controller" ],
+        "operationId" : "sync",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : {
+                    "type" : "string"
+                  }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/kite/session" : {
+      "post" : {
+        "tags" : [ "kite-auth-controller" ],
+        "operationId" : "session",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SessionRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ExchangeResult"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete" : {
+        "tags" : [ "kite-auth-controller" ],
+        "operationId" : "invalidate",
+        "responses" : {
+          "200" : {
+            "description" : "OK"
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/ticks/latest" : {
+      "get" : {
+        "tags" : [ "market-surface-controller" ],
+        "operationId" : "latestTicks",
+        "parameters" : [ {
+          "name" : "symbols",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : {
+                    "$ref" : "#/components/schemas/NormalizedTick"
+                  }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/status" : {
+      "get" : {
+        "tags" : [ "market-surface-controller" ],
+        "operationId" : "status",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/screener" : {
+      "get" : {
+        "tags" : [ "screener-controller" ],
+        "operationId" : "screen",
+        "parameters" : [ {
+          "name" : "preset",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "window",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "lookback",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }, {
+          "name" : "lookbackDays",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }, {
+          "name" : "minReturnPct",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "number"
+          }
+        }, {
+          "name" : "minAvgVolume",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "number"
+          }
+        }, {
+          "name" : "minPrice",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "number"
+          }
+        }, {
+          "name" : "maxPrice",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "number"
+          }
+        }, {
+          "name" : "exchange",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "limit",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 25
+          }
+        }, {
+          "name" : "offset",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 0
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/options/chain" : {
+      "get" : {
+        "tags" : [ "options-chain-controller" ],
+        "operationId" : "chain",
+        "parameters" : [ {
+          "name" : "underlying",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "expiry",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Chain"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/options/chain/history" : {
+      "get" : {
+        "tags" : [ "options-chain-controller" ],
+        "operationId" : "history",
+        "parameters" : [ {
+          "name" : "underlying",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "expiry",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        }, {
+          "name" : "at",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/futures/term-structure" : {
+      "get" : {
+        "tags" : [ "futures-controller" ],
+        "operationId" : "termStructure",
+        "parameters" : [ {
+          "name" : "underlying",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TermStructure"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/candles" : {
+      "get" : {
+        "tags" : [ "candles-controller" ],
+        "operationId" : "candles",
+        "parameters" : [ {
+          "name" : "exchange",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "tradingsymbol",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "interval",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "from",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }, {
+          "name" : "to",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }, {
+          "name" : "adjust",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "default" : "back"
+          }
+        }, {
+          "name" : "limit",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 5000
+          }
+        }, {
+          "name" : "offset",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 0
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CandlesResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/instruments" : {
+      "get" : {
+        "tags" : [ "instruments-controller" ],
+        "operationId" : "list_2",
+        "parameters" : [ {
+          "name" : "exchange",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "type",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "q",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "limit",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 50
+          }
+        }, {
+          "name" : "offset",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 0
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageInstrument"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/instruments/{underlying}/strikes" : {
+      "get" : {
+        "tags" : [ "instruments-controller" ],
+        "operationId" : "strikes",
+        "parameters" : [ {
+          "name" : "underlying",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "expiry",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "type" : "number"
+                  }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/instruments/{underlying}/expiries" : {
+      "get" : {
+        "tags" : [ "instruments-controller" ],
+        "operationId" : "expiries",
+        "parameters" : [ {
+          "name" : "underlying",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "type" : "string",
+                    "format" : "date"
+                  }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/instruments/{exchange}/{tradingsymbol}" : {
+      "get" : {
+        "tags" : [ "instruments-controller" ],
+        "operationId" : "byKey",
+        "parameters" : [ {
+          "name" : "exchange",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "tradingsymbol",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Instrument"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/instruments/sync/status" : {
+      "get" : {
+        "tags" : [ "instruments-controller" ],
+        "operationId" : "syncStatus",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SyncStatus"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/instruments/search" : {
+      "get" : {
+        "tags" : [ "instruments-controller" ],
+        "operationId" : "search",
+        "parameters" : [ {
+          "name" : "q",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "limit",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 20
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/Instrument"
+                  }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/instruments/indices/{index}/constituents" : {
+      "get" : {
+        "tags" : [ "index-constituents-controller" ],
+        "operationId" : "constituents",
+        "parameters" : [ {
+          "name" : "index",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "asOf",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/kite/status" : {
+      "get" : {
+        "tags" : [ "kite-auth-controller" ],
+        "operationId" : "status_1",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/KiteStatus"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/kite/login-url" : {
+      "get" : {
+        "tags" : [ "kite-auth-controller" ],
+        "operationId" : "loginUrl",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : {
+                    "type" : "string"
+                  }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/kite/callback" : {
+      "get" : {
+        "tags" : [ "kite-auth-controller" ],
+        "operationId" : "callback",
+        "parameters" : [ {
+          "name" : "request_token",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "text/html" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components" : {
+    "schemas" : {
+      "NameRequest" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "sortOrder" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "ItemRequest" : {
+        "type" : "object",
+        "properties" : {
+          "exchange" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          }
+        }
+      },
+      "WatchlistView" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ItemRequest"
+            }
+          }
+        }
+      },
+      "SubscribeRequest" : {
+        "type" : "object",
+        "properties" : {
+          "exchange" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "mode" : {
+            "type" : "string"
+          },
+          "priority" : {
+            "type" : "string"
+          },
+          "subscriber" : {
+            "type" : "string"
+          }
+        }
+      },
+      "SnapshotRequest" : {
+        "type" : "object",
+        "properties" : {
+          "underlying" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        }
+      },
+      "RefreshRequest" : {
+        "type" : "object",
+        "properties" : {
+          "exchange" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "interval" : {
+            "type" : "string"
+          },
+          "from" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "to" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "SessionRequest" : {
+        "type" : "object",
+        "properties" : {
+          "requestToken" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ExchangeResult" : {
+        "type" : "object",
+        "properties" : {
+          "connected" : {
+            "type" : "boolean"
+          },
+          "kiteUserId" : {
+            "type" : "string"
+          },
+          "tokenValidUntil" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "NormalizedTick" : {
+        "type" : "object",
+        "properties" : {
+          "exchange" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "lastPrice" : {
+            "type" : "number"
+          },
+          "cumulativeDayVolume" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "openInterest" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "timestamp" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "seq" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "SubscriptionView" : {
+        "type" : "object",
+        "properties" : {
+          "exchange" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "instrumentToken" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "mode" : {
+            "type" : "string",
+            "enum" : [ "LTP", "QUOTE", "FULL" ]
+          },
+          "priority" : {
+            "type" : "string",
+            "enum" : [ "PINNED_INDEX", "STRATEGY", "UI", "SPECULATIVE" ]
+          },
+          "subscribers" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "Chain" : {
+        "type" : "object",
+        "properties" : {
+          "underlying" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "spot" : {
+            "type" : "number"
+          },
+          "forward" : {
+            "type" : "number"
+          },
+          "forwardSource" : {
+            "type" : "string"
+          },
+          "riskFreeRate" : {
+            "type" : "number"
+          },
+          "pcr" : {
+            "type" : "number"
+          },
+          "stale" : {
+            "type" : "boolean"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "rows" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/StrikeRow"
+            }
+          }
+        }
+      },
+      "Leg" : {
+        "type" : "object",
+        "properties" : {
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "ltp" : {
+            "type" : "number"
+          },
+          "bid" : {
+            "type" : "number"
+          },
+          "ask" : {
+            "type" : "number"
+          },
+          "volume" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "oi" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "iv" : {
+            "type" : "number"
+          },
+          "delta" : {
+            "type" : "number"
+          },
+          "gamma" : {
+            "type" : "number"
+          },
+          "theta" : {
+            "type" : "number"
+          },
+          "vega" : {
+            "type" : "number"
+          },
+          "rho" : {
+            "type" : "number"
+          },
+          "ivReason" : {
+            "type" : "string"
+          },
+          "priceSource" : {
+            "type" : "string"
+          }
+        }
+      },
+      "StrikeRow" : {
+        "type" : "object",
+        "properties" : {
+          "strike" : {
+            "type" : "number"
+          },
+          "ce" : {
+            "$ref" : "#/components/schemas/Leg"
+          },
+          "pe" : {
+            "$ref" : "#/components/schemas/Leg"
+          }
+        }
+      },
+      "ContractLeg" : {
+        "type" : "object",
+        "properties" : {
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "daysToExpiry" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "ltp" : {
+            "type" : "number"
+          },
+          "oi" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "volume" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "basisAbsolute" : {
+            "type" : "number"
+          },
+          "basisAnnualized" : {
+            "type" : "number"
+          }
+        }
+      },
+      "TermStructure" : {
+        "type" : "object",
+        "properties" : {
+          "underlying" : {
+            "type" : "string"
+          },
+          "spot" : {
+            "type" : "number"
+          },
+          "state" : {
+            "type" : "string"
+          },
+          "calendarSpread" : {
+            "type" : "number"
+          },
+          "stale" : {
+            "type" : "boolean"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "contracts" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ContractLeg"
+            }
+          }
+        }
+      },
+      "Candle" : {
+        "type" : "object",
+        "properties" : {
+          "exchange" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "interval" : {
+            "type" : "string"
+          },
+          "bucket" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "open" : {
+            "type" : "number"
+          },
+          "high" : {
+            "type" : "number"
+          },
+          "low" : {
+            "type" : "number"
+          },
+          "close" : {
+            "type" : "number"
+          },
+          "volume" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "oi" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "source" : {
+            "type" : "string"
+          }
+        }
+      },
+      "CandlesResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Candle"
+            }
+          },
+          "stale" : {
+            "type" : "boolean"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "limit" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "offset" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "total" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "Instrument" : {
+        "type" : "object",
+        "properties" : {
+          "exchange" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "instrumentToken" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "segment" : {
+            "type" : "string"
+          },
+          "instrumentType" : {
+            "type" : "string"
+          },
+          "underlyingExchange" : {
+            "type" : "string"
+          },
+          "underlyingTradingsymbol" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "strike" : {
+            "type" : "number"
+          },
+          "tickSize" : {
+            "type" : "number"
+          },
+          "lotSize" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "active" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "PageInstrument" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Instrument"
+            }
+          },
+          "total" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "limit" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "offset" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "SyncStatus" : {
+        "type" : "object",
+        "properties" : {
+          "jobId" : {
+            "type" : "string"
+          },
+          "state" : {
+            "type" : "string"
+          },
+          "lastRun" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "perExchangeRows" : {
+            "type" : "object",
+            "additionalProperties" : {
+              "type" : "integer",
+              "format" : "int64"
+            }
+          },
+          "durationMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "error" : {
+            "type" : "string"
+          }
+        }
+      },
+      "KiteStatus" : {
+        "type" : "object",
+        "properties" : {
+          "connected" : {
+            "type" : "boolean"
+          },
+          "profile" : {
+            "type" : "string"
+          },
+          "state" : {
+            "type" : "string"
+          },
+          "kiteUserId" : {
+            "type" : "string"
+          },
+          "tokenValidUntil" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "lastValidatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "tickerState" : {
+            "type" : "string"
+          },
+          "circuitState" : {
+            "type" : "string"
+          },
+          "lastContractCheck" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "contractDrift" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "ErrorResponse" : {
+        "type" : "object",
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "details" : {
+            "type" : "object"
+          }
+        }
+      }
+    }
+  }
+}

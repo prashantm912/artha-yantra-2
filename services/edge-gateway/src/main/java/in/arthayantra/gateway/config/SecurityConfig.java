@@ -78,8 +78,26 @@ public class SecurityConfig {
                     .permitAll()
                     .pathMatchers("/actuator/health/**", "/actuator/health", "/actuator/info")
                     .permitAll()
+                    // Deny-by-default still holds for every DYNAMIC surface: the data/control
+                    // plane, the WS feed, management beyond liveness, and the api-docs/Swagger
+                    // proxy all require the session. A compose typo degrades to "password
+                    // required", not "open data". [A.2.3]
+                    .pathMatchers(
+                        "/api/**",
+                        "/ws/**",
+                        "/actuator/**",
+                        "/docs/**",
+                        "/v3/api-docs",
+                        "/v3/api-docs/**",
+                        "/swagger-ui.html",
+                        "/swagger-ui/**")
+                    .authenticated()
+                    // Everything else is the Angular shell served through the SOLE ingress
+                    // (catch-all route -> frontend-ui). A compiled SPA bundle carries no
+                    // secrets, and it MUST be reachable unauthenticated or the login page —
+                    // the only way to obtain a session — can never load. [Phase 27 / C-2.28]
                     .anyExchange()
-                    .authenticated())
+                    .permitAll())
         .exceptionHandling(
             handling ->
                 handling
@@ -104,7 +122,18 @@ public class SecurityConfig {
             headers ->
                 headers
                     .contentSecurityPolicy(
-                        csp -> csp.policyDirectives("default-src 'self'; frame-ancestors 'none'"))
+                        // script-src stays strict ('self', inherited from default-src — no inline
+                        // JS). style-src adds 'unsafe-inline' because Angular/PrimeNG apply inline
+                        // `style` attributes at runtime (virtual-scroll row heights, popups); inline
+                        // CSS cannot execute, so this is the standard safe relaxation for a
+                        // component SPA. data: covers PrimeNG's inlined icons/fonts. [A.2.3, Phase 27]
+                        csp ->
+                            csp.policyDirectives(
+                                "default-src 'self'; "
+                                    + "style-src 'self' 'unsafe-inline'; "
+                                    + "img-src 'self' data:; "
+                                    + "font-src 'self' data:; "
+                                    + "frame-ancestors 'none'"))
                     .frameOptions(
                         frame -> frame.mode(XFrameOptionsServerHttpHeadersWriter.Mode.DENY))
                     .referrerPolicy(

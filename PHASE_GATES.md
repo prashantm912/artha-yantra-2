@@ -12,23 +12,97 @@ subset is CI-enforced).
 
 ## Current phase
 
-**Stage B — Market-data spine (Phases 9, 9A, 10–15, 15A, 15B, 16, 16A, 17) —
-IMPLEMENTATION + AUDIT COMPLETE on `feat/stage-b-market-data-spine`,
-phase-per-commit; exit gate walked 2026-06-13 (record below); pending push/PR/
-CI/merge. (Stage A completed 2026-06-12; its exit-gate record is below.)**
+**Stage C — Strategy engine MVP (Phases 18–27) — IMPLEMENTATION + AUDIT COMPLETE
+on `feat/stage-c-strategy-engine`, phase-per-commit; exit gate walked 2026-06-13
+(record below); pending push/PR/CI/merge. Stage B merged to main 2026-06-13 via
+PR #2; Stage A completed 2026-06-12. Earlier exit-gate records are below.**
 
-*(How Stage B was walked: 13 phases implemented phase-per-commit with unit +
-Testcontainers ITs + WireMock for every live wire adapter + a compose demo
-through the gateway per phase; then a 39-agent spec-vs-implementation audit
-(one auditor per phase, adversarial verification of every serious finding)
-confirmed 3 CRITICAL + ~20 MAJOR gaps, all fixed and regression-tested in the
-audit commit — headline: post-close ticks re-opening the flushed session-close
-bar, continuous=1 on per-contract FUT fetches, CONT symbols reachable through
-POST /candles/refresh. 164 market-data + 20 gateway tests green.)*
+*(How Stage C was walked: Phases 18–27 implemented phase-per-commit with unit +
+Testcontainers ITs + Vitest, then a full-stack Playwright E2E that drove the live
+MVP through a real browser for the first time — it exposed and fixed 9
+integration gaps unit/IT coverage could not reach (SPA auth-gating made login
+unreachable; the STOMP `Sec-WebSocket-Protocol` echo missing failed every
+browser WS handshake; a strict CSP blocked PrimeNG inline styles; the auth probe
+trusted any 200 and admitted anonymous users; a `+05:30` candle warm-up query
+encoding 500'd, leaving the engine cold). Then an 18-agent adversarial
+spec-vs-impl audit (8 reviewers, independent verification of every finding)
+confirmed 1 CRITICAL + 8 MAJOR gaps — headline: `candles.1m.*` conflated with
+latest-value-wins (a dropped bar = permanent series gap + a possibly-skipped
+exit), `.nan`/`.inf` 500s, duplicate YAML keys defeating the checksum,
+score-breakdown decimals as rounding JSON numbers, registry filter-after-
+pagination, phantom ARCHIVE audit rows, and a wall-clock `generated_at` breaking
+live↔replay determinism — all fixed and regression-tested in the audit commit.
+strategy-schema + strategy-engine + both services green; Playwright E2E 7/7.)*
 
 ---
 
-## Stage-B exit gate (plan §15.2 Phase-1 row — walked 2026-06-13 against the running mock stack)
+## Stage-C exit gate (plan §15.2 Phase-2 row — the MVP gate — walked 2026-06-13 against the running mock stack)
+
+- [x] **Golden-vector tests pin determinism** — same YAML + same candles ⇒
+      identical signals/scores/breakdowns. `GoldenDeterminismTest` 5/5 byte-
+      matches the frozen fixtures across two runs; the `ScoreBreakdown` writer is
+      byte-stable (now exact-decimal strings); the replay half lands Stage D. `[Phase 23]`
+- [x] **Publishing a YAML strategy → a live signal pushed over gateway STOMP,
+      visible in the browser.** The Playwright MVP test publishes a strategy via
+      the API and sees a live `RELIANCE`/`ENTRY` row stream onto `/signals` with
+      its reasoning breakdown — the MVP statement, driven end-to-end through a
+      real browser. `[Phases 23+26]`
+- [x] `strategy-schema/v1` **complete + frozen** — 31-fixture corpus green;
+      `slippage_bps`, `fees{}`, `objective.fold_aggregation`, `walk_forward`,
+      `scoring.{optional_min_score, optional_gate_margin}` and the A7 additions
+      (`1w`, `risk.session.{pre_close_at, fill_timing, exit_intrabar}`, indicator
+      `instrument` override, `universe.mode: futures_of_underlying` + `futures{}`)
+      all present + validated; indicator-name enum stays advisory (Q2). The
+      loader now rejects non-finite scalars and duplicate keys (audit). `[Phase 18]`
+- [x] strategy-engine JAR — `IndicatorVectorTest` 19/19 (ta4j matches the
+      committed reference vectors exactly), `CompositeScorerTest` 9/9 (the
+      normative A1 composite + optional-activation truth table),
+      `BreakdownContractTest` 5/5 (byte-stable `ScoreBreakdown`); JaCoCo BRANCH
+      ≥ 70 %. `[Phases 19–20]`
+- [x] Registry — immutable JSONB versions + SHA-256; full
+      draft→published→archived with publish/rollback/diff/validate; every
+      mutating call writes an audit row (append-only BY GRANT);
+      `index_constituents`-universe publish guard (422
+      `STRATEGY_UNIVERSE_UNSUPPORTED`). `RegistryLifecycleIntegrationTest` 12/12,
+      incl. the audit's filter-then-paginate + archive-idempotency fixes. `[Phase 21]`
+- [x] `marketdata.index_constituents` — append-only with point-in-time REST
+      resolution (latest-on-or-before, audit-confirmed); mock fixture path green;
+      live NSE fetcher gated on source verification; no cross-schema FK;
+      survivorship-bias caveat documented. `[Phase 22]`
+- [x] OpenAPI 3.1 specs for the three running services committed and **diff-
+      gated** in CI; each `ContractCaptureTest` green; generated TS client
+      compiles under `tsc --strict` (ci-contracts). `[Phase 24]`
+- [x] Angular 21 SPA (zoneless, signals-first) served **through the gateway,
+      same origin, zero CORS**; login round-trip works; initial bundle **457 KB
+      raw / 109 KB transfer** (≤ 500 KB budget enforced); no Zone.js, no
+      hardcoded `localhost`. SPA-shell auth + CSP relaxation fixed (E2E). `[Phases 25–26]`
+- [x] `WsClientService` reconnects with backoff + jitter and re-syncs the REST
+      snapshot; `/signals` renders the reasoning breakdown obeying
+      `composite = Σ contributions / weightDenominator`. STOMP subprotocol echo
+      fixed so the browser socket opens (E2E). `[Phase 26]`
+- [x] **Playwright E2E 7/7 green** on the full mock stack: login (deep-link,
+      cookie flags, wrong/right password, axe), the live-signals MVP + breakdown,
+      signals-page axe, and the WS-reconnect chaos test; axe reports no
+      violations on login/signals. `ci-e2e` runs the same suite on every PR
+      (green-on-main lands at merge). `PHASE_GATES.md` mirrors this row. `[Phase 27]`
+
+**Stage-end notes:** `strategy-schema/v1` (Phase 18) and the `ScoreBreakdown`
+contract (Phase 20) **freeze here** — Stage D's FillSimulator/replay consume both
+unchanged, and the replay half of the golden parity pair asserts byte-identity
+against the live half frozen in Phase 23. **Open items carried forward:** NSE
+index-constituents CSV source verification (before the Phase 22 live fetcher);
+statutory fee-schedule values (pinned at Stage-D Phase 29). Neither blocks the
+MVP demo on the mock stack. Owner action: mint a brand-new 2.0 Kite API
+key/secret for live-mode (the Stage-C manual-testing guide's live appendix).
+
+---
+
+## Stage-B exit gate (plan §15.2 Phase-1 row — walked 2026-06-13 against the running mock stack; merged to main via PR #2)
+
+*(Stage B walk: 13 phases phase-per-commit + a 39-agent audit — 3 CRITICAL + ~20
+MAJOR fixed (post-close ticks re-opening the flushed close bar, continuous=1 on
+per-contract FUT fetches, CONT via POST /candles/refresh); 164 market-data + 20
+gateway tests green.)*
 
 - [x] **Live tick reaches Redis < 50 ms after Kite delivery.** Measured live:
       tick generation → published-on-Redis = **3 ms** (mock feed, B-6

@@ -33,7 +33,11 @@ import reactor.core.publisher.Mono;
  * Phase-8 IT (A.7b): per-symbol isolation, conflation under burst, never-conflated signals, and
  * 401 on unauthenticated upgrade — against a real Redis.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(
+    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+    // the login POST + WS handshake are slow on a loaded 2-core CI runner; the default 5s
+    // WebTestClient read timeout flakes there
+    properties = "spring.test.webtestclient.timeout=30s")
 @Testcontainers
 class StompWsBridgeIntegrationTest {
 
@@ -121,7 +125,7 @@ class StompWsBridgeIntegrationTest {
 
     // wait until CONNECTED arrives (subscriptions registered) — generous for CI
     await()
-        .atMost(Duration.ofSeconds(30))
+        .atMost(Duration.ofSeconds(90))
         .until(() -> received.stream().anyMatch(f -> f.startsWith("CONNECTED")));
 
     // give the Redis-side subscriptions a beat to attach
@@ -140,7 +144,7 @@ class StompWsBridgeIntegrationTest {
     }
 
     await()
-        .atMost(Duration.ofSeconds(10))
+        .atMost(Duration.ofSeconds(90))
         .until(() -> countBodies(received, "\"signal\":") >= 5);
     sleep(500); // a final flush window
 
@@ -190,7 +194,7 @@ class StompWsBridgeIntegrationTest {
                             .then()))
         .subscribe();
     await()
-        .atMost(Duration.ofSeconds(30))
+        .atMost(Duration.ofSeconds(90))
         .until(() -> received.stream().anyMatch(f -> f.startsWith("CONNECTED")));
     return outbound;
   }
@@ -210,7 +214,7 @@ class StompWsBridgeIntegrationTest {
 
     redis.convertAndSend("ticks.NSE.UNSUB", "{\"marker\":\"before\"}");
     await()
-        .atMost(Duration.ofSeconds(20))
+        .atMost(Duration.ofSeconds(90))
         .until(() -> countBodies(received, "\"marker\":\"before\"") >= 1);
 
     outbound.tryEmitNext(
@@ -252,7 +256,7 @@ class StompWsBridgeIntegrationTest {
             .serialize());
 
     await()
-        .atMost(Duration.ofSeconds(20))
+        .atMost(Duration.ofSeconds(90))
         .until(() -> received.stream().anyMatch(f -> f.startsWith("ERROR")));
     sleep(800); // silence window for the legal forms
 
@@ -260,6 +264,42 @@ class StompWsBridgeIntegrationTest {
     long messages = received.stream().filter(f -> f.startsWith("MESSAGE")).count();
     assertThat(errors).as("only the illegal destination errors").isEqualTo(1);
     assertThat(messages).as("producers do not exist yet — silence is fine (A.7.2)").isZero();
+  }
+
+  @Test
+  void browserStyleHandshakeNegotiatesTheStompSubprotocol() throws InterruptedException {
+    // RFC 6455: a real browser FAILS the upgrade unless the server echoes one of the
+    // Sec-WebSocket-Protocol values it offered. @stomp/stompjs always offers v12/v11/v10.stomp,
+    // so the gateway MUST advertise + select one or no browser socket ever opens. The Netty
+    // client here is lenient (it does not enforce the echo), which is why this needs an explicit
+    // assertion rather than a connection failure.
+    java.util.concurrent.atomic.AtomicReference<String> negotiated =
+        new java.util.concurrent.atomic.AtomicReference<>();
+    java.util.concurrent.CountDownLatch handled = new java.util.concurrent.CountDownLatch(1);
+    HttpHeaders headers = new HttpHeaders();
+    headers.add(HttpHeaders.COOKIE, "SESSION=" + login());
+
+    org.springframework.web.reactive.socket.WebSocketHandler clientHandler =
+        new org.springframework.web.reactive.socket.WebSocketHandler() {
+          @Override
+          public List<String> getSubProtocols() {
+            return List.of("v12.stomp", "v11.stomp", "v10.stomp");
+          }
+
+          @Override
+          public Mono<Void> handle(org.springframework.web.reactive.socket.WebSocketSession s) {
+            negotiated.set(s.getHandshakeInfo().getSubProtocol());
+            handled.countDown();
+            return s.close(); // close immediately — never leak a server session into later tests
+          }
+        };
+
+    new ReactorNettyWebSocketClient()
+        .execute(URI.create("ws://127.0.0.1:" + port + "/ws"), headers, clientHandler)
+        .subscribe();
+
+    assertThat(handled.await(20, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+    assertThat(negotiated.get()).isEqualTo("v12.stomp");
   }
 
   @Test

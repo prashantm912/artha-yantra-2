@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import in.arthayantra.backtest.analytics.BenchmarkAnalytics;
 import in.arthayantra.backtest.replay.MetricsCalculator.Metrics;
 import in.arthayantra.backtest.replay.folds.FoldPersistence;
 import in.arthayantra.backtest.replay.options.PremiumSource;
@@ -56,11 +57,16 @@ public class RunRepository {
       String dataHash,
       String engineVersion,
       PremiumSource premiumSource,
-      FoldPersistence folds) {
+      FoldPersistence folds,
+      BenchmarkAnalytics benchmark) {
     ArrayNode foldMetrics = folds == null ? null : folds.foldMetrics();
     BigDecimal oosFoldMean = folds == null ? null : folds.oosFoldMean();
     BigDecimal oosFoldStd = folds == null ? null : folds.oosFoldStd();
     BigDecimal sharpeDegradation = folds == null ? null : folds.sharpeDegradation();
+    // §D.16: benchmark columns persist NULL — flagged, never silently zero — when coverage absent.
+    boolean bench = benchmark != null && benchmark.present();
+    String benchmarkCurve =
+        bench && !benchmark.benchmarkCurve().isEmpty() ? curveJson(benchmark.benchmarkCurve()) : null;
     return jdbc.queryForObject(
         """
         INSERT INTO backtest_runs (
@@ -68,9 +74,10 @@ public class RunRepository {
           initial_equity, final_equity, params_override, seed, data_hash,
           total_return, sharpe, sortino, max_drawdown, win_rate, profit_factor, trade_count,
           metrics, equity_curve, drawdown_curve, engine_version, premium_source,
-          fold_metrics, oos_fold_mean, oos_fold_std, sharpe_degradation)
+          fold_metrics, oos_fold_mean, oos_fold_std, sharpe_degradation,
+          alpha, beta, information_ratio, excess_cagr, benchmark_curve)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?, ?,
-                ?::jsonb, ?, ?, ?)
+                ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
         RETURNING id
         """,
         (rs, n) -> UUID.fromString(rs.getString("id")),
@@ -101,7 +108,12 @@ public class RunRepository {
         foldMetrics == null ? null : json(foldMetrics),
         oosFoldMean,
         oosFoldStd,
-        sharpeDegradation);
+        sharpeDegradation,
+        bench ? benchmark.alpha() : null,
+        bench ? benchmark.beta() : null,
+        bench ? benchmark.informationRatio() : null,
+        bench ? benchmark.excessCagr() : null,
+        benchmarkCurve);
   }
 
   /**
@@ -160,6 +172,40 @@ public class RunRepository {
             runId)
         .stream()
         .findFirst();
+  }
+
+  /**
+   * The inputs Monte Carlo needs from a run: starting equity, the window span (for the CAGR
+   * statistic), and the previously-persisted {@code montecarlo_summary} (or {@code null} on first
+   * computation). {@code null} when the run id is unknown.
+   */
+  public record MonteCarloRun(
+      BigDecimal initialEquity,
+      OffsetDateTime startTs,
+      OffsetDateTime endTs,
+      JsonNode montecarloSummary) {}
+
+  /** Reads the §D.16 Monte Carlo inputs for a run, or empty when the run id is unknown. */
+  public Optional<MonteCarloRun> findForMonteCarlo(UUID runId) {
+    return jdbc
+        .query(
+            "SELECT initial_equity, start_ts, end_ts, montecarlo_summary "
+                + "FROM backtest_runs WHERE id=?",
+            (rs, n) ->
+                new MonteCarloRun(
+                    rs.getBigDecimal("initial_equity"),
+                    rs.getObject("start_ts", OffsetDateTime.class),
+                    rs.getObject("end_ts", OffsetDateTime.class),
+                    parse(rs.getString("montecarlo_summary"))),
+            runId)
+        .stream()
+        .findFirst();
+  }
+
+  /** Persists (or replaces) the §D.16 Monte Carlo summary for a run. */
+  public void updateMonteCarloSummary(UUID runId, JsonNode summary) {
+    jdbc.update(
+        "UPDATE backtest_runs SET montecarlo_summary=?::jsonb WHERE id=?", json(summary), runId);
   }
 
   /** Extracts the {@code caveats} array embedded in the metrics JSONB (empty when absent). */

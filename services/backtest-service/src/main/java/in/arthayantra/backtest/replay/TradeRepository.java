@@ -79,6 +79,17 @@ public class TradeRepository {
         offset);
   }
 
+  /**
+   * The closed-trade net P&amp;Ls for a run in trade order — the §D.16 Monte Carlo resampling pool.
+   * Open-at-end trades (no {@code exit_ts}) are excluded; the bootstrap resamples realized P&amp;L.
+   */
+  public List<java.math.BigDecimal> findClosedPnls(UUID runId) {
+    return jdbc.query(
+        "SELECT pnl FROM backtest_trades WHERE run_id=? AND exit_ts IS NOT NULL ORDER BY seq",
+        (rs, n) -> rs.getBigDecimal("pnl"),
+        runId);
+  }
+
   private String contributionsJson(Trade trade) {
     try {
       return trade.contributions() == null

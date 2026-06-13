@@ -1,6 +1,10 @@
 package in.arthayantra.backtest.replay;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import in.arthayantra.backtest.analytics.BenchmarkAnalytics;
+import in.arthayantra.backtest.analytics.BenchmarkAnalyzer;
 import in.arthayantra.backtest.client.StrategyVersionClient;
 import in.arthayantra.backtest.client.StrategyVersionClient.ResolvedVersion;
 import in.arthayantra.backtest.dispatch.JobCancelledException;
@@ -54,6 +58,7 @@ public class BacktestRunner {
   private final WalkForwardRunner walkForward;
   private final RegimeLabeler regimeLabeler;
   private final RegimePreflight regimePreflight;
+  private final BenchmarkAnalyzer benchmarkAnalyzer;
 
   /** Wires the replay collaborators. */
   public BacktestRunner(
@@ -67,7 +72,8 @@ public class BacktestRunner {
       PremiumProvenance premiumProvenance,
       WalkForwardRunner walkForward,
       RegimeLabeler regimeLabeler,
-      RegimePreflight regimePreflight) {
+      RegimePreflight regimePreflight,
+      BenchmarkAnalyzer benchmarkAnalyzer) {
     this.versions = versions;
     this.candleReader = candleReader;
     this.replayEngine = replayEngine;
@@ -79,6 +85,7 @@ public class BacktestRunner {
     this.walkForward = walkForward;
     this.regimeLabeler = regimeLabeler;
     this.regimePreflight = regimePreflight;
+    this.benchmarkAnalyzer = benchmarkAnalyzer;
   }
 
   /** Runs the job; throws {@link JobCancelledException} on cancel and other exceptions on failure. */
@@ -166,6 +173,14 @@ public class BacktestRunner {
       m.full().put("foldsExcluded", folds.excludedFoldCount());
     }
 
+    // §D.16 benchmark-relative block: pure post-processing over the persisted equity curve + the
+    // benchmark daily series (guard-6's series). Absent coverage -> NULL columns + an explicit
+    // "benchmarkCoverage":"absent" flag on the metrics JSONB, never silently zero.
+    BenchmarkAnalytics benchmark =
+        benchmarkAnalyzer.analyze(
+            config, result.equityCurve(), from, to, result.initialEquity(), cagrFraction(m));
+    mergeBenchmark(m.full(), benchmark);
+
     // §D.15 premium provenance: resolved BEFORE results persist, never defaulted/null.
     PremiumSource premiumSource = premiumProvenance.forCandleReplay(config);
 
@@ -195,7 +210,8 @@ public class BacktestRunner {
             dataHash,
             engineVersion(resolved),
             premiumSource,
-            folds);
+            folds,
+            benchmark);
     trades.insertAll(runId, result.trades());
     progress.accept(100);
     log.info("backtest run {} completed: {} trades", runId, result.trades().size());
@@ -218,6 +234,53 @@ public class BacktestRunner {
             to,
             RegimeLabeler.WARMUP_SESSIONS);
     return regimeLabeler.label(dailyBenchmark);
+  }
+
+  /** The strategy CAGR as a fraction (the metrics JSONB stores it as a percent). */
+  private static BigDecimal cagrFraction(MetricsCalculator.Metrics m) {
+    JsonNode cagr = m.full().path("cagr");
+    if (cagr.isMissingNode() || cagr.isNull()) {
+      return null;
+    }
+    return new BigDecimal(cagr.asText()).movePointLeft(2);
+  }
+
+  /**
+   * Folds the §D.16 benchmark block into the metrics JSONB: the relative metrics (as the §D.9
+   * string convention), the payload-only up/down capture, and the price-index caveat — or, when the
+   * benchmark was not covered, an explicit {@code "benchmarkCoverage":"absent"} flag so a consumer
+   * never mistakes a missing benchmark for a zero one.
+   */
+  private static void mergeBenchmark(ObjectNode full, BenchmarkAnalytics benchmark) {
+    if (!benchmark.present()) {
+      full.put("benchmarkCoverage", "absent");
+      appendCaveat(full, "Benchmark coverage absent; benchmark-relative metrics omitted.");
+      return;
+    }
+    full.put("benchmarkCoverage", "present");
+    putDecimal(full, "alpha", benchmark.alpha());
+    putDecimal(full, "beta", benchmark.beta());
+    putDecimal(full, "informationRatio", benchmark.informationRatio());
+    putDecimal(full, "excessCagr", benchmark.excessCagr());
+    putDecimal(full, "upCapture", benchmark.upCapture());
+    putDecimal(full, "downCapture", benchmark.downCapture());
+    appendCaveat(full, BenchmarkAnalyzer.priceIndexCaveat());
+  }
+
+  private static void putDecimal(ObjectNode node, String key, BigDecimal value) {
+    if (value == null) {
+      node.putNull(key);
+    } else {
+      node.put(key, value.toPlainString());
+    }
+  }
+
+  private static void appendCaveat(ObjectNode full, String caveat) {
+    ArrayNode caveats =
+        full.has("caveats") && full.get("caveats").isArray()
+            ? (ArrayNode) full.get("caveats")
+            : full.putArray("caveats");
+    caveats.add(caveat);
   }
 
   private Map<SeriesKey, List<EngineCandle>> contextSeries(

@@ -1,0 +1,81 @@
+package in.arthayantra.strategysignal.signals;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.math.BigDecimal;
+import java.time.OffsetDateTime;
+import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.stereotype.Component;
+
+/**
+ * Publishes emitted signals on the {@code signals} channel (COMMON 7.3.1) — the Stage-A gateway
+ * STOMP bridge relays it to {@code /topic/signals} for the browser. The payload embeds the SAME
+ * breakdown JSON that was persisted (a Phase 23 FAIL criterion is any divergence between row
+ * and channel payload).
+ */
+@Component
+public class SignalPublisher {
+
+  /** The pub/sub channel. */
+  public static final String CHANNEL = "signals";
+
+  private static final Logger log = LoggerFactory.getLogger(SignalPublisher.class);
+
+  private final StringRedisTemplate redis;
+  private final ObjectMapper objectMapper;
+
+  /** Wires Redis. */
+  public SignalPublisher(StringRedisTemplate redis, ObjectMapper objectMapper) {
+    this.redis = redis;
+    this.objectMapper = objectMapper;
+  }
+
+  /** Emits one signal event; failures log and never break persistence. */
+  public void publish(
+      long signalId,
+      UUID strategyVersionId,
+      String strategyName,
+      String slug,
+      String version,
+      String checksum,
+      String exchange,
+      String tradingsymbol,
+      String interval,
+      String signalType,
+      String side,
+      BigDecimal entryPrice,
+      BigDecimal stopLoss,
+      BigDecimal target,
+      BigDecimal compositeScore,
+      JsonNode scoreBreakdown,
+      OffsetDateTime generatedAt) {
+    try {
+      ObjectNode payload = objectMapper.createObjectNode();
+      payload.put("id", signalId);
+      payload.put("strategyVersionId", strategyVersionId.toString());
+      payload.put("strategyName", strategyName);
+      payload.put("strategyId", slug);
+      payload.put("version", version);
+      payload.put("checksum", checksum);
+      payload.put("exchange", exchange);
+      payload.put("tradingsymbol", tradingsymbol);
+      payload.put("interval", interval);
+      payload.put("signalType", signalType);
+      payload.put("side", side);
+      payload.put("entryPrice", entryPrice == null ? null : entryPrice.toPlainString());
+      payload.put("stopLoss", stopLoss == null ? null : stopLoss.toPlainString());
+      payload.put("target", target == null ? null : target.toPlainString());
+      payload.put("compositeScore", compositeScore.toPlainString());
+      payload.set("scoreBreakdown", scoreBreakdown);
+      payload.put("generatedAt", generatedAt.toString());
+      payload.put("status", "ACTIVE");
+      redis.convertAndSend(CHANNEL, objectMapper.writeValueAsString(payload));
+    } catch (Exception e) {
+      log.warn("signal publish failed for #{}: {}", signalId, e.getMessage());
+    }
+  }
+}

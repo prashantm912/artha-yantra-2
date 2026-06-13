@@ -1,0 +1,5 @@
+# Playwright transient outputs (never committed)
+test-results/
+playwright-report/
+playwright/.cache/
+node_modules/

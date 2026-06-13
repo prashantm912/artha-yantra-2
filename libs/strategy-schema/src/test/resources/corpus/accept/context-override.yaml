@@ -1,0 +1,33 @@
+# A7 fixture [FP-19]: indicator-level instrument context override - the
+# "BTST longs only when NIFTY > 200-DMA and VIX < 20" mechanism. RS_VS_INDEX
+# and VIX_LEVEL require the override; existence of the override instrument is
+# a PUBLISH-time check, not a schema concern.
+schema: strategy-schema/v1
+id: context-aware-swing
+name: "Context-Aware Swing"
+version: 1.0.0
+universe:
+  mode: explicit
+  instruments:
+    - { exchange: NSE, tradingsymbol: RELIANCE }
+timeframes: { primary: 1d }
+indicators:
+  - { name: EMA, alias: ema20, timeframe: 1d, params: { period: 20 }, weight: 1.0 }
+  - { name: RS_VS_INDEX, alias: rs_nifty, timeframe: 1d, params: { lookback: 63 }, weight: 1.0,
+      instrument: { exchange: NSE, tradingsymbol: "NIFTY 50" },
+      normalize: { type: linear, from: -5.0, to: 10.0 } }
+  - { name: VIX_LEVEL, alias: vix, timeframe: 1d, weight: 0.0,
+      instrument: { exchange: NSE, tradingsymbol: "INDIA VIX" } }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - "close > ema20"
+      - "vix < 20"             # context series gating the entry
+  scoring: { threshold: 0.5 }
+exit_rules:
+  - { type: stop_loss, params: { basis: atr_multiple, value: 2.0, atr_period: 14 } }
+risk:
+  position_sizing: { method: atr_risk, params: { risk_pct_equity: 1.0 } }
+  max_positions: 3
+  session: { style: positional, allow_overnight: true }

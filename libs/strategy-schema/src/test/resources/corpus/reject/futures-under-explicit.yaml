@@ -1,0 +1,25 @@
+# expect: /universe
+schema: strategy-schema/v1
+id: reject-futures-under-explicit
+name: "Futures Under Explicit"
+version: 1.0.0
+universe:
+  mode: explicit
+  instruments:
+    - { exchange: NSE, tradingsymbol: RELIANCE }
+  futures: { contract: front_month, roll_days_before_expiry: 1 }   # A7: futures{} only under futures_of_underlying
+timeframes: { primary: 1m }
+indicators:
+  - { name: EMA, alias: ema_fast, timeframe: 1m, params: { period: 9 }, weight: 1.0 }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - "close > ema_fast"
+  scoring: { threshold: 0.5 }
+exit_rules:
+  - { type: stop_loss, params: { basis: r_multiple, value: 1.5 } }
+risk:
+  position_sizing: { method: fixed_quantity, params: { quantity: 1 } }
+  max_positions: 1
+  session: { style: intraday }

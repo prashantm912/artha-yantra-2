@@ -53,6 +53,20 @@ spring:
               uri: ${ARTHA_ROUTE_OPTIMIZER:http://optimizer-service:8084}
               predicates:
                 - Path=/api/v1/optimizations/**
+            # CD-8 (Phase 24): service api-docs proxied for the aggregated
+            # Swagger UI; the UI itself is enabled under mock only (below)
+            - id: docs-market-data
+              uri: ${ARTHA_ROUTE_MARKET_DATA:http://market-data-service:8081}
+              predicates:
+                - Path=/docs/market-data/v3/api-docs
+              filters:
+                - SetPath=/v3/api-docs
+            - id: docs-strategy-signal
+              uri: ${ARTHA_ROUTE_STRATEGY:http://strategy-signal-service:8082}
+              predicates:
+                - Path=/docs/strategy-signal/v3/api-docs
+              filters:
+                - SetPath=/v3/api-docs
             # everything else -> frontend static files (gateway-local
             # controllers and actuator mappings take precedence over routes)
             - id: frontend-ui
@@ -76,6 +90,29 @@ management:
     health:
       probes:
         enabled: true
+
+# CD-8: the gateway's own spec is always capturable; the aggregated Swagger
+# UI is a mock-profile convenience (plan 5.3) and stays off otherwise
+springdoc:
+  swagger-ui:
+    enabled: false
+
+---
+# plan 5.3: aggregated Swagger UI for the owner, MOCK profile only
+spring:
+  config:
+    activate:
+      on-profile: mock
+springdoc:
+  swagger-ui:
+    enabled: true
+    urls:
+      - name: edge-gateway
+        url: /v3/api-docs
+      - name: market-data-service
+        url: /docs/market-data/v3/api-docs
+      - name: strategy-signal-service
+        url: /docs/strategy-signal/v3/api-docs
 
 ---
 # T2 host-run inner loop (docs/dev-setup.md): compose Redis published on

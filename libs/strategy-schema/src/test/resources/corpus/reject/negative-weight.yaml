@@ -1,0 +1,25 @@
+# expect: /indicators/0/weight
+schema: strategy-schema/v1
+id: reject-negative-weight
+name: "Negative Weight"
+version: 1.0.0
+universe:
+  mode: explicit
+  instruments:
+    - { exchange: NSE, tradingsymbol: RELIANCE }
+timeframes: { primary: 1m }
+indicators:
+  - { name: RSI, alias: rsi_1m, timeframe: 1m, params: { period: 14 }, weight: -0.5,
+      normalize: { type: rsi_momentum } }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - "rsi_1m > 50"
+  scoring: { threshold: 0.5 }
+exit_rules:
+  - { type: stop_loss, params: { basis: r_multiple, value: 1.5 } }
+risk:
+  position_sizing: { method: fixed_quantity, params: { quantity: 1 } }
+  max_positions: 1
+  session: { style: intraday }

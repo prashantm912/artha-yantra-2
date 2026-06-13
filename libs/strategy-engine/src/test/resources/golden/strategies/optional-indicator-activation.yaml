@@ -1,0 +1,33 @@
+# Golden feature: A1 optional-indicator activation (min-score + gate-margin
+# semantics) - optionals reinforce, never gate or carry alone.
+schema: strategy-schema/v1
+id: golden-optional-activation
+name: "Golden Optional Activation"
+version: 1.0.0
+universe:
+  mode: explicit
+  instruments:
+    - { exchange: NSE, tradingsymbol: "NIFTY 50" }
+timeframes: { primary: 1m }
+indicators:
+  - { name: RSI, alias: rsi_1m, timeframe: 1m, params: { period: 14 }, weight: 1.0,
+      normalize: { type: linear, from: 45, to: 70 } }
+  - { name: EMA, alias: ema_fast, timeframe: 1m, params: { period: 9 }, weight: 1.0 }
+  - { name: EMA, alias: ema_slow, timeframe: 1m, params: { period: 21 }, weight: 1.0 }
+  - { name: VOLUME_RATIO, alias: vol_x, timeframe: 1m, params: { lookback: 20 }, weight: 0.6,
+      optional: true, normalize: { type: linear, from: 1.0, to: 3.0 } }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - "ema_fast > ema_slow"
+  scoring:
+    threshold: 0.45
+    optional_min_score: 0.6
+    optional_gate_margin: 0.15
+exit_rules:
+  - { type: signal_exit, params: { rule: "crossunder(ema_fast, ema_slow)" } }
+risk:
+  position_sizing: { method: fixed_quantity, params: { quantity: 1 } }
+  max_positions: 1
+  session: { style: intraday }

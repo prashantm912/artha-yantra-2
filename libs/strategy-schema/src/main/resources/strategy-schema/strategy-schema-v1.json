@@ -1,0 +1,720 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arthayantra.in/schemas/strategy-schema/v1",
+  "title": "strategy-schema/v1",
+  "description": "ArthaYantra 2.0 versioned strategy document (ADR D18; freezes at the Stage-C exit gate). Includes the freeze-time obligation keys (slippage_bps, fees{}, objective.fold_aggregation, walk_forward, scoring.{optional_min_score, optional_gate_margin}) and the A7 owner-selection keys ratified 2026-06-12 (1w timeframe, risk.session.{pre_close_at, fill_timing, exit_intrabar}, indicator-level instrument override, universe.mode futures_of_underlying + futures{}). The indicator-name enum is ADVISORY (Q2/A5) - names validate against the identifier pattern; existence is a server-side registry check at save/publish, never a schema violation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "name", "version", "universe", "timeframes", "indicators", "entry_rules", "exit_rules", "risk"],
+  "properties": {
+    "schema": { "const": "strategy-schema/v1" },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{2,63}$",
+      "description": "Stable slug; never changes across versions"
+    },
+    "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "description": "Semver; bumped automatically on save-as-draft"
+    },
+    "description": { "type": "string", "maxLength": 2000 },
+    "author": { "type": "string", "maxLength": 120 },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+      "uniqueItems": true,
+      "maxItems": 16
+    },
+    "enabled": { "type": "boolean", "default": true },
+    "universe": { "$ref": "#/$defs/universe" },
+    "timeframes": { "$ref": "#/$defs/timeframes" },
+    "indicators": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/indicator" }
+    },
+    "entry_rules": { "$ref": "#/$defs/entryRules" },
+    "exit_rules": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": { "$ref": "#/$defs/exitRule" }
+    },
+    "risk": { "$ref": "#/$defs/risk" },
+    "backtest": { "$ref": "#/$defs/backtest" }
+  },
+
+  "$defs": {
+    "interval": {
+      "description": "Bar-interval vocabulary; 1w added at the freeze (A7 [FP-8]) - served from the candles_1w aggregate, never fetched",
+      "enum": ["1m", "5m", "15m", "1h", "1d", "1w"]
+    },
+    "identifier": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "hhmm": { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$" },
+    "instrumentRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exchange", "tradingsymbol"],
+      "properties": {
+        "exchange": { "type": "string", "minLength": 1, "maxLength": 16 },
+        "tradingsymbol": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+
+    "universe": {
+      "description": "One closed branch per mode; futures{} is valid ONLY under futures_of_underlying (A11 [FP-11a])",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "instruments"],
+          "properties": {
+            "mode": { "const": "explicit" },
+            "instruments": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 200,
+              "items": { "$ref": "#/$defs/instrumentRef" }
+            },
+            "filters": { "$ref": "#/$defs/universeFilters" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "index"],
+          "properties": {
+            "mode": { "const": "index_constituents" },
+            "index": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "filters": { "$ref": "#/$defs/universeFilters" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "underlying", "options"],
+          "properties": {
+            "mode": { "const": "options_of_underlying" },
+            "underlying": { "$ref": "#/$defs/instrumentRef" },
+            "options": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["expiry", "strikes"],
+              "properties": {
+                "expiry": {
+                  "oneOf": [
+                    { "enum": ["nearest_weekly", "nearest_monthly"] },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["offset"],
+                      "properties": { "offset": { "type": "integer", "minimum": 0, "maximum": 12 } }
+                    }
+                  ]
+                },
+                "strikes": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["selector"],
+                      "properties": { "selector": { "const": "atm" } }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["selector", "width"],
+                      "properties": {
+                        "selector": { "const": "atm_window" },
+                        "width": { "type": "integer", "minimum": 0, "maximum": 10 }
+                      }
+                    }
+                  ]
+                },
+                "option_types": {
+                  "type": "array",
+                  "items": { "enum": ["CE", "PE"] },
+                  "minItems": 1,
+                  "uniqueItems": true
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "underlying"],
+          "properties": {
+            "mode": { "const": "futures_of_underlying" },
+            "underlying": { "$ref": "#/$defs/instrumentRef" },
+            "futures": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "contract": { "enum": ["front_month", "next_month"], "default": "front_month" },
+                "roll_days_before_expiry": { "type": "integer", "minimum": 0, "maximum": 10, "default": 1 }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "universeFilters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "min_avg_daily_volume": { "type": "number", "minimum": 0 },
+        "min_price": { "type": "number", "minimum": 0 },
+        "max_price": { "type": "number", "exclusiveMinimum": 0 },
+        "exclude": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[A-Z]+:.+$" },
+          "uniqueItems": true
+        }
+      }
+    },
+
+    "timeframes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["primary"],
+      "properties": {
+        "primary": { "$ref": "#/$defs/interval" },
+        "additional": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/interval" },
+          "uniqueItems": true,
+          "maxItems": 5
+        }
+      }
+    },
+
+    "indicator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "alias", "timeframe"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "anyOf": [
+            {
+              "description": "ADVISORY known-name enum (editor autocomplete only - Q2/A5: unknown names are registry warnings at save, refusals at publish, NEVER schema violations)",
+              "enum": ["EMA", "SMA", "RSI", "VWAP", "ADX", "MACD_HIST", "SUPERTREND", "VOLUME_RATIO", "OI_CHANGE_PCT", "ATR", "ORB_HIGH", "ORB_LOW", "PREV_DAY_HIGH", "PREV_DAY_LOW", "PREV_DAY_CLOSE", "DAY_HIGH", "DAY_LOW", "GAP_PCT", "RS_VS_INDEX", "VIX_LEVEL"]
+            },
+            { "pattern": "^[A-Z][A-Z0-9_]*$" }
+          ]
+        },
+        "alias": { "$ref": "#/$defs/identifier" },
+        "timeframe": { "$ref": "#/$defs/interval" },
+        "instrument": {
+          "$ref": "#/$defs/instrumentRef",
+          "description": "Optional context-series override (A7 [FP-19]): evaluate against this instrument's series instead of the signal instrument's; existence checked at publish against the instruments master"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": {
+            "type": ["number", "integer", "string", "boolean"]
+          },
+          "maxProperties": 12
+        },
+        "weight": { "type": "number", "minimum": 0, "default": 1.0 },
+        "optional": { "type": "boolean", "default": false },
+        "normalize": { "$ref": "#/$defs/normalize" }
+      }
+    },
+    "normalize": {
+      "description": "Maps the raw indicator value to a score s in [0,1] (A1 composite inputs)",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "from", "to"],
+          "properties": {
+            "type": { "const": "linear" },
+            "from": { "type": "number" },
+            "to": { "type": "number" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "bands"],
+          "properties": {
+            "type": { "const": "step" },
+            "bands": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 10,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["score"],
+                "properties": {
+                  "upto": { "type": "number", "description": "Band applies while value <= upto; omit on the final catch-all band" },
+                  "score": { "type": "number", "minimum": 0, "maximum": 1 }
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": { "type": { "const": "direction" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": { "type": { "const": "rsi_momentum" } }
+        }
+      ]
+    },
+
+    "gateExpression": {
+      "type": "string",
+      "pattern": "^\\s*[a-z][a-z0-9_]*\\s*(>=|<=|==|!=|>|<)\\s*([a-z][a-z0-9_]*|-?[0-9]+(\\.[0-9]+)?)\\s*$",
+      "description": "Threshold expression over aliases/built-ins (close, volume, vwap) - comparison operators only, NO arithmetic (closed grammar)"
+    },
+    "gateNode": {
+      "oneOf": [
+        { "$ref": "#/$defs/gateExpression" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["all"],
+          "properties": {
+            "all": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "$ref": "#/$defs/gateNode" } }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["any"],
+          "properties": {
+            "any": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "$ref": "#/$defs/gateNode" } }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["not"],
+          "properties": { "not": { "$ref": "#/$defs/gateNode" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["crossover"],
+          "properties": { "crossover": { "$ref": "#/$defs/crossPair" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["crossunder"],
+          "properties": { "crossunder": { "$ref": "#/$defs/crossPair" } }
+        }
+      ]
+    },
+    "crossPair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fast", "slow"],
+      "properties": {
+        "fast": { "$ref": "#/$defs/identifier" },
+        "slow": { "$ref": "#/$defs/identifier" }
+      }
+    },
+
+    "entryRules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["direction", "gate", "scoring"],
+      "properties": {
+        "direction": { "enum": ["long", "short", "both"] },
+        "gate": { "$ref": "#/$defs/gateNode" },
+        "scoring": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["threshold"],
+          "properties": {
+            "threshold": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+            "optional_min_score": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.6 },
+            "optional_gate_margin": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.15 }
+          }
+        }
+      }
+    },
+
+    "exitRule": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "params"],
+          "properties": {
+            "type": { "const": "stop_loss" },
+            "params": { "$ref": "#/$defs/levelParams" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "params"],
+          "properties": {
+            "type": { "const": "take_profit" },
+            "params": { "$ref": "#/$defs/levelParams" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "params"],
+          "properties": {
+            "type": { "const": "trailing_stop" },
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["basis"],
+              "properties": {
+                "basis": { "enum": ["premium_pct", "atr_multiple"] },
+                "value": { "type": "number", "exclusiveMinimum": 0 },
+                "activate_at": { "type": "number", "exclusiveMinimum": 0 },
+                "trail_by": { "type": "number", "exclusiveMinimum": 0 },
+                "atr_period": { "type": "integer", "minimum": 1, "maximum": 200 }
+              },
+              "anyOf": [
+                { "required": ["value"] },
+                { "required": ["activate_at", "trail_by"] }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "params"],
+          "properties": {
+            "type": { "const": "time_stop" },
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "max_bars": { "type": "integer", "minimum": 1, "maximum": 10000 },
+                "max_holding_days": { "type": "integer", "minimum": 1, "maximum": 365 }
+              },
+              "oneOf": [
+                { "required": ["max_bars"], "not": { "required": ["max_holding_days"] } },
+                { "required": ["max_holding_days"], "not": { "required": ["max_bars"] } }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "params"],
+          "properties": {
+            "type": { "const": "signal_exit" },
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["rule"],
+              "properties": {
+                "rule": {
+                  "type": "string",
+                  "pattern": "^\\s*((crossover|crossunder)\\(\\s*[a-z][a-z0-9_]*\\s*,\\s*[a-z][a-z0-9_]*\\s*\\)|[a-z][a-z0-9_]*\\s*(>=|<=|==|!=|>|<)\\s*([a-z][a-z0-9_]*|-?[0-9]+(\\.[0-9]+)?))\\s*$"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "levelParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["basis", "value"],
+      "properties": {
+        "basis": { "enum": ["premium_pct", "atr_multiple", "r_multiple"] },
+        "value": { "type": "number", "exclusiveMinimum": 0 },
+        "atr_period": { "type": "integer", "minimum": 1, "maximum": 200 }
+      }
+    },
+
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["position_sizing", "max_positions", "session"],
+      "properties": {
+        "position_sizing": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["method", "params"],
+          "properties": {
+            "method": { "enum": ["fixed_quantity", "percent_equity", "premium_budget", "atr_risk", "kelly_fraction"] },
+            "params": { "type": "object" }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "method": { "const": "fixed_quantity" } } },
+              "then": {
+                "properties": {
+                  "params": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["quantity"],
+                    "properties": { "quantity": { "type": "integer", "minimum": 1 } }
+                  }
+                }
+              }
+            },
+            {
+              "if": { "properties": { "method": { "const": "percent_equity" } } },
+              "then": {
+                "properties": {
+                  "params": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["percent"],
+                    "properties": { "percent": { "type": "number", "exclusiveMinimum": 0, "maximum": 100 } }
+                  }
+                }
+              }
+            },
+            {
+              "if": { "properties": { "method": { "const": "premium_budget" } } },
+              "then": {
+                "properties": {
+                  "params": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["budget_inr"],
+                    "properties": { "budget_inr": { "type": "number", "exclusiveMinimum": 0 } }
+                  }
+                }
+              }
+            },
+            {
+              "if": { "properties": { "method": { "const": "atr_risk" } } },
+              "then": {
+                "properties": {
+                  "params": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["risk_pct_equity"],
+                    "properties": {
+                      "risk_pct_equity": { "type": "number", "exclusiveMinimum": 0, "maximum": 10 },
+                      "atr_period": { "type": "integer", "minimum": 1, "maximum": 200 }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": { "properties": { "method": { "const": "kelly_fraction" } } },
+              "then": {
+                "properties": {
+                  "params": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["fraction"],
+                    "properties": {
+                      "fraction": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "maximum": 0.25,
+                        "description": "HARD-CAPPED at 0.25 (plan v1 position-sizing table)"
+                      },
+                      "lookback_trades": { "type": "integer", "minimum": 10, "maximum": 1000 }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "max_positions": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "max_positions_per_underlying": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "max_daily_loss_pct": { "type": "number", "exclusiveMinimum": 0, "maximum": 100 },
+        "session": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["style"],
+          "properties": {
+            "style": { "enum": ["intraday", "btst", "expiry_day", "positional"] },
+            "window": { "$ref": "#/$defs/sessionWindow" },
+            "square_off": { "$ref": "#/$defs/hhmm" },
+            "allow_overnight": { "type": "boolean" },
+            "expiry_day": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["allowed"],
+              "properties": {
+                "allowed": { "type": "boolean" },
+                "window": { "$ref": "#/$defs/sessionWindow" }
+              }
+            },
+            "pre_close_at": {
+              "$ref": "#/$defs/hhmm",
+              "description": "A7 [FP-6]: BTST pre-close evaluation clock (IST), default 15:20; evaluated against the deterministic pre-close bar view (A9)",
+              "default": "15:20"
+            },
+            "fill_timing": {
+              "enum": ["next_open", "at_close"],
+              "description": "A7 [FP-6]: fill reference price; default at_close when style btst, else next_open"
+            },
+            "exit_intrabar": {
+              "type": "boolean",
+              "description": "A7 [FP-5]: evaluate SL/TP/trailing on each closed 1m bar in live AND replay (default true when primary > 1m); entry stays primary-bar-close"
+            }
+          }
+        }
+      }
+    },
+    "sessionWindow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to"],
+      "properties": {
+        "from": { "$ref": "#/$defs/hhmm" },
+        "to": { "$ref": "#/$defs/hhmm" }
+      }
+    },
+
+    "backtest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "defaults": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "interval": { "$ref": "#/$defs/interval" },
+            "lookback_days": { "type": "integer", "minimum": 1, "maximum": 3650 },
+            "initial_capital": { "type": "number", "exclusiveMinimum": 0 },
+            "benchmark": { "type": "string", "pattern": "^[A-Z]+:.+$", "default": "NSE:NIFTY 50" },
+            "costs": { "$ref": "#/$defs/costs" }
+          }
+        },
+        "optimize": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["parameters", "method", "max_trials", "objective"],
+          "properties": {
+            "parameters": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 20,
+              "items": { "$ref": "#/$defs/optimizeParameter" }
+            },
+            "method": { "enum": ["grid", "random", "tpe", "nsga2"] },
+            "max_trials": { "type": "integer", "minimum": 1, "maximum": 100000 },
+            "objective": {
+              "oneOf": [
+                { "$ref": "#/$defs/objective" },
+                { "type": "array", "minItems": 1, "maxItems": 4, "items": { "$ref": "#/$defs/objectiveEntry" } }
+              ]
+            },
+            "constraints": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": { "min_trades": { "type": "integer", "minimum": 1 } }
+            },
+            "walk_forward": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["train_days", "test_days", "step_days"],
+              "description": "Freeze-time obligation (BPC); consumer lands Stage D Phase 31",
+              "properties": {
+                "train_days": { "type": "integer", "minimum": 1, "maximum": 3650 },
+                "test_days": { "type": "integer", "minimum": 1, "maximum": 3650 },
+                "step_days": { "type": "integer", "minimum": 1, "maximum": 3650 },
+                "anchored": { "type": "boolean", "default": false }
+              }
+            }
+          }
+        }
+      }
+    },
+    "costs": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Q1/A5: slippage_ticks XOR slippage_bps (at most one); fees{} is the optional statutory schedule, defaulted from the current Zerodha/NSE schedule when omitted (values pinned Stage D)",
+      "not": { "required": ["slippage_ticks", "slippage_bps"] },
+      "properties": {
+        "per_lot_inr": { "type": "number", "minimum": 0 },
+        "pct_per_side": { "type": "number", "minimum": 0, "maximum": 5 },
+        "slippage_ticks": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "slippage_bps": { "type": "number", "minimum": 0, "maximum": 1000 },
+        "fees": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "stt": { "type": "number", "minimum": 0, "maximum": 5 },
+            "exchange_txn": { "type": "number", "minimum": 0, "maximum": 5 },
+            "gst": { "type": "number", "minimum": 0, "maximum": 50 },
+            "stamp": { "type": "number", "minimum": 0, "maximum": 5 },
+            "sebi": { "type": "number", "minimum": 0, "maximum": 5 }
+          }
+        }
+      }
+    },
+    "objective": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric", "direction"],
+      "properties": {
+        "metric": { "$ref": "#/$defs/identifier" },
+        "direction": { "enum": ["maximize", "minimize"] },
+        "fold_aggregation": {
+          "enum": ["mean", "min", "mean_minus_std"],
+          "description": "Freeze-time obligation (S1A); consumer lands Stage D Phase 32"
+        }
+      }
+    },
+    "objectiveEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric", "direction"],
+      "properties": {
+        "metric": { "$ref": "#/$defs/identifier" },
+        "direction": { "enum": ["maximize", "minimize"] }
+      }
+    },
+    "optimizeParameter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^(indicators\\[(alias=[a-z][a-z0-9_]*|type=[a-z][a-z0-9_]*|[0-9]+)\\]\\.params\\.[a-z][a-z0-9_]*|exit_rules\\[(alias=[a-z][a-z0-9_]*|type=[a-z][a-z0-9_]*|[0-9]+)\\]\\.params\\.[a-z][a-z0-9_]*|entry_rules\\.scoring\\.[a-z][a-z0-9_]*|risk\\.position_sizing\\.[a-z][a-z0-9_]*)$",
+          "description": "Closed whitelist grammar (COMMON 12.5): alias/type selectors preferred; bare positional indices accepted but linted"
+        },
+        "range": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "choices": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 50,
+          "items": { "type": ["number", "string", "boolean"] }
+        },
+        "step": { "type": "number", "exclusiveMinimum": 0 }
+      },
+      "oneOf": [
+        { "required": ["range"], "not": { "required": ["choices"] } },
+        { "required": ["choices"], "not": { "required": ["range"] } }
+      ]
+    }
+  }
+}

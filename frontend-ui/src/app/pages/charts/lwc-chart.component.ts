@@ -12,12 +12,30 @@ import {
   viewChild,
 } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
+import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { MarketStore } from '../../stores/market.store';
 import { ArthaYantraDatafeed, type Bar, type RawCandle } from './datafeed/datafeed-core';
 import { LwcChartBinding, type CrosshairSnapshot } from './lwc-chart-binding';
 import { ChartIndicatorsService, type IndicatorMeta } from './chart-indicators.service';
 import { type OverlayConfig } from './chart-state.store';
+import {
+  signalMarks,
+  tradeMarks,
+  type MarkDto,
+  type SignalLike,
+  type TradeLike,
+} from './datafeed/marks';
+import { floorBucketMs } from './datafeed/timestamp';
+
+const SPAN_MS: Record<string, number> = {
+  '1m': 60_000,
+  '5m': 300_000,
+  '15m': 900_000,
+  '1h': 3_600_000,
+  '1d': 86_400_000,
+  '1w': 604_800_000,
+};
 
 /**
  * `LwcChartComponent` (Phases 40 + 40C, A13): the `/charts` main chart. Wires the library-agnostic
@@ -132,11 +150,16 @@ export class LwcChartComponent {
   readonly interval = input<string>('1d');
   readonly overlays = input<OverlayConfig[]>([]);
   readonly showTable = input<boolean>(false);
+  // Phase 40A deep-link marks: a backtest run's trades (by runId) OR signals (by symbol window)
+  readonly runId = input<string | null>(null);
+  readonly focusTradeId = input<number | null>(null);
+  readonly focusSignalId = input<number | null>(null);
 
   private readonly host = viewChild.required<ElementRef<HTMLDivElement>>('host');
   private readonly http = inject(HttpClient);
   private readonly market = inject(MarketStore);
   private readonly indicators = inject(ChartIndicatorsService);
+  private readonly router = inject(Router);
   private readonly datafeed = new ArthaYantraDatafeed(this.candleFetch());
 
   protected readonly legend = signal<CrosshairSnapshot | null>(null);
@@ -151,6 +174,7 @@ export class LwcChartComponent {
   private loadedFromMs = 0;
   private loadedToMs = 0;
   private overlayTimer?: ReturnType<typeof setTimeout>;
+  private marksReAnchored = false;
 
   constructor() {
     afterNextRender(() => this.init());
@@ -175,6 +199,18 @@ export class LwcChartComponent {
     effect(() => {
       if (this.showTable()) {
         this.tableSnapshot.set(this.binding?.tableRows() ?? []);
+      }
+    });
+
+    // deep-link marks: re-render when the run/signal focus changes
+    effect(() => {
+      this.runId();
+      this.focusTradeId();
+      this.focusSignalId();
+      this.symbol();
+      if (this.binding && this.loadedFromMs) {
+        this.marksReAnchored = false;
+        this.refreshMarks();
       }
     });
 
@@ -222,6 +258,7 @@ export class LwcChartComponent {
       });
       this.binding.onPageBack((oldestMs) => this.pageBack(oldestMs));
       this.binding.subscribeCrosshair((snap) => this.legend.set(snap));
+      this.binding.subscribeMarkClick((mark) => this.onMarkClick(mark));
       void this.indicators.registry().then((list) => {
         this.meta = new Map(list.map((m) => [m.id, m]));
         this.reconcileOverlays(this.overlays());
@@ -253,6 +290,7 @@ export class LwcChartComponent {
         this.loadedFromMs = bars.length ? bars[0].time : this.loadedToMs;
         this.binding?.setData(bars);
         this.refreshOverlays();
+        this.refreshMarks();
       });
   }
 
@@ -277,6 +315,88 @@ export class LwcChartComponent {
 
   private reconcileOverlays(configs: OverlayConfig[]): void {
     this.refreshOverlays(configs);
+  }
+
+  /** Fetch + render trade marks (by runId) or signal marks (by symbol); center on a deep-link focus. */
+  private refreshMarks(): void {
+    if (!this.binding || !this.loadedFromMs) {
+      return;
+    }
+    const runId = this.runId();
+    if (runId) {
+      const params = new HttpParams().set('limit', 1000);
+      void firstValueFrom(
+        this.http.get<{ items: TradeLike[] }>(`/api/v1/backtests/${runId}/trades`, { params }),
+      )
+        .then((r) => {
+          const trades = r.items ?? [];
+          const focusId = this.focusTradeId();
+          this.binding?.setMarks(
+            tradeMarks(trades, this.interval(), this.loadedFromMs, this.loadedToMs),
+            focusId != null,
+          );
+          if (focusId != null) {
+            this.centerOnTrade(trades, focusId);
+          }
+        })
+        .catch(() => undefined);
+    } else {
+      const params = new HttpParams().set('limit', 200);
+      void firstValueFrom(this.http.get<{ items: SignalLike[] }>('/api/v1/signals', { params }))
+        .then((r) => {
+          const focusSig = this.focusSignalId();
+          const marks = signalMarks(
+            r.items ?? [],
+            this.symbol(),
+            this.interval(),
+            focusSig ?? undefined,
+          );
+          this.binding?.setMarks(marks, focusSig != null);
+          const focus =
+            focusSig != null ? marks.find((m) => m.id === `s${focusSig}-entry`) : undefined;
+          if (focus) {
+            this.binding?.centerOn(focus.timeMs);
+          }
+        })
+        .catch(() => undefined);
+    }
+  }
+
+  private centerOnTrade(trades: TradeLike[], focusId: number): void {
+    const trade = trades.find((t) => t.seq === focusId);
+    if (!trade) {
+      return;
+    }
+    const focusMs = floorBucketMs(Date.parse(trade.entryTs), this.interval());
+    if (focusMs >= this.loadedFromMs && focusMs <= this.loadedToMs) {
+      this.binding?.centerOn(focusMs);
+    } else if (!this.marksReAnchored) {
+      // the trade predates the recent window — load bars around it first, then re-mark + center
+      this.marksReAnchored = true;
+      const span = SPAN_MS[this.interval()] ?? SPAN_MS['1d'];
+      const { exchange, tradingsymbol } = split(this.symbol());
+      this.loadedToMs = focusMs + 40 * span;
+      void this.datafeed
+        .fetchBars(exchange, tradingsymbol, this.interval(), this.loadedToMs, 300)
+        .then((bars) => {
+          this.loadedFromMs = bars.length ? bars[0].time : this.loadedToMs;
+          this.lastBar = bars.length ? bars[bars.length - 1] : null;
+          this.binding?.setData(bars);
+          this.refreshOverlays();
+          this.refreshMarks();
+          this.binding?.centerOn(focusMs);
+        })
+        .catch(() => undefined);
+    }
+  }
+
+  private onMarkClick(mark: MarkDto): void {
+    const runId = this.runId();
+    if (runId && mark.id.startsWith('t')) {
+      void this.router.navigate(['/backtests', runId]);
+    } else if (mark.id.startsWith('s')) {
+      void this.router.navigate(['/signals']);
+    }
   }
 
   private scheduleOverlayRefresh(): void {

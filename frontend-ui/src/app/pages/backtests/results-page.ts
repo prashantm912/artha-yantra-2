@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import type { EChartsCoreOption } from 'echarts/core';
+import { ButtonModule } from 'primeng/button';
 import { TableModule, type TableRowSelectEvent } from 'primeng/table';
 import { TabsModule } from 'primeng/tabs';
 import { TagModule } from 'primeng/tag';
@@ -48,9 +49,11 @@ const BENCH_METRICS: MetricDef[] = [
   selector: 'ay-results-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    RouterLink,
     TabsModule,
     TableModule,
     TagModule,
+    ButtonModule,
     MessageModule,
     EquityCurveComponent,
     EChartsComponent,
@@ -193,6 +196,14 @@ const BENCH_METRICS: MetricDef[] = [
               <div class="detail">
                 <strong>Trade #{{ t.seq }}</strong> — entry {{ t.entryTs.slice(0, 16) }} · touch
                 {{ t.touchBasis ?? '—' }}
+                <p-button
+                  size="small"
+                  [text]="true"
+                  label="View on chart"
+                  icon="pi pi-chart-line"
+                  [routerLink]="['/charts']"
+                  [queryParams]="{ runId: runId(), tradeId: t.seq, interval: '1d' }"
+                />
                 <div class="kv">
                   @for (c of contributions(t); track c.k) {
                     <span>{{ c.k }}</span
@@ -239,11 +250,13 @@ export class ResultsPage {
   protected readonly coreMetrics = CORE_METRICS;
   protected readonly benchMetrics = BENCH_METRICS;
   protected readonly selected = signal<TradeRow | null>(null);
+  protected readonly runId = signal<string>('');
 
   constructor() {
     this.route.paramMap.subscribe((p) => {
       const id = p.get('id');
       if (id) {
+        this.runId.set(id);
         this.store.loadResults(id);
         this.store.loadTrades(id);
         this.store.loadFolds(id);

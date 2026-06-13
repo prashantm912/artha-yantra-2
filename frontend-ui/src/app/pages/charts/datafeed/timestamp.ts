@@ -64,8 +64,15 @@ export function toChartTime(epochMs: number, interval: string): ChartTime {
   return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
 }
 
-/** Inverse of {@link toChartTime}: a chart time read back from LWC → real epoch-ms. */
-export function fromChartTime(time: ChartTime): number {
+/**
+ * Inverse of {@link toChartTime}: a chart time read back from LWC → real epoch-ms. Accepts the
+ * `'yyyy-mm-dd'` BusinessDay string form lightweight-charts also emits.
+ */
+export function fromChartTime(time: ChartTime | string): number {
+  if (typeof time === 'string') {
+    const [y, m, d] = time.split('-').map(Number);
+    return Date.UTC(y, m - 1, d) - IST_OFFSET_MS;
+  }
   if (typeof time === 'number') {
     return (time - IST_OFFSET_SECONDS) * 1000;
   }

@@ -3,17 +3,31 @@ import {
   HistogramSeries,
   LineSeries,
   createChart,
+  createSeriesMarkers,
   type CandlestickData,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
+  type ISeriesMarkersPluginApi,
   type LineData,
   type LogicalRange,
   type MouseEventParams,
+  type SeriesMarker,
   type SeriesType,
   type Time,
 } from 'lightweight-charts';
 import { type Bar } from './datafeed/datafeed-core';
-import { toChartTime } from './datafeed/timestamp';
+import { type MarkDto } from './datafeed/marks';
+import { fromChartTime, toChartTime } from './datafeed/timestamp';
+
+const SPAN_MS: Record<string, number> = {
+  '1m': 60_000,
+  '5m': 300_000,
+  '15m': 900_000,
+  '1h': 3_600_000,
+  '1d': 86_400_000,
+  '1w': 604_800_000,
+};
 
 /** Crosshair legend snapshot: OHLCV at the hovered bar + each active overlay's value. */
 export interface CrosshairSnapshot {
@@ -49,6 +63,9 @@ export class LwcChartBinding {
     string,
     { series: ISeriesApi<SeriesType>; byMs: Map<number, number> }
   >();
+  private markersApi?: ISeriesMarkersPluginApi<Time>;
+  private priceLines: IPriceLine[] = [];
+  private marks: MarkDto[] = [];
 
   constructor(
     private readonly el: HTMLElement,
@@ -228,6 +245,90 @@ export class LwcChartBinding {
       }
       return row;
     });
+  }
+
+  /**
+   * Render trade/signal marks via `createSeriesMarkers` (Phase 40A): entry = arrowUp aboveBar (bull),
+   * exit = arrowDown belowBar (bear) — paired glyphs, never colour-only (E-7); SL/target =
+   * price-positioned markers, and ALSO `createPriceLine` ONLY in single-trade/signal focus mode
+   * (full-width lines in the multi-trade view would stack into noise). Markers are time-sorted.
+   */
+  setMarks(marks: MarkDto[], focus: boolean): void {
+    const css = getComputedStyle(this.el);
+    const bull = css.getPropertyValue('--ay-bull').trim() || '#22c55e';
+    const bear = css.getPropertyValue('--ay-bear').trim() || '#ef4444';
+    this.marks = [...marks].sort((a, b) => a.timeMs - b.timeMs);
+
+    const markers: SeriesMarker<Time>[] = this.marks.map((m) => {
+      const time = toChartTime(m.timeMs, this.interval) as Time;
+      if (m.kind === 'entry') {
+        return { time, position: 'aboveBar', color: bull, shape: 'arrowUp', text: m.label };
+      }
+      if (m.kind === 'exit') {
+        return { time, position: 'belowBar', color: bear, shape: 'arrowDown', text: m.label };
+      }
+      // SL/target: price-positioned markers
+      return {
+        time,
+        position: m.kind === 'target' ? 'atPriceTop' : 'atPriceBottom',
+        price: Number(m.price),
+        color: m.kind === 'target' ? bull : bear,
+        shape: 'circle',
+        text: m.label,
+      } as SeriesMarker<Time>;
+    });
+
+    this.markersApi ??= createSeriesMarkers(this.candles, []);
+    this.markersApi.setMarkers(markers);
+
+    for (const pl of this.priceLines) {
+      this.candles.removePriceLine(pl);
+    }
+    this.priceLines = [];
+    if (focus) {
+      for (const m of this.marks.filter((m) => m.kind === 'sl' || m.kind === 'target')) {
+        this.priceLines.push(
+          this.candles.createPriceLine({
+            price: Number(m.price),
+            color: m.kind === 'target' ? bull : bear,
+            title: m.label,
+            lineStyle: 2,
+            lineWidth: 1,
+          }),
+        );
+      }
+    }
+  }
+
+  /**
+   * Click hit-test (Phase 40A spike outcome): v5.2 `hoveredObjectId` does not reliably surface
+   * marker identity, so we map the click time back to the nearest mark by our own time math.
+   */
+  subscribeMarkClick(cb: (mark: MarkDto) => void): void {
+    this.chart.subscribeClick((param: MouseEventParams) => {
+      if (param.time == null || !this.marks.length) {
+        return;
+      }
+      const clickedMs = fromChartTime(param.time);
+      const span = SPAN_MS[this.interval] ?? SPAN_MS['1d'];
+      const hit = this.marks.find((m) => Math.abs(m.timeMs - clickedMs) < span / 2);
+      if (hit) {
+        cb(hit);
+      }
+    });
+  }
+
+  /** Center the visible range on a deep-linked target time (bars must already be loaded). */
+  centerOn(timeMs: number): void {
+    const span = SPAN_MS[this.interval] ?? SPAN_MS['1d'];
+    try {
+      this.chart.timeScale().setVisibleRange({
+        from: toChartTime(timeMs - 40 * span, this.interval) as Time,
+        to: toChartTime(timeMs + 40 * span, this.interval) as Time,
+      });
+    } catch {
+      // range not loaded yet — fitContent already showed the data
+    }
   }
 
   remove(): void {

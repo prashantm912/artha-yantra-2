@@ -27,6 +27,9 @@ import { LwcChartComponent } from './lwc-chart.component';
         [interval]="state.interval()"
         [overlays]="state.overlays()"
         [showTable]="showTable()"
+        [runId]="runId()"
+        [focusTradeId]="tradeId()"
+        [focusSignalId]="signalId()"
       />
     </div>
   `,
@@ -34,6 +37,9 @@ import { LwcChartComponent } from './lwc-chart.component';
 export class ChartsPage {
   protected readonly state = inject(ChartStateStore);
   protected readonly showTable = signal(false);
+  protected readonly runId = signal<string | null>(null);
+  protected readonly tradeId = signal<number | null>(null);
+  protected readonly signalId = signal<number | null>(null);
   private readonly route = inject(ActivatedRoute);
 
   constructor() {
@@ -46,6 +52,13 @@ export class ChartsPage {
       if (interval) {
         this.state.setInterval(interval);
       }
+      this.runId.set(q.get('runId'));
+      this.tradeId.set(numOrNull(q.get('tradeId')));
+      this.signalId.set(numOrNull(q.get('signalId')));
     });
   }
+}
+
+function numOrNull(v: string | null): number | null {
+  return v == null || v === '' ? null : Number(v);
 }

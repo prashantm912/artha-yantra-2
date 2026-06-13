@@ -30,6 +30,16 @@ Sections 4 and 6 are that statement, end to end.
 > - The owner password in this setup is `MyPassword123` — substitute yours
 >   wherever a command shows it. (A literal placeholder will 401; use the real
 >   value.)
+> - **Git-Bash `/tmp` vs Windows `python`:** Git-Bash writes `/tmp/...` to its own
+>   temp dir, but the Windows `python.exe` resolves `/tmp/...` to `C:\tmp\...` —
+>   a different place. So **never have python OPEN a `/tmp` file**
+>   (`python -c "open('/tmp/x')"` fails); pipe instead: `cat /tmp/x | python -c
+>   "...sys.stdin.read()..."`. (`curl`, `cat`, `grep`, `sed` are Git-Bash and read
+>   `/tmp` fine — only Windows python is confused by it.)
+> - **Everything under `/api/v1/**`, `/v3/api-docs`, `/docs/**` and
+>   `/swagger-ui.html` requires the session** — send `-b /tmp/ay.jar` on every
+>   curl (the gateway returns 401 otherwise), or, in a browser, log into the SPA
+>   first so the tab carries the cookie.
 
 ---
 
@@ -91,9 +101,12 @@ curl -s -b /tmp/ay.jar -H "X-XSRF-TOKEN: $XSRF" -H 'Content-Type: application/js
   http://127.0.0.1:8080/api/v1/strategies/validate
 ```
 
-**PASS when:** the first returns `"valid":true` with a 64-hex `checksum`; the
-second returns `"valid":false` and the error names the offending field — never a
-stack trace.
+**PASS when:** the first returns `{"valid":true,"errors":[],"warnings":[]}`; the
+second returns `"valid":false` and the errors name the offending field
+(`/indicators/0/normalize` — the allowed `type` constants `step`/`linear`/
+`direction`/`rsi_momentum`) — never a stack trace. (`/validate` reports validity
+only; the canonical 64-hex SHA-256 **checksum** is shown when you create or
+version a strategy — see §2.)
 
 > The frozen schema lives at `libs/strategy-schema/src/main/resources/strategy-schema/strategy-schema-v1.json`.
 > The freeze obligations (the `slippage_bps`, `fees{}`, `objective.fold_aggregation`,
@@ -111,34 +124,51 @@ The seed `minimal-ema-crossover` arrives as a **draft**. Walk it through the
 full immutable-version lifecycle.
 
 ```bash
-# the seed strategy is present as a draft
-curl -s -b /tmp/ay.jar 'http://127.0.0.1:8080/api/v1/strategies?q=minimal-ema-crossover'
-# grab its id
+XSRF=$(grep XSRF-TOKEN /tmp/ay.jar | awk '{print $NF}')
+# the seed strategy is present as a draft; grab its id
 SID=$(curl -s -b /tmp/ay.jar 'http://127.0.0.1:8080/api/v1/strategies?q=minimal-ema-crossover' \
   | python -c "import sys,json;print(json.load(sys.stdin)['items'][0]['id'])")
 echo "SID=$SID"
 
-# versions + audit trail (every mutating call wrote a row)
-curl -s -b /tmp/ay.jar "http://127.0.0.1:8080/api/v1/strategies/$SID"
-curl -s -b /tmp/ay.jar "http://127.0.0.1:8080/api/v1/strategies/$SID/audit"
+# detail carries the canonical 64-hex checksum + the version's status
+curl -s -b /tmp/ay.jar "http://127.0.0.1:8080/api/v1/strategies/$SID" \
+  | python -m json.tool | grep -E '"version"|"status"|"checksum"'
 
-# publish the draft (CSRF required)
+# publish the draft (CSRF required) -> status flips to published
 curl -s -b /tmp/ay.jar -H "X-XSRF-TOKEN: $XSRF" -H 'Content-Type: application/json' \
-  --data '{}' http://127.0.0.1:8080/api/v1/strategies/$SID/publish
+  --data '{}' http://127.0.0.1:8080/api/v1/strategies/$SID/publish; echo
 
-# update -> mints a NEW draft (immutability: the published 1.0.0 is untouched);
-# identical content (checksum match) is refused with 409 CONFLICT_NO_CONTENT_CHANGE
-curl -s -b /tmp/ay.jar -H "X-XSRF-TOKEN: $XSRF" -H 'Content-Type: application/json' \
-  --data '{"versionBump":"patch","notes":"tweak","config":"<same yaml with one number changed>"}' \
-  -X PUT http://127.0.0.1:8080/api/v1/strategies/$SID
+# update -> mints a NEW draft 1.0.1 (the published 1.0.0 stays untouched). Fetch the
+# current config, bump the fast-EMA period 9 -> 11, PUT it back. NOTE the `cat | python`
+# stdin pattern (never `python open('/tmp/..')` on Windows — see the machine notes).
+curl -s -b /tmp/ay.jar "http://127.0.0.1:8080/api/v1/strategies/$SID" \
+  | python -c "import sys,json;sys.stdout.write(json.load(sys.stdin)['configYaml'])" \
+  | sed 's/period: 9/period: 11/' > /tmp/v2.yaml
+cat /tmp/v2.yaml | python -c "import sys,json;print(json.dumps({'config':sys.stdin.read(),'versionBump':'patch','notes':'tune fast ema'}))" \
+  | curl -s -b /tmp/ay.jar -H "X-XSRF-TOKEN: $XSRF" -H 'Content-Type: application/json' --data @- -X PUT http://127.0.0.1:8080/api/v1/strategies/$SID; echo
 
-# diff two versions
-curl -s -b /tmp/ay.jar "http://127.0.0.1:8080/api/v1/strategies/$SID/diff?from=1.0.0&to=1.0.1"
+# the SAME content again -> 409 CONFLICT_NO_CONTENT_CHANGE (checksum match)
+cat /tmp/v2.yaml | python -c "import sys,json;print(json.dumps({'config':sys.stdin.read(),'versionBump':'patch','notes':'again'}))" \
+  | curl -s -b /tmp/ay.jar -H "X-XSRF-TOKEN: $XSRF" -H 'Content-Type: application/json' --data @- -X PUT http://127.0.0.1:8080/api/v1/strategies/$SID; echo
+
+# the versions list shows the lifecycle; diff two versions
+curl -s -b /tmp/ay.jar "http://127.0.0.1:8080/api/v1/strategies/$SID/versions" | python -m json.tool | grep -E '"version"|"status"'
+curl -s -b /tmp/ay.jar "http://127.0.0.1:8080/api/v1/strategies/$SID/diff?from=1.0.0&to=1.0.1" | python -m json.tool | head -16
+
+# every mutating call wrote an APPEND-ONLY audit row. There is no REST view by design;
+# read the trail (and confirm its tamper-evidence) via psql:
+docker exec ay-timescaledb psql -U artha -d artha -c \
+  "select action, from_version, to_version, actor from strategy.strategy_audit_log where strategy_id = '$SID' order by created_at"
 ```
 
-**PASS when:** publish flips `status` to `published`; the audit log carries
-`CREATE`, `PUBLISH` (and `UPDATE_DRAFT` after the PUT) rows; an attempt to PUT
-byte-identical content returns `409`; the diff lists the changed paths.
+**PASS when:** detail shows a 64-hex `checksum`; publish flips `status` to
+`published`; the PUT mints draft `1.0.1` (the versions list still shows `1.0.0`
+`published`); the SECOND identical PUT returns `409 CONFLICT_NO_CONTENT_CHANGE`;
+the diff lists the changed path (`indicators[alias=ema_fast].params.period`,
+`9`→`11`); and the audit log carries `CREATE`, `PUBLISH`, `UPDATE_DRAFT`. (The
+audit log is **append-only by grant** — even the service role is denied
+`UPDATE`/`DELETE` on it; that D18 tamper-evidence is pinned by
+`RegistryLifecycleIntegrationTest`.)
 
 **The `index_constituents`-universe publish guard** (422): a strategy whose
 universe is an index-membership set cannot publish until Phase 44 lands the
@@ -152,17 +182,20 @@ pinning — publishing one returns `422 STRATEGY_UNIVERSE_UNSUPPORTED`. (Covered
 Append-only point-in-time index membership, resolved over REST.
 
 ```bash
-# current NIFTY100 membership (point-in-time = today)
-curl -s -b /tmp/ay.jar 'http://127.0.0.1:8080/api/v1/market/index-constituents?index=NIFTY%20100' | head -c 400
-# as-of a past date resolves the membership that was effective then
-curl -s -b /tmp/ay.jar 'http://127.0.0.1:8080/api/v1/market/index-constituents?index=NIFTY%20100&asOf=2026-01-01' | head -c 200
+# current NIFTY 100 membership (default = latest snapshot) -> {index, asOf, checksum, items[]}
+curl -s -b /tmp/ay.jar 'http://127.0.0.1:8080/api/v1/instruments/indices/NIFTY%20100/constituents' \
+  | python -c "import sys,json;d=json.load(sys.stdin);print('count:',len(d['items']),'| asOf:',d['asOf'],'| checksum:',d['checksum'][:16]);print('sample:',d['items'][:3])"
+# a date BEFORE accrual started -> 404 (the survivorship caveat: the data starts at capture)
+curl -s -b /tmp/ay.jar 'http://127.0.0.1:8080/api/v1/instruments/indices/NIFTY%20100/constituents?asOf=2025-01-01' | head -c 170; echo
 ```
 
 **PASS when:** the list returns ~50 symbols (the committed
-`nse-constituents/ind_nifty100list.csv` fixture); a second accrual run never
-mutates prior rows (append-only — verified by
-`IndexConstituentsIntegrationTest`). The survivorship-bias caveat is documented
-in the fetcher Javadoc; the live NSE fetcher stays gated on source verification.
+`nse-constituents/ind_nifty100list.csv` fixture) with a resolved `asOf` and a
+64-hex `checksum` over the canonical ordered list; a date before accrual started
+is a clean `404` (`no snapshot of 'NIFTY 100' as of ...`). A second accrual run
+never mutates prior rows (append-only — verified by
+`IndexConstituentsIntegrationTest`); the survivorship-bias caveat is documented in
+the fetcher Javadoc, and the live NSE fetcher stays gated on source verification.
 
 ---
 
@@ -202,13 +235,16 @@ risk:
   session: { style: intraday }
 YAML
 
-# build the JSON request (python wraps the YAML as a string), create, then publish
-python -c "import json;print(json.dumps({'name':'Manual Smoke Entry','config':open('/tmp/smoke.yaml').read()}))" > /tmp/smoke.json
-MID=$(curl -s -b /tmp/ay.jar -H "X-XSRF-TOKEN: $XSRF" -H 'Content-Type: application/json' \
-  --data @/tmp/smoke.json http://127.0.0.1:8080/api/v1/strategies \
-  | python -c "import sys,json;print(json.load(sys.stdin)['id'])")
+# build the request + create, then publish. `cat | python` (stdin) — NEVER
+# `python open('/tmp/..')` (Windows python can't read Git-Bash /tmp; see machine notes).
+XSRF=$(grep XSRF-TOKEN /tmp/ay.jar | awk '{print $NF}')
+MID=$(cat /tmp/smoke.yaml \
+  | python -c "import sys,json;print(json.dumps({'name':'Manual Smoke Entry','config':sys.stdin.read()}))" \
+  | curl -s -b /tmp/ay.jar -H "X-XSRF-TOKEN: $XSRF" -H 'Content-Type: application/json' --data @- http://127.0.0.1:8080/api/v1/strategies \
+  | python -c "import sys,json;print(json.load(sys.stdin).get('id',''))")
+echo "MID=$MID"
 curl -s -b /tmp/ay.jar -H "X-XSRF-TOKEN: $XSRF" -H 'Content-Type: application/json' \
-  --data '{}' http://127.0.0.1:8080/api/v1/strategies/$MID/publish
+  --data '{}' http://127.0.0.1:8080/api/v1/strategies/$MID/publish; echo
 
 # poll for the signal (the engine warms RSI from market-data history, then scores
 # the next 1m bar close — usually within ~60-90 s)
@@ -221,12 +257,18 @@ curl -s -b /tmp/ay.jar 'http://127.0.0.1:8080/api/v1/signals?limit=1' | python -
 ```
 
 **PASS when:** within ~2 minutes `/signals` returns a `RELIANCE` `ENTRY` signal
-pinned with `(strategyId, version, checksum)` and a `scoreBreakdown` object whose
-`composite` equals `Σ contributions / weightDenominator`, with the `rsi_1m`
-indicator flagged `REQUIRED` and the gate leaf `close > 1` shown with its operand
+carrying its immutable `strategyVersionId` (the engine pinning — the resolved
+slug/version/checksum triple rides the WS channel payload, §6) and a
+`scoreBreakdown` whose `composite` equals `Σ contributions / weightDenominator`
+(every decimal is an exact-decimal STRING), with the `rsi_1m` entry
+`optional:false` (REQUIRED) and the gate leaf `close > 1` shown with its operand
 value. That is the live half of the golden-parity pair (the replay half lands
 Stage D); determinism is pinned by the committed golden vectors
 (`mvnw -pl services/strategy-signal-service test -Dtest=SignalEngineIntegrationTest`).
+
+> On a **freshly-booted** stack the RSI(14) warm-up needs ~14 one-minute bars; if
+> no signal has appeared after a couple of minutes, give the mock feed a few more
+> minutes to accrue history (or just continue — it fires once warm).
 
 > **Engine internals you can watch:** the candle-close bus and the engine's own
 > metrics.
@@ -247,20 +289,24 @@ them (`openapi-typescript`) and must compile under `tsc --strict`. The aggregate
 Swagger UI is a **mock-profile** convenience:
 
 ```powershell
-# open the aggregated Swagger UI (mock profile only) in a browser
+# the aggregated Swagger UI (mock profile only). Log into the SPA first (sec. 6) so the
+# browser carries the SESSION cookie, THEN open this in the SAME browser:
 start http://127.0.0.1:8080/swagger-ui.html
 ```
 
 ```bash
-# the gateway proxies each service's api-docs; the raw specs are diff-gated
-curl -s http://127.0.0.1:8080/v3/api-docs | head -c 120; echo
-curl -s http://127.0.0.1:8080/docs/strategy-signal/v3/api-docs | head -c 120; echo
+# the gateway's own spec + each service's proxied api-docs (AUTHENTICATED -> send the cookie)
+curl -s -b /tmp/ay.jar http://127.0.0.1:8080/v3/api-docs | head -c 120; echo
+curl -s -b /tmp/ay.jar http://127.0.0.1:8080/docs/strategy-signal/v3/api-docs | head -c 120; echo
+curl -s -b /tmp/ay.jar http://127.0.0.1:8080/docs/market-data/v3/api-docs | head -c 120; echo
 ```
 
-**PASS when:** the Swagger UI lists edge-gateway, market-data-service and
-strategy-signal-service; the api-docs endpoints return OpenAPI 3.1 JSON. (The
-committed specs match the controllers — enforced by each `ContractCaptureTest`
-and the `ci-contracts` workflow.)
+**PASS when:** the api-docs endpoints return OpenAPI 3.1 JSON
+(`{"openapi":"3.1.0",...}`); without the cookie they are `401` (the A.2.3
+deny-by-default). The Swagger UI (once you are logged in) lists edge-gateway,
+market-data-service and strategy-signal-service. The committed specs match the
+controllers — enforced by each `ContractCaptureTest` and the `ci-contracts`
+workflow.
 
 ---
 

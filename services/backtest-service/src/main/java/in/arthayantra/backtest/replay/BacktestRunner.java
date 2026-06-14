@@ -150,7 +150,10 @@ public class BacktestRunner {
             contexts,
             initialEquity,
             CostConfig.defaults(),
-            true);
+            true,
+            // D17b: smooth intra-replay progress over the 40→80 band so the bar no longer sits at 40
+            // for the whole replay. Pure progress side-channel — replay numerics are unchanged.
+            pct -> progress.accept(40 + pct * 40 / 100));
     checkpoint(cancelled, job.id(), progress, 80);
 
     MetricsCalculator.Metrics m =

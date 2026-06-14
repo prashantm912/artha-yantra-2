@@ -40,17 +40,18 @@ public class MarketDataClient {
       OffsetDateTime from,
       OffsetDateTime to) {
     try {
+      // URI-template variables (not a UriBuilder lambda): RestClient strictly encodes them, so the
+      // `+05:30` offset in the ISO timestamps becomes %2B — a raw `+` would be decoded server-side
+      // as a space and 400 the request, silently defeating the warm.
       http.get()
           .uri(
-              uri ->
-                  uri.path("/api/v1/market/candles")
-                      .queryParam("exchange", exchange)
-                      .queryParam("tradingsymbol", tradingsymbol)
-                      .queryParam("interval", interval)
-                      .queryParam("from", from.toString())
-                      .queryParam("to", to.toString())
-                      .queryParam("limit", 5000)
-                      .build())
+              "/api/v1/market/candles?exchange={e}&tradingsymbol={s}&interval={i}"
+                  + "&from={f}&to={t}&limit=5000",
+              exchange,
+              tradingsymbol,
+              interval,
+              from.toString(),
+              to.toString())
           .retrieve()
           .toBodilessEntity();
     } catch (RuntimeException e) {

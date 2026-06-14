@@ -82,9 +82,7 @@ export class LwcChartBinding {
     const crosshair = token('--ay-chart-crosshair', '#64748b');
 
     this.chart = createChart(el, {
-      width: el.clientWidth || 640,
-      height: el.clientHeight || 420,
-      autoSize: false,
+      autoSize: true,
       layout: { background: { color: 'transparent' }, textColor: text, attributionLogo: true },
       grid: { vertLines: { color: grid }, horzLines: { color: grid } },
       rightPriceScale: { borderVisible: false },

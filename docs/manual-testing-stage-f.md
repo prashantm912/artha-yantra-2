@@ -46,7 +46,7 @@ curl -s -b $S -X POST 127.0.0.1:8080/api/v1/market/options/snapshot -H 'content-
 
 1. Browse `127.0.0.1:8080/options`.
    - **PASS:** the calls/strike/puts grid renders with **non-zero IV** for liquid strikes; ITM
-     cells are highlighted; the table scrolls smoothly (virtualized, ~30 DOM rows).
+     cells are highlighted; the table scrolls smoothly within a fixed-height viewport.
    - Change **Expiry**/**Strike-window** → the chain refetches (filters are wired — not the v1 dead
      filters). Change **Underlying** → expiries reload.
    - Header shows an **India-VIX chip** (level + 1-yr %ile) and, after market close, a **STALE** chip.

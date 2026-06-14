@@ -73,6 +73,12 @@ public class InstrumentsController {
     return lookups.strikes(underlying, expiry);
   }
 
+  /** Distinct F&O underlyings (index/stock) for the options + futures pickers. */
+  @GetMapping("/underlyings")
+  public List<InstrumentRepository.Underlying> underlyings() {
+    return lookups.underlyings();
+  }
+
   /** Single instrument by stable key. */
   @GetMapping("/{exchange}/{tradingsymbol}")
   public Instrument byKey(@PathVariable String exchange, @PathVariable String tradingsymbol) {
@@ -118,6 +124,12 @@ public class InstrumentsController {
     @Cacheable(cacheNames = "expiries", key = "'strikes:' + #underlying + ':' + #expiry")
     public List<BigDecimal> strikes(String underlying, LocalDate expiry) {
       return repository.strikes(underlying, expiry);
+    }
+
+    /** Cached F&O underlying list. */
+    @Cacheable(cacheNames = "expiries", key = "'underlyings'")
+    public List<InstrumentRepository.Underlying> underlyings() {
+      return repository.underlyings();
     }
   }
 }

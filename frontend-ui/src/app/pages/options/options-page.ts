@@ -7,11 +7,12 @@ import { TableModule } from 'primeng/table';
 import { TagModule } from 'primeng/tag';
 import { compareDecimal, formatDecimal } from '../../core/decimal';
 import { EChartsComponent } from '../../shared/echarts-chart';
+import { MarketStore } from '../../stores/market.store';
 import { OptionsStore, type OptionStrikeRow } from '../../stores/options.store';
 
 /**
  * /options (F-42): the live options workbench — wired underlying/expiry/strike-window filters, a
- * virtualized calls/strike/puts grid with ITM highlighting, PCR/IV-smile/OI-profile analytics
+ * scrollable calls/strike/puts grid with ITM highlighting, PCR/IV-smile/OI-profile analytics
  * (ECharts, derived via `computed()`), an India-VIX header chip, off-hours staleness chips and a
  * snapshot-history mode. Fed by the `options.chain` topic + REST snapshot — never the tick firehose.
  */
@@ -80,9 +81,10 @@ import { OptionsStore, type OptionStrikeRow } from '../../stores/options.store';
     <h1 class="ay-sr-only">Options chain</h1>
     <div class="filters">
       <p-select
-        [options]="underlyings"
+        [options]="underlyings()"
         [ngModel]="store.underlying()"
         (ngModelChange)="store.setUnderlying($event)"
+        [filter]="true"
         ariaLabel="Underlying"
       />
       <p-select
@@ -153,8 +155,6 @@ import { OptionsStore, type OptionStrikeRow } from '../../stores/options.store';
       [value]="store.windowedRows()"
       [scrollable]="true"
       scrollHeight="60vh"
-      [virtualScroll]="true"
-      [virtualScrollItemSize]="40"
       dataKey="strike"
       [loading]="store.loading()"
     >
@@ -206,8 +206,16 @@ import { OptionsStore, type OptionStrikeRow } from '../../stores/options.store';
 })
 export class OptionsPage {
   protected readonly store = inject(OptionsStore);
+  private readonly market = inject(MarketStore);
 
-  protected readonly underlyings = ['NIFTY 50', 'NIFTY BANK'];
+  /** All synced F&O underlyings (NSE/BSE), falling back to the index defaults until loaded. */
+  protected readonly underlyings = computed(() =>
+    this.market.underlyings().length ? this.market.underlyings() : ['NIFTY 50', 'NIFTY BANK'],
+  );
+
+  constructor() {
+    this.market.loadUnderlyings();
+  }
   protected readonly windowOptions = [
     { label: '±5 strikes', value: 5 },
     { label: '±10 strikes', value: 10 },

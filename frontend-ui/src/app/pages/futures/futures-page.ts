@@ -8,6 +8,7 @@ import { ButtonModule } from 'primeng/button';
 import { formatDecimal } from '../../core/decimal';
 import { EChartsComponent } from '../../shared/echarts-chart';
 import { FuturesStore, stateSeverity } from '../../stores/futures.store';
+import { MarketStore } from '../../stores/market.store';
 
 /**
  * /futures (F-42A): the futures workbench — near/next/far term-structure cards (basis +
@@ -102,9 +103,10 @@ import { FuturesStore, stateSeverity } from '../../stores/futures.store';
     <h1 class="ay-sr-only">Futures workbench</h1>
     <div class="filters">
       <p-select
-        [options]="underlyings"
+        [options]="underlyings()"
         [ngModel]="store.underlying()"
         (ngModelChange)="store.setUnderlying($event)"
+        [filter]="true"
         ariaLabel="Underlying"
       />
       @if (store.term(); as t) {
@@ -185,7 +187,16 @@ import { FuturesStore, stateSeverity } from '../../stores/futures.store';
 })
 export class FuturesPage {
   protected readonly store = inject(FuturesStore);
-  protected readonly underlyings = ['NIFTY 50', 'NIFTY BANK'];
+  private readonly market = inject(MarketStore);
+
+  /** All synced F&O underlyings (NSE/BSE), falling back to the index defaults until loaded. */
+  protected readonly underlyings = computed(() =>
+    this.market.underlyings().length ? this.market.underlyings() : ['NIFTY 50', 'NIFTY BANK'],
+  );
+
+  constructor() {
+    this.market.loadUnderlyings();
+  }
 
   protected readonly basisOption = computed<EChartsCoreOption>(() => {
     const series = this.store.basisSeries();

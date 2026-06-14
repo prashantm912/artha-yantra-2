@@ -56,8 +56,6 @@ import { JobsStore, type JobStatus } from '../../stores/jobs.store';
       [value]="store.jobs()"
       [scrollable]="true"
       scrollHeight="calc(100vh - 12rem)"
-      [virtualScroll]="true"
-      [virtualScrollItemSize]="46"
       dataKey="jobId"
       [loading]="store.loading()"
     >

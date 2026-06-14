@@ -12,7 +12,7 @@ import { SignalsStore, type SignalDto } from '../../stores/signals.store';
 import { ReasoningBreakdownPanel } from './reasoning-breakdown-panel';
 
 /**
- * /signals (C-2.24/C-2.26): live feed + history in one virtualized table, click-through to the
+ * /signals (C-2.24/C-2.26): live feed + history in one scrollable table, click-through to the
  * reasoning breakdown. The MVP surface — a published EMA-crossover strategy's call lands here
  * over STOMP with its per-indicator score breakdown.
  */
@@ -95,8 +95,6 @@ import { ReasoningBreakdownPanel } from './reasoning-breakdown-panel';
           [value]="store.filtered()"
           [scrollable]="true"
           scrollHeight="calc(100vh - 12rem)"
-          [virtualScroll]="true"
-          [virtualScrollItemSize]="44"
           selectionMode="single"
           dataKey="id"
           [loading]="store.loading()"
@@ -133,7 +131,7 @@ import { ReasoningBreakdownPanel } from './reasoning-breakdown-panel';
           </ng-template>
           <ng-template #emptymessage>
             <tr>
-              <td colspan="7">No signals yet — publish a strategy and let the mock feed run.</td>
+              <td colspan="7">No signals yet — publish a strategy to start emitting signals.</td>
             </tr>
           </ng-template>
         </p-table>

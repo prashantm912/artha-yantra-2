@@ -97,7 +97,7 @@ interface ScreenerRow {
               <p-autocomplete
                 [suggestions]="market.searchResults()"
                 (completeMethod)="search($event)"
-                field="tradingsymbol"
+                optionLabel="tradingsymbol"
                 placeholder="Add instrument…"
                 [(ngModel)]="picked"
                 (onSelect)="addPicked(list)"
@@ -219,10 +219,11 @@ export class WatchlistsPage {
   }
 
   private reload(keepId?: string): void {
-    this.http.get<WatchlistView[]>('/api/v1/watchlists').subscribe({
-      next: (lists) => {
-        this.lists.set(lists ?? []);
-        const target = (lists ?? []).find((l) => l.id === keepId) ?? lists?.[0] ?? null;
+    this.http.get<{ items: WatchlistView[] }>('/api/v1/watchlists').subscribe({
+      next: (resp) => {
+        const lists = resp.items ?? [];
+        this.lists.set(lists);
+        const target = lists.find((l) => l.id === keepId) ?? lists[0] ?? null;
         this.selectList(target);
       },
       error: () => undefined,

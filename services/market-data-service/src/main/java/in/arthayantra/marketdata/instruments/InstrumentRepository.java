@@ -234,6 +234,22 @@ public class InstrumentRepository {
         expiry == null ? null : Date.valueOf(expiry));
   }
 
+  /** Distinct underlyings that have listed F&O (options or futures) — feeds the chain/futures pickers. */
+  public List<Underlying> underlyings() {
+    return jdbc.query(
+        """
+        SELECT DISTINCT underlying_exchange AS exch, underlying_tradingsymbol AS sym
+        FROM instruments
+        WHERE is_active AND instrument_type IN ('CE','PE','FUT')
+          AND underlying_tradingsymbol IS NOT NULL AND underlying_tradingsymbol <> ''
+        ORDER BY sym
+        """,
+        (rs, n) -> new Underlying(rs.getString("exch"), rs.getString("sym")));
+  }
+
+  /** An F&O underlying (the index/stock a derivative is written on). */
+  public record Underlying(String exchange, String tradingsymbol) {}
+
   /** The CE/PE rows of one (underlying, expiry) chain, strike-ordered (Phase 15). */
   public List<Instrument> optionChain(String underlying, LocalDate expiry) {
     return jdbc.query(

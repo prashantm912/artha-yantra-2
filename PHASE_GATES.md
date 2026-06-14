@@ -120,7 +120,10 @@ on the running mock stack / Playwright E2E.)*
 
 - [x] Zero polling where a topic exists (only the 10 s system-status fallback) (impl)
 - [x] No `markForCheck`; OnPush default; signal-driven re-renders (impl)
-- [x] Virtualized tables keep ~30 DOM rows (impl — p-table virtualScroll)
+- [x] Large tables scroll within a fixed-height viewport (impl — plain `p-table` + `scrollHeight`;
+      `virtualScroll` removed: the PrimeNG 21 scroller renders 0 rows / collapses to 0-height under
+      zoneless CD — bounded per-view row counts make plain render fine; a zoneless-compatible
+      virtualization is parking)
 - [x] Bundle budgets: initial ~113 KB gz (no chart/editor lib in initial); Monaco editor route
       ~562 KB gz is the documented exception (parking) (impl)
 - [x] No chart-library types outside the designated wrappers (lint-proven) (impl)

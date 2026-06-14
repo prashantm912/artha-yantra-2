@@ -1,103 +1,54 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  DestroyRef,
-  ElementRef,
-  afterNextRender,
-  effect,
-  inject,
-  input,
-  model,
-  viewChild,
-} from '@angular/core';
-import { ensureMonacoYaml, monaco } from './monaco-bootstrap';
+import { ChangeDetectionStrategy, Component, input, model } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 
 /**
- * The YAML editor: Monaco bound to monaco-yaml against `strategy-schema/v1` (autocomplete, hover,
- * schema squiggles), used DIRECTLY (no ngx wrapper — D2). Two-way `value`; the live `schema` drives
- * monaco-yaml validation. Lazy with its route, so Monaco stays out of the initial bundle.
+ * YAML editor — plain `<textarea>` fallback (interim). Monaco was removed from this surface: under
+ * the zoneless production build the monaco-yaml worker fails to register at runtime ("Missing
+ * requestHandler doValidation") and floods a ResizeObserver loop, which broke the whole editor
+ * route. The authoritative server `POST /validate` still surfaces schema + semantic errors in the
+ * page's validation panel — only inline squiggles / autocomplete are lost until Monaco is restored.
+ * `schema` is accepted for API compatibility (unused here). Same selector + two-way `value`, so the
+ * editor page is a no-touch drop-in.
  */
 @Component({
   selector: 'ay-monaco-yaml-editor',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [FormsModule],
   styles: `
-    .editor {
+    textarea {
       width: 100%;
       height: 100%;
       min-height: 24rem;
+      box-sizing: border-box;
       border: 1px solid var(--ay-border);
       border-radius: 8px;
-      overflow: hidden;
+      background: var(--ay-surface-1);
+      color: inherit;
+      font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      padding: 0.6rem 0.8rem;
+      resize: vertical;
+      tab-size: 2;
+      white-space: pre;
+      overflow: auto;
     }
   `,
-  template: `<div #host class="editor"></div>`,
+  template: `
+    <textarea
+      [ngModel]="value()"
+      (ngModelChange)="value.set($event)"
+      spellcheck="false"
+      autocomplete="off"
+      autocapitalize="off"
+      wrap="off"
+      aria-label="Strategy YAML"
+    ></textarea>
+  `,
 })
 export class MonacoYamlEditor {
   /** Two-way YAML buffer. */
   readonly value = model<string>('');
-  /** The JSON Schema object served by `GET /strategies/schema/v1`. */
+  /** Accepted for API compatibility; inline schema validation is server-side (`POST /validate`) now. */
   readonly schema = input<object | null>(null);
-
-  private readonly host = viewChild.required<ElementRef<HTMLDivElement>>('host');
-  private editor?: monaco.editor.IStandaloneCodeEditor;
-  private applyingExternal = false;
-
-  constructor() {
-    afterNextRender(() => this.init());
-
-    // external value → editor (guard against the change-content echo)
-    effect(() => {
-      const v = this.value();
-      if (this.editor && this.editor.getValue() !== v) {
-        this.applyingExternal = true;
-        this.editor.setValue(v);
-        this.applyingExternal = false;
-      }
-    });
-
-    // live schema → monaco-yaml validation/autocomplete
-    effect(() => {
-      const s = this.schema();
-      if (s) {
-        void ensureMonacoYaml().update({
-          enableSchemaRequest: false,
-          validate: true,
-          hover: true,
-          completion: true,
-          schemas: [{ uri: 'inmemory://schema/strategy-v1.json', fileMatch: ['*'], schema: s }],
-        });
-      }
-    });
-
-    inject(DestroyRef).onDestroy(() => {
-      this.editor?.getModel()?.dispose();
-      this.editor?.dispose();
-    });
-  }
-
-  private init(): void {
-    ensureMonacoYaml();
-    const light = document.documentElement.classList.contains('ay-light');
-    const model = monaco.editor.createModel(
-      this.value(),
-      'yaml',
-      monaco.Uri.parse('inmemory://model/strategy-draft.yaml'),
-    );
-    this.editor = monaco.editor.create(this.host().nativeElement, {
-      model,
-      language: 'yaml',
-      theme: light ? 'vs' : 'vs-dark',
-      automaticLayout: true,
-      minimap: { enabled: false },
-      fontSize: 13,
-      tabSize: 2,
-      scrollBeyondLastLine: false,
-      renderWhitespace: 'boundary',
-    });
-    this.editor.onDidChangeModelContent(() => {
-      if (!this.applyingExternal) {
-        this.value.set(this.editor!.getValue());
-      }
-    });
-  }
 }

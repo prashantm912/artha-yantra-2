@@ -1237,6 +1237,37 @@
         }
       }
     },
+    "/api/v1/instruments/underlyings" : {
+      "get" : {
+        "tags" : [ "instruments-controller" ],
+        "operationId" : "underlyings",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/Underlying"
+                  }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/instruments/sync/status" : {
       "get" : {
         "tags" : [ "instruments-controller" ],
@@ -2011,6 +2042,17 @@
           "offset" : {
             "type" : "integer",
             "format" : "int32"
+          }
+        }
+      },
+      "Underlying" : {
+        "type" : "object",
+        "properties" : {
+          "exchange" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
           }
         }
       },

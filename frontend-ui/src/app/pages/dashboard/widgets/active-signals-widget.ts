@@ -62,7 +62,7 @@ import { SignalsStore } from '../../../stores/signals.store';
         }
       </ul>
     } @else {
-      <p class="empty">No live signals yet — publish a strategy and let the mock feed run.</p>
+      <p class="empty">No live signals yet — publish a strategy to start emitting signals.</p>
     }
   `,
 })

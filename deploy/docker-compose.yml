@@ -253,11 +253,14 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-mock}
       ARTHA_DB_PASSWORD_FILE: /run/secrets/postgres_password
+      ARTHA_MARKETDATA_BASE_URL: http://market-data-service:8081
     secrets: [postgres_password]
     depends_on:
       flyway-init:
         condition: service_completed_successfully
       redis:
+        condition: service_healthy
+      market-data-service:
         condition: service_healthy
       strategy-signal-service:
         condition: service_healthy

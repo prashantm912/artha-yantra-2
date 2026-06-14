@@ -53,6 +53,21 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
   healthy stack and won't overwrite an existing `.env`; the helper password defaults to
   `e2e-owner-password`, so override it to match your hash.
 
+## Frontend (Angular 21 zoneless + PrimeNG 21)
+- **Zoneless (D1) breaks several libs** — verify in a prod build, not just dev:
+  - PrimeNG 21 `[virtualScroll]` collapses its viewport → **renders 0 rows**; use a plain
+    `[scrollable]` `p-table` with `scrollHeight`, no virtualization.
+  - `lightweight-charts` paints blank unless `createChart(el,{autoSize:true})` (the
+    afterNextRender width/height measure misses first paint).
+  - `monaco-editor`/`monaco-yaml` workers fail to register → editor/diff blank; the repo
+    uses a `<textarea>` editor + a plain LCS diff (`monaco-diff.ts`) instead.
+- **PrimeNG 21 API:** `p-autocomplete` uses `optionLabel`, not `field` (a `field` binding
+  silently renders `[object Object]`).
+- **List endpoints return an `{items:[...]}` envelope** (signals/paper/journal/screener/
+  watchlists); only `instruments/search` + `instruments/underlyings` return bare arrays.
+- **Verify trio** (PowerShell `Push-Location frontend-ui`): `npm run lint` +
+  `npm run test:ci` + `npm run build`.
+
 ## Database / migrations
 - **Applied Flyway migrations are checksum-locked** in the dev stack and CI — editing
   an applied migration (even a comment) fails `flyway validate` / flyway-init.

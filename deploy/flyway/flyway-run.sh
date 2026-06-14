@@ -6,9 +6,13 @@
 # service_completed_successfully.
 set -eu
 
-DB_URL="jdbc:postgresql://timescaledb:5432/artha"
+# Profile-isolated database (live → artha, mock → artha_mock); the db-create
+# init service has already ensured this database exists. Defaults to artha.
+DB_NAME="${ARTHA_DB_NAME:-artha}"
+DB_URL="jdbc:postgresql://timescaledb:5432/${DB_NAME}"
 DB_USER="artha"
 DB_PASSWORD="$(cat /run/secrets/postgres_password)"
+echo "[flyway-init] target database: ${DB_NAME}"
 
 run_lineage() {
   lineage="$1"

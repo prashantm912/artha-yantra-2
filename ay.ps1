@@ -23,8 +23,28 @@ $RepoRoot    = $PSScriptRoot
 $ComposeFile = Join-Path $RepoRoot 'deploy\docker-compose.yml'
 $EnvFile     = Join-Path $RepoRoot '.env'
 
+# Profile isolation (mock vs live share ONE Postgres instance + Redis but get
+# SEPARATE databases + Redis logical DBs, so mock's synthetic data can never
+# pollute live): derive the names from SPRING_PROFILES_ACTIVE and export them so
+# compose interpolates ${ARTHA_DB_NAME}/${ARTHA_REDIS_DB} consistently across
+# every service + the db-create/flyway-init/backup containers.
+function Set-ProfileEnv {
+    $activeProfile = 'mock'
+    if (Test-Path $EnvFile) {
+        $m = Select-String -Path $EnvFile -Pattern '^SPRING_PROFILES_ACTIVE=(.*)$'
+        if ($m) { $activeProfile = $m.Matches[0].Groups[1].Value.Trim() }
+    }
+    if ($activeProfile -eq 'mock') {
+        $env:ARTHA_DB_NAME = 'artha_mock'; $env:ARTHA_REDIS_DB = '1'
+    } else {
+        $env:ARTHA_DB_NAME = 'artha';      $env:ARTHA_REDIS_DB = '0'
+    }
+    Write-Host "[ay] profile=$activeProfile -> db=$($env:ARTHA_DB_NAME) redisDb=$($env:ARTHA_REDIS_DB)"
+}
+
 function Invoke-Compose {
     param([string[]]$ComposeArgs)
+    Set-ProfileEnv
     # docker compose writes progress to stderr; stringify it so PS 5.1 does
     # not promote NativeCommandError under redirection - the exit code is
     # the only failure signal that matters here

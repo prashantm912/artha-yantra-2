@@ -61,6 +61,17 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
   `{"password":...}`, then a GET to seed the `XSRF-TOKEN` cookie, echoed as the
   `X-XSRF-TOKEN` header on mutating calls. In-container SQL: DB is `artha`/`artha_mock`
   (not `arthayantra`).
+- **optimizer-service is Python (FastAPI), not Java** — `/api/v1/optimizations/*` lives there
+  (backtest-service owns `/api/v1/backtests/*`). Tests: `(cd services/optimizer-service && python -m
+  pytest tests/ -q)` + `python -m ruff check app tests` (Python 3.14 global, no venv). A sweep needs
+  the strategy to carry a `backtest.optimize` block (`method`+`max_trials`+`objective`+`parameters`,
+  all required) else 422 "no tunable parameters".
+- **Rebuild + redeploy ONE service (no `ay` build verb):** build the artifact (`(cd frontend-ui &&
+  npm run build)` or the service JAR), set `$env:ARTHA_DB_NAME`/`$env:ARTHA_REDIS_DB` to the LIVE
+  values (`artha`/`0`, mock `artha_mock`/`1`), then `docker compose -f deploy/docker-compose.yml
+  --env-file .env build <svc> && up -d <svc>` — recreates only `<svc>`; unset vars drift the others.
+- **Thread-dump a stalled JVM service:** `docker exec ay-<svc> sh -c 'kill -3 1'` → dump lands in
+  `docker logs` (jstack/jcmd absent in the slim image).
 
 ## Frontend (Angular 21 zoneless + PrimeNG 21)
 - **Zoneless (D1) breaks several libs** — verify in a prod build, not just dev:
@@ -70,6 +81,12 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
     afterNextRender width/height measure misses first paint).
   - `monaco-editor`/`monaco-yaml` workers fail to register → editor/diff blank; the repo
     uses a `<textarea>` editor + a plain LCS diff (`monaco-diff.ts`) instead.
+- **PrimeNG `darkModeSelector` must be a plain class** (`.ay-dark`) — a `:root`-anchored selector
+  (`:root:not(.ay-light)`) collides with @primeuix's `:root,:host` colour-scheme wrapper, emits a
+  dead `& :root` rule, and the WHOLE app renders the LIGHT PrimeNG scheme on the dark shell (axe +
+  e2e pass it). `SessionStore.applyTheme` toggles `.ay-dark`/`.ay-light` on `<html>`; echarts is
+  themed ONLY via the shared `ay-echart` wrapper (transparent bg). After a rebuild HARD-reload — a
+  stale cached chunk renders the old UI/white charts.
 - **PrimeNG 21 API:** `p-autocomplete` uses `optionLabel`, not `field` (a `field` binding
   silently renders `[object Object]`).
 - **List endpoints return an `{items:[...]}` envelope** (signals/paper/journal/screener/

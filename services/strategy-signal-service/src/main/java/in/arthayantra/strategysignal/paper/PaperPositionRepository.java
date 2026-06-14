@@ -26,10 +26,12 @@ public class PaperPositionRepository {
       BigDecimal realizedPnl,
       String status,
       OffsetDateTime openedAt,
-      OffsetDateTime closedAt) {}
+      OffsetDateTime closedAt,
+      String closeReason) {}
 
   private static final String COLUMNS =
-      "id, exchange, tradingsymbol, side, qty, avg_entry_price, realized_pnl, status, opened_at, closed_at";
+      "id, exchange, tradingsymbol, side, qty, avg_entry_price, realized_pnl, status,"
+          + " opened_at, closed_at, close_reason";
 
   private final JdbcTemplate jdbc;
 
@@ -49,7 +51,8 @@ public class PaperPositionRepository {
         rs.getBigDecimal("realized_pnl"),
         rs.getString("status"),
         rs.getObject("opened_at", OffsetDateTime.class),
-        rs.getObject("closed_at", OffsetDateTime.class));
+        rs.getObject("closed_at", OffsetDateTime.class),
+        rs.getString("close_reason"));
   }
 
   /** The OPEN position for a key+side, if any. */
@@ -101,11 +104,12 @@ public class PaperPositionRepository {
         id);
   }
 
-  /** Closes a position with its realized P&amp;L (releases the partial-unique open key). */
-  public void close(long id, BigDecimal realizedPnl) {
+  /** Closes a position with its realized P&amp;L + close reason (releases the partial-unique key). */
+  public void close(long id, BigDecimal realizedPnl, String closeReason) {
     jdbc.update(
-        "UPDATE paper_positions SET status='CLOSED', realized_pnl=?, closed_at=now() WHERE id=?",
+        "UPDATE paper_positions SET status='CLOSED', realized_pnl=?, closed_at=now(), close_reason=? WHERE id=?",
         realizedPnl,
+        closeReason,
         id);
   }
 
@@ -116,19 +120,22 @@ public class PaperPositionRepository {
         PaperPositionRepository::map);
   }
 
-  /** Closed trades in a window, newest first. */
+  /** Closed trades in a window (optionally one tradingsymbol — the chart-marks fetch), newest first. */
   public List<PositionRow> listClosed(
-      OffsetDateTime from, OffsetDateTime to, int limit, int offset) {
+      OffsetDateTime from, OffsetDateTime to, String tradingsymbol, int limit, int offset) {
     return jdbc.query(
         "SELECT " + COLUMNS + " FROM paper_positions WHERE status='CLOSED'"
             + " AND (?::timestamptz IS NULL OR closed_at >= ?)"
             + " AND (?::timestamptz IS NULL OR closed_at <= ?)"
+            + " AND (?::text IS NULL OR tradingsymbol = ?)"
             + " ORDER BY closed_at DESC LIMIT ? OFFSET ?",
         PaperPositionRepository::map,
         from,
         from,
         to,
         to,
+        tradingsymbol,
+        tradingsymbol,
         Math.min(Math.max(limit, 1), 500),
         Math.max(offset, 0));
   }
@@ -141,7 +148,7 @@ public class PaperPositionRepository {
     return jdbc.query(
         """
         SELECT DISTINCT p.id, p.exchange, p.tradingsymbol, p.side, p.qty, p.avg_entry_price,
-               p.realized_pnl, p.status, p.opened_at, p.closed_at
+               p.realized_pnl, p.status, p.opened_at, p.closed_at, p.close_reason
         FROM paper_positions p
         JOIN paper_orders o
           ON o.exchange = p.exchange AND o.tradingsymbol = p.tradingsymbol AND o.side = p.side
@@ -152,6 +159,33 @@ public class PaperPositionRepository {
         """,
         PaperPositionRepository::map);
   }
+
+  /** The strategy that opened a position (via its first signal-linked order), for the T-1 audit. */
+  public java.util.Optional<NotifyTarget> notifyTargetFor(
+      String exchange, String tradingsymbol, String side) {
+    return jdbc
+        .query(
+            """
+            SELECT s2.id AS strategy_id, COALESCE(s2.notification_channel, 'NTFY') AS channel
+            FROM paper_orders o
+            JOIN signals sg ON sg.id = o.signal_id
+            JOIN strategy_versions sv ON sv.id = sg.strategy_version_id
+            JOIN strategies s2 ON s2.id = sv.strategy_id
+            WHERE o.exchange=? AND o.tradingsymbol=? AND o.side=? AND o.signal_id IS NOT NULL
+            ORDER BY o.id LIMIT 1
+            """,
+            (rs, n) ->
+                new NotifyTarget(
+                    java.util.UUID.fromString(rs.getString("strategy_id")), rs.getString("channel")),
+            exchange,
+            tradingsymbol,
+            side)
+        .stream()
+        .findFirst();
+  }
+
+  /** A position's originating strategy + its notification channel. */
+  public record NotifyTarget(java.util.UUID strategyId, String channel) {}
 
   /** Wipes the position ledger (paper reset). */
   public int deleteAll() {

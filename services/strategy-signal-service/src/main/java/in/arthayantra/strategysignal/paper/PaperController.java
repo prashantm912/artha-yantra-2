@@ -66,16 +66,20 @@ public class PaperController {
     return Map.of("items", paper.openPositions());
   }
 
-  /** The closed-trade ledger. */
+  /** The closed-trade ledger; an optional {@code symbol} (EXCH:SYM or SYM) feeds the chart marks. */
   @GetMapping("/trades")
   public Map<String, Object> trades(
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
           OffsetDateTime from,
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
           OffsetDateTime to,
+      @RequestParam(required = false) String symbol,
       @RequestParam(defaultValue = "50") int limit,
       @RequestParam(defaultValue = "0") int offset) {
-    return Map.of("items", paper.trades(from, to, limit, offset), "limit", limit, "offset", offset);
+    String tradingsymbol =
+        symbol == null ? null : symbol.contains(":") ? symbol.substring(symbol.indexOf(':') + 1) : symbol;
+    return Map.of(
+        "items", paper.trades(from, to, tradingsymbol, limit, offset), "limit", limit, "offset", offset);
   }
 
   /** Aggregate daily equity + win rate / expectancy. */

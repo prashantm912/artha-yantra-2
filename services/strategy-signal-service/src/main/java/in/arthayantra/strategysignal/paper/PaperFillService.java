@@ -6,6 +6,8 @@ import in.arthayantra.strategyengine.fills.FillSimulator.Fees;
 import in.arthayantra.strategyengine.fills.FillSimulator.Fill;
 import in.arthayantra.strategyengine.fills.FillSimulator.FillRequest;
 import in.arthayantra.strategyengine.fills.FillSimulator.Slippage;
+import in.arthayantra.strategyengine.fills.FeeConstants;
+import in.arthayantra.strategyengine.fills.InstrumentClass;
 import in.arthayantra.strategyengine.fills.LtpSlippageV1;
 import in.arthayantra.strategyengine.fills.Side;
 import in.arthayantra.strategysignal.paper.InstrumentMetaClient.InstrumentMeta;
@@ -33,7 +35,19 @@ public class PaperFillService {
 
   /** Prices an order with the per-class slippage fallback (live-order semantics). */
   public Fill fill(Side side, long qty, BigDecimal reference, InstrumentMeta meta) {
-    return fills.simulate(request(side, qty, reference, meta, Slippage.NONE));
+    return fills.simulate(request(side, qty, reference, meta, Slippage.NONE, Fees.DEFAULTS));
+  }
+
+  /**
+   * Expiry settlement (Phase 43B): no slippage (the settlement value is the reference), and for
+   * options the STT leg is the exercise rate — the expiry STT joins the shared engine fee schedule.
+   */
+  public Fill settlementFill(Side side, long qty, BigDecimal reference, InstrumentMeta meta) {
+    Fees fees =
+        meta.instrumentClass() == InstrumentClass.OPTION
+            ? new Fees(FeeConstants.STT_OPTION_EXERCISE, null, null, null, null)
+            : Fees.DEFAULTS;
+    return fills.simulate(request(side, qty, reference, meta, Slippage.ticks(0), fees));
   }
 
   /**
@@ -41,11 +55,11 @@ public class PaperFillService {
    * already baked into {@code avgEntryPrice}), so only the turnover + cost legs are recomputed.
    */
   public Fill costBasis(Side side, long qty, BigDecimal avgEntryPrice, InstrumentMeta meta) {
-    return fills.simulate(request(side, qty, avgEntryPrice, meta, Slippage.ticks(0)));
+    return fills.simulate(request(side, qty, avgEntryPrice, meta, Slippage.ticks(0), Fees.DEFAULTS));
   }
 
   private static FillRequest request(
-      Side side, long qty, BigDecimal reference, InstrumentMeta meta, Slippage slippage) {
+      Side side, long qty, BigDecimal reference, InstrumentMeta meta, Slippage slippage, Fees fees) {
     Brokerage brokerage =
         switch (meta.instrumentClass()) {
           case OPTION -> new Brokerage(OPTION_PER_LOT, null);
@@ -61,6 +75,6 @@ public class PaperFillService {
         null,
         slippage,
         brokerage,
-        Fees.DEFAULTS);
+        fees);
   }
 }

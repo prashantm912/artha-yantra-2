@@ -40,6 +40,54 @@ export interface SignalLike {
   generatedAt: string;
 }
 
+/** A closed paper trade as `/api/v1/paper/trades` delivers it (no exit price persisted). */
+export interface PaperTradeLike {
+  id: number;
+  side: string;
+  avgEntryPrice: string;
+  realizedPnl: string;
+  openedAt: string;
+  closedAt: string;
+}
+
+/**
+ * Entry + exit marks for closed PAPER trades (FP-67), within [fromMs, toMs). The trade DTO carries
+ * no exit price, so the exit marker rides the avg-entry price and labels the realized P&L.
+ */
+export function paperTradeMarks(
+  trades: PaperTradeLike[],
+  interval: string,
+  fromMs: number,
+  toMs: number,
+): MarkDto[] {
+  const out: MarkDto[] = [];
+  for (const t of trades) {
+    const entryMs = floorBucketMs(Date.parse(t.openedAt), interval);
+    if (entryMs >= fromMs && entryMs < toMs) {
+      out.push({
+        id: `p${t.id}-entry`,
+        timeMs: entryMs,
+        price: t.avgEntryPrice,
+        kind: 'entry',
+        side: t.side,
+        label: `paper ${t.side} entry`,
+      });
+    }
+    const exitMs = floorBucketMs(Date.parse(t.closedAt), interval);
+    if (exitMs >= fromMs && exitMs < toMs) {
+      out.push({
+        id: `p${t.id}-exit`,
+        timeMs: exitMs,
+        price: t.avgEntryPrice,
+        kind: 'exit',
+        side: t.side,
+        label: `paper exit P&L ${t.realizedPnl}`,
+      });
+    }
+  }
+  return out;
+}
+
 /** Entry + exit marks for a run's trades, within [fromMs, toMs); times IST bucket-floored. */
 export function tradeMarks(
   trades: TradeLike[],

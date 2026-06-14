@@ -174,7 +174,7 @@ public class PaperService {
     if (!"OPEN".equals(pos.status())) {
       throw new ApiException(409, ErrorCodes.CONFLICT_POSITION_CLOSED, "position already closed");
     }
-    settle(pos, price);
+    settle(pos, price, "MANUAL");
     return positions
         .find(id)
         .map(this::toTradeDto)
@@ -182,18 +182,30 @@ public class PaperService {
   }
 
   /** The shared close path (used by manual close, the 15:45 sweep, and expiry settlement). */
-  BigDecimal settle(PositionRow pos, BigDecimal price) {
+  BigDecimal settle(PositionRow pos, BigDecimal price, String closeReason) {
+    return doSettle(pos, price, closeReason, false);
+  }
+
+  /** Expiry settlement at intrinsic/spot — exercise STT leg, no slippage (Phase 43B). */
+  BigDecimal settleExpiry(PositionRow pos, BigDecimal reference, boolean exercise) {
+    return doSettle(pos, reference, "EXPIRY_SETTLEMENT", exercise);
+  }
+
+  private BigDecimal doSettle(PositionRow pos, BigDecimal price, String closeReason, boolean exercise) {
     InstrumentMeta meta = instruments.meta(pos.exchange(), pos.tradingsymbol());
     Side exitSide = "BUY".equals(pos.side()) ? Side.SELL : Side.BUY;
     BigDecimal reference =
         firstNonNull(price, lastTick.lastPrice(pos.exchange(), pos.tradingsymbol()).orElse(null), pos.avgEntryPrice());
-    Fill exit = fills.fill(exitSide, pos.qty(), reference, meta);
+    Fill exit =
+        exercise
+            ? fills.settlementFill(exitSide, pos.qty(), reference, meta)
+            : fills.fill(exitSide, pos.qty(), reference, meta);
     Fill entryBasis = fills.costBasis(Side.valueOf(pos.side()), pos.qty(), pos.avgEntryPrice(), meta);
     BigDecimal realized = exit.netValue().add(entryBasis.netValue()).setScale(4, RoundingMode.HALF_UP);
     orders.insertFilled(
         null, pos.exchange(), pos.tradingsymbol(), exitSide.name(), pos.qty(), exit.fillPrice(),
         fills.simulatorId(), exit.slippageApplied(), null, null);
-    positions.close(pos.id(), realized);
+    positions.close(pos.id(), realized, closeReason);
     return realized;
   }
 
@@ -202,14 +214,17 @@ public class PaperService {
     return positions.listOpen().stream().map(this::toPositionDto).toList();
   }
 
-  /** The closed-trade ledger. */
-  public List<TradeDto> trades(OffsetDateTime from, OffsetDateTime to, int limit, int offset) {
-    return positions.listClosed(from, to, limit, offset).stream().map(this::toTradeDto).toList();
+  /** The closed-trade ledger (optionally one tradingsymbol — the chart-marks fetch, FP-67). */
+  public List<TradeDto> trades(
+      OffsetDateTime from, OffsetDateTime to, String tradingsymbol, int limit, int offset) {
+    return positions.listClosed(from, to, tradingsymbol, limit, offset).stream()
+        .map(this::toTradeDto)
+        .toList();
   }
 
   /** Daily realized-equity curve + win rate / expectancy over the closed trades. */
   public Map<String, Object> pnl() {
-    List<PositionRow> closed = positions.listClosed(null, null, 500, 0);
+    List<PositionRow> closed = positions.listClosed(null, null, null, 500, 0);
     // listClosed is newest-first; walk oldest-first for the cumulative curve
     List<PositionRow> chrono = new ArrayList<>(closed);
     java.util.Collections.reverse(chrono);
@@ -257,7 +272,7 @@ public class PaperService {
     int closed = 0;
     for (PositionRow pos : positions.intradayOpen()) {
       try {
-        settle(pos, null);
+        settle(pos, null, "INTRADAY_MTM");
         closed++;
       } catch (Exception e) {
         log.warn("mark-to-close failed for position {}: {}", pos.id(), e.getMessage());

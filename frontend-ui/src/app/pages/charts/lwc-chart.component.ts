@@ -20,9 +20,11 @@ import { LwcChartBinding, type CrosshairSnapshot } from './lwc-chart-binding';
 import { ChartIndicatorsService, type IndicatorMeta } from './chart-indicators.service';
 import { type OverlayConfig } from './chart-state.store';
 import {
+  paperTradeMarks,
   signalMarks,
   tradeMarks,
   type MarkDto,
+  type PaperTradeLike,
   type SignalLike,
   type TradeLike,
 } from './datafeed/marks';
@@ -341,16 +343,25 @@ export class LwcChartComponent {
         })
         .catch(() => undefined);
     } else {
-      const params = new HttpParams().set('limit', 200);
-      void firstValueFrom(this.http.get<{ items: SignalLike[] }>('/api/v1/signals', { params }))
-        .then((r) => {
+      const sym = this.symbol();
+      const signals$ = firstValueFrom(
+        this.http.get<{ items: SignalLike[] }>('/api/v1/signals', {
+          params: new HttpParams().set('limit', 200),
+        }),
+      );
+      // FP-67: closed paper trades on this symbol feed the same chart-marks surface
+      const paper$ = firstValueFrom(
+        this.http.get<{ items: PaperTradeLike[] }>('/api/v1/paper/trades', {
+          params: new HttpParams().set('symbol', sym).set('limit', 200),
+        }),
+      ).catch(() => ({ items: [] as PaperTradeLike[] }));
+      void Promise.all([signals$, paper$])
+        .then(([s, p]) => {
           const focusSig = this.focusSignalId();
-          const marks = signalMarks(
-            r.items ?? [],
-            this.symbol(),
-            this.interval(),
-            focusSig ?? undefined,
-          );
+          const marks = [
+            ...signalMarks(s.items ?? [], sym, this.interval(), focusSig ?? undefined),
+            ...paperTradeMarks(p.items ?? [], this.interval(), this.loadedFromMs, this.loadedToMs),
+          ];
           this.binding?.setMarks(marks, focusSig != null);
           const focus =
             focusSig != null ? marks.find((m) => m.id === `s${focusSig}-entry`) : undefined;

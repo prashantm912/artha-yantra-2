@@ -17,10 +17,30 @@ public class PaperScheduler {
   private static final Logger log = LoggerFactory.getLogger(PaperScheduler.class);
 
   private final PaperService paper;
+  private final PaperExpiryService expiry;
 
-  /** Wires the ledger service. */
-  public PaperScheduler(PaperService paper) {
+  /** Wires the ledger + expiry services. */
+  public PaperScheduler(PaperService paper, PaperExpiryService expiry) {
     this.paper = paper;
+    this.expiry = expiry;
+  }
+
+  /** 15:30 IST T-1 roll-or-close push for positions expiring tomorrow. */
+  @Scheduled(cron = "0 30 15 * * MON-FRI", zone = "Asia/Kolkata")
+  public void t1RolloverPrompt() {
+    int sent = expiry.notifyExpiring();
+    if (sent > 0) {
+      log.info("paper T-1 roll-or-close pushed for {} position(s)", sent);
+    }
+  }
+
+  /** 15:35 IST expiry settlement (post-close on expiry dates). */
+  @Scheduled(cron = "0 35 15 * * MON-FRI", zone = "Asia/Kolkata")
+  public void expirySettlement() {
+    int settled = expiry.settleExpiries();
+    if (settled > 0) {
+      log.info("paper expiry settlement closed {} derivative position(s)", settled);
+    }
   }
 
   /** 15:45 IST intraday mark-to-close. */

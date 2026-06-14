@@ -127,7 +127,7 @@ public class JobsService {
     }
 
     Job job =
-        repository.insertQueued(JobKind.BACKTEST, null, v.strategyId(), request, correlationId);
+        repository.insertQueued(JobKind.BACKTEST, null, v.versionId(), request, correlationId);
     dispatcher.dispatchBacktest(job.id());
     progress.refreshSummary();
     return job;

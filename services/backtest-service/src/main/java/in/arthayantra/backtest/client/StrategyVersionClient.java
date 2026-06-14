@@ -30,8 +30,8 @@ public class StrategyVersionClient {
   private final Cache<String, ResolvedVersion> cache =
       Caffeine.newBuilder().maximumSize(500).expireAfterAccess(Duration.ofHours(1)).build();
 
-  /** The pinned version: strategy id, semver, immutable checksum and the full config. */
-  public record ResolvedVersion(UUID strategyId, String version, String checksum, JsonNode config) {}
+  /** The pinned version: strategy id, version UUID, semver, immutable checksum and the full config. */
+  public record ResolvedVersion(UUID strategyId, UUID versionId, String version, String checksum, JsonNode config) {}
 
   /** Builds the client against the strategy-signal base URL. */
   public StrategyVersionClient(@Value("${artha.strategy.base-url}") String baseUrl) {
@@ -57,8 +57,11 @@ public class StrategyVersionClient {
       if (body == null) {
         throw new NotFoundException(ErrorCodes.NOT_FOUND_RESOURCE, "empty strategy response");
       }
+      String rawVersionId = body.path("versionId").asText(null);
+      UUID versionId = rawVersionId != null ? UUID.fromString(rawVersionId) : null;
       return new ResolvedVersion(
           strategyId,
+          versionId,
           body.path("version").asText(),
           body.path("checksum").asText(),
           body.path("config"));

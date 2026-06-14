@@ -51,7 +51,7 @@ class StressGuardIntegrationTest extends BacktestIntegrationTestBase {
     this.currentStrategyId = strategyId;
     when(versions.resolve(any(), any()))
         .thenReturn(
-            new ResolvedVersion(strategyId, "1.0.0", "checksum-stress", objectMapper.createObjectNode()));
+            new ResolvedVersion(strategyId, null, "1.0.0", "checksum-stress", objectMapper.createObjectNode()));
   }
 
   @Test

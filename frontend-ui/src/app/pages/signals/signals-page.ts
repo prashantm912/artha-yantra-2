@@ -99,6 +99,7 @@ import { ReasoningBreakdownPanel } from './reasoning-breakdown-panel';
           dataKey="id"
           [loading]="store.loading()"
           (onRowSelect)="onRowSelect($event)"
+          [pt]="{ tableContainer: { tabindex: '0' } }"
         >
           <ng-template #header>
             <tr>

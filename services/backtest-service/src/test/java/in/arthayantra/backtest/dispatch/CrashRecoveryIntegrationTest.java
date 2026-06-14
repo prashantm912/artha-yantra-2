@@ -45,7 +45,7 @@ class CrashRecoveryIntegrationTest extends BacktestIntegrationTestBase {
     // an empty config routes the orphan job through the progress stub (the spine path)
     when(versions.resolve(any(), any()))
         .thenReturn(
-            new ResolvedVersion(UUID.randomUUID(), "1.0.0", "chk", objectMapper.createObjectNode()));
+            new ResolvedVersion(UUID.randomUUID(), null, "1.0.0", "chk", objectMapper.createObjectNode()));
   }
 
   @Test

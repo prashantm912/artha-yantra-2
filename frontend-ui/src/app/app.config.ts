@@ -40,8 +40,11 @@ export const appConfig: ApplicationConfig = {
       theme: {
         preset: AyAura,
         options: {
-          // dark default; SessionStore toggles .ay-light on <html> (C-2.23)
-          darkModeSelector: ':root:not(.ay-light)',
+          // dark default; SessionStore toggles .ay-dark / .ay-light on <html> (C-2.23).
+          // Use a plain class selector — a `:root`-anchored selector (e.g. `:root:not(.ay-light)`)
+          // collides with @primeuix's own `:root, :host` colour-scheme wrapper and emits a dead
+          // `& :root, & :host` rule, leaving every PrimeNG component on the LIGHT scheme.
+          darkModeSelector: '.ay-dark',
         },
       },
     }),

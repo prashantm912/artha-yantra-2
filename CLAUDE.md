@@ -44,7 +44,11 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
   boot) — derive a recent covered window, never hardcode dates; every windowed run's
   regime pre-flight needs ~272 daily benchmark sessions, so backfill `NIFTY 50` 1d
   via cache-first GET `/api/v1/market/candles` first. Results/trades/folds/montecarlo
-  are keyed by the **run id** (the job's `resultRef`), not the jobId.
+  are keyed by the **run id** (the job's `resultRef`), not the jobId. Submission + the
+  worker now **auto-warm** the primary 1m + benchmark (+ contexts) via market-data's
+  cache-first GET before the pre-flight, so a fresh window no longer 422s — but
+  `libs/market-calendar` covers only the CURRENT year, so a window outside it (2024/2025)
+  500s with "NSE holiday calendar covers years [...]".
 - **Candle sources split by interval:** `CandleReader.read()` serves the `candles_<iv>`
   caggs (5m/15m/1h/1d/1w), **sparse on a fresh boot**; native daily lives in `candles`@1d
   (dense — `readDailyWithWarmup`). The two diverge for 1d (chart overlays hit this).
@@ -52,6 +56,11 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
   E2E_OWNER_PASSWORD=<your .env owner pw> npx playwright test` — global-setup reuses a
   healthy stack and won't overwrite an existing `.env`; the helper password defaults to
   `e2e-owner-password`, so override it to match your hash.
+- **Drive the gateway API from PowerShell** (live/mock verification): `Invoke-WebRequest
+  -UseBasicParsing` (PS5.1's IE engine prompts otherwise); POST `/api/v1/auth/login`
+  `{"password":...}`, then a GET to seed the `XSRF-TOKEN` cookie, echoed as the
+  `X-XSRF-TOKEN` header on mutating calls. In-container SQL: DB is `artha`/`artha_mock`
+  (not `arthayantra`).
 
 ## Frontend (Angular 21 zoneless + PrimeNG 21)
 - **Zoneless (D1) breaks several libs** — verify in a prod build, not just dev:
@@ -81,6 +90,12 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
   it. Project-scoped compose only — **never `docker kill`**.
 - Mock vs live is `SPRING_PROFILES_ACTIVE` in `.env`, orthogonal to compose profiles;
   mock needs zero secrets. PHC password hashes in `.env` need every `$` escaped `$$`.
+- **Mock and live use SEPARATE databases + Redis logical DBs** — live → `artha`/db0,
+  mock → `artha_mock`/db1 — derived from the profile by `ay.ps1` (exports
+  `ARTHA_DB_NAME`/`ARTHA_REDIS_DB` into compose env); the `db-create` one-shot makes both,
+  flyway-init migrates only the active `${ARTHA_DB_NAME}`. ALWAYS switch profiles via `ay`
+  (raw compose leaves the vars unset → mock writes to `artha`); `ay reset-db` wipes BOTH
+  (one shared volume).
 - **Image build context differs per service** — `market-data-service` and
   `optimizer-service` Dockerfiles COPY repo-root paths (`deploy/dev-certs/`,
   `services/*/target/`) so they build with **repo-root context + `-f <dockerfile>`**

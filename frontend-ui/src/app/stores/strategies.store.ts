@@ -9,6 +9,8 @@ export interface StrategySummary {
   name: string;
   currentVersion?: string;
   publishedVersion?: string | null;
+  currentVersionId?: string | null;
+  publishedVersionId?: string | null;
   status: string;
   tags: string[];
   author?: string;
@@ -16,6 +18,20 @@ export interface StrategySummary {
   updatedAt?: string;
   notificationsEnabled?: boolean;
   notificationChannel?: string | null;
+}
+
+/**
+ * Latest-backtest summary for a strategy version (`GET /api/v1/backtests/summary`). `equity` is a
+ * downsampled value series (decimal strings) for the list sparkline; metrics are decimal strings.
+ */
+export interface BacktestSummary {
+  strategyVersionId: string;
+  runId: string;
+  sharpe: string | null;
+  totalReturn: string | null;
+  maxDrawdown: string | null;
+  completedAt?: string;
+  equity: string[];
 }
 
 /** Full strategy detail (`GET /api/v1/strategies/{id}`) — `configYaml` is the Monaco buffer source. */
@@ -83,6 +99,7 @@ export interface UniverseInfo {
 
 interface StrategiesState {
   list: StrategySummary[];
+  summaries: Record<string, BacktestSummary>;
   loading: boolean;
   q: string;
   statusFilter: string | null;
@@ -109,6 +126,7 @@ export const StrategiesStore = signalStore(
   { providedIn: 'root' },
   withState<StrategiesState>({
     list: [],
+    summaries: {},
     loading: false,
     q: '',
     statusFilter: null,
@@ -136,8 +154,43 @@ export const StrategiesStore = signalStore(
         params = params.set('status', store.statusFilter()!);
       }
       http.get<{ items: StrategySummary[] }>('/api/v1/strategies', { params }).subscribe({
-        next: (page) => patchState(store, { list: page.items ?? [], loading: false }),
+        next: (page) => {
+          patchState(store, { list: page.items ?? [], loading: false });
+          this.loadSummaries();
+        },
         error: () => patchState(store, { loading: false }),
+      });
+    },
+
+    /**
+     * Enrich the list with each strategy's last-backtest summary (Stage F follow-on). Joins the
+     * backtest schema client-side: collect the published-or-current version UUID per row, ask
+     * backtest-service for the latest run per version, and key the result map by version id. Best
+     * effort — a failure leaves the list rendering without the summary column.
+     */
+    loadSummaries(): void {
+      const versionIds = [
+        ...new Set(
+          store
+            .list()
+            .map((s) => s.publishedVersionId ?? s.currentVersionId)
+            .filter((v): v is string => !!v),
+        ),
+      ];
+      if (versionIds.length === 0) {
+        patchState(store, { summaries: {} });
+        return;
+      }
+      const params = new HttpParams().set('strategyVersionIds', versionIds.join(','));
+      http.get<{ items: BacktestSummary[] }>('/api/v1/backtests/summary', { params }).subscribe({
+        next: (page) => {
+          const map: Record<string, BacktestSummary> = {};
+          for (const item of page.items ?? []) {
+            map[item.strategyVersionId] = item;
+          }
+          patchState(store, { summaries: map });
+        },
+        error: () => patchState(store, { summaries: {} }),
       });
     },
 

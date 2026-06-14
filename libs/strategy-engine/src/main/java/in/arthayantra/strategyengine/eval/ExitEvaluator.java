@@ -34,7 +34,48 @@ public final class ExitEvaluator {
   /** A triggered exit. */
   public record ExitDecision(String type, String reason) {}
 
+  /** The entry-time protective levels (absolute prices); either may be {@code null}. */
+  public record EntryLevels(BigDecimal stopLoss, BigDecimal takeProfit) {}
+
   private ExitEvaluator() {}
+
+  /**
+   * The protective levels a position would carry from entry: the FIRST stop_loss rule's level and
+   * the FIRST take_profit rule's level, as absolute prices off {@code position.entryPrice()}
+   * (direction-aware, same arithmetic as {@link #level}). Either is {@code null} when the strategy
+   * declares no such rule or its distance is unresolvable. Read-only and deterministic — uses the
+   * ATR/r-multiple-at-entry distances exactly like the exit evaluation, so a persisted level equals
+   * the price the exit check would fire on. Pure reporting: it never affects emitted signals.
+   */
+  public static EntryLevels entryLevels(
+      StrategyDefinition definition, IndicatorBank bank, Position position) {
+    EngineSeries series = bank.primarySeries();
+    return new EntryLevels(
+        levelPrice(definition, series, position, "stop_loss", true),
+        levelPrice(definition, series, position, "take_profit", false));
+  }
+
+  private static BigDecimal levelPrice(
+      StrategyDefinition definition,
+      EngineSeries series,
+      Position position,
+      String type,
+      boolean isStop) {
+    for (StrategyDefinition.ExitRuleSpec rule : definition.exitRules()) {
+      if (!rule.type().equals(type)) {
+        continue;
+      }
+      BigDecimal distance = levelDistance(definition, series, position, rule.params());
+      if (distance == null) {
+        return null;
+      }
+      boolean subtract = (position.direction() == Direction.LONG) == isStop;
+      return subtract
+          ? position.entryPrice().subtract(distance)
+          : position.entryPrice().add(distance);
+    }
+    return null;
+  }
 
   /**
    * A9 [FP-5] intrabar exits: when {@code exit_intrabar} is on and the primary timeframe is

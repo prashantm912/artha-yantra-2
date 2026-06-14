@@ -274,6 +274,44 @@ class ExitEvaluatorTest {
   }
 
   @Test
+  void entryLevelsComputeProtectivePricesForLongAndShort() {
+    StrategyDefinition def =
+        definitionWith(
+            """
+              - { type: stop_loss,   params: { basis: premium_pct, value: 10 } }
+              - { type: take_profit, params: { basis: premium_pct, value: 20 } }
+            """);
+    EngineSeries s = series(10000, 10000, 10000);
+    IndicatorBank b = bank(def, s);
+
+    ExitEvaluator.EntryLevels lng =
+        ExitEvaluator.entryLevels(
+            def, b, new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, new BigDecimal("100.00"), 1));
+    assertThat(lng.stopLoss()).isEqualByComparingTo("90.00"); // 100 - 10%
+    assertThat(lng.takeProfit()).isEqualByComparingTo("120.00"); // 100 + 20%
+
+    ExitEvaluator.EntryLevels sht =
+        ExitEvaluator.entryLevels(
+            def, b, new ExitEvaluator.Position(ExitEvaluator.Direction.SHORT, new BigDecimal("100.00"), 1));
+    assertThat(sht.stopLoss()).isEqualByComparingTo("110.00"); // mirrored for a short
+    assertThat(sht.takeProfit()).isEqualByComparingTo("80.00");
+  }
+
+  @Test
+  void entryLevelsNullWhenStrategyDeclaresNoSuchRule() {
+    StrategyDefinition def =
+        definitionWith("  - { type: time_stop, params: { max_bars: 3 } }\n");
+    EngineSeries s = series(10000, 10000, 10000);
+    ExitEvaluator.EntryLevels levels =
+        ExitEvaluator.entryLevels(
+            def,
+            bank(def, s),
+            new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, new BigDecimal("100.00"), 1));
+    assertThat(levels.stopLoss()).isNull();
+    assertThat(levels.takeProfit()).isNull();
+  }
+
+  @Test
   void positionSizerRoundsLotsAndCapsKelly() {
     var inputs =
         new PositionSizer.Inputs(

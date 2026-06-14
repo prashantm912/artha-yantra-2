@@ -118,6 +118,71 @@ class BacktestReplayIntegrationTest extends BacktestIntegrationTestBase {
   }
 
   @Test
+  void tradesCarrySymbolAndLevelsAndHonorFiltersAndSummary() throws Exception {
+    Job job =
+        jobs.insertQueued(
+            JobKind.BACKTEST,
+            null,
+            STRATEGY_ID,
+            objectMapper
+                .createObjectNode()
+                .put("strategyId", STRATEGY_ID.toString())
+                .put("from", "2026-01-05")
+                .put("to", "2026-01-10"),
+            "corr-symbol");
+    runner.run(job, pct -> {}, () -> false);
+    UUID runId = runs.findRunIdByJobId(job.id()).orElseThrow();
+
+    // every trade row denormalizes the run's instrument (and exposes the SL/TP level keys)
+    mockMvc
+        .perform(get("/api/v1/backtests/" + runId + "/trades"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items[0].tradingsymbol").value("NIFTY 50"))
+        .andExpect(jsonPath("$.items[0].exchange").value("NSE"))
+        .andExpect(jsonPath("$.items[0].seq").exists());
+
+    // symbol filter: the run's symbol returns rows, a foreign symbol returns none
+    mockMvc
+        .perform(get("/api/v1/backtests/" + runId + "/trades").param("symbol", "NIFTY 50"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items[0].tradingsymbol").value("NIFTY 50"));
+    mockMvc
+        .perform(get("/api/v1/backtests/" + runId + "/trades").param("symbol", "NOSUCH"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items").isEmpty());
+
+    // from/to entry-window filter: a window past every trade returns none
+    mockMvc
+        .perform(
+            get("/api/v1/backtests/" + runId + "/trades").param("from", "2030-01-01T00:00:00Z"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items").isEmpty());
+
+    // the latest-backtest summary join surface: one item for the run's strategy version
+    String summary =
+        mockMvc
+            .perform(
+                get("/api/v1/backtests/summary").param("strategyVersionIds", STRATEGY_ID.toString()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.items[0].strategyVersionId").value(STRATEGY_ID.toString()))
+            .andExpect(jsonPath("$.items[0].sharpe").exists())
+            .andExpect(jsonPath("$.items[0].equity").isArray())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+    assertThat(objectMapper.readTree(summary).path("items").get(0).path("runId").asText())
+        .isEqualTo(runId.toString());
+
+    // an unknown version id yields an empty summary list (no run)
+    mockMvc
+        .perform(
+            get("/api/v1/backtests/summary")
+                .param("strategyVersionIds", UUID.randomUUID().toString()))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items").isEmpty());
+  }
+
+  @Test
   void everyRunCarriesANonNullPremiumSource() throws Exception {
     Job job =
         jobs.insertQueued(

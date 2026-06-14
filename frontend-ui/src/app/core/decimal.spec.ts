@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { compareDecimal, formatDecimal, isNegative, subtractDecimal } from './decimal';
+import {
+  compareDecimal,
+  formatDecimal,
+  isNegative,
+  multiplyByInt,
+  subtractDecimal,
+} from './decimal';
 
 describe('decimal utility (exact strings, never parseFloat)', () => {
   it('compares beyond double precision', () => {
@@ -29,5 +35,12 @@ describe('decimal utility (exact strings, never parseFloat)', () => {
     expect(subtractDecimal('18050.50', '18100.00')).toBe('-49.5');
     expect(subtractDecimal('0.10', '0.10')).toBe('0');
     expect(subtractDecimal('21750.05000000001', '21750.05')).toBe('0.00000000001');
+  });
+
+  it('multiplies a decimal by an integer exactly', () => {
+    expect(multiplyByInt('1.25', 4)).toBe('5');
+    expect(multiplyByInt('99.95', 50)).toBe('4997.5');
+    expect(multiplyByInt('-0.05', 50)).toBe('-2.5');
+    expect(multiplyByInt('100.00', 0)).toBe('0');
   });
 });

@@ -16,6 +16,12 @@ public interface FillSimulator {
   Fill simulate(FillRequest request);
 
   /**
+   * The implementation identity (e.g. {@code ltp_slippage/v1}) — stamped onto a paper fill's audit
+   * trail so a historical fill stays attributable to the exact model that produced it.
+   */
+  String id();
+
+  /**
    * Slippage spec: at most one of {@code ticks} / {@code bps} (the schema enforces the XOR; this is
    * defended again here). Both null ⇒ the per-class fallback applies.
    */

@@ -2,11 +2,13 @@ package in.arthayantra.strategysignal.signals;
 
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.error.NotFoundException;
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -25,10 +27,12 @@ public class SignalsController {
   public record TakenRequest(String fillPrice, Integer qty, String note) {}
 
   private final SignalRepository repository;
+  private final ApplicationEventPublisher events;
 
-  /** Wires the repository. */
-  public SignalsController(SignalRepository repository) {
+  /** Wires the repository + the domain-event publisher (paper listens for TAKEN). */
+  public SignalsController(SignalRepository repository, ApplicationEventPublisher events) {
     this.repository = repository;
+    this.events = events;
   }
 
   /** Paged/filtered history. */
@@ -72,12 +76,16 @@ public class SignalsController {
     return dto(row);
   }
 
-  /** Owner executed manually at the broker. */
+  /** Owner executed manually at the broker; optionally opens a paper position (when a qty is given). */
   @PostMapping("/{id}/taken")
   public Map<String, Object> taken(
       @PathVariable long id, @RequestBody(required = false) TakenRequest request) {
     requireExists(id);
     repository.transition(id, "TAKEN");
+    Integer qty = request == null ? null : request.qty();
+    BigDecimal fillPrice =
+        request == null || request.fillPrice() == null ? null : new BigDecimal(request.fillPrice());
+    events.publishEvent(new SignalTaken(id, qty, fillPrice));
     return detail(id);
   }
 

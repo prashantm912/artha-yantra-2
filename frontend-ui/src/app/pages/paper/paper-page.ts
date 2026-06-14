@@ -14,8 +14,10 @@ import { TableModule } from 'primeng/table';
 import { TagModule } from 'primeng/tag';
 import { formatDecimal, isNegative, multiplyByInt, subtractDecimal } from '../../core/decimal';
 import { EquityCurveComponent, type CurvePoint } from '../../shared/equity-curve';
+import { JournalDrawer } from '../../shared/journal-drawer';
 import { MarketStore } from '../../stores/market.store';
 import { PaperStore } from '../../stores/paper.store';
+import type { JournalLink } from '../../stores/journal.store';
 
 /**
  * /paper (F-43): the paper-trading ledger — open positions with LIVE mark-to-market (recomputed
@@ -32,6 +34,7 @@ import { PaperStore } from '../../stores/paper.store';
     ButtonModule,
     InputTextModule,
     EquityCurveComponent,
+    JournalDrawer,
   ],
   styles: `
     .summary {
@@ -265,6 +268,13 @@ import { PaperStore } from '../../stores/paper.store';
               </td>
               <td>
                 <p-button size="small" [text]="true" label="Close" (onClick)="store.close(p.id)" />
+                <p-button
+                  size="small"
+                  icon="pi pi-book"
+                  [text]="true"
+                  ariaLabel="Journal this position"
+                  (onClick)="journal({ paperPositionId: p.id })"
+                />
               </td>
             </tr>
           </ng-template>
@@ -285,6 +295,7 @@ import { PaperStore } from '../../stores/paper.store';
               <th class="num">Avg</th>
               <th class="num">Realized</th>
               <th>Closed</th>
+              <th></th>
             </tr>
           </ng-template>
           <ng-template #body let-t>
@@ -297,11 +308,20 @@ import { PaperStore } from '../../stores/paper.store';
                 {{ money(t.realizedPnl) }}
               </td>
               <td>{{ t.closedAt?.slice(0, 19) }}</td>
+              <td>
+                <p-button
+                  size="small"
+                  icon="pi pi-book"
+                  [text]="true"
+                  ariaLabel="Journal this trade"
+                  (onClick)="journal({ paperPositionId: t.id })"
+                />
+              </td>
             </tr>
           </ng-template>
           <ng-template #emptymessage>
             <tr>
-              <td colspan="6">No closed trades yet.</td>
+              <td colspan="7">No closed trades yet.</td>
             </tr>
           </ng-template>
         </p-table>
@@ -312,12 +332,22 @@ import { PaperStore } from '../../stores/paper.store';
         <div class="curve"><ay-equity-curve [equity]="curve()" /></div>
       </section>
     </div>
+    <ay-journal-drawer [(open)]="journalOpen" [link]="journalLink()" />
   `,
 })
 export class PaperPage {
   protected readonly store = inject(PaperStore);
   private readonly market = inject(MarketStore);
   private tracked = new Set<string>();
+
+  protected readonly journalOpen = signal(false);
+  protected readonly journalLink = signal<JournalLink>({});
+
+  /** Opens the journal drawer prefilled with the paper position/trade link (F-44A). */
+  protected journal(link: JournalLink): void {
+    this.journalLink.set(link);
+    this.journalOpen.set(true);
+  }
 
   protected readonly capitalDraft = signal('');
   protected readonly maxOpenDraft = signal('');

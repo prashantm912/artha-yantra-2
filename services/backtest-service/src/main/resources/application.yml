@@ -32,6 +32,11 @@ artha:
     # D14: immutable strategy-version reads over REST (Caffeine-cached); the
     # backtest engine holds NO strategy-schema grant.
     base-url: ${ARTHA_STRATEGY_BASE_URL:http://strategy-signal-service:8082}
+  marketdata:
+    # Cache-first candle warm before the §D.6 pre-flight + replay: backtest never
+    # fetches on demand, so a fresh/uncovered window is warmed via market-data's GET
+    # /api/v1/market/candles (which backfills the shared store CandleReader reads).
+    base-url: ${ARTHA_MARKETDATA_BASE_URL:http://market-data-service:8081}
   backtest:
     # 0 => max(1, availableProcessors - 2) platform workers (D12); override for tests.
     workers: ${ARTHA_BACKTEST_WORKERS:0}

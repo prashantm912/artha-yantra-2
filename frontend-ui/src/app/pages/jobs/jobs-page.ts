@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
 import { ProgressBarModule } from 'primeng/progressbar';
 import { SelectModule } from 'primeng/select';
@@ -86,6 +87,16 @@ import { JobsStore, type JobStatus } from '../../stores/jobs.store';
                 [routerLink]="['/optimizations', job.jobId]"
               />
             }
+            @if (job.kind === 'BACKTEST' && job.status === 'completed') {
+              <p-button
+                size="small"
+                [text]="true"
+                icon="pi pi-eye"
+                label="Results"
+                [ariaLabel]="'View results ' + job.jobId"
+                (onClick)="viewResults(job.jobId)"
+              />
+            }
             <p-button
               size="small"
               [text]="true"
@@ -108,10 +119,26 @@ import { JobsStore, type JobStatus } from '../../stores/jobs.store';
 })
 export class JobsPage {
   protected readonly store = inject(JobsStore);
+  private readonly http = inject(HttpClient);
+  private readonly router = inject(Router);
   protected readonly statusOptions = ['queued', 'running', 'completed', 'failed', 'cancelled'];
 
   protected cancellable(status: JobStatus): boolean {
     return status === 'queued' || status === 'running';
+  }
+
+  /**
+   * Open a completed backtest's results (D12). The jobs LIST payload omits {@code resultRef}, so it's
+   * resolved lazily from the job detail on click, then we route to the run-keyed results page.
+   */
+  protected viewResults(jobId: string): void {
+    this.http.get<{ resultRef?: string | null }>(`/api/v1/backtests/jobs/${jobId}`).subscribe({
+      next: (job) => {
+        if (job.resultRef) {
+          void this.router.navigate(['/backtests', job.resultRef]);
+        }
+      },
+    });
   }
 
   protected severity(status: JobStatus): 'info' | 'warn' | 'success' | 'danger' | 'secondary' {

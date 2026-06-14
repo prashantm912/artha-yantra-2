@@ -20,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.IntConsumer;
 
 /**
  * The LIVE half of the parity pair (C-2.19): 1m bars arrive ONE AT A TIME — exactly how the live
@@ -47,6 +48,18 @@ public final class TickwiseGoldenRunner {
   /** Feeds 1m candles tick-wise; context series advance in lock-step by timestamp. */
   public List<GoldenSignalsJson.SignalEvent> run(
       List<EngineCandle> primaryOneMinute, Map<SeriesKey, List<EngineCandle>> contextCandles) {
+    return run(primaryOneMinute, contextCandles, null);
+  }
+
+  /**
+   * As {@link #run(List, Map)} but reports the 0-based primary-bar index to {@code onBar} each tick
+   * (D17b progress; nullable). A pure side-channel — it never touches the emitted events, so the
+   * golden vectors stay byte-identical (the no-arg overload passes {@code null}).
+   */
+  public List<GoldenSignalsJson.SignalEvent> run(
+      List<EngineCandle> primaryOneMinute,
+      Map<SeriesKey, List<EngineCandle>> contextCandles,
+      IntConsumer onBar) {
     boolean btst = "btst".equals(definition.session().style());
     boolean coarsePrimary = !definition.primaryTimeframe().equals("1m") && !btst;
     EngineSeries live1m = new EngineSeries(new SeriesKey(exchange, tradingsymbol, "1m"));
@@ -100,7 +113,12 @@ public final class TickwiseGoldenRunner {
     Duration primaryDuration =
         coarsePrimary ? intervalDuration(definition.primaryTimeframe()) : Duration.ofMinutes(1);
 
+    int barIndex = 0;
     for (EngineCandle bar : primaryOneMinute) {
+      if (onBar != null) {
+        onBar.accept(barIndex);
+      }
+      barIndex++;
       advanceContexts(contexts, contextCursor, contextCandles, bar);
 
       LocalDate barDay = EngineSeries.sessionDate(bar);

@@ -76,20 +76,51 @@ services:
     restart: unless-stopped
     logging: *default-logging
 
+  # ---- one-shot database creator (profile isolation) ----------------------
+  # mock and live each get their OWN database in the one Postgres instance
+  # (live → artha, mock → artha_mock), so mock's synthetic candles/snapshots
+  # can never pollute live data. Idempotently creates BOTH so either profile
+  # boots cleanly; flyway-init then migrates only the active ${ARTHA_DB_NAME}.
+  db-create:
+    image: postgres:17-alpine
+    container_name: ay-db-create
+    secrets: [postgres_password]
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        export PGPASSWORD="$$(cat /run/secrets/postgres_password)"
+        for db in artha artha_mock; do
+          psql -h timescaledb -U artha -d postgres -tAc \
+            "SELECT 1 FROM pg_database WHERE datname='$$db'" | grep -q 1 \
+            || createdb -h timescaledb -U artha "$$db"
+          echo "[db-create] ensured database $$db"
+        done
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    mem_limit: 64m
+    restart: "no"
+    logging: *default-logging
+
   # ---- one-shot DB init (A.8 / D17, CD-1, CD-7) ---------------------------
-  # Runs the four Flyway lineages (admin first) from an empty volume and
-  # exits 0; app services gate on service_completed_successfully. Every
+  # Runs the four Flyway lineages (admin first) into the active ${ARTHA_DB_NAME}
+  # and exits 0; app services gate on service_completed_successfully. Every
   # service runs ddl-auto=none — Flyway owns ALL schema.
   flyway-init:
     image: flyway/flyway:11-alpine
     container_name: ay-flyway-init
     secrets: [postgres_password]
+    environment:
+      ARTHA_DB_NAME: ${ARTHA_DB_NAME:-artha}
     volumes:
       - ./flyway:/flyway/sql:ro
     entrypoint: ["/bin/sh", "/flyway/sql/flyway-run.sh"]
     depends_on:
       timescaledb:
         condition: service_healthy
+      db-create:
+        condition: service_completed_successfully
     mem_limit: 256m
     restart: "no"
     logging: *default-logging
@@ -107,7 +138,7 @@ services:
       TZ: Asia/Kolkata
       PGHOST: timescaledb
       PGUSER: artha
-      PGDATABASE: artha
+      PGDATABASE: ${ARTHA_DB_NAME:-artha}
       ARTHA_NTFY_TOPIC: ${ARTHA_NTFY_TOPIC:-}
       ARTHA_NTFY_URL: ${ARTHA_NTFY_URL:-https://ntfy.sh}
     secrets: [postgres_password]
@@ -142,6 +173,8 @@ services:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-mock}
       ARTHA_OWNER_PASSWORD_HASH: ${ARTHA_OWNER_PASSWORD_HASH:-}
       GATEWAY_WS_FLUSH_HZ: ${GATEWAY_WS_FLUSH_HZ:-20}
+      # Profile isolation: separate Redis logical DB per profile (live 0 / mock 1)
+      SPRING_DATA_REDIS_DATABASE: ${ARTHA_REDIS_DB:-0}
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
@@ -171,6 +204,9 @@ services:
       MOCK_SCENARIO: ${MOCK_SCENARIO:-trend-up}
       # Stage B: marketdata schema access — password via secret file, never env
       ARTHA_DB_PASSWORD_FILE: /run/secrets/postgres_password
+      # Profile isolation: per-profile database + Redis logical DB (live → artha/0, mock → artha_mock/1)
+      SPRING_DATASOURCE_URL: jdbc:postgresql://timescaledb:5432/${ARTHA_DB_NAME:-artha}?currentSchema=marketdata
+      SPRING_DATA_REDIS_DATABASE: ${ARTHA_REDIS_DB:-0}
     # kite_* + master key mount into THIS service only (B-2: the token and the
     # credentials never reach any other container)
     secrets: [postgres_password, kite_api_key, kite_api_secret, artha_master_key]
@@ -217,6 +253,9 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-mock}
       ARTHA_DB_PASSWORD_FILE: /run/secrets/postgres_password
+      # Profile isolation: per-profile database + Redis logical DB (live → artha/0, mock → artha_mock/1)
+      SPRING_DATASOURCE_URL: jdbc:postgresql://timescaledb:5432/${ARTHA_DB_NAME:-artha}?currentSchema=strategy
+      SPRING_DATA_REDIS_DATABASE: ${ARTHA_REDIS_DB:-0}
       # Phase 41 notifier (Q6): the signal-push ntfy endpoint + its OWN topic (distinct from the
       # ops topic). Under mock this points at the WireMock stub; live mode overrides both.
       ARTHA_NOTIFIER_NTFY_URL: ${ARTHA_NOTIFIER_NTFY_URL:-http://wiremock:8080}
@@ -254,6 +293,9 @@ services:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-mock}
       ARTHA_DB_PASSWORD_FILE: /run/secrets/postgres_password
       ARTHA_MARKETDATA_BASE_URL: http://market-data-service:8081
+      # Profile isolation: per-profile database + Redis logical DB (live → artha/0, mock → artha_mock/1)
+      SPRING_DATASOURCE_URL: jdbc:postgresql://timescaledb:5432/${ARTHA_DB_NAME:-artha}?currentSchema=backtest
+      SPRING_DATA_REDIS_DATABASE: ${ARTHA_REDIS_DB:-0}
     secrets: [postgres_password]
     depends_on:
       flyway-init:
@@ -286,7 +328,9 @@ services:
     environment:
       ARTHA_DB_PASSWORD_FILE: /run/secrets/postgres_password
       DB_HOST: timescaledb
-      REDIS_URL: redis://redis:6379/0
+      # Profile isolation: per-profile database + Redis logical DB (live → artha/0, mock → artha_mock/1)
+      DB_NAME: ${ARTHA_DB_NAME:-artha}
+      REDIS_URL: redis://redis:6379/${ARTHA_REDIS_DB:-0}
       STRATEGY_SIGNAL_BASE: http://strategy-signal-service:8082
       BACKTEST_BASE: http://backtest-service:8083
     secrets: [postgres_password]

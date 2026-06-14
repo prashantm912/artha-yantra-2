@@ -49,11 +49,15 @@ class SweepService:
         method = request.get("method", "tpe")
         if method not in _METHODS:
             raise ApiError(400, "VALIDATION_FAILED", f"unsupported method: {method!r}")
-        for field in ("strategyId", "strategyVersion", "from", "to"):
+        for field in ("strategyId", "from", "to"):
             if not request.get(field):
                 raise ApiError(400, "VALIDATION_FAILED", f"missing required field: {field}")
 
-        config = self._strategy.version_config(request["strategyId"], request["strategyVersion"])
+        # strategyVersion is OPTIONAL — when omitted we pin the strategy's current resolution
+        # (latest published, else latest draft), matching /backtests/run (§D.5).
+        version, config = self._strategy.resolve(
+            request["strategyId"], request.get("strategyVersion")
+        )
         parameters = resolve_parameters(config, request.get("parameters"))
         if not parameters:
             raise ApiError(422, "VALIDATION_FAILED", "no tunable parameters in the optimize block")
@@ -68,7 +72,7 @@ class SweepService:
 
         request_base = {
             "strategyId": request["strategyId"],
-            "strategyVersion": request["strategyVersion"],
+            "strategyVersion": version,
             "from": request["from"],
             "to": request["to"],
         }

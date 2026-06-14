@@ -61,10 +61,18 @@ def test_unsupported_method_is_400():
 
 
 def test_missing_field_is_400():
-    body = {k: v for k, v in RUN_BODY.items() if k != "strategyVersion"}
+    body = {k: v for k, v in RUN_BODY.items() if k != "from"}
     resp = _client(GOOD_CONFIG).post("/api/v1/optimizations/run", json=body)
     assert resp.status_code == 400
     assert resp.json()["code"] == "VALIDATION_FAILED"
+
+
+def test_strategy_version_optional_resolves_current():
+    # strategyVersion omitted -> resolved to the strategy's current version (§D.5), not a 400.
+    body = {k: v for k, v in RUN_BODY.items() if k != "strategyVersion"}
+    resp = _client(GOOD_CONFIG).post("/api/v1/optimizations/run", json=body)
+    assert resp.status_code == 202
+    assert resp.json()["jobId"].startswith("sweep-")
 
 
 def test_no_tunable_parameters_is_422():

@@ -59,7 +59,7 @@ import { ChartIndicatorsService, type IndicatorMeta } from './chart-indicators.s
       <p-autocomplete
         [suggestions]="market.searchResults()"
         (completeMethod)="search($event)"
-        field="tradingsymbol"
+        optionLabel="tradingsymbol"
         [placeholder]="state.symbol()"
         [(ngModel)]="picked"
         (onSelect)="pick()"

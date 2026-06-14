@@ -33,6 +33,13 @@ artha:
     base-url: ${ARTHA_MARKETDATA_BASE_URL:http://market-data-service:8081}
   signals:
     engine-enabled: ${ARTHA_SIGNAL_ENGINE_ENABLED:true}
+  paper:
+    # A12 per-class capital-usage margin approximations (no Kite margin API).
+    # Equities use full notional; long options the premium; futures & short
+    # options a margin-pct-of-notional approximation (real SPAN+exposure varies).
+    margin-pct:
+      future: ${ARTHA_PAPER_MARGIN_FUTURE:0.15}
+      short-option: ${ARTHA_PAPER_MARGIN_SHORT_OPTION:0.12}
 
 management:
   endpoints:

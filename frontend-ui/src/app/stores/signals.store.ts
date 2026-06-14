@@ -1,6 +1,13 @@
 import { computed, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
+import {
+  patchState,
+  signalStore,
+  withComputed,
+  withHooks,
+  withMethods,
+  withState,
+} from '@ngrx/signals';
 import { ConflationBuffer } from '../core/conflation';
 import { WsClientService } from '../core/ws-client.service';
 
@@ -25,6 +32,7 @@ export interface SignalDto {
   status: 'ACTIVE' | 'EXPIRED' | 'TAKEN' | 'DISMISSED';
   generatedAt: string;
   expiresAt?: string | null;
+  suggestedQty?: string | null;
 }
 
 /** The frozen C-2.6 contract as JSON. */
@@ -93,9 +101,7 @@ export const SignalsStore = signalStore(
     offset: 0,
   }),
   withComputed((store) => ({
-    selected: computed(
-      () => store.items().find((item) => item.id === store.selectedId()) ?? null,
-    ),
+    selected: computed(() => store.items().find((item) => item.id === store.selectedId()) ?? null),
     filtered: computed(() => {
       const status = store.statusFilter();
       const symbol = store.symbolFilter()?.toUpperCase();
@@ -109,9 +115,7 @@ export const SignalsStore = signalStore(
     /** REST snapshot (also the reconnect gap-healer). */
     load(): void {
       patchState(store, { loading: true });
-      let params = new HttpParams()
-        .set('limit', store.limit())
-        .set('offset', store.offset());
+      let params = new HttpParams().set('limit', store.limit()).set('offset', store.offset());
       const status = store.statusFilter();
       if (status) {
         params = params.set('status', status);
@@ -154,9 +158,9 @@ export const SignalsStore = signalStore(
       patchState(store, { symbolFilter: symbol });
     },
 
-    /** Owner actions round-trip then refresh the row. */
-    markTaken(id: number): void {
-      http.post<SignalDto>(`/api/v1/signals/${id}/taken`, {}).subscribe({
+    /** Owner actions round-trip then refresh the row; a qty opens a paper position (A12 prefill). */
+    markTaken(id: number, qty?: number): void {
+      http.post<SignalDto>(`/api/v1/signals/${id}/taken`, qty ? { qty } : {}).subscribe({
         next: (updated) => this.replace(updated),
       });
     },

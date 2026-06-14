@@ -41,6 +41,16 @@ describe('StrategiesStore', () => {
         status: 'draft',
         configYaml: 'schema: strategy-schema/v1\n',
       });
+    // loadDetail also resolves the pinned universe (Phase 44 editor label)
+    http
+      .expectOne((r) => r.url === '/api/v1/strategies/a/universe')
+      .flush({
+        mode: 'explicit',
+        asOf: null,
+        constituentCount: 0,
+        checksum: 'x',
+        survivorshipCaveat: null,
+      });
     expect(store.draft()).toBe('schema: strategy-schema/v1\n');
     expect(store.dirty()).toBe(false);
   });

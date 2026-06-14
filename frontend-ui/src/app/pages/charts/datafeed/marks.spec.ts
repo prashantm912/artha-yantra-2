@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { signalMarks, tradeMarks, type SignalLike, type TradeLike } from './marks';
+import {
+  paperTradeMarks,
+  signalMarks,
+  tradeMarks,
+  type PaperTradeLike,
+  type SignalLike,
+  type TradeLike,
+} from './marks';
 
 const ms = (iso: string): number => Date.parse(iso);
 
@@ -36,6 +43,27 @@ describe('chart marks mapping (E-10.3)', () => {
       ms('2026-02-03T10:00:00+05:30'),
     );
     expect(marks.map((m) => m.id)).toEqual(['t1-exit']); // entry at 09:15 is before the window
+  });
+
+  it('maps a closed paper trade to entry + exit marks (FP-67)', () => {
+    const paper: PaperTradeLike[] = [
+      {
+        id: 9,
+        side: 'BUY',
+        avgEntryPrice: '120.00',
+        realizedPnl: '900.00',
+        openedAt: '2026-02-03T09:16:00+05:30',
+        closedAt: '2026-02-03T09:30:00+05:30',
+      },
+    ];
+    const marks = paperTradeMarks(
+      paper,
+      '1m',
+      ms('2026-02-03T09:00:00+05:30'),
+      ms('2026-02-03T10:00:00+05:30'),
+    );
+    expect(marks.map((m) => m.id)).toEqual(['p9-entry', 'p9-exit']);
+    expect(marks[1].label).toContain('P&L 900.00');
   });
 
   const signals: SignalLike[] = [

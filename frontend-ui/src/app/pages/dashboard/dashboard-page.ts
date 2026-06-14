@@ -6,6 +6,7 @@ import { ActiveSignalsWidget } from './widgets/active-signals-widget';
 import { JobsWidget } from './widgets/jobs-widget';
 import { KiteStatusWidget } from './widgets/kite-status-widget';
 import { WatchlistWidget } from './widgets/watchlist-widget';
+import { PaperPnlWidget } from './widgets/paper-pnl-widget';
 
 /**
  * /dashboard (Phase 35): the at-a-glance widget grid (E-2). 12-col CSS grid, each widget in the
@@ -24,6 +25,7 @@ import { WatchlistWidget } from './widgets/watchlist-widget';
     JobsWidget,
     KiteStatusWidget,
     WatchlistWidget,
+    PaperPnlWidget,
   ],
   styles: `
     .grid {
@@ -48,11 +50,15 @@ import { WatchlistWidget } from './widgets/watchlist-widget';
       grid-column: span 6;
       min-height: 18rem;
     }
+    .paper {
+      grid-column: span 6;
+    }
     @media (max-width: 1439px) {
       .signals,
       .jobs,
       .kite,
-      .watchlist {
+      .watchlist,
+      .paper {
         grid-column: span 6;
       }
     }
@@ -61,7 +67,8 @@ import { WatchlistWidget } from './widgets/watchlist-widget';
       .signals,
       .jobs,
       .kite,
-      .watchlist {
+      .watchlist,
+      .paper {
         grid-column: span 12;
       }
     }
@@ -90,6 +97,12 @@ import { WatchlistWidget } from './widgets/watchlist-widget';
       <div class="kite">
         <ay-widget title="Kite Status" widgetId="kite">
           <ay-kite-status-widget />
+        </ay-widget>
+      </div>
+
+      <div class="paper">
+        <ay-widget title="Paper P&L" widgetId="paper">
+          <ay-paper-pnl-widget />
         </ay-widget>
       </div>
 

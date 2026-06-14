@@ -174,7 +174,7 @@ class RegistryLifecycleIntegrationTest extends StrategySignalIntegrationTestBase
 
   @Test
   @Order(4)
-  void indexConstituentsUniverseSavesButRefusesPublish() {
+  void indexConstituentsUniversePublishesAfterTheGuardLift() {
     String constituents =
         BASE_YAML
             .replace("id: lifecycle-walk", "id: constituents-guard")
@@ -195,13 +195,10 @@ class RegistryLifecycleIntegrationTest extends StrategySignalIntegrationTestBase
         service.create("Constituents Guard", null, null, constituents);
     UUID id = (UUID) created.get("id");
 
-    assertThatThrownBy(() -> service.publish(id, null, null))
-        .isInstanceOfSatisfying(
-            ApiException.class,
-            e -> {
-              assertThat(e.httpStatus()).isEqualTo(422);
-              assertThat(e.code()).isEqualTo(ErrorCodes.STRATEGY_UNIVERSE_UNSUPPORTED);
-            });
+    // Phase 44: the publish guard is LIFTED — index_constituents now publishes (the resolver pins
+    // membership by copy at submission). Previously this threw 422 STRATEGY_UNIVERSE_UNSUPPORTED.
+    service.publish(id, null, null);
+    assertThat(service.detail(id, null).get("status")).isEqualTo("published");
   }
 
   @Test

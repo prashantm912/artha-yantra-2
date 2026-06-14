@@ -28,6 +28,43 @@ export function isNegative(value: string): boolean {
   return normalize(value).sign < 0;
 }
 
+/**
+ * Exact decimal subtraction `a - b` via BigInt scaling — never `parseFloat`. Used for basis
+ * (FUT − spot) and mark-to-market (last tick − avg entry) where the result must stay exact.
+ */
+export function subtractDecimal(a: string, b: string): string {
+  const scale = Math.max(fractionLen(a), fractionLen(b));
+  return fromScaled(toScaled(a, scale) - toScaled(b, scale), scale);
+}
+
+/** Exact decimal × integer (e.g. per-unit P&L × qty, price × qty notional) — never `parseFloat`. */
+export function multiplyByInt(value: string, n: number): string {
+  const scale = fractionLen(value);
+  return fromScaled(toScaled(value, scale) * BigInt(Math.trunc(n)), scale);
+}
+
+function fractionLen(value: string): number {
+  const dot = value.indexOf('.');
+  return dot < 0 ? 0 : value.length - dot - 1;
+}
+
+function toScaled(value: string, scale: number): bigint {
+  const neg = value.trim().startsWith('-');
+  const v = neg ? value.trim().slice(1) : value.trim();
+  const [int, frac = ''] = v.split('.');
+  const mag = BigInt((int || '0') + frac.padEnd(scale, '0').slice(0, scale));
+  return neg ? -mag : mag;
+}
+
+function fromScaled(scaled: bigint, scale: number): string {
+  const neg = scaled < 0n;
+  const digits = (neg ? -scaled : scaled).toString().padStart(scale + 1, '0');
+  const int = digits.slice(0, digits.length - scale);
+  const frac = scale === 0 ? '' : digits.slice(digits.length - scale).replace(/0+$/, '');
+  const body = frac ? `${int}.${frac}` : int;
+  return neg && body !== '0' ? `-${body}` : body;
+}
+
 interface Parts {
   sign: number;
   int: string;

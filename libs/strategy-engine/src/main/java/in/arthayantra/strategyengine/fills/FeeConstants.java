@@ -32,6 +32,13 @@ public final class FeeConstants {
   /** Equity delivery STT — 0.10% on BOTH buy and sell. */
   public static final BigDecimal STT_EQUITY = new BigDecimal("0.001000");
 
+  /**
+   * Options EXERCISE/settlement STT — 0.125% on the intrinsic settlement value (CBDT exercised-option
+   * rate; distinct from the 0.10% sell-side premium STT). The expiry-settlement fill overrides the
+   * STT leg to this rate (Stage F Phase 43B).
+   */
+  public static final BigDecimal STT_OPTION_EXERCISE = new BigDecimal("0.001250");
+
   // ---- NSE exchange transaction charges (on turnover / premium) ----
   /** Options exchange transaction charge — 0.03503% on premium. */
   public static final BigDecimal TXN_OPTION = new BigDecimal("0.00035030");

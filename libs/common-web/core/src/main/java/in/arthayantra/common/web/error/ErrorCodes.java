@@ -50,6 +50,7 @@ public final class ErrorCodes {
   public static final String CONFLICT_NO_CONTENT_CHANGE = "CONFLICT_NO_CONTENT_CHANGE";
   public static final String CONFLICT_NOT_A_DRAFT = "CONFLICT_NOT_A_DRAFT";
   public static final String CONFLICT_HAS_PUBLISHED_HISTORY = "CONFLICT_HAS_PUBLISHED_HISTORY";
+  public static final String CONFLICT_POSITION_CLOSED = "CONFLICT_POSITION_CLOSED";
 
   // ---- STRATEGY_* (400/422) ----
   public static final String STRATEGY_SCHEMA_INVALID = "STRATEGY_SCHEMA_INVALID";

@@ -43,6 +43,7 @@ interface MarketState {
   overall: string | null;
   searchResults: Instrument[];
   searching: boolean;
+  underlyings: string[];
   ticks: Record<string, NormalizedTick>;
   dashboardLayout: Record<string, boolean>;
 }
@@ -62,6 +63,7 @@ export const MarketStore = signalStore(
     overall: null,
     searchResults: [],
     searching: false,
+    underlyings: [],
     ticks: {},
     dashboardLayout: {},
   }),
@@ -103,6 +105,19 @@ export const MarketStore = signalStore(
 
       clearSearch(): void {
         patchState(store, { searchResults: [] });
+      },
+
+      /** Distinct F&O underlyings (index/stock) for the options/futures pickers. */
+      loadUnderlyings(): void {
+        http
+          .get<{ exchange: string; tradingsymbol: string }[]>('/api/v1/instruments/underlyings')
+          .subscribe({
+            next: (rows) =>
+              patchState(store, {
+                underlyings: [...new Set((rows ?? []).map((r) => r.tradingsymbol))],
+              }),
+            error: () => undefined,
+          });
       },
 
       /**

@@ -84,6 +84,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/options/iv-rollup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["rollup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/candles/refresh": {
         parameters: {
             query?: never;
@@ -172,6 +188,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["screen"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/options/iv-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["ivHistory"];
         put?: never;
         post?: never;
         delete?: never;
@@ -300,6 +332,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["byKey"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/instruments/underlyings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["underlyings"];
         put?: never;
         post?: never;
         delete?: never;
@@ -437,6 +485,13 @@ export interface components {
             /** Format: date */
             expiry?: string;
         };
+        RollupRequest: {
+            underlying?: string;
+            /** Format: date */
+            from?: string;
+            /** Format: date */
+            to?: string;
+        };
         RefreshRequest: {
             exchange?: string;
             tradingsymbol?: string;
@@ -479,6 +534,27 @@ export interface components {
             priority?: "PINNED_INDEX" | "STRATEGY" | "UI" | "SPECULATIVE";
             /** Format: int32 */
             subscribers?: number;
+        };
+        HistoryPoint: {
+            /** Format: date */
+            date?: string;
+            iv?: number;
+            atmIv?: number;
+            iv30d?: number;
+            spot?: number;
+        };
+        IvHistory: {
+            underlying?: string;
+            series?: components["schemas"]["HistoryPoint"][];
+            currentIv?: number;
+            rank?: number;
+            /** Format: int32 */
+            percentile?: number;
+            /** Format: int32 */
+            windowDays?: number;
+            /** Format: int32 */
+            floorDays?: number;
+            insufficientHistory?: boolean;
         };
         Chain: {
             underlying?: string;
@@ -595,6 +671,10 @@ export interface components {
             limit?: number;
             /** Format: int32 */
             offset?: number;
+        };
+        Underlying: {
+            exchange?: string;
+            tradingsymbol?: string;
         };
         SyncStatus: {
             jobId?: string;
@@ -997,6 +1077,41 @@ export interface operations {
             };
         };
     };
+    rollup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RollupRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     refresh: {
         parameters: {
             query?: never;
@@ -1217,6 +1332,37 @@ export interface operations {
                     "*/*": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    ivHistory: {
+        parameters: {
+            query: {
+                underlying: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["IvHistory"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -1484,6 +1630,35 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["Instrument"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    underlyings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["Underlying"][];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

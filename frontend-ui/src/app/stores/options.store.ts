@@ -92,6 +92,27 @@ export interface VixStat {
   windowDays: number;
 }
 
+/** One day in the IV-history series (F-42B). */
+export interface IvHistoryPoint {
+  date: string;
+  iv: string | null;
+  atmIv: string | null;
+  iv30d: string | null;
+  spot: string | null;
+}
+
+/** The iv-history read (F-42B): trailing series + rank/percentile (null below the floor). */
+export interface IvHistory {
+  underlying: string;
+  series: IvHistoryPoint[];
+  currentIv: string | null;
+  rank: string | null;
+  percentile: number | null;
+  windowDays: number;
+  floorDays: number;
+  insufficientHistory: boolean;
+}
+
 /** Bounded trailing PCR trend buffer (live deltas). */
 export const PCR_TREND_LIMIT = 120;
 
@@ -100,13 +121,14 @@ interface OptionsState {
   expiry: string | null;
   expiries: string[];
   strikeWindow: number;
-  activeTab: 'pcr' | 'smile' | 'oi';
+  activeTab: 'pcr' | 'smile' | 'oi' | 'iv';
   chain: OptionChain | null;
   loading: boolean;
   historyMode: boolean;
   historyAt: string | null;
   pcrTrend: { ts: string; pcr: string }[];
   vix: VixPoint[];
+  ivHistory: IvHistory | null;
 }
 
 const DEFAULT_UNDERLYING = 'NIFTY 50';
@@ -228,6 +250,7 @@ export const OptionsStore = signalStore(
     historyAt: null,
     pcrTrend: [],
     vix: [],
+    ivHistory: null,
   }),
   withComputed((store) => ({
     spot: computed(() => store.chain()?.spot ?? null),
@@ -307,9 +330,22 @@ export const OptionsStore = signalStore(
         });
     },
 
+    /** Trailing-1-year IV history + rank/percentile (F-42B); the badge + IV tab read it. */
+    loadIvHistory(): void {
+      http
+        .get<IvHistory>('/api/v1/market/options/iv-history', {
+          params: new HttpParams().set('underlying', store.underlying()),
+        })
+        .subscribe({
+          next: (ivHistory) => patchState(store, { ivHistory }),
+          error: () => patchState(store, { ivHistory: null }),
+        });
+    },
+
     setUnderlying(underlying: string): void {
-      patchState(store, { underlying, expiry: null, expiries: [], pcrTrend: [] });
+      patchState(store, { underlying, expiry: null, expiries: [], pcrTrend: [], ivHistory: null });
       this.loadExpiries();
+      this.loadIvHistory();
     },
 
     setExpiry(expiry: string | null): void {
@@ -321,7 +357,7 @@ export const OptionsStore = signalStore(
       patchState(store, { strikeWindow });
     },
 
-    setActiveTab(activeTab: 'pcr' | 'smile' | 'oi'): void {
+    setActiveTab(activeTab: 'pcr' | 'smile' | 'oi' | 'iv'): void {
       patchState(store, { activeTab });
     },
 
@@ -364,6 +400,7 @@ export const OptionsStore = signalStore(
       ws.reconnects$.subscribe(() => store.load());
       store.loadExpiries();
       store.loadVix();
+      store.loadIvHistory();
     },
   }),
 );

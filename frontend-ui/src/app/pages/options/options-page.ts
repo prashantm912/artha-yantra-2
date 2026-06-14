@@ -103,6 +103,15 @@ import { OptionsStore, type OptionStrikeRow } from '../../stores/options.store';
       <p-button [text]="true" icon="pi pi-refresh" ariaLabel="Reload" (onClick)="store.load()" />
       <span class="spacer"></span>
       <div class="chip-row">
+        @if (store.ivHistory(); as iv) {
+          <span class="vix" title="IV rank/percentile over the trailing 1y of own snapshots">
+            @if (iv.insufficientHistory) {
+              IV rank: insufficient ({{ iv.windowDays }}/{{ iv.floorDays }}d)
+            } @else {
+              IV rank {{ iv.rank }} · {{ iv.percentile }}%ile
+            }
+          </span>
+        }
         @if (store.vixStat(); as vix) {
           <span class="vix" title="India VIX level + trailing 1-year percentile">
             VIX {{ price(vix.level) }}
@@ -209,6 +218,7 @@ export class OptionsPage {
     { key: 'smile' as const, label: 'IV smile' },
     { key: 'oi' as const, label: 'OI profile' },
     { key: 'pcr' as const, label: 'PCR trend' },
+    { key: 'iv' as const, label: 'IV history' },
   ];
 
   /** datetime-local needs `YYYY-MM-DDTHH:mm`; strip the offset/seconds off the stored ISO. */
@@ -234,6 +244,22 @@ export class OptionsPage {
           yAxis: { type: 'value', name: 'PCR' },
           series: [
             { name: 'PCR', type: 'line', smooth: true, data: trend.map((p) => Number(p.pcr)) },
+          ],
+        };
+      }
+      case 'iv': {
+        const points = this.store.ivHistory()?.series ?? [];
+        return {
+          tooltip: { trigger: 'axis' },
+          xAxis: { type: 'category', data: points.map((p) => p.date), name: 'date' },
+          yAxis: { type: 'value', name: 'IV (30d / ATM)' },
+          series: [
+            {
+              name: 'IV',
+              type: 'line',
+              smooth: true,
+              data: points.map((p) => this.numOrNull(p.iv)),
+            },
           ],
         };
       }

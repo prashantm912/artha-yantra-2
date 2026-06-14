@@ -190,6 +190,21 @@ describe('OptionsStore', () => {
         ],
       });
     http.expectOne((r) => r.url === '/api/v1/market/options/chain').flush(chain());
+    http
+      .expectOne((r) => r.url === '/api/v1/market/options/iv-history')
+      .flush({
+        underlying: 'NIFTY 50',
+        series: [
+          { date: '2026-06-12', iv: '0.1500', atmIv: '0.1500', iv30d: null, spot: '18050.00' },
+          { date: '2026-06-13', iv: '0.1600', atmIv: '0.1600', iv30d: null, spot: '18060.00' },
+        ],
+        currentIv: '0.1600',
+        rank: null,
+        percentile: null,
+        windowDays: 2,
+        floorDays: 60,
+        insufficientHistory: true,
+      });
     await Promise.resolve();
   });
 
@@ -200,6 +215,12 @@ describe('OptionsStore', () => {
     expect(store.windowedRows()).toHaveLength(3);
     expect(store.pcr()).toBe('0.9500');
     expect(store.vixStat()?.level).toBe('14.50');
+  });
+
+  it('loads the IV history and surfaces the insufficient-history flag', () => {
+    expect(store.ivHistory()?.windowDays).toBe(2);
+    expect(store.ivHistory()?.insufficientHistory).toBe(true);
+    expect(store.ivHistory()?.rank).toBeNull();
   });
 
   it('a matching live frame replaces the chain and grows the PCR trend', () => {

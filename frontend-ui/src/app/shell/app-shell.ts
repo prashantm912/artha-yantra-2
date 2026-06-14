@@ -118,6 +118,7 @@ import { WsClientService } from '../core/ws-client.service';
         <a routerLink="/dashboard" routerLinkActive="active">Dashboard</a>
         <a routerLink="/signals" routerLinkActive="active">Signals</a>
         <a routerLink="/paper" routerLinkActive="active">Paper</a>
+        <a routerLink="/journal" routerLinkActive="active">Journal</a>
         <a routerLink="/charts" routerLinkActive="active">Charts</a>
         <a routerLink="/options" routerLinkActive="active">Options</a>
         <a routerLink="/futures" routerLinkActive="active">Futures</a>

@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
@@ -7,6 +7,7 @@ import { SelectModule } from 'primeng/select';
 import { TableModule } from 'primeng/table';
 import { TagModule } from 'primeng/tag';
 import { formatDecimal } from '../../core/decimal';
+import { JournalDrawer } from '../../shared/journal-drawer';
 import { SignalsStore, type SignalDto } from '../../stores/signals.store';
 import { ReasoningBreakdownPanel } from './reasoning-breakdown-panel';
 
@@ -27,6 +28,7 @@ import { ReasoningBreakdownPanel } from './reasoning-breakdown-panel';
     SelectModule,
     InputTextModule,
     ReasoningBreakdownPanel,
+    JournalDrawer,
   ],
   styles: `
     .layout {
@@ -173,6 +175,13 @@ import { ReasoningBreakdownPanel } from './reasoning-breakdown-panel';
                   signalId: signal.id,
                 }"
               />
+              <p-button
+                size="small"
+                label="Journal"
+                icon="pi pi-book"
+                [text]="true"
+                (onClick)="journalOpen.set(true)"
+              />
             </div>
           </div>
           <ay-reasoning-breakdown [breakdown]="signal.scoreBreakdown" />
@@ -181,10 +190,18 @@ import { ReasoningBreakdownPanel } from './reasoning-breakdown-panel';
         }
       </aside>
     </div>
+    <ay-journal-drawer [(open)]="journalOpen" [link]="journalLink()" />
   `,
 })
 export class SignalsPage {
   protected readonly store = inject(SignalsStore);
+  protected readonly journalOpen = signal(false);
+
+  /** Prefills the journal drawer with the selected signal's id (F-44A). */
+  protected readonly journalLink = computed(() => {
+    const id = this.store.selected()?.id;
+    return id ? { signalId: id } : {};
+  });
 
   protected readonly statusOptions = ['ACTIVE', 'EXPIRED', 'TAKEN', 'DISMISSED'];
 

@@ -14,6 +14,18 @@ curl -s -c /tmp/ay.txt -X POST 127.0.0.1:8080/api/v1/auth/login -H 'content-type
   -d '{"password":"<owner-password>"}' -i | head -1     # -> 204 + Set-Cookie
 ```
 
+**CSRF (curl mutations):** the gateway requires an `X-XSRF-TOKEN` header on every non-GET (the SPA
+sends it automatically). After login, grab the cookie and send it on POST/PUT/DELETE:
+
+```bash
+XT=$(grep -i XSRF-TOKEN /tmp/ay.txt | tail -1 | awk '{print $NF}')   # then add: -H "X-XSRF-TOKEN: $XT"
+```
+
+> **Off-hours note:** on a weekend / outside 09:15–15:30 IST the mock serves a **zeroed options book**
+> (bid/ask 0) and the futures term-structure falls back to stale — so chain IV renders `null`
+> (`ivReason: ZERO_QUOTE`) and `/futures` basis is stale. That is correct off-hours behaviour; non-zero
+> IV / basis show during market hours (and are pinned by the JUnit ITs + the Playwright ci-e2e run).
+
 The mock feed is **boot-rolling** — candles/snapshots accrue from start. Seed the data the read
 paths need (derive a recent covered window; never hardcode dates):
 

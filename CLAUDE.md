@@ -89,6 +89,12 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
   stale cached chunk renders the old UI/white charts.
 - **PrimeNG 21 API:** `p-autocomplete` uses `optionLabel`, not `field` (a `field` binding
   silently renders `[object Object]`).
+- **PrimeNG 21 does NOT `aria-hidden` button icon spans** — bundling `primeicons.css`
+  (angular.json `styles`) makes `icon="pi ..."` glyphs render, but the `::before` PUA glyph
+  then leaks into every icon+label button's *accessible name* (breaks axe + Playwright
+  `getByRole({name,exact:true})`; an icon-only button with `ariaLabel` is immune). Stamp it
+  globally: `providePrimeNG({pt:{button:{icon:{'aria-hidden':'true'}}}})`. All app `pi-*`
+  icons ride `p-button`; other components use built-in SVG icons (no `::before` text, no leak).
 - **List endpoints return an `{items:[...]}` envelope** (signals/paper/journal/screener/
   watchlists); only `instruments/search` + `instruments/underlyings` return bare arrays.
 - **Verify trio** (PowerShell `Push-Location frontend-ui`): `npm run lint` +

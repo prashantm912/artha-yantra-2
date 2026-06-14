@@ -40,6 +40,17 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
   unique slug+name; `RegistryService.create` 409s on a duplicate slug OR name. State
   persists across methods *and* across surefire reruns.
 - JaCoCo gate ≥ 60% line on services; Modulith `verify` runs in CI.
+- **Extend engine records parity-safely:** golden vectors compare byte-string (signals)
+  + record-equality (trades); `GoldenSignalsJson.write()` is FROZEN, so new
+  `SignalEvent`/`Trade` fields ride as a NON-serialized side-channel — golden stays
+  byte-identical and parity holds *iff* both deterministic replays compute the same value
+  (compute at entry, e.g. `ExitEvaluator.entryLevels`, never per-run random). Verify with
+  GoldenDeterminismTest + BacktestParityTest.
+- **Contract spec drift (springdoc):** `ContractCaptureTest` snapshots `/v3/api-docs`;
+  re-capture with `-Dcontracts.capture=true`, regen TS via `npx openapi-typescript@7` →
+  `contracts/gen/*.d.ts`. Generic `Map<String,Object>` returns are NOT enumerated, so adding
+  response keys does NOT drift the spec; new query params + new `@*Mapping` paths DO.
+  ci-contracts fails on BREAKING spec diffs, warns on gen drift, requires `tsc --strict`.
 - **Mock-stack backtest testing:** candle data is real-time/rolling (accrues from
   boot) — derive a recent covered window, never hardcode dates; every windowed run's
   regime pre-flight needs ~272 daily benchmark sessions, so backfill `NIFTY 50` 1d

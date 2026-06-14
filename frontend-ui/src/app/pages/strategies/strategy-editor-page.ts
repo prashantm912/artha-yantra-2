@@ -112,6 +112,19 @@ import { type StrategyDoc, formIndicators, parseDoc, withField } from './strateg
   `,
   template: `
     <h1 class="ay-sr-only">Strategy editor</h1>
+    @if (store.universe(); as u) {
+      <div
+        style="margin-bottom: 0.6rem; padding: 0.5rem 0.7rem; border: 1px solid var(--ay-border); border-radius: 8px; background: var(--ay-surface-1); font-size: 0.85rem;"
+      >
+        <strong>Published Universe</strong> ({{ u.mode }}{{ u.asOf ? ', as of ' + u.asOf : '' }}):
+        {{ u.constituentCount }} constituents · checksum {{ u.checksum.slice(0, 12) }}…
+        @if (u.survivorshipCaveat) {
+          <div style="color: var(--ay-text-muted); margin-top: 0.2rem;">
+            {{ u.survivorshipCaveat }}
+          </div>
+        }
+      </div>
+    }
     <div class="toolbar">
       <strong>{{ store.current()?.name ?? 'New strategy' }}</strong>
       @if (store.current(); as c) {

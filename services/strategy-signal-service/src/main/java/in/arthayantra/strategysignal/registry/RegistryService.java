@@ -424,12 +424,8 @@ public class RegistryService {
           422, ErrorCodes.STRATEGY_SCHEMA_INVALID, "config no longer validates",
           Map.of("errors", result.errors()));
     }
-    if ("index_constituents".equals(target.config().path("universe").path("mode").asText())) {
-      throw new ApiException(
-          422, ErrorCodes.STRATEGY_UNIVERSE_UNSUPPORTED,
-          "index_constituents universes publish after the Phase 44 universe resolver lands; "
-              + "drafts are fine");
-    }
+    // Phase 44: the index_constituents publish guard is LIFTED — the submission-time universe
+    // resolver (UniverseResolver) now pins membership by copy, so these strategies are publishable.
     List<ValidationIssue> hardIssues = new ArrayList<>();
     for (JsonNode indicator : target.config().path("indicators")) {
       String name = indicator.path("name").asText();
@@ -473,7 +469,8 @@ public class RegistryService {
       warnings.add(
           new ValidationIssue(
               "/universe/mode",
-              "index_constituents saves as draft but refuses publish until Phase 44"));
+              "index_constituents resolves CURRENT membership — windows predating constituent"
+                  + " capture carry the survivorship-bias caveat"));
     }
     for (JsonNode indicator : config.path("indicators")) {
       String name = indicator.path("name").asText();

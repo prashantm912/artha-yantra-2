@@ -7,6 +7,7 @@ import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.error.NotFoundException;
 import java.time.Duration;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -68,6 +69,23 @@ public class StrategyVersionClient {
     } catch (HttpServerErrorException | ResourceAccessException e) {
       throw new ApiException(
           503, ErrorCodes.UPSTREAM_UNAVAILABLE, "strategy-signal unavailable: " + e.getMessage());
+    }
+  }
+
+  /**
+   * Resolves the strategy's universe to the pinned copy + checksum over REST (Phase 44 / S8). The
+   * resolver lives in strategy-signal-service (REST-only, no marketdata grant); backtest-service
+   * merely COPIES the result into the job request. Empty when the mode needs no pinning or the
+   * resolver is unreachable.
+   */
+  public Optional<JsonNode> resolveUniverse(UUID strategyId, String version) {
+    String uri =
+        "/api/v1/strategies/" + strategyId + "/universe"
+            + (version == null || version.isBlank() ? "" : "?version=" + version);
+    try {
+      return Optional.ofNullable(http.get().uri(uri).retrieve().body(JsonNode.class));
+    } catch (HttpClientErrorException | HttpServerErrorException | ResourceAccessException e) {
+      return Optional.empty();
     }
   }
 

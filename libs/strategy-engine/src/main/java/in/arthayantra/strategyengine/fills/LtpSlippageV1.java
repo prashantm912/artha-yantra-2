@@ -15,8 +15,16 @@ import java.math.RoundingMode;
  */
 public final class LtpSlippageV1 implements FillSimulator {
 
+  /** The pinned implementation id (stamped onto paper fill-audit rows). */
+  public static final String ID = "ltp_slippage/v1";
+
   private static final BigDecimal TEN_THOUSAND = new BigDecimal("10000");
   private static final BigDecimal TWO = new BigDecimal("2");
+
+  @Override
+  public String id() {
+    return ID;
+  }
 
   @Override
   public Fill simulate(FillRequest request) {

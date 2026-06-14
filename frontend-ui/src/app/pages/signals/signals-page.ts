@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
@@ -7,11 +7,12 @@ import { SelectModule } from 'primeng/select';
 import { TableModule } from 'primeng/table';
 import { TagModule } from 'primeng/tag';
 import { formatDecimal } from '../../core/decimal';
+import { JournalDrawer } from '../../shared/journal-drawer';
 import { SignalsStore, type SignalDto } from '../../stores/signals.store';
 import { ReasoningBreakdownPanel } from './reasoning-breakdown-panel';
 
 /**
- * /signals (C-2.24/C-2.26): live feed + history in one virtualized table, click-through to the
+ * /signals (C-2.24/C-2.26): live feed + history in one scrollable table, click-through to the
  * reasoning breakdown. The MVP surface — a published EMA-crossover strategy's call lands here
  * over STOMP with its per-indicator score breakdown.
  */
@@ -27,6 +28,7 @@ import { ReasoningBreakdownPanel } from './reasoning-breakdown-panel';
     SelectModule,
     InputTextModule,
     ReasoningBreakdownPanel,
+    JournalDrawer,
   ],
   styles: `
     .layout {
@@ -93,8 +95,6 @@ import { ReasoningBreakdownPanel } from './reasoning-breakdown-panel';
           [value]="store.filtered()"
           [scrollable]="true"
           scrollHeight="calc(100vh - 12rem)"
-          [virtualScroll]="true"
-          [virtualScrollItemSize]="44"
           selectionMode="single"
           dataKey="id"
           [loading]="store.loading()"
@@ -131,7 +131,7 @@ import { ReasoningBreakdownPanel } from './reasoning-breakdown-panel';
           </ng-template>
           <ng-template #emptymessage>
             <tr>
-              <td colspan="7">No signals yet — publish a strategy and let the mock feed run.</td>
+              <td colspan="7">No signals yet — publish a strategy to start emitting signals.</td>
             </tr>
           </ng-template>
         </p-table>
@@ -143,14 +143,15 @@ import { ReasoningBreakdownPanel } from './reasoning-breakdown-panel';
             #{{ signal.id }} · v{{ signal.version ?? '?' }} · checksum
             {{ signal.checksum?.slice(0, 12) ?? 'n/a' }}… · SL
             {{ signal.stopLoss ? price(signal.stopLoss) : '—' }} · target
-            {{ signal.target ? price(signal.target) : '—' }}
+            {{ signal.target ? price(signal.target) : '—' }} · suggested qty
+            {{ signal.suggestedQty ?? '—' }}
             <div>
               <p-button
                 size="small"
                 label="Taken"
                 icon="pi pi-check"
                 [text]="true"
-                (onClick)="store.markTaken(signal.id)"
+                (onClick)="store.markTaken(signal.id, takenQty(signal))"
               />
               <p-button
                 size="small"
@@ -172,6 +173,13 @@ import { ReasoningBreakdownPanel } from './reasoning-breakdown-panel';
                   signalId: signal.id,
                 }"
               />
+              <p-button
+                size="small"
+                label="Journal"
+                icon="pi pi-book"
+                [text]="true"
+                (onClick)="journalOpen.set(true)"
+              />
             </div>
           </div>
           <ay-reasoning-breakdown [breakdown]="signal.scoreBreakdown" />
@@ -180,10 +188,18 @@ import { ReasoningBreakdownPanel } from './reasoning-breakdown-panel';
         }
       </aside>
     </div>
+    <ay-journal-drawer [(open)]="journalOpen" [link]="journalLink()" />
   `,
 })
 export class SignalsPage {
   protected readonly store = inject(SignalsStore);
+  protected readonly journalOpen = signal(false);
+
+  /** Prefills the journal drawer with the selected signal's id (F-44A). */
+  protected readonly journalLink = computed(() => {
+    const id = this.store.selected()?.id;
+    return id ? { signalId: id } : {};
+  });
 
   protected readonly statusOptions = ['ACTIVE', 'EXPIRED', 'TAKEN', 'DISMISSED'];
 
@@ -197,6 +213,11 @@ export class SignalsPage {
     if (row) {
       this.store.select(row.id);
     }
+  }
+
+  /** Suggested qty (A12) prefilled into the taken→paper-position action; undefined if unsized. */
+  protected takenQty(signal: SignalDto): number | undefined {
+    return signal.suggestedQty ? Number(signal.suggestedQty) : undefined;
   }
 
   protected price(value: string): string {

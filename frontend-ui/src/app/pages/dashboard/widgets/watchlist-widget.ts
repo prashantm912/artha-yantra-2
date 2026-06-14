@@ -23,8 +23,8 @@ interface WatchlistView {
 }
 
 /**
- * Watchlist widget (E-2/E-3): the first named watchlist's instruments as a virtualized live tick
- * table (~30 DOM rows under any size), prices CSS-pulsing on each update (not row re-creation).
+ * Watchlist widget (E-2/E-3): the first named watchlist's instruments as a scrollable live tick
+ * table, prices CSS-pulsing on each update (not row re-creation).
  */
 @Component({
   selector: 'ay-watchlist-widget',
@@ -41,14 +41,7 @@ interface WatchlistView {
   `,
   template: `
     @if (rows().length) {
-      <p-table
-        [value]="rows()"
-        [scrollable]="true"
-        scrollHeight="16rem"
-        [virtualScroll]="true"
-        [virtualScrollItemSize]="34"
-        dataKey="key"
-      >
+      <p-table [value]="rows()" [scrollable]="true" scrollHeight="16rem" dataKey="key">
         <ng-template #header>
           <tr>
             <th>Instrument</th>
@@ -92,9 +85,9 @@ export class WatchlistWidget {
 
   constructor() {
     inject(DestroyRef).onDestroy(() => this.market.untrack(this.tracked));
-    this.http.get<WatchlistView[]>('/api/v1/watchlists').subscribe({
-      next: (lists) => {
-        const first = lists?.[0];
+    this.http.get<{ items: WatchlistView[] }>('/api/v1/watchlists').subscribe({
+      next: (resp) => {
+        const first = resp.items?.[0];
         const its = first?.items ?? [];
         this.items.set(its);
         this.tracked = its.map((it) => canonicalKey(it.exchange, it.tradingsymbol));

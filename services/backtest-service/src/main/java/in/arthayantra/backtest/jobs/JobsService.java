@@ -92,6 +92,20 @@ public class JobsService {
     }
     request.put("purpose", purpose);
 
+    // Phase 44 (S8): resolve index_constituents / futures_of_underlying universes ONCE, at
+    // submission, and PIN them by copy into the request JSONB — every sweep trial reuses this
+    // embedded copy, so a mid-sweep constituent rebalance can never split a leaderboard.
+    String universeMode = v.config().path("universe").path("mode").asText("explicit");
+    if ("index_constituents".equals(universeMode) || "futures_of_underlying".equals(universeMode)) {
+      versions
+          .resolveUniverse(v.strategyId(), v.version())
+          .ifPresent(
+              universe -> {
+                request.set("universe", universe.path("items"));
+                request.put("universeChecksum", universe.path("checksum").asText());
+              });
+    }
+
     // S1C stress guard (§D.6): a stress test's window must not overlap ANY prior lineage job
     // (sweeps AND manual backtests both leak). The check runs BEFORE the row is inserted so a
     // refused stress never appears in lineage. The reuse counter is recorded on a clean window.

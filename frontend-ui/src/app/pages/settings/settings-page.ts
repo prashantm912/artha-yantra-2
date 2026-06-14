@@ -21,8 +21,8 @@ interface SyncStatus {
 
 /**
  * /settings (Phase 35, E-8): Kite OAuth (popup + postMessage round-trip), token health, theme,
- * data-sync triggers, mock-mode banner — plus the RESERVED Global-risk slot (controls,
- * `strategy.risk_settings` rows and the trip audit land in Stage F Phase 43A — FP-42).
+ * data-sync triggers, mock-mode banner — plus a Global-risk note pointing at the Paper page, where
+ * the kill switch, `strategy.risk_settings` rows and the trip audit shipped (Stage F Phase 43A — FP-42).
  */
 @Component({
   selector: 'ay-settings-page',
@@ -158,8 +158,7 @@ interface SyncStatus {
       <section>
         <h2>Global Risk</h2>
         <p class="reserved">
-          Pause-all kill switch and global risk-limit controls land in Stage F (Phase 43A). Reserved
-          slot only.
+          Kill switch, daily-loss and max-open limits are managed on the Paper trading page.
         </p>
       </section>
     </div>
@@ -178,7 +177,7 @@ export class SettingsPage {
     const onMessage = (e: MessageEvent): void => {
       if (
         e.origin === window.location.origin &&
-        (e.data as { type?: string })?.type === 'kite-auth'
+        (e.data as { type?: string })?.type === 'kite-connected'
       ) {
         this.loadKite();
       }

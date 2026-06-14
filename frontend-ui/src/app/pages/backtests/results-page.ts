@@ -41,7 +41,7 @@ const BENCH_METRICS: MetricDef[] = [
 
 /**
  * /backtests/:id (Phase 38, E-11 / E-12.5): metric panel (+ benchmark-relative columns when
- * present), virtualized trade table with per-trade contribution drill-down, persisted equity +
+ * present), scrollable trade table with per-trade contribution drill-down, persisted equity +
  * drawdown curves with the buy-and-hold benchmark overlay (never client-recomputed), the
  * walk-forward fold panel, and the Monte Carlo tab — all NULL-safe for runs predating Phase 32A.
  */
@@ -161,8 +161,6 @@ const BENCH_METRICS: MetricDef[] = [
               [value]="store.trades()"
               [scrollable]="true"
               scrollHeight="calc(100vh - 18rem)"
-              [virtualScroll]="true"
-              [virtualScrollItemSize]="40"
               selectionMode="single"
               dataKey="seq"
               (onRowSelect)="select($event)"

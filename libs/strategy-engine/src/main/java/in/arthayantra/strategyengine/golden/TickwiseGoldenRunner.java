@@ -82,6 +82,13 @@ public final class TickwiseGoldenRunner {
           return null;
         };
 
+    // Build the indicator bank ONCE: the series resolved through `provider` (primary/live1m/
+    // contexts) are stable instances that grow as bars append, so the bound ta4j indicators see
+    // each appended bar with a WARM cache. Rebuilding the bank per bar gave every tick a COLD
+    // ta4j cache, re-prefilling the whole history from scratch — O(n^2) over the run (D17). The
+    // emitted events are unchanged: indicators are pure functions of (series, index).
+    IndicatorBank bank = bank(provider);
+
     List<GoldenSignalsJson.SignalEvent> events = new ArrayList<>();
     OpenPosition open = null;
     LocalDate currentDay = null;
@@ -109,7 +116,6 @@ public final class TickwiseGoldenRunner {
             && !bucketBuffer.isEmpty()) {
           primary.append(aggregate(bucketBuffer, currentBucketFloor));
           bucketBuffer.clear();
-          IndicatorBank bank = bank(provider);
           int primaryIndex = primary.size() - 1;
           if (open != null) {
             Optional<ExitEvaluator.ExitDecision> exit =
@@ -160,7 +166,6 @@ public final class TickwiseGoldenRunner {
         if (!preCloseDone && !barClose.isBefore(preCloseAt)) {
           preCloseDone = true;
           primary.append(preCloseDailyBar(dayBuffer));
-          IndicatorBank bank = bank(provider);
           Optional<EntryEvaluator.Evaluation> evaluation =
               EntryEvaluator.evaluate(definition, bank, primary.size() - 1);
           if (evaluation.isPresent() && evaluation.get().entry()) {
@@ -171,7 +176,6 @@ public final class TickwiseGoldenRunner {
       }
 
       // 1m primary: exits resolve before a new entry on the same bar
-      IndicatorBank bank = bank(provider);
       int index = primary.size() - 1;
       if (open != null) {
         Optional<ExitEvaluator.ExitDecision> exit =

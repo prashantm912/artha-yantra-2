@@ -151,7 +151,9 @@ public final class TickwiseGoldenRunner {
             Optional<EntryEvaluator.Evaluation> evaluation =
                 EntryEvaluator.evaluate(definition, bank, primaryIndex);
             if (evaluation.isPresent() && evaluation.get().entry()) {
-              events.add(entryEvent(bar.bucketStart(), evaluation.get()));
+              events.add(
+                  entryEvent(
+                      bar.bucketStart(), evaluation.get(), entryLevels(bank, primary, primaryIndex)));
               open = openPosition(primary, primaryIndex, live1m.size(), evaluation.get());
             }
           }
@@ -187,7 +189,11 @@ public final class TickwiseGoldenRunner {
           Optional<EntryEvaluator.Evaluation> evaluation =
               EntryEvaluator.evaluate(definition, bank, primary.size() - 1);
           if (evaluation.isPresent() && evaluation.get().entry()) {
-            events.add(entryEvent(bar.bucketStart(), evaluation.get()));
+            events.add(
+                entryEvent(
+                    bar.bucketStart(),
+                    evaluation.get(),
+                    entryLevels(bank, primary, primary.size() - 1)));
           }
         }
         continue;
@@ -211,7 +217,8 @@ public final class TickwiseGoldenRunner {
         Optional<EntryEvaluator.Evaluation> evaluation =
             EntryEvaluator.evaluate(definition, bank, index);
         if (evaluation.isPresent() && evaluation.get().entry()) {
-          events.add(entryEvent(bar.bucketStart(), evaluation.get()));
+          events.add(
+              entryEvent(bar.bucketStart(), evaluation.get(), entryLevels(bank, primary, index)));
           open = openPosition(primary, index, live1m.size() - 1, evaluation.get());
         }
       }
@@ -243,16 +250,30 @@ public final class TickwiseGoldenRunner {
   }
 
   private GoldenSignalsJson.SignalEvent entryEvent(
-      OffsetDateTime at, EntryEvaluator.Evaluation evaluation) {
+      OffsetDateTime at, EntryEvaluator.Evaluation evaluation, ExitEvaluator.EntryLevels levels) {
     String direction =
         definition.direction() == StrategyDefinition.Direction.SHORT ? "SHORT" : "LONG";
     return new GoldenSignalsJson.SignalEvent(
-        at.toString(), exchange, tradingsymbol, direction, evaluation.breakdown());
+        at.toString(), exchange, tradingsymbol, direction, evaluation.breakdown(),
+        levels.stopLoss(), levels.takeProfit());
   }
 
   private GoldenSignalsJson.SignalEvent exitEvent(OffsetDateTime at, OpenPosition open) {
     return new GoldenSignalsJson.SignalEvent(
-        at.toString(), exchange, tradingsymbol, "EXIT", open.entryBreakdown());
+        at.toString(), exchange, tradingsymbol, "EXIT", open.entryBreakdown(), null, null);
+  }
+
+  /** Entry-time protective levels at {@code primaryIndex} (both {@code null} when no such rule). */
+  private ExitEvaluator.EntryLevels entryLevels(
+      IndicatorBank bank, EngineSeries primary, int primaryIndex) {
+    ExitEvaluator.Direction direction =
+        definition.direction() == StrategyDefinition.Direction.SHORT
+            ? ExitEvaluator.Direction.SHORT
+            : ExitEvaluator.Direction.LONG;
+    return ExitEvaluator.entryLevels(
+        definition,
+        bank,
+        new ExitEvaluator.Position(direction, primary.candle(primaryIndex).close(), primaryIndex));
   }
 
   private OpenPosition openPosition(

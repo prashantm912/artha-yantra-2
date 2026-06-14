@@ -2,6 +2,7 @@ package in.arthayantra.backtest.replay;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,8 +29,9 @@ public class TradeRepository {
         """
         INSERT INTO backtest_trades (
           run_id, seq, side, qty, entry_ts, entry_price, exit_ts, exit_price,
-          pnl, pnl_pct, exit_reason, bars_held, touch_basis, contributions)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
+          pnl, pnl_pct, exit_reason, bars_held, touch_basis, contributions,
+          exchange, tradingsymbol, stop_loss, take_profit)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?)
         """,
         trades,
         trades.size(),
@@ -48,15 +50,49 @@ public class TradeRepository {
           ps.setInt(12, trade.barsHeld());
           ps.setString(13, trade.touchBasis() == null ? null : trade.touchBasis().name());
           ps.setString(14, contributionsJson(trade));
+          ps.setString(15, trade.exchange());
+          ps.setString(16, trade.tradingsymbol());
+          ps.setBigDecimal(17, trade.stopLoss());
+          ps.setBigDecimal(18, trade.takeProfit());
         });
   }
 
-  /** Paged trades for one run, in sequence order. */
-  public List<Map<String, Object>> findByRun(UUID runId, int limit, int offset) {
+  /**
+   * Paged trades for one run, in sequence order. Optional {@code symbol} (exact tradingsymbol) and
+   * {@code from}/{@code to} (entry-timestamp half-open window {@code [from, to)}) narrow the page;
+   * any of them may be {@code null} to skip that predicate.
+   */
+  public List<Map<String, Object>> findByRun(
+      UUID runId,
+      int limit,
+      int offset,
+      String symbol,
+      OffsetDateTime from,
+      OffsetDateTime to) {
+    StringBuilder sql =
+        new StringBuilder(
+            "SELECT seq, side, qty, entry_ts, entry_price, exit_ts, exit_price, pnl, pnl_pct, "
+                + "exit_reason, bars_held, touch_basis, contributions, exchange, tradingsymbol, "
+                + "stop_loss, take_profit FROM backtest_trades WHERE run_id=?");
+    List<Object> args = new java.util.ArrayList<>();
+    args.add(runId);
+    if (symbol != null && !symbol.isBlank()) {
+      sql.append(" AND tradingsymbol=?");
+      args.add(symbol);
+    }
+    if (from != null) {
+      sql.append(" AND entry_ts >= ?");
+      args.add(from);
+    }
+    if (to != null) {
+      sql.append(" AND entry_ts < ?");
+      args.add(to);
+    }
+    sql.append(" ORDER BY seq LIMIT ? OFFSET ?");
+    args.add(limit);
+    args.add(offset);
     return jdbc.query(
-        "SELECT seq, side, qty, entry_ts, entry_price, exit_ts, exit_price, pnl, pnl_pct, "
-            + "exit_reason, bars_held, touch_basis, contributions FROM backtest_trades "
-            + "WHERE run_id=? ORDER BY seq LIMIT ? OFFSET ?",
+        sql.toString(),
         (rs, n) -> {
           Map<String, Object> row = new LinkedHashMap<>();
           row.put("seq", rs.getInt("seq"));
@@ -72,11 +108,13 @@ public class TradeRepository {
           row.put("barsHeld", rs.getInt("bars_held"));
           row.put("touchBasis", rs.getString("touch_basis"));
           row.put("contributions", parse(rs.getString("contributions")));
+          row.put("exchange", rs.getString("exchange"));
+          row.put("tradingsymbol", rs.getString("tradingsymbol"));
+          row.put("stopLoss", rs.getBigDecimal("stop_loss"));
+          row.put("takeProfit", rs.getBigDecimal("take_profit"));
           return row;
         },
-        runId,
-        limit,
-        offset);
+        args.toArray());
   }
 
   /**

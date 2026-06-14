@@ -494,16 +494,19 @@ each with its target:
   surface in the Phase-39 fold drill-down (regime chips + guard-7 degradation), the
   all-trials states (pruned/failed flagged), and the Pareto front, NOT as dedicated
   leaderboard columns. Adding the columns needs an optimizer `/best` enrichment.
-- **Strategy list has no last-backtest summary** → the E-11 screen-1 "last-backtest
-  Sharpe + 90-day equity sparkline" column is omitted (the list endpoint exposes no
-  per-strategy backtest summary). `/strategies/compare` shows configs only (no
-  latest-backtest-per-version query exists).
-- **Backtest `TradeRow` carries no symbol or SL/target** → chart trade-marks are
-  entry/exit only (filtered client-side over the runId-scoped trades); SL/target marks
-  come from signals (which persist them). The results "View on chart" deep-link omits
-  the symbol (defaults to the persisted chart symbol) since neither the run results nor
-  the trade rows expose the instrument. The trades/signals endpoints do not yet accept
-  `symbol`/`from`/`to` params (read-only param addition deferred).
+- **Strategy list last-backtest summary** → RESOLVED (2026-06-14): the strategy list
+  shows a "Last backtest" column (Sharpe + equity sparkline). Strategy versions carry
+  `currentVersionId`/`publishedVersionId`; the frontend enriches via backtest-service
+  `GET /api/v1/backtests/summary?strategyVersionIds=…` (latest run per version) — the
+  cross-schema join stays client-side, no new cross-service backend dependency.
+  `/strategies/compare` still shows configs only (no per-version compare metrics).
+- **Backtest `TradeRow` symbol + SL/target** → RESOLVED (2026-06-14): each trade row
+  denormalizes the run instrument (`exchange`/`tradingsymbol`) and persists entry-time
+  `stop_loss`/`take_profit` levels (migration `V005`; levels computed parity-safe as a
+  `SignalEvent` side-channel — golden vectors byte-identical). Results expose the run
+  symbol so the "View on chart" deep-link carries the right instrument; the `/trades`
+  endpoint accepts `symbol`/`from`/`to` filters. SL/target chart price-lines remain a
+  display follow-on (data is now available; trades table shows Stop/Target columns).
 - **Per-trade reasoning drill-down** shows the trade's `contributions` map (all the
   `TradeRow` persists), not the full `ReasoningBreakdownPanel`; compare-page
   trade-distribution histograms deferred (need per-run trade fetches).

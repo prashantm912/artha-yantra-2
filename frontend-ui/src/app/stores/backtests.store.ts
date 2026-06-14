@@ -35,6 +35,9 @@ export interface BacktestResults {
   premiumSource?: string;
   universeChecksum?: string | null;
   caveats?: string[];
+  // the run's instrument — lets "View on chart" deep-link the right symbol
+  exchange?: string | null;
+  tradingsymbol?: string | null;
 }
 
 /** One closed/open replay trade row (`GET /{id}/trades`). `contributions` is a per-indicator map. */
@@ -52,6 +55,11 @@ export interface TradeRow {
   barsHeld: number;
   touchBasis?: string | null;
   contributions?: Record<string, unknown> | null;
+  // denormalized run instrument + entry-time protective levels (null when no SL/TP rule)
+  exchange?: string | null;
+  tradingsymbol?: string | null;
+  stopLoss?: string | null;
+  takeProfit?: string | null;
 }
 
 /** One walk-forward fold (`GET /{id}/folds`); `regimeMix` is nullable (BPC degrades cleanly). */

@@ -8,7 +8,11 @@ import { InputTextModule } from 'primeng/inputtext';
 import { SelectModule } from 'primeng/select';
 import { TableModule } from 'primeng/table';
 import { TagModule } from 'primeng/tag';
-import { StrategiesStore } from '../../stores/strategies.store';
+import {
+  StrategiesStore,
+  type BacktestSummary,
+  type StrategySummary,
+} from '../../stores/strategies.store';
 
 const STARTER_TEMPLATE = `schema: strategy-schema/v1
 id: my-strategy
@@ -75,6 +79,15 @@ risk:
       gap: 0.3rem;
       align-items: center;
     }
+    .last-bt {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      white-space: nowrap;
+    }
+    .spark {
+      color: var(--p-primary-color);
+    }
     textarea {
       width: 100%;
       min-height: 14rem;
@@ -120,6 +133,7 @@ risk:
           <th>Name</th>
           <th>Status</th>
           <th>Version</th>
+          <th>Last backtest</th>
           <th>Tags</th>
           <th>Notify</th>
           <th>Updated</th>
@@ -131,6 +145,25 @@ risk:
           <td>{{ s.name }}</td>
           <td><p-tag [value]="s.status" [severity]="severity(s.status)" /></td>
           <td>{{ s.publishedVersion ?? s.currentVersion ?? '—' }}</td>
+          <td>
+            @if (summaryFor(s); as bt) {
+              <div class="last-bt">
+                <span>Sharpe {{ bt.sharpe ?? '—' }}</span>
+                @if (sparkPoints(bt.equity); as pts) {
+                  <svg class="spark" viewBox="0 0 80 22" width="80" height="22" aria-hidden="true">
+                    <polyline
+                      [attr.points]="pts"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                    />
+                  </svg>
+                }
+              </div>
+            } @else {
+              —
+            }
+          </td>
           <td>
             <span class="tags">
               @for (t of s.tags; track t) {
@@ -186,7 +219,7 @@ risk:
       </ng-template>
       <ng-template #emptymessage>
         <tr>
-          <td colspan="6">No strategies yet — create one to get started.</td>
+          <td colspan="8">No strategies yet — create one to get started.</td>
         </tr>
       </ng-template>
     </p-table>
@@ -233,6 +266,31 @@ export class StrategyListPage {
 
   protected severity(status: string): 'success' | 'warn' | 'secondary' {
     return status === 'published' ? 'success' : status === 'archived' ? 'secondary' : 'warn';
+  }
+
+  /** The last-backtest summary for a row, keyed by its published-or-current version id. */
+  protected summaryFor(s: StrategySummary): BacktestSummary | null {
+    const id = s.publishedVersionId ?? s.currentVersionId;
+    return id ? (this.store.summaries()[id] ?? null) : null;
+  }
+
+  /** A decorative `<polyline>` points string for the equity sparkline (display-only scaling). */
+  protected sparkPoints(equity: string[]): string {
+    if (!equity || equity.length < 2) {
+      return '';
+    }
+    const nums = equity.map(Number);
+    const min = Math.min(...nums);
+    const span = Math.max(...nums) - min || 1;
+    const w = 80;
+    const h = 22;
+    return nums
+      .map((v, i) => {
+        const x = (i / (nums.length - 1)) * w;
+        const y = h - ((v - min) / span) * h;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(' ');
   }
 
   protected edit(id: string): void {

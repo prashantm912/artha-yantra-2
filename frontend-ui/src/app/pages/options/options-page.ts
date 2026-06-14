@@ -182,7 +182,7 @@ import { OptionsStore, type OptionStrikeRow } from '../../stores/options.store';
       </ng-template>
       <ng-template #emptymessage>
         <tr>
-          <td colspan="7">No chain — pick an underlying with a live (mock) options chain.</td>
+          <td colspan="7">No chain — pick an underlying with a live options chain.</td>
         </tr>
       </ng-template>
     </p-table>

@@ -1,7 +1,14 @@
 import { computed, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
-import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
+import {
+  patchState,
+  signalStore,
+  withComputed,
+  withHooks,
+  withMethods,
+  withState,
+} from '@ngrx/signals';
 
 /** Gateway-session auth states. */
 export type AuthStatus = 'unknown' | 'checking' | 'authenticated' | 'anonymous';
@@ -31,7 +38,11 @@ function initialTheme(): 'dark' | 'light' {
 }
 
 function applyTheme(theme: 'dark' | 'light'): void {
-  document.documentElement.classList.toggle('ay-light', theme === 'light');
+  const root = document.documentElement;
+  // .ay-dark drives PrimeNG's darkModeSelector (dark colour scheme); .ay-light flips the
+  // custom --ay-* tokens to the light surfaces. Keep them mutually exclusive.
+  root.classList.toggle('ay-dark', theme === 'dark');
+  root.classList.toggle('ay-light', theme === 'light');
 }
 
 /**
@@ -117,8 +128,7 @@ export const SessionStore = signalStore(
     /** Seeds the mock-mode banner from system status (Caffeine-cached server-side). */
     refreshSystemStatus(): void {
       http.get<{ kite?: { session?: string } }>('/api/v1/system/status').subscribe({
-        next: (status) =>
-          patchState(store, { mockMode: status?.kite?.session === 'MOCK' }),
+        next: (status) => patchState(store, { mockMode: status?.kite?.session === 'MOCK' }),
         error: () => undefined,
       });
     },

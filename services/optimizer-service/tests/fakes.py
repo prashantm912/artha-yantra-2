@@ -118,6 +118,9 @@ class FakeStrategy:
     def version_config(self, strategy_id: str, version: str) -> dict[str, Any]:
         return self._config
 
+    def resolve(self, strategy_id: str, version: str | None) -> tuple[str, dict[str, Any]]:
+        return (version or "1.0.0"), self._config
+
     def create_draft(self, strategy_id: str, config: dict[str, Any], notes: str) -> dict[str, Any]:
         self.drafts.append({"strategyId": strategy_id, "config": config, "notes": notes})
         return {"version": "1.1.0", "status": "draft"}

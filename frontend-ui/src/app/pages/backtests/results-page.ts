@@ -183,7 +183,10 @@ const BENCH_METRICS: MetricDef[] = [
                 <tr [pSelectableRow]="t" style="height: 40px">
                   <td>{{ t.seq }}</td>
                   <td>
-                    <p-tag [value]="t.side" [severity]="t.side === 'LONG' ? 'success' : 'danger'" />
+                    <p-tag
+                      [value]="t.side"
+                      [severity]="t.side === 'LONG' || t.side === 'BUY' ? 'success' : 'danger'"
+                    />
                   </td>
                   <td class="mono">{{ price(t.entryPrice) }}</td>
                   <td class="mono">{{ t.exitPrice ? price(t.exitPrice) : '—' }}</td>

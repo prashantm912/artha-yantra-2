@@ -26,6 +26,20 @@ class StrategyClient:
         body = resp.json()
         return body.get("config", body)
 
+    def resolve(
+        self, strategy_id: str, version: str | None
+    ) -> tuple[str, dict[str, Any]]:
+        """Resolve a strategy version to ``(version, config)`` (§D.5). An explicit version is
+        fetched directly; an omitted version pins the registry's current resolution (latest
+        published, else latest draft) at submission, mirroring backtest-service's
+        StrategyVersionClient so a sweep is never "whatever is current"."""
+        if version:
+            return version, self.version_config(strategy_id, version)
+        resp = self._client.get(f"{self._base}/api/v1/strategies/{strategy_id}")
+        resp.raise_for_status()
+        body = resp.json()
+        return body["version"], body.get("config", {})
+
     def create_draft(
         self, strategy_id: str, config: dict[str, Any], notes: str
     ) -> dict[str, Any]:

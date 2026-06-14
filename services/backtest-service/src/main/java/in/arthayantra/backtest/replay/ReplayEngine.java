@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.IntConsumer;
 import org.springframework.stereotype.Component;
 
 /**
@@ -54,10 +55,41 @@ public class ReplayEngine {
       BigDecimal initialEquity,
       CostConfig costs,
       boolean oneMinuteCovered) {
+    return replay(
+        definition, exchange, tradingsymbol, primaryOneMinute, contextCandles, initialEquity, costs,
+        oneMinuteCovered, null);
+  }
+
+  /**
+   * As {@link #replay} but reports replay completion 0..100 to {@code replayProgress} (D17b; nullable),
+   * throttled, mapping signal generation onto 0..60% and the trade/equity loop onto 60..100%. The
+   * callback is a pure side-channel — trades/equity/metrics are unchanged (the parity gate holds).
+   */
+  public ReplayResult replay(
+      StrategyDefinition definition,
+      String exchange,
+      String tradingsymbol,
+      List<EngineCandle> primaryOneMinute,
+      Map<SeriesKey, List<EngineCandle>> contextCandles,
+      BigDecimal initialEquity,
+      CostConfig costs,
+      boolean oneMinuteCovered,
+      IntConsumer replayProgress) {
+
+    int barCount = primaryOneMinute.size();
+    int sigStep = Math.max(1, barCount / 20);
+    IntConsumer signalProgress =
+        replayProgress == null || barCount == 0
+            ? null
+            : i -> {
+                if (i % sigStep == 0) {
+                  replayProgress.accept(i * 60 / barCount);
+                }
+              };
 
     List<SignalEvent> signals =
         new TickwiseGoldenRunner(definition, exchange, tradingsymbol)
-            .run(primaryOneMinute, contextCandles);
+            .run(primaryOneMinute, contextCandles, signalProgress);
 
     FillTiming timing =
         ReferencePriceSelector.defaultFor(
@@ -96,7 +128,11 @@ public class ReplayEngine {
     long barsInPosition = 0;
     int seq = 0;
 
+    int fillStep = Math.max(1, barCount / 12);
     for (int i = 0; i < primaryOneMinute.size(); i++) {
+      if (replayProgress != null && i % fillStep == 0) {
+        replayProgress.accept(60 + i * 40 / barCount);
+      }
       EngineCandle bar = primaryOneMinute.get(i);
 
       Leg closing = closeAt.get(i);

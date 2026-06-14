@@ -87,7 +87,9 @@ export class WatchlistWidget {
     inject(DestroyRef).onDestroy(() => this.market.untrack(this.tracked));
     this.http.get<{ items: WatchlistView[] }>('/api/v1/watchlists').subscribe({
       next: (resp) => {
-        const first = resp.items?.[0];
+        // Pick the first watchlist that HAS instruments, not just the alphabetically-first one — a
+        // newly-created populated list otherwise shows empty behind an empty default (D16).
+        const first = resp.items?.find((w) => w.items.length > 0) ?? resp.items?.[0];
         const its = first?.items ?? [];
         this.items.set(its);
         this.tracked = its.map((it) => canonicalKey(it.exchange, it.tradingsymbol));

@@ -14,7 +14,7 @@ import redis
 TRIALS_STREAM = "jobs.backtest.trials"
 RESULTS_STREAM = "optimizations.results"
 RESULTS_GROUP = "cg-optuna"
-PROGRESS_PREFIX = "jobs."
+PROGRESS_CHANNEL = "jobs.progress"
 
 
 class TrialDispatcher:
@@ -55,8 +55,10 @@ class TrialDispatcher:
         return out
 
     def publish_progress(self, job_id: str, payload: str) -> None:
-        """Publishes a sweep-progress delta on the per-job channel (gateway relays to STOMP)."""
-        self._redis.publish(f"{PROGRESS_PREFIX}{job_id}", payload)
+        """Publishes a sweep-progress delta on the single ``jobs.progress`` channel (D10); the
+        payload's own ``jobId`` lets the gateway-relayed browser fan out per job. ``job_id`` is kept
+        for caller symmetry with the backtest-service publisher."""
+        self._redis.publish(PROGRESS_CHANNEL, payload)
 
 
 def _decode(value: Any) -> Any:

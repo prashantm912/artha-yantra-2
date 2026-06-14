@@ -18,7 +18,7 @@ import {
 } from 'lightweight-charts';
 import { type Bar } from './datafeed/datafeed-core';
 import { type MarkDto } from './datafeed/marks';
-import { fromChartTime, toChartTime } from './datafeed/timestamp';
+import { IST_OFFSET_SECONDS, fromChartTime, toChartTime } from './datafeed/timestamp';
 
 const SPAN_MS: Record<string, number> = {
   '1m': 60_000,
@@ -58,6 +58,7 @@ export class LwcChartBinding {
   private readonly chart: IChartApi;
   private readonly candles: ISeriesApi<'Candlestick'>;
   private readonly volume: ISeriesApi<'Histogram'>;
+  private readonly precision: number;
   private bars: Bar[] = [];
   private readonly overlays = new Map<
     string,
@@ -72,6 +73,7 @@ export class LwcChartBinding {
     private interval: string,
     price: PriceFormat,
   ) {
+    this.precision = price.precision;
     const css = getComputedStyle(el);
     const token = (name: string, fallback: string): string =>
       css.getPropertyValue(name).trim() || fallback;
@@ -230,7 +232,9 @@ export class LwcChartBinding {
     const overlayKeys = [...this.overlays.keys()];
     return this.bars.slice(-limit).map((b) => {
       const row: Record<string, string> = {
-        time: new Date(b.time).toISOString(),
+        // IST wall-clock to match the chart x-axis (D-charts-2): b.time is a real UTC instant; shift
+        // by +05:30 before formatting so the sliced ISO string reads the same time the axis shows.
+        time: new Date(b.time + IST_OFFSET_SECONDS * 1000).toISOString(),
         open: b.open,
         high: b.high,
         low: b.low,
@@ -239,7 +243,8 @@ export class LwcChartBinding {
       };
       for (const key of overlayKeys) {
         const v = this.overlays.get(key)!.byMs.get(b.time);
-        row[key] = v == null ? '' : String(v);
+        // engine overlays arrive as raw floats — round to the price precision (D-charts-2).
+        row[key] = v == null ? '' : v.toFixed(this.precision);
       }
       return row;
     });

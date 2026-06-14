@@ -378,3 +378,28 @@ Re-test notes:
 - **D4** (monaco still bundled → worker fallback), **D5/D15** (unnamed buttons a11y),
   **D12** (no results link on Jobs row), **D16** (dashboard watchlist widget shows empty),
   **D-charts-2** (table tz/rounding) — frontend follow-ups.
+
+---
+
+## Follow-up fixes — part 2 (2026-06-14, branch `fix/live-defects-followups`)
+
+The remaining open defects above, fixed + re-tested live (3 services rebuilt + redeployed:
+frontend-ui, backtest-service, optimizer-service; live profile, only the changed services recreated).
+
+| # | Sev | Fix | Files | Re-test result |
+|---|-----|-----|-------|----------------|
+| **D10** | S2 | Job progress was published per-job on `jobs.<jobId>`, but the gateway folds every `/topic/jobs/*` subscription onto the SINGLE `jobs.progress` Redis channel (the design + all three frontend stores agree). Nothing published there → no frame ever reached the browser. Both publishers now emit on `jobs.progress` (each frame carries its `jobId`; the client fans out). No gateway/frontend change. | bt `ProgressPublisher`/`Streams.java`; opt `streams.py` | ✅ Quick-backtest drawer advances queued→completed(100%) + renders metrics (Sharpe −74.05, 35 trades). |
+| **D17b** | S3 | Coarse 40→80→100 progress. Throttled intra-replay progress over the 40–80 band via no-op-default overloads on `TickwiseGoldenRunner.run` + `ReplayEngine.replay` (signal-gen→0–60%, fill loop→60–100%). | strategy-engine `TickwiseGoldenRunner`; bt `ReplayEngine`/`BacktestRunner` | ✅ `GoldenDeterminismTest` 5/5 byte-match (parity preserved). Post-D17 the replay is so fast (~3 s) the bar no longer visibly sticks. |
+| **D1** | S2 | Market cards never re-fetched an empty (uncached) index. Now a BOUNDED re-poll (5×3 s) fills it in when the warm resolves; on exhaustion it settles. | `market-overview-widget.ts` | ✅ NIFTY/BANK/VIX render; an uncached index self-heals without a manual reload. |
+| **D2** | DATA | `BSE:SENSEX` is not in the instrument universe (only NSE/NFO/BFO) and can't warm. The card now shows an explicit **"n/a"** once the warm retries exhaust, instead of a perpetual "—" (reversible — auto-corrects if BSE is ever synced). | `market-overview-widget.ts` | ✅ SENSEX shows "n/a". |
+| **D4** | S3 | The `doValidation` console error was a STALE-CACHE artifact — source has no monaco import (textarea/LCS fallbacks since 92a4be4). Removed the dead `monaco-editor`/`monaco-yaml` deps. | `package.json` (+lock) | ✅ No `doValidation`/monaco error on the fresh build. |
+| **D5** | S4 | Not a real defect — every dashboard button already has an accessible name (the `read_page` "unnamed ref_20" was the labelled "Connect Kite" button; a DOM scan found 0 unnamed buttons). | — | ✅ All 10 buttons named. |
+| **D15** | S4→S3 | Root cause: **PrimeIcons CSS was never bundled** (no `primeicons` import anywhere) → ALL `pi-*` icons missing app-wide; icon-only buttons rendered as blank "white squares". Added `node_modules/primeicons/primeicons.css` to angular.json styles. | `angular.json` | ✅ Icons render app-wide (top bar, collapse chevrons, eye/cancel/refresh/chart-bar). |
+| **D12** | S3 | Completed BACKTEST rows had no results action. Added a "Results" button (visible label + `pi-eye`) that lazily resolves the run id from the job detail (the LIST omits `resultRef`) and routes to `/backtests/{runId}`. | `jobs-page.ts` | ✅ Button on every completed BACKTEST row → opens the run results page (verified routing to `/backtests/{runId}`). |
+| **D16** | S3 | Watchlist widget showed the alphabetically-first watchlist even when empty. Now picks the first watchlist that HAS instruments. | `watchlist-widget.ts` | ✅ Dashboard widget shows NSE:RELIANCE. |
+| **D-charts-2** | S3 | "View as table" rendered the bucket time as UTC (chart axis is IST) + unrounded overlay floats. Table time now IST-shifted (matches the axis); overlay values rounded to the price precision. | `lwc-chart-binding.ts` | ✅ Verified vs real data: bucket `09:15:00+05:30` → table `09:15:00` (was `03:45:00`). |
+| **D7** | S3 | Frontend default is already sane (`NSE:NIFTY 50`/`1d`); the bogus `NFO:BSE26AUG3300CE@15m` fetch was STALE localStorage, not a code default — fresh `/charts` fetches only NIFTY 50 (200, no 400). The backend `continuous=1`-for-options edge case is left unchanged (deliberate per B-18/B-19; not reproduced on clean state, Kite rule unconfirmed). | — (no code change) | ✅ Fresh `/charts` clean. |
+
+Build gates: frontend `lint`/`test:ci` (121)/`build`; optimizer `pytest` (50) + `ruff`; maven compile +
+`GoldenDeterminismTest` 5/5. Bonus: discovered + fixed PrimeIcons never loading (the real root cause
+of D15, which would also have hidden D12's icon).

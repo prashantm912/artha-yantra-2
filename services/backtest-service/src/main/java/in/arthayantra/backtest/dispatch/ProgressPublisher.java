@@ -51,7 +51,7 @@ public class ProgressPublisher {
       frame.put("jobId", jobId.toString());
       frame.put("status", status);
       frame.put("progress", progress);
-      redis.convertAndSend(Streams.progressChannel(jobId), objectMapper.writeValueAsString(frame));
+      redis.convertAndSend(Streams.PROGRESS_CHANNEL, objectMapper.writeValueAsString(frame));
     } catch (Exception e) {
       log.warn("progress publish failed for {}: {}", jobId, e.getMessage());
     }

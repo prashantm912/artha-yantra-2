@@ -30,6 +30,10 @@ const INDICES: IndexDef[] = [
   { key: 'NSE:INDIA VIX', label: 'INDIA VIX' },
 ];
 
+/** Bounded re-poll for an index whose daily isn't cached on first paint (D1). */
+const MAX_WARM_RETRIES = 5;
+const WARM_RETRY_MS = 3000;
+
 /**
  * MarketOverview widget (E-2, Phase 35): NIFTY / BANK NIFTY / SENSEX / INDIA VIX cards with the
  * live last price (from the MarketStore tick map), a sign-only ▲/▼ vs the prior close (no float
@@ -104,43 +108,70 @@ export class MarketOverviewWidget {
 
   protected readonly series = signal<Record<string, SparkPoint[]>>({});
   private readonly prevClose = signal<Record<string, string>>({});
+  // indices whose daily never warmed after the bounded retries (e.g. BSE:SENSEX — not in the
+  // instrument universe). Rendered as an explicit "n/a" instead of a perpetual "—" (D2).
+  private readonly unavailable = signal<Set<string>>(new Set());
 
   // live tick prices, reactive to the store
   private readonly ticks = computed(() => this.market.ticks());
 
+  private readonly retryTimers = new Set<ReturnType<typeof setTimeout>>();
+
   constructor() {
     const keys = INDICES.map((i) => i.key);
     this.market.track(keys);
-    inject(DestroyRef).onDestroy(() => this.market.untrack(keys));
+    inject(DestroyRef).onDestroy(() => {
+      this.market.untrack(keys);
+      this.retryTimers.forEach(clearTimeout);
+    });
     const to = new Date();
     const from = new Date(to.getTime() - 70 * 86_400_000);
     for (const idx of INDICES) {
-      const sep = idx.key.indexOf(':');
-      const params = new HttpParams()
-        .set('exchange', idx.key.slice(0, sep))
-        .set('tradingsymbol', idx.key.slice(sep + 1))
-        .set('interval', '1d')
-        .set('from', from.toISOString())
-        .set('to', to.toISOString())
-        .set('limit', 60);
-      this.http.get<{ items: Candle[] }>('/api/v1/market/candles', { params }).subscribe({
-        next: (resp) => {
-          const items = resp.items ?? [];
-          if (items.length === 0) {
-            return;
-          }
-          // decimal-string→number conversion happens HERE, at the chart render boundary only (E-10.2)
-          const pts: SparkPoint[] = items.map((c) => ({
-            time: Math.floor(Date.parse(c.bucket) / 1000),
-            value: Number(c.close),
-          }));
-          this.series.update((s) => ({ ...s, [idx.key]: pts }));
-          const prior = items[items.length - 2]?.close ?? items[items.length - 1].close;
-          this.prevClose.update((p) => ({ ...p, [idx.key]: prior }));
-        },
-        error: () => undefined,
-      });
+      this.loadIndex(idx, from, to, 0);
     }
+  }
+
+  /**
+   * Fetch one index's daily series. The cache-first warm on market-data can still be in flight on a
+   * cold cache, so an empty response is re-polled a BOUNDED number of times (D1) — a freshly-warmed
+   * index then fills in without a manual reload. Bounded so an index with no data settles on "—"
+   * instead of polling forever.
+   */
+  private loadIndex(idx: IndexDef, from: Date, to: Date, attempt: number): void {
+    const sep = idx.key.indexOf(':');
+    const params = new HttpParams()
+      .set('exchange', idx.key.slice(0, sep))
+      .set('tradingsymbol', idx.key.slice(sep + 1))
+      .set('interval', '1d')
+      .set('from', from.toISOString())
+      .set('to', to.toISOString())
+      .set('limit', 60);
+    this.http.get<{ items: Candle[] }>('/api/v1/market/candles', { params }).subscribe({
+      next: (resp) => {
+        const items = resp.items ?? [];
+        if (items.length === 0) {
+          if (attempt < MAX_WARM_RETRIES) {
+            const timer = setTimeout(() => {
+              this.retryTimers.delete(timer);
+              this.loadIndex(idx, from, to, attempt + 1);
+            }, WARM_RETRY_MS);
+            this.retryTimers.add(timer);
+          } else {
+            this.unavailable.update((s) => new Set(s).add(idx.key));
+          }
+          return;
+        }
+        // decimal-string→number conversion happens HERE, at the chart render boundary only (E-10.2)
+        const pts: SparkPoint[] = items.map((c) => ({
+          time: Math.floor(Date.parse(c.bucket) / 1000),
+          value: Number(c.close),
+        }));
+        this.series.update((s) => ({ ...s, [idx.key]: pts }));
+        const prior = items[items.length - 2]?.close ?? items[items.length - 1].close;
+        this.prevClose.update((p) => ({ ...p, [idx.key]: prior }));
+      },
+      error: () => undefined,
+    });
   }
 
   /** Live last price, falling back to the latest daily close; "—" when neither is known. */
@@ -150,7 +181,10 @@ export class MarketOverviewWidget {
       return formatDecimal(live, 2);
     }
     const pts = this.series()[key];
-    return pts && pts.length ? formatDecimal(String(pts[pts.length - 1].value), 2) : '—';
+    if (pts && pts.length) {
+      return formatDecimal(String(pts[pts.length - 1].value), 2);
+    }
+    return this.unavailable().has(key) ? 'n/a' : '—';
   }
 
   /** Direction sign vs the prior close — sign comparison only, never float arithmetic (E-6). */

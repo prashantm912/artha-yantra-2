@@ -335,15 +335,22 @@ Re-test notes:
   UI never exercised before (D14 blocked all sweeps). **Next:** read `BacktestRunner` past the 40%
   publish (fold loop / `optimizations.results` emit), add progress granularity, repro in an IT. The
   2 stuck trial threads are inert (2 of 14 workers) and clear on the next `backtest-service` restart.
-  - D17 precise localization (after reading the code): the hang is in `BacktestRunner.run` between
-    `checkpoint(...,40)` (line 142) and `checkpoint(...,80)` (line 154) — the core
-    `replayEngine.replay(...)` call (lines 144-153), which is BEFORE the fold logic and the trial
-    emit (so walk-forward / ask-tell are NOT the cause). Key clue: solo `/backtests/run` on **v1.0.0**
-    (no `optimize` block) replays fine; trials run **v1.1.0** (with the `optimize` block + the
-    optimizer's `paramsOverride` applied) and hang. Suspect the param-override application or the
-    `optimize` block yielding a definition the replay engine loops on. Next: inspect how
-    `paramsOverride` is applied to the resolved config + the replay loop for the overridden indicator;
-    add intra-replay progress + a cancel check; build a repro IT.
+  - **D17 CORRECTED (downgraded S2 hang -> S3 slow + poor progress) after a thread dump + status
+    recheck.** It is NOT a hang/deadlock: both trials eventually **completed** (`status=completed,
+    progress=100`) after ~1336 s (~22 min) wall each; a `kill -3` thread dump showed all 14
+    `bt-worker` threads idle (parking at `WorkerPool.loop:121`) with two of them having burned
+    `cpu=322 s` and `cpu=378 s` — i.e. the trials were CPU/work-heavy, then finished. Both trial
+    runs are **full-window** (`foldContext=false`, `fold_metrics` NULL) so walk-forward is NOT the
+    cause either; the optimizer recorded trial 0's objective (`sharpe 0.89`) and trial 1's backtest
+    finished (`sharpe 5.85`, 73 trades) — its ledger row only stayed `RUNNING` because the sweep was
+    cancelled mid-flight. So the optimizer is **functionally correct**; the real issues are:
+    (a) **per-trial latency** — ~22 min wall / ~350 s CPU on a 60-day 1m window vs the 30-day solo's
+    ~87 s; a multi-trial sweep on minute data would take hours. The ~970 s of non-CPU wait per trial
+    isn't pinned (candidates: the runner's default 60-day window vs the solo's 30, 2x parallel
+    contention, or `warmSeries` HTTP waits). Needs single-variable controlled runs (~20 min each) to
+    isolate. (b) **progress UX** — `progress` jumps 40 -> 80 -> 100 in coarse steps, so it sits at 40%
+    for the whole replay and looks hung (same family as D10). Next: add intra-replay progress; isolate
+    the latency with a controlled solo run on the same 60-day window + a known period.
 - **D1** (dashboard cards don't reactively update after async warm) — reactive/poll fix.
 - **D2** (SENSEX / BSE cash not in instruments), **D7** (charts default placeholder fetch + Kite
   `continuous` interval) — market-data/Kite-side.

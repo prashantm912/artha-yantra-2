@@ -72,6 +72,15 @@ export interface DiffResult {
   yamlTo: string;
 }
 
+/** The Phase-44 resolved universe label (`index_constituents` / `futures_of_underlying`). */
+export interface UniverseInfo {
+  mode: string;
+  asOf: string | null;
+  constituentCount: number;
+  checksum: string;
+  survivorshipCaveat: string | null;
+}
+
 interface StrategiesState {
   list: StrategySummary[];
   loading: boolean;
@@ -88,6 +97,7 @@ interface StrategiesState {
   createdId: string | null;
   versions: VersionRow[];
   diff: DiffResult | null;
+  universe: UniverseInfo | null;
 }
 
 /**
@@ -113,6 +123,7 @@ export const StrategiesStore = signalStore(
     createdId: null,
     versions: [],
     diff: null,
+    universe: null,
   }),
   withMethods((store, http = inject(HttpClient)) => ({
     loadList(): void {
@@ -152,6 +163,16 @@ export const StrategiesStore = signalStore(
             lastSaved: null,
           }),
         error: () => undefined,
+      });
+      this.loadUniverse(id);
+    },
+
+    /** Resolve the strategy's pinned universe (Phase 44 editor label); null for explicit universes. */
+    loadUniverse(id: string): void {
+      http.get<UniverseInfo>(`/api/v1/strategies/${id}/universe`).subscribe({
+        next: (universe) =>
+          patchState(store, { universe: universe.mode === 'explicit' ? null : universe }),
+        error: () => patchState(store, { universe: null }),
       });
     },
 

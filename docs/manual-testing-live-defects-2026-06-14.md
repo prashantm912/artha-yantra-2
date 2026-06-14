@@ -351,6 +351,27 @@ Re-test notes:
     isolate. (b) **progress UX** — `progress` jumps 40 -> 80 -> 100 in coarse steps, so it sits at 40%
     for the whole replay and looks hung (same family as D10). Next: add intra-replay progress; isolate
     the latency with a controlled solo run on the same 60-day window + a known period.
+  - **D17 ROOT-CAUSED + FIXED (2026-06-14) — replay was O(n²) in bars.** Controlled solo, pre-warmed
+    runs of the seed strategy (RELIANCE 1m) isolated it: **30-day = 87 s; 60-day = 387 s** — i.e.
+    **2× the bars → 4.5× wall / ~3.25× CPU**, super-linear (a year of 1m would be ~hours; sweeps
+    impractical). Two mid-run `kill -3` thread dumps caught the worker **RUNNABLE on-CPU** (not
+    blocked/IO/lock; zero market-data fetch) in
+    `BigDecimal.divide → DecimalNum.plus → AbstractEMAIndicator.calculate →
+    RecursiveCachedIndicator.prefillMissingValues → CachedBuffer.prefillUntil → IndicatorBank.valueAt
+    → TickwiseGoldenRunner.run → ReplayEngine.replay`. **Root cause:** `TickwiseGoldenRunner.run`
+    rebuilt the whole `IndicatorBank` (fresh ta4j indicators, COLD cache) **inside the per-bar loop**
+    (1m path, also per-bucket/per-day paths), so bar *i* re-prefilled the entire 0..i history from
+    scratch → Σi = n(n+1)/2. ta4j's DecimalNum-32 (deliberate for golden/live parity) is only the
+    constant factor; the O(n²) was ours. **Fix:** hoist the bank build ONCE before the loop — the
+    `provider` series are stable instances that grow via `append`, so the bound indicators stay warm
+    (O(n)). Numerically identical (indicators are pure functions of series+index): `GoldenDeterminismTest`
+    5/5 still byte-match the frozen vectors, full strategy-engine suite 94/94 green. The 2× parallel
+    contention seen in the sweep was a *symptom* (two O(n²) replays sharing cores), not the cause; it
+    disappears once each replay is O(n). **Measured after redeploy:** the same 60-day solo run dropped
+    to **5.7 s replay wall (was 387 s — ~68× faster)** with **byte-identical results on real data**
+    (69 trades; sharpe −152.160913, return −0.037042, drawdown 0.037042 all equal to the pre-fix run) —
+    real-data parity on top of the frozen golden vectors. (b) coarse progress 40→80→100 remains a
+    separate UX follow-up.
 - **D1** (dashboard cards don't reactively update after async warm) — reactive/poll fix.
 - **D2** (SENSEX / BSE cash not in instruments), **D7** (charts default placeholder fetch + Kite
   `continuous` interval) — market-data/Kite-side.

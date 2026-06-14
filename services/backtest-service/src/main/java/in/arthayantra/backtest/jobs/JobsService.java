@@ -3,11 +3,13 @@ package in.arthayantra.backtest.jobs;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.JsonNode;
+import in.arthayantra.backtest.client.MarketDataClient;
 import in.arthayantra.backtest.client.StrategyVersionClient;
 import in.arthayantra.backtest.dispatch.JobStreamDispatcher;
 import in.arthayantra.backtest.dispatch.ProgressPublisher;
 import in.arthayantra.backtest.dispatch.Streams;
 import in.arthayantra.backtest.regime.BenchmarkSeries;
+import in.arthayantra.backtest.regime.RegimeLabeler;
 import in.arthayantra.backtest.regime.RegimePreflight;
 import in.arthayantra.backtest.replay.PreflightCoverage;
 import java.time.OffsetDateTime;
@@ -25,6 +27,10 @@ import org.springframework.stereotype.Service;
 @Service
 public class JobsService {
 
+  // Calendar-day lookback for warming the benchmark daily series — generously covers the
+  // WARMUP_SESSIONS trading sessions the regime pre-flight needs strictly before `from`.
+  private static final int BENCHMARK_WARMUP_LOOKBACK_DAYS = RegimeLabeler.WARMUP_SESSIONS * 2;
+
   private final JobRepository repository;
   private final JobStreamDispatcher dispatcher;
   private final StrategyVersionClient versions;
@@ -34,6 +40,7 @@ public class JobsService {
   private final StressGuard stressGuard;
   private final StringRedisTemplate redis;
   private final ObjectMapper objectMapper;
+  private final MarketDataClient marketData;
 
   /** Wires the collaborators. */
   public JobsService(
@@ -45,7 +52,8 @@ public class JobsService {
       RegimePreflight regimePreflight,
       StressGuard stressGuard,
       StringRedisTemplate redis,
-      ObjectMapper objectMapper) {
+      ObjectMapper objectMapper,
+      MarketDataClient marketData) {
     this.repository = repository;
     this.dispatcher = dispatcher;
     this.versions = versions;
@@ -55,6 +63,7 @@ public class JobsService {
     this.stressGuard = stressGuard;
     this.redis = redis;
     this.objectMapper = objectMapper;
+    this.marketData = marketData;
   }
 
   /** The outcome of a cancel request — 204 (was queued) vs 202 (running, observed at checkpoint). */
@@ -168,13 +177,27 @@ public class JobsService {
     JsonNode instruments = config.path("universe").path("instruments");
     if (instruments.isArray() && !instruments.isEmpty()) {
       JsonNode first = instruments.get(0);
-      preflight.check(
-          first.path("exchange").asText(), first.path("tradingsymbol").asText(), from, to);
+      String exch = first.path("exchange").asText();
+      String sym = first.path("tradingsymbol").asText();
+      // Auto-warm the primary 1m series into the shared store (cache-first, best-effort) so the
+      // coverage check below passes on a fresh/uncovered window instead of 422-ing DATA_GAP —
+      // replay always reads 1m for the primary instrument regardless of the strategy timeframe.
+      marketData.warm(exch, sym, "1m", from, to);
+      preflight.check(exch, sym, from, to);
     }
     // index/options/futures universes resolve at submission in Stage F (no primary check here), but
     // the benchmark gate runs for every windowed run with a resolvable benchmark.
     try {
-      regimePreflight.check(BenchmarkSeries.resolve(config), from);
+      BenchmarkSeries benchmark = BenchmarkSeries.resolve(config);
+      // Warm the benchmark daily series with enough lookback for the WARMUP_SESSIONS regime depth
+      // strictly before `from`, then run the same gate the worker re-checks for fold attribution.
+      marketData.warm(
+          benchmark.exchange(),
+          benchmark.tradingsymbol(),
+          "1d",
+          from.minusDays(BENCHMARK_WARMUP_LOOKBACK_DAYS),
+          to);
+      regimePreflight.check(benchmark, from);
     } catch (IllegalArgumentException malformedBenchmark) {
       // a malformed benchmark string is a schema-validation concern (rejected upstream), not a
       // coverage failure — never block submission on it here.

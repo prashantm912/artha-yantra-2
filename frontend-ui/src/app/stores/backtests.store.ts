@@ -33,6 +33,7 @@ export interface BacktestResults {
   dataHash?: string;
   seed?: number;
   premiumSource?: string;
+  universeChecksum?: string | null;
   caveats?: string[];
 }
 

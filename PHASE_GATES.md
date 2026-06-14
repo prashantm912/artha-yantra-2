@@ -55,9 +55,11 @@ exercised on the running mock stack / Playwright e2e — runs via ci-e2e on the 
       documented in the manual guide / settlement caveat)
 - [x] Universe pinning — submission-time resolve (REST-only) copied into `jobs.request`
       + checksum; publish guard lifted; editor "Published Universe (as of …)" label `[44]`
-      (impl; persisting `universe_checksum` onto run rows + leaderboard mismatch flag = parking)
+      (impl; `universe_checksum` now persisted onto `backtest_runs` rows + echoed in `/results`
+      + the `/backtests/compare` universe-checksum mismatch banner beside `dataHash` — follow-on)
 - [x] Trade journal — `journal_entries` + CRUD + drawer (signals surface) + `/journal`
-      review route `[44A]` (impl; paper/backtest-trade drawer entry points = thin follow-on)
+      review route `[44A]` (impl; paper-position/closed-trade + backtest-trade drawer entry points
+      now wired — follow-on)
 
 **Cross-cutting invariants (impl):**
 

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import in.arthayantra.backtest.analytics.BenchmarkAnalytics;
 import in.arthayantra.backtest.analytics.BenchmarkAnalyzer;
+import in.arthayantra.backtest.client.MarketDataClient;
 import in.arthayantra.backtest.client.StrategyVersionClient;
 import in.arthayantra.backtest.client.StrategyVersionClient.ResolvedVersion;
 import in.arthayantra.backtest.dispatch.JobCancelledException;
@@ -62,6 +63,7 @@ public class BacktestRunner {
   private final RegimePreflight regimePreflight;
   private final BenchmarkAnalyzer benchmarkAnalyzer;
   private final TrialResultPublisher trialResults;
+  private final MarketDataClient marketData;
 
   /** Wires the replay collaborators. */
   public BacktestRunner(
@@ -77,7 +79,8 @@ public class BacktestRunner {
       RegimeLabeler regimeLabeler,
       RegimePreflight regimePreflight,
       BenchmarkAnalyzer benchmarkAnalyzer,
-      TrialResultPublisher trialResults) {
+      TrialResultPublisher trialResults,
+      MarketDataClient marketData) {
     this.versions = versions;
     this.candleReader = candleReader;
     this.replayEngine = replayEngine;
@@ -91,6 +94,7 @@ public class BacktestRunner {
     this.regimePreflight = regimePreflight;
     this.benchmarkAnalyzer = benchmarkAnalyzer;
     this.trialResults = trialResults;
+    this.marketData = marketData;
   }
 
   /** Runs the job; throws {@link JobCancelledException} on cancel and other exceptions on failure. */
@@ -123,6 +127,13 @@ public class BacktestRunner {
             ? request.get("initialCapital").decimalValue()
             : DEFAULT_CAPITAL;
     long seed = request.path("seed").asLong(0);
+
+    // Auto-warm every series this run reads (primary 1m + each context (instrument, timeframe) +
+    // the benchmark daily) into the shared store via market-data's cache-first GET BEFORE the reads
+    // below. Backtest replay never fetches on demand, so without this a fresh/uncovered window reads
+    // empty. Best-effort (each call swallows its own failure); submission already warmed the two
+    // pre-flight series, this covers the context series too.
+    warmSeries(definition, signal, config, from, to);
 
     List<EngineCandle> primary1m =
         candleReader.read(signal.exchange(), signal.tradingsymbol(), "1m", from, to);
@@ -220,6 +231,7 @@ public class BacktestRunner {
             request.has("paramsOverride") ? request.get("paramsOverride") : null,
             seed,
             dataHash,
+            request.path("universeChecksum").asText(null),
             engineVersion(resolved),
             premiumSource,
             folds,
@@ -320,6 +332,38 @@ public class BacktestRunner {
             ? (ArrayNode) full.get("caveats")
             : full.putArray("caveats");
     caveats.add(caveat);
+  }
+
+  /**
+   * Best-effort cache-first warm of every series the replay will read: primary 1m, each indicator's
+   * (instrument, timeframe) context, and the benchmark daily series with WARMUP_SESSIONS lookback.
+   * Each {@link MarketDataClient#warm} swallows its own failure, so a market-data outage never aborts
+   * a run — the subsequent {@code candleReader.read} simply sees whatever the store already holds.
+   */
+  private void warmSeries(
+      StrategyDefinition definition,
+      SeriesKey signal,
+      JsonNode config,
+      OffsetDateTime from,
+      OffsetDateTime to) {
+    marketData.warm(signal.exchange(), signal.tradingsymbol(), "1m", from, to);
+    for (StrategyDefinition.IndicatorSpec ind : definition.indicators()) {
+      String exch = ind.instrument() == null ? signal.exchange() : ind.instrument().exchange();
+      String sym =
+          ind.instrument() == null ? signal.tradingsymbol() : ind.instrument().tradingsymbol();
+      marketData.warm(exch, sym, ind.timeframe(), from, to);
+    }
+    try {
+      BenchmarkSeries benchmark = BenchmarkSeries.resolve(config);
+      marketData.warm(
+          benchmark.exchange(),
+          benchmark.tradingsymbol(),
+          "1d",
+          from.minusDays(RegimeLabeler.WARMUP_SESSIONS * 2L),
+          to);
+    } catch (IllegalArgumentException malformedBenchmark) {
+      // a malformed benchmark is a schema concern handled elsewhere — nothing to warm
+    }
   }
 
   private Map<SeriesKey, List<EngineCandle>> contextSeries(

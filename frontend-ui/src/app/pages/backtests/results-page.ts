@@ -10,6 +10,8 @@ import { formatDecimal } from '../../core/decimal';
 import { BacktestsStore, type TradeRow } from '../../stores/backtests.store';
 import { EquityCurveComponent } from '../../shared/equity-curve';
 import { EChartsComponent } from '../../shared/echarts-chart';
+import { JournalDrawer } from '../../shared/journal-drawer';
+import type { JournalLink } from '../../stores/journal.store';
 import { FoldPanel } from './fold-panel';
 
 interface MetricDef {
@@ -57,6 +59,7 @@ const BENCH_METRICS: MetricDef[] = [
     MessageModule,
     EquityCurveComponent,
     EChartsComponent,
+    JournalDrawer,
     FoldPanel,
   ],
   styles: `
@@ -202,6 +205,13 @@ const BENCH_METRICS: MetricDef[] = [
                   [routerLink]="['/charts']"
                   [queryParams]="{ runId: runId(), tradeId: t.seq, interval: '1d' }"
                 />
+                <p-button
+                  size="small"
+                  [text]="true"
+                  label="Journal"
+                  icon="pi pi-book"
+                  (onClick)="journal(t)"
+                />
                 <div class="kv">
                   @for (c of contributions(t); track c.k) {
                     <span>{{ c.k }}</span
@@ -240,6 +250,7 @@ const BENCH_METRICS: MetricDef[] = [
     } @else {
       <p>Loading results…</p>
     }
+    <ay-journal-drawer [(open)]="journalOpen" [link]="journalLink()" />
   `,
 })
 export class ResultsPage {
@@ -249,6 +260,14 @@ export class ResultsPage {
   protected readonly benchMetrics = BENCH_METRICS;
   protected readonly selected = signal<TradeRow | null>(null);
   protected readonly runId = signal<string>('');
+  protected readonly journalOpen = signal(false);
+  protected readonly journalLink = signal<JournalLink>({});
+
+  /** Opens the journal drawer linked to this run + trade (F-44A; soft backtest references). */
+  protected journal(t: TradeRow): void {
+    this.journalLink.set({ backtestRunId: this.runId(), backtestTradeId: t.seq });
+    this.journalOpen.set(true);
+  }
 
   constructor() {
     this.route.paramMap.subscribe((p) => {

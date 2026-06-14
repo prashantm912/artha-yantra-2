@@ -61,6 +61,12 @@ const ROWS: Row[] = [
           text="Runs have differing dataHash — not a like-for-like comparison."
         />
       }
+      @if (universeMismatch()) {
+        <p-message
+          severity="warn"
+          text="Runs were pinned to differing universes — not a like-for-like comparison."
+        />
+      }
       <p-table [value]="matrix()" dataKey="key">
         <ng-template #header>
           <tr>
@@ -106,6 +112,18 @@ export class ComparePage {
   protected readonly dataHashMismatch = computed(() => {
     const hashes = new Set(this.store.compareResults().map((c) => c.results.dataHash));
     return hashes.size > 1;
+  });
+
+  /**
+   * Phase 44 universe-checksum mismatch, beside the dataHash one: two runs pinned to differing
+   * universes (index_constituents / futures_of_underlying) are not like-for-like. `null` (explicit /
+   * unpinned universes) is its own bucket, so all-explicit comparisons never flag.
+   */
+  protected readonly universeMismatch = computed(() => {
+    const checksums = new Set(
+      this.store.compareResults().map((c) => c.results.universeChecksum ?? '∅'),
+    );
+    return checksums.size > 1;
   });
 
   protected readonly matrix = computed(() => {

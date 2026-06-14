@@ -55,6 +55,7 @@ public class RunRepository {
       JsonNode paramsOverride,
       long seed,
       String dataHash,
+      String universeChecksum,
       String engineVersion,
       PremiumSource premiumSource,
       FoldPersistence folds,
@@ -71,12 +72,12 @@ public class RunRepository {
         """
         INSERT INTO backtest_runs (
           job_id, strategy_version_id, exchange, tradingsymbol, "interval", start_ts, end_ts,
-          initial_equity, final_equity, params_override, seed, data_hash,
+          initial_equity, final_equity, params_override, seed, data_hash, universe_checksum,
           total_return, sharpe, sortino, max_drawdown, win_rate, profit_factor, trade_count,
           metrics, equity_curve, drawdown_curve, engine_version, premium_source,
           fold_metrics, oos_fold_mean, oos_fold_std, sharpe_degradation,
           alpha, beta, information_ratio, excess_cagr, benchmark_curve)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?, ?,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?, ?,
                 ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
         RETURNING id
         """,
@@ -93,6 +94,7 @@ public class RunRepository {
         paramsOverride == null ? null : json(paramsOverride),
         seed,
         dataHash,
+        universeChecksum,
         metrics.totalReturn(),
         metrics.sharpe(),
         metrics.sortino(),
@@ -154,7 +156,7 @@ public class RunRepository {
     return jdbc
         .query(
             "SELECT metrics, equity_curve, drawdown_curve, benchmark_curve, data_hash, seed, "
-                + "premium_source FROM backtest_runs WHERE id=?",
+                + "premium_source, universe_checksum FROM backtest_runs WHERE id=?",
             (rs, n) -> {
               Map<String, Object> out = new LinkedHashMap<>();
               JsonNode metrics = parse(rs.getString("metrics"));
@@ -165,6 +167,10 @@ public class RunRepository {
               out.put("dataHash", rs.getString("data_hash"));
               out.put("seed", rs.getLong("seed"));
               out.put("premiumSource", rs.getString("premium_source"));
+              // Phase 44: the pinned universe hash, so the compare view flags non-like-for-like
+              // runs (differing universe_checksum) beside the dataHash mismatch. NULL for explicit
+              // single-instrument / unpinned universes — the compare banner ignores NULLs.
+              out.put("universeChecksum", rs.getString("universe_checksum"));
               // §D.15: surface synthetic-premium caveats at the top level, never buried.
               out.put("caveats", caveats(metrics));
               return out;

@@ -65,7 +65,7 @@ class JobLifecycleIntegrationTest extends BacktestIntegrationTestBase {
     when(versions.resolve(eq(KNOWN), any()))
         .thenReturn(
             new ResolvedVersion(
-                UUID.fromString(KNOWN), "1.0.0", "checksum-abc", objectMapper.createObjectNode()));
+                UUID.fromString(KNOWN), null, "1.0.0", "checksum-abc", objectMapper.createObjectNode()));
     when(versions.resolve(eq(UNKNOWN), any()))
         .thenThrow(new NotFoundException(ErrorCodes.NOT_FOUND_RESOURCE, "no such strategy"));
   }

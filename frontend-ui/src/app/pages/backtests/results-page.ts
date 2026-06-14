@@ -176,6 +176,8 @@ const BENCH_METRICS: MetricDef[] = [
                   <th>Exit</th>
                   <th>P&L</th>
                   <th>%</th>
+                  <th>Stop</th>
+                  <th>Target</th>
                   <th>Reason</th>
                 </tr>
               </ng-template>
@@ -192,6 +194,8 @@ const BENCH_METRICS: MetricDef[] = [
                   <td class="mono">{{ t.exitPrice ? price(t.exitPrice) : '—' }}</td>
                   <td class="mono">{{ price(t.pnl) }}</td>
                   <td class="mono">{{ price(t.pnlPct) }}</td>
+                  <td class="mono">{{ price(t.stopLoss) }}</td>
+                  <td class="mono">{{ price(t.takeProfit) }}</td>
                   <td>{{ t.exitReason }}</td>
                 </tr>
               </ng-template>
@@ -206,7 +210,12 @@ const BENCH_METRICS: MetricDef[] = [
                   label="View on chart"
                   icon="pi pi-chart-line"
                   [routerLink]="['/charts']"
-                  [queryParams]="{ runId: runId(), tradeId: t.seq, interval: '1d' }"
+                  [queryParams]="{
+                    runId: runId(),
+                    tradeId: t.seq,
+                    interval: '1d',
+                    symbol: chartSymbol(t),
+                  }"
                 />
                 <p-button
                   size="small"
@@ -287,6 +296,14 @@ export class ResultsPage {
 
   protected price(v: string | null | undefined): string {
     return v == null ? '—' : formatDecimal(v, 2);
+  }
+
+  /** Canonical EXCHANGE:TRADINGSYMBOL for the "View on chart" deep-link (run-level fallback). */
+  protected chartSymbol(t: TradeRow): string | undefined {
+    const r = this.store.viewResults();
+    const exchange = t.exchange ?? r?.exchange;
+    const tradingsymbol = t.tradingsymbol ?? r?.tradingsymbol;
+    return exchange && tradingsymbol ? `${exchange}:${tradingsymbol}` : undefined;
   }
 
   protected metric(r: { metrics: Record<string, unknown> }, m: MetricDef): string {

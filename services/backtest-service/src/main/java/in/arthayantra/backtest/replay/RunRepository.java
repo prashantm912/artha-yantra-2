@@ -156,7 +156,8 @@ public class RunRepository {
     return jdbc
         .query(
             "SELECT metrics, equity_curve, drawdown_curve, benchmark_curve, data_hash, seed, "
-                + "premium_source, universe_checksum FROM backtest_runs WHERE id=?",
+                + "premium_source, universe_checksum, exchange, tradingsymbol "
+                + "FROM backtest_runs WHERE id=?",
             (rs, n) -> {
               Map<String, Object> out = new LinkedHashMap<>();
               JsonNode metrics = parse(rs.getString("metrics"));
@@ -167,6 +168,10 @@ public class RunRepository {
               out.put("dataHash", rs.getString("data_hash"));
               out.put("seed", rs.getLong("seed"));
               out.put("premiumSource", rs.getString("premium_source"));
+              // Stage F follow-on: the run's instrument, so the results "View on chart" deep-link
+              // and trade-mark filtering carry the right symbol instead of the persisted default.
+              out.put("exchange", rs.getString("exchange"));
+              out.put("tradingsymbol", rs.getString("tradingsymbol"));
               // Phase 44: the pinned universe hash, so the compare view flags non-like-for-like
               // runs (differing universe_checksum) beside the dataHash mismatch. NULL for explicit
               // single-instrument / unpinned universes — the compare banner ignores NULLs.
@@ -178,6 +183,62 @@ public class RunRepository {
             runId)
         .stream()
         .findFirst();
+  }
+
+  /**
+   * The latest completed run per strategy version (Stage F follow-on, for the strategy-list
+   * last-backtest summary). One row per requested version id that has at least one run — newest by
+   * {@code completed_at} via {@code DISTINCT ON} over {@code idx_runs_strategy}. Each row carries
+   * the headline metrics (decimal strings) and a downsampled equity series ({@code ~32} value
+   * strings) for a sparkline. Versions with no runs are simply absent. Empty input ⇒ empty list.
+   */
+  public List<Map<String, Object>> findLatestSummaries(List<UUID> versionIds) {
+    if (versionIds == null || versionIds.isEmpty()) {
+      return List.of();
+    }
+    String placeholders = String.join(",", java.util.Collections.nCopies(versionIds.size(), "?"));
+    String sql =
+        "SELECT DISTINCT ON (strategy_version_id) strategy_version_id, id, sharpe, total_return, "
+            + "max_drawdown, completed_at, equity_curve FROM backtest_runs "
+            + "WHERE strategy_version_id IN ("
+            + placeholders
+            + ") ORDER BY strategy_version_id, completed_at DESC";
+    return jdbc.query(
+        sql,
+        (rs, n) -> {
+          Map<String, Object> row = new LinkedHashMap<>();
+          row.put("strategyVersionId", rs.getString("strategy_version_id"));
+          row.put("runId", rs.getString("id"));
+          row.put("sharpe", plain(rs.getBigDecimal("sharpe")));
+          row.put("totalReturn", plain(rs.getBigDecimal("total_return")));
+          row.put("maxDrawdown", plain(rs.getBigDecimal("max_drawdown")));
+          row.put("completedAt", rs.getString("completed_at"));
+          row.put("equity", compactEquity(parse(rs.getString("equity_curve")), 32));
+          return row;
+        },
+        versionIds.toArray());
+  }
+
+  private static String plain(BigDecimal value) {
+    return value == null ? null : value.toPlainString();
+  }
+
+  /** Downsamples a persisted equity curve to ~{@code target} value strings for a sparkline. */
+  private static List<String> compactEquity(JsonNode curve, int target) {
+    List<String> out = new java.util.ArrayList<>();
+    if (curve == null || !curve.isArray() || curve.isEmpty()) {
+      return out;
+    }
+    int size = curve.size();
+    int stride = Math.max(1, (int) Math.ceil((double) size / target));
+    for (int i = 0; i < size; i += stride) {
+      out.add(curve.get(i).get("value").asText());
+    }
+    String last = curve.get(size - 1).get("value").asText();
+    if (!out.get(out.size() - 1).equals(last)) {
+      out.add(last);
+    }
+    return out;
   }
 
   /**

@@ -307,6 +307,14 @@ public class RegistryService {
               : repository.findVersionById(row.publishedVersionId())
                   .map(StrategyRepository.VersionRow::version)
                   .orElse(null));
+      // version UUIDs let the strategy list fetch each row's last-backtest summary from
+      // backtest-service (keyed by strategy_version_id) — the cross-schema join done client-side.
+      item.put(
+          "currentVersionId",
+          latest.map(StrategyRepository.VersionRow::id).map(UUID::toString).orElse(null));
+      item.put(
+          "publishedVersionId",
+          row.publishedVersionId() == null ? null : row.publishedVersionId().toString());
       item.put("status", derived);
       item.put("tags", row.tags());
       item.put("author", row.author());

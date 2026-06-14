@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import in.arthayantra.strategyengine.eval.ScoreBreakdown;
+import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
 
@@ -15,13 +16,22 @@ import java.util.List;
  */
 public final class GoldenSignalsJson {
 
-  /** One emitted signal event (the tick-wise runner's output). */
+  /**
+   * One emitted signal event (the tick-wise runner's output). {@code stopLoss}/{@code takeProfit}
+   * are the entry-time protective levels (absolute prices, direction-aware) computed by
+   * {@link in.arthayantra.strategyengine.eval.ExitEvaluator#entryLevels}; both are {@code null} on
+   * EXIT events and on entries whose strategy declares no stop_loss / take_profit rule. They are a
+   * pure SIDE-CHANNEL: {@link #write} never serializes them, so the frozen golden vectors stay
+   * byte-identical (same contract as the D17b progress side-channel).
+   */
   public record SignalEvent(
       String timestamp,
       String exchange,
       String tradingsymbol,
       String direction,
-      ScoreBreakdown breakdown) {}
+      ScoreBreakdown breakdown,
+      BigDecimal stopLoss,
+      BigDecimal takeProfit) {}
 
   private static final JsonNodeFactory F = JsonNodeFactory.instance;
 

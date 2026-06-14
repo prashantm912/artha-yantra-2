@@ -161,7 +161,11 @@ public class ReplayEngine {
                 closing.exitReason(),
                 i - entryFillBar,
                 touchBasis,
-                contributions(closing.entryBreakdown())));
+                contributions(closing.entryBreakdown()),
+                exchange,
+                tradingsymbol,
+                closing.stopLoss(),
+                closing.takeProfit()));
         posSign = 0;
         posQty = 0;
         openLeg = null;
@@ -215,13 +219,15 @@ public class ReplayEngine {
         barsInPosition);
   }
 
-  /** A directed entry→exit leg with the 1m indices of the signalling bars. */
+  /** A directed entry→exit leg with the 1m indices of the signalling bars + entry protective levels. */
   private record Leg(
       boolean shortSide,
       int entryIndex,
       int exitIndex,
       String exitReason,
-      in.arthayantra.strategyengine.eval.ScoreBreakdown entryBreakdown) {}
+      in.arthayantra.strategyengine.eval.ScoreBreakdown entryBreakdown,
+      BigDecimal stopLoss,
+      BigDecimal takeProfit) {}
 
   private static List<Leg> legs(List<SignalEvent> signals, Map<String, Integer> indexByTs, int bars) {
     List<Leg> legs = new ArrayList<>();
@@ -235,7 +241,9 @@ public class ReplayEngine {
                   indexByTs.getOrDefault(openEntry.timestamp(), 0),
                   indexByTs.getOrDefault(ev.timestamp(), bars - 1),
                   "signal_exit",
-                  openEntry.breakdown()));
+                  openEntry.breakdown(),
+                  openEntry.stopLoss(),
+                  openEntry.takeProfit()));
           openEntry = null;
         }
       } else if (openEntry == null) {
@@ -250,7 +258,9 @@ public class ReplayEngine {
               indexByTs.getOrDefault(openEntry.timestamp(), 0),
               bars - 1,
               "end_of_data",
-              openEntry.breakdown()));
+              openEntry.breakdown(),
+              openEntry.stopLoss(),
+              openEntry.takeProfit()));
     }
     return legs;
   }

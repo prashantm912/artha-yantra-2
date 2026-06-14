@@ -47,6 +47,18 @@ export const appConfig: ApplicationConfig = {
           darkModeSelector: '.ay-dark',
         },
       },
+      // D15: primeicons.css is bundled so `icon="pi ..."` glyphs render, but PrimeNG 21's button
+      // icon span (unlike its label/spinner spans) ships WITHOUT aria-hidden, so the primeicons
+      // `::before` PUA glyph (e.g. U+E909) leaks into the button's accessible name in Chrome —
+      // breaking axe and Playwright `getByRole({name, exact:true})`. Stamp aria-hidden on every
+      // button icon via the global PassThrough `ptm('icon')` hook (icons are decorative; the
+      // button's own label / ariaLabel carries the name). All `pi-*` icons are on p-button; other
+      // components use built-in SVG icons (no `::before` text, no leak).
+      pt: {
+        button: {
+          icon: { 'aria-hidden': 'true' },
+        },
+      },
     }),
     MessageService,
   ],

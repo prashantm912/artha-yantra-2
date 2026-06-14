@@ -60,7 +60,7 @@ class FoldsIntegrationTest extends BacktestIntegrationTestBase {
   /** Stubs the resolver with a walk_forward config and seeds the golden candles (once). */
   private void stub(JsonNode config) {
     when(versions.resolve(any(), any()))
-        .thenReturn(new ResolvedVersion(STRATEGY_ID, "1.0.0", "checksum-wf", config));
+        .thenReturn(new ResolvedVersion(STRATEGY_ID, null, "1.0.0", "checksum-wf", config));
   }
 
   @Test

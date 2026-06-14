@@ -136,7 +136,7 @@ class RegimeMixIntegrationTest extends BacktestIntegrationTestBase {
 
   private void stub(JsonNode config) {
     when(versions.resolve(any(), any()))
-        .thenReturn(new ResolvedVersion(STRATEGY_ID, "1.0.0", "checksum-regime", config));
+        .thenReturn(new ResolvedVersion(STRATEGY_ID, null, "1.0.0", "checksum-regime", config));
   }
 
   private UUID runFold(String from, String to) {

@@ -223,7 +223,7 @@ public class BacktestRunner {
     UUID runId =
         runs.insert(
             job.id(),
-            resolved.strategyId(),
+            resolved.versionId(),
             signal.exchange(),
             signal.tradingsymbol(),
             definition.primaryTimeframe(),

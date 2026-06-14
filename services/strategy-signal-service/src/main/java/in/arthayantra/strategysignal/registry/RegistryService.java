@@ -337,6 +337,7 @@ public class RegistryService {
     verifyChecksumOnRead(row);
     Map<String, Object> response = new LinkedHashMap<>();
     response.put("id", strategy.id());
+    response.put("versionId", row.id());
     response.put("slug", strategy.slug());
     response.put("name", strategy.name());
     response.put("description", strategy.description());

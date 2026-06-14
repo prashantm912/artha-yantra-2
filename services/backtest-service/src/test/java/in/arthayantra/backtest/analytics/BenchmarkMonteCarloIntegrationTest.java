@@ -65,7 +65,7 @@ class BenchmarkMonteCarloIntegrationTest extends BacktestIntegrationTestBase {
                     golden().resolve("strategies/ema-crossover.yaml"), StandardCharsets.UTF_8))
             .config();
     when(versions.resolve(any(), any()))
-        .thenReturn(new ResolvedVersion(STRATEGY_ID, "1.0.0", "checksum-ema", config));
+        .thenReturn(new ResolvedVersion(STRATEGY_ID, null, "1.0.0", "checksum-ema", config));
     seedNiftyCandles();
     BenchmarkSeeder.seedDefault(jdbc, LocalDate.of(2026, 1, 10)); // daily NIFTY 50 for the benchmark
   }

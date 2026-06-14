@@ -12,15 +12,62 @@ subset is CI-enforced).
 
 ## Current phase
 
-**Stage E — Frontend UX (Phases 35–41 + 40A/40B/40C) — IN PROGRESS** on branch
-`feat/stage-e-frontend-ux` (phase-per-commit: 35,36,37,38,39,40B,40,40C,40A,41 +
-contract regen). Each phase is unit-tested (Vitest frontend / JUnit backend) with
-lint + production build green; the Stage-E exit checklist below is the S5 Friday-gate
-input, walked against the running mock stack (`docs/manual-testing-stage-e.md`). PR
-pending at the stage boundary. **Stage D — Backtesting + Optimization (Phases 28–34) —
-MERGED to main 2026-06-13 via [PR #5](https://github.com/prashantm912/artha-yantra-2/pull/5)**
-(squash → main `19ddcd4`); Stage C merged via PR #4; Stage B via PR #2; Stage A
+**Stage F — Options analytics + Paper trading + Universe pinning (Phases 42, 42A, 42B,
+43, 43A, 43B, 44, 44A) — IMPLEMENTED** on branch `feat/stage-f-options-paper-universe`
+(phase-per-commit, one commit per phase). Each phase is unit-tested (Vitest frontend /
+JUnit backend) with lint + production build green and the new ITs green per phase
+(market-data + strategy-signal Testcontainers); the Stage-F exit checklist below is the
+S5 Friday-gate input, walked via `docs/manual-testing-stage-f.md` + the Playwright e2e on
+the PR (ci-e2e). PR pending at the stage boundary — the **feature-complete milestone**
+(only Stage G remains). **Stage E — Frontend UX — MERGED to main 2026-06-14 via PR #6**
+(squash `a96c99b`); Stage D via PR #5; Stage C via PR #4; Stage B via PR #2; Stage A
 completed 2026-06-12.
+
+---
+
+## Stage-F exit gate (plan §15.2 Phase-5 row — mirrored from the Stage-F design)
+
+*(Legend: **impl** = implemented + unit/IT/build/lint green per phase; **walk** =
+exercised on the running mock stack / Playwright e2e — runs via ci-e2e on the PR.)*
+
+**Phase 5 acceptance criteria (demo-able):**
+
+- [x] **Chain refreshes live via WS** — `/options` updates from the `options.chain` topic
+      through the gateway STOMP bridge `[Phase 42]` (impl)
+- [x] **Historical IV query over own snapshots** — history mode returns stored
+      `options_chain_snapshots` rows via `GET /options/chain/history` `[Phase 42]` (impl)
+- [x] **Accepting a signal opens a paper position whose P&L tracks ticks** —
+      `signals/{id}/taken` (with qty) → paper position → mark-to-market from the last-tick
+      map `[Phases 43/43A]` (impl; IT-proven taken→position)
+
+**Key-deliverable checklist:**
+
+- [x] Options chain UI (Black-76 IV/Greeks, PCR, wired filters) + snapshot-history `[42]` (impl)
+- [x] Futures workbench (`/futures` term-structure, basis history, oi-buildup) `[42A]` (impl)
+- [x] IV rank/percentile rollup (`iv_daily_summary`, `GET /options/iv-history`, badge/tab,
+      honest insufficient-history floor) `[42B]` (impl; IT recompute-idempotent)
+- [x] Paper-trading ledger on the **shared `ltp_slippage/v1` FillSimulator** with fill-audit
+      columns + P&L UI — paisa-parity to the backtest vector proven `[43]` (impl)
+- [x] Paper account + capital model + global risk limits + kill switch + `suggested_qty`
+      at emission `[43A]` (impl; daily-loss trip pauses ENTRY only, IT-proven)
+- [x] Derivative expiry settlement (intrinsic vs spot LTP, expiry STT leg, `close_reason`)
+      + T-1 roll-or-close push + paper chart marks `[43B]` (impl; spot-LTP approximation
+      documented in the manual guide / settlement caveat)
+- [x] Universe pinning — submission-time resolve (REST-only) copied into `jobs.request`
+      + checksum; publish guard lifted; editor "Published Universe (as of …)" label `[44]`
+      (impl; persisting `universe_checksum` onto run rows + leaderboard mismatch flag = parking)
+- [x] Trade journal — `journal_entries` + CRUD + drawer (signals surface) + `/journal`
+      review route `[44A]` (impl; paper/backtest-trade drawer entry points = thin follow-on)
+
+**Cross-cutting invariants (impl):**
+
+- [x] Resolution REST-only, submission-time, by-copy; strategy-signal holds no `marketdata`
+      grant (Phase 44 FAIL guarded)
+- [x] Paper fill == backtest fill **to the paisa** (shared JAR); no paper-local fill path
+- [x] Unrealized P&L / equity computed on demand, never stored; risk limits on DB rows, never YAML
+- [x] No cross-schema FK (journal/paper soft references only); same-schema FKs validated
+- [x] Prices as decimal strings end-to-end (new exact `subtractDecimal`/`multiplyByInt`)
+- [x] Chain/futures pages use per-symbol topics, never the tick firehose
 
 ---
 

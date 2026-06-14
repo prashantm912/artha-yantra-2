@@ -430,6 +430,44 @@
         }
       }
     },
+    "/api/v1/market/options/iv-rollup" : {
+      "post" : {
+        "tags" : [ "iv-analytics-controller" ],
+        "operationId" : "rollup",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RollupRequest"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/candles/refresh" : {
       "post" : {
         "tags" : [ "candles-controller" ],
@@ -723,6 +761,42 @@
                 "schema" : {
                   "type" : "object",
                   "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/options/iv-history" : {
+      "get" : {
+        "tags" : [ "iv-analytics-controller" ],
+        "operationId" : "ivHistory",
+        "parameters" : [ {
+          "name" : "underlying",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/IvHistory"
                 }
               }
             }
@@ -1459,6 +1533,22 @@
           }
         }
       },
+      "RollupRequest" : {
+        "type" : "object",
+        "properties" : {
+          "underlying" : {
+            "type" : "string"
+          },
+          "from" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "to" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        }
+      },
       "RefreshRequest" : {
         "type" : "object",
         "properties" : {
@@ -1558,6 +1648,62 @@
           "subscribers" : {
             "type" : "integer",
             "format" : "int32"
+          }
+        }
+      },
+      "HistoryPoint" : {
+        "type" : "object",
+        "properties" : {
+          "date" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "iv" : {
+            "type" : "number"
+          },
+          "atmIv" : {
+            "type" : "number"
+          },
+          "iv30d" : {
+            "type" : "number"
+          },
+          "spot" : {
+            "type" : "number"
+          }
+        }
+      },
+      "IvHistory" : {
+        "type" : "object",
+        "properties" : {
+          "underlying" : {
+            "type" : "string"
+          },
+          "series" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/HistoryPoint"
+            }
+          },
+          "currentIv" : {
+            "type" : "number"
+          },
+          "rank" : {
+            "type" : "number"
+          },
+          "percentile" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "windowDays" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "floorDays" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "insufficientHistory" : {
+            "type" : "boolean"
           }
         }
       },

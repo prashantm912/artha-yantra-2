@@ -5,8 +5,11 @@ import {
   computed,
   effect,
   inject,
+  signal,
 } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
+import { InputTextModule } from 'primeng/inputtext';
 import { TableModule } from 'primeng/table';
 import { TagModule } from 'primeng/tag';
 import { formatDecimal, isNegative, multiplyByInt, subtractDecimal } from '../../core/decimal';
@@ -22,7 +25,14 @@ import { PaperStore } from '../../stores/paper.store';
 @Component({
   selector: 'ay-paper-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [TableModule, TagModule, ButtonModule, EquityCurveComponent],
+  imports: [
+    FormsModule,
+    TableModule,
+    TagModule,
+    ButtonModule,
+    InputTextModule,
+    EquityCurveComponent,
+  ],
   styles: `
     .summary {
       display: flex;
@@ -68,9 +78,126 @@ import { PaperStore } from '../../stores/paper.store';
       font-size: 1rem;
       margin: 0 0 0.5rem;
     }
+    .account {
+      display: flex;
+      gap: 1.2rem;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 0.6rem;
+      padding-bottom: 0.6rem;
+      border-bottom: 1px solid var(--ay-border);
+    }
+    .account .metric {
+      font-variant-numeric: tabular-nums;
+    }
+    .account .metric .v {
+      font-size: 1.2rem;
+      font-weight: 700;
+    }
+    .account .k {
+      color: var(--ay-text-muted);
+      font-size: 0.8rem;
+    }
+    .cap-edit {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .cap-edit input {
+      width: 9rem;
+    }
+    .risk {
+      display: flex;
+      gap: 1.5rem;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 0.8rem;
+      font-size: 0.85rem;
+      color: var(--ay-text-muted);
+    }
+    .risk .limit input {
+      width: 7rem;
+      margin: 0 0.3rem;
+    }
+    .risk .limit.on {
+      color: var(--ay-text);
+      font-weight: 600;
+    }
   `,
   template: `
     <h1 class="ay-sr-only">Paper trading</h1>
+
+    @if (store.account(); as acct) {
+      <section class="account">
+        <div class="metric">
+          <div class="k">Equity</div>
+          <div class="v">{{ money(acct.equity) }}</div>
+        </div>
+        <div class="metric">
+          <div class="k">Free cash</div>
+          <div class="v">{{ money(acct.cash) }}</div>
+        </div>
+        <div class="metric">
+          <div class="k">Day P&L</div>
+          <div class="v" [class.pos]="!neg(acct.dayPnl)" [class.neg]="neg(acct.dayPnl)">
+            {{ money(acct.dayPnl) }}
+          </div>
+        </div>
+        <div class="metric">
+          <div class="k">Capital used</div>
+          <div class="v">{{ money(acct.capitalUsed) }}</div>
+        </div>
+        <div class="cap-edit">
+          <span class="k">Starting capital</span>
+          <input
+            pInputText
+            [ngModel]="capitalDraft()"
+            (ngModelChange)="capitalDraft.set($event)"
+            [placeholder]="acct.startingCapital"
+          />
+          <p-button size="small" [text]="true" label="Set" (onClick)="saveCapital()" />
+        </div>
+        <span class="spacer"></span>
+        <p-button
+          size="small"
+          [severity]="killOn() ? 'danger' : 'secondary'"
+          [label]="killOn() ? 'KILL SWITCH ON' : 'Kill switch'"
+          icon="pi pi-power-off"
+          (onClick)="toggleKill()"
+        />
+      </section>
+      <section class="risk">
+        <span class="limit" [class.on]="enabled('max_open_paper_positions')">
+          Max open
+          <input pInputText [ngModel]="maxOpenDraft()" (ngModelChange)="maxOpenDraft.set($event)" />
+          <p-button size="small" [text]="true" label="Apply" (onClick)="applyMaxOpen()" />
+          <p-button
+            size="small"
+            [text]="true"
+            severity="secondary"
+            label="Off"
+            (onClick)="disable('max_open_paper_positions')"
+          />
+        </span>
+        <span class="limit" [class.on]="enabled('daily_loss_limit')">
+          Daily loss ₹
+          <input
+            pInputText
+            [ngModel]="dailyLossDraft()"
+            (ngModelChange)="dailyLossDraft.set($event)"
+          />
+          <p-button size="small" [text]="true" label="Apply" (onClick)="applyDailyLoss()" />
+          <p-button
+            size="small"
+            [text]="true"
+            severity="secondary"
+            label="Off"
+            (onClick)="disable('daily_loss_limit')"
+          />
+        </span>
+      </section>
+    }
+
     <div class="summary">
       @if (store.pnl(); as pnl) {
         <div class="metric">
@@ -192,6 +319,10 @@ export class PaperPage {
   private readonly market = inject(MarketStore);
   private tracked = new Set<string>();
 
+  protected readonly capitalDraft = signal('');
+  protected readonly maxOpenDraft = signal('');
+  protected readonly dailyLossDraft = signal('');
+
   /** Positions with live unrealized P&L recomputed from the per-symbol tick map. */
   protected readonly livePositions = computed(() => {
     const ticks = this.market.ticks();
@@ -246,5 +377,42 @@ export class PaperPage {
 
   protected neg(value: string): boolean {
     return isNegative(value);
+  }
+
+  protected enabled(key: string): boolean {
+    return this.store.risk().find((r) => r.key === key)?.value?.['enabled'] === true;
+  }
+
+  protected killOn(): boolean {
+    return this.enabled('kill_switch');
+  }
+
+  protected toggleKill(): void {
+    this.store.updateRisk('kill_switch', { enabled: !this.killOn() });
+  }
+
+  protected saveCapital(): void {
+    if (this.capitalDraft().trim()) {
+      this.store.updateStartingCapital(this.capitalDraft().trim());
+    }
+  }
+
+  protected applyMaxOpen(): void {
+    this.store.updateRisk('max_open_paper_positions', {
+      enabled: true,
+      value: Number(this.maxOpenDraft()),
+    });
+  }
+
+  protected applyDailyLoss(): void {
+    this.store.updateRisk('daily_loss_limit', {
+      enabled: true,
+      mode: 'inr',
+      value: Number(this.dailyLossDraft()),
+    });
+  }
+
+  protected disable(key: string): void {
+    this.store.updateRisk(key, { enabled: false });
   }
 }

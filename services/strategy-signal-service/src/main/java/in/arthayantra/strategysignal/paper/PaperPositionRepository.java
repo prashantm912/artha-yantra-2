@@ -157,4 +157,25 @@ public class PaperPositionRepository {
   public int deleteAll() {
     return jdbc.update("DELETE FROM paper_positions");
   }
+
+  /** Count of OPEN positions (the {@code max_open_paper_positions} gate). */
+  public int openCount() {
+    Integer count = jdbc.queryForObject("SELECT count(*) FROM paper_positions WHERE status='OPEN'", Integer.class);
+    return count == null ? 0 : count;
+  }
+
+  /** Total realized P&amp;L over all closed trades. */
+  public BigDecimal realizedTotal() {
+    return jdbc.queryForObject(
+        "SELECT COALESCE(SUM(realized_pnl),0) FROM paper_positions WHERE status='CLOSED'", BigDecimal.class);
+  }
+
+  /** Realized P&amp;L of trades closed on a given IST day (day-P&L input). */
+  public BigDecimal realizedOn(java.time.LocalDate istDate) {
+    return jdbc.queryForObject(
+        "SELECT COALESCE(SUM(realized_pnl),0) FROM paper_positions"
+            + " WHERE status='CLOSED' AND (closed_at AT TIME ZONE 'Asia/Kolkata')::date = ?",
+        BigDecimal.class,
+        java.sql.Date.valueOf(istDate));
+  }
 }

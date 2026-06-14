@@ -33,7 +33,8 @@ public class SignalRepository {
       JsonNode scoreBreakdown,
       String status,
       OffsetDateTime generatedAt,
-      OffsetDateTime expiresAt) {}
+      OffsetDateTime expiresAt,
+      BigDecimal suggestedQty) {}
 
   private final JdbcTemplate jdbc;
   private final ObjectMapper objectMapper;
@@ -161,7 +162,13 @@ public class SignalRepository {
         readTree(rs.getString("score_breakdown")),
         rs.getString("status"),
         rs.getObject("generated_at", OffsetDateTime.class),
-        rs.getObject("expires_at", OffsetDateTime.class));
+        rs.getObject("expires_at", OffsetDateTime.class),
+        rs.getBigDecimal("suggested_qty"));
+  }
+
+  /** Stamps the engine-computed suggested qty (A12) — outside the frozen score breakdown. */
+  public void stampSuggestedQty(long id, BigDecimal qty) {
+    jdbc.update("UPDATE signals SET suggested_qty = ? WHERE id = ?", qty, id);
   }
 
   private JsonNode readTree(String json) {

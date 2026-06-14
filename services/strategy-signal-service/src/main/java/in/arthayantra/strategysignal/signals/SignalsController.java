@@ -120,6 +120,7 @@ public class SignalsController {
     dto.put("status", row.status());
     dto.put("generatedAt", row.generatedAt());
     dto.put("expiresAt", row.expiresAt());
+    dto.put("suggestedQty", row.suggestedQty());
     return dto;
   }
 }

@@ -87,6 +87,8 @@ public class SignalEngine {
   private final ObjectMapper objectMapper;
   private final Clock clock;
   private final int signalTtlMinutes;
+  // A12 SPI (paper adapter): ENTRY risk gate + engine-stamped suggested qty. Absent ⇒ permissive.
+  private final java.util.Optional<EmissionGuard> emissionGuard;
 
   // candles.1m.* are NEVER conflated (A.7.2 bus contract — every closed bar matters). A FIFO
   // queue preserves each distinct bar in arrival order; the single-threaded evalExecutor drains it
@@ -123,6 +125,7 @@ public class SignalEngine {
       ObjectMapper objectMapper,
       Clock clock,
       MeterRegistry meterRegistry,
+      java.util.Optional<EmissionGuard> emissionGuard,
       @Value("${artha.signals.ttl-minutes:60}") int signalTtlMinutes) {
     this.registry = registry;
     this.signals = signals;
@@ -134,6 +137,7 @@ public class SignalEngine {
     this.objectMapper = objectMapper;
     this.clock = clock;
     this.signalTtlMinutes = signalTtlMinutes;
+    this.emissionGuard = emissionGuard;
     this.evalTimer = meterRegistry.timer("ay_signal_eval_duration_seconds");
     this.emitted = meterRegistry.counter("ay_signals_emitted_total");
   }
@@ -486,6 +490,12 @@ public class SignalEngine {
   private void emitEntry(
       Loaded strategy, String exchange, String tradingsymbol, String interval, EngineCandle bar,
       EntryEvaluator.Evaluation evaluation) {
+    // A12 global risk gate: a daily-loss trip / kill switch / max-open cap pauses ENTRY emission
+    // for the rest of the IST day — exit/stop evaluation (emit()) is deliberately NOT gated.
+    if (emissionGuard.isPresent() && !emissionGuard.get().entryAllowed()) {
+      log.info("ENTRY suppressed by global risk gate: {} {}:{}", strategy.slug(), exchange, tradingsymbol);
+      return;
+    }
     BigDecimal entryPrice = bar.close();
     BigDecimal stopLoss = levelFromRules(strategy.definition(), entryPrice, "stop_loss");
     BigDecimal target = levelFromRules(strategy.definition(), entryPrice, "take_profit");
@@ -503,6 +513,16 @@ public class SignalEngine {
             strategy.versionId(), exchange, tradingsymbol, interval, "ENTRY", side,
             entryPrice, stopLoss, target, evaluation.breakdown().composite(), breakdownJson,
             generatedAt, expiresAt);
+    // A12 suggested qty (lot-rounded sizing vs paper equity), stamped OUTSIDE the score breakdown
+    if (emissionGuard.isPresent()) {
+      BigDecimal stopDistance = stopLoss == null ? null : entryPrice.subtract(stopLoss).abs();
+      BigDecimal suggestedQty =
+          emissionGuard.get().suggestedQty(
+              strategy.definition().sizing(), exchange, tradingsymbol, entryPrice, stopDistance);
+      if (suggestedQty != null) {
+        signals.stampSuggestedQty(id, suggestedQty);
+      }
+    }
     emitted.increment();
     // the channel carries EXACTLY the persisted canonical bytes (divergence = FAIL criterion)
     JsonNode canonicalBreakdown;

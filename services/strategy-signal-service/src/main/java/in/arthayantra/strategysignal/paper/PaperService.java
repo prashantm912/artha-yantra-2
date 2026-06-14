@@ -44,7 +44,7 @@ public class PaperService {
       long qty,
       BigDecimal price) {}
 
-  /** An open position with its live mark-to-market. */
+  /** An open position with its live mark-to-market (and an optional buying-power warning on open). */
   public record PositionDto(
       long id,
       String exchange,
@@ -56,7 +56,16 @@ public class PaperService {
       BigDecimal unrealizedPnl,
       BigDecimal realizedPnl,
       String status,
-      OffsetDateTime openedAt) {}
+      OffsetDateTime openedAt,
+      String buyingPowerWarning) {
+
+    /** A copy carrying the non-blocking buying-power warning (A12). */
+    PositionDto withWarning(String warning) {
+      return new PositionDto(
+          id, exchange, tradingsymbol, side, qty, avgEntryPrice, markPrice, unrealizedPnl,
+          realizedPnl, status, openedAt, warning);
+    }
+  }
 
   /** A closed trade. */
   public record TradeDto(
@@ -76,6 +85,7 @@ public class PaperService {
   private final LastTickReader lastTick;
   private final InstrumentMetaClient instruments;
   private final SignalRepository signals;
+  private final PaperAccountService accountService;
 
   /** Wires the ledger collaborators. */
   public PaperService(
@@ -84,13 +94,15 @@ public class PaperService {
       PaperFillService fills,
       LastTickReader lastTick,
       InstrumentMetaClient instruments,
-      SignalRepository signals) {
+      SignalRepository signals,
+      PaperAccountService accountService) {
     this.orders = orders;
     this.positions = positions;
     this.fills = fills;
     this.lastTick = lastTick;
     this.instruments = instruments;
     this.signals = signals;
+    this.accountService = accountService;
   }
 
   /** Simulates an entry; fills via {@code ltp_slippage/v1} against the next-tick LTP + cost model. */
@@ -128,9 +140,12 @@ public class PaperService {
         request.signalId(), exchange, tradingsymbol, side, request.qty(), fill.fillPrice(),
         fills.simulatorId(), fill.slippageApplied(), null, null);
     upsertPosition(exchange, tradingsymbol, side, request.qty(), fill.fillPrice());
+    String warning =
+        accountService.buyingPowerWarning(
+            accountService.usageFor(meta, side, fill.fillPrice(), request.qty()));
     return positions
         .findOpen(exchange, tradingsymbol, side)
-        .map(this::toPositionDto)
+        .map(row -> toPositionDto(row).withWarning(warning))
         .orElseThrow(() -> new ApiException(500, ErrorCodes.INTERNAL_ERROR, "position not opened"));
   }
 
@@ -263,7 +278,7 @@ public class PaperService {
     }
     return new PositionDto(
         row.id(), row.exchange(), row.tradingsymbol(), row.side(), row.qty(), row.avgEntryPrice(),
-        mark, unrealized, row.realizedPnl(), row.status(), row.openedAt());
+        mark, unrealized, row.realizedPnl(), row.status(), row.openedAt(), null);
   }
 
   private TradeDto toTradeDto(PositionRow row) {

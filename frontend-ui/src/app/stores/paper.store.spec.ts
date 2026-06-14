@@ -44,6 +44,19 @@ describe('PaperStore', () => {
       points: [{ date: '2026-06-13', equity: '1200.00' }],
       summary: { realizedTotal: '1200.00', trades: 3, winRate: '0.6667', expectancy: '400.00' },
     });
+    http.expectOne('/api/v1/paper/account').flush({
+      startingCapital: '1000000.00',
+      cash: '1000000.00',
+      equity: '1001200.00',
+      realized: '1200.00',
+      unrealized: '0.00',
+      dayPnl: '1200.00',
+      openPositions: 1,
+      capitalUsed: '0.00',
+      usageByClass: { equities: '0.00' },
+      marginPercents: { future: '0.15', shortOption: '0.12' },
+    });
+    http.expectOne('/api/v1/risk/settings').flush({ items: [] });
   }
 
   beforeEach(() => {

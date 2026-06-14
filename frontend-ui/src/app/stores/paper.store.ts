@@ -42,10 +42,33 @@ export interface PaperPnl {
   };
 }
 
+/** The paper-account header (A12): equity, free cash, capital usage, day P&L. */
+export interface PaperAccount {
+  startingCapital: string;
+  cash: string;
+  equity: string;
+  realized: string;
+  unrealized: string;
+  dayPnl: string;
+  openPositions: number;
+  capitalUsed: string;
+  usageByClass: Record<string, string>;
+  marginPercents: Record<string, string>;
+}
+
+/** One global risk-limit row. */
+export interface RiskSetting {
+  key: string;
+  value: Record<string, unknown>;
+  updatedAt: string;
+}
+
 interface PaperState {
   positions: PaperPosition[];
   trades: PaperTrade[];
   pnl: PaperPnl | null;
+  account: PaperAccount | null;
+  risk: RiskSetting[];
   loading: boolean;
 }
 
@@ -56,7 +79,14 @@ interface PaperState {
  */
 export const PaperStore = signalStore(
   { providedIn: 'root' },
-  withState<PaperState>({ positions: [], trades: [], pnl: null, loading: false }),
+  withState<PaperState>({
+    positions: [],
+    trades: [],
+    pnl: null,
+    account: null,
+    risk: [],
+    loading: false,
+  }),
   withMethods((store, http = inject(HttpClient)) => ({
     loadAll(): void {
       patchState(store, { loading: true });
@@ -75,6 +105,34 @@ export const PaperStore = signalStore(
       http.get<PaperPnl>('/api/v1/paper/pnl').subscribe({
         next: (pnl) => patchState(store, { pnl }),
         error: () => undefined,
+      });
+      this.loadAccount();
+      this.loadRisk();
+    },
+
+    loadAccount(): void {
+      http.get<PaperAccount>('/api/v1/paper/account').subscribe({
+        next: (account) => patchState(store, { account }),
+        error: () => undefined,
+      });
+    },
+
+    loadRisk(): void {
+      http.get<{ items: RiskSetting[] }>('/api/v1/risk/settings').subscribe({
+        next: (res) => patchState(store, { risk: res.items ?? [] }),
+        error: () => undefined,
+      });
+    },
+
+    updateStartingCapital(startingCapital: string): void {
+      http.put<PaperAccount>('/api/v1/paper/account', { startingCapital }).subscribe({
+        next: (account) => patchState(store, { account }),
+      });
+    },
+
+    updateRisk(key: string, value: Record<string, unknown>): void {
+      http.put<{ items: RiskSetting[] }>('/api/v1/risk/settings', { key, value }).subscribe({
+        next: (res) => patchState(store, { risk: res.items ?? [] }),
       });
     },
 

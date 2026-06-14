@@ -143,14 +143,15 @@ import { ReasoningBreakdownPanel } from './reasoning-breakdown-panel';
             #{{ signal.id }} · v{{ signal.version ?? '?' }} · checksum
             {{ signal.checksum?.slice(0, 12) ?? 'n/a' }}… · SL
             {{ signal.stopLoss ? price(signal.stopLoss) : '—' }} · target
-            {{ signal.target ? price(signal.target) : '—' }}
+            {{ signal.target ? price(signal.target) : '—' }} · suggested qty
+            {{ signal.suggestedQty ?? '—' }}
             <div>
               <p-button
                 size="small"
                 label="Taken"
                 icon="pi pi-check"
                 [text]="true"
-                (onClick)="store.markTaken(signal.id)"
+                (onClick)="store.markTaken(signal.id, takenQty(signal))"
               />
               <p-button
                 size="small"
@@ -197,6 +198,11 @@ export class SignalsPage {
     if (row) {
       this.store.select(row.id);
     }
+  }
+
+  /** Suggested qty (A12) prefilled into the taken→paper-position action; undefined if unsized. */
+  protected takenQty(signal: SignalDto): number | undefined {
+    return signal.suggestedQty ? Number(signal.suggestedQty) : undefined;
   }
 
   protected price(value: string): string {

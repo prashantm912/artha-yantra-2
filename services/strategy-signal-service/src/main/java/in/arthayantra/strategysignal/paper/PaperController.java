@@ -11,6 +11,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -31,11 +32,32 @@ public class PaperController {
   /** Reset is guarded by an explicit confirm flag. */
   public record ResetBody(boolean confirm) {}
 
-  private final PaperService paper;
+  /** Owner edit of the starting capital. */
+  public record AccountBody(BigDecimal startingCapital) {}
 
-  /** Wires the ledger service. */
-  public PaperController(PaperService paper) {
+  private final PaperService paper;
+  private final PaperAccountService account;
+
+  /** Wires the ledger + account services. */
+  public PaperController(PaperService paper, PaperAccountService account) {
     this.paper = paper;
+    this.account = account;
+  }
+
+  /** The account header: equity, cash, capital usage by class, day P&amp;L (A12). */
+  @GetMapping("/account")
+  public PaperAccountService.AccountDto account() {
+    return account.account();
+  }
+
+  /** Edit the starting capital. */
+  @PutMapping("/account")
+  public PaperAccountService.AccountDto updateAccount(@RequestBody AccountBody body) {
+    if (body.startingCapital() == null || body.startingCapital().signum() < 0) {
+      throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "startingCapital must be non-negative");
+    }
+    account.updateStartingCapital(body.startingCapital());
+    return account.account();
   }
 
   /** Open positions with mark-to-market P&amp;L from the last-tick map. */

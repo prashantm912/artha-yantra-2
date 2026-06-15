@@ -1,0 +1,68 @@
+package in.arthayantra.marketdata.futures.analytics;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import in.arthayantra.marketdata.options.OiInterval;
+import in.arthayantra.marketdata.testsupport.MarketDataIntegrationTestBase;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
+
+@SpringBootTest(
+    properties = {
+      "spring.profiles.active=mock",
+      "artha.feed.autostart=false",
+      "artha.instruments.bootstrap-sync=false"
+    })
+class FuturesSnapshotReaderIntegrationTest extends MarketDataIntegrationTestBase {
+
+  @Autowired JdbcTemplate jdbc;
+  @Autowired FuturesSnapshotReader reader;
+
+  private void insert(String u, OffsetDateTime ts, String symbol, long oi, long oiChange) {
+    jdbc.update(
+        "INSERT INTO futures_oi_snapshots (ts, underlying, tradingsymbol, expiry, ltp, volume, oi, oi_change) "
+            + "VALUES (?,?,?,?,?::numeric,?,?,?) ON CONFLICT DO NOTHING",
+        java.sql.Timestamp.from(ts.toInstant()),
+        u,
+        symbol,
+        java.sql.Date.valueOf(LocalDate.of(2026, 6, 25)),
+        "100.00",
+        10L,
+        oi,
+        oiChange);
+  }
+
+  @Test
+  void downsamplesPerContractToLastValue() {
+    String u = "FUTREAD";
+    OffsetDateTime t0 =
+        OffsetDateTime.of(2026, 6, 20, 9, 16, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    insert(u, t0, u + "26JUNFUT", 5000L, 200L);
+
+    List<FuturesSnapshotReader.FutPoint> pts =
+        reader.series(u, OiInterval.M5, t0.minusMinutes(1), t0.plusMinutes(6));
+
+    assertThat(pts).hasSize(1);
+    assertThat(pts.get(0).tradingsymbol()).isEqualTo(u + "26JUNFUT");
+    assertThat(pts.get(0).oi()).isEqualTo(5000L);
+  }
+
+  @Test
+  void latestAnchorsOnMaxTsRegardlessOfWallClock() {
+    String u = "FUTLATEST";
+    OffsetDateTime t0 =
+        OffsetDateTime.of(2026, 6, 20, 9, 16, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    insert(u, t0, u + "26JUNFUT", 7000L, 300L);
+
+    List<FuturesSnapshotReader.FutPoint> pts = reader.latest(u, OiInterval.M5);
+
+    assertThat(pts).hasSize(1);
+    assertThat(pts.get(0).oi()).isEqualTo(7000L);
+  }
+}

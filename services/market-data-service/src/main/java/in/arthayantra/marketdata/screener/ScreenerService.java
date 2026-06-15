@@ -229,9 +229,8 @@ public class ScreenerService {
           BigDecimal priceDelta = bars.get(0).close().subtract(bars.get(1).close());
           long oiDelta = bars.get(0).oi() - bars.get(1).oi();
           String label =
-              priceDelta.signum() >= 0
-                  ? (oiDelta >= 0 ? "LONG_BUILDUP" : "SHORT_COVERING")
-                  : (oiDelta >= 0 ? "SHORT_BUILDUP" : "LONG_UNWINDING");
+              in.arthayantra.marketdata.options.OiInterpretation.classify(priceDelta, oiDelta)
+                  .name();
           rows.add(
               new Row(
                   exchanges.get(symbol), symbol, bars.get(0).close(), bars.get(1).close(),

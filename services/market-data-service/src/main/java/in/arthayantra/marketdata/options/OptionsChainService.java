@@ -319,6 +319,11 @@ public class OptionsChainService {
         : BigDecimal.valueOf(peOi).divide(BigDecimal.valueOf(ceOi), 4, RoundingMode.HALF_UP);
   }
 
+  /** Public, reusable PCR for analytics over stored snapshots (delegates to {@link #putCallRatio}). */
+  public static BigDecimal pcr(long ceOi, long peOi) {
+    return putCallRatio(ceOi, peOi);
+  }
+
   /** The configured pinned rate (provenance). */
   public BigDecimal riskFreeRate() {
     return riskFreeRate;

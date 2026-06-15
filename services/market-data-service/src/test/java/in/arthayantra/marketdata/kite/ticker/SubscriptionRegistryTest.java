@@ -77,6 +77,31 @@ class SubscriptionRegistryTest {
   }
 
   @Test
+  void persistsNonPinnedHoldsAndRemovesThemOnUnsubscribe() {
+    InMemorySubscriptionStore store = new InMemorySubscriptionStore();
+    SubscriptionRegistry registry =
+        new SubscriptionRegistry(RESOLVER, 3_000, new SimpleMeterRegistry(), store);
+
+    // pinned holds self-restore from config on boot — they are never persisted
+    registry.subscribe(
+        "system-pinned", key("NIFTY 50"), SubscriptionMode.QUOTE, SubscriptionPriority.PINNED_INDEX);
+    registry.subscribe("ui:tab1", key("AAA"), SubscriptionMode.QUOTE, SubscriptionPriority.UI);
+
+    assertThat(store.all())
+        .singleElement()
+        .satisfies(
+            h -> {
+              assertThat(h.subscriber()).isEqualTo("ui:tab1");
+              assertThat(h.key().tradingsymbol()).isEqualTo("AAA");
+              assertThat(h.mode()).isEqualTo(SubscriptionMode.QUOTE);
+              assertThat(h.priority()).isEqualTo(SubscriptionPriority.UI);
+            });
+
+    registry.unsubscribe("ui:tab1", key("AAA"));
+    assertThat(store.all()).isEmpty();
+  }
+
+  @Test
   void unknownInstrumentIs404() {
     assertThatThrownBy(
             () ->

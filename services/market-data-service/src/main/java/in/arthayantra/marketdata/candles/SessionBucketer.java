@@ -17,10 +17,21 @@ import java.time.temporal.ChronoUnit;
 public final class SessionBucketer {
 
   private final MarketCalendar calendar;
+  private final boolean clampToSession;
 
-  /** Wires the shared calendar. */
+  /** Wires the shared calendar with session clamping ON (the live default). */
   public SessionBucketer(MarketCalendar calendar) {
+    this(calendar, true);
+  }
+
+  /**
+   * Wires the calendar. {@code clampToSession=false} (mock 1m feed only) keeps plain minute
+   * flooring 24/7: the mock feed ticks round the clock, so clamping would freeze every symbol's
+   * bucket at 15:29 all evening — no further closed bars roll, starving the live signal engine.
+   */
+  public SessionBucketer(MarketCalendar calendar, boolean clampToSession) {
     this.calendar = calendar;
+    this.clampToSession = clampToSession;
   }
 
   /** The 1m bucket start (IST) for a tick timestamp. */
@@ -33,7 +44,7 @@ public final class SessionBucketer {
     } catch (IllegalArgumentException uncoveredYear) {
       tradingDay = false;
     }
-    if (tradingDay) {
+    if (tradingDay && clampToSession) {
       LocalTime time = ist.toLocalTime();
       if (time.isBefore(MarketCalendar.SESSION_OPEN)) {
         return day.atTime(MarketCalendar.SESSION_OPEN).atOffset(Ist.OFFSET);

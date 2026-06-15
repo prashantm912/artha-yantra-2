@@ -89,4 +89,29 @@ public class OptionsSnapshotReader {
     }
     return series(underlying, expiry, interval, bucketStart, bucketStart.plus(interval.bucket()));
   }
+
+  /**
+   * Rows for the two most-recent snapshot buckets (newest + the prior captured bucket), used to
+   * compute interval deltas (LTP-delta, OI-delta) for spurt. Robust to gaps: it picks the two
+   * most-recent buckets that ACTUALLY hold data, not two wall-clock-adjacent slots. Empty if no
+   * snapshot; a single bucket if only one exists (the caller then has no prior to diff against).
+   */
+  public List<StrikePoint> latestPair(String underlying, LocalDate expiry, OiInterval interval) {
+    List<OffsetDateTime> buckets =
+        jdbc.query(
+            "SELECT DISTINCT public.time_bucket(INTERVAL '"
+                + interval.pgInterval()
+                + "', ts, 'Asia/Kolkata') AS b "
+                + "FROM options_chain_snapshots WHERE underlying = ? AND expiry = ? "
+                + "ORDER BY b DESC LIMIT 2",
+            (rs, n) -> rs.getObject("b", OffsetDateTime.class),
+            underlying,
+            java.sql.Date.valueOf(expiry));
+    if (buckets.isEmpty()) {
+      return List.of();
+    }
+    OffsetDateTime newest = buckets.get(0);
+    OffsetDateTime earliest = buckets.get(buckets.size() - 1);
+    return series(underlying, expiry, interval, earliest, newest.plus(interval.bucket()));
+  }
 }

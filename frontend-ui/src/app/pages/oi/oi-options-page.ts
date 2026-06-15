@@ -4,6 +4,7 @@ import { compareDecimal, formatDecimal } from '../../core/decimal';
 import { OiAnalyticsStore, type OiChainRow } from '../../stores/oi-analytics.store';
 import { SymbolContextStore } from '../../stores/symbol-context.store';
 import { DataBar } from '../../shared/data-bar';
+import { OiIntBadge } from '../../shared/oi-int-badge';
 import { OiControlBar } from './oi-control-bar';
 
 /**
@@ -15,7 +16,7 @@ import { OiControlBar } from './oi-control-bar';
 @Component({
   selector: 'ay-oi-options-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [TableModule, DataBar, OiControlBar],
+  imports: [TableModule, DataBar, OiIntBadge, OiControlBar],
   styles: `
     .meta {
       margin: 0 0 0.7rem;
@@ -39,10 +40,21 @@ import { OiControlBar } from './oi-control-bar';
     .itm {
       background: color-mix(in srgb, var(--ay-accent) 12%, transparent);
     }
+    .bias {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      margin: 0 0 0.6rem;
+      color: var(--ay-text-muted);
+    }
   `,
   template: `
     <h1 class="ay-sr-only">Options OI analysis</h1>
     <ay-oi-control-bar />
+
+    <p class="bias" aria-live="polite">
+      OI bias <ay-oi-int-badge [value]="store.oiInterpretation()" />
+    </p>
 
     @if (store.oiStats(); as s) {
       <p class="meta" aria-live="polite">
@@ -136,6 +148,7 @@ export class OiOptionsPage {
     this.ctx.mode();
     this.ctx.date();
     this.store.loadOptions();
+    this.store.loadSpurt();
   });
 
   protected dec(value: string | null | undefined, fractionDigits: number): string {

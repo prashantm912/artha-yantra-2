@@ -173,4 +173,47 @@ describe('OiAnalyticsStore', () => {
     expect(store.futures()[0].tradingsymbol).toBe('NIFTY26JUNFUT');
     expect(store.maxFuturesOi()).toBe(120000);
   });
+
+  it('loadSpurt maps the rollup summary to the oiInterpretation computed', () => {
+    ctx.setExpiry('2026-06-25');
+    store.loadSpurt();
+
+    http
+      .expectOne((r) => r.url.includes('/options/spurt'))
+      .flush({
+        items: [
+          {
+            strike: '22500',
+            optionType: 'CE',
+            ltp: '110',
+            oi: 1200,
+            oiChange: 200,
+            spurtPct: '20.00',
+            interpretation: 'LONG_BUILDUP',
+          },
+        ],
+        summary: { interpretation: 'LONG_BUILDUP', spotDelta: '20', oiChange: 400 },
+        asOf: 'x',
+      });
+
+    expect(store.spurt()?.items).toHaveLength(1);
+    expect(store.oiInterpretation()).toBe('LONG_BUILDUP');
+  });
+
+  it('maps a 422 DATA_GAP on spurt to null (no badge)', () => {
+    ctx.setExpiry('2026-06-25');
+    store.loadSpurt();
+    http
+      .expectOne((r) => r.url.includes('/options/spurt'))
+      .flush({ code: 'DATA_GAP' }, { status: 422, statusText: 'Unprocessable Entity' });
+    expect(store.spurt()).toBeNull();
+    expect(store.oiInterpretation()).toBeNull();
+  });
+
+  it('skips the spurt call when no expiry is selected', () => {
+    ctx.setExpiry(null);
+    store.loadSpurt();
+    http.expectNone((r) => r.url.includes('/options/spurt'));
+    expect(store.oiInterpretation()).toBeNull();
+  });
 });

@@ -22,10 +22,13 @@ public class OptionsAnalyticsController {
 
   private final OptionsSnapshotReader reader;
   private final ActiveStrikeService activeStrikes;
+  private final OiSpurtService spurtService;
 
-  public OptionsAnalyticsController(OptionsSnapshotReader reader, ActiveStrikeService activeStrikes) {
+  public OptionsAnalyticsController(
+      OptionsSnapshotReader reader, ActiveStrikeService activeStrikes, OiSpurtService spurtService) {
     this.reader = reader;
     this.activeStrikes = activeStrikes;
+    this.spurtService = spurtService;
   }
 
   public record OiStats(BigDecimal pcr, BigDecimal maxPain, long ceOi, long peOi, OffsetDateTime asOf) {}
@@ -95,6 +98,23 @@ public class OptionsAnalyticsController {
     LocalDate exp = requireExpiry(q);
     List<OptionsSnapshotReader.StrikePoint> latest = reader.latest(q.name(), exp, q.interval());
     return Map.of("items", latest); // {items:[...]} envelope (CLAUDE.md)
+  }
+
+  /** /spurt: oipulse Options OI Spurt — per-strike interval buildup + the underlying 4-state rollup. */
+  @GetMapping("/spurt")
+  public OiSpurtService.SpurtChain spurt(
+      @RequestParam(required = false) String mode,
+      @RequestParam String name,
+      @RequestParam(required = false) String date,
+      @RequestParam(required = false) String interval,
+      @RequestParam(required = false) String expiry) {
+    OiQuery q = OiQuery.of(mode, name, date, interval, expiry);
+    LocalDate exp = requireExpiry(q);
+    List<OptionsSnapshotReader.StrikePoint> pair = reader.latestPair(q.name(), exp, q.interval());
+    if (pair.isEmpty()) {
+      throw new ApiException(422, ErrorCodes.DATA_GAP, "no snapshot for " + q.name() + " " + exp);
+    }
+    return spurtService.spurts(pair);
   }
 
   private LocalDate requireExpiry(OiQuery q) {

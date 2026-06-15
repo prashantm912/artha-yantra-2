@@ -196,6 +196,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/options/oi-stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["oiStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/options/oi-analysis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["oiAnalysis"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/options/iv-history": {
         parameters: {
             query?: never;
@@ -244,6 +276,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/options/active-strikes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["activeStrikes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/futures/term-structure": {
         parameters: {
             query?: never;
@@ -252,6 +300,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["termStructure"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/futures/oi-analysis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["oiAnalysis_1"];
         put?: never;
         post?: never;
         delete?: never;
@@ -535,6 +599,16 @@ export interface components {
             /** Format: int32 */
             subscribers?: number;
         };
+        OiStats: {
+            pcr?: number;
+            maxPain?: number;
+            /** Format: int64 */
+            ceOi?: number;
+            /** Format: int64 */
+            peOi?: number;
+            /** Format: date-time */
+            asOf?: string;
+        };
         HistoryPoint: {
             /** Format: date */
             date?: string;
@@ -592,6 +666,19 @@ export interface components {
             strike?: number;
             ce?: components["schemas"]["Leg"];
             pe?: components["schemas"]["Leg"];
+        };
+        ActiveStrikesResponse: {
+            sentimentPct?: number;
+            items?: components["schemas"]["StrikeView"][];
+            /** Format: date-time */
+            asOf?: string;
+        };
+        StrikeView: {
+            strike?: number;
+            /** Format: int64 */
+            ceOi?: number;
+            /** Format: int64 */
+            peOi?: number;
         };
         ContractLeg: {
             tradingsymbol?: string;
@@ -1345,6 +1432,78 @@ export interface operations {
             };
         };
     };
+    oiStats: {
+        parameters: {
+            query: {
+                mode?: string;
+                name: string;
+                date?: string;
+                interval?: string;
+                expiry?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["OiStats"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    oiAnalysis: {
+        parameters: {
+            query: {
+                mode?: string;
+                name: string;
+                date?: string;
+                interval?: string;
+                expiry?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     ivHistory: {
         parameters: {
             query: {
@@ -1443,6 +1602,41 @@ export interface operations {
             };
         };
     };
+    activeStrikes: {
+        parameters: {
+            query: {
+                mode?: string;
+                name: string;
+                date?: string;
+                interval?: string;
+                expiry?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ActiveStrikesResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     termStructure: {
         parameters: {
             query: {
@@ -1461,6 +1655,43 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["TermStructure"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    oiAnalysis_1: {
+        parameters: {
+            query: {
+                mode?: string;
+                name: string;
+                date?: string;
+                interval?: string;
+                expiry?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

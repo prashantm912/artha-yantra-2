@@ -778,6 +778,135 @@
         }
       }
     },
+    "/api/v1/market/options/oi-stats" : {
+      "get" : {
+        "tags" : [ "options-analytics-controller" ],
+        "operationId" : "oiStats",
+        "parameters" : [ {
+          "name" : "mode",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "name",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "date",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "interval",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "expiry",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/OiStats"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/options/oi-analysis" : {
+      "get" : {
+        "tags" : [ "options-analytics-controller" ],
+        "operationId" : "oiAnalysis",
+        "parameters" : [ {
+          "name" : "mode",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "name",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "date",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "interval",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "expiry",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/options/iv-history" : {
       "get" : {
         "tags" : [ "iv-analytics-controller" ],
@@ -911,6 +1040,70 @@
         }
       }
     },
+    "/api/v1/market/options/active-strikes" : {
+      "get" : {
+        "tags" : [ "options-analytics-controller" ],
+        "operationId" : "activeStrikes",
+        "parameters" : [ {
+          "name" : "mode",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "name",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "date",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "interval",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "expiry",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ActiveStrikesResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/futures/term-structure" : {
       "get" : {
         "tags" : [ "futures-controller" ],
@@ -930,6 +1123,71 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/TermStructure"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/futures/oi-analysis" : {
+      "get" : {
+        "tags" : [ "futures-analytics-controller" ],
+        "operationId" : "oiAnalysis_1",
+        "parameters" : [ {
+          "name" : "mode",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "name",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "date",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "interval",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "expiry",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : { }
                 }
               }
             }
@@ -1682,6 +1940,29 @@
           }
         }
       },
+      "OiStats" : {
+        "type" : "object",
+        "properties" : {
+          "pcr" : {
+            "type" : "number"
+          },
+          "maxPain" : {
+            "type" : "number"
+          },
+          "ceOi" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "peOi" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
       "HistoryPoint" : {
         "type" : "object",
         "properties" : {
@@ -1838,6 +2119,40 @@
           },
           "pe" : {
             "$ref" : "#/components/schemas/Leg"
+          }
+        }
+      },
+      "ActiveStrikesResponse" : {
+        "type" : "object",
+        "properties" : {
+          "sentimentPct" : {
+            "type" : "number"
+          },
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/StrikeView"
+            }
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "StrikeView" : {
+        "type" : "object",
+        "properties" : {
+          "strike" : {
+            "type" : "number"
+          },
+          "ceOi" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "peOi" : {
+            "type" : "integer",
+            "format" : "int64"
           }
         }
       },

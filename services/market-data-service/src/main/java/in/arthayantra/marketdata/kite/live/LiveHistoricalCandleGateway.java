@@ -1,6 +1,5 @@
 package in.arthayantra.marketdata.kite.live;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
@@ -10,7 +9,8 @@ import in.arthayantra.marketdata.kite.HistoricalCandleGateway;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.InstrumentTokenResolver;
 import in.arthayantra.marketdata.kite.KiteCallExecutor;
-import java.math.BigDecimal;
+import in.arthayantra.marketdata.kite.wire.KiteCandle;
+import in.arthayantra.marketdata.kite.wire.KiteHistoricalResponse;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
@@ -28,8 +28,6 @@ import org.springframework.web.client.RestClient;
  */
 public class LiveHistoricalCandleGateway implements HistoricalCandleGateway {
 
-  private static final DateTimeFormatter KITE_TS =
-      DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssZ");
   private static final DateTimeFormatter KITE_PARAM =
       DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
   // continuous=1 ONLY for options: for FUT it is Kite's roll-unaware stitched series, which
@@ -133,21 +131,24 @@ public class LiveHistoricalCandleGateway implements HistoricalCandleGateway {
 
   private List<Candle> parse(InstrumentKey key, String interval, String body) {
     try {
-      JsonNode candles = objectMapper.readTree(body).path("data").path("candles");
+      KiteHistoricalResponse response = objectMapper.readValue(body, KiteHistoricalResponse.class);
       List<Candle> out = new ArrayList<>();
-      for (JsonNode row : candles) {
-        OffsetDateTime bucket = OffsetDateTime.parse(row.get(0).asText(), KITE_TS);
+      if (response.data() == null || response.data().candles() == null) {
+        return out;
+      }
+      for (var row : response.data().candles()) {
+        KiteCandle candle = KiteCandle.of(row);
         out.add(
             new Candle(
                 key,
                 interval,
-                bucket,
-                new BigDecimal(row.get(1).asText()),
-                new BigDecimal(row.get(2).asText()),
-                new BigDecimal(row.get(3).asText()),
-                new BigDecimal(row.get(4).asText()),
-                row.get(5).asLong(),
-                row.size() > 6 && !row.get(6).isNull() ? row.get(6).asLong() : null));
+                candle.timestamp(),
+                candle.open(),
+                candle.high(),
+                candle.low(),
+                candle.close(),
+                candle.volume(),
+                candle.openInterest()));
       }
       return out;
     } catch (Exception e) {

@@ -4,6 +4,7 @@ import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.marketdata.kite.AccessTokenProvider;
 import in.arthayantra.marketdata.kite.InstrumentDumpGateway;
+import in.arthayantra.marketdata.kite.wire.KiteInstrument;
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -24,13 +25,14 @@ import org.springframework.web.client.RestClient;
 
 /**
  * Live instrument dump (B-6 port 5/5): {@code GET {base}/instruments/{exchange}} per exchange —
- * NSE, NFO, BFO sequentially (B-3 step 2) — parsing Kite's (optionally gzipped) CSV. Speaks the
- * wire format so WireMock can verify it (Phase 9 acceptance).
+ * NSE, BSE, NFO, BFO sequentially (B-3 step 2) — parsing Kite's (optionally gzipped) CSV. BSE
+ * carries the SENSEX/BANKEX spot indices + BSE-only cash, needed to resolve spot for the BFO
+ * options chain. Speaks the wire format so WireMock can verify it (Phase 9 acceptance).
  */
 public class LiveInstrumentDumpGateway implements InstrumentDumpGateway {
 
   private static final Logger log = LoggerFactory.getLogger(LiveInstrumentDumpGateway.class);
-  private static final List<String> EXCHANGES = List.of("NSE", "NFO", "BFO");
+  private static final List<String> EXCHANGES = List.of("NSE", "BSE", "NFO", "BFO");
 
   private final RestClient restClient;
   private final String apiKey;
@@ -75,15 +77,33 @@ public class LiveInstrumentDumpGateway implements InstrumentDumpGateway {
               .header("Authorization", "token " + apiKey + ":" + token)
               .retrieve()
               .body(byte[].class);
-      List<InstrumentRecord> rows = parseCsv(body);
+      List<KiteInstrument> rows = parseCsv(body);
       log.info("instrument dump {}: {} rows", exchange, rows.size());
-      all.addAll(rows);
+      for (KiteInstrument row : rows) {
+        all.add(toRecord(row));
+      }
     }
     return all;
   }
 
-  /** Parses the Kite dump CSV (gzip-sniffed); header-driven column mapping. */
-  static List<InstrumentRecord> parseCsv(byte[] body) {
+  /** Maps a full wire row to the domain record; {@code exchange_token}/{@code last_price} are
+   * mirrored on {@link KiteInstrument} for reference but the domain record does not carry them. */
+  private static InstrumentRecord toRecord(KiteInstrument k) {
+    return new InstrumentRecord(
+        k.instrumentToken(),
+        k.exchange(),
+        k.tradingsymbol(),
+        k.name(),
+        k.instrumentType(),
+        k.segment(),
+        k.expiry(),
+        k.strike(),
+        k.lotSize() == null ? 0 : k.lotSize(),
+        k.tickSize());
+  }
+
+  /** Parses the Kite dump CSV (gzip-sniffed) into full wire rows; header-driven column mapping. */
+  static List<KiteInstrument> parseCsv(byte[] body) {
     try (InputStream raw = maybeGunzip(body);
         BufferedReader reader = new BufferedReader(new InputStreamReader(raw, StandardCharsets.UTF_8))) {
       String headerLine = reader.readLine();
@@ -95,7 +115,7 @@ public class LiveInstrumentDumpGateway implements InstrumentDumpGateway {
       for (int i = 0; i < headers.length; i++) {
         col.put(headers[i].trim(), i);
       }
-      List<InstrumentRecord> rows = new ArrayList<>();
+      List<KiteInstrument> rows = new ArrayList<>();
       String line;
       while ((line = reader.readLine()) != null) {
         if (line.isBlank()) {
@@ -103,17 +123,19 @@ public class LiveInstrumentDumpGateway implements InstrumentDumpGateway {
         }
         String[] f = line.split(",", -1);
         rows.add(
-            new InstrumentRecord(
+            new KiteInstrument(
                 parseLong(get(f, col, "instrument_token")),
-                get(f, col, "exchange"),
+                parseLong(get(f, col, "exchange_token")),
                 get(f, col, "tradingsymbol"),
                 get(f, col, "name"),
-                get(f, col, "instrument_type"),
-                get(f, col, "segment"),
+                parseDecimal(get(f, col, "last_price")),
                 parseDate(get(f, col, "expiry")),
                 parseDecimal(get(f, col, "strike")),
+                parseDecimal(get(f, col, "tick_size")),
                 parseInt(get(f, col, "lot_size")),
-                parseDecimal(get(f, col, "tick_size"))));
+                get(f, col, "instrument_type"),
+                get(f, col, "segment"),
+                get(f, col, "exchange")));
       }
       return rows;
     } catch (IOException e) {

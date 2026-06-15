@@ -86,7 +86,12 @@ public class InstrumentRepository {
     return rows.size();
   }
 
-  /** Step 4: one atomic upsert from staging keyed by the stable key. */
+  /**
+   * Step 4: one atomic upsert from staging keyed by the stable key. The Kite dump can carry
+   * duplicate (exchange, tradingsymbol) rows; {@code DISTINCT ON} collapses them to one
+   * (highest instrument_token wins) so a single ON CONFLICT never touches the same key twice
+   * ("ON CONFLICT DO UPDATE command cannot affect row a second time").
+   */
   public int upsertFromStaging() {
     return jdbc.update(
         """
@@ -94,10 +99,12 @@ public class InstrumentRepository {
           (exchange, tradingsymbol, instrument_token, exchange_token, name, segment,
            instrument_type, underlying_exchange, underlying_tradingsymbol, expiry,
            strike, tick_size, lot_size, is_active, first_seen_at, last_seen_at, updated_at)
-        SELECT exchange, tradingsymbol, instrument_token, exchange_token, name, segment,
+        SELECT DISTINCT ON (exchange, tradingsymbol)
+               exchange, tradingsymbol, instrument_token, exchange_token, name, segment,
                instrument_type, underlying_exchange, underlying_tradingsymbol, expiry,
                strike, tick_size, lot_size, TRUE, now(), now(), now()
         FROM instruments_staging
+        ORDER BY exchange, tradingsymbol, instrument_token DESC
         ON CONFLICT (exchange, tradingsymbol) DO UPDATE SET
           instrument_token = EXCLUDED.instrument_token,
           exchange_token = EXCLUDED.exchange_token,

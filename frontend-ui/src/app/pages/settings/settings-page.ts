@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal } from '
 import { HttpClient } from '@angular/common/http';
 import { ButtonModule } from 'primeng/button';
 import { TagModule } from 'primeng/tag';
+import { MessageService } from 'primeng/api';
 import { SessionStore } from '../../core/session.store';
 
 interface KiteStatus {
@@ -167,6 +168,7 @@ interface SyncStatus {
 export class SettingsPage {
   protected readonly session = inject(SessionStore);
   private readonly http = inject(HttpClient);
+  private readonly toast = inject(MessageService);
   protected readonly kite = signal<KiteStatus | null>(null);
   protected readonly sync = signal<SyncStatus | null>(null);
 
@@ -210,8 +212,32 @@ export class SettingsPage {
   }
 
   protected syncInstruments(): void {
+    // HTTP errors on the trigger (409 already-running, 5xx) toast via errorEnvelopeInterceptor.
+    // The run is async — a 202 here does NOT mean success, so poll status and toast the outcome.
     this.http
       .post('/api/v1/instruments/sync', {})
-      .subscribe({ next: () => this.loadSync(), error: () => undefined });
+      .subscribe({ next: () => this.pollSyncOutcome(0), error: () => undefined });
+  }
+
+  /** Polls sync status until the run leaves RUNNING, then toasts OK / FAILED. Caps at ~60s. */
+  private pollSyncOutcome(attempt: number): void {
+    this.http.get<SyncStatus>('/api/v1/instruments/sync/status').subscribe({
+      next: (s) => {
+        this.sync.set(s);
+        if (s.state === 'RUNNING' && attempt < 30) {
+          setTimeout(() => this.pollSyncOutcome(attempt + 1), 2000);
+        } else if (s.state === 'FAILED') {
+          this.toast.add({
+            severity: 'error',
+            summary: 'Instrument sync failed',
+            detail: s.error ?? 'See market-data-service logs.',
+            life: 8000,
+          });
+        } else if (s.state === 'OK') {
+          this.toast.add({ severity: 'success', summary: 'Instruments synced', life: 4000 });
+        }
+      },
+      error: () => undefined,
+    });
   }
 }

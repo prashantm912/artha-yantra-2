@@ -39,4 +39,15 @@ class SessionBucketerTest {
     // uncovered year never throws
     assertThat(bucketer.bucketFor(ist("2030-03-03T11:07:42"))).isEqualTo(ist("2030-03-03T11:07:00"));
   }
+
+  @Test
+  void clampDisabledFloorsPlainMinuteEvenInsideAndAfterSession() {
+    // The mock CandleBuilder runs with clamping off so its 1m feed keeps advancing 24/7 (a clamped
+    // feed freezes at 15:29 all evening — no new closed bars, starving the live signal engine).
+    SessionBucketer unclamped = new SessionBucketer(MarketCalendar.nse(), false);
+    // a trading-day post-close tick floors to its own minute, NOT the 15:29 session clamp
+    assertThat(unclamped.bucketFor(ist("2026-06-10T15:45:10"))).isEqualTo(ist("2026-06-10T15:45:00"));
+    // pre-open too — no 09:15 fold
+    assertThat(unclamped.bucketFor(ist("2026-06-10T09:08:30"))).isEqualTo(ist("2026-06-10T09:08:00"));
+  }
 }

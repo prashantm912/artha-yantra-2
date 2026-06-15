@@ -40,6 +40,17 @@ export const routes: Routes = [
         title: 'Futures · ArthaYantra',
         loadComponent: () => import('./pages/futures/futures-page').then((m) => m.FuturesPage),
       },
+      { path: 'oi', pathMatch: 'full', redirectTo: 'oi/options' },
+      {
+        path: 'oi/options',
+        title: 'Options OI · ArthaYantra',
+        loadComponent: () => import('./pages/oi/oi-options-page').then((m) => m.OiOptionsPage),
+      },
+      {
+        path: 'oi/futures',
+        title: 'Futures OI · ArthaYantra',
+        loadComponent: () => import('./pages/oi/oi-futures-page').then((m) => m.OiFuturesPage),
+      },
       {
         path: 'paper',
         title: 'Paper trading · ArthaYantra',

@@ -108,6 +108,16 @@ public class OptionsChainService {
                     ErrorCodes.NOT_FOUND_INSTRUMENT, "no option expiries for " + underlying));
   }
 
+  /** Expiries on/after today and within {@code horizonDays} (ascending) — the snapshot horizon. */
+  public List<LocalDate> expiriesWithin(String underlying, int horizonDays) {
+    LocalDate today =
+        OffsetDateTime.now(clock).atZoneSameInstant(ZoneOffset.ofHoursMinutes(5, 30)).toLocalDate();
+    LocalDate limit = today.plusDays(horizonDays);
+    return instruments.expiries(underlying).stream()
+        .filter(e -> !e.isBefore(today) && !e.isAfter(limit))
+        .toList();
+  }
+
   /** Computes the full chain for (underlying, expiry). */
   public Chain chain(String underlying, LocalDate requestedExpiry) {
     LocalDate expiry = resolveExpiry(underlying, requestedExpiry);

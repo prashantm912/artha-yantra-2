@@ -87,6 +87,55 @@ class FuturesSnapshotReaderIntegrationTest extends MarketDataIntegrationTestBase
     assertThat(d1.get(0).oi()).isEqualTo(1111L); // day2 excluded by the IST-day window
   }
 
+  private void insertOhlc(
+      String u,
+      OffsetDateTime ts,
+      String sym,
+      String ltp,
+      long oi,
+      long oiChange,
+      String dayOpen,
+      String dayHigh,
+      String dayLow) {
+    jdbc.update(
+        "INSERT INTO futures_oi_snapshots "
+            + "(ts, underlying, tradingsymbol, expiry, ltp, volume, oi, oi_change, "
+            + " day_open, day_high, day_low) "
+            + "VALUES (?,?,?,?,?::numeric,?,?,?,?::numeric,?::numeric,?::numeric) ON CONFLICT DO NOTHING",
+        java.sql.Timestamp.from(ts.toInstant()),
+        u,
+        sym,
+        java.sql.Date.valueOf(LocalDate.of(2026, 6, 25)),
+        ltp,
+        100L,
+        oi,
+        oiChange,
+        dayOpen,
+        dayHigh,
+        dayLow);
+  }
+
+  @Test
+  void eodRollsUpPerContractPerDay() {
+    String u = "FUTEODREAD";
+    OffsetDateTime t1 =
+        OffsetDateTime.of(2026, 6, 18, 9, 30, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime t2 =
+        OffsetDateTime.of(2026, 6, 18, 15, 20, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    insertOhlc(u, t1, u + "26JUNFUT", "100", 1000L, 50L, "99", "101", "98");
+    insertOhlc(u, t2, u + "26JUNFUT", "105", 1100L, 100L, "99", "106", "97");
+
+    List<FuturesSnapshotReader.EodRow> rows =
+        reader.eod(u, LocalDate.of(2026, 6, 18), LocalDate.of(2026, 6, 18));
+
+    assertThat(rows).hasSize(1);
+    assertThat(rows.get(0).close()).isEqualByComparingTo("105"); // last ltp
+    assertThat(rows.get(0).high()).isEqualByComparingTo("106"); // max day_high
+    assertThat(rows.get(0).low()).isEqualByComparingTo("97"); // min day_low
+    assertThat(rows.get(0).oiClose()).isEqualTo(1100L);
+    assertThat(rows.get(0).oiChange()).isEqualTo(150L); // 50 + 100
+  }
+
   @Test
   void surfacesDayOhlcColumns() {
     String u = "FUTOHLC";

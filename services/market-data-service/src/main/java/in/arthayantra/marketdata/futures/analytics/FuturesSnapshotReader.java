@@ -33,6 +33,18 @@ public class FuturesSnapshotReader {
       BigDecimal prevClose,
       LocalDate expiry) {}
 
+  /** One contract's per-IST-day EOD rollup (from the intraday snapshots). */
+  public record EodRow(
+      String tradingsymbol,
+      LocalDate tradeDate,
+      BigDecimal open,
+      BigDecimal high,
+      BigDecimal low,
+      BigDecimal close,
+      long oiClose,
+      long oiChange,
+      long volume) {}
+
   public List<FutPoint> series(
       String underlying, OiInterval interval, OffsetDateTime from, OffsetDateTime to) {
     String sql =
@@ -126,6 +138,39 @@ public class FuturesSnapshotReader {
     OffsetDateTime newest = buckets.get(0);
     OffsetDateTime earliest = buckets.get(buckets.size() - 1);
     return series(underlying, interval, earliest, newest.plus(interval.bucket()));
+  }
+
+  /**
+   * Per-contract per-IST-day EOD rollup over [{@code from}, {@code to}] (inclusive): open/high/low
+   * (from the captured day range), close = last ltp, OI close, net OI-change and day volume.
+   */
+  public List<EodRow> eod(String underlying, LocalDate from, LocalDate to) {
+    OffsetDateTime start = from.atStartOfDay().atOffset(Ist.OFFSET);
+    OffsetDateTime end = to.plusDays(1).atStartOfDay().atOffset(Ist.OFFSET);
+    String sql =
+        "SELECT tradingsymbol, (ts AT TIME ZONE 'Asia/Kolkata')::date AS d, "
+            + "  public.last(day_open, ts) AS o, max(day_high) AS h, min(day_low) AS l, "
+            + "  public.last(ltp, ts) AS c, public.last(oi, ts) AS oi_close, "
+            + "  COALESCE(sum(oi_change), 0) AS oi_chg, public.last(volume, ts) AS vol "
+            + "FROM futures_oi_snapshots "
+            + "WHERE underlying = ? AND ts >= ? AND ts < ? "
+            + "GROUP BY tradingsymbol, d ORDER BY d, tradingsymbol";
+    return jdbc.query(
+        sql,
+        (rs, n) ->
+            new EodRow(
+                rs.getString("tradingsymbol"),
+                rs.getObject("d", LocalDate.class),
+                rs.getBigDecimal("o"),
+                rs.getBigDecimal("h"),
+                rs.getBigDecimal("l"),
+                rs.getBigDecimal("c"),
+                rs.getLong("oi_close"),
+                rs.getLong("oi_chg"),
+                rs.getLong("vol")),
+        underlying,
+        Timestamp.from(start.toInstant()),
+        Timestamp.from(end.toInstant()));
   }
 
   /** Appends an IST-day window predicate (history mode) when {@code date} is non-null. */

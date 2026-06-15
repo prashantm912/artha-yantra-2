@@ -59,6 +59,26 @@ class OptionsSnapshotReaderIntegrationTest extends MarketDataIntegrationTestBase
         .containsExactlyInAnyOrder("CE", "PE");
   }
 
+  @Test
+  void latestReturnsExactlyOneBucketWhenSnapshotsStraddleBucketEdge() {
+    // Regression: two snapshots for the SAME strike in ADJACENT 5-min buckets. latest() must
+    // return only the most-recent bucket — a rolling [maxTs - width, maxTs] window would span
+    // both and double-count the strike's point-in-time OI downstream.
+    String u = "READER_STRADDLE";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    OffsetDateTime tA =
+        OffsetDateTime.of(2026, 6, 20, 9, 18, 0, 0, ZoneOffset.ofHoursMinutes(5, 30)); // [09:15,09:20)
+    OffsetDateTime tB =
+        OffsetDateTime.of(2026, 6, 20, 9, 22, 0, 0, ZoneOffset.ofHoursMinutes(5, 30)); // [09:20,09:25)
+    insertRow(jdbc, tA, u, exp, "22500", "CE", "100.00", 1000L, 0L);
+    insertRow(jdbc, tB, u, exp, "22500", "CE", "200.00", 2000L, 0L);
+
+    List<OptionsSnapshotReader.StrikePoint> pts = reader.latest(u, exp, OiInterval.M5);
+
+    assertThat(pts).hasSize(1); // one bucket, not two
+    assertThat(pts.get(0).oi()).isEqualTo(2000L); // the later bucket wins
+  }
+
   /** Helper: minimal insert into options_chain_snapshots (only the columns the reader touches). */
   static void insertRow(
       JdbcTemplate jdbc,

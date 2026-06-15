@@ -26,7 +26,7 @@ public class FuturesSnapshotReader {
     String sql =
         "SELECT public.time_bucket(INTERVAL '"
             + interval.pgInterval()
-            + "', ts) AS b, "
+            + "', ts, 'Asia/Kolkata') AS b, "
             + "  tradingsymbol, public.last(ltp, ts) AS ltp, public.last(oi, ts) AS oi, "
             + "  public.last(oi_change, ts) AS oi_change "
             + "FROM futures_oi_snapshots "
@@ -46,17 +46,24 @@ public class FuturesSnapshotReader {
         Timestamp.from(to.toInstant()));
   }
 
-  /** Most recent snapshot bucket per contract (clock-independent: anchors on max(ts)). */
+  /**
+   * Most recent snapshot bucket per contract (clock-independent: anchors on the bucket CONTAINING
+   * max(ts), bucket-aligned via the same IST {@code time_bucket} as {@link #series}, so it returns
+   * exactly one bucket and never double-counts a contract's OI across two adjacent buckets).
+   */
   public List<FutPoint> latest(String underlying, OiInterval interval) {
-    List<OffsetDateTime> max =
+    List<OffsetDateTime> bucket =
         jdbc.query(
-            "SELECT max(ts) AS m FROM futures_oi_snapshots WHERE underlying = ?",
-            (rs, n) -> rs.getObject("m", OffsetDateTime.class),
+            "SELECT public.time_bucket(INTERVAL '"
+                + interval.pgInterval()
+                + "', max(ts), 'Asia/Kolkata') AS b "
+                + "FROM futures_oi_snapshots WHERE underlying = ?",
+            (rs, n) -> rs.getObject("b", OffsetDateTime.class),
             underlying);
-    OffsetDateTime maxTs = max.isEmpty() ? null : max.get(0);
-    if (maxTs == null) {
+    OffsetDateTime bucketStart = bucket.isEmpty() ? null : bucket.get(0);
+    if (bucketStart == null) {
       return List.of();
     }
-    return series(underlying, interval, maxTs.minus(interval.bucket()), maxTs.plusSeconds(1));
+    return series(underlying, interval, bucketStart, bucketStart.plus(interval.bucket()));
   }
 }

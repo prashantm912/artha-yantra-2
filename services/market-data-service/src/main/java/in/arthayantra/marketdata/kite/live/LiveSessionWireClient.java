@@ -1,10 +1,11 @@
 package in.arthayantra.marketdata.kite.live;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.marketdata.kite.session.SessionWireClient;
+import in.arthayantra.marketdata.kite.wire.KiteSession;
+import in.arthayantra.marketdata.kite.wire.KiteSessionResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -66,12 +67,13 @@ public class LiveSessionWireClient implements SessionWireClient {
           "Kite rejected the request token (" + rejected.getStatusCode().value() + ")");
     }
     try {
-      JsonNode data = objectMapper.readTree(body).path("data");
-      String accessToken = data.path("access_token").asText("");
-      if (accessToken.isEmpty()) {
+      KiteSessionResponse response = objectMapper.readValue(body, KiteSessionResponse.class);
+      KiteSession session = response.data();
+      String accessToken = session == null ? null : session.accessToken();
+      if (accessToken == null || accessToken.isEmpty()) {
         throw new IllegalStateException("no access_token in exchange response");
       }
-      return new TokenSession(accessToken, data.path("user_id").asText(null));
+      return new TokenSession(accessToken, session.userId());
     } catch (Exception e) {
       throw new ApiException(
           502, ErrorCodes.KITE_UPSTREAM_ERROR, "session exchange parse failed: " + e.getMessage());

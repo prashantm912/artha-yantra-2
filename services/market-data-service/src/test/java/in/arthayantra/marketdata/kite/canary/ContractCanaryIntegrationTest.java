@@ -71,7 +71,8 @@ class ContractCanaryIntegrationTest extends MarketDataIntegrationTestBase {
           + "\"email\":\"o@x.in\"}}";
   private static final String QUOTE_BODY =
       "{\"status\":\"success\",\"data\":{\"NSE:NIFTY 50\":{\"last_price\":24137.55,"
-          + "\"volume\":1,\"oi\":0,\"depth\":{\"buy\":[],\"sell\":[]}}}}";
+          + "\"volume\":1,\"oi\":0,\"ohlc\":{\"open\":1,\"high\":1,\"low\":1,\"close\":1},"
+          + "\"depth\":{\"buy\":[],\"sell\":[]}}}}";
   private static final String HISTORICAL_BODY =
       "{\"status\":\"success\",\"data\":{\"candles\":[]}}";
   private static final String DUMP_HEADER =

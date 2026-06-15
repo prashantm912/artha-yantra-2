@@ -11,6 +11,7 @@
     "data.*.last_price": "number",
     "data.*.volume": "number",
     "data.*.oi": "number",
+    "data.*.ohlc": "object",
     "data.*.depth": "object"
   },
   "historical": {

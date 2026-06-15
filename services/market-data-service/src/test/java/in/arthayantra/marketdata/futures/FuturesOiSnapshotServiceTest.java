@@ -80,6 +80,67 @@ class FuturesOiSnapshotServiceTest {
   }
 
   @Test
+  void batchesEveryUnderlyingIntoOneQuoteCall() {
+    // Two underlyings, one contract each. The kite-quote limiter is 1 call/s with a 5s
+    // timeout, so a call-per-underlying loop 429s past ~5-6 underlyings — the whole pass
+    // must batch into ONE quotes() call (Kite caps at 250 instruments).
+    InstrumentKey niftyFut = new InstrumentKey("NFO", "NIFTY26JUNFUT");
+    InstrumentKey hdfcFut = new InstrumentKey("NFO", "HDFCBANK26JUNFUT");
+    Map<String, InstrumentKey> ladder =
+        Map.of("NIFTY 50", niftyFut, "HDFCBANK", hdfcFut);
+
+    FuturesContractSource contracts =
+        (underlying, onOrAfter) ->
+            List.of(new FutContract(ladder.get(underlying), LocalDate.parse("2026-06-25")));
+
+    List<List<InstrumentKey>> callLog = new ArrayList<>();
+    QuoteGateway quotes =
+        keys -> {
+          callLog.add(List.copyOf(keys));
+          Map<InstrumentKey, QuoteGateway.Quote> out = new HashMap<>();
+          for (InstrumentKey k : keys) {
+            out.put(
+                k,
+                new QuoteGateway.Quote(
+                    k, new BigDecimal("100"), null, null, 1L, 5_000L, OffsetDateTime.now(CLOCK)));
+          }
+          return out;
+        };
+
+    List<FuturesOiSnapshotRepository.Row> captured = new ArrayList<>();
+    FuturesOiSnapshotRepository repo =
+        new FuturesOiSnapshotRepository(null) {
+          @Override
+          public void insertAll(List<Row> rows) {
+            captured.addAll(rows);
+          }
+        };
+
+    FuturesOiSnapshotService svc =
+        new FuturesOiSnapshotService(
+            contracts,
+            quotes,
+            repo,
+            MarketCalendar.nse(),
+            CLOCK,
+            List.of("NIFTY 50", "HDFCBANK"),
+            new SimpleMeterRegistry());
+
+    svc.snapshotNow();
+
+    // exactly one batched call carrying both underlyings' contracts
+    assertThat(callLog).hasSize(1);
+    assertThat(callLog.get(0)).containsExactlyInAnyOrder(niftyFut, hdfcFut);
+    // rows still attributed to the right underlying
+    assertThat(captured)
+        .extracting(FuturesOiSnapshotRepository.Row::underlying)
+        .containsExactlyInAnyOrder("NIFTY 50", "HDFCBANK");
+    assertThat(captured)
+        .extracting(FuturesOiSnapshotRepository.Row::tradingsymbol)
+        .containsExactlyInAnyOrder("NIFTY26JUNFUT", "HDFCBANK26JUNFUT");
+  }
+
+  @Test
   void capturesDayOhlcFromQuote() {
     List<FuturesOiSnapshotRepository.Row> captured = new ArrayList<>();
     FuturesOiSnapshotRepository repo =

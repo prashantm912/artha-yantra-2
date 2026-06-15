@@ -19,7 +19,7 @@ class FuturesMoversServiceTest {
   private static FuturesSnapshotReader.FutPoint p(
       OffsetDateTime b, String sym, String ltp, long oi, String prevClose, LocalDate exp) {
     return new FuturesSnapshotReader.FutPoint(
-        b, sym, new BigDecimal(ltp), oi, 0L, null, null, null,
+        b, null, sym, new BigDecimal(ltp), oi, 0L, null, null, null,
         prevClose == null ? null : new BigDecimal(prevClose), exp);
   }
 

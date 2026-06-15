@@ -32,8 +32,8 @@
 
 | Data | oipulse pages using it | Source | Status |
 |---|---|---|---|
-| Option chain OI / LTP / volume per strike (CE+PE) | Chain, OI Analysis, Spurt, Trending, Active Strikes, Big OI, Premium, Straddle/Strangle, Multi-leg, Connecting Dots | **Kite quote()** on chain instruments → `option_chain_snapshots` | **BUILD (Phase 1)** |
-| Option IV / Greeks | Active Strikes IV, Strategy Builder, Greeks | **`black76-math`** from chain LTP | Have lib; wire up |
+| Option chain OI / LTP / volume per strike (CE+PE) | Chain, OI Analysis, Spurt, Trending, Active Strikes, Big OI, Premium, Connecting Dots | **Kite quote()** on chain instruments → `option_chain_snapshots` | **BUILD (Phase 1)** |
+| Option IV | Active Strikes IV | **`black76-math`** from chain LTP | Have lib; wire up |
 | Futures OI / LTP / volume | Futures OI Analysis/Chart/Spurt/Buzz, Market Movers, Banks | **Kite quote()** on futures → `futures_oi_snapshots` | **BUILD (Phase 1)** |
 | India VIX | Vix&Index, Connecting Dots, chain header | Kite/NSE VIX quote | Mostly have (verify symbol) |
 | Spot/index LTP, candles, VWAP/RSI/Supertrend | every chart, Connecting Dots TA inputs | Existing candle store + TA compute | Have candles; **build TA calc** |
@@ -72,7 +72,7 @@ New suffix-versioned Flyway migrations under `deploy/.../marketdata/` (never edi
 - **Primitive #2 Active-Strike tracking** (peak-OI strike → its OI/IV series; **Active Strike Sentiment %**).
 - **Primitive #3 Buildup classifier** (4-bucket spurt across instruments).
 - **Derived:** PCR (+chart), Max Pain, straddle/strangle premium series, Greeks aggregation, OI-spurt %, big-OI-move detector, O=H/O=L probability, market movers, banks-analysis grid.
-- **Endpoints:** `/api/v1/options/{chain,oi-analysis,spurt,trending,active-strikes,big-oi,premium,oi-stats}`, `/api/v1/futures/{oi-analysis,spurt,buzz,movers,banks,eod}`, `/api/v1/fii-dii/*`, `/api/v1/strategies/{straddle,strangle,multi-leg,payoff}`. All accept `Mode·Name·Date·Expiry·Interval` (the universal control-bar contract).
+- **Endpoints:** `/api/v1/options/{chain,oi-analysis,spurt,trending,active-strikes,big-oi,premium,oi-stats}`, `/api/v1/futures/{oi-analysis,spurt,buzz,movers,banks,eod}`, `/api/v1/fii-dii/*`. All accept `Mode·Name·Date·Expiry·Interval` (the universal control-bar contract).
 - **Verify:** unit tests per metric vs hand-computed fixtures; `ContractCaptureTest` re-captured; contract gen + `tsc --strict` green.
 
 ### Phase 3 — Frontend foundation (shared components)
@@ -87,20 +87,19 @@ Build ONCE, reuse across all 40 pages (`frontend-ui/src/app/shared/`):
 - Semantic theme tokens in `.ay-dark`: `--ay-bull/--ay-bear/--ay-neutral` (AA-contrast checked).
 - **Verify:** `npm run lint` + `test:ci` + `build`; axe pass on a harness page; badge/bar render under zoneless prod build (watch the virtualScroll/zoneless gotchas).
 
-### Phase 4 — Pages by archetype (12 components → 40 pages)
+### Phase 4 — Pages by archetype (11 components)
 Implement one archetype component, then config-instantiate its pages. Order = cheapest coverage first:
 1. **Data-table** (color-arrow grid) → Connecting Dots*, Trending OI(+PA), Futures/Options OI Analysis, Interval-wise OI, EOD Analyzer *(table part)*
 2. **Options-chain** (mirrored + data bars + badges) → Options Chain
 3. **Buildup multi-table** → Futures/Options OI Spurt, Big OI Movement
-4. **Single chart** → Straddle, Strangle, Options/OI Chart, Premium, Calendar Spread, Vix&Index
+4. **Single chart** → Options/OI Chart, Premium, Vix&Index
 5. **Multi-chart panel** → OI Stats (Cumulative/Individual/PCR)
-6. **Payoff builder** → Strategy Builder, Multi-Leg Price *(needs Greeks/POP — `black76-math`)*
-7. **Heatmap** → OI Buzz, Sector Heatmap
-8. **Gainers/Losers** → Market Movers
-9. **EOD table** → FII Derivative Stats, Participant-wise OI, FII L/S Ratio, Capital Market, Delivery, Equity Returns, Index Contribution
-10. **Custom dashboard** → Multiple Window (compose N archetype components in a grid)
-11. **Calculator** → Risk Calculator
-12. **Reference** → World Indices, Event Days, Market Holidays, Update Logs *(reuse `market-calendar`)*
+6. **Heatmap** → OI Buzz, Sector Heatmap
+7. **Gainers/Losers** → Market Movers
+8. **EOD table** → FII Derivative Stats, Participant-wise OI, FII L/S Ratio, Capital Market, Delivery, Equity Returns, Index Contribution
+9. **Custom dashboard** → Multiple Window (compose N archetype components in a grid)
+10. **Calculator** → Risk Calculator
+11. **Reference** → World Indices, Event Days, Market Holidays, Update Logs *(reuse `market-calendar`)*
 
 \*Connecting Dots final fusion lands in Phase 5.
 - **Verify per archetype:** Playwright e2e drives the page vs mock stack; visual matches oipulse layout; data matches a backend fixture.
@@ -116,11 +115,14 @@ Column chooser (PrimeNG column toggle), Graph/Table `p-selectButton`, sortable c
 
 ---
 
-## 4. Complete page checklist (all 40 — nothing dropped)
+## 4. Complete page checklist
+
+> **Option-strategies suite (Straddle · Strangle · Open&High · OI Expiry · Strategy
+> Builder · Calendar Spread · Multi-Leg Price) is CUT from oipulse parity** — needs
+> Greeks/POP/payoff (own undefined schema). Not deferred-within, removed from scope.
 
 **Futures:** OI Analysis · OI Chart · OI Spurt · OI Buzz · Pre-open · Market Movers · Banks Analysis · EOD OI Analyzer
 **Options:** OI Analysis · OI Chart · Options Chain · Options Chart · OI Spurt · OI Stats · Option Premium · Trending OI · Trending OI-PA · Big OI Movement · Active Strikes OI · Active Strikes IV · Interval-wise OI · Multiple OI Chart
-**Strategies:** Straddle · Strangle · Open&High · OI Expiry · Strategy Builder · Calendar Spread · Multi-Leg Price
 **Equity:** Pre-open · Open&High-low · Index Contribution · Sector Stats · Sector Heatmap · Equity Returns · Delivery Data · Announcement
 **FII/DII:** Capital Market · FII Derivative Stats · Participant-wise OI · FII Long-Short Ratio
 **Features:** Dashboard · Connecting Dots · World Indices · Vix&Index · Multiple Window · Risk Calculator · Event Days · Market Holidays · Advance/Multiframe Chart

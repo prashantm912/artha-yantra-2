@@ -176,6 +176,23 @@ export interface Banks {
   asOf: string | null;
 }
 
+/** One row of GET /api/v1/market/futures/banks-grid — a bank-sector stock's front-future buildup. */
+export interface BankGridRow {
+  underlying: string;
+  tradingsymbol: string;
+  expiry: string | null;
+  ltp: string | null;
+  pricePct: string | null;
+  oi: number;
+  oiChange: number;
+  oiPct: string | null;
+  interpretation: OiInterpretation | null;
+}
+export interface BankGrid {
+  items: BankGridRow[];
+  asOf: string | null;
+}
+
 /** GET /api/v1/market/futures/buzz — a time x contract 4-state heatmap (null cell = no signal). */
 export interface BuzzMatrix {
   contracts: string[];
@@ -248,6 +265,7 @@ interface OiAnalyticsState {
   futSpurt: FutSpurtChain | null;
   movers: Movers | null;
   banks: Banks | null;
+  bankGrid: BankGrid | null;
   buzz: BuzzMatrix | null;
   eod: EodRow[];
   loadingOptions: boolean;
@@ -258,6 +276,7 @@ interface OiAnalyticsState {
   loadingPremiumSeries: boolean;
   loadingFutSpurt: boolean;
   loadingMovers: boolean;
+  loadingBankGrid: boolean;
   loadingBuzz: boolean;
   loadingEod: boolean;
 }
@@ -285,6 +304,7 @@ export const OiAnalyticsStore = signalStore(
     futSpurt: null,
     movers: null,
     banks: null,
+    bankGrid: null,
     buzz: null,
     eod: [],
     loadingOptions: false,
@@ -295,6 +315,7 @@ export const OiAnalyticsStore = signalStore(
     loadingPremiumSeries: false,
     loadingFutSpurt: false,
     loadingMovers: false,
+    loadingBankGrid: false,
     loadingBuzz: false,
     loadingEod: false,
   }),
@@ -324,6 +345,7 @@ export const OiAnalyticsStore = signalStore(
     let futSpurtGen = 0;
     let moversGen = 0;
     let banksGen = 0;
+    let bankGridGen = 0;
     let buzzGen = 0;
     let eodGen = 0;
 
@@ -561,6 +583,34 @@ export const OiAnalyticsStore = signalStore(
           .subscribe({
             next: (banks) => g === banksGen && patchState(store, { banks }),
             error: () => g === banksGen && patchState(store, { banks: null }),
+          });
+      },
+
+      /**
+       * Bank-stock futures grid: one row per bank-sector stock (front future). Sector-wide — NO
+       * symbol; driven by mode/date/interval only. Empty until the forward-only capture accrues
+       * two buckets (422 DATA_GAP → null, toast suppressed).
+       */
+      loadBankGrid(): void {
+        // history mode requires a date (backend 400s otherwise — known-invalid, don't fire it).
+        if (ctx.mode() === 'history' && !ctx.date()) {
+          patchState(store, { bankGrid: null, loadingBankGrid: false });
+          return;
+        }
+        const g = ++bankGridGen;
+        patchState(store, { loadingBankGrid: true });
+        let p = new HttpParams().set('mode', ctx.mode()).set('interval', ctx.interval());
+        const date = ctx.date();
+        if (date) {
+          p = p.set('date', date);
+        }
+        http
+          .get<BankGrid>('/api/v1/market/futures/banks-grid', { params: p, context: SILENT })
+          .subscribe({
+            next: (bankGrid) =>
+              g === bankGridGen && patchState(store, { bankGrid, loadingBankGrid: false }),
+            error: () =>
+              g === bankGridGen && patchState(store, { bankGrid: null, loadingBankGrid: false }),
           });
       },
 

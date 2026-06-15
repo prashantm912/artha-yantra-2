@@ -300,4 +300,35 @@ describe('OiAnalyticsStore', () => {
     });
     expect(store.eod()[0].high).toBe('106');
   });
+
+  it('loadBankGrid fetches the sector grid with no name param', () => {
+    store.loadBankGrid();
+    const req = http.expectOne((r) => r.url.includes('/futures/banks-grid'));
+    expect(req.request.params.has('name')).toBe(false);
+    req.flush({
+      items: [
+        {
+          underlying: 'HDFCBANK',
+          tradingsymbol: 'HDFCBANK26JUNFUT',
+          expiry: '2026-06-25',
+          ltp: '110',
+          pricePct: '10.00',
+          oi: 1200,
+          oiChange: 200,
+          oiPct: '20.00',
+          interpretation: 'LONG_BUILDUP',
+        },
+      ],
+      asOf: 'x',
+    });
+    expect(store.bankGrid()?.items[0].underlying).toBe('HDFCBANK');
+    expect(store.loadingBankGrid()).toBe(false);
+  });
+
+  it('loadBankGrid skips in history mode until a date is chosen', () => {
+    ctx.setMode('history');
+    store.loadBankGrid();
+    http.expectNone((r) => r.url.includes('/futures/banks-grid'));
+    expect(store.bankGrid()).toBeNull();
+  });
 });

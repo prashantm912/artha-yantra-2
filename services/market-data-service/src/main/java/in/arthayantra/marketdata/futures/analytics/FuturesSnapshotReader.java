@@ -23,6 +23,7 @@ public class FuturesSnapshotReader {
 
   public record FutPoint(
       OffsetDateTime bucket,
+      String underlying,
       String tradingsymbol,
       BigDecimal ltp,
       Long oi,
@@ -47,23 +48,43 @@ public class FuturesSnapshotReader {
 
   public List<FutPoint> series(
       String underlying, OiInterval interval, OffsetDateTime from, OffsetDateTime to) {
+    return seriesAll(List.of(underlying), interval, from, to);
+  }
+
+  /**
+   * As {@link #series} but across a SET of underlyings in one query (the bank-stock grid reads the
+   * whole sector at once). Each {@link FutPoint} carries its {@code underlying}, so callers can fold
+   * the front contract per underlying.
+   */
+  public List<FutPoint> seriesAll(
+      List<String> underlyings, OiInterval interval, OffsetDateTime from, OffsetDateTime to) {
+    if (underlyings.isEmpty()) {
+      return List.of();
+    }
+    String placeholders = String.join(",", java.util.Collections.nCopies(underlyings.size(), "?"));
     String sql =
         "SELECT public.time_bucket(INTERVAL '"
             + interval.pgInterval()
             + "', ts, 'Asia/Kolkata') AS b, "
-            + "  tradingsymbol, public.last(ltp, ts) AS ltp, public.last(oi, ts) AS oi, "
+            + "  underlying, tradingsymbol, public.last(ltp, ts) AS ltp, public.last(oi, ts) AS oi, "
             + "  public.last(oi_change, ts) AS oi_change, "
             + "  public.last(day_open, ts) AS day_open, public.last(day_high, ts) AS day_high, "
             + "  public.last(day_low, ts) AS day_low, public.last(prev_close, ts) AS prev_close, "
             + "  public.last(expiry, ts) AS expiry "
             + "FROM futures_oi_snapshots "
-            + "WHERE underlying = ? AND ts >= ? AND ts < ? "
-            + "GROUP BY b, tradingsymbol ORDER BY b, tradingsymbol";
+            + "WHERE underlying IN ("
+            + placeholders
+            + ") AND ts >= ? AND ts < ? "
+            + "GROUP BY b, underlying, tradingsymbol ORDER BY b, underlying, tradingsymbol";
+    List<Object> args = new ArrayList<>(underlyings);
+    args.add(Timestamp.from(from.toInstant()));
+    args.add(Timestamp.from(to.toInstant()));
     return jdbc.query(
         sql,
         (rs, n) ->
             new FutPoint(
                 rs.getObject("b", OffsetDateTime.class),
+                rs.getString("underlying"),
                 rs.getString("tradingsymbol"),
                 rs.getBigDecimal("ltp"),
                 rs.getObject("oi", Long.class),
@@ -73,9 +94,7 @@ public class FuturesSnapshotReader {
                 rs.getBigDecimal("day_low"),
                 rs.getBigDecimal("prev_close"),
                 rs.getObject("expiry", LocalDate.class)),
-        underlying,
-        Timestamp.from(from.toInstant()),
-        Timestamp.from(to.toInstant()));
+        args.toArray());
   }
 
   /**
@@ -138,6 +157,39 @@ public class FuturesSnapshotReader {
     OffsetDateTime newest = buckets.get(0);
     OffsetDateTime earliest = buckets.get(buckets.size() - 1);
     return series(underlying, interval, earliest, newest.plus(interval.bucket()));
+  }
+
+  /**
+   * Two most-recent snapshot buckets across a SET of underlyings (the bank-stock grid). All
+   * underlyings ride the same capture pass, so the global newest-two buckets hold every contract's
+   * newest + prior point; {@link #seriesAll} then returns them tagged with {@code underlying}.
+   */
+  public List<FutPoint> latestPairAll(
+      List<String> underlyings, OiInterval interval, LocalDate date) {
+    if (underlyings.isEmpty()) {
+      return List.of();
+    }
+    String placeholders = String.join(",", java.util.Collections.nCopies(underlyings.size(), "?"));
+    StringBuilder sql =
+        new StringBuilder(
+            "SELECT DISTINCT public.time_bucket(INTERVAL '"
+                + interval.pgInterval()
+                + "', ts, 'Asia/Kolkata') AS b "
+                + "FROM futures_oi_snapshots WHERE underlying IN ("
+                + placeholders
+                + ")");
+    List<Object> args = new ArrayList<>(underlyings);
+    appendDayFilter(sql, args, date);
+    sql.append(" ORDER BY b DESC LIMIT 2");
+    List<OffsetDateTime> buckets =
+        jdbc.query(
+            sql.toString(), (rs, n) -> rs.getObject("b", OffsetDateTime.class), args.toArray());
+    if (buckets.isEmpty()) {
+      return List.of();
+    }
+    OffsetDateTime newest = buckets.get(0);
+    OffsetDateTime earliest = buckets.get(buckets.size() - 1);
+    return seriesAll(underlyings, interval, earliest, newest.plus(interval.bucket()));
   }
 
   /**

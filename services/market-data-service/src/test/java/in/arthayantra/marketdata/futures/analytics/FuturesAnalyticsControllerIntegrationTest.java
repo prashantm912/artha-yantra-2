@@ -156,6 +156,42 @@ class FuturesAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
   }
 
   @Test
+  void banksGridReturnsFrontContractRowPerUnderlyingSortedByOi() throws Exception {
+    OffsetDateTime b0 =
+        OffsetDateTime.of(2026, 6, 20, 9, 15, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime b1 = b0.plusMinutes(5);
+    LocalDate jun = LocalDate.of(2026, 6, 25);
+    LocalDate jul = LocalDate.of(2026, 7, 30);
+    // HDFCBANK + SBIN are in the default artha.futures.bank-stocks universe.
+    insert(b0, "HDFCBANK", "HDFCBANK26JUNFUT", jun, "100", 1000L, "100");
+    insert(b1, "HDFCBANK", "HDFCBANK26JUNFUT", jun, "110", 1200L, "100");
+    insert(b0, "HDFCBANK", "HDFCBANK26JULFUT", jul, "105", 50L, "105"); // far — ignored
+    insert(b1, "HDFCBANK", "HDFCBANK26JULFUT", jul, "106", 60L, "105");
+    insert(b0, "SBIN", "SBIN26JUNFUT", jun, "200", 5000L, "200");
+    insert(b1, "SBIN", "SBIN26JUNFUT", jun, "198", 4800L, "200");
+
+    mockMvc
+        .perform(get("/api/v1/market/futures/banks-grid").param("interval", "5m"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items[0].underlying").value("SBIN")) // oi desc
+        .andExpect(jsonPath("$.items[1].underlying").value("HDFCBANK"))
+        .andExpect(jsonPath("$.items[1].tradingsymbol").value("HDFCBANK26JUNFUT"))
+        .andExpect(jsonPath("$.items[1].pricePct").value("10.00"))
+        .andExpect(jsonPath("$.items[1].interpretation").value("LONG_BUILDUP"));
+  }
+
+  @Test
+  void banksGridHistoryModeWithNoDataReturns422() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/market/futures/banks-grid")
+                .param("mode", "history")
+                .param("date", "2000-01-03")
+                .param("interval", "5m"))
+        .andExpect(status().isUnprocessableEntity());
+  }
+
+  @Test
   void eodRollsUpDailyOhlc() throws Exception {
     String u = "FUTEODCTRL";
     OffsetDateTime t1 =

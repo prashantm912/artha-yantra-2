@@ -120,4 +120,5 @@ artha:
     oi-snapshot-interval-ms: 180000
   nse:
     base-url: https://www.nseindia.com
+    archives-url: https://nsearchives.nseindia.com
     eod-cron: "0 0 19 * * MON-FRI"

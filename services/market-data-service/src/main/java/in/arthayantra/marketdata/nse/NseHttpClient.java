@@ -41,4 +41,12 @@ public class NseHttpClient {
   public String get(String path) {
     return http.get().uri(baseUrl + path).retrieve().body(String.class);
   }
+
+  /**
+   * GET an absolute URL (e.g. the {@code nsearchives.nseindia.com} archive host), reusing the same
+   * anti-bot headers + fail-fast timeouts. The archive host needs the browser UA + referer too.
+   */
+  public String getAbsolute(String url) {
+    return http.get().uri(url).retrieve().body(String.class);
+  }
 }

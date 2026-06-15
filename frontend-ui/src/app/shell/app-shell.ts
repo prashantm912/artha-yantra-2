@@ -122,6 +122,8 @@ import { WsClientService } from '../core/ws-client.service';
         <a routerLink="/charts" routerLinkActive="active">Charts</a>
         <a routerLink="/options" routerLinkActive="active">Options</a>
         <a routerLink="/futures" routerLinkActive="active">Futures</a>
+        <a routerLink="/oi/options" routerLinkActive="active">Options OI</a>
+        <a routerLink="/oi/futures" routerLinkActive="active">Futures OI</a>
         <a routerLink="/strategies" routerLinkActive="active">Strategies</a>
         <a routerLink="/backtests/run" routerLinkActive="active">Backtests</a>
         <a routerLink="/backtests/jobs" routerLinkActive="active">Jobs</a>

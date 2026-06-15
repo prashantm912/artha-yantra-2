@@ -1,9 +1,11 @@
-import { ChangeDetectionStrategy, Component, effect, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject } from '@angular/core';
 import { TableModule } from 'primeng/table';
+import type { EChartsCoreOption } from 'echarts/core';
 import { formatDecimal } from '../../core/decimal';
 import { OiAnalyticsStore } from '../../stores/oi-analytics.store';
 import { SymbolContextStore } from '../../stores/symbol-context.store';
 import { DataBar } from '../../shared/data-bar';
+import { EChartsComponent } from '../../shared/echarts-chart';
 import { OiIntBadge } from '../../shared/oi-int-badge';
 import { OiControlBar } from './oi-control-bar';
 
@@ -17,7 +19,7 @@ import { OiControlBar } from './oi-control-bar';
 @Component({
   selector: 'ay-oi-futures-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [TableModule, DataBar, OiIntBadge, OiControlBar],
+  imports: [TableModule, DataBar, EChartsComponent, OiIntBadge, OiControlBar],
   styles: `
     .meta {
       margin: 0 0 0.7rem;
@@ -28,6 +30,9 @@ import { OiControlBar } from './oi-control-bar';
       font-size: 1rem;
       margin: 1.2rem 0 0.4rem;
       color: var(--ay-text);
+    }
+    .chart {
+      height: 14rem;
     }
     .num {
       text-align: right;
@@ -136,6 +141,11 @@ import { OiControlBar } from './oi-control-bar';
       </ng-template>
     </p-table>
 
+    @if ((store.buzz()?.buckets?.length ?? 0) > 0) {
+      <h2>Buzz (OI interpretation over time)</h2>
+      <div class="chart"><ay-echart [option]="buzzChart()" /></div>
+    }
+
     <h2>Term structure</h2>
     <p-table [value]="store.banks()?.items ?? []" [scrollable]="true" scrollHeight="20vh">
       <ng-template #header>
@@ -224,6 +234,41 @@ export class OiFuturesPage {
     const m = this.store.movers();
     return m ? [...m.gainers, ...m.losers] : [];
   }
+
+  /** Buzz heatmap: bucket (x) x contract (y), the 4-state encoded 0..3 with a labelled legend. */
+  protected readonly buzzChart = computed<EChartsCoreOption>(() => {
+    const m = this.store.buzz();
+    if (!m) {
+      return {};
+    }
+    const order = ['LONG_BUILDUP', 'SHORT_BUILDUP', 'SHORT_COVERING', 'LONG_UNWINDING'];
+    const data: [number, number, number][] = [];
+    m.cells.forEach((row, bi) =>
+      row.forEach((cell, ci) => {
+        if (cell != null) {
+          data.push([bi, ci, order.indexOf(cell)]);
+        }
+      }),
+    );
+    return {
+      tooltip: { position: 'top' },
+      grid: { left: 120, right: 16, top: 12, bottom: 56 },
+      xAxis: { type: 'category', data: m.buckets.map((b) => b.slice(11, 16)) },
+      yAxis: { type: 'category', data: m.contracts },
+      visualMap: {
+        type: 'piecewise',
+        orient: 'horizontal',
+        bottom: 0,
+        pieces: [
+          { value: 0, label: 'Long buildup', color: '#22c55e' },
+          { value: 1, label: 'Short buildup', color: '#ef4444' },
+          { value: 2, label: 'Short covering', color: '#3b82f6' },
+          { value: 3, label: 'Long unwinding', color: '#f59e0b' },
+        ],
+      },
+      series: [{ type: 'heatmap', data, label: { show: false } }],
+    };
+  });
 
   /** EOD date: the history-mode date if chosen, else today (IST). */
   protected eodDate(): string {

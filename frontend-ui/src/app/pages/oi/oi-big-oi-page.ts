@@ -1,9 +1,11 @@
-import { ChangeDetectionStrategy, Component, effect, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject } from '@angular/core';
 import { TableModule } from 'primeng/table';
+import type { EChartsCoreOption } from 'echarts/core';
 import { formatDecimal } from '../../core/decimal';
 import { OiAnalyticsStore } from '../../stores/oi-analytics.store';
 import { SymbolContextStore } from '../../stores/symbol-context.store';
 import { DataBar } from '../../shared/data-bar';
+import { EChartsComponent } from '../../shared/echarts-chart';
 import { OiControlBar } from './oi-control-bar';
 
 /**
@@ -14,12 +16,16 @@ import { OiControlBar } from './oi-control-bar';
 @Component({
   selector: 'ay-oi-big-oi-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [TableModule, DataBar, OiControlBar],
+  imports: [TableModule, DataBar, EChartsComponent, OiControlBar],
   styles: `
     .meta {
       margin: 0 0 0.7rem;
       color: var(--ay-text-muted);
       font-variant-numeric: tabular-nums;
+    }
+    .chart {
+      height: 13rem;
+      margin-bottom: 1rem;
     }
     .num {
       text-align: right;
@@ -38,6 +44,10 @@ import { OiControlBar } from './oi-control-bar';
       }
       OI trend {{ trendLabel() }}
     </p>
+
+    @if ((store.trend()?.items?.length ?? 0) > 1) {
+      <div class="chart"><ay-echart [option]="trendChart()" /></div>
+    }
 
     <p-table
       [value]="store.bigOi()?.items ?? []"
@@ -98,6 +108,18 @@ export class OiBigOiPage {
     const items = this.store.trend()?.items ?? [];
     return items.length ? items[items.length - 1].trend : '—';
   }
+
+  /** Total-OI line over the interval series (numbers only at the chart boundary). */
+  protected readonly trendChart = computed<EChartsCoreOption>(() => {
+    const items = this.store.trend()?.items ?? [];
+    return {
+      tooltip: { trigger: 'axis' },
+      grid: { left: 64, right: 16, top: 16, bottom: 28 },
+      xAxis: { type: 'category', data: items.map((p) => p.bucket.slice(11, 16)) },
+      yAxis: { type: 'value', name: 'total OI' },
+      series: [{ name: 'Total OI', type: 'line', smooth: true, data: items.map((p) => p.totalOi) }],
+    };
+  });
 
   protected maxOi(): number {
     return (this.store.bigOi()?.items ?? []).reduce((m, r) => Math.max(m, r.oi), 1);

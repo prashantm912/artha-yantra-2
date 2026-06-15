@@ -2,6 +2,7 @@ package in.arthayantra.marketdata.nse;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
@@ -23,8 +24,13 @@ public class NseHttpClient {
       RestClient.Builder builder,
       @Value("${artha.nse.base-url:https://www.nseindia.com}") String baseUrl) {
     this.baseUrl = baseUrl;
+    // Fail fast — a blocked/blackholed NSE must never hang a startup pull or an IT.
+    SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+    factory.setConnectTimeout(8_000);
+    factory.setReadTimeout(12_000);
     this.http =
         builder
+            .requestFactory(factory)
             .defaultHeader(HttpHeaders.USER_AGENT, UA)
             .defaultHeader(HttpHeaders.ACCEPT, "*/*")
             .defaultHeader(HttpHeaders.REFERER, baseUrl + "/")

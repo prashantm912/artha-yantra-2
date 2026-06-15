@@ -1,6 +1,7 @@
 import { DestroyRef, inject } from '@angular/core';
-import { HttpClient, HttpParams } from '@angular/common/http';
+import { HttpClient, HttpContext, HttpParams } from '@angular/common/http';
 import { patchState, signalStore, withHooks, withMethods, withState } from '@ngrx/signals';
+import { SILENCE_ERROR_TOAST } from '../core/error.interceptor';
 import { type Subscription } from 'rxjs';
 import { ConflationBuffer } from '../core/conflation';
 import { WsClientService } from '../core/ws-client.service';
@@ -183,13 +184,17 @@ export const MarketStore = signalStore(
             tickSubs.set(key, sub);
             // Register the ticker subscription so the backend actually streams this symbol.
             http
-              .post('/api/v1/market/subscriptions', {
-                exchange: exch,
-                tradingsymbol: sym,
-                mode: 'quote',
-                priority: 'ui',
-                subscriber,
-              })
+              .post(
+                '/api/v1/market/subscriptions',
+                {
+                  exchange: exch,
+                  tradingsymbol: sym,
+                  mode: 'quote',
+                  priority: 'ui',
+                  subscriber,
+                },
+                { context: new HttpContext().set(SILENCE_ERROR_TOAST, true) },
+              )
               .subscribe({ next: () => undefined, error: () => undefined });
             added.push(key);
           }
@@ -221,6 +226,7 @@ export const MarketStore = signalStore(
                   .set('exchange', key.slice(0, sep))
                   .set('tradingsymbol', key.slice(sep + 1))
                   .set('subscriber', subscriber),
+                context: new HttpContext().set(SILENCE_ERROR_TOAST, true),
               })
               .subscribe({ next: () => undefined, error: () => undefined });
           } else {

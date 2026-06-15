@@ -59,17 +59,27 @@ public class SubscriptionRegistry {
   private final InstrumentTokenResolver tokenResolver;
   private final int cap;
   private final Counter evictions;
+  private final SubscriptionStore store;
   private final Map<InstrumentKey, Instrument> instruments = new LinkedHashMap<>();
   private volatile TickerCommands commands;
 
-  /** Wires the resolver + cap. */
+  /** Legacy ctor (unit tests): no durable store — holds live only in memory. */
+  public SubscriptionRegistry(
+      InstrumentTokenResolver tokenResolver, int cap, MeterRegistry meterRegistry) {
+    this(tokenResolver, cap, meterRegistry, SubscriptionStore.NOOP);
+  }
+
+  /** Wires the resolver, cap, and the durable {@link SubscriptionStore} (B-6 restart durability). */
+  @org.springframework.beans.factory.annotation.Autowired
   public SubscriptionRegistry(
       InstrumentTokenResolver tokenResolver,
       @Value("${artha.subscriptions.cap:3000}") int cap,
-      MeterRegistry meterRegistry) {
+      MeterRegistry meterRegistry,
+      SubscriptionStore store) {
     this.tokenResolver = tokenResolver;
     this.cap = cap;
     this.evictions = meterRegistry.counter("ay_subscription_evictions_total");
+    this.store = store;
     meterRegistry.gauge("ay_subscriptions_active", this, r -> r.instruments.size());
   }
 
@@ -97,9 +107,11 @@ public class SubscriptionRegistry {
       holds.put(subscriber, new Hold(mode, priority));
       instruments.put(key, new Instrument(info.instrumentToken(), info.isIndex(), holds, mode));
       notifySubscribe(List.of(info.instrumentToken()), mode);
+      persist(subscriber, key, mode, priority);
       return mode;
     }
     existing.holds().put(subscriber, new Hold(mode, priority));
+    persist(subscriber, key, mode, priority);
     SubscriptionMode newEffective = effectiveModeOf(existing.holds());
     if (newEffective != existing.effectiveMode()) {
       instruments.put(
@@ -116,6 +128,7 @@ public class SubscriptionRegistry {
     if (existing == null || existing.holds().remove(subscriber) == null) {
       return;
     }
+    store.remove(subscriber, key);
     if (existing.holds().isEmpty()) {
       instruments.remove(key);
       notifyUnsubscribe(List.of(existing.token()));
@@ -198,6 +211,9 @@ public class SubscriptionRegistry {
     }
     Instrument evicted = instruments.remove(victim);
     evictions.increment();
+    for (String subscriber : evicted.holds().keySet()) {
+      store.remove(subscriber, victim);
+    }
     log.warn(
         "subscription cap {}: evicted {} (priority {}) for {} (priority {})",
         cap, victim.canonical(), victimPriority, forKey.canonical(), incoming);
@@ -222,6 +238,14 @@ public class SubscriptionRegistry {
       }
     }
     return best;
+  }
+
+  /** Persists a non-pinned hold so it survives a restart; pinned indices self-restore from config. */
+  private void persist(
+      String subscriber, InstrumentKey key, SubscriptionMode mode, SubscriptionPriority priority) {
+    if (priority != SubscriptionPriority.PINNED_INDEX) {
+      store.put(subscriber, key, mode, priority);
+    }
   }
 
   private void notifySubscribe(List<Long> tokens, SubscriptionMode mode) {

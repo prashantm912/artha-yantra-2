@@ -113,11 +113,11 @@ spring:
 artha:
   options:
     snapshot-underlyings: NIFTY 50,SENSEX
-    snapshot-interval-ms: 180000
+    snapshot-interval-ms: 60000
     snapshot-expiry-horizon-days: 90
   futures:
     oi-snapshot-underlyings: NIFTY 50,NIFTY BANK
-    oi-snapshot-interval-ms: 180000
+    oi-snapshot-interval-ms: 60000
   nse:
     base-url: https://www.nseindia.com
     archives-url: https://nsearchives.nseindia.com

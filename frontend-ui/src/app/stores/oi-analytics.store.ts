@@ -78,6 +78,113 @@ export interface SpurtChain {
   asOf: string | null;
 }
 
+// --- Stage-G endpoints (decimal fields are JSON strings; long OI fields are numbers) ---
+
+/** One row of GET /api/v1/market/options/big-oi. */
+export interface BigOiRow {
+  strike: string;
+  optionType: 'CE' | 'PE';
+  oi: number;
+  oiChange: number;
+  ltp: string | null;
+}
+export interface BigOi {
+  items: BigOiRow[];
+  asOf: string | null;
+}
+
+/** GET /api/v1/market/options/premium — per-strike straddle premium + the ATM straddle. */
+export interface PremiumRow {
+  strike: string;
+  straddle: string;
+  ce: string;
+  pe: string;
+}
+export interface PremiumChain {
+  items: PremiumRow[];
+  atmStrike: string | null;
+  atmStraddle: string | null;
+  spot: string | null;
+  asOf: string | null;
+}
+
+/** GET /api/v1/market/options/trending — per-bucket OI trend. */
+export interface TrendPoint {
+  bucket: string;
+  totalOi: number;
+  ceOi: number;
+  peOi: number;
+  trend: 'UP' | 'DOWN' | 'FLAT';
+}
+export interface TrendSeries {
+  items: TrendPoint[];
+  asOf: string | null;
+}
+
+/** One row of GET /api/v1/market/futures/spurt. */
+export interface FutSpurt {
+  tradingsymbol: string;
+  ltp: string | null;
+  oi: number;
+  oiChange: number;
+  spurtPct: string | null;
+  interpretation: OiInterpretation;
+}
+export interface FutSpurtChain {
+  items: FutSpurt[];
+  asOf: string | null;
+}
+
+/** GET /api/v1/market/futures/movers — gainers/losers by price% + OI%. */
+export interface MoverRow {
+  tradingsymbol: string;
+  ltp: string | null;
+  pricePct: string | null;
+  oiPct: string | null;
+  interpretation: OiInterpretation;
+}
+export interface Movers {
+  gainers: MoverRow[];
+  losers: MoverRow[];
+  asOf: string | null;
+}
+
+/** GET /api/v1/market/futures/banks — the index's futures term structure + calendar-spread basis. */
+export interface BankRow {
+  tradingsymbol: string;
+  expiry: string | null;
+  ltp: string | null;
+  oi: number;
+  oiChange: number;
+  basis: string | null;
+  interpretation: OiInterpretation | null;
+}
+export interface Banks {
+  items: BankRow[];
+  asOf: string | null;
+}
+
+/** GET /api/v1/market/futures/buzz — a time x contract 4-state heatmap (null cell = no signal). */
+export interface BuzzMatrix {
+  contracts: string[];
+  buckets: string[];
+  cells: (OiInterpretation | null)[][];
+  asOf: string | null;
+}
+
+/** One row of GET /api/v1/market/futures/eod. */
+export interface EodRow {
+  tradingsymbol: string;
+  tradeDate: string;
+  open: string | null;
+  high: string | null;
+  low: string | null;
+  close: string | null;
+  oiClose: number;
+  oiChange: number;
+  volume: number;
+}
+
 /** A CE/PE leg's cell values in the folded strike grid. */
 export interface LegCell {
   oi: number | null;
@@ -122,9 +229,23 @@ interface OiAnalyticsState {
   strikes: OiStrikePoint[];
   futures: FuturesOiPoint[];
   spurt: SpurtChain | null;
+  bigOi: BigOi | null;
+  premium: PremiumChain | null;
+  trend: TrendSeries | null;
+  futSpurt: FutSpurtChain | null;
+  movers: Movers | null;
+  banks: Banks | null;
+  buzz: BuzzMatrix | null;
+  eod: EodRow[];
   loadingOptions: boolean;
   loadingFutures: boolean;
   loadingSpurt: boolean;
+  loadingBigOi: boolean;
+  loadingTrend: boolean;
+  loadingFutSpurt: boolean;
+  loadingMovers: boolean;
+  loadingBuzz: boolean;
+  loadingEod: boolean;
 }
 
 /** Context where an empty result (DATA_GAP / no snapshot) is normal — suppress the error toast. */
@@ -143,9 +264,23 @@ export const OiAnalyticsStore = signalStore(
     strikes: [],
     futures: [],
     spurt: null,
+    bigOi: null,
+    premium: null,
+    trend: null,
+    futSpurt: null,
+    movers: null,
+    banks: null,
+    buzz: null,
+    eod: [],
     loadingOptions: false,
     loadingFutures: false,
     loadingSpurt: false,
+    loadingBigOi: false,
+    loadingTrend: false,
+    loadingFutSpurt: false,
+    loadingMovers: false,
+    loadingBuzz: false,
+    loadingEod: false,
   }),
   withComputed((store) => ({
     chainRows: computed(() => foldStrikes(store.strikes())),
@@ -166,6 +301,14 @@ export const OiAnalyticsStore = signalStore(
     let optGen = 0;
     let futGen = 0;
     let spurtGen = 0;
+    let bigOiGen = 0;
+    let premiumGen = 0;
+    let trendGen = 0;
+    let futSpurtGen = 0;
+    let moversGen = 0;
+    let banksGen = 0;
+    let buzzGen = 0;
+    let eodGen = 0;
 
     function params(includeExpiry: boolean): HttpParams {
       let p = new HttpParams()
@@ -271,6 +414,153 @@ export const OiAnalyticsStore = signalStore(
           .subscribe({
             next: (spurt) => g === spurtGen && patchState(store, { spurt, loadingSpurt: false }),
             error: () => g === spurtGen && patchState(store, { spurt: null, loadingSpurt: false }),
+          });
+      },
+
+      /** Options Big-OI: the latest bucket's legs ranked by |interval ΔOI|. */
+      loadBigOi(): void {
+        if (unsatisfiable(true)) {
+          patchState(store, { bigOi: null, loadingBigOi: false });
+          return;
+        }
+        const g = ++bigOiGen;
+        patchState(store, { loadingBigOi: true });
+        http
+          .get<BigOi>('/api/v1/market/options/big-oi', { params: params(true), context: SILENT })
+          .subscribe({
+            next: (bigOi) => g === bigOiGen && patchState(store, { bigOi, loadingBigOi: false }),
+            error: () => g === bigOiGen && patchState(store, { bigOi: null, loadingBigOi: false }),
+          });
+      },
+
+      /** Options premium: per-strike straddle premium + the ATM straddle. */
+      loadPremium(): void {
+        if (unsatisfiable(true)) {
+          patchState(store, { premium: null });
+          return;
+        }
+        const g = ++premiumGen;
+        http
+          .get<PremiumChain>('/api/v1/market/options/premium', {
+            params: params(true),
+            context: SILENT,
+          })
+          .subscribe({
+            next: (premium) => g === premiumGen && patchState(store, { premium }),
+            error: () => g === premiumGen && patchState(store, { premium: null }),
+          });
+      },
+
+      /** Options OI-trend over the last N buckets. */
+      loadTrending(): void {
+        if (unsatisfiable(true)) {
+          patchState(store, { trend: null, loadingTrend: false });
+          return;
+        }
+        const g = ++trendGen;
+        patchState(store, { loadingTrend: true });
+        http
+          .get<TrendSeries>('/api/v1/market/options/trending', {
+            params: params(true),
+            context: SILENT,
+          })
+          .subscribe({
+            next: (trend) => g === trendGen && patchState(store, { trend, loadingTrend: false }),
+            error: () => g === trendGen && patchState(store, { trend: null, loadingTrend: false }),
+          });
+      },
+
+      /** Futures interval buildup (per contract). */
+      loadFutSpurt(): void {
+        if (unsatisfiable(false)) {
+          patchState(store, { futSpurt: null, loadingFutSpurt: false });
+          return;
+        }
+        const g = ++futSpurtGen;
+        patchState(store, { loadingFutSpurt: true });
+        http
+          .get<FutSpurtChain>('/api/v1/market/futures/spurt', {
+            params: params(false),
+            context: SILENT,
+          })
+          .subscribe({
+            next: (futSpurt) =>
+              g === futSpurtGen && patchState(store, { futSpurt, loadingFutSpurt: false }),
+            error: () =>
+              g === futSpurtGen && patchState(store, { futSpurt: null, loadingFutSpurt: false }),
+          });
+      },
+
+      /** Futures gainers/losers by price% + OI%. */
+      loadMovers(): void {
+        if (unsatisfiable(false)) {
+          patchState(store, { movers: null, loadingMovers: false });
+          return;
+        }
+        const g = ++moversGen;
+        patchState(store, { loadingMovers: true });
+        http
+          .get<Movers>('/api/v1/market/futures/movers', { params: params(false), context: SILENT })
+          .subscribe({
+            next: (movers) =>
+              g === moversGen && patchState(store, { movers, loadingMovers: false }),
+            error: () =>
+              g === moversGen && patchState(store, { movers: null, loadingMovers: false }),
+          });
+      },
+
+      /** Futures term structure (calendar-spread basis) for the queried index. */
+      loadBanks(): void {
+        if (unsatisfiable(false)) {
+          patchState(store, { banks: null });
+          return;
+        }
+        const g = ++banksGen;
+        http
+          .get<Banks>('/api/v1/market/futures/banks', { params: params(false), context: SILENT })
+          .subscribe({
+            next: (banks) => g === banksGen && patchState(store, { banks }),
+            error: () => g === banksGen && patchState(store, { banks: null }),
+          });
+      },
+
+      /** Futures buzz: time x contract 4-state heatmap. */
+      loadBuzz(): void {
+        if (unsatisfiable(false)) {
+          patchState(store, { buzz: null, loadingBuzz: false });
+          return;
+        }
+        const g = ++buzzGen;
+        patchState(store, { loadingBuzz: true });
+        http
+          .get<BuzzMatrix>('/api/v1/market/futures/buzz', {
+            params: params(false),
+            context: SILENT,
+          })
+          .subscribe({
+            next: (buzz) => g === buzzGen && patchState(store, { buzz, loadingBuzz: false }),
+            error: () => g === buzzGen && patchState(store, { buzz: null, loadingBuzz: false }),
+          });
+      },
+
+      /** Futures EOD daily OHLC+OI rollup over [from, to] (date-driven, not the interval model). */
+      loadEod(from: string, to?: string): void {
+        if (!ctx.name() || !from) {
+          patchState(store, { eod: [], loadingEod: false });
+          return;
+        }
+        const g = ++eodGen;
+        patchState(store, { loadingEod: true });
+        let p = new HttpParams().set('name', ctx.name()).set('from', from);
+        if (to) {
+          p = p.set('to', to);
+        }
+        http
+          .get<{ items: EodRow[] }>('/api/v1/market/futures/eod', { params: p, context: SILENT })
+          .subscribe({
+            next: (res) =>
+              g === eodGen && patchState(store, { eod: res.items ?? [], loadingEod: false }),
+            error: () => g === eodGen && patchState(store, { eod: [], loadingEod: false }),
           });
       },
     };

@@ -216,4 +216,71 @@ describe('OiAnalyticsStore', () => {
     http.expectNone((r) => r.url.includes('/options/spurt'));
     expect(store.oiInterpretation()).toBeNull();
   });
+
+  it('loadBigOi maps the big-oi envelope', () => {
+    ctx.setExpiry('2026-06-25');
+    store.loadBigOi();
+    http
+      .expectOne((r) => r.url.includes('/options/big-oi'))
+      .flush({
+        items: [{ strike: '22500', optionType: 'PE', oi: 2000, oiChange: -900, ltp: '80' }],
+        asOf: 'x',
+      });
+    expect(store.bigOi()?.items[0].oiChange).toBe(-900);
+  });
+
+  it('loadFutSpurt maps the futures interval buildup', () => {
+    store.loadFutSpurt();
+    http
+      .expectOne((r) => r.url.includes('/futures/spurt'))
+      .flush({
+        items: [
+          {
+            tradingsymbol: 'NIFTY26JUNFUT',
+            ltp: '110',
+            oi: 1200,
+            oiChange: 200,
+            spurtPct: '20.00',
+            interpretation: 'LONG_BUILDUP',
+          },
+        ],
+        asOf: 'x',
+      });
+    expect(store.futSpurt()?.items[0].interpretation).toBe('LONG_BUILDUP');
+  });
+
+  it('loadBuzz maps the time x contract matrix', () => {
+    store.loadBuzz();
+    http
+      .expectOne((r) => r.url.includes('/futures/buzz'))
+      .flush({
+        contracts: ['X'],
+        buckets: ['b0', 'b1'],
+        cells: [[null], ['LONG_BUILDUP']],
+        asOf: 'b1',
+      });
+    expect(store.buzz()?.cells[1][0]).toBe('LONG_BUILDUP');
+  });
+
+  it('loadEod maps the {items} envelope for a date range', () => {
+    store.loadEod('2026-06-18');
+    const req = http.expectOne((r) => r.url.includes('/futures/eod'));
+    expect(req.request.params.get('from')).toBe('2026-06-18');
+    req.flush({
+      items: [
+        {
+          tradingsymbol: 'NIFTY26JUNFUT',
+          tradeDate: '2026-06-18',
+          open: '99',
+          high: '106',
+          low: '97',
+          close: '105',
+          oiClose: 1100,
+          oiChange: 150,
+          volume: 0,
+        },
+      ],
+    });
+    expect(store.eod()[0].high).toBe('106');
+  });
 });

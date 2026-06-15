@@ -2,6 +2,7 @@ import { computed, inject } from '@angular/core';
 import { HttpClient, HttpContext, HttpParams } from '@angular/common/http';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
 import { compareDecimal } from '../core/decimal';
+import { type OiInterpretation } from '../core/oi-interpretation';
 import { SILENCE_ERROR_TOAST } from '../core/error.interceptor';
 import { SymbolContextStore } from './symbol-context.store';
 
@@ -52,6 +53,31 @@ export interface FuturesOiPoint {
   oiChange: number | null;
 }
 
+/** One row of GET /api/v1/market/options/spurt `{items}` — per strike·side interval buildup. */
+export interface SpurtRow {
+  strike: string;
+  optionType: 'CE' | 'PE';
+  ltp: string | null;
+  oi: number | null;
+  oiChange: number;
+  spurtPct: string | null;
+  interpretation: OiInterpretation;
+}
+
+/** GET /api/v1/market/options/spurt summary: spot-dir × total-OI-dir → the 4-state badge. */
+export interface SpurtSummary {
+  interpretation: OiInterpretation;
+  spotDelta: string;
+  oiChange: number;
+}
+
+/** GET /api/v1/market/options/spurt — per-strike buildup + the underlying rollup; 422 on no snapshot. */
+export interface SpurtChain {
+  items: SpurtRow[];
+  summary: SpurtSummary | null;
+  asOf: string | null;
+}
+
 /** A CE/PE leg's cell values in the folded strike grid. */
 export interface LegCell {
   oi: number | null;
@@ -95,8 +121,10 @@ interface OiAnalyticsState {
   activeStrikes: ActiveStrikes | null;
   strikes: OiStrikePoint[];
   futures: FuturesOiPoint[];
+  spurt: SpurtChain | null;
   loadingOptions: boolean;
   loadingFutures: boolean;
+  loadingSpurt: boolean;
 }
 
 /** Context where an empty result (DATA_GAP / no snapshot) is normal — suppress the error toast. */
@@ -114,8 +142,10 @@ export const OiAnalyticsStore = signalStore(
     activeStrikes: null,
     strikes: [],
     futures: [],
+    spurt: null,
     loadingOptions: false,
     loadingFutures: false,
+    loadingSpurt: false,
   }),
   withComputed((store) => ({
     chainRows: computed(() => foldStrikes(store.strikes())),
@@ -127,12 +157,15 @@ export const OiAnalyticsStore = signalStore(
     maxFuturesOiChange: computed(() =>
       store.futures().reduce((m, f) => Math.max(m, Math.abs(f.oiChange ?? 0)), 1),
     ),
+    // The underlying 4-state OI-Interpretation (spurt rollup) — null until two buckets accrue.
+    oiInterpretation: computed(() => store.spurt()?.summary?.interpretation ?? null),
   })),
   withMethods((store, http = inject(HttpClient), ctx = inject(SymbolContextStore)) => {
     // Per-loader generation tokens: a response is applied only if its selection is still current,
     // so a slow earlier request cannot overwrite a newer selection's data (symbol-switch race).
     let optGen = 0;
     let futGen = 0;
+    let spurtGen = 0;
 
     function params(includeExpiry: boolean): HttpParams {
       let p = new HttpParams()
@@ -219,6 +252,25 @@ export const OiAnalyticsStore = signalStore(
               g === futGen &&
               patchState(store, { futures: res.items ?? [], loadingFutures: false }),
             error: () => g === futGen && patchState(store, { futures: [], loadingFutures: false }),
+          });
+      },
+
+      /** Options OI spurt: per-strike interval buildup + the underlying 4-state rollup. */
+      loadSpurt(): void {
+        if (unsatisfiable(true)) {
+          patchState(store, { spurt: null, loadingSpurt: false });
+          return;
+        }
+        const g = ++spurtGen;
+        patchState(store, { loadingSpurt: true });
+        http
+          .get<SpurtChain>('/api/v1/market/options/spurt', {
+            params: params(true),
+            context: SILENT,
+          })
+          .subscribe({
+            next: (spurt) => g === spurtGen && patchState(store, { spurt, loadingSpurt: false }),
+            error: () => g === spurtGen && patchState(store, { spurt: null, loadingSpurt: false }),
           });
       },
     };

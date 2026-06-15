@@ -81,6 +81,13 @@ describe('OiOptionsPage', () => {
           },
         ],
       });
+    http
+      .expectOne((r) => r.url.includes('/options/spurt'))
+      .flush({
+        items: [],
+        summary: { interpretation: 'LONG_BUILDUP', spotDelta: '20', oiChange: 400 },
+        asOf: 'x',
+      });
     await fixture.whenStable();
 
     const store = TestBed.inject(OiAnalyticsStore);
@@ -89,5 +96,6 @@ describe('OiOptionsPage', () => {
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
     expect(text).toContain('PCR 1.5000');
     expect(text).toContain('1 strike');
+    expect(text).toContain('Long Buildup');
   });
 });

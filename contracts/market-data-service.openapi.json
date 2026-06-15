@@ -778,6 +778,70 @@
         }
       }
     },
+    "/api/v1/market/options/spurt" : {
+      "get" : {
+        "tags" : [ "options-analytics-controller" ],
+        "operationId" : "spurt",
+        "parameters" : [ {
+          "name" : "mode",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "name",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "date",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "interval",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "expiry",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SpurtChain"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/options/oi-stats" : {
       "get" : {
         "tags" : [ "options-analytics-controller" ],
@@ -1937,6 +2001,69 @@
           "subscribers" : {
             "type" : "integer",
             "format" : "int32"
+          }
+        }
+      },
+      "SpurtChain" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/StrikeSpurt"
+            }
+          },
+          "summary" : {
+            "$ref" : "#/components/schemas/SpurtSummary"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "SpurtSummary" : {
+        "type" : "object",
+        "properties" : {
+          "interpretation" : {
+            "type" : "string",
+            "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
+          },
+          "spotDelta" : {
+            "type" : "number"
+          },
+          "oiChange" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "StrikeSpurt" : {
+        "type" : "object",
+        "properties" : {
+          "strike" : {
+            "type" : "number"
+          },
+          "optionType" : {
+            "type" : "string"
+          },
+          "ltp" : {
+            "type" : "number"
+          },
+          "oi" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "oiChange" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "spurtPct" : {
+            "type" : "number"
+          },
+          "interpretation" : {
+            "type" : "string",
+            "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
           }
         }
       },

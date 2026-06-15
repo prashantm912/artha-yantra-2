@@ -69,6 +69,17 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
 - **Candle sources split by interval:** `CandleReader.read()` serves the `candles_<iv>`
   caggs (5m/15m/1h/1d/1w), **sparse on a fresh boot**; native daily lives in `candles`@1d
   (dense — `readDailyWithWarmup`). The two diverge for 1d (chart overlays hit this).
+- **Kite REST → full-mirror DTOs (`kite/wire/`):** one record per endpoint (quote / historical /
+  session / profile / instrument-CSV) mirrors **every** documented Kite field, each
+  `@JsonIgnoreProperties(ignoreUnknown=true)` so a field Kite ADDS can never crash the live feed.
+  Gateways `.body(KiteXxx.class)` then map to the domain port records (`Quote`, `Candle`,
+  `InstrumentRecord`, `TokenSession`); DTOs stay domain-free. **NEVER** enable global
+  `FAIL_ON_UNKNOWN_PROPERTIES` on the live mapper (couples the live path to Kite's exact shape).
+  Drift (rename/remove/retype) is caught OFF the critical path by the daily `ContractCanary`
+  (raw-JSON vs `kite-contract-manifest.json` — sentinels for CONSUMED fields, not a full mirror) +
+  `KiteWireContractTest`. The WS ticker uses the javakiteconnect SDK; REST is hand-rolled
+  `RestClient` because the SDK pins `Routes._rootUrl` (no setter) → unstubbable by WireMock. EVERY
+  new Kite call follows this — see `kite/wire/package-info.java`.
 - **Run the Playwright e2e vs a running mock stack:** `cd e2e &&
   E2E_OWNER_PASSWORD=<your .env owner pw> npx playwright test` — global-setup reuses a
   healthy stack and won't overwrite an existing `.env`; the helper password defaults to

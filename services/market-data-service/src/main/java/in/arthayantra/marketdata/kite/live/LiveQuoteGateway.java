@@ -1,6 +1,5 @@
 package in.arthayantra.marketdata.kite.live;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
@@ -8,6 +7,8 @@ import in.arthayantra.marketdata.kite.AccessTokenProvider;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.KiteCallExecutor;
 import in.arthayantra.marketdata.kite.QuoteGateway;
+import in.arthayantra.marketdata.kite.wire.KiteQuote;
+import in.arthayantra.marketdata.kite.wire.KiteQuoteResponse;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -92,32 +93,13 @@ public class LiveQuoteGateway implements QuoteGateway {
                     .retrieve()
                     .body(String.class));
     try {
-      JsonNode data = objectMapper.readTree(body).path("data");
+      KiteQuoteResponse response = objectMapper.readValue(body, KiteQuoteResponse.class);
+      Map<String, KiteQuote> data = response.data() == null ? Map.of() : response.data();
       for (InstrumentKey key : batch) {
-        JsonNode q = data.path(key.canonical());
-        if (q.isMissingNode()) {
-          continue;
+        KiteQuote quote = data.get(key.canonical());
+        if (quote != null) {
+          out.put(key, toDomain(key, quote));
         }
-        JsonNode ohlcNode = q.path("ohlc");
-        Quote.Ohlc ohlc =
-            ohlcNode.isMissingNode()
-                ? null
-                : new Quote.Ohlc(
-                    dec(ohlcNode, "open"),
-                    dec(ohlcNode, "high"),
-                    dec(ohlcNode, "low"),
-                    dec(ohlcNode, "close"));
-        out.put(
-            key,
-            new Quote(
-                key,
-                new BigDecimal(q.path("last_price").asText("0")),
-                new BigDecimal(q.path("depth").path("buy").path(0).path("price").asText("0")),
-                new BigDecimal(q.path("depth").path("sell").path(0).path("price").asText("0")),
-                q.path("volume").isMissingNode() ? null : q.path("volume").asLong(),
-                q.path("oi").isMissingNode() ? null : q.path("oi").asLong(),
-                ohlc,
-                OffsetDateTime.now(ZoneOffset.UTC)));
       }
     } catch (Exception e) {
       throw new ApiException(
@@ -125,11 +107,32 @@ public class LiveQuoteGateway implements QuoteGateway {
     }
   }
 
-  /** A nullable decimal field of {@code parent} — {@code null} when absent/blank (no zero coercion). */
-  private static BigDecimal dec(JsonNode parent, String field) {
-    JsonNode node = parent.path(field);
-    return node.isMissingNode() || node.isNull() || node.asText("").isBlank()
-        ? null
-        : new BigDecimal(node.asText());
+  /**
+   * Maps a Kite wire quote to the domain {@link Quote}; a missing {@code last_price} or depth side
+   * defaults to zero, matching Kite's index feeds (which omit depth) and the prior hand-parse.
+   */
+  private static Quote toDomain(InstrumentKey key, KiteQuote quote) {
+    KiteQuote.Ohlc wireOhlc = quote.ohlc();
+    Quote.Ohlc ohlc =
+        wireOhlc == null
+            ? null
+            : new Quote.Ohlc(wireOhlc.open(), wireOhlc.high(), wireOhlc.low(), wireOhlc.close());
+    return new Quote(
+        key,
+        quote.lastPrice() != null ? quote.lastPrice() : BigDecimal.ZERO,
+        firstPrice(quote.depth() == null ? null : quote.depth().buy()),
+        firstPrice(quote.depth() == null ? null : quote.depth().sell()),
+        quote.volume(),
+        quote.oi() != null ? quote.oi().longValue() : null,
+        ohlc,
+        OffsetDateTime.now(ZoneOffset.UTC));
+  }
+
+  /** Best price of a depth side, or zero when the side is absent/empty. */
+  private static BigDecimal firstPrice(List<KiteQuote.Depth.Level> side) {
+    if (side == null || side.isEmpty() || side.get(0).price() == null) {
+      return BigDecimal.ZERO;
+    }
+    return side.get(0).price();
   }
 }

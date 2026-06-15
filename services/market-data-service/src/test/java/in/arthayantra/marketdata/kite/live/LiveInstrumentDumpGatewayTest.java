@@ -114,6 +114,26 @@ class LiveInstrumentDumpGatewayTest {
     assertThatThrownBy(gateway::fetchDump).hasMessageContaining("no live Kite session");
   }
 
+  @Test
+  void parseCsvCapturesAllTwelveColumns() {
+    String csv =
+        "instrument_token,exchange_token,tradingsymbol,name,last_price,expiry,strike,lot_size,"
+            + "tick_size,instrument_type,segment,exchange\n"
+            + "256265,1001,NIFTY 50,\"NIFTY 50\",24100.5,,0,1,0.05,EQ,INDICES,NSE\n";
+
+    var rows = LiveInstrumentDumpGateway.parseCsv(csv.getBytes(StandardCharsets.UTF_8));
+
+    assertThat(rows).hasSize(1);
+    var k = rows.get(0);
+    assertThat(k.instrumentToken()).isEqualTo(256265L);
+    assertThat(k.exchangeToken()).isEqualTo(1001L);
+    assertThat(k.lastPrice()).isEqualByComparingTo("24100.5");
+    assertThat(k.tradingsymbol()).isEqualTo("NIFTY 50");
+    assertThat(k.tickSize()).isEqualByComparingTo("0.05");
+    assertThat(k.lotSize()).isEqualTo(1);
+    assertThat(k.exchange()).isEqualTo("NSE");
+  }
+
   private static byte[] gzip(String text) throws IOException {
     ByteArrayOutputStream bytes = new ByteArrayOutputStream();
     try (GZIPOutputStream gz = new GZIPOutputStream(bytes)) {

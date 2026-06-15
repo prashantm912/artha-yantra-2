@@ -229,6 +229,23 @@ describe('OiAnalyticsStore', () => {
     expect(store.bigOi()?.items[0].oiChange).toBe(-900);
   });
 
+  it('loadPremiumSeries maps the ATM-straddle decay series', () => {
+    ctx.setExpiry('2026-06-25');
+    store.loadPremiumSeries();
+    http
+      .expectOne((r) => r.url.includes('/options/premium-series'))
+      .flush({
+        items: [
+          { bucket: 'b0', atmStrike: '22500', atmStraddle: '150.00', spot: '22480' },
+          { bucket: 'b1', atmStrike: '22500', atmStraddle: '170.00', spot: '22520' },
+        ],
+        asOf: 'b1',
+      });
+    expect(store.premiumSeries()?.items).toHaveLength(2);
+    expect(store.premiumSeries()?.items[1].atmStraddle).toBe('170.00');
+    expect(store.loadingPremiumSeries()).toBe(false);
+  });
+
   it('loadFutSpurt maps the futures interval buildup', () => {
     store.loadFutSpurt();
     http

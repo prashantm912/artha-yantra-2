@@ -3,10 +3,9 @@ import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { Subject } from 'rxjs';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it } from 'vitest';
 import { WsClientService } from '../../core/ws-client.service';
-import { OiAnalyticsStore } from '../../stores/oi-analytics.store';
-import { OiFuturesPage } from './oi-futures-page';
+import { OiFuturesSpurtPage } from './oi-futures-spurt-page';
 
 class FakeWs {
   readonly state = signal<'idle'>('idle');
@@ -17,14 +16,15 @@ class FakeWs {
   activate(): void {}
 }
 
-@Component({ imports: [OiFuturesPage], template: `<ay-oi-futures-page />` })
+@Component({ imports: [OiFuturesSpurtPage], template: `<ay-oi-futures-spurt-page />` })
 class Host {}
 
-describe('OiFuturesPage', () => {
+describe('OiFuturesSpurtPage', () => {
   let http: HttpTestingController;
 
   beforeEach(() => {
     localStorage.clear();
+    localStorage.setItem('ay.oi.name', 'NIFTY 50');
     TestBed.configureTestingModule({
       imports: [Host],
       providers: [
@@ -38,7 +38,7 @@ describe('OiFuturesPage', () => {
 
   afterEach(() => localStorage.clear());
 
-  it('reloads futures OI on the shared selection', async () => {
+  it('renders the per-contract futures spurt buildup', async () => {
     const fixture = TestBed.createComponent(Host);
     await fixture.whenStable();
 
@@ -47,32 +47,21 @@ describe('OiFuturesPage', () => {
     http.match((r) => r.url.endsWith('/expiries')).forEach((r) => r.flush(['2026-06-25']));
 
     http
-      .expectOne((r) => r.url.includes('/futures/oi-analysis'))
+      .expectOne((r) => r.url.includes('/futures/spurt'))
       .flush({
         items: [
           {
-            bucket: 'b',
             tradingsymbol: 'NIFTY26JUNFUT',
-            ltp: '22510.00',
-            oi: 120000,
-            oiChange: 3400,
+            ltp: '23950',
+            oi: 1200,
+            oiChange: 200,
+            spurtPct: '20.00',
+            interpretation: 'LONG_BUILDUP',
           },
         ],
+        asOf: 'x',
       });
-    // Movers / banks / buzz sections fire alongside the main table — drain them (spurt + EOD
-    // moved to their own dedicated pages).
-    http
-      .expectOne((r) => r.url.includes('/futures/movers'))
-      .flush({ gainers: [], losers: [], asOf: null });
-    http.expectOne((r) => r.url.includes('/futures/banks')).flush({ items: [], asOf: null });
-    http
-      .expectOne((r) => r.url.includes('/futures/buzz'))
-      .flush({ contracts: [], buckets: [], cells: [], asOf: null });
     await fixture.whenStable();
-
-    const store = TestBed.inject(OiAnalyticsStore);
-    expect(store.futures()).toHaveLength(1);
-    expect(store.futures()[0].tradingsymbol).toBe('NIFTY26JUNFUT');
 
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
     expect(text).toContain('NIFTY26JUNFUT');

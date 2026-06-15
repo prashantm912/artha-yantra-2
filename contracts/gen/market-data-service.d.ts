@@ -196,6 +196,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/options/spurt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["spurt"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/options/oi-stats": {
         parameters: {
             query?: never;
@@ -598,6 +614,31 @@ export interface components {
             priority?: "PINNED_INDEX" | "STRATEGY" | "UI" | "SPECULATIVE";
             /** Format: int32 */
             subscribers?: number;
+        };
+        SpurtChain: {
+            items?: components["schemas"]["StrikeSpurt"][];
+            summary?: components["schemas"]["SpurtSummary"];
+            /** Format: date-time */
+            asOf?: string;
+        };
+        SpurtSummary: {
+            /** @enum {string} */
+            interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+            spotDelta?: number;
+            /** Format: int64 */
+            oiChange?: number;
+        };
+        StrikeSpurt: {
+            strike?: number;
+            optionType?: string;
+            ltp?: number;
+            /** Format: int64 */
+            oi?: number;
+            /** Format: int64 */
+            oiChange?: number;
+            spurtPct?: number;
+            /** @enum {string} */
+            interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
         };
         OiStats: {
             pcr?: number;
@@ -1419,6 +1460,41 @@ export interface operations {
                     "*/*": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    spurt: {
+        parameters: {
+            query: {
+                mode?: string;
+                name: string;
+                date?: string;
+                interval?: string;
+                expiry?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["SpurtChain"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

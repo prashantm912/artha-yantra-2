@@ -79,6 +79,24 @@ class OptionsSnapshotReaderIntegrationTest extends MarketDataIntegrationTestBase
     assertThat(pts.get(0).oi()).isEqualTo(2000L); // the later bucket wins
   }
 
+  @Test
+  void latestPairReturnsTwoMostRecentBuckets() {
+    String u = "PAIRTEST";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    OffsetDateTime b0 =
+        OffsetDateTime.of(2026, 6, 20, 9, 16, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime b1 = b0.plusMinutes(5); // next 5-min bucket
+    OffsetDateTime b2 = b0.plusMinutes(10); // newest 5-min bucket
+    insertRow(jdbc, b0, u, exp, "22500", "CE", "100.00", 1000L, 0L);
+    insertRow(jdbc, b1, u, exp, "22500", "CE", "110.00", 1200L, 0L);
+    insertRow(jdbc, b2, u, exp, "22500", "CE", "130.00", 1500L, 0L);
+
+    List<OptionsSnapshotReader.StrikePoint> pair = reader.latestPair(u, exp, OiInterval.M5);
+
+    // exactly the two newest buckets (b1, b2), oldest-first — b0 excluded
+    assertThat(pair).extracting(OptionsSnapshotReader.StrikePoint::oi).containsExactly(1200L, 1500L);
+  }
+
   /** Helper: minimal insert into options_chain_snapshots (only the columns the reader touches). */
   static void insertRow(
       JdbcTemplate jdbc,

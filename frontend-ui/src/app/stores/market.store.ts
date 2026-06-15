@@ -72,6 +72,10 @@ export const MarketStore = signalStore(
     // (many widgets can watch the same symbol), + the rAF conflation buffer.
     const tickSubs = new Map<string, Subscription>();
     const refs = new Map<string, number>();
+    // A UI-priority ticker subscription must be registered per watched symbol (D9): opening the WS
+    // tick topic alone never makes the Kite ticker stream a non-pinned instrument. One subscriber
+    // identity per app instance so the registry keeps the symbol live until THIS tab releases it.
+    const subscriber = `ui:${Math.random().toString(36).slice(2, 12)}`;
     const buffer = new ConflationBuffer<NormalizedTick>((batch) =>
       patchState(store, { ticks: { ...store.ticks(), ...Object.fromEntries(batch) } }),
     );
@@ -143,6 +147,16 @@ export const MarketStore = signalStore(
               }
             });
             tickSubs.set(key, sub);
+            // Register the ticker subscription so the backend actually streams this symbol.
+            http
+              .post('/api/v1/market/subscriptions', {
+                exchange: exch,
+                tradingsymbol: sym,
+                mode: 'quote',
+                priority: 'ui',
+                subscriber,
+              })
+              .subscribe({ next: () => undefined, error: () => undefined });
             added.push(key);
           }
         }
@@ -166,6 +180,15 @@ export const MarketStore = signalStore(
             refs.delete(key);
             tickSubs.get(key)?.unsubscribe();
             tickSubs.delete(key);
+            const sep = key.indexOf(':');
+            http
+              .delete('/api/v1/market/subscriptions', {
+                params: new HttpParams()
+                  .set('exchange', key.slice(0, sep))
+                  .set('tradingsymbol', key.slice(sep + 1))
+                  .set('subscriber', subscriber),
+              })
+              .subscribe({ next: () => undefined, error: () => undefined });
           } else {
             refs.set(key, n);
           }

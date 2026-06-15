@@ -94,6 +94,9 @@ describe('MarketStore', () => {
   it('track() subscribes to the per-symbol tick topic and seeds the latest snapshot', async () => {
     store.track(['NSE:RELIANCE']);
     http
+      .expectOne((req) => req.method === 'POST' && req.url === '/api/v1/market/subscriptions')
+      .flush({ exchange: 'NSE', tradingsymbol: 'RELIANCE', effectiveMode: 'quote' });
+    http
       .expectOne(
         (req) =>
           req.url === '/api/v1/market/ticks/latest' && req.params.get('symbols') === 'NSE:RELIANCE',
@@ -109,6 +112,9 @@ describe('MarketStore', () => {
 
   it('track()/untrack() refcount — the subscription survives until the last consumer releases', () => {
     store.track(['NSE:RELIANCE']);
+    http
+      .expectOne((req) => req.method === 'POST' && req.url === '/api/v1/market/subscriptions')
+      .flush({ exchange: 'NSE', tradingsymbol: 'RELIANCE', effectiveMode: 'quote' });
     http.expectOne((req) => req.url === '/api/v1/market/ticks/latest').flush({});
     store.track(['NSE:RELIANCE']); // second consumer: no new sub, no new seed
     expect(ws.subCount.get('/topic/ticks.NSE.RELIANCE')).toBe(1);
@@ -117,6 +123,35 @@ describe('MarketStore', () => {
     expect(ws.subCount.get('/topic/ticks.NSE.RELIANCE')).toBe(1);
     store.untrack(['NSE:RELIANCE']); // last consumer leaves — torn down
     expect(ws.subCount.get('/topic/ticks.NSE.RELIANCE')).toBe(0);
+    http
+      .expectOne((req) => req.method === 'DELETE' && req.url === '/api/v1/market/subscriptions')
+      .flush(null);
+  });
+
+  it('track() registers a UI ticker subscription and untrack() releases the same hold', () => {
+    store.track(['NSE:TCS']);
+    const sub = http.expectOne(
+      (r) => r.method === 'POST' && r.url === '/api/v1/market/subscriptions',
+    );
+    expect(sub.request.body).toMatchObject({
+      exchange: 'NSE',
+      tradingsymbol: 'TCS',
+      mode: 'quote',
+      priority: 'ui',
+    });
+    const subscriber = (sub.request.body as { subscriber: string }).subscriber;
+    expect(subscriber).toMatch(/^ui:/);
+    sub.flush({ exchange: 'NSE', tradingsymbol: 'TCS', effectiveMode: 'quote' });
+    http.expectOne((r) => r.url === '/api/v1/market/ticks/latest').flush({});
+
+    store.untrack(['NSE:TCS']);
+    const del = http.expectOne(
+      (r) => r.method === 'DELETE' && r.url === '/api/v1/market/subscriptions',
+    );
+    expect(del.request.params.get('exchange')).toBe('NSE');
+    expect(del.request.params.get('tradingsymbol')).toBe('TCS');
+    expect(del.request.params.get('subscriber')).toBe(subscriber);
+    del.flush(null);
   });
 
   it('widget collapse state persists to localStorage', () => {

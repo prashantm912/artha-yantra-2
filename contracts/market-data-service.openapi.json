@@ -1832,6 +1832,56 @@
         }
       }
     },
+    "/api/v1/market/futures/banks-grid" : {
+      "get" : {
+        "tags" : [ "futures-analytics-controller" ],
+        "operationId" : "banksGrid",
+        "parameters" : [ {
+          "name" : "mode",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "date",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "interval",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BankGrid"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/fii-dii/participant-oi" : {
       "get" : {
         "tags" : [ "fii-dii-controller" ],
@@ -3385,6 +3435,57 @@
           "asOf" : {
             "type" : "string",
             "format" : "date-time"
+          }
+        }
+      },
+      "BankGrid" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/BankGridRow"
+            }
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "BankGridRow" : {
+        "type" : "object",
+        "properties" : {
+          "underlying" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "ltp" : {
+            "type" : "number"
+          },
+          "pricePct" : {
+            "type" : "number"
+          },
+          "oi" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "oiChange" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "oiPct" : {
+            "type" : "number"
+          },
+          "interpretation" : {
+            "type" : "string",
+            "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
           }
         }
       },

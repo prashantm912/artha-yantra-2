@@ -120,6 +120,9 @@ artha:
     # quotes() call per pass — see FuturesOiSnapshotService). Unbackfillable, so widen early.
     oi-snapshot-underlyings: NIFTY 50,NIFTY BANK,HDFCBANK,ICICIBANK,SBIN,AXISBANK,KOTAKBANK,INDUSINDBK,BANKBARODA,PNB,AUBANK,FEDERALBNK,IDFCFIRSTB,CANBK,BANDHANBNK,BANKINDIA,RBLBANK,UNIONBANK,YESBANK
     oi-snapshot-interval-ms: 60000
+    # /banks-grid sector universe: the 17 bank-sector stocks above (indices excluded — they have
+    # their own /banks term-structure view). Front future per stock = one grid row.
+    bank-stocks: HDFCBANK,ICICIBANK,SBIN,AXISBANK,KOTAKBANK,INDUSINDBK,BANKBARODA,PNB,AUBANK,FEDERALBNK,IDFCFIRSTB,CANBK,BANDHANBNK,BANKINDIA,RBLBANK,UNIONBANK,YESBANK
   nse:
     base-url: https://www.nseindia.com
     archives-url: https://nsearchives.nseindia.com

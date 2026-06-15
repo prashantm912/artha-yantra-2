@@ -12,7 +12,7 @@
 
 ## Scope
 
-Phase 2 spans four endpoint families (options, futures, fii-dii, option-strategies). This plan covers the **critical-path core** that unblocks the Phase 3/4 frontend, in full TDD detail:
+Phase 2 spans three endpoint families (options, futures, fii-dii). This plan covers the **critical-path core** that unblocks the Phase 3/4 frontend, in full TDD detail:
 
 - The shared read/downsample layer (Tasks 3–4)
 - All three primitives (Tasks 2, 6, 8)
@@ -20,7 +20,7 @@ Phase 2 spans four endpoint families (options, futures, fii-dii, option-strategi
 - The universal control-bar request contract + OI interval set (Tasks 1, 9)
 - Three representative endpoints proving the full pattern end-to-end + contract recapture (Tasks 10–14)
 
-The remaining endpoint families (futures spurt/buzz/movers/banks/eod, fii-dii/\*, option-strategies straddle/strangle/multi-leg/payoff) **reuse these exact components** and are deferred to thin follow-on sub-plans — see "Follow-on sub-plans" at the end. This split follows the writing-plans scope-check (one shippable, testable increment per plan).
+The remaining endpoint families (futures spurt/buzz/movers/banks/eod, fii-dii/\*) **reuse these exact components** and are deferred to thin follow-on sub-plans — see "Follow-on sub-plans" at the end. This split follows the writing-plans scope-check (one shippable, testable increment per plan). (Option-strategies straddle/strangle/multi-leg/payoff is CUT from oipulse parity — Greeks/POP/payoff, own undefined schema.)
 
 ---
 
@@ -1527,7 +1527,7 @@ git commit -m "fix(market-data): keep OI analytics within module boundaries"
 - Universal control-bar contract + interval set → Tasks 1, 9 ✓
 - Read/downsample layer (query-time decision) → Tasks 3, 4 ✓
 - Representative endpoints + contract gate → Tasks 10, 11, 12 ✓
-- **Deferred to follow-on plans (named below):** straddle/strangle premium series, Greeks aggregation, big-OI-move, O=H/O=L probability, market movers, banks grid, all futures spurt/buzz/movers/banks/eod endpoints, fii-dii/\* endpoints, option-strategies endpoints. These are NOT gaps — they reuse Tasks 1–9 and are split out per the writing-plans scope-check.
+- **Deferred to follow-on plans (named below):** straddle/strangle premium series, big-OI-move, O=H/O=L probability, market movers, banks grid, all futures spurt/buzz/movers/banks/eod endpoints, fii-dii/\* endpoints. These are NOT gaps — they reuse Tasks 1–9 and are split out per the writing-plans scope-check. (Option-strategies endpoints CUT from oipulse parity.)
 
 **Type consistency:** `StrikePoint` (Task 3) fields reused unchanged in Tasks 7, 10; `StrikeOiSnap` (Task 6) built by the controller's `toSnaps` (Task 10); `MaxPainCalculator.StrikeOi` (Task 5) built in Task 10; `OiInterval`/`OiQuery`/`OiInterpretation` names consistent across all tasks. `OptionsChainService.pcr` added in Task 7, used in Tasks 7 + 10.
 
@@ -1542,8 +1542,7 @@ Each is a thin plan that adds endpoints + (where new) one pure metric, on the es
 1. **Options endpoints completion** — `/spurt` (OiSpurtService over the chain), `/big-oi` (top OI-change movers), `/premium` (straddle/strangle premium series — new pure calc), `/trending` + `/trending-pa` (OI trend over buckets). Archetypes: buildup-multi-table, single-chart, data-table.
 2. **Futures endpoints completion** — `/spurt`, `/buzz` (heatmap), `/movers` (gainers/losers), `/banks` (bank-stock futures grid), `/eod` (from `futures_oi_snapshots` + bhavcopy). Needs the deferred `day_high`/`day_low` columns (Phase-1 gap) for buzz/movers — add the migration in this plan.
 3. **FII/DII endpoints** — `/api/v1/market/fii-dii/{cash,participant-oi,long-short}` over `nse_eod_fii_dii` + `nse_eod_participant_oi`. Pure EOD-table reads; no primitives. (Resolve the path: `fii-dii` under `/api/v1/market/` to match the base-path convention.)
-4. **Option-strategies endpoints** — `/straddle`, `/strangle`, `/multi-leg`, `/payoff` (uses `black76-math` Greeks + POP). **Naming decision required:** these collide with strategy-signal's `/api/v1/strategies/*`; namespace under `/api/v1/market/options/strategies/*` to disambiguate.
-5. **Greeks aggregation + O=H/O=L probability** — OI-weighted portfolio Greeks roll-up; open=high / open=low probability from candle history. Feeds the Strategy Builder + Open&High pages.
+4. **O=H/O=L probability** — open=high / open=low probability from candle history. Feeds the Open&High page.
 
 ---
 

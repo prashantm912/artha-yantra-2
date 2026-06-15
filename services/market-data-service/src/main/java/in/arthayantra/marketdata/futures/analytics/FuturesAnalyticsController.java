@@ -2,6 +2,7 @@ package in.arthayantra.marketdata.futures.analytics;
 
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
+import in.arthayantra.marketdata.options.OiInterval;
 import in.arthayantra.marketdata.options.OiQuery;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -22,19 +23,29 @@ public class FuturesAnalyticsController {
   private final FuturesSpurtService spurtService;
   private final FuturesMoversService moversService;
   private final FuturesBuzzService buzzService;
+  private final FuturesBankGridService bankGridService;
   private final int buzzBuckets;
+  private final List<String> bankStocks;
 
   public FuturesAnalyticsController(
       FuturesSnapshotReader reader,
       FuturesSpurtService spurtService,
       FuturesMoversService moversService,
       FuturesBuzzService buzzService,
-      @Value("${artha.futures.buzz-buckets:12}") int buzzBuckets) {
+      FuturesBankGridService bankGridService,
+      @Value("${artha.futures.buzz-buckets:12}") int buzzBuckets,
+      @Value(
+              "${artha.futures.bank-stocks:HDFCBANK,ICICIBANK,SBIN,AXISBANK,KOTAKBANK,INDUSINDBK,"
+                  + "BANKBARODA,PNB,AUBANK,FEDERALBNK,IDFCFIRSTB,CANBK,BANDHANBNK,BANKINDIA,"
+                  + "RBLBANK,UNIONBANK,YESBANK}")
+          List<String> bankStocks) {
     this.reader = reader;
     this.spurtService = spurtService;
     this.moversService = moversService;
     this.buzzService = buzzService;
+    this.bankGridService = bankGridService;
     this.buzzBuckets = buzzBuckets;
+    this.bankStocks = bankStocks;
   }
 
   @GetMapping("/oi-analysis")
@@ -96,6 +107,29 @@ public class FuturesAnalyticsController {
       throw new ApiException(422, ErrorCodes.DATA_GAP, "no snapshot for " + q.name());
     }
     return moversService.banks(pair);
+  }
+
+  /**
+   * /banks-grid: one row per bank-sector underlying = its FRONT future's buildup (sector-wide; no
+   * {@code name}). Forward-only data, so it 422s until ≥2 snapshot buckets have accrued.
+   */
+  @GetMapping("/banks-grid")
+  public FuturesBankGridService.BankGrid banksGrid(
+      @RequestParam(required = false) String mode,
+      @RequestParam(required = false) String date,
+      @RequestParam(required = false) String interval) {
+    boolean live = mode == null || mode.isBlank() || "live".equalsIgnoreCase(mode);
+    OiInterval iv =
+        interval == null || interval.isBlank() ? OiInterval.M3 : OiInterval.parse(interval);
+    LocalDate d = date == null || date.isBlank() ? null : parseDate(date);
+    if (!live && d == null) {
+      throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "history mode requires date");
+    }
+    List<FuturesSnapshotReader.FutPoint> pair = reader.latestPairAll(bankStocks, iv, d);
+    if (pair.isEmpty()) {
+      throw new ApiException(422, ErrorCodes.DATA_GAP, "no bank-stock futures snapshots");
+    }
+    return bankGridService.grid(pair);
   }
 
   /** /buzz: a time x contract heatmap of the 4-state OI interpretation over the last N buckets. */

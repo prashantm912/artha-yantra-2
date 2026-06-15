@@ -9,7 +9,7 @@
 **Tech Stack:** Java 21 / Spring Boot (market-data-service, JdbcTemplate), TimescaleDB, Flyway; Angular 21 zoneless + PrimeNG 21 + NgRx Signals + ECharts (`ay-echart`); vitest; springdoc + openapi-typescript@7.
 
 **Scope decisions (owner, 2026-06-15):**
-- **Option-strategies (straddle/strangle/multi-leg/payoff + Greeks/POP) is DEFERRED** to its own later stage (undefined schema, Stage-sized). NOT in Stage G. (Note: the lightweight read-only `/premium` straddle/strangle *premium* metric IS in Stage G — it is a pure LTP read, no Greeks/POP/payoff.)
+- **Option-strategies (straddle/strangle/multi-leg/payoff + Greeks/POP) is CUT** from oipulse parity (undefined schema, Greeks/POP/payoff — out of scope, not deferred-within). (Note: the lightweight read-only `/premium` straddle/strangle *premium* metric IS in Stage G — it is a pure LTP read, no Greeks/POP/payoff.)
 - **Futures OHLC capture is EXTENDED** (V015 + thread Kite quote `ohlc`). Forward-only data; ITs seed rows. Unblocks `/buzz`, `/movers`, `/eod`.
 - **`/banks`** (oipulse "bank-stock futures grid") is scoped to **NIFTY BANK *index* futures buildup** (front/next/far month + basis) because only index futures are captured today; a bank-*stock* futures grid needs a capture expansion and is flagged as a follow-on (like OHLC was).
 

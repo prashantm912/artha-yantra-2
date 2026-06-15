@@ -78,6 +78,11 @@ export const routes: Routes = [
         loadComponent: () => import('./pages/oi/oi-eod-page').then((m) => m.OiEodPage),
       },
       {
+        path: 'oi/banks-grid',
+        title: 'Bank Futures Grid · ArthaYantra',
+        loadComponent: () => import('./pages/oi/oi-bank-grid-page').then((m) => m.OiBankGridPage),
+      },
+      {
         path: 'market/fii-dii',
         title: 'FII / DII · ArthaYantra',
         loadComponent: () => import('./pages/fii-dii/fii-dii-page').then((m) => m.FiiDiiPage),

@@ -38,14 +38,16 @@ import {
   `,
   template: `
     <div class="controls">
-      <p-select
-        [options]="underlyings()"
-        [ngModel]="ctx.name()"
-        (ngModelChange)="ctx.setName($event)"
-        [filter]="true"
-        ariaLabel="Underlying"
-        placeholder="Underlying"
-      />
+      @if (showName()) {
+        <p-select
+          [options]="underlyings()"
+          [ngModel]="ctx.name()"
+          (ngModelChange)="ctx.setName($event)"
+          [filter]="true"
+          ariaLabel="Underlying"
+          placeholder="Underlying"
+        />
+      }
       @if (showExpiry()) {
         <p-select
           [options]="ctx.expiries()"
@@ -86,6 +88,7 @@ export class OiControlBar {
   private readonly market = inject(MarketStore);
 
   readonly showExpiry = input(true);
+  readonly showName = input(true);
   protected readonly intervals: OiInterval[] = [...OI_INTERVALS];
 
   // Fall back to the two index defaults until the instrument-master underlyings load.

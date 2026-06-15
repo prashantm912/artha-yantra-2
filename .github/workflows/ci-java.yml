@@ -46,6 +46,27 @@ jobs:
 
   build-test:
     runs-on: ubuntu-latest
+    # Shard the reactor by service so the Testcontainers ITs (the 2-core
+    # bottleneck — a single serial `verify` is ~23 min) run on parallel
+    # runners. Each shard `-am`-builds its upstream libs, so every lib still
+    # gets compiled + checkstyle + Error Prone + JaCoCo + unit-tested in at
+    # least one shard; collectively all 4 services + all 5 libs are covered
+    # (black76-math rides market-data/backtest, the rest ride every service).
+    # jacoco-check is bound PER MODULE (not an aggregate root goal), so the
+    # >= 60% line gate is enforced unchanged inside whichever shard owns the
+    # module. ModularityTest lives in market-data + strategy-signal — both
+    # shards present. fail-fast off so one shard's break doesn't mask others.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: market-data
+            modules: services/market-data-service
+          - shard: backtest
+            modules: services/backtest-service
+          - shard: strategy-gateway
+            modules: services/strategy-signal-service,services/edge-gateway
+    name: build-test (${{ matrix.shard }})
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -60,7 +81,7 @@ jobs:
         # rerunFailingTestsCount retries a flaky test in-run (the Testcontainers/awaitility ITs
         # occasionally time out on the 2-core runner); a genuinely failing test still fails after
         # the retries, so this hides flakes without hiding real breakage.
-        run: ./mvnw -ntp -B verify -Dsurefire.rerunFailingTestsCount=2
+        run: ./mvnw -ntp -B -pl ${{ matrix.modules }} -am verify -Dsurefire.rerunFailingTestsCount=2
 
   build-images:
     needs: build-test

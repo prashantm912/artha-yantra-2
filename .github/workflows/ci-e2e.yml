@@ -26,6 +26,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+          # both npm ci calls below (frontend-ui + e2e) hit the shared npm cache
+          cache: npm
+          cache-dependency-path: |
+            frontend-ui/package-lock.json
+            e2e/package-lock.json
 
       - name: Build service jars (host-build pattern)
         run: ./mvnw -ntp -q -DskipTests package
@@ -35,6 +40,16 @@ jobs:
         run: |
           npm ci
           npm run build
+
+      # Cache the downloaded browser binaries (the slow part of the install);
+      # keyed on the e2e lockfile so a Playwright bump invalidates it. On a hit
+      # `playwright install` just re-checks the OS deps, no ~120 MB download.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
+          restore-keys: pw-${{ runner.os }}-
 
       - name: Install Playwright
         working-directory: e2e

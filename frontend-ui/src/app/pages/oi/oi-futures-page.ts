@@ -4,23 +4,30 @@ import { formatDecimal } from '../../core/decimal';
 import { OiAnalyticsStore } from '../../stores/oi-analytics.store';
 import { SymbolContextStore } from '../../stores/symbol-context.store';
 import { DataBar } from '../../shared/data-bar';
+import { OiIntBadge } from '../../shared/oi-int-badge';
 import { OiControlBar } from './oi-control-bar';
 
 /**
- * Futures OI Analysis (oipulse parity): per-contract OI / ΔOI / LTP with in-cell OI bars. Reads
- * GET /api/v1/market/futures/oi-analysis via {@link OiAnalyticsStore}, reloading on the shared
- * {@link SymbolContextStore} selection (expiry is ignored by the endpoint, so the control bar hides
- * it). LTP is a decimal string.
+ * Futures OI (oipulse parity): the per-contract OI table plus the Stage-G analytics sections —
+ * interval spurt, gainers/losers movers, the index term-structure (banks) and the daily EOD
+ * rollup. Reads the /futures/* endpoints via {@link OiAnalyticsStore}, reloading on the shared
+ * {@link SymbolContextStore} selection (expiry ignored — the control bar hides it). Decimals are
+ * strings. The buzz heatmap is rendered by a chart panel.
  */
 @Component({
   selector: 'ay-oi-futures-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [TableModule, DataBar, OiControlBar],
+  imports: [TableModule, DataBar, OiIntBadge, OiControlBar],
   styles: `
     .meta {
       margin: 0 0 0.7rem;
       color: var(--ay-text-muted);
       font-variant-numeric: tabular-nums;
+    }
+    h2 {
+      font-size: 1rem;
+      margin: 1.2rem 0 0.4rem;
+      color: var(--ay-text);
     }
     .num {
       text-align: right;
@@ -39,7 +46,7 @@ import { OiControlBar } from './oi-control-bar';
     <p-table
       [value]="store.futures()"
       [scrollable]="true"
-      scrollHeight="62vh"
+      scrollHeight="34vh"
       [loading]="store.loadingFutures()"
       dataKey="tradingsymbol"
     >
@@ -74,6 +81,125 @@ import { OiControlBar } from './oi-control-bar';
         </tr>
       </ng-template>
     </p-table>
+
+    <h2>Interval spurt</h2>
+    <p-table [value]="store.futSpurt()?.items ?? []" [scrollable]="true" scrollHeight="22vh">
+      <ng-template #header>
+        <tr>
+          <th>Contract</th>
+          <th class="num">LTP</th>
+          <th class="num">Δ OI</th>
+          <th class="num">Spurt %</th>
+          <th>Buildup</th>
+        </tr>
+      </ng-template>
+      <ng-template #body let-r>
+        <tr>
+          <td>{{ r.tradingsymbol }}</td>
+          <td class="num">{{ dec(r.ltp, 2) }}</td>
+          <td class="num">{{ signedOi(r.oiChange) }}</td>
+          <td class="num">{{ dec(r.spurtPct, 2) }}</td>
+          <td><ay-oi-int-badge [value]="r.interpretation" /></td>
+        </tr>
+      </ng-template>
+      <ng-template #emptymessage>
+        <tr>
+          <td colspan="5">No interval spurt yet (needs two buckets).</td>
+        </tr>
+      </ng-template>
+    </p-table>
+
+    <h2>Movers</h2>
+    <p-table [value]="movers()" [scrollable]="true" scrollHeight="22vh">
+      <ng-template #header>
+        <tr>
+          <th>Contract</th>
+          <th class="num">LTP</th>
+          <th class="num">Price %</th>
+          <th class="num">OI %</th>
+          <th>Buildup</th>
+        </tr>
+      </ng-template>
+      <ng-template #body let-r>
+        <tr>
+          <td>{{ r.tradingsymbol }}</td>
+          <td class="num">{{ dec(r.ltp, 2) }}</td>
+          <td class="num">{{ dec(r.pricePct, 2) }}</td>
+          <td class="num">{{ dec(r.oiPct, 2) }}</td>
+          <td><ay-oi-int-badge [value]="r.interpretation" /></td>
+        </tr>
+      </ng-template>
+      <ng-template #emptymessage>
+        <tr>
+          <td colspan="5">No movers for this selection.</td>
+        </tr>
+      </ng-template>
+    </p-table>
+
+    <h2>Term structure</h2>
+    <p-table [value]="store.banks()?.items ?? []" [scrollable]="true" scrollHeight="20vh">
+      <ng-template #header>
+        <tr>
+          <th>Contract</th>
+          <th>Expiry</th>
+          <th class="num">LTP</th>
+          <th class="num">Basis</th>
+          <th class="num">Δ OI</th>
+          <th>Buildup</th>
+        </tr>
+      </ng-template>
+      <ng-template #body let-r>
+        <tr>
+          <td>{{ r.tradingsymbol }}</td>
+          <td>{{ r.expiry ?? '—' }}</td>
+          <td class="num">{{ dec(r.ltp, 2) }}</td>
+          <td class="num">{{ dec(r.basis, 2) }}</td>
+          <td class="num">{{ signedOi(r.oiChange) }}</td>
+          <td><ay-oi-int-badge [value]="r.interpretation" /></td>
+        </tr>
+      </ng-template>
+      <ng-template #emptymessage>
+        <tr>
+          <td colspan="6">No contracts for this selection.</td>
+        </tr>
+      </ng-template>
+    </p-table>
+
+    <h2>EOD ({{ eodDate() }})</h2>
+    <p-table
+      [value]="store.eod()"
+      [scrollable]="true"
+      scrollHeight="20vh"
+      [loading]="store.loadingEod()"
+    >
+      <ng-template #header>
+        <tr>
+          <th>Contract</th>
+          <th class="num">O</th>
+          <th class="num">H</th>
+          <th class="num">L</th>
+          <th class="num">C</th>
+          <th class="num">OI close</th>
+          <th class="num">Δ OI</th>
+        </tr>
+      </ng-template>
+      <ng-template #body let-r>
+        <tr>
+          <td>{{ r.tradingsymbol }}</td>
+          <td class="num">{{ dec(r.open, 2) }}</td>
+          <td class="num">{{ dec(r.high, 2) }}</td>
+          <td class="num">{{ dec(r.low, 2) }}</td>
+          <td class="num">{{ dec(r.close, 2) }}</td>
+          <td class="num">{{ oi(r.oiClose) }}</td>
+          <td class="num">{{ signedOi(r.oiChange) }}</td>
+        </tr>
+      </ng-template>
+      <ng-template #emptymessage>
+        <tr>
+          <td colspan="7">No EOD rollup for this date (forward-only OHLC capture).</td>
+        </tr>
+      </ng-template>
+    </p-table>
   `,
 })
 export class OiFuturesPage {
@@ -86,7 +212,26 @@ export class OiFuturesPage {
     this.ctx.mode();
     this.ctx.date();
     this.store.loadFutures();
+    this.store.loadFutSpurt();
+    this.store.loadMovers();
+    this.store.loadBanks();
+    this.store.loadBuzz();
+    this.store.loadEod(this.eodDate());
   });
+
+  /** Movers as a single gainers-then-losers list for the table. */
+  protected movers() {
+    const m = this.store.movers();
+    return m ? [...m.gainers, ...m.losers] : [];
+  }
+
+  /** EOD date: the history-mode date if chosen, else today (IST). */
+  protected eodDate(): string {
+    return (
+      this.ctx.date() ??
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date())
+    );
+  }
 
   protected dec(value: string | null | undefined, fractionDigits: number): string {
     return value ? formatDecimal(value, fractionDigits) : '—';
@@ -96,7 +241,6 @@ export class OiFuturesPage {
     return value != null ? value.toLocaleString('en-IN') : '—';
   }
 
-  /** Signed ΔOI label: '+' for increases (decreases already carry '-') — direction is not colour-only. */
   protected signedOi(value: number | null | undefined): string {
     if (value == null) {
       return '—';
@@ -104,7 +248,6 @@ export class OiFuturesPage {
     return value > 0 ? '+' + value.toLocaleString('en-IN') : value.toLocaleString('en-IN');
   }
 
-  /** ΔOI bar tone: 0 (and null) is neutral, so green never means "≥ 0". */
   protected oiTone(value: number | null | undefined): 'bull' | 'bear' | 'neutral' {
     if (value == null || value === 0) {
       return 'neutral';

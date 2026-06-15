@@ -52,6 +52,26 @@ export const routes: Routes = [
         loadComponent: () => import('./pages/oi/oi-futures-page').then((m) => m.OiFuturesPage),
       },
       {
+        path: 'oi/spurt',
+        title: 'Options OI Spurt · ArthaYantra',
+        loadComponent: () => import('./pages/oi/oi-spurt-page').then((m) => m.OiSpurtPage),
+      },
+      {
+        path: 'oi/big-oi',
+        title: 'Big OI · ArthaYantra',
+        loadComponent: () => import('./pages/oi/oi-big-oi-page').then((m) => m.OiBigOiPage),
+      },
+      {
+        path: 'market/fii-dii',
+        title: 'FII / DII · ArthaYantra',
+        loadComponent: () => import('./pages/fii-dii/fii-dii-page').then((m) => m.FiiDiiPage),
+      },
+      {
+        path: 'market/breadth',
+        title: 'Breadth · ArthaYantra',
+        loadComponent: () => import('./pages/breadth/breadth-page').then((m) => m.BreadthPage),
+      },
+      {
         path: 'paper',
         title: 'Paper trading · ArthaYantra',
         loadComponent: () => import('./pages/paper/paper-page').then((m) => m.PaperPage),

@@ -1,6 +1,7 @@
 import * as echarts from 'echarts/core';
 import {
   BarChart,
+  CandlestickChart,
   CustomChart,
   HeatmapChart,
   LineChart,
@@ -32,6 +33,7 @@ echarts.use([
   ScatterChart,
   HeatmapChart,
   ParallelChart,
+  CandlestickChart,
   CustomChart,
   GridComponent,
   TooltipComponent,

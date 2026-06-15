@@ -62,6 +62,22 @@ export const routes: Routes = [
         loadComponent: () => import('./pages/oi/oi-big-oi-page').then((m) => m.OiBigOiPage),
       },
       {
+        path: 'oi/premium',
+        title: 'Option Premium · ArthaYantra',
+        loadComponent: () => import('./pages/oi/oi-premium-page').then((m) => m.OiPremiumPage),
+      },
+      {
+        path: 'oi/futures-spurt',
+        title: 'Futures OI Spurt · ArthaYantra',
+        loadComponent: () =>
+          import('./pages/oi/oi-futures-spurt-page').then((m) => m.OiFuturesSpurtPage),
+      },
+      {
+        path: 'oi/eod',
+        title: 'Futures EOD · ArthaYantra',
+        loadComponent: () => import('./pages/oi/oi-eod-page').then((m) => m.OiEodPage),
+      },
+      {
         path: 'market/fii-dii',
         title: 'FII / DII · ArthaYantra',
         loadComponent: () => import('./pages/fii-dii/fii-dii-page').then((m) => m.FiiDiiPage),

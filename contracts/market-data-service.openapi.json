@@ -970,6 +970,70 @@
         }
       }
     },
+    "/api/v1/market/options/premium-series" : {
+      "get" : {
+        "tags" : [ "options-analytics-controller" ],
+        "operationId" : "premiumSeries",
+        "parameters" : [ {
+          "name" : "mode",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "name",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "date",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "interval",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "expiry",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PremiumSeries"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/options/oi-stats" : {
       "get" : {
         "tags" : [ "options-analytics-controller" ],
@@ -2811,6 +2875,39 @@
             "type" : "number"
           },
           "pe" : {
+            "type" : "number"
+          }
+        }
+      },
+      "PremiumSeries" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PremiumSeriesPoint"
+            }
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "PremiumSeriesPoint" : {
+        "type" : "object",
+        "properties" : {
+          "bucket" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "atmStrike" : {
+            "type" : "number"
+          },
+          "atmStraddle" : {
+            "type" : "number"
+          },
+          "spot" : {
             "type" : "number"
           }
         }

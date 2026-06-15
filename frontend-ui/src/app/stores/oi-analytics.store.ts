@@ -108,6 +108,18 @@ export interface PremiumChain {
   asOf: string | null;
 }
 
+/** One point of GET /api/v1/market/options/premium-series — the ATM straddle per bucket. */
+export interface PremiumSeriesPoint {
+  bucket: string;
+  atmStrike: string | null;
+  atmStraddle: string | null;
+  spot: string | null;
+}
+export interface PremiumSeries {
+  items: PremiumSeriesPoint[];
+  asOf: string | null;
+}
+
 /** GET /api/v1/market/options/trending — per-bucket OI trend. */
 export interface TrendPoint {
   bucket: string;
@@ -231,6 +243,7 @@ interface OiAnalyticsState {
   spurt: SpurtChain | null;
   bigOi: BigOi | null;
   premium: PremiumChain | null;
+  premiumSeries: PremiumSeries | null;
   trend: TrendSeries | null;
   futSpurt: FutSpurtChain | null;
   movers: Movers | null;
@@ -242,6 +255,7 @@ interface OiAnalyticsState {
   loadingSpurt: boolean;
   loadingBigOi: boolean;
   loadingTrend: boolean;
+  loadingPremiumSeries: boolean;
   loadingFutSpurt: boolean;
   loadingMovers: boolean;
   loadingBuzz: boolean;
@@ -266,6 +280,7 @@ export const OiAnalyticsStore = signalStore(
     spurt: null,
     bigOi: null,
     premium: null,
+    premiumSeries: null,
     trend: null,
     futSpurt: null,
     movers: null,
@@ -277,6 +292,7 @@ export const OiAnalyticsStore = signalStore(
     loadingSpurt: false,
     loadingBigOi: false,
     loadingTrend: false,
+    loadingPremiumSeries: false,
     loadingFutSpurt: false,
     loadingMovers: false,
     loadingBuzz: false,
@@ -303,6 +319,7 @@ export const OiAnalyticsStore = signalStore(
     let spurtGen = 0;
     let bigOiGen = 0;
     let premiumGen = 0;
+    let premiumSeriesGen = 0;
     let trendGen = 0;
     let futSpurtGen = 0;
     let moversGen = 0;
@@ -448,6 +465,29 @@ export const OiAnalyticsStore = signalStore(
           .subscribe({
             next: (premium) => g === premiumGen && patchState(store, { premium }),
             error: () => g === premiumGen && patchState(store, { premium: null }),
+          });
+      },
+
+      /** Options ATM-straddle premium decay over the last N buckets (the premium chart series). */
+      loadPremiumSeries(): void {
+        if (unsatisfiable(true)) {
+          patchState(store, { premiumSeries: null, loadingPremiumSeries: false });
+          return;
+        }
+        const g = ++premiumSeriesGen;
+        patchState(store, { loadingPremiumSeries: true });
+        http
+          .get<PremiumSeries>('/api/v1/market/options/premium-series', {
+            params: params(true),
+            context: SILENT,
+          })
+          .subscribe({
+            next: (premiumSeries) =>
+              g === premiumSeriesGen &&
+              patchState(store, { premiumSeries, loadingPremiumSeries: false }),
+            error: () =>
+              g === premiumSeriesGen &&
+              patchState(store, { premiumSeries: null, loadingPremiumSeries: false }),
           });
       },
 

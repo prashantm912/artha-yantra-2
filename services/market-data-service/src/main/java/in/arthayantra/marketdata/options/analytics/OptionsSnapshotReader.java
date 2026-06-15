@@ -1,10 +1,12 @@
 package in.arthayantra.marketdata.options.analytics;
 
+import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketdata.options.OiInterval;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -74,15 +76,29 @@ public class OptionsSnapshotReader {
    * when the snapshot cadence is not bucket-aligned). Empty if none.
    */
   public List<StrikePoint> latest(String underlying, LocalDate expiry, OiInterval interval) {
-    List<OffsetDateTime> bucket =
-        jdbc.query(
+    return latest(underlying, expiry, interval, null);
+  }
+
+  /**
+   * As {@link #latest(String, LocalDate, OiInterval)} but {@code date}-scoped: when {@code date}
+   * is non-null the anchor is the newest bucket WITHIN that IST day (history mode); {@code null}
+   * anchors on the newest bucket overall (live).
+   */
+  public List<StrikePoint> latest(
+      String underlying, LocalDate expiry, OiInterval interval, LocalDate date) {
+    StringBuilder sql =
+        new StringBuilder(
             "SELECT public.time_bucket(INTERVAL '"
                 + interval.pgInterval()
                 + "', max(ts), 'Asia/Kolkata') AS b "
-                + "FROM options_chain_snapshots WHERE underlying = ? AND expiry = ?",
-            (rs, n) -> rs.getObject("b", OffsetDateTime.class),
-            underlying,
-            java.sql.Date.valueOf(expiry));
+                + "FROM options_chain_snapshots WHERE underlying = ? AND expiry = ?");
+    List<Object> args = new ArrayList<>();
+    args.add(underlying);
+    args.add(java.sql.Date.valueOf(expiry));
+    appendDayFilter(sql, args, date);
+    List<OffsetDateTime> bucket =
+        jdbc.query(
+            sql.toString(), (rs, n) -> rs.getObject("b", OffsetDateTime.class), args.toArray());
     OffsetDateTime bucketStart = bucket.isEmpty() ? null : bucket.get(0);
     if (bucketStart == null) {
       return List.of();
@@ -97,21 +113,42 @@ public class OptionsSnapshotReader {
    * snapshot; a single bucket if only one exists (the caller then has no prior to diff against).
    */
   public List<StrikePoint> latestPair(String underlying, LocalDate expiry, OiInterval interval) {
-    List<OffsetDateTime> buckets =
-        jdbc.query(
+    return latestPair(underlying, expiry, interval, null);
+  }
+
+  /** As {@link #latestPair(String, LocalDate, OiInterval)} but {@code date}-scoped (history mode). */
+  public List<StrikePoint> latestPair(
+      String underlying, LocalDate expiry, OiInterval interval, LocalDate date) {
+    StringBuilder sql =
+        new StringBuilder(
             "SELECT DISTINCT public.time_bucket(INTERVAL '"
                 + interval.pgInterval()
                 + "', ts, 'Asia/Kolkata') AS b "
-                + "FROM options_chain_snapshots WHERE underlying = ? AND expiry = ? "
-                + "ORDER BY b DESC LIMIT 2",
-            (rs, n) -> rs.getObject("b", OffsetDateTime.class),
-            underlying,
-            java.sql.Date.valueOf(expiry));
+                + "FROM options_chain_snapshots WHERE underlying = ? AND expiry = ?");
+    List<Object> args = new ArrayList<>();
+    args.add(underlying);
+    args.add(java.sql.Date.valueOf(expiry));
+    appendDayFilter(sql, args, date);
+    sql.append(" ORDER BY b DESC LIMIT 2");
+    List<OffsetDateTime> buckets =
+        jdbc.query(
+            sql.toString(), (rs, n) -> rs.getObject("b", OffsetDateTime.class), args.toArray());
     if (buckets.isEmpty()) {
       return List.of();
     }
     OffsetDateTime newest = buckets.get(0);
     OffsetDateTime earliest = buckets.get(buckets.size() - 1);
     return series(underlying, expiry, interval, earliest, newest.plus(interval.bucket()));
+  }
+
+  /** Appends an IST-day window predicate (history mode) when {@code date} is non-null. */
+  private static void appendDayFilter(StringBuilder sql, List<Object> args, LocalDate date) {
+    if (date == null) {
+      return;
+    }
+    OffsetDateTime start = date.atStartOfDay().atOffset(Ist.OFFSET);
+    sql.append(" AND ts >= ? AND ts < ?");
+    args.add(Timestamp.from(start.toInstant()));
+    args.add(Timestamp.from(start.plusDays(1).toInstant()));
   }
 }

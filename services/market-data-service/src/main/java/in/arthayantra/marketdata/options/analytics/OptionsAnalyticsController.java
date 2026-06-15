@@ -47,7 +47,7 @@ public class OptionsAnalyticsController {
       @RequestParam(required = false) String expiry) {
     OiQuery q = OiQuery.of(mode, name, date, interval, expiry);
     LocalDate exp = requireExpiry(q);
-    List<OptionsSnapshotReader.StrikePoint> latest = reader.latest(q.name(), exp, q.interval());
+    List<OptionsSnapshotReader.StrikePoint> latest = reader.latest(q.name(), exp, q.interval(), q.date());
     if (latest.isEmpty()) {
       throw new ApiException(422, ErrorCodes.DATA_GAP, "no snapshot for " + q.name() + " " + exp);
     }
@@ -73,7 +73,7 @@ public class OptionsAnalyticsController {
       @RequestParam(required = false) String expiry) {
     OiQuery q = OiQuery.of(mode, name, date, interval, expiry);
     LocalDate exp = requireExpiry(q);
-    List<OptionsSnapshotReader.StrikePoint> latest = reader.latest(q.name(), exp, q.interval());
+    List<OptionsSnapshotReader.StrikePoint> latest = reader.latest(q.name(), exp, q.interval(), q.date());
     if (latest.isEmpty()) {
       throw new ApiException(422, ErrorCodes.DATA_GAP, "no snapshot for " + q.name() + " " + exp);
     }
@@ -96,7 +96,7 @@ public class OptionsAnalyticsController {
       @RequestParam(required = false) String expiry) {
     OiQuery q = OiQuery.of(mode, name, date, interval, expiry);
     LocalDate exp = requireExpiry(q);
-    List<OptionsSnapshotReader.StrikePoint> latest = reader.latest(q.name(), exp, q.interval());
+    List<OptionsSnapshotReader.StrikePoint> latest = reader.latest(q.name(), exp, q.interval(), q.date());
     return Map.of("items", latest); // {items:[...]} envelope (CLAUDE.md)
   }
 
@@ -110,7 +110,8 @@ public class OptionsAnalyticsController {
       @RequestParam(required = false) String expiry) {
     OiQuery q = OiQuery.of(mode, name, date, interval, expiry);
     LocalDate exp = requireExpiry(q);
-    List<OptionsSnapshotReader.StrikePoint> pair = reader.latestPair(q.name(), exp, q.interval());
+    List<OptionsSnapshotReader.StrikePoint> pair =
+        reader.latestPair(q.name(), exp, q.interval(), q.date());
     if (pair.isEmpty()) {
       throw new ApiException(422, ErrorCodes.DATA_GAP, "no snapshot for " + q.name() + " " + exp);
     }

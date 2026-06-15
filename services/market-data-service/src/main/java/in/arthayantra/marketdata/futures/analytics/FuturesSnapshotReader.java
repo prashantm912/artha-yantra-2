@@ -1,9 +1,12 @@
 package in.arthayantra.marketdata.futures.analytics;
 
+import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketdata.options.OiInterval;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -66,18 +69,42 @@ public class FuturesSnapshotReader {
    * exactly one bucket and never double-counts a contract's OI across two adjacent buckets).
    */
   public List<FutPoint> latest(String underlying, OiInterval interval) {
-    List<OffsetDateTime> bucket =
-        jdbc.query(
+    return latest(underlying, interval, null);
+  }
+
+  /**
+   * As {@link #latest(String, OiInterval)} but {@code date}-scoped: when {@code date} is non-null
+   * the anchor is the newest bucket WITHIN that IST day (history mode); {@code null} = newest
+   * overall (live).
+   */
+  public List<FutPoint> latest(String underlying, OiInterval interval, LocalDate date) {
+    StringBuilder sql =
+        new StringBuilder(
             "SELECT public.time_bucket(INTERVAL '"
                 + interval.pgInterval()
                 + "', max(ts), 'Asia/Kolkata') AS b "
-                + "FROM futures_oi_snapshots WHERE underlying = ?",
-            (rs, n) -> rs.getObject("b", OffsetDateTime.class),
-            underlying);
+                + "FROM futures_oi_snapshots WHERE underlying = ?");
+    List<Object> args = new ArrayList<>();
+    args.add(underlying);
+    appendDayFilter(sql, args, date);
+    List<OffsetDateTime> bucket =
+        jdbc.query(
+            sql.toString(), (rs, n) -> rs.getObject("b", OffsetDateTime.class), args.toArray());
     OffsetDateTime bucketStart = bucket.isEmpty() ? null : bucket.get(0);
     if (bucketStart == null) {
       return List.of();
     }
     return series(underlying, interval, bucketStart, bucketStart.plus(interval.bucket()));
+  }
+
+  /** Appends an IST-day window predicate (history mode) when {@code date} is non-null. */
+  static void appendDayFilter(StringBuilder sql, List<Object> args, LocalDate date) {
+    if (date == null) {
+      return;
+    }
+    OffsetDateTime start = date.atStartOfDay().atOffset(Ist.OFFSET);
+    sql.append(" AND ts >= ? AND ts < ?");
+    args.add(Timestamp.from(start.toInstant()));
+    args.add(Timestamp.from(start.plusDays(1).toInstant()));
   }
 }

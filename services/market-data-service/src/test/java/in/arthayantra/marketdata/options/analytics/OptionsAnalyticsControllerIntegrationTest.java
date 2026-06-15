@@ -57,6 +57,44 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
   }
 
   @Test
+  void historyModeWithoutDateIs400() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/oi-stats")
+                .param("name", "X")
+                .param("mode", "history")
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+  }
+
+  @Test
+  void historyModeWithDateReturnsThatDaysBucket() throws Exception {
+    String u = "CTRLHIST";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    OffsetDateTime day1 =
+        OffsetDateTime.of(2026, 6, 18, 10, 0, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime day2 =
+        OffsetDateTime.of(2026, 6, 19, 10, 0, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, day1, u, exp, "22500", "CE", "100", 1000L, 0L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, day1, u, exp, "22500", "PE", "90", 1500L, 0L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, day2, u, exp, "22500", "CE", "999", 9L, 0L);
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/oi-stats")
+                .param("name", u)
+                .param("mode", "history")
+                .param("date", "2026-06-18")
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.ceOi").value(1000))
+        .andExpect(jsonPath("$.peOi").value(1500)); // day2's decoy CE excluded
+  }
+
+  @Test
   void spurtReturnsRowsAndSummary() throws Exception {
     String u = "SPURTCTRL";
     LocalDate exp = LocalDate.of(2026, 6, 25);

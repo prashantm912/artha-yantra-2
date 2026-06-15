@@ -26,9 +26,8 @@ public class FuturesAnalyticsController {
       @RequestParam(required = false) String interval,
       @RequestParam(required = false) String expiry) {
     OiQuery q = OiQuery.of(mode, name, date, interval, expiry);
-    // live = the most recent snapshot bucket per contract (clock-independent via max(ts));
-    // a date-scoped window in history mode is a follow-on.
-    List<FuturesSnapshotReader.FutPoint> pts = reader.latest(q.name(), q.interval());
+    // live (date null) = newest bucket per contract; history (date set) = newest bucket that day.
+    List<FuturesSnapshotReader.FutPoint> pts = reader.latest(q.name(), q.interval(), q.date());
     return Map.of("items", pts);
   }
 }

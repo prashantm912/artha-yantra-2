@@ -54,6 +54,23 @@ class FuturesSnapshotReaderIntegrationTest extends MarketDataIntegrationTestBase
   }
 
   @Test
+  void latestHonorsDateInHistoryMode() {
+    String u = "FUTHIST";
+    OffsetDateTime day1 =
+        OffsetDateTime.of(2026, 6, 18, 10, 0, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime day2 =
+        OffsetDateTime.of(2026, 6, 19, 10, 0, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    insert(u, day1, u + "26JUNFUT", 1111L, 0L);
+    insert(u, day2, u + "26JUNFUT", 2222L, 0L);
+
+    List<FuturesSnapshotReader.FutPoint> d1 =
+        reader.latest(u, OiInterval.M5, LocalDate.of(2026, 6, 18));
+
+    assertThat(d1).hasSize(1);
+    assertThat(d1.get(0).oi()).isEqualTo(1111L); // day2 excluded by the IST-day window
+  }
+
+  @Test
   void surfacesDayOhlcColumns() {
     String u = "FUTOHLC";
     OffsetDateTime t0 =

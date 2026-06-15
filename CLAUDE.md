@@ -32,6 +32,12 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
   a `-pl` install skips parent POMs and nested lib submodules
   (`libs/common-web/servlet`, `libs/black76-math`), so the compose fat JAR silently
   embeds a stale lib.
+- **CI `build-test` is sharded per-service** (`.github/workflows/ci-java.yml`): a 3-leg
+  matrix (`market-data` / `backtest` / `strategy-gateway` = strategy-signal + edge-gateway),
+  each runs `mvnw -pl <svc> -am verify` on its own runner (Testcontainers ITs are the
+  2-core bottleneck; serial reactor was ~23m, sharded ~5m). Safe because `jacoco-check`
+  binds PER MODULE, not an aggregate root goal. **Adding a new service?** Add a matrix
+  shard or its tests NEVER run in CI. Libs ride upstream via `-am` (covered in ≥1 shard).
 - IT harness: singleton Testcontainers (Timescale 2.17.2-pg17 + redis 7.4), real
   Flyway lineages, `@DynamicPropertySource` for `currentSchema`. Services connect to
   Postgres as `artha` (D10 single-writer by convention); per-schema roles like

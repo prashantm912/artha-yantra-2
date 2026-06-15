@@ -98,6 +98,15 @@ public class LiveQuoteGateway implements QuoteGateway {
         if (q.isMissingNode()) {
           continue;
         }
+        JsonNode ohlcNode = q.path("ohlc");
+        Quote.Ohlc ohlc =
+            ohlcNode.isMissingNode()
+                ? null
+                : new Quote.Ohlc(
+                    dec(ohlcNode, "open"),
+                    dec(ohlcNode, "high"),
+                    dec(ohlcNode, "low"),
+                    dec(ohlcNode, "close"));
         out.put(
             key,
             new Quote(
@@ -107,11 +116,20 @@ public class LiveQuoteGateway implements QuoteGateway {
                 new BigDecimal(q.path("depth").path("sell").path(0).path("price").asText("0")),
                 q.path("volume").isMissingNode() ? null : q.path("volume").asLong(),
                 q.path("oi").isMissingNode() ? null : q.path("oi").asLong(),
+                ohlc,
                 OffsetDateTime.now(ZoneOffset.UTC)));
       }
     } catch (Exception e) {
       throw new ApiException(
           502, ErrorCodes.KITE_UPSTREAM_ERROR, "quote response parse failed: " + e.getMessage());
     }
+  }
+
+  /** A nullable decimal field of {@code parent} — {@code null} when absent/blank (no zero coercion). */
+  private static BigDecimal dec(JsonNode parent, String field) {
+    JsonNode node = parent.path(field);
+    return node.isMissingNode() || node.isNull() || node.asText("").isBlank()
+        ? null
+        : new BigDecimal(node.asText());
   }
 }

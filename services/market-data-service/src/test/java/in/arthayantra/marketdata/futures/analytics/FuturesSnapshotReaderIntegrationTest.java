@@ -54,6 +54,38 @@ class FuturesSnapshotReaderIntegrationTest extends MarketDataIntegrationTestBase
   }
 
   @Test
+  void surfacesDayOhlcColumns() {
+    String u = "FUTOHLC";
+    OffsetDateTime t0 =
+        OffsetDateTime.of(2026, 6, 20, 9, 16, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    jdbc.update(
+        "INSERT INTO futures_oi_snapshots "
+            + "(ts, underlying, tradingsymbol, expiry, ltp, volume, oi, oi_change, "
+            + " day_open, day_high, day_low, prev_close) "
+            + "VALUES (?,?,?,?,?::numeric,?,?,?,?::numeric,?::numeric,?::numeric,?::numeric) "
+            + "ON CONFLICT DO NOTHING",
+        java.sql.Timestamp.from(t0.toInstant()),
+        u,
+        u + "26JUNFUT",
+        java.sql.Date.valueOf(LocalDate.of(2026, 6, 25)),
+        "100.00",
+        10L,
+        5000L,
+        200L,
+        "99.50",
+        "101.20",
+        "98.80",
+        "99.00");
+
+    List<FuturesSnapshotReader.FutPoint> pts = reader.latest(u, OiInterval.M5);
+
+    assertThat(pts).hasSize(1);
+    assertThat(pts.get(0).dayHigh()).isEqualByComparingTo("101.20");
+    assertThat(pts.get(0).dayLow()).isEqualByComparingTo("98.80");
+    assertThat(pts.get(0).prevClose()).isEqualByComparingTo("99.00");
+  }
+
+  @Test
   void latestAnchorsOnMaxTsRegardlessOfWallClock() {
     String u = "FUTLATEST";
     OffsetDateTime t0 =

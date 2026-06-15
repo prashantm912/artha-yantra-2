@@ -20,7 +20,11 @@ public class FuturesOiSnapshotRepository {
       BigDecimal ltp,
       Long volume,
       Long oi,
-      Long oiChange) {}
+      Long oiChange,
+      BigDecimal dayOpen,
+      BigDecimal dayHigh,
+      BigDecimal dayLow,
+      BigDecimal prevClose) {}
 
   private final JdbcTemplate jdbc;
 
@@ -33,8 +37,9 @@ public class FuturesOiSnapshotRepository {
     jdbc.batchUpdate(
         """
         INSERT INTO futures_oi_snapshots
-          (ts, underlying, tradingsymbol, expiry, ltp, volume, oi, oi_change)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          (ts, underlying, tradingsymbol, expiry, ltp, volume, oi, oi_change,
+           day_open, day_high, day_low, prev_close)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (ts, underlying, tradingsymbol) DO NOTHING
         """,
         rows,
@@ -48,6 +53,10 @@ public class FuturesOiSnapshotRepository {
           ps.setObject(6, r.volume());
           ps.setObject(7, r.oi());
           ps.setObject(8, r.oiChange());
+          ps.setBigDecimal(9, r.dayOpen());
+          ps.setBigDecimal(10, r.dayHigh());
+          ps.setBigDecimal(11, r.dayLow());
+          ps.setBigDecimal(12, r.prevClose());
         });
   }
 }

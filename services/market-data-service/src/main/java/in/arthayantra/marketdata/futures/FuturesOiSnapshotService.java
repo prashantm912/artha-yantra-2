@@ -99,10 +99,15 @@ public class FuturesOiSnapshotService {
         Long oi = quote.oi();
         Long previous = previousOi.get(symbol);
         Long oiChange = (oi != null && previous != null) ? oi - previous : null;
+        QuoteGateway.Quote.Ohlc ohlc = quote.ohlc();
         out.add(
             new FuturesOiSnapshotRepository.Row(
                 ts, underlying, symbol, contract.expiry(),
-                quote.lastPrice(), quote.volume(), oi, oiChange));
+                quote.lastPrice(), quote.volume(), oi, oiChange,
+                ohlc == null ? null : ohlc.open(),
+                ohlc == null ? null : ohlc.high(),
+                ohlc == null ? null : ohlc.low(),
+                ohlc == null ? null : ohlc.close()));
         if (oi != null) {
           previousOi.put(symbol, oi);
         }

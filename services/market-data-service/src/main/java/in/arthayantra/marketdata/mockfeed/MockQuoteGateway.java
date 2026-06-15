@@ -139,8 +139,16 @@ public class MockQuoteGateway implements QuoteGateway {
     long token = instrument.instrumentToken() == null ? 0 : instrument.instrumentToken();
     long oi = 50_000 + Math.floorMod(token * 6_271L, 150_000L);
     long volume = open ? Math.floorMod(token * 99_991L, 800_000L) : 0;
+    // Stage-G: synthesize a deterministic day range around the carry-priced ltp (close ~ prev ltp).
+    Quote.Ohlc ohlc =
+        new Quote.Ohlc(
+            ltp,
+            tick(ltp.multiply(new BigDecimal("1.01"))),
+            tick(ltp.multiply(new BigDecimal("0.99"))),
+            ltp);
     return Optional.of(
-        new Quote(key, ltp, bid, ask, volume, oi, OffsetDateTime.ofInstant(now, ZoneOffset.UTC)));
+        new Quote(
+            key, ltp, bid, ask, volume, oi, ohlc, OffsetDateTime.ofInstant(now, ZoneOffset.UTC)));
   }
 
   private Optional<Quote> spotQuote(InstrumentKey key, Instrument instrument, Instant now) {

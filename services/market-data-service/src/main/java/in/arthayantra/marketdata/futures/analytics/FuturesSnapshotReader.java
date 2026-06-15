@@ -19,7 +19,15 @@ public class FuturesSnapshotReader {
   }
 
   public record FutPoint(
-      OffsetDateTime bucket, String tradingsymbol, BigDecimal ltp, Long oi, Long oiChange) {}
+      OffsetDateTime bucket,
+      String tradingsymbol,
+      BigDecimal ltp,
+      Long oi,
+      Long oiChange,
+      BigDecimal dayOpen,
+      BigDecimal dayHigh,
+      BigDecimal dayLow,
+      BigDecimal prevClose) {}
 
   public List<FutPoint> series(
       String underlying, OiInterval interval, OffsetDateTime from, OffsetDateTime to) {
@@ -28,7 +36,9 @@ public class FuturesSnapshotReader {
             + interval.pgInterval()
             + "', ts, 'Asia/Kolkata') AS b, "
             + "  tradingsymbol, public.last(ltp, ts) AS ltp, public.last(oi, ts) AS oi, "
-            + "  public.last(oi_change, ts) AS oi_change "
+            + "  public.last(oi_change, ts) AS oi_change, "
+            + "  public.last(day_open, ts) AS day_open, public.last(day_high, ts) AS day_high, "
+            + "  public.last(day_low, ts) AS day_low, public.last(prev_close, ts) AS prev_close "
             + "FROM futures_oi_snapshots "
             + "WHERE underlying = ? AND ts >= ? AND ts < ? "
             + "GROUP BY b, tradingsymbol ORDER BY b, tradingsymbol";
@@ -40,7 +50,11 @@ public class FuturesSnapshotReader {
                 rs.getString("tradingsymbol"),
                 rs.getBigDecimal("ltp"),
                 rs.getObject("oi", Long.class),
-                rs.getObject("oi_change", Long.class)),
+                rs.getObject("oi_change", Long.class),
+                rs.getBigDecimal("day_open"),
+                rs.getBigDecimal("day_high"),
+                rs.getBigDecimal("day_low"),
+                rs.getBigDecimal("prev_close")),
         underlying,
         Timestamp.from(from.toInstant()),
         Timestamp.from(to.toInstant()));

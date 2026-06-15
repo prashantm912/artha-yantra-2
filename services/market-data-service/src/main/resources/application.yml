@@ -104,3 +104,14 @@ spring:
 artha:
   db:
     password-file: ${ARTHA_DB_PASSWORD_FILE:deploy/secrets/postgres_password}
+---
+# Live: oipulse OI capture — full chain for NIFTY + SENSEX, every in-horizon expiry, 3-min cadence
+spring:
+  config:
+    activate:
+      on-profile: live
+artha:
+  options:
+    snapshot-underlyings: NIFTY 50,SENSEX
+    snapshot-interval-ms: 180000
+    snapshot-expiry-horizon-days: 90

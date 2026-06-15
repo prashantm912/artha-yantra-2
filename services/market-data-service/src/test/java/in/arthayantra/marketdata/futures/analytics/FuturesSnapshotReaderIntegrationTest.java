@@ -87,6 +87,41 @@ class FuturesSnapshotReaderIntegrationTest extends MarketDataIntegrationTestBase
     assertThat(d1.get(0).oi()).isEqualTo(1111L); // day2 excluded by the IST-day window
   }
 
+  private void insertExp(
+      String u, OffsetDateTime ts, String sym, long oi, LocalDate expiry) {
+    jdbc.update(
+        "INSERT INTO futures_oi_snapshots (ts, underlying, tradingsymbol, expiry, ltp, volume, oi, oi_change) "
+            + "VALUES (?,?,?,?,?::numeric,?,?,?) ON CONFLICT DO NOTHING",
+        java.sql.Timestamp.from(ts.toInstant()),
+        u,
+        sym,
+        java.sql.Date.valueOf(expiry),
+        "100.00",
+        10L,
+        oi,
+        0L);
+  }
+
+  @Test
+  void latestPairAllTagsUnderlyingAcrossTheSet() {
+    OffsetDateTime b0 =
+        OffsetDateTime.of(2026, 6, 20, 9, 16, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime b1 = b0.plusMinutes(5);
+    LocalDate jun = LocalDate.of(2026, 6, 25);
+    insertExp("GRIDA", b0, "GRIDA26JUNFUT", 1000L, jun);
+    insertExp("GRIDA", b1, "GRIDA26JUNFUT", 1100L, jun);
+    insertExp("GRIDB", b0, "GRIDB26JUNFUT", 2000L, jun);
+    insertExp("GRIDB", b1, "GRIDB26JUNFUT", 2200L, jun);
+
+    List<FuturesSnapshotReader.FutPoint> pair =
+        reader.latestPairAll(List.of("GRIDA", "GRIDB"), OiInterval.M5, null);
+
+    assertThat(pair)
+        .extracting(FuturesSnapshotReader.FutPoint::underlying)
+        .contains("GRIDA", "GRIDB");
+    assertThat(pair).hasSize(4); // 2 underlyings x 2 buckets
+  }
+
   private void insertOhlc(
       String u,
       OffsetDateTime ts,

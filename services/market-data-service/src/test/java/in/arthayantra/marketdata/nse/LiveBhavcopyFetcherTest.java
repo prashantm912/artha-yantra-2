@@ -1,0 +1,70 @@
+package in.arthayantra.marketdata.nse;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import in.arthayantra.marketdata.nse.BhavcopyFetcher.BhavcopyRow;
+import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+import org.springframework.web.client.RestClient;
+
+/** Parses the spike-captured NSE sec_bhavdata_full CSV (leading-space cells, "-" non-deliv rows). */
+class LiveBhavcopyFetcherTest {
+
+  private static final String CSV =
+      "SYMBOL, SERIES, DATE1, PREV_CLOSE, OPEN_PRICE, HIGH_PRICE, LOW_PRICE, LAST_PRICE,"
+          + " CLOSE_PRICE, AVG_PRICE, TTL_TRD_QNTY, TURNOVER_LACS, NO_OF_TRADES, DELIV_QTY,"
+          + " DELIV_PER\n"
+          + "360ONE, EQ, 12-Jun-2026, 1064.10, 1079.70, 1099.00, 1058.00, 1094.00, 1096.80,"
+          + " 1082.08, 696601, 7537.75, 33351, 336020, 48.24\n"
+          + "AAKASH, BE, 12-Jun-2026, 10.00, 10.20, 10.50, 10.05, 10.30, 10.30, 10.27, 219779,"
+          + " 22.58, 444, -, -\n";
+
+  private static final Clock CLOCK =
+      Clock.fixed(Instant.parse("2026-06-15T13:30:00Z"), ZoneOffset.UTC);
+
+  @Test
+  void parsesSecBhavdataFullCsv() {
+    BhavcopyFetcher fetcher = new LiveBhavcopyFetcher(new StubClient(CSV), "https://archives", CLOCK);
+
+    List<BhavcopyRow> rows = fetcher.fetchLatest();
+
+    assertThat(rows).hasSize(2);
+
+    BhavcopyRow eq = rows.stream().filter(r -> r.symbol().equals("360ONE")).findFirst().orElseThrow();
+    assertThat(eq.series()).isEqualTo("EQ");
+    assertThat(eq.date()).isEqualTo(LocalDate.of(2026, 6, 12));
+    assertThat(eq.open()).isEqualByComparingTo("1079.70");
+    assertThat(eq.last()).isEqualByComparingTo("1094.00");
+    assertThat(eq.close()).isEqualByComparingTo("1096.80");
+    assertThat(eq.totalTradedQty()).isEqualTo(696601L);
+    assertThat(eq.noOfTrades()).isEqualTo(33351L);
+    assertThat(eq.delivQty()).isEqualTo(336020L);
+    assertThat(eq.delivPer()).isEqualByComparingTo("48.24");
+
+    BhavcopyRow be = rows.stream().filter(r -> r.symbol().equals("AAKASH")).findFirst().orElseThrow();
+    assertThat(be.series()).isEqualTo("BE");
+    assertThat(be.close()).isEqualByComparingTo("10.30");
+    assertThat(be.delivQty()).isNull();
+    assertThat(be.delivPer()).isNull();
+  }
+
+  /** NseHttpClient stub returning canned CSV for any archive URL. */
+  static class StubClient extends NseHttpClient {
+    private final String body;
+
+    StubClient(String body) {
+      super(RestClient.builder(), "https://x");
+      this.body = body;
+    }
+
+    @Override
+    public String getAbsolute(String url) {
+      return body;
+    }
+  }
+}

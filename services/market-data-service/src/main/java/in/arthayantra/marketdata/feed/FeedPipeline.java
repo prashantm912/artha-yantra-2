@@ -17,7 +17,7 @@ import org.springframework.stereotype.Component;
  * daemon thread — the single-writer guarantee behind monotonic per-instrument sequences.
  */
 @Component
-public class FeedPipeline implements SmartLifecycle {
+public class FeedPipeline implements SmartLifecycle, in.arthayantra.marketdata.kite.FeedRearm {
 
   /** Canonical Redis key for Kite session/ticker state (COMMON §3). */
   public static final String SESSION_STATUS_KEY = "kite:session:status";
@@ -84,6 +84,21 @@ public class FeedPipeline implements SmartLifecycle {
   /** Explicit stop (the Phase-16 15:35 ticker schedule). */
   public void stopFeed() {
     stop();
+  }
+
+  /**
+   * Re-arm the ticker after a fresh login (B-2): cycle the feed so the handle is rebuilt with the
+   * newly-stored access token. No-op unless the feed is already running — autostart/the 09:10 cron
+   * own the first start, and a login must never start a feed that ops/tests deliberately left down.
+   */
+  @Override
+  public void restartFeed() {
+    if (!running) {
+      return;
+    }
+    log.info("re-arming feed after session change");
+    stop();
+    startFeed();
   }
 
   private void normalizerLoop() {

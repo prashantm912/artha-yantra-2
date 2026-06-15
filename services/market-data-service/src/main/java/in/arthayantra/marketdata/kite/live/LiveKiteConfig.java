@@ -128,13 +128,21 @@ public class LiveKiteConfig {
       in.arthayantra.marketdata.kite.KiteCallExecutor executor,
       KiteHttpProperties properties,
       in.arthayantra.marketdata.kite.canary.ContractCanary canary,
-      org.springframework.beans.factory.ObjectProvider<MarketFeed> marketFeed) {
+      org.springframework.beans.factory.ObjectProvider<MarketFeed> marketFeed,
+      org.springframework.beans.factory.ObjectProvider<in.arthayantra.marketdata.kite.FeedRearm>
+          feedRearm) {
     return new in.arthayantra.marketdata.kite.session.LiveKiteSessionService(
         wireClient, store, statusPublisher, executor,
         properties.loginUrlBase(), properties.resolveApiKey(), canary,
         () -> {
           MarketFeed feed = marketFeed.getIfAvailable();
           return feed != null && feed.running();
+        },
+        () -> {
+          in.arthayantra.marketdata.kite.FeedRearm pipeline = feedRearm.getIfAvailable();
+          if (pipeline != null) {
+            pipeline.restartFeed();
+          }
         });
   }
 

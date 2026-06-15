@@ -42,6 +42,7 @@ public class OptionsSnapshotService {
   private final MarketCalendar calendar;
   private final Clock clock;
   private final List<String> snapshotUnderlyings;
+  private final int expiryHorizonDays;
   private final Timer snapshotTimer;
   private final Counter snapshotRows;
   // previous-pass OI per leg — oi_change = oi − previous snapshot's oi (null on the first pass)
@@ -63,6 +64,7 @@ public class OptionsSnapshotService {
       MarketCalendar calendar,
       Clock clock,
       @Value("${artha.options.snapshot-underlyings:NIFTY 50}") List<String> snapshotUnderlyings,
+      @Value("${artha.options.snapshot-expiry-horizon-days:90}") int expiryHorizonDays,
       MeterRegistry meterRegistry) {
     this.chainService = chainService;
     this.repository = repository;
@@ -71,21 +73,28 @@ public class OptionsSnapshotService {
     this.calendar = calendar;
     this.clock = clock;
     this.snapshotUnderlyings = snapshotUnderlyings;
+    this.expiryHorizonDays = expiryHorizonDays;
     this.snapshotTimer = meterRegistry.timer("ay_options_snapshot_duration_seconds");
     this.snapshotRows = meterRegistry.counter("ay_options_snapshot_rows_total");
   }
 
-  /** 5-min cadence, market hours only (B-12; the Phase 16 schedule registry references this). */
-  @Scheduled(fixedDelay = 300_000, initialDelay = 60_000)
+  /**
+   * Configurable cadence (default 5 min), market hours only (B-12; the Phase 16 schedule registry
+   * references this). Snapshots the full chain of EVERY expiry within the horizon per underlying.
+   */
+  @Scheduled(fixedDelayString = "${artha.options.snapshot-interval-ms:300000}", initialDelay = 60_000)
   public void scheduledSnapshot() {
     if (!isOpenSafe()) {
       return;
     }
     for (String underlying : snapshotUnderlyings) {
-      try {
-        snapshotNow(underlying, null);
-      } catch (Exception e) {
-        log.warn("scheduled options snapshot failed for {}: {}", underlying, e.getMessage());
+      for (LocalDate expiry : chainService.expiriesWithin(underlying, expiryHorizonDays)) {
+        try {
+          snapshotNow(underlying, expiry);
+        } catch (Exception e) {
+          log.warn(
+              "scheduled options snapshot failed for {} {}: {}", underlying, expiry, e.getMessage());
+        }
       }
     }
   }

@@ -3,7 +3,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { Observable, Subject } from 'rxjs';
 import { signal } from '@angular/core';
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { WsClientService } from '../core/ws-client.service';
 import { MarketStore, type Instrument, type NormalizedTick } from './market.store';
 
@@ -152,6 +152,31 @@ describe('MarketStore', () => {
     expect(del.request.params.get('tradingsymbol')).toBe('TCS');
     expect(del.request.params.get('subscriber')).toBe(subscriber);
     del.flush(null);
+  });
+
+  it('releases every tracked hold via a keepalive DELETE on pagehide (ngOnDestroy skips unload)', () => {
+    const fetchMock = vi.fn(() => Promise.resolve());
+    vi.stubGlobal('fetch', fetchMock);
+    document.cookie = 'XSRF-TOKEN=tok123';
+
+    store.track(['NSE:TCS']);
+    http
+      .expectOne((req) => req.method === 'POST' && req.url === '/api/v1/market/subscriptions')
+      .flush({ exchange: 'NSE', tradingsymbol: 'TCS', effectiveMode: 'quote' });
+    http.expectOne((req) => req.url === '/api/v1/market/ticks/latest').flush({});
+
+    window.dispatchEvent(new Event('pagehide'));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain('/api/v1/market/subscriptions');
+    expect(url).toContain('exchange=NSE');
+    expect(url).toContain('tradingsymbol=TCS');
+    expect(init.method).toBe('DELETE');
+    expect(init.keepalive).toBe(true);
+    expect((init.headers as Record<string, string>)['X-XSRF-TOKEN']).toBe('tok123');
+
+    vi.unstubAllGlobals();
   });
 
   it('widget collapse state persists to localStorage', () => {

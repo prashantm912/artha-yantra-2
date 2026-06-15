@@ -1,4 +1,4 @@
-import { inject } from '@angular/core';
+import { DestroyRef, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { patchState, signalStore, withHooks, withMethods, withState } from '@ngrx/signals';
 import { type Subscription } from 'rxjs';
@@ -36,6 +36,12 @@ export interface NormalizedTick {
 /** `EXCHANGE:TRADINGSYMBOL` — the canonical key /ticks/latest uses and the tick map is keyed by. */
 export function canonicalKey(exchange: string, tradingsymbol: string): string {
   return `${exchange}:${tradingsymbol}`;
+}
+
+/** Reads a non-HttpOnly cookie (the XSRF token) for the keepalive unload DELETE that bypasses HttpClient. */
+function readCookie(name: string): string | null {
+  const match = document.cookie.match(new RegExp('(?:^|;\\s*)' + name + '=([^;]+)'));
+  return match ? match[1] : null;
 }
 
 interface MarketState {
@@ -79,6 +85,34 @@ export const MarketStore = signalStore(
     const buffer = new ConflationBuffer<NormalizedTick>((batch) =>
       patchState(store, { ticks: { ...store.ticks(), ...Object.fromEntries(batch) } }),
     );
+    // Release every UI ticker hold when the page is torn down: ngOnDestroy does NOT run on a hard
+    // tab-close/reload, so the in-app untrack DELETE never fires and the holds would leak. keepalive
+    // lets the DELETE survive the unload; pagehide (not visibilitychange) avoids dropping a hold on
+    // a mere tab switch. Bypasses HttpClient, so the XSRF header is attached by hand.
+    const releaseAllOnUnload = (): void => {
+      const xsrf = readCookie('XSRF-TOKEN');
+      const headers: Record<string, string> = xsrf ? { 'X-XSRF-TOKEN': xsrf } : {};
+      for (const key of refs.keys()) {
+        const sep = key.indexOf(':');
+        const params = new URLSearchParams({
+          exchange: key.slice(0, sep),
+          tradingsymbol: key.slice(sep + 1),
+          subscriber,
+        });
+        void fetch(`/api/v1/market/subscriptions?${params.toString()}`, {
+          method: 'DELETE',
+          keepalive: true,
+          credentials: 'same-origin',
+          headers,
+        });
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('pagehide', releaseAllOnUnload);
+      inject(DestroyRef).onDestroy(() =>
+        window.removeEventListener('pagehide', releaseAllOnUnload),
+      );
+    }
     return {
       refresh(): void {
         http

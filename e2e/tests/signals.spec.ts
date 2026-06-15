@@ -1,6 +1,12 @@
 import { expect, test } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { apiLogin, loginThroughForm, publishE2eStrategy, resetLoginLimiter } from './helpers';
+import {
+  apiLogin,
+  loginThroughForm,
+  publishE2eStrategy,
+  resetLoginLimiter,
+  warm1mHistory,
+} from './helpers';
 
 test.describe('live signals — the MVP statement (C-2.28)', () => {
   test.beforeEach(resetLoginLimiter); // fresh A.2.6 window per journey
@@ -9,8 +15,12 @@ test.describe('live signals — the MVP statement (C-2.28)', () => {
     request,
   }) => {
     // API fixture: publish the deterministic momentum strategy (warm history
-    // through the cache-first candle surface makes the next 1m bar scoreable)
+    // through the cache-first candle surface makes the next 1m bar scoreable).
+    // Prime RELIANCE 1m FIRST so the engine's self-warm at publish is a populated cache hit and
+    // RSI(period 2) is non-NaN on the first live bar — otherwise a cold/slow warm on a fresh CI
+    // stack degrades to ~3 live bars and races the 180 s budget (the signals flake).
     await apiLogin(request);
+    await warm1mHistory(request, 'NSE', 'RELIANCE');
     await publishE2eStrategy(request);
 
     await loginThroughForm(page);

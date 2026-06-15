@@ -46,6 +46,47 @@ export async function apiLogin(request: APIRequestContext): Promise<void> {
 }
 
 /**
+ * Deterministically warm an instrument's 1m history through the cache-first candle surface, over
+ * the same 4-day window the signal engine warms (LiveSeriesStore.warmupDays). On a fresh CI stack
+ * the candle store is empty, so the engine's self-warm at publish triggers a synchronous mock
+ * historical synth inside its REST call; under 2-core contention that can be slow or time out, the
+ * client swallows it ("engine starts cold"), and RSI(period 2) then needs ~3 LIVE 1m bars to become
+ * non-NaN — racing the test's 180 s budget (the documented signals flake). Priming the cache here,
+ * before publish, makes the engine's self-warm a fast populated cache hit: RSI is non-NaN on the
+ * FIRST live bar, so the fixture emits within one bar (~75 s). Caller owns the wait — no 180 s
+ * pressure on this synth. Requires an authenticated `request` (call apiLogin first).
+ */
+export async function warm1mHistory(
+  request: APIRequestContext,
+  exchange: string,
+  tradingsymbol: string,
+): Promise<void> {
+  const to = new Date();
+  const from = new Date(to.getTime() - 4 * 86_400_000);
+  for (let attempt = 0; attempt < 15; attempt++) {
+    const res = await request.get('/api/v1/market/candles', {
+      params: {
+        exchange,
+        tradingsymbol,
+        interval: '1m',
+        from: from.toISOString(),
+        to: to.toISOString(),
+        limit: 50_000,
+      },
+    });
+    if (res.ok()) {
+      const body = (await res.json()) as { items?: unknown[] };
+      // ≥3 bars covers RSI(period 2)'s look-back; a healthy synth returns hundreds.
+      if ((body.items?.length ?? 0) >= 3) {
+        return;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+  }
+  throw new Error(`failed to warm 1m history for ${exchange}:${tradingsymbol}`);
+}
+
+/**
  * The gateway requires X-XSRF-TOKEN on mutating calls (CSRF, A.2.3). Angular's HttpClient echoes
  * the XSRF-TOKEN cookie automatically, but Playwright's raw request context does not — so a fixture
  * POST would be 403'd. Read the double-submit cookie and surface it as the header; if it has not

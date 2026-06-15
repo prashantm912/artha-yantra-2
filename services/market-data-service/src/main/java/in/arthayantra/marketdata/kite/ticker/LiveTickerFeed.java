@@ -109,6 +109,12 @@ public class LiveTickerFeed implements MarketFeed, SubscriptionRegistry.TickerCo
     if (current != null) {
       current.disconnect();
     }
+    // Drop the handle so the next start() rebuilds it via the factory, re-reading the CURRENT
+    // access token. Without this the day's first handle (often built at boot, before the morning
+    // login) is frozen for the process lifetime and the SDK reconnect loop 403s forever on the
+    // stale token — a restart was the only recovery.
+    handle = null;
+    connectedBefore.set(false);
   }
 
   @Override

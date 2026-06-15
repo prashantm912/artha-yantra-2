@@ -232,4 +232,47 @@ class LiveTickerFeedTest {
 
     assertThat(received).hasSize(2);
   }
+
+  @Test
+  void aRestartRebuildsTheHandleSoAFreshTokenIsCaptured() {
+    // Each factory call models reading the CURRENT access token. After stop(), a start() MUST
+    // build a NEW handle (re-read the token), never reuse the stale one — otherwise a post-login
+    // restart 403s forever on the token captured at the first (pre-login) start.
+    List<FakeTickerHandle> built = new ArrayList<>();
+    MeterRegistry meters = new SimpleMeterRegistry();
+    SubscriptionRegistry registry = new SubscriptionRegistry(RESOLVER, 3_000, meters);
+    CircuitBreaker breaker = CircuitBreakerRegistry.ofDefaults().circuitBreaker("kite-ticker");
+    LiveTickerFeed feed =
+        new LiveTickerFeed(
+            () -> {
+              FakeTickerHandle h = new FakeTickerHandle();
+              built.add(h);
+              return h;
+            },
+            registry,
+            key -> Optional.empty(),
+            new GapBackfiller() {
+              @Override
+              public void backfill(InstrumentKey key, Instant from, Instant to) {}
+
+              @Override
+              public void prefetch(
+                  InstrumentKey key, String baseInterval, Instant from, Instant to) {}
+            },
+            MarketCalendar.nse(),
+            breaker,
+            Clock.fixed(MARKET_OPEN_NOW, ZoneOffset.UTC),
+            meters);
+
+    feed.start(tick -> {});
+    assertThat(built).hasSize(1);
+    assertThat(built.get(0).connected).isTrue();
+
+    feed.stop();
+    assertThat(built.get(0).connected).isFalse();
+
+    feed.start(tick -> {});
+    assertThat(built).as("restart must rebuild the handle with a freshly-read token").hasSize(2);
+    assertThat(built.get(1).connected).isTrue();
+  }
 }

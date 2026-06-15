@@ -1,6 +1,7 @@
-import { inject } from '@angular/core';
-import { HttpClient, HttpParams } from '@angular/common/http';
+import { DestroyRef, inject } from '@angular/core';
+import { HttpClient, HttpContext, HttpParams } from '@angular/common/http';
 import { patchState, signalStore, withHooks, withMethods, withState } from '@ngrx/signals';
+import { SILENCE_ERROR_TOAST } from '../core/error.interceptor';
 import { type Subscription } from 'rxjs';
 import { ConflationBuffer } from '../core/conflation';
 import { WsClientService } from '../core/ws-client.service';
@@ -38,6 +39,12 @@ export function canonicalKey(exchange: string, tradingsymbol: string): string {
   return `${exchange}:${tradingsymbol}`;
 }
 
+/** Reads a non-HttpOnly cookie (the XSRF token) for the keepalive unload DELETE that bypasses HttpClient. */
+function readCookie(name: string): string | null {
+  const match = document.cookie.match(new RegExp('(?:^|;\\s*)' + name + '=([^;]+)'));
+  return match ? match[1] : null;
+}
+
 interface MarketState {
   kiteSession: string | null;
   overall: string | null;
@@ -72,9 +79,41 @@ export const MarketStore = signalStore(
     // (many widgets can watch the same symbol), + the rAF conflation buffer.
     const tickSubs = new Map<string, Subscription>();
     const refs = new Map<string, number>();
+    // A UI-priority ticker subscription must be registered per watched symbol (D9): opening the WS
+    // tick topic alone never makes the Kite ticker stream a non-pinned instrument. One subscriber
+    // identity per app instance so the registry keeps the symbol live until THIS tab releases it.
+    const subscriber = `ui:${Math.random().toString(36).slice(2, 12)}`;
     const buffer = new ConflationBuffer<NormalizedTick>((batch) =>
       patchState(store, { ticks: { ...store.ticks(), ...Object.fromEntries(batch) } }),
     );
+    // Release every UI ticker hold when the page is torn down: ngOnDestroy does NOT run on a hard
+    // tab-close/reload, so the in-app untrack DELETE never fires and the holds would leak. keepalive
+    // lets the DELETE survive the unload; pagehide (not visibilitychange) avoids dropping a hold on
+    // a mere tab switch. Bypasses HttpClient, so the XSRF header is attached by hand.
+    const releaseAllOnUnload = (): void => {
+      const xsrf = readCookie('XSRF-TOKEN');
+      const headers: Record<string, string> = xsrf ? { 'X-XSRF-TOKEN': xsrf } : {};
+      for (const key of refs.keys()) {
+        const sep = key.indexOf(':');
+        const params = new URLSearchParams({
+          exchange: key.slice(0, sep),
+          tradingsymbol: key.slice(sep + 1),
+          subscriber,
+        });
+        void fetch(`/api/v1/market/subscriptions?${params.toString()}`, {
+          method: 'DELETE',
+          keepalive: true,
+          credentials: 'same-origin',
+          headers,
+        });
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('pagehide', releaseAllOnUnload);
+      inject(DestroyRef).onDestroy(() =>
+        window.removeEventListener('pagehide', releaseAllOnUnload),
+      );
+    }
     return {
       refresh(): void {
         http
@@ -143,6 +182,20 @@ export const MarketStore = signalStore(
               }
             });
             tickSubs.set(key, sub);
+            // Register the ticker subscription so the backend actually streams this symbol.
+            http
+              .post(
+                '/api/v1/market/subscriptions',
+                {
+                  exchange: exch,
+                  tradingsymbol: sym,
+                  mode: 'quote',
+                  priority: 'ui',
+                  subscriber,
+                },
+                { context: new HttpContext().set(SILENCE_ERROR_TOAST, true) },
+              )
+              .subscribe({ next: () => undefined, error: () => undefined });
             added.push(key);
           }
         }
@@ -166,6 +219,16 @@ export const MarketStore = signalStore(
             refs.delete(key);
             tickSubs.get(key)?.unsubscribe();
             tickSubs.delete(key);
+            const sep = key.indexOf(':');
+            http
+              .delete('/api/v1/market/subscriptions', {
+                params: new HttpParams()
+                  .set('exchange', key.slice(0, sep))
+                  .set('tradingsymbol', key.slice(sep + 1))
+                  .set('subscriber', subscriber),
+                context: new HttpContext().set(SILENCE_ERROR_TOAST, true),
+              })
+              .subscribe({ next: () => undefined, error: () => undefined });
           } else {
             refs.set(key, n);
           }

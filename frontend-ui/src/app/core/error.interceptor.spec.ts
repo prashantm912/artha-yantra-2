@@ -1,9 +1,9 @@
 import { TestBed } from '@angular/core/testing';
-import { HttpClient, provideHttpClient, withInterceptors } from '@angular/common/http';
+import { HttpClient, HttpContext, provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { MessageService } from 'primeng/api';
 import { describe, expect, it, beforeEach, vi } from 'vitest';
-import { errorEnvelopeInterceptor } from './error.interceptor';
+import { SILENCE_ERROR_TOAST, errorEnvelopeInterceptor } from './error.interceptor';
 
 describe('errorEnvelopeInterceptor', () => {
   let http: HttpClient;
@@ -39,6 +39,23 @@ describe('errorEnvelopeInterceptor', () => {
         detail: 'config fails strategy-schema/v1',
       }),
     );
+  });
+
+  it('stays silent for requests carrying the SILENCE_ERROR_TOAST context', () => {
+    const add = vi.spyOn(toast, 'add');
+    http
+      .post(
+        '/api/v1/market/subscriptions',
+        {},
+        {
+          context: new HttpContext().set(SILENCE_ERROR_TOAST, true),
+        },
+      )
+      .subscribe({ error: () => undefined });
+    backend
+      .expectOne('/api/v1/market/subscriptions')
+      .flush({ code: 'NOT_FOUND_INSTRUMENT' }, { status: 404, statusText: 'Not Found' });
+    expect(add).not.toHaveBeenCalled();
   });
 
   it('keeps session-probe 401s silent', () => {

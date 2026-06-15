@@ -31,8 +31,14 @@ public class CandlesConfig {
   /** The 1m builder, registered as a NormalizedTickListener on the feed pipeline. */
   @Bean
   public CandleBuilder candleBuilder(
-      SessionBucketer bucketer, BarWriter writer, Clock clock, Environment environment) {
-    String source = environment.matchesProfiles("live") ? "TICK_AGG" : "MOCK";
+      MarketCalendar calendar, BarWriter writer, Clock clock, Environment environment) {
+    boolean live = environment.matchesProfiles("live");
+    String source = live ? "TICK_AGG" : "MOCK";
+    // Live clamps pre/post-market prints into the session open/15:29 close bucket (B-7). The mock
+    // feed ticks 24/7, so that same clamp would freeze the 1m feed at 15:29 every evening — no new
+    // closed bars roll and the live signal engine starves — so mock uses a 24/7 unclamped bucketer.
+    // (The shared sessionBucketer() bean stays clamped for MarketSurfaceController.)
+    SessionBucketer bucketer = new SessionBucketer(calendar, live);
     return new CandleBuilder(bucketer, writer, clock, source);
   }
 

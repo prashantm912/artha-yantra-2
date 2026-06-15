@@ -78,4 +78,53 @@ class FuturesOiSnapshotServiceTest {
     assertThat(captured.get(0).oi()).isEqualTo(5_300L);
     assertThat(captured.get(0).oiChange()).isEqualTo(300L); // 5300 - 5000
   }
+
+  @Test
+  void capturesDayOhlcFromQuote() {
+    List<FuturesOiSnapshotRepository.Row> captured = new ArrayList<>();
+    FuturesOiSnapshotRepository repo =
+        new FuturesOiSnapshotRepository(null) {
+          @Override
+          public void insertAll(List<Row> rows) {
+            captured.addAll(rows);
+          }
+        };
+    FuturesContractSource contracts =
+        (underlying, onOrAfter) ->
+            List.of(new FutContract(NIFTY_FUT, LocalDate.parse("2026-06-25")));
+    QuoteGateway quotes =
+        keys ->
+            Map.of(
+                NIFTY_FUT,
+                new QuoteGateway.Quote(
+                    NIFTY_FUT,
+                    new BigDecimal("23950"),
+                    null,
+                    null,
+                    1000L,
+                    5000L,
+                    new QuoteGateway.Quote.Ohlc(
+                        new BigDecimal("23900"),
+                        new BigDecimal("24010"),
+                        new BigDecimal("23850"),
+                        new BigDecimal("23880")),
+                    OffsetDateTime.now(CLOCK)));
+
+    FuturesOiSnapshotService svc =
+        new FuturesOiSnapshotService(
+            contracts,
+            quotes,
+            repo,
+            MarketCalendar.nse(),
+            CLOCK,
+            List.of("NIFTY 50"),
+            new SimpleMeterRegistry());
+
+    svc.snapshotNow();
+
+    assertThat(captured).hasSize(1);
+    assertThat(captured.get(0).dayHigh()).isEqualByComparingTo("24010");
+    assertThat(captured.get(0).dayLow()).isEqualByComparingTo("23850");
+    assertThat(captured.get(0).prevClose()).isEqualByComparingTo("23880");
+  }
 }

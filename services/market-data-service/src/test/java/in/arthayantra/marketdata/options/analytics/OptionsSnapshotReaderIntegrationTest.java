@@ -97,6 +97,24 @@ class OptionsSnapshotReaderIntegrationTest extends MarketDataIntegrationTestBase
     assertThat(pair).extracting(OptionsSnapshotReader.StrikePoint::oi).containsExactly(1200L, 1500L);
   }
 
+  @Test
+  void latestHonorsDateInHistoryMode() {
+    String u = "READER_HIST";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    OffsetDateTime day1 =
+        OffsetDateTime.of(2026, 6, 18, 10, 0, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime day2 =
+        OffsetDateTime.of(2026, 6, 19, 10, 0, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    insertRow(jdbc, day1, u, exp, "22500", "CE", "100.00", 1111L, 0L);
+    insertRow(jdbc, day2, u, exp, "22500", "CE", "200.00", 2222L, 0L);
+
+    List<OptionsSnapshotReader.StrikePoint> d1 =
+        reader.latest(u, exp, OiInterval.M5, LocalDate.of(2026, 6, 18));
+
+    assertThat(d1).hasSize(1);
+    assertThat(d1.get(0).oi()).isEqualTo(1111L); // day2 excluded by the IST-day window
+  }
+
   /** Helper: minimal insert into options_chain_snapshots (only the columns the reader touches). */
   static void insertRow(
       JdbcTemplate jdbc,

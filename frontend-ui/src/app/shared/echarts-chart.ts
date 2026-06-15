@@ -48,7 +48,11 @@ export class EChartsComponent {
     });
     inject(DestroyRef).onDestroy(() => {
       this.resize?.disconnect();
-      this.chart?.dispose();
+      try {
+        this.chart?.dispose();
+      } catch {
+        // chart was never fully initialised (e.g. jsdom has no 2d canvas context)
+      }
     });
   }
 
@@ -69,7 +73,13 @@ export class EChartsComponent {
       this.chart = echarts.init(el, undefined, { renderer: 'canvas' });
       this.chart.setOption(this.withBase(this.option()), true);
       this.chartInit.emit(this.chart);
-      this.resize = new ResizeObserver(() => this.chart?.resize());
+      this.resize = new ResizeObserver(() => {
+        try {
+          this.chart?.resize();
+        } catch {
+          // resize fired during teardown / headless — ignore
+        }
+      });
       this.resize.observe(el);
     } catch {
       // no real canvas (jsdom) — renders nothing

@@ -54,6 +54,23 @@ class FuturesSnapshotReaderIntegrationTest extends MarketDataIntegrationTestBase
   }
 
   @Test
+  void latestPairReturnsTwoMostRecentBucketsPerContract() {
+    String u = "FUTPAIR";
+    OffsetDateTime b0 =
+        OffsetDateTime.of(2026, 6, 20, 9, 16, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime b1 = b0.plusMinutes(5);
+    OffsetDateTime b2 = b0.plusMinutes(10);
+    insert(u, b0, u + "26JUNFUT", 1000L, 0L);
+    insert(u, b1, u + "26JUNFUT", 1200L, 0L);
+    insert(u, b2, u + "26JUNFUT", 1500L, 0L);
+
+    List<FuturesSnapshotReader.FutPoint> pair = reader.latestPair(u, OiInterval.M5);
+
+    // exactly the two newest buckets (b1, b2), oldest-first
+    assertThat(pair).extracting(FuturesSnapshotReader.FutPoint::oi).containsExactly(1200L, 1500L);
+  }
+
+  @Test
   void latestHonorsDateInHistoryMode() {
     String u = "FUTHIST";
     OffsetDateTime day1 =

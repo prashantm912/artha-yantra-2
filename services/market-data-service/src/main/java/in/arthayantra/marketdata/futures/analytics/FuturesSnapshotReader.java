@@ -30,7 +30,8 @@ public class FuturesSnapshotReader {
       BigDecimal dayOpen,
       BigDecimal dayHigh,
       BigDecimal dayLow,
-      BigDecimal prevClose) {}
+      BigDecimal prevClose,
+      LocalDate expiry) {}
 
   public List<FutPoint> series(
       String underlying, OiInterval interval, OffsetDateTime from, OffsetDateTime to) {
@@ -41,7 +42,8 @@ public class FuturesSnapshotReader {
             + "  tradingsymbol, public.last(ltp, ts) AS ltp, public.last(oi, ts) AS oi, "
             + "  public.last(oi_change, ts) AS oi_change, "
             + "  public.last(day_open, ts) AS day_open, public.last(day_high, ts) AS day_high, "
-            + "  public.last(day_low, ts) AS day_low, public.last(prev_close, ts) AS prev_close "
+            + "  public.last(day_low, ts) AS day_low, public.last(prev_close, ts) AS prev_close, "
+            + "  public.last(expiry, ts) AS expiry "
             + "FROM futures_oi_snapshots "
             + "WHERE underlying = ? AND ts >= ? AND ts < ? "
             + "GROUP BY b, tradingsymbol ORDER BY b, tradingsymbol";
@@ -57,7 +59,8 @@ public class FuturesSnapshotReader {
                 rs.getBigDecimal("day_open"),
                 rs.getBigDecimal("day_high"),
                 rs.getBigDecimal("day_low"),
-                rs.getBigDecimal("prev_close")),
+                rs.getBigDecimal("prev_close"),
+                rs.getObject("expiry", LocalDate.class)),
         underlying,
         Timestamp.from(from.toInstant()),
         Timestamp.from(to.toInstant()));
@@ -95,6 +98,34 @@ public class FuturesSnapshotReader {
       return List.of();
     }
     return series(underlying, interval, bucketStart, bucketStart.plus(interval.bucket()));
+  }
+
+  /** Two most-recent snapshot buckets per contract (newest + the prior that holds data). */
+  public List<FutPoint> latestPair(String underlying, OiInterval interval) {
+    return latestPair(underlying, interval, null);
+  }
+
+  /** As {@link #latestPair(String, OiInterval)} but {@code date}-scoped (history mode). */
+  public List<FutPoint> latestPair(String underlying, OiInterval interval, LocalDate date) {
+    StringBuilder sql =
+        new StringBuilder(
+            "SELECT DISTINCT public.time_bucket(INTERVAL '"
+                + interval.pgInterval()
+                + "', ts, 'Asia/Kolkata') AS b "
+                + "FROM futures_oi_snapshots WHERE underlying = ?");
+    List<Object> args = new ArrayList<>();
+    args.add(underlying);
+    appendDayFilter(sql, args, date);
+    sql.append(" ORDER BY b DESC LIMIT 2");
+    List<OffsetDateTime> buckets =
+        jdbc.query(
+            sql.toString(), (rs, n) -> rs.getObject("b", OffsetDateTime.class), args.toArray());
+    if (buckets.isEmpty()) {
+      return List.of();
+    }
+    OffsetDateTime newest = buckets.get(0);
+    OffsetDateTime earliest = buckets.get(buckets.size() - 1);
+    return series(underlying, interval, earliest, newest.plus(interval.bucket()));
   }
 
   /** Appends an IST-day window predicate (history mode) when {@code date} is non-null. */

@@ -116,7 +116,9 @@ artha:
     snapshot-interval-ms: 60000
     snapshot-expiry-horizon-days: 90
   futures:
-    oi-snapshot-underlyings: NIFTY 50,NIFTY BANK
+    # index futs + all 17 NSE bank-sector F&O stocks (forward-only OI capture; one batched
+    # quotes() call per pass — see FuturesOiSnapshotService). Unbackfillable, so widen early.
+    oi-snapshot-underlyings: NIFTY 50,NIFTY BANK,HDFCBANK,ICICIBANK,SBIN,AXISBANK,KOTAKBANK,INDUSINDBK,BANKBARODA,PNB,AUBANK,FEDERALBNK,IDFCFIRSTB,CANBK,BANDHANBNK,BANKINDIA,RBLBANK,UNIONBANK,YESBANK
     oi-snapshot-interval-ms: 60000
   nse:
     base-url: https://www.nseindia.com

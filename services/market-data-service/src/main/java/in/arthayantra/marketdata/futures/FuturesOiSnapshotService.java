@@ -75,7 +75,12 @@ public class FuturesOiSnapshotService {
   public void snapshotNow() {
     OffsetDateTime ts = OffsetDateTime.now(clock);
     LocalDate today = ts.atZoneSameInstant(Ist.ZONE).toLocalDate();
-    List<FuturesOiSnapshotRepository.Row> out = new ArrayList<>();
+
+    // Resolve every underlying's ladder first, then batch ALL contracts into ONE quotes()
+    // call. The kite-quote limiter is 1/s with a 5s timeout, so a call-per-underlying loop
+    // 429s past ~5-6 underlyings; Kite accepts up to 250 instruments per quote call.
+    record Pinned(String underlying, FutContract contract) {}
+    List<Pinned> pinned = new ArrayList<>();
     for (String configured : underlyings) {
       String underlying = configured.trim();
       List<FutContract> ladder;
@@ -85,32 +90,38 @@ public class FuturesOiSnapshotService {
         log.warn("futures OI snapshot resolve failed for {}: {}", underlying, resolveFailed.getMessage());
         continue;
       }
-      if (ladder.isEmpty()) {
+      for (FutContract contract : ladder) {
+        pinned.add(new Pinned(underlying, contract));
+      }
+    }
+    if (pinned.isEmpty()) {
+      return;
+    }
+
+    List<InstrumentKey> keys = pinned.stream().map(p -> p.contract().key()).toList();
+    Map<InstrumentKey, QuoteGateway.Quote> quotes = quoteGateway.quotes(keys);
+
+    List<FuturesOiSnapshotRepository.Row> out = new ArrayList<>();
+    for (Pinned p : pinned) {
+      QuoteGateway.Quote quote = quotes.get(p.contract().key());
+      if (quote == null) {
         continue;
       }
-      List<InstrumentKey> keys = ladder.stream().map(FutContract::key).toList();
-      Map<InstrumentKey, QuoteGateway.Quote> quotes = quoteGateway.quotes(keys);
-      for (FutContract contract : ladder) {
-        QuoteGateway.Quote quote = quotes.get(contract.key());
-        if (quote == null) {
-          continue;
-        }
-        String symbol = contract.key().tradingsymbol();
-        Long oi = quote.oi();
-        Long previous = previousOi.get(symbol);
-        Long oiChange = (oi != null && previous != null) ? oi - previous : null;
-        QuoteGateway.Quote.Ohlc ohlc = quote.ohlc();
-        out.add(
-            new FuturesOiSnapshotRepository.Row(
-                ts, underlying, symbol, contract.expiry(),
-                quote.lastPrice(), quote.volume(), oi, oiChange,
-                ohlc == null ? null : ohlc.open(),
-                ohlc == null ? null : ohlc.high(),
-                ohlc == null ? null : ohlc.low(),
-                ohlc == null ? null : ohlc.close()));
-        if (oi != null) {
-          previousOi.put(symbol, oi);
-        }
+      String symbol = p.contract().key().tradingsymbol();
+      Long oi = quote.oi();
+      Long previous = previousOi.get(symbol);
+      Long oiChange = (oi != null && previous != null) ? oi - previous : null;
+      QuoteGateway.Quote.Ohlc ohlc = quote.ohlc();
+      out.add(
+          new FuturesOiSnapshotRepository.Row(
+              ts, p.underlying(), symbol, p.contract().expiry(),
+              quote.lastPrice(), quote.volume(), oi, oiChange,
+              ohlc == null ? null : ohlc.open(),
+              ohlc == null ? null : ohlc.high(),
+              ohlc == null ? null : ohlc.low(),
+              ohlc == null ? null : ohlc.close()));
+      if (oi != null) {
+        previousOi.put(symbol, oi);
       }
     }
     if (!out.isEmpty()) {

@@ -24,13 +24,14 @@ import org.springframework.web.client.RestClient;
 
 /**
  * Live instrument dump (B-6 port 5/5): {@code GET {base}/instruments/{exchange}} per exchange —
- * NSE, NFO, BFO sequentially (B-3 step 2) — parsing Kite's (optionally gzipped) CSV. Speaks the
- * wire format so WireMock can verify it (Phase 9 acceptance).
+ * NSE, BSE, NFO, BFO sequentially (B-3 step 2) — parsing Kite's (optionally gzipped) CSV. BSE
+ * carries the SENSEX/BANKEX spot indices + BSE-only cash, needed to resolve spot for the BFO
+ * options chain. Speaks the wire format so WireMock can verify it (Phase 9 acceptance).
  */
 public class LiveInstrumentDumpGateway implements InstrumentDumpGateway {
 
   private static final Logger log = LoggerFactory.getLogger(LiveInstrumentDumpGateway.class);
-  private static final List<String> EXCHANGES = List.of("NSE", "NFO", "BFO");
+  private static final List<String> EXCHANGES = List.of("NSE", "BSE", "NFO", "BFO");
 
   private final RestClient restClient;
   private final String apiKey;

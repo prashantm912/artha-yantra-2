@@ -70,6 +70,8 @@ class LiveInstrumentDumpGatewayTest {
                     .withHeader("Content-Type", "text/csv")
                     .withBody(gzip(CSV))));
     wireMock.stubFor(
+        get(urlEqualTo("/instruments/BSE")).willReturn(aResponse().withBody("instrument_token\n")));
+    wireMock.stubFor(
         get(urlEqualTo("/instruments/NFO")).willReturn(aResponse().withBody("instrument_token\n")));
     wireMock.stubFor(
         get(urlEqualTo("/instruments/BFO")).willReturn(aResponse().withBody("instrument_token\n")));

@@ -12,8 +12,14 @@ class OiPremiumServiceTest {
 
   private static OptionsSnapshotReader.StrikePoint pt(String strike, String type, String ltp) {
     OffsetDateTime b = OffsetDateTime.of(2026, 6, 20, 9, 15, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    return ptAt(b, strike, type, ltp);
+  }
+
+  private static OptionsSnapshotReader.StrikePoint ptAt(
+      OffsetDateTime bucket, String strike, String type, String ltp) {
     return new OptionsSnapshotReader.StrikePoint(
-        b, new BigDecimal(strike), type, new BigDecimal(ltp), 0L, 0L, null, new BigDecimal("22480"));
+        bucket, new BigDecimal(strike), type, new BigDecimal(ltp), 0L, 0L, null,
+        new BigDecimal("22480"));
   }
 
   @Test
@@ -42,5 +48,26 @@ class OiPremiumServiceTest {
     OiPremiumService.PremiumChain c =
         new OiPremiumService().premium(List.of(pt("22500", "CE", "80"))); // no PE
     assertThat(c.items()).isEmpty();
+  }
+
+  @Test
+  void premiumSeriesTracksAtmStraddlePerBucket() {
+    OffsetDateTime b0 = OffsetDateTime.of(2026, 6, 20, 9, 15, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime b1 = b0.plusMinutes(5);
+    // one ATM strike per bucket; straddle 150 then 170 (intraday decay/move curve)
+    List<OptionsSnapshotReader.StrikePoint> series =
+        List.of(
+            ptAt(b0, "22500", "CE", "80"),
+            ptAt(b0, "22500", "PE", "70"),
+            ptAt(b1, "22500", "CE", "100"),
+            ptAt(b1, "22500", "PE", "70"));
+
+    OiPremiumService.PremiumSeries s = new OiPremiumService().premiumSeries(series);
+
+    assertThat(s.items()).hasSize(2);
+    assertThat(s.items().get(0).bucket()).isEqualTo(b0);
+    assertThat(s.items().get(0).atmStraddle()).isEqualByComparingTo("150");
+    assertThat(s.items().get(1).atmStraddle()).isEqualByComparingTo("170");
+    assertThat(s.asOf()).isEqualTo(b1);
   }
 }

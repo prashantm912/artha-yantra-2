@@ -26,6 +26,12 @@ public class OiPremiumService {
       BigDecimal spot,
       OffsetDateTime asOf) {}
 
+  /** One bucket's ATM straddle (the intraday decay/move curve point). */
+  public record PremiumSeriesPoint(
+      OffsetDateTime bucket, BigDecimal atmStrike, BigDecimal atmStraddle, BigDecimal spot) {}
+
+  public record PremiumSeries(List<PremiumSeriesPoint> items, OffsetDateTime asOf) {}
+
   public PremiumChain premium(List<OptionsSnapshotReader.StrikePoint> latest) {
     Map<BigDecimal, BigDecimal[]> byStrike = new LinkedHashMap<>(); // [ceLtp, peLtp]
     BigDecimal spot = null;
@@ -68,5 +74,28 @@ public class OiPremiumService {
         atm == null ? null : atm.straddle(),
         spot,
         asOf);
+  }
+
+  /**
+   * The ATM-straddle premium per bucket over a (bucket-ordered) series — the intraday premium-decay
+   * curve. Reuses {@link #premium} per bucket (ATM = listed strike nearest that bucket's spot);
+   * buckets with no resolvable ATM straddle (a missing leg, or no spot) are skipped.
+   */
+  public PremiumSeries premiumSeries(List<OptionsSnapshotReader.StrikePoint> series) {
+    Map<OffsetDateTime, List<OptionsSnapshotReader.StrikePoint>> byBucket = new LinkedHashMap<>();
+    for (OptionsSnapshotReader.StrikePoint p : series) {
+      byBucket.computeIfAbsent(p.bucket(), k -> new ArrayList<>()).add(p);
+    }
+    List<PremiumSeriesPoint> items = new ArrayList<>();
+    for (Map.Entry<OffsetDateTime, List<OptionsSnapshotReader.StrikePoint>> e : byBucket.entrySet()) {
+      PremiumChain chain = premium(e.getValue());
+      if (chain.atmStraddle() == null) {
+        continue;
+      }
+      items.add(
+          new PremiumSeriesPoint(e.getKey(), chain.atmStrike(), chain.atmStraddle(), chain.spot()));
+    }
+    OffsetDateTime asOf = items.isEmpty() ? null : items.get(items.size() - 1).bucket();
+    return new PremiumSeries(items, asOf);
   }
 }

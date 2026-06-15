@@ -179,4 +179,29 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
         .andExpect(jsonPath("$.items[0].spurtPct").value("20.00"))
         .andExpect(jsonPath("$.summary.interpretation").value("LONG_BUILDUP"));
   }
+
+  @Test
+  void premiumSeriesTracksAtmStraddlePerBucket() throws Exception {
+    String u = "PREMSERIES";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    OffsetDateTime b0 =
+        OffsetDateTime.of(2026, 6, 20, 9, 15, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime b1 = b0.plusMinutes(5);
+    // one ATM strike per bucket; straddle 150 then 170 (the intraday decay/move curve)
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b0, u, exp, "22500", "CE", "80", 1000L, 0L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b0, u, exp, "22500", "PE", "70", 1000L, 0L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b1, u, exp, "22500", "CE", "100", 1000L, 0L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b1, u, exp, "22500", "PE", "70", 1000L, 0L);
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/premium-series")
+                .param("name", u)
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items.length()").value(2))
+        .andExpect(jsonPath("$.items[0].atmStraddle").value(org.hamcrest.Matchers.startsWith("150")))
+        .andExpect(jsonPath("$.items[1].atmStraddle").value(org.hamcrest.Matchers.startsWith("170")));
+  }
 }

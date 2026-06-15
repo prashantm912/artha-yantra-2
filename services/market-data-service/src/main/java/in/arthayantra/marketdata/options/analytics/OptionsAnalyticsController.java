@@ -29,6 +29,7 @@ public class OptionsAnalyticsController {
   private final OiTrendingService trendingService;
   private final int bigOiTopN;
   private final int trendBuckets;
+  private final int premiumBuckets;
 
   public OptionsAnalyticsController(
       OptionsSnapshotReader reader,
@@ -38,7 +39,8 @@ public class OptionsAnalyticsController {
       OiPremiumService premiumService,
       OiTrendingService trendingService,
       @Value("${artha.options.big-oi-top-n:10}") int bigOiTopN,
-      @Value("${artha.options.trend-buckets:20}") int trendBuckets) {
+      @Value("${artha.options.trend-buckets:20}") int trendBuckets,
+      @Value("${artha.options.premium-buckets:60}") int premiumBuckets) {
     this.reader = reader;
     this.activeStrikes = activeStrikes;
     this.spurtService = spurtService;
@@ -47,6 +49,7 @@ public class OptionsAnalyticsController {
     this.trendingService = trendingService;
     this.bigOiTopN = bigOiTopN;
     this.trendBuckets = trendBuckets;
+    this.premiumBuckets = premiumBuckets;
   }
 
   public record OiStats(BigDecimal pcr, BigDecimal maxPain, long ceOi, long peOi, OffsetDateTime asOf) {}
@@ -170,6 +173,29 @@ public class OptionsAnalyticsController {
       throw new ApiException(422, ErrorCodes.DATA_GAP, "no snapshot for " + q.name() + " " + exp);
     }
     return premiumService.premium(latest);
+  }
+
+  /** /premium-series: oipulse Option Premium decay — the ATM straddle per bucket over the last N buckets. */
+  @GetMapping("/premium-series")
+  public OiPremiumService.PremiumSeries premiumSeries(
+      @RequestParam(required = false) String mode,
+      @RequestParam String name,
+      @RequestParam(required = false) String date,
+      @RequestParam(required = false) String interval,
+      @RequestParam(required = false) String expiry) {
+    OiQuery q = OiQuery.of(mode, name, date, interval, expiry);
+    LocalDate exp = requireExpiry(q);
+    // Anchor on the newest captured bucket (clock-independent); span the last premiumBuckets buckets.
+    List<OptionsSnapshotReader.StrikePoint> latest =
+        reader.latest(q.name(), exp, q.interval(), q.date());
+    if (latest.isEmpty()) {
+      throw new ApiException(422, ErrorCodes.DATA_GAP, "no snapshot for " + q.name() + " " + exp);
+    }
+    OffsetDateTime newest = latest.get(0).bucket();
+    OffsetDateTime from = newest.minus(q.interval().bucket().multipliedBy(premiumBuckets - 1L));
+    List<OptionsSnapshotReader.StrikePoint> series =
+        reader.series(q.name(), exp, q.interval(), from, newest.plus(q.interval().bucket()));
+    return premiumService.premiumSeries(series);
   }
 
   /** /trending: oipulse OI Trending — per-bucket total/CE/PE OI + UP/DOWN/FLAT over the last N buckets. */

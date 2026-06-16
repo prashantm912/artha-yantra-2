@@ -84,7 +84,7 @@ NIFTY PVT BANK · NIFTY CONSR DURBL · NIFTY SERV SECTOR
 ## Data source / API
 | Endpoint | Namespace | Request | Notes |
 |---|---|---|---|
-| `getindexconstituentswithdata` | `equity` | `{stSelectedModeOfData, stSelectedAvailableDate}` | returns sectorStats (19 sectors + constituent arrays) |
+| `getindexconstituentswithdata` | `equity` | `{stSelectedModeOfData, stSelectedAvailableDate, stStartTime:"09:15:00", stEndTime:"15:30:00"}` | returns sectorStats (19 sectors + constituent arrays) |
 
 Response envelope: `{status, msg, data:[...sectorRows]}`. Each sector row has `inPositiveStocks`, `inNegativeStocks`, `inTotalStocks` + `data:[]` array of constituent stocks.
 

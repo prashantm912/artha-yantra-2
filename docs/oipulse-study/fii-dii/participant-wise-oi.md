@@ -73,8 +73,8 @@ Interpretation (stInterpretation)
 ## Data source / API
 | Call | Namespace | Request | Response |
 |---|---|---|---|
-| `getparticipantwiseoidate` | `fii-dii` | `{stSelectedModeOfData}` | available dates |
-| `getparticipantwiseoidata` | `fii-dii` | `{stSelectedModeOfData, stSelectedAvailableDate}` | raw participant rows |
+| `getparticipantwiseoidate` | `fii-dii` | `{}` | available dates |
+| `getparticipantwiseoidata` | `fii-dii` | `{stSelectedAvailableDate}` | raw participant rows |
 
 API returns 4 wide rows (one per participant: FII/Pro/DII/Client). Vue component transforms them into `tableData` (span-grouped) + `oiData` + `totalOiData`. Segment breakdown and `stInterpretation` may be computed client-side from the raw long/short values.
 

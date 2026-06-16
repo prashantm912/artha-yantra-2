@@ -53,8 +53,8 @@ suggestionList, defaultSuggestionList
 ## Data source / API
 | Call | Request | Response |
 |---|---|---|
-| `getlistoffnosymbolnames` | `{stSelectedModeOfData}` | `[{text,value}]` — 211 F&O symbol names |
-| `getequitydeliverydata` | `{stSelectedModeOfData, stSymbolNameString:"AXISBANK", inSelectedNoOfDays:15}` | `data:[ row ]` |
+| `getlistoffnosymbolnames` | `{}` | `[{text,value}]` — 211 F&O symbol names |
+| `getequitydeliverydata` | `{stSymbolName:"AXISBANK", stExchange:"NSE", inNoOfDays:15}` | `data:[ row ]` |
 
 Namespace: `equity` for both endpoints.
 
@@ -78,7 +78,7 @@ Confirmed row schema (AXISBANK):
 Note: `inCloseChange` is a STRING (`"0.88"` not `0.88`). `inNoOfAnnouncement` can be null. `inDayRange`/`inDayRangePercentage` are server-computed.
 
 ## Replication notes (→ ArthaYantra)
-- No date picker — only a period (# of days). Request: `{stSymbolNameString, inSelectedNoOfDays}`.
+- No date picker — only a period (# of days). Request: `{stSymbolName, stExchange:"NSE", inNoOfDays}`.
 - `p-table` sorted by date desc; % Delivery is the key column (high = institutional conviction).
 - Announcement count → red badge; null shows as `-`.
 

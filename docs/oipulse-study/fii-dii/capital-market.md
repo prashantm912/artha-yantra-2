@@ -1,7 +1,7 @@
 # FII/DII Capital Market — `/app/fii-dii/capital-market`
 
 **Purpose:** FII & DII **cash-market** buy/sell/net flows — daily, charted and tabulated. Track who's
-buying/selling the cash market. Sub-tabs: `Capital Market | FII & DII Activity`.
+buying/selling the cash market. No sub-tabs.
 
 ## Layout
 ```
@@ -27,18 +27,42 @@ sub-tabs: [ Capital Market ] [ FII & DII Activity ]   ;  ticker strip
 
 Table value coloring: Net columns green (+) / red (−).
 
-## Data source / API
-`POST /api/fii-dii/getcapitalmarketdata` →
-```json
-{ "data":[ { "dtDate":"15-06-2026",
-             "inFiiBuyValue":15650.2,"inFiiSellValue":15450.15,"inFiiNetValue":200.05,
-             "inDiiBuyValue":21080.9,"inDiiSellValue":17891.64,"inDiiNetValue":3189.26 } ] }   // 365 days
+## Vue component state (confirmed)
 ```
-Charts use `inFiiNetValue` / `inDiiNetValue`; "In Market" = total turnover (buy+sell) computed.
+multipleBar2,                // ECharts config object (2 bar chart series in one chart)
+disableRefreshDataButton,
+capitalMarketData ([]),      // 365 daily rows (all data)
+tableData ([]),              // same 365 rows used for table display
+columns ([]),                // vue-good-table column defs
+pagination,                  // server-side pagination state
+totalRecords                 // 365
+```
+
+## Columns (vue-good-table — confirmed)
+```
+Date (dtDate) · FII Buy (inFiiBuyValue) · FII Sell (inFiiSellValue) · FII Net (inFiiNetValue) ·
+In Market (inMarketNet) · DII Net (inDiiNetValue) · DII Buy (inDiiBuyValue) · DII Sell (inDiiSellValue)
+```
+`inMarketNet` = computed (likely `inFiiNetValue + inDiiNetValue`). No sort on any column.
+
+## Data source / API
+`POST /api/fii-dii/getcapitalmarketdata` — no filter params (returns full ~365 days):
+
+Confirmed rows:
+```json
+// Older row (Dec 2024)
+{"dtDate":"2024-12-23","inFiiBuyValue":8705.49,"inFiiSellValue":8874.2,"inFiiNetValue":-168.71,"inDiiBuyValue":11083.76,"inDiiSellValue":8856.08,"inDiiNetValue":2227.68}
+// Recent row
+{"dtDate":"2026-06-15","inFiiBuyValue":15650.2,"inFiiSellValue":15450.15,"inFiiNetValue":200.05,"inDiiBuyValue":21080.9,"inDiiSellValue":17891.64,"inDiiNetValue":3189.26}
+```
+Note: `dtDate` uses ISO date format `YYYY-MM-DD`. All values in ₹ Crore. `inMarketNet` not in API — computed client-side.
+
+Chart: `multipleBar2` = ECharts config with `{backgroundColor, title, tooltip, toolbox, axisPointer, grid, xAxis, yAxis, series}`. Two bar series (FII Net, DII Net) in one chart.
 
 ## Replication notes (→ ArthaYantra)
-- We already have an FII-DII net-flow chart (per project memory). This = two `ay-echart` net-value bar charts + a detailed flows table off one daily endpoint.
-- Green/red bars by net sign; table mirrors all six buy/sell/net fields.
+- We already have an FII-DII net-flow chart on the dashboard. This page = two `ay-echart` bar series (FII Net + DII Net) + a detailed flows table off one daily endpoint.
+- `inMarketNet` = FII Net + DII Net (computed client-side).
+- Green/red bars by net sign; table shows all 6 buy/sell/net fields + computed `inMarketNet`.
 
 ## Screenshot
 ss_2052tq4p8 (FII Net + DII Net bar charts + detailed flows table).

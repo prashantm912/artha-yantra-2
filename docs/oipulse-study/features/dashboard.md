@@ -39,9 +39,32 @@ All 6 = **TradingView Advanced Charts** (full charting library), **Investing.com
 Dow=`DJI`(NYSE), Nifty50=`IND50`(NSE), Banknifty=`NBNc1`(NSE), India VIX=`NIFVIX`(NSE),
 Crude=`CL`(WTI), USD/INR(currencies). **USD/INR panel overlays B / S / C circular markers** on candles (buy/sell/cover signal annotations).
 
+## Vue component state (confirmed)
+```
+showSideBanner,
+showSuccessInfoModal,
+showRearrangeModal,        // toggles "Rearrange Charts" drag-to-reorder modal
+tempCharts,               // staging list while rearranging
+charts ([]),              // current ordered list of 6 chart configs
+defaultCharts ([])        // default/fallback order (same 6 entries)
+```
+
+Each chart entry: `{order: 0..5, title: "Dow Futures"|"Nifty 50 Futures"|..., url: <iframe src>}`
+
+Default chart list (confirmed, in order):
+1. `Dow Futures` (order 0)
+2. `Nifty 50 Futures` (order 1)
+3. `Banknifty` (order 2)
+4. `India Vix` (order 3)
+5. `Crude Oil` (order 4)
+6. `USD / INR` (order 5)
+
+Rearrange: drag-and-drop modal updates `tempCharts` → confirmed → saved to `charts`. No OiPulse API call for chart data.
+
 ## Data source
-- Charts: external TradingView + Investing.com (NOT oipulse API).
+- Charts: 6 × **`ssltvc.forexprostools.com`** iframes (Investing.com widget — NOT TradingView embed directly; Investing.com wraps TradingView).
 - Ticker strip: `POST /api/gettickerdata`.
+- No other OiPulse API calls on Dashboard.
 
 ## Replication notes (→ ArthaYantra)
 - We already use **lightweight-charts**. Dashboard = a configurable grid of N panels, each bound to symbol+interval, with a TV-style toolbar (symbol, interval, indicators) and remove icon.

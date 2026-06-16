@@ -2,7 +2,7 @@
 
 **Purpose:** SEBI **participant-wise open interest** (No. of Contracts) — long/short positions of each
 participant class (FII, Pro, DII, Client) across all F&O segments, with changes and a bullish/bearish
-interpretation per row. The key institutional-positioning report. Sub-tabs: `Participant Wise Oi | FII & DII Activity`.
+interpretation per row. The key institutional-positioning report. No sub-tabs.
 
 ## Layout
 ```
@@ -31,25 +31,57 @@ Grouped by participant (FII/Pro/DII/Client); 6 instrument rows each.
 | Chng. In Total | computed `ΔLong − ΔShort` | green/red **badge** |
 | Interpretation | derived (net + change bias) | **`Bullish` (green) / `Bearish` (red) badge** |
 
-## Data source / API
-| Call | Response |
-|---|---|
-| `/api/fii-dii/getparticipantwiseoidate` | dates (90 days) |
-| `/api/fii-dii/getparticipantwiseoidata` | `data:[ <category row> ]` (5 categories) |
-
-Category row (one per FII/Pro/DII/Client/…):
-```json
-{ "stCategoryType":"FII","dtDate":"…",
-  "inFutIndexLong":…,"inFutIndexShort":…, "inFutStockLong":…,"inFutStockShort":…,
-  "inOptIndexCallLong":…,"inOptIndexCallShort":…, "inOptIndexPutLong":…,"inOptIndexPutShort":…,
-  "inOptStockCallLong":…,"inOptStockCallShort":…, "inOptStockPutLong":…,"inOptStockPutShort":…,
-  "inFutIndexLongChng":…, …Chng for every segment… }
+## Vue component state (confirmed)
 ```
-UI pivots each category into 6 segment rows; %/Total Diff/Chng Total/Interpretation computed client-side.
+minAvailableDate, maxAvailableDate, disableRefreshDataButton,
+selectedAvailableDate ("2026-06-15"),
+availableDate,
+tableData ([]),      // 4 grouped participant rows (mode:"span") for vue-good-table expandable
+oiData ([]),         // raw API rows
+totalOiData ([]),    // total/summary rows
+columns ([]),        // vue-good-table column defs
+pagination,
+totalRecords
+```
+
+## tableData structure (confirmed)
+Vue-good-table `mode:"span"` grouped rows — 4 parent rows (FII/Pro/DII/Client), each with `children`:
+```json
+{
+  "mode": "span",
+  "label": "FII",
+  "html": false,
+  "children": [
+    {"stSegment":"Future Index",      "inLong":"41074",    "inShort":"282315",  "inTotal":-241241,"inLongChng":"1103",   "inShortChng":"-1279", "inTotalChng":2382,   "stInterpretation":"..."},
+    {"stSegment":"Future Stock",      "inLong":"4135474",  "inShort":"3344880", "inTotal":790594, "inLongChng":"12483",  "inShortChng":"5789",  "inTotalChng":6694},
+    {"stSegment":"Option Index Call", "inLong":"672396",   "inShort":"924723",  "inTotal":-252327,"inLongChng":"48978",  "inShortChng":"92285", "inTotalChng":-43307},
+    {"stSegment":"Option Index Put",  "inLong":"1145247",  "inShort":"600061",  "inTotal":545186, "inLongChng":"-48817","inShortChng":"-51391","inTotalChng":2574},
+    {"stSegment":"Option Stock Call", "inLong":"236813",   "inShort":"378538",  "inTotal":-141725,"inLongChng":"25161",  "inShortChng":"19195", "inTotalChng":5966},
+    {"stSegment":"Option Stock Put",  ...}
+  ]
+}
+```
+
+## Columns (vue-good-table — confirmed)
+```
+Type (stSegment) · Long (inLong) · Short (inShort) · Total Diff. (inTotal) ·
+Chng. In Long (inLongChng) · Chng. In Short (inShortChng) · Chng. In Total (inTotalChng) ·
+Interpretation (stInterpretation)
+```
+`inLong`/`inShort`/`inLongChng`/`inShortChng` are STRINGS in the children rows; `inTotal`/`inTotalChng` are numbers.
+
+## Data source / API
+| Call | Namespace | Request | Response |
+|---|---|---|---|
+| `getparticipantwiseoidate` | `fii-dii` | `{stSelectedModeOfData}` | available dates |
+| `getparticipantwiseoidata` | `fii-dii` | `{stSelectedModeOfData, stSelectedAvailableDate}` | raw participant rows |
+
+API returns 4 wide rows (one per participant: FII/Pro/DII/Client). Vue component transforms them into `tableData` (span-grouped) + `oiData` + `totalOiData`. Segment breakdown and `stInterpretation` may be computed client-side from the raw long/short values.
 
 ## Replication notes (→ ArthaYantra)
-- One endpoint = wide row per participant with long/short(+chng) for 6 segments. Pivot to grouped table (participant → 6 rows).
+- API returns wide rows per participant; pivot into grouped table: 4 parent rows × 6 segment children each.
 - Interpretation: net long & rising long ⇒ Bullish; net short & rising short ⇒ Bearish (per segment).
+- `inTotal = inLong - inShort` (signed); `inTotalChng = inLongChng - inShortChng`.
 
 ## Screenshot
 ss_0353sjq0s (FII/Pro/DII/Client × 6 segments, Long/Short, Bullish/Bearish interpretation).

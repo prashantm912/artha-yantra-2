@@ -34,6 +34,23 @@ Name (cash symbol, no `-I` suffix) · Today Open (`inPreOpenClose`) · Prev. day
 LTP Chng % (computed, green/red) · LTP Chng (`inPreOpenChange`) · Prev. Day Break (`inPrevDayBreak`
 → green `High Break` / red `Low Break` / `-`). Sortable; paginated 7.
 
+## Vue component state (confirmed — identical structure to futures/pre-open-market.md)
+```
+minAvailableDate, maxAvailableDate, disableRefreshDataButton,
+selectedModeOfData, selectedAvailableDate,
+availableDate, selectedIndex (null), availableIndex, availableModeOfData,
+preOpenMarketMajorIndexData,
+preOpenMarketIndexAdvancesSymbol, preOpenMarketIndexDeclinesSymbol,
+tempPreOpenMarketIndexAdvancesSymbol, tempPreOpenMarketIndexDeclinesSymbol,
+preMarketAdvancesSymbol, preMarketDeclinesSymbol, preMarketUnchangedSymbol,
+tempPreMarketAdvancesSymbol, tempPreMarketDeclinesSymbol, tempPreMarketUnchangedSymbol,
+searchSymbol, doneTypingInterval
+```
+No socket subscription (snapshot page).
+
+Raw API row (confirmed): `{stSymbolName:"LODHA", inPreOpenClose:925.95, inPreOpenChange:"5.10", inPrevDayBreak:null}`
+Note: equity symbols have NO `-I` suffix (vs futures version which appends `-I`).
+
 ## Data source / API
 Shares the pre-open namespace (no expiry param — equity mode):
 - `/api/pre-open-market/getlistofassetpreopenmarket`

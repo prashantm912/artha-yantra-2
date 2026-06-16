@@ -25,12 +25,48 @@ filter: Mode(Live/Hist)  Name[BANKNIFTY▾]  Date[📅]  Time Interval[3 min▾]
 
 ECharts dual-axis line, toolbox, bottom legend. Put IV typically above Call IV (put skew visible).
 
+## Filter bar — exact controls
+| Control | Values | Notes |
+|---|---|---|
+| Mode | live / historical | |
+| Name | underlyings list | uses `stSelectedAsset` |
+| Date | date picker | |
+| Time Interval | `3`, `5`, `10`, `15`, `30`, `60` | no 1-min |
+| Go | button | |
+
+## Vue component state
+```
+activeStrikeIvData: { xAxisData, yAxisInAssetPrice, yAxisCallData, yAxisPutData }
+socketSubscribedEvents
+```
+`activeStrikeIvData` has `yAxisInAssetPrice` (unlike OI version which has no price axis).
+
+## Socket subscriptions
+- `AS_IV_BANKNIFTY` — live active-strike IV events (no expiry in event name)
+
 ## Data source / API
 | Call | Response |
 |---|---|
 | `/api/active-strike-oi/getavailableactivestrikeassetdata` | underlyings |
 | `/api/active-strike-oi/getselectedassetdate` | dates |
-| `/api/active-strike-oi/getselectedactivestrikeivalldata` | `data:[{ stTime:"09:16:00", inAssetPrice:57758.85, obOiData:[{CE:13.84},{PE:19.2}] }]` |
+| `/api/active-strike-oi/getselectedactivestrikeivalldata` | main |
+
+Main request + confirmed row schema:
+```
+POST /api/active-strike-oi/getselectedactivestrikeivalldata
+Body: {
+  "stSelectedAsset": "BANKNIFTY",
+  "stSelectedAvailableDate": "2026-06-16",
+  "stSelectedModeOfData": "live"
+}
+```
+**No expiry date in request** (same as OI version). Server determines active strike.
+
+Response row schema (confirmed):
+```json
+{ "stTime": "09:16:00", "inAssetPrice": 57758.85, "obOiData": [ { "CE": 13.84 }, { "PE": 19.2 } ] }
+```
+`inAssetPrice` present per row (key difference from OI endpoint); `obOiData` carries CE/PE **IV** values.
 
 Same `active-strike-oi` namespace; the `…ivalldata` endpoint returns CE/PE **IV** (not OI) + asset price.
 

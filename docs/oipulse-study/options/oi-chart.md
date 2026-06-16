@@ -30,12 +30,64 @@ filter: Mode  Name[BANKNIFTY▾]  Date[📅]  Expiry[30-Jun-2026▾]  Strike[571
 
 Each chart: ECharts toolbox (zoom/restore/line-bar/refresh/save PNG), "Oi Pulse / BANKNIFTY 57100" watermark, bottom legend (clickable to toggle series).
 
+## Filter bar — exact controls
+| Control | Values | Notes |
+|---|---|---|
+| Mode | live / historical | |
+| Name | same 9 Index + 211 Stocks | |
+| Date | date picker | |
+| Expiry Date | YYMMDD values | |
+| Strike Price | 193 strikes, ATM default | |
+| Time Interval | `3`(3 min), `5`, `10`, `15`, `30`, `60`(60 min) | **no 1-min, no Full Day/null** — starts at 3 min |
+| Go | button | fetch |
+
+**Time interval is client-side aggregation** — the API request does NOT include `stSelectedTimeInterval`. Server returns 1-min resolution; client aggregates to selected interval.
+
+## Vue component state fields
+```
+minAvailableDate, maxAvailableDate, disableRefreshDataButton, selectedModeOfData,
+selectedOptions, selectedAvailableDate, selectedAvailableExpiryDate,
+selectedStrikePrice, selectedStrikePriceForTable, selectedTimeInterval,
+availableModeOfData, availableOptionsData, availableDate, availableExpiryDate,
+availableStrikePrices, timeInterval,
+callChartData, putChartData, callPutOiData,
+underlyingDetails, socketSubscribedEvents, socketDataUpdateTimeoutId
+```
+
+Chart data structures:
+- `callPutOiData`: `{xAxisData:["09:18","09:21",...] (88pts), yAxisCallOiData:["137250","140820",...], yAxisPutOiData:["95340","103740",...]}`
+- `callChartData`: `{typeOfData, xAxisData, yAxisOiData:["137250",...], yAxisPriceData:[782.45,...], toolTipData:["Short Build Up",...]}`
+- `putChartData`: same structure as callChartData
+- `toolTipData` = OI interpretation label per interval (computed client-side)
+
+## Socket subscriptions
+- `OD_OI_CHART_BANKNIFTY_260630_57200` — live OI+price updates for this strike
+
 ## Data source / API
-Same discovery chain as Options OI Analysis, plus the chart endpoint:
-`POST /api/options/getselectedoptionsalldataforchart`
-(req: `{stSelectedOptions, stSelectedAvailableDate, stSelectedModeOfData, stSelectedAvailableExpiryDate, …strike, …interval}`) →
-`data:[{ stOptionsType:"CE"/"PE", inStrikePrice, stTime, inOi, inOpen,inHigh,inLow,inClose, inDayHigh,inDayLow, inTradedVolume }]`
-(identical shape to `getselectedoptionsalldata`; split CE/PE for the three charts).
+```
+POST /api/options/getselectedoptionsalldataforchart
+Body: {
+  "stSelectedOptions": "BANKNIFTY",
+  "stSelectedAvailableDate": "2026-06-16",
+  "inSelectedStrikePrice": "57200",        ← NOTE: "in" prefix, not "st"
+  "stSelectedModeOfData": "live",
+  "stSelectedAvailableExpiryDate": "260630"
+  // NO stSelectedTimeInterval — client aggregates
+}
+Response: {
+  "status": "success",
+  "data": [
+    { "stOptionsType": "PE", "inStrikePrice": "57200", "stTime": "09:16:00",
+      "inOi": "90450", "inOpen": 749.1, "inHigh": 749.1, "inLow": 630.75,
+      "inClose": 686, "inIv": 18.78, "inVolume": 14790 },
+    { "stOptionsType": "CE", "inStrikePrice": "57200", "stTime": "09:16:00",
+      "inOi": "129900", "inOpen": 811.25, "inHigh": 858.75, "inLow": 761,
+      "inClose": 775.25, "inIv": 13.03, "inVolume": ... }
+    ...
+  ]
+}
+```
+Row has `inIv` (IV per minute) — not present in OI Analysis endpoint. Interleaved CE/PE by stTime (1-min resolution).
 
 ## Replication notes (→ ArthaYantra)
 - Three `ay-echart` line charts off ONE CE/PE strike series:

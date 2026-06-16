@@ -20,9 +20,21 @@ Observed: **2 frames** horizontally (BANKNIFTY-I left, NIFTY-I right). Layout li
   undo/redo, Save▾, ⚙, fullscreen, 📷, Refresh; overlays VWAP/VWMA20/SuperTrend; sub-panes OSPL Volume + RSI.
 - Frames are independent (different symbols/intervals per frame).
 
+## Vue component state (confirmed — 2 instances of same advance-chart component)
+```
+// Frame 1: BANKNIFTY-I, 3-min
+// Frame 2: NIFTY-I, 3-min
+// Each instance: same 20-key state as advance-chart.md
+websiteUrl, enabledNotification, notificationAudioFile, tvWidget, showTradeHistoryFlag,
+latestActiveSymbol, prevPaneHeight, resizeTimeout, stCvsId, mouseMoveHandler,
+showOiBars, socketReconnecting, socketSubscribedEvents, latestPriceRangeIntervalId,
+latestPriceRange, chartEle, chartCvs, chartCvsCtx, oiBarChart, widgetOptions
+```
+Two independent instances of the same single-chart Vue component rendered side-by-side.
+
 ## Data source
 Identical to Advance Chart — `/api/trading-view/*` (`getcandledata`, `getlistofsymbols`,
-`getservertime`, `getallstudytemplates`), once per frame.
+`getservertime`, `getallstudytemplates`), called once per frame (2× each on page load).
 
 ## Replication notes (→ ArthaYantra)
 - A CSS grid of N Advance-Chart components, each independently configurable. Optional symbol/interval sync.

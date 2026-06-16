@@ -37,14 +37,36 @@ Two side-by-side tables (CE left, PE right); only the significant OI-move rows (
 | `/api/big-oi-movement/getselectedoptionsdataexpirydate` | expiries |
 | `/api/big-oi-movement/getbigoimovementdata` | main |
 
-Main:
-```json
-{ "data":[ { "stFetchTimeOld":"10:00:00","stFetchTime":"10:05:00",
-             "inAssetPrice":57431.05, "inStrikePrice":"57400", "stOptionsType":"PE",
-             "stOptionsMoneyness":"ATM", "inOiChange":… /* + close, ltp chg, interp */ } ],
-  "underLyingAssetData":{…} }
+Main request + confirmed row schema:
 ```
-`stOptionsType` splits CE/PE tables; `stOptionsMoneyness` drives the moneyness badge; rows are pre-filtered to "big" moves server-side.
+POST /api/big-oi-movement/getbigoimovementdata
+Body: {
+  "stSelectedOptions": "BANKNIFTY",
+  "stSelectedAvailableDate": "2026-06-16",
+  "stSelectedAvailableExpiryDate": "260630",
+  "stSelectedModeOfData": "live"
+}
+Response: {
+  "status": "success",
+  "data": {
+    "data": [
+      { "stFetchTimeOld": "13:35:00", "stFetchTime": "13:40:00",
+        "inAssetPrice": 57244, "inStrikePrice": "57300", "stOptionsType": "CE",
+        "stOptionsMoneyness": "OTM", "inOiChange": "23190",
+        "inLtpChange": "-0.50", "inLtp": "669.75" },
+      ...
+    ],
+    "underLyingAssetData": {...}
+  }
+}
+```
+Vue enriches each row client-side with `inOiInterpretation:3` (enum) + `stOiInterpretation:"Short Build Up"` (string).
+Confirmed row fields: `{stFetchTimeOld, stFetchTime, inAssetPrice, inStrikePrice, stOptionsType, stOptionsMoneyness, inOiChange, inLtpChange, inLtp, inOiInterpretation, stOiInterpretation}`.
+`stOptionsType` splits into `callTableData` (CE) / `putTableData` (PE). "Big" threshold is server-side.
+
+## Socket subscriptions
+- `BIG_OI_MOVEMENT_BANKNIFTY_260630` — live big-move events for expiry
+- `EQUITY_UNDERLYING_DATA_NIFTY BANK`
 
 ## Replication notes (→ ArthaYantra)
 - Endpoint returns notable OI-move rows (CE+PE) with moneyness; render two `p-table`s.

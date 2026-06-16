@@ -28,18 +28,60 @@ legend: Green - Long Buildup / Red - Short Buildup / Yellow - Long Unwinding / B
 - **Bar color = OI interpretation** (confirms enum): green Long Buildup · red Short Buildup · yellow Long Unwinding · blue Short Covering.
 - ECharts bar, toolbox, "Oi Pulse / 15-06-2026" watermark. Bottom global legend.
 
+## Filter bar — exact controls
+| Control | Values | Notes |
+|---|---|---|
+| Name | underlyings | uses `stSelectedOptions` |
+| Date | date picker | |
+| Select Expiry Date | YYMMDD | |
+| Go | button | |
+**No Mode filter** — always live data only.
+
+## Vue component state
+```
+oiRise15min, oiLose15min, oiRise60min, oiLose60min, oiRiseDaily, oiLoseDaily
+```
+Each is a chart-data object:
+```json
+{
+  "xAxisData": ["57300 CE", "57400 CE", ...],
+  "yAxisData": [
+    { "value": "27840", "itemStyle": { "color": "#f44336" } },
+    ...
+  ],
+  "tooltipLabel": ["Short Build Up", "Long Buildup", ...]
+}
+```
+Color: **`#f44336`** = red = bearish (Short Build Up) · **`#4caf50`** = green = bullish (Long Buildup) · yellow = Long Unwinding · blue = Short Covering.
+
+## Socket subscriptions
+**None** — no socket; page is batch/snapshot only.
+
 ## Data source / API (`interval-wise-oi`)
 | Call | Response |
 |---|---|
 | `/api/interval-wise-oi/getselectedoptionsdate` | dates |
 | `/api/interval-wise-oi/getselectedoptionsdataexpirydate` | expiries |
-| `/api/interval-wise-oi/getintervalwiseoidata` | `{ data:[ row ], underLyingAssetData }` |
+| `/api/interval-wise-oi/getintervalwiseoidata` | main |
 
-Row:
-```json
-{ "stOptionName":"57500 CE", "inOiDiff":"296790", "inLtpDiff":"-283.95", "stChartType":"oi_rise_60_min_cd_data" }
+Main request + confirmed row schema:
 ```
-- `stChartType` buckets the row into one of the 6 charts (`oi_rise_15_min` / `oi_rise_60_min` / `oi_rise_daily` / `oi_fall_*`).
+POST /api/interval-wise-oi/getintervalwiseoidata
+Body: {
+  "stSelectedOptions": "BANKNIFTY",
+  "stSelectedAvailableDate": "2026-06-16",
+  "stSelectedAvailableExpiryDate": "260630",
+  "stSelectedModeOfData": "live"
+}
+Response: { "status": "success", "data": { "data": [ row, ... ], "underLyingAssetData": {...} } }
+```
+
+Row schema (confirmed):
+```json
+{ "stOptionName": "57000 CE", "inOiDiff": "190440", "inLtpDiff": "-77.75", "stChartType": "oi_rise_daily" }
+```
+- `stChartType` values confirmed: `oi_rise_15_min_cd_data`, `oi_rise_60_min_cd_data`, `oi_rise_daily`, `oi_fall_15_min_cd_data`, `oi_fall_60_min_cd_data`, `oi_fall_daily`
+- `stChartType` buckets the row into one of the 6 charts.
 - Bar value = `inOiDiff`; color = interpretation from sign(`inOiDiff`)×sign(`inLtpDiff`).
 
 ## Replication notes (→ ArthaYantra)

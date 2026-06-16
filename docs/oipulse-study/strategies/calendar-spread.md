@@ -28,10 +28,31 @@ filter: Mode  Name[BANKNIFTY▾]  Date[📅]  Time Interval[3 min▾]
 
 Build a spread by adding the same strike/type at two expiries → chart plots the differential premium over time.
 
+## Vue component state (confirmed)
+```
+minAvailableDate, maxAvailableDate, disableRefreshDataButton,
+selectedModeOfData, selectedOptions ("BANKNIFTY"), selectedAvailableDate,
+selectedStrikePrice ("57200"), selectedAvailableExpiryDate ("260630"),
+selectedStrikePriceForTable, selectedTimeInterval (3),
+availableOptionsData, availableDate, availableExpiryDate, availableStrikePrices,
+availableModeOfData,
+timeInterval,         // [{text:"1 min",value:1},...{value:60}] — has 1-min
+underLyingAssetData,
+strategyLegs,         // {} initially; keyed by leg when added
+selectedOptionsType ("CE"), optionsType ([{text:"CE"},{text:"PE"}]),
+arCallCandleStickData, arPutCandleStickData, ar1minCandleData,
+arFinalCandleStickData,      // combined spread candle series
+arFinalCandleStickChartData, // ECharts-ready chart object
+columns,              // [{label:"Expiry",field:"stExpiryDate"},{label:"Strike Price",field:"inStrikePrice"},{label:"Type",field:"stOptionsType"},{label:"Action",field:"stAction"}]
+socketSubscribedEvents ([]),  // no live socket
+updateChartTimeoutId
+```
+
 ## Data source / API
 On load: `/api/options/getavailableoptionsdata`, `getselectedoptionsdate`, `getoptionsdataexpirydate`,
 `getselectedoptionsstrikepricedata` (the standard options metadata cascade). The spread series loads on
 **Add Position** (per-leg `getselectedoptionsalldataforchart`, differenced across the two expiries).
+No live socket — `socketSubscribedEvents: []`.
 
 ## Replication notes (→ ArthaYantra)
 - Two-leg picker (same strike/type, two expiries) → fetch each leg's premium series → plot the difference as a candlestick + VWAP/EMA/Volume.

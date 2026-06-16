@@ -20,9 +20,39 @@ filter: Mode  Select Name[BANKNIFTY▾]  Select Date[📅]  Select Expiry Date[3
 └─────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Filter bar
-Mode · Select Name · Select Date · Select Expiry Date · Select Period (`Full day` / intraday) · Go ·
-**Show Chg. in OI** checkbox (plot OI change instead of absolute OI).
+## Filter bar — exact controls
+| Control | Values | Notes |
+|---|---|---|
+| Mode | live / historical | |
+| Name | same 9 Index + 211 Stocks | |
+| Date | date picker | min 2019-01-01, max today |
+| Expiry Date | YYMMDD values | same 6 expiries for BANKNIFTY |
+| Select Period | `null`(Full day), `3`(Last 3 minutes), `5`(Last 5 min), `10`, `15`, `30`, **`45`**(Last 45 minutes), `60`(Last 60 min) | **Has 45-min option** — unique to this page |
+| Go | button (primary blue) | triggers both API calls |
+| Show Chg. in OI | checkbox (Bootstrap `custom-switch`) | toggles OI vs OI-change view on both bar charts |
+
+## Vue component state
+```
+allDataFields: [minAvailableDate, maxAvailableDate, disableRefreshDataButton, selectedModeOfData,
+  selectedOptions, selectedAvailableDate, selectedAvailableExpiryDate, selectedAvailableTimePeriod,
+  availableOptionsData, availableDate, availableExpiryDate, availableTimePeriod, availableModeOfData,
+  underLyingAssetData, showChangeInOiData, oiData, oiPcrData, pcrChartData,
+  inCallTotalOi, inPutTotalOi, individualChartXaxis, individualChartXaxisData1, individualChartXaxisData2,
+  cummulativeOiChartData, tempCummulativeOiChartData, individualOiChartData, tempIndividualOiChartData,
+  strikePriceIndex, socketSubscribedEvents, randomIdString, socketDataUpdateTimeoutId]
+```
+
+Key state:
+- `showChangeInOiData: false` — checkbox state; triggers `changeOiDataChartView()`
+- When `false`: `calculateDataForOptionsOi()` → absolute OI (Call ~16.4M, Put ~16.7M total)
+- When `true`: `calculateDataForChangeInOptionsOi()` → OI delta (newOi − oldOi), e.g. Call change ~929K, Put change ~677K
+- `cummulativeOiChartData`: `{xAxisData:["OI"], xAxisCallData:[16486530], xAxisPutData:[16796910], xAxisMarkLine:null}`
+- `individualOiChartData`: `{selectedOptions:"BANKNIFTY", xAxisData:["43000","43500",...,"69000"] (193 strikes), xAxisCallData:[...], xAxisPutData:[...], xAxisMarkLine:[{xAxis:"57200"}]}`
+- `pcrChartData`: `{xAxisData:["09:16:00",...], yAxisPcrData:["1.09","1.09",...], yAxisPriceData:[57320.3,...]}` (258 points)
+
+## Socket subscriptions
+- `OD_OI_STATS_BANKNIFTY_260630` — live OI updates for this expiry
+- `EQUITY_UNDERLYING_DATA_NIFTY BANK` — underlying LTP
 
 ## Charts
 | Chart | Type | Series | Notes |
@@ -32,10 +62,59 @@ Mode · Select Name · Select Date · Select Expiry Date · Select Period (`Full
 | PCR Chart | ECharts dual-axis line | PCR (blue, left), price (orange, right) | intraday PCR vs underlying; Refresh button |
 
 ## Data source / API
-| Call | Response |
-|---|---|
-| `/api/options/getoistatsdataforselectedoptions` | `{ data:[{inStrikePrice, stOptionsType:"CE"/"PE", inNewOi, inOldOi}] (311), underLyingAssetData }` |
-| `/api/options/getoipcrdataforselectedpptions` *(sic)* | `data:[{ stFetchTime:"09:16:00", inClose:57758.85, inPcr:"1.18" }]` |
+
+### OI Stats endpoint
+```
+POST /api/options/getoistatsdataforselectedoptions
+Body: {
+  "stSelectedOptions": "BANKNIFTY",
+  "stSelectedAvailableDate": "2026-06-16",
+  "stSelectedAvailableExpiryDate": "260630",
+  "stSelectedAvailableTimePeriod": null,
+  "stSelectedModeOfData": "live"
+}
+Response: {
+  "status": "success",
+  "msg": "Data fetched successfully.",
+  "data": {
+    "data": [
+      { "inNewOi": "690", "inStrikePrice": 43000, "stOptionsType": "CE", "inOldOi": "690" },
+      { "inNewOi": "110280", "inStrikePrice": 43000, "stOptionsType": "PE", "inOldOi": "114480" },
+      ...
+    ],
+    "underLyingAssetData": {
+      "stUnderLyingAsset": "NIFTY BANK",
+      "stDateTime": "16 Jun 2026, 13:33:00",
+      "inLtp": 57231.15,
+      "inDayHigh": 57399.7,
+      "inDayLow": 57076.25,
+      "inDayOpen": 57198.8
+    }
+  }
+}
+```
+311 rows (CE + PE interleaved, all 193+ strikes). Client sums by CE/PE for cumulative; groups by strike for individual bars.
+
+### PCR endpoint (note typo: `pptions` not `ptions`)
+```
+POST /api/options/getoipcrdataforselectedpptions
+Body: {
+  "stSelectedModeOfData": "live",
+  "stSelectedOptions": "BANKNIFTY",
+  "stSelectedAvailableDate": "2026-06-16",
+  "stSelectedAvailableExpiryDate": "260630"
+}
+Response: {
+  "status": "success",
+  "msg": "Data fetched successfully.",
+  "data": [
+    { "stFetchTime": "09:16:00", "inClose": 57320.3, "inPcr": "1.09" },
+    { "stFetchTime": "09:17:00", "inClose": 57353.2, "inPcr": "1.09" },
+    ...
+  ]
+}
+```
+258 rows (1-min resolution for full day 09:16–13:33). `inPcr` = string decimal; `inClose` = float.
 
 - Cumulative OI = sum `inNewOi` over CE vs PE. Individual OI = per `inStrikePrice` CE/PE bars (ATM = nearest to underlying `inLtp`).
 - "Show Chg. in OI" → use `inNewOi − inOldOi`.

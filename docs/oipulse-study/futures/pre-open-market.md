@@ -40,18 +40,46 @@ Note: For Live trading day, Pre open market data will be updated here on or afte
 - All columns sortable (⇅). Each table paginated (`Rows per page 7`, `1-7 of N`, Prev/Next).
 - Counts: Market Advances 189, Declines 22; Indice Advances 5, Declines 0.
 
+## Vue component state (confirmed)
+```
+selectedModeOfData, selectedAvailableDate,
+selectedIndex (null = all), selectedExpiry,
+availableDate, availableIndex, availableExpiryData, availableModeOfData,
+preOpenMarketMajorIndexData,
+preOpenMarketIndexAdvancesSymbol, preOpenMarketIndexDeclinesSymbol,
+tempPreOpenMarketIndexAdvancesSymbol, tempPreOpenMarketIndexDeclinesSymbol,
+preMarketAdvancesSymbol,    // 125 today
+preMarketDeclinesSymbol,    // 86 today
+preMarketUnchangedSymbol,   // 7 today
+tempPreMarketAdvancesSymbol, tempPreMarketDeclinesSymbol, tempPreMarketUnchangedSymbol,
+searchSymbol, doneTypingInterval
+```
+(No `socketSubscribedEvents` — pre-open is a snapshot, no live socket.)
+
 ## Data source / API
 | Call | Request | Response |
 |---|---|---|
-| `/api/pre-open-market/getlistofassetpreopenmarket` | — | asset options |
+| `/api/pre-open-market/getlistofassetpreopenmarket` | `{}` | index options (same list as heatmap) |
 | `/api/futures/getpreopenmarketdate` | `{stSelectedModeOfData}` | dates |
 | `/api/futures/getpreopenmarketdata` | `{stSelectedModeOfData, stSelectedAvailableDate, stSelectedExpiry, stSelectedIndex}` | `data:{ sData:[…stocks], iData:[…indices] }` |
 
-Row:
+Raw API row (confirmed):
 ```json
-{ "stSymbolName":"ADANIPORTS-I", "inPreOpenClose":1838, "inPreOpenChange":"14.80", "inPrevDayBreak":"H" }
+{ "stSymbolName": "ADANIPORTS-I", "inPreOpenClose": 1816, "inPreOpenChange": "2.00", "inPrevDayBreak": null }
 ```
-`inPrevDayBreak`: `H`=broke prev-day high, `L`=broke prev-day low, `-`=none. Advances/Declines split client-side by sign of `inPreOpenChange`; stocks→sData, indices→iData.
+
+Vue enriched row (confirmed):
+```json
+{
+  "stSymbolName": "ADANIPORTS-I",
+  "inPrevDayBreak": null,
+  "inPreOpenClose": 1816,
+  "inPreOpenChange": 2,
+  "inPrevDayClose": 1814,
+  "inPreOpenChangePercentage": "0.11"
+}
+```
+`inPrevDayBreak`: `"H"`=prev-day high break, `"L"`=prev-day low break, `null`=none. `stSymbolName` includes `-I` suffix for Current Month futures. Advances/Declines/Unchanged split client-side by sign of `inPreOpenChange`.
 
 ## Replication notes (→ ArthaYantra)
 - Pre-open snapshot endpoint returning {symbol, preOpenPrice, change, prevDayBreak} for stocks + indices.

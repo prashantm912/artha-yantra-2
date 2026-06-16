@@ -42,6 +42,33 @@ Axes auto-scaled to each series' range (independent left/right). Grid lines fain
 ## Chart library
 **ECharts** (canvas — 2 `<canvas>`; not exposed on `window`, imported as Vue component). Toolbox + dual-axis + watermark + bottom legend are ECharts idioms. (Not Highcharts/Chart.js/ApexCharts.)
 
+## Vue component state (confirmed — 11 keys)
+```
+minAvailableDate, maxAvailableDate, disableRefreshDataButton,
+selectedAvailableDate ("2026-06-16"),
+selectedModeOfData ("live"),
+availableDate,           // dropdown options from date API
+availableModeOfData,
+vixNiftyData,            // pre-computed chart series for Chart 1
+vixBankniftyData,        // pre-computed chart series for Chart 2
+socketSubscribedEvents,  // ["EQ_VPD_NIFTY 50","EQ_VPD_NIFTY BANK","EQ_VPD_INDIA VIX"]
+stLastUpdatedAt          // "-" initially; updates on data refresh
+```
+
+**vixNiftyData structure (confirmed)**:
+```json
+{
+  "xAxisData": ["09:09","09:16","09:17",...],  // 361 entries (1-min; first "09:09" is PEOD baseline)
+  "yAxisVixData": [14.3525, 13.95, ...],       // INDIA VIX values (floats)
+  "yAxisPriceData": [23923.9, 23909.35, ...]   // NIFTY 50 futures LTP (floats)
+}
+```
+`vixBankniftyData` has same structure with NIFTY BANK prices in `yAxisPriceData`.
+
+**Socket subscriptions (live mode)**:
+`["EQ_VPD_NIFTY 50","EQ_VPD_NIFTY BANK","EQ_VPD_INDIA VIX"]` — pattern `EQ_VPD_{INDEX_NAME}`.
+Live ticks push new data points; chart auto-extends without re-fetch.
+
 ## Data source / API
 | Call | Method | Request | Response |
 |---|---|---|---|

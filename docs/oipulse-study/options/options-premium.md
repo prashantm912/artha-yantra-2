@@ -16,29 +16,67 @@ filter: Mode  Select Name[BANKNIFTY▾]  Select Date[📅]  Select Expiry Date[3
 └─────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Filter bar
-| Control | Type | Values |
+## Filter bar — exact controls
+| Control | Values | Notes |
 |---|---|---|
-| Mode | radio | Live / Historical |
-| Select Name | select | underlying |
-| Select Date | date picker | day |
-| Select Expiry Date | select | expiry |
-| Show Strikes | select | `Near ATM 10 Strikes` (window of strikes around ATM) |
-| Go | button (red) | fetch |
-| Show LTP | checkbox | annotate bars with premium LTP values |
+| Mode | live / historical | |
+| Name | 9 Index + 211 Stocks | |
+| Date | date picker | |
+| Expiry Date | YYMMDD | |
+| Show Strikes | `10`(Near ATM 10 Strikes), `15`(Near ATM 15 Strikes), `25`(Near ATM 25 Strikes), `"All"`(All Strikes) | default 10 |
+| Go | button | sends `stSelectedNoOfData` as int (or "All") |
+| Show LTP | checkbox | `showLtp` state; annotates bars with premium LTP values |
+
+## Vue component state
+```
+selectedOptions, selectedAvailableDate, selectedAvailableExpiryDate, selectedNoOfData,
+availableDate, availableExpiryDate, availableNoOfData, availableModeOfData,
+underLyingAssetData, oiData, showLtp, tempChartData, chartData, strikePriceIndex, socketSubscribedEvents
+```
+
+`chartData` structure:
+```json
+{
+  "xAxisData": ["56200","56300",...,"58100"],
+  "xAxisCallData": [1385.0, ...],
+  "xAxisPutData": [323.05, ...],
+  "xAxisMarkLine": {"xAxis":"57200"},
+  "xAxisCallMarkPoint": [...],
+  "xAxisPutMarkPoint": [...]
+}
+```
+
+## Socket subscriptions
+- `OD_PREMIUM_BANKNIFTY_260630` — live premium updates for all strikes in expiry
+- `EQUITY_UNDERLYING_DATA_NIFTY BANK` — underlying LTP
 
 ## Chart
 ECharts grouped bar: per strike a Call bar (green) + Put bar (red); x = strike ladder centered on ATM
 (marker at spot); y = premium. Reveals where calls vs puts are richer and the ATM crossover.
 
 ## Data source / API
-`POST /api/options/getoptionspremiumdataforselectedoptions` →
-```json
-{ "data": [ { "stFetchTime":"23:45:00", "inStrikePrice":"56100", "stOptionsType":"PE", "inNewClose":"351.6" } ],
-  "underLyingAssetData": {"stUnderLyingAsset":"NIFTY BANK","inLtp":57198.8, ...} }
 ```
-`inNewClose` = option premium. CE/PE split by `stOptionsType`, paired per `inStrikePrice`.
-`Show Strikes` limits to N strikes around ATM (nearest to underlying `inLtp`).
+POST /api/options/getoptionspremiumdataforselectedoptions
+Body: {
+  "stSelectedOptions": "BANKNIFTY",
+  "stSelectedAvailableDate": "2026-06-16",
+  "stSelectedAvailableExpiryDate": "260630",
+  "stSelectedNoOfData": 10,
+  "stSelectedModeOfData": "live"
+}
+Response: {
+  "status": "success",
+  "data": {
+    "data": [
+      { "stFetchTime": "13:40:00", "inStrikePrice": "56200", "stOptionsType": "PE", "inNewClose": "323.05" },
+      { "stFetchTime": "13:29:00", "inStrikePrice": "56200", "stOptionsType": "CE", "inNewClose": "1385" },
+      ...
+    ],
+    "underLyingAssetData": { "stUnderLyingAsset": "NIFTY BANK", "inLtp": 57200, ... }
+  }
+}
+```
+`inNewClose` = option current close/LTP. 4 fields per row. No OHLC. CE/PE interleaved per strike.
 
 ## Replication notes (→ ArthaYantra)
 - `ay-echart` grouped bar: Call vs Put premium per strike, ATM markLine, strike-window selector.

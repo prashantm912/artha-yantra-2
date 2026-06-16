@@ -23,8 +23,47 @@ filter: Mode  Name[BANKNIFTY▾]  Date[📅]  Expiry[30-Jun-2026▾]  Strike[571
 └────────────────────────────────────────┘   └────────────────────────────────────────┘
 ```
 
-## Filter bar
-Mode · Name · Date · Expiry Date · Strike Price · Interval · **Show** (`Both (Side By side)` / Call only / Put only) · Go (red).
+## Filter bar — exact controls
+| Control | Values | Notes |
+|---|---|---|
+| Mode | live / historical | |
+| Name | 9 Index + 211 Stocks | |
+| Date | date picker | |
+| Expiry Date | YYMMDD | |
+| Strike Price | 193 strikes | |
+| Interval | `1`(1 min), `3`, `5`, `10`, `15`, `30`, `60` | **Has 1-min option** |
+| Show | `SBS`(Both Side By side), `UAD`(Both Up and down), `CALL`(Call only), `PUT`(Put only) | 4 options |
+| Go | button | |
+
+## Vue component state
+```
+fields: selectedOptions, selectedAvailableDate, selectedAvailableExpiryDate, selectedStrikePrice,
+  selectedStrikePriceForTable, selectedTimeInterval, selectedShowCriteria,
+  availableStrikePrices, timeInterval, availableShowCriteria,
+  showCallChart, showPutChart, chartShowCriteriaGrid,
+  callChartData, putChartData, underlyingDetails, stLastUpdatedAt, noOfDecimalPoints,
+  socketSubscribedEvents
+```
+
+`callChartData` / `putChartData` structure:
+```json
+{
+  "typeOfData": "call",
+  "xAxisData": ["09:18", "09:21", ...],
+  "yAxisOiData": [137250, 140820, ...],
+  "yAxisIvData": [13.03, 13.72, ...],
+  "toolTipData": ["Short Build Up", ...],
+  "yAxisCandlestickData": [["811.25","782.45","760.95","858.75"], ...],
+  "yAxisVolumeData": [[0, 39600, -1], [1, 25680, -1], ...]
+}
+```
+`yAxisCandlestickData` order: `[open, close, low, high]` (NOT standard OHLC order).
+`yAxisVolumeData`: `[index, volume, -1]` — third element likely color flag.
+`chartShowCriteriaGrid`: `{lg:6, md:6, sm:12, xs:12}` (side-by-side) → `{lg:12, md:12, sm:12, xs:12}` (up-and-down/single).
+
+## Socket subscriptions
+- `OD_OPT_CHART_BANKNIFTY_260630_57200` — live option price/OI ticks
+- `EQUITY_UNDERLYING_DATA_NIFTY BANK` — underlying LTP
 
 ## Components (per chart, ×2)
 | Element | Type | Axis | Source |

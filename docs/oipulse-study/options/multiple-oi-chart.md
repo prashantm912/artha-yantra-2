@@ -25,13 +25,53 @@ empty ("No data available") until ≥1 strike is selected.
 
 Each selected strike → one colored OI line; underlying price overlaid for context. Toolbox + legend (toggle lines).
 
-## Data source / API
-`POST /api/options/getoptionsoidataformultipleoichart` →
-```json
-{ "data": { "strikePriceData": { /* per selected strike: time→OI series */ },
-            "underlyingData":  { /* underlying price time series */ } } }
+## Filter bar — exact controls
+| Control | Values | Notes |
+|---|---|---|
+| Mode | live / historical | |
+| Select Name | underlyings | uses `stSelectedOptions` |
+| Select Date | date picker | |
+| Expiry Date | YYMMDD | |
+| Select Strike Price | **multi-select** (not plain `<select>`) | format: `"57200 CE"` / `"57200 PE"` strings |
+| Go | button (red) | disabled until ≥1 strike selected |
+
+## Vue component state
 ```
-Request carries the selected strikes (+ name/date/expiry). `strikePriceData` → one OI line per strike; `underlyingData` → price line.
+avaiableStrikePriceData  // NOTE: typo in source (not "available") — array of all strikes as "57200 CE" strings
+selectedStrikePrices: [] // starts empty; user must pick ≥1 before Go works
+preFinalDataSet          // built client-side from response
+socketSubscribedEvents: [] // always empty — no live socket subscriptions
+```
+`preFinalDataSet.legend.data`: `["NIFTY BANK", "57200 PE", "57200 CE", "57100 PE", "57100 CE"]` — underlying always first, then selected strikes.
+
+## Socket subscriptions
+**None** — `socketSubscribedEvents` is always `[]`. Page is request/response only, no live updates.
+
+## Data source / API
+Main request + confirmed schema:
+```
+POST /api/options/getoptionsoidataformultipleoichart
+Body: {
+  "stSelectedOptions": "BANKNIFTY",
+  "stSelectedAvailableDate": "2026-06-16",
+  "stSelectedAvailableExpiryDate": "260630",
+  "stSelectedStrikePrices": ["57200 CE", "57200 PE", "57100 CE", "57100 PE"],
+  "stSelectedModeOfData": "live"
+}
+Response: {
+  "status": "success",
+  "data": {
+    "strikePriceData": [
+      {
+        "stTime": "09:16:00",
+        "obOiData": [ { "57200 PE": 90450 }, { "57200 CE": 134820 }, ... ]
+      },
+      ...
+    ]
+  }
+}
+```
+`strikePriceData` is a flat array of time-rows. Each row's `obOiData` is an array of single-key objects keyed by the strike string (e.g. `"57200 PE"`). Underlying price comes from the separate `EQUITY_UNDERLYING_DATA` socket/store (not in this endpoint).
 
 ## Replication notes (→ ArthaYantra)
 - Multi-select strike picker (PrimeNG `p-multiSelect`/autocomplete) → fetch per-strike OI series + underlying price → `ay-echart` dual-axis multi-line.

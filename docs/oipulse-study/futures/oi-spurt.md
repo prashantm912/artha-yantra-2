@@ -44,19 +44,48 @@ filter: Mode(Live/Hist)  Asset[All F&O Stocks▾]  Expiry[Current Month▾]  Dat
 - Counts seen: Long Build Up 69 · Short Build Up 27 · Short Covering 104 · Long Unwinding 19.
 - Bucketing rule = OI Interpretation matrix: sign(LTP Chg) × sign(OI Chg).
 
+## Vue component state (confirmed)
+```
+selectedModeOfData, selectedAvailableDate, selectedAvailableAsset (null = all),
+selectedExpiry, availableAsset, availableDate, availableExpiryData, availableModeOfData,
+RiseInOiRiseInPriceData,    // Long Build Up — 92 rows today
+SlideInOiSlideInPriceData,  // Long Unwinding — 22 rows
+RiseInOiSlideInPriceData,   // Short Build Up — 64 rows
+SlideInOiRiseInPriceData,   // Short Covering — 40 rows
+tempRiseInOiRiseInPriceData, tempSlideInOiSlideInPriceData, ... (backup for search filter)
+searchSymbol, doneTypingInterval,
+socketSubscribedEvents,     // ["FD_OIS"]
+stLastUpdatedAt, socketDataUpdateTimeoutId
+```
+
+Vue enriches each raw row with computed fields:
+```json
+{
+  "stSymbolName": "360ONE",
+  "inNewLtp": "1140.3",  "inOldLtp": "1133.5",
+  "inLtpChangeInPercentage": 0.6,  "inLtpChange": 6.8,
+  "inNewOi": "5939500",  "inOldOi": "5792500",
+  "inOiChangeInPercentage": 2.54,  "inOiChange": 147000
+}
+```
+
+## Socket subscriptions
+- `FD_OIS` — futures OI spurt live feed (no symbol suffix — all-market feed)
+
 ## Data source / API
 | Call | Request | Response |
 |---|---|---|
-| `/api/heatmap/getlistofassetforheatmap` | — | `data:[{text,value}]` asset groups |
+| `/api/heatmap/getlistofassetforheatmap` | `{}` | `data:[{text:"Nifty 50",value:"Nifty 50"},{text:"Nifty Bank",...}]` |
 | `/api/futures/getfuturesoispurtdate` | `{stSelectedModeOfData}` | `data:[{text,value}]` dates |
 | `/api/futures/getfuturesoispurtdata` | `{stSelectedAsset, stSelectedExpiry, stSelectedAvailableDate, stSelectedModeOfData}` | `data:[ row ]` |
 
-Row:
+Raw API row (confirmed):
 ```json
-{ "stSymbolName":"RADICO","stFetchDate":"...","stFetchTime":"...",
-  "inOldOi":"181200","inOldClose":"3559.3","inNewOi":"225000","inNewClose":"3609.3" }
+{ "stSymbolName": "360ONE", "stFetchTime": "14:02:00", "stFetchDate": "2026-06-16",
+  "inOldOi": "5792500", "inOldClose": "1133.5",
+  "inNewOi": "5939500", "inNewClose": "1140.3" }
 ```
-All 4 quadrants come from ONE `getfuturesoispurtdata` response; client computes %changes and buckets.
+`stSelectedAsset: null` = all instruments. All 4 quadrants come from ONE response; client computes %changes and buckets.
 
 ## Replication notes (→ ArthaYantra)
 - One scan endpoint returning {symbol, oldOi, oldClose, newOi, newClose} for the asset universe.

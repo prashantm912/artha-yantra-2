@@ -21,14 +21,16 @@ Rows per page:[25▾]                                         1 - 25 of 127   �
 ```
 
 ## Filter bar
-| Control | Type | Values |
-|---|---|---|
-| Mode | radio | Live data / Historical |
-| Name | select | future instrument (BANKNIFTY, NIFTY, stocks…) — from `getavailablefuturesdata` |
-| Expiry | select | Current Month / Next / Far (per instrument) |
-| Date | date picker | trading day (Historical) |
-| Time Interval | select | 3 min (and others) |
-| Go | button (red) | fetch |
+| Control | Type | Values | Notes |
+|---|---|---|---|
+| Mode | radio | Live data / Historical | `selectedModeOfData` |
+| Name | select | BANKNIFTY, NIFTY, FINNIFTY, MIDCPNIFTY, NIFTYNXT50, BANKEX, FOCIT, SENSEX, SENSEX50 + ~200 stocks | `selectedFutures` |
+| Expiry | select | `I`=Current Month · `II`=Next Month · `III`=Far Month | `selectedExpiry` |
+| Date | date picker | trading day | `selectedAvailableDate` |
+| Time Interval | select | 3 / 5 / 10 / 15 / 30 / 60 min | `selectedTimeInterval`; default 3 |
+| Go | button (red) | fetch | |
+
+**Expiry availability**: `futuresDataWiseAvailableExpiry` map — each instrument shows which of I/II/III exist.
 
 ## Table columns
 First row is `15:30-EOD` (end-of-day summary), then descending 3-min intervals.
@@ -57,20 +59,60 @@ First row is `15:30-EOD` (end-of-day summary), then descending 3-min intervals.
 
 (Observed live: "Short Covering ↑" blue, "Long Unwinding ↓" yellow.)
 
+## Vue component state (confirmed)
+```
+minAvailableDate, maxAvailableDate, disableRefreshDataButton,
+selectedModeOfData, selectedFutures, selectedExpiry,
+selectedAvailableDate, selectedTimeInterval,
+availableFuturesData, availableExpiryData, availableDate, availableModeOfData,
+futuresDataWiseAvailableExpiry,   // {BANKNIFTY:["I","II","III"], NIFTY:[...], ...}
+timeInterval,                     // [{text:"3 min",value:3}, ...]
+tableData, columns, pagination, totalRecords,
+socketSubscribedEvents,           // ["FD_OIA_BANKNIFTY-I"]
+randomIdString, stLastUpdatedAt
+```
+
+## Socket subscriptions
+- `FD_OIA_BANKNIFTY-I` — pattern: `FD_OIA_{SYMBOL}-{EXPIRY}` (e.g. `FD_OIA_NIFTY-II`)
+
 ## Data source / API
 | Call | Request | Response |
 |---|---|---|
-| `/api/futures/getavailablefuturesdata` | `{stSelectedModeOfData}` | `data:[{text, type, value:[…expiries…]}]` instrument list |
+| `/api/futures/getavailablefuturesdata` | `{stSelectedModeOfData}` | `data:[{text, type:"FUTIDX"/"FUTSTK", value:["I","II","III"]}]` |
 | `/api/futures/getselectedfuturesdate` | `{stSelectedFutures, stSelectedExpiry, stSelectedModeOfData}` | `data:[{text,value}]` available dates |
 | `/api/futures/getselectedfuturesalldata` | `{stSelectedFutures, stSelectedExpiry, stSelectedAvailableDate, stSelectedModeOfData}` | `data:[ row ]` |
 
-Raw row (display columns derived from these):
+PEOD row (previous EOD baseline):
 ```json
-{ "stDate":"2026-06-12", "stTime":"23:46:00", "stDataFetchType":"PEOD",
-  "inOi":"2395620", "inOpen":55975, "inHigh":56926.4, "inLow":55800, "inClose":56872.4,
-  "inDayOpen":55975, "inDayHigh":56926.4, "inDayLow":55800, "inTradedVolume":34767000 }
+{ "stDate":"2026-06-15", "stTime":"23:46:00", "stDataFetchType":"PEOD",
+  "inOi":"2267070", "inOpen":57800, "inHigh":57800, "inLow":57180, "inClose":57257.2,
+  "inDayOpen":57800, "inDayHigh":57800, "inDayLow":57180, "inTradedVolume":878910 }
 ```
-`stDataFetchType`: e.g. `PEOD` (previous EOD), intraday types — flags row provenance. `inOi` is a numeric string.
+
+IM row (intraday, confirmed full schema):
+```json
+{
+  "stDate": "2026-06-16", "stDataFetchType": "IM",
+  "inOi": "2265990",
+  "inHigh": 57256.8, "inLow": 57218, "inClose": 57220,
+  "inDayOpen": 57280, "inDayHigh": 57420, "inDayLow": 57079,
+  "inTradedVolume": 660,
+  "stNewTime": "14:03",
+  "inLastOi": 2266350,
+  "inOiChange": 0,
+  "isDayHighBrake": false,
+  "isDayLowBrake": false,
+  "isDayHighVolume": false,
+  "inTotalChangeInOi": -720,
+  "stTimeInterval": "14:00-14:03",
+  "inLtpDiff": -22.2,
+  "inOiDiff": 420,
+  "inDayHighPrev": 57420,
+  "inDayLowPrev": 57079,
+  "inOiInterpretation": 3
+}
+```
+`inOi` is a numeric string. `stDataFetchType`: `PEOD` (prev EOD), `IM` (intraday). `isDayHighBrake`/`isDayLowBrake` = level break flags. `inOiInterpretation` uses the 4-state enum.
 
 ## Replication notes (→ ArthaYantra)
 - We already capture futures OI per memory (bank-sector F&O). Build: instrument+expiry+date+interval filter → fetch raw OI/price rows → compute Total Chng, LTP Change, OI Change, OI Interpretation, Level Break client-side.

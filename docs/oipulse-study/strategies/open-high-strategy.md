@@ -1,57 +1,130 @@
 # Open & High Strategy — `/app/options-analysis/open-high-strategy`
 
-**Purpose:** scan strikes for the **Open = High / Open = Low** intraday options setup. When an option's
-day Open equals its day High (O=H) the premium is expected to fall (sell signal), and vice-versa for O=L.
-Shows which strikes match, when they triggered, the probability, and whether it hit. Sub-tabs:
-`Open & High Strategy | Options Analysis`. (Listed under the Strategies menu column.)
+**Purpose:** surface options strikes where **Open = High** (bullish CE signal) or **Open = Low** (bearish PE signal)
+fired today, with triggered time and historical probability of the condition triggering.
+Listed under Strategies menu. Sub-tabs: `Open & High Strategy | Options Analysis`.
 
 ## Layout
 ```
 sub-tabs: [ Open & High Strategy ] [ Options Analysis ]   ;  ticker strip
-filter: Mode  Select Name[BANKNIFTY▾]  Select Date[📅]  Select Expiry Date[30-Jun-2026▾]  [Go]   [Open = High | Open = Low]  (toggle)
-        Underlying: NIFTY BANK at 57198.8 …
-┌ mirrored table (Call | Strike | Put) ─────────────────────────────────────────────────────────────┐
-│ CALL: Day Open | Day High | New D.High | New D.Low | O=H/O=L | Triggered Time | Probability | Call LTP │
-│ STRIKE | PUT: Put LTP | Probability | Triggered Time | O=H/O=L | New D.Low | New D.High | Day High | Day Open │
-└────────────────────────────────────────────────────────────────────────────────────────────────────┘
-Rows per page:[30▾]                                    1 - 19 of 19
+filter: Mode  Select Name[BANKNIFTY▾]  Select Date[📅]  Select Expiry Date[30-Jun-2026▾]
+        Action: ● Open = High  ○ Open = Low   [Go]
+        Underlying: NIFTY BANK at 57203.4 …
+
+Symmetric table — CE side (left) | Strike | PE side (right):
+┌ Call (CE) ──────────────────────────────────────── Strike ──────────────────── Put (PE) ─────────────────────────────────────── ┐
+│ Day Open │ Day High │ New D.High │ New D.Low │ O=H/O=L │ Triggered Time │ Probability │ Call LTP │ STRIKE │ Put LTP │ Probability │ Triggered Time │ O=H/O=L │ New D.Low │ New D.High │ Day High │ Day Open │
+└────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+Rows per page: [30▾]    1 - 19 of 19
 ```
 
-## Filter
-Mode · Name · Date · Expiry Date · Go · **Open=High / Open=Low** toggle (which setup to scan).
-
-## Columns (mirrored Call | Strike | Put)
-| Column | Source | Render |
+## Filter bar — exact controls
+| Control | Values | Notes |
 |---|---|---|
-| Day Open / Day High | `inOldDayOpen` / `inOldDayHigh` | the O=H condition is `Open == High` |
-| New D.High / New D.Low | `inNewDayHigh` / `inNewDayLow` | current day extremes |
-| O=H / O=L | computed | **green `O = H` badge** when condition met (red dot if recently) |
-| Triggered Time | `stOldDayHighBreakTime` / `stOldDayLowBreakTime` | time the level broke; ✓ check if triggered |
-| Probability | computed | **`Hit ✓` (yellow)** or `90% / 60%` (red text) — historical hit-rate |
-| Call/Put LTP | `inNewLtp` | blue (clickable) |
-| Strike | `inStrikePrice` | centered, cream/ATM highlight |
+| Mode | live / historical | `selectedModeOfData` |
+| Select Name | 9 indices + 211 stocks | `selectedOptions` / `stSelectedOptions` |
+| Select Date | date picker | `selectedAvailableDate` |
+| Select Expiry Date | YYMMDD | `selectedAvailableExpiryDate` |
+| Action | radio: `openHigh` / `openLow` | `selectedTypeOfData`; "Open = High" or "Open = Low" |
+| Go | button | triggers fetch |
 
-Row coloring: matching/active rows green-tinted; no-data rows dark.
+## Table columns
+Symmetric: left half = CE, right half = PE, center = Strike.
+
+| Column | Source | Notes |
+|---|---|---|
+| Day Open | `inOldDayOpen` (opening LTP) | option's day-open premium |
+| Day High | `inOldDayHigh` | option's day-high at open-bar |
+| New D.High | `inNewDayHigh` | current day high |
+| New D.Low | `inNewDayLow` | current day low |
+| O=H / O=L | text badge `O = H` / `O = L` | confirms which condition applies |
+| Triggered Time | `stOldDayHighBreakTime` / `stOldDayLowBreakTime` | "Open = High Triggered" label + `HH:MM` time |
+| Probability | client-side computed | discrete % (60/80/90/95); shown only when NOT yet triggered today |
+| Call/Put LTP | `inNewLtp` | current premium |
+| Strike | `inStrikePrice` | center column |
+
+**Triggered row**: shows "Open = High Triggered" text + `HH:MM` time in Triggered Time column; Probability hidden.
+**Not-yet-triggered row**: shows Probability % (historical odds); Triggered Time empty.
+
+## Vue component state
+```
+minAvailableDate, maxAvailableDate, disableRefreshDataButton,
+selectedModeOfData, selectedTypeOfData,   // "openHigh" | "openLow"
+selectedOptions, selectedAvailableDate, selectedAvailableExpiryDate,
+availableOptionsData, availableDate, availableExpiryDate, availableModeOfData,
+underLyingAssetData, inAtmStrikePrice,
+fullTableData, tableData,                  // fullTableData usually empty (historical mode only)
+doneTypingInterval                         // polling timer handle
+```
+
+Vue **pairs** raw CE+PE rows by `inStrikePrice` into one combined `tableData` row:
+```json
+{
+  "inStrikePrice": "57200",
+  "inCallOldDayOpen": 638.5, "inCallOldDayHigh": 638.5, "inCallOldDayLow": 638.5,
+  "inCallOldDayHighBreakTime": "09:42:00", "inCallOldDayLowBreakTime": null,
+  "inCallNewDayHigh": 702.6, "inCallNewDayLow": 591.65, "inCallNewLtp": 749.1,
+  "inCallOpenHighProbability": null,   // null when triggered (shows text instead)
+  "inCallOpenLowProbability": null,
+  "inPutOldDayOpen": 682.5, ...same pattern...
+  "inPutOpenHighProbability": null, "inPutOpenLowProbability": null
+}
+```
+
+## Socket subscriptions
+**None** — no `socketSubscribedEvents` in Vue state. Page uses `doneTypingInterval` timer for auto-poll.
 
 ## Data source / API (`open-high-strategy`)
 | Call | Response |
 |---|---|
+| `/api/options/getavailableoptionsdata` | underlyings (shared namespace) |
 | `/api/open-high-strategy/getselectedoptionsdate` | dates |
 | `/api/open-high-strategy/getselectedoptionsdataexpirydate` | expiries |
-| `/api/open-high-strategy/getoptionsopenhighstrategydata` | `{ data:[ row ], underLyingAssetData }` |
+| `/api/open-high-strategy/getoptionsopenhighstrategydata` | main |
 
-Row:
-```json
-{ "inStrikePrice":"43000","stOptionsType":"PE",
-  "inOldLtp":2,"inOldDayOpen":2,"inOldDayHigh":2,"inOldDayLow":2,
-  "inNewLtp":3.6,"inNewDayHigh":4.2,"inNewDayLow":2,
-  "stOldDayHighBreakTime":"09:17:00","stOldDayLowBreakTime":null }
+Main request + confirmed row schema:
 ```
-O=H when `inOldDayOpen == inOldDayHigh`; trigger time = the break-time field; CE/PE pivoted by strike.
+POST /api/open-high-strategy/getoptionsopenhighstrategydata
+Body: {
+  "stSelectedOptions": "BANKNIFTY",
+  "stSelectedAvailableDate": "2026-06-16",
+  "stSelectedAvailableExpiryDate": "260630",
+  "stSelectedModeOfData": "live"
+}
+Response: {
+  "status": "success",
+  "data": {
+    "data": [
+      {
+        "inStrikePrice": "57200",
+        "stOptionsType": "CE",
+        "inOldLtp": 638.5,
+        "inOldDayOpen": 638.5,
+        "inOldDayHigh": 638.5,
+        "inOldDayLow": 638.5,
+        "inNewLtp": 749.1,
+        "inNewDayHigh": 702.6,
+        "inNewDayLow": 591.65,
+        "stOldDayHighBreakTime": "09:42:00",
+        "stOldDayLowBreakTime": null
+      },
+      ...
+    ],
+    "underLyingAssetData": {...}
+  }
+}
+```
+- Flat array of CE + PE rows (one entry per strike per type)
+- **No probability in API response** — probability is computed client-side by Vue (discrete: 60/80/90/95%)
+- `stOldDayHighBreakTime` = time Open=High was broken; null = not triggered
+- `stOldDayLowBreakTime` = time Open=Low was broken; null = not triggered
 
 ## Replication notes (→ ArthaYantra)
-- Per strike (CE/PE): detect Open==High (or Open==Low), record break/trigger time, compute hit probability.
-- Mirrored chain table; O=H/O=L + Hit badges; toggle which setup. Probability from historical backtest of the setup.
+- Symmetric table: pair CE/PE rows by strike, display both halves mirrored around center Strike column.
+- "Triggered" detection: `stOldDayHighBreakTime != null` → show triggered label + time, suppress probability.
+- Probability column: client-computed; exact formula requires Vue source inspection (discrete 60/80/90/95 tiers).
+- Auto-poll interval (no socket); `selectedTypeOfData` toggles Open=High vs Open=Low view.
 
 ## Screenshot
 ss_71353v83g (BANKNIFTY O=H scan, green O=H badges, Hit/Triggered columns).

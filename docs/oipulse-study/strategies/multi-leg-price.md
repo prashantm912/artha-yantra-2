@@ -29,10 +29,45 @@ filter: Mode  Name[BANKNIFTY▾]  Date[📅]  Expiry Date[30-Jun-2026▾]  Strik
 | Multi Leg Chart | ECharts candlestick | combined net premium of all legs; overlays: Spot Price, Price Line, VWAP, 20 EMA; sub-panes Volume + **RSI(14)**; dataZoom |
 | Positions | table | per leg: Expiry, Strike, Type, **Entry Price**, LTP, Lots, Action (remove) |
 
+## Vue component state (confirmed)
+```
+minAvailableDate, maxAvailableDate, disableRefreshDataButton,
+selectedModeOfData, selectedOptions ("BANKNIFTY"), selectedAvailableDate,
+selectedStrikePrice, selectedAvailableExpiryDate,
+selectedStrikePriceForTable,
+selectedLots (1),               // stepper value
+selectedBuySellType ("BUY"),    // Buy / Sell radio
+selectedOptionsType ("CE"),     // CE / PE (shown as "Call"/"Put" in UI)
+selectedTimeInterval (3),
+multiplyByLotSize (1),          // 0 or 1 toggle
+inLotSize (30),
+availableOptionsData, availableDate, availableExpiryDate, availableStrikePrices,
+availableModeOfData,
+timeInterval,                   // [{text:"1 min",value:1},{text:"2 min",value:2},...{value:60}]
+                                // UNIQUE: includes 2-min interval (no other page has this)
+underLyingAssetData,
+strategyLegs ([]),              // array of added legs
+arAllUnderlyingData,            // spot price series per 1-min
+arBuyCandleStickData,           // per-leg buy premium series
+arSellCandleStickData,          // per-leg sell premium series
+arAllPosition1MinData,          // combined net basket 1-min series
+ar1minCandleData,               // aggregated to selected interval
+arFinalCandleStickData,
+arFinalUnderlyingData,
+arFinalCandleStickChartData,    // ECharts-ready chart object
+columns,                        // [{label:"Expiry",field:"stExpiryDate"},{label:"Strike",field:"inStrikePrice"},{label:"Type",field:"stOptionsType"},{label:"Entry Price",field:"inEntryPrice"},{label:"LTP",field:"inClose"},{label:"Lots",field:"inLots"},{label:"Action",field:"stAction"}]
+socketSubscribedEvents ([]),     // no live socket
+updateChartTimeoutId
+```
+
+**Note**: interval list has **2-min** (unique — no other OiPulse page offers this).
+
 ## Data source / API
 On load: `/api/options/getavailableoptionsdata`, `getselectedoptionsdate`, `getoptionsdataexpirydate`,
-`getselectedoptionsstrikepricedata` + **`/api/strategy/getoptionslotsizedata`** (lot size, e.g. 30 for BANKNIFTY).
-Combined-leg series loads on **Add** (sum of each leg's premium series × side × lots).
+`getselectedoptionsstrikepricedata` (standard cascade). Combined-leg series loads on **Add**
+(sum of each leg's premium series × side × lots). No live socket.
+
+Underlying fetch also calls `getavailableoptionsdata` with `{stSelectedModeOfData}` on init.
 
 ## Replication notes (→ ArthaYantra)
 - Leg builder (type/side/lots) → net basket premium series = Σ(legPremium × ±side × lots[×lotSize]); chart as candlestick + VWAP/EMA/RSI/Volume.

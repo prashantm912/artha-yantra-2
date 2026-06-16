@@ -41,20 +41,58 @@ header (global)
 | RSI | sub-pane | bottom | RSI 14 + SMA 14, purple, 80/60/20 levels |
 | Range bar | TV footer | bottom | `5y 1y 6m 3m 1m 5d 1d`, time UTC+5:30, log/auto |
 
-## Chart library
-**TradingView Charting Library** (self-hosted) with a **UDF-style datafeed adapter** on OiPulse's API.
-Custom studies (OSPL Volume, SuperTrend defaults, Oi Bar). Note: this differs from the Dashboard
-panels (which use the Investing.com datafeed for global symbols); Advance Chart uses NSE F&O native data.
+## Vue component state (confirmed)
+```
+websiteUrl, enabledNotification, notificationAudioFile,
+tvWidget,                     // TradingView IChartingLibraryWidget instance
+showTradeHistoryFlag,
+latestActiveSymbol ("BANKNIFTY-I"),
+prevPaneHeight, resizeTimeout,
+stCvsId, mouseMoveHandler,
+showOiBars (false),           // "Show OI Bar (Beta)" toggle
+socketReconnecting,
+socketSubscribedEvents ([]),  // live price subscription (empty on initial load)
+latestPriceRangeIntervalId, latestPriceRange,
+chartEle, chartCvs, chartCvsCtx, oiBarChart,   // canvas overlay for OI bars
+widgetOptions                 // TV widget config (see below)
+```
 
-## Data source / API (TradingView datafeed adapter)
+## TradingView widgetOptions (confirmed)
+```json
+{
+  "symbol": "BANKNIFTY-I",
+  "interval": "3",
+  "container": "chart_1",
+  "library_path": "/charting_library/",
+  "datafeed": "<OiPulse UDF adapter>",
+  "timezone": "Asia/Kolkata",
+  "locale": "en",
+  "theme": "Dark",
+  "enabled_features": ["countdown","study_templates","side_toolbar_in_fullscreen_mode","header_in_fullscreen_mode","timezone_menu"],
+  "disabled_features": ["create_volume_indicator_by_default","popup_hints","go_to_date","symbol_info","header_compare","volume_force_overlay","source_selection_markers","use_localstorage_for_settings"],
+  "fullscreen": false,
+  "autosize": true,
+  "load_last_chart": true,
+  "auto_save_delay": <N>,
+  "custom_indicators_getter": "<function>",
+  "save_load_adapter": "<object>"
+}
+```
+
+## Chart library
+**TradingView Charting Library** (self-hosted at `/charting_library/`) with a **UDF-style datafeed adapter** on OiPulse's API.
+Custom studies (OSPL Volume, SuperTrend defaults, Oi Bar). Note: this differs from the Dashboard
+panels (which use the Investing.com `ssltvc.forexprostools.com` iframes); Advance Chart uses NSE F&O native data.
+
+## Data source / API (TradingView datafeed adapter, namespace `trading-view`)
 | Call | Request | Purpose |
 |---|---|---|
-| `/api/trading-view/getservertime` | — | server clock |
-| `/api/trading-view/getlistofsymbols` | `{stUserInput, stSymbolType}` | symbol search/resolve |
-| `/api/trading-view/getallstudytemplates` | — | saved indicator templates |
-| `/api/trading-view/getcandledata` | `{ex, symbol, fromTs, toTs, resolution, countBack, limit, type}` | OHLCV history bars (the datafeed) |
+| `getservertime` | — | server clock |
+| `getlistofsymbols` | `{stUserInput, stSymbolType}` | symbol search/resolve |
+| `getallstudytemplates` | — | saved indicator templates |
+| `getcandledata` | `{ex, symbol, fromTs, toTs, resolution, countBack, limit, type}` | OHLCV history bars (the TV datafeed `getBars`) |
 
-`getcandledata` is the bar feed: exchange + symbol + time range + resolution → candles (standard TradingView `getBars`).
+`getcandledata` is the bar feed: exchange + symbol + time range + resolution → candles. Called multiple times per page load (initial bars + pagination).
 
 ## Replication notes (→ ArthaYantra)
 - We have lightweight-charts + a candle store. Advance Chart = our chart bound to our `/api/v1/market/candles` with a symbol search, interval, indicator overlays (VWAP/VWMA/SuperTrend/RSI/volume), and OI-bar overlay.

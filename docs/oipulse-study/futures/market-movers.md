@@ -40,15 +40,68 @@ Columns: Time, Name, Chart, Min. B.O., LTP, % LTP Chg., Oi. Empty until a curren
 prints a new high/low during market hours, then appends a row (timestamped). Placeholder text:
 "Data will only show up here whenever any current month futures makes new high or new low in market hours."
 
+## Vue component state (confirmed)
+```
+selectedModeOfData, selectedAvailableAsset (null=all), selectedExpiry,
+selectedAvailableDate, availableAsset, availableDate, availableExpiryData, availableModeOfData,
+topGainers,        // 225 rows today — sorted by inLtpChangeInPercentage desc
+topLosers,         // 159 rows today — sorted asc
+newHighLowData,    // 5 rows — live new-H/L events during session
+arPrevDaysHighLowData,   // from getlimitedprevdayhighlows (for breakout reference)
+searchSymbol, doneTypingInterval,
+socketSubscribedEvents,          // ["FD_OIS"]
+socketSeperateSubscribedEvents,
+stLastUpdatedAt, isSocketConnectedSecondTime, socketDataUpdateTimeoutId
+```
+
+Top gainer enriched row (confirmed):
+```json
+{
+  "stSymbolName": "360ONE",
+  "inNewLtp": "1141.3", "inOldLtp": "1133.5",
+  "inLtpChangeInPercentage": 0.69, "inLtpChange": 7.8,
+  "inNewOi": "5939000", "inOldOi": "5792500",
+  "inOiChangeInPercentage": 2.53, "inOiChange": 146500,
+  "inDayHighLow": "",
+  "inNewDayOpen": 1147, "inNewDayHigh": 1168.8, "inNewDayLow": 1133.7,
+  "inOiInterpretation": 1,
+  "inDaysBreakOut": 13
+}
+```
+
+New High/Low live row (confirmed):
+```json
+{
+  "stName": "NIFTY-I", "stTime": "14:10:20",
+  "ltp": 24016.6, "ltpChgPercentage": 0.418,
+  "highOrLow": "H",   // "H" = new high, "L" = new low
+  "inOi": 17710680,
+  "inDaysBreakOut": 0,
+  "is52WeekHighBroken": false, "is52WeekLowBroken": false,
+  "inOiInterpretation": 4,
+  "inChangeInOiPercentage": "-0.60"
+}
+```
+
+## Socket subscriptions
+- `FD_OIS` — same all-market futures feed as OI Spurt
+- `socketSeperateSubscribedEvents` — secondary socket (e.g. for new-H/L live events)
+
 ## Data source / API
 | Call | Request | Response |
 |---|---|---|
-| `/api/heatmap/getlistofassetforheatmap` | — | asset options |
+| `/api/heatmap/getlistofassetforheatmap` | `{}` | asset options |
 | `/api/futures/getfuturesoispurtdate` | `{stSelectedModeOfData}` | dates |
-| `/api/futures/getlimitedprevdayhighlows` | — | `data:[{stFuturesName, in52WeekHigh, in52WeekLow, inPrevOi, inHighs:[…], inLows:[…]}]` (breakout reference) |
-| `/api/futures/getfuturesmarketmoversdata` | `{stSelectedAsset, stSelectedExpiry, stSelectedAvailableDate, stSelectedModeOfData}` | `data:[{stSymbolName, stFetchTime, inOldOi, inOldClose, inNewOi, inNewClose, …OHLC}]` |
+| `/api/futures/getlimitedprevdayhighlows` | `{}` | `data:[{stFuturesName, in52WeekHigh, in52WeekLow, inPrevOi, inHighs:[15 daily highs], inLows:[15 daily lows]}]` |
+| `/api/futures/getfuturesmarketmoversdata` | `{stSelectedAsset, stSelectedExpiry, stSelectedAvailableDate, stSelectedModeOfData}` | `data:[ row ]` |
 
-Gainers/Losers derived by ranking movers data on LTP%; Min.B.O./O=H/L computed against prevdayhighlows + intraday OHLC; New-H/L feed watches live extremes.
+Raw movers API row:
+```json
+{ "stSymbolName": "360ONE", "stFetchTime": "14:09:00",
+  "inOldOi": "5792500", "inOldClose": "1133.5",
+  "inNewOi": "5939000", "inNewClose": "1141.3" }
+```
+Gainers/Losers: rank by `inLtpChangeInPercentage` client-side. `inDaysBreakOut` from comparing new-high vs `inHighs` array. `inOiInterpretation` uses 4-state enum.
 
 ## Replication notes (→ ArthaYantra)
 - Movers endpoint (symbol OHLC+OI) + a prev-day high/low reference endpoint (52w H/L + recent highs/lows arrays).

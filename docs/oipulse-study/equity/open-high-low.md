@@ -29,18 +29,61 @@ Rows per page:[200▾]                                   1 - 66 of 66
 
 `isOH` / `isOL` booleans flag which setup the stock matches.
 
-## Data source / API
-`POST /api/equity/getequityopenhighlowdata` →
-```json
-{ "data":[ { "stSymbolName":"ABB", "inOldLtp":6858, "inOldDayOpen":6880,"inOldDayHigh":6880,"inOldDayLow":6846,
-             "isOH":true,"isOL":false, "inNewLtp":6947.5,"inNewDayHigh":6977.5,"inNewDayLow":6821,
-             "stOldDayHighBreakTime":"10:25:00","stOldDayLowBreakTime":null } ] }
+## Vue component state (confirmed)
 ```
-`isOH`/`isOL` drive the setup match; "Far from" % computed from `inNewLtp` vs old day high/low; trigger = break-time fields.
+isSocketConnectedSecondTime (false),
+minAvailableDate, maxAvailableDate, disableRefreshDataButton,
+availableModeOfData, availableAsset, availableDate,
+selectedModeOfData, selectedAvailableAsset (null), selectedAvailableDate,
+searchSymbol, doneTypingInterval,
+stLastUpdatedAt,
+openHighData ([]),   // 66 rows (O=H stocks)
+openLowData ([]),    // 17 rows (O=L stocks)
+allData ([]),        // 83 = openHighData + openLowData combined
+tempAllData
+```
+No socket subscription — `isSocketConnectedSecondTime` flag stays `false` (snapshot page).
+
+## Data source / API
+| Endpoint | Namespace | Request | Notes |
+|---|---|---|---|
+| `getequitydate` | `equity` | `{stSelectedModeOfData}` | available dates |
+| `getlistofassetforheatmap` | `heatmap` | `{stSelectedModeOfData}` | Asset dropdown (All F&O Stocks + specific indices) |
+| `getequityopenhighlowdata` | `equity` | `{stSelectedAsset:null, stSelectedAvailableDate:"2026-06-16", stSelectedModeOfData:"live"}` | main data |
+
+Raw API row (confirmed — ADANIENSOL sample):
+```json
+{
+  "stSymbolName": "ADANIENSOL",
+  "inOldLtp": 1485,
+  "inOldDayOpen": 1498,
+  "inOldDayHigh": 1498,
+  "inOldDayLow": 1485,
+  "isOH": true,
+  "isOL": false,
+  "inNewLtp": 1502.7,
+  "inNewDayHigh": 1519,
+  "inNewDayLow": 1475.5,
+  "stOldDayHighBreakTime": "09:29:00",
+  "stOldDayLowBreakTime": null
+}
+```
+
+Earlier confirmed row (ABB):
+```json
+{ "stSymbolName":"ABB", "inOldLtp":6858, "inOldDayOpen":6880,"inOldDayHigh":6880,"inOldDayLow":6846,
+  "isOH":true,"isOL":false, "inNewLtp":6947.5,"inNewDayHigh":6977.5,"inNewDayLow":6821,
+  "stOldDayHighBreakTime":"10:25:00","stOldDayLowBreakTime":null }
+```
+
+`isOH`/`isOL` booleans drive which setup the stock matches. "Far from" % computed client-side: `(inNewLtp − inOldDayHigh) / inOldDayHigh * 100`. Break-time fields null until the level is broken.
 
 ## Replication notes (→ ArthaYantra)
-- Equity universe scan: detect Open==High / Open==Low (booleans), compute distance-from-level + break time.
+- Asset dropdown uses `heatmap` namespace endpoint (shared with Sector Heatmap).
+- Equity universe scan: detect Open==High / Open==Low via `isOH`/`isOL` booleans.
+- Compute distance-from-level + break time client-side from the raw OHLC fields.
 - Mirrored table (O=H left / O=L right) with Hit/% Far badges. Cash-market OHLC source.
+- allData = openHighData + openLowData; filtered by search; paginated.
 
 ## Screenshot
 ss_05561cyho (66 F&O stocks, O=H/O=L mirror, Hit/Far badges).

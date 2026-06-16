@@ -18,10 +18,33 @@ Identical structure to Straddle Chart:
 - blue VWAP, yellow 20 EMA, Call Price line, Put Price line
 - day H/L markers, dataZoom slider, legend (Candles/VWAP/20 EMA/Call Price/Put Price)
 
+## Vue component state (confirmed — same keys as straddle-chart.md except two strike fields)
+```
+selectedCallStrikePrice ("57800"), selectedPutStrikePrice ("56600"),
+selectedAvailableExpiryDate ("260630"), selectedTimeInterval (3),
+separateData, timeframeData, closeAndVwapData,  // same structure as straddle
+socketSubscribedEvents, stLastUpdatedAt, realTimeDataTimeOutId
+```
+`closeAndVwapData` keys: `{xAxisData, yAxisCallCloseData, yAxisPutCloseData, yAxisCloseData, yAxisVwapData, yAxisCandlestickData, volumeData}` — identical to straddle.
+
+## Socket subscriptions (confirmed)
+```
+socketSubscribedEvents: [
+  "OD_SSC_BANKNIFTY_260630_57800_CE",   // CE at call strike
+  "OD_SSC_BANKNIFTY_260630_56600_PE",   // PE at put strike (different!)
+  "EQUITY_UNDERLYING_DATA_NIFTY BANK"
+]
+```
+Pattern: `OD_SSC_{SYMBOL}_{YYMMDD}_{CALL_STRIKE}_CE` + `OD_SSC_{SYMBOL}_{YYMMDD}_{PUT_STRIKE}_PE`
+
 ## Data source / API
-`POST /api/strategy/getstranglechartdata` — same response shape as `getstraddlechartdata`
-(`data:[{stTime, obOiData:[{PE:{OHLC,vol}},{CE:{OHLC,vol}}]}], underLyingAssetData`) but the request carries
-**separate Call and Put strikes**; combined candle = CE(callStrike) + PE(putStrike).
+| Endpoint | Request | Response |
+|---|---|---|
+| same discovery chain as straddle | same | same |
+| `POST /api/strategy/getstranglechartdata` | `{stSelectedModeOfData, stSelectedOptions, stSelectedAvailableDate, stSelectedAvailableExpiryDate:"260630", inSelectedCallStrikePrice:"57800", inSelectedPutStrikePrice:"56600"}` | same shape as straddle |
+
+Request carries **two separate strike params** (`inSelectedCallStrikePrice` + `inSelectedPutStrikePrice`) vs straddle's single `inSelectedStrikePrice`.
+Response shape identical: `data.data:[{stTime, obOiData:[{PE:{...}},{CE:{...}}]}]`.
 
 ## Replication notes (→ ArthaYantra)
 - Reuse the Straddle chart component; parameterize with independent CE/PE strikes.

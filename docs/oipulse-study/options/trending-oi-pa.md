@@ -25,18 +25,35 @@ table columns:
 | **Total Put Ltp** | sum PE premium (`PE_CLOSE`) | |
 | Sentiment | derived | Bearish (red) / Bullish (green) |
 
-## Data source / API
-Same `trending-oi-static` discovery chain; main endpoint is the **`…withclose`** variant:
-`POST /api/trending-oi-static/gettrendingoiforselectedstrikepriceswithclose` →
-```json
-{ "data":[ { "stFetchDate":"2026-06-12","stTime":"23:50:00",
-             "inClose":0,"inHigh":0,"inLow":0,
-             "objOiData":[ {"CE":2059260,"CE_CLOSE":6905.5}, {"PE":476130,"PE_CLOSE":19049.95} ],
-             "totalCeOi":…, "totalPeOi":… } ],
-  "listOfStrikePrice":[…], "underLyingAssetData":{…}, "oiSnapshotData":{…} }
+## Data source / API (CONFIRMED live)
+Same request body as Trending OI; only the endpoint changes:
 ```
-Difference vs Trending OI: `objOiData` carries `CE_CLOSE`/`PE_CLOSE` (premium totals) → the LTP columns;
-all premium chng + straddle (CE+PE) chng computed over consecutive rows.
+POST /api/trending-oi-static/gettrendingoiforselectedstrikepriceswithclose
+Body: {
+  "stSelectedAsset": "BANKNIFTY",
+  "stSelectedAvailableDate": "2026-06-16",
+  "stSelectedAvailableExpiryDate": "260630",
+  "selectedStrikePrices": [56700,...,58100],
+  "stSelectedModeOfData": "live"
+}
+```
+Table row schema (confirmed from live data):
+```json
+{
+  "stFetchDate": "2026-06-16", "stTime": "13:43:00", "stNewTime": "16-06-2026 13:45",
+  "stDataFetchType": "IM",
+  "inClose": 57219.15, "inHigh": 57233.4, "inLow": 57191.2,
+  "CE": 893460, "PE": 500550,
+  "CE_CLOSE": 9511.2, "PE_CLOSE": 11944.6,
+  "CE_CLOSE_CHANGE": -1150, "PE_CLOSE_CHANGE": -758.7, "CE_PE_CLOSE_CHANGE": -1908.7,
+  "inDifferenceInOi": -392910, "inDifferenceInOiDirection": 1,
+  "inChangeInDifferenceInOi": 6750, "inChangeInDifferenceInOiPerc": 1.69,
+  "inNetPcr": "0.56", "inSentimentPercentage": "-78.50",
+  "inDayHighLowBreak": 0, "isDayHighDiffInOi": 0, "isDayLowDiffInOi": 0,
+  "inBrokenDayHigh": 0, "inBrokenDayLow": 0
+}
+```
+`CE_CLOSE` = sum of CE premiums across selected strikes. No `LTP` column (unlike Trending OI which has `inClose` as LTP column).
 
 ## Replication notes (→ ArthaYantra)
 - Extend Trending OI aggregation to also sum CE/PE premium per interval; add Total/Δ premium + straddle-change columns.

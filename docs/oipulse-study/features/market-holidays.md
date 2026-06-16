@@ -20,8 +20,8 @@ Rows per page:[20▾]                                  1 - 20 of 20   ‹ Previo
 | Column | Header | API field | Render |
 |---|---|---|---|
 | # | (row no.) | — | index |
-| Date | `Date` (sortable ⇅) | `stDate` (e.g. "15-Jan-2026") | text |
-| Day | `Day` (sortable ⇅) | `stDay` (e.g. "Thursday") | text |
+| Date | `Date` (sortable ⇅) | `stDate` (e.g. "2026-01-15", ISO format) | text |
+| Day | `Day` (sortable ⇅) | `stDay` (e.g. "Thursday   " — trailing spaces in API response; trim before display) | text |
 | Description | `Description` (sortable ⇅) | `stDescription` (e.g. "Republic Day") | text |
 | Validity | `Validity` (sortable ⇅) | *(computed)* | **badge: red `Passed`** if date < today, **green `Coming`** if date ≥ today |
 
@@ -33,8 +33,9 @@ Rows per page:[20▾]                                  1 - 20 of 20   ‹ Previo
 `POST /api/market-view/getmarketholidays` (empty body) →
 ```json
 { "status":"success","msg":"Market holidays fetched successfully.",
-  "data":[ {"stDate":"26-Jan-2026","stDay":"Monday","stDescription":"Republic Day"} ] }
+  "data":[ {"stDate":"2026-01-26","stDay":"Monday   ","stDescription":"Republic Day"} ] }
 ```
+`stDate` is ISO `YYYY-MM-DD`. `stDay` has trailing spaces (pad to 9 chars) — trim client-side.
 `Validity` is derived client-side (compare `stDate` to current date).
 
 ## Replication notes (→ ArthaYantra)

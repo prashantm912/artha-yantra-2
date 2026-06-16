@@ -81,12 +81,12 @@ Table columns (`fields` — confirmed):
 | Call | Request | Response |
 |---|---|---|
 | `POST /api/options/getselectedoptionsdate` | `{stSelectedOptions, stSelectedModeOfData}` | dates |
-| `POST /api/options/getoptionsunderlyingdata` | `{stSelectedOptions, stSelectedModeOfData, stSelectedAvailableDate}` | `{stFetchDate, stFetchTime, stUnderLyingAsset, inSpotLtp, inFuturesLtp, inLotSize}` |
-| `POST /api/options/getoptionsdataexpirydate` | `{stSelectedModeOfData, stSelectedOptions, stSelectedAvailableDate}` | expiry list `[{text:"260630",value:"260630"},...]` |
-| `POST /api/options/getselectedassetspotalldata` | `{stSelectedModeOfData, stSelectedAvailableDate, stAssetName:"NIFTY BANK"}` | `data.data:[{stFetchTime:"09:16:00",inClose:57320.3},...]` |
-| `POST /api/options/getselectedoptionchainalldata` | `{stSelectedModeOfData, stSelectedOptions, stSelectedAvailableDate, stSelectedAvailableExpiryDate:"260630"}` | `data:[{stFetchTime, objData:{strike:{inPeOi,inPePrice},...}}]` |
+| `POST /api/strategy-builder/getoptionsdataexpirydate` | `{stSelectedModeOfData, stSelectedOptions, stSelectedAvailableDate}` | expiry list |
+| `POST /api/strategy-builder/getoptionsunderlyingdata` | `{stSelectedOptions, stSelectedModeOfData, stSelectedAvailableDate}` | `{stFetchDate, stFetchTime, stUnderLyingAsset, inSpotLtp, inFuturesLtp, inLotSize}` |
+| `POST /api/strategy-builder/getselectedassetspotalldata` | `{stSelectedModeOfData, stSelectedAvailableDate, stSelectedOptions}` | `data.data:[{stFetchTime:"09:16:00",inClose:57320.3},...]` |
+| `POST /api/strategy-builder/getselectedoptionchainalldata` | `{stSelectedModeOfData, stSelectedOptions, stSelectedAvailableDate, stSelectedAvailableExpiryDate:"260630"}` | `data:[{stFetchTime, objData:{strike:{inPeOi,inPePrice},...}}]` |
 
-Note: namespace is `options` (not `strategy-builder`). Payoff, Greeks, Max P/L, breakeven, POP are **computed client-side** — no greeks from API; computed from HV + days-to-expiry + spot via Black-Scholes.
+**Note:** namespace is `strategy-builder` (not `options` — doc was wrong). Payoff, Greeks, Max P/L, breakeven, POP are **computed client-side** — no greeks from API; computed from HV + days-to-expiry + spot via Black-Scholes.
 
 ## Replication notes (→ ArthaYantra)
 - Leg builder (add CE/PE buy/sell legs from chain) → compute expiry payoff + T+0 (Black-76 — we have `libs/black76-math`) → render P&L curve, Greeks, stats, POP.

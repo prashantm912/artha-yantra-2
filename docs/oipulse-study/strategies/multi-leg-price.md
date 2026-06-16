@@ -63,11 +63,16 @@ updateChartTimeoutId
 **Note**: interval list has **2-min** (unique — no other OiPulse page offers this).
 
 ## Data source / API
-On load: `/api/options/getavailableoptionsdata`, `getselectedoptionsdate`, `getoptionsdataexpirydate`,
-`getselectedoptionsstrikepricedata` (standard cascade). Combined-leg series loads on **Add**
-(sum of each leg's premium series × side × lots). No live socket.
+On load (confirmed):
+| Endpoint | Request | Response |
+|---|---|---|
+| `/api/options/getavailableoptionsdata` | `{stSelectedModeOfData}` | instruments |
+| `/api/strategy/getoptionslotsizedata` | `{stSelectedModeOfData, stSelectedOptions}` | `{data:{inLotSize:30}}` |
+| `/api/options/getselectedoptionsdate` | + `{stSelectedOptions}` | dates |
+| `/api/options/getoptionsdataexpirydate` | + `{stSelectedAvailableDate}` | expiries |
+| `/api/options/getselectedoptionsstrikepricedata` | + `{stSelectedAvailableExpiryDate}` | strikes |
 
-Underlying fetch also calls `getavailableoptionsdata` with `{stSelectedModeOfData}` on init.
+Combined-leg series loads on **Add** (sum of each leg's premium series × side × lots). No live socket.
 
 ## Replication notes (→ ArthaYantra)
 - Leg builder (type/side/lots) → net basket premium series = Σ(legPremium × ±side × lots[×lotSize]); chart as candlestick + VWAP/EMA/RSI/Volume.

@@ -80,8 +80,11 @@ Row schema (confirmed):
 ```json
 { "stOptionName": "57000 CE", "inOiDiff": "190440", "inLtpDiff": "-77.75", "stChartType": "oi_rise_daily" }
 ```
-- `stChartType` values confirmed: `oi_rise_15_min_cd_data`, `oi_rise_60_min_cd_data`, `oi_rise_daily`, `oi_fall_15_min_cd_data`, `oi_fall_60_min_cd_data`, `oi_fall_daily`
-- `stChartType` buckets the row into one of the 6 charts.
+- `stChartType` values confirmed (12 total — 6 regular + 6 `_cd_data` variants):
+  - Regular (6 charts): `oi_rise_15_min`, `oi_rise_60_min`, `oi_rise_daily`, `oi_lose_15_min`, `oi_lose_60_min`, `oi_lose_daily`
+  - `_cd_data` (overlay): `oi_rise_15_min_cd_data`, `oi_rise_60_min_cd_data`, `oi_rise_daily_cd_data`, `oi_lose_15_min_cd_data`, `oi_lose_60_min_cd_data`, `oi_lose_daily_cd_data`
+  - **Note:** "lose" not "fall"; `_cd_data` rows are the same strike repeated across all 3 intervals (change-direction overlay markers)
+- `stChartType` buckets each row into one of the 6 primary charts; `_cd_data` rows are secondary overlays.
 - Bar value = `inOiDiff`; color = interpretation from sign(`inOiDiff`)×sign(`inLtpDiff`).
 
 ## Replication notes (→ ArthaYantra)

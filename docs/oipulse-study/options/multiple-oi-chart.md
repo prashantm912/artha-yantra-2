@@ -48,6 +48,22 @@ socketSubscribedEvents: [] // always empty — no live socket subscriptions
 **None** — `socketSubscribedEvents` is always `[]`. Page is request/response only, no live updates.
 
 ## Data source / API
+| Call | Response |
+|---|---|
+| `/api/options/getavailableoptionsdata` | instruments |
+| `/api/options/getselectedoptionsdate` | dates |
+| `/api/options/getoptionsdataexpirydate` | expiries |
+| `/api/options/getselectedoptionsstrikepricewithtypedata` | available strikes for multi-select |
+| `/api/options/getoptionsoidataformultipleoichart` | main OI series |
+
+Strike-list endpoint:
+```
+POST /api/options/getselectedoptionsstrikepricewithtypedata
+Body: {"stSelectedOptions":"BANKNIFTY","stSelectedAvailableDate":"2026-06-16","stSelectedAvailableExpiryDate":"260630","stSelectedModeOfData":"live"}
+Response: {"status":"success","data":[{"text":"43000 PE","value":"43000 PE"},{"text":"57200 CE","value":"57200 CE"},...]}
+```
+Returns `{text, value}` pairs (both same string e.g. `"57200 CE"`). ~250+ strikes for BANKNIFTY, sorted by ascending strike, PE-before-CE at deep OTM/ITM and interleaved near ATM.
+
 Main request + confirmed schema:
 ```
 POST /api/options/getoptionsoidataformultipleoichart

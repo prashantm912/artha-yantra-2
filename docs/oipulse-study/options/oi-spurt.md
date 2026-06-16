@@ -39,7 +39,7 @@ Temp arrays (`temp*`) hold original data before search filter — restored on se
 |---|---|---|
 | Strike | `inStrikePrice` | "43000", "58200", etc. |
 | Type | `stOptionsType` | "CE" or "PE" |
-| Expiry | `stExpiryDate` | "30-Jun-2026" (display format) |
+| Expiry | `stExpiryDate` | raw API: "260630" (YYMMDD); Vue displays as "30-Jun-2026" |
 | LTP (New) | `inNewLtp` | current interval close |
 | Prev LTP | `inOldLtp` | previous interval close |
 | % Chng LTP | `inLtpChangeInPercentage` | computed, e.g. 1.01 |
@@ -85,7 +85,7 @@ Sample row (Rise in OI + Rise in Price):
 | `POST /api/options/getavailableoptionsdata` | `{stSelectedModeOfData}` | grouped instruments |
 | `POST /api/options/getselectedoptionsdate` | + `{stSelectedOptions}` | dates |
 | `POST /api/options/getoptionsdataexpirydate` | + `{stSelectedAvailableDate}` | expiries |
-| `POST /api/options/getoispurtdataforselectedoptions` | + `{stSelectedAvailableExpiryDate}` | all rows |
+| `POST /api/options/getoispurtdataforselectedoptions` | `{stSelectedOptions, stSelectedAvailableDate, stSelectedAvailableExpiryDate, stSelectedModeOfData}` | all rows |
 
 Main endpoint response:
 ```json

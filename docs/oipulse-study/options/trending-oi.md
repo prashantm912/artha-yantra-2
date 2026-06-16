@@ -83,7 +83,8 @@ Body: {
   "stSelectedAsset": "BANKNIFTY",
   "stSelectedAvailableDate": "2026-06-16",
   "stSelectedAvailableExpiryDate": "260630",
-  "selectedStrikePrices": [56700,56800,56900,57000,57100,57200,57300,57400,57500,57600,57700,57800,57900,58000,58100],
+  "selectedStrikePrices": [],  // empty [] on initial page load → server auto-selects 15 near-ATM strikes
+  // After "Change Strike Prices" modal: [56700,56800,56900,57000,57100,57200,57300,57400,57500,57600,57700,57800,57900,58000,58100],
   "stSelectedModeOfData": "live"
 }
 Response: {

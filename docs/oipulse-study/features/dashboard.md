@@ -61,6 +61,24 @@ Default chart list (confirmed, in order):
 
 Rearrange: drag-and-drop modal updates `tempCharts` → confirmed → saved to `charts`. No OiPulse API call for chart data.
 
+## Iframe URL schema (confirmed via URLSearchParams extraction 2026-06-16)
+
+Base: `https://ssltvc.forexprostools.com/`
+Template: `?pair_ID={pair_ID}&height=1200&width=1920&interval=300&plotStyle=candles&domain_ID={domain_ID}&lang_ID={lang_ID}&timezone_ID=20`
+
+| order | title | pair_ID | domain_ID | lang_ID |
+|---|---|---|---|---|
+| 0 | Dow Futures | 169 | 1 | 1 |
+| 1 | Nifty 50 Futures | 8985 | 1 | 1 |
+| 2 | Banknifty | 104423 | 56 | 56 |
+| 3 | India Vix | 17942 | 56 | 56 |
+| 4 | Crude Oil | 8849 | 56 | 56 |
+| 5 | USD / INR | 160 | 56 | 56 |
+
+- `interval=300` = 5-minute candles (matches default "5" interval button)
+- `domain_ID=1 / lang_ID=1` = English global; `56/56` = India locale
+- `timezone_ID=20` = IST (+5:30)
+
 ## Data source
 - Charts: 6 × **`ssltvc.forexprostools.com`** iframes (Investing.com widget — NOT TradingView embed directly; Investing.com wraps TradingView).
 - Ticker strip: `POST /api/gettickerdata`.

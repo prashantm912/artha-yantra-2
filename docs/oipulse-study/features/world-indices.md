@@ -72,21 +72,37 @@ Each MapPoint has these settings:
 ```
 `geometry.coordinates` = [longitude, latitude] (GeoJSON order). `rotation` = label-arrow rotation angle (hint for crowded positions). Commodities (Gold/Silver/Crude) use placeholder coordinates in the S-Atlantic (~-40 to 0 lon, -44 to -52 lat) since they have no country.
 
-## Data source / API
-`POST /api/heatmap/getworldindicesdata` — request body likely `{}` or `{stSelectedModeOfData:"live"}` (direct fetch blocked by CORS in JS context; inferred from API namespace pattern).
+## Data source / API (confirmed via XHR interception 2026-06-16)
+`POST /api/heatmap/getworldindicesdata` — body `{}` (empty).
 
-Server response (inferred from field naming convention + prior study):
 ```json
 { "status":"success","msg":"Data fetched successfully.",
   "data":[ {
-    "stFetchDate":"16-06-2026", "stFetchTime":"15:05:01",
+    "stFetchDate":"2026-06-16", "stFetchTime":"15:37:02",
     "stIndiceName":"Dow Jones (F)",
-    "inClose": 52166, "inChangePoint": 37, "inChangePercentage": 0.07,
+    "inClose": 52182, "inChangePoint": 53, "inChangePercentage": 0.1,
     "objLocation": { "latitude": 42.3001, "longitude": -103.6587, "rotation": 0 }
-  }, ... ]
+  }, ... 13 total ]
 }
 ```
-Vue component transforms server fields → amCharts: `stIndiceName→title`, `inClose→value`, `inChangePercentage→percentage`, `inChangePoint→changePoint`, `objLocation→geometry(GeoJSON)`.
+
+**All 13 raw coordinates confirmed:**
+| stIndiceName | lat | lon | rotation |
+|---|---|---|---|
+| S&P 500 (F) | 35.6042 | -113.5678 | -30 |
+| Dow Jones (F) | 42.3001 | -103.6587 | 0 |
+| NASDAQ 100 (F) | 35.6042 | -83.7973 | 30 |
+| DAX 40 (F) | 51.1657 | 10.4515 | 45 |
+| FTSE 100 (F) | 55.3781 | -3.436 | -35 |
+| Nikkei 225 (F) | 36.2048 | 138.2529 | 0 |
+| China A50 (F) | 35.8617 | 104.1954 | 0 |
+| NIFTY 50 (F) | 20.5937 | 78.9629 | 0 |
+| Hang Seng (F) | 22.3193 | 114.1694 | 0 |
+| Gold/USD | -44.2232 | -40.2802 | 0 |
+| Silver/USD | -48.2232 | -20.2802 | 0 |
+| Crude Oil (F) | -52.2232 | -0.2802 | 0 |
+
+Vue component transforms server fields → amCharts: `stIndiceName→title`, `inClose→value`, `inChangePercentage→percentage`, `inChangePoint→changePoint`, `objLocation.{longitude,latitude}→geometry.coordinates[lon,lat]`, `objLocation.rotation→rotation`.
 
 ## Replication notes (→ ArthaYantra)
 - Use amCharts 5 (`am5map.MapChart` + `am5map.MapPointSeries`) or ECharts geo map.

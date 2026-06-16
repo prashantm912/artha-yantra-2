@@ -44,3 +44,11 @@ replay_pid*
 
 # --- oipulse study auth state (saved Playwright cookies) ---
 docs/oipulse-study/.oipulse-state.json
+
+# --- MCP tool working directories (ephemeral; findings encoded in docs) ---
+.playwright-mcp/
+.firecrawl/
+
+# --- session screenshots / one-off captures at repo root ---
+*.png
+oipulse-frame.html

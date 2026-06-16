@@ -177,7 +177,7 @@ Bar width = (cellValue / maxValue) × 100%. Separate max for call/put OI and OI 
 | `POST /api/options/getavailableoptionsdata` | `{stSelectedModeOfData}` | grouped `[{label:"Index",options:[...]},{label:"Stocks",options:[...]}]` |
 | `POST /api/options/getselectedoptionsdate` | + `{stSelectedOptions}` | dates array |
 | `POST /api/options/getoptionsdataexpirydate` | + `{stSelectedAvailableDate}` | expiries YYMMDD |
-| `POST /api/options/getoptionschaindataforselectedoptions` | + `{stSelectedAvailableExpiryDate, selectedavailableTimeRange}` | full chain response (below) |
+| `POST /api/options/getoptionschaindataforselectedoptions` | + `{stSelectedAvailableExpiryDate, stSelectedModeOfData, inSelectedavailableTimeRange:null, stStartTime:null, stEndTime:null}` | full chain response (below) |
 
 Full chain API response structure:
 ```json
@@ -208,7 +208,7 @@ Vue component pairs CE/PE by `inStrikePrice` → computes all deltas/Greeks/PCR/
 - Column visibility modal (17 toggleable columns)
 - ATM computed from `optionChainAtm` (nearest strike to underlying LTP)
 - Days to expiry = `inDaysLeftInExpiry` (fractional)
-- Socket events: subscribed to `Array(3)` events for live LTP updates
+- Socket events (CONFIRMED): `OD_OC_{SYMBOL}_{EXPIRY}` (chain ticks), `EQUITY_UNDERLYING_DATA_NIFTY BANK` (underlying), `EQUITY_UNDERLYING_DATA_INDIA VIX` (VIX)
 
 ## Screenshot
 ss_5693wz43d (BANKNIFTY 30-Jun chain, ATM band, OI data-bars, PCR column).

@@ -52,7 +52,7 @@ selectedTimeInterval,    // default 5
 timeInterval,            // [{text:"3 min",value:3},...{value:60}]
 availableFuturesData,    // [{"value":null,"text":"Please select a futures name"}]
 availableDate, availableModeOfData,
-tableData,               // array of ~60 rows (for 5-min → ~5h of market)
+tableData,               // array of 75 rows for full day (09:15–15:30 = 375 min / 5 = 75 at 5-min)
 columns,                 // [{label:"Time",field:"stTimeInterval"}, {label:"Hdfc Bank",field:"inOiInterpretation_HDFCBANK"},...]
 pagination,              // {perPage:25, page:1, ...}
 totalRecords,

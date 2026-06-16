@@ -91,7 +91,7 @@ Row striping: extreme-trend rows get faint maroon background tint.
 ## Data source / API
 | Endpoint | Request | Response |
 |---|---|---|
-| `POST /api/connecting-dots/getselectedassetdate` | `{stSelectedAsset:"BANKNIFTY-I", stSelectedModeOfData:"live"}` | `{data:[{value:null,text:"Please select..."},{text:"Tue, Jun 16, 2026",value:"2026-06-16"}]}` |
+| `POST /api/connecting-dots/getselectedassetdate` | `{stSelectedAsset:"BANKNIFTY-I", stSelectedModeOfData:"live"}` | `{data:[{text:"2026-06-16",value:"2026-06-16"}]}` — API returns dates only; null placeholder is added client-side by Vue |
 | `POST /api/connecting-dots/getselectedassetalldata` | `{stSelectedAsset:"BANKNIFTY-I", stSelectedAvailableDate:"2026-06-16", stSelectedTimeInterval:3, stSelectedModeOfData:"live"}` | `{data:[<row>×82]}` |
 
 Row schema (13 fields all integers except `stTimeInterval`):
@@ -120,7 +120,7 @@ Five pills: `Ext. Bullish ↑` (green), `Ext. Bearish ↓` (red), `↑ = Bullish
 - Render: PrimeNG `p-table`, paginator(25), each factor cell = `p-tag` with arrow icon; composite Trend = wider tag
 - Legend card below table
 - Extreme rows: faint maroon row-class tint
-- 82 rows/session at 3-min for a ~7hr day (9:15–15:30 IST)
+- ~125 rows/session at 3-min for a full day (9:15–15:30 IST = 375 min / 3 = 125 intervals). Partial-day reads return fewer rows.
 
 ## Screenshot
 ss_533127vwh (live BANKNIFTY 3-min matrix, 82 rows).

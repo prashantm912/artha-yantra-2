@@ -21,7 +21,7 @@ underlying header strip:
 │    Put LTP  Put D.H/L  Total OI Chng  Put OI                                                    │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘
 Rows per page:[10▾]     [25]  pagination: ‹ Previous  Next ›
-Total rows: ~80 displayed (filtered from 484 raw API rows = 242 CE + 242 PE paired by stTime)
+Total rows: 125 at 3-min full day (from 750 raw 1-min rows = 375 CE + 375 PE paired by stTime)
 ```
 
 ## Filter bar — exact controls
@@ -83,9 +83,9 @@ Full CSS: `badge text-capitalize badge-interpretation text-right badge-{class}`
   "stName": "BANKNIFTY",
   "stDataFetchType": "IM",
   "inCallOi": "173580",
-  "inCallLatestOi": 170880,
-  "inCallOiChange": -3420,
-  "inCallCumulativeOiChange": 103410,
+  "inCallLatestOi": "208650",
+  "inCallOiChange": -10950,
+  "inCallCumulativeOiChange": 78750,
   "inCallClose": 731.05,
   "inCallOpen": 728,
   "inCallHigh": 736.95,
@@ -101,9 +101,9 @@ Full CSS: `badge text-capitalize badge-interpretation text-right badge-{class}`
   "isCallDayLowBrake": false,
   "inStrikePrice": "57100",
   "inPutOi": "151530",
-  "inPutLatestOi": 148620,
-  "inPutOiChange": -3420,
-  "inPutCumulativeOiChange": 62370,
+  "inPutLatestOi": "202170",
+  "inPutOiChange": -4620,
+  "inPutCumulativeOiChange": 111720,
   "inPutClose": 677,
   "inPutOpen": 679.5,
   "inPutHigh": 680.45,
@@ -128,9 +128,12 @@ Vue pairs raw CE+PE rows by `stTime` into this combined structure and computes d
 | `POST /api/options/getselectedoptionsdate` | `{stSelectedOptions:"BANKNIFTY", stSelectedModeOfData:"live"}` | `data:[{value:null,text:...},{text:"Tue, Jun 16, 2026",value:"2026-06-16"}]` |
 | `POST /api/options/getoptionsdataexpirydate` | + `{stSelectedAvailableDate:"2026-06-16"}` | `data:[{value:null,...},{text:"30-Jun-2026",value:"260630"},...]` value=YYMMDD |
 | `POST /api/options/getselectedoptionsstrikepricedata` | + `{stSelectedAvailableExpiryDate:"260630"}` | `data:[{value:null,...},{text:"57100",value:"57100"},...]` 193 strikes |
-| `POST /api/options/getselectedoptionsalldata` | + `{stSelectedStrikePrice:"57100", stSelectedTimeInterval:"3"}` | `data:[raw_row×484]` |
+| `POST /api/options/getselectedoptionsalldata` | + `{inSelectedStrikePrice:"57200", stSelectedModeOfData:"live"}` | `data:[raw_row×750]` |
 
-Raw API row (one CE or PE entry, 484 total = 242 CE + 242 PE):
+Note: no time interval in request — server returns full 1-min data; Vue aggregates to `selectedTimeInterval` client-side.
+`underlyingDetails` is returned by `getselectedoptionsstrikepricedata`, not by `getselectedoptionsalldata`.
+
+Raw API row (one CE or PE entry, 750 total for full day = 375 CE + 375 PE at 1-min):
 ```json
 {
   "stOptionsType": "PE",
@@ -149,6 +152,10 @@ Raw API row (one CE or PE entry, 484 total = 242 CE + 242 PE):
 ```
 Vue pairs CE+PE rows by `stTime`, computes OI change/cumulative/LTP diff/interpretation/DH-DL-break per side.
 `stDataFetchType`: `IM`=intraday-minute.
+
+## Socket subscriptions (CONFIRMED)
+Channel pattern: `OD_OIA_{SYMBOL}_{EXPIRY}_{STRIKE}` (e.g. `OD_OIA_BANKNIFTY_260630_57200`).
+Subscribed after Go button fires. Phase B will capture the live push payload schema.
 
 ## Replication notes (→ ArthaYantra)
 - Raw endpoint returns alternating CE/PE rows per time tick → pair by stTime → mirrored table

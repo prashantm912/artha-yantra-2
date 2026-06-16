@@ -114,7 +114,7 @@ Response: {
   ]
 }
 ```
-258 rows (1-min resolution for full day 09:16–13:33). `inPcr` = string decimal; `inClose` = float.
+375 rows for full day (1-min resolution 09:16:00–15:30:00). `inPcr` = string decimal; `inClose` = float.
 
 - Cumulative OI = sum `inNewOi` over CE vs PE. Individual OI = per `inStrikePrice` CE/PE bars (ATM = nearest to underlying `inLtp`).
 - "Show Chg. in OI" → use `inNewOi − inOldOi`.

@@ -147,17 +147,50 @@ The Manual-V10 audit ([MANUAL-V10-GAP-ANALYSIS.md](MANUAL-V10-GAP-ANALYSIS.md)) 
 
 ---
 
+## Execution model — user-paced, NOT unattended
+
+**This is NOT a 6.5-hour unattended run.** Claude has no background clock — it acts only
+when the user sends a message (or a scheduled wakeup fires). It cannot "wait until 09:15
+then capture" on its own. Capture is also interactive (inject → wait for ticks → harvest
+via Chrome MCP), so it needs Claude actively driving each burst.
+
+**Model:** the **user is the clock**; Claude is the worker. The user pings Claude in a few
+short bursts across the morning; each burst Claude does ~15–90 min of active work. Total
+**active** time ≈ 2 hours, spread across ~09:00–12:00.
+
+| Burst | User pings ~ | Claude does (active) |
+|---|---|---|
+| 1 — Setup | 09:00 IST | Open all 12 pages, inject socket interceptor on each, confirm channels registered (~15 min) |
+| 2 — Open-burst harvest | 09:15 IST (at open) | Ride the open burst, work pages 1→12, record payload schemas (~60–90 min → ends ~10:45, mostly waiting on ticks between pages) |
+| 3 — Mop-up + verify | ~11:30 IST | Re-capture thin channels; clear V1–V17 visual/REST checks (any time market open) |
+
+> Note: the burst-1 interceptors keep buffering ticks into `window.__socketCapture` from 09:15
+> onward, so even a slightly late burst-2 ping still has open-burst frames in the buffer. Pinging
+> right at 09:15 just lets Claude harvest live per page rather than draining a backlog.
+
+Do **not** rely on `ScheduleWakeup` to chain a full session — context compaction + cache
+expiry across 6.5 hrs is fragile. A single reminder for burst 1 is fine; the user drives the rest.
+
+### Day / token preconditions
+- **Arrive 08:55** to inject before the 09:15 open (pre-09:15 = no ticks yet, setup only).
+- **V10 needs a weekly-expiry day** (options-chain IV only shows on expiry days — NIFTY Tue,
+  BANKNIFTY Thu currently). Pick an expiry day if folding V10 into the same session; else V10 waits.
+- **Let the open settle ~30s** (skip 09:15:00–09:15:30) for clean schema reads — some pages
+  re-subscribe right at open.
+- **Kite token expires 06:00 IST** — irrelevant to oipulse (separate site, user's own Chrome
+  session), but if also live-comparing ArthaYantra, re-arm Kite first.
+
 ## Timing guidance
 
 | IST | Market state | What to do |
 |---|---|---|
-| 09:00–09:14 | Pre-market | Navigate to pages, inject interceptors, wait |
+| 08:55–09:14 | Pre-market | Navigate to pages, inject interceptors, wait (setup only — no ticks) |
 | 09:15–09:30 | Market open | First ticks arrive — highest volume of socket events |
-| 09:30–12:00 | Normal session | Steady ticks — capture remaining pages |
+| 09:30–12:00 | Normal session | Steady ticks — capture remaining pages + V1–V17 checks |
 | 12:00–15:30 | Normal session | Can re-capture any missed pages |
 | 15:30+ | Market closed | Ticks stop — no point continuing |
 
-**Optimal:** Start at 09:00, inject on all 12 pages before 09:15, then harvest ticks from 09:15.
+**Optimal:** Start at 08:55, inject on all 12 pages before 09:15, then harvest ticks from 09:15.
 Sequence: VIX page first (most important), then Options Chain, then remaining in order.
 
 ---

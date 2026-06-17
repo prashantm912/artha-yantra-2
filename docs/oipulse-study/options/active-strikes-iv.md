@@ -70,6 +70,13 @@ Response row schema (confirmed):
 
 Same `active-strike-oi` namespace; the `…ivalldata` endpoint returns CE/PE **IV** (not OI) + asset price.
 
+## Interpretation (how to trade)
+- IV reflects seller-perceived risk: HIGH IV = sellers see more risk / buyers show more demand; LOW IV = less of both.
+- IV regimes (qualitative): low IV favours trend moves and option buying; rising IV erodes premium; high IV is an option-selling environment; very high IV means volatile conditions — book profits fast. Strike distance: in low IV pick ATM/near strikes, in high IV far-OTM strikes get expensive.
+- "Magic of IV" — the CE–PE IV-spread rule: when the Put-side and Call-side IV differ by ~10 points, buy the higher-IV side in the trade direction (it appreciates faster if price moves that way). A tight spread means both sides erode (a sell-side regime). Compute `PutIV − CallIV` as the signal.
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
+
 ## Replication notes (→ ArthaYantra)
 - `ay-echart` dual-axis line: Call IV + Put IV (left) vs price (right) for the active strike; live auto-update.
 - Reuse the active-strike resolution from active-strikes-oi; just swap OI→IV series.

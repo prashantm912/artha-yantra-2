@@ -170,6 +170,7 @@ Note: deeply ITM/OTM rows have `"-"` for many fields (no market activity). `inPc
 }
 ```
 Bar width = (cellValue / maxValue) × 100%. Separate max for call/put OI and OI change.
+Our max-reference object should also add `maxCallVolume` / `maxPutVolume` (the other five extrema are already captured) to drive the Max Volume cell highlight.
 
 ## Data source / API
 | Endpoint | Request | Response |
@@ -200,6 +201,12 @@ Vue component pairs CE/PE by `inStrikePrice` → computes all deltas/Greeks/PCR/
 - **OI interpretation**: same 4-state badge as OI Analysis (badge-success/warning/danger/info)
 - **ITM tint**: rows where strike < underlying LTP (calls ITM) or > underlying (puts ITM) get light tint
 - **PCR Ratio column**: rightmost PUT column; "-" for strikes without meaningful PCR
+- **Cell highlighting**: on EACH of the Call and Put sides, the cell holding the Max OI, the Max OI Change, the Min OI Change, and the Max Volume is highlighted (8 highlighted cells total) — distinct from the proportional inline data-bars
+
+## Interpretation (how to trade)
+- Advantages vs NSE: per-minute OI (vs NSE's ~3-min publish lag), live PCR, and historical options-chain data.
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
 
 ## Replication notes (→ ArthaYantra)
 - Use AG-Grid (not p-table) for this page — it uses custom cell renderers + animated cells

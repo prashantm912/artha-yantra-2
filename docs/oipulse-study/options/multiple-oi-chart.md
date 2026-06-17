@@ -25,6 +25,8 @@ empty ("No data available") until ≥1 strike is selected.
 
 Each selected strike → one colored OI line; underlying price overlaid for context. Toolbox + legend (toggle lines).
 
+Legend-deselect and historical-date support are confirmed; the overlay freely mixes CE and PE strikes on one OI axis.
+
 ## Filter bar — exact controls
 | Control | Values | Notes |
 |---|---|---|

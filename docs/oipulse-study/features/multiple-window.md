@@ -30,6 +30,8 @@ Each panel is an **embed of another page's widget**. Observed defaults:
 - Options OI Statistics (→ see `../options/oi-statistics.md`)
 - Options Premium (→ see `../options/options-premium.md`)
 
+The manual-era canonical layout is 4 panes in a 2×2 grid. The per-pane widget picker enumerates 7 widgets: Futures OI Analysis, Options OI Analysis, Options OI Chart, Options OI Statistics, Options OI Spurt, Options Chain, Options Premium. Each pane is fully independent — its own Mode/Name/Date/Interval/Strike, with no cross-pane sync. Rationale: a single-screen fast decision.
+
 ## Data source
 No unique endpoints — it calls the SAME APIs as its embedded widgets. Discovery calls fired on load:
 `/api/options/getavailableoptionsdata`, `/api/futures/getavailablefuturesdata`,

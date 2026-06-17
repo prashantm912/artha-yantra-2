@@ -31,6 +31,8 @@ Rows per page:[100▾]                                   1 - 100 of 126
 
 **Default selected strikes**: 15 near-ATM strikes (56700→58100 with 100-pt spacing for BANKNIFTY ATM ~57200).
 
+The "Change Strike Prices" modal has Clear-all and Reset buttons, a "Total Strike Prices" count header, and an unbounded multi-select. The legacy control "Show detail view" is the inverse of the "Show Graph View" toggle (detail on = table, off = graph); graph view renders two line panels (ΔCall-OI and ΔPut-OI over time).
+
 ## Vue component state
 ```
 showGraphData, showPositionalData, selectedAsset, availableAssetData,
@@ -107,6 +109,16 @@ Response: {
 ```
 `stDataFetchType:"PEOD"` = prev EOD row; `"IM"` = intraday.
 All computed cols (CE change, PE change, Diff, Direction, PCR, Sentiment) are client-side from consecutive rows vs PEOD baseline.
+
+## Interpretation (how to trade)
+- What "trending" means: the widening gap between ΔCall-OI and ΔPut-OI; use Change-in-OI (not Total OI) for intraday.
+- 5-level sentiment, derived from the sign of the Difference-in-OI and whether each side's OI rose or fell vs the previous interval: Extreme Bullish / Bullish / Neutral / Bearish / Extreme Bearish (this adds Neutral and Extreme tiers beyond a binary read). A positive Difference-in-OI (puts dominant) is a bullish lean.
+- Strength ladder: no remark = Simple; a Day-High/Low Break = Moderate; a Day-Break plus a reduction in the opposite side's OI (and continuous breaks) = Extreme. Refinement: Call-OI still rising alongside Put writing is only Moderate bullish; Call-OI falling (unwinding) is Strong.
+- The Call/Put OI columns are cumulative Δ vs the prior-day EOD baseline; the table reads bottom-to-top (newest on top).
+- Day-High/Low Break trigger: the Difference-in-OI is a new day extreme AND exceeds the previous interval's value (positive for a High Break, negative for a Low Break); it seeds after ~09:16.
+- Trading playbook: focus on OTM CE/PE strikes; a long needs price above VWAP with rising volume and RSI; veto the entry if RSI is overbought or major resistance is near; the bearish case mirrors it. "Buy on Dips / Sell on Rise", and never trade Trending-OI alone.
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
 
 ## Replication notes (→ ArthaYantra)
 - Strike-band selector → aggregate CE/PE OI per interval → compute ΔCall, ΔPut, Diff, PCR, direction, sentiment.

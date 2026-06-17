@@ -31,6 +31,9 @@ filter: Mode(Live/Hist)  Index[Nifty 50▾]  Date[📅]  Search[…]  [Go]      
 ### Color scale
 Continuous green→red: strong gainers dark green, flat pale, strong losers dark red. White tile labels.
 
+The tile tooltip shows 6 fields: OI interpretation, Change %, Open, High, Low, LTP. The export menu
+offers Download SVG / PNG / CSV (CSV = `category | %Change`, sorted descending).
+
 ## Vue component state (confirmed)
 ```
 selectedModeOfData, selectedAvailableDate, selectedAvailableAsset,
@@ -78,6 +81,13 @@ Raw API row (confirmed):
   "inNewClose": 2958.1, "inNewOi": "19453404" }
 ```
 Tile `%` = `inLtpChangeInPercentage` (computed client-side). Advance/Decline = counts of sign of that %. OI fields power the `stOiInterpretation` badge (shown on tile tooltip or detail).
+
+## Interpretation (how to trade)
+- The point is OI-change-relative-to-price per constituent — the tile's OI interpretation is the
+  headline read, not just a tooltip. Works for both the Nifty and Bank Nifty universes. EOD /
+  next-day use: read the day that went by for next-day implications.
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
 
 ## Replication notes (→ ArthaYantra)
 - `ay-echart` treemap: value = weight (tile size), color mapped to change% via `visualMap` (green↔red).

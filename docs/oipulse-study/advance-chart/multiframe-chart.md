@@ -36,6 +36,11 @@ Two independent instances of the same single-chart Vue component rendered side-b
 Identical to Advance Chart — `/api/trading-view/*` (`getcandledata`, `getlistofsymbols`,
 `getservertime`, `getallstudytemplates`), called once per frame (2× each on page load).
 
+## Interpretation (how to trade)
+- Intended use is a top-down timeframe cascade (Weekly → Daily → 3-min) for trade confirmation; a Double-SMA(100,200) overlay is a useful daily preset.
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
+
 ## Replication notes (→ ArthaYantra)
 - A CSS grid of N Advance-Chart components, each independently configurable. Optional symbol/interval sync.
 - Reuse the single-chart component; parameterize per cell.

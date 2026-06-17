@@ -84,6 +84,15 @@ widgetOptions                 // TV widget config (see below)
 Custom studies (OSPL Volume, SuperTrend defaults, Oi Bar). Note: this differs from the Dashboard
 panels (which use the Investing.com `ssltvc.forexprostools.com` iframes); Advance Chart uses NSE F&O native data.
 
+"Open Interest" is a named live sub-pane study (futures OI + change, with a live label like
+"Open Interest 2.516M"), distinct from any OI-bar toggle. The "OSPL Volume" indicator colours a
+volume candle dark when volume is above a threshold (manual: >50K BankNifty / >125K Nifty futures).
+The chart supports multiple saved indicator templates (the Save dialog has Remember Symbol /
+Remember Interval; a "MY TEMPLATES" switcher; example `INTRADAY_SCALPING` = VWAP + SuperTrend +
+VWMA + OSPL Volume + RSI + Open Interest) and an unlimited indicator count. Clarification on the
+Audio-Alerts toolbar button: it is specifically the OSPL-Signal sound alert (Yes/No enable dialog),
+not a generic price alert — see [ospl-signal.md](ospl-signal.md).
+
 ## Data source / API (TradingView datafeed adapter, namespace `trading-view`)
 | Call | Request | Purpose |
 |---|---|---|
@@ -93,6 +102,11 @@ panels (which use the Investing.com `ssltvc.forexprostools.com` iframes); Advanc
 | `getcandledata` | `{ex, symbol, fromTs, toTs, resolution, countBack, limit, type}` | OHLCV history bars (the TV datafeed `getBars`) |
 
 `getcandledata` is the bar feed: exchange + symbol + time range + resolution → candles. Called multiple times per page load (initial bars + pagination).
+
+## Interpretation (how to trade)
+- Top-down workflow: analyse Weekly → Daily → 3-min, each saved as a template; a Double-SMA(100,200) overlay is the recommended daily preset.
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
 
 ## Replication notes (→ ArthaYantra)
 - We have lightweight-charts + a candle store. Advance Chart = our chart bound to our `/api/v1/market/candles` with a symbol search, interval, indicator overlays (VWAP/VWMA/SuperTrend/RSI/volume), and OI-bar overlay.

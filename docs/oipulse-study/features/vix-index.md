@@ -82,6 +82,12 @@ Row:
 ```
 `obVixData` = array of single-key objects (one per instrument) per minute. Chart1 uses INDIA VIX + NIFTY 50; chart2 uses INDIA VIX + NIFTY BANK.
 
+## Interpretation (how to trade)
+- VIX is the "fear index" — the market's collective perceived risk (contrast with IV, which is the seller's perceived risk). It is computed from Nifty OTM call/put premiums. Rising VIX is bearish, falling VIX is bullish; the CE-side reading is proportional to price and the PE-side is inverse.
+- Signal: a steep VIX–Price "X / V-shape" crossover marks a momentum-build-up trigger. Ignore VIX when it is erratic. Although computed from Nifty options, it applies to Bank Nifty as well.
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
+
 ## Replication notes (→ ArthaYantra)
 - Two `ay-echart` line charts, dual y-axis, one minute-series of {time, INDIA VIX, NIFTY 50/BANK}.
 - Bind Vix to left axis (tight range), price to right axis. Blue/orange. Bottom legend, PNG export.

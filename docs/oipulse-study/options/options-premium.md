@@ -78,6 +78,12 @@ Response: {
 ```
 `inNewClose` = option current close/LTP. 4 fields per row. No OHLC. CE/PE interleaved per strike.
 
+## Interpretation (how to trade)
+- The manual defines the premium bar as *extrinsic value*: LTP = intrinsic + extrinsic; OTM options are pure extrinsic; the chart plots extrinsic value (premium/discount). Extrinsic ≈ the market-priced probability ("Risk Value").
+- Strike selection (for buying): avoid OTM (fragile premium), prefer ATM/ITM. Use this chart to find an ITM strike that is relatively *cheap* vs its neighbours (higher leverage). The "Show LTP" toggle overlays each strike's LTP for the comparison.
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
+
 ## Replication notes (→ ArthaYantra)
 - `ay-echart` grouped bar: Call vs Put premium per strike, ATM markLine, strike-window selector.
 - One fetch (CE+PE close per strike); ATM = nearest strike to underlying.

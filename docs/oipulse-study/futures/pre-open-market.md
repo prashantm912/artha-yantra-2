@@ -81,6 +81,17 @@ Vue enriched row (confirmed):
 ```
 `inPrevDayBreak`: `"H"`=prev-day high break, `"L"`=prev-day low break, `null`=none. `stSymbolName` includes `-I` suffix for Current Month futures. Advances/Declines/Unchanged split client-side by sign of `inPreOpenChange`.
 
+## Interpretation (how to trade)
+- The advances/declines skew gives the day's bias; Prev-Day-Break badges flag continuation
+  candidates; require sector-index agreement.
+- Threshold heuristic: a stock already down ~5% is "too high" (avoid); down ~1–3% is a "good
+  opportunity" (~1% intraday target).
+- Historical pre-open is an exchange-unavailable differentiator ⇒ we must persist daily pre-open
+  snapshots to replicate it.
+- Timing: the exchange publishes pre-open data ~09:08; the market opens 09:15.
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
+
 ## Replication notes (→ ArthaYantra)
 - Pre-open snapshot endpoint returning {symbol, preOpenPrice, change, prevDayBreak} for stocks + indices.
 - Client splits advances/declines by sign; 4 sortable `p-table`s; Prev Day Break → `p-tag` (High/Low Break).

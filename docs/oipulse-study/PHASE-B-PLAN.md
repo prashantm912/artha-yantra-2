@@ -119,6 +119,34 @@ After Phase B, update `NOT-CAPTURED.md` item 5:
 
 ---
 
+## Manual V10 audit — interpretation verify items
+
+The Manual-V10 audit ([MANUAL-V10-GAP-ANALYSIS.md](MANUAL-V10-GAP-ANALYSIS.md)) folded its trading-interpretation findings into the study docs (additive). The items below were **NOT** folded in because the older manual may differ from the live site — confirm each during this live session (mostly a quick visual / REST-payload check, done alongside the socket capture). Where the live site differs, correct the named doc; where it confirms the manual, drop the caveat.
+
+| # | Doc to correct | What to verify | How |
+|---|---|---|---|
+| V1 | `futures/banks-analysis.md` | cell %s baseline: prev-day **adjusted close** / prev-day **OI** (manual) vs **day-open** (study); interpretation badge is per-interval | inspect live `inLtpDiffInPercentage` / `inOiDiffInPercentage` |
+| V2 | `options/trending-oi.md` | Difference-in-OI sign: **ΔPut − ΔCall** (manual, positive=bullish) vs study's "Call − Put" | live `inDifferenceInOi` sign when calls dominate |
+| V3 | `fii-dii/capital-market.md` | "In Market" column = cash-market net per row (manual) vs FII Net + DII Net (study) | live payload + arithmetic |
+| V4 | `options/active-strikes-oi.md` | Call line colour: green (study) vs blue/dark (manual); Put=red stable. Also page scope (Nifty/BankNifty present-month?) | visual |
+| V5 | `strategies/open-high-strategy.md` | menu placement (Options vs Strategies); Probability = AI % + >90% gate + "Red Dot" vs discrete 60/80/90/95 tiers | visual + live values |
+| V6 | `futures/oi-analysis.md` | does a **"Pattern"** column exist between Level Break and Volume | visual / live columns |
+| V7 | `options/active-strikes-iv.md` + `oi-interpretation-method.md` | exact IV band bounds; the price-action "~50K candle" figure; Trending-OI RSI thresholds (kept qualitative in docs) | in-app guidance / observed behaviour (may remain manual-sourced) |
+| V8 | `futures/eod-oi-analyzer.md` | a **"Show Detail View"** button (→ ~2-month detail) vs the current 3 checkboxes | visual |
+| V9 | `options/options-premium.md` | premium bar basis: **extrinsic** (LTP − intrinsic) vs raw LTP | compare a known ITM strike's bar to LTP − intrinsic |
+| V10 | `options/options-chain.md` | IV present on **weekly-expiry days**; capture the cell-highlight tint/colour | visual on an expiry day |
+| V11 | `options/oi-statistics.md` | ATM marker: **double-arrow** (manual) vs single ▲ (study) | visual |
+| V12 | `strategies/oi-expiry-strategy.md` | data window (5-day + AI-highlight, manual) vs ~31-session (study); menu (Options vs Strategies) | visual |
+| V13 | `options/multiple-oi-chart.md` | does the live chart have the underlying-price overlay (manual lacks it) | visual |
+| V14 | `futures/pre-open-market.md` + `equity/pre-open-market.md` | one combined "Pre open market" page + tab (manual) vs split futures/equity routes (study) | visual / routing |
+| V15 | `strategies/calendar-spread.md` | chart overlays = VWAP + 20-EMA + volume | visual |
+| V16 | `advance-chart/advance-chart.md` | OSPL-Volume dark-candle thresholds (manual: 50K BankNifty / 125K Nifty) — current values | observe |
+| V17 | `README.md` | exact routes for **Morning Trade** and **3:20 Strategy** (added to menu map as unconfirmed) | navigate Strategies menu |
+
+> These are additive corrections only — none removes existing study content. Items that stay unconfirmable (paid/Annual-only: OSPL Signal, Morning Trade, 3:20 Strategy outputs) remain manual-sourced and tagged as such in their docs.
+
+---
+
 ## Timing guidance
 
 | IST | Market state | What to do |

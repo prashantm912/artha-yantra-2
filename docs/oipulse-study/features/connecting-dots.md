@@ -111,6 +111,13 @@ Row schema (13 fields all integers except `stTimeInterval`):
 ## Signals legend (bottom card)
 Five pills: `Ext. Bullish ↑` (green), `Ext. Bearish ↓` (red), `↑ = Bullish` (green), `↓ = Bearish` (red), `↔ = Neutral` (blue).
 
+## Interpretation (how to trade)
+- The "connect the dots" framework combines six inputs — Global Markets, Futures OI, Options OI, India VIX, Implied Volatility, and Price Action. Take a trade when the majority of inputs align; discount the dissenters.
+- Global-input priority order: Dow Jones → Crude → USD-INR → SGX/GIFT Nifty → Europe. USD-INR is inverse; SGX/GIFT Nifty leads the pre-open; discount global markets entirely on big domestic-news days.
+- The page name derives from this thesis — "connect all the dots".
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
+
 ## Replication notes (→ ArthaYantra)
 - **4 index instruments only** (BANKNIFTY-I, NIFTY-I, FINNIFTY-I, MIDCPNIFTY-I) — not stocks
 - Asset select value has "-I" suffix; display text is bare name (e.g. `value:"BANKNIFTY-I"` displayed as "BANKNIFTY")

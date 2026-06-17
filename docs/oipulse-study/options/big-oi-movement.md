@@ -29,6 +29,8 @@ Two side-by-side tables (CE left, PE right); only the significant OI-move rows (
 | OI Chg. | `inOiChange` | green/red |
 | OI Interpretation | computed | badge (Long/Short Build Up etc.) |
 
+The 4 OI-interpretation badge colours: Long Build-Up green, Short Covering blue, Long Unwinding grey, Short Build-Up red. Moneyness badges: ATM yellow, ITM green, OTM orange.
+
 ## Data source / API (`big-oi-movement`)
 | Call | Response |
 |---|---|
@@ -67,6 +69,13 @@ Confirmed row fields: `{stFetchTimeOld, stFetchTime, inAssetPrice, inStrikePrice
 ## Socket subscriptions
 - `BIG_OI_MOVEMENT_BANKNIFTY_260630` — live big-move events for expiry
 - `EQUITY_UNDERLYING_DATA_NIFTY BANK`
+
+## Interpretation (how to trade)
+- Row-read recipe (ΔOI × ΔLTP): OI↑/price↑ = Long Build-Up; OI↑/price↓ = Short Build-Up; OI↓/price↑ = Short Covering; OI↓/price↓ = Long Unwinding.
+- Methodology: Big-OI is a confirmation / position-sizing gate, not a standalone entry. If Big-OI confirms your bias, size up (aggressive); if it doesn't, or the table is empty, size down (cautious). Watch for bull/bear traps ("two candles that remove weak hands"). Confluence recipe: 2 consecutive candles + rising volume + SuperTrend + RSI, then confirm via Big-OI.
+- Purpose is a position-sizing aid; "big" is an AI/server-side significance filter; the manual-era coverage was index-only.
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
 
 ## Replication notes (→ ArthaYantra)
 - Endpoint returns notable OI-move rows (CE+PE) with moneyness; render two `p-table`s.

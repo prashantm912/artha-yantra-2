@@ -78,6 +78,14 @@ Interpretation (stInterpretation)
 
 API returns 4 wide rows (one per participant: FII/Pro/DII/Client). Vue component transforms them into `tableData` (span-grouped) + `oiData` + `totalOiData`. Segment breakdown and `stInterpretation` may be computed client-side from the raw long/short values.
 
+## Interpretation (how to trade)
+- Net OI = Long − Short per participant; total longs always equal total shorts, so read who is net-long vs net-short.
+- Smart-money vs retail: FII / DII / Pro are smart money, Client is retail. Align with institutions and fade clients; participant importance order is FII > Pro > DII > Client. Valid mainly for the next morning and can flip on global cues.
+- Four change-in-OI regimes from ΔLong / ΔShort: Aggressively Bullish (Long↑ & Short↓), Cautiously Bullish, Aggressively Bearish (Short↑ & Long↓), Cautiously Bearish.
+- The FII Index-Future Long% / Short% is the headline bias; writer rules: more Put selling = bullish, more Call selling = bearish; tally the per-segment Bullish/Bearish (majority wins).
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
+
 ## Replication notes (→ ArthaYantra)
 - API returns wide rows per participant; pivot into grouped table: 4 parent rows × 6 segment children each.
 - Interpretation: net long & rising long ⇒ Bullish; net short & rising short ⇒ Bearish (per segment).

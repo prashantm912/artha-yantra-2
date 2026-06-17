@@ -56,6 +56,14 @@ Confirmed rows:
 ```
 `dtDate` = ISO date `YYYY-MM-DD`. All values ₹ Crore. Negative = FII net short.
 
+## Interpretation (how to trade)
+- Segment composition: Index Futures = Nifty / BankNifty / FinNifty (near + next + far months); Index Options = CE + PE combined for those; Stock Futures = all F&O stocks, all months; Stock Options = CE + PE for all F&O stocks.
+- A large *positive* Index-Options figure usually means Put-buying / hedging (bearish), not "long" — read the options sign carefully.
+- Combine the cash segment with the four derivative segments into a next-morning directional bias.
+- Conflict rule: when FII and DII disagree, weight FII more; treat a futures-buy / cash-sell divergence cautiously.
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
+
 ## Replication notes (→ ArthaYantra)
 - One daily endpoint with 4 nested net segment values → four `ay-echart` bar charts + 4-column table.
 - Flatten `statsObj` when building table data: `{dtDate, idx_fut, idx_opt, stk_fut, stk_opt}`.

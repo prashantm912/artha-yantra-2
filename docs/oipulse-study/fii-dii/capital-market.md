@@ -59,6 +59,12 @@ Note: `dtDate` uses ISO date format `YYYY-MM-DD`. All values in ₹ Crore. `inMa
 
 Chart: `multipleBar2` = ECharts config with `{backgroundColor, title, tooltip, toolbox, axisPointer, grid, xAxis, yAxis, series}`. Two bar series (FII Net, DII Net) in one chart.
 
+## Interpretation (how to trade)
+- A green bar means institutions invested that day (bullish); a red bar means redemption (bearish). Judge collective action over several days, not any single bar.
+- FII/DII activity influences but does not determine the next session — never use it in isolation.
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
+
 ## Replication notes (→ ArthaYantra)
 - We already have an FII-DII net-flow chart on the dashboard. This page = two `ay-echart` bar series (FII Net + DII Net) + a detailed flows table off one daily endpoint.
 - `inMarketNet` = FII Net + DII Net (computed client-side).

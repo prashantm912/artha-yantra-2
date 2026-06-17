@@ -58,6 +58,14 @@ Shares the pre-open namespace (no expiry param — equity mode):
 - `/api/pre-open-market/getpreopenmarketdata` → `data:{ sData:[…stocks], iData:[…indices] }`
   (row: `{stSymbolName, inPreOpenClose, inPreOpenChange, inPrevDayBreak}`)
 
+## Interpretation (how to trade)
+- The advances/declines skew sets the day's bias; Prev-Day-Break badges flag continuation candidates; require sector-index agreement before acting.
+- Threshold heuristic: a stock already down ~5% is "too high" to chase (avoid); one down ~1–3% is a "good opportunity" with a ~1% intraday target.
+- Historical pre-open is an exchange-unavailable differentiator, so we must persist daily pre-open snapshots ourselves.
+- Timing: the exchange publishes pre-open around 09:08; the market opens 09:15.
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
+
 ## Replication notes (→ ArthaYantra)
 - Same as Futures pre-open (see `../futures/pre-open-market.md`) but equity universe + `Indices` filter; no expiry.
 

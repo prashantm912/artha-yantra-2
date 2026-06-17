@@ -157,6 +157,13 @@ Vue pairs CE+PE rows by `stTime`, computes OI change/cumulative/LTP diff/interpr
 Channel pattern: `OD_OIA_{SYMBOL}_{EXPIRY}_{STRIKE}` (e.g. `OD_OIA_BANKNIFTY_260630_57200`).
 Subscribed after Go button fires. Phase B will capture the live push payload schema.
 
+## Interpretation (how to trade)
+- Options OI is the same futures OI primitive applied to CE and PE, mirrored.
+- Read both legs at one strike: pick ATM + high-OI strikes, then read the CE and PE interpretation together. Opposite-side agreement (e.g. CE Short Build-Up + PE Long Build-Up) is a high-confidence direction. Gate on strength (ΔOI/ΔLTP) and confirm with Volume + Day-High/Low-Break.
+- Timeframe roles: 60-min = trend/overnight context (weak in the first half), 15-min = intraday trend, 5-min = entry timing.
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
+
 ## Replication notes (→ ArthaYantra)
 - Raw endpoint returns alternating CE/PE rows per time tick → pair by stTime → mirrored table
 - 16 columns: 7 Call + Strike + 7 Put (symmetric). vue-good-table with line-numbers column

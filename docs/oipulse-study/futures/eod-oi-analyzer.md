@@ -92,6 +92,9 @@ Chart data (`priceOiData`) structure — EOD version has 6 series (extra `yAxisD
 ```
 `yAxisDeliveryData` — delivery quantity series (only in EOD chart, not intraday).
 Candlestick format: `[open, close, low, high]` (same as intraday — NOT standard OHLC).
+The chart price series is the **adjusted close**; the EOD OI-vs-price chart supports a line/bar
+toggle. For indices the Name dropdown exposes Current / Next / Far month variants inline. Historical
+look-back ≈ 2 months.
 
 Range Data row (from `getfutureseodrangedata`):
 ```json
@@ -122,6 +125,11 @@ Daily row (raw API):
   "inClose": 57300.2, "inOi": "2268330", "inVolume": 401670, "inDelQty": 0 }
 ```
 All Change/%/Range/Interpretation columns derived from consecutive daily rows client-side.
+
+## Interpretation (how to trade)
+- Expiry-day tactic: read ~10 days of Future OI to decode big-player activity.
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
 
 ## Replication notes (→ ArthaYantra)
 - Daily EOD OI series endpoint (per future+expiry) → table; compute day-over-day deltas + OI interpretation.

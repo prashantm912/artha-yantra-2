@@ -98,6 +98,13 @@ Response shape: `data` is an object keyed by bank symbol (`HDFCBANK, ICICIBANK, 
 Note: `inLtpDiffInPercentage`/`inOiDiffInPercentage` are STRINGS in raw API (`"-0.52"`) but numbers in Vue enriched rows.
 Per-bank arrays are aligned by `stTimeInterval`; UI pivots them into one matrix row.
 
+## Interpretation (how to trade)
+- The 6 banks are the 6 highest-contribution Bank Nifty constituents.
+- Consensus vs divergence: if all/most banks point one way ⇒ Bank Nifty may move strongly;
+  divergence ⇒ consolidation / irrational one-candle moves.
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
+
 ## Replication notes (→ ArthaYantra)
 - We already capture all 17 bank-sector F&O futures (per project memory / `/banks-grid`). This is a time × bank pivot of LTP%/OI%/interpretation.
 - Endpoint returns per-bank interval arrays; UI pivots to a matrix `p-table`. Each cell = numbers + interpretation `p-tag`.

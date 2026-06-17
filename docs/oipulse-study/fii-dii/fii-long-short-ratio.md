@@ -51,6 +51,11 @@ Only 2 state keys — no filter controls, no table, no socket.
 
 Response populates `chartData` directly (no intermediate transformation). The chart `xAxisDate` drives the x-axis; `yAxisFutIdxLSR` drives the ratio line; `yAxisNiftyFutCandlestickData` drives the NIFTY candles.
 
+## Interpretation (how to trade)
+- The FII Index-Future Long% / Short% ratio is the primary next-day directional bias gauge — a high long ratio signals a bullish lean (see participant-wise-oi for the cross-segment read).
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
+
 ## Replication notes (→ ArthaYantra)
 - `ay-echart` combo (dual y-axis): Nifty futures candles (left price axis) + FII index LSR% line (right axis).
 - dataZoom slider; dynamic title: "FII Long Short Ratio - As on {date}, FII are long for {lsr}%".

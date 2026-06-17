@@ -55,6 +55,11 @@ Table row schema (confirmed from live data):
 ```
 `CE_CLOSE` = sum of CE premiums across selected strikes. No `LTP` column (unlike Trending OI which has `inClose` as LTP column).
 
+## Interpretation (how to trade)
+- Same 5-level sentiment as Trending OI, plus a "premium confirms OI" rule: OI up + premium up confirms the writing; OI up + premium down diverges (read it cautiously).
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
+
 ## Replication notes (→ ArthaYantra)
 - Extend Trending OI aggregation to also sum CE/PE premium per interval; add Total/Δ premium + straddle-change columns.
 - Same sentiment logic; PA columns add confirmation (OI up + premium up vs OI up + premium down).

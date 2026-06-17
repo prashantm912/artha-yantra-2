@@ -39,6 +39,8 @@ No socket subscription — data loaded once on mount, manual Refresh re-fetches.
 | Index bubble ×13 | amCharts MapPoint | geo-pinned by `geometry.coordinates` | 3 lines: **value**, **±%**, **±pts** | green fill ≥0 / red fill <0; white text |
 | Bubble label pill | grey tag | below each bubble | index name e.g. "Dow Jones (F)" | rounded grey tag |
 
+A useful companion reference alongside this map is an IST exchange open/close-time table (which global market is live at which IST hour) so the trader knows which market is driving price at a given time.
+
 ### Confirmed bubbles — live 16-06-2026 (title / value / %chg / pts)
 | Title | Value | % | Pts | Region |
 |---|---|---|---|---|
@@ -103,6 +105,11 @@ Each MapPoint has these settings:
 | Crude Oil (F) | -52.2232 | -0.2802 | 0 |
 
 Vue component transforms server fields → amCharts: `stIndiceName→title`, `inClose→value`, `inChangePercentage→percentage`, `inChangePoint→changePoint`, `objLocation.{longitude,latitude}→geometry.coordinates[lon,lat]`, `objLocation.rotation→rotation`.
+
+## Interpretation (how to trade)
+- Directional relationships to the Indian indices: Dow is a direct lead (Bank Nifty moves with Dow), USD-INR is inverse, and Crude is influential.
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
 
 ## Replication notes (→ ArthaYantra)
 - Use amCharts 5 (`am5map.MapChart` + `am5map.MapPointSeries`) or ECharts geo map.

@@ -62,6 +62,8 @@ Numeric change values: green text if positive, red if negative, with ▲/▼ arr
 | Center-left nav | `All Menu ▾` · `Dashboard` · `Connecting Dots` · `Advance Chart` | text links; All Menu opens mega-dropdown |
 | Right | red **`IC | 1Cliq`** badge · circular user avatar | avatar → account menu |
 
+The account/avatar menu lists: Profile settings · Plan billings · Contact Us · Sign out. The top-right also carries a full-screen toggle, and the left sidebar has a minimise/collapse control.
+
 ### All Menu mega-dropdown
 Full-width dark panel. Columns by section: **Features** (icon grid, 10 items) · **Advance Chart** (2) · **Futures** (8) · **Options** (14) · **Strategies** (7) · **Equity** (8) · **FII/DII Activity** (4). Each item = router link (`<a href="/app/...">`). Opens on click, closes on outside-click/navigation (NOT Escape). Links remain in DOM when closed (SPA-clickable).
 

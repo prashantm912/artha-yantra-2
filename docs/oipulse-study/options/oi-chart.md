@@ -29,6 +29,7 @@ filter: Mode  Name[BANKNIFTY▾]  Date[📅]  Expiry[30-Jun-2026▾]  Strike[571
 | Put Oi Analysis | ECharts dual-axis line | OI (red, left), Price (orange, right) | left OI / right premium |
 
 Each chart: ECharts toolbox (zoom/restore/line-bar/refresh/save PNG), "Oi Pulse / BANKNIFTY 57100" watermark, bottom legend (clickable to toggle series).
+The ECharts toolbox exposes 6 actions, with Line as the default render; line/bar is a first-class toggle.
 
 ## Filter bar — exact controls
 | Control | Values | Notes |
@@ -88,6 +89,12 @@ Response: {
 }
 ```
 Row has `inIv` (IV per minute) — not present in OI Analysis endpoint. Interleaved CE/PE by stTime (1-min resolution).
+
+## Interpretation (how to trade)
+- OI/LTP "X-crossover": on the dual-axis OI+premium chart a steep X = momentum — price↓/OI↑ = Strong Short Build-Up; price↑/OI↓ = Strong Short Covering. The opposite-type option mirrors it; the signal is short-lived; best read on 15-min.
+- The dual-axis chart is the per-strike decision tool; the axis scaling is intentional.
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
 
 ## Replication notes (→ ArthaYantra)
 - Three `ay-echart` line charts off ONE CE/PE strike series:

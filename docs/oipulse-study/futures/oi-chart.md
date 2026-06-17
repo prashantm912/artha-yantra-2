@@ -32,6 +32,10 @@ filter bar: Mode  Name[BANKNIFTY▾]  Expiry[Current Month▾]  Date[📅]  Time
 | Legend | bottom center | — | `▭ Candles` (green) · `● Oi` (blue) |
 | Watermark | faint text | center | "Oi Pulse / BANKNIFTY-I" |
 
+**Toolbox** has 6 actions (zoom, restore-zoom, line [default], bar, restore-chart, save-image);
+line/bar is a first-class toggle — the bar form colours OI by up/down. The hover tooltip surfaces
+the OI-interpretation label per point (`toolTipData`).
+
 ## Chart library
 **ECharts** — candlestick + line, dual y-axis, `dataZoom` slider, `toolbox`, `markPoint`.
 
@@ -82,6 +86,14 @@ Body: {
 Candles from OHLC, OI line from `inOi`. (Note the `…alldataforchart` variant vs `…alldata` for the table.)
 
 > **API pattern (whole app):** per area → `getavailable<area>data` (instruments), `getselected<area>date` (dates), `getselected<area>alldata` (table rows), `getselected<area>alldataforchart` (chart series).
+
+## Interpretation (how to trade)
+- The dual-axis OI-vs-price chart is the per-strike decision tool; its left/right axis scaling is
+  intentional — don't independently auto-scale both axes.
+- OI/LTP "X-crossover": a steep X between the OI line and the price/premium line marks momentum
+  (method doc §6). Best read on 15-min.
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
 
 ## Replication notes (→ ArthaYantra)
 - `ay-echart` combo: candlestick (price, right axis) + line (OI, left axis), dataZoom slider, day extreme markers.

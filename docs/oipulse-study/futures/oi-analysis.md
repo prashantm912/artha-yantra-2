@@ -32,6 +32,8 @@ Rows per page:[25▾]                                         1 - 25 of 127   �
 
 **Expiry availability**: `futuresDataWiseAvailableExpiry` map — each instrument shows which of I/II/III exist.
 
+**Pagination**: the rows-per-page selector offers 25 / 50 / 75 / All.
+
 ## Table columns
 First row is `15:30-EOD` (end-of-day summary), then descending 3-min intervals.
 
@@ -48,6 +50,12 @@ First row is `15:30-EOD` (end-of-day summary), then descending 3-min intervals.
 | LTP Change | computed: `inClose − prev inClose` | green if +, red if − |
 | OI Change | computed: `inOi − prev inOi` | green/red |
 | **OI Interpretation** | computed from sign(LTP Change) × sign(OI Change) | **badge** (see matrix) |
+
+### 15:30-EOD data
+The first `15:30-EOD` row is NSE's post-close **adjusted** OI, distinct from the live 15:15–15:30
+close. The gap between the two is much larger for single-stock futures than for indices. It is
+caused by Clearing-Member reconciliation, and the readjustment only ever **decreases** OI — so the
+EOD OI-interpretation can differ from the last intraday reading. Historical look-back ≈ 2 months.
 
 ### OI Interpretation matrix (REUSED across Futures & Options pages)
 | Price (LTP) | OI | Interpretation | Badge color | Arrow |
@@ -113,6 +121,22 @@ IM row (intraday, confirmed full schema):
 }
 ```
 `inOi` is a numeric string. `stDataFetchType`: `PEOD` (prev EOD), `IM` (intraday). `isDayHighBrake`/`isDayLowBrake` = level break flags. `inOiInterpretation` uses the 4-state enum.
+
+## Interpretation (how to trade)
+- The four OI states split by intent: **Long/Short Build-Up** = fresh positions (strong);
+  **Short Covering / Long Unwinding** = position-closing (weak — no fresh money entering).
+- Signal strength: **strongest** = high Volume + the matching Level-Break + significant ΔLTP & ΔOI;
+  **strong** = high Volume, no break; **weak** = low Volume or insignificant change. Bullish states
+  (Long Build-Up, Short Covering) pair with a Day-High-Break, bearish states with a Day-Low-Break
+  (`isDayHighBrake`/`isDayLowBrake`, `isDayHighVolume`).
+- Scenario flips the weak states: Short Covering reads strongest on a bullish day; Long Unwinding
+  strongest on a bearish day.
+- OI vs Volume: OI counts distinct outstanding contracts, Volume counts times traded, so Volume ≥ OI
+  always; OI rises on fresh writing, falls on buy-back; high Volume signals conviction.
+- Interval roles: **60-min** = trend / overnight context (weak in the first half), **15-min** =
+  intraday trend, **5-min** = entry timing — confirm a small-TF entry against the larger TF.
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
 
 ## Replication notes (→ ArthaYantra)
 - We already capture futures OI per memory (bank-sector F&O). Build: instrument+expiry+date+interval filter → fetch raw OI/price rows → compute Total Chng, LTP Change, OI Change, OI Interpretation, Level Break client-side.

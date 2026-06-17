@@ -32,6 +32,10 @@ Mode: (•)Strategy Builder ( )Strategy Simulator   Select Asset[BANKNIFTY▾]  
 | Save & Load tab | actions | persist/recall strategies (paid feature) |
 | Remove all | action | clear legs |
 | Settings | slider | **Spot % move** (−7…+7) to shift the payoff/T+0 and recompute stats |
+| Save/Update dialog | form | **Strategy Market view** radio (Not Known / Bullish / Bearish / Range Bound / Big move either side); saved strategy persisted with name |
+| Saved-strategy table | table | includes an **RR** (risk/reward) column |
+| Simulator toolbar | controls | Hour / Minute / Time, Min. Gap, Start Autoplay / Stop Autoplay, Reset Time |
+| Per-position edit modal | form | Order Type (Buy/Sell), Entry Price, Exit Price, No. of Lots, and an **"Is position exited?"** toggle |
 
 ## Vue component state (confirmed)
 ```

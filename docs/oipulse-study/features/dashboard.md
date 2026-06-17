@@ -38,6 +38,7 @@ All 6 = **TradingView Advanced Charts** (full charting library), **Investing.com
 (watermark on each). Candlestick + volume, default 5m. Default symbols:
 Dow=`DJI`(NYSE), Nifty50=`IND50`(NSE), Banknifty=`NBNc1`(NSE), India VIX=`NIFVIX`(NSE),
 Crude=`CL`(WTI), USD/INR(currencies). **USD/INR panel overlays B / S / C circular markers** on candles (buy/sell/cover signal annotations).
+Default-symbol rationale: Dow Jones is treated as the "mother of all markets" (the global lead), while Crude and USD/INR are watched as Bank Nifty drivers.
 
 ## Vue component state (confirmed)
 ```

@@ -120,6 +120,13 @@ Response: {
 - "Show Chg. in OI" → use `inNewOi − inOldOi`.
 - PCR Chart from the PCR time series (`inPcr` vs `inClose`).
 
+## Interpretation (how to trade)
+- Support/resistance/range: the strike with max Put OI = support, max Call OI = resistance, and the band between the two = the probable day range. On the Individual-OI bar chart, green (Call) bars to the right of ATM are resistance walls and red (Put) bars to the left are support walls. A breach of a high-OI wall traps writers → strong Short Covering → a buy-the-option moment.
+- The cumulative-OI bar is a writer-dominance gauge; also read the ATM strikes specifically (which side dominates at-the-money).
+- Select Period purpose: restrict the OI/ΔOI bars to a trailing 15/30/45/60-min window to see where option writing is concentrated *now*; it pairs with the "Show Chg. in OI" toggle and is the bridge feature for confirming a Trending-OI sentiment.
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
+
 ## Replication notes (→ ArthaYantra)
 - `ay-echart`: (1) 2-bar cumulative CE/PE OI; (2) per-strike grouped bar with ATM markLine + dataZoom; (3) dual-axis PCR-vs-price line.
 - Strike OI profile is the support/resistance / max-pain visual — high CE OI = resistance, high PE OI = support.

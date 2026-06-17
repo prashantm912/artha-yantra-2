@@ -103,6 +103,11 @@ Main endpoint response:
 ```
 Client buckets rows into 4 quadrants by sign(ΔPrice) × sign(ΔOI), then sorts by OI change magnitude descending.
 
+## Interpretation (how to trade)
+- The four-quadrant model plus a strength filter: a strike merely *appearing* in a quadrant is not a signal — it qualifies only when %ΔLTP > 50% AND %ΔOI > 50% (the `inLtpChangeInPercentage` / `inOiChangeInPercentage` columns are the decision metrics). Per-quadrant trade role: Q1 Long Build-Up = buyer focus; Q2 Short Build-Up = writer focus; Q3 Short Covering = buyer but short-lived; Q4 Long Unwinding = retail avoid. Calls and Puts in the same quadrant imply opposite market direction — read all four together.
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
+
 ## Replication notes (→ ArthaYantra)
 - One API call returns all strikes (CE+PE) for the expiry; client-side quadrant bucketing
 - 4 PrimeNG p-tables (one per quadrant) with shared search filter

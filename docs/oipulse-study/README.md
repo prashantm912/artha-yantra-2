@@ -47,6 +47,8 @@ Click `All Menu` → full-width panel, columns grouped by section. Each item = a
 | Advance Chart | `/app/advance-chart` | + |
 | Multiframe Chart | `/app/multi-frame-advance-chart` | + |
 
+> OSPL Signal + OSPL Volume are Advance-Chart **indicators** (not routes) — see [advance-chart/ospl-signal.md](advance-chart/ospl-signal.md).
+
 ### Futures
 | Item | Route | Scope |
 |---|---|---|
@@ -87,6 +89,8 @@ Click `All Menu` → full-width panel, columns grouped by section. Each item = a
 | Strategy Builder | `/app/strategies/strategy-builder` | + |
 | Calendar Spread | `/app/strategies/calender-spread` | + |
 | Multi Leg Price | `/app/strategies/multi-leg-price` | + |
+| Morning Trade | `/app/strategies/morning-trade` *(manual V10; route to confirm in Phase B)* | + |
+| 3:20 Strategy | `/app/strategies/3-20-strategy` *(manual V10; route to confirm in Phase B)* | + |
 
 ### Equity
 | Item | Route | Scope |
@@ -124,6 +128,12 @@ Each page file captures: route · purpose · layout (positional) · component in
 - [x] **FII/DII (4/4)** — `fii-dii/`: capital-market, fii-derivative-stats, participant-wise-oi, fii-long-short-ratio
 
 **STUDY COMPLETE — 53/53 pages + global shell.**
+
+## Trading-interpretation layer (folded from the Manual V10 audit)
+Per-page docs capture UI + API; the *how-to-trade* methodology, folded in from the OI Pulse Manual (V10), lives in:
+- [oi-interpretation-method.md](oi-interpretation-method.md) — the shared OI read (4 states + strength grading, the four-quadrant model, OI/LTP X-crossover, support/resistance/range, timeframe roles, strike selection, connect-the-dots confluence). Per-page docs link to it from their `## Interpretation (how to trade)` sections.
+- [strategies/expiry-day-trading-plan.md](strategies/expiry-day-trading-plan.md) · [strategies/morning-trade.md](strategies/morning-trade.md) · [strategies/3-20-strategy.md](strategies/3-20-strategy.md) · [advance-chart/ospl-signal.md](advance-chart/ospl-signal.md) — standalone strategy/signal methodologies (the last three are paid/AI features, not yet live-verified — see [NOT-CAPTURED.md](NOT-CAPTURED.md)).
+- [MANUAL-V10-GAP-ANALYSIS.md](MANUAL-V10-GAP-ANALYSIS.md) — the full audit log. Remaining `[VERIFY]` items (where the older manual may differ from live) are tracked in [PHASE-B-PLAN.md](PHASE-B-PLAN.md).
 
 ## API namespace map (`https://api.oipulse.com/api/<ns>/...`)
 Per area, the same verb pattern repeats: `getavailable*` (instruments) · `getselected*date` (dates) ·

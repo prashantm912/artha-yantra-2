@@ -28,6 +28,8 @@ filter: Mode(Live/Hist)  Asset[All F&O Stocks▾]  Expiry[Current Month▾]  Dat
 | Search | text input | "Search for particular symbol" — filter rows |
 | Go | button (red) | scan |
 
+**Historical mode** shows the previous ~2 months (date dropdown).
+
 ## Per-quadrant table columns
 | Column | Source | Render |
 |---|---|---|
@@ -86,6 +88,14 @@ Raw API row (confirmed):
   "inNewOi": "5939500", "inNewClose": "1140.3" }
 ```
 `stSelectedAsset: null` = all instruments. All 4 quadrants come from ONE response; client computes %changes and buckets.
+
+## Interpretation (how to trade)
+- Per-quadrant read: **Short Build-Up** ⇒ likely resistance zone; **Short Covering** ⇒ limited/weak
+  rally; **Long Build-Up** ⇒ fresh longs / bullish; **Long Unwinding** ⇒ profit-booking (price↓ +
+  OI↓ ⇒ book profits). Apply the 50% strength filter, read all four quadrants together, and remember
+  Calls vs Puts in the same quadrant imply opposite direction (method doc §5).
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
 
 ## Replication notes (→ ArthaYantra)
 - One scan endpoint returning {symbol, oldOi, oldClose, newOi, newClose} for the asset universe.

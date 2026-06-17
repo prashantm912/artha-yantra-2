@@ -46,6 +46,14 @@ Pattern: `OD_SSC_{SYMBOL}_{YYMMDD}_{CALL_STRIKE}_CE` + `OD_SSC_{SYMBOL}_{YYMMDD}
 Request carries **two separate strike params** (`inSelectedCallStrikePrice` + `inSelectedPutStrikePrice`) vs straddle's single `inSelectedStrikePrice`.
 Response shape identical: `data.data:[{stTime, obOiData:[{PE:{...}},{CE:{...}}]}]`.
 
+## Interpretation (how to trade)
+- Definition: a Strangle = CE + PE at different OTM strikes; the objective is to harvest premium decay.
+- When to use: high IV with OI not building on either side means sell premium — deploy an OTM Strangle, selecting OTM strikes outside the established day high/low.
+- Pre-trade qualify: Trending-OI flat + Active-IV high.
+- Chart read: the combined CE+PE premium (the candlestick series — see Chart) reverting to its VWAP (blue line) is an entry / scale-in trigger.
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
+
 ## Replication notes (→ ArthaYantra)
 - Reuse the Straddle chart component; parameterize with independent CE/PE strikes.
 

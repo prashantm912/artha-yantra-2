@@ -144,6 +144,14 @@ Main endpoint response (confirmed body):
 Note: response is `data.data` (double-nested). `underLyingAssetData` appears as a separate top-level key in the response.
 Per interval: CE and PE OHLC+volume in `obOiData` array. Straddle = CE+PE summed OHLC.
 
+## Interpretation (how to trade)
+- Definition: a Straddle = CE + PE at the same ATM strike; the objective is to harvest premium decay.
+- When to use: high IV on both sides plus flat / no-trend OI means sell premium — deploy a Straddle when you're directionless.
+- Pre-trade qualify: confirm a non-trending day (Trending-OI flat + Active-IV high) before deploying.
+- Chart read: the combined CE+PE premium (the candlestick series — see Chart series) reverting to its VWAP (blue line) is an entry / scale-in trigger.
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
+
 ## Replication notes (→ ArthaYantra)
 - Time interval has 1-min option (others start at 3 min) — important for scalping
 - Sum CE+PE OHLC per interval → straddle candlestick; overlay VWAP, 20 EMA, CE/PE close lines

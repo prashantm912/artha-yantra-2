@@ -151,6 +151,11 @@ Response: {
 
 **OI Interpretation enum** (same as all other pages): 1=Long Build Up · 2=Long Unwinding · 3=Short Build Up · 4=Short Covering.
 
+## Interpretation (how to trade)
+- This feature (the per-strike, last-N-day EOD OI + premium table) is the data input the **Expiry-Day Trading Plan** consumes. For the full two-session methodology see [expiry-day-trading-plan.md](expiry-day-trading-plan.md).
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
+
 ## Replication notes (→ ArthaYantra)
 - Strike selector (multi/default set of 5) → one CE + one PE table per strike.
 - Each table: paginated (7 rows default), columns as above, `isAllDayHigh`/`isAllDayLow` row highlight.

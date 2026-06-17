@@ -22,7 +22,7 @@ filter: Mode(Live/Hist)  Name[BANKNIFTY▾]  Date[📅]  Time Interval[3 min▾]
 | Active Strike Change in OI | ECharts line | Call OI (green), Put OI (red) | active strike's CE/PE OI over time |
 | Active Strike Sentiment % | ECharts line | Sentiment % (blue) | derived from CE vs PE OI; negative = bearish (more call writing) |
 
-ECharts toolbox on each; "Oi Pulse" watermark; bottom legend.
+ECharts toolbox on each; "Oi Pulse" watermark; bottom legend. Both charts support a line/bar render toggle.
 
 ## Filter bar — exact controls
 | Control | Values | Notes |
@@ -67,6 +67,13 @@ Response row schema (confirmed):
 ```
 Per interval `stTime`: active strike's `CE`/`PE` OI. Chart 1 plots CE & PE; **Sentiment %** derived
 (e.g. `(CE − PE)/PE` or net OI bias) → blue line (deep negative ⇒ call-heavy ⇒ bearish).
+
+## Interpretation (how to trade)
+- The "active strike" is the strike with the greatest activity by Volume / ΔOI (auto-picked by the server), not simply the ATM strike.
+- Active Strike Sentiment %: above 0 = bullish, below 0 = bearish; rising while positive = strengthening bullishness. The value is an unbounded percentage (can reach into the thousands), so the y-axis is not a fixed small band.
+- Treat sentiment as a confirmation tool — time entries off the price chart, not off a sentiment spike.
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
 
 ## Replication notes (→ ArthaYantra)
 - Determine active strike per interval (ATM/highest activity); two `ay-echart` lines:

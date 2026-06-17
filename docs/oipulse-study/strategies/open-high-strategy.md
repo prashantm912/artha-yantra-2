@@ -120,6 +120,24 @@ Response: {
 - `stOldDayHighBreakTime` = time Open=High was broken; null = not triggered
 - `stOldDayLowBreakTime` = time Open=Low was broken; null = not triggered
 
+## Interpretation (how to trade) — the Open=High method
+- Definition: a contract is Open=High (or Open=Low) when its Open price exactly equals its High (or Low) at the open — strict equality; the Day-High equals the Day-Open at formation.
+- Polarity: the option-premium trade is contrarian to the usual cash "O=H ⇒ bearish" intuition — an OH on a Call (with an OL on the Put) is read bullish for that Call (its premium is expected to revisit the high).
+- Why OH forms: a big player's aggressive pre-open bid sweeps the book so the open prints at the top, then reverts.
+- Confluence (Table 1): Futures OH + Call OH + Put OL = High probability; an option-only signal = Mild; the bearish twin mirrors it.
+- Confirmation (Table 2): wait for follow-up candles judged against a volume threshold — for a Call OH, a pullback on low volume raises the odds, while a pullback on heavy volume lowers them.
+- Extra filters: global markets and India VIX must not be moving against the position.
+- Entry is a momentum scalp (price turning back toward the OH level with volume), not a level-cross; treat it as a scalp, not a positional trade, and pyramid modestly.
+- Strike selection: only ATM ±3–4 strikes with premium ≈ ₹200–300; ignore deep ITM/OTM strikes even if they show OH.
+- Validity: the odds decay exponentially after roughly 11:00 AM.
+- Size by confidence; if OH appears on both the CE and the PE, reduce size.
+- Exit: trail the position; do not wait for price to cross the OH level to book.
+- LTP-distance gate: the smaller the gap of the current LTP below the OH level, the higher the reversion odds — this is the interpretation behind the existing "Far from High?" % column.
+- Probability framing: the manual treats Probability as an AI output — treat >90% as a *prepare* signal (not an entry), and a "Red Dot" on the O=H badge as a stronger composite trigger.
+- Failure modes: reversion fails when a bigger player enters later (a heavy-volume move against it); OH does not predict the day's direction — it is one scalp, not a trend tool.
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
+
 ## Replication notes (→ ArthaYantra)
 - Symmetric table: pair CE/PE rows by strike, display both halves mirrored around center Strike column.
 - "Triggered" detection: `stOldDayHighBreakTime != null` → show triggered label + time, suppress probability.

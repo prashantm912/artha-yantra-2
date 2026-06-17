@@ -78,6 +78,13 @@ Earlier confirmed row (ABB):
 
 `isOH`/`isOL` booleans drive which setup the stock matches. "Far from" % computed client-side: `(inNewLtp − inOldDayHigh) / inOldDayHigh * 100`. Break-time fields null until the level is broken.
 
+## Interpretation (how to trade)
+- Definition: Open=High / Open=Low means the day's Open price exactly equals its High / Low (strict equality).
+- Distance gate: the smaller the gap of the current LTP below the Open=High level, the higher the reversion odds — this is the read behind the "Far from High?" % column.
+- The full trading method (confluence tables, entry, strikes, ≤11 AM validity, failure modes) lives in [../strategies/open-high-strategy.md](../strategies/open-high-strategy.md).
+
+See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
+
 ## Replication notes (→ ArthaYantra)
 - Asset dropdown uses `heatmap` namespace endpoint (shared with Sector Heatmap).
 - Equity universe scan: detect Open==High / Open==Low via `isOH`/`isOL` booleans.

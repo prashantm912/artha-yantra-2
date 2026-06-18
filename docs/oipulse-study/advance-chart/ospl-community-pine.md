@@ -147,9 +147,15 @@ the *independent* Pine confluence components.
      23133 with VWAP ~23230 overhead) = washout/stretch buys; momentum greens (Gen 23571.2, 23485) fire
      above VWAP; reds cluster below VWAP in the down-leg. So greens appear both sides of VWAP → VWAP does
      **not** gate direction, but "buy the washout below VWAP" holds as confluence.
-   - **VWMA(20) — still inferred** (not yet isolated). Characterised only from price-vs-MA structure: price
-     tracked the fast MA through the down-leg. SuperTrend(10,2) already encapsulates the fast-MA momentum
-     role, so it adds little beyond #1.
+   - **VWMA(20) — bar-verified 2026-06-18 (not a gate; tracks momentum side).** Isolated with OSPL Signal.
+     In the down-leg VWMA sits above price and reds fire on that side (momentum shorts); reversal greens fire
+     below VWMA at the dip then price snaps back through it. In the up-leg momentum greens fire above the
+     rising VWMA. Greens appear both sides → not a gate. Of the three MAs, VWMA tracks the momentum side most
+     tightly — exactly the SuperTrend(10,2) role — so it adds nothing beyond #1.
+
+   **MA stack summary (all bar-verified 2026-06-18):** none of EMA200 / VWAP / VWMA20 gate OSPL Signal
+   direction — greens fire both above and below each. They are agreeing confluence (washout-below for
+   VWAP, momentum-side for VWMA), not filters; SuperTrend(10,2) already subsumes the trend-MA role.
 
 **Net (OSPL Signal):** OSPL Signal ≈ **SuperTrend(10,2) direction + a structure-stop (Void/Void Line) +
 volume-confirmed entries**, with BB / SAR / the MA stack as agreeing confluence. It is **not** the rare

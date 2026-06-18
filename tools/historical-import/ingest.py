@@ -223,16 +223,21 @@ def detect_candle_schema(header: list[str]) -> dict:
 
 
 def parse_candle_rows(path: Path, instrument: dict, interval: str) -> list[tuple]:
-    """Read a candle CSV -> rows ready for marketdata.candles."""
+    """
+    Read a candle CSV -> rows ready for marketdata.candles, deduplicated by bucket
+    (last occurrence wins). Source files sometimes repeat a minute (data quality);
+    without dedup the replace-mode direct COPY hits the candles PK. Last-wins matches
+    the upsert-mode ON CONFLICT semantics.
+    """
     exch = instrument["exchange"]
     tsym = instrument["tradingsymbol"]
     fetched_at = datetime.now(UTC)
-    rows: list[tuple] = []
+    by_bucket: dict = {}
 
     with open(path, encoding="utf-8-sig", errors="replace") as fh:
         header = fh.readline().strip().split(",")
         if len(header) < 5:
-            return rows
+            return []
         schema = detect_candle_schema(header)
 
         for line in fh:
@@ -264,9 +269,9 @@ def parse_candle_rows(path: Path, instrument: dict, interval: str) -> list[tuple
                         oi = None
             except (ValueError, IndexError, InvalidOperation):
                 continue
-            rows.append((exch, tsym, interval, bucket,
-                         open_, high, low, close, volume, oi, "BACKFILL", fetched_at))
-    return rows
+            by_bucket[bucket] = (exch, tsym, interval, bucket,
+                                 open_, high, low, close, volume, oi, "BACKFILL", fetched_at)
+    return list(by_bucket.values())
 
 
 # --------------------------------------------------------------------------- #
@@ -482,6 +487,14 @@ _COPY_STAGE = (
 
 def _load_candles(instrument: dict, rows: list[tuple]):
     conn = _conn()
+    try:
+        _load_candles_tx(conn, instrument, rows)
+    except Exception:
+        conn.rollback()  # leave the persistent connection clean for the next file
+        raise
+
+
+def _load_candles_tx(conn, instrument: dict, rows: list[tuple]):
     with conn.cursor() as cur:
         cur.execute(_UPSERT_INSTRUMENT, (
             instrument["exchange"], instrument["tradingsymbol"],
@@ -513,9 +526,13 @@ def _load_candles(instrument: dict, rows: list[tuple]):
 
 def _load_simple(sql: str, rows: list[tuple]):
     conn = _conn()
-    with conn.cursor() as cur:
-        cur.executemany(sql, rows)
-    conn.commit()
+    try:
+        with conn.cursor() as cur:
+            cur.executemany(sql, rows)
+        conn.commit()
+    except Exception:
+        conn.rollback()  # one bad file must not poison the next on this worker
+        raise
 
 
 def _interval_for(path: Path) -> str:
@@ -608,8 +625,8 @@ def open_manifest(path: Path) -> sqlite3.Connection:
 
 
 def load_fingerprints(conn: sqlite3.Connection) -> dict:
-    cur = conn.execute("SELECT path, size, mtime_ns, sha256 FROM manifest")
-    return {p: (sz, mt, sha) for p, sz, mt, sha in cur.fetchall()}
+    cur = conn.execute("SELECT path, size, mtime_ns, sha256, status FROM manifest")
+    return {p: (sz, mt, sha, st) for p, sz, mt, sha, st in cur.fetchall()}
 
 
 def _sha256(path: Path) -> str:
@@ -628,7 +645,8 @@ def classify_changes(root: Path, prior: dict, verify_checksum: bool, log) -> tup
       touches = [(path_str, mtime_ns)]  -> mtime moved but content identical; update mtime only
     """
     pending, touches = [], []
-    counts = {"new": 0, "modified": 0, "unchanged": 0, "skipped_empty": 0, "unknown": 0}
+    counts = {"new": 0, "retry": 0, "modified": 0, "unchanged": 0,
+              "skipped_empty": 0, "unknown": 0}
     seen = set()
 
     for path in root.rglob("*.csv"):
@@ -642,9 +660,14 @@ def classify_changes(root: Path, prior: dict, verify_checksum: bool, log) -> tup
             continue
         key = str(path)
         seen.add(key)
-        prev = prior.get(key)  # (size, mtime_ns, sha256) or None
+        prev = prior.get(key)  # (size, mtime_ns, sha256, status) or None
         if prev is None:
             counts["new"] += 1
+            pending.append((key, kind, st.st_size, st.st_mtime_ns,
+                            _sha256(path) if verify_checksum else None))
+        elif prev[3] != "loaded":
+            # previously failed / skipped_empty record / never finished -> retry
+            counts["retry"] += 1
             pending.append((key, kind, st.st_size, st.st_mtime_ns,
                             _sha256(path) if verify_checksum else None))
         elif prev[0] != st.st_size:
@@ -708,8 +731,8 @@ def main():
 
     log.info("scanning %s ...", root)
     pending, touches, counts, deleted = classify_changes(root, prior, args.verify_checksum, log)
-    log.info("new=%d modified=%d unchanged=%d skipped_empty=%d unknown=%d deleted=%d",
-             counts["new"], counts["modified"], counts["unchanged"],
+    log.info("new=%d retry=%d modified=%d unchanged=%d skipped_empty=%d unknown=%d deleted=%d",
+             counts["new"], counts["retry"], counts["modified"], counts["unchanged"],
              counts["skipped_empty"], counts["unknown"], counts["deleted"])
 
     if manifest and touches:

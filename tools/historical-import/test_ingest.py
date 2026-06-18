@@ -178,6 +178,23 @@ def test_parse_candle_iso_timestamp_with_offset(tmp_path):
     assert rows[0][9] == 38400
 
 
+def test_duplicate_bucket_deduped_last_wins(tmp_path):
+    # source data sometimes repeats a minute; replace-mode direct COPY would hit the
+    # candles PK without dedup. Keep last occurrence.
+    p = _write(tmp_path, "NIFTY_7700_CE_29_DEC_16.csv",
+               "date,time,open,high,low,close,volume\n"
+               "2016-11-17,09:19,10,10,10,10,100\n"
+               "2016-11-17,09:19,20,20,20,20,200\n"
+               "2016-11-17,09:20,30,30,30,30,300\n")
+    instr = ig.parse_option("NIFTY_7700_CE_29_DEC_16")
+    rows = ig.parse_candle_rows(p, instr, "1m")
+    assert len(rows) == 2  # 09:19 collapsed
+    by = {r[3]: r for r in rows}
+    nineteen = [r for r in rows if r[3] == datetime(2016, 11, 17, 3, 49, tzinfo=UTC)][0]
+    assert nineteen[7] == 20  # last close wins
+    assert nineteen[8] == 200
+
+
 def test_oi_zero_becomes_null(tmp_path):
     p = _write(tmp_path, "X_1_CE_30_JAN_14.csv",
                "date,time,open,high,low,close,volume,oi\n"

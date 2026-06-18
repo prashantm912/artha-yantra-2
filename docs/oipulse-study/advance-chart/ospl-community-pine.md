@@ -142,10 +142,14 @@ the *independent* Pine confluence components.
    price-vs-EMA200**. The 200 EMA is independent macro context, not a trend filter. (This corrects the prior
    "inferred trend-filter / EMA200 macro bias" reading, which was characterised from price-vs-MA structure
    before clean isolation was possible.)
-   - **VWMA(20) / VWAP — still inferred** (not yet isolated; the legend hide-toggle drift that blocked these
-     before persists). Characterised only from price-vs-MA structure: price tracked the fast MAs through the
-     down-leg. SuperTrend(10,2) already encapsulates the fast-MA momentum role, so the MA stack adds little
-     beyond #1.
+   - **VWAP — bar-verified 2026-06-18 (same: not a gate, but washout confluence).** Isolated with OSPL Signal.
+     The counter-trend reversal greens fire **deep below VWAP** (Gen 23260.6/Void 23153, Gen 23183.1/Void
+     23133 with VWAP ~23230 overhead) = washout/stretch buys; momentum greens (Gen 23571.2, 23485) fire
+     above VWAP; reds cluster below VWAP in the down-leg. So greens appear both sides of VWAP → VWAP does
+     **not** gate direction, but "buy the washout below VWAP" holds as confluence.
+   - **VWMA(20) — still inferred** (not yet isolated). Characterised only from price-vs-MA structure: price
+     tracked the fast MA through the down-leg. SuperTrend(10,2) already encapsulates the fast-MA momentum
+     role, so it adds little beyond #1.
 
 **Net (OSPL Signal):** OSPL Signal ≈ **SuperTrend(10,2) direction + a structure-stop (Void/Void Line) +
 volume-confirmed entries**, with BB / SAR / the MA stack as agreeing confluence. It is **not** the rare

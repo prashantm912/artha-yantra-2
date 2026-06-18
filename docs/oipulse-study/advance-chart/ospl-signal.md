@@ -14,7 +14,17 @@
 >   `Factor=2, Pd=10` and a High-Volume flag at `volume > 50K`, matching the (10,2) signal core and the
 >   ~50K dark-bar threshold observed here. (The proprietary studies stay closed-source; the community
 >   template only confirms the shared building blocks, not the Gen/Void scalp layer.)
-> - **OSPL Qwik scalp** = faster scalp variant (same study family).
+> - **OSPL Signal live visual = `Gen. At:` / `Void. At:` / yellow `Void Line`** (confirmed NIFTY-I 3m,
+>   2026-06-18) — the SAME marker family as OSPL Qwik scalp, **NOT** the "In:/Out:" labels the manual
+>   describes (the manual's In/Out is **stale**). Green ↑ at swing lows = long, red ↓ at swing highs =
+>   short; the Void Line persists right until invalidated. It is **NOT rare** — ~15–20 fires over a 3-week
+>   window (≈2–3/session). And it is **SuperTrend(10,2)-direction-locked**: red ↓ sells only while the
+>   SuperTrend line is red (above price), green ↑ buys only while green (below); the first signal of a leg
+>   ≈ the ST flip, later same-direction ones are adds, and `Void Line ≈ the SuperTrend trailing stop`. Full
+>   live cross-correlation vs the Pine confluence stack (SuperTrend/SAR/BB/VWMA/EMA/VWAP/Volume) in
+>   [ospl-community-pine.md](ospl-community-pine.md) § "Live correlation — OSPL Signal vs the Pine components".
+> - **OSPL Qwik scalp** = faster scalp variant (same study family) — same Gen/Void/Void Line markers; it
+>   *leads* the SuperTrend flip whereas OSPL Signal is *coincident* with it (counterparts of one engine).
 > - **OSPL Volume** Inputs = MA Length **20** + a "Color based on previous close" toggle; the dark-bar
 >   threshold (50K BankNifty / 125K Nifty) is **hardcoded in the Pine script, NOT a user input**.
 >   - **vs standard Volume (live-proven 2026-06-18, NIFTY-I 3m):** same volume value, but the **hue rule
@@ -41,6 +51,11 @@ Added like any indicator: **Indicators → search "ospl" → "OSPL Signal"** (no
 Price, Volume, Open Interest, India VIX, Global markets (and SuperTrend), all live.
 
 ## On-chart display
+
+> **Manual (V10) describes this as In:/Out: — but LIVE it draws `Gen. At:` / `Void. At:` / `Void Line`**
+> (same as Qwik scalp; see the live block above). The In/Out model below is the manual's older
+> description, kept for the *interpretation* (condition-flag, not literal entry/exit), but the on-chart
+> labels you actually see are Gen/Void.
 
 - A **directional arrow** at the signal candle: **green up = look long, red down = look short.**
 - Paired **"In:" / "Out:"** price labels (e.g. "In: 37405.1 / Out: 37589"). Multiple In/Out pairs through the session.

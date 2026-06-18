@@ -88,6 +88,67 @@ community Pine reproduces the building blocks; the proprietary layer adds the le
 conviction filter (Signal). Both observed flip-timings still depend on the closed Pine source, so treat
 the equivalences as strong-but-empirical, not proven identity.
 
+> **Correction to point 2 (added 2026-06-18 PM):** the "OSPL Signal silent / rare high-conviction / uses
+> In:/Out:" read above was an artefact of that one quiet 2-day **BANKNIFTY** window. A wider **NIFTY-I 3m**
+> sample (next section) shows OSPL Signal firing **~15–20× in three weeks** and drawing **Gen/Void/Void Line**
+> (NOT In/Out). It is **not rare**, and it is the **same marker family as Qwik scalp** — see below.
+
+## Live correlation — OSPL Signal vs the Pine components (NIFTY-I 3m, May 19–Jun 18 2026)
+
+Second pass, on the **OSPL Signal** study (the chart already carried `OSPL Signal 10 2` + RSI; added
+BB(20,2), SuperTrend(10,2), Parabolic SAR(0.02/0.02/0.2), VWMA(20), EMA(200), VWAP and OSPL Volume).
+**Qwik scalp was deliberately NOT used here** — Qwik and OSPL Signal are counterparts of the *same*
+Gen/Void engine, so correlating them to each other is circular; the point is to relate OSPL Signal to
+the *independent* Pine confluence components.
+
+**Two corrections to the OSPL Signal record (live-confirmed this pass):**
+- **Live visual = `Gen. At:` / `Void. At:` / yellow `Void Line`** — the SAME marker family as OSPL Qwik
+  scalp, **NOT** the "In:/Out:" labels the manual describes. The manual's In/Out is **stale**; legend
+  reads `OSPL Signal 10 2`, arrows are green ↑ at swing lows / red ↓ at swing highs with a persisting
+  Void Line. (See [ospl-signal.md](ospl-signal.md), updated.)
+- **Not rare** — ~15–20 fires over the 3-week window (≈2–3/session), i.e. the BANKNIFTY "0 fires" above
+  was a quiet-window fluke, not the design.
+
+1. **OSPL Signal ⟷ SuperTrend(10,2) — direction-locked (the core).** Every red ↓ sell printed while the
+   SuperTrend line was **RED** (above price); every green ↑ buy while it was **GREEN** (below price). The
+   **first** signal of a leg ≈ the bar SuperTrend flips; **subsequent same-direction signals are
+   adds/re-entries** down/up the same leg — the May 19–20 decline stacked ~5 red sells with Void Lines
+   stair-stepping **23349 → 23309 → 23283 → 23273**, all under one red ST run. The `Void Line` sits right
+   at/just inside the SuperTrend trailing band → **Void ≈ the SuperTrend stop**. Since the legend params
+   ARE (10,2), OSPL Signal ≈ **SuperTrend(10,2) direction + a structure-stop overlay**. Strongest link.
+2. **OSPL Signal ⟷ Parabolic SAR — flips coincide at leg starts.** SAR flips below price at buy reversals
+   / above price at sell reversals, on the same bars (±1) as the first signal of each leg; the SAR dot
+   trail rides opposite price ≈ where the Void Line sits. SAR and ST flip near-together → largely
+   redundant with #1 (both are the trend/stop leg).
+3. **OSPL Signal ⟷ Bollinger Bands(20,2) — sell-the-rip, buy-the-washout.** In the downtrend price **rode
+   the lower band**; red ↓ sells fired on **bounces back toward the basis/upper band** (sell the rally to
+   the mean), then price slid to the lower band again. The big green ↑ buy (**Gen 23365.4 / Void 23285**)
+   fired at a **lower-band washout reversal** where the bands **ballooned** (vol expansion) at the May 20
+   capitulation, then price reclaimed toward the basis. Basis(SMA20) = the mean signals fade from / revert
+   toward. Same band behaviour as Qwik (point 5 above); BB has no proprietary OSPL counterpart →
+   confluence, not equivalence.
+4. **OSPL Signal ⟷ OSPL Volume — turns get volume, adds don't.** The high-conviction reversals carried
+   OSPL-Volume spikes: a **red climax bar** at the start of the sell cluster and a **green spike** at the
+   buy reversal, with the volume-bar hue (prev-close rule) matching signal direction at those turns.
+   Mid-leg add signals fired on ordinary volume. No saturated >125K "dark bars" were unambiguously visible
+   at the zoom used (NIFTY threshold ~125K) → treat the dark-bar tie-in as plausible-not-proven.
+5. **OSPL Signal ⟷ VWMA(20) / VWAP / EMA(200) — trend-filter side, inferred.** *(These three MA overlays
+   could not be cleanly isolated live — the legend's per-study hide toggle drifts faster than its 12-px
+   eye icon can be hit in this capture environment; characterised from price-vs-MA structure, not
+   bar-by-bar.)* Through the May 19–20 decline price stayed **below the fast MAs and well below EMA200**,
+   matching the red-sell cluster (signals on the side of the fast MA = momentum); the counter-trend green
+   buy at the bottom was a **deep stretch below EMA200** (mean-reversion vs the macro trend). So OSPL
+   Signal direction tracks price's side of VWMA/VWAP for momentum, with EMA200 as macro bias
+   (counter-trend signals = far-from-EMA200 washouts). SuperTrend(10,2) already encapsulates this
+   trend-MA role, so the MA stack adds little beyond #1.
+
+**Net (OSPL Signal):** OSPL Signal ≈ **SuperTrend(10,2) direction + a structure-stop (Void/Void Line) +
+volume-confirmed entries**, with BB / SAR / the MA stack as agreeing confluence. It is **not** the rare
+In/Out study the manual implies — live it is a frequent, SuperTrend-locked Gen/Void scalp signal, the
+**same marker family as Qwik scalp** (Qwik = the faster, ST-*leading* sibling; Signal = the
+ST-*coincident* one). The two are counterparts of one engine — correlating them to each other is
+circular, and both collapse to a SuperTrend(10,2) core once the proprietary timing is stripped.
+
 ---
 
 ## Script 1 — `OSPL - Siva Sir.txt` (base, as-is)

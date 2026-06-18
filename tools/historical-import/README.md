@@ -24,21 +24,34 @@ each file over the network. **Robocopy both trees to a local NVMe first**, then 
 
 ## Usage
 
+> **Always use `127.0.0.1` in the DSN, never `localhost`.** On Windows + Docker, `localhost`
+> resolves to IPv6 `::1` first; libpq stalls ~130 s on the TCP SYN timeout before falling back
+> to IPv4. With `127.0.0.1` the connect is instant (a 48-file load went 132 s → 2.1 s).
+
 ```bash
 cd tools/historical-import
 
 # Dry run — parse + classify only, no DB, no manifest writes
 python ingest.py --root "D:/market-import/options" --dry-run
 
-# Load (mock stack). Re-runnable: only NEW/MODIFIED files load on later runs.
+# First full backfill — replace mode (fast: bucket-range DELETE + direct COPY, no upsert)
 python ingest.py --root "D:/market-import/options" \
-  --dsn "postgresql://artha:artha@localhost:5432/artha_mock" --workers 8
+  --dsn "postgresql://artha:artha@127.0.0.1:5432/artha" \
+  --load-mode replace --workers 8
 
-# Live DB — use a separate manifest so the two states don't mix
+# Incremental top-ups (default upsert mode; re-runnable, only NEW/MODIFIED files load)
 python ingest.py --root "D:/market-import/options" \
-  --dsn "postgresql://artha:artha@localhost:5432/artha" \
-  --manifest manifest_live.sqlite --workers 8
+  --dsn "postgresql://artha:artha@127.0.0.1:5432/artha" --workers 8
+
+# Mock rehearsal — same flags, mock DSN + a separate manifest
+python ingest.py --root "D:/market-import/options" \
+  --dsn "postgresql://artha:artha@127.0.0.1:5432/artha_mock" \
+  --manifest manifest_mock.sqlite --load-mode replace --workers 8
 ```
+
+`--load-mode replace` is the fast first-load path (per-row `ON CONFLICT` is ~60× slower);
+`upsert` (default) is incremental-safe for top-ups. Both reuse one DB connection per worker,
+so the connect cost is paid once, not per file.
 
 Run once per source root (the two Drive folders), sharing one `--manifest` if desired
 (it's keyed by absolute path).

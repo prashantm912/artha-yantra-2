@@ -448,11 +448,13 @@ ON CONFLICT (symbol, statement, period_end, metric) DO UPDATE SET
 
 _CONN = None
 _DSN = ""
+_LOAD_MODE = "upsert"  # 'upsert' (incremental-safe) | 'replace' (fast virgin backfill)
 
 
-def _init_worker(dsn: str):
-    global _DSN
+def _init_worker(dsn: str, load_mode: str = "upsert"):
+    global _DSN, _LOAD_MODE
     _DSN = dsn
+    _LOAD_MODE = load_mode
 
 
 def _conn():
@@ -467,6 +469,16 @@ def _conn():
     return _CONN
 
 
+_COPY_DIRECT = (
+    "COPY marketdata.candles (exchange, tradingsymbol, interval, bucket, "
+    "open, high, low, close, volume, oi, source, fetched_at) FROM STDIN"
+)
+_COPY_STAGE = (
+    "COPY _candle_stage (exchange, tradingsymbol, interval, bucket, "
+    "open, high, low, close, volume, oi, source, fetched_at) FROM STDIN"
+)
+
+
 def _load_candles(instrument: dict, rows: list[tuple]):
     conn = _conn()
     with conn.cursor() as cur:
@@ -476,14 +488,25 @@ def _load_candles(instrument: dict, rows: list[tuple]):
             instrument["underlying_tradingsymbol"], instrument["expiry"],
             instrument["strike"],
         ))
-        cur.execute("TRUNCATE _candle_stage")
-        with cur.copy(
-            "COPY _candle_stage (exchange, tradingsymbol, interval, bucket, "
-            "open, high, low, close, volume, oi, source, fetched_at) FROM STDIN"
-        ) as cp:
-            for r in rows:
-                cp.write_row(r)
-        cur.execute(_STAGE_FLUSH)
+        if _LOAD_MODE == "replace":
+            # Fast path: clear this instrument's bucket range (a no-op on virgin data,
+            # and idempotent for crash-resume), then COPY straight into the hypertable.
+            # No per-row ON CONFLICT probe -> ~100x the upsert throughput.
+            exch, tsym, interval = rows[0][0], rows[0][1], rows[0][2]
+            buckets = [r[3] for r in rows]
+            cur.execute(
+                "DELETE FROM marketdata.candles WHERE exchange=%s AND tradingsymbol=%s "
+                "AND interval=%s AND bucket BETWEEN %s AND %s",
+                (exch, tsym, interval, min(buckets), max(buckets)))
+            with cur.copy(_COPY_DIRECT) as cp:
+                for r in rows:
+                    cp.write_row(r)
+        else:
+            cur.execute("TRUNCATE _candle_stage")
+            with cur.copy(_COPY_STAGE) as cp:
+                for r in rows:
+                    cp.write_row(r)
+            cur.execute(_STAGE_FLUSH)
     conn.commit()
 
 
@@ -652,9 +675,14 @@ def classify_changes(root: Path, prior: dict, verify_checksum: bool, log) -> tup
 def main():
     ap = argparse.ArgumentParser(description="Historical CSV -> TimescaleDB ingest")
     ap.add_argument("--root", required=True, help="Local root to walk (copy off Drive first)")
-    ap.add_argument("--dsn", default="postgresql://artha:artha@localhost:5432/artha")
+    ap.add_argument("--dsn", default="postgresql://artha:artha@127.0.0.1:5432/artha",
+                    help="Use 127.0.0.1, NOT localhost — localhost resolves to IPv6 ::1 "
+                         "first and libpq stalls ~130s on the SYN timeout before IPv4 fallback")
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--manifest", default="historical_manifest.sqlite")
+    ap.add_argument("--load-mode", choices=["upsert", "replace"], default="upsert",
+                    help="upsert = incremental-safe ON CONFLICT (default); "
+                         "replace = fast bucket-range DELETE + direct COPY (virgin backfill)")
     ap.add_argument("--verify-checksum", action="store_true",
                     help="When mtime moved but size is unchanged, confirm with sha256")
     ap.add_argument("--dry-run", action="store_true", help="Parse only; no DB, no manifest")
@@ -705,8 +733,8 @@ def main():
     worker = _worker_dry if args.dry_run else _worker_fn
 
     errors, ok = [], 0
-    with multiprocessing.Pool(processes=args.workers,
-                              initializer=_init_worker, initargs=(args.dsn,)) as pool:
+    with multiprocessing.Pool(processes=args.workers, initializer=_init_worker,
+                              initargs=(args.dsn, args.load_mode)) as pool:
         for path_str, status, nrows, msg in tqdm(
                 pool.imap_unordered(worker, tasks), total=len(tasks), unit="file"):
             if status == "loaded":

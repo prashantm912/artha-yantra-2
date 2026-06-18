@@ -50,6 +50,36 @@ dev   = mult * stdev(src, length)      // ✗ uses `src` (hlc3, the VWAP source)
 **Script 3** below fixes this single line to `dev = mult * stdev(src1, length)`; everything else is
 byte-identical to v2.
 
+## Live correlation vs the proprietary OSPL studies (BANKNIFTY-I 3m, 2026-06-18)
+
+Added the fixed-script components as TV built-ins (VWAP, SuperTrend **10/2**, PSAR 0.02/0.02/0.2,
+VWMA 20, EMA 200, BB 20/2 — TV's built-in BB is single-source so already bug-free) **alongside** the
+proprietary **OSPL Signal**, **OSPL Qwik scalp** and **OSPL Volume**, then compared on a live chart.
+
+1. **Qwik scalp ⟷ SuperTrend(10,2) — same direction, Qwik leads.** Bullish Qwik arrows printed at
+   swing lows **1–2 bars BEFORE** SuperTrend flipped green (Gen 57501.6 at the bottom, 57755 at the
+   pullback — both while ST was still red); the bearish Qwik at the top (57730) was **coincident** with
+   the ST red flip. So Qwik scalp = a **faster front-run of the SuperTrend(10,2) trend**; its `Void`
+   level tracks the recent swing extreme (same role as ST's trailing stop, but structure-based/tighter,
+   not ATR-based).
+2. **OSPL Signal (10,2) — silent all window.** **Zero In/Out markers** across the visible ~2 days while
+   Qwik fired ~4×. Confirms the design split: **OSPL Signal = rare high-conviction, Qwik scalp =
+   frequent scalp**. Shares the ST(10,2) core (param match), but **could not be flip-compared today**
+   (it never fired) — caveat, not a disproof.
+3. **OSPL Volume ⟷ >50K dark-bar flag — never triggered.** All bars pastel, no dark bars: BANKNIFTY 3m
+   futures volume stayed **<50K all session** (axis topped ~30K). The high-volume confluence is silent
+   on a quiet day — consistent with the script's 50K threshold.
+4. **Confluence at the bottom turn.** The strongest bullish Qwik (57501.6) lined up with PSAR flipping
+   below price + price reclaiming VWAP + ST flipping green the next bar — the exact multi-factor
+   agreement this confluence stack is built to catch. Price held **above EMA200** through the rally
+   (long-term bias up), aligning with the bullish signals.
+
+**Net:** the proprietary studies are not independent magic — **Qwik scalp ≈ a leading SuperTrend(10,2)**,
+**OSPL Signal ≈ a filtered/rarer SuperTrend(10,2)**, **OSPL Volume ≈ the >50K dark-bar flag**. The
+community Pine reproduces the building blocks; the proprietary layer adds the lead timing (Qwik) and the
+conviction filter (Signal). Both observed flip-timings still depend on the closed Pine source, so treat
+the equivalences as strong-but-empirical, not proven identity.
+
 ---
 
 ## Script 1 — `OSPL - Siva Sir.txt` (base, as-is)

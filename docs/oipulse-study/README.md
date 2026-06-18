@@ -48,6 +48,7 @@ Click `All Menu` → full-width panel, columns grouped by section. Each item = a
 | Multiframe Chart | `/app/multi-frame-advance-chart` | + |
 
 > OSPL Signal + OSPL Volume are Advance-Chart **indicators** (not routes) — see [advance-chart/ospl-signal.md](advance-chart/ospl-signal.md).
+> The public community OSPL template (3 Pine v4 scripts: base / +BB / fixed) is in [advance-chart/ospl-community-pine.md](advance-chart/ospl-community-pine.md).
 
 ### Futures
 | Item | Route | Scope |

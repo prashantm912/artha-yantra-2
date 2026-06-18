@@ -225,6 +225,18 @@ def test_parse_iv_rows(tmp_path):
 # Fundamentals transpose                                                       #
 # --------------------------------------------------------------------------- #
 
+def test_iv_overflow_value_nulled(tmp_path):
+    # source emits garbage like 1.26e31 that overflows NUMERIC(12,6); null it, keep row
+    p = _write(tmp_path, "CHOLAFIN.csv",
+               "Date,Open,High,Low,Close,IV,Rank,IV Percentile\n"
+               "2019-07-30,245.05,248.4,236.5,243.5,1.2676506e+31,1,100.0\n")
+    rows = ig.parse_iv_rows(p)
+    assert len(rows) == 1
+    assert rows[0][6] is None       # iv nulled
+    assert float(rows[0][5]) == 243.5  # close preserved
+    assert float(rows[0][7]) == 1.0    # rank preserved
+
+
 def test_parse_period_month_end():
     assert ig.parse_period("Mar 2023") == date(2023, 3, 31)
     assert ig.parse_period("Jun 2023") == date(2023, 6, 30)

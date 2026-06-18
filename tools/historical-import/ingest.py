@@ -278,6 +278,19 @@ def parse_candle_rows(path: Path, instrument: dict, interval: str) -> list[tuple
 # IV parsing                                                                  #
 # --------------------------------------------------------------------------- #
 
+# integer-part limits per column (NUMERIC(p,s) holds |value| < 10**(p-s))
+_MAX_18_4 = Decimal(10) ** 14   # open/high/low/close
+_MAX_12_6 = Decimal(10) ** 6    # iv
+_MAX_8_4 = Decimal(10) ** 4     # iv_rank / iv_percentile
+
+
+def _fit(v, limit):
+    """None if v is None or overflows the column (|v| >= limit), else v."""
+    if v is None:
+        return None
+    return v if -limit < v < limit else None
+
+
 def parse_iv_rows(path: Path) -> list[tuple]:
     """
     implied volatility/<SYMBOL>.csv ->
@@ -302,6 +315,11 @@ def parse_iv_rows(path: Path) -> list[tuple]:
             except (ValueError, InvalidOperation):
                 continue
             o, h, l, c, iv, rank, pct = vals
+            # null garbage values that overflow the target columns (source sometimes
+            # emits sentinels like 1.26e31); keep the row, drop the bad cell.
+            o, h, l, c = (_fit(v, _MAX_18_4) for v in (o, h, l, c))
+            iv = _fit(iv, _MAX_12_6)
+            rank, pct = _fit(rank, _MAX_8_4), _fit(pct, _MAX_8_4)
             rows.append((underlying, trade_date, o, h, l, c, iv, rank, pct,
                          "BACKFILL", fetched_at))
     return rows

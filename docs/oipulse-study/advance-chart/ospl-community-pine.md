@@ -166,6 +166,75 @@ circular, and both collapse to a SuperTrend(10,2) core once the proprietary timi
 
 ---
 
+## Comparison — OSPL Signal vs OSPL Qwik scalp vs Pine config
+
+Full cross-check on NIFTY-I 3m (May 19–Jun 18 2026), all components bar-verified together 2026-06-18
+(OSPL Signal + SuperTrend + SAR + VWMA + VWAP + EMA200 + BB + OSPL Volume overlaid).
+
+### Similarity
+
+| Aspect | Shared across all |
+|---|---|
+| Engine core | All reduce to **SuperTrend(10,2)** direction — Signal & Qwik are proprietary wrappers; the Pine stack is the open skeleton of the same idea. |
+| Marker family | OSPL Signal & Qwik both draw **`Gen. At:` / `Void. At:` / yellow `Void Line`** (identical visual contract). |
+| Stop model | Both use **Void Line ≈ structure / SuperTrend trailing stop**. |
+| Direction rule | Green ↑ at swing lows = long, red ↓ at swing highs = short. |
+| Confluence inputs | Same blocks the Pine template carries (ST 2/10, SAR, VWMA20, VWAP, High-Volume) feed the proprietary logic. |
+
+### Difference
+
+| Aspect | OSPL Signal | OSPL Qwik scalp | Pine config (community) |
+|---|---|---|---|
+| Timing vs ST flip | **Coincident** (fires ≈ at the flip) | **Leads** the flip (faster/earlier) | the ST flip itself (reference) |
+| Inputs tab | **Params (10,2)** + watches Price/Vol/OI/VIX/Global | **No Inputs tab** — fully automatic, 0 params | Fully user-configurable (Factor, Pd, SAR steps, MA len) |
+| Feature set | Multi-factor AI (adds OI/VIX/Global on top of ST) | Pure price/structure scalp | Pure price (+ volume flag) |
+| Fire rate | ~15–20/3wk (≈2–3/session) | More frequent (faster scalp) | n/a (continuous line) |
+| Source | Server-protected Pine | Server-protected Pine | Open (`OSPL - Siva Sir.txt`, below) |
+| Style params | plottable Void series + plotshapes | single yellow Void series only | full per-plot styling |
+
+### Correlation (each Pine component → OSPL Signal, bar-verified)
+
+| Pine component (config) | Relation to OSPL Signal | Verdict |
+|---|---|---|
+| **SuperTrend (Factor 2, Pd 10)** | **Direction-lock core.** Green only while ST green/below price; red only while ST red/above. 1st signal = flip, rest = adds. | **Causal — the engine** |
+| **Parabolic SAR (0.02/0.02/0.2)** | Dot-flip coincides with leg starts; dot trail ≈ Void level. | Redundant w/ ST |
+| **Bollinger Bands (20,2)** | Buy the ballooning **lower-band washout**; sell rip-to-basis in downtrend. | Confluence (entry timing) |
+| **OSPL Volume (MA20, prev-close hue, ~50K/125K dark bar)** | Red climax at sell-cluster start + green spike at reversal buy; adds on ordinary volume. | Confluence (conviction) |
+| **EMA 200** | Greens fire **both above & far below** → not a gate. | Context only — **not a filter** |
+| **VWAP (session, hlc3)** | Greens both sides; reversal buys are deep stretches below. | Confluence ("washout below") — **not a filter** |
+| **VWMA 20** | Greens both sides; tracks momentum side tightest (= ST role). | Subsumed by ST — **not a filter** |
+
+### Bottom line
+
+- **OSPL Signal** = SuperTrend(10,2) direction + Void structure-stop + volume-confirmed entries, multi-factor-tuned (OI/VIX/Global).
+- **OSPL Qwik scalp** = the same engine, faster — *leads* the flip, zero params. Counterpart, not independent → correlating the two to each other is circular.
+- **Pine config** = the open skeleton: ST 2/10 is the spine; SAR/BB/Volume/MAs are confluence, **none gate direction** (all bar-verified).
+
+> **⚠ Inference, not source.** Everything above is reverse-engineered from live chart behaviour — the
+> proprietary Pine source for **OSPL Signal** and **OSPL Qwik scalp** is server-protected and was **not**
+> obtained. The conclusions are the best fit to observed markers, not the actual trigger code.
+
+### OPEN — actual Pine source (to be filled if obtained)
+
+> Placeholder. If the real Pine source for the OSPL studies is ever recovered, drop it here verbatim and
+> reconcile against the inferred model above (mark each inferred row Confirmed / Corrected / Refuted).
+
+| Study | Source status | Notes |
+|---|---|---|
+| OSPL Signal | ❌ not obtained (server-protected) | inferred = ST(10,2) + multi-factor; replace with real logic when found |
+| OSPL Qwik scalp | ❌ not obtained (server-protected) | inferred = faster ST-leading scalp, 0 params; replace when found |
+| OSPL Volume | ⚠ partial (inputs known: MA20 + prev-close hue; dark-bar threshold hardcoded, not exposed) | full plot/threshold logic still closed |
+
+```pine
+// OSPL Signal — actual source (PASTE HERE if/when recovered)
+```
+
+```pine
+// OSPL Qwik scalp — actual source (PASTE HERE if/when recovered)
+```
+
+---
+
 ## Script 1 — `OSPL - Siva Sir.txt` (base, as-is)
 
 ```pine

@@ -157,6 +157,16 @@ the *independent* Pine confluence components.
    direction — greens fire both above and below each. They are agreeing confluence (washout-below for
    VWAP, momentum-side for VWMA), not filters; SuperTrend(10,2) already subsumes the trend-MA role.
 
+6. **OSPL Signal ⟷ RSI(14, SMA 14) — extraneous to the config; coincident confirm only (qualitative).**
+   RSI is **not** part of the OSPL Pine stack (that = ST/SAR/VWMA/VWAP/High-Volume, +EMA/BB in the modified
+   variant) — it sits on the chart as a separate default oscillator. Qualitative read only (could not be
+   value-read per-signal: the RSI sub-pane lands in the Claude-in-Chrome viewport-drift zone, so a clean
+   isolated value-at-each-Gen read was not captured). Observed: RSI falls/below ~50 through the red-sell
+   down-legs and troughs-then-turns-up at the green reversal buys, BUT **buys did not require RSI oversold
+   (<30)** — they fired mid-range, driven by the SuperTrend flip, not an RSI level. So RSI is at most a
+   **coincident momentum confirm, not a trigger or gate** (same verdict class as the MA stack). Not folded
+   into the engine model.
+
 **Net (OSPL Signal):** OSPL Signal ≈ **SuperTrend(10,2) direction + a structure-stop (Void/Void Line) +
 volume-confirmed entries**, with BB / SAR / the MA stack as agreeing confluence. It is **not** the rare
 In/Out study the manual implies — live it is a frequent, SuperTrend-locked Gen/Void scalp signal, the

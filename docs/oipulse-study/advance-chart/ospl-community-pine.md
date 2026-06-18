@@ -73,6 +73,14 @@ proprietary **OSPL Signal**, **OSPL Qwik scalp** and **OSPL Volume**, then compa
    below price + price reclaiming VWAP + ST flipping green the next bar — the exact multi-factor
    agreement this confluence stack is built to catch. Price held **above EMA200** through the rally
    (long-term bias up), aligning with the bullish signals.
+5. **Bollinger Bands(20,2) ⟷ Qwik scalp — band extremes + squeeze/expansion** (BB has **no OSPL
+   proprietary counterpart**, so this is a confluence check, not an equivalence). The bearish Qwik
+   (57730) fired as price **tagged/extended past the upper band and stalled** at the post-rally top — an
+   upper-band-extreme fade. The rally was a **band-ride** (price hugging the upper band = strong trend)
+   off a prior **squeeze** (narrow bands in the pre-rally chop) that **expanded** on the breakout bar.
+   The bullish Qwik (57825) sat at a **pullback toward the basis/lower half** mid-uptrend (buy-the-dip).
+   The **basis (SMA20)** acted as pullback S/R — price broke below it as the move rolled toward the
+   lower band. With only ~3 signals in view this is suggestive, not statistical.
 
 **Net:** the proprietary studies are not independent magic — **Qwik scalp ≈ a leading SuperTrend(10,2)**,
 **OSPL Signal ≈ a filtered/rarer SuperTrend(10,2)**, **OSPL Volume ≈ the >50K dark-bar flag**. The

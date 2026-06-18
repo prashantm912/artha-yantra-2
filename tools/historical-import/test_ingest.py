@@ -68,6 +68,18 @@ def test_parse_option_sensex_routes_bfo():
     assert i["tradingsymbol"] == "SENSEX24DEC73200PE"
 
 
+def test_classify_option_hyphen_symbol():
+    p = Path("data/options/stocks/BAJAJ-AUTO/2025-04-24/BAJAJ-AUTO_8300_CE_24_APR_25.csv")
+    assert ig.classify_path(p) == "OPTION"
+
+
+def test_parse_option_hyphen_symbol():
+    i = ig.parse_option("BAJAJ-AUTO_8300_CE_24_APR_25")
+    assert i["underlying_tradingsymbol"] == "BAJAJ-AUTO"
+    assert i["tradingsymbol"] == "BAJAJ-AUTO25APR8300CE"
+    assert i["strike"] == 8300
+
+
 def test_parse_option_future():
     i = ig.parse_option("NIFTY_24500_FUT_26_DEC_24")
     assert i["instrument_type"] == "FUT"

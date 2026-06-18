@@ -86,8 +86,9 @@ FUND_STATEMENTS = {
 }
 
 # Regex: SYMBOL_STRIKE_(CE|PE|FUT)_DD_MON_YY
+# Symbol class includes '-' and '.' for NSE symbols like BAJAJ-AUTO, M&M.
 _OPT_RE = re.compile(
-    r"^(?P<sym>[A-Z0-9&]+)_(?P<strike>\d+(?:\.\d+)?)_(?P<otype>CE|PE|FUT)_"
+    r"^(?P<sym>[A-Z0-9&.\-]+)_(?P<strike>\d+(?:\.\d+)?)_(?P<otype>CE|PE|FUT)_"
     r"(?P<dd>\d{2})_(?P<mon>[A-Z]{3})_(?P<yy>\d{2})$",
     re.IGNORECASE,
 )

@@ -44,7 +44,7 @@ First row is `15:30-EOD` (end-of-day summary), then descending 3-min intervals.
 | Total Chng. In OI | computed: `inOi − day-open OI` | cumulative day OI change |
 | Day High | `inDayHigh` | |
 | Day Low | `inDayLow` | |
-| Level Break | computed | breakout marker vs day high/low ("-" if none) |
+| Level Break | computed | breakout marker vs day high/low ("-" if none); see Level Break below |
 | Volume | `inTradedVolume` (interval delta) | |
 | LTP | `inClose` | last price of interval |
 | LTP Change | computed: `inClose − prev inClose` | green if +, red if − |
@@ -56,6 +56,11 @@ The first `15:30-EOD` row is NSE's post-close **adjusted** OI, distinct from the
 close. The gap between the two is much larger for single-stock futures than for indices. It is
 caused by Clearing-Member reconciliation, and the readjustment only ever **decreases** OI — so the
 EOD OI-interpretation can differ from the last intraday reading. Historical look-back ≈ 2 months.
+
+### Level Break ("Day H/L Break" column — confirmed live 2026-06-18)
+Fires when LTP breaks the session extreme: **`D.H.B.`** (Day High Break — shows the level) when LTP breaks
+the session high, **`Day Low Break`** when it breaks the session low. Backed by the row flags
+`isDayHighBrake` / `isDayLowBrake`. See [PHASE-B-FINDINGS.md](../PHASE-B-FINDINGS.md) §6.
 
 ### OI Interpretation matrix (REUSED across Futures & Options pages)
 | Price (LTP) | OI | Interpretation | Badge color | Arrow |

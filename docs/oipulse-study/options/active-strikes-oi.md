@@ -72,8 +72,16 @@ Response row schema (confirmed):
 ```json
 { "stTime": "09:16:00", "obOiData": [ { "CE": 2092.5 }, { "PE": 3150 } ] }
 ```
-Per interval `stTime`: active strike's `CE`/`PE` OI. Chart 1 plots CE & PE; **Sentiment %** derived
-(e.g. `(CE − PE)/PE` or net OI bias) → blue line (deep negative ⇒ call-heavy ⇒ bearish).
+Per interval `stTime`: active strike's `CE`/`PE` OI. Chart 1 plots CE & PE; **Sentiment %** → blue line
+(deep negative ⇒ call-heavy ⇒ bearish).
+
+**Sentiment % formula (confirmed live 2026-06-18):**
+```
+Sentiment % = (ΣPut OI − ΣCall OI) / ΣPut OI × 100      (negative = calls dominate = bearish)
+```
+Inputs = the cumulative active-strike Call/Put OI (the green/red "Change in OI" lines, i.e.
+`activeStrikeOiData.{yAxisCallData, yAxisPutData}`). Fitted EXACT on live data — e.g.
+`(7,052,711 − 16,052,253) / 7,052,711 × 100 = −127.60 %`. See [PHASE-B-FINDINGS.md](../PHASE-B-FINDINGS.md) §6.
 
 ## Interpretation (how to trade)
 - The "active strike" is the strike with the greatest activity by Volume / ΔOI (auto-picked by the server), not simply the ATM strike.

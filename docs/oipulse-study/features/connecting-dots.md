@@ -72,6 +72,16 @@ Rows per page:[25▾]          1 - 25 of 82        ‹ Previous   Next ›
 
 Row striping: extreme-trend rows get faint maroon background tint.
 
+### Confirmed structure (live 2026-06-18)
+`tableData` rows carry **pre-classified enum codes** per factor (`0`=Neutral blue↔, `1`=Bullish green↑,
+`2`=Bearish red↓), **not raw values** — so the per-factor raw→enum cutoffs are server-side. The **12 factors**:
+`inDow, inVolume, inDailyTrend, inSelectedFutPrice, inSelectedFutOi, inVix, inActiveStrikeOi, inActiveStrikeIv,
+inVwap, inRsi, inSupertrend` → composite **`inTrend`** (`1`=Ext.Bullish, `2`=Bullish, `3`=Bearish,
+`4`=Ext.Bearish). Composite rule fitted from net = (#bull − #bear) across the 11 factors:
+**net ≥ 8 → 1; +2..+7 → 2; −4..+1 → 3; ≤ −6 → 4**. The asymmetry (net +1 → Bearish) implies the factors are
+**weighted, not equal-vote** — exact weights + per-factor raw→enum cutoffs are server-side. The page loads
+**~5-10 s after open** (REST). See [PHASE-B-FINDINGS.md](../PHASE-B-FINDINGS.md) §6.
+
 ## Live data sample (2026-06-16 BANKNIFTY 3-min):
 ```json
 [

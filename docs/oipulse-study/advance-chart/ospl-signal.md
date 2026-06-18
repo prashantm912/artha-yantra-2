@@ -2,7 +2,19 @@
 
 **What this is.** OI Pulse's flagship **proprietary AI signal**, rendered as an indicator on the Advance Chart. Sourced from the Manual (V10) Addendum 8 (PDF p266–p273) and logged from [MANUAL-V10-GAP-ANALYSIS.md](../MANUAL-V10-GAP-ANALYSIS.md) §A5. Previously flagged unobserved in [NOT-CAPTURED.md](../NOT-CAPTURED.md) item 4 — this fills that gap from the manual.
 
-> **Not live-verified** (Annual-plan-gated paid feature). Methodology paraphrased for replication, not trading advice. Builds on [oi-interpretation-method.md](../oi-interpretation-method.md).
+> **Live-confirmed 2026-06-18** (accessible on the owner's Annual plan). Methodology paraphrased for replication, not trading advice. Builds on [oi-interpretation-method.md](../oi-interpretation-method.md).
+
+> **Live-confirmed structure (2026-06-18).** OSPL Signal, OSPL Qwik scalp and OSPL Volume are **TradingView
+> Pine custom studies on the Advance Chart** — added via the Indicators dialog, accessible on the owner's
+> Annual plan — **NOT separate pages or endpoints**. Specifics:
+> - **OSPL Signal** uses params **(10, 2)** — identical to SuperTrend(10,2); it renders a SuperTrend-style
+>   trend line + stop level (signal = trend flip), i.e. a SuperTrend-derived directional buy/sell.
+> - **OSPL Qwik scalp** = faster scalp variant (same study family).
+> - **OSPL Volume** Inputs = MA Length **20** + a "Color based on previous close" toggle; the dark-bar
+>   threshold (50K BankNifty / 125K Nifty) is **hardcoded in the Pine script, NOT a user input**.
+> - The Pine source is server-protected, so the exact logic cannot be extracted.
+>
+> See [PHASE-B-FINDINGS.md](../PHASE-B-FINDINGS.md) §6.
 
 ## What it is
 

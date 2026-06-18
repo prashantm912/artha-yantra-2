@@ -88,10 +88,12 @@ panels (which use the Investing.com `ssltvc.forexprostools.com` iframes); Advanc
 
 "Open Interest" is a named live sub-pane study (futures OI + change, with a live label like
 "Open Interest 2.516M"), distinct from any OI-bar toggle. The **OSPL Volume** indicator IS one of the
-**default** indicators (confirmed live 2026-06-18 — coloured volume bars, green/red). It colours a
+**default** indicators (confirmed live 2026-06-18 — coloured volume bars, green/red). Its only **Inputs**
+are **MA Length = 20** + a "Color based on previous close" toggle (confirmed live 2026-06-18). It colours a
 volume candle dark when volume is above a threshold (manual: >50K BankNifty / >125K Nifty futures);
-that dark-bar threshold is **internal to the indicator and not exposed in the legend**, so it stays
-**manual-sourced** (not readable off the live UI).
+that dark-bar threshold is **hardcoded in the Pine script — not a user input, not exposed in the legend**,
+so it stays **manual-sourced** (not user-configurable; not readable off the live UI). See
+[PHASE-B-FINDINGS.md](../PHASE-B-FINDINGS.md) §6.
 The chart supports multiple saved indicator templates (the Save dialog has Remember Symbol /
 Remember Interval; a "MY TEMPLATES" switcher; example `INTRADAY_SCALPING` = VWAP + SuperTrend +
 VWMA + OSPL Volume + RSI + Open Interest) and an unlimited indicator count. Clarification on the

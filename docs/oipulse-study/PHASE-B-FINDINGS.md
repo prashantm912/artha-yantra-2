@@ -126,3 +126,45 @@ Evidence captured live on 2026-06-18. "→ study"/"→ manual" = which existing 
 - **OI Interpretation badge enum** confirmed live on the chain: `L.U.` Long Unwinding (amber), `S.B.` Short Buildup (red ↓), `L.B.` Long Buildup (green ↑), `S.C.` Short Covering (seen on banks-analysis).
 - **oipulse lists SENSEX/BANKEX** (BSE indices) in the options/futures name dropdowns; some pages (active-strikes-oi/iv) are NSE-index-only.
 - Route spellings: `calender-spread` (sic), `option-premium` (singular), `oi-stats`, `oi-expiry-strategy`.
+
+---
+
+## 6. Follow-up captures (2026-06-18 PM) — paid features + reverse-engineered formulas
+
+### Paid / AI features (owner on Annual plan — accessible, not locked)
+- **Strategy Builder** (`/app/strategies/strategy-builder`) — options payoff builder. "Add Positions" opens a
+  **full Greeks chain** (per CE/PE strike: `OI | Vega | Theta | Delta | IV | Price` + Spot/Fut price). Tabs:
+  Strategy Positions / Greeks / P&L / Save & Load. Stats: Max Profit, Max Loss, Risk:Reward, Breakeven, Days Left,
+  POP. Settings: Spot %-move slider (±7) recomputes the payoff. **Strategy Simulator** is a mode-radio on the same
+  page (autoplay time-walk: Start Autoplay / Reset Time / Min Gap), NOT a separate route. Payoff + Greeks are
+  client-side Black-Scholes → replicable with our black76-math.
+- **OSPL Signal / OSPL Qwik scalp / OSPL Volume** — these are **TradingView Pine custom studies on Advance Chart**
+  (added via the Indicators dialog), not separate pages. Pine source is server-protected, but:
+  - **OSPL Signal** params **(10, 2)** — identical to SuperTrend(10,2); renders a SuperTrend-style trend line +
+    stop level (signal = trend flip). I.e. a SuperTrend-derived directional buy/sell.
+  - **OSPL Qwik scalp** — faster scalp variant (same study family).
+  - **OSPL Volume** (V16) — Inputs are only **MA Length = 20** + "Color based on previous close" toggle. There is
+    **no threshold input** → the dark-bar threshold (manual: 50K BankNifty / 125K Nifty) is hardcoded in the Pine
+    script, **not user-configurable / not readable from the UI**. Stays manual-sourced.
+- "Morning Trade" / "3:20 Strategy" remain non-existent as routes/menu/indicators (confirmed again).
+
+### Reverse-engineered formulas (fitted from live data)
+- **Active-Strike Sentiment %** = **`(ΣPut OI − ΣCall OI) / ΣPut OI × 100`** — EXACT match on 5 consecutive
+  points (e.g. 10:43: (7,052,711 − 16,052,253)/7,052,711 = −127.60 %). Negative ⇒ calls dominate ⇒ bearish.
+  (Inputs are the cumulative active-strike Call/Put OI; `activeStrikeOiData.{yAxisCallData,yAxisPutData}`.)
+- **banks-analysis cell** = `inLtpDiffInPercentage_{BANK}` / `inOiDiffInPercentage_{BANK}` + `inOiInterpretation_{BANK}`
+  (1-4 enum badge), per-interval row × per-bank columns. The %s are **cumulative from the day-open baseline** —
+  proven: `inOiDiffInPercentage` rises monotonically through the session (0.54 → 0.78 over 10:05→10:40). Confirms V1 (study).
+- **Level Break** (futures oi-analysis / trending-oi "Day H/L Break") = fires when LTP breaks the **session high**
+  (`D.H.B.` Day High Break, shows the level) or **session low** (`Day Low Break`).
+- **Connecting-Dots** — `tableData` rows carry **pre-classified enum codes** per factor (0=Neutral/blue↔,
+  1=Bullish/green↑, 2=Bearish/red↓), NOT raw values, so per-factor raw→enum cutoffs are server-side. The **12 factors**:
+  `inDow, inVolume, inDailyTrend, inSelectedFutPrice, inSelectedFutOi, inVix, inActiveStrikeOi, inActiveStrikeIv,
+  inVwap, inRsi, inSupertrend` → composite **`inTrend`** (1=Ext.Bullish, 2=Bullish, 3=Bearish, 4=Ext.Bearish).
+  Composite rule fitted from net = (#bull − #bear) across the 11 factors: **net ≥ 8 → 1; +2..+7 → 2; −4..+1 → 3;
+  ≤ −6 → 4**. The asymmetry (net +1 → Bearish) implies the factors are **weighted**, not equal-vote — exact weights
+  are server-side.
+
+### Minor
+- `OD_OPT_CHART` 10th element is consistently **0** (reserved/unused, or an always-0 ΔOI slot).
+- Historical mode not separately re-captured this session — Phase A assumes the same endpoints with a date param + same response shape.

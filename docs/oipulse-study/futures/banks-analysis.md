@@ -81,6 +81,12 @@ Vue enriched row (flat, per time interval — confirmed):
 ```
 Vue creates this by pivoting the per-bank arrays from the API response, aligning on `stTimeInterval`.
 
+**Confirmed data contract (live 2026-06-18):** each matrix cell = `inLtpDiffInPercentage_{BANK}` /
+`inOiDiffInPercentage_{BANK}` + `inOiInterpretation_{BANK}` (enum `1`=Long Buildup, `2`=Long Unwinding,
+`3`=Short Buildup, `4`=Short Covering) — per-interval rows × per-bank columns. The %s are **cumulative
+from day-open**, proven live: `inOiDiffInPercentage` rises **monotonically** through the session
+(0.54 → 0.78 over 10:05 → 10:40). See [PHASE-B-FINDINGS.md](../PHASE-B-FINDINGS.md) §6.
+
 ## Socket subscriptions
 No futures-specific socket — page is fetch-on-demand (Go button).
 Only `TICKER_DATA` / `TICKER_RESET_DATA` from the ticker strip component.

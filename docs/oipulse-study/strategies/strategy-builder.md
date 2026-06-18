@@ -4,6 +4,14 @@
 P&L payoff diagram, Greeks, key stats (max profit/loss, breakeven, POP), and simulate spot moves.
 Sub-tabs: `Strategy Builder | Strategies`. Two modes: **Strategy Builder** / **Strategy Simulator**.
 
+> **Live-confirmed 2026-06-18** (accessible on the owner's Annual plan — was previously paid/inferred).
+> **"Add Positions"** opens a **full Greeks chain** per CE/PE strike (`OI | Vega | Theta | Delta | IV | Price`
+> + Spot/Fut price). Tabs: **Strategy Positions / Greeks / P&L / Save & Load**. Stats: **Max Profit, Max Loss,
+> Risk:Reward, Breakeven, Days Left, POP**. Settings: a **Spot %-move slider (±7)** recomputes the payoff.
+> **Strategy Simulator** is a **mode-radio on the same page** (autoplay time-walk: Start Autoplay / Reset Time /
+> Min Gap), NOT a separate route. Payoff + Greeks are **client-side Black-Scholes** (replicable with our
+> `libs/black76-math`). See [PHASE-B-FINDINGS.md](../PHASE-B-FINDINGS.md) §6.
+
 ## Layout
 ```
 sub-tabs: [ Strategy Builder ] [ Strategies ]   ;  ticker strip

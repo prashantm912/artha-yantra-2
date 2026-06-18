@@ -111,18 +111,21 @@ https://ssltvc.forexprostools.com/?pair_ID={pair_ID}&height=1200&width=1920&inte
 
 ---
 
-## 4. Paid-only features (Annual plan required)
+## 4. Paid-only features (Annual plan) ✅ CAPTURED 2026-06-18
 
-**Page:** `/app/strategies/strategy-builder` (Save & Load tab), Plans page
+Owner's session is on the Annual (Go Combo) plan, so these were **accessible** — captured live. See
+[PHASE-B-FINDINGS.md §6](PHASE-B-FINDINGS.md#6-follow-up-captures-2026-06-18-pm--paid-features--reverse-engineered-formulas).
 
-| Feature | Plan | Status |
-|---|---|---|
-| OSPL Signal | Annual | Not observed — likely polling endpoint |
-| Qwik Scalp Signal | Annual | Not observed |
-| Save Strategy Builder Strategy | Annual | POST `/api/strategy-builder/savesession` not captured |
-| Intraday Strategy Simulator | Annual | "Strategy Simulator" radio not exercised |
+| Feature | Status |
+|---|---|
+| OSPL Signal | ✅ TradingView Pine study on Advance Chart (Indicators → "OSPL Signal"); params (10,2) = SuperTrend-derived directional signal. Pine source server-protected. |
+| Qwik Scalp Signal | ✅ Pine study "OSPL Qwik scalp" on Advance Chart (faster scalp variant). Source protected. |
+| OSPL Volume | ✅ Pine study; Inputs = MA Length 20 + color-by-prev-close; dark-bar threshold internal (not exposed). |
+| Strategy Builder | ✅ Payoff builder + per-strike Greeks chain (Δ/Θ/V/IV); Stats (MaxP/MaxL/RR/Breakeven/POP/DaysLeft); client-side BS. |
+| Strategy Simulator | ✅ A mode-radio inside Strategy Builder (autoplay time-walk), not a separate route. |
+| Save Strategy Builder Strategy | "Save & Load" tab present (CRUD save-session); endpoint not separately intercepted — low replication value. |
 
-**To verify:** Activate each feature and intercept API calls in DevTools.
+The only thing NOT extractable is the **Pine source** of the OSPL studies (server-protected) — but params + visual behaviour are captured.
 
 ---
 

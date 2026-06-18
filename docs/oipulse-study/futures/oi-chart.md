@@ -71,6 +71,15 @@ stLastUpdatedAt
 ## Socket subscriptions
 - `FD_OIA_BANKNIFTY-I` — same socket as OI Analysis page; pattern `FD_OIA_{SYMBOL}-{EXPIRY}`
 
+**Socket payload ([Phase B confirmed](../PHASE-B-FINDINGS.md))** — channel `FD_OIA_{SYM}-I`
+(near-month future, e.g. `NIFTY-I`, `SENSEX-I`). Two encodings coexist for this page:
+- The **REST batch** (`…alldataforchart`) returns the **object** form (`stTime / stDataFetchType /
+  inOi (string) / inOpen …`) documented in the Data source section above.
+- The **live socket push** is a compact **array[8]** `[symbol, time, open, high, low, close, volume, OI]`:
+```
+FD_OIA_NIFTY-I   ["NIFTY-I","09:22:00",24097.5,24102.8,24094,24094,8125,16826875]
+```
+
 ## Data source / API
 Same instrument/date discovery as oi-analysis, plus the chart-data endpoint:
 ```

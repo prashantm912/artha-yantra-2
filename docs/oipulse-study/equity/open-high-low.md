@@ -4,6 +4,15 @@
 at its day high (O=H, bearish) or day low (O=L, bullish), how far price has moved from that level, and
 when it triggered. Sub-tabs: `Open & High Strategy | Equity`.
 
+> **Confirmed live 2026-06-18.** The page lives under **both** menus — the route
+> `/app/options-analysis/open-high-strategy` (Options menu) AND `/app/equity/open-high-strategy`
+> (Equity menu). The live layout splits **CALL / PUT around a Strike** and carries a
+> **Probability column shown as a continuous percentage** (live values seen: 10 / 20 / 40 / 95 %) —
+> not a fixed 60/80/90/95 tier set and not a single AI score. When a level triggers it shows an amber
+> **"Hit ✔"** badge plus the Triggered Time, and high-probability (95 %) O=H badges carry a **Red Dot ●**.
+> Live column order: Day Open · Day High · New D.High · New D.Low · O=H/O=L · Triggered Time ·
+> Probability · Call LTP · Strike · Put LTP. See [PHASE-B-FINDINGS.md](../PHASE-B-FINDINGS.md) (§5 V5).
+
 ## Layout
 ```
 sub-tabs: [ Open & High Strategy ] [ Equity ]   ;  ticker strip

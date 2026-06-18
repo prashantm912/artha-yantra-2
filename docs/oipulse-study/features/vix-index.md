@@ -69,6 +69,14 @@ stLastUpdatedAt          // "-" initially; updates on data refresh
 `["EQ_VPD_NIFTY 50","EQ_VPD_NIFTY BANK","EQ_VPD_INDIA VIX"]` — pattern `EQ_VPD_{INDEX_NAME}`.
 Live ticks push new data points; chart auto-extends without re-fetch.
 
+**Socket payload ([Phase B confirmed](../PHASE-B-FINDINGS.md))** — channels `EQ_VPD_{NAME}`
+(`NIFTY 50` / `NIFTY BANK` / `INDIA VIX`). Live frame is a **keyed object** `{stName, stDateTime, inLtp}`
+where `stDateTime` is a full ISO timestamp `YYYY-MM-DDTHH:MM:SS`:
+```json
+{"stName":"INDIA VIX","stDateTime":"2026-06-18T09:10:00","inLtp":13.1875}
+```
+These price channels also emit a **snapshot frame on subscribe**, so the schema is capturable even pre-open.
+
 ## Data source / API
 | Call | Method | Request | Response |
 |---|---|---|---|

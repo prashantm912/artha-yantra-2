@@ -73,6 +73,11 @@ Left-aligned local tabs. Pattern: `<PageName> | Tool` (e.g. `Dashboard | Tool`, 
 ## Live ticker strip (below sub-tabs, most pages)
 Horizontal auto-scrolling quotes. Format per item: `SYMBOL(F): price ±chg (±%)`, green ▲ up / red ▼ down. Source: `POST /api/gettickerdata`. Instruments: BANKNIFTY, AXISBANK, HDFCBANK, ICICIBANK, INFY, KOTAKBANK, RELIANCE, TCS, NIFTY, … (F)=futures.
 
+**Live socket (confirmed 2026-06-18):** the strip updates via `TICKER_DATA` — frame ARRAY[2] `[symbol, ltp]`
+(e.g. `["HDFCBANK-I",789.3]`), the highest-frequency channel on the socket (~2000 frames/hour); the ±chg/±%
+are derived client-side. `TICKER_RESET_DATA` is also registered (fires on a reset/day rollover). The strip is
+toggleable in the owner's profile — when disabled, neither channel subscribes. See [Phase B findings](PHASE-B-FINDINGS.md).
+
 ## Footer (some pages)
 `Oi Pulse - Feel the pulse of our market` + social icons (YouTube/Twitter/Telegram, red) bottom-right.
 

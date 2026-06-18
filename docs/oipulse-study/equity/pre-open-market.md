@@ -4,6 +4,10 @@
 pre-open vs prev close, with prev-day break. Equity counterpart of the Futures pre-open page.
 Sub-tabs: `Pre open market | Equity`.
 
+> **Confirmed live 2026-06-18:** pre-open is **two separate routes** — this `/app/equity/pre-open-market`
+> and `/app/futures-analysis/pre-open-market` (the study's split is correct, not the manual's single combined page).
+> See [PHASE-B-FINDINGS.md](../PHASE-B-FINDINGS.md) (§5 V14).
+
 ## Layout
 ```
 sub-tabs: [ Pre open market ] [ Equity ]   ;  ticker strip

@@ -26,6 +26,10 @@ Newest date first (descending).
 | Show Cumulative Oi | checkbox | add cumulative-OI column/series |
 | Show Range Data | checkbox | add range (high-low) detail |
 
+> **Confirmed live 2026-06-18:** the page exposes exactly these **three checkboxes** (Show chart data /
+> Show Cumulative Oi / Show Range Data) — there is **no "Show Detail View" button** (the manual was
+> stale; the study is correct). See [PHASE-B-FINDINGS.md](../PHASE-B-FINDINGS.md) (§5 V8).
+
 ## Table columns
 | Column | Source | Render |
 |---|---|---|

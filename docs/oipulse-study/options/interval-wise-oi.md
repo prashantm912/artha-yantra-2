@@ -57,6 +57,9 @@ Color: **`#f44336`** = red = bearish (Short Build Up) · **`#4caf50`** = green =
 ## Socket subscriptions
 **None** — no socket; page is batch/snapshot only.
 
+> **Phase B (2026-06-18) — CONFIRMED:** this page is **REST-only — subscribes NO socket channels**
+> (verified after a Go on the live capture run). See [Phase B findings](../PHASE-B-FINDINGS.md).
+
 ## Data source / API (`interval-wise-oi`)
 | Call | Response |
 |---|---|

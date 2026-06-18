@@ -83,6 +83,20 @@ randomIdString, stLastUpdatedAt
 ## Socket subscriptions
 - `FD_OIA_BANKNIFTY-I` — pattern: `FD_OIA_{SYMBOL}-{EXPIRY}` (e.g. `FD_OIA_NIFTY-II`)
 
+**Socket payload ([Phase B confirmed](../PHASE-B-FINDINGS.md))** — channel `FD_OIA_{SYM}-I`
+(near-month future, e.g. `NIFTY-I`, `SENSEX-I`). Two encodings coexist:
+- The **REST batch** (`…alldata`) returns the **object** rows documented under Data source / API
+  below (`stTime / stDataFetchType / inOi (string) / inOpen …`).
+- The **live socket push** is a compact **array[8]** `[symbol, time, open, high, low, close, volume, OI]`:
+```
+FD_OIA_NIFTY-I   ["NIFTY-I","09:22:00",24097.5,24102.8,24094,24094,8125,16826875]
+```
+
+> **V6 — Pattern column confirmed absent.** The live column order is `Date Time | Total OI |
+> Total Chng. In OI | Day High | Day Low | Level Break | Volume | LTP | LTP Change | OI Change |
+> OI Interpretation` — there is **no "Pattern" column** (the manual was stale). See the Table columns
+> section above, which already matches this order.
+
 ## Data source / API
 | Call | Request | Response |
 |---|---|---|

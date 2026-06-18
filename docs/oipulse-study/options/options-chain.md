@@ -203,6 +203,18 @@ Vue component pairs CE/PE by `inStrikePrice` → computes all deltas/Greeks/PCR/
 - **PCR Ratio column**: rightmost PUT column; "-" for strikes without meaningful PCR
 - **Cell highlighting**: on EACH of the Call and Put sides, the cell holding the Max OI, the Max OI Change, the Min OI Change, and the Max Volume is highlighted (8 highlighted cells total) — distinct from the proportional inline data-bars
 
+### Live V10 verification (CONFIRMED — Phase B 2026-06-18, SENSEX expiry day)
+Verified live on a SENSEX expiry day (resolves the manual-V10 IV question):
+- **IV column IS present** on both sides on an expiry day; shows a **vol-smile** (PUT IV ~10.7
+  rising to ~16 OTM); **IV = 0 for deep-ITM calls** (premium all-intrinsic).
+- Cell highlights observed: **ATM strike row tinted cream/yellow**; **"OI Chng." cells have GREEN
+  bars** (OI additions); **"OI" cells have red horizontal data-bars** (magnitude); the **"OI Int."
+  column** is the OI-interpretation badge, colour-coded `L.U.`(amber) / `S.B.`(red ↓) / `L.B.`(green ↑).
+- Column order — CALL side: `OI Int. | OI % | OI | OI Chng. | IV | LTP | LTP % | LTP Chg | Strike`;
+  PUT side mirrors it and the row ends with a `PCR Ratio` column.
+
+See [Phase B findings](../PHASE-B-FINDINGS.md) (item V10) for the full visual capture.
+
 ## Interpretation (how to trade)
 - Advantages vs NSE: per-minute OI (vs NSE's ~3-min publish lag), live PCR, and historical options-chain data.
 
@@ -216,6 +228,20 @@ See [OI interpretation method](../oi-interpretation-method.md) for the shared OI
 - ATM computed from `optionChainAtm` (nearest strike to underlying LTP)
 - Days to expiry = `inDaysLeftInExpiry` (fractional)
 - Socket events (CONFIRMED): `OD_OC_{SYMBOL}_{EXPIRY}` (chain ticks), `EQUITY_UNDERLYING_DATA_NIFTY BANK` (underlying), `EQUITY_UNDERLYING_DATA_INDIA VIX` (VIX)
+
+### Live push payload (CONFIRMED — Phase B 2026-06-18, SENSEX expiry)
+Channel `OD_OC_{SYM}_{EXP}` streams **one ARRAY[5] frame per strike per side** (~190–200
+frames/interval — every strike pushed as a separate frame):
+```
+[strike, side(CE|PE), LTP, volume, OI]
+```
+e.g. `["77100","CE",179.95,598240,3356180]` (cross-checked vs `OD_OIA`: element[3]=volume, element[4]=OI).
+Plus `EQUITY_UNDERLYING_DATA_{NAME}` objects `{stName, stDateTime, inLtp, inHigh, inLow}`.
+
+**CRITICAL: the socket frame has NO IV** (5 elements only) — the chain's IV column is
+**REST-served, not pushed**.
+
+See [Phase B findings](../PHASE-B-FINDINGS.md) for the full socket capture.
 
 ## Screenshot
 ss_5693wz43d (BANKNIFTY 30-Jun chain, ATM band, OI data-bars, PCR column).

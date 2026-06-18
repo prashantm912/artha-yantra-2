@@ -23,7 +23,7 @@ sub-tabs: [ Capital Market ] [ FII & DII Activity ]   ;  ticker strip
 |---|---|---|
 | FII Net Value chart | ECharts bar | `inFiiNetValue` per day (green +, red −); watermark; toolbox |
 | DII Net Value chart | ECharts bar | `inDiiNetValue` per day |
-| Detailed table | table | Date, FII Buy/Sell/Net, **In Market** (green badge = total turnover), DII Net/Buy/Sell |
+| Detailed table | table | Date, FII Buy/Sell/Net, **In Market** (= FII Net + DII Net), DII Net/Buy/Sell |
 
 Table value coloring: Net columns green (+) / red (−).
 
@@ -43,7 +43,11 @@ totalRecords                 // 365
 Date (dtDate) · FII Buy (inFiiBuyValue) · FII Sell (inFiiSellValue) · FII Net (inFiiNetValue) ·
 In Market (inMarketNet) · DII Net (inDiiNetValue) · DII Buy (inDiiBuyValue) · DII Sell (inDiiSellValue)
 ```
-`inMarketNet` = computed (likely `inFiiNetValue + inDiiNetValue`). No sort on any column.
+`inMarketNet` = computed = **`FII Net + DII Net`**. No sort on any column.
+
+> **Confirmed live 2026-06-18** by arithmetic on live rows: `101.59 + 1561.4 = 1662.99` and
+> `200.05 + 3189.26 = 3389.31` — the **"In Market" column = FII Net + DII Net** (the study's reading),
+> NOT the manual's "cash-market net per row". See [PHASE-B-FINDINGS.md](../PHASE-B-FINDINGS.md) (§5 V3).
 
 ## Data source / API
 `POST /api/fii-dii/getcapitalmarketdata` — no filter params (returns full ~365 days):

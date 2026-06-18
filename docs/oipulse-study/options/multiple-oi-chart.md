@@ -27,6 +27,14 @@ Each selected strike → one colored OI line; underlying price overlaid for cont
 
 Legend-deselect and historical-date support are confirmed; the overlay freely mixes CE and PE strikes on one OI axis.
 
+**Confirmed live 2026-06-18 (V13):** the chart is **dual-axis (left "Price", right "OI")**, so the underlying/price
+overlay **is present** (the manual lacked it). Verified with 77200 CE+PE: **blue dotted = SENSEX price (left axis),
+green = CE OI, yellow = PE OI (right axis)**. The selector is **one symbol + expiry + a searchable multi-STRIKE
+picker** (not multi-symbol) + Go. The page **IS socket-driven** — once a strike is picked it subscribes
+`OD_OPT_CHART_{SYM}_{EXP}_{STRIKE}`, live frame ARRAY[10] `[time, strike, side, O, H, L, C, volume, OI, 0]`
+(one channel per selected strike). A correction to an earlier draft that called this page REST-only — the socket
+only registers *after* the strike selection is completed. See [Phase B findings](../PHASE-B-FINDINGS.md) (V13 + §2).
+
 ## Filter bar — exact controls
 | Control | Values | Notes |
 |---|---|---|

@@ -74,6 +74,13 @@ Vue enriches each raw row with computed fields:
 ## Socket subscriptions
 - `FD_OIS` — futures OI spurt live feed (no symbol suffix — all-market feed)
 
+**Socket payload ([Phase B confirmed](../PHASE-B-FINDINGS.md))** — single channel `FD_OIS` streams
+~320 futures, one frame each per interval. Each live frame is an **array[4]** `[symbol, LTP, volume, OI]`;
+the spurt ranking / bucketing is computed **client-side**:
+```
+FD_OIS   ["RECLTD-I",358.7,2800,57766800]
+```
+
 ## Data source / API
 | Call | Request | Response |
 |---|---|---|

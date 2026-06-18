@@ -115,6 +115,20 @@ socketSubscribedEvents: [
 ```
 Pattern: `OD_SSC_{SYMBOL}_{EXPIRY_YYMMDD}_{STRIKE}_{CE|PE}` + `EQUITY_UNDERLYING_DATA_{INDEX_NAME}`
 
+### Live push payload (CONFIRMED — Phase B 2026-06-18, SENSEX expiry)
+Each `OD_SSC_{SYM}_{EXP}_{STRIKE}_{CE|PE}` frame is a compact positional **ARRAY[7]** — a
+premium candle + volume, with **NO OI**:
+```
+[time, instrumentId, open, high, low, close, volume]
+```
+where `instrumentId = {SYM}{YYMMDD}{STRIKE}{CE|PE}`. Samples:
+```
+OD_SSC_SENSEX_260618_77100_CE  ["09:28:00","SENSEX26061877100CE",180.9,189.9,178.4,181.45,655400]
+OD_SSC_SENSEX_260618_77100_PE  ["09:28:00","SENSEX26061877100PE",135.2,139,129,138.2,717820]
+```
+
+See [Phase B findings](../PHASE-B-FINDINGS.md) for the full socket capture.
+
 ## Data source / API
 | Endpoint | Request | Response |
 |---|---|---|

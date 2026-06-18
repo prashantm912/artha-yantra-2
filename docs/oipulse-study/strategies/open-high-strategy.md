@@ -2,7 +2,9 @@
 
 **Purpose:** surface options strikes where **Open = High** (bullish CE signal) or **Open = Low** (bearish PE signal)
 fired today, with triggered time and historical probability of the condition triggering.
-Listed under Strategies menu. Sub-tabs: `Open & High Strategy | Options Analysis`.
+Reached from the **Options** *and* **Equity** menus, not Strategies (confirmed live 2026-06-18 — both
+`/app/options-analysis/open-high-strategy` and `/app/equity/open-high-strategy` routes exist; despite this
+doc's location it is not under a Strategies route). Sub-tabs: `Open & High Strategy | Options Analysis`.
 
 ## Layout
 ```
@@ -40,12 +42,13 @@ Symmetric: left half = CE, right half = PE, center = Strike.
 | New D.Low | `inNewDayLow` | current day low |
 | O=H / O=L | text badge `O = H` / `O = L` | confirms which condition applies |
 | Triggered Time | `stOldDayHighBreakTime` / `stOldDayLowBreakTime` | "Open = High Triggered" label + `HH:MM` time |
-| Probability | client-side computed | discrete % (60/80/90/95); shown only when NOT yet triggered today |
+| Probability | client-side computed | a **percentage** (saw 10/20/40/95% live 2026-06-18 — a continuous %, not fixed 60/80/90/95 tiers) |
 | Call/Put LTP | `inNewLtp` | current premium |
 | Strike | `inStrikePrice` | center column |
 
-**Triggered row**: shows "Open = High Triggered" text + `HH:MM` time in Triggered Time column; Probability hidden.
-**Not-yet-triggered row**: shows Probability % (historical odds); Triggered Time empty.
+**Triggered row** (confirmed live 2026-06-18): an amber **"Hit ✔"** badge accompanies the "Open = High Triggered"
+text + `HH:MM` in the Triggered Time column. High-probability (95%) O=H badges also carry a **Red Dot ●**.
+**Not-yet-triggered row**: shows the Probability % (historical odds); Triggered Time empty.
 
 ## Vue component state
 ```
@@ -116,7 +119,7 @@ Response: {
 }
 ```
 - Flat array of CE + PE rows (one entry per strike per type)
-- **No probability in API response** — probability is computed client-side by Vue (discrete: 60/80/90/95%)
+- **No probability in API response** — probability is computed client-side by Vue (a continuous %; live values 10/20/40/95%, confirmed live 2026-06-18 — not fixed tiers)
 - `stOldDayHighBreakTime` = time Open=High was broken; null = not triggered
 - `stOldDayLowBreakTime` = time Open=Low was broken; null = not triggered
 
@@ -133,15 +136,16 @@ Response: {
 - Size by confidence; if OH appears on both the CE and the PE, reduce size.
 - Exit: trail the position; do not wait for price to cross the OH level to book.
 - LTP-distance gate: the smaller the gap of the current LTP below the OH level, the higher the reversion odds — this is the interpretation behind the existing "Far from High?" % column.
-- Probability framing: the manual treats Probability as an AI output — treat >90% as a *prepare* signal (not an entry), and a "Red Dot" on the O=H badge as a stronger composite trigger.
+- Probability framing: the Probability column is a continuous % computed client-side (live values 10/20/40/95%, confirmed live 2026-06-18); treat >90% as a *prepare* signal (not an entry), and the **Red Dot ●** that appears on 95% O=H badges as a stronger composite trigger.
 - Failure modes: reversion fails when a bigger player enters later (a heavy-volume move against it); OH does not predict the day's direction — it is one scalp, not a trend tool.
 
 See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
+Probability/menu/badge corrections verified live — see [PHASE-B-FINDINGS.md](../PHASE-B-FINDINGS.md) (V5).
 
 ## Replication notes (→ ArthaYantra)
 - Symmetric table: pair CE/PE rows by strike, display both halves mirrored around center Strike column.
-- "Triggered" detection: `stOldDayHighBreakTime != null` → show triggered label + time, suppress probability.
-- Probability column: client-computed; exact formula requires Vue source inspection (discrete 60/80/90/95 tiers).
+- "Triggered" detection: `stOldDayHighBreakTime != null` → show triggered label + amber **"Hit ✔"** badge + time, suppress probability; render a **Red Dot ●** on 95% O=H badges.
+- Probability column: client-computed continuous % (live values 10/20/40/95%); exact formula requires Vue source inspection (not fixed tiers).
 - Auto-poll interval (no socket); `selectedTypeOfData` toggles Open=High vs Open=Low view.
 
 ## Screenshot

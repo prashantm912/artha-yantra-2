@@ -1,8 +1,10 @@
 # Advance Chart — `/app/advance-chart`
 
-**Purpose:** the pro charting page. A full-screen **TradingView charting library** wired to
-**OiPulse's OWN NSE F&O datafeed** (not Investing.com), with custom OiPulse indicators, an OI
+**Purpose:** the pro charting page. A full-screen **TradingView lightweight charting library** (in an iframe)
+wired to **OiPulse's OWN BSE/NSE F&O datafeed** (not Investing.com), with custom OiPulse indicators, an OI
 overlay, trade-history/audio-alert tooling, and 1Cliq trade integration. Top nav link (always visible).
+**Default indicators (confirmed live 2026-06-18):** VWAP, **VWMA(20)** (a volume-weighted MA, *not* a plain
+20-EMA), SuperTrend(10,2), OSPL Volume(20), RSI(14, SMA 14).
 
 ## Layout
 ```
@@ -85,8 +87,11 @@ Custom studies (OSPL Volume, SuperTrend defaults, Oi Bar). Note: this differs fr
 panels (which use the Investing.com `ssltvc.forexprostools.com` iframes); Advance Chart uses NSE F&O native data.
 
 "Open Interest" is a named live sub-pane study (futures OI + change, with a live label like
-"Open Interest 2.516M"), distinct from any OI-bar toggle. The "OSPL Volume" indicator colours a
-volume candle dark when volume is above a threshold (manual: >50K BankNifty / >125K Nifty futures).
+"Open Interest 2.516M"), distinct from any OI-bar toggle. The **OSPL Volume** indicator IS one of the
+**default** indicators (confirmed live 2026-06-18 — coloured volume bars, green/red). It colours a
+volume candle dark when volume is above a threshold (manual: >50K BankNifty / >125K Nifty futures);
+that dark-bar threshold is **internal to the indicator and not exposed in the legend**, so it stays
+**manual-sourced** (not readable off the live UI).
 The chart supports multiple saved indicator templates (the Save dialog has Remember Symbol /
 Remember Interval; a "MY TEMPLATES" switcher; example `INTRADAY_SCALPING` = VWAP + SuperTrend +
 VWMA + OSPL Volume + RSI + Open Interest) and an unlimited indicator count. Clarification on the
@@ -107,6 +112,8 @@ not a generic price alert — see [ospl-signal.md](ospl-signal.md).
 - Top-down workflow: analyse Weekly → Daily → 3-min, each saved as a template; a Double-SMA(100,200) overlay is the recommended daily preset.
 
 See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
+Default-indicator set + VWMA (not 20-EMA) + OSPL-Volume verified live —
+see [PHASE-B-FINDINGS.md](../PHASE-B-FINDINGS.md) (V16).
 
 ## Replication notes (→ ArthaYantra)
 - We have lightweight-charts + a candle store. Advance Chart = our chart bound to our `/api/v1/market/candles` with a symbol search, interval, indicator overlays (VWAP/VWMA/SuperTrend/RSI/volume), and OI-bar overlay.

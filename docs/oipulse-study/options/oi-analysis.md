@@ -157,6 +157,17 @@ Vue pairs CE+PE rows by `stTime`, computes OI change/cumulative/LTP diff/interpr
 Channel pattern: `OD_OIA_{SYMBOL}_{EXPIRY}_{STRIKE}` (e.g. `OD_OIA_BANKNIFTY_260630_57200`).
 Subscribed after Go button fires. Phase B will capture the live push payload schema.
 
+### Live push payload (CONFIRMED — Phase B 2026-06-18, SENSEX expiry)
+Channel `OD_OIA_{SYM}_{EXP}_{STRIKE}` (EXP = expiry `YYMMDD`). Each frame is a compact
+positional **ARRAY[8]**:
+```
+[time, side(CE|PE), open, high, low, close, volume, OI]
+```
+Both a CE frame **and** a PE frame push under the **same** channel key each interval (3-min default).
+Sample (PE): `["09:25:00","PE",138.3,141.2,130.15,138.7,705720,3386780]`.
+
+See [Phase B findings](../PHASE-B-FINDINGS.md) for the full socket capture.
+
 ## Interpretation (how to trade)
 - Options OI is the same futures OI primitive applied to CE and PE, mirrored.
 - Read both legs at one strike: pick ATM + high-OI strikes, then read the CE and PE interpretation together. Opposite-side agreement (e.g. CE Short Build-Up + PE Long Build-Up) is a high-confidence direction. Gate on strength (ΔOI/ΔLTP) and confirm with Volume + Day-High/Low-Break.

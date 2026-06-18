@@ -126,69 +126,45 @@ https://ssltvc.forexprostools.com/?pair_ID={pair_ID}&height=1200&width=1920&inte
 
 ---
 
-## 5. Socket message payload schema ✅ SUBSTANTIALLY CONFIRMED
+## 5. Socket message payload schema ✅ CONFIRMED LIVE (2026-06-18)
 
-**Updated:** Market was closed during session 2 (after 15:30 IST), so live pushes couldn't be
-directly captured. However, the **REST batch response** format was confirmed via XHR interception
-on the Futures OI Chart page — socket pushes single-row increments in this same format.
+**Resolved by the live Phase-B run** — see [PHASE-B-FINDINGS.md](PHASE-B-FINDINGS.md) for the
+full table, raw samples, and capture method. The session-2 INFERRED guesses below were **object
+shapes; the actual live frames for OI/candle/chain/spurt channels are POSITIONAL ARRAYS** — the
+REST-batch object format (still valid for REST) is NOT the socket frame shape.
 
-**Confirmed socket infrastructure:**
-- Library: Socket.IO (client object has `onAny`, `_callbacks`, `nsp`)
-- Wrapper: Vue plugin exposes `vm.$socket` with `{connected, client, $subscribe, $unsubscribe}`
-- Event registration: Vue component calls `$socket.$subscribe(channelName, handler)` → stored in `client._callbacks['$'+channelName]`
+**Confirmed socket infrastructure:** Socket.IO (one shared `$socket.client` for the SPA; `onAny`,
+`_callbacks`, `nsp`); channels subscribe on page mount, unsubscribe on leave; OI channels push on
+3-min interval boundaries; price channels also emit a snapshot frame on subscribe.
 
-**`FD_OIA_{SYMBOL}-{EXPIRY}` — Futures OI interval tick (CONFIRMED format via REST batch):**
-```json
-{
-  "stTime": "15:30:00",
-  "stDataFetchType": "IM",
-  "inOi": "2258160",
-  "inOpen": 57338.4,
-  "inHigh": 57359.8,
-  "inLow": 57322.2,
-  "inClose": 57357,
-  "inVolume": 5760
-}
+**Live socket frame layouts (CONFIRMED):**
 ```
-- `stDataFetchType`: `"PEOD"` = previous EOD baseline row, `"IM"` = intraday minute
-- `inOi` is a **string** (not number)
-- `inOiInterpretation` is computed client-side (not in socket payload)
-- REST batch returns 376 rows (PEOD + 375 IM rows for current day)
-- Socket pushes one new `"IM"` row per 3-minute interval during market hours
-
-**`TICKER_DATA` — Global ticker strip update (Vue state shape confirmed):**
-```json
-{
-  "stFuturesName": "BANKNIFTY-I",
-  "stName": "BANKNIFTY(F)",
-  "inNewClose": 57357,
-  "inPrevNewClose": 57257.2,
-  "inOldClose": 57257.2,
-  "inChangeInPoint": 99.8,
-  "inChangeInPercentage": 0.17
-}
+EQ_VPD_{name}                 {stName, stDateTime(ISO), inLtp}                         # object
+EQUITY_UNDERLYING_DATA_{name} {stName, stDateTime, inLtp, inHigh, inLow}              # object
+EQ_ICD_{stock}                [symbol, ltp]                                            # array[2]
+OD_OIA_{sym}_{exp}_{strike}   [time, side, O, H, L, C, volume, OI]                     # array[8]
+OD_OC_{sym}_{exp}             [strike, side, LTP, volume, OI]  (per-strike stream)     # array[5]
+OD_OI_SPURT_{sym}_{exp}       [strike, side, LTP, volume, OI]  (stream)               # array[5]
+OD_SSC_{sym}_{exp}_{strike}_{CE|PE}  [time, instrumentId, O, H, L, C, volume]         # array[7]
+FD_OIA_{sym}-I                [symbol, time, O, H, L, C, volume, OI]                   # array[8]
+FD_OIS                        [symbol, LTP, volume, OI]  (stream)                      # array[4]
+OD_OPT_CHART_{sym}_{exp}_{strike}    [time, strike, side, O, H, L, C, volume, OI, 0]   # array[10] (multiple-oi-chart)
+CALENDAR_SPREAD_OPT_{sym}_{exp}_{strike}_{CE|PE}  [time, expiry, strike, side, O,H,L,C, volume]  # array[9], no OI
+TICKER_DATA                   [symbol, ltp]   (highest-freq; + TICKER_RESET_DATA on rollover)    # array[2]
 ```
-9 ticker symbols tracked (confirmed from `tickerSymbols[]` Vue state with 9 entries).
+- **`OD_OC` carries no IV** — the chain's IV column is REST-served, not pushed.
+- `FD_OIA` REST batch still returns the object form (`stTime/stDataFetchType/inOi(string)/inOpen…`,
+  376 rows = PEOD + intraday); the **socket** frame is the positional array above.
 
-**`EQ_VPD_{INDEX_NAME}` — VIX & Index live price (INFERRED):**
-Likely single-value push matching REST `obVixData` entry:
-```json
-{ "stTime": "15:30:00", "inLtp": 24007.5, "stSymbol": "NIFTY 50" }
-```
-Not directly confirmed — market closed; fire next market-open day on VIX page.
+**`TICKER_DATA` ✅ confirmed (follow-up):** absent in the first pass only because the ticker was
+**disabled in the owner's profile**; after re-enabling, the strip subscribes `TICKER_DATA`
+(`[symbol, ltp]`, highest-frequency channel) + `TICKER_RESET_DATA` (registered; fires on rollover).
+Replaces the session-2 INFERRED rich-object guess with the array form above. The dashboard panels
+still use the external Investing.com feed (item 2) — no oipulse socket of its own.
 
-**`OD_SSC_{SYMBOL}_{YYMMDD}_{STRIKE}_{CE|PE}` — Straddle chart tick (INFERRED):**
-Likely: `{ "stTime": "...", "inLtp": ..., "inOi": ... }` per strike/type.
-
-**`EQ_ICD_{SYMBOL}` / `EQUITY_UNDERLYING_DATA_{NAME}` — Index/underlying ticks (INFERRED):**
-Not directly captured. Likely `{ "stSymbol": "...", "inLtp": ..., "inWeight": ... }`.
-
-**Channel names confirmed registered (via `client._callbacks` inspection):**
-```
-$TICKER_DATA, $TICKER_RESET_DATA
-$FD_OIA_BANKNIFTY-I
-$EQ_VPD_NIFTY 50, $EQ_VPD_NIFTY BANK, $EQ_VPD_INDIA VIX
-```
+**REST-only pages (no socket at all):** interval-wise-oi, banks-analysis, connecting-dots,
+active-strikes-oi, active-strikes-iv. (`multiple-oi-chart` and `calendar-spread` are NOT REST-only —
+they subscribe `OD_OPT_CHART` / `CALENDAR_SPREAD_OPT` once a strike/position is selected.)
 
 ---
 

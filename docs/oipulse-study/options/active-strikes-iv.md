@@ -25,6 +25,12 @@ filter: Mode(Live/Hist)  Name[BANKNIFTY▾]  Date[📅]  Time Interval[3 min▾]
 
 ECharts dual-axis line, toolbox, bottom legend. Put IV typically above Call IV (put skew visible).
 
+**Confirmed live 2026-06-18 (V7):** the page is a time-series chart of **Call IV (green) / Put IV (red) /
+Price (orange dotted, right axis)** — chart structure and colours verified. Page scope = **NSE indices only**;
+REST auto-refresh ("Data Auto-updated At: …"), no socket. The numeric IV-band bounds, the "~50K candle", and the
+RSI thresholds are **not exposed in the live UI** — they remain manual-sourced/qualitative (caveat retained).
+See [Phase B findings](../PHASE-B-FINDINGS.md) (V7).
+
 ## Filter bar — exact controls
 | Control | Values | Notes |
 |---|---|---|
@@ -42,7 +48,9 @@ socketSubscribedEvents
 `activeStrikeIvData` has `yAxisInAssetPrice` (unlike OI version which has no price axis).
 
 ## Socket subscriptions
-- `AS_IV_BANKNIFTY` — live active-strike IV events (no expiry in event name)
+**None** — confirmed live 2026-06-18 (V7): the page is **REST-driven** (auto-refresh "Data Auto-updated At: …");
+no socket channel is registered even after a Go. (An earlier draft listed `AS_IV_BANKNIFTY` as a live event —
+that was not reproducible from the socket.)
 
 ## Data source / API
 | Call | Response |

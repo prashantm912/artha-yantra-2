@@ -1,9 +1,10 @@
 # OI Expiry Strategy — `/app/options-analysis/oi-expiry-strategy`
 
 **Real tab title:** "Options EOD Oi Analysis"
-**Purpose:** EOD OHLC + OI + Volume history for each selected strike (CE and PE) across the current expiry cycle
-(~31 trading sessions). Lets you see OI build/unwind pattern per strike across all sessions till expiry.
-Sub-tabs: `Oi Expiry Strategy | Options Analysis`. Listed under Strategies menu.
+**Purpose:** EOD OHLC + OI + Volume history for each selected strike (CE and PE) across a short recent window
+(default ≈ **7 sessions** — live pager showed "1 - 7 of 7", confirmed live 2026-06-18; the manual's short
+window, not a full ~31-session expiry cycle). Lets you see the OI build/unwind pattern per strike over recent
+sessions. Sub-tabs: `Oi Expiry Strategy | Options Analysis`. Listed under Strategies menu.
 
 ## Layout
 ```
@@ -20,7 +21,7 @@ For EACH selected strike — two stacked tables:
 │ 2 │ 15-Jun│ 1500.05│1611.35★│1175.10 │ 1220.50│5,17,410 │ 16.2%       │ -34.2%   │2,50,590│ Short Covering    │
 │...│       │        │        │        │        │         │             │          │        │                   │
 └────────────────────────────────────────────────────────────────────────────────────────────────┘
-Rows per page: [7▾ 15 25 50 75 All]    1 - 7 of 31
+Rows per page: [7▾ 15 25 50 75 All]    1 - 7 of 7   (default ≈7-session window, confirmed live 2026-06-18)
 
 ┌ 56500 PE ────────────────────────────────────────────────────────── ┐
 │ Same columns ...                                                     │
@@ -57,7 +58,7 @@ Rows per page: [7▾ 15 25 50 75 All]    1 - 7 of 31
 | OI | `inOi` | absolute OI |
 | OI Interpretation | `stOiInterpretation` | badge: Long Build Up / Long Unwinding / Short Build Up / Short Covering |
 
-Pagination per table: 7 rows default; 7/15/25/50/75/All options. ~31 rows = one full expiry cycle.
+Pagination per table: 7 rows default; 7/15/25/50/75/All options. Default window ≈ 7 recent sessions (confirmed live 2026-06-18), not a full expiry cycle.
 
 ## Vue component state
 ```
@@ -81,8 +82,8 @@ arTableData                    // main: [{inStrikePrice, objStrikePriceData:[{CE
   {
     "inStrikePrice": "56500",
     "objStrikePriceData": [
-      { "CE": [ ...31 daily rows ] },
-      { "PE": [ ...31 daily rows ] }
+      { "CE": [ ...~7 recent daily rows ] },
+      { "PE": [ ...~7 recent daily rows ] }
     ]
   },
   ...
@@ -155,6 +156,7 @@ Response: {
 - This feature (the per-strike, last-N-day EOD OI + premium table) is the data input the **Expiry-Day Trading Plan** consumes. For the full two-session methodology see [expiry-day-trading-plan.md](expiry-day-trading-plan.md).
 
 See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.
+Default-window correction (≈7 sessions, not ~31) verified live — see [PHASE-B-FINDINGS.md](../PHASE-B-FINDINGS.md) (V12).
 
 ## Replication notes (→ ArthaYantra)
 - Strike selector (multi/default set of 5) → one CE + one PE table per strike.

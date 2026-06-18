@@ -79,6 +79,17 @@ Sample row (Rise in OI + Rise in Price):
 - Socket: `Array(2)` events subscribed for live updates
 - `randomIdString`: "Oz6" — per-instance identifier (ignore)
 
+## Socket subscriptions (CONFIRMED — Phase B 2026-06-18, SENSEX expiry)
+Channel `OD_OI_SPURT_{SYM}_{EXP}` (EXP = expiry `YYMMDD`) streams **one ARRAY[5] frame per
+strike** — same shape as `OD_OC`:
+```
+[strike, side(CE|PE), LTP, volume, OI]
+```
+e.g. `[80000,"PE",2875,20,12320]`. The spurt ranking is computed **client-side** from these frames.
+Also subscribes `EQUITY_UNDERLYING_DATA_{SYM}` (underlying LTP/DH/DL strip).
+
+See [Phase B findings](../PHASE-B-FINDINGS.md) for the full socket capture.
+
 ## Data source / API
 | Endpoint | Request | Response |
 |---|---|---|

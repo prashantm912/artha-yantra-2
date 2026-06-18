@@ -33,7 +33,13 @@ No expiry or symbol filter — always shows all 6 banks.
 Columns: **Time** + one per bank (Hdfc Bank, Icici Bank, Axis Bank, SBI, Kotak bank, Indusind bank;
 each header has an ⓘ info icon). Each bank cell:
 - Text: `( LTP% / OI% )` — **cumulative-from-day-open** percentages (LTP first, OI second). Green if +, red if −.
-- Badge: OI interpretation for that interval — `L.B`/`S.B`/`L.U`/`S.C` colored.
+- Badge: OI interpretation for that interval — `L.B`/`S.B`/`L.U`/`S.C` colored. The badge is **per-interval** (per time bucket), not a running/aggregate state.
+
+> **Confirmed live 2026-06-18** (REST-driven, no socket; live/historical mode + interval selector + Go).
+> The cell `(LTP% / OI%)` values rise across later intervals — i.e. they accumulate from the
+> **day-open baseline** (the study's reading), NOT the manual's prev-day-close / prev-day-OI baseline.
+> The 4-state interpretation badge (`L.B`/`S.B`/`S.C`/`L.U`) is computed per-interval. See
+> [PHASE-B-FINDINGS.md](../PHASE-B-FINDINGS.md) (§5 V1).
 
 ### OI interpretation enum (CONFIRMED — `inOiInterpretation`, reused app-wide)
 | int | label | abbrev | badge | color | price×OI |

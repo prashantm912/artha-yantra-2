@@ -37,6 +37,18 @@ socketSubscribedEvents: [
 ```
 Pattern: `OD_SSC_{SYMBOL}_{YYMMDD}_{CALL_STRIKE}_CE` + `OD_SSC_{SYMBOL}_{YYMMDD}_{PUT_STRIKE}_PE`
 
+### Live push payload (CONFIRMED — Phase B 2026-06-18, SENSEX expiry)
+Same `OD_SSC_..._{CE|PE}` **ARRAY[7]** layout as straddle (`[time, instrumentId, O, H, L, C, volume]`,
+NO OI), but the two legs are at **two different strikes** — one CE channel at the call strike, one
+PE channel at the put strike. Confirmed live channel set:
+```
+OD_SSC_SENSEX_260618_77800_CE   // CE at call strike
+OD_SSC_SENSEX_260618_76300_PE   // PE at put strike (different!)
+EQUITY_UNDERLYING_DATA_SENSEX
+```
+
+See [Phase B findings](../PHASE-B-FINDINGS.md) for the full socket capture (and `straddle-chart.md` for the per-frame layout).
+
 ## Data source / API
 | Endpoint | Request | Response |
 |---|---|---|

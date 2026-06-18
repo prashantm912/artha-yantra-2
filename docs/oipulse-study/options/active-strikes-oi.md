@@ -24,6 +24,11 @@ filter: Mode(Live/Hist)  Name[BANKNIFTY▾]  Date[📅]  Time Interval[3 min▾]
 
 ECharts toolbox on each; "Oi Pulse" watermark; bottom legend. Both charts support a line/bar render toggle.
 
+**Confirmed live 2026-06-18 (V4):** the left "Active Strike Change in OI" chart draws **Call OI = GREEN line,
+Put OI = RED line** (the study was correct; the manual's "blue Call" was wrong — the blue line belongs to the
+*separate* "Active Strike Sentiment %" chart on the right, which the manual conflated). Page scope = **NSE indices
+only** (BANKNIFTY / FINNIFTY / MIDCPNIFTY / NIFTY — no SENSEX). See [Phase B findings](../PHASE-B-FINDINGS.md) (V4).
+
 ## Filter bar — exact controls
 | Control | Values | Notes |
 |---|---|---|
@@ -41,7 +46,9 @@ socketSubscribedEvents
 `activeStrikeOiData` has NO `yAxisPriceData` axis (unlike IV version).
 
 ## Socket subscriptions
-- `AS_OI_BANKNIFTY` — live active-strike OI events (no expiry in event name)
+**None** — confirmed live 2026-06-18 (V4): the page is **REST-driven** (auto-refresh, shown as
+"Data Auto-updated At: …"); no socket channel is registered even after a Go. (An earlier draft listed
+`AS_OI_BANKNIFTY` as a live event — that was not reproducible from the socket.)
 
 ## Data source / API (`active-strike-oi`)
 | Call | Response |

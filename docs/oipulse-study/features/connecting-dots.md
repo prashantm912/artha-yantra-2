@@ -105,6 +105,10 @@ Row schema (13 fields all integers except `stTimeInterval`):
 }
 ```
 
+## Socket subscriptions ([Phase B confirmed](../PHASE-B-FINDINGS.md))
+**None.** Live Phase-B capture found connecting-dots is **REST-only — it subscribes NO socket
+channels** (verified after a Go click). Data loads and refreshes via the REST endpoints above.
+
 ## Pagination
 25 rows per page (default); `N - M of TOTAL` counter; Previous / Next buttons. Client-side over full session's intervals (~82 for 3-min on a live day).
 

@@ -80,6 +80,11 @@ Click `All Menu` → full-width panel, columns grouped by section. Each item = a
 | Multiple OI Chart | `/app/options-analysis/multiple-oi-chart` | ✓ |
 
 ### Strategies (whole section NOT in user's list)
+> Live Strategies menu (confirmed live 2026-06-18) = **calender-spread** (sic), iv-strategy, multi-leg-price,
+> straddle-chart, strangle-chart, strategy-builder. "Morning Trade" and "3:20 Strategy" are **not navigable
+> routes** — they are paid/AI manual-sourced features (0 of 122 app routes match). See
+> [PHASE-B-FINDINGS.md](PHASE-B-FINDINGS.md) (V17).
+
 | Item | Route | Scope |
 |---|---|---|
 | Straddle Chart | `/app/strategies/straddle-chart` | + |
@@ -89,8 +94,8 @@ Click `All Menu` → full-width panel, columns grouped by section. Each item = a
 | Strategy Builder | `/app/strategies/strategy-builder` | + |
 | Calendar Spread | `/app/strategies/calender-spread` | + |
 | Multi Leg Price | `/app/strategies/multi-leg-price` | + |
-| Morning Trade | `/app/strategies/morning-trade` *(manual V10; route to confirm in Phase B)* | + |
-| 3:20 Strategy | `/app/strategies/3-20-strategy` *(manual V10; route to confirm in Phase B)* | + |
+| Morning Trade | *not a navigable route* — paid/AI manual-sourced feature only ([morning-trade.md](strategies/morning-trade.md)); confirmed live 2026-06-18 (0 of 122 app routes match) | + |
+| 3:20 Strategy | *not a navigable route* — paid/AI manual-sourced feature only ([3-20-strategy.md](strategies/3-20-strategy.md)); confirmed live 2026-06-18 (0 of 122 app routes match) | + |
 
 ### Equity
 | Item | Route | Scope |
@@ -132,7 +137,7 @@ Each page file captures: route · purpose · layout (positional) · component in
 ## Trading-interpretation layer (folded from the Manual V10 audit)
 Per-page docs capture UI + API; the *how-to-trade* methodology, folded in from the OI Pulse Manual (V10), lives in:
 - [oi-interpretation-method.md](oi-interpretation-method.md) — the shared OI read (4 states + strength grading, the four-quadrant model, OI/LTP X-crossover, support/resistance/range, timeframe roles, strike selection, connect-the-dots confluence). Per-page docs link to it from their `## Interpretation (how to trade)` sections.
-- [strategies/expiry-day-trading-plan.md](strategies/expiry-day-trading-plan.md) · [strategies/morning-trade.md](strategies/morning-trade.md) · [strategies/3-20-strategy.md](strategies/3-20-strategy.md) · [advance-chart/ospl-signal.md](advance-chart/ospl-signal.md) — standalone strategy/signal methodologies (the last three are paid/AI features, not yet live-verified — see [NOT-CAPTURED.md](NOT-CAPTURED.md)).
+- [strategies/expiry-day-trading-plan.md](strategies/expiry-day-trading-plan.md) · [strategies/morning-trade.md](strategies/morning-trade.md) · [strategies/3-20-strategy.md](strategies/3-20-strategy.md) · [advance-chart/ospl-signal.md](advance-chart/ospl-signal.md) — standalone strategy/signal methodologies (the last three are paid/AI features whose methodology stays manual-sourced; Morning Trade / 3:20 Strategy are **not navigable routes**, confirmed live 2026-06-18 — see [PHASE-B-FINDINGS.md](PHASE-B-FINDINGS.md) V17 and [NOT-CAPTURED.md](NOT-CAPTURED.md)).
 - [MANUAL-V10-GAP-ANALYSIS.md](MANUAL-V10-GAP-ANALYSIS.md) — the full audit log. Remaining `[VERIFY]` items (where the older manual may differ from live) are tracked in [PHASE-B-PLAN.md](PHASE-B-PLAN.md).
 
 ## API namespace map (`https://api.oipulse.com/api/<ns>/...`)

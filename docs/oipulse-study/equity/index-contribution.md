@@ -65,6 +65,16 @@ EQ_ICD_SBIN, EQ_ICD_JSWSTEEL, EQ_ICD_TATASTEEL, EQ_ICD_MARUTI, EQ_ICD_INDIGO,
 EQ_ICD_GRASIM, EQ_ICD_HDFCLIFE, EQ_ICD_APOLLOHOSP, ... (all 50 constituents)
 ```
 
+**Socket payload ([Phase B confirmed](../PHASE-B-FINDINGS.md))** — `EQ_ICD_{STOCK}`, one per NIFTY-50
+constituent (50 of them), **plus** `EQUITY_UNDERLYING_DATA_NIFTY 50` for the index summary. The
+`EQ_ICD` live frame is an **array[2]** `[symbol, ltp]`; the weighted index-contribution math is
+computed **client-side** from these constituent LTPs (the live push does NOT carry `inIndexPoint`).
+`EQUITY_UNDERLYING_DATA_{NAME}` is an object `{stName, stDateTime, inLtp, inHigh, inLow}`.
+```
+EQ_ICD_TRENT                    ["TRENT",3142.2]
+EQUITY_UNDERLYING_DATA_NIFTY 50 {"stName":"NIFTY 50","stDateTime":"...","inLtp":...,"inHigh":...,"inLow":...}
+```
+
 ## Data source / API (`index-contribution`)
 | Call | Response |
 |---|---|

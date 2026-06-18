@@ -4,6 +4,10 @@
 declining at pre-open vs prev close, and whether they've broken the previous day's high/low.
 Sub-tabs: `Pre Open Market | Futures Analysis`.
 
+> **Confirmed live 2026-06-18:** pre-open is **two separate routes** — this `/app/futures-analysis/pre-open-market`
+> and `/app/equity/pre-open-market` (the study's split is correct, not the manual's single combined page).
+> See [PHASE-B-FINDINGS.md](../PHASE-B-FINDINGS.md) (§5 V14).
+
 ## Layout
 ```
 sub-tabs: [ Pre Open Market ] [ Futures Analysis ]   ;  ticker strip

@@ -1,5 +1,10 @@
 # Phase B — Socket Payload Capture (Market Hours)
 
+> **✅ EXECUTED 2026-06-18 (SENSEX expiry day).** Results in
+> [PHASE-B-FINDINGS.md](PHASE-B-FINDINGS.md): 9 socket channel families decoded, REST-only pages
+> identified, and all 17 Manual-V10 verify items (V1–V17) resolved. Progress table at the bottom
+> is ticked. The plan below is retained as the method record.
+
 **Goal:** Confirm live Socket.IO push payload schemas for all live-data pages.
 Phase A confirms REST API schemas; Phase B completes the picture with real-time socket frames.
 
@@ -123,6 +128,12 @@ After Phase B, update `NOT-CAPTURED.md` item 5:
 
 The Manual-V10 audit ([MANUAL-V10-GAP-ANALYSIS.md](MANUAL-V10-GAP-ANALYSIS.md)) folded its trading-interpretation findings into the study docs (additive). The items below were **NOT** folded in because the older manual may differ from the live site — confirm each during this live session (mostly a quick visual / REST-payload check, done alongside the socket capture). Where the live site differs, correct the named doc; where it confirms the manual, drop the caveat.
 
+> **✅ ALL 17 RESOLVED on 2026-06-18** — verdicts + evidence in
+> [PHASE-B-FINDINGS.md §5](PHASE-B-FINDINGS.md#5-manual-v10-verify-items-v1v17--verdicts). Summary:
+> manual was right on V2 (ΔPut−ΔCall), V9 (extrinsic premium), V11 (double-arrow ATM), V5/V12;
+> study was right on V1, V3, V4, V8, V14; V6 (no Pattern col) + V17 (no Morning/3:20 route) were
+> stale in the manual; V7/V16 thresholds stay manual-sourced (not exposed in the live UI).
+
 | # | Doc to correct | What to verify | How |
 |---|---|---|---|
 | V1 | `futures/banks-analysis.md` | cell %s baseline: prev-day **adjusted close** / prev-day **OI** (manual) vs **day-open** (study); interpretation badge is per-interval | inspect live `inLtpDiffInPercentage` / `inOiDiffInPercentage` |
@@ -173,8 +184,9 @@ expiry across 6.5 hrs is fragile. A single reminder for burst 1 is fine; the use
 
 ### Day / token preconditions
 - **Arrive 08:55** to inject before the 09:15 open (pre-09:15 = no ticks yet, setup only).
-- **V10 needs a weekly-expiry day** (options-chain IV only shows on expiry days — NIFTY Tue,
-  BANKNIFTY Thu currently). Pick an expiry day if folding V10 into the same session; else V10 waits.
+- **V10 needs a weekly-expiry day** (options-chain IV only shows on expiry days). The 2026-06-18
+  run used **SENSEX (Thursday = BSE SENSEX weekly expiry)** and captured V10. (Index expiry weekdays
+  drift with exchange circulars — confirm the live name dropdown rather than assuming a fixed day.)
 - **Let the open settle ~30s** (skip 09:15:00–09:15:30) for clean schema reads — some pages
   re-subscribe right at open.
 - **Kite token expires 06:00 IST** — irrelevant to oipulse (separate site, user's own Chrome
@@ -197,19 +209,21 @@ Sequence: VIX page first (most important), then Options Chain, then remaining in
 
 ## Progress Tracking
 
+Status as of the 2026-06-18 run (schemas in [PHASE-B-FINDINGS.md](PHASE-B-FINDINGS.md)):
+
 | Page | Channels confirmed | Payload schema | Doc updated |
 |---|---|---|---|
-| Vix & Index | ☐ | ☐ | ☐ |
-| Options OI Analysis | ☐ | ☐ | ☐ |
-| Options Chain | ☐ | ☐ | ☐ |
-| Straddle Chart | ☐ | ☐ | ☐ |
-| Strangle Chart | ☐ | ☐ | ☐ |
-| Connecting Dots | ☐ | ☐ | ☐ |
-| Index Contribution | ☐ | ☐ | ☐ |
-| Interval Wise OI | ☐ | ☐ | ☐ |
-| Multiple OI Chart | ☐ | ☐ | ☐ |
-| Banks Analysis | ☐ | ☐ | ☐ |
-| Futures OI Spurt | ☐ | ☐ | ☐ |
-| Options OI Spurt | ☐ | ☐ | ☐ |
-| Futures OI Chart | ☐ (verify) | ☐ | ☐ |
-| Global ticker | ☐ (verify) | ☐ | ☐ |
+| Vix & Index | ✅ `EQ_VPD_{name}` | ✅ `{stName,stDateTime,inLtp}` | ✅ |
+| Options OI Analysis | ✅ `OD_OIA_{sym}_{exp}_{strike}` | ✅ `[time,side,O,H,L,C,vol,OI]` | ✅ |
+| Options Chain | ✅ `OD_OC_{sym}_{exp}` + underlying | ✅ `[strike,side,LTP,vol,OI]` (IV via REST) | ✅ |
+| Straddle Chart | ✅ `OD_SSC_..._{CE\|PE}` | ✅ `[time,instrId,O,H,L,C,vol]` | ✅ |
+| Strangle Chart | ✅ `OD_SSC_..._{CE\|PE}` ×2 strikes | ✅ same as straddle | ✅ |
+| Connecting Dots | — REST-only (no socket) | n/a | ✅ |
+| Index Contribution | ✅ `EQ_ICD_{stock}` ×50 | ✅ `[symbol, ltp]` | ✅ |
+| Interval Wise OI | — REST-only (no socket) | n/a | ✅ |
+| Multiple OI Chart | ✅ `OD_OPT_CHART_{sym}_{exp}_{strike}` (after strike pick) | ✅ `[time,strike,side,O,H,L,C,vol,OI,0]` | ✅ |
+| Banks Analysis | — REST-only (no socket) | n/a | ✅ |
+| Futures OI Spurt | ✅ `FD_OIS` | ✅ `[symbol,LTP,vol,OI]` | ✅ |
+| Options OI Spurt | ✅ `OD_OI_SPURT_{sym}_{exp}` | ✅ `[strike,side,LTP,vol,OI]` | ✅ |
+| Futures OI Chart | ✅ `FD_OIA_{sym}-I` | ✅ `[symbol,time,O,H,L,C,vol,OI]` | ✅ |
+| Global ticker | ✅ `TICKER_DATA` + `TICKER_RESET_DATA` (after re-enable) | ✅ `[symbol, ltp]` | ✅ |

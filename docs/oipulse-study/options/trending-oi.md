@@ -60,7 +60,7 @@ tempCeSum, tempPeSum, socketSubscribedEvents
 | Day H/L Break | computed | badge `D.L.B (57136.7)` red / `D.H.B` |
 | Chng. In Call OI | Δ `totalCeOi` vs prev | green/red |
 | Chng. In Put OI | Δ `totalPeOi` | green/red |
-| Diff. in OI | (Call OI chng − Put OI chng) | red if calls dominate (bearish), green if puts |
+| Diff. in OI | `ΔPut OI − ΔCall OI` (puts minus calls) | green (positive) = bullish, red (negative) = bearish |
 | Direction of chng. | sign of Diff | arrow badge ↑ green / ↓ red |
 | Chng. In Direction | net OI direction magnitude | green/red |
 | Direction of chng. % | % | green/red |
@@ -68,7 +68,14 @@ tempCeSum, tempPeSum, socketSubscribedEvents
 | Day High/Low Diff. in OI | computed | |
 | Sentiment | derived | **badge `Bearish` (red) / `Bullish` (green)** |
 
-Sentiment is the headline: more call writing than put → Bearish; vice-versa → Bullish.
+**`Diff. in OI = ΔPut OI − ΔCall OI`, and positive = Bullish** (confirmed live 2026-06-18 by arithmetic on
+the live rows: Put chng `26,111,280` − Call chng `21,478,740` = `+46,32,540` → Sentiment "Bullish"; a row
+with calls dominating gave `−42,28,120` → "Bearish"). An earlier draft framed this as "Call − Put" — that is wrong.
+Confirmed live columns, in order: Date, Time, LTP, Day H/L Break, Chng. In Call OI, Chng. In Put OI, Diff. in OI,
+Direction of chng., Chng. In Direction, Direction of chng. %, Net PCR, Sentiment.
+
+Sentiment is the headline: more put writing than call (positive Diff) → Bullish; more call writing → Bearish.
+See [Phase B findings](../PHASE-B-FINDINGS.md) (V2).
 
 ## Data source / API (`trending-oi-static`)
 | Call | Response |

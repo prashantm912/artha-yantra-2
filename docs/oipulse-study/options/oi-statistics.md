@@ -11,7 +11,7 @@ filter: Mode  Select Name[BANKNIFTY▾]  Select Date[📅]  Select Expiry Date[3
         Cumulative OI                          Individual OI
 ┌ bar (2 bars) ─────────────┐   ┌ bar per strike ──────────────────────────────────────┐
 │ green=Call OI ~15.5M       │   │ x: strikes 51200–62400   green=Call OI, red=Put OI    │
-│ red=Put OI ~16M            │   │ ATM marker (red ▲)   dataZoom slider                  │
+│ red=Put OI ~16M            │   │ ATM marker (green Call ▲ + red Put ▲)  dataZoom       │
 │ dataZoom; legend Call/Put  │   │ legend: Call OI / Put OI                              │
 └────────────────────────────┘   └───────────────────────────────────────────────────────┘
                          PCR Chart   BANKNIFTY - 30-Jun-26                    [Refresh]
@@ -58,8 +58,12 @@ Key state:
 | Chart | Type | Series | Notes |
 |---|---|---|---|
 | Cumulative OI | ECharts bar (2 bars) | Call OI total (green), Put OI total (red) | sum across strikes; dataZoom; legend |
-| Individual OI | ECharts grouped bar | per strike: Call OI (green) vs Put OI (red) | x = strike ladder; **ATM marker** (red ▲) at spot; dataZoom; shows OI walls (support/resistance) |
+| Individual OI | ECharts grouped bar | per strike: Call OI (green) vs Put OI (red) | x = strike ladder; **ATM marker = double arrow** (green Call ▲ + red Put ▲) at spot — confirmed live 2026-06-18 (V11), not a single ▲; dataZoom; shows OI walls (support/resistance) |
 | PCR Chart | ECharts dual-axis line | PCR (blue, left), price (orange, right) | intraday PCR vs underlying; Refresh button |
+
+The ATM marker is a **double arrow** (green Call ▲ + red Put ▲), not a single ▲ — confirmed live 2026-06-18; an
+earlier draft showed a single arrow. Page = "Cumulative OI" (Call green / Put red totals) + "Individual OI"
+(per-strike bars) + a PCR chart. See [Phase B findings](../PHASE-B-FINDINGS.md) (V11).
 
 ## Data source / API
 

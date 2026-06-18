@@ -12,7 +12,7 @@ filter: Mode  Select Name[BANKNIFTY▾]  Select Date[📅]  Select Expiry Date[3
 ┌ grouped bar chart ────────────────────────────────────────────────────────────────────────────────┐
 │ x: strikes 56100 … 57100(ATM) … 58100   y: premium (0–800)                                           │
 │ green bar = Call Premium, red bar = Put Premium (paired per strike)                                  │
-│ ATM marker (green ▲ / red ▼)   legend: ● Call Premium  ● Put Premium   watermark OiPulse             │
+│ ATM marker (green ▲ + red ▲)   legend: ● Call Premium  ● Put Premium   watermark OiPulse             │
 └─────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -79,7 +79,13 @@ Response: {
 `inNewClose` = option current close/LTP. 4 fields per row. No OHLC. CE/PE interleaved per strike.
 
 ## Interpretation (how to trade)
-- The manual defines the premium bar as *extrinsic value*: LTP = intrinsic + extrinsic; OTM options are pure extrinsic; the chart plots extrinsic value (premium/discount). Extrinsic ≈ the market-priced probability ("Risk Value").
+- **Confirmed live 2026-06-18 (V9):** the premium bars are **extrinsic value (LTP − intrinsic), NOT raw LTP**.
+  Evidence: the bars peak at ATM and fall to near-zero at the wings, and the **deep-ITM 76200 CE bar goes slightly
+  NEGATIVE** — impossible for raw LTP. The **"Show LTP" toggle switches the bars to raw LTP**. (An earlier draft
+  treated the bars as raw LTP — that is wrong.) Call Premium = green, Put Premium = red. See
+  [Phase B findings](../PHASE-B-FINDINGS.md) (V9).
+- LTP = intrinsic + extrinsic; OTM options are pure extrinsic; the chart plots extrinsic value (premium/discount).
+  Extrinsic ≈ the market-priced probability ("Risk Value").
 - Strike selection (for buying): avoid OTM (fragile premium), prefer ATM/ITM. Use this chart to find an ITM strike that is relatively *cheap* vs its neighbours (higher leverage). The "Show LTP" toggle overlays each strike's LTP for the comparison.
 
 See [OI interpretation method](../oi-interpretation-method.md) for the shared OI/strength/quadrant logic.

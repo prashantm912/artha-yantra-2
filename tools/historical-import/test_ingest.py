@@ -237,6 +237,23 @@ def test_iv_overflow_value_nulled(tmp_path):
     assert float(rows[0][7]) == 1.0    # rank preserved
 
 
+def test_classify_changes_skips_options(tmp_path):
+    # options scope dropped: --skip-kinds OPTION must skip option files, keep spot
+    opt = tmp_path / "nifty" / "2014" / "2014-01-30"
+    opt.mkdir(parents=True)
+    (opt / "NIFTY_6200_CE_30_JAN_14.csv").write_text(
+        "date,time,open,high,low,close,volume\n2014-01-30,09:15,1,1,1,1,10\n")
+    (tmp_path / "nifty_spot.csv").write_text(
+        "Date,Open,High,Low,Close,Volume\n"
+        + "".join(f"2014-01-{d:02d},100,101,99,100,1000\n" for d in range(1, 12)))
+    pending, _, counts, _ = ig.classify_changes(
+        tmp_path, {}, False, None, skip_kinds=frozenset({"OPTION"}))
+    kinds = {k for _, k, *_ in pending}
+    assert kinds == {"SPOT"}            # option excluded, spot kept
+    assert counts["skipped_kind"] == 1
+    assert counts["new"] == 1
+
+
 def test_parse_period_month_end():
     assert ig.parse_period("Mar 2023") == date(2023, 3, 31)
     assert ig.parse_period("Jun 2023") == date(2023, 6, 30)

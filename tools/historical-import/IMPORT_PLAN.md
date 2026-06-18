@@ -8,6 +8,19 @@ Scope decided 2026-06-18:
 - **IV CSVs** → new `marketdata.iv_history` table.
 - **Fundamentals** → new `marketdata.fundamentals` table (included in this pass).
 
+> **SCOPE REVISED 2026-06-19 — options + equity-minute DROPPED.**
+> Mid-backfill (~1.2B rows, all uncompressed) the candles table hit 277 GB and filled the
+> 952 GB C: drive (Docker WSL2 `docker_data.vhdx`). Two decisions cut the scope:
+> - **Options scalping is not viable to backtest** → ALL option OHLCV (NFO/BFO `BACKFILL`)
+>   was deleted from the DB via truncate-keep (277 GB → 1.1 GB) and is **never re-loaded**.
+>   Live option candles (`KITE`/`TICK_AGG`) were preserved.
+> - **Stock strategies are daily-only** → `equity/minute` (the ~2B-row giant, §4) is **not
+>   loaded**.
+>
+> **Now in scope (loaded):** equity-day (NSE 1d), spot index (NSE 1m, NIFTY 50 / NIFTY BANK),
+> IV (219 symbols), fundamentals. `ingest.py` gained `--skip-kinds OPTION`; `run_full_load.ps1`
+> drops stages 5–6 and passes it. Re-running the script is idempotent and never reloads options.
+
 > **Status: IMPLEMENTED** (2026-06-18). `ingest.py` rewritten; migrations
 > `V016__iv_history.sql` + `V017__fundamentals.sql` added; `test_ingest.py` (27 tests)
 > passing; dry-run validated on real options/spot/equity/IV/fundamentals files. Not yet

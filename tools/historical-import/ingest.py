@@ -655,22 +655,27 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def classify_changes(root: Path, prior: dict, verify_checksum: bool, log) -> tuple:
+def classify_changes(root: Path, prior: dict, verify_checksum: bool, log,
+                     skip_kinds: frozenset = frozenset()) -> tuple:
     """
     Walk root, classify each file against the manifest.
+    `skip_kinds` = classes to ignore entirely (e.g. {'OPTION'} — options scope dropped).
     Returns (pending, touches, counts, deleted):
       pending = [(path_str, kind, size, mtime_ns, sha_or_None)]  -> load these
       touches = [(path_str, mtime_ns)]  -> mtime moved but content identical; update mtime only
     """
     pending, touches = [], []
     counts = {"new": 0, "retry": 0, "modified": 0, "unchanged": 0,
-              "skipped_empty": 0, "unknown": 0}
+              "skipped_empty": 0, "unknown": 0, "skipped_kind": 0}
     seen = set()
 
     for path in root.rglob("*.csv"):
         kind = classify_path(path)
         if kind == "UNKNOWN":
             counts["unknown"] += 1
+            continue
+        if kind in skip_kinds:
+            counts["skipped_kind"] += 1
             continue
         st = path.stat()
         if kind in ("OPTION", "SPOT", "EQUITY") and st.st_size <= EMPTY_FILE_BYTES:
@@ -730,6 +735,9 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="Parse only; no DB, no manifest")
     ap.add_argument("--mark-deleted", action="store_true",
                     help="Mark manifest rows whose file vanished as status='deleted'")
+    ap.add_argument("--skip-kinds", default="",
+                    help="comma-separated classes to skip (OPTION,SPOT,EQUITY,IV,FUNDAMENTAL). "
+                         "Options scope was dropped 2026-06-19 — pass OPTION to ignore them.")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
@@ -747,11 +755,14 @@ def main():
     manifest = None if args.dry_run else open_manifest(Path(args.manifest))
     prior = load_fingerprints(manifest) if manifest else {}
 
+    skip_kinds = frozenset(k.strip().upper() for k in args.skip_kinds.split(",") if k.strip())
     log.info("scanning %s ...", root)
-    pending, touches, counts, deleted = classify_changes(root, prior, args.verify_checksum, log)
-    log.info("new=%d retry=%d modified=%d unchanged=%d skipped_empty=%d unknown=%d deleted=%d",
+    pending, touches, counts, deleted = classify_changes(
+        root, prior, args.verify_checksum, log, skip_kinds)
+    log.info("new=%d retry=%d modified=%d unchanged=%d skipped_empty=%d skipped_kind=%d "
+             "unknown=%d deleted=%d",
              counts["new"], counts["retry"], counts["modified"], counts["unchanged"],
-             counts["skipped_empty"], counts["unknown"], counts["deleted"])
+             counts["skipped_empty"], counts["skipped_kind"], counts["unknown"], counts["deleted"])
 
     if manifest and touches:
         manifest.executemany(

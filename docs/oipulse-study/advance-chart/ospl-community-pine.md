@@ -132,15 +132,20 @@ the *independent* Pine confluence components.
    buy reversal, with the volume-bar hue (prev-close rule) matching signal direction at those turns.
    Mid-leg add signals fired on ordinary volume. No saturated >125K "dark bars" were unambiguously visible
    at the zoom used (NIFTY threshold ~125K) → treat the dark-bar tie-in as plausible-not-proven.
-5. **OSPL Signal ⟷ VWMA(20) / VWAP / EMA(200) — trend-filter side, inferred.** *(These three MA overlays
-   could not be cleanly isolated live — the legend's per-study hide toggle drifts faster than its 12-px
-   eye icon can be hit in this capture environment; characterised from price-vs-MA structure, not
-   bar-by-bar.)* Through the May 19–20 decline price stayed **below the fast MAs and well below EMA200**,
-   matching the red-sell cluster (signals on the side of the fast MA = momentum); the counter-trend green
-   buy at the bottom was a **deep stretch below EMA200** (mean-reversion vs the macro trend). So OSPL
-   Signal direction tracks price's side of VWMA/VWAP for momentum, with EMA200 as macro bias
-   (counter-trend signals = far-from-EMA200 washouts). SuperTrend(10,2) already encapsulates this
-   trend-MA role, so the MA stack adds little beyond #1.
+5. **OSPL Signal ⟷ EMA(200) — NOT a gate (bar-verified 2026-06-18).** Isolated live (OSPL Signal + EMA 200
+   only, all else hidden) on NIFTY-I 3m. EMA200 does **NOT** filter signal direction: in a window where the
+   200-line sat **above all price** (24038→23400, price 23050–23260), OSPL Signal still fired **green buys
+   deep below it** — Gen 23260.6/Void 23153 and Gen 23183.1/Void 23133 — i.e. counter-trend reversal longs
+   far under the 200 EMA, alongside reds (Gen 23120/23104.9/23005.2) also below it. On the right side, as
+   price climbed above the rising EMA, greens fired above it (Gen 23354.4, 23571.2, 23485). So **greens
+   appear both above AND far below the 200 EMA** → direction follows the **SuperTrend(10,2) flip, not
+   price-vs-EMA200**. The 200 EMA is independent macro context, not a trend filter. (This corrects the prior
+   "inferred trend-filter / EMA200 macro bias" reading, which was characterised from price-vs-MA structure
+   before clean isolation was possible.)
+   - **VWMA(20) / VWAP — still inferred** (not yet isolated; the legend hide-toggle drift that blocked these
+     before persists). Characterised only from price-vs-MA structure: price tracked the fast MAs through the
+     down-leg. SuperTrend(10,2) already encapsulates the fast-MA momentum role, so the MA stack adds little
+     beyond #1.
 
 **Net (OSPL Signal):** OSPL Signal ≈ **SuperTrend(10,2) direction + a structure-stop (Void/Void Line) +
 volume-confirmed entries**, with BB / SAR / the MA stack as agreeing confluence. It is **not** the rare

@@ -42,6 +42,25 @@ final class SessionIndicators {
         });
   }
 
+  /** Volume-weighted MA: sum(close*vol, n) / sum(vol, n) over the trailing n bars (rolling,
+   * NOT session-cumulative — VWMA(20) is the last 20 bars regardless of session). */
+  static EngineIndicator vwma(EngineSeries series, int period) {
+    return indicator(
+        period - 1, // unstable: needs `period` bars (index >= period-1)
+        series,
+        index -> {
+          BigDecimal pv = BigDecimal.ZERO;
+          BigDecimal vol = BigDecimal.ZERO;
+          for (int i = index - period + 1; i <= index; i++) {
+            EngineCandle c = series.candle(i);
+            BigDecimal v = BigDecimal.valueOf(c.volume());
+            pv = pv.add(c.close().multiply(v, EngineMath.MC));
+            vol = vol.add(v);
+          }
+          return vol.signum() == 0 ? null : pv.divide(vol, EngineMath.MC);
+        });
+  }
+
   /** Opening-range high/low: defined once the first {@code windowMinutes} of the session end. */
   static EngineIndicator openingRange(EngineSeries series, int windowMinutes, boolean high) {
     return indicator(
@@ -211,6 +230,32 @@ final class SessionIndicators {
         index -> {
           int ctxIndex = context.indexAtOrBefore(series.candle(index).bucketStart().toInstant());
           return ctxIndex < 0 ? null : context.candle(ctxIndex).close();
+        });
+  }
+
+  /**
+   * Futures basis as a percent of futures: (spot - futures) / futures * 100, evaluated on the
+   * spot/index signal series against the front-month futures context series (time-aligned
+   * at-or-before). Sign convention per the plan §7.7 reference formula (positive = spot above
+   * futures / backwardation); the exact Siva sign + threshold gates are encoded in the S12
+   * strategy YAML, not here (VERIFY against C:\Trading\ArthaYantra\StockMarketStrategyTraining
+   * during S12 — a flip is a one-line change + vector regen).
+   */
+  static EngineIndicator basisPct(EngineSeries spot, EngineSeries futures) {
+    return indicator(
+        0,
+        spot,
+        index -> {
+          int fi = futures.indexAtOrBefore(spot.candle(index).bucketStart().toInstant());
+          if (fi < 0) {
+            return null;
+          }
+          BigDecimal f = futures.candle(fi).close();
+          BigDecimal s = spot.candle(index).close();
+          if (f.signum() == 0) {
+            return null;
+          }
+          return s.subtract(f).divide(f, EngineMath.MC).multiply(EngineMath.HUNDRED, EngineMath.MC);
         });
   }
 

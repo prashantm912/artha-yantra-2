@@ -74,6 +74,18 @@ public final class IndicatorRegistry {
     register(
         new Definition("ATR", "Wilder average true range", Set.of("period"), false),
         (s, c, p) -> Ta4jIndicators.atr(s, requirePositive(p, "period", 14)));
+    register(
+        new Definition(
+            "VWMA", "Volume-weighted moving average of close", Set.of("period"), false),
+        (s, c, p) -> SessionIndicators.vwma(s, requirePositive(p, "period", 20)));
+    register(
+        new Definition(
+            "PSAR", "Parabolic SAR stop-and-reverse level", Set.of("step", "max"), false),
+        (s, c, p) ->
+            Ta4jIndicators.psar(
+                s,
+                p.decimalValue("step", new BigDecimal("0.02")),
+                p.decimalValue("max", new BigDecimal("0.2"))));
 
     // session-level family (A7 [FP-18]); warm-up: PREV_DAY_*/GAP_PCT need one prior session
     register(
@@ -116,6 +128,18 @@ public final class IndicatorRegistry {
     register(
         new Definition(
             "VIX_LEVEL", "Context-series close (the INDIA VIX level)", Set.of(), true),
+        (s, c, p) -> SessionIndicators.contextLevel(s, c));
+    register(
+        new Definition(
+            "BASIS_PCT",
+            "Spot-minus-futures basis, percent of futures (context: front-month futures)",
+            Set.of(), true),
+        (s, c, p) -> SessionIndicators.basisPct(s, c));
+    register(
+        new Definition(
+            "ADVANCE_DECLINE_RATIO",
+            "Intraday advance/decline breadth (the context-series close)",
+            Set.of(), true),
         (s, c, p) -> SessionIndicators.contextLevel(s, c));
   }
 

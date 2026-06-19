@@ -31,7 +31,15 @@ MMAIndicator, RSIIndicator, ATRIndicator, the adx package, EMAIndicator):
 
 SUPERTREND is deliberately NOT vector-pinned here (ta4j-internal band
 ratchet); it is behavior-tested (monotonic/V-shape direction) and frozen
-end-to-end by the Phase 23 golden harness.
+end-to-end by the Phase 23 golden harness. PSAR (§7.4) shares the same
+acceleration-factor ratchet (ta4j-internal) and is likewise behavior-tested
+(PsarBehaviorTest), NOT vector-pinned.
+
+VWMA(20), BASIS_PCT and ADVANCE_DECLINE_RATIO (§7.3/§7.6/§7.7) ARE closed-form
+(no ratchet) and pinned below. BASIS_PCT/ADVANCE_DECLINE_RATIO read the context
+series (front-month futures / breadth) the same way RS_VS_INDEX/VIX_LEVEL do;
+the synthetic primary+context fixture already covers them (same bucket times,
+so the context bar at-or-before primary bar i is context[i]).
 """
 
 from decimal import Decimal, getcontext, ROUND_HALF_UP
@@ -285,6 +293,29 @@ def main():
         rs.append(own - cref)
     write("RS_VS_INDEX_lookback5", [(i, rs[i]) for i in range(N)])
     write("VIX_LEVEL", [(i, ctx[i]["c"]) for i in range(N)])
+
+    # VWMA(20): rolling volume-weighted MA = sum(c*v, 20)/sum(v, 20); unstable = 19
+    vwma = []
+    for i in range(N):
+        if i < 19:
+            vwma.append(None)
+            continue
+        win = bars[i - 19:i + 1]
+        pv = sum(b["c"] * b["v"] for b in win)
+        vol = sum(b["v"] for b in win)
+        vwma.append(pv / vol)
+    write("VWMA_period20", [(i, vwma[i]) for i in range(N)])
+
+    # BASIS_PCT: (spot - futures) / futures * 100; futures = context close at-or-before
+    # primary bar i (identical bucket times -> context[i]); unstable = 0
+    basis = []
+    for i in range(N):
+        f = ctx[i]["c"]
+        basis.append((closes[i] - f) / f * Decimal(100))
+    write("BASIS_PCT", [(i, basis[i]) for i in range(N)])
+
+    # ADVANCE_DECLINE_RATIO: the context-series close (contextLevel mechanism, no math)
+    write("ADVANCE_DECLINE_RATIO", [(i, ctx[i]["c"]) for i in range(N)])
 
     print(f"wrote vectors to {OUT}")
 

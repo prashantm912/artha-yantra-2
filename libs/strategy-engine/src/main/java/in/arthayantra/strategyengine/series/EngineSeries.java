@@ -160,6 +160,7 @@ public final class EngineSeries {
   static Duration intervalDuration(String interval) {
     return switch (interval) {
       case "1m" -> Duration.ofMinutes(1);
+      case "3m" -> Duration.ofMinutes(3);
       case "5m" -> Duration.ofMinutes(5);
       case "15m" -> Duration.ofMinutes(15);
       case "1h" -> Duration.ofHours(1);

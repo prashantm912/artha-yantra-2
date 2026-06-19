@@ -5,6 +5,7 @@ import java.math.BigDecimal;
 import org.ta4j.core.Indicator;
 import org.ta4j.core.indicators.ATRIndicator;
 import org.ta4j.core.indicators.MACDIndicator;
+import org.ta4j.core.indicators.ParabolicSarIndicator;
 import org.ta4j.core.indicators.RSIIndicator;
 import org.ta4j.core.indicators.adx.ADXIndicator;
 import org.ta4j.core.indicators.averages.EMAIndicator;
@@ -66,6 +67,16 @@ final class Ta4jIndicators {
         return unstable;
       }
     };
+  }
+
+  /** Parabolic SAR stop-and-reverse PRICE LEVEL (ta4j-internal acceleration ratchet → behavior-tested,
+   * not vector-pinned, like SUPERTREND). "close &gt; PSAR = long bias" is an S12 YAML gate, not here. */
+  static EngineIndicator psar(EngineSeries series, BigDecimal step, BigDecimal max) {
+    var num = series.barSeries().numFactory();
+    ParabolicSarIndicator psar =
+        new ParabolicSarIndicator(series.barSeries(), num.numOf(step), num.numOf(max));
+    int unstable = Math.max(2, psar.getCountOfUnstableBars());
+    return wrap(psar, unstable);
   }
 
   private static EngineIndicator wrap(Indicator<Num> indicator, int unstable) {

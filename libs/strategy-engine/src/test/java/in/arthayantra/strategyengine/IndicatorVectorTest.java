@@ -45,6 +45,9 @@ class IndicatorVectorTest {
     new Vector("GAP_PCT", "GAP_PCT", Map.of(), false),
     new Vector("RS_VS_INDEX_lookback5", "RS_VS_INDEX", Map.of("lookback", 5), true),
     new Vector("VIX_LEVEL", "VIX_LEVEL", Map.of(), true),
+    new Vector("VWMA_period20", "VWMA", Map.of("period", 20), false),
+    new Vector("BASIS_PCT", "BASIS_PCT", Map.of(), true),
+    new Vector("ADVANCE_DECLINE_RATIO", "ADVANCE_DECLINE_RATIO", Map.of(), true),
   };
 
   @TestFactory

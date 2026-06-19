@@ -112,7 +112,21 @@ class MarketCalendarTest {
   }
 
   @Test
-  void holidayResourceCoversTheBuildYear() {
-    assertThat(calendar.coveredYears()).contains(2026);
+  void holidayResourceCoversBackfillYears() {
+    // 2024 + 2025 added for the Phase-1 backfill window + scalp backtests (plan §17.5)
+    assertThat(calendar.coveredYears()).contains(2024, 2025, 2026);
+  }
+
+  @Test
+  void multiYearHolidaysAndTradingDays() {
+    // 2024 — Republic Day + Diwali Laxmi Pujan (regular session closed) are holidays; an
+    // ordinary weekday trades
+    assertThat(calendar.isTradingDay(LocalDate.parse("2024-01-26"))).isFalse();
+    assertThat(calendar.isTradingDay(LocalDate.parse("2024-11-01"))).isFalse();
+    assertThat(calendar.isTradingDay(LocalDate.parse("2024-01-02"))).isTrue();
+    // 2025 — Independence Day + Diwali Laxmi Pujan are holidays; an ordinary weekday trades
+    assertThat(calendar.isTradingDay(LocalDate.parse("2025-08-15"))).isFalse();
+    assertThat(calendar.isTradingDay(LocalDate.parse("2025-10-21"))).isFalse();
+    assertThat(calendar.isTradingDay(LocalDate.parse("2025-01-02"))).isTrue();
   }
 }

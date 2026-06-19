@@ -5,6 +5,49 @@
 # session is a special out-of-hours session and is NOT modeled here — this
 # calendar covers regular sessions only.
 # format: ISO-date,name
+#
+# 2024 + 2025 lists added for the OpenAlgo Phase-1 backfill window (ExpiryTrack
+# intraday-OI + openchart daily) and scalp backtests over 2024/2025 (plan §17.5
+# entry gate — an uncovered year fails loudly). Equity-segment REGULAR-session
+# holidays only (muhurat sessions excluded, as above); reconstructed from the NSE
+# annual trading-holiday circulars, cross-checked against public mirrors and
+# weekday-verified (every date Mon-Fri; 14 holidays each year) on 2026-06-20.
+# Diwali Laxmi Pujan (2024-11-01, 2025-10-21) had the REGULAR session closed with
+# a separate evening muhurat session — the regular-session closure is modeled.
+#
+# --- 2024 ---
+2024-01-26,Republic Day
+2024-03-08,Mahashivratri
+2024-03-25,Holi
+2024-03-29,Good Friday
+2024-04-11,Id-Ul-Fitr (Ramzan Id)
+2024-04-17,Shri Ram Navami
+2024-05-01,Maharashtra Day
+2024-06-17,Bakri Id
+2024-07-17,Muharram
+2024-08-15,Independence Day
+2024-10-02,Mahatma Gandhi Jayanti
+2024-11-01,Diwali Laxmi Pujan
+2024-11-15,Gurunanak Jayanti
+2024-12-25,Christmas
+#
+# --- 2025 ---
+2025-02-26,Mahashivratri
+2025-03-14,Holi
+2025-03-31,Id-Ul-Fitr (Ramzan Id)
+2025-04-10,Shri Mahavir Jayanti
+2025-04-14,Dr. Baba Saheb Ambedkar Jayanti
+2025-04-18,Good Friday
+2025-05-01,Maharashtra Day
+2025-08-15,Independence Day
+2025-08-27,Ganesh Chaturthi
+2025-10-02,Mahatma Gandhi Jayanti / Dussehra
+2025-10-21,Diwali Laxmi Pujan
+2025-10-22,Diwali - Balipratipada
+2025-11-05,Prakash Gurpurb Sri Guru Nanak Dev
+2025-12-25,Christmas
+#
+# --- 2026 ---
 2026-01-15,Municipal Corporation Election - Maharashtra
 2026-01-26,Republic Day
 2026-03-03,Holi

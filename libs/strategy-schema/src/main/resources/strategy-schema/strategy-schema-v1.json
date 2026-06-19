@@ -49,8 +49,8 @@
 
   "$defs": {
     "interval": {
-      "description": "Bar-interval vocabulary; 1w added at the freeze (A7 [FP-8]) - served from the candles_1w aggregate, never fetched",
-      "enum": ["1m", "5m", "15m", "1h", "1d", "1w"]
+      "description": "Bar-interval vocabulary; 1w added at the freeze (A7 [FP-8]) - served from the candles_1w aggregate, never fetched; 3m added for the Siva scalper execution timeframe (served from the candles_3m aggregate)",
+      "enum": ["1m", "3m", "5m", "15m", "1h", "1d", "1w"]
     },
     "identifier": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
     "hhmm": { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$" },
@@ -204,7 +204,7 @@
           "anyOf": [
             {
               "description": "ADVISORY known-name enum (editor autocomplete only - Q2/A5: unknown names are registry warnings at save, refusals at publish, NEVER schema violations)",
-              "enum": ["EMA", "SMA", "RSI", "VWAP", "ADX", "MACD_HIST", "SUPERTREND", "VOLUME_RATIO", "OI_CHANGE_PCT", "ATR", "ORB_HIGH", "ORB_LOW", "PREV_DAY_HIGH", "PREV_DAY_LOW", "PREV_DAY_CLOSE", "DAY_HIGH", "DAY_LOW", "GAP_PCT", "RS_VS_INDEX", "VIX_LEVEL"]
+              "enum": ["EMA", "SMA", "RSI", "VWAP", "ADX", "MACD_HIST", "SUPERTREND", "VOLUME_RATIO", "OI_CHANGE_PCT", "ATR", "VWMA", "PSAR", "ORB_HIGH", "ORB_LOW", "PREV_DAY_HIGH", "PREV_DAY_LOW", "PREV_DAY_CLOSE", "DAY_HIGH", "DAY_LOW", "GAP_PCT", "RS_VS_INDEX", "VIX_LEVEL", "BASIS_PCT", "ADVANCE_DECLINE_RATIO"]
             },
             { "pattern": "^[A-Z][A-Z0-9_]*$" }
           ]

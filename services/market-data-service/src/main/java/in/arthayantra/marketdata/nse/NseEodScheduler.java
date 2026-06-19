@@ -8,10 +8,13 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * Daily NSE EOD pull (B-1b). FII/DII cash + participant-wise OI + security-wise bhavcopy/delivery;
- * later sources add their fetch here. Pulls once on startup (immediate data + the live-fetch canary)
- * and daily after close. Each source has its own try/catch — a fetch failure is logged, never fatal,
- * and never blocks the other sources (NSE anti-bot/outage must not break the service).
+ * Daily NSE EOD pull (B-1b). FII/DII cash + participant-wise OI; later non-candle sources add their
+ * fetch here. Pulls once on startup (immediate data + the live-fetch canary) and daily after close.
+ * Each source has its own try/catch — a fetch failure is logged, never fatal, and never blocks the
+ * other sources (NSE anti-bot/outage must not break the service).
+ *
+ * <p>Security-wise bhavcopy moved to {@code BhavcopyBackfillService} (Phase A): it now self-heals
+ * across missed days and projects into {@code candles}, so it owns its own schedule.
  */
 @Component
 public class NseEodScheduler {
@@ -22,22 +25,16 @@ public class NseEodScheduler {
   private final NseEodFiiDiiRepository fiiDiiRepo;
   private final ParticipantOiFetcher participantOi;
   private final NseEodParticipantOiRepository participantOiRepo;
-  private final BhavcopyFetcher bhavcopy;
-  private final NseEodBhavcopyRepository bhavcopyRepo;
 
   public NseEodScheduler(
       FiiDiiFetcher fiiDii,
       NseEodFiiDiiRepository fiiDiiRepo,
       ParticipantOiFetcher participantOi,
-      NseEodParticipantOiRepository participantOiRepo,
-      BhavcopyFetcher bhavcopy,
-      NseEodBhavcopyRepository bhavcopyRepo) {
+      NseEodParticipantOiRepository participantOiRepo) {
     this.fiiDii = fiiDii;
     this.fiiDiiRepo = fiiDiiRepo;
     this.participantOi = participantOi;
     this.participantOiRepo = participantOiRepo;
-    this.bhavcopy = bhavcopy;
-    this.bhavcopyRepo = bhavcopyRepo;
   }
 
   /** Pull once on startup so data is present immediately and the NSE fetch path is exercised. */
@@ -55,7 +52,6 @@ public class NseEodScheduler {
   private void pullAll() {
     pullFiiDii();
     pullParticipantOi();
-    pullBhavcopy();
   }
 
   private void pullFiiDii() {
@@ -76,16 +72,6 @@ public class NseEodScheduler {
     } catch (RuntimeException failed) {
       log.warn(
           "NSE participant-OI EOD pull failed (will retry next schedule): {}", failed.getMessage());
-    }
-  }
-
-  private void pullBhavcopy() {
-    try {
-      var rows = bhavcopy.fetchLatest();
-      bhavcopyRepo.upsertAll(rows);
-      log.info("NSE bhavcopy EOD upserted {} rows", rows.size());
-    } catch (RuntimeException failed) {
-      log.warn("NSE bhavcopy EOD pull failed (will retry next schedule): {}", failed.getMessage());
     }
   }
 }

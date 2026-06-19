@@ -225,8 +225,16 @@ public class LiveKiteConfig {
         meterRegistry);
   }
 
-  /** Live batched quotes through the QUOTE limiter family (Phase 15; WireMock-tested). */
+  /**
+   * Live batched quotes through the QUOTE limiter family (Phase 15; WireMock-tested). Default
+   * source; an OpenAlgo swap (plan §3/§4) is selected per capability by
+   * {@code artha.marketdata.source.quotes=openalgo} ({@link in.arthayantra.marketdata.openalgo.live.OpenAlgoConfig}).
+   */
   @Bean
+  @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+      name = "artha.marketdata.source.quotes",
+      havingValue = "kite",
+      matchIfMissing = true)
   public QuoteGateway liveQuoteGateway(
       org.springframework.web.client.RestClient.Builder restClientBuilder,
       KiteHttpProperties properties,
@@ -245,8 +253,15 @@ public class LiveKiteConfig {
         quoteBatchSize);
   }
 
-  /** Live historical fetch through the rate-limited executor (Phase 11; WireMock-tested). */
+  /**
+   * Live historical fetch through the rate-limited executor (Phase 11; WireMock-tested). Default
+   * source; {@code artha.marketdata.source.candles=openalgo} swaps in the OpenAlgo adapter (§3/§4).
+   */
   @Bean
+  @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+      name = "artha.marketdata.source.candles",
+      havingValue = "kite",
+      matchIfMissing = true)
   public HistoricalCandleGateway liveHistoricalCandleGateway(
       org.springframework.web.client.RestClient.Builder restClientBuilder,
       KiteHttpProperties properties,

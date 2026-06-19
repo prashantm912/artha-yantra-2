@@ -39,6 +39,18 @@ artha:
     scenario: ${MOCK_SCENARIO:trend-up}
     seed: ${MOCK_SEED:42}
     instrument-count: ${MOCK_INSTRUMENT_COUNT:10}
+  # OpenAlgo broker-swap spine (plan §3/§4). Per-capability source selector — DEFAULT kite, so
+  # Phase 0 changes NO routing (the live OpenAlgo gateways bind only when a capability is flipped to
+  # openalgo). The production cutover + OI-coverage canary is Phase 1 (§4).
+  marketdata:
+    source:
+      quotes: ${ARTHA_MD_SOURCE_QUOTES:kite}     # kite | openalgo
+      candles: ${ARTHA_MD_SOURCE_CANDLES:kite}   # kite | openalgo
+  openalgo:
+    base-url: ${ARTHA_OPENALGO_BASE_URL:http://openalgo:5000}
+    api-key-file: ${ARTHA_OPENALGO_API_KEY_FILE:/run/secrets/openalgo_api_key}
+    # Phase-1 entry gate (§17.11): must be green vs the LIVE appliance before any source.* flips
+    contract-canary-enabled: ${ARTHA_OPENALGO_CANARY_ENABLED:false}
 
 # B-3: the per-endpoint-family resilience stack — exactly one resilience
 # dependency. Limiter saturation queues up to 5s (virtual threads), then 429
@@ -63,9 +75,27 @@ resilience4j:
         limit-for-period: 5
         limit-refresh-period: 1s
         timeout-duration: 5s
+      # OpenAlgo REST budgets (plan §3/§4). Conservative placeholders — MEASURE the appliance's
+      # real per-endpoint limits before the Phase-1 cutover (Risk R3).
+      openalgo-quote:
+        limit-for-period: 5
+        limit-refresh-period: 1s
+        timeout-duration: 5s
+      openalgo-historical:
+        limit-for-period: 5
+        limit-refresh-period: 1s
+        timeout-duration: 5s
   circuitbreaker:
     instances:
       kite-rest:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        minimum-number-of-calls: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 2
+      # OpenAlgo gets its OWN breaker so an OpenAlgo outage never trips Kite-direct calls (§4)
+      openalgo-rest:
         sliding-window-type: COUNT_BASED
         sliding-window-size: 10
         minimum-number-of-calls: 10

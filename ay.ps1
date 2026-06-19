@@ -80,13 +80,45 @@ function Initialize-LocalConfig {
         Write-Host '[ay] generated deploy/secrets/artha_master_key (gitignored)'
     }
     # empty placeholders so compose can mount them; mock mode never reads them,
-    # live mode fails fast until the owner fills in real Kite credentials
-    foreach ($name in 'kite_api_key', 'kite_api_secret') {
+    # live mode fails fast until the owner fills in real Kite credentials. openalgo_api_key is
+    # mounted into market-data-service but read only when capture routes through OpenAlgo (§3/§4).
+    foreach ($name in 'kite_api_key', 'kite_api_secret', 'openalgo_api_key') {
         $f = Join-Path $RepoRoot "deploy\secrets\$name"
         if (-not (Test-Path $f)) {
             New-Item -ItemType File -Path $f | Out-Null
             Write-Host "[ay] created empty deploy/secrets/$name placeholder (fill for live mode)"
         }
+    }
+    # OpenAlgo appliance config (plan §2): copy the sample and generate APP_KEY + API_KEY_PEPPER
+    # once (gitignored; the appliance's own keys, not ours). Broker login is a runtime UI step.
+    $oaEnv = Join-Path $RepoRoot 'deploy\openalgo\.env'
+    if (-not (Test-Path $oaEnv)) {
+        $rng = New-Object System.Security.Cryptography.RNGCryptoServiceProvider
+        $gen = @{}
+        foreach ($k in 'APP_KEY', 'API_KEY_PEPPER', 'FERNET_SALT') {
+            $b = New-Object byte[] 32
+            $rng.GetBytes($b)
+            $gen[$k] = (($b | ForEach-Object { $_.ToString('x2') }) -join '')
+        }
+        # Single-owner: OpenAlgo holds the Kite session (one app -> OpenAlgo), so seed its broker
+        # creds from the existing kite_* secret files when present (empty in mock mode -> blank, the
+        # owner logs the broker in via the OpenAlgo UI). NOT the _MARKET keys (XTS-only).
+        $kkFile = Join-Path $RepoRoot 'deploy\secrets\kite_api_key'
+        $ksFile = Join-Path $RepoRoot 'deploy\secrets\kite_api_secret'
+        $bkey = if (Test-Path $kkFile) { (Get-Content $kkFile -Raw).Trim() } else { '' }
+        $bsec = if (Test-Path $ksFile) { (Get-Content $ksFile -Raw).Trim() } else { '' }
+        # The sample is OpenAlgo's COMPLETE native-format config (KEY = 'value'); fill placeholders.
+        $sample = Get-Content (Join-Path $RepoRoot 'deploy\openalgo\.env.sample')
+        $sample = $sample `
+            -replace "^APP_KEY = .*", "APP_KEY = '$($gen['APP_KEY'])'" `
+            -replace "^API_KEY_PEPPER = .*", "API_KEY_PEPPER = '$($gen['API_KEY_PEPPER'])'" `
+            -replace "^FERNET_SALT = .*", "FERNET_SALT = '$($gen['FERNET_SALT'])'" `
+            -replace "^BROKER_API_KEY = .*", "BROKER_API_KEY = '$bkey'" `
+            -replace "^BROKER_API_SECRET = .*", "BROKER_API_SECRET = '$bsec'"
+        # UTF-8 WITHOUT BOM: it is mounted AS /app/.env and read by python-dotenv (a BOM would
+        # corrupt the first key); ascii would mangle the upstream comments' em-dashes.
+        [System.IO.File]::WriteAllLines($oaEnv, $sample, (New-Object System.Text.UTF8Encoding($false)))
+        Write-Host '[ay] generated deploy/openalgo/.env (APP_KEY/API_KEY_PEPPER/FERNET_SALT + broker creds; gitignored)'
     }
 }
 
@@ -95,8 +127,8 @@ switch ($Verb) {
         Initialize-LocalConfig
         $composeArgs = @()
         foreach ($p in $Rest) {
-            if ($p -eq 'obs' -or $p -eq 'dev-tools') { $composeArgs += @('--profile', $p) }
-            else { Write-Error "[ay] unknown profile '$p' (expected: obs, dev-tools)" }
+            if ($p -eq 'obs' -or $p -eq 'dev-tools' -or $p -eq 'openalgo') { $composeArgs += @('--profile', $p) }
+            else { Write-Error "[ay] unknown profile '$p' (expected: obs, dev-tools, openalgo)" }
         }
         Invoke-Compose ($composeArgs + @('up', '-d', '--wait'))
     }
@@ -137,7 +169,7 @@ switch ($Verb) {
         Write-Host @'
 ay - ArthaYantra operator CLI (project-scoped docker compose)
 
-  ay up [obs] [dev-tools]   start the stack (creates .env + db password if missing)
+  ay up [obs] [dev-tools] [openalgo]   start the stack (creates .env + db password if missing)
   ay down                   stop project containers (volumes kept)
   ay logs <svc>             follow logs for one service
   ay status                 healthcheck summary of all containers

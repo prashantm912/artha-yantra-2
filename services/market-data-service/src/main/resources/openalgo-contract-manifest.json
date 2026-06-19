@@ -1,0 +1,13 @@
+{
+  "comment": "OpenAlgo expected-field sentinels (plan §3 / §17.11), derived from the SAME fixtures the OpenAlgo WireMock tests replay - one source of truth. Consumed/capture fields ONLY, NOT a full mirror (that is the wire DTO's job). Phase 0 probes /quotes + /history (stable params); the live /optionchain OI-coverage probe (per-strike chain[].ce.oi/pe.oi) is added in Phase 1 (§17.11) once `underlying`+`expiry_date` resolution lands - the optionchain wire shape is guarded meanwhile by OpenAlgoWireContractTest.",
+  "quote": {
+    "status": "string",
+    "data.ltp": "number",
+    "data.oi": "number"
+  },
+  "history": {
+    "status": "string",
+    "data": "array"
+  },
+  "knownTopLevel": ["status", "data"]
+}

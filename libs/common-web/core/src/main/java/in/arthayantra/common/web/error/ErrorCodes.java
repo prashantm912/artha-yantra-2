@@ -33,6 +33,9 @@ public final class ErrorCodes {
   public static final String KITE_CIRCUIT_OPEN = "KITE_CIRCUIT_OPEN";
   public static final String KITE_UPSTREAM_ERROR = "KITE_UPSTREAM_ERROR";
 
+  // ---- OPENALGO_* (502) — OpenAlgo appliance upstream/parse failure (plan §3) ----
+  public static final String OPENALGO_UPSTREAM_ERROR = "OPENALGO_UPSTREAM_ERROR";
+
   // ---- NOT_FOUND_* (404) ----
   public static final String NOT_FOUND_RESOURCE = "NOT_FOUND_RESOURCE";
   public static final String NOT_FOUND_INSTRUMENT = "NOT_FOUND_INSTRUMENT";

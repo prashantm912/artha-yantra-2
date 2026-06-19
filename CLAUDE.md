@@ -175,3 +175,7 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
 ## Where things live
 - `services/` services · `libs/` shared libs · `deploy/` compose + flyway · `e2e/`
   Playwright · `contracts/` OpenAPI/schema · `docs/design/` design authority.
+- `docs/superpowers/plans/` = active forward-work plans (NOT frozen design). The
+  OpenAlgo-ecosystem + React-migration + strategy re-platform authority is
+  `docs/superpowers/plans/2026-06-19-openalgo-react-integration-master-plan.md` —
+  read §17 (Errata) + §18 (Gap Addendum) FIRST; they override §1–§16 on conflict.

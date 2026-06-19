@@ -44,8 +44,9 @@ artha:
   # openalgo). The production cutover + OI-coverage canary is Phase 1 (§4).
   marketdata:
     source:
-      quotes: ${ARTHA_MD_SOURCE_QUOTES:kite}     # kite | openalgo
-      candles: ${ARTHA_MD_SOURCE_CANDLES:kite}   # kite | openalgo
+      quotes: ${ARTHA_MD_SOURCE_QUOTES:kite}             # kite | openalgo
+      candles: ${ARTHA_MD_SOURCE_CANDLES:kite}           # kite | openalgo
+      optionchain: ${ARTHA_MD_SOURCE_OPTIONCHAIN:kite}   # kite | openalgo (per-strike OI capture; flip ONLY after the live OI-coverage canary is green, §17.11)
   openalgo:
     base-url: ${ARTHA_OPENALGO_BASE_URL:http://openalgo:5000}
     api-key-file: ${ARTHA_OPENALGO_API_KEY_FILE:/run/secrets/openalgo_api_key}

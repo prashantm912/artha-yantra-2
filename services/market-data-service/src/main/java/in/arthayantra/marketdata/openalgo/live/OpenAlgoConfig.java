@@ -5,6 +5,7 @@ import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.alerts.NtfyClient;
 import in.arthayantra.marketdata.kite.HistoricalCandleGateway;
 import in.arthayantra.marketdata.kite.KiteCallExecutor;
+import in.arthayantra.marketdata.kite.OptionChainGateway;
 import in.arthayantra.marketdata.kite.QuoteGateway;
 import in.arthayantra.marketdata.openalgo.canary.OpenAlgoContractCanary;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -54,6 +55,23 @@ public class OpenAlgoConfig {
       KiteCallExecutor executor,
       ObjectMapper objectMapper) {
     return new OpenAlgoHistoricalCandleGateway(
+        restClientBuilder, properties.baseUrl(), properties.resolveApiKey(), executor, objectMapper);
+  }
+
+  /**
+   * OpenAlgo full option chain (with per-strike OI) when {@code
+   * artha.marketdata.source.optionchain=openalgo}. This is the irreplaceable
+   * {@code options_chain_snapshots} OI-capture path; it stays Kite-default until the live
+   * OI-coverage canary is green (§17.11 entry gate).
+   */
+  @Bean
+  @ConditionalOnProperty(name = "artha.marketdata.source.optionchain", havingValue = "openalgo")
+  public OptionChainGateway openAlgoOptionChainGateway(
+      RestClient.Builder restClientBuilder,
+      OpenAlgoProperties properties,
+      KiteCallExecutor executor,
+      ObjectMapper objectMapper) {
+    return new OpenAlgoOptionChainGateway(
         restClientBuilder, properties.baseUrl(), properties.resolveApiKey(), executor, objectMapper);
   }
 

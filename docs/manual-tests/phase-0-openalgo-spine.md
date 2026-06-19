@@ -68,12 +68,15 @@ maps `127.0.0.1:5001`).
 
 ## 4. Open the OpenAlgo UI + (optional) broker login
 
-Open **http://127.0.0.1:5001** in a browser → OpenAlgo's setup/login page renders. To exercise live
-data later you would, in the UI: pick a broker, enter that broker's API key/secret, complete OAuth
-(redirect must be `http://127.0.0.1:5001/<broker>/callback` — edit `deploy/openalgo/.env`
-`REDIRECT_URL` if not Zerodha), then **generate an OpenAlgo API key** and save it to
-`deploy/secrets/openalgo_api_key` (single line, no trailing newline). *Broker login is optional for
-Phase 0* — the spine does not consume it until Phase 1.
+Open **http://127.0.0.1:5001** in a browser → OpenAlgo's setup/login page renders; create the admin
+account on first run. To exercise live data, follow the **authoritative broker-login walkthrough in
+`deploy/openalgo/README.md`** ("Broker login (Zerodha — single-owner)"): broker creds come from
+`.env` (ay-seeded from `deploy/secrets/kite_*`, NOT entered in the UI); repoint the Zerodha Connect
+app's redirect to `http://127.0.0.1:5001/zerodha/callback`; the UI button runs the OAuth (login +
+TOTP, daily); then generate an **OpenAlgo API key** and save it to `deploy/secrets/openalgo_api_key`
+(single line, no trailing newline). *Broker login is optional for Phase 0* — the spine does not
+consume the key until Phase 1. Verified end-to-end 2026-06-19 (live RELIANCE/NIFTY quotes +
+daily history through `:5001/api/v1/`).
 
 ## 5. (Optional, needs the OpenAlgo API key from step 4) round-trip a quote
 

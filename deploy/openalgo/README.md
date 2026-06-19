@@ -11,11 +11,12 @@ store — capture is written by ArthaYantra into TimescaleDB.
 `marketcalls/openalgo@sha256:b1bc2ec4fc40a0e32730bab9c4b9dd3a43daefee30453de46885544eab45fdd7`
 (Docker Hub publishes only commit-hash tags + `latest`, no semver — so we pin by **digest**, never
 `latest`. Source tracks GitHub release `v2.0.1.3`.) Bump procedure: pull the new digest, run the
-`OpenAlgoWireContractTest` + `OpenAlgoContractCanary` against it, **sync `ENV_CONFIG_VERSION` in
-`.env.sample` to the image's `/app/.sample.env` Version header** (`docker run --rm <digest> head
-/app/.sample.env` — a stale version makes the app hard-refuse boot with an interactive prompt under
-the no-TTY container, so the healthcheck times out), then update the digest here and in
-`docs/design/DECISIONS_LOG.md`.
+`OpenAlgoWireContractTest` + `OpenAlgoContractCanary` against it, **re-sync `.env.sample` from the
+new image's `/app/.sample.env`** (`docker run --rm <digest> cat /app/.sample.env`), re-applying the
+ArthaYantra overrides (the header in `.env.sample` lists them) — because `.env.sample` is mounted AS
+the app's `/app/.env`, a missing/renamed key OR a stale `ENV_CONFIG_VERSION` makes the app
+hard-refuse boot (missing-key error or a no-TTY version prompt → healthcheck timeout). Then update
+the digest here and in `docs/design/DECISIONS_LOG.md`.
 
 ## Running it (opt-in)
 
@@ -26,18 +27,31 @@ nothing depends on it — the core stack always boots green). Start it explicitl
 .\ay.ps1 up openalgo      # starts ay-openalgo + ay-openalgo-publish (loopback :5001)
 ```
 
-`ay` creates `deploy/openalgo/.env` from `.env.sample` on first run, generating `APP_KEY` and
-`API_KEY_PEPPER`. The file is gitignored (its keys are the appliance's, not ours).
+`ay` creates `deploy/openalgo/.env` from `.env.sample` on first run: it generates `APP_KEY`,
+`API_KEY_PEPPER`, and `FERNET_SALT`, and (single-owner) fills `BROKER_API_KEY/SECRET` from the
+existing `deploy/secrets/kite_*` files. The file is gitignored (its keys are the appliance's, not
+ours). `.env.sample` is the **complete** OpenAlgo config (mirrors the pinned image's
+`/app/.sample.env`, ArthaYantra overrides baked in) because it is mounted **AS** `/app/.env`
+(compose `volumes:`, not `env_file:`) — OpenAlgo is file-config-native, so every key must be present
+and the generated secrets must persist verbatim (a salt rotated into a throwaway `/app/.env` would
+make stored ciphertext undecryptable on the next recreate). See DECISIONS_LOG 2026-06-19.
 
-## Broker login (runtime, in the UI)
+## Broker login (Zerodha — single-owner)
 
-Broker credentials are NOT set in `.env` — log in through the OpenAlgo web UI:
+OpenAlgo reads `BROKER_API_KEY/SECRET` from `.env` (env, not the UI — `blueprints/auth.py`); `ay`
+seeds them from `deploy/secrets/kite_*`. The UI only runs the OAuth. The broker is **derived from
+`REDIRECT_URL`'s path segment** (`/zerodha/callback`).
 
-1. `ay up openalgo`, then open **http://127.0.0.1:5001** (the loopback publisher).
-2. Pick a broker, enter that broker's API key/secret, complete OAuth. The broker OAuth
-   `REDIRECT_URL` must point at `http://127.0.0.1:5001/<broker>/callback` (edit `.env` if you use a
-   broker other than the Zerodha default).
-3. Generate an **OpenAlgo API key** in the UI and write it to `deploy/secrets/openalgo_api_key`
+1. `ay up openalgo`, then open **http://127.0.0.1:5001** (the loopback publisher) and create the
+   OpenAlgo admin account on first run.
+2. **Repoint the Zerodha Connect app's Redirect URL** to `http://127.0.0.1:5001/zerodha/callback`
+   (developers.kite.trade). Zerodha allows one redirect + one session per app, so the single app is
+   repurposed to OpenAlgo; ArthaYantra's Kite-direct path is the never-deleted fallback (reads via
+   OpenAlgo after the Phase-1 cutover). For another broker, edit `REDIRECT_URL`'s `/zerodha/` segment.
+3. In the UI, connect the broker → complete Zerodha login + TOTP. **Daily re-login** applies (Kite
+   tokens expire ~06:00 IST). Verify: `POST http://127.0.0.1:5001/api/v1/quotes`
+   `{"apikey":...,"symbol":"RELIANCE","exchange":"NSE"}` returns `status:success` with live data.
+4. Generate an **OpenAlgo API key** in the UI and write it to `deploy/secrets/openalgo_api_key`
    (single line, no newline). market-data-service reads it ONLY when a capture capability is routed
    through OpenAlgo (`artha.marketdata.source.*=openalgo`, Phase 1).
 
@@ -52,5 +66,11 @@ ArthaYantra stack at a live (non-analyzer) OpenAlgo broker session** (mock/live 
 
 ## Persistence
 
-`openalgo-data` volume → `/app/db` (SQLite: sessions, hashed API keys, sandbox state; DuckDB
-history). Survives recreate. `ay reset-db` drops volumes (you re-log-in the broker afterward).
+Two layers:
+- `deploy/openalgo/.env` (host file, mounted AS `/app/.env`) holds the **stable** secrets
+  (`APP_KEY`/`API_KEY_PEPPER`/`FERNET_SALT`) + broker creds. Survives everything including
+  `ay reset-db` (it is not a volume) — so the Fernet salt never changes and stored ciphertext stays
+  decryptable. Deleting this file makes `ay` regenerate fresh secrets → existing ciphertext is lost.
+- `openalgo-data` volume → `/app/db` (SQLite: admin account, sessions, hashed API keys, sandbox
+  state; DuckDB history). Survives recreate. `ay reset-db` drops it — you re-create the admin
+  account + re-log-in the broker afterward (the `.env` salt is unchanged, so no decrypt issues).

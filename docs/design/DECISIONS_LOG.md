@@ -56,6 +56,29 @@ Several plan assumptions had to be pinned against reality during implementation.
   port — fixed to `127.0.0.1:5001:5001` (matches the dev-tools sidecar pattern: host:listen:listen).
   After both fixes: `/health/status` returns 200 via the loopback publisher, loopback-only confirmed,
   the OpenAlgo API key mounts into market-data-service ONLY, and config survives a restart.
+- **Config is FILE-BASED (mount a complete `/app/.env`), NOT compose env vars.** Bringing the broker
+  up live surfaced three more defects, all one root cause — OpenAlgo is file-config-native and
+  start.sh's env→file heredoc is lossy: (4) `CSP_UPGRADE_INSECURE_REQUESTS` defaults TRUE → the
+  browser upgrades same-origin POSTs (setup/login) to https → TLS on the plain socat port →
+  `ERR_CONNECTION_CLOSED`; (5) `FERNET_SALT` is auto-rotated by `env_check` into the container's
+  `/app/.env` and lost on recreate → stored ciphertext won't decrypt → hard boot refusal; (6) the
+  heredoc omits required keys (rate limits, logging, `VALID_BROKERS`) that the app hard-checks. Fix:
+  `ay` seeds `deploy/openalgo/.env` from the **pinned image's own `/app/.sample.env`** (every key
+  present, version-locked), bakes the ArthaYantra overrides (`HOST_SERVER`/`REDIRECT_URL` = the
+  loopback publisher `:5001`; `FLASK_HOST_IP`/`WEBSOCKET_HOST` = `0.0.0.0` so socat reaches the
+  bind; `CSP_UPGRADE_INSECURE_REQUESTS=FALSE`), generates `APP_KEY`/`API_KEY_PEPPER`/`FERNET_SALT`,
+  and (single-owner) fills `BROKER_API_KEY/SECRET` from the existing `deploy/secrets/kite_*`. That
+  file is mounted AS `/app/.env` (compose `volumes:`, NOT `env_file:` — it is OpenAlgo's native
+  `KEY = 'value'` dotenv format), so start.sh skips generation and every secret persists verbatim
+  across recreates (no rotation). Live bring-up verified end-to-end: Zerodha logged in via the UI;
+  `POST /api/v1/quotes` (RELIANCE/NIFTY) and `/api/v1/history` (daily) return live data whose wire
+  shape matches the `OpenAlgoQuote`/`OpenAlgoCandle` DTOs byte-for-byte — `oi` present, `timestamp`
+  an integer epoch-second — confirming the §17.2 source-verification corrections against the REAL feed.
+- **Kite app repurposed to OpenAlgo (single Kite session).** Zerodha issues one access_token + one
+  registered redirect per Connect app; per owner decision the single app's redirect is pointed at
+  OpenAlgo (`:5001/zerodha/callback`) and OpenAlgo holds the session. ArthaYantra's own Kite-direct
+  path stays the never-deleted fallback (directive 6f/6g) and reads via OpenAlgo after the Phase-1
+  cutover. Running both Kite-direct sessions in parallel would need a second Connect app.
 
 **No schema change** (capture path untouched; Flyway heads V017/V008/V005 confirmed). Branch
 `feat/openalgo-spine`. Phase 1 (§4 routing + OI-coverage canary) flips `source.*` and enables the

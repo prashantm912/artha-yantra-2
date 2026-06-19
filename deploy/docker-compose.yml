@@ -243,12 +243,16 @@ services:
     image: marketcalls/openalgo@sha256:b1bc2ec4fc40a0e32730bab9c4b9dd3a43daefee30453de46885544eab45fdd7
     container_name: ay-openalgo
     profiles: [openalgo]
-    # env_file lines are injected as env vars; OpenAlgo's start.sh generates /app/.env from
-    # them on boot (HOST_SERVER is the trigger). Broker creds stay blank until login via UI.
-    env_file:
-      - ./openalgo/.env
+    # Config is FILE-BASED: deploy/openalgo/.env is a COMPLETE OpenAlgo config (ay seeds it from the
+    # pinned image's /app/.sample.env, then overrides keys + fills secrets) mounted AS /app/.env.
+    # start.sh sees an existing non-empty /app/.env and skips its env→file generation, so every
+    # required key is present and our FERNET_SALT/APP_KEY/API_KEY_PEPPER persist verbatim across
+    # recreates (env_check never rotates them → stored ciphertext keeps decrypting). We deliberately
+    # do NOT use `env_file:` — the file is in OpenAlgo's native `KEY = 'value'` dotenv format, which
+    # is not compose-env_file-safe; the mount + python-dotenv is the single config source.
     volumes:
       - openalgo-data:/app/db   # SQLite (sessions/api-keys/sandbox) + DuckDB history
+      - ./openalgo/.env:/app/.env
     healthcheck:
       # purpose-built, unauthenticated, cheap health endpoint (openalgo blueprints/health.py);
       # returns 200 on a fresh, logged-out container. curl is present in the image.

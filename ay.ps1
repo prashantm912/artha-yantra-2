@@ -95,17 +95,30 @@ function Initialize-LocalConfig {
     if (-not (Test-Path $oaEnv)) {
         $rng = New-Object System.Security.Cryptography.RNGCryptoServiceProvider
         $gen = @{}
-        foreach ($k in 'APP_KEY', 'API_KEY_PEPPER') {
+        foreach ($k in 'APP_KEY', 'API_KEY_PEPPER', 'FERNET_SALT') {
             $b = New-Object byte[] 32
             $rng.GetBytes($b)
             $gen[$k] = (($b | ForEach-Object { $_.ToString('x2') }) -join '')
         }
+        # Single-owner: OpenAlgo holds the Kite session (one app -> OpenAlgo), so seed its broker
+        # creds from the existing kite_* secret files when present (empty in mock mode -> blank, the
+        # owner logs the broker in via the OpenAlgo UI). NOT the _MARKET keys (XTS-only).
+        $kkFile = Join-Path $RepoRoot 'deploy\secrets\kite_api_key'
+        $ksFile = Join-Path $RepoRoot 'deploy\secrets\kite_api_secret'
+        $bkey = if (Test-Path $kkFile) { (Get-Content $kkFile -Raw).Trim() } else { '' }
+        $bsec = if (Test-Path $ksFile) { (Get-Content $ksFile -Raw).Trim() } else { '' }
+        # The sample is OpenAlgo's COMPLETE native-format config (KEY = 'value'); fill placeholders.
         $sample = Get-Content (Join-Path $RepoRoot 'deploy\openalgo\.env.sample')
         $sample = $sample `
-            -replace '^APP_KEY=.*', "APP_KEY=$($gen['APP_KEY'])" `
-            -replace '^API_KEY_PEPPER=.*', "API_KEY_PEPPER=$($gen['API_KEY_PEPPER'])"
-        Set-Content -Path $oaEnv -Value $sample -Encoding ascii
-        Write-Host '[ay] generated deploy/openalgo/.env (APP_KEY/API_KEY_PEPPER; gitignored)'
+            -replace "^APP_KEY = .*", "APP_KEY = '$($gen['APP_KEY'])'" `
+            -replace "^API_KEY_PEPPER = .*", "API_KEY_PEPPER = '$($gen['API_KEY_PEPPER'])'" `
+            -replace "^FERNET_SALT = .*", "FERNET_SALT = '$($gen['FERNET_SALT'])'" `
+            -replace "^BROKER_API_KEY = .*", "BROKER_API_KEY = '$bkey'" `
+            -replace "^BROKER_API_SECRET = .*", "BROKER_API_SECRET = '$bsec'"
+        # UTF-8 WITHOUT BOM: it is mounted AS /app/.env and read by python-dotenv (a BOM would
+        # corrupt the first key); ascii would mangle the upstream comments' em-dashes.
+        [System.IO.File]::WriteAllLines($oaEnv, $sample, (New-Object System.Text.UTF8Encoding($false)))
+        Write-Host '[ay] generated deploy/openalgo/.env (APP_KEY/API_KEY_PEPPER/FERNET_SALT + broker creds; gitignored)'
     }
 }
 

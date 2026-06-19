@@ -12,8 +12,8 @@ class ErrorCodesTaxonomyTest {
 
   private static final List<String> FAMILIES =
       List.of(
-          "VALIDATION_", "AUTH_", "KITE_", "NOT_FOUND_", "CONFLICT_", "STRATEGY_", "DATA_",
-          "INTERNAL_", "NOT_CONFIGURED", "UPSTREAM_", "RATE_", "INVALID_", "WINDOW_");
+          "VALIDATION_", "AUTH_", "KITE_", "OPENALGO_", "NOT_FOUND_", "CONFLICT_", "STRATEGY_",
+          "DATA_", "INTERNAL_", "NOT_CONFIGURED", "UPSTREAM_", "RATE_", "INVALID_", "WINDOW_");
 
   @Test
   void everyCodeIsScreamingSnakeMatchingItsConstantName() throws Exception {

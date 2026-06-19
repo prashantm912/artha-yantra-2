@@ -7,6 +7,62 @@ spike outputs, calibrated defaults, accepted deviations. Newest first.
 
 ---
 
+## 2026-06-19 — OpenAlgo integration spine (master plan Phase 0)
+
+**Context.** Master plan `docs/superpowers/plans/2026-06-19-openalgo-react-integration-master-plan.md`
+Phase 0 (§2 appliance + §3 gateway + contract test) re-platforms the broker boundary around OpenAlgo.
+Several plan assumptions had to be pinned against reality during implementation.
+
+**Decisions.**
+
+- **Image pin = DIGEST, not a tag.** `marketcalls/openalgo` on Docker Hub publishes only commit-hash
+  tags + `latest` (NO semver), so the plan's "pin a release tag" is impossible. Pinned by digest
+  `marketcalls/openalgo@sha256:b1bc2ec4fc40a0e32730bab9c4b9dd3a43daefee30453de46885544eab45fdd7`
+  (pulled 2026-06-19; source tracks GitHub release `v2.0.1.3`). Bump = pull new digest → run
+  `OpenAlgoWireContractTest` + `OpenAlgoContractCanary` → update digest in compose + `deploy/openalgo/README.md`.
+- **OpenAlgo REST is POST-with-`apikey`-in-body, single-symbol.** Verified against the local source
+  checkout (`C:\Trading\openalgo`, plan §19.1): `/quotes` DOES carry `oi` (always present, `0` for
+  cash/index, real for F&O — `services/quotes_service.py` + `broker/*/api/data.py`); per-strike OI also
+  rides `/optionchain` (`chain[].ce.oi`/`pe.oi`). `/history` `timestamp` is Unix epoch **seconds** as a
+  JSON integer (`OpenAlgoCandle.timestamp` is `long`, NOT a String). Daily interval code is `D`.
+  optionchain request uses `underlying` (not `symbol`) + a required `expiry_date` (DDMMMYY) — so its
+  live canary OI-coverage probe is Phase 1 (§17.11, needs expiry resolution); the optionchain wire
+  shape is guarded meanwhile by `OpenAlgoWireContractTest`. Healthcheck = `/health/status` (purpose-
+  built, unauthenticated). Exchange codes (NSE/NFO/BSE/BFO/NSE_INDEX/BSE_INDEX) + index symbol remaps
+  (NIFTY/BANKNIFTY/FINNIFTY/MIDCPNIFTY/SENSEX/BANKEX) match OpenAlgo's own loader byte-for-byte.
+- **REST hand-rolled `RestClient`; SDK deferred to Phase 3 (WS + orders).** Correction: the
+  `in.openalgo:openalgo:1.0.1` SDK's base URL IS settable (constructor/Builder — NOT pinned like Kite's),
+  so WireMock-via-SDK was technically possible. We still hand-roll REST, but for PARITY with the
+  `kite/wire` pattern — typed `@JsonIgnoreProperties` DTOs + off-critical-path `OpenAlgoContractCanary`
+  drift detection, which the SDK's untyped `JsonObject` returns give up. No SDK dep in Phase 0 (no
+  caller); when WS/orders land it still needs a mapping layer (SDK is untyped end-to-end).
+- **Sandbox/analyzer (mock) mode is a RUNTIME toggle, not an env flag (§17.8).** OpenAlgo's only
+  sandbox env var (`SANDBOX_DATABASE_URL`) just sets a DB path; the mode is set via the UI /
+  `POST /api/v1/analyzer/toggle`. Mock⇒analyzer coupling therefore CANNOT be baked into the container
+  via env and is deferred to the Phase-1 routing cutover (documented in `deploy/openalgo/README.md`);
+  Phase 0 leaves it manual.
+- **Appliance is OPT-IN (compose `profiles: [openalgo]`).** `ay up` uses `up -d --wait`; an
+  unconfigured OpenAlgo would fail the wait and regress the green-boot entry gate. Nothing depends on
+  `openalgo`, and the default source stays `kite`, so Phase 0 changes NO routing. Start with
+  `ay up openalgo`. OpenAlgo's default `API_RATE_LIMIT` is 50/s (ours set conservatively to 5/s,
+  MEASURE before the Phase-1 cutover, Risk R3).
+- **Manual-verification fixes (ran the Phase-0 guide end-to-end).** Two appliance-config defects the
+  contract tests can't catch surfaced only on a real `ay up openalgo`: (1) start.sh defaults
+  `ENV_CONFIG_VERSION` to an OLD `1.0.4` when unset, and the app then HARD-REFUSES boot via an
+  interactive `Continue anyway? (y/N)` prompt (no TTY → worker loops → :5000 never binds → healthcheck
+  times out) — fixed by pinning `ENV_CONFIG_VERSION=1.0.7` in `.env.sample` (version-locked to the
+  image digest; added to the bump runbook). (2) The `openalgo-publish` socat sidecar listened on
+  container `5001` but published container `5000` (`127.0.0.1:5001:5000`), so the host port hit a dead
+  port — fixed to `127.0.0.1:5001:5001` (matches the dev-tools sidecar pattern: host:listen:listen).
+  After both fixes: `/health/status` returns 200 via the loopback publisher, loopback-only confirmed,
+  the OpenAlgo API key mounts into market-data-service ONLY, and config survives a restart.
+
+**No schema change** (capture path untouched; Flyway heads V017/V008/V005 confirmed). Branch
+`feat/openalgo-spine`. Phase 1 (§4 routing + OI-coverage canary) flips `source.*` and enables the
+contract canary against the live appliance (§17.11 entry gate).
+
+---
+
 ## 2026-06-13 — S3 pruner-calibration defaults (Stage D, Phase 33/34 entry gate)
 
 **Context.** §D.13 mandates the fold-fed `MedianPruner` calibration be RUN and its

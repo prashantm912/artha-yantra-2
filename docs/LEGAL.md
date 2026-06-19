@@ -39,3 +39,23 @@ pair is **never configured anywhere in 2.0**. Consequently:
   but it gates nothing.
 - All other D13 mechanics stand unchanged: Argon2id login, AES-GCM token at
   rest (Stage B), `.env` + Docker secrets, credential-free mock mode.
+
+## OpenAlgo ecosystem (attribution record) [master plan §1d, 2026-06-19]
+
+License filter governing the OpenAlgo integration (master plan §1d): **MIT → import/port freely,
+keep the copyright notice; AGPL-3.0 → run STANDALONE behind a process boundary, consume only its
+output/network API, NEVER merge its source.**
+
+1. **OpenAlgo** (`marketcalls/openalgo`, Python/Flask, **AGPL-3.0**) — integration form: **APPLIANCE**.
+   Run UNMODIFIED in its own container, **digest-pinned** (Phase 0:
+   `sha256:b1bc2ec4fc40a0e32730bab9c4b9dd3a43daefee30453de46885544eab45fdd7`), consumed ONLY over its
+   `/api/v1/` REST + WebSocket surface. Its source is **never** merged into any ArthaYantra module and
+   its frontend is **never** imported. **AGPL containment:** never fork-and-patch the image (a modified,
+   network-served AGPL work triggers the §13 source-offer obligation — and this stack is exposed to a
+   phone over Tailscale, a network use). Wait for upstream releases; if a patch is ever unavoidable,
+   publish the modified Corresponding Source (master plan §17.10).
+2. **OpenAlgo-Java SDK** (`in.openalgo:openalgo`, Maven Central, **MIT**) — integration form: **IMPORT**
+   (DEFERRED to Phase 3: WS streaming + order placement only; REST capture is hand-rolled per §17.2).
+   An MIT client of the AGPL appliance does not infect ArthaYantra. Keep the MIT notice when added.
+3. Future MIT ports/imports under this plan (opengreeks → `libs/black76-math`, pyindicators, marginism,
+   openalgo-heatmap) record their attribution here as they land; each keeps its MIT copyright notice.

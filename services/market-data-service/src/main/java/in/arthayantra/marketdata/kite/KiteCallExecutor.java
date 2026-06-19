@@ -31,17 +31,25 @@ import org.springframework.web.client.ResourceAccessException;
 @Component
 public class KiteCallExecutor {
 
-  /** Endpoint families with their B-3 limiter instances. */
+  /**
+   * Broker-REST endpoint families with their B-3 limiter + breaker instances. Each broker gets its
+   * own breaker so an OpenAlgo outage never trips Kite-direct calls (plan §3/§4 per-capability
+   * source flag keeps both paths alive).
+   */
   public enum Family {
-    HISTORICAL("kite-historical"),
-    QUOTE("kite-quote"),
-    DUMP("kite-dump"),
-    MISC("kite-misc");
+    HISTORICAL("kite-historical", "kite-rest"),
+    QUOTE("kite-quote", "kite-rest"),
+    DUMP("kite-dump", "kite-rest"),
+    MISC("kite-misc", "kite-rest"),
+    OPENALGO_QUOTE("openalgo-quote", "openalgo-rest"),
+    OPENALGO_HISTORICAL("openalgo-historical", "openalgo-rest");
 
     final String limiterName;
+    final String breakerName;
 
-    Family(String limiterName) {
+    Family(String limiterName, String breakerName) {
       this.limiterName = limiterName;
+      this.breakerName = breakerName;
     }
   }
 
@@ -123,17 +131,17 @@ public class KiteCallExecutor {
   /** Executes a Kite call under the family's limiter, the kite-rest breaker and retry. */
   public <T> T execute(Family family, Supplier<T> call) {
     RateLimiter limiter = rateLimiters.rateLimiter(family.limiterName);
-    CircuitBreaker breaker = circuitBreakers.circuitBreaker("kite-rest");
+    CircuitBreaker breaker = circuitBreakers.circuitBreaker(family.breakerName);
     Supplier<T> attempt =
         () -> RateLimiter.decorateSupplier(limiter, CircuitBreaker.decorateSupplier(breaker, call)).get();
     try {
       return Retry.decorateSupplier(retry, attempt).get();
     } catch (RequestNotPermitted saturation) {
       throw new ApiException(
-          429, ErrorCodes.RATE_LIMIT_LOCAL, "local Kite " + family + " budget saturated");
+          429, ErrorCodes.RATE_LIMIT_LOCAL, "local broker " + family + " budget saturated");
     } catch (CallNotPermittedException open) {
       throw new ApiException(
-          503, ErrorCodes.KITE_CIRCUIT_OPEN, "kite-rest circuit open; serving cached data");
+          503, ErrorCodes.KITE_CIRCUIT_OPEN, family.breakerName + " circuit open; serving cached data");
     }
   }
 

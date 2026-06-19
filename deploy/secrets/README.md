@@ -10,6 +10,7 @@ them at `/run/secrets/` per service.
 | `kite_api_key` | brand-new 2.0 Kite API key (A6) | market-data-service only (live mode) |
 | `kite_api_secret` | its secret | market-data-service only (live mode) |
 | `artha_master_key` | 256-bit base64 AES-GCM key (Stage B token store) | market-data-service |
+| `openalgo_api_key` | OpenAlgo's OWN generated API key (from its UI; NOT a broker secret) | market-data-service (only when `artha.marketdata.source.*=openalgo`, plan §3/§4) |
 
 Mock mode (`SPRING_PROFILES_ACTIVE=mock`) needs **only `postgres_password`**
 (the database always requires one); no Kite material is ever present.

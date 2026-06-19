@@ -27,9 +27,14 @@ secrets:
     file: ./secrets/kite_api_secret
   artha_master_key:
     file: ./secrets/artha_master_key
+  # OpenAlgo's OWN generated API key (NOT the fronted broker's secret) — plan §2/§3.
+  # market-data-service reads it only when a source.* capability is routed to openalgo.
+  openalgo_api_key:
+    file: ./secrets/openalgo_api_key
 
 volumes:
   timescale-data:
+  openalgo-data:        # OpenAlgo SQLite (sessions/api-keys/sandbox) + DuckDB persistence (§2)
 
 services:
   timescaledb:
@@ -207,9 +212,12 @@ services:
       # Profile isolation: per-profile database + Redis logical DB (live → artha/0, mock → artha_mock/1)
       SPRING_DATASOURCE_URL: jdbc:postgresql://timescaledb:5432/${ARTHA_DB_NAME:-artha}?currentSchema=marketdata
       SPRING_DATA_REDIS_DATABASE: ${ARTHA_REDIS_DB:-0}
-    # kite_* + master key mount into THIS service only (B-2: the token and the
-    # credentials never reach any other container)
-    secrets: [postgres_password, kite_api_key, kite_api_secret, artha_master_key]
+      # OpenAlgo appliance URL (plan §3/§4); read only when a source.* capability = openalgo
+      ARTHA_OPENALGO_BASE_URL: ${ARTHA_OPENALGO_BASE_URL:-http://openalgo:5000}
+    # kite_* + master key + the OpenAlgo API key mount into THIS service only (B-2: the token
+    # and the credentials never reach any other container). The openalgo key is read only when
+    # capture routes through OpenAlgo (Phase 1); an empty placeholder is harmless otherwise.
+    secrets: [postgres_password, kite_api_key, kite_api_secret, artha_master_key, openalgo_api_key]
     depends_on:
       flyway-init:
         condition: service_completed_successfully
@@ -221,6 +229,58 @@ services:
       retries: 12
       start_period: 40s
     mem_limit: 640m
+    restart: unless-stopped
+    logging: *default-logging
+
+  # ---- OpenAlgo appliance (plan §2/§3) — AGPL, UNMODIFIED, digest-pinned ----
+  # Broker-swappable unified API (24+ brokers) consumed ONLY over /api/v1 REST + WS; its
+  # source is never merged here. OPT-IN via `profiles: [openalgo]` so it stays OUT of the
+  # default `ay up --wait` — it needs a broker login through its own UI before it is useful,
+  # and nothing depends on it, so the core stack always boots green. Start with `ay up
+  # openalgo`. Phase 0 stands it up; routing capture through it is Phase 1 (§4). Sandbox/
+  # analyzer mode is a RUNTIME toggle, not an env flag (§17.8) — see deploy/openalgo/README.md.
+  openalgo:
+    image: marketcalls/openalgo@sha256:b1bc2ec4fc40a0e32730bab9c4b9dd3a43daefee30453de46885544eab45fdd7
+    container_name: ay-openalgo
+    profiles: [openalgo]
+    # Config is FILE-BASED: deploy/openalgo/.env is a COMPLETE OpenAlgo config (ay seeds it from the
+    # pinned image's /app/.sample.env, then overrides keys + fills secrets) mounted AS /app/.env.
+    # start.sh sees an existing non-empty /app/.env and skips its env→file generation, so every
+    # required key is present and our FERNET_SALT/APP_KEY/API_KEY_PEPPER persist verbatim across
+    # recreates (env_check never rotates them → stored ciphertext keeps decrypting). We deliberately
+    # do NOT use `env_file:` — the file is in OpenAlgo's native `KEY = 'value'` dotenv format, which
+    # is not compose-env_file-safe; the mount + python-dotenv is the single config source.
+    volumes:
+      - openalgo-data:/app/db   # SQLite (sessions/api-keys/sandbox) + DuckDB history
+      - ./openalgo/.env:/app/.env
+    healthcheck:
+      # purpose-built, unauthenticated, cheap health endpoint (openalgo blueprints/health.py);
+      # returns 200 on a fresh, logged-out container. curl is present in the image.
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:5000/health/status >/dev/null || exit 1"]
+      interval: 15s
+      retries: 8
+      start_period: 60s
+    mem_limit: 2048m
+    restart: unless-stopped
+    logging: *default-logging
+
+  # loopback publisher for OpenAlgo's UI + broker OAuth callback (:5001 -> openalgo:5000);
+  # needed to log a broker in via the web UI. Rides the openalgo profile.
+  openalgo-publish:
+    image: alpine/socat:1.8.0.3
+    container_name: ay-openalgo-publish
+    profiles: [openalgo]
+    command: ["TCP-LISTEN:5001,fork,reuseaddr", "TCP:openalgo:5000"]
+    ports:
+      - "127.0.0.1:5001:5001"
+    depends_on:
+      openalgo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "socat", "-V"]
+      interval: 30s
+      retries: 3
+    mem_limit: 16m
     restart: unless-stopped
     logging: *default-logging
 

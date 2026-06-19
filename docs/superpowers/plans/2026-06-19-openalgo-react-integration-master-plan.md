@@ -3308,7 +3308,7 @@ Note: §13 put `minervini_screen_results` in `marketdata/V018`; screen results a
 ### 17.2 Client decision — RestClient for REST, SDK for WS + orders (reconciles the §3 ↔ §4 contradiction)
 
 §3 says "use the OpenAlgo-Java SDK"; §4.2 says "hand-rolled RestClient, NOT the SDK." **Authoritative resolution:**
-- **REST capture path (quotes, depth, history, optionchain, optiongreeks-mirror, instruments): hand-rolled `RestClient`** — mirrors the existing `kite/wire/` anti-corruption pattern and routes through the `KiteCallExecutor`-style rate-limiter/circuit-breaker so OpenAlgo calls get uniform throttling + WireMock testability (the same reasons CLAUDE.md gives for not using the Kite SDK on REST).
+- **REST capture path (quotes, depth, history, optionchain, optiongreeks-mirror, instruments): hand-rolled `RestClient`** — mirrors the existing `kite/wire/` anti-corruption pattern and routes through the `KiteCallExecutor`-style rate-limiter/circuit-breaker so OpenAlgo calls get uniform throttling + WireMock testability. **Correction (verified 2026-06-19 against `C:\Trading\OpenAlgo-Java`, §19.1):** unlike the Kite SDK (whose `Routes._rootUrl` is pinned → unstubbable, the original CLAUDE.md reason), the OpenAlgo-Java SDK's base URL **is** settable (constructor/Builder), so WireMock-via-SDK was technically possible. The hand-roll decision still stands, but the load-bearing reason is **parity with the `kite/wire` typed-DTO + `ContractCanary` drift-detection pattern** — the SDK returns untyped `com.google.gson.JsonObject`, giving up field-level typing and the off-critical-path canary. (So even the Phase-3 WS/order SDK use will need a mapping layer.)
 - **WebSocket streaming + ORDER placement: use the OpenAlgo-Java SDK** (`in.openalgo:openalgo:1.0.1`) — its WS client and order client are the value-add and are not on the throttled capture path.
 - The SDK **remains a declared dependency** (decision 2 honoured) — we just don't use it for REST capture.
 - **Unify the package + config namespace** (the two sections diverged): package = `…marketdata.openalgo.wire` (parallel to `kite/wire`); config prefix = **`artha.marketdata.source`** with per-capability keys `…source.quotes`, `…source.candles`, `…source.optionchain`, `…source.orders` each `kite|openalgo`. Drop the `artha.md.source.*` variant.
@@ -3480,5 +3480,42 @@ The notifier (ntfy/telegram, Stage E [[stage-e-progress]]) exists and §1b plans
 | 18.5 | Clarity | §3/§4/§17.2 | §3+§4 = ONE gateway deliverable in `marketdata.openalgo`; discard the `kite/openalgo`+`artha.md.source` duplicate |
 | 18.6 | Verify | §12.0/§12.1 | reconcile Active-Strike sentiment% vs oipulse EXACT before scalper gates use it |
 | 18.7 | Scope | §11.0 | React = 1:1 with current Angular; extra oipulse pages are future work |
+
+## 19. Process addenda — local source references & per-phase manual test guides (AUTHORITATIVE)
+
+> Added 2026-06-19 after Phase 0. Same standing as §17/§18.
+
+### 19.1 Local reference checkouts (consult these BEFORE hitting GitHub)
+
+The owner has checked out the upstream sources locally so a session can read them directly instead
+of repeatedly fetching from GitHub. **These are the authoritative reference for library facts** — when
+this plan's description of an OpenAlgo wire shape / exchange code / symbol format / SDK API conflicts
+with the checkout, **the checkout wins** (the plan was written from docs that may lag the code).
+
+| Path | What it is | Use it to confirm |
+|---|---|---|
+| `C:\Trading\openalgo` | OpenAlgo platform source (Python/Flask) | REST request/response shapes (`restx_api/`, `blueprints/`, `services/`, `schemas`), exchange codes, analyzer/sandbox toggle, `start.sh` boot, healthcheck route, rate limits |
+| `C:\Trading\openalgo-docs` | OpenAlgo documentation + API reference | `api-documentation/`, `symbol-format.md`, broker connect guides — the human-readable contract |
+| `C:\Trading\OpenAlgo-Java` | OpenAlgo-Java SDK source | Maven coordinates (`pom.xml`), client API surface, whether base-URL is configurable (WS + order path, §17.2) |
+
+**Rule:** before implementing or changing any OpenAlgo-touching code (§2–§5, §17.2/§17.3), grep/read
+the relevant file in these checkouts to ground the field names + shapes. Wire DTOs and the
+`OpenAlgoExchange` translator MUST match what the source actually emits, not what this plan guessed.
+
+### 19.2 Checking out future upstream repos
+
+Before incorporating ANY `https://github.com/marketcalls/*` repo (or other upstream we port/appliance
+— opengreeks, pyindicators, marginism, openalgo-heatmap, ExpiryTrack, openchart, raptorbt, …),
+**`git clone` it into `C:\Trading\<repo>`** first so the source is a handy local reference (mirrors
+the three checkouts above). Note the local path in the relevant section + in project memory.
+
+### 19.3 Per-phase manual testing guide (deployable phases)
+
+After completing each phase, if that phase produced something the owner can run/observe, **create a
+manual testing guide at `docs/manual-tests/phase-<N>-<slug>.md`** that lets the owner verify the
+phase's deliverables by hand. It should cover: prerequisites, exact commands (PowerShell-first, this
+box), what to click/observe, expected results, and how to tear down. Phase 0's guide is
+`docs/manual-tests/phase-0-openalgo-spine.md`. A non-deployable / pure-library phase (e.g. §6 greeks)
+can note "no manual surface — verified by tests" instead.
 
 *End of plan.*

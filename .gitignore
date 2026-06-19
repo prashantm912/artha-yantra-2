@@ -2,6 +2,9 @@
 .env
 .env.*
 !.env.example
+# OpenAlgo appliance config: commit the sample + README, ignore the generated .env
+# (.env above already ignores deploy/openalgo/.env; .env.* would hide the sample — re-include it)
+!deploy/openalgo/.env.sample
 deploy/secrets/*
 !deploy/secrets/.gitkeep
 !deploy/secrets/README.md
@@ -52,3 +55,5 @@ docs/oipulse-study/.oipulse-state.json
 # --- session screenshots / one-off captures at repo root ---
 *.png
 oipulse-frame.html
+/tools/historical-import/manifest_live.sqlite
+/tools/historical-import/run_full_load.ps1

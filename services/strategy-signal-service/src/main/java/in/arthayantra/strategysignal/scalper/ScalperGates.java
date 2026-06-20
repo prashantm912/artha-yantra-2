@@ -43,6 +43,23 @@ public final class ScalperGates {
     return GateOutcome.pass(null, "within scalp window");
   }
 
+  /**
+   * #9 (section 3.9) Morning Trade window-aware overload: FAIL before {@code from} and at/after {@code
+   * to}, using the strategy's own opening-tick bounds instead of the default 09:45 floor. The default's
+   * 11:00-13:00 midday block is intentionally NOT applied here — an opening-tick window (e.g.
+   * 09:15-09:30) never reaches it, so the extra clause would be dead. Only the opening-tick path uses
+   * this; the 4 core strategies keep the no-arg {@link #timeWindow(LocalTime)} unchanged.
+   */
+  public static GateOutcome timeWindow(LocalTime ist, LocalTime from, LocalTime to) {
+    if (ist.isBefore(from)) {
+      return GateOutcome.fail(null, "before " + from + " opening-tick window");
+    }
+    if (!ist.isBefore(to)) {
+      return GateOutcome.fail(null, "at/after " + to + " opening-tick window");
+    }
+    return GateOutcome.pass(null, "within opening-tick window");
+  }
+
   /** Bar volume ≥ the underlying's floor (NIFTY 125k / other indices 50k). */
   public static GateOutcome volume(String underlying, BigDecimal volume) {
     BigDecimal floor = VOL_FLOOR.getOrDefault(underlying, INDEX_VOL);
@@ -108,6 +125,24 @@ public final class ScalperGates {
     boolean ok = side == OptionType.CE ? !m.vixRising() : m.vixRising();
     String dir = m.vixRising() ? "rising" : "falling";
     return new GateOutcome(ok, m.vixLevel(), "vix " + dir + (ok ? " supports " : " opposes ") + side);
+  }
+
+  /**
+   * #5 (T2.1): the trending-OI call-put delta-imbalance HARD pre-gate. PASS when the imbalance %
+   * (|peDelta-ceDelta|/max(|peDelta|,|ceDelta|)*100) is at/above {@code floorPct}; FAIL when it is
+   * present and below. A {@code null} imbalance (data unavailable or the flat-OI caveat the producer
+   * documents) DEGRADES to PASS — it never blocks, so a missing derivation can't gate out an entry.
+   */
+  public static GateOutcome callPutDeltaFilter(Oi oi, BigDecimal floorPct) {
+    BigDecimal imbalance = oi.callPutDeltaImbalancePct();
+    if (imbalance == null) {
+      return GateOutcome.pass(null, "call-put dOI imbalance unavailable (degrade -> pass)");
+    }
+    boolean ok = imbalance.compareTo(floorPct) >= 0;
+    return new GateOutcome(
+        ok,
+        imbalance,
+        "call-put dOI imbalance " + imbalance.toPlainString() + (ok ? " >= " : " < ") + floorPct.toPlainString());
   }
 
   /** Futures basis: future > spot (premium) is bullish → CE; future < spot (discount) bearish → PE. */

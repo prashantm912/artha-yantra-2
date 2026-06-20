@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.options.analytics;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.marketdata.options.OiQuery;
@@ -55,7 +56,11 @@ public class OptionsAnalyticsController {
   public record OiStats(BigDecimal pcr, BigDecimal maxPain, long ceOi, long peOi, OffsetDateTime asOf) {}
 
   public record ActiveStrikesResponse(
-      BigDecimal sentimentPct, List<StrikeView> items, OffsetDateTime asOf) {}
+      BigDecimal sentimentPct,
+      List<StrikeView> items,
+      @JsonInclude(JsonInclude.Include.NON_NULL) List<ActiveStrikeService.SentimentPoint>
+              sentimentSeries,
+      OffsetDateTime asOf) {}
 
   public record StrikeView(BigDecimal strike, long ceOi, long peOi) {}
 
@@ -91,7 +96,8 @@ public class OptionsAnalyticsController {
       @RequestParam String name,
       @RequestParam(required = false) String date,
       @RequestParam(required = false) String interval,
-      @RequestParam(required = false) String expiry) {
+      @RequestParam(required = false) String expiry,
+      @RequestParam(required = false) Integer buckets) {
     OiQuery q = OiQuery.of(mode, name, date, interval, expiry);
     LocalDate exp = requireExpiry(q);
     List<OptionsSnapshotReader.StrikePoint> latest = reader.latest(q.name(), exp, q.interval(), q.date());
@@ -104,7 +110,19 @@ public class OptionsAnalyticsController {
         activeStrikes.activeStrikes(snaps).stream()
             .map(s -> new StrikeView(s.strike(), s.ceOi(), s.peOi()))
             .toList();
-    return new ActiveStrikesResponse(sentiment, items, latest.get(latest.size() - 1).bucket());
+    OffsetDateTime asOf = latest.get(latest.size() - 1).bucket();
+    if (buckets == null) {
+      // NON_NULL on sentimentSeries omits the key, keeping the absent-buckets response byte-identical.
+      return new ActiveStrikesResponse(sentiment, items, null, asOf);
+    }
+    // Anchor on the newest captured bucket (clock-independent); span the last `buckets` buckets.
+    OffsetDateTime newest = latest.get(0).bucket();
+    OffsetDateTime from = newest.minus(q.interval().bucket().multipliedBy(buckets - 1L));
+    List<OptionsSnapshotReader.StrikePoint> series =
+        reader.series(q.name(), exp, q.interval(), from, newest.plus(q.interval().bucket()));
+    List<ActiveStrikeService.SentimentPoint> sentimentSeries =
+        activeStrikes.sentimentSeries(series);
+    return new ActiveStrikesResponse(sentiment, items, sentimentSeries, asOf);
   }
 
   /** /oi-analysis: the data-table archetype source (per-strike rows for the latest bucket). */

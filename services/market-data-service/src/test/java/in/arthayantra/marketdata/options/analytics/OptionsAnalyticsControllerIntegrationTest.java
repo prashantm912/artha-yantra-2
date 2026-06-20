@@ -177,7 +177,60 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
         .andExpect(jsonPath("$.items[0].interpretation").value("LONG_BUILDUP"))
         .andExpect(jsonPath("$.items[0].oiChange").value(200))
         .andExpect(jsonPath("$.items[0].spurtPct").value("20.00"))
-        .andExpect(jsonPath("$.summary.interpretation").value("LONG_BUILDUP"));
+        // ltp 100 -> 110: ltpChangePct = (110-100)/100*100 = 10.00 (BigDecimal -> string)
+        .andExpect(jsonPath("$.items[0].ltpChangePct").value("10.00"))
+        .andExpect(jsonPath("$.summary.interpretation").value("LONG_BUILDUP"))
+        // single spurt row is the representative: oiChangePct=spurtPct, priceChangePct=ltpChangePct
+        .andExpect(jsonPath("$.summary.oiChangePct").value("20.00"))
+        .andExpect(jsonPath("$.summary.priceChangePct").value("10.00"));
+  }
+
+  @Test
+  void activeStrikesOmitsSeriesWhenBucketsAbsent() throws Exception {
+    String u = "ACTIVECTRL";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    OffsetDateTime t0 =
+        OffsetDateTime.of(2026, 6, 20, 9, 16, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, t0, u, exp, "22500", "CE", "100", 1000L, 0L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, t0, u, exp, "22500", "PE", "90", 1500L, 0L);
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/active-strikes")
+                .param("name", u)
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items.length()").value(1))
+        // buckets absent -> response shape UNCHANGED: no sentimentSeries key
+        .andExpect(jsonPath("$.sentimentSeries").doesNotExist());
+  }
+
+  @Test
+  void activeStrikesAddsSentimentSeriesWhenBucketsPresent() throws Exception {
+    String u = "ACTIVESERIES";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    OffsetDateTime b0 =
+        OffsetDateTime.of(2026, 6, 20, 9, 15, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime b1 = b0.plusMinutes(5);
+    // b0: PE OI-change +300, CE OI-change -200; base 1000+1000 -> 100*500/2000 = 25.00
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b0, u, exp, "22500", "CE", "100", 1000L, -200L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b0, u, exp, "22500", "PE", "90", 1000L, 300L);
+    // b1: PE OI-change -100, CE OI-change +400; base 900+1100 -> 100*-500/2000 = -25.00
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b1, u, exp, "22500", "CE", "110", 900L, 400L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b1, u, exp, "22500", "PE", "80", 1100L, -100L);
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/active-strikes")
+                .param("name", u)
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m")
+                .param("buckets", "20"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.sentimentSeries.length()").value(2))
+        .andExpect(jsonPath("$.sentimentSeries[0].sentimentPct").value("25.00"))
+        .andExpect(jsonPath("$.sentimentSeries[1].sentimentPct").value("-25.00")); // newest-last
   }
 
   @Test

@@ -38,12 +38,43 @@ class ScalperConfluenceGateTest {
       new ScalperConfig(
           "NSE", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          false, ScalperConfig.StructuralStop.NONE);
+          false, ScalperConfig.StructuralStop.NONE, false, false, false, false, false);
   private static final ScalperConfig TWO_CANDLE_CFG =
       new ScalperConfig(
           "NSE", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          true, ScalperConfig.StructuralStop.TWO_CANDLE_FIRST);
+          true, ScalperConfig.StructuralStop.TWO_CANDLE_FIRST, false, false, false, false, false);
+  // #5: a strategy with the oi-cross-filter HARD pre-gate enabled.
+  private static final ScalperConfig OI_CROSS_CFG =
+      new ScalperConfig(
+          "NSE", "NIFTY 50", 2,
+          new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
+          false, ScalperConfig.StructuralStop.NONE, true, false, false, false, false);
+  // #4: a strategy with the gap-theory HARD gap-fill pre-gate enabled.
+  private static final ScalperConfig GAP_CFG =
+      new ScalperConfig(
+          "NSE", "NIFTY 50", 2,
+          new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
+          false, ScalperConfig.StructuralStop.GAP_TREND, false, true, false, false, false);
+  // #12: a strategy with the trend-change HARD pre-gate enabled (structure break + >=50% OI shift).
+  private static final ScalperConfig TREND_CHANGE_CFG =
+      new ScalperConfig(
+          "NSE", "NIFTY 50", 2,
+          new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
+          false, ScalperConfig.StructuralStop.SWING_BREAK, false, false, true, false, false);
+  // #2: a strategy with the open-high-low HARD FNO-structure pre-gate enabled.
+  private static final ScalperConfig OPEN_HIGH_LOW_CFG =
+      new ScalperConfig(
+          "NSE", "NIFTY 50", 2,
+          new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
+          false, ScalperConfig.StructuralStop.VWAP, false, false, false, true, false);
+  // #9: a strategy with the opening-tick (Morning Trade) path enabled — its own opening-tick time
+  // window + the VWAP HARD-gate degrade before 10:30 + a FIRST-CANDLE stop anchor.
+  private static final ScalperConfig OPENING_TICK_CFG =
+      new ScalperConfig(
+          "NSE", "NIFTY 50", 2,
+          new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
+          false, ScalperConfig.StructuralStop.FIRST_CANDLE, false, false, false, false, true);
 
   // a 3m index-future series: index 2 is the deploy bar; indices 0/1 are the forming candles.
   private static EngineSeries futureSeries(EngineCandle... candles) {
@@ -94,8 +125,21 @@ class ScalperConfluenceGateTest {
     return new ScalperGateContext(
         "NIFTY 50", IST_TIME,
         new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("130000")),
-        new Oi(OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("5"), bd("5")),
-        new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50")));
+        new Oi(
+            OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("5"), bd("5"), null, null, null, false,
+            false, null, null, null),
+        new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), null, null));
+  }
+
+  // a bullish context whose OI carries a specific call-put dOI imbalance % (the #5 pre-gate operand).
+  private static ScalperGateContext bullContextWithImbalance(BigDecimal imbalancePct) {
+    return new ScalperGateContext(
+        "NIFTY 50", IST_TIME,
+        new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("130000")),
+        new Oi(
+            OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("5"), bd("5"), null, null,
+            imbalancePct, false, false, null, null, null),
+        new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), null, null));
   }
 
   private static ChainSnapshot chainWithInBandCe() {
@@ -111,10 +155,10 @@ class ScalperConfluenceGateTest {
   void confluenceConfirmsAndPicksTheInBandCe() {
     MarketOiClient client = mock(MarketOiClient.class);
     when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
-    when(client.context(eq("NIFTY 50"), any(), any(), any(), any())).thenReturn(bullContext());
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any())).thenReturn(bullContext());
 
     Optional<Decision> decision =
-        new ScalperConfluenceGate(client).evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD);
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults()).evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD);
 
     assertThat(decision).isPresent();
     assertThat(decision.get().side()).isEqualTo(CE);
@@ -127,7 +171,7 @@ class ScalperConfluenceGateTest {
     MarketOiClient client = mock(MarketOiClient.class);
     when(client.chain("NIFTY 50")).thenReturn(Optional.empty());
 
-    assertThat(new ScalperConfluenceGate(client).evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD))
+    assertThat(new ScalperConfluenceGate(client, ScalperOiProps.defaults()).evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD))
         .isEmpty();
   }
 
@@ -138,13 +182,15 @@ class ScalperConfluenceGateTest {
         new ScalperGateContext(
             "NIFTY 50", IST_TIME,
             new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("130000")),
-            new Oi(OiQuadrant.SHORT_BUILDUP, OiQuadrant.SHORT_BUILDUP, bd("-10"), bd("-5"), bd("-5")),
-            new Macro(bd("14"), bd("80"), bd("12"), Boolean.TRUE, 10, 40, bd("50")));
+            new Oi(
+                OiQuadrant.SHORT_BUILDUP, OiQuadrant.SHORT_BUILDUP, bd("-10"), bd("-5"), bd("-5"), null, null, null,
+                false, false, null, null, null),
+            new Macro(bd("14"), bd("80"), bd("12"), Boolean.TRUE, 10, 40, bd("50"), null, null));
     MarketOiClient client = mock(MarketOiClient.class);
     when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
-    when(client.context(eq("NIFTY 50"), any(), any(), any(), any())).thenReturn(bear);
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any())).thenReturn(bear);
 
-    assertThat(new ScalperConfluenceGate(client).evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD))
+    assertThat(new ScalperConfluenceGate(client, ScalperOiProps.defaults()).evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD))
         .isEmpty();
   }
 
@@ -153,7 +199,7 @@ class ScalperConfluenceGateTest {
     MarketOiClient client = mock(MarketOiClient.class);
     // 11:30 IST is inside the §0B 11:00–13:00 block — blocked at the hard pre-flight, no HTTP
     assertThat(
-            new ScalperConfluenceGate(client)
+            new ScalperConfluenceGate(client, ScalperOiProps.defaults())
                 .evaluate(CFG, bullBank(), null, 0, NOW, LocalTime.of(11, 30), EOD))
         .isEmpty();
     org.mockito.Mockito.verifyNoInteractions(client);
@@ -182,7 +228,7 @@ class ScalperConfluenceGateTest {
           }
         };
 
-    assertThat(new ScalperConfluenceGate(client).evaluate(CFG, deadRsi, null, 0, NOW, IST_TIME, EOD))
+    assertThat(new ScalperConfluenceGate(client, ScalperOiProps.defaults()).evaluate(CFG, deadRsi, null, 0, NOW, IST_TIME, EOD))
         .isEmpty();
   }
 
@@ -195,9 +241,9 @@ class ScalperConfluenceGateTest {
             EXPIRY, bd("20000"), bd("20000"),
             List.of(new StrikePicker.Candidate("NIFTY20800CE", bd("20800"), CE, bd("110"), bd("0.14"))));
     when(client.chain("NIFTY 50")).thenReturn(Optional.of(otmOnly));
-    when(client.context(eq("NIFTY 50"), any(), any(), any(), any())).thenReturn(bullContext());
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any())).thenReturn(bullContext());
 
-    assertThat(new ScalperConfluenceGate(client).evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD))
+    assertThat(new ScalperConfluenceGate(client, ScalperOiProps.defaults()).evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD))
         .isEmpty();
   }
 
@@ -205,12 +251,12 @@ class ScalperConfluenceGateTest {
   void twoCandleStrategyConfirmsOnAFormationAndAnchorsTheStop() {
     MarketOiClient client = mock(MarketOiClient.class);
     when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
-    when(client.context(eq("NIFTY 50"), any(), any(), any(), any())).thenReturn(bullContext());
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any())).thenReturn(bullContext());
     // two strong green candles (0,1) then the deploy bar (2) → the §3.1 formation is present
     EngineSeries future = futureSeries(strongGreen(0), strongGreen(1), strongGreen(2));
 
     Optional<Decision> decision =
-        new ScalperConfluenceGate(client)
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults())
             .evaluate(TWO_CANDLE_CFG, bullBank(), future, 2, NOW, IST_TIME, EOD);
 
     assertThat(decision).isPresent();
@@ -225,8 +271,389 @@ class ScalperConfluenceGateTest {
     EngineSeries future = futureSeries(strongGreen(0), weakGreen(1), strongGreen(2));
 
     assertThat(
-            new ScalperConfluenceGate(client)
+            new ScalperConfluenceGate(client, ScalperOiProps.defaults())
                 .evaluate(TWO_CANDLE_CFG, bullBank(), future, 2, NOW, IST_TIME, EOD))
+        .isEmpty();
+  }
+
+  @Test
+  void oiCrossFilterStrategyBlocksBelowFiftyPercentAndPassesAtOrAbove() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    // imbalance 49.9% (< the default 50 floor) → the #5 HARD pre-gate blocks before any pick
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any()))
+        .thenReturn(bullContextWithImbalance(bd("49.9")));
+    assertThat(
+            new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+                .evaluate(OI_CROSS_CFG, bullBank(), null, 0, NOW, IST_TIME, EOD))
+        .isEmpty();
+
+    // imbalance 50% (== the floor) → the pre-gate passes and the confluence picks the in-band CE
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any()))
+        .thenReturn(bullContextWithImbalance(bd("50")));
+    Optional<Decision> decision =
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+            .evaluate(OI_CROSS_CFG, bullBank(), null, 0, NOW, IST_TIME, EOD);
+    assertThat(decision).isPresent();
+    assertThat(decision.get().pick().candidate().tradingsymbol()).isEqualTo("NIFTY19850CE");
+  }
+
+  // a strong green candle at an explicit price (open,high,low,close), volume above the 125k floor.
+  private static EngineCandle gapBar(int i, String open, String high, String low, String close) {
+    return new EngineCandle(
+        NOW.atOffset(IST).plusMinutes(3L * i), bd(open), bd(high), bd(low), bd(close), 130_000);
+  }
+
+  @Test
+  void gapTheoryStrategyBlocksWhileTheGapIsStillOpen() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    // bar0 close 100; bar1 opens 105 (5 pt gap up) and stays above the origin -> unfilled -> block.
+    EngineSeries future =
+        futureSeries(
+            gapBar(0, "99", "101", "98", "100"),
+            gapBar(1, "105", "108", "104", "107"));
+
+    assertThat(
+            new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+                .evaluate(GAP_CFG, bullBank(), future, 1, NOW, IST_TIME, EOD))
+        .isEmpty();
+  }
+
+  @Test
+  void gapTheoryStrategyPassesWithTrendOnceTheGapHasFilledAndAnchorsThePreGapStop() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    // 5 pt gap up (bar0->bar1), then bar2 low (96) retraces below the origin (100) -> filled -> pass.
+    EngineSeries future =
+        futureSeries(
+            gapBar(0, "99", "101", "95", "100"),
+            gapBar(1, "105", "108", "104", "107"),
+            gapBar(2, "106", "107", "96", "98"));
+
+    Optional<Decision> decision =
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+            .evaluate(GAP_CFG, bullBank(), future, 2, NOW, IST_TIME, EOD);
+
+    assertThat(decision).isPresent();
+    assertThat(decision.get().structuralStop()).isEqualByComparingTo("95"); // pre-gap candle low
+  }
+
+  @Test
+  void gapTheoryStrategyIsInertAndTradesNormallyWhenNoSignificantGapExists() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    // a flat series with no >3 pt jump -> the gap gate never fires -> the confluence picks normally.
+    EngineSeries future =
+        futureSeries(
+            gapBar(0, "99", "101", "98", "100"),
+            gapBar(1, "100", "102", "99", "101"),
+            gapBar(2, "101", "103", "100", "102"));
+
+    Optional<Decision> decision =
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+            .evaluate(GAP_CFG, bullBank(), future, 2, NOW, IST_TIME, EOD);
+
+    assertThat(decision).isPresent();
+    assertThat(decision.get().structuralStop()).isNull(); // inert => no gap stop anchor
+  }
+
+  // a bullish context whose OI carries the #12 trend-change shift (put-OI up, call-OI down, >=50%).
+  private static ScalperGateContext bullContextWithTrendShift() {
+    return new ScalperGateContext(
+        "NIFTY 50", IST_TIME,
+        new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("130000")),
+        new Oi(
+            OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("5"), bd("5"),
+            bd("-200"), bd("300"), bd("60"), false, false, null, null, null),
+        new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), null, null));
+  }
+
+  // a 3m future where bar2 is a swing-high (high 111), two green confirm bars, then the deploy bar5
+  // closes above the swing-high -> an up-structure break that coincides with the §3.1 2-candle confirm.
+  private static EngineSeries upReversalFuture() {
+    return futureSeries(
+        gapBar(0, "90", "95", "88", "94"),
+        gapBar(1, "94", "100", "93", "98"),
+        gapBar(2, "98", "111", "97", "105"), // swing-high pivot (high 111)
+        gapBar(3, "103", "106", "102", "105"), // green confirm 1
+        gapBar(4, "105", "109", "104", "108"), // green confirm 2 (strong body)
+        gapBar(5, "108", "113", "107", "112")); // deploy: closes 112 > swing-high 111 -> break
+  }
+
+  @Test
+  void trendChangeStrategyPassesOnAStructureBreakWithTheOiShiftAndAnchorsTheSwingStop() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any()))
+        .thenReturn(bullContextWithTrendShift());
+
+    Optional<Decision> decision =
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+            .evaluate(TREND_CHANGE_CFG, bullBank(), upReversalFuture(), 5, NOW, IST_TIME, EOD);
+
+    assertThat(decision).isPresent();
+    assertThat(decision.get().structuralStop()).isEqualByComparingTo("111"); // the broken swing-high
+  }
+
+  @Test
+  void trendChangeStrategyBlocksWithoutAStructureBreak() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any()))
+        .thenReturn(bullContextWithTrendShift());
+    // the deploy bar closes 108 (below the swing-high 111) -> no break -> the hard pre-gate blocks.
+    EngineSeries noBreak =
+        futureSeries(
+            gapBar(0, "90", "95", "88", "94"),
+            gapBar(1, "94", "100", "93", "98"),
+            gapBar(2, "98", "111", "97", "105"),
+            gapBar(3, "103", "106", "102", "105"),
+            gapBar(4, "105", "109", "104", "107"),
+            gapBar(5, "107", "110", "106", "108"));
+
+    assertThat(
+            new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+                .evaluate(TREND_CHANGE_CFG, bullBank(), noBreak, 5, NOW, IST_TIME, EOD))
+        .isEmpty();
+  }
+
+  @Test
+  void trendChangeStrategyBlocksWhenTheOiShiftIsBelowFiftyPercent() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    // correct break + directional OI, but the imbalance is 49% (< the 50% floor) -> block.
+    ScalperGateContext weakShift =
+        new ScalperGateContext(
+            "NIFTY 50", IST_TIME,
+            new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("130000")),
+            new Oi(
+                OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("5"), bd("5"),
+                bd("-200"), bd("300"), bd("49"), false, false, null, null, null),
+            new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), null, null));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any())).thenReturn(weakShift);
+
+    assertThat(
+            new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+                .evaluate(TREND_CHANGE_CFG, bullBank(), upReversalFuture(), 5, NOW, IST_TIME, EOD))
+        .isEmpty();
+  }
+
+  @Test
+  void nonTrendChangeStrategyIsUnaffectedByThePreGate() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    // CFG carries no trend-change tag -> the structure-break/OI-shift pre-gate is never consulted.
+    assertThat(
+            new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+                .evaluate(CFG, bullBank(), upReversalFuture(), 5, NOW, IST_TIME, EOD))
+        .isPresent();
+  }
+
+  // a 3m future Open=High session: bar0 open 100 is the running session high (later bars never exceed
+  // it). The deploy bar is index 2. (gapBar volume 130k clears the §0B NIFTY floor.)
+  private static EngineSeries openHighFuture() {
+    return futureSeries(
+        gapBar(0, "100", "100", "95", "98"),
+        gapBar(1, "98", "99", "94", "96"),
+        gapBar(2, "96", "100", "93", "97"));
+  }
+
+  // a bullish context whose underlying quadrant (LONG_BUILDUP) confirms a CE OH + within-band spurts.
+  private static ScalperGateContext bullContextWithSpurts(String spurtOiPct, String spurtPricePct) {
+    return new ScalperGateContext(
+        "NIFTY 50", IST_TIME,
+        new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("130000")),
+        new Oi(
+            OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("5"), bd("5"), null, null,
+            null, false, false, null,
+            spurtOiPct == null ? null : bd(spurtOiPct),
+            spurtPricePct == null ? null : bd(spurtPricePct)),
+        new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), null, null));
+  }
+
+  @Test
+  void openHighLowStrategyPassesOnAFutureOpenHighAtTheHighTierAndAnchorsTheVwapStop() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any()))
+        .thenReturn(bullContextWithSpurts("10", "20"));
+
+    Optional<Decision> decision =
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+            .evaluate(OPEN_HIGH_LOW_CFG, bullBank(), openHighFuture(), 2, NOW, IST_TIME, EOD);
+
+    assertThat(decision).isPresent();
+    assertThat(decision.get().structuralStop()).isEqualByComparingTo("99"); // the front-future VWAP
+  }
+
+  @Test
+  void openHighLowStrategyBlocksAtTheMildTierWhenTheQuadrantDoesNotConfirm() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    // OH on the future but a bearish (SHORT_BUILDUP) quadrant for the CE side -> MILD -> block.
+    ScalperGateContext mild =
+        new ScalperGateContext(
+            "NIFTY 50", IST_TIME,
+            new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("130000")),
+            new Oi(
+                OiQuadrant.SHORT_BUILDUP, OiQuadrant.SHORT_BUILDUP, bd("10"), bd("5"), bd("5"), null,
+                null, null, false, false, null, bd("10"), bd("20")),
+            new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), null, null));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any())).thenReturn(mild);
+
+    assertThat(
+            new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+                .evaluate(OPEN_HIGH_LOW_CFG, bullBank(), openHighFuture(), 2, NOW, IST_TIME, EOD))
+        .isEmpty();
+  }
+
+  @Test
+  void openHighLowStrategyBlocksWhenARejectSpurtExceedsFiftyPercent() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    // a HIGH-tier OH but the price spurt is 60% (> the 50% reject barrier) -> the move exhausted -> block.
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any()))
+        .thenReturn(bullContextWithSpurts("10", "60"));
+
+    assertThat(
+            new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+                .evaluate(OPEN_HIGH_LOW_CFG, bullBank(), openHighFuture(), 2, NOW, IST_TIME, EOD))
+        .isEmpty();
+  }
+
+  @Test
+  void nonOpenHighLowStrategyIsUnaffectedByTheFutureOpenHigh() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    // CFG carries no open-high-low tag -> the OH/OL pre-gate is never consulted; the confluence picks.
+    assertThat(
+            new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+                .evaluate(CFG, bullBank(), openHighFuture(), 2, NOW, IST_TIME, EOD))
+        .isPresent();
+  }
+
+  @Test
+  void nonOiCrossFilterStrategyIsUnaffectedByALowImbalance() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    // a 1% imbalance would trip the #5 gate, but CFG (no oi-cross-filter tag) never consults it
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any()))
+        .thenReturn(bullContextWithImbalance(bd("1")));
+
+    assertThat(
+            new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+                .evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD))
+        .isPresent();
+  }
+
+  // #9 Morning Trade -------------------------------------------------------------------------------
+
+  private static final LocalTime OPEN_TICK = LocalTime.of(9, 16);
+
+  // a bank whose close (100) EQUALS its VWAP (100): the seam still routes it CE (close >= vwap) but the
+  // scorer's strictly-greater vwapSide is FALSE — the only way to drive a VWAP-misaligned CE through the
+  // gate. RSI 65 / volume 130k clear the §0B rails so only the VWAP dot is off.
+  private static BarValues closeEqualsVwapBank() {
+    Map<String, BigDecimal> builtins = Map.of("close", bd("100"), "vwap", bd("100"), "volume", bd("130000"));
+    Map<String, BigDecimal> aliases =
+        Map.of("vwma20", bd("98"), "psar", bd("97"), "rsi14", bd("65"), "supertrend", bd("1"));
+    return new BarValues() {
+      @Override
+      public BigDecimal valueAt(String alias, int i) {
+        return aliases.get(alias);
+      }
+
+      @Override
+      public BigDecimal previousValueAt(String alias, int i) {
+        return null;
+      }
+
+      @Override
+      public BigDecimal builtin(String name, int i) {
+        return builtins.get(name);
+      }
+    };
+  }
+
+  // a strongly-bullish CE context: every OI/macro dot supports, so the aggregate clears 0.6 even with
+  // the decisive VWAP dot off (proves the degrade actually fires on the rest of the confluence).
+  private static ScalperGateContext strongBullContext(LocalTime ist) {
+    return new ScalperGateContext(
+        "NIFTY 50", ist,
+        new Chart(bd("100"), bd("100"), bd("98"), bd("97"), 1, bd("65"), bd("130000")),
+        new Oi(
+            OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("80"), bd("5"), bd("5"),
+            bd("-60000"), bd("70000"), bd("80"), true, false, bd("5"), bd("60"), bd("60")),
+        new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), bd("0.20"), bd("0.05")));
+  }
+
+  @Test
+  void openingTickStrategyPassesTheOpenWindowWhileADefaultStrategyIsBlocked() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any()))
+        .thenReturn(
+            new ScalperGateContext(
+                "NIFTY 50", OPEN_TICK,
+                new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("130000")),
+                new Oi(
+                    OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("5"), bd("5"), null, null,
+                    null, false, false, null, null, null),
+                new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), null, null)));
+    EngineSeries future = futureSeries(strongGreen(0), strongGreen(1), strongGreen(2));
+
+    // the opening-tick strategy admits 09:16 (its 09:15-09:30 window) and anchors the first-candle stop
+    Optional<Decision> opening =
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+            .evaluate(OPENING_TICK_CFG, bullBank(), future, 2, NOW, OPEN_TICK, EOD);
+    assertThat(opening).isPresent();
+    assertThat(opening.get().structuralStop()).isEqualByComparingTo("99"); // first session candle low
+
+    // a default strategy at the same 09:16 is blocked at the §0B "after 09:45" floor (no HTTP)
+    MarketOiClient idle = mock(MarketOiClient.class);
+    assertThat(
+            new ScalperConfluenceGate(idle, ScalperOiProps.defaults())
+                .evaluate(CFG, bullBank(), future, 2, NOW, OPEN_TICK, EOD))
+        .isEmpty();
+    org.mockito.Mockito.verifyNoInteractions(idle);
+  }
+
+  @Test
+  void openingTickStrategyFiresOnAVwapMisalignedSetupBeforeTenThirty() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any())).thenReturn(strongBullContext(OPEN_TICK));
+    EngineSeries future = futureSeries(strongGreen(0), strongGreen(1), strongGreen(2));
+
+    // close == vwap (vwapSide false) but the OI/macro confluence is strong: before 10:30 the opening
+    // tick degrades VWAP from the HARD gate, so the CE still fires.
+    Optional<Decision> decision =
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+            .evaluate(OPENING_TICK_CFG, closeEqualsVwapBank(), future, 2, NOW, OPEN_TICK, EOD);
+    assertThat(decision).isPresent();
+    assertThat(decision.get().side()).isEqualTo(CE);
+    assertThat(decision.get().confluence().bullish()).isTrue();
+    assertThat(decision.get().confluence().vwapAligned()).isFalse(); // VWAP truly was misaligned
+  }
+
+  @Test
+  void nonOpeningTickStrategyKeepsTheHardVwapGate() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any())).thenReturn(strongBullContext(IST_TIME));
+    EngineSeries future = futureSeries(strongGreen(0), strongGreen(1), strongGreen(2));
+
+    // the SAME VWAP-misaligned (close == vwap) setup at a normal 10:00: a default strategy keeps the
+    // decisive hard-VWAP gate, so the otherwise-strong confluence is blocked.
+    assertThat(
+            new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+                .evaluate(CFG, closeEqualsVwapBank(), future, 2, NOW, IST_TIME, EOD))
         .isEmpty();
   }
 }

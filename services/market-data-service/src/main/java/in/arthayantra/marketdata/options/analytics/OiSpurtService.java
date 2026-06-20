@@ -18,7 +18,11 @@ public class OiSpurtService {
 
   public record SpurtRow(OiInterpretation interpretation, BigDecimal spurtPct) {}
 
-  /** One spurt row per (strike, optionType): interval LTP/OI deltas + 4-state classification. */
+  /**
+   * One spurt row per (strike, optionType): interval LTP/OI deltas + 4-state classification.
+   * {@code ltpChangePct} is the signed % change of this strike's LTP between the latest pair of
+   * buckets ((now - prior) / prior * 100); null when the prior LTP is absent or zero.
+   */
   public record StrikeSpurt(
       BigDecimal strike,
       String optionType,
@@ -26,10 +30,21 @@ public class OiSpurtService {
       Long oi,
       long oiChange,
       BigDecimal spurtPct,
+      BigDecimal ltpChangePct,
       OiInterpretation interpretation) {}
 
-  /** Underlying rollup: spot direction x total OI-delta direction -> the 4-state badge. */
-  public record SpurtSummary(OiInterpretation interpretation, BigDecimal spotDelta, long oiChange) {}
+  /**
+   * Underlying rollup: spot direction x total OI-delta direction -> the 4-state badge.
+   * {@code oiChangePct}/{@code priceChangePct} are the representative spurt strike's (largest
+   * |spurtPct|) OI %-change and matching price %-change magnitudes the scalper gates on; null when
+   * no strike has a spurt.
+   */
+  public record SpurtSummary(
+      OiInterpretation interpretation,
+      BigDecimal spotDelta,
+      long oiChange,
+      BigDecimal oiChangePct,
+      BigDecimal priceChangePct) {}
 
   public record SpurtChain(List<StrikeSpurt> items, SpurtSummary summary, OffsetDateTime asOf) {}
 
@@ -96,6 +111,7 @@ public class OiSpurtService {
           (cur.ltp() == null ? BigDecimal.ZERO : cur.ltp())
               .subtract(old.ltp() == null ? BigDecimal.ZERO : old.ltp());
       SpurtRow r = classify(ltpDelta, oiDelta, priorOi);
+      BigDecimal ltpChangePct = pctChange(old.ltp(), cur.ltp());
       items.add(
           new StrikeSpurt(
               cur.strike(),
@@ -104,6 +120,7 @@ public class OiSpurtService {
               cur.oi(),
               oiDelta,
               r.spurtPct(),
+              ltpChangePct,
               r.interpretation()));
       totalOiDelta += oiDelta;
     }
@@ -113,11 +130,36 @@ public class OiSpurtService {
     SpurtSummary summary = null;
     if (spotNew != null && spotOld != null) {
       BigDecimal spotDelta = spotNew.subtract(spotOld);
+      StrikeSpurt rep = representativeSpurt(items);
+      BigDecimal oiChangePct = rep == null ? null : rep.spurtPct();
+      BigDecimal priceChangePct = rep == null ? null : rep.ltpChangePct();
       summary =
           new SpurtSummary(
-              OiInterpretation.classify(spotDelta, totalOiDelta), spotDelta, totalOiDelta);
+              OiInterpretation.classify(spotDelta, totalOiDelta),
+              spotDelta,
+              totalOiDelta,
+              oiChangePct,
+              priceChangePct);
     }
     return new SpurtChain(items, summary, newest);
+  }
+
+  /** The spurt strike: the row with the largest |spurtPct| (null when no row has a spurt). */
+  private static StrikeSpurt representativeSpurt(List<StrikeSpurt> items) {
+    return items.stream()
+        .filter(s -> s.spurtPct() != null)
+        .max(Comparator.comparing(s -> s.spurtPct().abs()))
+        .orElse(null);
+  }
+
+  /** Signed % change ((cur - prior) / prior * 100); null when prior is absent or zero. */
+  private static BigDecimal pctChange(BigDecimal prior, BigDecimal cur) {
+    if (prior == null || cur == null || prior.signum() == 0) {
+      return null;
+    }
+    return cur.subtract(prior)
+        .multiply(BigDecimal.valueOf(100))
+        .divide(prior, 2, RoundingMode.HALF_UP);
   }
 
   private static BigDecimal spotAt(

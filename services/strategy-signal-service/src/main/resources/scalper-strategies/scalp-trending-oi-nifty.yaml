@@ -8,7 +8,7 @@ name: "Scalper · Trending-OI Crossover · NIFTY CE"
 version: 1.0.0
 description: "Trending-OI crossover scalp (Siva #5) on the NIFTY front future; long-premium CE, OI-led via the confluence."
 author: owner
-tags: [scalper, options, intraday, nifty]
+tags: [scalper, options, intraday, nifty, oi-cross-filter]
 
 universe:
   mode: options_of_underlying

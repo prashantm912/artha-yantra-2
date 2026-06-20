@@ -2,8 +2,12 @@ package in.arthayantra.marketdata.options.analytics;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -19,6 +23,9 @@ public class ActiveStrikeService {
 
   public record StrikeOiSnap(
       BigDecimal strike, long ceOi, long ceOiChange, long peOi, long peOiChange) {}
+
+  /** One Active Strike Sentiment % point per snapshot bucket (newest-last in the series). */
+  public record SentimentPoint(OffsetDateTime bucket, BigDecimal sentimentPct) {}
 
   public List<StrikeOiSnap> activeStrikes(List<StrikeOiSnap> chain) {
     return chain.stream()
@@ -42,5 +49,37 @@ public class ActiveStrikeService {
     return BigDecimal.valueOf(bullishFlow)
         .multiply(BigDecimal.valueOf(100))
         .divide(BigDecimal.valueOf(baseOi), 2, RoundingMode.HALF_UP);
+  }
+
+  /**
+   * Active Strike Sentiment % per snapshot bucket: groups {@code series} (ordered oldest-first, as
+   * {@link OptionsSnapshotReader#series} returns) by bucket, folds each bucket's points per strike,
+   * and applies the same top-N formula. One point per bucket, newest-last; a bucket with no base OI
+   * carries a null {@code sentimentPct}.
+   */
+  public List<SentimentPoint> sentimentSeries(List<OptionsSnapshotReader.StrikePoint> series) {
+    Map<OffsetDateTime, Map<BigDecimal, long[]>> byBucket = new LinkedHashMap<>();
+    for (OptionsSnapshotReader.StrikePoint p : series) {
+      Map<BigDecimal, long[]> m =
+          byBucket.computeIfAbsent(p.bucket(), k -> new LinkedHashMap<>()); // [ceOi,ceChg,peOi,peChg]
+      long[] v = m.computeIfAbsent(p.strike(), k -> new long[4]);
+      long oi = p.oi() == null ? 0 : p.oi();
+      long chg = p.oiChange() == null ? 0 : p.oiChange();
+      if ("CE".equals(p.optionType())) {
+        v[0] += oi;
+        v[1] += chg;
+      } else {
+        v[2] += oi;
+        v[3] += chg;
+      }
+    }
+    List<SentimentPoint> out = new ArrayList<>();
+    byBucket.forEach(
+        (bucket, m) -> {
+          List<StrikeOiSnap> snaps = new ArrayList<>();
+          m.forEach((strike, v) -> snaps.add(new StrikeOiSnap(strike, v[0], v[1], v[2], v[3])));
+          out.add(new SentimentPoint(bucket, sentimentPct(snaps)));
+        });
+    return out;
   }
 }

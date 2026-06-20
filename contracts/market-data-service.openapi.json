@@ -468,6 +468,37 @@
         }
       }
     },
+    "/api/v1/market/eod-backfill" : {
+      "post" : {
+        "tags" : [ "eod-backfill-controller" ],
+        "operationId" : "trigger",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : {
+                    "type" : "string"
+                  }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/candles/refresh" : {
       "post" : {
         "tags" : [ "candles-controller" ],
@@ -1399,6 +1430,14 @@
           "schema" : {
             "type" : "string"
           }
+        }, {
+          "name" : "buckets",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
         } ],
         "responses" : {
           "200" : {
@@ -2014,6 +2053,34 @@
         }
       }
     },
+    "/api/v1/market/eod-backfill/status" : {
+      "get" : {
+        "tags" : [ "eod-backfill-controller" ],
+        "operationId" : "status_1",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Status"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/candles" : {
       "get" : {
         "tags" : [ "candles-controller" ],
@@ -2495,7 +2562,7 @@
     "/api/v1/auth/kite/status" : {
       "get" : {
         "tags" : [ "kite-auth-controller" ],
-        "operationId" : "status_1",
+        "operationId" : "status_2",
         "responses" : {
           "200" : {
             "description" : "OK",
@@ -2856,6 +2923,12 @@
           "oiChange" : {
             "type" : "integer",
             "format" : "int64"
+          },
+          "oiChangePct" : {
+            "type" : "number"
+          },
+          "priceChangePct" : {
+            "type" : "number"
           }
         }
       },
@@ -2880,6 +2953,9 @@
             "format" : "int64"
           },
           "spurtPct" : {
+            "type" : "number"
+          },
+          "ltpChangePct" : {
             "type" : "number"
           },
           "interpretation" : {
@@ -3193,9 +3269,27 @@
               "$ref" : "#/components/schemas/StrikeView"
             }
           },
+          "sentimentSeries" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SentimentPoint"
+            }
+          },
           "asOf" : {
             "type" : "string",
             "format" : "date-time"
+          }
+        }
+      },
+      "SentimentPoint" : {
+        "type" : "object",
+        "properties" : {
+          "bucket" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "sentimentPct" : {
+            "type" : "number"
           }
         }
       },
@@ -3486,6 +3580,38 @@
           "interpretation" : {
             "type" : "string",
             "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
+          }
+        }
+      },
+      "Status" : {
+        "type" : "object",
+        "properties" : {
+          "jobId" : {
+            "type" : "string"
+          },
+          "state" : {
+            "type" : "string"
+          },
+          "lastRun" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "durationMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "nse" : {
+            "$ref" : "#/components/schemas/ExchangeResult"
+          },
+          "bse" : {
+            "$ref" : "#/components/schemas/ExchangeResult"
+          },
+          "ratiosDetected" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "error" : {
+            "type" : "string"
           }
         }
       },

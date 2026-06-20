@@ -31,6 +31,22 @@ class ScalperGatesTest {
   }
 
   @Test
+  void openingTickWindowOverloadBoundsOnFromInclusiveToExclusive() {
+    // #9 Morning Trade: the opening-tick overload passes from `from` (inclusive) up to `to` (exclusive).
+    assertThat(ScalperGates.timeWindow(LocalTime.of(9, 16), LocalTime.of(9, 16), LocalTime.of(9, 30)).pass())
+        .isTrue(); // at `from` => pass
+    assertThat(ScalperGates.timeWindow(LocalTime.of(9, 15), LocalTime.of(9, 16), LocalTime.of(9, 30)).pass())
+        .isFalse(); // before `from` => fail
+    assertThat(ScalperGates.timeWindow(LocalTime.of(9, 29), LocalTime.of(9, 16), LocalTime.of(9, 30)).pass())
+        .isTrue();
+    assertThat(ScalperGates.timeWindow(LocalTime.of(9, 30), LocalTime.of(9, 16), LocalTime.of(9, 30)).pass())
+        .isFalse(); // at `to` => fail (exclusive)
+    // the default no-arg window still rejects 09:16 (its "after 09:45" floor) — the overload is the
+    // only path that admits the opening tick.
+    assertThat(ScalperGates.timeWindow(LocalTime.of(9, 16)).pass()).isFalse();
+  }
+
+  @Test
   void volumeFloorByUnderlying() {
     assertThat(ScalperGates.volume("NIFTY 50", bd("124999")).pass()).isFalse();
     assertThat(ScalperGates.volume("NIFTY 50", bd("125000")).pass()).isTrue();
@@ -105,15 +121,33 @@ class ScalperGatesTest {
     assertThat(ScalperGates.futuresBasis(basis(null), PE).pass()).isTrue(); // unavailable -> pass
   }
 
+  @Test
+  void callPutDeltaFilterPassesAtFloorFailsBelowAndDegradesOnNull() {
+    BigDecimal floor = bd("50");
+    assertThat(ScalperGates.callPutDeltaFilter(imbalance(bd("50")), floor).pass()).isTrue(); // == floor
+    assertThat(ScalperGates.callPutDeltaFilter(imbalance(bd("75")), floor).pass()).isTrue();
+    assertThat(ScalperGates.callPutDeltaFilter(imbalance(bd("49.9")), floor).pass()).isFalse();
+    // null imbalance (data unavailable / flat-OI caveat) DEGRADES to pass — never blocks
+    assertThat(ScalperGates.callPutDeltaFilter(imbalance(null), floor).pass()).isTrue();
+  }
+
+  private static Oi imbalance(BigDecimal pct) {
+    return new Oi(
+        OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("0"), bd("5"),
+        null, null, pct, false, false, null, null, null);
+  }
+
   private static Oi oi(OiQuadrant futures) {
-    return new Oi(futures, futures, bd("10"), bd("0"), bd("5"));
+    return new Oi(futures, futures, bd("10"), bd("0"), bd("5"), null, null, null, false, false, null, null, null);
   }
 
   private static Oi basis(BigDecimal b) {
-    return new Oi(OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("0"), b);
+    return new Oi(
+        OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("0"), b, null, null, null, false, false, null,
+        null, null);
   }
 
   private static Macro macro(int adv, int dec, Boolean vixRising) {
-    return new Macro(bd("14"), bd("30"), bd("12.5"), vixRising, adv, dec, bd("50"));
+    return new Macro(bd("14"), bd("30"), bd("12.5"), vixRising, adv, dec, bd("50"), null, null);
   }
 }

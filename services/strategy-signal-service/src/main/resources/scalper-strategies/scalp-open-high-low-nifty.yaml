@@ -1,0 +1,91 @@
+# Siva #2 - Open=High / Open=Low (O=H / O=L). The `open-high-low` tag arms the section-12.3
+# OpenHighLowGate: a momentum scalp that reads big-players' intent - a strike opening at its high
+# (Open=High on Calls, bullish) or its low (Open=Low on Puts, bearish) is a magnet the institution will
+# drag the premium back toward, so the trade is WITH the open-extreme intent and targets that extreme.
+#
+# v1 SCOPE (the Step-0 feasibility outcome). The doc's full configuration needs (1) per-strike ATM+-3
+# OH/OL confluence (>=3 strikes matching, "very high" at 4-5) AND (2) an external "OI-Pulse AI badge
+# >=90% (red dot)". NEITHER is available to strategy-signal-service:
+#   - The badge is a Phase-4 OiPulse-parity model we do NOT have. It is treated as an OPTIONAL,
+#     currently-unavailable confirmation we degrade around - NEVER required.
+#   - Per-strike ATM+-3 OH/OL needs per-strike option-premium intraday OHLC (session-open vs running
+#     high per strike). This service holds NO marketdata grant and reads only via market-data REST;
+#     the /options/chain endpoint returns per-strike point-in-time LTP, NOT per-strike OHLC, and there
+#     is no per-strike-OHLC REST endpoint. So the strike-count confluence cannot be computed without a
+#     NEW market-data endpoint (out of scope). It is a DEFERRED REFINEMENT.
+# v1 therefore gates on the HONEST equivalent the doc itself defines - the deterministic FNO-structure
+# probability TIER (section 3.2 L489): the front-FUTURE Open=High/Open=Low mark x the underlying OI
+# quadrant. Future OH + a bullish quadrant (LB/SC) => the bullish HIGH-tier proxy for a CE; Future OL +
+# a bearish quadrant (SB/LU) => the bearish HIGH-tier proxy for a PE; a mark without quadrant
+# confirmation => MILD (block); a two-sided OH+OL session or no mark => STAND_ASIDE (block).
+#
+# The hard pre-gate requires ALL of: (a) tier >= HIGH for the side; (b) the OI build-up in the side's
+# direction (folded into the tier - CE needs LB/SC, PE needs SB/LU); (c) the section-3.2 reject rules -
+# the option premium must not have moved >50% from the previous close AND the identified-strike OI
+# change must not be >50% (the move must not already be exhausted), reusing the Tier-1 spurt
+# price/OI magnitudes (a null/unavailable magnitude does NOT block); (d) the 1st-half preference - the
+# general >=09:45 pre-flight applies, plus no FRESH entry after ~12:00 (2nd-half time-value erosion).
+# Any failing leg BLOCKS (an OH/OL scalp is high-conviction-only - never a false fire); a null OI
+# snapshot degrades to a block.
+#
+# Structural stop: the VWAP (section 3.2 S22 - "on a live OH momentum scalp the VWAP is the stop-loss"),
+# anchored on the front-future session VWAP supplied by the engine (replay-safe). Exit target
+# (live-management, NOT engine-carried): the OH/OL extreme is the magnet but NEVER trade beyond it -
+# exit ~5 points INSIDE (below the OH for a CE, above the OL for a PE).
+#
+# DEFERRED REFINEMENTS (need a future per-strike-OHLC market-data endpoint / a Phase-4 OiPulse model):
+# the per-strike ATM+-3 OH/OL strike-count confluence (>=3 strikes matching; "very high" at 4-5) and
+# the >=90% OI-Pulse AI badge gate.
+#
+# Evaluates on the NIFTY 50 front future (Model A); the confluence seam buys the nearest-weekly
+# ATM-band CE.
+schema: strategy-schema/v1
+id: scalp-open-high-low-nifty
+name: "Scalper · Open=High / Open=Low · NIFTY CE"
+version: 1.0.0
+description: "Open=High/Open=Low momentum scalp (Siva #2) on the NIFTY 50 3-min front future. v1 gates on the deterministic FNO-structure probability tier (front-future OH/OL x the underlying OI quadrant) being HIGH - the honest equivalent of the unavailable OiPulse >=90% AI badge (treated as optional, degraded around) - plus the section-3.2 <=50% premium/OI spurt reject rules and a 1st-half (no fresh entry after ~12:00) window. VWAP stop; target the OH/OL extreme but never beyond it (exit ~5pts inside). DEFERRED: the per-strike ATM+-3 OH/OL strike-count confluence (needs a per-strike-OHLC market-data endpoint) and the >=90% OI-Pulse badge."
+author: owner
+tags: [scalper, options, intraday, nifty, open-high-low]
+
+universe:
+  mode: options_of_underlying
+  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  options:
+    expiry: nearest_weekly
+    strikes: { selector: atm_window, width: 3 }
+    option_types: [CE]
+
+timeframes:
+  primary: 3m
+  additional: [1h]
+
+indicators:
+  - { name: VWMA,       alias: vwma20,    timeframe: 3m, params: { period: 20 } }
+  - { name: PSAR,       alias: psar,      timeframe: 3m }
+  - { name: RSI,        alias: rsi14,     timeframe: 3m, params: { period: 14 }, weight: 1.0,
+      normalize: { type: rsi_momentum } }
+  - { name: SUPERTREND, alias: supertrend, timeframe: 3m, params: { period: 10, multiplier: 2.0 },
+      weight: 1.0, normalize: { type: direction } }
+  - { name: SUPERTREND, alias: bias60m,   timeframe: 1h, params: { period: 7, multiplier: 3.0 } }
+
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - "close > vwap"           # §3.2 S22: a Call-side OH is high-probability only while price > VWAP
+  scoring:
+    threshold: 0.2
+
+exit_rules:
+  - { type: signal_exit, params: { rule: "close < vwap" } }   # §3.2 S22: VWAP is the OH momentum-scalp SL
+  - { type: time_stop,   params: { max_bars: 20 } }           # §3.2: small momentum scalp
+
+risk:
+  position_sizing: { method: premium_budget, params: { budget_inr: 15000 } }
+  max_positions: 1
+  max_positions_per_underlying: 1
+  max_daily_loss_pct: 2.0
+  session:
+    style: intraday
+    window: { from: "09:45", to: "12:00" }   # §3.2: 1st-half preference (no fresh entry after ~12:00)
+    square_off: "15:15"

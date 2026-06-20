@@ -3694,4 +3694,34 @@ component-first wave plan). Key corrections:
 across **~34** options+futures+fii-dii+equity pages. The wave page-list is the oipulse set, NOT the
 Angular 10. Each wave's page is built faithful to its `docs/oipulse-study/<area>/<page>.md` doc.
 
+### 20.7 Wave-1 Options Chain — fidelity acceptance criteria (vs oipulse, audit 2026-06-21)
+
+The PR-F anchor (`OptionsChainPage`) is a **"lite" chain** that proved the architecture (FilterBar +
+`MirroredCspTable` + atoms + cascade + adaptive mobile) but is NOT yet a faithful oipulse Options Chain.
+Wave-1 makes it faithful to `docs/oipulse-study/options/options-chain.md`. Acceptance criteria (the
+confirmed gaps — PR-F has 9 cols/neutral colours/5 controls; oipulse has ~17 visible cols + colour-coded
+cells + Go/Column-Setting):
+
+1. **Columns — 17 visible (from 9):** CALL `OI Int · OI% · OI · OI Chng · IV · LTP · LTP% · LTP Chg` |
+   **Strike** | PUT mirror + **PCR Ratio**. Plus a **Column Setting** modal toggling the ~28 hidden
+   cols (Greeks/Premium/Intrinsic/Volume/O=H/O=L). **Backend:** the full **`/chain` endpoint** + the
+   **greeks-in-chain** task (per-strike PCR/IV + black76 greeks) — supersedes the lite `oi-analysis`
+   feed.
+2. **Colours (carry the signal — currently neutral):** OI bars **red (CALL) / green (PUT)** (`DataBar`
+   already takes `tone` → pass by side); **OI Chng green/red bars** (not text); per-row **`OiBadge4`**
+   (OI Int column); **ATM-row cream tint** (#ffeeba-equivalent token) + clickable; ITM row tint;
+   **max-OI / max-ΔOI / max-Vol cell highlights**; LTP **flash on change** (`usePulse`).
+3. **Controls:** add a **Go button**; **grouped Name select** (Index / Stocks headers); Interval add
+   **Full-Day / 2h / 4h / custom-time**; add the **Column Setting** button. (Mode: keep the toggle or
+   switch to a radio — note the divergence.)
+4. **Header strip:** **INDIA VIX** (LTP/DH/DL/DO) · Total PCR (+prev +chg) · **ATM** · **Days-to-Expiry**
+   · underlying LTP/DH/DL/DO. **Move Max-pain/Sentiment OFF this header** — they belong to the separate
+   **OI Statistics** / **Active Strikes** pages (the current header bled them in).
+5. **Also Wave-1 (distinct page):** the TRUE **"Options OI Analysis"** — per-strike intraday, a **Strike
+   selector** + **buckets-on-rows** (a NEW time-rows mirrored-table variant; `MirroredCspTable` is
+   strike-rows only). Endpoint `oi-analysis` already carries the bucket dimension.
+
+Live pixel side-by-side (Claude-in-Chrome on the owner's logged-in oipulse) is the visual QA gate when
+building this — the study doc is the authoritative spec until then.
+
 *End of plan.*

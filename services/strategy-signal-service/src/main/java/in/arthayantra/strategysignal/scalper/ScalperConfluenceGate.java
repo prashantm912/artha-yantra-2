@@ -1,6 +1,7 @@
 package in.arthayantra.strategysignal.scalper;
 
 import in.arthayantra.black76.Black76.OptionType;
+import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.strategyengine.eval.BarValues;
 import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategyengine.series.EngineSeries;
@@ -123,7 +124,11 @@ public class ScalperConfluenceGate {
       }
       structuralStop = gap.stopLevel();
     }
-    ScalperGateContext ctx = client.context(cfg.underlying(), istTime, eodDate, chain.expiry(), chart);
+    // The live bar's IST date drives the S24 monthly-expiry OI suppression (distinct from eodDate,
+    // the prior completed session used for breadth/FII).
+    LocalDate tradeDate = barInstant.atZone(Ist.ZONE).toLocalDate();
+    ScalperGateContext ctx =
+        client.context(cfg.underlying(), istTime, eodDate, chain.expiry(), tradeDate, chart);
     // #5 (T2.1): the oi-cross-filter strategies HARD-require a >=50% call-put dOI imbalance before
     // the confluence is even consulted. Fail-closed like the volume/RSI rails; a null imbalance
     // (data unavailable / flat-OI caveat) DEGRADES to pass inside the gate, so it never blocks then.

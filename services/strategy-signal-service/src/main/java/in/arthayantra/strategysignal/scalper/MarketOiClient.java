@@ -3,6 +3,7 @@ package in.arthayantra.strategysignal.scalper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.black76.Black76;
+import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.strategysignal.scalper.ScalperGateContext.Macro;
 import in.arthayantra.strategysignal.scalper.ScalperGateContext.Oi;
 import java.math.BigDecimal;
@@ -49,14 +50,17 @@ public class MarketOiClient {
 
   private final RestClient restClient;
   private final ObjectMapper objectMapper;
+  private final MarketCalendar calendar;
 
   /** Wires the configured market-data base URL (same bean pattern as the candle client). */
   public MarketOiClient(
       RestClient.Builder builder,
       ObjectMapper objectMapper,
+      MarketCalendar calendar,
       @Value("${artha.marketdata.base-url}") String baseUrl) {
     this.restClient = builder.baseUrl(baseUrl).build();
     this.objectMapper = objectMapper;
+    this.calendar = calendar;
   }
 
   /**
@@ -70,6 +74,7 @@ public class MarketOiClient {
    *     a live intraday bar the caller should pass the most-recent COMPLETED session — today's date
    *     422s until the post-close bhavcopy lands, degrading breadth/FII to their inert defaults.
    * @param expiry the option expiry the scalp will trade (options analytics require it)
+   * @param tradeDate the live bar's IST date — drives the monthly-expiry OI suppression (S24 caveat)
    * @param chart the chart dots already computed by the engine {@code IndicatorBank}
    */
   public ScalperGateContext context(
@@ -77,8 +82,10 @@ public class MarketOiClient {
       java.time.LocalTime istTime,
       LocalDate eodDate,
       LocalDate expiry,
+      LocalDate tradeDate,
       ScalperGateContext.Chart chart) {
-    return new ScalperGateContext(underlying, istTime, chart, oi(underlying, expiry), macro(underlying, eodDate));
+    return new ScalperGateContext(
+        underlying, istTime, chart, oi(underlying, expiry, tradeDate), macro(underlying, eodDate));
   }
 
   /** The nearest-expiry option chain flattened for {@link StrikePicker}: spot, forward, the candidates. */
@@ -137,8 +144,23 @@ public class MarketOiClient {
     }
   }
 
-  /** The OI confluence half: underlying + futures quadrants, sentiment, PE−CE cross, futures basis. */
-  public Oi oi(String underlying, LocalDate expiry) {
+  /**
+   * The OI confluence half: underlying + futures quadrants, sentiment, PE−CE cross, futures basis.
+   *
+   * <p><b>S24 monthly-expiry caveat:</b> on a MONTHLY index-expiry day the expiring series' writers
+   * are unwinding, so the chain-OI / Trending-OI read is corrupted. The four OI reads (spurt /
+   * futures-quadrant / active-strikes / trending) are SKIPPED and degrade to their inert defaults
+   * (NEUTRAL quadrants, null soft-numerics, false flags) — exactly as if the OI endpoints were
+   * unavailable, so every OI dot/gate is non-confirming. The price-derived futures basis is kept.
+   */
+  public Oi oi(String underlying, LocalDate expiry, LocalDate tradeDate) {
+    if (calendar.isMonthlyIndexExpiryDay(tradeDate)) {
+      log.debug("scalper OI suppressed for monthly-expiry day {} ({}) - chain-OI is corrupted (S24)", tradeDate, underlying);
+      BigDecimal futuresBasis = futuresBasis(underlying);
+      return new Oi(
+          OiQuadrant.NEUTRAL, OiQuadrant.NEUTRAL, null, null, futuresBasis, null, null, null,
+          false, false, null, null, null);
+    }
     // /options/spurt: one read → the underlying quadrant PLUS the spurt OI/price magnitudes (§A6).
     Spurt spurt =
         get(
@@ -184,15 +206,7 @@ public class MarketOiClient {
             Trending.EMPTY,
             "options/trending");
 
-    BigDecimal futuresBasis =
-        get(
-            uri ->
-                uri.path("/api/v1/market/futures/term-structure")
-                    .queryParam("underlying", underlying)
-                    .build(),
-            this::frontContractBasis,
-            null,
-            "futures/term-structure");
+    BigDecimal futuresBasis = futuresBasis(underlying);
 
     return new Oi(
         spurt.quadrant(),
@@ -208,6 +222,18 @@ public class MarketOiClient {
         sentiment.slope(),
         spurt.oiPct(),
         spurt.pricePct());
+  }
+
+  /** Front-contract absolute futures basis (F − S) — price-derived, so NOT suppressed on a monthly expiry. */
+  private BigDecimal futuresBasis(String underlying) {
+    return get(
+        uri ->
+            uri.path("/api/v1/market/futures/term-structure")
+                .queryParam("underlying", underlying)
+                .build(),
+        this::frontContractBasis,
+        null,
+        "futures/term-structure");
   }
 
   /** The macro confluence half: ATM IV + rank, breadth, FII positioning (VIX is a v1 gap → null). */

@@ -1,6 +1,8 @@
 package in.arthayantra.strategysignal.scalper;
 
+import in.arthayantra.marketcalendar.MarketCalendar;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
@@ -10,4 +12,14 @@ import org.springframework.context.annotation.Configuration;
  */
 @Configuration
 @EnableConfigurationProperties(ScalperOiProps.class)
-public class ScalperOiConfig {}
+public class ScalperOiConfig {
+
+  /**
+   * Shared NSE calendar — {@link MarketOiClient} uses it to detect a monthly-expiry day and suppress
+   * the corrupted chain-OI reads (S24 caveat). Same bean pattern as market-data-service.
+   */
+  @Bean
+  public MarketCalendar marketCalendar() {
+    return MarketCalendar.nse();
+  }
+}

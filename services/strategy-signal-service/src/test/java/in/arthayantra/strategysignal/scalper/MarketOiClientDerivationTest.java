@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.strategysignal.scalper.MarketOiClient.IvPair;
 import in.arthayantra.strategysignal.scalper.MarketOiClient.Sentiment;
 import in.arthayantra.strategysignal.scalper.MarketOiClient.Spurt;
@@ -20,7 +21,8 @@ class MarketOiClientDerivationTest {
 
   private final ObjectMapper mapper = new ObjectMapper();
   // The derivation helpers are pure (JsonNode in → carrier out); the RestClient is never exercised.
-  private final MarketOiClient client = new MarketOiClient(RestClient.builder(), mapper, "http://unused");
+  private final MarketOiClient client =
+      new MarketOiClient(RestClient.builder(), mapper, MarketCalendar.nse(), "http://unused");
 
   private JsonNode json(String raw) {
     try {

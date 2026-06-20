@@ -184,6 +184,13 @@ public final class MarketCalendar {
     return isTradingDay(date) && nextWeeklyIndexExpiry(date).equals(date);
   }
 
+  /** True when {@code date} is the MONTHLY index expiry (the last weekly index expiry of its calendar month). */
+  public boolean isMonthlyIndexExpiryDay(LocalDate date) {
+    return isWeeklyIndexExpiryDay(date)
+        && !java.time.YearMonth.from(nextWeeklyIndexExpiry(date.plusDays(1)))
+            .equals(java.time.YearMonth.from(date));
+  }
+
   /** The years the bundled holiday resource covers. */
   public NavigableSet<Integer> coveredYears() {
     return coveredYears;

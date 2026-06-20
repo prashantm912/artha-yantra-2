@@ -57,6 +57,30 @@ class ConnectTheDotsScorerTest {
   }
 
   @Test
+  void suppressedMonthlyExpiryOiDegradesEveryOiDotWithoutBlocking() {
+    // The exact inert OI the MarketOiClient returns on a monthly-expiry day (S24 caveat): NEUTRAL
+    // quadrants, null soft-numerics, false flags — only the price-derived basis survives.
+    Oi inert =
+        new Oi(
+            OiQuadrant.NEUTRAL, OiQuadrant.NEUTRAL, null, null, bd("5"), null, null, null,
+            false, false, null, null, null);
+
+    Confluence r = ConnectTheDotsScorer.score(ctx(BULL_CHART, inert, BULL_MACRO), CE, 1, T, P, true);
+
+    // Every chain-OI dot is non-confirming — it neither blocks nor falsely confirms.
+    for (String oiDot :
+        new String[] {
+          "futures_oi", "underlying_oi", "trending_cross", "sentiment",
+          "drastic_oi", "sentiment_slope", "oi_spurt"
+        }) {
+      assertThat(dot(r, oiDot)).as(oiDot).isFalse();
+    }
+    // The price-derived basis dot still works, and the scorer never throws / hard-blocks.
+    assertThat(dot(r, "basis")).isTrue();
+    assertThat(r.bearish()).isFalse();
+  }
+
+  @Test
   void wrongVwapSideBlocksEvenWithStrongRest() {
     // price below VWAP but still above VWMA/PSAR so only the decisive VWAP dot flips
     Chart c = new Chart(bd("98"), bd("99"), bd("96"), bd("95"), 1, bd("65"), bd("130000"));

@@ -94,6 +94,18 @@ class MarketCalendarTest {
   }
 
   @Test
+  void monthlyIndexExpiryIsTheLastWeeklyExpiryOfTheMonth() {
+    // June 2026 weekly expiries: Tue 2/9/16/23/30 (all trading days). The LAST, 2026-06-30, is the
+    // monthly — the next weekly expiry after it (2026-07-07) is in July.
+    assertThat(calendar.isMonthlyIndexExpiryDay(LocalDate.parse("2026-06-30"))).isTrue();
+    // an earlier June weekly expiry is weekly but NOT monthly (the next, 2026-06-30, is same month)
+    assertThat(calendar.isWeeklyIndexExpiryDay(LocalDate.parse("2026-06-23"))).isTrue();
+    assertThat(calendar.isMonthlyIndexExpiryDay(LocalDate.parse("2026-06-23"))).isFalse();
+    // a non-expiry weekday is neither weekly nor monthly
+    assertThat(calendar.isMonthlyIndexExpiryDay(LocalDate.parse("2026-06-24"))).isFalse();
+  }
+
+  @Test
   void holidayTuesdayExpiryPreponesToMonday() {
     // 2026-10-20 (Tue) is Dussehra -> expiry prepones to Mon 2026-10-19
     assertThat(calendar.nextWeeklyIndexExpiry(LocalDate.parse("2026-10-14")))

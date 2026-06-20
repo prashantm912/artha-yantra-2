@@ -7,6 +7,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.strategysignal.scalper.ScalperGateContext.Macro;
 import in.arthayantra.strategysignal.scalper.ScalperGateContext.Oi;
 import java.time.LocalDate;
@@ -26,6 +27,9 @@ class MarketOiClientTest {
   private static final String UNDERLYING = "NIFTY 50";
   private static final LocalDate EXPIRY = LocalDate.of(2026, 6, 25);
   private static final LocalDate TRADE_DATE = LocalDate.of(2026, 6, 20);
+  // 2026-06-30 is the June MONTHLY index expiry (the last June weekly expiry); 2026-06-23 is weekly-only.
+  private static final LocalDate MONTHLY_EXPIRY = LocalDate.of(2026, 6, 30);
+  private static final LocalDate NON_MONTHLY = LocalDate.of(2026, 6, 23);
 
   private MockRestServiceServer server;
   private MarketOiClient client;
@@ -33,7 +37,7 @@ class MarketOiClientTest {
   private void wire() {
     RestClient.Builder builder = RestClient.builder();
     server = MockRestServiceServer.bindTo(builder).ignoreExpectOrder(true).build();
-    client = new MarketOiClient(builder, new ObjectMapper(), "http://market-data:8081");
+    client = new MarketOiClient(builder, new ObjectMapper(), MarketCalendar.nse(), "http://market-data:8081");
   }
 
   private void stub(String pathFragment, String json) {
@@ -64,7 +68,7 @@ class MarketOiClientTest {
             + "{\"expiry\":\"2026-07-30\",\"basisAbsolute\":\"25\"},"
             + "{\"expiry\":\"2026-06-25\",\"basisAbsolute\":\"10.5\"}]}");
 
-    Oi oi = client.oi(UNDERLYING, EXPIRY);
+    Oi oi = client.oi(UNDERLYING, EXPIRY, NON_MONTHLY);
 
     assertThat(oi.underlying()).isEqualTo(OiQuadrant.SHORT_COVERING);
     assertThat(oi.futures()).isEqualTo(OiQuadrant.LONG_BUILDUP); // nearest expiry, not the far leg
@@ -72,6 +76,34 @@ class MarketOiClientTest {
     assertThat(oi.trendingPeMinusCePct()).isEqualByComparingTo("33.3333");
     assertThat(oi.futuresBasis()).isEqualByComparingTo("10.5"); // front leg basis
     server.verify();
+  }
+
+  @Test
+  void suppressesChainOiOnAMonthlyExpiryDayKeepingOnlyTheBasis() {
+    wire();
+    // S24 caveat: on the monthly expiry the 4 chain-OI reads must NOT fire (expiring writers unwind).
+    // Only the price-derived term-structure basis is read. Asserted by NOT stubbing the OI endpoints —
+    // MockRestServiceServer fails on any unexpected request, so an OI call here would error the test.
+    stub("/api/v1/market/futures/term-structure", "{\"contracts\":[{\"expiry\":\"2026-06-25\",\"basisAbsolute\":\"10.5\"}]}");
+
+    Oi oi = client.oi(UNDERLYING, EXPIRY, MONTHLY_EXPIRY);
+
+    // Every OI input degrades to its inert default — non-confirming for either side.
+    assertThat(oi.underlying()).isEqualTo(OiQuadrant.NEUTRAL);
+    assertThat(oi.futures()).isEqualTo(OiQuadrant.NEUTRAL);
+    assertThat(oi.sentimentPct()).isNull();
+    assertThat(oi.trendingPeMinusCePct()).isNull();
+    assertThat(oi.ceOiDelta()).isNull();
+    assertThat(oi.peOiDelta()).isNull();
+    assertThat(oi.callPutDeltaImbalancePct()).isNull();
+    assertThat(oi.sentimentSlope()).isNull();
+    assertThat(oi.spurtOiPct()).isNull();
+    assertThat(oi.spurtPricePct()).isNull();
+    assertThat(oi.crossedThisWindow()).isFalse();
+    assertThat(oi.gapWidening()).isFalse();
+    // The price-derived basis is KEPT so the basis dot still works.
+    assertThat(oi.futuresBasis()).isEqualByComparingTo("10.5");
+    server.verify(); // only the one basis request fired
   }
 
   @Test
@@ -176,7 +208,7 @@ class MarketOiClientTest {
       server.expect(ExpectedCount.once(), requestTo(containsString(path))).andRespond(withServerError());
     }
 
-    Oi oi = client.oi(UNDERLYING, EXPIRY);
+    Oi oi = client.oi(UNDERLYING, EXPIRY, NON_MONTHLY);
 
     // NEUTRAL is bullish()==false AND bearish()==false → cannot confirm either side
     assertThat(oi.underlying()).isEqualTo(OiQuadrant.NEUTRAL);

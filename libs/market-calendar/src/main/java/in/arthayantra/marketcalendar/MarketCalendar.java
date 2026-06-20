@@ -126,6 +126,15 @@ public final class MarketCalendar {
     return candidate;
   }
 
+  /** The first trading day strictly before {@code date}. */
+  public LocalDate previousTradingDay(LocalDate date) {
+    LocalDate candidate = date.minusDays(1);
+    while (!isTradingDay(candidate)) {
+      candidate = candidate.minusDays(1);
+    }
+    return candidate;
+  }
+
   /**
    * The number of 1-minute candle buckets whose bucket-start lies in {@code [from, to)} and inside
    * a regular session — the denominator for gap detection (a full day is 375).

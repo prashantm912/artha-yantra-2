@@ -3,6 +3,8 @@ package in.arthayantra.marketdata.options.analytics;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
+import in.arthayantra.common.web.time.Ist;
+import in.arthayantra.marketdata.options.OiInterval;
 import in.arthayantra.marketdata.options.OiQuery;
 import in.arthayantra.marketdata.options.OptionsChainService;
 import java.math.BigDecimal;
@@ -28,9 +30,11 @@ public class OptionsAnalyticsController {
   private final OiBigOiService bigOiService;
   private final OiPremiumService premiumService;
   private final OiTrendingService trendingService;
+  private final OpenHighStatsService openHighStats;
   private final int bigOiTopN;
   private final int trendBuckets;
   private final int premiumBuckets;
+  private final int defaultSessionIntervalMinutes;
 
   public OptionsAnalyticsController(
       OptionsSnapshotReader reader,
@@ -39,18 +43,24 @@ public class OptionsAnalyticsController {
       OiBigOiService bigOiService,
       OiPremiumService premiumService,
       OiTrendingService trendingService,
+      OpenHighStatsService openHighStats,
       @Value("${artha.options.big-oi-top-n:10}") int bigOiTopN,
       @Value("${artha.options.trend-buckets:20}") int trendBuckets,
-      @Value("${artha.options.premium-buckets:60}") int premiumBuckets) {
+      @Value("${artha.options.premium-buckets:60}") int premiumBuckets,
+      @Value("${artha.options.snapshot-interval-ms:300000}") long snapshotIntervalMs) {
     this.reader = reader;
     this.activeStrikes = activeStrikes;
     this.spurtService = spurtService;
     this.bigOiService = bigOiService;
     this.premiumService = premiumService;
     this.trendingService = trendingService;
+    this.openHighStats = openHighStats;
     this.bigOiTopN = bigOiTopN;
     this.trendBuckets = trendBuckets;
     this.premiumBuckets = premiumBuckets;
+    // Default session-stats bucket = the snapshot capture cadence (ms -> minutes), min 1, default 5.
+    long minutes = snapshotIntervalMs / 60000L;
+    this.defaultSessionIntervalMinutes = minutes <= 0 ? 5 : (int) minutes;
   }
 
   public record OiStats(BigDecimal pcr, BigDecimal maxPain, long ceOi, long peOi, OffsetDateTime asOf) {}
@@ -237,6 +247,56 @@ public class OptionsAnalyticsController {
     List<OptionsSnapshotReader.StrikePoint> series =
         reader.series(q.name(), exp, q.interval(), from, newest.plus(q.interval().bucket()));
     return trendingService.trending(series);
+  }
+
+  /**
+   * /strike-session-stats: per-strike session OH/OL grading (Siva #2) for the {@code 2*window+1}
+   * strikes nearest the ATM. {@code window} default 3; {@code interval} (minutes) default = the
+   * snapshot capture cadence; {@code session} default = today IST. Empty items -> 200 (no error).
+   */
+  @GetMapping("/strike-session-stats")
+  public OpenHighStatsService.StrikeSessionStats strikeSessionStats(
+      @RequestParam String underlying,
+      @RequestParam String expiry,
+      @RequestParam(required = false) Integer window,
+      @RequestParam(required = false) Integer interval,
+      @RequestParam(required = false) String session) {
+    LocalDate exp = LocalDate.parse(expiry);
+    int win = window == null ? 3 : window;
+    int intervalMinutes = interval == null ? defaultSessionIntervalMinutes : interval;
+    LocalDate sess = session == null ? LocalDate.now(Ist.ZONE) : LocalDate.parse(session);
+
+    List<OptionsSnapshotReader.PerStrikeSessionStat> stats =
+        reader.sessionStats(underlying, exp, sess, intervalMinutes);
+    // ATM = listed strike nearest the latest spot (history-scoped to the session).
+    OiInterval oi = OiInterval.parse(intervalMinutes + "m");
+    List<OptionsSnapshotReader.StrikePoint> latest = reader.latest(underlying, exp, oi, sess);
+    BigDecimal spot = latestSpot(latest);
+    BigDecimal atm = atmStrike(stats, spot);
+    OffsetDateTime asOf = latest.isEmpty() ? null : latest.get(latest.size() - 1).bucket();
+    return openHighStats.grade(underlying, exp, intervalMinutes, spot, atm, win, asOf, stats);
+  }
+
+  private static BigDecimal latestSpot(List<OptionsSnapshotReader.StrikePoint> latest) {
+    for (OptionsSnapshotReader.StrikePoint p : latest) {
+      if (p.spot() != null) {
+        return p.spot();
+      }
+    }
+    return null;
+  }
+
+  /** The listed (session) strike nearest {@code spot}; null when spot or strikes are absent. */
+  private static BigDecimal atmStrike(
+      List<OptionsSnapshotReader.PerStrikeSessionStat> stats, BigDecimal spot) {
+    if (spot == null) {
+      return null;
+    }
+    return stats.stream()
+        .map(OptionsSnapshotReader.PerStrikeSessionStat::strike)
+        .distinct()
+        .min(java.util.Comparator.comparing(s -> s.subtract(spot).abs()))
+        .orElse(null);
   }
 
   private LocalDate requireExpiry(OiQuery q) {

@@ -45,6 +45,15 @@ artha:
       iv-both-high-floor: 0.40
       spurt-oi-pct: 50
       spurt-price-pct: 50
+      # #2 (section 3.2) Open=High faithful grading (Table-1 / Table-2 / LOW rules). min-strikes is the
+      # per-side OH-strike count for a HIGH footprint; fall-volume-floor downgrades a fall-on-volume OH
+      # to LOW; max-prev-close-fall-pct is the >50% fall = bigger-player LOW rule; window is the ATM+-N
+      # listed-strike footprint; rsi-floor relaxes #2's RSI gate to ">50" (source), not the 60-80 band.
+      open-high-min-strikes: 3
+      open-high-fall-volume-floor: 50000
+      open-high-max-prev-close-fall-pct: 50
+      open-high-window: 3
+      open-high-rsi-floor: 50
   paper:
     # A12 per-class capital-usage margin approximations (no Kite margin API).
     # Equities use full notional; long options the premium; futures & short

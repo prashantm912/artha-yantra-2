@@ -102,10 +102,15 @@ public class ScalperConfluenceGate {
         chart.close() != null && chart.vwap() != null && chart.close().compareTo(chart.vwap()) >= 0
             ? OptionType.CE
             : OptionType.PE;
-    // §0B hard "no trade" rails: volume floor + the RSI 40–60 dead band (both are blocks, not the
-    // soft dots the scorer also weighs — a strong-everything-else signal must still respect them).
-    if (!ScalperGates.volume(cfg.underlying(), chart.volume()).pass()
-        || !ScalperGates.rsiBand(chart.rsi14(), side).pass()) {
+    // §0B hard "no trade" rails: volume floor + the RSI gate (both are blocks, not the soft dots the
+    // scorer also weighs — a strong-everything-else signal must still respect them). #2 (open-high-low)
+    // relaxes RSI to the source's ">50" floor instead of the shared 60-80/20-40 band; the shared
+    // rsiBand is unchanged for every other strategy.
+    boolean rsiOk =
+        cfg.requireOpenHighLow()
+            ? ScalperGates.rsiAbove(chart.rsi14(), oiProps.openHighRsiFloor()).pass()
+            : ScalperGates.rsiBand(chart.rsi14(), side).pass();
+    if (!ScalperGates.volume(cfg.underlying(), chart.volume()).pass() || !rsiOk) {
       return Optional.empty();
     }
     // §3.1 Two-Candle: when the strategy declares it, the multi-bar formation is a HARD entry gate
@@ -149,12 +154,18 @@ public class ScalperConfluenceGate {
       structuralStop = tc.stopLevel();
     }
     // #2 (section 3.2) Open=High/Open=Low: when the strategy declares it, a HARD FNO-structure pre-gate -
-    // the front-future OH/OL mark + the HIGH probability tier (mark x OI quadrant) + the <=50% spurt
-    // reject rules + the 1st-half (~12:00) cutoff. Fail-closed (a MILD/STAND_ASIDE tier or null OI
-    // blocks; null reject magnitudes do NOT block); the front-future VWAP becomes the structural stop.
+    // the front-future OH/OL mark + the source-faithful Table-1/Table-2 HIGH tier (per-strike footprint,
+    // NOT the OI quadrant) + the <=50% spurt reject rules + the 1st-half (~12:00) cutoff. The per-strike
+    // footprint is fetched HERE (#2-only, not in the shared context fan-out). Fail-closed (a
+    // MILD/LOW/STAND_ASIDE tier, null/empty stats or null OI blocks; null reject magnitudes do NOT
+    // block); the front-future VWAP becomes the structural stop.
     if (cfg.requireOpenHighLow()) {
+      OpenHighLow.Marks futureMarks = OpenHighLow.marks(future, index);
+      MarketOiClient.OpenHighStats stats =
+          client.openHighStats(cfg.underlying(), chain.expiry(), oiProps.openHighWindow().intValue());
       OpenHighLowGate.Verdict ohl =
-          OpenHighLowGate.evaluate(future, index, side, ctx.oi(), ctx.chart().vwap(), istTime);
+          OpenHighLowGate.evaluate(
+              futureMarks, stats, side, oiProps, ctx.oi(), ctx.chart().vwap(), istTime);
       if (!ohl.pass()) {
         return Optional.empty();
       }

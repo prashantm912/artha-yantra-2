@@ -19,7 +19,7 @@ class OiPremiumServiceTest {
       OffsetDateTime bucket, String strike, String type, String ltp) {
     return new OptionsSnapshotReader.StrikePoint(
         bucket, new BigDecimal(strike), type, new BigDecimal(ltp), 0L, 0L, null,
-        new BigDecimal("22480"));
+        new BigDecimal("22480"), null);
   }
 
   @Test

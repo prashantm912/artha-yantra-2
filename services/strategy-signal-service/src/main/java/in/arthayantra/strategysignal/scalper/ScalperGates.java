@@ -83,6 +83,21 @@ public final class ScalperGates {
     return new GateOutcome(ok, rsi, ok ? want + " ok" : want + " (40-60 no-trade / exhaustion)");
   }
 
+  /**
+   * #2 (section 3.2) Open=High relaxed RSI gate: the source asks only for "RSI &gt;50" on the
+   * open-high path (a directional-momentum confirmation), NOT the {@link #rsiBand} 60-80 / 20-40 band
+   * the other strategies use. PASS when the RSI is strictly above {@code floor}; a null RSI FAILS
+   * (the data is required, like the band). Only #2 uses this; the shared band is untouched.
+   */
+  public static GateOutcome rsiAbove(BigDecimal rsi, BigDecimal floor) {
+    if (rsi == null) {
+      return GateOutcome.fail(null, "rsi unavailable");
+    }
+    boolean ok = rsi.compareTo(floor) > 0;
+    return new GateOutcome(
+        ok, rsi, "rsi " + rsi.toPlainString() + (ok ? " > " : " <= ") + floor.toPlainString());
+  }
+
   /** Bull (CE): PSAR, VWMA, ST and VWAP all below price; bear (PE): all above. */
   public static GateOutcome indicatorAlignment(Chart c, OptionType side) {
     boolean ok;

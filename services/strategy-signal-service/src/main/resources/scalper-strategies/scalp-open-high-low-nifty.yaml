@@ -43,7 +43,7 @@ schema: strategy-schema/v1
 id: scalp-open-high-low-nifty
 name: "Scalper · Open=High / Open=Low · NIFTY CE"
 version: 1.0.0
-description: "Open=High/Open=Low momentum scalp (Siva #2) on the NIFTY 50 3-min front future. v1 gates on the deterministic FNO-structure probability tier (front-future OH/OL x the underlying OI quadrant) being HIGH - the honest equivalent of the unavailable OiPulse >=90% AI badge (treated as optional, degraded around) - plus the section-3.2 <=50% premium/OI spurt reject rules and a 1st-half (no fresh entry after ~12:00) window. VWAP stop; target the OH/OL extreme but never beyond it (exit ~5pts inside). DEFERRED: the per-strike ATM+-3 OH/OL strike-count confluence (needs a per-strike-OHLC market-data endpoint) and the >=90% OI-Pulse badge."
+description: "Open=High/Open=Low momentum scalp (Siva #2) on the NIFTY 50 3-min front future. Gates on the SOURCE-FAITHFUL FNO-structure probability tier (Table-1: Futures-OH + >=3 ATM+-3 Call strikes Open=High + Put Open=Low -> HIGH; few strikes -> MILD; both-sides OH -> stand aside) refined by the Table-2 price/volume modifier (a CE-OH premium falling on >=50k volume, or a >50% fall vs prev close, downgrades to LOW). Only HIGH fires. Per-strike OH/OL + volume come from /options/strike-session-stats (5-min snapshot resolution; native 3-min needs 3-min capture). RSI>50 entry; section-3.2 <=50% premium/OI spurt reject; 1st-half (no fresh entry after ~12:00) window; VWAP stop; exit ~5pts inside the OH/OL, never beyond it. The OiPulse >=90% AI badge stays external/unavailable (optional, degraded around)."
 author: owner
 tags: [scalper, options, intraday, nifty, open-high-low]
 

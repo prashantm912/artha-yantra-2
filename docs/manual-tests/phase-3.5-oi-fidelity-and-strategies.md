@@ -71,9 +71,10 @@ touch `ScoreBreakdown` / the golden byte-string.
   is the exhaustive proof.)
 
 ## 5. Deferred (NOT in this phase — documented so the gate is honest)
-- **#2 per-strike ATM±3 OH/OL confluence** + the **OiPulse ≥90% AI badge** — need a per-strike-OHLC
-  market-data endpoint / the OiPulse model (Phase-4 OiPulse-parity). #2 ships front-Future OH/OL + the
-  OI-quadrant probability tier (the honest equivalent of the badge).
+- **#2 per-strike ATM±3 OH/OL confluence** — ✅ NOW DONE in the follow-up slice (`feat/open-high-per-strike`,
+  see `phase-3.5b-open-high-per-strike.md`): the source-faithful Table-1/Table-2 grading over the new
+  `/options/strike-session-stats` endpoint. Only the **OiPulse ≥90% AI badge** stays deferred (external
+  Phase-4 OiPulse-parity model; optional, degraded around).
 - **#4 counter-trend gap-fill scalp** (risky, scalping-only) — automated path is with-trend-after-fill.
 - **#3 Market Movers** (F&O stock universe → Track-1), **#8 BTST/STBT** (overnight carry + SPAN short
   leg), **#7/#11 short-premium** (SPAN #47) — all out of the index-option-intraday scope.

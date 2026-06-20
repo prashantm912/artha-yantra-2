@@ -2,8 +2,10 @@ package in.arthayantra.strategysignal.scalper;
 
 import in.arthayantra.black76.Black76.OptionType;
 import in.arthayantra.strategyengine.eval.BarValues;
+import in.arthayantra.strategyengine.series.EngineSeries;
 import in.arthayantra.strategysignal.scalper.ConnectTheDotsScorer.Confluence;
 import in.arthayantra.strategysignal.scalper.MarketOiClient.ChainSnapshot;
+import in.arthayantra.strategysignal.scalper.ScalperConfig.StructuralStop;
 import in.arthayantra.strategysignal.scalper.ScalperGateContext.Chart;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -44,15 +46,23 @@ public class ScalperConfluenceGate {
     this.client = client;
   }
 
-  /** The chosen option, the side, and the confluence that justified it. */
+  /**
+   * The chosen option, the side, the confluence that justified it, and the entry-time structural
+   * stop-loss on the index future ({@code null} when the strategy sizes off structure/VWAP only).
+   */
   public record Decision(
-      OptionType side, StrikePicker.Pick pick, Confluence confluence, LocalDate expiry) {}
+      OptionType side,
+      StrikePicker.Pick pick,
+      Confluence confluence,
+      LocalDate expiry,
+      BigDecimal structuralStop) {}
 
   /**
    * Confluence-gate one passing chart entry. Empty BLOCKS the signal.
    *
    * @param cfg the strategy's scalper knobs (underlying, strike band, threshold)
    * @param bank the engine indicator bank for the index future at this bar
+   * @param future the index-future series (raw OHLCV for the §3.1 candle pattern + structural stop)
    * @param index the just-closed primary bar index
    * @param barInstant the bar instant (deterministic; drives the StrikePicker expiry clock)
    * @param istTime the bar's IST wall-clock (the time-window dot)
@@ -61,6 +71,7 @@ public class ScalperConfluenceGate {
   public Optional<Decision> evaluate(
       ScalperConfig cfg,
       BarValues bank,
+      EngineSeries future,
       int index,
       Instant barInstant,
       LocalTime istTime,
@@ -87,6 +98,12 @@ public class ScalperConfluenceGate {
         || !ScalperGates.rsiBand(chart.rsi14(), side).pass()) {
       return Optional.empty();
     }
+    // §3.1 Two-Candle: when the strategy declares it, the multi-bar formation is a HARD entry gate
+    // (the chart-only YAML grammar cannot express it). The 1st-candle extreme becomes the stop.
+    BigDecimal structuralStop = structuralStop(cfg, future, index, side);
+    if (cfg.requireTwoCandle() && structuralStop == null) {
+      return Optional.empty();
+    }
     ScalperGateContext ctx = client.context(cfg.underlying(), istTime, eodDate, chain.expiry(), chart);
     Confluence conf =
         ConnectTheDotsScorer.score(ctx, side, bias60m(bank, index), cfg.confluenceThreshold());
@@ -94,10 +111,27 @@ public class ScalperConfluenceGate {
     if (!valid) {
       return Optional.empty();
     }
+    BigDecimal stop = structuralStop;
     return StrikePicker.pick(
             chain.candidates(), chain.spot(), chain.basis(), side, barInstant, chain.expiry(),
             cfg.strikeParams())
-        .map(pick -> new Decision(side, pick, conf, chain.expiry()));
+        .map(pick -> new Decision(side, pick, conf, chain.expiry(), stop));
+  }
+
+  /**
+   * The entry-time structural stop on the index future: the 1st-candle extreme of a Two-Candle
+   * formation ({@code null} when required but absent ⇒ the caller blocks the entry), the entry
+   * (crossover) candle's extreme, or {@code null} when the strategy sizes off structure/VWAP only.
+   */
+  private static BigDecimal structuralStop(
+      ScalperConfig cfg, EngineSeries future, int index, OptionType side) {
+    if (cfg.requireTwoCandle()) {
+      return TwoCandleGate.detect(future, index, side, cfg.underlying()).stopLevel();
+    }
+    if (cfg.structuralStop() == StructuralStop.ENTRY_CANDLE && future != null && index >= 0) {
+      return side == OptionType.CE ? future.candle(index).low() : future.candle(index).high();
+    }
+    return null;
   }
 
   private Chart chart(BarValues bank, int index) {

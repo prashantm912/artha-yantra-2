@@ -8,6 +8,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import in.arthayantra.strategyengine.eval.BarValues;
+import in.arthayantra.strategyengine.series.EngineCandle;
+import in.arthayantra.strategyengine.series.EngineSeries;
+import in.arthayantra.strategyengine.series.SeriesKey;
 import in.arthayantra.strategysignal.scalper.MarketOiClient.ChainSnapshot;
 import in.arthayantra.strategysignal.scalper.ScalperConfluenceGate.Decision;
 import in.arthayantra.strategysignal.scalper.ScalperGateContext.Chart;
@@ -34,7 +37,30 @@ class ScalperConfluenceGateTest {
   private static final ScalperConfig CFG =
       new ScalperConfig(
           "NSE", "NIFTY 50", 2,
-          new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"));
+          new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
+          false, ScalperConfig.StructuralStop.NONE);
+  private static final ScalperConfig TWO_CANDLE_CFG =
+      new ScalperConfig(
+          "NSE", "NIFTY 50", 2,
+          new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
+          true, ScalperConfig.StructuralStop.TWO_CANDLE_FIRST);
+
+  // a 3m index-future series: index 2 is the deploy bar; indices 0/1 are the forming candles.
+  private static EngineSeries futureSeries(EngineCandle... candles) {
+    return EngineSeries.of(new SeriesKey("NSE", "NIFTY-FUT", "3m"), List.of(candles));
+  }
+
+  // open, high, low, close, volume — a strong green candle (body 10, shadow 2), volume above 125k.
+  private static EngineCandle strongGreen(int i) {
+    return new EngineCandle(
+        NOW.atOffset(IST).plusMinutes(i), bd("100"), bd("111"), bd("99"), bd("110"), 130_000);
+  }
+
+  // a weak candle (body 1, shadow 14 ≥ 2×body) — fails the 2nd-candle strength test.
+  private static EngineCandle weakGreen(int i) {
+    return new EngineCandle(
+        NOW.atOffset(IST).plusMinutes(i), bd("100"), bd("110"), bd("95"), bd("101"), 130_000);
+  }
 
   private static BigDecimal bd(String s) {
     return new BigDecimal(s);
@@ -88,7 +114,7 @@ class ScalperConfluenceGateTest {
     when(client.context(eq("NIFTY 50"), any(), any(), any(), any())).thenReturn(bullContext());
 
     Optional<Decision> decision =
-        new ScalperConfluenceGate(client).evaluate(CFG, bullBank(), 0, NOW, IST_TIME, EOD);
+        new ScalperConfluenceGate(client).evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD);
 
     assertThat(decision).isPresent();
     assertThat(decision.get().side()).isEqualTo(CE);
@@ -101,7 +127,7 @@ class ScalperConfluenceGateTest {
     MarketOiClient client = mock(MarketOiClient.class);
     when(client.chain("NIFTY 50")).thenReturn(Optional.empty());
 
-    assertThat(new ScalperConfluenceGate(client).evaluate(CFG, bullBank(), 0, NOW, IST_TIME, EOD))
+    assertThat(new ScalperConfluenceGate(client).evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD))
         .isEmpty();
   }
 
@@ -118,7 +144,7 @@ class ScalperConfluenceGateTest {
     when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
     when(client.context(eq("NIFTY 50"), any(), any(), any(), any())).thenReturn(bear);
 
-    assertThat(new ScalperConfluenceGate(client).evaluate(CFG, bullBank(), 0, NOW, IST_TIME, EOD))
+    assertThat(new ScalperConfluenceGate(client).evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD))
         .isEmpty();
   }
 
@@ -128,7 +154,7 @@ class ScalperConfluenceGateTest {
     // 11:30 IST is inside the §0B 11:00–13:00 block — blocked at the hard pre-flight, no HTTP
     assertThat(
             new ScalperConfluenceGate(client)
-                .evaluate(CFG, bullBank(), 0, NOW, LocalTime.of(11, 30), EOD))
+                .evaluate(CFG, bullBank(), null, 0, NOW, LocalTime.of(11, 30), EOD))
         .isEmpty();
     org.mockito.Mockito.verifyNoInteractions(client);
   }
@@ -156,7 +182,7 @@ class ScalperConfluenceGateTest {
           }
         };
 
-    assertThat(new ScalperConfluenceGate(client).evaluate(CFG, deadRsi, 0, NOW, IST_TIME, EOD))
+    assertThat(new ScalperConfluenceGate(client).evaluate(CFG, deadRsi, null, 0, NOW, IST_TIME, EOD))
         .isEmpty();
   }
 
@@ -171,7 +197,36 @@ class ScalperConfluenceGateTest {
     when(client.chain("NIFTY 50")).thenReturn(Optional.of(otmOnly));
     when(client.context(eq("NIFTY 50"), any(), any(), any(), any())).thenReturn(bullContext());
 
-    assertThat(new ScalperConfluenceGate(client).evaluate(CFG, bullBank(), 0, NOW, IST_TIME, EOD))
+    assertThat(new ScalperConfluenceGate(client).evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD))
+        .isEmpty();
+  }
+
+  @Test
+  void twoCandleStrategyConfirmsOnAFormationAndAnchorsTheStop() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any())).thenReturn(bullContext());
+    // two strong green candles (0,1) then the deploy bar (2) → the §3.1 formation is present
+    EngineSeries future = futureSeries(strongGreen(0), strongGreen(1), strongGreen(2));
+
+    Optional<Decision> decision =
+        new ScalperConfluenceGate(client)
+            .evaluate(TWO_CANDLE_CFG, bullBank(), future, 2, NOW, IST_TIME, EOD);
+
+    assertThat(decision).isPresent();
+    assertThat(decision.get().structuralStop()).isEqualByComparingTo("99"); // 1st candle low
+  }
+
+  @Test
+  void twoCandleStrategyBlocksWhenTheFormationIsAbsent() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    // the 2nd candle is weak (wick ≥ 2×body) → no formation → the hard gate blocks the entry
+    EngineSeries future = futureSeries(strongGreen(0), weakGreen(1), strongGreen(2));
+
+    assertThat(
+            new ScalperConfluenceGate(client)
+                .evaluate(TWO_CANDLE_CFG, bullBank(), future, 2, NOW, IST_TIME, EOD))
         .isEmpty();
   }
 }

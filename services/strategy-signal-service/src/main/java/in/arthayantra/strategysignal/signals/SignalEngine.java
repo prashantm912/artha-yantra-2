@@ -191,7 +191,7 @@ public class SignalEngine {
         ScalperConfig scalper =
             strategy.tags().contains("scalper")
                     && "options_of_underlying".equals(config.path("universe").path("mode").asText())
-                ? ScalperConfig.from(config.path("universe"))
+                ? ScalperConfig.from(config.path("universe"), strategy.tags())
                 : null;
         // §0B hard-stop rule: a scalper without a fixed SL or a time-stop could ride an unbounded
         // losing option — refuse to load it rather than emit signals it can never safely exit.
@@ -393,6 +393,17 @@ public class SignalEngine {
     Optional<SignalRepository.SignalRow> activeEntry =
         signals.activeEntry(strategy.versionId(), exchange, tradingsymbol);
     if (activeEntry.isPresent()) {
+      // §3.1/§3.6 structural stop (scalper, live-only): the persisted stop_loss is the captured
+      // 1st-candle / entry-candle extreme on the index future. A bar that touches it exits FIRST
+      // (protective priority, mirroring ExitEvaluator's stop_loss-wins precedence). The confluence
+      // path is live-only, so this never affects the deterministic golden replay.
+      if (strategy.scalper() != null
+          && activeEntry.get().stopLoss() != null
+          && structuralStopHit(
+              directionOf(strategy.definition()), primary.candle(index), activeEntry.get().stopLoss())) {
+        emit(strategy, exchange, tradingsymbol, interval, "EXIT", bar, activeEntry.get());
+        return;
+      }
       int entryIndex =
           primary.indexAtOrBefore(activeEntry.get().generatedAt().toInstant());
       Optional<ExitEvaluator.ExitDecision> exit =
@@ -412,7 +423,7 @@ public class SignalEngine {
           EntryEvaluator.evaluate(strategy.definition(), bank, index);
       if (evaluation.isPresent() && evaluation.get().entry()) {
         if (strategy.scalper() != null) {
-          scalperEntry(strategy, exchange, tradingsymbol, interval, bar, evaluation.get(), bank, index);
+          scalperEntry(strategy, exchange, tradingsymbol, interval, bar, evaluation.get(), bank, primary, index);
         } else {
           emitEntry(strategy, exchange, tradingsymbol, interval, bar, evaluation.get(), null);
         }
@@ -428,7 +439,7 @@ public class SignalEngine {
    */
   private void scalperEntry(
       Loaded strategy, String exchange, String tradingsymbol, String interval, EngineCandle bar,
-      EntryEvaluator.Evaluation evaluation, BarValues bank, int index) {
+      EntryEvaluator.Evaluation evaluation, BarValues bank, EngineSeries future, int index) {
     if (scalperGate.isEmpty()) {
       log.warn("scalper strategy {} loaded but confluence gate absent — entry suppressed", strategy.slug());
       return;
@@ -436,7 +447,7 @@ public class SignalEngine {
     OffsetDateTime istBar = bar.bucketStart().withOffsetSameInstant(Ist.OFFSET);
     Optional<ScalperConfluenceGate.Decision> decision =
         scalperGate.get().evaluate(
-            strategy.scalper(), bank, index, bar.bucketStart().toInstant(),
+            strategy.scalper(), bank, future, index, bar.bucketStart().toInstant(),
             istBar.toLocalTime(), istBar.toLocalDate());
     if (decision.isEmpty()) {
       log.info("scalper confluence blocked entry: {} {}:{}", strategy.slug(), exchange, tradingsymbol);
@@ -559,6 +570,12 @@ public class SignalEngine {
     }
     BigDecimal entryPrice = bar.close();
     BigDecimal stopLoss = levelFromRules(strategy.definition(), entryPrice, "stop_loss");
+    // §3.1/§3.6 structural stop: a scalper anchors its stop on the 1st-candle (Two-Candle) or
+    // entry-candle (Golden-Cross) extreme of the index future, captured at entry. It overrides the
+    // (absent) YAML rule level and is the price the bar-close structural-stop exit check fires on.
+    if (decision != null && decision.structuralStop() != null) {
+      stopLoss = decision.structuralStop();
+    }
     BigDecimal target = levelFromRules(strategy.definition(), entryPrice, "take_profit");
     String side =
         strategy.definition().direction() == StrategyDefinition.Direction.SHORT ? "SELL" : "BUY";
@@ -729,6 +746,14 @@ public class SignalEngine {
     return definition.direction() == StrategyDefinition.Direction.SHORT
         ? ExitEvaluator.Direction.SHORT
         : ExitEvaluator.Direction.LONG;
+  }
+
+  /** A scalper structural stop fires when the bar touches the level: low ≤ stop (long), high ≥ stop (short). */
+  private static boolean structuralStopHit(
+      ExitEvaluator.Direction dir, EngineCandle bar, BigDecimal stop) {
+    return dir == ExitEvaluator.Direction.LONG
+        ? bar.low().compareTo(stop) <= 0
+        : bar.high().compareTo(stop) >= 0;
   }
 
   private static BigDecimal levelFromRules(

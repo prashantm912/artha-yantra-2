@@ -10,7 +10,8 @@ name: "Scalper · Golden Crossover · NIFTY CE"
 version: 1.0.0
 description: "Golden-crossover scalp (Siva #6) on the NIFTY front future; ST+VWMA pierce VWAP + confluence; long-premium CE only."
 author: owner
-tags: [scalper, options, intraday, nifty]
+# `entry-candle-stop` anchors the structural stop on the crossover candle's low (§3.6 breakout form).
+tags: [scalper, options, intraday, nifty, entry-candle-stop]
 
 universe:
   mode: options_of_underlying

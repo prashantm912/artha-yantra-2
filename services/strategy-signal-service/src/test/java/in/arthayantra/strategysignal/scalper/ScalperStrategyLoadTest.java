@@ -59,7 +59,7 @@ class ScalperStrategyLoadTest {
       StrategyDefinition def = StrategyCompiler.compile(config);
       assertThat(def.primaryTimeframe()).as(id + " scalps on 3m").isEqualTo("3m");
 
-      ScalperConfig cfg = ScalperConfig.from(config.path("universe"));
+      ScalperConfig cfg = ScalperConfig.from(config.path("universe"), tags);
       assertThat(cfg.underlying()).isEqualTo("NIFTY 50");
       assertThat(cfg.strikeParams().deltaLo()).isEqualTo(0.6);
       assertThat(cfg.confluenceThreshold()).isEqualByComparingTo("0.6");

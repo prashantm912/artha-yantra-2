@@ -1,13 +1,15 @@
-# Siva #1 — Two-Candle Theory. Momentum continuation above VWAP with RSI confirming;
-# the §12.3 confluence seam buys the nearest-weekly ATM-band NIFTY CE. Evaluates on the
-# NIFTY front future (Model A).
+# Siva #1 — Two-Candle Theory. The `two-candle-pattern` tag arms the §12.3 TwoCandleGate: entry
+# requires two consecutive same-colour candles (each above the volume floor) with a strong 2nd
+# candle, deploying on the 3rd — the multi-bar pattern the chart-only gate grammar cannot express.
+# The 1st candle's low is the structural stop (§3.1). Evaluates on the NIFTY front future (Model A);
+# the confluence seam buys the nearest-weekly ATM-band CE.
 schema: strategy-schema/v1
 id: scalp-two-candle-nifty
 name: "Scalper · Two-Candle · NIFTY CE"
 version: 1.0.0
-description: "Two-candle momentum scalp (Siva #1) on the NIFTY front future; long-premium CE only."
+description: "Two-candle scalp (Siva #1) on the NIFTY front future; 2-candle pattern + 1st-candle SL; long-premium CE only."
 author: owner
-tags: [scalper, options, intraday, nifty]
+tags: [scalper, options, intraday, nifty, two-candle-pattern]
 
 universe:
   mode: options_of_underlying

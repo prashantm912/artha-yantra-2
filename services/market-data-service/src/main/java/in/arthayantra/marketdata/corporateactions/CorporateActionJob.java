@@ -155,6 +155,13 @@ public class CorporateActionJob {
 
   private java.util.Optional<UUID> sweepSymbol(Instrument equity, LocalDate today) throws Exception {
     InstrumentKey key = new InstrumentKey(equity.exchange(), equity.tradingsymbol());
+    // Skip BHAVCOPY-only equities (Phase C): the bulk universe is split/bonus-adjusted on read by
+    // EquitySplitBonusAdjuster, not by this purge+Kite-refetch path. Without this gate, projecting
+    // bhavcopy 1d candles for the whole ~22k equity universe would fire one Kite fetch per symbol
+    // on every sweep.
+    if (!candles.hasNonBhavcopyDaily(equity.exchange(), equity.tradingsymbol())) {
+      return java.util.Optional.empty();
+    }
     // anchors snapped back to trading days; only those with a cached close participate
     Map<LocalDate, BigDecimal> cachedCloses = new HashMap<>();
     for (Period offset : ANCHOR_OFFSETS) {

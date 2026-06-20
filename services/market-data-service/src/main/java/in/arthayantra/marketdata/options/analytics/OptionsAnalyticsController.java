@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.options.analytics;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.marketdata.options.OiQuery;
@@ -55,13 +56,10 @@ public class OptionsAnalyticsController {
   public record OiStats(BigDecimal pcr, BigDecimal maxPain, long ceOi, long peOi, OffsetDateTime asOf) {}
 
   public record ActiveStrikesResponse(
-      BigDecimal sentimentPct, List<StrikeView> items, OffsetDateTime asOf) {}
-
-  /** As {@link ActiveStrikesResponse} but with the optional per-bucket sentiment series. */
-  public record ActiveStrikesSeriesResponse(
       BigDecimal sentimentPct,
       List<StrikeView> items,
-      List<ActiveStrikeService.SentimentPoint> sentimentSeries,
+      @JsonInclude(JsonInclude.Include.NON_NULL) List<ActiveStrikeService.SentimentPoint>
+              sentimentSeries,
       OffsetDateTime asOf) {}
 
   public record StrikeView(BigDecimal strike, long ceOi, long peOi) {}
@@ -93,7 +91,7 @@ public class OptionsAnalyticsController {
   }
 
   @GetMapping("/active-strikes")
-  public Object activeStrikes(
+  public ActiveStrikesResponse activeStrikes(
       @RequestParam(required = false) String mode,
       @RequestParam String name,
       @RequestParam(required = false) String date,
@@ -114,7 +112,8 @@ public class OptionsAnalyticsController {
             .toList();
     OffsetDateTime asOf = latest.get(latest.size() - 1).bucket();
     if (buckets == null) {
-      return new ActiveStrikesResponse(sentiment, items, asOf);
+      // NON_NULL on sentimentSeries omits the key, keeping the absent-buckets response byte-identical.
+      return new ActiveStrikesResponse(sentiment, items, null, asOf);
     }
     // Anchor on the newest captured bucket (clock-independent); span the last `buckets` buckets.
     OffsetDateTime newest = latest.get(0).bucket();
@@ -123,7 +122,7 @@ public class OptionsAnalyticsController {
         reader.series(q.name(), exp, q.interval(), from, newest.plus(q.interval().bucket()));
     List<ActiveStrikeService.SentimentPoint> sentimentSeries =
         activeStrikes.sentimentSeries(series);
-    return new ActiveStrikesSeriesResponse(sentiment, items, sentimentSeries, asOf);
+    return new ActiveStrikesResponse(sentiment, items, sentimentSeries, asOf);
   }
 
   /** /oi-analysis: the data-table archetype source (per-strike rows for the latest bucket). */

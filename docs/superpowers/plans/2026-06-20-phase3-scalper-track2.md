@@ -37,6 +37,38 @@ The master plan §12.10 step 7 fixes the v1 surface. **Index-option core first:*
 #10 (Connect-the-Dots) is the master confluence scorer — **build it first**; the other 11 are its
 sub-cases.
 
+## Engine model for `options_of_underlying` — Model A (owner-locked 2026-06-20)
+
+The Siva scalper makes its **entry decision on the index, not the option** — RSI(3m), VWAP/VWMA/
+PSAR/Supertrend, OI quadrants, breadth, VIX, basis are all index/market-level; the option is only the
+vehicle, with the strike chosen mechanically (ATM±3, delta 0.6–0.7, premium band → `StrikePicker`).
+**Owner clarification: the analysis chart is the index FUTURES, not spot** (the future carries the
+volume the §0B VWAP/VWMA/volume gates need).
+
+**Decision — Model A (index-driven, option in the side-channel):**
+
+- `resolveUniverse(options_of_underlying)` → the **front index FUTURE** (reuse `futuresResolver`, the
+  same front/next + roll logic as `futures_of_underlying`). The engine evaluates + charts on the
+  future, so the §0B chart gates read it natively — no context-alias gymnastics.
+- The OI/macro half is keyed on the **underlying index name** (e.g. `"NIFTY 50"`) via `MarketOiClient`
+  (#40, done) — independent of which future is the evaluated instrument.
+- At signal time (the confluence seam) `StrikePicker` picks the CE/PE from the live chain
+  (`MarketOiClient.chain()`, to build); the chosen option rides the **V009 side-channel as the
+  `tradeable`** (#45). The signal stays **keyed on the future**, so the engine's
+  *signal-instrument == evaluated-instrument* invariant is preserved.
+- **Entry is evaluated on the future; EXIT is on the option premium** → the picked option's series is
+  subscribed for exit pricing.
+
+*Rejected — Model B (evaluate the picked option, futures precedent):* fits the invariant with no new
+field, but forces every index indicator through context aliases, freezes the strike at daily reload
+(stale as spot drifts intraday), and evaluates the option's own thin chart — none of which is §0B.
+
+**#41 + #43 are ONE coupled slice (do not land piecemeal):** resolving to the future *without* the
+tag-gated confluence seam would let a published scalper emit on chart-only gates with no OI gate (a
+mis-fire). Land together: resolver→future · tag-gate (`tags` contains `scalper`) · confluence seam
+(mirror `EmissionGuard` Optional injection, consulted after the chart `EntryEvaluator` passes, before
+`emitEntry`) · `chain()`→`StrikePicker` pick · tradeable on the side-channel.
+
 ## Build order (master plan §12.10) + status
 
 0. **Provenance** — `docs/strategy-sources.md` manifest + per-strategy source tags. *(this commit)*

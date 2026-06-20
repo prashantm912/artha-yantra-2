@@ -20,7 +20,7 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-surface-0 p-4">
+    <main className="flex min-h-screen items-center justify-center bg-surface-0 p-4">
       <form
         onSubmit={onSubmit}
         className="w-full max-w-sm rounded-lg border border-ay-border bg-surface-1 p-6 shadow"
@@ -51,6 +51,6 @@ export function LoginPage() {
           {loggingIn ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
-    </div>
+    </main>
   );
 }

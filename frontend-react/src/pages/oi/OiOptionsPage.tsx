@@ -67,7 +67,12 @@ export function OiOptionsPage() {
       )}
 
       {/* Desktop / landscape: mirrored CE | Strike | PE grid */}
-      <div className="hidden max-h-[62vh] overflow-auto rounded border border-ay-border md:block">
+      <div
+        className="hidden max-h-[62vh] overflow-auto rounded border border-ay-border md:block"
+        tabIndex={0}
+        role="region"
+        aria-label="Options OI chain"
+      >
         <table className="w-full border-collapse text-sm">
           <thead className="sticky top-0 bg-surface-1 text-ay-muted">
             <tr>

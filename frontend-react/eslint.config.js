@@ -22,6 +22,12 @@ export default tseslint.config(
     rules: {
       ...reactHooks.configs.recommended.rules,
       ...jsxA11y.flatConfigs.recommended.rules,
+      // axe's scrollable-region-focusable (wcag 2.1.1) REQUIRES a focusable scroll container, which
+      // this rule otherwise forbids — allow tabIndex on region/group/tabpanel (the dense-table pattern).
+      'jsx-a11y/no-noninteractive-tabindex': [
+        'error',
+        { tags: [], roles: ['tabpanel', 'region', 'group'], allowExpressionValues: true },
+      ],
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
       // D1 typing bar — no `any`.
       '@typescript-eslint/no-explicit-any': 'error',

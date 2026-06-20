@@ -11,6 +11,7 @@
     "lint": "eslint src",
     "test": "vitest",
     "test:ci": "vitest run",
+    "e2e": "playwright test",
     "gen:api": "openapi-typescript ../contracts/strategy-signal-service.openapi.json -o ../contracts/gen/strategy-signal-service.d.ts && openapi-typescript ../contracts/market-data-service.openapi.json -o ../contracts/gen/market-data-service.d.ts && openapi-typescript ../contracts/edge-gateway.openapi.json -o ../contracts/gen/edge-gateway.d.ts && openapi-typescript ../contracts/backtest-service.openapi.json -o ../contracts/gen/backtest-service.d.ts && openapi-typescript ../contracts/optimizer-service.openapi.json -o ../contracts/gen/optimizer-service.d.ts"
   },
   "dependencies": {
@@ -24,6 +25,7 @@
     "zustand": "^5.0.2"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.10.1",
     "@eslint/js": "^9.17.0",
     "@playwright/test": "^1.49.0",
     "@tailwindcss/vite": "^4.0.0",

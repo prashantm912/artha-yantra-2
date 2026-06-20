@@ -7,6 +7,7 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
+    host: '127.0.0.1', // bind IPv4 so Playwright's 127.0.0.1 health-check + curl reach it (Windows dual-stack)
     port: 4300,
     proxy: {
       '/api': { target: 'http://127.0.0.1:8080', secure: false, changeOrigin: true },

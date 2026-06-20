@@ -3656,4 +3656,95 @@ Announcement need NEW external data sources (defer or skip — single-owner) · 
 assessment is a Wave-4 entry task · the TradingView fallback binary, if ever used, must be gitignored
 (Personal/Non-commercial license, no redistribution).
 
+### 20.6 Corrected oipulse→React page mapping (audit 2026-06-21, AUTHORITATIVE — supersedes §11.1 labels)
+
+A page-by-page audit of the ArthaYantra Angular UI against the oipulse per-page study docs found the
+Angular app is a **condensed MVP** that **mislabels, conflates, and omits** large parts of oipulse's
+structure. §11.1's inventory inherited those labels (it mapped the condensed Angular pages to oipulse
+names). **Do NOT port the condensed Angular pages 1:1** — build the oipulse page set faithfully (the §20
+component-first wave plan). Key corrections:
+
+- **MISLABEL — the anchor:** Angular `/oi/options` "Options OI Analysis" renders **all strikes,
+  strike-on-rows, no strike selector, PCR/max-pain header** → that is the oipulse **Options Chain**
+  structure, NOT oipulse "Options OI Analysis" (which is **per-strike intraday, time-on-rows, with a
+  Strike selector**). **Resolution (DONE in PR-F):** the React anchor is renamed **Options Chain**
+  (`/options/options-chain`, `OptionsChainPage`). It is a "lite" chain off the `oi-analysis` endpoint
+  (9 cols); the **full 45-col chain** (per-strike PCR/IV + black76 greeks via the existing `/chain`
+  endpoint) is a Wave-1 enhancement. The true **"Options OI Analysis"** (per-strike intraday: Strike
+  selector + buckets-on-rows, a NEW time-rows table variant — `MirroredCspTable` is strike-rows only)
+  is a **Wave-1 build item** (the `oi-analysis` endpoint already carries the bucket dimension).
+- **CONFLATIONS to un-merge in the waves:**
+  - Angular `/oi/options` absorbed **OI Statistics** (→ PCR/max-pain header only; the per-strike OI-wall
+    bars are unbuilt) + **Active Strikes** (→ sentiment% only) + spurt-summary. Build OI Statistics,
+    Active Strikes OI, Active Strikes IV as their own pages.
+  - Angular `/oi/futures` merged **4** oipulse pages: Futures OI Analysis + OI Chart + OI Buzz + Market
+    Movers. Split into 4 routes (`futures-spurt`, `banks-grid`, `eod` are already faithful, standalone).
+  - Angular `/market/fii-dii` merged **Capital Market + Participant-OI** (the `/fii-dii/long-short`
+    endpoint also exists). Split into Capital Market, Participant-wise OI, FII Long-Short Ratio, FII
+    Derivative Stats.
+- **MISLABEL — breadth:** `/market/breadth` "Breadth" is an ArthaYantra-original (advance/decline +
+  delivery leaders); oipulse has **no "Breadth" page** — it has **Delivery Data** (per-stock %delivery),
+  a different page. Keep Breadth as AY-original; build Delivery Data separately under Equity.
+- **MISSING oipulse pages (build per wave, by scalping value):** Options — Options OI Analysis (real),
+  OI Chart, Options Chart, OI Statistics, Trending OI, Trending OI-PA, Active Strikes OI, Active Strikes
+  IV, Interval-wise OI, Multiple OI Chart; Futures — Pre-open; FII/DII — FII Derivative Stats, FII LSR
+  (as pages); **all 8 Equity pages**; Features — Connecting Dots, Vix & Index, World Indices.
+
+**Condensation tally:** Angular had **10** pages covering (mislabeled/partially) what oipulse splits
+across **~34** options+futures+fii-dii+equity pages. The wave page-list is the oipulse set, NOT the
+Angular 10. Each wave's page is built faithful to its `docs/oipulse-study/<area>/<page>.md` doc.
+
+### 20.7 Wave-1 Options Chain — fidelity acceptance criteria (vs oipulse, audit 2026-06-21)
+
+The PR-F anchor (`OptionsChainPage`) is a **"lite" chain** that proved the architecture (FilterBar +
+`MirroredCspTable` + atoms + cascade + adaptive mobile) but is NOT yet a faithful oipulse Options Chain.
+Wave-1 makes it faithful to `docs/oipulse-study/options/options-chain.md`. Acceptance criteria (the
+confirmed gaps — PR-F has 9 cols/neutral colours/5 controls; oipulse has ~17 visible cols + colour-coded
+cells + Go/Column-Setting):
+
+1. **Columns — 18 visible (from 9):** exact order **confirmed live 2026-06-21** (Claude-in-Chrome,
+   SENSEX chain) — CALL `OI Int · OI% · OI · OI Chng · IV · LTP · LTP% · LTP Chg` | **Strike** | PUT
+   mirror `LTP Chg · LTP% · LTP · IV · OI Chng · OI · OI% · OI Int` + **PCR Ratio**. Plus a **Column
+   Setting** modal toggling the ~28 hidden cols (Greeks/Premium/Intrinsic/Volume/O=H/O=L). **Backend:**
+   the full **`/chain` endpoint** + the **greeks-in-chain** task (per-strike PCR/IV + black76 greeks) —
+   supersedes the lite `oi-analysis` feed.
+2. **Colours (carry the signal — currently neutral):** OI bars **red (CALL) / green (PUT)** (`DataBar`
+   already takes `tone` → pass by side); **OI Chng green/red bars** (not text); per-row **`OiBadge4`**
+   (OI Int column); **ATM-row cream tint** (#ffeeba-equivalent token) + clickable; ITM row tint;
+   **max-OI / max-ΔOI / max-Vol cell highlights**; LTP **flash on change** (`usePulse`).
+3. **Controls:** add a **Go button**; **grouped Name select** (Index / Stocks headers); Interval add
+   **Full-Day / 2h / 4h / custom-time**; add the **Column Setting** button. (Mode: keep the toggle or
+   switch to a radio — note the divergence.)
+4. **Header strip:** **INDIA VIX** (LTP/DH/DL/DO) · Total PCR (+prev +chg) · **ATM** · **Days-to-Expiry**
+   · underlying LTP/DH/DL/DO. **Move Max-pain/Sentiment OFF this header** — they belong to the separate
+   **OI Statistics** / **Active Strikes** pages (the current header bled them in).
+5. **Also Wave-1 (distinct page):** the TRUE **"Options OI Analysis"** — per-strike intraday, a **Strike
+   selector** + **buckets-on-rows** (a NEW time-rows mirrored-table variant; `MirroredCspTable` is
+   strike-rows only). Endpoint `oi-analysis` already carries the bucket dimension.
+
+Live pixel side-by-side (Claude-in-Chrome on the owner's logged-in oipulse) is the visual QA gate when
+building this — the study doc is the authoritative spec until then.
+
+### 20.8 Standing UI-fidelity rules (apply to EVERY page, every wave — AUTHORITATIVE)
+
+1. **UI authority = the oipulse study, NOT the Angular app.** Every React page's layout, columns,
+   colours, controls, header, and interactions are replicated from `docs/oipulse-study/<area>/<page>.md`
+   (the live oipulse capture). The React pages are **deliberately DIFFERENT** from the Angular pages
+   (which were a condensed/mislabeled MVP — §20.6). **NEVER port a page from, or use as a UI/visual
+   fidelity oracle, `frontend-ui/` (the Angular app).** The Angular code is a reference ONLY for: (a)
+   framework-free **pure-TS ports** (decimal, conflation, ws-client/`nextReconnectDelay`,
+   oi-interpretation, `foldStrikes`); (b) **backend wire-type + endpoint contracts** (the `name` param,
+   `{items}` envelope, decimal-as-string conventions, the OI-analytics endpoint shapes). For anything a
+   user SEES, the oracle is the oipulse doc + the live oipulse page — never the Angular page.
+
+2. **Per-page live side-by-side QA gate (mandatory acceptance).** After building EACH page, open the
+   corresponding **live oipulse page** in the owner's Chrome via **Claude-in-Chrome** and compare
+   directly: columns (count + order), **cell colours** (the visual signal — side-coloured OI bars,
+   per-row 4-state badges, max/min cell highlights, ATM-band tint), controls (set + position + type),
+   and header metrics. A page is **not "done"** until it matches the live oipulse page — within the
+   deliberate, documented substitutions only (LWC for TradingView; our `--ay-*` themes; our decimal
+   handling; black76 greeks instead of oipulse's server values). Record any residual divergence in that
+   page's `docs/manual-tests/` guide. (Owner connects the Claude extension for the live check; the study
+   doc is the authoritative spec until then.)
+
 *End of plan.*

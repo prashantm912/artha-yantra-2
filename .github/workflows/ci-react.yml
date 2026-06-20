@@ -1,0 +1,43 @@
+# PR-F (master plan §20): React Foundation gate — lint (no-explicit-any + jsx-a11y + LWC containment)
+# -> unit/RTL tests (Vitest/jsdom) -> production build (tsc -b + vite, bundle budget). Path-filtered.
+# The Docker image + the e2e/axe shard land later (Dockerfile at cutover; e2e against the mock stack).
+name: ci-react
+
+on:
+  pull_request:
+    paths:
+      - "frontend-react/**"
+      - "contracts/**"
+      - ".github/workflows/ci-react.yml"
+  push:
+    branches: [main]
+    paths:
+      - "frontend-react/**"
+      - "contracts/**"
+
+jobs:
+  react:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend-react
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend-react/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint (ESLint — no-explicit-any, jsx-a11y, lightweight-charts containment)
+        run: npm run lint
+
+      - name: Unit + RTL tests (Vitest + jsdom)
+        run: npm run test:ci
+
+      - name: Production build (tsc -b + vite)
+        run: npm run build

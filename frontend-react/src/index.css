@@ -1,0 +1,154 @@
+@import 'tailwindcss';
+
+/* ArthaYantra design tokens — ONE consolidated --ay-* palette (ported from frontend-ui
+   styles.scss, C-2.23/D2). Raw hex lives HERE AND ONLY HERE. Each named theme is a complete
+   token set, swapped via data-theme on <html> (master plan §20). Dark is the default. */
+
+/* Tailwind dark: variant follows any non-light theme. */
+@custom-variant dark (&:where(:not([data-theme='light']) *), &:where(:not([data-theme='light'])));
+
+/* Expose the --ay-* palette as Tailwind utilities (bg-surface-0, text-muted, …).
+   `inline` emits var() references so runtime data-theme switching re-themes everything. */
+@theme inline {
+  --color-surface-0: var(--ay-surface-0);
+  --color-surface-1: var(--ay-surface-1);
+  --color-surface-2: var(--ay-surface-2);
+  --color-ay-border: var(--ay-border);
+  --color-ay-text: var(--ay-text);
+  --color-ay-muted: var(--ay-text-muted);
+  --color-bull: var(--ay-bull);
+  --color-bear: var(--ay-bear);
+  --color-warn: var(--ay-warn);
+  --color-accent: var(--ay-accent);
+  --font-sans: Inter, 'Segoe UI', system-ui, sans-serif;
+}
+
+/* ── Dark (default) ── */
+:root,
+[data-theme='dark'] {
+  --ay-surface-0: #0c1017;
+  --ay-surface-1: #131926;
+  --ay-surface-2: #1b2335;
+  --ay-border: #2a3550;
+  --ay-text: #e6ebf5;
+  --ay-text-muted: #93a0bd;
+  --ay-bull: #22c55e;
+  --ay-bear: #ef4444;
+  --ay-warn: #f59e0b;
+  --ay-accent: #38bdf8;
+  --ay-chart-grid: #1f2940;
+  --ay-chart-crosshair: #64748b;
+  color-scheme: dark;
+}
+
+/* ── Light (WCAG-retuned semantics for near-white surfaces) ── */
+[data-theme='light'] {
+  --ay-surface-0: #f6f8fc;
+  --ay-surface-1: #ffffff;
+  --ay-surface-2: #eef2f9;
+  --ay-border: #d5deee;
+  --ay-text: #16203a;
+  --ay-text-muted: #5a6882;
+  --ay-bull: #166534;
+  --ay-bear: #991b1b;
+  --ay-warn: #b45309;
+  --ay-accent: #0369a1;
+  --ay-chart-grid: #e2e8f0;
+  --ay-chart-crosshair: #94a3b8;
+  color-scheme: light;
+}
+
+/* ── OiPulse Red (faithful to the study: near-black shell, #c42b1e brand) ── */
+[data-theme='oipulse-red'] {
+  --ay-surface-0: #0c0c0c;
+  --ay-surface-1: #161616;
+  --ay-surface-2: #211c1c;
+  --ay-border: #3a2a2a;
+  --ay-text: #f0eaea;
+  --ay-text-muted: #b59a9a;
+  --ay-bull: #4caf50;
+  --ay-bear: #f44336;
+  --ay-warn: #ffc107;
+  --ay-accent: #e2574c;
+  --ay-chart-grid: #2a2020;
+  --ay-chart-crosshair: #7c423e;
+  color-scheme: dark;
+}
+
+/* ── Midnight Blue ── */
+[data-theme='midnight-blue'] {
+  --ay-surface-0: #0a0f1f;
+  --ay-surface-1: #111933;
+  --ay-surface-2: #182347;
+  --ay-border: #28365e;
+  --ay-text: #e8edfb;
+  --ay-text-muted: #94a3c8;
+  --ay-bull: #34d399;
+  --ay-bear: #fb7185;
+  --ay-warn: #fbbf24;
+  --ay-accent: #60a5fa;
+  --ay-chart-grid: #1c2950;
+  --ay-chart-crosshair: #5b6da3;
+  color-scheme: dark;
+}
+
+/* ── High Contrast (pure black, vivid semantics; ≥7:1) ── */
+[data-theme='high-contrast'] {
+  --ay-surface-0: #000000;
+  --ay-surface-1: #0a0a0a;
+  --ay-surface-2: #161616;
+  --ay-border: #5a5a5a;
+  --ay-text: #ffffff;
+  --ay-text-muted: #d4d4d4;
+  --ay-bull: #00e676;
+  --ay-bear: #ff5252;
+  --ay-warn: #ffd600;
+  --ay-accent: #40c4ff;
+  --ay-chart-grid: #2a2a2a;
+  --ay-chart-crosshair: #888888;
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: var(--ay-surface-0);
+  color: var(--ay-text);
+  font-family: var(--font-sans);
+}
+
+#root {
+  min-height: 100%;
+}
+
+/* Screen-reader-only (axe page-has-heading-one without visual change). */
+.ay-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Price-flash pulse (E-3), reduced-motion aware. */
+@keyframes ay-flash {
+  0% {
+    background-color: color-mix(in srgb, var(--ay-accent) 18%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+.ay-pulse {
+  animation: ay-flash 0.5s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ay-pulse {
+    animation: none;
+  }
+}

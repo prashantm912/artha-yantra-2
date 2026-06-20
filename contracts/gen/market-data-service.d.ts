@@ -100,6 +100,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/eod-backfill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["trigger"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/candles/refresh": {
         parameters: {
             query?: never;
@@ -548,6 +564,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/eod-backfill/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["status_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/candles": {
         parameters: {
             query?: never;
@@ -715,7 +747,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["status_1"];
+        get: operations["status_2"];
         put?: never;
         post?: never;
         delete?: never;
@@ -868,6 +900,8 @@ export interface components {
             spotDelta?: number;
             /** Format: int64 */
             oiChange?: number;
+            oiChangePct?: number;
+            priceChangePct?: number;
         };
         StrikeSpurt: {
             strike?: number;
@@ -878,6 +912,7 @@ export interface components {
             /** Format: int64 */
             oiChange?: number;
             spurtPct?: number;
+            ltpChangePct?: number;
             /** @enum {string} */
             interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
         };
@@ -992,8 +1027,14 @@ export interface components {
         ActiveStrikesResponse: {
             sentimentPct?: number;
             items?: components["schemas"]["StrikeView"][];
+            sentimentSeries?: components["schemas"]["SentimentPoint"][];
             /** Format: date-time */
             asOf?: string;
+        };
+        SentimentPoint: {
+            /** Format: date-time */
+            bucket?: string;
+            sentimentPct?: number;
         };
         StrikeView: {
             strike?: number;
@@ -1100,6 +1141,19 @@ export interface components {
             oiPct?: number;
             /** @enum {string} */
             interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+        };
+        Status: {
+            jobId?: string;
+            state?: string;
+            /** Format: date-time */
+            lastRun?: string;
+            /** Format: int64 */
+            durationMs?: number;
+            nse?: components["schemas"]["ExchangeResult"];
+            bse?: components["schemas"]["ExchangeResult"];
+            /** Format: int32 */
+            ratiosDetected?: number;
+            error?: string;
         };
         Candle: {
             exchange?: string;
@@ -1607,6 +1661,37 @@ export interface operations {
                 content: {
                     "*/*": {
                         [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    trigger: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": {
+                        [key: string]: string;
                     };
                 };
             };
@@ -2207,6 +2292,7 @@ export interface operations {
                 date?: string;
                 interval?: string;
                 expiry?: string;
+                buckets?: number;
             };
             header?: never;
             path?: never;
@@ -2612,6 +2698,35 @@ export interface operations {
             };
         };
     };
+    status_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["Status"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     candles: {
         parameters: {
             query: {
@@ -2937,7 +3052,7 @@ export interface operations {
             };
         };
     };
-    status_1: {
+    status_2: {
         parameters: {
             query?: never;
             header?: never;

@@ -40,7 +40,7 @@ rule lives in the three `.md` docs (its S20–S23 raw decks are external-archive
 | # | Strategy | §6 key | In-repo S24 deck (`…/Daywise Sessions/…`) | Phase-3 scope | last-ported |
 |---|---|---|---|---|---|
 | 1 | Two-Candle Theory | `two_candle` | `Day 4/2 Candle Theory.pdf` | **core** | — |
-| 2 | Open=High / Open=Low | `open_high_low` | `Day 14/Open & High Strategy - Index Options & Futures (2).pdf` | derived | `19e7234` (→ §3.2) |
+| 2 | Open=High / Open=Low | `open_high_low` | `Day 14/Open & High Strategy - Index Options & Futures (2).pdf` | derived | `5cf157b` (→ §3.2; per-strike faithful) |
 | 3 | Market Movers | `market_movers` | `Day 10/Market Movers Strategy.pdf` | **DEFER** (equity-fut screener) | — |
 | 4 | Gap Theory | `gap` | `Day 6/Gap Theory.pdf` | derived | `61292e2` (→ §3.4) |
 | 5 | Trending-OI Crossover | `trending_oi_crossover` | — (consolidated doc only) | **core** | — |
@@ -63,11 +63,13 @@ external (not vendored) — already folded into the structured docs above; consu
 The four derived scalpers seeded as registry drafts (`scalper-strategies/*.yaml`) port a SUBSET of their
 spec; the deferred legs are recorded here so a later re-port re-opens the right gap.
 
-- **#2 Open=High / Open=Low (§3.2, `19e7234`):** v1 ships the front-Future OH/OL mark x the underlying
-  OI-quadrant probability tier (OI-tier v1). DEFERRED: the per-strike ATM±3 strike-count confluence
-  (≥3 strikes matching, "very high" at 4–5) — needs a per-strike-OHLC market-data endpoint that does
-  not yet exist — and the OiPulse ≥90% AI badge (a Phase-4 OiPulse-parity model we do not have; treated
-  as an OPTIONAL confirmation degraded around, never required).
+- **#2 Open=High / Open=Low (§3.2, `5cf157b`):** NOW PER-STRIKE FAITHFUL. The OI-quadrant proxy was
+  dropped; the tier is the source's Table-1 (Futures-OH + ≥3 ATM±3 Call strikes Open=High + Put Open=Low
+  → HIGH; few → MILD; both-sides OH → stand aside) refined by Table-2 (a CE-OH premium falling on ≥50k
+  volume, or a >50% fall vs prev close → LOW), from `/options/strike-session-stats` (per-strike session
+  OHLC+volume derived from `options_chain_snapshots`). RSI>50 entry. Caveat: 5-min snapshot resolution
+  for the volume-candle test (native 3-min needs 3-min capture — `snapshot-interval-ms`). STILL DEFERRED:
+  only the OiPulse ≥90% AI badge (a Phase-4 OiPulse-parity model; OPTIONAL, degraded around, never required).
 - **#9 Morning Trade (§3.9, `b8f9cdb`):** an opening-tick scalp — the session window runs from 09:16
   (the general "after 09:45" cross-strategy rule does NOT apply); VWAP is degraded (soft, not the hard
   gate) before 10:30 IST; SL = the first session candle's low (CE) / high (PE); profits-only small size

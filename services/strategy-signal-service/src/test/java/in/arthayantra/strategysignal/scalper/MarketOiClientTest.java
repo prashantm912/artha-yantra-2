@@ -222,6 +222,54 @@ class MarketOiClientTest {
   }
 
   @Test
+  void mapsTheOpenHighPerStrikeFootprint() {
+    wire();
+    stub(
+        "/api/v1/market/options/strike-session-stats",
+        "{\"atmStrike\":\"20000\",\"items\":["
+            + "{\"strike\":\"19900\",\"optionType\":\"CE\",\"ohMark\":true,\"olMark\":false,"
+            + "\"last\":\"90\",\"open\":\"100\",\"high\":\"100\",\"declineVolume\":60000,"
+            + "\"fallPctFromPrevClose\":\"-12.5\"},"
+            // a PE leg with no declineVolume (null) and a string-typed last
+            + "{\"strike\":\"19900\",\"optionType\":\"PE\",\"ohMark\":false,\"olMark\":true,"
+            + "\"last\":\"40\",\"open\":\"40\",\"high\":\"45\",\"fallPctFromPrevClose\":\"5\"},"
+            // a malformed row (bad optionType) must be skipped, not fatal
+            + "{\"strike\":\"20000\",\"optionType\":\"XX\",\"ohMark\":true,\"olMark\":false}]}");
+
+    MarketOiClient.OpenHighStats stats = client.openHighStats(UNDERLYING, EXPIRY, 3);
+
+    assertThat(stats.atmStrike()).isEqualByComparingTo("20000");
+    assertThat(stats.items()).hasSize(2); // the XX row dropped
+    MarketOiClient.StrikeStat ce = stats.items().get(0);
+    assertThat(ce.type()).isEqualTo(in.arthayantra.black76.Black76.OptionType.CE);
+    assertThat(ce.strike()).isEqualByComparingTo("19900");
+    assertThat(ce.ohMark()).isTrue();
+    assertThat(ce.last()).isEqualByComparingTo("90");
+    assertThat(ce.declineVolume()).isEqualTo(60000L);
+    assertThat(ce.fallPctFromPrevClose()).isEqualByComparingTo("-12.5");
+    MarketOiClient.StrikeStat pe = stats.items().get(1);
+    assertThat(pe.olMark()).isTrue();
+    assertThat(pe.declineVolume()).isNull(); // absent -> null
+    server.verify();
+  }
+
+  @Test
+  void openHighStatsDegradesToEmptyOnUpstreamFailure() {
+    wire();
+    server
+        .expect(
+            ExpectedCount.once(),
+            requestTo(containsString("/api/v1/market/options/strike-session-stats")))
+        .andRespond(withServerError());
+
+    MarketOiClient.OpenHighStats stats = client.openHighStats(UNDERLYING, EXPIRY, 3);
+
+    // empty footprint -> the OpenHighLowGate then blocks (a missing endpoint never yields a HIGH).
+    assertThat(stats.atmStrike()).isNull();
+    assertThat(stats.items()).isEmpty();
+  }
+
+  @Test
   void breadthDefaultsToZeroZeroSoTheGateCannotConfirm() {
     wire();
     stub("/api/v1/market/options/iv-history", "{\"currentIv\":\"0.14\",\"rank\":\"0.5\"}");

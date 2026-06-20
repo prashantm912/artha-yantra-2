@@ -21,7 +21,12 @@ public record ScalperOiProps(
     BigDecimal ivPairMinGap,
     BigDecimal ivBothHighFloor,
     BigDecimal spurtOiPct,
-    BigDecimal spurtPricePct) {
+    BigDecimal spurtPricePct,
+    BigDecimal openHighMinStrikes,
+    BigDecimal openHighFallVolumeFloor,
+    BigDecimal openHighMaxPrevCloseFallPct,
+    BigDecimal openHighWindow,
+    BigDecimal openHighRsiFloor) {
 
   // T2.1: the #5 call-put delta-imbalance HARD pre-gate floor (>= 50% of the larger leg).
   private static final BigDecimal DEFAULT_CROSS_FILTER_PCT = new BigDecimal("50");
@@ -36,6 +41,17 @@ public record ScalperOiProps(
   // T2.7: the OI-spurt magnitudes (% change) the spurt dot needs on BOTH legs.
   private static final BigDecimal DEFAULT_SPURT_OI_PCT = new BigDecimal("50");
   private static final BigDecimal DEFAULT_SPURT_PRICE_PCT = new BigDecimal("50");
+  // #2 (section 3.2) Table-1: the per-side OH-strike count that makes the footprint a HIGH (>=3).
+  private static final BigDecimal DEFAULT_OPEN_HIGH_MIN_STRIKES = new BigDecimal("3");
+  // #2 Table-2: the declineVolume floor on the representative OH strike that downgrades a fall to LOW
+  // (fell on heavy volume = a real opposite player). 50000 contracts is the doc's reference floor.
+  private static final BigDecimal DEFAULT_OPEN_HIGH_FALL_VOLUME_FLOOR = new BigDecimal("50000");
+  // #2 extra-LOW rule: a >50% premium fall from the previous close on the OH strike = a bigger player.
+  private static final BigDecimal DEFAULT_OPEN_HIGH_MAX_PREV_CLOSE_FALL_PCT = new BigDecimal("50");
+  // #2: the ATM+-window of listed strikes the per-strike footprint is read over.
+  private static final BigDecimal DEFAULT_OPEN_HIGH_WINDOW = new BigDecimal("3");
+  // #2: the relaxed RSI floor (source "RSI >50") that replaces the 60-80 band for the open-high path.
+  private static final BigDecimal DEFAULT_OPEN_HIGH_RSI_FLOOR = new BigDecimal("50");
 
   /** Fills any unset field with its documented default (so a partial yaml override is honoured). */
   public ScalperOiProps {
@@ -45,10 +61,19 @@ public record ScalperOiProps(
     ivBothHighFloor = ivBothHighFloor == null ? DEFAULT_IV_BOTH_HIGH_FLOOR : ivBothHighFloor;
     spurtOiPct = spurtOiPct == null ? DEFAULT_SPURT_OI_PCT : spurtOiPct;
     spurtPricePct = spurtPricePct == null ? DEFAULT_SPURT_PRICE_PCT : spurtPricePct;
+    openHighMinStrikes = openHighMinStrikes == null ? DEFAULT_OPEN_HIGH_MIN_STRIKES : openHighMinStrikes;
+    openHighFallVolumeFloor =
+        openHighFallVolumeFloor == null ? DEFAULT_OPEN_HIGH_FALL_VOLUME_FLOOR : openHighFallVolumeFloor;
+    openHighMaxPrevCloseFallPct =
+        openHighMaxPrevCloseFallPct == null
+            ? DEFAULT_OPEN_HIGH_MAX_PREV_CLOSE_FALL_PCT
+            : openHighMaxPrevCloseFallPct;
+    openHighWindow = openHighWindow == null ? DEFAULT_OPEN_HIGH_WINDOW : openHighWindow;
+    openHighRsiFloor = openHighRsiFloor == null ? DEFAULT_OPEN_HIGH_RSI_FLOOR : openHighRsiFloor;
   }
 
   /** The all-defaults instance (used where config is absent — tests, the pure-scorer fallback). */
   public static ScalperOiProps defaults() {
-    return new ScalperOiProps(null, null, null, null, null, null);
+    return new ScalperOiProps(null, null, null, null, null, null, null, null, null, null, null);
   }
 }

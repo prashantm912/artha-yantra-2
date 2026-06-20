@@ -12,6 +12,8 @@ import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategyengine.series.EngineSeries;
 import in.arthayantra.strategyengine.series.SeriesKey;
 import in.arthayantra.strategysignal.scalper.MarketOiClient.ChainSnapshot;
+import in.arthayantra.strategysignal.scalper.MarketOiClient.OpenHighStats;
+import in.arthayantra.strategysignal.scalper.MarketOiClient.StrikeStat;
 import in.arthayantra.strategysignal.scalper.ScalperConfluenceGate.Decision;
 import in.arthayantra.strategysignal.scalper.ScalperGateContext.Chart;
 import in.arthayantra.strategysignal.scalper.ScalperGateContext.Macro;
@@ -463,6 +465,23 @@ class ScalperConfluenceGateTest {
         gapBar(2, "96", "100", "93", "97"));
   }
 
+  private static StrikeStat ohStrike(String strike, in.arthayantra.black76.Black76.OptionType type) {
+    return new StrikeStat(bd(strike), type, true, false, bd("100"), bd("100"), bd("100"), null, null);
+  }
+
+  // a bullish HIGH footprint: 3 CE OH strikes + 1 PE OL, ATM 20000.
+  private static OpenHighStats bullishHighFootprint() {
+    return new OpenHighStats(
+        bd("20000"),
+        List.of(
+            ohStrike("19900", CE),
+            ohStrike("20000", CE),
+            ohStrike("20100", CE),
+            new StrikeStat(
+                bd("19900"), in.arthayantra.black76.Black76.OptionType.PE, false, true, bd("40"),
+                bd("40"), bd("45"), null, null)));
+  }
+
   // a bullish context whose underlying quadrant (LONG_BUILDUP) confirms a CE OH + within-band spurts.
   private static ScalperGateContext bullContextWithSpurts(String spurtOiPct, String spurtPricePct) {
     return new ScalperGateContext(
@@ -482,6 +501,7 @@ class ScalperConfluenceGateTest {
     when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
     when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any()))
         .thenReturn(bullContextWithSpurts("10", "20"));
+    when(client.openHighStats(eq("NIFTY 50"), any(), eq(3))).thenReturn(bullishHighFootprint());
 
     Optional<Decision> decision =
         new ScalperConfluenceGate(client, ScalperOiProps.defaults())
@@ -492,19 +512,31 @@ class ScalperConfluenceGateTest {
   }
 
   @Test
-  void openHighLowStrategyBlocksAtTheMildTierWhenTheQuadrantDoesNotConfirm() {
+  void openHighLowStrategyBlocksAtTheMildTierWhenFewerThanMinStrikes() {
     MarketOiClient client = mock(MarketOiClient.class);
     when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
-    // OH on the future but a bearish (SHORT_BUILDUP) quadrant for the CE side -> MILD -> block.
-    ScalperGateContext mild =
-        new ScalperGateContext(
-            "NIFTY 50", IST_TIME,
-            new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("130000")),
-            new Oi(
-                OiQuadrant.SHORT_BUILDUP, OiQuadrant.SHORT_BUILDUP, bd("10"), bd("5"), bd("5"), null,
-                null, null, false, false, null, bd("10"), bd("20")),
-            new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), null, null));
-    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any())).thenReturn(mild);
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any()))
+        .thenReturn(bullContextWithSpurts("10", "20"));
+    // OH on the future but only 2 CE OH strikes (< minStrikes 3) -> MILD footprint -> block.
+    OpenHighStats few =
+        new OpenHighStats(bd("20000"), List.of(ohStrike("19900", CE), ohStrike("20000", CE)));
+    when(client.openHighStats(eq("NIFTY 50"), any(), eq(3))).thenReturn(few);
+
+    assertThat(
+            new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+                .evaluate(OPEN_HIGH_LOW_CFG, bullBank(), openHighFuture(), 2, NOW, IST_TIME, EOD))
+        .isEmpty();
+  }
+
+  @Test
+  void openHighLowStrategyBlocksWhenTheFootprintIsUnavailable() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any()))
+        .thenReturn(bullContextWithSpurts("10", "20"));
+    // the endpoint degraded to an empty footprint -> the gate blocks (never a false HIGH).
+    when(client.openHighStats(eq("NIFTY 50"), any(), eq(3)))
+        .thenReturn(OpenHighStats.EMPTY);
 
     assertThat(
             new ScalperConfluenceGate(client, ScalperOiProps.defaults())
@@ -519,6 +551,7 @@ class ScalperConfluenceGateTest {
     // a HIGH-tier OH but the price spurt is 60% (> the 50% reject barrier) -> the move exhausted -> block.
     when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any()))
         .thenReturn(bullContextWithSpurts("10", "60"));
+    when(client.openHighStats(eq("NIFTY 50"), any(), eq(3))).thenReturn(bullishHighFootprint());
 
     assertThat(
             new ScalperConfluenceGate(client, ScalperOiProps.defaults())

@@ -73,6 +73,15 @@ class ScalperGatesTest {
   }
 
   @Test
+  void rsiAboveIsTheRelaxedOpenHighFloor() {
+    // #2 (open-high-low) gates on the source's "RSI >50" floor, not the 60-80 band.
+    assertThat(ScalperGates.rsiAbove(bd("50"), bd("50")).pass()).isFalse(); // exactly 50 -> not >
+    assertThat(ScalperGates.rsiAbove(bd("50.1"), bd("50")).pass()).isTrue();
+    assertThat(ScalperGates.rsiAbove(bd("85"), bd("50")).pass()).isTrue(); // no upper cap for #2
+    assertThat(ScalperGates.rsiAbove(null, bd("50")).pass()).isFalse(); // null rsi -> fail
+  }
+
+  @Test
   void indicatorAlignmentNeedsAllOnTheCorrectSide() {
     Chart bull = new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("60000"));
     assertThat(ScalperGates.indicatorAlignment(bull, CE).pass()).isTrue();

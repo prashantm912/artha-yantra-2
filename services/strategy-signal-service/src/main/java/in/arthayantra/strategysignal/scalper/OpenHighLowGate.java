@@ -2,6 +2,9 @@ package in.arthayantra.strategysignal.scalper;
 
 import in.arthayantra.black76.Black76.OptionType;
 import in.arthayantra.strategyengine.series.EngineSeries;
+import in.arthayantra.strategysignal.scalper.MarketOiClient.OpenHighStats;
+import in.arthayantra.strategysignal.scalper.OpenHighLow.Marks;
+import in.arthayantra.strategysignal.scalper.OpenHighLow.Tier;
 import in.arthayantra.strategysignal.scalper.ScalperGateContext.Oi;
 import java.math.BigDecimal;
 import java.time.LocalTime;
@@ -13,25 +16,20 @@ import java.time.LocalTime;
  * is a magnet the institution will drag the premium back toward, so the trade is WITH the open-extreme
  * intent, targeting that extreme.
  *
- * <p><b>v1 scope (the Step-0 feasibility outcome):</b> the doc's full configuration needs per-strike
- * ATM+-3 OH/OL confluence (>=3 strikes matching) AND an external "OI-Pulse AI badge &gt;=90%". Neither
- * is available to strategy-signal-service: it holds no marketdata grant and reads only via market-data
- * REST, whose {@code /options/chain} returns per-strike point-in-time LTP, NOT per-strike OHLC - so the
- * strike-count confluence cannot be computed without a NEW market-data endpoint (out of scope). And the
- * OI-Pulse badge is a Phase-4 OiPulse-parity model we do not have. So v1 gates on the HONEST equivalent:
- * the deterministic FNO-structure tier {@link OpenHighLow#tier} (front-future OH/OL x the OI quadrant)
- * being {@link OpenHighLow.Tier#HIGH}, with the badge treated as an optional, currently-unavailable
- * confirmation we degrade around (never require). The per-strike strike-count confluence is a DOCUMENTED
- * REFINEMENT (see the strategy YAML) deferred to a future per-strike-OHLC market-data endpoint.
+ * <p><b>Source-faithful grading (the v1 OI-quadrant proxy is REPLACED):</b> the gate now reads the
+ * per-strike option-premium footprint from the {@code /options/strike-session-stats} market-data
+ * endpoint and grades it through the deck's Table-1/Table-2 in {@link OpenHighLow#tier} - it no longer
+ * uses the underlying OI quadrant for the OH probability (the source does not). The stats are fetched
+ * by the dispatching {@link ScalperConfluenceGate} (#2-only, not in the shared context fan-out) and
+ * handed in.
  *
  * <p>All gating legs are required; any failing leg BLOCKS (an OH/OL scalp is high-conviction-only -
  * never a false fire):
  *
  * <ol>
- *   <li><b>Tier &gt;= HIGH</b> for the side (the FNO-structure proxy for the badge). MILD or
- *       STAND_ASIDE - including a two-sided OH+OL session or no mark - blocks.
- *   <li><b>OI build-up</b> in the side's direction (folded into the tier: CE needs LB/SC, PE needs
- *       SB/LU via {@link OiQuadrant#bullish()}/{@link OiQuadrant#bearish()}).
+ *   <li><b>Tier == HIGH</b> for the side (the Table-1 footprint, possibly downgraded by Table-2 / the
+ *       &gt;50% prev-close-fall LOW rule). MILD, LOW or STAND_ASIDE - including a two-sided OH
+ *       footprint, a future-only mark, or no mark - blocks.
  *   <li><b>Reject rules (section 3.2 L444/L445/L472):</b> the move must not have already exhausted -
  *       the option premium must not have moved &gt;50% from the previous close AND the identified-strike
  *       OI change must not be &gt;50%. v1 reuses the Tier-1 spurt magnitudes: {@code spurtPricePct} and
@@ -59,10 +57,15 @@ public final class OpenHighLowGate {
 
   private OpenHighLowGate() {}
 
-  /** Whether the OH/OL entry may proceed and, if so, the VWAP structural stop. */
-  public record Verdict(boolean pass, BigDecimal stopLevel) {}
+  /**
+   * Whether the OH/OL entry may proceed, the VWAP structural stop, and the graded tier + a short
+   * reason for the signal side-channel (explainability).
+   */
+  public record Verdict(boolean pass, BigDecimal stopLevel, Tier tier, String reason) {}
 
-  private static final Verdict BLOCK = new Verdict(false, null);
+  private static Verdict block(Tier tier, String reason) {
+    return new Verdict(false, null, tier, reason);
+  }
   /** section 3.2: the >50% premium-move / >50% OI-change reject barrier (magnitude). */
   private static final BigDecimal REJECT_PCT = new BigDecimal("50");
   /** section 3.2: 1st-half preference - avoid initiating a fresh OH/OL scalp after ~12:00. */
@@ -71,38 +74,41 @@ public final class OpenHighLowGate {
   /**
    * Evaluate the Open=High / Open=Low pre-gate at the just-closed deploy bar.
    *
-   * @param future the index-future 3-min series the scalper evaluates on
-   * @param index the just-closed deploy bar index
+   * @param futureMarks the front-future OH/OL marks ({@link OpenHighLow#marks})
+   * @param stats the #2-only per-strike OH/OL footprint (null/empty degrades to a block)
    * @param side CE (bullish: Open=High) or PE (bearish: Open=Low)
-   * @param oi the Tier-1 OI snapshot (the underlying quadrant + the spurt reject magnitudes)
+   * @param props the #2 grading thresholds (min-strikes / fall-volume floor / prev-close fall %)
+   * @param oi the Tier-1 OI snapshot (the spurt reject magnitudes); null degrades to a block
    * @param vwap the front-future session VWAP (the SL anchor); null when the engine has none yet
    * @param istTime the bar's IST wall-clock (the 1st-half cutoff)
    */
   public static Verdict evaluate(
-      EngineSeries future,
-      int index,
+      Marks futureMarks,
+      OpenHighStats stats,
       OptionType side,
+      ScalperOiProps props,
       Oi oi,
       BigDecimal vwap,
       LocalTime istTime) {
     if (oi == null) {
-      return BLOCK; // no OI snapshot -> cannot confirm the quadrant -> never fire
+      return block(null, "no OI snapshot"); // cannot run the spurt reject -> never fire
     }
     // (d) 1st-half preference: avoid a fresh OH/OL scalp after ~12:00 (2nd-half premium erosion).
     if (istTime != null && !istTime.isBefore(FIRST_HALF_CUTOFF)) {
-      return BLOCK;
+      return block(null, "2nd-half (>=12:00) cutoff");
     }
-    // (a)+(b) tier >= HIGH for the side (the FNO-structure proxy + the folded-in OI build-up). MILD or
-    // STAND_ASIDE (two-sided OH+OL, no mark, or no quadrant confirmation) blocks.
-    if (OpenHighLow.tier(future, index, side, oi) != OpenHighLow.Tier.HIGH) {
-      return BLOCK;
+    // (a) Table-1/Table-2 tier == HIGH for the side. MILD, LOW or STAND_ASIDE (two-sided OH footprint,
+    // a future-only mark, a fall-on-volume / >50% prev-close-fall downgrade, or no mark) blocks.
+    Tier tier = OpenHighLow.tier(futureMarks, stats, side, props);
+    if (tier != Tier.HIGH) {
+      return block(tier, "tier " + tier + " (not HIGH)");
     }
-    // (c) reject rules: the move must not already be exhausted - >50% premium move OR >50% OI change.
+    // (b) reject rules: the move must not already be exhausted - >50% premium move OR >50% OI change.
     // Reuse the Tier-1 spurt magnitudes; a null magnitude is unavailable and does NOT block.
     if (exceedsReject(oi.spurtPricePct()) || exceedsReject(oi.spurtOiPct())) {
-      return BLOCK;
+      return block(tier, "spurt >50% reject");
     }
-    return new Verdict(true, vwap);
+    return new Verdict(true, vwap, tier, "HIGH footprint");
   }
 
   /** True only when the magnitude is present AND strictly above the 50% reject barrier. Null = pass. */

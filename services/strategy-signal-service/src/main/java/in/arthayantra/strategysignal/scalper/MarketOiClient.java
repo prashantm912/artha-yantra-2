@@ -88,6 +88,86 @@ public class MarketOiClient {
         underlying, istTime, chart, oi(underlying, expiry, tradeDate), macro(underlying, eodDate));
   }
 
+  /**
+   * #2 Open=High per-strike session footprint: the ATM strike plus one {@link StrikeStat} per
+   * CE/PE leg over the ATM+-window listed strikes (the {@code /options/strike-session-stats}
+   * endpoint). {@code items} is empty when the endpoint is unavailable or returns no rows — the
+   * {@link OpenHighLowGate} then blocks (a missing footprint never yields a false HIGH).
+   */
+  public record OpenHighStats(BigDecimal atmStrike, List<StrikeStat> items) {
+    static final OpenHighStats EMPTY = new OpenHighStats(null, List.of());
+  }
+
+  /** One CE/PE leg's session OH/OL footprint (the subset of the endpoint the grading reads). */
+  public record StrikeStat(
+      BigDecimal strike,
+      Black76.OptionType type,
+      boolean ohMark,
+      boolean olMark,
+      BigDecimal last,
+      BigDecimal open,
+      BigDecimal high,
+      Long declineVolume,
+      BigDecimal fallPctFromPrevClose) {}
+
+  /**
+   * The #2-only per-strike OH/OL footprint for {@code underlying}'s {@code expiry} chain over the
+   * ATM+-{@code window} listed strikes. Fetched directly by {@link OpenHighLowGate} (NOT folded into
+   * the shared {@link #context} fan-out — only the open-high-low strategy pays this HTTP call). A
+   * missing endpoint / empty body degrades to {@link OpenHighStats#EMPTY} so the gate blocks.
+   */
+  public OpenHighStats openHighStats(String underlying, LocalDate expiry, int window) {
+    return get(
+        uri ->
+            uri.path("/api/v1/market/options/strike-session-stats")
+                .queryParam("underlying", underlying)
+                .queryParam("expiry", expiry)
+                .queryParam("window", window)
+                .build(),
+        this::toOpenHighStats,
+        OpenHighStats.EMPTY,
+        "options/strike-session-stats");
+  }
+
+  private OpenHighStats toOpenHighStats(JsonNode json) {
+    BigDecimal atm = decimal(json.path("atmStrike"));
+    List<StrikeStat> items = new ArrayList<>();
+    for (JsonNode row : json.path("items")) {
+      Black76.OptionType type = optionType(text(row.path("optionType")));
+      BigDecimal strike = decimal(row.path("strike"));
+      if (type == null || strike == null) {
+        continue; // a malformed row is skipped, not fatal
+      }
+      items.add(
+          new StrikeStat(
+              strike,
+              type,
+              row.path("ohMark").asBoolean(false),
+              row.path("olMark").asBoolean(false),
+              decimal(row.path("last")),
+              decimal(row.path("open")),
+              decimal(row.path("high")),
+              longOrNull(row.path("declineVolume")),
+              decimal(row.path("fallPctFromPrevClose"))));
+    }
+    return new OpenHighStats(atm, items);
+  }
+
+  private static Black76.OptionType optionType(String raw) {
+    if ("CE".equals(raw)) {
+      return Black76.OptionType.CE;
+    }
+    if ("PE".equals(raw)) {
+      return Black76.OptionType.PE;
+    }
+    return null;
+  }
+
+  private static Long longOrNull(JsonNode node) {
+    String t = text(node);
+    return t == null ? null : Long.valueOf(t);
+  }
+
   /** The nearest-expiry option chain flattened for {@link StrikePicker}: spot, forward, the candidates. */
   public record ChainSnapshot(
       LocalDate expiry, BigDecimal spot, BigDecimal forward, List<StrikePicker.Candidate> candidates) {

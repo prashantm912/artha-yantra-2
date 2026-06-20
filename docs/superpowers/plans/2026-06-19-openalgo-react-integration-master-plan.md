@@ -3520,4 +3520,140 @@ box), what to click/observe, expected results, and how to tear down. Phase 0's g
 `docs/manual-tests/phase-0-openalgo-spine.md`. A non-deployable / pure-library phase (e.g. §6 greeks)
 can note "no manual surface — verified by tests" instead.
 
+## 20. Phase 4 — React + oipulse Replication: Grilled Plan (2026-06-21, AUTHORITATIVE)
+
+> Status: PLAN (no code changed). Produced by a per-decision grilling session with the owner on
+> 2026-06-21. **Same standing as §17/§18/§19. Where §10/§11/§16-Phase-4/§17.11/§18.7 conflict with
+> §20, §20 wins.** The React migration is now DRIVEN BY oipulse replication, built component-first,
+> sequenced by scalping value. Decisions below are owner-confirmed unless marked "rec".
+
+### 20.0 Headline reframe (what this supersedes)
+- **§18.7 "React = 1:1 current Angular, oipulse deferred" → SUPERSEDED.** oipulse replication is the
+  PRIORITY driver. Any page that exists in the oipulse study is built UNDER oipulse replication (to
+  oipulse fidelity on the shared component library), NOT as a 1:1 Angular port. Only Angular-native
+  cockpit pages with no oipulse equivalent are ported separately, AFTER the oipulse waves.
+- **§16 "Phase 4a = zero backend changes" → SUPERSEDED.** Read-only analytics backend is built
+  per-wave, just-in-time for that wave's pages. 4b live-trading (orders/positions/funds, §18.1) stays
+  PARKED.
+- **§11/§10 `OiControlBar` (showName/showExpiry) → generalized to `FilterBar`** (config-driven, fed by
+  a shared cascade hook; more knobs).
+- **§11/§18.7 "Advance Chart = LWC substitute" → openalgo-chart (MIT, React, lightweight-charts)**
+  adopted as the single advanced-chart basis (covers Advance Chart + Multiframe + builder tools +
+  option-chain-with-greeks + OI bars). The old app `C:\Trading\ArthaYantra\artha-yantra` ships a
+  legitimately-obtained TradingView Advanced Charts binary + a working backend datafeed adapter —
+  kept as the DOCUMENTED FALLBACK if openalgo-chart proves insufficient (license: Personal/
+  Non-commercial → gitignore the binary, never redistribute).
+- **Cutover "atomic flip at Angular parity" → flip at the very END** (after all oipulse waves + the
+  cockpit ports); Angular stays the rollback throughout (gateway can't path-split two SPAs).
+
+### 20.1 Stack & architecture (owner-confirmed)
+- Stack: React 19 · Vite 6 · Tailwind 4 (`data-theme` token sets) · shadcn/ui · React Router v7 ·
+  TanStack Query v5 · Zustand · ECharts · lightweight-charts · CodeMirror 6. New dir `frontend-react/`.
+- **Component model = 3 tiers** (the oipulse study collapses 53 pages into a small reused set):
+  - **9 page archetypes** — mirrored CSP table · 4-quadrant OI scanner · treemap heatmap · combo
+    candle+line · dual-axis line · net-value bars · filter+table · TradingView/LWC widget · interactive
+    builder · signal matrix.
+  - **4 composites** — `FilterBar` (config-driven + shared cascade hook Instrument→Date→Expiry→Strike) ·
+    `DataTable` (per-page column registry + TanStack Virtual) · `EChart` wrapper · `LwcChart` wrapper.
+  - **~15 atoms** — ModeToggle · GoButton · TickerStrip · SubTabs · DatePicker · Pagination ·
+    InstrumentSelect(+symbol adapter) · ExpirySelect(+format adapter) · StrikeSelect ·
+    IntervalSelect(`allowedIntervals`) · SearchBox(free-text + autocomplete) · IndexSectorSelect ·
+    OiBadge4 · SentimentBadge3 · ValueDeltaCell · ChartLegend/visualMap.
+  - **Leaky-but-shared rule:** Instrument/Expiry/Interval vary by DATA (lists, formats, allowed sets),
+    not behaviour → one component + per-page config/adapter, never copy-paste.
+  - **One-offs (inline, no extraction):** strike-window selector · custom-time picker · period selector ·
+    payoff/leg-builder/greeks · risk cards · amCharts world map · draw-tools/audio/OI-bar.
+- **Shell = hybrid:** ArthaYantra topbar (IST clock · mock-mode tag · WS pill · theme picker · logout)
+  + oipulse "All Menu" mega-dropdown (grouped by section) + sub-tab row + live ticker strip (wired to
+  our WS). Mega-menu → hamburger drawer on mobile.
+- **Mobile = adaptive both, baked in from PR-F.** Component-first makes it affordable: atoms / FilterBar
+  / mega-menu / charts are responsive-once; only ~3-4 DENSE archetypes (CSP 16-col table, Options Chain
+  45-col, treemap) need a real mobile VARIANT (tab CE/PE, card-per-strike, top-N). Target device =
+  Samsung S24 Ultra → CSS breakpoints **~480px portrait / ~915px landscape** (NOT its 1440 physical px;
+  DPR ~3). Favour vector/SVG + scalable charts. Retrofitting later is far costlier → decided up front.
+- **Themes:** curated NAMED `--ay-*` token sets (Dark, Light, OiPulse-Red #c42b1e, Midnight-Blue,
+  High-Contrast, extensible), `data-theme` on `<html>`, Settings picker, persisted; shadcn + Tailwind
+  alias `--ay-*` so the whole app follows; each theme WCAG ≥4.5:1.
+- **Live data = hybrid:** WS (existing tick bridge) drives ticker / underlying LTP-spot-DH-DL header /
+  price-flash; OI tables stay REST, auto-refreshing on the 3-min capture cadence (or Go). No new WS OI
+  push channel (OI is snapshot-grained → live push adds ~zero over a 3-min poll).
+- **Routes:** section-based mirroring the mega-menu (`/options/* /futures/* /equity/* /fii-dii/*
+  /features/* /cockpit/*`); old `/oi/*` → redirect. (rec)
+- **Greeks:** option-chain display greeks computed **server-side via black76-math** in `/chain` (single
+  source, §17.9 — OpenAlgo greeks stay canary-only; do NOT use openalgo-chart's client-side greeks). (rec)
+- Dashboard: keep AY cockpit dashboard; drop oipulse's Investing.com-iframe Dashboard. Degradation/
+  staleness badge ported. PWA = optional nice-to-have, not in scope. (rec)
+
+### 20.2 Backend capability audit (2026-06-21 — what already exists vs gaps)
+Mapped the oipulse 53-page data needs against existing endpoints. **~18 pages fully backed** (all 10
+current Angular OI/market pages + Options oi-stats/trending/active-strikes-OI/chain-table, Futures
+movers, all FII/DII). **~18 partial** (data/engine exists, needs endpoint wiring/overlay): greeks-in-
+chain, Connecting-Dots read endpoint (engine `ConnectTheDotsScorer` exists, no controller), Active-
+Strikes-IV, Interval-wise OI, Options/Futures OI-Chart, Trending-OI-PA, Multiple-OI, Straddle/Strangle,
+Open-High/OI-Expiry, Index-Contribution, Sector-Stats, Delivery, Equity-Open-High, Vix (India VIX
+captured as a pinned index, no endpoint), Advance Chart. **~10-12 missing** (no data/endpoint): Futures/
+Equity pre-open, Sector-Heatmap, Equity-Returns, Announcement, World Indices, the 3 builder tools, +
+static/utility. Wave 1's scalping core is almost fully backed; gaps concentrate in later waves.
+
+### 20.3 Sequence — PRs to main (each green; `frontend-react/` NOT gateway-wired until the final flip)
+Owner chose a SEQUENCE of smaller PRs (65 routes is unreviewable in one).
+- **PR-F Foundation** — skeleton (Vite/Tailwind/shadcn/RR-v7/TanStack/Zustand, eslint no-explicit-any +
+  jsx-a11y + LWC-containment, `gen:api`→`contracts/gen`) + hybrid shell + multi-theme system + API
+  client (XSRF, `credentials`, error-envelope→toast, 422-suppress, `{items}` helper) + auth (session
+  store/RequireAuth/LoginPage; probe() seeds XSRF before any POST) + WS singleton (`nextReconnectDelay`,
+  refcount `wsTopic`, conflation, reconnect→`invalidateQueries`) + shared pure-TS ports (+specs) +
+  **anchor-driven** component library (only what the anchor page exercises — ~12 atoms + FilterBar +
+  cascade hook + DataTable + EChart + `symbolContext`/`useExpiries`; remaining atoms added by their
+  first wave) + **anchor page = Options OI Analysis** (mirrored CSP table, with its mobile variant).
+  Done = lint+test+build green · e2e (login+shell+anchor) + axe at desktop & ~480px mobile vs mock ·
+  `ci-react` shard added.
+- **PR-W1 Wave 1 (tight, minimum viable scalping cockpit)** — Options OI Spurt (4-quadrant scanner),
+  Options Chain (+greeks), Connecting Dots (signal matrix + SentimentBadge3), Straddle/Strangle premium
+  (combo candle+line). **2 backend tasks:** greeks-in-chain (black76 server-side) + Connecting-Dots read
+  endpoint (expose the per-factor matrix). Both drift springdoc → recapture + `contracts/gen` regen.
+- **PR-W2 depth (fast, config-only on the library)** — Active Strikes OI, Trending OI/-PA, Big OI,
+  Premium, the Futures suite, FII/DII. All ✅ zero-backend.
+- **PR-W3 breadth/equity** — + backend gaps: Vix endpoint, equity sector-stats/heatmap/returns/pre-open,
+  delivery depth, index-contribution.
+- **PR-W4 tools/charts** — adopt openalgo-chart (Advance/Multiframe + builder tools + option-chain-
+  greeks + OI bars), Risk Calculator, Open-High/OI-Expiry strategy pages, static/utility pages. Entry
+  task: clone openalgo-chart to `C:\Trading\openalgo-chart` (§19.2), assess its API coupling before
+  wiring the data-adapter to our backend.
+- **PR-Cockpit** — port the Angular-only cockpit pages one-by-one (dashboard, signals, charts, paper,
+  journal, watchlists, strategies + editor [**CodeMirror 6** + ported LCS diff], backtests,
+  optimizations, jobs, settings [theme picker home], home); skip any page oipulse already covers.
+- **PR-Cutover** — add compose service + Dockerfile (clone frontend-ui's, swap dist path; keep service
+  name `frontend-ui` / container `ay-frontend-ui` / image tag for e2e + tooling), flip
+  `ARTHA_ROUTE_FRONTEND`, delete old `frontend-ui/`, full e2e green.
+
+Full oipulse coverage = 52 pages (`Plans`/billing + the non-route Morning-Trade/3:20 excluded; all
+other optional `+` groups INCLUDED). e2e selectors preserved: `input[name=password]`, "Sign in",
+shell → `data-testid="app-shell"`.
+
+### 20.4 Testing & CI (owner-confirmed)
+- **Unit (vitest+jsdom):** port pure-TS specs verbatim (decimal, conflation, `nextReconnectDelay`,
+  oi-interpretation, `foldStrikes`, datafeed) + new pure-fn specs (cascade, `oiParams`/`satisfiable`,
+  format).
+- **Component (RTL):** cost CONCENTRATED on the ~15 atoms + 4 composites (tested once → 65 pages inherit
+  confidence — the component-first leverage).
+- **Page:** light MSW-mocked smoke (key header/table/badge text + 422 empty-state).
+- **e2e gate = "A+ with manual trigger":** per-PR runs THAT wave's pages, e2e + axe, at **desktop AND
+  ~480px mobile**; a **scheduled nightly + mandatory pre-cutover** full-suite e2e; PLUS a
+  `workflow_dispatch` **manual full-suite** trigger so the owner can run it between waves before
+  starting the next. Pixel screenshot-diff = a BUILD-TIME one-shot vs the oracle, NEVER a CI gate
+  (flaky on the 2-core cold-start runner). Shared-library PRs lean on heavy RTL + the nightly/manual
+  full run (path-filter optional).
+- **Parity oracle:** oipulse pages → the oipulse STUDY DOCS (cell-for-cell) + seeded deterministic mock
+  fixtures (stable assertions). Cockpit pages → the running Angular app (1:1).
+- **CI shards:** `ci-react` from PR-F (lint + unit/RTL + build with the E-6 bundle-size budget,
+  ECharts/LWC lazy-chunked); `ci-e2e` regenerated for React; `ci-frontend` (Angular) green till cutover
+  then deleted; `ci-contracts` intact (React consumes `contracts/gen`; recapture per Wave backend
+  endpoint; `*.d.ts` stay `eol=lf`).
+
+### 20.5 Flagged / deferred (non-blocking)
+Per-page fidelity cross-checked against `docs/oipulse-study/` at build time · World Indices &
+Announcement need NEW external data sources (defer or skip — single-owner) · openalgo-chart API-coupling
+assessment is a Wave-4 entry task · the TradingView fallback binary, if ever used, must be gitignored
+(Personal/Non-commercial license, no redistribution).
+
 *End of plan.*

@@ -177,7 +177,12 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
         .andExpect(jsonPath("$.items[0].interpretation").value("LONG_BUILDUP"))
         .andExpect(jsonPath("$.items[0].oiChange").value(200))
         .andExpect(jsonPath("$.items[0].spurtPct").value("20.00"))
-        .andExpect(jsonPath("$.summary.interpretation").value("LONG_BUILDUP"));
+        // ltp 100 -> 110: ltpChangePct = (110-100)/100*100 = 10.00 (BigDecimal -> string)
+        .andExpect(jsonPath("$.items[0].ltpChangePct").value("10.00"))
+        .andExpect(jsonPath("$.summary.interpretation").value("LONG_BUILDUP"))
+        // single spurt row is the representative: oiChangePct=spurtPct, priceChangePct=ltpChangePct
+        .andExpect(jsonPath("$.summary.oiChangePct").value("20.00"))
+        .andExpect(jsonPath("$.summary.priceChangePct").value("10.00"));
   }
 
   @Test

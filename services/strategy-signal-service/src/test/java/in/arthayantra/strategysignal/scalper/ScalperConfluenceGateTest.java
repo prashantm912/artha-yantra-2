@@ -116,7 +116,7 @@ class ScalperConfluenceGateTest {
     when(client.context(eq("NIFTY 50"), any(), any(), any(), any())).thenReturn(bullContext());
 
     Optional<Decision> decision =
-        new ScalperConfluenceGate(client).evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD);
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults()).evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD);
 
     assertThat(decision).isPresent();
     assertThat(decision.get().side()).isEqualTo(CE);
@@ -129,7 +129,7 @@ class ScalperConfluenceGateTest {
     MarketOiClient client = mock(MarketOiClient.class);
     when(client.chain("NIFTY 50")).thenReturn(Optional.empty());
 
-    assertThat(new ScalperConfluenceGate(client).evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD))
+    assertThat(new ScalperConfluenceGate(client, ScalperOiProps.defaults()).evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD))
         .isEmpty();
   }
 
@@ -148,7 +148,7 @@ class ScalperConfluenceGateTest {
     when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
     when(client.context(eq("NIFTY 50"), any(), any(), any(), any())).thenReturn(bear);
 
-    assertThat(new ScalperConfluenceGate(client).evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD))
+    assertThat(new ScalperConfluenceGate(client, ScalperOiProps.defaults()).evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD))
         .isEmpty();
   }
 
@@ -157,7 +157,7 @@ class ScalperConfluenceGateTest {
     MarketOiClient client = mock(MarketOiClient.class);
     // 11:30 IST is inside the §0B 11:00–13:00 block — blocked at the hard pre-flight, no HTTP
     assertThat(
-            new ScalperConfluenceGate(client)
+            new ScalperConfluenceGate(client, ScalperOiProps.defaults())
                 .evaluate(CFG, bullBank(), null, 0, NOW, LocalTime.of(11, 30), EOD))
         .isEmpty();
     org.mockito.Mockito.verifyNoInteractions(client);
@@ -186,7 +186,7 @@ class ScalperConfluenceGateTest {
           }
         };
 
-    assertThat(new ScalperConfluenceGate(client).evaluate(CFG, deadRsi, null, 0, NOW, IST_TIME, EOD))
+    assertThat(new ScalperConfluenceGate(client, ScalperOiProps.defaults()).evaluate(CFG, deadRsi, null, 0, NOW, IST_TIME, EOD))
         .isEmpty();
   }
 
@@ -201,7 +201,7 @@ class ScalperConfluenceGateTest {
     when(client.chain("NIFTY 50")).thenReturn(Optional.of(otmOnly));
     when(client.context(eq("NIFTY 50"), any(), any(), any(), any())).thenReturn(bullContext());
 
-    assertThat(new ScalperConfluenceGate(client).evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD))
+    assertThat(new ScalperConfluenceGate(client, ScalperOiProps.defaults()).evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD))
         .isEmpty();
   }
 
@@ -214,7 +214,7 @@ class ScalperConfluenceGateTest {
     EngineSeries future = futureSeries(strongGreen(0), strongGreen(1), strongGreen(2));
 
     Optional<Decision> decision =
-        new ScalperConfluenceGate(client)
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults())
             .evaluate(TWO_CANDLE_CFG, bullBank(), future, 2, NOW, IST_TIME, EOD);
 
     assertThat(decision).isPresent();
@@ -229,7 +229,7 @@ class ScalperConfluenceGateTest {
     EngineSeries future = futureSeries(strongGreen(0), weakGreen(1), strongGreen(2));
 
     assertThat(
-            new ScalperConfluenceGate(client)
+            new ScalperConfluenceGate(client, ScalperOiProps.defaults())
                 .evaluate(TWO_CANDLE_CFG, bullBank(), future, 2, NOW, IST_TIME, EOD))
         .isEmpty();
   }

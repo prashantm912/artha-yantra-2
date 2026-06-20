@@ -33,6 +33,18 @@ artha:
     base-url: ${ARTHA_MARKETDATA_BASE_URL:http://market-data-service:8081}
   signals:
     engine-enabled: ${ARTHA_SIGNAL_ENGINE_ENABLED:true}
+  scalper:
+    # Tier-1 OI-analytics thresholds (Phase-3.5 T2.1/T2.6/T2.7/T2.8) read by the confluence scorer
+    # and the #5 trending-OI pre-gate. ivPairMinGap/ivBothHighFloor are on the 0..1 IV FRACTION scale
+    # (10 IV points = 0.10; 40/40 both-high = 0.40). drasticFloor is a conservative, DB-tunable,
+    # index-agnostic v1 placeholder dOI magnitude. All values are tunable (DB params later, §12.2).
+    oi:
+      cross-filter-pct: 50
+      drastic-floor: 50000
+      iv-pair-min-gap: 0.10
+      iv-both-high-floor: 0.40
+      spurt-oi-pct: 50
+      spurt-price-pct: 50
   paper:
     # A12 per-class capital-usage margin approximations (no Kite margin API).
     # Equities use full notional; long options the premium; futures & short

@@ -40,10 +40,12 @@ public class ScalperConfluenceGate {
   static final String BIAS_60M = "bias60m";
 
   private final MarketOiClient client;
+  private final ScalperOiProps oiProps;
 
-  /** Wires the market-data OI/chain client. */
-  public ScalperConfluenceGate(MarketOiClient client) {
+  /** Wires the market-data OI/chain client + the Tier-1 OI-analytics thresholds. */
+  public ScalperConfluenceGate(MarketOiClient client, ScalperOiProps oiProps) {
     this.client = client;
+    this.oiProps = oiProps;
   }
 
   /**

@@ -38,18 +38,24 @@ class ScalperConfluenceGateTest {
       new ScalperConfig(
           "NSE", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          false, ScalperConfig.StructuralStop.NONE, false);
+          false, ScalperConfig.StructuralStop.NONE, false, false);
   private static final ScalperConfig TWO_CANDLE_CFG =
       new ScalperConfig(
           "NSE", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          true, ScalperConfig.StructuralStop.TWO_CANDLE_FIRST, false);
+          true, ScalperConfig.StructuralStop.TWO_CANDLE_FIRST, false, false);
   // #5: a strategy with the oi-cross-filter HARD pre-gate enabled.
   private static final ScalperConfig OI_CROSS_CFG =
       new ScalperConfig(
           "NSE", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          false, ScalperConfig.StructuralStop.NONE, true);
+          false, ScalperConfig.StructuralStop.NONE, true, false);
+  // #4: a strategy with the gap-theory HARD gap-fill pre-gate enabled.
+  private static final ScalperConfig GAP_CFG =
+      new ScalperConfig(
+          "NSE", "NIFTY 50", 2,
+          new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
+          false, ScalperConfig.StructuralStop.GAP_TREND, false, true);
 
   // a 3m index-future series: index 2 is the deploy bar; indices 0/1 are the forming candles.
   private static EngineSeries futureSeries(EngineCandle... candles) {
@@ -271,6 +277,69 @@ class ScalperConfluenceGateTest {
             .evaluate(OI_CROSS_CFG, bullBank(), null, 0, NOW, IST_TIME, EOD);
     assertThat(decision).isPresent();
     assertThat(decision.get().pick().candidate().tradingsymbol()).isEqualTo("NIFTY19850CE");
+  }
+
+  // a strong green candle at an explicit price (open,high,low,close), volume above the 125k floor.
+  private static EngineCandle gapBar(int i, String open, String high, String low, String close) {
+    return new EngineCandle(
+        NOW.atOffset(IST).plusMinutes(3L * i), bd(open), bd(high), bd(low), bd(close), 130_000);
+  }
+
+  @Test
+  void gapTheoryStrategyBlocksWhileTheGapIsStillOpen() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any())).thenReturn(bullContext());
+    // bar0 close 100; bar1 opens 105 (5 pt gap up) and stays above the origin -> unfilled -> block.
+    EngineSeries future =
+        futureSeries(
+            gapBar(0, "99", "101", "98", "100"),
+            gapBar(1, "105", "108", "104", "107"));
+
+    assertThat(
+            new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+                .evaluate(GAP_CFG, bullBank(), future, 1, NOW, IST_TIME, EOD))
+        .isEmpty();
+  }
+
+  @Test
+  void gapTheoryStrategyPassesWithTrendOnceTheGapHasFilledAndAnchorsThePreGapStop() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any())).thenReturn(bullContext());
+    // 5 pt gap up (bar0->bar1), then bar2 low (96) retraces below the origin (100) -> filled -> pass.
+    EngineSeries future =
+        futureSeries(
+            gapBar(0, "99", "101", "95", "100"),
+            gapBar(1, "105", "108", "104", "107"),
+            gapBar(2, "106", "107", "96", "98"));
+
+    Optional<Decision> decision =
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+            .evaluate(GAP_CFG, bullBank(), future, 2, NOW, IST_TIME, EOD);
+
+    assertThat(decision).isPresent();
+    assertThat(decision.get().structuralStop()).isEqualByComparingTo("95"); // pre-gap candle low
+  }
+
+  @Test
+  void gapTheoryStrategyIsInertAndTradesNormallyWhenNoSignificantGapExists() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any())).thenReturn(bullContext());
+    // a flat series with no >3 pt jump -> the gap gate never fires -> the confluence picks normally.
+    EngineSeries future =
+        futureSeries(
+            gapBar(0, "99", "101", "98", "100"),
+            gapBar(1, "100", "102", "99", "101"),
+            gapBar(2, "101", "103", "100", "102"));
+
+    Optional<Decision> decision =
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+            .evaluate(GAP_CFG, bullBank(), future, 2, NOW, IST_TIME, EOD);
+
+    assertThat(decision).isPresent();
+    assertThat(decision.get().structuralStop()).isNull(); // inert => no gap stop anchor
   }
 
   @Test

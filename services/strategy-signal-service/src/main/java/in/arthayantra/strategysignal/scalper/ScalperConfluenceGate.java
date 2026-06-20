@@ -106,6 +106,16 @@ public class ScalperConfluenceGate {
     if (cfg.requireTwoCandle() && structuralStop == null) {
       return Optional.empty();
     }
+    // #4 (section 3.4) Gap-Theory: when the strategy declares it, a still-open significant gap BLOCKS
+    // the entry until it fills; once filled the with-trend entry passes and the pre-gap extreme
+    // becomes the stop. No significant gap => the gate is INERT and leaves the entry to the confluence.
+    if (cfg.requireGapFill()) {
+      GapTheoryGate.Verdict gap = GapTheoryGate.evaluate(future, index, side, cfg.underlying());
+      if (!gap.pass()) {
+        return Optional.empty();
+      }
+      structuralStop = gap.stopLevel();
+    }
     ScalperGateContext ctx = client.context(cfg.underlying(), istTime, eodDate, chain.expiry(), chart);
     // #5 (T2.1): the oi-cross-filter strategies HARD-require a >=50% call-put dOI imbalance before
     // the confluence is even consulted. Fail-closed like the volume/RSI rails; a null imbalance

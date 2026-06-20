@@ -12,10 +12,12 @@ import java.util.Map;
  * {@link ScalperGates}), so a scalper strategy YAML declares only {@code mode: options_of_underlying}
  * + the underlying + the scalper indicator aliases. Tuning later rides DB rows, never the YAML.
  *
- * <p>Two per-strategy behaviours the chart-only YAML grammar cannot express are declared via tags
- * (the same hook the {@code scalper} detection uses): {@code two-candle-pattern} runs the {@link
+ * <p>Per-strategy behaviours the chart-only YAML grammar cannot express are declared via tags (the
+ * same hook the {@code scalper} detection uses): {@code two-candle-pattern} runs the {@link
  * TwoCandleGate} as a hard entry gate (and anchors the stop on the 1st candle); {@code
- * entry-candle-stop} anchors the stop on the entry (crossover) candle's extreme.
+ * entry-candle-stop} anchors the stop on the entry (crossover) candle's extreme; {@code gap-theory}
+ * runs the {@link GapTheoryGate} as a hard gap-fill pre-gate (and anchors the stop on the pre-gap
+ * candle's extreme).
  */
 public record ScalperConfig(
     String underlyingExchange,
@@ -25,13 +27,15 @@ public record ScalperConfig(
     BigDecimal confluenceThreshold,
     boolean requireTwoCandle,
     StructuralStop structuralStop,
-    boolean requireCallPutDeltaFilter) {
+    boolean requireCallPutDeltaFilter,
+    boolean requireGapFill) {
 
   /** Where the entry-time structural stop-loss is anchored (none = size off structure/VWAP only). */
   public enum StructuralStop {
     NONE,
     TWO_CANDLE_FIRST,
-    ENTRY_CANDLE
+    ENTRY_CANDLE,
+    GAP_TREND
   }
 
   // §0B delta band — uniform across indices (the slightly-ITM 0.6–0.7 Siva favours). The §4.14.7 /
@@ -63,13 +67,20 @@ public record ScalperConfig(
     StrikePicker.Params params =
         new StrikePicker.Params(DELTA_LO, DELTA_HI, premium[0], premium[1], RATE);
     boolean twoCandle = tags.contains("two-candle-pattern");
+    // #4 (section 3.4): the gap-theory tag arms the gap-fill pre-gate (GapTheoryGate) + a pre-gap SL anchor.
+    boolean gapFill = tags.contains("gap-theory");
     StructuralStop stop =
         twoCandle
             ? StructuralStop.TWO_CANDLE_FIRST
-            : tags.contains("entry-candle-stop") ? StructuralStop.ENTRY_CANDLE : StructuralStop.NONE;
+            : gapFill
+                ? StructuralStop.GAP_TREND
+                : tags.contains("entry-candle-stop")
+                    ? StructuralStop.ENTRY_CANDLE
+                    : StructuralStop.NONE;
     // #5 (T2.1): the oi-cross-filter tag makes the >=50% call-put dOI imbalance a HARD pre-gate.
     boolean callPutDeltaFilter = tags.contains("oi-cross-filter");
     return new ScalperConfig(
-        exchange, underlying, rollDays, params, THRESHOLD, twoCandle, stop, callPutDeltaFilter);
+        exchange, underlying, rollDays, params, THRESHOLD, twoCandle, stop, callPutDeltaFilter,
+        gapFill);
   }
 }

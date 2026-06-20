@@ -228,6 +228,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/options/strike-session-stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["strikeSessionStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/options/spurt": {
         parameters: {
             query?: never;
@@ -887,6 +903,35 @@ export interface components {
             items?: components["schemas"]["TrendPoint"][];
             /** Format: date-time */
             asOf?: string;
+        };
+        StrikeSessionStat: {
+            strike?: number;
+            optionType?: string;
+            open?: number;
+            high?: number;
+            low?: number;
+            last?: number;
+            /** Format: int64 */
+            dayVolume?: number;
+            /** Format: int64 */
+            declineVolume?: number;
+            prevClose?: number;
+            ohMark?: boolean;
+            olMark?: boolean;
+            fallPctFromOpen?: number;
+            fallPctFromPrevClose?: number;
+        };
+        StrikeSessionStats: {
+            /** Format: date-time */
+            asOf?: string;
+            underlying?: string;
+            /** Format: date */
+            expiry?: string;
+            spot?: number;
+            atmStrike?: number;
+            /** Format: int32 */
+            interval?: number;
+            items?: components["schemas"]["StrikeSessionStat"][];
         };
         SpurtChain: {
             items?: components["schemas"]["StrikeSpurt"][];
@@ -1961,6 +2006,41 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["TrendSeries"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    strikeSessionStats: {
+        parameters: {
+            query: {
+                underlying: string;
+                expiry: string;
+                window?: number;
+                interval?: number;
+                session?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["StrikeSessionStats"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

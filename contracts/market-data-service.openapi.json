@@ -873,6 +873,72 @@
         }
       }
     },
+    "/api/v1/market/options/strike-session-stats" : {
+      "get" : {
+        "tags" : [ "options-analytics-controller" ],
+        "operationId" : "strikeSessionStats",
+        "parameters" : [ {
+          "name" : "underlying",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "expiry",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "window",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }, {
+          "name" : "interval",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }, {
+          "name" : "session",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/StrikeSessionStats"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/options/spurt" : {
       "get" : {
         "tags" : [ "options-analytics-controller" ],
@@ -2889,6 +2955,84 @@
           "asOf" : {
             "type" : "string",
             "format" : "date-time"
+          }
+        }
+      },
+      "StrikeSessionStat" : {
+        "type" : "object",
+        "properties" : {
+          "strike" : {
+            "type" : "number"
+          },
+          "optionType" : {
+            "type" : "string"
+          },
+          "open" : {
+            "type" : "number"
+          },
+          "high" : {
+            "type" : "number"
+          },
+          "low" : {
+            "type" : "number"
+          },
+          "last" : {
+            "type" : "number"
+          },
+          "dayVolume" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "declineVolume" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "prevClose" : {
+            "type" : "number"
+          },
+          "ohMark" : {
+            "type" : "boolean"
+          },
+          "olMark" : {
+            "type" : "boolean"
+          },
+          "fallPctFromOpen" : {
+            "type" : "number"
+          },
+          "fallPctFromPrevClose" : {
+            "type" : "number"
+          }
+        }
+      },
+      "StrikeSessionStats" : {
+        "type" : "object",
+        "properties" : {
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "underlying" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "spot" : {
+            "type" : "number"
+          },
+          "atmStrike" : {
+            "type" : "number"
+          },
+          "interval" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/StrikeSessionStat"
+            }
           }
         }
       },

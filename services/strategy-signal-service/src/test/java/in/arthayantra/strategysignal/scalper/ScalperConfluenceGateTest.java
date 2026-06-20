@@ -94,8 +94,10 @@ class ScalperConfluenceGateTest {
     return new ScalperGateContext(
         "NIFTY 50", IST_TIME,
         new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("130000")),
-        new Oi(OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("5"), bd("5")),
-        new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50")));
+        new Oi(
+            OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("5"), bd("5"), null, null, null, false,
+            false, null, null, null),
+        new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), null, null));
   }
 
   private static ChainSnapshot chainWithInBandCe() {
@@ -138,8 +140,10 @@ class ScalperConfluenceGateTest {
         new ScalperGateContext(
             "NIFTY 50", IST_TIME,
             new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("130000")),
-            new Oi(OiQuadrant.SHORT_BUILDUP, OiQuadrant.SHORT_BUILDUP, bd("-10"), bd("-5"), bd("-5")),
-            new Macro(bd("14"), bd("80"), bd("12"), Boolean.TRUE, 10, 40, bd("50")));
+            new Oi(
+                OiQuadrant.SHORT_BUILDUP, OiQuadrant.SHORT_BUILDUP, bd("-10"), bd("-5"), bd("-5"), null, null, null,
+                false, false, null, null, null),
+            new Macro(bd("14"), bd("80"), bd("12"), Boolean.TRUE, 10, 40, bd("50"), null, null));
     MarketOiClient client = mock(MarketOiClient.class);
     when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
     when(client.context(eq("NIFTY 50"), any(), any(), any(), any())).thenReturn(bear);

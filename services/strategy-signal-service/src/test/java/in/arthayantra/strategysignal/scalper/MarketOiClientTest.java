@@ -87,11 +87,16 @@ class MarketOiClientTest {
     stub(
         "/api/v1/market/fii-dii/long-short",
         "{\"items\":[{\"fiiLong\":60,\"fiiShort\":40},{\"fiiLong\":70,\"fiiShort\":30}]}");
+    // §A4: macro now also reads the chain for the 6-strike IV pair — a chain with <6 strikes leaves
+    // the pair null without disturbing the IV/rank/breadth/FII assertions below.
+    stub("/api/v1/market/options/chain", "{\"spot\":\"20000\",\"rows\":[]}");
 
     Macro m = client.macro(UNDERLYING, TRADE_DATE);
 
     assertThat(m.atmIv()).isEqualByComparingTo("0.14");
     assertThat(m.ivRank()).isEqualByComparingTo("30"); // 0.30 × 100
+    assertThat(m.ceIvAvg6()).isNull(); // <6 strikes → no IV pair
+    assertThat(m.peIvAvg6()).isNull();
     assertThat(m.advances()).isEqualTo(35);
     assertThat(m.declines()).isEqualTo(12);
     assertThat(m.fiiLongPct()).isEqualByComparingTo("70"); // 70 / (70+30) × 100
@@ -108,6 +113,7 @@ class MarketOiClientTest {
         "{\"currentIv\":\"0.18\",\"rank\":null,\"insufficientHistory\":true}");
     stub("/api/v1/market/breadth", "{\"summary\":{\"advances\":5,\"declines\":40}}");
     stub("/api/v1/market/fii-dii/long-short", "{\"items\":[]}");
+    stub("/api/v1/market/options/chain", "{\"spot\":\"20000\",\"rows\":[]}");
 
     Macro m = client.macro(UNDERLYING, TRADE_DATE);
 
@@ -191,6 +197,7 @@ class MarketOiClientTest {
         .expect(ExpectedCount.once(), requestTo(containsString("/api/v1/market/breadth")))
         .andRespond(withServerError());
     stub("/api/v1/market/fii-dii/long-short", "{\"items\":[]}");
+    stub("/api/v1/market/options/chain", "{\"spot\":\"20000\",\"rows\":[]}");
 
     Macro m = client.macro(UNDERLYING, TRADE_DATE);
 

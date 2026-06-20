@@ -22,15 +22,35 @@ public record ScalperGateContext(
       BigDecimal rsi14,
       BigDecimal volume) {}
 
-  /** OI confluence from the market-data readers: 4-state quadrants, sentiment %, trending cross, basis. */
+  /**
+   * OI confluence from the market-data readers: 4-state quadrants, sentiment %, trending cross, basis,
+   * plus the Phase-3.5 TEMPORAL derivations computed over the trending / sentiment series in {@code
+   * MarketOiClient} (the scorer is pure/point-in-time, so all temporal math is pre-computed here):
+   * signed CE/PE OI deltas over the window, the call/put delta imbalance %, whether the PE−CE tilt
+   * crossed within the window and whether that gap is widening, the sentiment slope, and the spurt
+   * OI/price magnitudes. Each temporal field is {@code null}/{@code false} when its series is short or
+   * absent, so the scorer can never confirm a side on a missing derivation.
+   */
   public record Oi(
       OiQuadrant underlying,
       OiQuadrant futures,
       BigDecimal sentimentPct,
       BigDecimal trendingPeMinusCePct,
-      BigDecimal futuresBasis) {}
+      BigDecimal futuresBasis,
+      BigDecimal ceOiDelta,
+      BigDecimal peOiDelta,
+      BigDecimal callPutDeltaImbalancePct,
+      boolean crossedThisWindow,
+      boolean gapWidening,
+      BigDecimal sentimentSlope,
+      BigDecimal spurtOiPct,
+      BigDecimal spurtPricePct) {}
 
-  /** Macro confluence: ATM IV + rank, India VIX (level + direction), breadth, FII positioning. */
+  /**
+   * Macro confluence: ATM IV + rank, India VIX (level + direction), breadth, FII positioning, plus the
+   * Phase-3.5 6-strike CE/PE IV averages (the mean IV over the 3 strikes above + 3 below the ATM) —
+   * {@code null} when fewer than 6 usable strikes carry the needed IV.
+   */
   public record Macro(
       BigDecimal atmIv,
       BigDecimal ivRank,
@@ -38,5 +58,7 @@ public record ScalperGateContext(
       Boolean vixRising,
       int advances,
       int declines,
-      BigDecimal fiiLongPct) {}
+      BigDecimal fiiLongPct,
+      BigDecimal ceIvAvg6,
+      BigDecimal peIvAvg6) {}
 }

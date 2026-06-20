@@ -106,14 +106,16 @@ class ScalperGatesTest {
   }
 
   private static Oi oi(OiQuadrant futures) {
-    return new Oi(futures, futures, bd("10"), bd("0"), bd("5"));
+    return new Oi(futures, futures, bd("10"), bd("0"), bd("5"), null, null, null, false, false, null, null, null);
   }
 
   private static Oi basis(BigDecimal b) {
-    return new Oi(OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("0"), b);
+    return new Oi(
+        OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("0"), b, null, null, null, false, false, null,
+        null, null);
   }
 
   private static Macro macro(int adv, int dec, Boolean vixRising) {
-    return new Macro(bd("14"), bd("30"), bd("12.5"), vixRising, adv, dec, bd("50"));
+    return new Macro(bd("14"), bd("30"), bd("12.5"), vixRising, adv, dec, bd("50"), null, null);
   }
 }

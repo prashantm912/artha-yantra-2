@@ -27,8 +27,11 @@ class ConnectTheDotsScorerTest {
 
   // fully-bullish dots for a CE signal
   private static final Chart BULL_CHART = new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("130000"));
-  private static final Oi BULL_OI = new Oi(OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("5"), bd("5"));
-  private static final Macro BULL_MACRO = new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"));
+  private static final Oi BULL_OI =
+      new Oi(OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("5"), bd("5"), null, null, null, false,
+          false, null, null, null);
+  private static final Macro BULL_MACRO =
+      new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), null, null);
 
   @Test
   void allDotsAlignedFiresBullishCe() {
@@ -64,8 +67,10 @@ class ConnectTheDotsScorerTest {
   @Test
   void belowThresholdBlocksThoughVwapAligned() {
     // VWAP still aligned, but the OI/macro dots all oppose -> aggregate under threshold
-    Oi oi = new Oi(OiQuadrant.SHORT_BUILDUP, OiQuadrant.SHORT_BUILDUP, bd("-10"), bd("-5"), bd("-5"));
-    Macro m = new Macro(bd("14"), bd("80"), bd("12"), Boolean.TRUE, 10, 40, bd("50"));
+    Oi oi =
+        new Oi(OiQuadrant.SHORT_BUILDUP, OiQuadrant.SHORT_BUILDUP, bd("-10"), bd("-5"), bd("-5"), null, null, null,
+            false, false, null, null, null);
+    Macro m = new Macro(bd("14"), bd("80"), bd("12"), Boolean.TRUE, 10, 40, bd("50"), null, null);
 
     Confluence r = ConnectTheDotsScorer.score(ctx(BULL_CHART, oi, m), CE, 1, T);
 
@@ -77,8 +82,10 @@ class ConnectTheDotsScorerTest {
   @Test
   void allDotsAlignedFiresBearishPe() {
     Chart c = new Chart(bd("98"), bd("99"), bd("100"), bd("101"), -1, bd("35"), bd("130000"));
-    Oi oi = new Oi(OiQuadrant.SHORT_BUILDUP, OiQuadrant.SHORT_BUILDUP, bd("-10"), bd("-5"), bd("-5"));
-    Macro m = new Macro(bd("14"), bd("30"), bd("12"), Boolean.TRUE, 10, 40, bd("50"));
+    Oi oi =
+        new Oi(OiQuadrant.SHORT_BUILDUP, OiQuadrant.SHORT_BUILDUP, bd("-10"), bd("-5"), bd("-5"), null, null, null,
+            false, false, null, null, null);
+    Macro m = new Macro(bd("14"), bd("30"), bd("12"), Boolean.TRUE, 10, 40, bd("50"), null, null);
 
     Confluence r = ConnectTheDotsScorer.score(ctx(c, oi, m), PE, -1, T);
 

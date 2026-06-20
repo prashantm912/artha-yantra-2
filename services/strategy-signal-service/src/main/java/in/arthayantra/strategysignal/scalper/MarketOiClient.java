@@ -44,6 +44,8 @@ public class MarketOiClient {
 
   private static final Logger log = LoggerFactory.getLogger(MarketOiClient.class);
   private static final BigDecimal HUNDRED = new BigDecimal("100");
+  /** Bucket window requested from the temporal series endpoints (trending/sentiment) — newest-last. */
+  private static final int SERIES_WINDOW = 20;
 
   private final RestClient restClient;
   private final ObjectMapper objectMapper;
@@ -137,15 +139,16 @@ public class MarketOiClient {
 
   /** The OI confluence half: underlying + futures quadrants, sentiment, PE−CE cross, futures basis. */
   public Oi oi(String underlying, LocalDate expiry) {
-    OiQuadrant underlyingQuadrant =
+    // /options/spurt: one read → the underlying quadrant PLUS the spurt OI/price magnitudes (§A6).
+    Spurt spurt =
         get(
             uri ->
                 uri.path("/api/v1/market/options/spurt")
                     .queryParam("name", underlying)
                     .queryParam("expiry", expiry)
                     .build(),
-            json -> OiQuadrant.fromInterpretation(text(json.path("summary").path("interpretation"))),
-            OiQuadrant.NEUTRAL,
+            this::deriveSpurt,
+            Spurt.EMPTY,
             "options/spurt");
 
     OiQuadrant futuresQuadrant =
@@ -156,26 +159,29 @@ public class MarketOiClient {
             OiQuadrant.NEUTRAL,
             "futures/banks");
 
-    BigDecimal sentimentPct =
+    // /options/active-strikes?buckets=N: one read → the sentiment LEVEL plus the sentiment SLOPE (§A5).
+    Sentiment sentiment =
         get(
             uri ->
                 uri.path("/api/v1/market/options/active-strikes")
                     .queryParam("name", underlying)
                     .queryParam("expiry", expiry)
+                    .queryParam("buckets", SERIES_WINDOW)
                     .build(),
-            json -> decimal(json.path("sentimentPct")),
-            null,
+            this::deriveSentiment,
+            Sentiment.EMPTY,
             "options/active-strikes");
 
-    BigDecimal trendingPeMinusCePct =
+    // /options/trending: one read → the PE−CE LEVEL plus the full-window derivations (§A3).
+    Trending trending =
         get(
             uri ->
                 uri.path("/api/v1/market/options/trending")
                     .queryParam("name", underlying)
                     .queryParam("expiry", expiry)
                     .build(),
-            this::latestPeMinusCePct,
-            null,
+            this::deriveTrending,
+            Trending.EMPTY,
             "options/trending");
 
     BigDecimal futuresBasis =
@@ -188,7 +194,20 @@ public class MarketOiClient {
             null,
             "futures/term-structure");
 
-    return new Oi(underlyingQuadrant, futuresQuadrant, sentimentPct, trendingPeMinusCePct, futuresBasis);
+    return new Oi(
+        spurt.quadrant(),
+        futuresQuadrant,
+        sentiment.level(),
+        trending.peMinusCePct(),
+        futuresBasis,
+        trending.ceOiDelta(),
+        trending.peOiDelta(),
+        trending.imbalancePct(),
+        trending.crossed(),
+        trending.gapWidening(),
+        sentiment.slope(),
+        spurt.oiPct(),
+        spurt.pricePct());
   }
 
   /** The macro confluence half: ATM IV + rank, breadth, FII positioning (VIX is a v1 gap → null). */
@@ -226,9 +245,19 @@ public class MarketOiClient {
             null,
             "fii-dii/long-short");
 
+    // §A4: the 6-strike CE/PE IV pair (3 above + 3 below the ATM), read off the same chain endpoint.
+    // null when fewer than 6 usable strikes carry the needed IV → the later IV-pair dot stays inert.
+    IvPair ivPair =
+        get(
+            uri -> uri.path("/api/v1/market/options/chain").queryParam("underlying", underlying).build(),
+            this::deriveIvPair,
+            IvPair.EMPTY,
+            "options/chain");
+
     // VIX has no market-data endpoint yet (§12.2 follow-up). null level + null direction; the vix
     // gate treats an unknown direction as non-blocking, so the macro stays honest, not falsely bull.
-    return new Macro(atmIv, ivRank, null, null, breadth[0], breadth[1], fiiLongPct);
+    return new Macro(
+        atmIv, ivRank, null, null, breadth[0], breadth[1], fiiLongPct, ivPair.ceIvAvg6(), ivPair.peIvAvg6());
   }
 
   /** Front (nearest-expiry) index-future quadrant from the term-structure-with-interpretation grid. */
@@ -261,15 +290,70 @@ public class MarketOiClient {
     return front;
   }
 
-  /** Latest trending point's PE−CE tilt as a % of total OI; null if the series is empty. */
-  private BigDecimal latestPeMinusCePct(JsonNode trending) {
+  // ---------------------------------------------------------------------------------------------
+  // Phase-3.5 temporal derivations (§A3/A4/A5/A6). All temporal math lives HERE so the pure,
+  // point-in-time scorer just reads the resulting fields. Each helper degrades to a value that
+  // never falsely confirms a side: null/false on a short or absent series, never an exception.
+  // ---------------------------------------------------------------------------------------------
+
+  /**
+   * §A3 carrier: the PE−CE LEVEL (unchanged from the old {@code latestPeMinusCePct}) plus the
+   * full-window derivations over the {@code /options/trending} series.
+   */
+  record Trending(
+      BigDecimal peMinusCePct,
+      BigDecimal ceOiDelta,
+      BigDecimal peOiDelta,
+      BigDecimal imbalancePct,
+      boolean crossed,
+      boolean gapWidening) {
+    static final Trending EMPTY = new Trending(null, null, null, null, false, false);
+  }
+
+  /**
+   * §A3: the trending full-series derivations over {@code {items:[{ceOi,peOi}], ...}} (newest-last).
+   * Reuses the same JSON that feeds the PE−CE level — one fetch maps to both. Signed CE/PE OI deltas
+   * (last − first), the call/put delta imbalance % (null on the FLAT-OI caveat: both deltas ~0), the
+   * within-window PE-over-CE / CE-over-PE sign cross, and whether the latest gap widened vs the prior.
+   */
+  Trending deriveTrending(JsonNode trending) {
     JsonNode items = trending.path("items");
     if (!items.isArray() || items.isEmpty()) {
-      return null;
+      return Trending.EMPTY;
     }
     JsonNode last = items.get(items.size() - 1);
-    long ceOi = last.path("ceOi").asLong();
-    long peOi = last.path("peOi").asLong();
+    BigDecimal level = peMinusCePct(last);
+    if (items.size() < 2) {
+      // A single bucket gives a level but no temporal signal — all derivations null/false.
+      return new Trending(level, null, null, null, false, false);
+    }
+    JsonNode first = items.get(0);
+    JsonNode prior = items.get(items.size() - 2);
+
+    long ceFirst = first.path("ceOi").asLong();
+    long peFirst = first.path("peOi").asLong();
+    long ceLast = last.path("ceOi").asLong();
+    long peLast = last.path("peOi").asLong();
+
+    BigDecimal ceDelta = BigDecimal.valueOf(ceLast - ceFirst);
+    BigDecimal peDelta = BigDecimal.valueOf(peLast - peFirst);
+    BigDecimal imbalance = imbalancePct(ceDelta, peDelta);
+
+    long gapFirst = peFirst - ceFirst;
+    long gapPrior = (prior.path("peOi").asLong()) - (prior.path("ceOi").asLong());
+    long gapLast = peLast - ceLast;
+    // A sign transition of (peOi − ceOi) across the window: first below 0 → last above 0 (bullish
+    // PE-over-CE cross) or first above → last below (bearish). Zero on either edge is not a cross.
+    boolean crossed = (gapFirst < 0 && gapLast > 0) || (gapFirst > 0 && gapLast < 0);
+    boolean widening = Math.abs(gapLast) > Math.abs(gapPrior);
+
+    return new Trending(level, ceDelta, peDelta, imbalance, crossed, widening);
+  }
+
+  /** A single trending bucket's PE−CE tilt as a % of total OI; null when the bucket carries no OI. */
+  private BigDecimal peMinusCePct(JsonNode bucket) {
+    long ceOi = bucket.path("ceOi").asLong();
+    long peOi = bucket.path("peOi").asLong();
     long total = ceOi + peOi;
     if (total == 0) {
       return null;
@@ -277,6 +361,122 @@ public class MarketOiClient {
     return BigDecimal.valueOf(peOi - ceOi)
         .multiply(HUNDRED)
         .divide(BigDecimal.valueOf(total), 4, RoundingMode.HALF_UP);
+  }
+
+  /**
+   * {@code |peDelta − ceDelta| / max(|peDelta|, |ceDelta|) × 100}, scale 4. null when both deltas are
+   * ~0 — the FLAT-OI caveat: a static PE/CE gap with unchanged OI over the window must yield null, not
+   * a large (here, divide-by-zero) imbalance.
+   */
+  private BigDecimal imbalancePct(BigDecimal ceDelta, BigDecimal peDelta) {
+    BigDecimal denom = ceDelta.abs().max(peDelta.abs());
+    if (denom.signum() == 0) {
+      return null;
+    }
+    return peDelta.subtract(ceDelta).abs().multiply(HUNDRED).divide(denom, 4, RoundingMode.HALF_UP);
+  }
+
+  /** §A5 carrier: the sentiment LEVEL plus the signed slope over the {@code sentimentSeries} window. */
+  record Sentiment(BigDecimal level, BigDecimal slope) {
+    static final Sentiment EMPTY = new Sentiment(null, null);
+  }
+
+  /**
+   * §A5: the sentiment LEVEL (scalar {@code sentimentPct}) plus a simple signed slope over the new
+   * {@code sentimentSeries:[{sentimentPct}]} (newest-last): {@code last − first}. null slope when the
+   * series is shorter than 2 buckets or absent — the level is still surfaced from the scalar.
+   */
+  Sentiment deriveSentiment(JsonNode json) {
+    BigDecimal level = decimal(json.path("sentimentPct"));
+    JsonNode series = json.path("sentimentSeries");
+    if (!series.isArray() || series.size() < 2) {
+      return new Sentiment(level, null);
+    }
+    BigDecimal first = decimal(series.get(0).path("sentimentPct"));
+    BigDecimal last = decimal(series.get(series.size() - 1).path("sentimentPct"));
+    if (first == null || last == null) {
+      return new Sentiment(level, null);
+    }
+    return new Sentiment(level, last.subtract(first));
+  }
+
+  /** §A6 carrier: the underlying quadrant plus the representative spurt OI/price %-changes. */
+  record Spurt(OiQuadrant quadrant, BigDecimal oiPct, BigDecimal pricePct) {
+    static final Spurt EMPTY = new Spurt(OiQuadrant.NEUTRAL, null, null);
+  }
+
+  /**
+   * §A6: the underlying quadrant (from {@code summary.interpretation}) plus the spurt OI/price
+   * magnitudes ({@code summary.oiChangePct} / {@code summary.priceChangePct}) — one read. null
+   * magnitudes when absent; the quadrant degrades to NEUTRAL.
+   */
+  Spurt deriveSpurt(JsonNode json) {
+    JsonNode summary = json.path("summary");
+    OiQuadrant quadrant = OiQuadrant.fromInterpretation(text(summary.path("interpretation")));
+    return new Spurt(
+        quadrant, decimal(summary.path("oiChangePct")), decimal(summary.path("priceChangePct")));
+  }
+
+  /** §A4 carrier: the 6-strike CE/PE IV averages (3 strikes above + 3 below the ATM). */
+  record IvPair(BigDecimal ceIvAvg6, BigDecimal peIvAvg6) {
+    static final IvPair EMPTY = new IvPair(null, null);
+  }
+
+  /**
+   * §A4: the mean CE IV and mean PE IV over the 3 strikes ABOVE plus the 3 BELOW the ATM (the strike
+   * nearest to {@code spot}) — 6 strikes. null for a side when fewer than 6 usable strikes exist or
+   * any needed IV on that side is missing. IVs are fractions ({@code rows[].ce.iv}/{@code .pe.iv}).
+   */
+  IvPair deriveIvPair(JsonNode chain) {
+    BigDecimal spot = decimal(chain.path("spot"));
+    JsonNode rows = chain.path("rows");
+    if (spot == null || !rows.isArray() || rows.size() < 6) {
+      return IvPair.EMPTY;
+    }
+    // Sort the rows by strike, then locate the ATM (nearest to spot) and take 3 below + 3 above.
+    List<JsonNode> sorted = new ArrayList<>();
+    for (JsonNode row : rows) {
+      if (decimal(row.path("strike")) != null) {
+        sorted.add(row);
+      }
+    }
+    if (sorted.size() < 6) {
+      return IvPair.EMPTY;
+    }
+    sorted.sort((a, b) -> decimal(a.path("strike")).compareTo(decimal(b.path("strike"))));
+    int atm = 0;
+    BigDecimal best = null;
+    for (int i = 0; i < sorted.size(); i++) {
+      BigDecimal diff = decimal(sorted.get(i).path("strike")).subtract(spot).abs();
+      if (best == null || diff.compareTo(best) < 0) {
+        best = diff;
+        atm = i;
+      }
+    }
+    int from = atm - 3;
+    int to = atm + 3; // exclusive end below, inclusive above → [atm-3 .. atm-1] + [atm+1 .. atm+3]
+    if (from < 0 || to >= sorted.size()) {
+      return IvPair.EMPTY; // not 3 full strikes on BOTH sides of the ATM
+    }
+    BigDecimal ceSum = BigDecimal.ZERO;
+    BigDecimal peSum = BigDecimal.ZERO;
+    int count = 0;
+    for (int i = from; i <= to; i++) {
+      if (i == atm) {
+        continue; // ATM itself is excluded — 3 above + 3 below only
+      }
+      BigDecimal ceIv = decimal(sorted.get(i).path("ce").path("iv"));
+      BigDecimal peIv = decimal(sorted.get(i).path("pe").path("iv"));
+      if (ceIv == null || peIv == null) {
+        return IvPair.EMPTY; // any missing IV across the 6 → cannot form the pair honestly
+      }
+      ceSum = ceSum.add(ceIv);
+      peSum = peSum.add(peIv);
+      count++;
+    }
+    BigDecimal n = BigDecimal.valueOf(count); // 6
+    return new IvPair(
+        ceSum.divide(n, 4, RoundingMode.HALF_UP), peSum.divide(n, 4, RoundingMode.HALF_UP));
   }
 
   /** Advances/declines counts from the breadth summary; {@code {0,0}} when absent. */

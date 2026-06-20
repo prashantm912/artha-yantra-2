@@ -12,16 +12,30 @@ subset is CI-enforced).
 
 ## Current phase
 
-**Stage F — Options analytics + Paper trading + Universe pinning (Phases 42, 42A, 42B,
-43, 43A, 43B, 44, 44A) — IMPLEMENTED** on branch `feat/stage-f-options-paper-universe`
-(phase-per-commit, one commit per phase). Each phase is unit-tested (Vitest frontend /
-JUnit backend) with lint + production build green and the new ITs green per phase
-(market-data + strategy-signal Testcontainers); the Stage-F exit checklist below is the
-S5 Friday-gate input, walked via `docs/manual-testing-stage-f.md` + the Playwright e2e on
-the PR (ci-e2e). PR pending at the stage boundary — the **feature-complete milestone**
-(only Stage G remains). **Stage E — Frontend UX — MERGED to main 2026-06-14 via PR #6**
-(squash `a96c99b`); Stage D via PR #5; Stage C via PR #4; Stage B via PR #2; Stage A
-completed 2026-06-12.
+**Re-platformed 2026-06-19 to the OpenAlgo + React master plan.**
+`docs/superpowers/plans/2026-06-19-openalgo-react-integration-master-plan.md` §16.1 is now the
+forward-work authority (Phases 0–6). The legacy **Stage A–G** system in the sections below is the
+**historical as-built record** — all merged to `main` (A 2026-06-12; B PR #2; C PR #4; D PR #5; E
+PR #6 `a96c99b`; F/G via the market-data + oipulse-parity PRs through #41). Its exit-gate
+checklists stay as the as-built reference; new phase boundaries are tracked by the map below.
+
+**Current = Phase 3 — Track-2 Siva options scalper** on branch `feat/scalper-track2`
+(phase-per-commit; PR at the stage boundary). The index-option core (#1/#5/#6/#10) is
+paper-complete + risk-railed + execution-boundaried, with the manual-verification-checklist
+backend done; the remaining strategies, §8 SPAN, live order routing, Tier-2 OI analytics, and the
+React UI are deferred (see the map).
+
+### Master-plan phase map (§16.1)
+
+| Phase | Branch | State |
+|---|---|---|
+| 0 — OpenAlgo spine | `feat/openalgo-spine` | **MERGED** (PR #39) |
+| 1 — Data inflow (routing + ExpiryTrack OI + openchart daily) | `feat/openalgo-phase1-phase2`, `feat/eod-bhavcopy-candles` | **PARTIAL** — §4 routing + EOD bhavcopy daily candles merged (#40/#41); §5 intraday-OI backfill + §15 200-day daily history + live OI cutover **DEFERRED** |
+| 2 — Quant libs (greeks + indicators) | `feat/openalgo-phase1-phase2` | **MOSTLY** — §7 scalp indicators merged (#40); §6 higher-order greeks **DEFERRED** (§17.6) |
+| 3 — Scalper engine (§12 + §8 SPAN) | `feat/scalper-track2` | **CURRENT** — core #1/#5/#6/#10 done; #2/#3/#4/#7/#8/#9/#11/#12 + SPAN + live orders + Tier-2 OI (Phase 3.5) + checklist UI (Phase 4) **DEFERRED** |
+| 4 — React migration (§10 + §11) | `feat/react-migration` | **NOT STARTED** — owner-deferred; consumes the manual-checklist contract |
+| 5 — Minervini Track-1 screener (§13) | `feat/minervini-track1` | **NOT STARTED** — needs Phase-1 200-day history |
+| 6 — Backtest + forward wiring (§14) | `feat/backtest-wiring` | **NOT STARTED** — needs Phases 3 + 5 |
 
 ---
 

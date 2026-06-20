@@ -3,8 +3,11 @@ package in.arthayantra.strategysignal.signals;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.common.web.time.Ist;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import in.arthayantra.strategyengine.config.StrategyCompiler;
 import in.arthayantra.strategyengine.config.StrategyDefinition;
+import in.arthayantra.strategyengine.eval.BarValues;
 import in.arthayantra.strategyengine.eval.EntryEvaluator;
 import in.arthayantra.strategyengine.eval.ExitEvaluator;
 import in.arthayantra.strategyengine.eval.IndicatorBank;
@@ -14,6 +17,12 @@ import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategyengine.series.EngineSeries;
 import in.arthayantra.strategyengine.series.SeriesKey;
 import in.arthayantra.strategysignal.registry.StrategyRepository;
+import in.arthayantra.strategysignal.scalper.ConnectTheDotsScorer;
+import in.arthayantra.strategysignal.scalper.ScalperConfig;
+import in.arthayantra.strategysignal.scalper.ScalperConfluenceGate;
+import in.arthayantra.strategysignal.scalper.ScalperManualChecks;
+import in.arthayantra.strategysignal.scalper.ScalperRisk;
+import in.arthayantra.strategysignal.scalper.StrikePicker;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -65,7 +74,7 @@ public class SignalEngine {
 
   private static final Logger log = LoggerFactory.getLogger(SignalEngine.class);
 
-  /** One loaded (strategy, version) with its resolved universe. */
+  /** One loaded (strategy, version) with its resolved universe; {@code scalper} non-null = Track-2. */
   record Loaded(
       UUID strategyId,
       UUID versionId,
@@ -75,7 +84,8 @@ public class SignalEngine {
       String checksum,
       StrategyDefinition definition,
       List<StrategyDefinition.InstrumentRef> universe,
-      Set<SeriesKey> seriesKeys) {}
+      Set<SeriesKey> seriesKeys,
+      ScalperConfig scalper) {}
 
   private final StrategyRepository registry;
   private final SignalRepository signals;
@@ -89,6 +99,9 @@ public class SignalEngine {
   private final int signalTtlMinutes;
   // A12 SPI (paper adapter): ENTRY risk gate + engine-stamped suggested qty. Absent ⇒ permissive.
   private final java.util.Optional<EmissionGuard> emissionGuard;
+  // §12.3 Track-2 confluence seam: OI/macro gate + option pick for scalper strategies. Absent ⇒
+  // scalper strategies cannot emit (fail-closed — a scalper without its confluence must not fire).
+  private final java.util.Optional<ScalperConfluenceGate> scalperGate;
 
   // candles.1m.* are NEVER conflated (A.7.2 bus contract — every closed bar matters). A FIFO
   // queue preserves each distinct bar in arrival order; the single-threaded evalExecutor drains it
@@ -126,6 +139,7 @@ public class SignalEngine {
       Clock clock,
       MeterRegistry meterRegistry,
       java.util.Optional<EmissionGuard> emissionGuard,
+      java.util.Optional<ScalperConfluenceGate> scalperGate,
       @Value("${artha.signals.ttl-minutes:60}") int signalTtlMinutes) {
     this.registry = registry;
     this.signals = signals;
@@ -138,6 +152,7 @@ public class SignalEngine {
     this.clock = clock;
     this.signalTtlMinutes = signalTtlMinutes;
     this.emissionGuard = emissionGuard;
+    this.scalperGate = scalperGate;
     this.evalTimer = meterRegistry.timer("ay_signal_eval_duration_seconds");
     this.emitted = meterRegistry.counter("ay_signals_emitted_total");
   }
@@ -170,9 +185,24 @@ public class SignalEngine {
         continue;
       }
       try {
-        StrategyDefinition definition = StrategyCompiler.compile(versionRow.get().config());
-        List<StrategyDefinition.InstrumentRef> universe =
-            resolveUniverse(versionRow.get().config());
+        JsonNode config = versionRow.get().config();
+        StrategyDefinition definition = StrategyCompiler.compile(config);
+        // Track-2: a strategy tagged `scalper` over an options_of_underlying universe carries the
+        // §0B knobs (the confluence seam reads them); every other strategy stays null = unaffected.
+        ScalperConfig scalper =
+            strategy.tags().contains("scalper")
+                    && "options_of_underlying".equals(config.path("universe").path("mode").asText())
+                ? ScalperConfig.from(config.path("universe"), strategy.tags())
+                : null;
+        // §0B hard-stop rule: a scalper without a fixed SL or a time-stop could ride an unbounded
+        // losing option — refuse to load it rather than emit signals it can never safely exit.
+        if (scalper != null && !ScalperRisk.hasBoundingExit(definition.exitRules())) {
+          log.warn(
+              "scalper {} has no hard stop / time-stop exit — not loaded (§0B hard-SL rule)",
+              strategy.slug());
+          continue;
+        }
+        List<StrategyDefinition.InstrumentRef> universe = resolveUniverse(config);
         if (universe.isEmpty()) {
           log.warn("strategy {} resolves to an empty universe — not loaded", strategy.slug());
           continue;
@@ -204,7 +234,7 @@ public class SignalEngine {
             new Loaded(
                 strategy.id(), versionRow.get().id(), strategy.slug(), strategy.name(),
                 versionRow.get().version(), versionRow.get().checksum(), definition,
-                universe, keys));
+                universe, keys, scalper));
       } catch (RuntimeException e) {
         log.error("strategy {} failed to load — skipped: {}", strategy.slug(), e.getMessage());
       }
@@ -235,12 +265,15 @@ public class SignalEngine {
               universe.path("underlying").path("tradingsymbol").asText(),
               universe.path("futures").path("contract").asText("front_month"),
               universe.path("futures").path("roll_days_before_expiry").asInt(1));
-      case "options_of_underlying" -> {
-        log.warn(
-            "options_of_underlying universes evaluate from Stage F (chain-driven resolution); "
-                + "strategy stays unloaded");
-        yield List.of();
-      }
+      case "options_of_underlying" ->
+          // Phase 3 / Model A: the scalper EVALUATES + CHARTS on the index FRONT FUTURE (it carries
+          // the volume the §0B VWAP/VWMA gates need); the option to TRADE is picked at signal time by
+          // the confluence seam. Same front/next + roll resolution as futures_of_underlying.
+          futuresResolver.resolve(
+              universe.path("underlying").path("exchange").asText(),
+              universe.path("underlying").path("tradingsymbol").asText(),
+              universe.path("futures").path("contract").asText("front_month"),
+              universe.path("futures").path("roll_days_before_expiry").asInt(2));
       default -> {
         // index_constituents cannot publish until Phase 44 (the registry guard) — defensive
         log.warn("universe mode '{}' is not live-resolvable yet", mode);
@@ -361,6 +394,17 @@ public class SignalEngine {
     Optional<SignalRepository.SignalRow> activeEntry =
         signals.activeEntry(strategy.versionId(), exchange, tradingsymbol);
     if (activeEntry.isPresent()) {
+      // §3.1/§3.6 structural stop (scalper, live-only): the persisted stop_loss is the captured
+      // 1st-candle / entry-candle extreme on the index future. A bar that touches it exits FIRST
+      // (protective priority, mirroring ExitEvaluator's stop_loss-wins precedence). The confluence
+      // path is live-only, so this never affects the deterministic golden replay.
+      if (strategy.scalper() != null
+          && activeEntry.get().stopLoss() != null
+          && structuralStopHit(
+              directionOf(strategy.definition()), primary.candle(index), activeEntry.get().stopLoss())) {
+        emit(strategy, exchange, tradingsymbol, interval, "EXIT", bar, activeEntry.get());
+        return;
+      }
       int entryIndex =
           primary.indexAtOrBefore(activeEntry.get().generatedAt().toInstant());
       Optional<ExitEvaluator.ExitDecision> exit =
@@ -379,9 +423,44 @@ public class SignalEngine {
       Optional<EntryEvaluator.Evaluation> evaluation =
           EntryEvaluator.evaluate(strategy.definition(), bank, index);
       if (evaluation.isPresent() && evaluation.get().entry()) {
-        emitEntry(strategy, exchange, tradingsymbol, interval, bar, evaluation.get());
+        if (strategy.scalper() != null) {
+          scalperEntry(strategy, exchange, tradingsymbol, interval, bar, evaluation.get(), bank, primary, index);
+        } else {
+          emitEntry(strategy, exchange, tradingsymbol, interval, bar, evaluation.get(), null);
+        }
       }
     }
+  }
+
+  /**
+   * Track-2 entry: the chart gate passed; now the §12.3 confluence seam must also confirm and pick
+   * the option, or the entry is blocked. Fail-closed — a scalper strategy without the gate never
+   * fires. The signal is keyed on the index FUTURE (this {@code exchange}/{@code tradingsymbol}); the
+   * picked option rides the side-channel.
+   */
+  private void scalperEntry(
+      Loaded strategy, String exchange, String tradingsymbol, String interval, EngineCandle bar,
+      EntryEvaluator.Evaluation evaluation, BarValues bank, EngineSeries future, int index) {
+    if (scalperGate.isEmpty()) {
+      log.warn("scalper strategy {} loaded but confluence gate absent — entry suppressed", strategy.slug());
+      return;
+    }
+    // §12.7 scalper 5-account discipline: 5 losses freeze all sub-accounts / 5 wins bank the day.
+    // Consulted IN ADDITION to the global risk gate (checked later in emitEntry); scalper entries only.
+    if (emissionGuard.isPresent() && !emissionGuard.get().scalperEntryAllowed()) {
+      log.info("scalper ENTRY paused by the 5-account discipline: {} {}:{}", strategy.slug(), exchange, tradingsymbol);
+      return;
+    }
+    OffsetDateTime istBar = bar.bucketStart().withOffsetSameInstant(Ist.OFFSET);
+    Optional<ScalperConfluenceGate.Decision> decision =
+        scalperGate.get().evaluate(
+            strategy.scalper(), bank, future, index, bar.bucketStart().toInstant(),
+            istBar.toLocalTime(), istBar.toLocalDate());
+    if (decision.isEmpty()) {
+      log.info("scalper confluence blocked entry: {} {}:{}", strategy.slug(), exchange, tradingsymbol);
+      return;
+    }
+    emitEntry(strategy, exchange, tradingsymbol, interval, bar, evaluation, decision.get());
   }
 
   private void evaluateCoarsePrimary(
@@ -483,13 +562,13 @@ public class SignalEngine {
       EngineCandle lastOneMinute = dayBars.get(dayBars.size() - 1);
       emitEntry(
           strategy, instrument.exchange(), instrument.tradingsymbol(), "1d", lastOneMinute,
-          evaluation.get());
+          evaluation.get(), null);
     }
   }
 
   private void emitEntry(
       Loaded strategy, String exchange, String tradingsymbol, String interval, EngineCandle bar,
-      EntryEvaluator.Evaluation evaluation) {
+      EntryEvaluator.Evaluation evaluation, ScalperConfluenceGate.Decision decision) {
     // A12 global risk gate: a daily-loss trip / kill switch / max-open cap pauses ENTRY emission
     // for the rest of the IST day — exit/stop evaluation (emit()) is deliberately NOT gated.
     if (emissionGuard.isPresent() && !emissionGuard.get().entryAllowed()) {
@@ -498,6 +577,12 @@ public class SignalEngine {
     }
     BigDecimal entryPrice = bar.close();
     BigDecimal stopLoss = levelFromRules(strategy.definition(), entryPrice, "stop_loss");
+    // §3.1/§3.6 structural stop: a scalper anchors its stop on the 1st-candle (Two-Candle) or
+    // entry-candle (Golden-Cross) extreme of the index future, captured at entry. It overrides the
+    // (absent) YAML rule level and is the price the bar-close structural-stop exit check fires on.
+    if (decision != null && decision.structuralStop() != null) {
+      stopLoss = decision.structuralStop();
+    }
     BigDecimal target = levelFromRules(strategy.definition(), entryPrice, "take_profit");
     String side =
         strategy.definition().direction() == StrategyDefinition.Direction.SHORT ? "SELL" : "BUY";
@@ -523,6 +608,14 @@ public class SignalEngine {
         signals.stampSuggestedQty(id, suggestedQty);
       }
     }
+    // §12.9 Track-2 side-channel: the signal is keyed on the index future; record the option the
+    // confluence picked (the order/paper layer trades it) + the confluence detail, OUTSIDE the
+    // frozen score breakdown. Options trade on the same derivatives exchange as the index future.
+    if (decision != null) {
+      signals.stampScalperDetail(
+          id, exchange, decision.pick().candidate().tradingsymbol(),
+          scalperDetailJson(decision, strategy.scalper()));
+    }
     emitted.increment();
     // the channel carries EXACTLY the persisted canonical bytes (divergence = FAIL criterion)
     JsonNode canonicalBreakdown;
@@ -544,6 +637,30 @@ public class SignalEngine {
         new SignalEmitted(
             id, strategy.versionId(), exchange, tradingsymbol, side, entryPrice, stopLoss, target,
             evaluation.breakdown().composite(), evaluation.breakdown().threshold()));
+  }
+
+  /** The §12.9 confluence side-channel JSON — chosen option, |delta|, IV, aggregate, per-dot detail. */
+  private String scalperDetailJson(ScalperConfluenceGate.Decision d, ScalperConfig cfg) {
+    StrikePicker.Candidate c = d.pick().candidate();
+    ObjectNode root = objectMapper.createObjectNode();
+    root.put("side", d.side().name());
+    root.put("underlying", cfg.underlying());
+    root.put("expiry", d.expiry().toString());
+    root.put("tradeable", c.tradingsymbol());
+    root.put("strike", c.strike());
+    root.put("option_ltp", c.ltp());
+    root.put("iv", c.iv());
+    root.put("delta", d.pick().delta());
+    root.put("confluence_aggregate", d.confluence().aggregate());
+    ArrayNode dots = root.putArray("dots");
+    for (ConnectTheDotsScorer.DotScore ds : d.confluence().dots()) {
+      ObjectNode n = dots.addObject();
+      n.put("dot", ds.dot());
+      n.put("weight", ds.weight());
+      n.put("supports", ds.supports());
+    }
+    ScalperManualChecks.appendTo(root);
+    return root.toString();
   }
 
   private void emit(
@@ -637,6 +754,14 @@ public class SignalEngine {
     return definition.direction() == StrategyDefinition.Direction.SHORT
         ? ExitEvaluator.Direction.SHORT
         : ExitEvaluator.Direction.LONG;
+  }
+
+  /** A scalper structural stop fires when the bar touches the level: low ≤ stop (long), high ≥ stop (short). */
+  private static boolean structuralStopHit(
+      ExitEvaluator.Direction dir, EngineCandle bar, BigDecimal stop) {
+    return dir == ExitEvaluator.Direction.LONG
+        ? bar.low().compareTo(stop) <= 0
+        : bar.high().compareTo(stop) >= 0;
   }
 
   private static BigDecimal levelFromRules(

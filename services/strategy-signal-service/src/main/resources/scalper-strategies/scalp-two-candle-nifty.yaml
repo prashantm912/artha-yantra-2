@@ -1,0 +1,56 @@
+# Siva #1 — Two-Candle Theory. The `two-candle-pattern` tag arms the §12.3 TwoCandleGate: entry
+# requires two consecutive same-colour candles (each above the volume floor) with a strong 2nd
+# candle, deploying on the 3rd — the multi-bar pattern the chart-only gate grammar cannot express.
+# The 1st candle's low is the structural stop (§3.1). Evaluates on the NIFTY front future (Model A);
+# the confluence seam buys the nearest-weekly ATM-band CE.
+schema: strategy-schema/v1
+id: scalp-two-candle-nifty
+name: "Scalper · Two-Candle · NIFTY CE"
+version: 1.0.0
+description: "Two-candle scalp (Siva #1) on the NIFTY front future; 2-candle pattern + 1st-candle SL; long-premium CE only."
+author: owner
+tags: [scalper, options, intraday, nifty, two-candle-pattern]
+
+universe:
+  mode: options_of_underlying
+  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  options:
+    expiry: nearest_weekly
+    strikes: { selector: atm_window, width: 3 }
+    option_types: [CE]
+
+timeframes:
+  primary: 3m
+  additional: [1h]
+
+indicators:
+  - { name: VWMA,       alias: vwma20,    timeframe: 3m, params: { period: 20 } }
+  - { name: PSAR,       alias: psar,      timeframe: 3m }
+  - { name: RSI,        alias: rsi14,     timeframe: 3m, params: { period: 14 }, weight: 1.0,
+      normalize: { type: rsi_momentum } }
+  - { name: SUPERTREND, alias: supertrend, timeframe: 3m, params: { period: 10, multiplier: 2.0 },
+      weight: 1.0, normalize: { type: direction } }
+  - { name: SUPERTREND, alias: bias60m,   timeframe: 1h, params: { period: 7, multiplier: 3.0 } }
+
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - "close > vwap"
+      - "close > vwma20"         # momentum continuation: price leading both VWAP and VWMA
+  scoring:
+    threshold: 0.2
+
+exit_rules:
+  - { type: signal_exit, params: { rule: "close < vwap" } }
+  - { type: time_stop,   params: { max_bars: 10 } }
+
+risk:
+  position_sizing: { method: premium_budget, params: { budget_inr: 15000 } }
+  max_positions: 1
+  max_positions_per_underlying: 1
+  max_daily_loss_pct: 2.0
+  session:
+    style: intraday
+    window: { from: "09:45", to: "15:00" }
+    square_off: "15:15"

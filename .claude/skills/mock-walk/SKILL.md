@@ -1,13 +1,13 @@
 ---
 name: mock-walk
-description: Use to run an ArthaYantra stage manual-testing walk on the mock stack — bring up/confirm the mock stack, rebake any changed services, backfill the benchmark, then run the Playwright e2e suite (the automated companion to docs/manual-testing-stage-*.md).
+description: Use to run an ArthaYantra stage manual-testing walk on the mock stack — bring up/confirm the mock stack, rebake any changed services, backfill the benchmark, then run the Playwright e2e suite (the automated companion to docs/manual-tests/archive/manual-testing-stage-*.md).
 disable-model-invocation: true
 ---
 
 # mock-walk
 
 Runs a stage walk on the **mock stack with zero Kite credentials**, end to end. The
-automated companion to `docs/manual-testing-stage-*.md`. The app is same-origin through the
+automated companion to `docs/manual-tests/archive/manual-testing-stage-*.md`. The app is same-origin through the
 gateway at `http://127.0.0.1:8080` (owner password is the `.env` hash — `MyPassword123` in
 the usual mock setup).
 
@@ -66,7 +66,7 @@ cd e2e && E2E_OWNER_PASSWORD=<your .env owner pw> npx playwright test --reporter
 
 ## 5. Spot-check the visual/curl-only steps the headless suite can't assert
 
-Walk the remaining `docs/manual-testing-stage-*.md` steps by hand or curl — e.g. indicator
+Walk the remaining `docs/manual-tests/archive/manual-testing-stage-*.md` steps by hand or curl — e.g. indicator
 overlays (`/api/v1/indicators/{id}/series?...`), the WireMock notifier count
 (`curl -s http://127.0.0.1:9099/__admin/requests | jq '[.requests[]|select(.request.method=="POST")]|length'`).
 Fix any step whose response isn't the guide's expected output, then re-verify.

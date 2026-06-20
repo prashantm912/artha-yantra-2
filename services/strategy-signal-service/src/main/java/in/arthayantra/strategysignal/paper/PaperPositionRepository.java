@@ -212,4 +212,21 @@ public class PaperPositionRepository {
         BigDecimal.class,
         java.sql.Date.valueOf(istDate));
   }
+
+  /** Win/loss counts of trades closed on an IST day. */
+  public record WinLoss(int wins, int losses) {}
+
+  /**
+   * Winning vs losing trades closed on a given IST day (the scalper 5-account discipline input —
+   * §12.7). A trade with realized P&amp;L &gt; 0 is a win; ≤ 0 (flat or losing) is counted as a loss.
+   */
+  public WinLoss winLossOn(java.time.LocalDate istDate) {
+    return jdbc.queryForObject(
+        "SELECT COUNT(*) FILTER (WHERE realized_pnl > 0) AS wins,"
+            + " COUNT(*) FILTER (WHERE realized_pnl <= 0) AS losses"
+            + " FROM paper_positions WHERE status='CLOSED'"
+            + " AND (closed_at AT TIME ZONE 'Asia/Kolkata')::date = ?",
+        (rs, n) -> new WinLoss(rs.getInt("wins"), rs.getInt("losses")),
+        java.sql.Date.valueOf(istDate));
+  }
 }

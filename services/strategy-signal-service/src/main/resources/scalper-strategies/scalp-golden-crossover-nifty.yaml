@@ -1,0 +1,58 @@
+# Siva #6 — Golden Crossover. Siva's golden cross is NOT a generic EMA cross: it is the
+# Supertrend AND VWMA(20) lines piercing VWAP together on the same candle (§3.6/§4.2). The
+# chart gate encodes the golden-cross STATE (VWMA above VWAP + Supertrend bullish — the engine
+# crossover op can't take VWAP, a built-in, as an operand); the §12.3
+# confluence seam then confirms OI/macro (drastic two-sided OI) and buys the nearest-weekly
+# ATM-band NIFTY CE. Evaluates on the NIFTY front future (Model A).
+schema: strategy-schema/v1
+id: scalp-golden-crossover-nifty
+name: "Scalper · Golden Crossover · NIFTY CE"
+version: 1.0.0
+description: "Golden-crossover scalp (Siva #6) on the NIFTY front future; ST+VWMA pierce VWAP + confluence; long-premium CE only."
+author: owner
+# `entry-candle-stop` anchors the structural stop on the crossover candle's low (§3.6 breakout form).
+tags: [scalper, options, intraday, nifty, entry-candle-stop]
+
+universe:
+  mode: options_of_underlying
+  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  options:
+    expiry: nearest_weekly
+    strikes: { selector: atm_window, width: 3 }
+    option_types: [CE]
+
+timeframes:
+  primary: 3m
+  additional: [1h]
+
+indicators:
+  - { name: VWMA,       alias: vwma20,    timeframe: 3m, params: { period: 20 } }
+  - { name: PSAR,       alias: psar,      timeframe: 3m }
+  - { name: RSI,        alias: rsi14,     timeframe: 3m, params: { period: 14 }, weight: 1.0,
+      normalize: { type: rsi_momentum } }
+  - { name: SUPERTREND, alias: supertrend, timeframe: 3m, params: { period: 10, multiplier: 2.0 },
+      weight: 1.0, normalize: { type: direction } }
+  - { name: SUPERTREND, alias: bias60m,   timeframe: 1h, params: { period: 7, multiplier: 3.0 } }
+
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - "vwma20 > vwap"      # VWMA(20) above VWAP — the VWMA leg of Siva's golden cross
+      - "supertrend > 0"     # Supertrend bullish — the ST leg (both lines on VWAP's bull side)
+  scoring:
+    threshold: 0.2
+
+exit_rules:
+  - { type: signal_exit, params: { rule: "vwma20 < vwap" } }   # VWMA falls back below VWAP (cross undone)
+  - { type: time_stop,   params: { max_bars: 12 } }
+
+risk:
+  position_sizing: { method: premium_budget, params: { budget_inr: 15000 } }
+  max_positions: 1
+  max_positions_per_underlying: 1
+  max_daily_loss_pct: 2.0
+  session:
+    style: intraday
+    window: { from: "09:45", to: "15:00" }
+    square_off: "15:15"

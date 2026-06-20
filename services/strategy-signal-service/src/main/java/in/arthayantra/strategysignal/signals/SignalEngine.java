@@ -444,6 +444,12 @@ public class SignalEngine {
       log.warn("scalper strategy {} loaded but confluence gate absent — entry suppressed", strategy.slug());
       return;
     }
+    // §12.7 scalper 5-account discipline: 5 losses freeze all sub-accounts / 5 wins bank the day.
+    // Consulted IN ADDITION to the global risk gate (checked later in emitEntry); scalper entries only.
+    if (emissionGuard.isPresent() && !emissionGuard.get().scalperEntryAllowed()) {
+      log.info("scalper ENTRY paused by the 5-account discipline: {} {}:{}", strategy.slug(), exchange, tradingsymbol);
+      return;
+    }
     OffsetDateTime istBar = bar.bucketStart().withOffsetSameInstant(Ist.OFFSET);
     Optional<ScalperConfluenceGate.Decision> decision =
         scalperGate.get().evaluate(

@@ -18,18 +18,28 @@ public class PaperEmissionGuard implements EmissionGuard {
   private final RiskService risk;
   private final PaperAccountService account;
   private final InstrumentMetaClient instruments;
+  private final ScalperAccountModel scalperAccounts;
 
-  /** Wires the risk gate + capital model. */
+  /** Wires the risk gate + capital model + the scalper 5-account discipline. */
   public PaperEmissionGuard(
-      RiskService risk, PaperAccountService account, InstrumentMetaClient instruments) {
+      RiskService risk,
+      PaperAccountService account,
+      InstrumentMetaClient instruments,
+      ScalperAccountModel scalperAccounts) {
     this.risk = risk;
     this.account = account;
     this.instruments = instruments;
+    this.scalperAccounts = scalperAccounts;
   }
 
   @Override
   public boolean entryAllowed() {
     return risk.entryAllowed();
+  }
+
+  @Override
+  public boolean scalperEntryAllowed() {
+    return scalperAccounts.scalperEntryAllowed();
   }
 
   @Override

@@ -15,6 +15,15 @@ public interface EmissionGuard {
   boolean entryAllowed();
 
   /**
+   * False when the scalper 5-sub-account discipline pauses a fresh scalper ENTRY for the IST day
+   * (§12.7 — 5 losses froze all sub-accounts, or 5 wins banked the day). Consulted IN ADDITION to
+   * {@link #entryAllowed()}, only on the scalper entry path. Default true (non-scalper / no paper).
+   */
+  default boolean scalperEntryAllowed() {
+    return true;
+  }
+
+  /**
    * The strategy's position-sizing run against the paper-account equity, lot-rounded for the
    * instrument; null when it sizes to zero or the equity is unknown. Stamped on the signal OUTSIDE
    * the frozen score breakdown.

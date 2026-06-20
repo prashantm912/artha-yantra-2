@@ -66,10 +66,13 @@ public class OpenHighStatsService {
       int window,
       OffsetDateTime asOf,
       List<OptionsSnapshotReader.PerStrikeSessionStat> stats) {
-    Set<BigDecimal> keep = nearestStrikes(stats, atmStrike, window);
+    // Scale-robust membership: BigDecimal.equals is scale-sensitive (22500 != 22500.0), so key
+    // both the keep-set and the test on stripTrailingZeros().toPlainString() (matches
+    // OptionsSnapshotReader.key()). Returned strike values stay the original BigDecimal.
+    Set<String> keep = nearestStrikes(stats, atmStrike, window);
     List<StrikeSessionStat> items = new ArrayList<>();
     for (OptionsSnapshotReader.PerStrikeSessionStat s : stats) {
-      if (!keep.contains(s.strike())) {
+      if (!keep.contains(strikeKey(s.strike()))) {
         continue;
       }
       items.add(
@@ -121,7 +124,7 @@ public class OpenHighStatsService {
    * The {@code 2*window+1} distinct listed strikes nearest {@code atmStrike} (by |strike - atm|;
    * ties broken by the lower strike). When {@code atmStrike} is null, the lowest strikes are kept.
    */
-  private static Set<BigDecimal> nearestStrikes(
+  private static Set<String> nearestStrikes(
       List<OptionsSnapshotReader.PerStrikeSessionStat> stats, BigDecimal atmStrike, int window) {
     List<BigDecimal> distinct =
         stats.stream()
@@ -135,8 +138,13 @@ public class OpenHighStatsService {
             ? Comparator.naturalOrder()
             : Comparator.<BigDecimal, BigDecimal>comparing(s -> s.subtract(atmStrike).abs())
                 .thenComparing(Comparator.naturalOrder());
-    Set<BigDecimal> keep = new LinkedHashSet<>();
-    distinct.stream().sorted(order).limit(limit).forEach(keep::add);
+    Set<String> keep = new LinkedHashSet<>();
+    distinct.stream().sorted(order).limit(limit).forEach(s -> keep.add(strikeKey(s)));
     return keep;
+  }
+
+  /** Scale-insensitive strike key (mirrors OptionsSnapshotReader.key()). */
+  private static String strikeKey(BigDecimal strike) {
+    return strike.stripTrailingZeros().toPlainString();
   }
 }

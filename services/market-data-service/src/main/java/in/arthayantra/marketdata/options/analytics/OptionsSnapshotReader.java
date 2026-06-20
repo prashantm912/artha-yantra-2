@@ -152,6 +152,11 @@ public class OptionsSnapshotReader {
         }
         if (i > 0 && ltp != null && runningHigh != null && ltp.compareTo(runningHigh) < 0) {
           Long iv = intervalVolume(pts.get(i - 1).volume(), pts.get(i).volume());
+          // Clamp non-monotone cumulative volume (broker reset / stale last()): a negative
+          // interval would wrongly SUBTRACT from declineVolume, so floor it at zero.
+          if (iv != null) {
+            iv = Math.max(0L, iv);
+          }
           declineVolume = add(declineVolume, iv);
         }
         if (ltp != null && (runningHigh == null || ltp.compareTo(runningHigh) > 0)) {

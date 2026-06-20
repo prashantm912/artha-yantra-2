@@ -20,6 +20,7 @@ import in.arthayantra.strategysignal.registry.StrategyRepository;
 import in.arthayantra.strategysignal.scalper.ConnectTheDotsScorer;
 import in.arthayantra.strategysignal.scalper.ScalperConfig;
 import in.arthayantra.strategysignal.scalper.ScalperConfluenceGate;
+import in.arthayantra.strategysignal.scalper.ScalperRisk;
 import in.arthayantra.strategysignal.scalper.StrikePicker;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -192,6 +193,14 @@ public class SignalEngine {
                     && "options_of_underlying".equals(config.path("universe").path("mode").asText())
                 ? ScalperConfig.from(config.path("universe"))
                 : null;
+        // §0B hard-stop rule: a scalper without a fixed SL or a time-stop could ride an unbounded
+        // losing option — refuse to load it rather than emit signals it can never safely exit.
+        if (scalper != null && !ScalperRisk.hasBoundingExit(definition.exitRules())) {
+          log.warn(
+              "scalper {} has no hard stop / time-stop exit — not loaded (§0B hard-SL rule)",
+              strategy.slug());
+          continue;
+        }
         List<StrategyDefinition.InstrumentRef> universe = resolveUniverse(config);
         if (universe.isEmpty()) {
           log.warn("strategy {} resolves to an empty universe — not loaded", strategy.slug());

@@ -234,6 +234,85 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
   }
 
   @Test
+  void strikeSessionStatsPicksAtmSlicesWindowAndGradesOhOl() throws Exception {
+    String u = "SESSCTRL";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    LocalDate session = LocalDate.of(2026, 6, 19); // Friday (trading day)
+    // spot is hardcoded 22480.00 in insertRow -> ATM nearest = 22500.
+    OffsetDateTime s0 =
+        OffsetDateTime.of(2026, 6, 19, 9, 16, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime s1 = s0.plusMinutes(5);
+    OffsetDateTime s2 = s0.plusMinutes(10);
+
+    // ATM 22500 CE: open=100, rises to 140 (high) then last=120 -> NOT open=high.
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, s0, u, exp, "22500", "CE", "100.00", 1000L, 0L, 2000L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, s1, u, exp, "22500", "CE", "140.00", 1100L, 0L, 2300L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, s2, u, exp, "22500", "CE", "120.00", 1200L, 0L, 2500L);
+    // 22550 CE: open==high (open=200, only falls) -> ohMark true; last=180.
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, s0, u, exp, "22550", "CE", "200.00", 800L, 0L, 1000L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, s1, u, exp, "22550", "CE", "180.00", 850L, 0L, 1200L);
+    // 22450 CE: in window (window=1 -> 22450,22500,22550).
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, s0, u, exp, "22450", "CE", "300.00", 700L, 0L, 500L);
+    // 22600 CE: OUT of window=1 (decoy, must be sliced away).
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, s0, u, exp, "22600", "CE", "10.00", 600L, 0L, 100L);
+
+    // Prior session for prevClose of the ATM CE: newest bucket ltp = 110.
+    OffsetDateTime p0 =
+        OffsetDateTime.of(2026, 6, 18, 14, 0, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, p0, u, exp, "22500", "CE", "110.00", 900L, 0L, 1500L);
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/strike-session-stats")
+                .param("underlying", u)
+                .param("expiry", "2026-06-25")
+                .param("session", "2026-06-19")
+                .param("window", "1")
+                .param("interval", "5"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.underlying").value(u))
+        .andExpect(jsonPath("$.atmStrike").value(org.hamcrest.Matchers.startsWith("22500")))
+        // window=1 -> 3 strikes (22450/22500/22550), CE leg only seeded -> 3 items; 22600 excluded
+        .andExpect(jsonPath("$.items.length()").value(3))
+        // ATM 22500 CE: open=100 high=140 -> not OH; last=120 from prevClose 110 -> +9.09%
+        .andExpect(
+            jsonPath("$.items[?(@.strike =~ /22500.*/ && @.optionType == 'CE')].ohMark")
+                .value(org.hamcrest.Matchers.contains(false)))
+        .andExpect(
+            jsonPath("$.items[?(@.strike =~ /22500.*/ && @.optionType == 'CE')].fallPctFromOpen")
+                .value(org.hamcrest.Matchers.contains("20.0000")))
+        .andExpect(
+            jsonPath(
+                    "$.items[?(@.strike =~ /22500.*/ && @.optionType == 'CE')].fallPctFromPrevClose")
+                .value(org.hamcrest.Matchers.contains("9.0909")))
+        // 22550 CE: open==high(200) -> ohMark true; low=180 so open-low=20 > tol -> olMark false
+        .andExpect(
+            jsonPath("$.items[?(@.strike =~ /22550.*/ && @.optionType == 'CE')].ohMark")
+                .value(org.hamcrest.Matchers.contains(true)))
+        .andExpect(
+            jsonPath("$.items[?(@.strike =~ /22550.*/ && @.optionType == 'CE')].olMark")
+                .value(org.hamcrest.Matchers.contains(false)))
+        // decimals serialize as JSON strings (open of ATM CE)
+        .andExpect(
+            jsonPath("$.items[?(@.strike =~ /22500.*/ && @.optionType == 'CE')].open")
+                .value(org.hamcrest.Matchers.contains("100.0000")));
+  }
+
+  @Test
+  void strikeSessionStatsEmptyWindowReturns200WithEmptyItems() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/strike-session-stats")
+                .param("underlying", "SESSEMPTY")
+                .param("expiry", "2026-06-25")
+                .param("session", "2026-06-19")
+                .param("interval", "5"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items.length()").value(0))
+        .andExpect(jsonPath("$.atmStrike").value(org.hamcrest.Matchers.nullValue()));
+  }
+
+  @Test
   void premiumSeriesTracksAtmStraddlePerBucket() throws Exception {
     String u = "PREMSERIES";
     LocalDate exp = LocalDate.of(2026, 6, 25);

@@ -40,23 +40,46 @@ rule lives in the three `.md` docs (its S20–S23 raw decks are external-archive
 | # | Strategy | §6 key | In-repo S24 deck (`…/Daywise Sessions/…`) | Phase-3 scope | last-ported |
 |---|---|---|---|---|---|
 | 1 | Two-Candle Theory | `two_candle` | `Day 4/2 Candle Theory.pdf` | **core** | — |
-| 2 | Open=High / Open=Low | `open_high_low` | `Day 14/Open & High Strategy - Index Options & Futures (2).pdf` | derived | — |
+| 2 | Open=High / Open=Low | `open_high_low` | `Day 14/Open & High Strategy - Index Options & Futures (2).pdf` | derived | `19e7234` (→ §3.2) |
 | 3 | Market Movers | `market_movers` | `Day 10/Market Movers Strategy.pdf` | **DEFER** (equity-fut screener) | — |
-| 4 | Gap Theory | `gap` | `Day 6/Gap Theory.pdf` | derived | — |
+| 4 | Gap Theory | `gap` | `Day 6/Gap Theory.pdf` | derived | `61292e2` (→ §3.4) |
 | 5 | Trending-OI Crossover | `trending_oi_crossover` | — (consolidated doc only) | **core** | — |
 | 6 | Golden Crossover | `golden_crossover` | `Day 6/How To Trade Using Golden Crossover.pdf` | **core** | — |
 | 7 | Hero-Zero (expiry OI) | `hero_zero` | `Day 9/Oi Expiry Strategy 10th Mentoring.pdf` · `Day 10/How To Identify Hero Or Zero - Expiry Day (1).pdf` | **gate** (SPAN+manual) | — |
 | 8 | BTST / STBT | `btst_stbt` | — (consolidated doc only) | derived (BTST clock built) | — |
-| 9 | Morning Trade | `morning_trade` | — (consolidated doc only) | derived | — |
+| 9 | Morning Trade | `morning_trade` | — (consolidated doc only) | derived | `b8f9cdb` (→ §3.9) |
 | 10 | Connect-the-Dots framework | `scalping_framework` | `Day 3/Connect The Dots - Become Successful Options Scalper.pdf` | **core (build first)** | — |
 | 11 | Straddle (long/short) | `straddle` | — (consolidated doc only) | **gate** (short = SPAN+hedge) | — |
-| 12 | Trend Change | `trend_change` | — (consolidated doc only) | derived | — |
+| 12 | Trend Change | `trend_change` | — (consolidated doc only) | derived | `754c44a` (→ §3.12) |
 
 Registry order = Consolidated §7 canonical order. Two shared S24 decks are framework inputs, not strategy
 rows: `Day 4/How To Scalp Sensex Using Nifty Charts.pdf` (§4.16 Sensex-via-Nifty proxy) and `Day 5/Kingdom
 Trading Strategy-1.pdf` (chess-metaphor re-framing of #1 + the indicator framework — a mnemonic, not a 13th
 strategy). The two `.txt` mentoring transcripts (`OSPL - Siva Sir.txt`, `OSPL-Modified with BB.txt`) remain
 external (not vendored) — already folded into the structured docs above; consult only to disambiguate.
+
+## Derived-strategy v1 scope notes (#4 / #12 / #2 / #9)
+
+The four derived scalpers seeded as registry drafts (`scalper-strategies/*.yaml`) port a SUBSET of their
+spec; the deferred legs are recorded here so a later re-port re-opens the right gap.
+
+- **#2 Open=High / Open=Low (§3.2, `19e7234`):** v1 ships the front-Future OH/OL mark x the underlying
+  OI-quadrant probability tier (OI-tier v1). DEFERRED: the per-strike ATM±3 strike-count confluence
+  (≥3 strikes matching, "very high" at 4–5) — needs a per-strike-OHLC market-data endpoint that does
+  not yet exist — and the OiPulse ≥90% AI badge (a Phase-4 OiPulse-parity model we do not have; treated
+  as an OPTIONAL confirmation degraded around, never required).
+- **#9 Morning Trade (§3.9, `b8f9cdb`):** an opening-tick scalp — the session window runs from 09:16
+  (the general "after 09:45" cross-strategy rule does NOT apply); VWAP is degraded (soft, not the hard
+  gate) before 10:30 IST; SL = the first session candle's low (CE) / high (PE); profits-only small size
+  (a discipline note, not enforced).
+- **#4 Gap Theory (§3.4, `61292e2`):** v1 automates the with-trend-after-fill variant — wait for the gap
+  to fill, then trade WITH the prevailing trend; pre-gap-candle SL. DEFERRED: the counter-trend
+  "trade toward the gap" gap-fill scalp (target = the gap level, SL = day-high/low), labelled
+  risky/scalping-only in §3.4, is manual-only and not wired.
+- **#12 Trend Change (§3.12, `754c44a`):** consumes the Tier-1 ≥50% call-put dOI momentum shift (read
+  off the signed CE/PE dOI imbalance) plus a price swing-structure break + the §3.1 2-candle confirm;
+  broken-swing-pivot SL. The ≥50% shift is enforced INSIDE the TrendChangeGate, so #12 does NOT also
+  carry the `oi-cross-filter` tag (that would stack a redundant second ≥50% pre-gate).
 
 ## Column-misattribution traps (verified — do not propagate across strategies)
 

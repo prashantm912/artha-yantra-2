@@ -34,7 +34,11 @@ public class ScalperStrategySeeder {
           "scalp-connect-the-dots-nifty",
           "scalp-two-candle-nifty",
           "scalp-trending-oi-nifty",
-          "scalp-golden-crossover-nifty");
+          "scalp-golden-crossover-nifty",
+          "scalp-gap-theory-banknifty",
+          "scalp-trend-change-banknifty",
+          "scalp-open-high-low-nifty",
+          "scalp-morning-trade-nifty");
 
   private final RegistryService registry;
 

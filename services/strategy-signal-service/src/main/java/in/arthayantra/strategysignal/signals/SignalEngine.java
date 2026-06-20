@@ -20,6 +20,7 @@ import in.arthayantra.strategysignal.registry.StrategyRepository;
 import in.arthayantra.strategysignal.scalper.ConnectTheDotsScorer;
 import in.arthayantra.strategysignal.scalper.ScalperConfig;
 import in.arthayantra.strategysignal.scalper.ScalperConfluenceGate;
+import in.arthayantra.strategysignal.scalper.ScalperManualChecks;
 import in.arthayantra.strategysignal.scalper.ScalperRisk;
 import in.arthayantra.strategysignal.scalper.StrikePicker;
 import io.micrometer.core.instrument.Counter;
@@ -658,6 +659,7 @@ public class SignalEngine {
       n.put("weight", ds.weight());
       n.put("supports", ds.supports());
     }
+    ScalperManualChecks.appendTo(root);
     return root.toString();
   }
 

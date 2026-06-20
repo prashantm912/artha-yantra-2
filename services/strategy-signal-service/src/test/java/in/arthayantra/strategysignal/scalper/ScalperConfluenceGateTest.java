@@ -38,30 +38,36 @@ class ScalperConfluenceGateTest {
       new ScalperConfig(
           "NSE", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          false, ScalperConfig.StructuralStop.NONE, false, false, false);
+          false, ScalperConfig.StructuralStop.NONE, false, false, false, false);
   private static final ScalperConfig TWO_CANDLE_CFG =
       new ScalperConfig(
           "NSE", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          true, ScalperConfig.StructuralStop.TWO_CANDLE_FIRST, false, false, false);
+          true, ScalperConfig.StructuralStop.TWO_CANDLE_FIRST, false, false, false, false);
   // #5: a strategy with the oi-cross-filter HARD pre-gate enabled.
   private static final ScalperConfig OI_CROSS_CFG =
       new ScalperConfig(
           "NSE", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          false, ScalperConfig.StructuralStop.NONE, true, false, false);
+          false, ScalperConfig.StructuralStop.NONE, true, false, false, false);
   // #4: a strategy with the gap-theory HARD gap-fill pre-gate enabled.
   private static final ScalperConfig GAP_CFG =
       new ScalperConfig(
           "NSE", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          false, ScalperConfig.StructuralStop.GAP_TREND, false, true, false);
+          false, ScalperConfig.StructuralStop.GAP_TREND, false, true, false, false);
   // #12: a strategy with the trend-change HARD pre-gate enabled (structure break + >=50% OI shift).
   private static final ScalperConfig TREND_CHANGE_CFG =
       new ScalperConfig(
           "NSE", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          false, ScalperConfig.StructuralStop.SWING_BREAK, false, false, true);
+          false, ScalperConfig.StructuralStop.SWING_BREAK, false, false, true, false);
+  // #2: a strategy with the open-high-low HARD FNO-structure pre-gate enabled.
+  private static final ScalperConfig OPEN_HIGH_LOW_CFG =
+      new ScalperConfig(
+          "NSE", "NIFTY 50", 2,
+          new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
+          false, ScalperConfig.StructuralStop.VWAP, false, false, false, true);
 
   // a 3m index-future series: index 2 is the deploy bar; indices 0/1 are the forming candles.
   private static EngineSeries futureSeries(EngineCandle... candles) {
@@ -438,6 +444,90 @@ class ScalperConfluenceGateTest {
     assertThat(
             new ScalperConfluenceGate(client, ScalperOiProps.defaults())
                 .evaluate(CFG, bullBank(), upReversalFuture(), 5, NOW, IST_TIME, EOD))
+        .isPresent();
+  }
+
+  // a 3m future Open=High session: bar0 open 100 is the running session high (later bars never exceed
+  // it). The deploy bar is index 2. (gapBar volume 130k clears the §0B NIFTY floor.)
+  private static EngineSeries openHighFuture() {
+    return futureSeries(
+        gapBar(0, "100", "100", "95", "98"),
+        gapBar(1, "98", "99", "94", "96"),
+        gapBar(2, "96", "100", "93", "97"));
+  }
+
+  // a bullish context whose underlying quadrant (LONG_BUILDUP) confirms a CE OH + within-band spurts.
+  private static ScalperGateContext bullContextWithSpurts(String spurtOiPct, String spurtPricePct) {
+    return new ScalperGateContext(
+        "NIFTY 50", IST_TIME,
+        new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("130000")),
+        new Oi(
+            OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("5"), bd("5"), null, null,
+            null, false, false, null,
+            spurtOiPct == null ? null : bd(spurtOiPct),
+            spurtPricePct == null ? null : bd(spurtPricePct)),
+        new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), null, null));
+  }
+
+  @Test
+  void openHighLowStrategyPassesOnAFutureOpenHighAtTheHighTierAndAnchorsTheVwapStop() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any()))
+        .thenReturn(bullContextWithSpurts("10", "20"));
+
+    Optional<Decision> decision =
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+            .evaluate(OPEN_HIGH_LOW_CFG, bullBank(), openHighFuture(), 2, NOW, IST_TIME, EOD);
+
+    assertThat(decision).isPresent();
+    assertThat(decision.get().structuralStop()).isEqualByComparingTo("99"); // the front-future VWAP
+  }
+
+  @Test
+  void openHighLowStrategyBlocksAtTheMildTierWhenTheQuadrantDoesNotConfirm() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    // OH on the future but a bearish (SHORT_BUILDUP) quadrant for the CE side -> MILD -> block.
+    ScalperGateContext mild =
+        new ScalperGateContext(
+            "NIFTY 50", IST_TIME,
+            new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("130000")),
+            new Oi(
+                OiQuadrant.SHORT_BUILDUP, OiQuadrant.SHORT_BUILDUP, bd("10"), bd("5"), bd("5"), null,
+                null, null, false, false, null, bd("10"), bd("20")),
+            new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), null, null));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any())).thenReturn(mild);
+
+    assertThat(
+            new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+                .evaluate(OPEN_HIGH_LOW_CFG, bullBank(), openHighFuture(), 2, NOW, IST_TIME, EOD))
+        .isEmpty();
+  }
+
+  @Test
+  void openHighLowStrategyBlocksWhenARejectSpurtExceedsFiftyPercent() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    // a HIGH-tier OH but the price spurt is 60% (> the 50% reject barrier) -> the move exhausted -> block.
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any()))
+        .thenReturn(bullContextWithSpurts("10", "60"));
+
+    assertThat(
+            new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+                .evaluate(OPEN_HIGH_LOW_CFG, bullBank(), openHighFuture(), 2, NOW, IST_TIME, EOD))
+        .isEmpty();
+  }
+
+  @Test
+  void nonOpenHighLowStrategyIsUnaffectedByTheFutureOpenHigh() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any())).thenReturn(bullContext());
+    // CFG carries no open-high-low tag -> the OH/OL pre-gate is never consulted; the confluence picks.
+    assertThat(
+            new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+                .evaluate(CFG, bullBank(), openHighFuture(), 2, NOW, IST_TIME, EOD))
         .isPresent();
   }
 

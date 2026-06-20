@@ -18,7 +18,9 @@ import java.util.Map;
  * entry-candle-stop} anchors the stop on the entry (crossover) candle's extreme; {@code gap-theory}
  * runs the {@link GapTheoryGate} as a hard gap-fill pre-gate (and anchors the stop on the pre-gap
  * candle's extreme); {@code trend-change} runs the {@link TrendChangeGate} as a hard reversal pre-gate
- * (structure break + &gt;=50% OI shift + 2-candle confirm) and anchors the stop on the broken swing.
+ * (structure break + &gt;=50% OI shift + 2-candle confirm) and anchors the stop on the broken swing;
+ * {@code open-high-low} runs the {@link OpenHighLowGate} as a hard FNO-structure pre-gate (front-future
+ * OH/OL + the HIGH probability tier + the &lt;=50% spurt reject rules) and anchors the stop on the VWAP.
  */
 public record ScalperConfig(
     String underlyingExchange,
@@ -30,7 +32,8 @@ public record ScalperConfig(
     StructuralStop structuralStop,
     boolean requireCallPutDeltaFilter,
     boolean requireGapFill,
-    boolean requireTrendChange) {
+    boolean requireTrendChange,
+    boolean requireOpenHighLow) {
 
   /** Where the entry-time structural stop-loss is anchored (none = size off structure/VWAP only). */
   public enum StructuralStop {
@@ -38,7 +41,8 @@ public record ScalperConfig(
     TWO_CANDLE_FIRST,
     ENTRY_CANDLE,
     GAP_TREND,
-    SWING_BREAK
+    SWING_BREAK,
+    VWAP
   }
 
   // §0B delta band — uniform across indices (the slightly-ITM 0.6–0.7 Siva favours). The §4.14.7 /
@@ -74,6 +78,8 @@ public record ScalperConfig(
     boolean gapFill = tags.contains("gap-theory");
     // #12 (section 3.12): the trend-change tag arms the TrendChangeGate + a broken-swing-pivot SL anchor.
     boolean trendChange = tags.contains("trend-change");
+    // #2 (section 3.2): the open-high-low tag arms the OpenHighLowGate + a VWAP SL anchor.
+    boolean openHighLow = tags.contains("open-high-low");
     StructuralStop stop =
         twoCandle
             ? StructuralStop.TWO_CANDLE_FIRST
@@ -81,13 +87,15 @@ public record ScalperConfig(
                 ? StructuralStop.GAP_TREND
                 : trendChange
                     ? StructuralStop.SWING_BREAK
-                    : tags.contains("entry-candle-stop")
-                        ? StructuralStop.ENTRY_CANDLE
-                        : StructuralStop.NONE;
+                    : openHighLow
+                        ? StructuralStop.VWAP
+                        : tags.contains("entry-candle-stop")
+                            ? StructuralStop.ENTRY_CANDLE
+                            : StructuralStop.NONE;
     // #5 (T2.1): the oi-cross-filter tag makes the >=50% call-put dOI imbalance a HARD pre-gate.
     boolean callPutDeltaFilter = tags.contains("oi-cross-filter");
     return new ScalperConfig(
         exchange, underlying, rollDays, params, THRESHOLD, twoCandle, stop, callPutDeltaFilter,
-        gapFill, trendChange);
+        gapFill, trendChange, openHighLow);
   }
 }

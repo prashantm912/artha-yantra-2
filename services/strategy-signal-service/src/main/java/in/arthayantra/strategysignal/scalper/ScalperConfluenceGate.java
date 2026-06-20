@@ -136,6 +136,18 @@ public class ScalperConfluenceGate {
       }
       structuralStop = tc.stopLevel();
     }
+    // #2 (section 3.2) Open=High/Open=Low: when the strategy declares it, a HARD FNO-structure pre-gate -
+    // the front-future OH/OL mark + the HIGH probability tier (mark x OI quadrant) + the <=50% spurt
+    // reject rules + the 1st-half (~12:00) cutoff. Fail-closed (a MILD/STAND_ASIDE tier or null OI
+    // blocks; null reject magnitudes do NOT block); the front-future VWAP becomes the structural stop.
+    if (cfg.requireOpenHighLow()) {
+      OpenHighLowGate.Verdict ohl =
+          OpenHighLowGate.evaluate(future, index, side, ctx.oi(), ctx.chart().vwap(), istTime);
+      if (!ohl.pass()) {
+        return Optional.empty();
+      }
+      structuralStop = ohl.stopLevel();
+    }
     Confluence conf =
         ConnectTheDotsScorer.score(ctx, side, bias60m(bank, index), cfg.confluenceThreshold(), oiProps);
     boolean valid = side == OptionType.CE ? conf.bullish() : conf.bearish();

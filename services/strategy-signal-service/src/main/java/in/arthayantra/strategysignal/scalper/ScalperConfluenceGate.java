@@ -108,7 +108,7 @@ public class ScalperConfluenceGate {
     }
     ScalperGateContext ctx = client.context(cfg.underlying(), istTime, eodDate, chain.expiry(), chart);
     Confluence conf =
-        ConnectTheDotsScorer.score(ctx, side, bias60m(bank, index), cfg.confluenceThreshold());
+        ConnectTheDotsScorer.score(ctx, side, bias60m(bank, index), cfg.confluenceThreshold(), oiProps);
     boolean valid = side == OptionType.CE ? conf.bullish() : conf.bearish();
     if (!valid) {
       return Optional.empty();

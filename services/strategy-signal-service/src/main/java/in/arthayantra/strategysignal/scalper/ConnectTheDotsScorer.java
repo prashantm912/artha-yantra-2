@@ -38,10 +38,14 @@ public final class ConnectTheDotsScorer {
   /** One confluence dot's contribution. */
   public record DotScore(String dot, double weight, boolean supports, String reason) {}
 
-  /** The aggregate confluence verdict for a side. */
+  /**
+   * The aggregate confluence verdict for a side. {@code standAside} is the T2.8 40/40 both-IV-high
+   * suppression: when set, the confluence is forced invalid regardless of the aggregate (the
+   * iv-pair dot also withholds support), so a high-IV/low-edge chop never fires.
+   */
   public record Confluence(
       BigDecimal aggregate, OptionType side, boolean bullish, boolean bearish,
-      boolean vwapAligned, boolean biasAligned, List<DotScore> dots) {}
+      boolean vwapAligned, boolean biasAligned, boolean standAside, List<DotScore> dots) {}
 
   /**
    * Score the confluence for {@code side}.
@@ -50,9 +54,12 @@ public final class ConnectTheDotsScorer {
    * @param side CE on a long bias, PE on a short bias
    * @param bias60mDir the 60-minute bias direction: +1 bull, -1 bear, 0 unknown (never blocks)
    * @param threshold the aggregate a valid signal must reach (0..1)
+   * @param props the Tier-1 OI-analytics thresholds (drastic / spurt / iv-pair); see {@link
+   *     ScalperOiProps}
    */
   public static Confluence score(
-      ScalperGateContext ctx, OptionType side, int bias60mDir, BigDecimal threshold) {
+      ScalperGateContext ctx, OptionType side, int bias60mDir, BigDecimal threshold,
+      ScalperOiProps props) {
     Chart c = ctx.chart();
     Oi oi = ctx.oi();
     Macro m = ctx.macro();
@@ -69,12 +76,23 @@ public final class ConnectTheDotsScorer {
     add(dots, "volume", W, ScalperGates.volume(ctx.underlying(), c.volume()).pass(), "volume floor");
     add(dots, "futures_oi", W_OI, ScalperGates.oiQuadrant(oi, side).pass(), "futures OI quadrant");
     add(dots, "underlying_oi", W, ce ? oi.underlying().bullish() : oi.underlying().bearish(), "underlying OI quadrant");
-    add(dots, "trending_cross", W, sideSigned(oi.trendingPeMinusCePct(), ce), "trending OI cross (PE-CE)");
+    // T2.2: the trending cross is a CHANGE (PE-OI rising while CE-OI falls), not a static PE-CE tilt.
+    add(dots, "trending_cross", W, trendingCross(oi, ce), "trending OI cross (dOI change)");
     add(dots, "sentiment", W, sideSigned(oi.sentimentPct(), ce), "active-strike sentiment");
+    // T2.6: a DRASTIC dOI move on BOTH legs, imbalanced toward the side.
+    add(dots, "drastic_oi", W, drasticOi(oi, ce, props), "drastic dOI both legs, imbalance favors side");
+    // T2.3: the sentiment is TRENDING the side's way (slope sign), alongside the level dot above.
+    add(dots, "sentiment_slope", W, sideSigned(oi.sentimentSlope(), ce), "sentiment slope direction");
+    // T2.7: an OI spurt matching the side's quadrant with both magnitudes past the floor.
+    add(dots, "oi_spurt", W, oiSpurt(oi, ce, props), "OI spurt quadrant + magnitude");
     add(dots, "breadth", W, ScalperGates.breadth(m, side).pass(), "advances/declines > 32");
     add(dots, "vix", W, ScalperGates.vix(m, side).pass(), "VIX direction");
     add(dots, "basis", W, ScalperGates.futuresBasis(oi, side).pass(), "futures basis");
     add(dots, "iv_rank", W_IV, m.ivRank() != null && m.ivRank().compareTo(IV_RANK_LOW) < 0, "IV rank low (cheap premium)");
+    // T2.8: the side's IV richer than the other by >= the gap; 40/40-both-high forces a stand-aside.
+    boolean standAside = ivBothHighStandAside(m, props);
+    add(dots, "iv_pair", W_IV, !standAside && ivPair(m, ce, props),
+        standAside ? "iv pair 40/40 stand-aside" : "iv pair gap favors side");
 
     double num = 0;
     double den = 0;
@@ -88,8 +106,86 @@ public final class ConnectTheDotsScorer {
         den == 0 ? BigDecimal.ZERO : BigDecimal.valueOf(num / den).setScale(4, RoundingMode.HALF_UP);
 
     boolean biasAligned = bias60mDir == 0 || (ce ? bias60mDir > 0 : bias60mDir < 0);
-    boolean valid = vwapSide && biasAligned && aggregate.compareTo(threshold) >= 0;
-    return new Confluence(aggregate, side, valid && ce, valid && !ce, vwapSide, biasAligned, dots);
+    boolean valid = vwapSide && biasAligned && !standAside && aggregate.compareTo(threshold) >= 0;
+    return new Confluence(
+        aggregate, side, valid && ce, valid && !ce, vwapSide, biasAligned, standAside, dots);
+  }
+
+  /**
+   * T2.2 trending OI cross as a CHANGE: the side supports only when the PE/CE OI deltas have
+   * crossed (or the gap is widening) AND the rising/falling pair favours the side — CE wants PE-OI
+   * rising while CE-OI falls (writers building put support), PE the mirror. Null deltas never confirm.
+   */
+  private static boolean trendingCross(Oi oi, boolean ce) {
+    if (!(oi.crossedThisWindow() || oi.gapWidening())
+        || oi.peOiDelta() == null
+        || oi.ceOiDelta() == null) {
+      return false;
+    }
+    return ce
+        ? oi.peOiDelta().signum() > 0 && oi.ceOiDelta().signum() < 0
+        : oi.ceOiDelta().signum() > 0 && oi.peOiDelta().signum() < 0;
+  }
+
+  /**
+   * T2.6 drastic dOI: BOTH legs move at least {@code props.drasticFloor} (absolute) and the
+   * imbalance favours the side — CE when PE-OI grew more than CE-OI, PE the mirror. Null deltas →
+   * no support.
+   */
+  private static boolean drasticOi(Oi oi, boolean ce, ScalperOiProps props) {
+    if (oi.ceOiDelta() == null || oi.peOiDelta() == null) {
+      return false;
+    }
+    boolean bothDrastic =
+        oi.ceOiDelta().abs().compareTo(props.drasticFloor()) >= 0
+            && oi.peOiDelta().abs().compareTo(props.drasticFloor()) >= 0;
+    boolean favorsSide =
+        ce
+            ? oi.peOiDelta().compareTo(oi.ceOiDelta()) > 0
+            : oi.ceOiDelta().compareTo(oi.peOiDelta()) > 0;
+    return bothDrastic && favorsSide;
+  }
+
+  /**
+   * T2.7 OI spurt: the spurt quadrant matches the side AND both the OI% and price% magnitudes clear
+   * their floors (direction comes from the quadrant; magnitude via abs). Null magnitudes → no support.
+   */
+  private static boolean oiSpurt(Oi oi, boolean ce, ScalperOiProps props) {
+    if (oi.spurtOiPct() == null || oi.spurtPricePct() == null) {
+      return false;
+    }
+    boolean quadrant = ce ? oi.underlying().bullish() : oi.underlying().bearish();
+    return quadrant
+        && oi.spurtOiPct().abs().compareTo(props.spurtOiPct()) >= 0
+        && oi.spurtPricePct().abs().compareTo(props.spurtPricePct()) >= 0;
+  }
+
+  /**
+   * T2.8 IV pair: CE supports when the CE 6-strike IV exceeds the PE by at least the gap, PE the
+   * mirror. Null averages → no support. (The 40/40 stand-aside is checked separately and overrides.)
+   */
+  private static boolean ivPair(Macro m, boolean ce, ScalperOiProps props) {
+    if (m.ceIvAvg6() == null || m.peIvAvg6() == null) {
+      return false;
+    }
+    BigDecimal gap =
+        ce ? m.ceIvAvg6().subtract(m.peIvAvg6()) : m.peIvAvg6().subtract(m.ceIvAvg6());
+    return gap.compareTo(props.ivPairMinGap()) >= 0;
+  }
+
+  /**
+   * T2.8 stand-aside: both the CE and PE 6-strike IVs are >= the both-high floor AND their gap is
+   * under the min gap (richly-priced chop with no directional IV edge) — suppress the whole signal.
+   */
+  private static boolean ivBothHighStandAside(Macro m, ScalperOiProps props) {
+    if (m.ceIvAvg6() == null || m.peIvAvg6() == null) {
+      return false;
+    }
+    boolean bothHigh =
+        m.ceIvAvg6().compareTo(props.ivBothHighFloor()) >= 0
+            && m.peIvAvg6().compareTo(props.ivBothHighFloor()) >= 0;
+    return bothHigh
+        && m.ceIvAvg6().subtract(m.peIvAvg6()).abs().compareTo(props.ivPairMinGap()) < 0;
   }
 
   private static void add(List<DotScore> dots, String name, double weight, boolean supports, String reason) {

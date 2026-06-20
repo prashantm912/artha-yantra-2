@@ -13,9 +13,11 @@ import { OiBadge4 } from '../../components/atoms/OiBadge4.tsx';
 import { DataBar } from '../../components/atoms/DataBar.tsx';
 import { MirroredCspTable, type CspColumn } from '../../components/MirroredCspTable.tsx';
 
-// Options OI Analysis — the PR-F anchor page (master plan §20). Composes the reusable
-// MirroredCspTable (Tier-A archetype) with this page's 9-column config + a PCR/max-pain/sentiment
-// header, driven by the shared FilterBar selection. All money/IV are decimal strings (never parseFloat).
+// Options Chain — all-strikes mirrored grid (strikes on rows). The PR-F anchor; structurally this IS
+// the oipulse "Options Chain", NOT the per-strike-intraday "Options OI Analysis" (corrected mapping,
+// master plan §20.6). A "lite" chain off the oi-analysis endpoint (9 cols); the full 45-col chain via
+// /chain + black76 greeks is a Wave-1 enhancement. Composes the reusable MirroredCspTable archetype.
+// All money/IV are decimal strings (never parseFloat).
 
 const dec = (v: string | null | undefined, n: number) => (v ? formatDecimal(v, n) : '—');
 const oiFmt = (v: number | null | undefined) => (v != null ? v.toLocaleString('en-IN') : '—');
@@ -55,7 +57,7 @@ const ltpCol = (header: string): CspColumn => ({
 const CE_COLUMNS = [barCol('CE OI'), deltaCol('CE ΔOI'), ivCol('CE IV'), ltpCol('CE LTP')];
 const PE_COLUMNS = [ltpCol('PE LTP'), ivCol('PE IV'), deltaCol('PE ΔOI'), barCol('PE OI')];
 
-export function OiOptionsPage() {
+export function OptionsChainPage() {
   const stats = useOiStats();
   const active = useActiveStrikes();
   const strikesQ = useOiAnalysis();
@@ -69,7 +71,7 @@ export function OiOptionsPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Options OI analysis</h1>
+      <h1 className="ay-sr-only">Options chain</h1>
       <FilterBar showName showExpiry />
 
       <p className="mb-2 flex items-center gap-2 text-sm text-ay-muted" aria-live="polite">
@@ -85,7 +87,7 @@ export function OiOptionsPage() {
         </p>
       ) : (
         <p className="mb-3 text-sm text-ay-muted">
-          No OI stats — pick an underlying + expiry with captured snapshots.
+          No chain stats — pick an underlying + expiry with captured snapshots.
         </p>
       )}
 

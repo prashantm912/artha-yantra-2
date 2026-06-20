@@ -19,9 +19,10 @@ const SECTIONS: MenuSection[] = [
   {
     title: 'Options',
     items: [
-      { label: 'OI Analysis', to: '/options/oi-analysis' },
+      { label: 'Options Chain', to: '/options/options-chain' },
+      { label: 'OI Analysis' }, // per-strike intraday — Wave 1 (§20.6); distinct from the chain
       { label: 'OI Spurt' },
-      { label: 'Options Chain' },
+      { label: 'OI Statistics' },
       { label: 'Options Premium' },
       { label: 'Trending OI' },
       { label: 'Active Strikes OI' },

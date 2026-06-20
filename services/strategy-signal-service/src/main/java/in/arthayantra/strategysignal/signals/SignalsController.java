@@ -121,6 +121,9 @@ public class SignalsController {
     dto.put("generatedAt", row.generatedAt());
     dto.put("expiresAt", row.expiresAt());
     dto.put("suggestedQty", row.suggestedQty());
+    dto.put("tradeableExchange", row.tradeableExchange());
+    dto.put("tradeableTradingsymbol", row.tradeableTradingsymbol());
+    dto.put("scalperDetail", row.scalperDetail());
     return dto;
   }
 }

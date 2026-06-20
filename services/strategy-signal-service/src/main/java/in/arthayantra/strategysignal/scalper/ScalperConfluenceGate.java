@@ -124,6 +124,18 @@ public class ScalperConfluenceGate {
         && !ScalperGates.callPutDeltaFilter(ctx.oi(), oiProps.crossFilterPct()).pass()) {
       return Optional.empty();
     }
+    // #12 (section 3.12) Trend-Change: when the strategy declares it, a HARD reversal pre-gate - a price
+    // structure break in the side's direction + the >=50% Trending-OI momentum shift + the §3.1
+    // 2-candle confirm + the ~14:30 down-reversal cap. Fail-closed (any missing leg / null OI deltas
+    // block); the broken swing pivot becomes the structural stop.
+    if (cfg.requireTrendChange()) {
+      TrendChangeGate.Verdict tc =
+          TrendChangeGate.evaluate(future, index, side, cfg.underlying(), ctx.oi(), istTime);
+      if (!tc.pass()) {
+        return Optional.empty();
+      }
+      structuralStop = tc.stopLevel();
+    }
     Confluence conf =
         ConnectTheDotsScorer.score(ctx, side, bias60m(bank, index), cfg.confluenceThreshold(), oiProps);
     boolean valid = side == OptionType.CE ? conf.bullish() : conf.bearish();

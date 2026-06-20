@@ -1,0 +1,75 @@
+# Siva #12 - Trend Change. The `trend-change` tag arms the §12.3 TrendChangeGate: a reversal-capture
+# strategy that trades a SHIFT in direction (sideways->up / down->up, and the mirror) rather than a
+# continuation breakout. The hard pre-gate requires ALL of: (a) a price market-structure break in the
+# side's direction (a 3-bar fractal swing-high taken out to the upside for CE / a swing-low taken out
+# to the downside for PE), (b) a Trending-OI momentum shift in that direction with a >=50% quantified
+# shift (CE: put-OI rising AND call-OI falling; PE mirror) read off the Tier-1 signed CE/PE dOI +
+# call-put delta imbalance %, (c) the §3.1 2-candle 3rd-candle confirmation, and (d) the ~14:30
+# late-reversal cap (avoid a fresh DOWN-reversal after 14:30; after that both OIs falling = the day is
+# over). OI leads price by ~15-30 min, so the structure break + 2-candle confirm are the price half the
+# OI shift has already telegraphed. Any missing leg BLOCKS (a trend change is high-conviction-only -
+# never a false fire); null OI deltas degrade to a block.
+#
+# The >=50% OI shift is enforced INSIDE the TrendChangeGate, so this strategy does NOT also carry the
+# `oi-cross-filter` tag - that would stack a second, redundant >=50% hard pre-gate on the same Tier-1
+# imbalance for no added signal.
+#
+# Structural stop: the broken swing pivot (the swing-high for a long / the swing-low for a short). §3.12
+# gives no numeric SL and permits a ~10-20 pt benefit-of-doubt allowance ONLY when the OI convincingly
+# confirms; v1 anchors on the raw swing pivot (the documented, bar-derivable anchor) and leaves the
+# allowance to live SL-management, so the persisted stop stays pure/deterministic. VWAP is the
+# defend/patience line (a VWAP break WITH volume invalidates; do NOT enter on a VWAP break without
+# volume - the volume floor + RSI bands are the §0B rails the confluence already enforces).
+#
+# Evaluates on the NIFTY BANK front future (Model A); the confluence seam buys the nearest-weekly
+# ATM-band CE.
+schema: strategy-schema/v1
+id: scalp-trend-change-banknifty
+name: "Scalper · Trend Change · BANKNIFTY CE"
+version: 1.0.0
+description: "Trend-change / reversal-capture scalp (Siva #12) on the NIFTY BANK 3-min front future: a price swing-structure break + a >=50% Trending-OI momentum shift + the §3.1 2-candle 3rd-candle confirm, capped to the 09:45-14:30 window (no fresh down-reversal after ~14:30); broken-swing-pivot SL; long-premium CE only."
+author: owner
+tags: [scalper, options, intraday, banknifty, trend-change]
+
+universe:
+  mode: options_of_underlying
+  underlying: { exchange: NSE, tradingsymbol: "NIFTY BANK" }
+  options:
+    expiry: nearest_weekly
+    strikes: { selector: atm_window, width: 3 }
+    option_types: [CE]
+
+timeframes:
+  primary: 3m
+  additional: [1h]
+
+indicators:
+  - { name: VWMA,       alias: vwma20,    timeframe: 3m, params: { period: 20 } }
+  - { name: PSAR,       alias: psar,      timeframe: 3m }
+  - { name: RSI,        alias: rsi14,     timeframe: 3m, params: { period: 14 }, weight: 1.0,
+      normalize: { type: rsi_momentum } }
+  - { name: SUPERTREND, alias: supertrend, timeframe: 3m, params: { period: 10, multiplier: 2.0 },
+      weight: 1.0, normalize: { type: direction } }
+  - { name: SUPERTREND, alias: bias60m,   timeframe: 1h, params: { period: 7, multiplier: 3.0 } }
+
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - "close > vwap"           # the reversal must hold the correct side of VWAP post-break
+  scoring:
+    threshold: 0.2
+
+exit_rules:
+  - { type: signal_exit, params: { rule: "close < vwap" } }   # §3.12: VWAP break invalidates the reversal
+  - { type: time_stop,   params: { max_bars: 30 } }
+
+risk:
+  position_sizing: { method: premium_budget, params: { budget_inr: 15000 } }
+  max_positions: 1
+  max_positions_per_underlying: 1
+  max_daily_loss_pct: 2.0
+  session:
+    style: intraday
+    window: { from: "09:45", to: "14:30" }   # §3.12: trend-change window 09:45-14:30
+    square_off: "15:15"

@@ -38,24 +38,30 @@ class ScalperConfluenceGateTest {
       new ScalperConfig(
           "NSE", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          false, ScalperConfig.StructuralStop.NONE, false, false);
+          false, ScalperConfig.StructuralStop.NONE, false, false, false);
   private static final ScalperConfig TWO_CANDLE_CFG =
       new ScalperConfig(
           "NSE", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          true, ScalperConfig.StructuralStop.TWO_CANDLE_FIRST, false, false);
+          true, ScalperConfig.StructuralStop.TWO_CANDLE_FIRST, false, false, false);
   // #5: a strategy with the oi-cross-filter HARD pre-gate enabled.
   private static final ScalperConfig OI_CROSS_CFG =
       new ScalperConfig(
           "NSE", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          false, ScalperConfig.StructuralStop.NONE, true, false);
+          false, ScalperConfig.StructuralStop.NONE, true, false, false);
   // #4: a strategy with the gap-theory HARD gap-fill pre-gate enabled.
   private static final ScalperConfig GAP_CFG =
       new ScalperConfig(
           "NSE", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          false, ScalperConfig.StructuralStop.GAP_TREND, false, true);
+          false, ScalperConfig.StructuralStop.GAP_TREND, false, true, false);
+  // #12: a strategy with the trend-change HARD pre-gate enabled (structure break + >=50% OI shift).
+  private static final ScalperConfig TREND_CHANGE_CFG =
+      new ScalperConfig(
+          "NSE", "NIFTY 50", 2,
+          new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
+          false, ScalperConfig.StructuralStop.SWING_BREAK, false, false, true);
 
   // a 3m index-future series: index 2 is the deploy bar; indices 0/1 are the forming candles.
   private static EngineSeries futureSeries(EngineCandle... candles) {
@@ -340,6 +346,99 @@ class ScalperConfluenceGateTest {
 
     assertThat(decision).isPresent();
     assertThat(decision.get().structuralStop()).isNull(); // inert => no gap stop anchor
+  }
+
+  // a bullish context whose OI carries the #12 trend-change shift (put-OI up, call-OI down, >=50%).
+  private static ScalperGateContext bullContextWithTrendShift() {
+    return new ScalperGateContext(
+        "NIFTY 50", IST_TIME,
+        new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("130000")),
+        new Oi(
+            OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("5"), bd("5"),
+            bd("-200"), bd("300"), bd("60"), false, false, null, null, null),
+        new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), null, null));
+  }
+
+  // a 3m future where bar2 is a swing-high (high 111), two green confirm bars, then the deploy bar5
+  // closes above the swing-high -> an up-structure break that coincides with the §3.1 2-candle confirm.
+  private static EngineSeries upReversalFuture() {
+    return futureSeries(
+        gapBar(0, "90", "95", "88", "94"),
+        gapBar(1, "94", "100", "93", "98"),
+        gapBar(2, "98", "111", "97", "105"), // swing-high pivot (high 111)
+        gapBar(3, "103", "106", "102", "105"), // green confirm 1
+        gapBar(4, "105", "109", "104", "108"), // green confirm 2 (strong body)
+        gapBar(5, "108", "113", "107", "112")); // deploy: closes 112 > swing-high 111 -> break
+  }
+
+  @Test
+  void trendChangeStrategyPassesOnAStructureBreakWithTheOiShiftAndAnchorsTheSwingStop() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any()))
+        .thenReturn(bullContextWithTrendShift());
+
+    Optional<Decision> decision =
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+            .evaluate(TREND_CHANGE_CFG, bullBank(), upReversalFuture(), 5, NOW, IST_TIME, EOD);
+
+    assertThat(decision).isPresent();
+    assertThat(decision.get().structuralStop()).isEqualByComparingTo("111"); // the broken swing-high
+  }
+
+  @Test
+  void trendChangeStrategyBlocksWithoutAStructureBreak() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any()))
+        .thenReturn(bullContextWithTrendShift());
+    // the deploy bar closes 108 (below the swing-high 111) -> no break -> the hard pre-gate blocks.
+    EngineSeries noBreak =
+        futureSeries(
+            gapBar(0, "90", "95", "88", "94"),
+            gapBar(1, "94", "100", "93", "98"),
+            gapBar(2, "98", "111", "97", "105"),
+            gapBar(3, "103", "106", "102", "105"),
+            gapBar(4, "105", "109", "104", "107"),
+            gapBar(5, "107", "110", "106", "108"));
+
+    assertThat(
+            new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+                .evaluate(TREND_CHANGE_CFG, bullBank(), noBreak, 5, NOW, IST_TIME, EOD))
+        .isEmpty();
+  }
+
+  @Test
+  void trendChangeStrategyBlocksWhenTheOiShiftIsBelowFiftyPercent() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    // correct break + directional OI, but the imbalance is 49% (< the 50% floor) -> block.
+    ScalperGateContext weakShift =
+        new ScalperGateContext(
+            "NIFTY 50", IST_TIME,
+            new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("130000")),
+            new Oi(
+                OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("5"), bd("5"),
+                bd("-200"), bd("300"), bd("49"), false, false, null, null, null),
+            new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), null, null));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any())).thenReturn(weakShift);
+
+    assertThat(
+            new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+                .evaluate(TREND_CHANGE_CFG, bullBank(), upReversalFuture(), 5, NOW, IST_TIME, EOD))
+        .isEmpty();
+  }
+
+  @Test
+  void nonTrendChangeStrategyIsUnaffectedByThePreGate() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any())).thenReturn(bullContext());
+    // CFG carries no trend-change tag -> the structure-break/OI-shift pre-gate is never consulted.
+    assertThat(
+            new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+                .evaluate(CFG, bullBank(), upReversalFuture(), 5, NOW, IST_TIME, EOD))
+        .isPresent();
   }
 
   @Test

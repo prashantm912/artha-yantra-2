@@ -869,7 +869,12 @@ container, UNMODIFIED, pinned to a release tag**. We consume only its **output d
 → Parquet) — never its source. Data is not license-encumbered; AGPL stays contained because no
 ArthaYantra code is merged with or linked to ExpiryTrack code. (Same boundary as decision 1/3.)
 
-**Prereqs (owner action):** Upstox Plus paid plan is funded (decision 3). ExpiryTrack needs Upstox
+**Why Upstox, not Kite, here (decisive — see §21):** Kite Connect **cannot** serve historical data for
+**expired** F&O contracts (instrument tokens drop from the master and get reused after expiry), so it can
+NEVER produce this backfill dataset. Upstox uniquely exposes expired-contract 1-min OHLCV+OI history —
+that is the entire reason Upstox Plus was bought. This source is *mandatory*, not a preference.
+
+**Prereqs (owner action):** Upstox Plus paid plan is **PURCHASED/ACTIVE** (confirmed 2026-06-21; decision 3). ExpiryTrack needs Upstox
 API credentials (API key + secret + redirect URI registered in the Upstox developer console, then
 a daily access-token via the Upstox login flow). Store the token in
 `deploy/secrets/upstox_access_token` (mirrors the existing `deploy/secrets/postgres_password`
@@ -3746,5 +3751,66 @@ building this — the study doc is the authoritative spec until then.
    handling; black76 greeks instead of oipulse's server values). Record any residual divergence in that
    page's `docs/manual-tests/` guide. (Owner connects the Claude extension for the live check; the study
    doc is the authoritative spec until then.)
+
+## 21. Broker API selection — Kite vs Upstox, per-connection-case (2026-06-21, AUTHORITATIVE)
+
+> Status: DECISION (no code changed). Produced by a current-docs comparison (Kite Connect v3 + Upstox
+> v3, fetched 2026-06-21). **Same standing as §17/§18/§19/§20.** Governs which broker each external API
+> connection points at. Does NOT change the locked architecture — the OpenAlgo abstraction (§2/§3, decision
+> 1) makes the broker swappable, so this is a *routing* decision, not a coupling one. **Rule stands: never
+> import a broker SDK into core; depend only on the domain ports (§3.139) and the OpenAlgo gateway.**
+
+### 21.0 Verdict
+**Upstox (Plus) is the technically superior API across most cases** — but the answer is per-connection-case,
+not a single global swap. Kite's only retained edges are *incumbent/already-wired* and a higher
+*per-connection* WS instrument cap (3000 vs 2000) — but Upstox allows **5** concurrent WS conns/user vs
+Kite's 3, so aggregate WS capacity actually favours Upstox. Standardize NEW data work on Upstox; keep Kite
+serving live until a deliberate migration;
+couple to neither directly (route through OpenAlgo / run appliances).
+
+### 21.1 Head-to-head (current docs)
+| Capability | Kite Connect v3 | Upstox (Plus) | Winner |
+|---|---|---|---|
+| Live WS — OI in tick | yes (full mode) | yes (full mode) | tie |
+| Live WS — greeks/IV in tick | **no** (we compute) | **yes** δ/γ/θ/vega/ρ + IV broker-side | Upstox |
+| Live WS — per-conn instrument cap | **3000**/conn | 2000 full / 5000 ltpc | Kite |
+| Live WS — concurrent connections | 3 conns/key (→ ≤9000 full aggregate) | **5 conns/user** (→ ≤10000 full aggregate) | Upstox |
+| Live WS — depth | 5-level | 5-level (**D30 = 30-level**, Plus, 50 instr) | Upstox |
+| Option-chain endpoint | build from instruments+quote (multi-call) | **one call** → per-strike OI+greeks+IV+PCR | Upstox |
+| REST rate limit | **Quote 1/s, historical 3/s** | **50/s**, 500/min, 2000/30min | Upstox (big) |
+| Recent intraday history + OI | minute, 60d back, `oi=1` | 1-min ~6mo back, OI incl., **1 instr/req (no batch)** | mixed |
+| **Expired-contract OI history** | **NOT served** (tokens drop post-expiry) | **yes** (ExpiryTrack engine, needs Plus) | **Upstox ONLY** |
+| Order throughput | 10/s, 400/min, 5000/day | 10/s reg / **50/s SEBI-algo**, 500/min | Upstox |
+| SPAN margin | mature API | API + we use marginism (§8) offline | tie |
+| Status in our app | **incumbent, wired, live** (`kite.FeedRearm`) | new | Kite |
+
+### 21.2 Per-connection-case routing (AUTHORITATIVE)
+1. **Historical OI backfill (expired contracts) → UPSTOX Plus. ONLY option.** Kite literally cannot serve
+   expired F&O history. ExpiryTrack runs on it (§5.A). Decisive; this is why Plus was purchased.
+2. **Live full-chain OI / per-strike snapshot capture → Upstox is technically stronger** (one-call chain
+   with greeks, 50/s vs Kite's 1/s Quote). The 3-min full-chain NIFTY+SENSEX capture across hundreds of
+   strikes is rate-limit-bound on Kite, roomy on Upstox. Migrate via the OpenAlgo source flag (§4) when
+   convenient — not urgent (current Kite capture works).
+3. **Live scalp WS feed → keep KITE for now** (incumbent, working, `kite.FeedRearm` deployed
+   [[live-mode-findings]]). Note the WS-cap picture is a wash, not a Kite win: Kite higher *per-conn* cap
+   (3000 vs 2000 full) but only 3 conns/key, while **Upstox allows 5 concurrent WS connections/user** →
+   higher *aggregate* WS capacity (≤10000 vs ≤9000 full). Move to Upstox via OpenAlgo later if D30
+   microstructure / broker greeks / more WS fan-out are wanted. Greeks stay computed in `black76-math`
+   for parity (§6/§17.9) either way.
+4. **EOD daily universe → NEITHER broker.** Already broker-free via NSE/BSE bhavcopy (§15, [[eod-bhavcopy-feature]]).
+   Do NOT add a broker dependency here.
+5. **Order execution / margin → through OpenAlgo**, broker = funded account; Upstox edge on algo throughput,
+   Kite proven. Defer to whichever account trades. SPAN sizing via marginism (§8), not broker-dependent.
+
+### 21.3 Caveat before trusting Upstox for scalp FILLS
+The you→OpenAlgo→Upstox hop adds latency + a failure point (decision-2 caveat, §2). Fine for 3-min OI
+snapshots; **MEASURE round-trip before any live order execution** (the §3.8 / §17.3 latency gate informs
+the broker choice for the execution leg specifically).
+
+*Sources (fetched 2026-06-21):* Kite [historical](https://kite.trade/docs/connect/v3/historical/) ·
+[websocket](https://kite.trade/docs/connect/v3/websocket/) · [rate limits](https://kite.trade/docs/connect/v3/exceptions/);
+Upstox [historical](https://upstox.com/developer/api-documentation/get-historical-candle-data/) ·
+[market-data feed v3](https://upstox.com/developer/api-documentation/v3/get-market-data-feed/) ·
+[rate limiting](https://upstox.com/developer/api-documentation/rate-limiting/).
 
 *End of plan.*

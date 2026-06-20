@@ -13,8 +13,9 @@ authority is the OpenAlgo/React master plan; the design authority is `docs/desig
   authority** (Phases 0–6); its §17 Errata + §18 Gap Addendum override §1–§16 on conflict.
 
 ## Active — forward-work plans (`superpowers/plans/`)
-- `2026-06-20-phase3-scalper-track2.md` — current phase (Phase 3 scalper engine).
-- `2026-06-20-phase3.5-scalper-oi-analytics-backlog.md` — deferred Tier-2 OI-analytics work.
+- `2026-06-20-phase3-scalper-track2.md` — Phase 3 scalper engine (MERGED via #42/#43).
+- `2026-06-20-phase3.5-scalper-oi-analytics-backlog.md` — Tier-2 OI-analytics (MERGED #43; per-strike #44).
+- `2026-06-21-open-high-per-strike-probability.md` — #2 per-strike Table-1/Table-2 faithful grading (MERGED #44).
 - `2026-06-20-scalper-manual-verification-checklist.md` — backend done; the React-UI contract.
 - `superpowers/plans/archive/` — completed plans (oipulse-parity, stage-g, eod-bhavcopy).
 
@@ -28,7 +29,12 @@ authority is the OpenAlgo/React master plan; the design authority is `docs/desig
 ## Active — manual-test guides (current convention = `manual-tests/`)
 - `manual-tests/phase-0-openalgo-spine.md`, `phase-1-openalgo-routing.md`,
   `phase-2-scalp-indicators.md`, `phase-eod-bhavcopy.md` — per-phase mock-stack walks.
+- `manual-tests/phase-3.5b-open-high-per-strike.md` — #2 per-strike OH/OL mock-stack walk (Phase 3.5b).
 - `manual-tests/archive/manual-testing-stage-{a..f}.md` — the legacy Stage A–G walks (historical).
+
+## Active — consolidated deferred backlog
+- `DEFERRED_BACKLOG.md` — single source of truth for all deferred/pending items Phases 0–3.5;
+  updated each phase; the forward-work authority for the next session.
 
 ## Historical — as-built record (`archive/`)
 - `archive/ARTHAYANTRA_2_FEATURE_PROPOSALS.md` — the 2026-06-12 owner feature selection; the

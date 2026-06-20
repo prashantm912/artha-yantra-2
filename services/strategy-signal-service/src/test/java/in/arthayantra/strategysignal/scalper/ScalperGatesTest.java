@@ -31,6 +31,22 @@ class ScalperGatesTest {
   }
 
   @Test
+  void openingTickWindowOverloadBoundsOnFromInclusiveToExclusive() {
+    // #9 Morning Trade: the opening-tick overload passes from `from` (inclusive) up to `to` (exclusive).
+    assertThat(ScalperGates.timeWindow(LocalTime.of(9, 16), LocalTime.of(9, 16), LocalTime.of(9, 30)).pass())
+        .isTrue(); // at `from` => pass
+    assertThat(ScalperGates.timeWindow(LocalTime.of(9, 15), LocalTime.of(9, 16), LocalTime.of(9, 30)).pass())
+        .isFalse(); // before `from` => fail
+    assertThat(ScalperGates.timeWindow(LocalTime.of(9, 29), LocalTime.of(9, 16), LocalTime.of(9, 30)).pass())
+        .isTrue();
+    assertThat(ScalperGates.timeWindow(LocalTime.of(9, 30), LocalTime.of(9, 16), LocalTime.of(9, 30)).pass())
+        .isFalse(); // at `to` => fail (exclusive)
+    // the default no-arg window still rejects 09:16 (its "after 09:45" floor) — the overload is the
+    // only path that admits the opening tick.
+    assertThat(ScalperGates.timeWindow(LocalTime.of(9, 16)).pass()).isFalse();
+  }
+
+  @Test
   void volumeFloorByUnderlying() {
     assertThat(ScalperGates.volume("NIFTY 50", bd("124999")).pass()).isFalse();
     assertThat(ScalperGates.volume("NIFTY 50", bd("125000")).pass()).isTrue();

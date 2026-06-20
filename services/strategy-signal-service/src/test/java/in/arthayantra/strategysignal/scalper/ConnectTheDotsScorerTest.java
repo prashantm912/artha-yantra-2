@@ -45,7 +45,7 @@ class ConnectTheDotsScorerTest {
 
   @Test
   void allDotsAlignedFiresBullishCe() {
-    Confluence r = ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, BULL_MACRO), CE, 1, T, P);
+    Confluence r = ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, BULL_MACRO), CE, 1, T, P, true);
 
     assertThat(r.bullish()).isTrue();
     assertThat(r.bearish()).isFalse();
@@ -61,15 +61,35 @@ class ConnectTheDotsScorerTest {
     // price below VWAP but still above VWMA/PSAR so only the decisive VWAP dot flips
     Chart c = new Chart(bd("98"), bd("99"), bd("96"), bd("95"), 1, bd("65"), bd("130000"));
 
-    Confluence r = ConnectTheDotsScorer.score(ctx(c, BULL_OI, BULL_MACRO), CE, 1, T, P);
+    Confluence r = ConnectTheDotsScorer.score(ctx(c, BULL_OI, BULL_MACRO), CE, 1, T, P, true);
 
     assertThat(r.vwapAligned()).isFalse();
     assertThat(r.bullish()).isFalse();
   }
 
   @Test
+  void vwapHardGateOffMakesTheVwapDegradeOptInWithoutAffectingCores() {
+    // #9 Morning Trade: price below VWAP (vwapSide false) but the OI/macro confluence is strong and
+    // the 60m bias agrees — with vwapHardGate=false (the opening-tick-before-10:30 path) VWAP degrades
+    // to a soft dot and the signal is VALID; with vwapHardGate=true (every core) it stays INVALID.
+    Chart belowVwap = new Chart(bd("98"), bd("99"), bd("96"), bd("95"), 1, bd("65"), bd("130000"));
+
+    Confluence soft =
+        ConnectTheDotsScorer.score(ctx(belowVwap, BULL_OI, BULL_MACRO), CE, 1, T, P, false);
+    assertThat(soft.vwapAligned()).isFalse(); // VWAP is still reported off
+    assertThat(soft.biasAligned()).isTrue();
+    assertThat(soft.aggregate()).isGreaterThanOrEqualTo(T); // the rest carries it past threshold
+    assertThat(soft.bullish()).isTrue(); // degrade => fires
+
+    Confluence hard =
+        ConnectTheDotsScorer.score(ctx(belowVwap, BULL_OI, BULL_MACRO), CE, 1, T, P, true);
+    assertThat(hard.aggregate()).isEqualByComparingTo(soft.aggregate()); // identical scoring
+    assertThat(hard.bullish()).isFalse(); // hard VWAP gate (the core default) blocks
+  }
+
+  @Test
   void opposing60mBiasBlocks() {
-    Confluence r = ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, BULL_MACRO), CE, -1, T, P);
+    Confluence r = ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, BULL_MACRO), CE, -1, T, P, true);
 
     assertThat(r.biasAligned()).isFalse();
     assertThat(r.bullish()).isFalse();
@@ -84,7 +104,7 @@ class ConnectTheDotsScorerTest {
             null, null, null, false, false, null, null, null);
     Macro m = new Macro(bd("14"), bd("80"), bd("12"), Boolean.TRUE, 10, 40, bd("50"), null, null);
 
-    Confluence r = ConnectTheDotsScorer.score(ctx(BULL_CHART, oi, m), CE, 1, T, P);
+    Confluence r = ConnectTheDotsScorer.score(ctx(BULL_CHART, oi, m), CE, 1, T, P, true);
 
     assertThat(r.vwapAligned()).isTrue();
     assertThat(r.aggregate()).isLessThan(T);
@@ -100,7 +120,7 @@ class ConnectTheDotsScorerTest {
             bd("70000"), bd("-60000"), bd("80"), true, false, bd("-5"), bd("60"), bd("60"));
     Macro m = new Macro(bd("14"), bd("30"), bd("12"), Boolean.TRUE, 10, 40, bd("50"), bd("0.05"), bd("0.20"));
 
-    Confluence r = ConnectTheDotsScorer.score(ctx(c, oi, m), PE, -1, T, P);
+    Confluence r = ConnectTheDotsScorer.score(ctx(c, oi, m), PE, -1, T, P, true);
 
     assertThat(r.bearish()).isTrue();
     assertThat(r.bullish()).isFalse();
@@ -116,7 +136,7 @@ class ConnectTheDotsScorerTest {
         new Oi(
             OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("50"), bd("5"),
             null, null, null, false, false, null, null, null);
-    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, staticTilt, BULL_MACRO), CE, 1, T, P), "trending_cross"))
+    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, staticTilt, BULL_MACRO), CE, 1, T, P, true), "trending_cross"))
         .isFalse();
 
     // the deltas crossed (PE-OI up / CE-OI down) -> CE supports
@@ -124,7 +144,7 @@ class ConnectTheDotsScorerTest {
         new Oi(
             OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("0"), bd("5"),
             bd("-1000"), bd("1000"), bd("50"), true, false, null, null, null);
-    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, crossed, BULL_MACRO), CE, 1, T, P), "trending_cross"))
+    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, crossed, BULL_MACRO), CE, 1, T, P, true), "trending_cross"))
         .isTrue();
 
     // gap widening (no explicit cross flag) also confirms the change
@@ -132,7 +152,7 @@ class ConnectTheDotsScorerTest {
         new Oi(
             OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("0"), bd("5"),
             bd("-1000"), bd("1000"), bd("50"), false, true, null, null, null);
-    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, widening, BULL_MACRO), CE, 1, T, P), "trending_cross"))
+    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, widening, BULL_MACRO), CE, 1, T, P, true), "trending_cross"))
         .isTrue();
   }
 
@@ -143,7 +163,7 @@ class ConnectTheDotsScorerTest {
         new Oi(
             OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("0"), bd("5"),
             bd("-60000"), bd("70000"), bd("80"), false, false, null, null, null);
-    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, drastic, BULL_MACRO), CE, 1, T, P), "drastic_oi"))
+    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, drastic, BULL_MACRO), CE, 1, T, P, true), "drastic_oi"))
         .isTrue();
 
     // one leg under the floor -> not drastic
@@ -151,7 +171,7 @@ class ConnectTheDotsScorerTest {
         new Oi(
             OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("0"), bd("5"),
             bd("-60000"), bd("10000"), bd("80"), false, false, null, null, null);
-    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, tooSmall, BULL_MACRO), CE, 1, T, P), "drastic_oi"))
+    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, tooSmall, BULL_MACRO), CE, 1, T, P, true), "drastic_oi"))
         .isFalse();
 
     // null deltas -> degrade to false (never throws)
@@ -159,20 +179,20 @@ class ConnectTheDotsScorerTest {
         new Oi(
             OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("0"), bd("5"),
             null, null, null, false, false, null, null, null);
-    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, nullDeltas, BULL_MACRO), CE, 1, T, P), "drastic_oi"))
+    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, nullDeltas, BULL_MACRO), CE, 1, T, P, true), "drastic_oi"))
         .isFalse();
   }
 
   @Test
   void sentimentSlopeFollowsSignAndDegradesOnNull() {
     Oi slopeUp = oiWithSlope(bd("5"));
-    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, slopeUp, BULL_MACRO), CE, 1, T, P), "sentiment_slope"))
+    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, slopeUp, BULL_MACRO), CE, 1, T, P, true), "sentiment_slope"))
         .isTrue(); // CE wants slope > 0
     Oi slopeDown = oiWithSlope(bd("-5"));
-    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, slopeDown, BULL_MACRO), CE, 1, T, P), "sentiment_slope"))
+    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, slopeDown, BULL_MACRO), CE, 1, T, P, true), "sentiment_slope"))
         .isFalse();
     Oi slopeNull = oiWithSlope(null);
-    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, slopeNull, BULL_MACRO), CE, 1, T, P), "sentiment_slope"))
+    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, slopeNull, BULL_MACRO), CE, 1, T, P, true), "sentiment_slope"))
         .isFalse();
   }
 
@@ -180,32 +200,32 @@ class ConnectTheDotsScorerTest {
   void oiSpurtNeedsQuadrantAndMagnitudeAndDegradesOnNull() {
     // bullish quadrant + both magnitudes >= 50 -> CE oi_spurt supports
     Oi spurt = oiWithSpurt(OiQuadrant.LONG_BUILDUP, bd("60"), bd("60"));
-    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, spurt, BULL_MACRO), CE, 1, T, P), "oi_spurt"))
+    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, spurt, BULL_MACRO), CE, 1, T, P, true), "oi_spurt"))
         .isTrue();
     // magnitude below the floor -> no support
     Oi weak = oiWithSpurt(OiQuadrant.LONG_BUILDUP, bd("40"), bd("60"));
-    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, weak, BULL_MACRO), CE, 1, T, P), "oi_spurt"))
+    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, weak, BULL_MACRO), CE, 1, T, P, true), "oi_spurt"))
         .isFalse();
     // bearish quadrant for a CE side -> no support even with magnitude
     Oi wrongQuadrant = oiWithSpurt(OiQuadrant.SHORT_BUILDUP, bd("60"), bd("60"));
-    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, wrongQuadrant, BULL_MACRO), CE, 1, T, P), "oi_spurt"))
+    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, wrongQuadrant, BULL_MACRO), CE, 1, T, P, true), "oi_spurt"))
         .isFalse();
     // null magnitudes -> degrade to false
     Oi nullSpurt = oiWithSpurt(OiQuadrant.LONG_BUILDUP, null, null);
-    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, nullSpurt, BULL_MACRO), CE, 1, T, P), "oi_spurt"))
+    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, nullSpurt, BULL_MACRO), CE, 1, T, P, true), "oi_spurt"))
         .isFalse();
   }
 
   @Test
   void ivPairNeedsTheSideRicherByTheGapAndDegradesOnNull() {
     // CE IV 0.20 vs PE 0.05 -> gap 0.15 >= 0.10 -> CE iv_pair supports
-    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, macroIv(bd("0.20"), bd("0.05"))), CE, 1, T, P), "iv_pair"))
+    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, macroIv(bd("0.20"), bd("0.05"))), CE, 1, T, P, true), "iv_pair"))
         .isTrue();
     // gap too small -> no support
-    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, macroIv(bd("0.15"), bd("0.10"))), CE, 1, T, P), "iv_pair"))
+    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, macroIv(bd("0.15"), bd("0.10"))), CE, 1, T, P, true), "iv_pair"))
         .isFalse();
     // null averages -> degrade to false
-    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, macroIv(null, null)), CE, 1, T, P), "iv_pair"))
+    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, macroIv(null, null)), CE, 1, T, P, true), "iv_pair"))
         .isFalse();
   }
 
@@ -213,7 +233,7 @@ class ConnectTheDotsScorerTest {
   void fortyFortyBothHighForcesStandAsideAndSuppressesTheSignal() {
     // both IVs >= 0.40 and within the gap -> stand aside: iv_pair withholds AND the signal is invalid
     Macro highChop = macroIv(bd("0.45"), bd("0.42"));
-    Confluence r = ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, highChop), CE, 1, T, P);
+    Confluence r = ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, highChop), CE, 1, T, P, true);
 
     assertThat(r.standAside()).isTrue();
     assertThat(dot(r, "iv_pair")).isFalse();

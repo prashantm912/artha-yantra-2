@@ -56,10 +56,13 @@ public final class ConnectTheDotsScorer {
    * @param threshold the aggregate a valid signal must reach (0..1)
    * @param props the Tier-1 OI-analytics thresholds (drastic / spurt / iv-pair); see {@link
    *     ScalperOiProps}
+   * @param vwapHardGate whether price-vs-VWAP is a HARD validity gate (the default for every strategy).
+   *     The #9 Morning Trade opening-tick path passes {@code false} before 10:30 IST — VWAP is "not yet
+   *     actionable" so early, so it DEGRADES to a soft dot (still scored in the aggregate, never gates).
    */
   public static Confluence score(
       ScalperGateContext ctx, OptionType side, int bias60mDir, BigDecimal threshold,
-      ScalperOiProps props) {
+      ScalperOiProps props, boolean vwapHardGate) {
     Chart c = ctx.chart();
     Oi oi = ctx.oi();
     Macro m = ctx.macro();
@@ -106,7 +109,10 @@ public final class ConnectTheDotsScorer {
         den == 0 ? BigDecimal.ZERO : BigDecimal.valueOf(num / den).setScale(4, RoundingMode.HALF_UP);
 
     boolean biasAligned = bias60mDir == 0 || (ce ? bias60mDir > 0 : bias60mDir < 0);
-    boolean valid = vwapSide && biasAligned && !standAside && aggregate.compareTo(threshold) >= 0;
+    // VWAP is decisive by default; the #9 opening-tick-before-10:30 path drops it from the HARD gate
+    // (vwapHardGate=false) so the OI/sentiment confluence carries the signal — VWAP stays a soft dot.
+    boolean valid =
+        (!vwapHardGate || vwapSide) && biasAligned && !standAside && aggregate.compareTo(threshold) >= 0;
     return new Confluence(
         aggregate, side, valid && ce, valid && !ce, vwapSide, biasAligned, standAside, dots);
   }

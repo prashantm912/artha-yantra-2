@@ -2,6 +2,7 @@ package in.arthayantra.strategysignal.scalper;
 
 import in.arthayantra.black76.Black76.OptionType;
 import in.arthayantra.strategyengine.eval.BarValues;
+import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategyengine.series.EngineSeries;
 import in.arthayantra.strategysignal.scalper.ConnectTheDotsScorer.Confluence;
 import in.arthayantra.strategysignal.scalper.MarketOiClient.ChainSnapshot;
@@ -80,7 +81,13 @@ public class ScalperConfluenceGate {
       LocalDate eodDate) {
     // §0B hard pre-flight (§12.1): the time window — the one the YAML session cannot express (the
     // 11:00–13:00 midday block). Blocked early, before the chain fetch, to skip the HTTP fan-out.
-    if (!ScalperGates.timeWindow(istTime).pass()) {
+    // #9 (section 3.9) Morning Trade: the opening-tick path uses its own opening window instead (the
+    // ~09:16-09:30 opening tick the general "after 09:45" rule must NOT block — owner-confirmed).
+    boolean timeOk =
+        cfg.openingTick()
+            ? ScalperGates.timeWindow(istTime, ScalperConfig.OPENING_FROM, ScalperConfig.OPENING_TO).pass()
+            : ScalperGates.timeWindow(istTime).pass();
+    if (!timeOk) {
       return Optional.empty();
     }
     Optional<ChainSnapshot> chainOpt = client.chain(cfg.underlying());
@@ -148,8 +155,13 @@ public class ScalperConfluenceGate {
       }
       structuralStop = ohl.stopLevel();
     }
+    // #9 (section 3.9) Morning Trade: VWAP is "not actionable before 10:30" in the opening tick, so the
+    // opening-tick path drops VWAP from the HARD validity gate before 10:30 IST (it stays a soft dot in
+    // the aggregate). Every other path keeps the decisive hard-VWAP behaviour (vwapHardGate=true).
+    boolean vwapHardGate = !(cfg.openingTick() && istTime.isBefore(ScalperConfig.VWAP_ACTIONABLE_FROM));
     Confluence conf =
-        ConnectTheDotsScorer.score(ctx, side, bias60m(bank, index), cfg.confluenceThreshold(), oiProps);
+        ConnectTheDotsScorer.score(
+            ctx, side, bias60m(bank, index), cfg.confluenceThreshold(), oiProps, vwapHardGate);
     boolean valid = side == OptionType.CE ? conf.bullish() : conf.bearish();
     if (!valid) {
       return Optional.empty();
@@ -164,7 +176,8 @@ public class ScalperConfluenceGate {
   /**
    * The entry-time structural stop on the index future: the 1st-candle extreme of a Two-Candle
    * formation ({@code null} when required but absent ⇒ the caller blocks the entry), the entry
-   * (crossover) candle's extreme, or {@code null} when the strategy sizes off structure/VWAP only.
+   * (crossover) candle's extreme, the #9 Morning Trade FIRST session candle's extreme, or {@code null}
+   * when the strategy sizes off structure/VWAP only.
    */
   private static BigDecimal structuralStop(
       ScalperConfig cfg, EngineSeries future, int index, OptionType side) {
@@ -173,6 +186,11 @@ public class ScalperConfluenceGate {
     }
     if (cfg.structuralStop() == StructuralStop.ENTRY_CANDLE && future != null && index >= 0) {
       return side == OptionType.CE ? future.candle(index).low() : future.candle(index).high();
+    }
+    // #9 (section 3.9) Morning Trade: SL = the FIRST session candle's low (CE) / high (PE).
+    if (cfg.structuralStop() == StructuralStop.FIRST_CANDLE && future != null && index >= 0) {
+      EngineCandle first = future.candle(future.sessionStart(index));
+      return side == OptionType.CE ? first.low() : first.high();
     }
     return null;
   }

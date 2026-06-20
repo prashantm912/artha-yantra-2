@@ -43,6 +43,23 @@ public final class ScalperGates {
     return GateOutcome.pass(null, "within scalp window");
   }
 
+  /**
+   * #9 (section 3.9) Morning Trade window-aware overload: FAIL before {@code from} and at/after {@code
+   * to}, using the strategy's own opening-tick bounds instead of the default 09:45 floor. The default's
+   * 11:00-13:00 midday block is intentionally NOT applied here — an opening-tick window (e.g.
+   * 09:15-09:30) never reaches it, so the extra clause would be dead. Only the opening-tick path uses
+   * this; the 4 core strategies keep the no-arg {@link #timeWindow(LocalTime)} unchanged.
+   */
+  public static GateOutcome timeWindow(LocalTime ist, LocalTime from, LocalTime to) {
+    if (ist.isBefore(from)) {
+      return GateOutcome.fail(null, "before " + from + " opening-tick window");
+    }
+    if (!ist.isBefore(to)) {
+      return GateOutcome.fail(null, "at/after " + to + " opening-tick window");
+    }
+    return GateOutcome.pass(null, "within opening-tick window");
+  }
+
   /** Bar volume ≥ the underlying's floor (NIFTY 125k / other indices 50k). */
   public static GateOutcome volume(String underlying, BigDecimal volume) {
     BigDecimal floor = VOL_FLOOR.getOrDefault(underlying, INDEX_VOL);

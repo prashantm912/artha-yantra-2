@@ -61,6 +61,12 @@
       <artifactId>market-calendar</artifactId>
       <version>${project.version}</version>
     </dependency>
+    <!-- Phase 3 (§12.4): in-JVM Black-76 greeks for delta-based scalper strike selection -->
+    <dependency>
+      <groupId>in.arthayantra</groupId>
+      <artifactId>black76-math</artifactId>
+      <version>${project.version}</version>
+    </dependency>
 
     <dependency>
       <groupId>org.springframework.boot</groupId>

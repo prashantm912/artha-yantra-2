@@ -3725,4 +3725,26 @@ cells + Go/Column-Setting):
 Live pixel side-by-side (Claude-in-Chrome on the owner's logged-in oipulse) is the visual QA gate when
 building this — the study doc is the authoritative spec until then.
 
+### 20.8 Standing UI-fidelity rules (apply to EVERY page, every wave — AUTHORITATIVE)
+
+1. **UI authority = the oipulse study, NOT the Angular app.** Every React page's layout, columns,
+   colours, controls, header, and interactions are replicated from `docs/oipulse-study/<area>/<page>.md`
+   (the live oipulse capture). The React pages are **deliberately DIFFERENT** from the Angular pages
+   (which were a condensed/mislabeled MVP — §20.6). **NEVER port a page from, or use as a UI/visual
+   fidelity oracle, `frontend-ui/` (the Angular app).** The Angular code is a reference ONLY for: (a)
+   framework-free **pure-TS ports** (decimal, conflation, ws-client/`nextReconnectDelay`,
+   oi-interpretation, `foldStrikes`); (b) **backend wire-type + endpoint contracts** (the `name` param,
+   `{items}` envelope, decimal-as-string conventions, the OI-analytics endpoint shapes). For anything a
+   user SEES, the oracle is the oipulse doc + the live oipulse page — never the Angular page.
+
+2. **Per-page live side-by-side QA gate (mandatory acceptance).** After building EACH page, open the
+   corresponding **live oipulse page** in the owner's Chrome via **Claude-in-Chrome** and compare
+   directly: columns (count + order), **cell colours** (the visual signal — side-coloured OI bars,
+   per-row 4-state badges, max/min cell highlights, ATM-band tint), controls (set + position + type),
+   and header metrics. A page is **not "done"** until it matches the live oipulse page — within the
+   deliberate, documented substitutions only (LWC for TradingView; our `--ay-*` themes; our decimal
+   handling; black76 greeks instead of oipulse's server values). Record any residual divergence in that
+   page's `docs/manual-tests/` guide. (Owner connects the Claude extension for the live check; the study
+   doc is the authoritative spec until then.)
+
 *End of plan.*

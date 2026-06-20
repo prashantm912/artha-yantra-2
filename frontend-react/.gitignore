@@ -4,6 +4,9 @@ coverage
 *.local
 .vite
 node_modules/.tmp
+test-results
+playwright-report
+.playwright
 
 # TradingView Charting Library binary (Personal/Non-commercial — NEVER commit/redistribute).
 # Served from public/ at build, like the old app. (master plan §20)

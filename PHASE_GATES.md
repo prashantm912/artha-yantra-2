@@ -19,11 +19,16 @@ forward-work authority (Phases 0–6). The legacy **Stage A–G** system in the 
 PR #6 `a96c99b`; F/G via the market-data + oipulse-parity PRs through #41). Its exit-gate
 checklists stay as the as-built reference; new phase boundaries are tracked by the map below.
 
-**Current = Phase 3 — Track-2 Siva options scalper** on branch `feat/scalper-track2`
-(phase-per-commit; PR at the stage boundary). The index-option core (#1/#5/#6/#10) is
+**Current = Phase 3 — Track-2 Siva options scalper.** The index-option core (#1/#5/#6/#10) is
 paper-complete + risk-railed + execution-boundaried, with the manual-verification-checklist
-backend done; the remaining strategies, §8 SPAN, live order routing, Tier-2 OI analytics, and the
-React UI are deferred (see the map).
+backend done. **Phase 3.5 (branch `feat/phase3.5-oi-and-scalpers`) is COMPLETE**: the Tier-2
+OI-analytics fidelity gaps T2.1–T2.8 are closed (per-side ΔOI cross/widening/drastic, sentiment
+slope, spurt OI%/price%, 6-strike IV pair → 18 confluence dots + the #5 ≥50% ΔOI hard pre-gate),
+and the four feasible index-option intraday strategies are implemented + seeded — **#4 Gap Theory,
+#12 Trend Change, #2 Open=High/Low (front-Future tier v1), #9 Morning Trade (opening-tick)**. Golden
++ Parity stay byte-identical (V009 side-channel). Still deferred: #3 (stock universe → Track-1), #8
+(overnight carry + SPAN), #7/#11 (SPAN #47), the §2 per-strike OH/OL confluence + OiPulse badge, the
+monthly-expiry OI suppression, Tier-3 OI history, and the React UI (Phase 4) — see the map.
 
 ### Master-plan phase map (§16.1)
 
@@ -32,7 +37,7 @@ React UI are deferred (see the map).
 | 0 — OpenAlgo spine | `feat/openalgo-spine` | **MERGED** (PR #39) |
 | 1 — Data inflow (routing + ExpiryTrack OI + openchart daily) | `feat/openalgo-phase1-phase2`, `feat/eod-bhavcopy-candles` | **PARTIAL** — §4 routing + EOD bhavcopy daily candles merged (#40/#41); §5 intraday-OI backfill + §15 200-day daily history + live OI cutover **DEFERRED** |
 | 2 — Quant libs (greeks + indicators) | `feat/openalgo-phase1-phase2` | **MOSTLY** — §7 scalp indicators merged (#40); §6 higher-order greeks **DEFERRED** (§17.6) |
-| 3 — Scalper engine (§12 + §8 SPAN) | `feat/scalper-track2` | **CURRENT** — core #1/#5/#6/#10 done; #2/#3/#4/#7/#8/#9/#11/#12 + SPAN + live orders + Tier-2 OI (Phase 3.5) + checklist UI (Phase 4) **DEFERRED** |
+| 3 — Scalper engine (§12 + §8 SPAN) | `feat/scalper-track2`, `feat/phase3.5-oi-and-scalpers` | **CURRENT** — core #1/#5/#6/#10 + Tier-2 OI fidelity (T2.1–T2.8) + #2/#4/#9/#12 done; #3/#8/#7/#11 + SPAN + live orders + §2 per-strike/OiPulse + monthly-expiry OI + checklist UI (Phase 4) **DEFERRED** |
 | 4 — React migration (§10 + §11) | `feat/react-migration` | **NOT STARTED** — owner-deferred; consumes the manual-checklist contract |
 | 5 — Minervini Track-1 screener (§13) | `feat/minervini-track1` | **NOT STARTED** — needs Phase-1 200-day history |
 | 6 — Backtest + forward wiring (§14) | `feat/backtest-wiring` | **NOT STARTED** — needs Phases 3 + 5 |

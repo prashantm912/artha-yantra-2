@@ -13,7 +13,7 @@ class OiTrendingServiceTest {
   private static OptionsSnapshotReader.StrikePoint pt(OffsetDateTime b, String type, long oi) {
     return new OptionsSnapshotReader.StrikePoint(
         b, new BigDecimal("22500"), type, new BigDecimal("100.00"), oi, 0L, null,
-        new BigDecimal("22480"));
+        new BigDecimal("22480"), null);
   }
 
   @Test

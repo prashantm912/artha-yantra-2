@@ -115,6 +115,84 @@ class OptionsSnapshotReaderIntegrationTest extends MarketDataIntegrationTestBase
     assertThat(d1.get(0).oi()).isEqualTo(1111L); // day2 excluded by the IST-day window
   }
 
+  @Test
+  void seriesPopulatesVolume() {
+    String u = "READER_VOL";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    OffsetDateTime t0 =
+        OffsetDateTime.of(2026, 6, 20, 9, 16, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    insertRow(jdbc, t0, u, exp, "22500", "CE", "100.00", 1000L, 0L, 7777L);
+
+    List<OptionsSnapshotReader.StrikePoint> pts =
+        reader.series(u, exp, OiInterval.M5, t0.minusMinutes(1), t0.plusMinutes(6));
+
+    assertThat(pts).hasSize(1);
+    assertThat(pts.get(0).volume()).isEqualTo(7777L);
+  }
+
+  @Test
+  void sessionStatsDerivesOhlcVolumeAndPrevClose() {
+    String u = "READER_SESS";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    LocalDate session = LocalDate.of(2026, 6, 19); // Friday (trading day)
+    LocalDate prior = LocalDate.of(2026, 6, 18); // Thursday (prior trading day)
+
+    // Prior session: newest bucket ltp per strike → prevClose.
+    OffsetDateTime p0 =
+        OffsetDateTime.of(2026, 6, 18, 14, 0, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    insertRow(jdbc, p0, u, exp, "22500", "CE", "80.00", 500L, 0L, 1000L);
+    insertRow(jdbc, p0.plusMinutes(5), u, exp, "22500", "CE", "85.00", 600L, 0L, 1200L);
+
+    // Session: 5 buckets, ltp rises 100→140 then falls 140→110→90 (decline buckets), cumulative vol.
+    OffsetDateTime s0 =
+        OffsetDateTime.of(2026, 6, 19, 9, 16, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    insertRow(jdbc, s0, u, exp, "22500", "CE", "100.00", 1000L, 0L, 2000L); // open
+    insertRow(jdbc, s0.plusMinutes(5), u, exp, "22500", "CE", "140.00", 1100L, 0L, 2300L); // high
+    insertRow(jdbc, s0.plusMinutes(10), u, exp, "22500", "CE", "110.00", 1200L, 0L, 2500L); // decline
+    insertRow(jdbc, s0.plusMinutes(15), u, exp, "22500", "CE", "90.00", 1300L, 0L, 2600L); // decline/low
+    insertRow(jdbc, s0.plusMinutes(20), u, exp, "22500", "CE", "120.00", 1400L, 0L, 3000L); // last (still < high)
+
+    List<OptionsSnapshotReader.PerStrikeSessionStat> stats =
+        reader.sessionStats(u, exp, session, 5);
+
+    assertThat(stats).hasSize(1);
+    OptionsSnapshotReader.PerStrikeSessionStat s = stats.get(0);
+    assertThat(s.optionType()).isEqualTo("CE");
+    assertThat(s.open()).isEqualByComparingTo("100.00");
+    assertThat(s.high()).isEqualByComparingTo("140.00");
+    assertThat(s.low()).isEqualByComparingTo("90.00");
+    assertThat(s.last()).isEqualByComparingTo("120.00");
+    assertThat(s.dayVolume()).isEqualTo(1000L); // 3000 - 2000 cumulative
+    // decline buckets vs running-high(140): 110 (2500-2300=200) + 90 (2600-2500=100)
+    //   + 120 (3000-2600=400, still below 140) = 700
+    assertThat(s.declineVolume()).isEqualTo(700L);
+    assertThat(s.prevClose()).isEqualByComparingTo("85.00"); // prior session newest bucket
+  }
+
+  @Test
+  void sessionStatsPrevCloseNullWhenNoPriorSession() {
+    String u = "READER_NOPRIOR";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    LocalDate session = LocalDate.of(2026, 6, 19);
+    OffsetDateTime s0 =
+        OffsetDateTime.of(2026, 6, 19, 9, 16, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    insertRow(jdbc, s0, u, exp, "22500", "CE", "100.00", 1000L, 0L, 2000L);
+
+    List<OptionsSnapshotReader.PerStrikeSessionStat> stats =
+        reader.sessionStats(u, exp, session, 5);
+
+    assertThat(stats).hasSize(1);
+    assertThat(stats.get(0).prevClose()).isNull();
+  }
+
+  @Test
+  void sessionStatsEmptyWhenNoSnapshots() {
+    assertThat(
+            reader.sessionStats(
+                "READER_EMPTY", LocalDate.of(2026, 6, 25), LocalDate.of(2026, 6, 19), 5))
+        .isEmpty();
+  }
+
   /** Helper: minimal insert into options_chain_snapshots (only the columns the reader touches). */
   static void insertRow(
       JdbcTemplate jdbc,
@@ -126,10 +204,25 @@ class OptionsSnapshotReaderIntegrationTest extends MarketDataIntegrationTestBase
       String ltp,
       Long oi,
       Long oiChange) {
+    insertRow(jdbc, ts, u, exp, strike, type, ltp, oi, oiChange, null);
+  }
+
+  /** As above, with an explicit cumulative {@code volume}. */
+  static void insertRow(
+      JdbcTemplate jdbc,
+      OffsetDateTime ts,
+      String u,
+      LocalDate exp,
+      String strike,
+      String type,
+      String ltp,
+      Long oi,
+      Long oiChange,
+      Long volume) {
     jdbc.update(
         "INSERT INTO options_chain_snapshots "
-            + "(ts, underlying, expiry, strike, option_type, tradingsymbol, ltp, oi, oi_change, spot_price) "
-            + "VALUES (?,?,?,?::numeric,?,?,?::numeric,?,?,?::numeric) "
+            + "(ts, underlying, expiry, strike, option_type, tradingsymbol, ltp, oi, oi_change, volume, spot_price) "
+            + "VALUES (?,?,?,?::numeric,?,?,?::numeric,?,?,?,?::numeric) "
             + "ON CONFLICT DO NOTHING",
         java.sql.Timestamp.from(ts.toInstant()),
         u,
@@ -140,6 +233,7 @@ class OptionsSnapshotReaderIntegrationTest extends MarketDataIntegrationTestBase
         ltp,
         oi,
         oiChange,
+        volume,
         "22480.00");
   }
 }

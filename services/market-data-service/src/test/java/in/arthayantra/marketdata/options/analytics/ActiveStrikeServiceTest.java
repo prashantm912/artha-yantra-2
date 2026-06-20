@@ -43,7 +43,7 @@ class ActiveStrikeServiceTest {
   private static OptionsSnapshotReader.StrikePoint pt(
       java.time.OffsetDateTime b, String strike, String type, long oi, long oiChange) {
     return new OptionsSnapshotReader.StrikePoint(
-        b, new BigDecimal(strike), type, null, oi, oiChange, null, null);
+        b, new BigDecimal(strike), type, null, oi, oiChange, null, null, null);
   }
 
   @Test

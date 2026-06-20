@@ -25,7 +25,8 @@ class OiSpurtServiceTest {
   private static OptionsSnapshotReader.StrikePoint pt(
       java.time.OffsetDateTime b, String strike, String type, String ltp, long oi, String spot) {
     return new OptionsSnapshotReader.StrikePoint(
-        b, new BigDecimal(strike), type, new BigDecimal(ltp), oi, 0L, null, new BigDecimal(spot));
+        b, new BigDecimal(strike), type, new BigDecimal(ltp), oi, 0L, null, new BigDecimal(spot),
+        null);
   }
 
   @Test

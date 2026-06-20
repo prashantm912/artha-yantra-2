@@ -15,7 +15,7 @@ class OiBigOiServiceTest {
     OffsetDateTime b = OffsetDateTime.of(2026, 6, 20, 9, 15, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
     return new OptionsSnapshotReader.StrikePoint(
         b, new BigDecimal(strike), type, new BigDecimal("100.00"), oi, oiChange, null,
-        new BigDecimal("22480"));
+        new BigDecimal("22480"), null);
   }
 
   @Test

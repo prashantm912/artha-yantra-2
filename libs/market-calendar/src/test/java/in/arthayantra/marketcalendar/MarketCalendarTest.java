@@ -59,6 +59,16 @@ class MarketCalendarTest {
   }
 
   @Test
+  void previousTradingDaySkipsWeekendsAndHolidays() {
+    // Monday -> previous Friday
+    assertThat(calendar.previousTradingDay(LocalDate.parse("2026-06-15")))
+        .isEqualTo(LocalDate.parse("2026-06-12"));
+    // Tuesday after Republic Day Monday -> previous Friday
+    assertThat(calendar.previousTradingDay(LocalDate.parse("2026-01-27")))
+        .isEqualTo(LocalDate.parse("2026-01-23"));
+  }
+
+  @Test
   void expectedMinuteBucketsCountsSessionBuckets() {
     // full trading day = 375 one-minute buckets (09:15 .. 15:29)
     assertThat(

@@ -3702,11 +3702,12 @@ Wave-1 makes it faithful to `docs/oipulse-study/options/options-chain.md`. Accep
 confirmed gaps — PR-F has 9 cols/neutral colours/5 controls; oipulse has ~17 visible cols + colour-coded
 cells + Go/Column-Setting):
 
-1. **Columns — 17 visible (from 9):** CALL `OI Int · OI% · OI · OI Chng · IV · LTP · LTP% · LTP Chg` |
-   **Strike** | PUT mirror + **PCR Ratio**. Plus a **Column Setting** modal toggling the ~28 hidden
-   cols (Greeks/Premium/Intrinsic/Volume/O=H/O=L). **Backend:** the full **`/chain` endpoint** + the
-   **greeks-in-chain** task (per-strike PCR/IV + black76 greeks) — supersedes the lite `oi-analysis`
-   feed.
+1. **Columns — 18 visible (from 9):** exact order **confirmed live 2026-06-21** (Claude-in-Chrome,
+   SENSEX chain) — CALL `OI Int · OI% · OI · OI Chng · IV · LTP · LTP% · LTP Chg` | **Strike** | PUT
+   mirror `LTP Chg · LTP% · LTP · IV · OI Chng · OI · OI% · OI Int` + **PCR Ratio**. Plus a **Column
+   Setting** modal toggling the ~28 hidden cols (Greeks/Premium/Intrinsic/Volume/O=H/O=L). **Backend:**
+   the full **`/chain` endpoint** + the **greeks-in-chain** task (per-strike PCR/IV + black76 greeks) —
+   supersedes the lite `oi-analysis` feed.
 2. **Colours (carry the signal — currently neutral):** OI bars **red (CALL) / green (PUT)** (`DataBar`
    already takes `tone` → pass by side); **OI Chng green/red bars** (not text); per-row **`OiBadge4`**
    (OI Int column); **ATM-row cream tint** (#ffeeba-equivalent token) + clickable; ITM row tint;

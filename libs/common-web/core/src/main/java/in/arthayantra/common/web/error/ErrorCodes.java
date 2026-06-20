@@ -54,6 +54,7 @@ public final class ErrorCodes {
   public static final String CONFLICT_NOT_A_DRAFT = "CONFLICT_NOT_A_DRAFT";
   public static final String CONFLICT_HAS_PUBLISHED_HISTORY = "CONFLICT_HAS_PUBLISHED_HISTORY";
   public static final String CONFLICT_POSITION_CLOSED = "CONFLICT_POSITION_CLOSED";
+  public static final String CONFLICT_BACKFILL_RUNNING = "CONFLICT_BACKFILL_RUNNING";
 
   // ---- STRATEGY_* (400/422) ----
   public static final String STRATEGY_SCHEMA_INVALID = "STRATEGY_SCHEMA_INVALID";

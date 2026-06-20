@@ -69,6 +69,51 @@ public class CandleRepository {
         });
   }
 
+  private static final String INSERT_IGNORE =
+      """
+      INSERT INTO candles
+        (exchange, tradingsymbol, "interval", bucket, open, high, low, close, volume, oi, source, fetched_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?, now())
+      ON CONFLICT (exchange, tradingsymbol, "interval", bucket) DO NOTHING
+      """;
+
+  /**
+   * Batched insert that NEVER overwrites an existing bar (ON CONFLICT DO NOTHING) — the bulk EOD
+   * bhavcopy projection (Phase A/B). {@code source} is not part of the candles PK, so a BHAVCOPY
+   * 1d row and a KITE 1d row collide on {@code (exchange, tradingsymbol, "interval", bucket)};
+   * DO NOTHING lets bhavcopy fill the universe long-tail without ever clobbering a Kite/live bar
+   * that already owns that bucket.
+   */
+  public int insertIgnoreAll(List<Candle> bars) {
+    int[][] counts =
+        jdbc.batchUpdate(
+            INSERT_IGNORE,
+            bars,
+            500,
+            (ps, bar) -> {
+              ps.setString(1, bar.exchange());
+              ps.setString(2, bar.tradingsymbol());
+              ps.setString(3, bar.interval());
+              ps.setTimestamp(4, Timestamp.from(bar.bucket().toInstant()));
+              ps.setBigDecimal(5, bar.open());
+              ps.setBigDecimal(6, bar.high());
+              ps.setBigDecimal(7, bar.low());
+              ps.setBigDecimal(8, bar.close());
+              ps.setLong(9, bar.volume());
+              ps.setObject(10, bar.oi());
+              ps.setString(11, bar.source());
+            });
+    int inserted = 0;
+    for (int[] batch : counts) {
+      for (int n : batch) {
+        if (n > 0) {
+          inserted += n;
+        }
+      }
+    }
+    return inserted;
+  }
+
   /** Range read from the base hypertable (1m/1d rows). */
   public List<Candle> range(
       String exchange, String tradingsymbol, String interval, OffsetDateTime from, OffsetDateTime to) {
@@ -202,6 +247,23 @@ public class CandleRepository {
         jdbc.queryForObject(
             "SELECT count(*) FROM candles WHERE \"interval\" = ?", Long.class, interval);
     return count == null ? 0 : count;
+  }
+
+  /**
+   * Whether a symbol has ANY non-BHAVCOPY 1d bar. {@code CorporateActionJob} remediates only such
+   * symbols (purge + Kite re-fetch) — a BHAVCOPY-only equity is adjusted by the read-time split/bonus
+   * adjuster instead, and sweeping every one of them would fire a Kite fetch for the whole ~22k
+   * equity universe daily.
+   */
+  public boolean hasNonBhavcopyDaily(String exchange, String tradingsymbol) {
+    Boolean exists =
+        jdbc.queryForObject(
+            "SELECT EXISTS(SELECT 1 FROM candles WHERE exchange = ? AND tradingsymbol = ?"
+                + " AND \"interval\" = '1d' AND source <> 'BHAVCOPY')",
+            Boolean.class,
+            exchange,
+            tradingsymbol);
+    return Boolean.TRUE.equals(exists);
   }
 
   /** The latest close at or before a bucket (Phase 15B/16A consumers). */

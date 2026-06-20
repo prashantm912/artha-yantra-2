@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.nse;
 
+import java.time.LocalDate;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -12,6 +13,25 @@ public class NseEodBhavcopyRepository {
 
   public NseEodBhavcopyRepository(JdbcTemplate jdbc) {
     this.jdbc = jdbc;
+  }
+
+  /** Newest {@code trade_date} present — the catch-up watermark; null when the table is empty. */
+  public LocalDate maxTradeDate() {
+    return jdbc.query(
+        "SELECT max(trade_date) AS d FROM nse_eod_bhavcopy",
+        rs -> rs.next() ? rs.getObject("d", LocalDate.class) : null);
+  }
+
+  /**
+   * Trade dates already stored in {@code [from, to]} — the catch-up anti-joins against these so a
+   * day missed by a transient fetch error (which looks identical to a holiday) is re-attempted on a
+   * later run instead of being permanently skipped once the watermark moves past it.
+   */
+  public List<LocalDate> presentTradeDates(LocalDate from, LocalDate to) {
+    return jdbc.query(
+        "SELECT DISTINCT trade_date FROM nse_eod_bhavcopy WHERE trade_date BETWEEN ? AND ?",
+        (rs, n) -> rs.getObject("trade_date", LocalDate.class),
+        from, to);
   }
 
   public void upsertAll(List<BhavcopyFetcher.BhavcopyRow> rows) {

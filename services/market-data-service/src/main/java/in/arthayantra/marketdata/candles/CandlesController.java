@@ -28,15 +28,18 @@ public class CandlesController {
 
   private final CandleQueryService queryService;
   private final ContBackAdjuster backAdjuster;
+  private final EquitySplitBonusAdjuster splitBonusAdjuster;
   private final in.arthayantra.marketdata.instruments.InstrumentRepository instruments;
 
   /** Wires the read path. */
   public CandlesController(
       CandleQueryService queryService,
       ContBackAdjuster backAdjuster,
+      EquitySplitBonusAdjuster splitBonusAdjuster,
       in.arthayantra.marketdata.instruments.InstrumentRepository instruments) {
     this.queryService = queryService;
     this.backAdjuster = backAdjuster;
+    this.splitBonusAdjuster = splitBonusAdjuster;
     this.instruments = instruments;
   }
 
@@ -64,6 +67,10 @@ public class CandlesController {
       if (underlying != null) {
         items = backAdjuster.backAdjust(underlying, items);
       }
+    } else if ("1d".equals(interval) && "back".equalsIgnoreCase(adjust)) {
+      // Equity 1d: READ-TIME multiplicative split/bonus adjustment of BHAVCOPY bars (Phase C).
+      // No-op for symbols with no recorded corporate actions, and skips already-adjusted Kite bars.
+      items = splitBonusAdjuster.adjust(exchange, tradingsymbol, items);
     }
     int boundedLimit = Math.min(Math.max(limit, 1), 50_000);
     int boundedOffset = Math.max(offset, 0);

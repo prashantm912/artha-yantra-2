@@ -136,25 +136,55 @@ artha:
   db:
     password-file: ${ARTHA_DB_PASSWORD_FILE:deploy/secrets/postgres_password}
 ---
-# Live: oipulse OI capture — full chain for NIFTY + SENSEX, every in-horizon expiry, 3-min cadence
+# Live: oipulse OI capture — full chain for ALL 6 F&O indices, every in-horizon expiry.
+# Indices only (NSE: NIFTY 50/BANK/FIN SERVICE/MID SELECT; BSE: SENSEX/BANKEX) — no stock
+# options. At Kite's 1 req/s /quote limit the 6-index snapshot cycle (~71 batched quote calls,
+# per-expiry) self-spaces via @Scheduled(fixedDelay) to an effective ~2-min OI cadence; tighter
+# needs the whole-universe batch refactor (deferred).
 spring:
   config:
     activate:
       on-profile: live
 artha:
+  subscriptions:
+    # WS ticker — all 6 F&O index SPOTS + INDIA VIX, PINNED (eviction-resistant). EXCHANGE:SYMBOL.
+    pinned-indices: NSE:NIFTY 50,NSE:NIFTY BANK,NSE:NIFTY FIN SERVICE,NSE:NIFTY MID SELECT,BSE:SENSEX,BSE:BANKEX,NSE:INDIA VIX
   options:
-    snapshot-underlyings: NIFTY 50,SENSEX
+    # full option chain (OI/IV/greeks) for ALL 6 F&O indices, every expiry <=90d
+    snapshot-underlyings: NIFTY 50,NIFTY BANK,NIFTY FIN SERVICE,NIFTY MID SELECT,SENSEX,BANKEX
     snapshot-interval-ms: 60000
     snapshot-expiry-horizon-days: 90
   futures:
-    # index futs + all 17 NSE bank-sector F&O stocks (forward-only OI capture; one batched
-    # quotes() call per pass — see FuturesOiSnapshotService). Unbackfillable, so widen early.
-    oi-snapshot-underlyings: NIFTY 50,NIFTY BANK,HDFCBANK,ICICIBANK,SBIN,AXISBANK,KOTAKBANK,INDUSINDBK,BANKBARODA,PNB,AUBANK,FEDERALBNK,IDFCFIRSTB,CANBK,BANDHANBNK,BANKINDIA,RBLBANK,UNIONBANK,YESBANK
+    # WS ticker pinned futures (front/next/far, auto-roll) — the 6 F&O indices.
+    # Drives FuturesPinner (live ticker) + ContinuousFuturesRoller (EOD roll).
+    underlyings: NIFTY 50,NIFTY BANK,NIFTY FIN SERVICE,NIFTY MID SELECT,SENSEX,BANKEX
+    # REST futures-OI snapshots: the 6 F&O index futs + all 17 NSE bank-sector F&O stocks (forward-only
+    # OI capture; one batched quotes() call per pass — see FuturesOiSnapshotService).
+    oi-snapshot-underlyings: NIFTY 50,NIFTY BANK,NIFTY FIN SERVICE,NIFTY MID SELECT,SENSEX,BANKEX,HDFCBANK,ICICIBANK,SBIN,AXISBANK,KOTAKBANK,INDUSINDBK,BANKBARODA,PNB,AUBANK,FEDERALBNK,IDFCFIRSTB,CANBK,BANDHANBNK,BANKINDIA,RBLBANK,UNIONBANK,YESBANK
     oi-snapshot-interval-ms: 60000
-    # /banks-grid sector universe: the 17 bank-sector stocks above (indices excluded — they have
-    # their own /banks term-structure view). Front future per stock = one grid row.
+    # /banks-grid sector universe: the 17 bank-sector stocks (indices have their own /banks view).
     bank-stocks: HDFCBANK,ICICIBANK,SBIN,AXISBANK,KOTAKBANK,INDUSINDBK,BANKBARODA,PNB,AUBANK,FEDERALBNK,IDFCFIRSTB,CANBK,BANDHANBNK,BANKINDIA,RBLBANK,UNIONBANK,YESBANK
   nse:
     base-url: https://www.nseindia.com
     archives-url: https://nsearchives.nseindia.com
     eod-cron: "0 0 19 * * MON-FRI"
+    bhavcopy:
+      # NSE series projected into candles as 1d source=BHAVCOPY (cash equities). EQ = rolling
+      # settlement, BE = trade-to-trade. Non-equity series (GS gilts, etc.) stay raw-only.
+      candle-series: EQ,BE
+  bse:
+    base-url: https://www.bseindia.com
+    api-url: https://api.bseindia.com   # corporate-actions JSON (DefaultData/w)
+  bhavcopy:
+    # Self-healing EOD universe backfill (Phase A/B). Runs daily after both exchanges publish
+    # (NSE ~19:00, BSE ~18:00 IST) and on startup; catches up every missing trading day from the
+    # table watermark to today. ca-lookback-days bounds the corporate-action ratio refresh (Phase C).
+    eod-cron: "0 30 19 * * MON-FRI"
+    # Deep universe history (~1 year): the first boot backfills a year of daily candles so the
+    # split/bonus adjustment reaches old corporate actions, and a long downtime self-heals back that
+    # far. The full-window anti-join (reconcile == window) re-scans the whole span each run, skipping
+    # dates already stored, so even a hole left by a throttled deep backfill is re-probed and heals.
+    catchup-floor-days: 365      # first-boot depth (empty table)
+    catchup-max-days: 365        # hard cap on the catch-up span
+    reconcile-lookback-days: 365 # full-window re-scan (heals deep holes, not just a trailing window)
+    ca-lookback-days: 420

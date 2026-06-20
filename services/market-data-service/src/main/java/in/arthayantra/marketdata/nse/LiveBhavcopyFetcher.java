@@ -45,22 +45,29 @@ public class LiveBhavcopyFetcher implements BhavcopyFetcher {
   @Override
   public List<BhavcopyRow> fetchLatest() {
     LocalDate today = OffsetDateTime.now(clock).atZoneSameInstant(IST).toLocalDate();
-    RuntimeException last = null;
     for (int back = 0; back <= MAX_LOOKBACK_DAYS; back++) {
-      LocalDate d = today.minusDays(back);
-      String url =
-          archivesUrl + "/products/content/sec_bhavdata_full_" + URL_DATE.format(d) + ".csv";
-      try {
-        String csv = client.getAbsolute(url);
-        if (csv != null && csv.contains("DELIV_PER")) {
-          return parse(csv);
-        }
-      } catch (RuntimeException miss) {
-        last = miss; // 404 on a non-trading day is expected — keep walking back
+      List<BhavcopyRow> rows = fetchForDate(today.minusDays(back));
+      if (!rows.isEmpty()) {
+        return rows;
       }
     }
     throw new IllegalStateException(
-        "No NSE bhavcopy file in the last " + MAX_LOOKBACK_DAYS + " days", last);
+        "No NSE bhavcopy file in the last " + MAX_LOOKBACK_DAYS + " days");
+  }
+
+  @Override
+  public List<BhavcopyRow> fetchForDate(LocalDate date) {
+    String url =
+        archivesUrl + "/products/content/sec_bhavdata_full_" + URL_DATE.format(date) + ".csv";
+    try {
+      String csv = client.getAbsolute(url);
+      // A real file carries the DELIV_PER header; anything else (an HTML error page, an empty body)
+      // is treated as "not published" so the catch-up just skips that day.
+      return csv != null && csv.contains("DELIV_PER") ? parse(csv) : List.of();
+    } catch (RuntimeException miss) {
+      // 404 on a weekend/holiday (or a not-yet-posted file) is the expected non-trading-day signal.
+      return List.of();
+    }
   }
 
   private static List<BhavcopyRow> parse(String csv) {

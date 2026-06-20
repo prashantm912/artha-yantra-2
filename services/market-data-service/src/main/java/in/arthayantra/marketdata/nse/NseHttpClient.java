@@ -1,5 +1,7 @@
 package in.arthayantra.marketdata.nse;
 
+import java.util.List;
+import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -48,5 +50,29 @@ public class NseHttpClient {
    */
   public String getAbsolute(String url) {
     return http.get().uri(url).retrieve().body(String.class);
+  }
+
+  /**
+   * GET an {@code /api/...} path that NSE gates behind anti-bot cookies (e.g.
+   * {@code corporates-corporateActions}): first hit the base "/" to harvest {@code Set-Cookie}
+   * (tolerating its 403 via {@code exchange}, which does not throw on 4xx), then replay those
+   * cookies on the API call. {@code referer} overrides the default for endpoints that check it.
+   */
+  public String getWithCookieSeed(String apiPath, String referer) {
+    List<String> setCookies =
+        http.get()
+            .uri(baseUrl + "/")
+            .exchange((request, response) -> response.getHeaders().get(HttpHeaders.SET_COOKIE));
+    String cookieHeader =
+        setCookies == null
+            ? ""
+            : setCookies.stream().map(c -> c.split(";", 2)[0]).collect(Collectors.joining("; "));
+    return http.get()
+        .uri(baseUrl + apiPath)
+        .header(HttpHeaders.COOKIE, cookieHeader)
+        .header(HttpHeaders.REFERER, referer)
+        .header(HttpHeaders.ACCEPT, "application/json")
+        .retrieve()
+        .body(String.class);
   }
 }

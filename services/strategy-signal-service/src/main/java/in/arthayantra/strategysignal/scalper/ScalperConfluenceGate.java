@@ -65,6 +65,11 @@ public class ScalperConfluenceGate {
       Instant barInstant,
       LocalTime istTime,
       LocalDate eodDate) {
+    // §0B hard pre-flight (§12.1): the time window — the one the YAML session cannot express (the
+    // 11:00–13:00 midday block). Blocked early, before the chain fetch, to skip the HTTP fan-out.
+    if (!ScalperGates.timeWindow(istTime).pass()) {
+      return Optional.empty();
+    }
     Optional<ChainSnapshot> chainOpt = client.chain(cfg.underlying());
     if (chainOpt.isEmpty()) {
       return Optional.empty();
@@ -76,6 +81,12 @@ public class ScalperConfluenceGate {
         chart.close() != null && chart.vwap() != null && chart.close().compareTo(chart.vwap()) >= 0
             ? OptionType.CE
             : OptionType.PE;
+    // §0B hard "no trade" rails: volume floor + the RSI 40–60 dead band (both are blocks, not the
+    // soft dots the scorer also weighs — a strong-everything-else signal must still respect them).
+    if (!ScalperGates.volume(cfg.underlying(), chart.volume()).pass()
+        || !ScalperGates.rsiBand(chart.rsi14(), side).pass()) {
+      return Optional.empty();
+    }
     ScalperGateContext ctx = client.context(cfg.underlying(), istTime, eodDate, chain.expiry(), chart);
     Confluence conf =
         ConnectTheDotsScorer.score(ctx, side, bias60m(bank, index), cfg.confluenceThreshold());

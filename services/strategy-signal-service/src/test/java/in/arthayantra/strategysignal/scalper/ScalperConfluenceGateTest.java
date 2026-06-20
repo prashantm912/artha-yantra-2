@@ -40,13 +40,16 @@ class ScalperConfluenceGateTest {
     return new BigDecimal(s);
   }
 
-  // a bank whose close (100) sits above VWAP (99) → the gate selects the CE side
+  // a bank whose close (100) sits above VWAP (99) → CE side; RSI 65 (in 60–80) + volume 130k (above
+  // the NIFTY 125k floor) clear the §0B hard pre-flight gates the seam now enforces.
   private static BarValues bullBank() {
     Map<String, BigDecimal> builtins = Map.of("close", bd("100"), "vwap", bd("99"), "volume", bd("130000"));
+    Map<String, BigDecimal> aliases =
+        Map.of("vwma20", bd("98"), "psar", bd("97"), "rsi14", bd("65"), "supertrend", bd("1"));
     return new BarValues() {
       @Override
       public BigDecimal valueAt(String alias, int i) {
-        return null; // the confluence reads the STUBBED context, not the bank, for the dots
+        return aliases.get(alias);
       }
 
       @Override
@@ -116,6 +119,44 @@ class ScalperConfluenceGateTest {
     when(client.context(eq("NIFTY 50"), any(), any(), any(), any())).thenReturn(bear);
 
     assertThat(new ScalperConfluenceGate(client).evaluate(CFG, bullBank(), 0, NOW, IST_TIME, EOD))
+        .isEmpty();
+  }
+
+  @Test
+  void blocksInTheMiddayWindowBeforeAnyChainFetch() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    // 11:30 IST is inside the §0B 11:00–13:00 block — blocked at the hard pre-flight, no HTTP
+    assertThat(
+            new ScalperConfluenceGate(client)
+                .evaluate(CFG, bullBank(), 0, NOW, LocalTime.of(11, 30), EOD))
+        .isEmpty();
+    org.mockito.Mockito.verifyNoInteractions(client);
+  }
+
+  @Test
+  void blocksWhenRsiSitsInTheDeadBand() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    // RSI 50 is in the 40–60 no-trade band → blocked even with everything else bullish
+    BarValues deadRsi =
+        new BarValues() {
+          @Override
+          public BigDecimal valueAt(String alias, int i) {
+            return "rsi14".equals(alias) ? bd("50") : bd("98");
+          }
+
+          @Override
+          public BigDecimal previousValueAt(String alias, int i) {
+            return null;
+          }
+
+          @Override
+          public BigDecimal builtin(String name, int i) {
+            return Map.of("close", bd("100"), "vwap", bd("99"), "volume", bd("130000")).get(name);
+          }
+        };
+
+    assertThat(new ScalperConfluenceGate(client).evaluate(CFG, deadRsi, 0, NOW, IST_TIME, EOD))
         .isEmpty();
   }
 

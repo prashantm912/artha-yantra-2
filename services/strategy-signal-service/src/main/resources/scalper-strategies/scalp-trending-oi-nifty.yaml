@@ -1,0 +1,54 @@
+# Siva #5 — Trending-OI Crossover. The directional edge is the OI cross (PE writers
+# building support → bullish), confirmed by the §12.3 confluence seam's futures-OI /
+# trending dots; the chart pre-gate is just the VWMA trend. NO native numeric SL/target
+# (size off structure + VWAP) — exits are structural. Evaluates on the NIFTY front future.
+schema: strategy-schema/v1
+id: scalp-trending-oi-nifty
+name: "Scalper · Trending-OI Crossover · NIFTY CE"
+version: 1.0.0
+description: "Trending-OI crossover scalp (Siva #5) on the NIFTY front future; long-premium CE, OI-led via the confluence."
+author: owner
+tags: [scalper, options, intraday, nifty]
+
+universe:
+  mode: options_of_underlying
+  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  options:
+    expiry: nearest_weekly
+    strikes: { selector: atm_window, width: 3 }
+    option_types: [CE]
+
+timeframes:
+  primary: 3m
+  additional: [1h]
+
+indicators:
+  - { name: VWMA,       alias: vwma20,    timeframe: 3m, params: { period: 20 } }
+  - { name: PSAR,       alias: psar,      timeframe: 3m }
+  - { name: RSI,        alias: rsi14,     timeframe: 3m, params: { period: 14 }, weight: 1.0,
+      normalize: { type: rsi_momentum } }
+  - { name: SUPERTREND, alias: supertrend, timeframe: 3m, params: { period: 10, multiplier: 3.0 },
+      weight: 1.0, normalize: { type: direction } }
+  - { name: SUPERTREND, alias: bias60m,   timeframe: 1h, params: { period: 10, multiplier: 3.0 } }
+
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - "close > vwma20"         # trend confirmation; the OI cross lives in the confluence seam
+  scoring:
+    threshold: 0.2
+
+exit_rules:
+  - { type: signal_exit, params: { rule: "close < vwma20" } }   # trend break exit
+  - { type: time_stop,   params: { max_bars: 12 } }
+
+risk:
+  position_sizing: { method: premium_budget, params: { budget_inr: 15000 } }
+  max_positions: 1
+  max_positions_per_underlying: 1
+  max_daily_loss_pct: 2.0
+  session:
+    style: intraday
+    window: { from: "09:45", to: "15:00" }
+    square_off: "15:15"

@@ -1,0 +1,55 @@
+# Siva #6 — Golden Crossover. A fast/slow EMA cross is the chart trigger; the §12.3
+# confluence seam then confirms OI/macro and buys the nearest-weekly ATM-band NIFTY CE.
+# Evaluates on the NIFTY front future (Model A).
+schema: strategy-schema/v1
+id: scalp-golden-crossover-nifty
+name: "Scalper · Golden Crossover · NIFTY CE"
+version: 1.0.0
+description: "Golden-crossover scalp (Siva #6) on the NIFTY front future; EMA9/EMA21 cross + confluence; long-premium CE only."
+author: owner
+tags: [scalper, options, intraday, nifty]
+
+universe:
+  mode: options_of_underlying
+  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  options:
+    expiry: nearest_weekly
+    strikes: { selector: atm_window, width: 3 }
+    option_types: [CE]
+
+timeframes:
+  primary: 3m
+  additional: [1h]
+
+indicators:
+  - { name: EMA,        alias: ema9,      timeframe: 3m, params: { period: 9 } }
+  - { name: EMA,        alias: ema21,     timeframe: 3m, params: { period: 21 } }
+  - { name: VWMA,       alias: vwma20,    timeframe: 3m, params: { period: 20 } }
+  - { name: PSAR,       alias: psar,      timeframe: 3m }
+  - { name: RSI,        alias: rsi14,     timeframe: 3m, params: { period: 14 }, weight: 1.0,
+      normalize: { type: rsi_momentum } }
+  - { name: SUPERTREND, alias: supertrend, timeframe: 3m, params: { period: 10, multiplier: 3.0 },
+      weight: 1.0, normalize: { type: direction } }
+  - { name: SUPERTREND, alias: bias60m,   timeframe: 1h, params: { period: 10, multiplier: 3.0 } }
+
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - crossover: { fast: ema9, slow: ema21 }   # the golden cross
+  scoring:
+    threshold: 0.2
+
+exit_rules:
+  - { type: signal_exit, params: { rule: "crossunder(ema9, ema21)" } }   # death cross exit
+  - { type: time_stop,   params: { max_bars: 12 } }
+
+risk:
+  position_sizing: { method: premium_budget, params: { budget_inr: 15000 } }
+  max_positions: 1
+  max_positions_per_underlying: 1
+  max_daily_loss_pct: 2.0
+  session:
+    style: intraday
+    window: { from: "09:45", to: "15:00" }
+    square_off: "15:15"

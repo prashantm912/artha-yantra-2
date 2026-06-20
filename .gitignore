@@ -48,6 +48,9 @@ replay_pid*
 # --- oipulse study auth state (saved Playwright cookies) ---
 docs/oipulse-study/.oipulse-state.json
 
+# --- oipulse raw source manual (20 MB PDF — local archive only; the derived .md study docs ARE versioned) ---
+docs/oipulse-study/Oi-Pulse-Manual-file.pdf
+
 # --- MCP tool working directories (ephemeral; findings encoded in docs) ---
 .playwright-mcp/
 .firecrawl/

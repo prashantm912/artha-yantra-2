@@ -3,11 +3,20 @@ import { apiFetch } from './client.ts';
 
 // Instrument-master queries. Both return BARE arrays (not the {items} envelope) — see CLAUDE.md.
 
-/** Underlyings for the control-bar name select. */
+/** /instruments/underlyings returns {exchange, tradingsymbol} rows — the OI endpoints key on the name. */
+interface UnderlyingRow {
+  exchange: string;
+  tradingsymbol: string;
+}
+
+/** Underlyings for the control-bar name select — mapped to the tradingsymbol `name` strings, deduped. */
 export function useUnderlyings() {
   return useQuery({
     queryKey: ['instruments', 'underlyings'],
-    queryFn: () => apiFetch<string[]>('/instruments/underlyings'),
+    queryFn: async () => {
+      const rows = await apiFetch<UnderlyingRow[]>('/instruments/underlyings');
+      return [...new Set(rows.map((r) => r.tradingsymbol))];
+    },
     staleTime: 5 * 60_000,
   });
 }

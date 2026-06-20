@@ -18,7 +18,10 @@ public record ScalperConfig(
     StrikePicker.Params strikeParams,
     BigDecimal confluenceThreshold) {
 
-  // §0B delta band — uniform across indices (the slightly-ITM 0.6–0.7 Siva favours).
+  // §0B delta band — uniform across indices (the slightly-ITM 0.6–0.7 Siva favours). The §4.14.7 /
+  // §4.15.4 expiry-phase refinements (0.7–0.8 near a weekly expiry's end, ~0.5 on its first day;
+  // buyer 0.9 / seller 0.4) are DEFERRED: §4.14.7 states the 0.6–0.7 baseline "remains the general
+  // case", so this fixed band is a doc-sanctioned v1 simplification, not an oversight.
   private static final double DELTA_LO = 0.6;
   private static final double DELTA_HI = 0.7;
   // Black-76 risk-free rate; delta is near rate-insensitive for short-dated options, so a fixed

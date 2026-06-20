@@ -50,7 +50,12 @@ public final class ScalperGates {
     return new GateOutcome(ok, volume, (ok ? "volume >= " : "volume < ") + floor.toPlainString());
   }
 
-  /** RSI(3m,14): 40–60 is NO-TRADE; CE trades 60–80, PE trades 20–40 (exhaustion caps at 80/20). */
+  /**
+   * RSI(3m,14): 40–60 is NO-TRADE; CE trades 60–80, PE trades 20–40 (exhaustion caps at 80/20).
+   * These follow §4.2 "Indicator Set &amp; Exact Settings" (the doc's designated single source of
+   * thresholds: no-trade 40–60, CE &gt;60, PE &lt;40). §3.10/§6.10 render the band as "buy 50–75 /
+   * no-trade 40–50", but a 50–60 CE floor would collide with the 40–60 no-trade zone, so §4.2 governs.
+   */
   public static GateOutcome rsiBand(BigDecimal rsi, OptionType side) {
     if (rsi == null) {
       return GateOutcome.fail(null, "rsi unavailable");

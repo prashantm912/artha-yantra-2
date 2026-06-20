@@ -46,7 +46,7 @@ public final class ScalperManualChecks {
           new Check(
               "vix_normal",
               "India VIX is not abnormally spiking (gap and whipsaw risk).",
-              "4.6",
+              "4.5",
               "Glance at India VIX versus the last few sessions."),
           new Check(
               "global_cues_ok",

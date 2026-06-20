@@ -1,0 +1,10 @@
+node_modules
+dist
+coverage
+*.local
+.vite
+node_modules/.tmp
+
+# TradingView Charting Library binary (Personal/Non-commercial — NEVER commit/redistribute).
+# Served from public/ at build, like the old app. (master plan §20)
+public/charting_library

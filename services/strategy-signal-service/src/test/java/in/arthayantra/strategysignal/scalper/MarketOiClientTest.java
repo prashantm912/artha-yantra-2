@@ -116,6 +116,47 @@ class MarketOiClientTest {
   }
 
   @Test
+  void flattensTheNearestChainIntoBothSideCandidates() {
+    wire();
+    stub(
+        "/api/v1/market/options/chain",
+        "{\"underlying\":\"NIFTY 50\",\"expiry\":\"2026-06-25\",\"spot\":\"20000\",\"forward\":\"20040\","
+            + "\"rows\":["
+            + "{\"strike\":\"19900\",\"ce\":{\"tradingsymbol\":\"NIFTY19900CE\",\"ltp\":\"180\",\"iv\":\"0.14\"},"
+            + "\"pe\":{\"tradingsymbol\":\"NIFTY19900PE\",\"ltp\":\"60\",\"iv\":\"0.15\"}},"
+            // a leg with null iv is dropped (cannot price it)
+            + "{\"strike\":\"20000\",\"ce\":{\"tradingsymbol\":\"NIFTY20000CE\",\"ltp\":\"110\",\"iv\":null},"
+            + "\"pe\":{\"tradingsymbol\":\"NIFTY20000PE\",\"ltp\":\"120\",\"iv\":\"0.13\"}}]}");
+
+    MarketOiClient.ChainSnapshot snap = client.chain(UNDERLYING).orElseThrow();
+
+    assertThat(snap.expiry()).isEqualTo(EXPIRY);
+    assertThat(snap.basis()).isEqualByComparingTo("40"); // forward 20040 − spot 20000
+    // 4 legs present, 1 (20000 CE, null iv) dropped → 3 candidates
+    assertThat(snap.candidates()).hasSize(3);
+    assertThat(snap.candidates())
+        .anySatisfy(
+            c -> {
+              assertThat(c.tradingsymbol()).isEqualTo("NIFTY19900CE");
+              assertThat(c.strike()).isEqualByComparingTo("19900");
+              assertThat(c.type()).isEqualTo(in.arthayantra.black76.Black76.OptionType.CE);
+              assertThat(c.ltp()).isEqualByComparingTo("180");
+              assertThat(c.iv()).isEqualByComparingTo("0.14");
+            });
+    server.verify();
+  }
+
+  @Test
+  void chainIsEmptyWhenUpstreamFails() {
+    wire();
+    server
+        .expect(ExpectedCount.once(), requestTo(containsString("/api/v1/market/options/chain")))
+        .andRespond(withServerError());
+
+    assertThat(client.chain(UNDERLYING)).isEmpty();
+  }
+
+  @Test
   void degradesEveryOiPrimitiveToConservativeDefaultOnUpstreamFailure() {
     wire();
     for (String path :

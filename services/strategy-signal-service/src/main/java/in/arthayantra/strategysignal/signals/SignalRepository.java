@@ -34,7 +34,10 @@ public class SignalRepository {
       String status,
       OffsetDateTime generatedAt,
       OffsetDateTime expiresAt,
-      BigDecimal suggestedQty) {}
+      BigDecimal suggestedQty,
+      String tradeableExchange,
+      String tradeableTradingsymbol,
+      JsonNode scalperDetail) {}
 
   private final JdbcTemplate jdbc;
   private final ObjectMapper objectMapper;
@@ -163,12 +166,27 @@ public class SignalRepository {
         rs.getString("status"),
         rs.getObject("generated_at", OffsetDateTime.class),
         rs.getObject("expires_at", OffsetDateTime.class),
-        rs.getBigDecimal("suggested_qty"));
+        rs.getBigDecimal("suggested_qty"),
+        rs.getString("tradeable_exchange"),
+        rs.getString("tradeable_tradingsymbol"),
+        nullableTree(rs.getString("scalper_detail")));
   }
 
   /** Stamps the engine-computed suggested qty (A12) — outside the frozen score breakdown. */
   public void stampSuggestedQty(long id, BigDecimal qty) {
     jdbc.update("UPDATE signals SET suggested_qty = ? WHERE id = ?", qty, id);
+  }
+
+  /**
+   * Stamps the §12.9 scalper side-channel: the option the seam picked to trade (the signal is keyed
+   * on the index future) plus the confluence detail JSON — outside the frozen score breakdown.
+   */
+  public void stampScalperDetail(
+      long id, String tradeableExchange, String tradeableTradingsymbol, String detailJson) {
+    jdbc.update(
+        "UPDATE signals SET tradeable_exchange = ?, tradeable_tradingsymbol = ?, "
+            + "scalper_detail = ?::jsonb WHERE id = ?",
+        tradeableExchange, tradeableTradingsymbol, detailJson, id);
   }
 
   private JsonNode readTree(String json) {
@@ -177,5 +195,10 @@ public class SignalRepository {
     } catch (JsonProcessingException e) {
       throw new IllegalStateException("stored breakdown is not valid JSON", e);
     }
+  }
+
+  /** Same as {@link #readTree} but tolerant of a NULL column (the scalper side-channel). */
+  private JsonNode nullableTree(String json) {
+    return json == null ? null : readTree(json);
   }
 }

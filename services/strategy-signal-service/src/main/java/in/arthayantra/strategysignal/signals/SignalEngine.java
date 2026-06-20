@@ -3,8 +3,11 @@ package in.arthayantra.strategysignal.signals;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.common.web.time.Ist;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import in.arthayantra.strategyengine.config.StrategyCompiler;
 import in.arthayantra.strategyengine.config.StrategyDefinition;
+import in.arthayantra.strategyengine.eval.BarValues;
 import in.arthayantra.strategyengine.eval.EntryEvaluator;
 import in.arthayantra.strategyengine.eval.ExitEvaluator;
 import in.arthayantra.strategyengine.eval.IndicatorBank;
@@ -14,6 +17,10 @@ import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategyengine.series.EngineSeries;
 import in.arthayantra.strategyengine.series.SeriesKey;
 import in.arthayantra.strategysignal.registry.StrategyRepository;
+import in.arthayantra.strategysignal.scalper.ConnectTheDotsScorer;
+import in.arthayantra.strategysignal.scalper.ScalperConfig;
+import in.arthayantra.strategysignal.scalper.ScalperConfluenceGate;
+import in.arthayantra.strategysignal.scalper.StrikePicker;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -65,7 +72,7 @@ public class SignalEngine {
 
   private static final Logger log = LoggerFactory.getLogger(SignalEngine.class);
 
-  /** One loaded (strategy, version) with its resolved universe. */
+  /** One loaded (strategy, version) with its resolved universe; {@code scalper} non-null = Track-2. */
   record Loaded(
       UUID strategyId,
       UUID versionId,
@@ -75,7 +82,8 @@ public class SignalEngine {
       String checksum,
       StrategyDefinition definition,
       List<StrategyDefinition.InstrumentRef> universe,
-      Set<SeriesKey> seriesKeys) {}
+      Set<SeriesKey> seriesKeys,
+      ScalperConfig scalper) {}
 
   private final StrategyRepository registry;
   private final SignalRepository signals;
@@ -89,6 +97,9 @@ public class SignalEngine {
   private final int signalTtlMinutes;
   // A12 SPI (paper adapter): ENTRY risk gate + engine-stamped suggested qty. Absent ⇒ permissive.
   private final java.util.Optional<EmissionGuard> emissionGuard;
+  // §12.3 Track-2 confluence seam: OI/macro gate + option pick for scalper strategies. Absent ⇒
+  // scalper strategies cannot emit (fail-closed — a scalper without its confluence must not fire).
+  private final java.util.Optional<ScalperConfluenceGate> scalperGate;
 
   // candles.1m.* are NEVER conflated (A.7.2 bus contract — every closed bar matters). A FIFO
   // queue preserves each distinct bar in arrival order; the single-threaded evalExecutor drains it
@@ -126,6 +137,7 @@ public class SignalEngine {
       Clock clock,
       MeterRegistry meterRegistry,
       java.util.Optional<EmissionGuard> emissionGuard,
+      java.util.Optional<ScalperConfluenceGate> scalperGate,
       @Value("${artha.signals.ttl-minutes:60}") int signalTtlMinutes) {
     this.registry = registry;
     this.signals = signals;
@@ -138,6 +150,7 @@ public class SignalEngine {
     this.clock = clock;
     this.signalTtlMinutes = signalTtlMinutes;
     this.emissionGuard = emissionGuard;
+    this.scalperGate = scalperGate;
     this.evalTimer = meterRegistry.timer("ay_signal_eval_duration_seconds");
     this.emitted = meterRegistry.counter("ay_signals_emitted_total");
   }
@@ -170,9 +183,16 @@ public class SignalEngine {
         continue;
       }
       try {
-        StrategyDefinition definition = StrategyCompiler.compile(versionRow.get().config());
-        List<StrategyDefinition.InstrumentRef> universe =
-            resolveUniverse(versionRow.get().config());
+        JsonNode config = versionRow.get().config();
+        StrategyDefinition definition = StrategyCompiler.compile(config);
+        // Track-2: a strategy tagged `scalper` over an options_of_underlying universe carries the
+        // §0B knobs (the confluence seam reads them); every other strategy stays null = unaffected.
+        ScalperConfig scalper =
+            strategy.tags().contains("scalper")
+                    && "options_of_underlying".equals(config.path("universe").path("mode").asText())
+                ? ScalperConfig.from(config.path("universe"))
+                : null;
+        List<StrategyDefinition.InstrumentRef> universe = resolveUniverse(config);
         if (universe.isEmpty()) {
           log.warn("strategy {} resolves to an empty universe — not loaded", strategy.slug());
           continue;
@@ -204,7 +224,7 @@ public class SignalEngine {
             new Loaded(
                 strategy.id(), versionRow.get().id(), strategy.slug(), strategy.name(),
                 versionRow.get().version(), versionRow.get().checksum(), definition,
-                universe, keys));
+                universe, keys, scalper));
       } catch (RuntimeException e) {
         log.error("strategy {} failed to load — skipped: {}", strategy.slug(), e.getMessage());
       }
@@ -235,12 +255,15 @@ public class SignalEngine {
               universe.path("underlying").path("tradingsymbol").asText(),
               universe.path("futures").path("contract").asText("front_month"),
               universe.path("futures").path("roll_days_before_expiry").asInt(1));
-      case "options_of_underlying" -> {
-        log.warn(
-            "options_of_underlying universes evaluate from Stage F (chain-driven resolution); "
-                + "strategy stays unloaded");
-        yield List.of();
-      }
+      case "options_of_underlying" ->
+          // Phase 3 / Model A: the scalper EVALUATES + CHARTS on the index FRONT FUTURE (it carries
+          // the volume the §0B VWAP/VWMA gates need); the option to TRADE is picked at signal time by
+          // the confluence seam. Same front/next + roll resolution as futures_of_underlying.
+          futuresResolver.resolve(
+              universe.path("underlying").path("exchange").asText(),
+              universe.path("underlying").path("tradingsymbol").asText(),
+              universe.path("futures").path("contract").asText("front_month"),
+              universe.path("futures").path("roll_days_before_expiry").asInt(2));
       default -> {
         // index_constituents cannot publish until Phase 44 (the registry guard) — defensive
         log.warn("universe mode '{}' is not live-resolvable yet", mode);
@@ -379,9 +402,38 @@ public class SignalEngine {
       Optional<EntryEvaluator.Evaluation> evaluation =
           EntryEvaluator.evaluate(strategy.definition(), bank, index);
       if (evaluation.isPresent() && evaluation.get().entry()) {
-        emitEntry(strategy, exchange, tradingsymbol, interval, bar, evaluation.get());
+        if (strategy.scalper() != null) {
+          scalperEntry(strategy, exchange, tradingsymbol, interval, bar, evaluation.get(), bank, index);
+        } else {
+          emitEntry(strategy, exchange, tradingsymbol, interval, bar, evaluation.get(), null);
+        }
       }
     }
+  }
+
+  /**
+   * Track-2 entry: the chart gate passed; now the §12.3 confluence seam must also confirm and pick
+   * the option, or the entry is blocked. Fail-closed — a scalper strategy without the gate never
+   * fires. The signal is keyed on the index FUTURE (this {@code exchange}/{@code tradingsymbol}); the
+   * picked option rides the side-channel.
+   */
+  private void scalperEntry(
+      Loaded strategy, String exchange, String tradingsymbol, String interval, EngineCandle bar,
+      EntryEvaluator.Evaluation evaluation, BarValues bank, int index) {
+    if (scalperGate.isEmpty()) {
+      log.warn("scalper strategy {} loaded but confluence gate absent — entry suppressed", strategy.slug());
+      return;
+    }
+    OffsetDateTime istBar = bar.bucketStart().withOffsetSameInstant(Ist.OFFSET);
+    Optional<ScalperConfluenceGate.Decision> decision =
+        scalperGate.get().evaluate(
+            strategy.scalper(), bank, index, bar.bucketStart().toInstant(),
+            istBar.toLocalTime(), istBar.toLocalDate());
+    if (decision.isEmpty()) {
+      log.info("scalper confluence blocked entry: {} {}:{}", strategy.slug(), exchange, tradingsymbol);
+      return;
+    }
+    emitEntry(strategy, exchange, tradingsymbol, interval, bar, evaluation, decision.get());
   }
 
   private void evaluateCoarsePrimary(
@@ -483,13 +535,13 @@ public class SignalEngine {
       EngineCandle lastOneMinute = dayBars.get(dayBars.size() - 1);
       emitEntry(
           strategy, instrument.exchange(), instrument.tradingsymbol(), "1d", lastOneMinute,
-          evaluation.get());
+          evaluation.get(), null);
     }
   }
 
   private void emitEntry(
       Loaded strategy, String exchange, String tradingsymbol, String interval, EngineCandle bar,
-      EntryEvaluator.Evaluation evaluation) {
+      EntryEvaluator.Evaluation evaluation, ScalperConfluenceGate.Decision decision) {
     // A12 global risk gate: a daily-loss trip / kill switch / max-open cap pauses ENTRY emission
     // for the rest of the IST day — exit/stop evaluation (emit()) is deliberately NOT gated.
     if (emissionGuard.isPresent() && !emissionGuard.get().entryAllowed()) {
@@ -523,6 +575,14 @@ public class SignalEngine {
         signals.stampSuggestedQty(id, suggestedQty);
       }
     }
+    // §12.9 Track-2 side-channel: the signal is keyed on the index future; record the option the
+    // confluence picked (the order/paper layer trades it) + the confluence detail, OUTSIDE the
+    // frozen score breakdown. Options trade on the same derivatives exchange as the index future.
+    if (decision != null) {
+      signals.stampScalperDetail(
+          id, exchange, decision.pick().candidate().tradingsymbol(),
+          scalperDetailJson(decision, strategy.scalper()));
+    }
     emitted.increment();
     // the channel carries EXACTLY the persisted canonical bytes (divergence = FAIL criterion)
     JsonNode canonicalBreakdown;
@@ -544,6 +604,29 @@ public class SignalEngine {
         new SignalEmitted(
             id, strategy.versionId(), exchange, tradingsymbol, side, entryPrice, stopLoss, target,
             evaluation.breakdown().composite(), evaluation.breakdown().threshold()));
+  }
+
+  /** The §12.9 confluence side-channel JSON — chosen option, |delta|, IV, aggregate, per-dot detail. */
+  private String scalperDetailJson(ScalperConfluenceGate.Decision d, ScalperConfig cfg) {
+    StrikePicker.Candidate c = d.pick().candidate();
+    ObjectNode root = objectMapper.createObjectNode();
+    root.put("side", d.side().name());
+    root.put("underlying", cfg.underlying());
+    root.put("expiry", d.expiry().toString());
+    root.put("tradeable", c.tradingsymbol());
+    root.put("strike", c.strike());
+    root.put("option_ltp", c.ltp());
+    root.put("iv", c.iv());
+    root.put("delta", d.pick().delta());
+    root.put("confluence_aggregate", d.confluence().aggregate());
+    ArrayNode dots = root.putArray("dots");
+    for (ConnectTheDotsScorer.DotScore ds : d.confluence().dots()) {
+      ObjectNode n = dots.addObject();
+      n.put("dot", ds.dot());
+      n.put("weight", ds.weight());
+      n.put("supports", ds.supports());
+    }
+    return root.toString();
   }
 
   private void emit(

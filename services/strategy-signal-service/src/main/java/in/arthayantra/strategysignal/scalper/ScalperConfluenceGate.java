@@ -1,0 +1,110 @@
+package in.arthayantra.strategysignal.scalper;
+
+import in.arthayantra.black76.Black76.OptionType;
+import in.arthayantra.strategyengine.eval.BarValues;
+import in.arthayantra.strategysignal.scalper.ConnectTheDotsScorer.Confluence;
+import in.arthayantra.strategysignal.scalper.MarketOiClient.ChainSnapshot;
+import in.arthayantra.strategysignal.scalper.ScalperGateContext.Chart;
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.util.Optional;
+import org.springframework.stereotype.Component;
+
+/**
+ * The §12.3 confluence seam — consulted after the chart {@code EntryEvaluator} passes and before
+ * {@code emitEntry}, for scalper strategies only (Model A). It assembles the per-bar {@link
+ * ScalperGateContext} (chart dots from the engine {@code IndicatorBank} on the index FUTURE + the
+ * OI/macro half from {@link MarketOiClient}), scores Connect-the-Dots, and — when the side's
+ * confluence holds — picks the option to trade ({@link StrikePicker}). An empty result BLOCKS the
+ * entry (confluence failed, the chain was unavailable, or no strike met the delta/premium band).
+ *
+ * <p>Wired into {@code SignalEngine} as an {@code Optional<ScalperConfluenceGate>}, mirroring the
+ * {@code EmissionGuard} seam. LIVE-only: the OI/macro/chain reads are current snapshots and never run
+ * on the deterministic replay path — the picked option + confluence are persisted at entry (the V009
+ * side-channel) so a replay reads them back rather than re-calling market-data.
+ */
+@Component
+public class ScalperConfluenceGate {
+
+  /** The scalper indicator-alias convention — a scalper YAML declares these on the index future. */
+  static final String VWMA = "vwma20";
+
+  static final String PSAR = "psar";
+  static final String RSI = "rsi14";
+  static final String SUPERTREND = "supertrend";
+  // optional 60-minute bias confirmation (e.g. SUPERTREND@60m); absent ⇒ unknown ⇒ never blocks.
+  static final String BIAS_60M = "bias60m";
+
+  private final MarketOiClient client;
+
+  /** Wires the market-data OI/chain client. */
+  public ScalperConfluenceGate(MarketOiClient client) {
+    this.client = client;
+  }
+
+  /** The chosen option, the side, and the confluence that justified it. */
+  public record Decision(
+      OptionType side, StrikePicker.Pick pick, Confluence confluence, LocalDate expiry) {}
+
+  /**
+   * Confluence-gate one passing chart entry. Empty BLOCKS the signal.
+   *
+   * @param cfg the strategy's scalper knobs (underlying, strike band, threshold)
+   * @param bank the engine indicator bank for the index future at this bar
+   * @param index the just-closed primary bar index
+   * @param barInstant the bar instant (deterministic; drives the StrikePicker expiry clock)
+   * @param istTime the bar's IST wall-clock (the time-window dot)
+   * @param eodDate the EOD-read date for breadth/FII (see {@link MarketOiClient})
+   */
+  public Optional<Decision> evaluate(
+      ScalperConfig cfg,
+      BarValues bank,
+      int index,
+      Instant barInstant,
+      LocalTime istTime,
+      LocalDate eodDate) {
+    Optional<ChainSnapshot> chainOpt = client.chain(cfg.underlying());
+    if (chainOpt.isEmpty()) {
+      return Optional.empty();
+    }
+    ChainSnapshot chain = chainOpt.get();
+    Chart chart = chart(bank, index);
+    // §0B VWAP-decisive: CE above VWAP, PE below — the side the rest of the confluence must confirm.
+    OptionType side =
+        chart.close() != null && chart.vwap() != null && chart.close().compareTo(chart.vwap()) >= 0
+            ? OptionType.CE
+            : OptionType.PE;
+    ScalperGateContext ctx = client.context(cfg.underlying(), istTime, eodDate, chain.expiry(), chart);
+    Confluence conf =
+        ConnectTheDotsScorer.score(ctx, side, bias60m(bank, index), cfg.confluenceThreshold());
+    boolean valid = side == OptionType.CE ? conf.bullish() : conf.bearish();
+    if (!valid) {
+      return Optional.empty();
+    }
+    return StrikePicker.pick(
+            chain.candidates(), chain.spot(), chain.basis(), side, barInstant, chain.expiry(),
+            cfg.strikeParams())
+        .map(pick -> new Decision(side, pick, conf, chain.expiry()));
+  }
+
+  private Chart chart(BarValues bank, int index) {
+    BigDecimal supertrend = bank.valueAt(SUPERTREND, index);
+    // the SUPERTREND indicator outputs +1/-1 directly (Ta4jIndicators.supertrendDirection).
+    int supertrendDir = supertrend == null ? 0 : supertrend.signum();
+    return new Chart(
+        bank.builtin("close", index),
+        bank.builtin("vwap", index),
+        bank.valueAt(VWMA, index),
+        bank.valueAt(PSAR, index),
+        supertrendDir,
+        bank.valueAt(RSI, index),
+        bank.builtin("volume", index));
+  }
+
+  private int bias60m(BarValues bank, int index) {
+    BigDecimal bias = bank.valueAt(BIAS_60M, index);
+    return bias == null ? 0 : bias.signum();
+  }
+}

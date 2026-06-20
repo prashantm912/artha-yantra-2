@@ -35,9 +35,13 @@ public final class StrikePicker {
 
   private StrikePicker() {}
 
-  /** One strike of the chain (the caller pre-filters to the trading side + the ATM±width window). */
+  /**
+   * One strike of the chain (the caller pre-filters to the trading side + the ATM±width window).
+   * {@code tradingsymbol} is the option's own symbol — carried through so the seam can stamp the
+   * chosen leg as the signal's tradeable.
+   */
   public record Candidate(
-      BigDecimal strike, Black76.OptionType type, BigDecimal ltp, BigDecimal iv) {}
+      String tradingsymbol, BigDecimal strike, Black76.OptionType type, BigDecimal ltp, BigDecimal iv) {}
 
   /** The chosen strike and the {@code |delta|} it was selected on. */
   public record Pick(Candidate candidate, BigDecimal delta) {}

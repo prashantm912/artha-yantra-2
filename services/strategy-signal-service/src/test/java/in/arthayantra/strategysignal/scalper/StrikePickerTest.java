@@ -30,7 +30,7 @@ class StrikePickerTest {
   }
 
   private static Candidate ce(String strike, String ltp, String iv) {
-    return new Candidate(bd(strike), CE, bd(ltp), bd(iv));
+    return new Candidate("NIFTY" + strike + "CE", bd(strike), CE, bd(ltp), bd(iv));
   }
 
   @Test
@@ -72,7 +72,7 @@ class StrikePickerTest {
   @Test
   void ignoresTheWrongSide() {
     // asking for CE but the chain only has PE strikes
-    List<Candidate> puts = List.of(new Candidate(bd("19850"), PE, bd("200"), bd("0.14")));
+    List<Candidate> puts = List.of(new Candidate("NIFTY19850PE", bd("19850"), PE, bd("200"), bd("0.14")));
 
     assertThat(StrikePicker.pick(puts, bd("20000"), bd("0"), CE, NOW, EXPIRY, P)).isEmpty();
   }

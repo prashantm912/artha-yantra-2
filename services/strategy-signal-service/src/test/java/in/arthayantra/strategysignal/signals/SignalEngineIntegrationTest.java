@@ -163,9 +163,17 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
         publishBar("SIGTEST", liveBase.plusMinutes(i), price);
       }
 
-      await().atMost(Duration.ofSeconds(20)).until(() -> !signals.active().isEmpty());
+      // scope to THIS test's instrument — the IT DB is shared with no per-method cleanup, so other
+      // methods/classes may leave their own active signals newer than ours (CLAUDE.md IT contract).
+      await()
+          .atMost(Duration.ofSeconds(20))
+          .until(() -> signals.active().stream().anyMatch(s -> "SIGTEST".equals(s.tradingsymbol())));
 
-      SignalRepository.SignalRow row = signals.active().get(0);
+      SignalRepository.SignalRow row =
+          signals.active().stream()
+              .filter(s -> "SIGTEST".equals(s.tradingsymbol()))
+              .findFirst()
+              .orElseThrow();
       firstSignalId = row.id();
       assertThat(row.signalType()).isEqualTo("ENTRY");
       assertThat(row.side()).isEqualTo("BUY");

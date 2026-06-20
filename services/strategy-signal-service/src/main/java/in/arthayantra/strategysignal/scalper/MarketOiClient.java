@@ -2,11 +2,15 @@ package in.arthayantra.strategysignal.scalper;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import in.arthayantra.black76.Black76;
 import in.arthayantra.strategysignal.scalper.ScalperGateContext.Macro;
 import in.arthayantra.strategysignal.scalper.ScalperGateContext.Oi;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
 import java.util.function.Function;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -73,6 +77,62 @@ public class MarketOiClient {
       LocalDate expiry,
       ScalperGateContext.Chart chart) {
     return new ScalperGateContext(underlying, istTime, chart, oi(underlying, expiry), macro(underlying, eodDate));
+  }
+
+  /** The nearest-expiry option chain flattened for {@link StrikePicker}: spot, forward, the candidates. */
+  public record ChainSnapshot(
+      LocalDate expiry, BigDecimal spot, BigDecimal forward, List<StrikePicker.Candidate> candidates) {
+
+    /** Forward − spot — the StrikePicker basis (Black-76 is on the forward). */
+    public BigDecimal basis() {
+      return forward == null || spot == null ? BigDecimal.ZERO : forward.subtract(spot);
+    }
+  }
+
+  /**
+   * The live nearest-expiry chain for {@code underlying} (no explicit expiry → market-data resolves
+   * the nearest), flattened into both-side {@link StrikePicker.Candidate}s. Empty when the chain is
+   * unavailable or carries no usable legs — the seam then blocks rather than guesses a strike. The
+   * leg {@code iv} is already a fraction (the solver's sigma), so it passes straight to StrikePicker.
+   */
+  public Optional<ChainSnapshot> chain(String underlying) {
+    return Optional.ofNullable(
+        get(
+            uri -> uri.path("/api/v1/market/options/chain").queryParam("underlying", underlying).build(),
+            this::toChainSnapshot,
+            null,
+            "options/chain"));
+  }
+
+  private ChainSnapshot toChainSnapshot(JsonNode chain) {
+    String expiryRaw = text(chain.path("expiry"));
+    if (expiryRaw == null) {
+      return null;
+    }
+    BigDecimal spot = decimal(chain.path("spot"));
+    BigDecimal forward = decimal(chain.path("forward"));
+    List<StrikePicker.Candidate> candidates = new ArrayList<>();
+    for (JsonNode row : chain.path("rows")) {
+      BigDecimal strike = decimal(row.path("strike"));
+      if (strike == null) {
+        continue;
+      }
+      addLeg(candidates, strike, Black76.OptionType.CE, row.path("ce"));
+      addLeg(candidates, strike, Black76.OptionType.PE, row.path("pe"));
+    }
+    if (candidates.isEmpty()) {
+      return null;
+    }
+    return new ChainSnapshot(LocalDate.parse(expiryRaw), spot, forward, candidates);
+  }
+
+  private static void addLeg(
+      List<StrikePicker.Candidate> out, BigDecimal strike, Black76.OptionType type, JsonNode leg) {
+    BigDecimal ltp = decimal(leg.path("ltp"));
+    BigDecimal iv = decimal(leg.path("iv"));
+    if (ltp != null && iv != null && iv.signum() > 0) {
+      out.add(new StrikePicker.Candidate(text(leg.path("tradingsymbol")), strike, type, ltp, iv));
+    }
   }
 
   /** The OI confluence half: underlying + futures quadrants, sentiment, PE−CE cross, futures basis. */
@@ -253,7 +313,7 @@ public class MarketOiClient {
       T fallback,
       String label) {
     try {
-      String body = restClient.get().uri(uri::apply).retrieve().body(String.class);
+      String body = restClient.get().uri(uri).retrieve().body(String.class);
       if (body == null || body.isBlank()) {
         return fallback;
       }

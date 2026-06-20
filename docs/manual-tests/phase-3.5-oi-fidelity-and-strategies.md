@@ -30,6 +30,9 @@ $env:MAVEN_OPTS = "-Djavax.net.ssl.trustStoreType=Windows-ROOT"
   and a degrade case per dot (null data → no support, never blocks). **18 dots total.**
 - `ScalperGatesTest` — `callPutDeltaFilter` (#5 ≥50% PASS/FAIL/degrade-null→PASS) + the window-aware
   `timeWindow` overload.
+- `MarketCalendarTest` / `MarketOiClientTest` — **monthly-expiry OI suppression** (S24 caveat): on the
+  month's last weekly index expiry, `oi()` skips the chain-OI reads (keeps the basis), so every OI dot
+  degrades to non-confirming and nothing blocks — `isMonthlyIndexExpiryDay` + the suppression test.
 
 ## 2. Automated proof — the 4 strategies
 ```powershell
@@ -72,8 +75,6 @@ touch `ScoreBreakdown` / the golden byte-string.
   market-data endpoint / the OiPulse model (Phase-4 OiPulse-parity). #2 ships front-Future OH/OL + the
   OI-quadrant probability tier (the honest equivalent of the badge).
 - **#4 counter-trend gap-fill scalp** (risky, scalping-only) — automated path is with-trend-after-fill.
-- **Monthly-expiry OI suppression** — the S24 caveat (ignore Trending-OI on a monthly-expiry day, the
-  expiring writers corrupt the read) is NOT yet wired; it needs expiry-day detection across the OI dots.
 - **#3 Market Movers** (F&O stock universe → Track-1), **#8 BTST/STBT** (overnight carry + SPAN short
   leg), **#7/#11 short-premium** (SPAN #47) — all out of the index-option-intraday scope.
 - **drasticFloor=50000** is a documented, DB-tunable, index-agnostic v1 placeholder (the source gives no

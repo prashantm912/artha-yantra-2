@@ -110,6 +110,24 @@ public final class ScalperGates {
     return new GateOutcome(ok, m.vixLevel(), "vix " + dir + (ok ? " supports " : " opposes ") + side);
   }
 
+  /**
+   * #5 (T2.1): the trending-OI call-put delta-imbalance HARD pre-gate. PASS when the imbalance %
+   * (|peDelta-ceDelta|/max(|peDelta|,|ceDelta|)*100) is at/above {@code floorPct}; FAIL when it is
+   * present and below. A {@code null} imbalance (data unavailable or the flat-OI caveat the producer
+   * documents) DEGRADES to PASS — it never blocks, so a missing derivation can't gate out an entry.
+   */
+  public static GateOutcome callPutDeltaFilter(Oi oi, BigDecimal floorPct) {
+    BigDecimal imbalance = oi.callPutDeltaImbalancePct();
+    if (imbalance == null) {
+      return GateOutcome.pass(null, "call-put dOI imbalance unavailable (degrade -> pass)");
+    }
+    boolean ok = imbalance.compareTo(floorPct) >= 0;
+    return new GateOutcome(
+        ok,
+        imbalance,
+        "call-put dOI imbalance " + imbalance.toPlainString() + (ok ? " >= " : " < ") + floorPct.toPlainString());
+  }
+
   /** Futures basis: future > spot (premium) is bullish → CE; future < spot (discount) bearish → PE. */
   public static GateOutcome futuresBasis(Oi oi, OptionType side) {
     BigDecimal basis = oi.futuresBasis();

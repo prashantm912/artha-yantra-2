@@ -105,6 +105,22 @@ class ScalperGatesTest {
     assertThat(ScalperGates.futuresBasis(basis(null), PE).pass()).isTrue(); // unavailable -> pass
   }
 
+  @Test
+  void callPutDeltaFilterPassesAtFloorFailsBelowAndDegradesOnNull() {
+    BigDecimal floor = bd("50");
+    assertThat(ScalperGates.callPutDeltaFilter(imbalance(bd("50")), floor).pass()).isTrue(); // == floor
+    assertThat(ScalperGates.callPutDeltaFilter(imbalance(bd("75")), floor).pass()).isTrue();
+    assertThat(ScalperGates.callPutDeltaFilter(imbalance(bd("49.9")), floor).pass()).isFalse();
+    // null imbalance (data unavailable / flat-OI caveat) DEGRADES to pass — never blocks
+    assertThat(ScalperGates.callPutDeltaFilter(imbalance(null), floor).pass()).isTrue();
+  }
+
+  private static Oi imbalance(BigDecimal pct) {
+    return new Oi(
+        OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("0"), bd("5"),
+        null, null, pct, false, false, null, null, null);
+  }
+
   private static Oi oi(OiQuadrant futures) {
     return new Oi(futures, futures, bd("10"), bd("0"), bd("5"), null, null, null, false, false, null, null, null);
   }

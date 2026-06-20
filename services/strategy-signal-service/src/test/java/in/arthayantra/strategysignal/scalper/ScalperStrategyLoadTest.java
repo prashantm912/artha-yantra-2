@@ -67,6 +67,13 @@ class ScalperStrategyLoadTest {
       Set<String> declared = new HashSet<>();
       config.path("indicators").forEach(i -> declared.add(i.path("alias").asText()));
       assertThat(declared).as(id + " declares the seam aliases").containsAll(SEAM_ALIASES);
+
+      // #5 (T2.1): only scalp-trending-oi carries the oi-cross-filter tag → the HARD call-put dOI
+      // pre-gate. ScalperConfig.requireCallPutDeltaFilter mirrors the tag; the others stay off.
+      boolean isTrendingOi = id.equals("scalp-trending-oi-nifty");
+      assertThat(cfg.requireCallPutDeltaFilter())
+          .as(id + " oi-cross-filter pre-gate")
+          .isEqualTo(isTrendingOi);
     }
   }
 }

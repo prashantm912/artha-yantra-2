@@ -107,6 +107,13 @@ public class ScalperConfluenceGate {
       return Optional.empty();
     }
     ScalperGateContext ctx = client.context(cfg.underlying(), istTime, eodDate, chain.expiry(), chart);
+    // #5 (T2.1): the oi-cross-filter strategies HARD-require a >=50% call-put dOI imbalance before
+    // the confluence is even consulted. Fail-closed like the volume/RSI rails; a null imbalance
+    // (data unavailable / flat-OI caveat) DEGRADES to pass inside the gate, so it never blocks then.
+    if (cfg.requireCallPutDeltaFilter()
+        && !ScalperGates.callPutDeltaFilter(ctx.oi(), oiProps.crossFilterPct()).pass()) {
+      return Optional.empty();
+    }
     Confluence conf =
         ConnectTheDotsScorer.score(ctx, side, bias60m(bank, index), cfg.confluenceThreshold(), oiProps);
     boolean valid = side == OptionType.CE ? conf.bullish() : conf.bearish();

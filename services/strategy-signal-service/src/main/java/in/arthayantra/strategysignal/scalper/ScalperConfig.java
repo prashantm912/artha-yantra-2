@@ -24,7 +24,8 @@ public record ScalperConfig(
     StrikePicker.Params strikeParams,
     BigDecimal confluenceThreshold,
     boolean requireTwoCandle,
-    StructuralStop structuralStop) {
+    StructuralStop structuralStop,
+    boolean requireCallPutDeltaFilter) {
 
   /** Where the entry-time structural stop-loss is anchored (none = size off structure/VWAP only). */
   public enum StructuralStop {
@@ -66,6 +67,9 @@ public record ScalperConfig(
         twoCandle
             ? StructuralStop.TWO_CANDLE_FIRST
             : tags.contains("entry-candle-stop") ? StructuralStop.ENTRY_CANDLE : StructuralStop.NONE;
-    return new ScalperConfig(exchange, underlying, rollDays, params, THRESHOLD, twoCandle, stop);
+    // #5 (T2.1): the oi-cross-filter tag makes the >=50% call-put dOI imbalance a HARD pre-gate.
+    boolean callPutDeltaFilter = tags.contains("oi-cross-filter");
+    return new ScalperConfig(
+        exchange, underlying, rollDays, params, THRESHOLD, twoCandle, stop, callPutDeltaFilter);
   }
 }

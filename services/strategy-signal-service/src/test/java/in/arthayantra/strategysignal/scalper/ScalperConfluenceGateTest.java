@@ -38,12 +38,18 @@ class ScalperConfluenceGateTest {
       new ScalperConfig(
           "NSE", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          false, ScalperConfig.StructuralStop.NONE);
+          false, ScalperConfig.StructuralStop.NONE, false);
   private static final ScalperConfig TWO_CANDLE_CFG =
       new ScalperConfig(
           "NSE", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          true, ScalperConfig.StructuralStop.TWO_CANDLE_FIRST);
+          true, ScalperConfig.StructuralStop.TWO_CANDLE_FIRST, false);
+  // #5: a strategy with the oi-cross-filter HARD pre-gate enabled.
+  private static final ScalperConfig OI_CROSS_CFG =
+      new ScalperConfig(
+          "NSE", "NIFTY 50", 2,
+          new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
+          false, ScalperConfig.StructuralStop.NONE, true);
 
   // a 3m index-future series: index 2 is the deploy bar; indices 0/1 are the forming candles.
   private static EngineSeries futureSeries(EngineCandle... candles) {
@@ -97,6 +103,17 @@ class ScalperConfluenceGateTest {
         new Oi(
             OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("5"), bd("5"), null, null, null, false,
             false, null, null, null),
+        new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), null, null));
+  }
+
+  // a bullish context whose OI carries a specific call-put dOI imbalance % (the #5 pre-gate operand).
+  private static ScalperGateContext bullContextWithImbalance(BigDecimal imbalancePct) {
+    return new ScalperGateContext(
+        "NIFTY 50", IST_TIME,
+        new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("130000")),
+        new Oi(
+            OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("5"), bd("5"), null, null,
+            imbalancePct, false, false, null, null, null),
         new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), null, null));
   }
 
@@ -232,5 +249,41 @@ class ScalperConfluenceGateTest {
             new ScalperConfluenceGate(client, ScalperOiProps.defaults())
                 .evaluate(TWO_CANDLE_CFG, bullBank(), future, 2, NOW, IST_TIME, EOD))
         .isEmpty();
+  }
+
+  @Test
+  void oiCrossFilterStrategyBlocksBelowFiftyPercentAndPassesAtOrAbove() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    // imbalance 49.9% (< the default 50 floor) → the #5 HARD pre-gate blocks before any pick
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any()))
+        .thenReturn(bullContextWithImbalance(bd("49.9")));
+    assertThat(
+            new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+                .evaluate(OI_CROSS_CFG, bullBank(), null, 0, NOW, IST_TIME, EOD))
+        .isEmpty();
+
+    // imbalance 50% (== the floor) → the pre-gate passes and the confluence picks the in-band CE
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any()))
+        .thenReturn(bullContextWithImbalance(bd("50")));
+    Optional<Decision> decision =
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+            .evaluate(OI_CROSS_CFG, bullBank(), null, 0, NOW, IST_TIME, EOD);
+    assertThat(decision).isPresent();
+    assertThat(decision.get().pick().candidate().tradingsymbol()).isEqualTo("NIFTY19850CE");
+  }
+
+  @Test
+  void nonOiCrossFilterStrategyIsUnaffectedByALowImbalance() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    // a 1% imbalance would trip the #5 gate, but CFG (no oi-cross-filter tag) never consults it
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any()))
+        .thenReturn(bullContextWithImbalance(bd("1")));
+
+    assertThat(
+            new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+                .evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD))
+        .isPresent();
   }
 }

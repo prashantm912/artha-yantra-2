@@ -27,10 +27,11 @@ export interface OiIntMeta {
   readonly arrow: string;
 }
 
+// Labels are oipulse's exact spelling (full = OI-Analysis page; abbr = the dense Options Chain).
 const META: Record<OiInterpretation, OiIntMeta> = {
-  LONG_BUILDUP: { label: 'Long Buildup', abbr: 'L.B.', glyph: '↑', severity: 'success', arrow: 'price up · OI up' },
-  SHORT_BUILDUP: { label: 'Short Buildup', abbr: 'S.B.', glyph: '↓', severity: 'danger', arrow: 'price down · OI up' },
-  SHORT_COVERING: { label: 'Short Covering', abbr: 'S.C.', glyph: '↑', severity: 'info', arrow: 'price up · OI down' },
+  LONG_BUILDUP: { label: 'Long Build Up', abbr: 'L.B.', glyph: '↑', severity: 'success', arrow: 'price up · OI up' },
+  SHORT_BUILDUP: { label: 'Short Build Up', abbr: 'S.B.', glyph: '↓', severity: 'danger', arrow: 'price down · OI up' },
+  SHORT_COVERING: { label: 'Shorts Covering', abbr: 'S.C.', glyph: '↑', severity: 'info', arrow: 'price up · OI down' },
   LONG_UNWINDING: { label: 'Long Unwinding', abbr: 'L.U.', glyph: '↓', severity: 'warn', arrow: 'price down · OI down' },
 };
 

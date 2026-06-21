@@ -104,3 +104,12 @@ export function bucketTime(iso: string): string {
   const m = /T(\d{2}:\d{2})/.exec(iso);
   return m ? m[1] : iso;
 }
+
+/** "HH:mm-HH:mm" interval window (oipulse Time column) — bucket start + the interval. */
+export function bucketWindow(iso: string, intervalMinutes: number): string {
+  const m = /T(\d{2}):(\d{2})/.exec(iso);
+  if (!m) return iso;
+  const total = Number(m[1]) * 60 + Number(m[2]) + intervalMinutes;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${m[1]}:${m[2]}-${pad(Math.floor(total / 60) % 24)}:${pad(total % 60)}`;
+}

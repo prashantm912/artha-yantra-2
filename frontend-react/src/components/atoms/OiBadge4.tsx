@@ -13,7 +13,8 @@ const TONE: Record<OiSeverity, string> = {
   warn: 'text-warn ring-warn/40',
 };
 
-export function OiBadge4({ value }: { value: OiInterpretation | null }) {
+// `full` shows the full label (oipulse OI-Analysis); default shows the abbreviation (the dense chain).
+export function OiBadge4({ value, full = false }: { value: OiInterpretation | null; full?: boolean }) {
   if (!value) {
     return (
       <>
@@ -34,7 +35,7 @@ export function OiBadge4({ value }: { value: OiInterpretation | null }) {
         TONE[meta.severity],
       )}
     >
-      <span aria-hidden="true">{meta.glyph}</span> {meta.abbr}
+      <span aria-hidden="true">{meta.glyph}</span> {full ? meta.label : meta.abbr}
     </span>
   );
 }

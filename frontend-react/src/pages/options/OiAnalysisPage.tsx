@@ -56,6 +56,10 @@ export function OiAnalysisPage() {
 
   const seriesQ = useStrikeSeries(strike);
   const rows = useMemo(() => foldOiAnalysis(seriesQ.data?.items ?? []), [seriesQ.data]);
+  const intervalMinutes = useMemo(
+    () => parseInt(seriesQ.data?.interval ?? '3m', 10) || 3,
+    [seriesQ.data],
+  );
 
   return (
     <div>
@@ -91,7 +95,7 @@ export function OiAnalysisPage() {
         </p>
       )}
 
-      <OiAnalysisTable rows={rows} strike={strike} />
+      <OiAnalysisTable rows={rows} strike={strike} intervalMinutes={intervalMinutes} />
     </div>
   );
 }

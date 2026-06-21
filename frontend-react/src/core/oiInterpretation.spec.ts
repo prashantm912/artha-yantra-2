@@ -10,7 +10,7 @@ describe('oiIntMeta (4-state OI interpretation)', () => {
       'LONG_UNWINDING',
     ];
     const labels = all.map((s) => oiIntMeta(s).label);
-    expect(labels).toEqual(['Long Buildup', 'Short Buildup', 'Short Covering', 'Long Unwinding']);
+    expect(labels).toEqual(['Long Build Up', 'Short Build Up', 'Shorts Covering', 'Long Unwinding']);
     expect(new Set(labels).size).toBe(4); // all distinct
   });
 

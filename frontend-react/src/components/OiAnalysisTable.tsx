@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { cn } from '../lib/cn.ts';
 import { formatDecimal } from '../lib/decimal.ts';
-import { bucketTime, type OiAnalysisRow, type OiAnalysisSide } from '../api/oiAnalysisFold.ts';
+import { bucketWindow, type OiAnalysisRow, type OiAnalysisSide } from '../api/oiAnalysisFold.ts';
 import { OiBadge4 } from './atoms/OiBadge4.tsx';
 import { ValueDeltaCell } from './atoms/ValueDeltaCell.tsx';
 
@@ -25,23 +25,33 @@ function SignedNum({ n }: { n: number | null }) {
 
 function BreakBadge({ side }: { side: OiAnalysisSide }) {
   if (side.dhBreak) {
-    return <span className="rounded bg-bull/15 px-1 text-xs text-bull">D.H.B ↑</span>;
+    return (
+      <span className="rounded bg-bull/15 px-1 text-xs text-bull">
+        D.H.B {side.ltp ? `(${formatDecimal(side.ltp, 2)}) ` : ''}↑
+      </span>
+    );
   }
   if (side.dlBreak) {
-    return <span className="rounded bg-bear/15 px-1 text-xs text-bear">D.L.B ↓</span>;
+    return (
+      <span className="rounded bg-bear/15 px-1 text-xs text-bear">
+        D.L.B {side.ltp ? `(${formatDecimal(side.ltp, 2)}) ` : ''}↓
+      </span>
+    );
   }
-  return <span className="text-ay-muted">—</span>;
+  return null; // oipulse renders a blank cell (not an em-dash) when there is no break
 }
 
 interface OiAnalysisTableProps {
   rows: OiAnalysisRow[];
   strike: string | null;
+  intervalMinutes: number;
   emptyMessage?: string;
 }
 
 export function OiAnalysisTable({
   rows,
   strike,
+  intervalMinutes,
   emptyMessage = 'No intraday data for this strike.',
 }: OiAnalysisTableProps) {
   // Newest interval first (intraday monitoring); the fold is oldest-first.
@@ -85,21 +95,21 @@ export function OiAnalysisTable({
           <tbody>
             {display.map((r) => (
               <tr key={r.bucket} className="border-t border-ay-border text-ay-text">
-                <td className="px-2 py-1 text-left font-semibold tabular-nums">{bucketTime(r.bucket)}</td>
+                <td className="px-2 py-1 text-left font-semibold tabular-nums">{bucketWindow(r.bucket, intervalMinutes)}</td>
                 <td className="px-2 py-1 text-right tabular-nums">{num(r.ce.oi)}</td>
-                <td className="px-2 py-1 text-right"><SignedNum n={r.ce.cumOiChange} /></td>
+                <td className="px-2 py-1 text-right tabular-nums">{num(r.ce.cumOiChange)}</td>
                 <td className="px-2 py-1 text-center"><BreakBadge side={r.ce} /></td>
                 <td className="px-2 py-1 text-right tabular-nums">{dec(r.ce.ltp, 2)}</td>
                 <td className="px-2 py-1 text-right"><ValueDeltaCell value={r.ce.ltpChange} /></td>
                 <td className="px-2 py-1 text-right"><SignedNum n={r.ce.oiChange} /></td>
-                <td className="px-2 py-1 text-center"><OiBadge4 value={r.ce.interpretation} /></td>
+                <td className="px-2 py-1 text-center"><OiBadge4 value={r.ce.interpretation} full /></td>
                 <td className="px-2 py-1 text-center font-semibold tabular-nums">{strike ?? '—'}</td>
-                <td className="px-2 py-1 text-center"><OiBadge4 value={r.pe.interpretation} /></td>
+                <td className="px-2 py-1 text-center"><OiBadge4 value={r.pe.interpretation} full /></td>
                 <td className="px-2 py-1 text-right"><SignedNum n={r.pe.oiChange} /></td>
                 <td className="px-2 py-1 text-right"><ValueDeltaCell value={r.pe.ltpChange} /></td>
                 <td className="px-2 py-1 text-right tabular-nums">{dec(r.pe.ltp, 2)}</td>
                 <td className="px-2 py-1 text-center"><BreakBadge side={r.pe} /></td>
-                <td className="px-2 py-1 text-right"><SignedNum n={r.pe.cumOiChange} /></td>
+                <td className="px-2 py-1 text-right tabular-nums">{num(r.pe.cumOiChange)}</td>
                 <td className="px-2 py-1 text-right tabular-nums">{num(r.pe.oi)}</td>
               </tr>
             ))}
@@ -119,7 +129,7 @@ export function OiAnalysisTable({
         {display.map((r) => (
           <div key={r.bucket} className="rounded border border-ay-border bg-surface-1 p-2 text-xs">
             <div className="mb-1 flex items-center justify-between font-semibold text-ay-text">
-              <span>{bucketTime(r.bucket)}</span>
+              <span>{bucketWindow(r.bucket, intervalMinutes)}</span>
               <span className="text-ay-muted">Strike {strike ?? '—'}</span>
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -128,14 +138,14 @@ export function OiAnalysisTable({
                 <div>OI: {num(r.ce.oi)}</div>
                 <div>Chng. OI: <SignedNum n={r.ce.oiChange} /></div>
                 <div>LTP: {dec(r.ce.ltp, 2)} (<ValueDeltaCell value={r.ce.ltpChange} />)</div>
-                <div>OI Int: <OiBadge4 value={r.ce.interpretation} /></div>
+                <div>OI Int: <OiBadge4 value={r.ce.interpretation} full /></div>
               </div>
               <div>
                 <div className="text-bull">PUT</div>
                 <div>OI: {num(r.pe.oi)}</div>
                 <div>Chng. OI: <SignedNum n={r.pe.oiChange} /></div>
                 <div>LTP: {dec(r.pe.ltp, 2)} (<ValueDeltaCell value={r.pe.ltpChange} />)</div>
-                <div>OI Int: <OiBadge4 value={r.pe.interpretation} /></div>
+                <div>OI Int: <OiBadge4 value={r.pe.interpretation} full /></div>
               </div>
             </div>
           </div>

@@ -38,6 +38,7 @@ const SECTIONS: MenuSection[] = [
       { label: 'Market Movers', to: '/futures/market-movers' }, // Wave 2
       { label: 'EOD OI Analyzer', to: '/futures/eod-oi-analyzer' }, // Wave 2
       { label: 'OI Analysis', to: '/futures/oi-analysis' }, // Wave 3 — per-interval series table
+      { label: 'OI Chart', to: '/futures/oi-chart' }, // Wave 3 — candle + OI dual-axis combo
       { label: 'OI Buzz' }, // deferred (constituent treemap)
       { label: 'Banks' }, // W3
     ],

@@ -7,6 +7,7 @@ import type {
   ConnectingDots,
   FiiDiiRow,
   FutEodRow,
+  FutOiChart,
   FutSeriesPoint,
   FutSpurtChain,
   LongShortRow,
@@ -260,6 +261,29 @@ export function useFuturesOiSeries() {
         oiParams(ctx, false),
         { items: [] },
       ),
+    enabled: satisfiable(ctx, false),
+  });
+}
+
+/**
+ * Futures OI Chart (§futures/oi-chart): one contract's candle (price) + OI series for the dual-axis
+ * combo. {@code intervalMinutes} is RAW MINUTES owned by the page (the oipulse set 1/3/5/10/15/30/60 is
+ * wider than the shared OiInterval — the candles aggregate from 1m base). Keyed on the index name; the
+ * BE picks the active front contract (no expiry sent). Null → empty state on a 422.
+ */
+export function useFuturesOiChart(intervalMinutes: number) {
+  const ctx = useOiCtx();
+  return useQuery({
+    queryKey: ['fut', 'oi-chart', ctx.name, intervalMinutes, ctx.mode, ctx.date],
+    queryFn: () => {
+      const p = new URLSearchParams({
+        mode: ctx.mode,
+        name: ctx.name,
+        interval: String(intervalMinutes),
+      });
+      if (ctx.date) p.set('date', ctx.date);
+      return oiGet<FutOiChart | null>('/market/futures/oi-chart', p.toString(), null);
+    },
     enabled: satisfiable(ctx, false),
   });
 }

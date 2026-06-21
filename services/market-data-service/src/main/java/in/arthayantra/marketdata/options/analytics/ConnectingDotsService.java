@@ -5,6 +5,8 @@ import in.arthayantra.marketdata.candles.Candle;
 import in.arthayantra.marketdata.candles.CandleQueryService;
 import in.arthayantra.marketdata.instruments.Instrument;
 import in.arthayantra.marketdata.instruments.InstrumentRepository;
+import in.arthayantra.marketdata.kite.GlobalQuoteSource;
+import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.options.OiInterval;
 import in.arthayantra.marketdata.options.OptionsChainService;
 import java.math.BigDecimal;
@@ -21,6 +23,7 @@ import java.util.Map;
 import java.util.TreeMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 /**
@@ -32,8 +35,10 @@ import org.springframework.stereotype.Service;
  * FUTURES candle series (cache-first {@link CandleQueryService}) drives Price / VWAP / Supertrend /
  * RSI / Volume / OI-Interpretation (the candle's {@code oi}); the INDEX daily candle drives Daily
  * Trend; INDIA VIX candles drive Vix; the option snapshots ({@link OptionsSnapshotReader} +
- * {@link ActiveStrikeService}) drive Active-Strike OI and Active-Strike IV. Dow Jones is wired but
- * Neutral until an Upstox global feed lands (the study confirms {@code inDow=0} during Indian hours).
+ * {@link ActiveStrikeService}) drive Active-Strike OI and Active-Strike IV. Dow Jones rides the
+ * dedicated OpenAlgo global-quote feed ({@link GlobalQuoteSource}) — live LTP-direction, Neutral in
+ * history mode or when the feed is unconfigured (the study confirms {@code inDow≈0} during Indian
+ * hours anyway).
  *
  * <p>The exact oipulse per-factor raw→enum cutoffs and the composite WEIGHTS are server-side (unknown);
  * ours are a documented approximation (the composite uses the empirically-fitted net→trend mapping from
@@ -48,6 +53,9 @@ public class ConnectingDotsService {
   private static final int RSI_PERIOD = 14;
   private static final int ST_PERIOD = 10;
   private static final double ST_MULT = 3.0;
+
+  /** OpenAlgo {@code DOWJONES@GLOBAL_INDEX} — the Dow factor's global-index key (plan §3). */
+  private static final InstrumentKey DOW = new InstrumentKey("GLOBAL_INDEX", "DOWJONES");
 
   static final int NEUTRAL = 0;
   static final int BULLISH = 1;
@@ -77,6 +85,7 @@ public class ConnectingDotsService {
   private final OptionsChainService chainService;
   private final OptionsSnapshotReader snapshotReader;
   private final ActiveStrikeService activeStrikeService;
+  private final ObjectProvider<GlobalQuoteSource> dowSource;
   private final Clock clock;
 
   public ConnectingDotsService(
@@ -85,12 +94,14 @@ public class ConnectingDotsService {
       OptionsChainService chainService,
       OptionsSnapshotReader snapshotReader,
       ActiveStrikeService activeStrikeService,
+      ObjectProvider<GlobalQuoteSource> dowSource,
       Clock clock) {
     this.instruments = instruments;
     this.candleQuery = candleQuery;
     this.chainService = chainService;
     this.snapshotReader = snapshotReader;
     this.activeStrikeService = activeStrikeService;
+    this.dowSource = dowSource;
     this.clock = clock;
   }
 
@@ -129,6 +140,7 @@ public class ConnectingDotsService {
 
     // ── the other-source factors, keyed by the SAME midnight-IST bucket as the futures spine ──
     int dailyTrend = dailyTrend(underlying, fut, sess);
+    int dow = dowFactor(sess); // one global cue per session: live LTP-direction, Neutral in history
     Map<OffsetDateTime, Double> vixClose = vixByBucket(interval, from, to);
     Map<OffsetDateTime, Integer> activeOi = activeStrikeOiByBucket(underlying, interval, from, to);
     Map<OffsetDateTime, Double> atmIv = atmIvByBucket(underlying, interval, from, to);
@@ -160,7 +172,6 @@ public class ConnectingDotsService {
         prevAtmIv = iv;
       }
       int activeOiF = activeOi.getOrDefault(b.bucket, NEUTRAL);
-      int dow = NEUTRAL; // Upstox global Dow feed pending (faithful: Neutral during Indian hours)
 
       int[] factors = {dow, vixF, volF, ivF, activeOiF, futOiF, vwapF, stF, rsiF, futPrice, dailyTrend};
       int trend = composite(factors);
@@ -262,6 +273,32 @@ public class ConnectingDotsService {
   }
 
   // ── other-source factor series (bucket-keyed to the futures spine) ──────────────────────────
+
+  /**
+   * Dow Jones factor (plan §3): a single global cue applied to every row of the session. Live mode
+   * (the session IS today IST) → the OpenAlgo {@code DOWJONES@GLOBAL_INDEX} LTP vs its prev close
+   * (globals are LTP-only, so direction is from the OHLC close slot). History mode (a past date) →
+   * Neutral, since there is no global historical series. Best-effort: the global feed bean is absent
+   * unless {@code artha.openalgo.global-quotes-enabled=true}, and any fetch failure → Neutral.
+   */
+  private int dowFactor(LocalDate sess) {
+    LocalDate today = OffsetDateTime.now(clock).withOffsetSameInstant(Ist.OFFSET).toLocalDate();
+    if (!sess.equals(today)) {
+      return NEUTRAL;
+    }
+    GlobalQuoteSource source = dowSource.getIfAvailable();
+    if (source == null) {
+      return NEUTRAL;
+    }
+    return source
+        .latest(DOW)
+        .map(
+            q ->
+                q.lastPrice() == null || q.ohlc() == null || q.ohlc().close() == null
+                    ? NEUTRAL
+                    : dirOf(q.lastPrice().subtract(q.ohlc().close()).doubleValue()))
+        .orElse(NEUTRAL);
+  }
 
   private int dailyTrend(String underlying, Instrument fut, LocalDate sess) {
     String exch = indexExchange(fut);

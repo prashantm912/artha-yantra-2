@@ -51,7 +51,7 @@ public class OptionsSnapshotRepository {
     this.jdbc = jdbc;
   }
 
-  /** Batch-inserts one snapshot pass (idempotent on the natural PK). */
+  /** Batch-inserts one LIVE snapshot pass (source defaults to {@code LIVE}); idempotent on the PK. */
   public void insertAll(List<SnapshotRow> rows) {
     jdbc.batchUpdate(
         """
@@ -64,31 +64,54 @@ public class OptionsSnapshotRepository {
         """,
         rows,
         500,
-        (ps, row) -> {
-          ps.setTimestamp(1, Timestamp.from(row.ts().toInstant()));
-          ps.setString(2, row.underlying());
-          ps.setDate(3, java.sql.Date.valueOf(row.expiry()));
-          ps.setBigDecimal(4, row.strike());
-          ps.setString(5, row.optionType());
-          ps.setString(6, row.tradingsymbol());
-          ps.setBigDecimal(7, row.ltp());
-          ps.setBigDecimal(8, row.bid());
-          ps.setBigDecimal(9, row.ask());
-          ps.setObject(10, row.volume());
-          ps.setObject(11, row.oi());
-          ps.setObject(12, row.oiChange());
-          ps.setBigDecimal(13, row.spotPrice());
-          ps.setBigDecimal(14, scale6(row.iv()));
-          ps.setBigDecimal(15, scale6(row.delta()));
-          ps.setBigDecimal(16, scale6(row.gamma()));
-          ps.setBigDecimal(17, scale6(row.theta()));
-          ps.setBigDecimal(18, scale6(row.vega()));
-          ps.setBigDecimal(19, scale6(row.rho()));
-          ps.setString(20, row.ivReason());
-          ps.setString(21, row.priceSource());
-          ps.setBigDecimal(22, row.forwardPrice());
-          ps.setBigDecimal(23, scale6(row.riskFreeRate()));
-        });
+        (ps, row) -> bind(ps, row));
+  }
+
+  /**
+   * Batch-inserts BACKFILL-provenance rows (the OI-backfill importer, data-foundation milestone) —
+   * identical columns/binding, but {@code source='BACKFILL'} so backfilled OI is never confused with
+   * live capture (or purged). Idempotent on the PK, so a re-run is a no-op.
+   */
+  public void insertBackfill(List<SnapshotRow> rows) {
+    jdbc.batchUpdate(
+        """
+        INSERT INTO options_chain_snapshots
+          (ts, underlying, expiry, strike, option_type, tradingsymbol, ltp, bid, ask, volume, oi,
+           oi_change, spot_price, iv, delta, gamma, theta, vega, rho, iv_reason, price_source,
+           forward_price, risk_free_rate, source)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'BACKFILL')
+        ON CONFLICT (ts, underlying, expiry, strike, option_type) DO NOTHING
+        """,
+        rows,
+        500,
+        (ps, row) -> bind(ps, row));
+  }
+
+  /** Binds the 23 raw/solver columns of one snapshot row (shared by live + backfill inserts). */
+  private static void bind(java.sql.PreparedStatement ps, SnapshotRow row) throws java.sql.SQLException {
+    ps.setTimestamp(1, Timestamp.from(row.ts().toInstant()));
+    ps.setString(2, row.underlying());
+    ps.setDate(3, java.sql.Date.valueOf(row.expiry()));
+    ps.setBigDecimal(4, row.strike());
+    ps.setString(5, row.optionType());
+    ps.setString(6, row.tradingsymbol());
+    ps.setBigDecimal(7, row.ltp());
+    ps.setBigDecimal(8, row.bid());
+    ps.setBigDecimal(9, row.ask());
+    ps.setObject(10, row.volume());
+    ps.setObject(11, row.oi());
+    ps.setObject(12, row.oiChange());
+    ps.setBigDecimal(13, row.spotPrice());
+    ps.setBigDecimal(14, scale6(row.iv()));
+    ps.setBigDecimal(15, scale6(row.delta()));
+    ps.setBigDecimal(16, scale6(row.gamma()));
+    ps.setBigDecimal(17, scale6(row.theta()));
+    ps.setBigDecimal(18, scale6(row.vega()));
+    ps.setBigDecimal(19, scale6(row.rho()));
+    ps.setString(20, row.ivReason());
+    ps.setString(21, row.priceSource());
+    ps.setBigDecimal(22, row.forwardPrice());
+    ps.setBigDecimal(23, scale6(row.riskFreeRate()));
   }
 
   /** The stored snapshot timestamp nearest to {@code at} (either side). */

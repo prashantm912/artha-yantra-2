@@ -32,7 +32,7 @@ public class FuturesOiSnapshotRepository {
     this.jdbc = jdbc;
   }
 
-  /** Batch-inserts a snapshot pass; a duplicate (ts, underlying, tradingsymbol) is ignored. */
+  /** Batch-inserts a LIVE snapshot pass; a duplicate (ts, underlying, tradingsymbol) is ignored. */
   public void insertAll(List<Row> rows) {
     jdbc.batchUpdate(
         """
@@ -44,19 +44,43 @@ public class FuturesOiSnapshotRepository {
         """,
         rows,
         rows.size(),
-        (ps, r) -> {
-          ps.setObject(1, r.ts());
-          ps.setString(2, r.underlying());
-          ps.setString(3, r.tradingsymbol());
-          ps.setObject(4, r.expiry());
-          ps.setBigDecimal(5, r.ltp());
-          ps.setObject(6, r.volume());
-          ps.setObject(7, r.oi());
-          ps.setObject(8, r.oiChange());
-          ps.setBigDecimal(9, r.dayOpen());
-          ps.setBigDecimal(10, r.dayHigh());
-          ps.setBigDecimal(11, r.dayLow());
-          ps.setBigDecimal(12, r.prevClose());
-        });
+        (ps, r) -> bind(ps, r));
+  }
+
+  /**
+   * Batch-inserts BACKFILL-provenance rows (the OI-backfill importer, data-foundation milestone) —
+   * identical columns/binding, but {@code source='BACKFILL'}. Idempotent on the natural key.
+   */
+  public void insertBackfill(List<Row> rows) {
+    if (rows.isEmpty()) {
+      return;
+    }
+    jdbc.batchUpdate(
+        """
+        INSERT INTO futures_oi_snapshots
+          (ts, underlying, tradingsymbol, expiry, ltp, volume, oi, oi_change,
+           day_open, day_high, day_low, prev_close, source)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BACKFILL')
+        ON CONFLICT (ts, underlying, tradingsymbol) DO NOTHING
+        """,
+        rows,
+        rows.size(),
+        (ps, r) -> bind(ps, r));
+  }
+
+  /** Binds the 12 contract columns of one futures snapshot row (shared by live + backfill). */
+  private static void bind(java.sql.PreparedStatement ps, Row r) throws java.sql.SQLException {
+    ps.setObject(1, r.ts());
+    ps.setString(2, r.underlying());
+    ps.setString(3, r.tradingsymbol());
+    ps.setObject(4, r.expiry());
+    ps.setBigDecimal(5, r.ltp());
+    ps.setObject(6, r.volume());
+    ps.setObject(7, r.oi());
+    ps.setObject(8, r.oiChange());
+    ps.setBigDecimal(9, r.dayOpen());
+    ps.setBigDecimal(10, r.dayHigh());
+    ps.setBigDecimal(11, r.dayLow());
+    ps.setBigDecimal(12, r.prevClose());
   }
 }

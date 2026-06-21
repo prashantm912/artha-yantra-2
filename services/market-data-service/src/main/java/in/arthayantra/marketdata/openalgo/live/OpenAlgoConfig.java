@@ -4,7 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.alerts.NtfyClient;
 import in.arthayantra.marketdata.kite.HistoricalCandleGateway;
+import in.arthayantra.marketdata.kite.GlobalQuoteSource;
 import in.arthayantra.marketdata.kite.KiteCallExecutor;
+import in.arthayantra.marketdata.kite.OiHistorySource;
 import in.arthayantra.marketdata.kite.OptionChainGateway;
 import in.arthayantra.marketdata.kite.QuoteGateway;
 import in.arthayantra.marketdata.openalgo.canary.OpenAlgoContractCanary;
@@ -73,6 +75,51 @@ public class OpenAlgoConfig {
       ObjectMapper objectMapper) {
     return new OpenAlgoOptionChainGateway(
         restClientBuilder, properties.baseUrl(), properties.resolveApiKey(), executor, objectMapper);
+  }
+
+  /**
+   * Dedicated OpenAlgo {@code /history} client for the OI-backfill importer (data-foundation
+   * milestone, plan §2). Wired only when {@code artha.openalgo.oi-backfill-enabled=true} — separate
+   * from {@code source.candles} so the backfill always hits OpenAlgo (Upstox-backed per-bar OI) while
+   * the live candle path stays on Kite. Its own port type ({@link OiHistorySource}) keeps it out of
+   * the {@code HistoricalCandleGateway} bean pool.
+   */
+  @Bean
+  @ConditionalOnProperty(name = "artha.openalgo.oi-backfill-enabled", havingValue = "true")
+  public OiHistorySource openAlgoOiHistorySource(
+      RestClient.Builder restClientBuilder,
+      OpenAlgoProperties properties,
+      KiteCallExecutor executor,
+      ObjectMapper objectMapper) {
+    return new OpenAlgoHistoryClient(
+        new OpenAlgoHistoricalCandleGateway(
+            restClientBuilder,
+            properties.baseUrl(),
+            properties.resolveApiKey(),
+            executor,
+            objectMapper));
+  }
+
+  /**
+   * Dedicated OpenAlgo {@code /quotes} client for GLOBAL indices (the Connecting-Dots Dow factor,
+   * plan §3). Wired only when {@code artha.openalgo.global-quotes-enabled=true} — separate from
+   * {@code source.quotes} (which stays Kite, with no global indices). Its own port type
+   * ({@link GlobalQuoteSource}) keeps it out of the {@code QuoteGateway} bean pool.
+   */
+  @Bean
+  @ConditionalOnProperty(name = "artha.openalgo.global-quotes-enabled", havingValue = "true")
+  public GlobalQuoteSource openAlgoGlobalQuoteSource(
+      RestClient.Builder restClientBuilder,
+      OpenAlgoProperties properties,
+      KiteCallExecutor executor,
+      ObjectMapper objectMapper) {
+    return new OpenAlgoGlobalQuoteClient(
+        new OpenAlgoQuoteGateway(
+            restClientBuilder,
+            properties.baseUrl(),
+            properties.resolveApiKey(),
+            executor,
+            objectMapper));
   }
 
   /**

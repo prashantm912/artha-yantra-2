@@ -3616,9 +3616,15 @@ Owner chose a SEQUENCE of smaller PRs (65 routes is unreviewable in one).
   Options Chain (+greeks), Connecting Dots (signal matrix + SentimentBadge3), Straddle/Strangle premium
   (combo candle+line). **2 backend tasks:** greeks-in-chain (black76 server-side) + Connecting-Dots read
   endpoint (expose the per-factor matrix). Both drift springdoc → recapture + `contracts/gen` regen.
-- **Data-foundation milestone (owner-decided 2026-06-21, between PR-W1 and PR-W2)** — the Upstox/
-  OpenAlgo "data foundation": Upstox Plus auth + global instruments (Dow), ExpiryTrack historical-OI
-  backfill, intraday option/futures OHLC capture. Rationale: Wave-1 data pages are built + structure-QA'd
+- **Data-foundation milestone (owner-decided 2026-06-21, between PR-W1 and PR-W2)** — DESIGN LOCKED, full
+  spec in `docs/superpowers/plans/2026-06-21-data-foundation-milestone.md` + `docs/adr/0001-...`. Resolved
+  to **(A) verify-now on the EXISTING OpenAlgo scaffold** (no new SDK/appliance): flip
+  `source.optionchain=openalgo` (canary-gated) + a snapshot-backfill importer (OpenAlgo `/history` 1m
+  OHLC+OI → `options_chain_snapshots`/`futures_oi_snapshots`, source=`BACKFILL`, idempotent admin
+  endpoint) + Dow live-LTP factor → value-verify every Wave-1 data page on a recent session. **(B) deep/
+  expired archive** (direct Upstox-Java SDK + ExpiryTrack appliance) DEFERRED to the backtesting milestone
+  (ADR-0001). Token-gated: build token-independent now, live-validate after the Upstox token (~2 days).
+  Original rationale: Wave-1 data pages are built + structure-QA'd
   but NOT value-verified (mock-synthetic / no live session / Dow absent — see
   `docs/manual-tests/phase-4-wave1-deferred-ledger.md` Bucket 5). Doing the data lever BEFORE the deeper
   W2/W3 OI pages lets them build + value-verify against real historical sessions from day one, and

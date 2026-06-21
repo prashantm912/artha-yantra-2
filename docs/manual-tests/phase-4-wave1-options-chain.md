@@ -39,23 +39,37 @@ against `docs/oipulse-study/options/options-chain.md`:
 - [ ] **Header strip:** Total PCR · ATM · Days-to-Expiry · underlying LTP. (Max-pain/Sentiment must NOT
       appear here — they belong to OI Statistics / Active Strikes.)
 
-## Documented divergences / deferrals (record any new ones here)
+## Live QA results — 2026-06-21 (Claude-in-Chrome vs live oipulse SENSEX chain)
 
-These are deliberate substitutions or data gaps, not bugs — surface to the owner during live QA:
+**Confirmed MATCHING the live page:** the 18-column count + exact order (CALL `OI Int·OI%·OI·OI Chng·
+IV·LTP·LTP%·LTP Chg` | Strike | PUT mirror | PCR Ratio); side-coloured OI bars (red CALL / green PUT);
+green/red ΔOI; the OI-Int 4-state **colour semantics** (L.B.→green, S.B.→red, S.C.→blue, L.U.→amber);
+ATM cream-tint row; per-strike PCR; signed-toned OI%/LTP%/LTP Chg; Go + Column Setting controls.
 
-- **INDIA VIX header** = `—` (gap): India VIX is captured as a pinned index but has no read endpoint
-  yet (Wave-3 §20.2). Header slot rendered, value pending.
-- **Underlying DH/DL/DO** = pending: `chain-table` carries only `spot` (LTP), not the underlying's
-  day OHLC. Header shows LTP only.
-- **Total PCR prev/chg** = current only: `chain-table` has the current PCR; prev + change need a PCR
-  history join (deferred).
-- **Interval set** = `1m/3m/5m/15m/30m/60m` only (the backend `OiInterval` enum). oipulse's
-  Full-Day / 2h / 4h / 10m / custom-time are NOT offered — they need an `OiInterval` extension (deferred).
-- **Grouped Name select** (Index / Stocks optgroups): the shared `FilterBar` uses a flat list; grouping
-  deferred (cosmetic).
-- **Column Setting optional set** = Delta / Volume / Bid / Ask (real chain-table data). oipulse's
-  O=H / O=L / Premium / Intrinsic / IV-Chng are deferred (O=H/O=L need a strike-session-stats join).
-- **Strike click → chart sub-view**: oipulse opens a per-strike chart; deferred (no chart widget yet —
-  Wave-4 openalgo-chart). The ATM row is tinted but not yet clickable.
-- **Greeks** are computed in `black76-math` server-side (§17.9), NOT oipulse's server values — a
-  permanent, intended divergence (parity).
+**Fixed after QA (this commit):**
+- **IV shown as percent** (×100) — oipulse renders IV `13.96`, our fraction `0.14` was wrong. Now ×100.
+- **Optional columns** → Delta / Volume / **Intrinsic** (the renderable subset of oipulse's Column-Setting
+  set). Dropped Bid/Ask — oipulse has no such columns.
+
+## Remaining divergences / gaps (surface to owner; some need a decision or a backend endpoint)
+
+- **OI-Int badge style** (owner decision — a11y vs fidelity): oipulse uses **abbreviated** labels
+  (`S.B./L.B./S.C./L.U.`) in **filled** coloured badges with an arrow icon. Ours uses the **full** label
+  (`Short Buildup`) in a ring outline — deliberately a11y-strong (PR-F). Colour semantics already match.
+  Pending your call: abbreviate+fill (faithful, keep full label as aria-label) or keep full labels.
+- **INDIA VIX header** = `—` (gap): oipulse shows `INDIA VIX 12.97, Chg +0.30 (2.35%)`. We capture India
+  VIX as a pinned index but have **no read endpoint** — needs one (Wave-3 §20.2) to fill the slot.
+- **Header detail**: oipulse header = INDIA VIX · Total PCR (+chg) · Underlying (name + LTP + chg% +
+  timestamp). It does **NOT** show ATM / Days-to-Expiry chips (ours adds them as extras). Add PCR-change +
+  underlying-change% + timestamp; ATM/DTE are an over-spec vs the live page.
+- **Interval set** = `1m/3m/5m/15m/30m/60m` only (backend `OiInterval`). oipulse default is **Full Day** +
+  2h/4h/10m/custom-time — need an `OiInterval` extension (deferred).
+- **Grouped Name select** (Index / Stocks): flat list for now (cosmetic).
+- **Strike column tan bg** + stronger ATM row; **max-ΔOI cell** = filled green/red bg (ours = accent ring).
+- **No `+` prefix** on positives in oipulse (colour only). Ours adds `+` — an intentional a11y improvement
+  (sign not colour-only); kept.
+- **Remaining optional cols** (IV Chng / O=H / O=L / Premium / Combine-Premium / Straddle / Chart) deferred:
+  need an IV-delta field, a strike-session-stats join, or a chart widget.
+- **Strike click → chart sub-view** deferred (Wave-4 openalgo-chart). ATM row tinted, not yet clickable.
+- **Greeks** computed in `black76-math` server-side (§17.9), NOT oipulse's server values — permanent,
+  intended divergence (parity).

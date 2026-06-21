@@ -1,7 +1,13 @@
 import type { ReactNode } from 'react';
 import { useMemo } from 'react';
 import { cn } from '../lib/cn.ts';
-import { compareDecimal, formatDecimal } from '../lib/decimal.ts';
+import {
+  compareDecimal,
+  formatDecimal,
+  isNegative,
+  multiplyByInt,
+  subtractDecimal,
+} from '../lib/decimal.ts';
 import type { ChainTableLeg, ChainTableRow } from '../api/types.ts';
 import { DataBar } from './atoms/DataBar.tsx';
 import { OiBadge4 } from './atoms/OiBadge4.tsx';
@@ -17,6 +23,8 @@ import { ValueDeltaCell } from './atoms/ValueDeltaCell.tsx';
 
 interface ChainCellCtx {
   side: 'CE' | 'PE';
+  strike: string;
+  spot: string | null;
   maxOi: number;
   maxAbsOiChange: number;
   isMaxOi: boolean;
@@ -38,8 +46,19 @@ const num = (n: number | null | undefined) => (n != null ? n.toLocaleString('en-
 const signed = (n: number | null | undefined) =>
   n == null ? '—' : (n > 0 ? '+' : '') + n.toLocaleString('en-IN');
 const dec = (v: string | null | undefined, d: number) => (v ? formatDecimal(v, d) : '—');
+// IV rides the wire as a fraction (0.1396); oipulse displays it as a percent (13.96) — ×100, exact.
+const ivPct = (v: string | null | undefined) => (v ? formatDecimal(multiplyByInt(v, 100), 2) : '—');
 // oipulse convention: CALL OI bars are red, PUT OI bars green (NOT bull/bear semantics).
 const oiTone = (side: 'CE' | 'PE') => (side === 'CE' ? 'bear' : 'bull');
+// Intrinsic value: CE = max(0, spot − strike), PE = max(0, strike − spot); exact decimal, no parseFloat.
+const intrinsic = (ctx: ChainCellCtx): string => {
+  if (!ctx.spot) return '—';
+  const diff =
+    ctx.side === 'CE'
+      ? subtractDecimal(ctx.spot, ctx.strike)
+      : subtractDecimal(ctx.strike, ctx.spot);
+  return isNegative(diff) ? formatDecimal('0', 2) : formatDecimal(diff, 2);
+};
 
 const VISIBLE_COLUMNS: ChainColumn[] = [
   { key: 'oiInt', header: 'OI Int', render: (c) => <OiBadge4 value={c?.deltas?.interpretation ?? null} /> },
@@ -68,7 +87,7 @@ const VISIBLE_COLUMNS: ChainColumn[] = [
     },
     tdClass: (ctx) => (ctx.isMaxOiChange ? MAX_CELL : ''),
   },
-  { key: 'iv', header: 'IV', render: (c) => <span className="tabular-nums">{dec(c?.leg.iv, 2)}</span> },
+  { key: 'iv', header: 'IV', render: (c) => <span className="tabular-nums">{ivPct(c?.leg.iv)}</span> },
   {
     key: 'ltp',
     header: 'LTP',
@@ -94,8 +113,11 @@ const OPTIONAL_COLUMNS: ChainColumn[] = [
     render: (c) => <span className="tabular-nums">{num(c?.leg.volume)}</span>,
     tdClass: (ctx) => (ctx.isMaxVol ? MAX_CELL : ''),
   },
-  { key: 'bid', header: 'Bid', render: (c) => <span className="tabular-nums">{dec(c?.leg.bid, 2)}</span> },
-  { key: 'ask', header: 'Ask', render: (c) => <span className="tabular-nums">{dec(c?.leg.ask, 2)}</span> },
+  {
+    key: 'intrinsic',
+    header: 'Intrinsic',
+    render: (_c, ctx) => <span className="tabular-nums">{intrinsic(ctx)}</span>,
+  },
 ];
 
 interface OptionsChainTableProps {
@@ -185,6 +207,8 @@ export function OptionsChainTable({
       (side === 'CE' ? compareDecimal(row.strike, spot) < 0 : compareDecimal(row.strike, spot) > 0);
     return {
       side,
+      strike: row.strike,
+      spot,
       maxOi: stats.maxOi,
       maxAbsOiChange: stats.maxAbsOiChange,
       isMaxOi: s.oiStrike === row.strike,

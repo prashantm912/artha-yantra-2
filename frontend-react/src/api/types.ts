@@ -348,6 +348,31 @@ export interface FutSeriesPoint {
   expiry: string | null;
 }
 
+/**
+ * One interval's candle of GET /api/v1/market/futures/oi-chart `{items}` — real per-bucket OHLC (from
+ * the contract's 1m bars) + the contract's OI at that bucket (null when no OI sample). OHLC are decimal
+ * STRINGS (never parseFloat — only the chart coordinate fold crosses to Number); oi/oiChange are longs.
+ */
+export interface FutOiCandle {
+  time: string;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  volume: number;
+  oi: number | null;
+}
+
+/** GET /api/v1/market/futures/oi-chart — one contract's candle+OI series; 422 when no FUT contract. */
+export interface FutOiChart {
+  underlying: string;
+  tradingsymbol: string;
+  expiry: string;
+  interval: string;
+  asOf: string;
+  items: FutOiCandle[];
+}
+
 /** One row of GET /api/v1/market/fii-dii/cash `{items}` — FII or DII cash buy/sell/net (₹ cr strings). */
 export interface FiiDiiRow {
   tradeDate: string;

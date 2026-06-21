@@ -27,6 +27,7 @@ public class FuturesAnalyticsController {
   private final FuturesMoversService moversService;
   private final FuturesBuzzService buzzService;
   private final FuturesBankGridService bankGridService;
+  private final FuturesOiChartService oiChartService;
   private final int buzzBuckets;
   private final List<String> bankStocks;
 
@@ -36,6 +37,7 @@ public class FuturesAnalyticsController {
       FuturesMoversService moversService,
       FuturesBuzzService buzzService,
       FuturesBankGridService bankGridService,
+      FuturesOiChartService oiChartService,
       @Value("${artha.futures.buzz-buckets:12}") int buzzBuckets,
       @Value(
               "${artha.futures.bank-stocks:HDFCBANK,ICICIBANK,SBIN,AXISBANK,KOTAKBANK,INDUSINDBK,"
@@ -47,6 +49,7 @@ public class FuturesAnalyticsController {
     this.moversService = moversService;
     this.buzzService = buzzService;
     this.bankGridService = bankGridService;
+    this.oiChartService = oiChartService;
     this.buzzBuckets = buzzBuckets;
     this.bankStocks = bankStocks;
   }
@@ -124,6 +127,32 @@ public class FuturesAnalyticsController {
     return front == null
         ? List.of()
         : series.stream().filter(p -> front.equals(p.tradingsymbol())).toList();
+  }
+
+  /**
+   * /oi-chart: the oipulse Futures OI Chart (§futures/oi-chart) — one contract's candlestick PRICE
+   * (real per-interval 1m-aggregated OHLC) + the OI LINE, for the dual-axis combo. {@code interval} is
+   * RAW MINUTES (1/3/5/10/15/30/60 — wider than the OI pages' {@code OiInterval}, since the candles
+   * aggregate from 1m base). Live mode → today IST; history → {@code date}. 422 when the underlying has
+   * no listed FUT contract. Map envelope (no typed schema), matching the sibling chart/series endpoints.
+   */
+  @GetMapping("/oi-chart")
+  public Map<String, Object> oiChart(
+      @RequestParam(required = false) String mode,
+      @RequestParam String name,
+      @RequestParam(required = false) String date,
+      @RequestParam(required = false) String expiry,
+      @RequestParam(required = false, defaultValue = "3") int interval) {
+    OiQuery q = OiQuery.of(mode, name, date, null, expiry);
+    FuturesOiChartService.FutOiChart chart =
+        oiChartService.chart(q.name(), q.expiry(), interval, q.date());
+    return Map.of(
+        "items", chart.items(),
+        "underlying", chart.underlying(),
+        "tradingsymbol", chart.tradingsymbol(),
+        "expiry", chart.expiry(),
+        "interval", chart.interval(),
+        "asOf", chart.asOf());
   }
 
   /** /spurt: futures interval buildup (per contract, 4-state + spurt %). */

@@ -1,7 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
 import { ApiError, apiFetch, listItems } from './client.ts';
 import { useSymbolContext } from '../stores/symbolContext.store.ts';
-import type { ActiveStrikes, ChainTable, OiStats, OiStrikePoint, SpurtChain } from './types.ts';
+import type {
+  ActiveStrikes,
+  ChainTable,
+  OiStats,
+  OiStrikePoint,
+  SpurtChain,
+  StrikeSeries,
+} from './types.ts';
 
 // OI-analytics query hooks (master plan §20 / §11.2). The Angular store hand-rolled 13 generation
 // counters for stale-drop — TanStack Query keys subsume that (a late response for an old key can't
@@ -93,6 +100,21 @@ export function useOptionsSpurt() {
     queryKey: ['oi', 'spurt', ctx.name, ctx.expiry, ctx.interval, ctx.mode, ctx.date],
     queryFn: () => oiGet<SpurtChain | null>('/market/options/spurt', oiParams(ctx, true), null),
     enabled: satisfiable(ctx, true),
+  });
+}
+
+/** The true Options OI Analysis feed (§20.7.5): one strike's CE+PE points across the session buckets. */
+export function useStrikeSeries(strike: string | null) {
+  const ctx = useOiCtx();
+  return useQuery({
+    queryKey: ['oi', 'strike-series', ctx.name, ctx.expiry, ctx.interval, ctx.mode, ctx.date, strike],
+    queryFn: () =>
+      oiGet<StrikeSeries | null>(
+        '/market/options/oi-analysis/strike-series',
+        `${oiParams(ctx, true)}&strike=${encodeURIComponent(strike ?? '')}`,
+        null,
+      ),
+    enabled: satisfiable(ctx, true) && !!strike,
   });
 }
 

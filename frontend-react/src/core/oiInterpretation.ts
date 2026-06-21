@@ -37,3 +37,13 @@ const META: Record<OiInterpretation, OiIntMeta> = {
 export function oiIntMeta(value: OiInterpretation): OiIntMeta {
   return META[value];
 }
+
+/**
+ * Price-direction × OI-direction → the 4-state interpretation. Mirrors the backend
+ * `OiInterpretation.classify` boundary convention exactly (a flat / zero delta counts as the UP side),
+ * so an FE-derived interpretation (e.g. the per-bucket OI-Analysis rows) matches a backend-served one.
+ */
+export function classifyOi(priceUp: boolean, oiUp: boolean): OiInterpretation {
+  if (priceUp) return oiUp ? 'LONG_BUILDUP' : 'SHORT_COVERING';
+  return oiUp ? 'SHORT_BUILDUP' : 'LONG_UNWINDING';
+}

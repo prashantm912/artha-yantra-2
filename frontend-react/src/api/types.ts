@@ -39,6 +39,16 @@ export interface OiStrikePoint {
   spot: string | null;
 }
 
+/** GET /api/v1/market/options/oi-analysis/strike-series — one strike's CE+PE points per session bucket. */
+export interface StrikeSeries {
+  underlying: string;
+  expiry: string;
+  strike: string;
+  interval: string;
+  asOf: string;
+  items: OiStrikePoint[];
+}
+
 /** One row of GET /api/v1/market/options/spurt `{items}` — per strike·side interval buildup. */
 export interface SpurtRow {
   strike: string;

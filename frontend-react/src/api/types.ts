@@ -440,3 +440,29 @@ export interface LongShortRow {
   fiiShort: number;
   ratio: string | null;
 }
+
+/**
+ * One bank's cell in the Banks Analysis matrix — cumulative-from-day-open LTP% / OI% (decimal STRINGS,
+ * never parseFloat) + the per-interval 4-state OI interpretation. Null cell = the bank had no point at
+ * that interval.
+ */
+export interface BankAnalysisCell {
+  bank: string;
+  ltpPct: string | null;
+  oiPct: string | null;
+  interpretation: OiInterpretation | null;
+}
+
+/** One Banks Analysis matrix row: a snapshot bucket + a cell per bank in the configured column order. */
+export interface BankAnalysisRow {
+  bucket: string;
+  cells: (BankAnalysisCell | null)[];
+}
+
+/** GET /api/v1/market/futures/banks-analysis — the time × bank OI matrix; 422 until ≥1 bucket accrues. */
+export interface BanksAnalysis {
+  banks: string[];
+  interval: string;
+  asOf: string;
+  rows: BankAnalysisRow[];
+}

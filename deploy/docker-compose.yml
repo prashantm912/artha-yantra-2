@@ -240,7 +240,7 @@ services:
   # openalgo`. Phase 0 stands it up; routing capture through it is Phase 1 (§4). Sandbox/
   # analyzer mode is a RUNTIME toggle, not an env flag (§17.8) — see deploy/openalgo/README.md.
   openalgo:
-    image: marketcalls/openalgo@sha256:b1bc2ec4fc40a0e32730bab9c4b9dd3a43daefee30453de46885544eab45fdd7
+    image: marketcalls/openalgo@sha256:892bca7259e2b3253118ec4f0209efe08563bca03bbde3da5a16723c52b4e11d  # 2.0.1.4 (was 2.0.1.3 b1bc2ec) — perf: broker keep-warm + latency caching; UI tools (Scalping/Gamma/OI-Range) unused via API
     container_name: ay-openalgo
     profiles: [openalgo]
     # Config is FILE-BASED: deploy/openalgo/.env is a COMPLETE OpenAlgo config (ay seeds it from the

@@ -120,6 +120,51 @@ When backtesting needs deep / expired-contract OI history: add the **direct Upst
 (consume its DuckDB/Parquet via an ingest job). The owner's 2nd Upstox token scopes the heavy backfill
 away from live rate limits. See ADR-0001.
 
+## Upstox Market-Information adoption (ADR-0002, added 2026-06-22)
+
+Upstox launched **Market Information** + **Company Fundamentals** REST APIs (11 May 2026). They give us,
+directly and authoritatively, several things we currently scrape from NSE or do not have. OpenAlgo does
+**not** normalize them (verified: not in the 2.0.1.4 `restx_api` namespaces) → a second Upstox-specific
+side-channel behind ports, NSE kept as fallback. Full rationale + scope table in
+[ADR-0002](../../adr/0002-upstox-market-information-analytics-side-channel.md).
+
+**Owner decision (2026-06-22): plan now, build still waits for Upstox activation** (same gate as §"Token-
+gated sequencing"). All new flags land dormant default-off, no behaviour change until a live `200` confirms
+access (cost tier is undisclosed in the docs — verify at activation, else NSE stays primary).
+
+Task breakdown (gated — do NOT start before activation):
+
+- **U1.** `upstox/wire/` full-mirror DTOs (hand-rolled `RestClient`, `@JsonIgnoreProperties(ignoreUnknown=true)`,
+  same pattern as `kite/wire/`) for `GET /market/fii`, `/market/dii`, `/market/max-pain`, `/market/pcr`,
+  `/market/change-oi`; a dedicated long-lived **analytics access token** (Upstox Developer Apps dashboard),
+  isolated from the live execution session; own rate-limiter family.
+- **U2.** `FiiDiiSource` port — Upstox primary (`Get FII NSE_EQ|CASH` + `Get DII`), **`LiveFiiDiiFetcher`
+  (NSE) demoted to fallback** behind a `source.fiidii=upstox|nse` flag. Wave-2 *FII/DII Capital Market* page
+  switches feed transparently.
+- **U3.** `MaxPainService` + authoritative `PcrService` (Upstox intraday-bucket series) → new read endpoints
+  → wires the **W3 OI-Statistics PCR series** and a **Max Pain** page (Max Pain was never built).
+- **U4.** FII **derivative** long/short (`Get FII NSE_FO|*`) → feeds the **W3 FII Derivative Stats** page.
+- **U5.** Value-verify each against oipulse at activation (same §20.8 gate as Wave-1/2).
+- **Keep NSE:** participant-wise OI (`Get FII` is FII-only — no Pro/DII/Client split). `LiveParticipantOiFetcher`
+  stays primary.
+- **Fundamentals (separate W3 thread, record only):** `Get Corporate Actions` could replace the NSE
+  corporate-actions scrape (EOD bhavcopy CA-adjust); `Get Share Holdings` (Promoter/FII/DII/Public) + key
+  ratios power a W3 equity-fundamentals page.
+
+**W3 deferral ledger delta:** this retires *FII Derivative Stats* (U4) and *OI-Statistics PCR series* (U3)
+from "needs a brand-new endpoint with no source" → "Upstox-fed, gated on activation", and adds a feasible
+*Max Pain* page. Participant-wise OI remains NSE-sourced.
+
+## OpenAlgo appliance bump 2.0.1.3 → 2.0.1.4 (2026-06-22)
+
+Re-pinned `marketcalls/openalgo` digest `b1bc2ec` (2.0.1.3) → `892bca72` (2.0.1.4, verified via
+`utils/version.py` inside the image). We consume OpenAlgo **API-only**; 2.0.1.4's headline features
+(Scalping Terminal, Gamma Density, OI Range, TradeSmart broker) are its **own UI** and do not reach us — the
+relevant gain is **perf** (broker keep-warm ~150ms→15ms RTT after idle, off-response-path SQLite commits,
+latency caching) on our three consumed endpoints (`/history`, `/quotes`, `/optionchain`, all unchanged). The
+named volume `openalgo-data:/app/db` (SQLite sessions/api-keys + DuckDB) and the mounted `.env`
+(FERNET_SALT/APP_KEY) persist across the recreate, so the in-progress Upstox broker connection survives.
+
 ## Risks
 
 - Appliance uptime dependency for live OI (mitigated: canary + Kite fallback).

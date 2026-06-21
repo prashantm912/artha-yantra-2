@@ -21,7 +21,7 @@ class FuturesBankGridServiceTest {
       LocalDate exp) {
     return new FuturesSnapshotReader.FutPoint(
         b, under, sym, new BigDecimal(ltp), oi, 0L, null, null, null,
-        prevClose == null ? null : new BigDecimal(prevClose), exp);
+        prevClose == null ? null : new BigDecimal(prevClose), null, exp);
   }
 
   @Test

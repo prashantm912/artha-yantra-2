@@ -2,11 +2,14 @@ package in.arthayantra.marketdata.futures.analytics;
 
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
+import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketdata.options.OiInterval;
 import in.arthayantra.marketdata.options.OiQuery;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
@@ -59,6 +62,68 @@ public class FuturesAnalyticsController {
     // live (date null) = newest bucket per contract; history (date set) = newest bucket that day.
     List<FuturesSnapshotReader.FutPoint> pts = reader.latest(q.name(), q.interval(), q.date());
     return Map.of("items", pts);
+  }
+
+  /**
+   * /oi-analysis-series: the per-interval Futures OI Analysis table (oipulse §futures/oi-analysis) for
+   * a SINGLE contract. Returns that contract's RAW per-bucket points for the session containing the
+   * latest snapshot (oldest-first); the FE folds the interval ΔOI / ΔLTP / cumulative ΔOI / level-break
+   * (off the captured day high/low) / 4-state interpretation columns — mirroring the options
+   * strike-series page. The contract = the requested {@code expiry}, else the active front (the
+   * tradingsymbol with the most captured buckets that day; ties broken by the nearest expiry). 422 only
+   * when the underlying has NO snapshot at all; an {@code expiry} matching no contract -> 200 + empty.
+   */
+  @GetMapping("/oi-analysis-series")
+  public Map<String, Object> oiAnalysisSeries(
+      @RequestParam(required = false) String mode,
+      @RequestParam String name,
+      @RequestParam(required = false) String date,
+      @RequestParam(required = false) String interval,
+      @RequestParam(required = false) String expiry) {
+    OiQuery q = OiQuery.of(mode, name, date, interval, expiry);
+    List<FuturesSnapshotReader.FutPoint> latest = reader.latest(q.name(), q.interval(), q.date());
+    if (latest.isEmpty()) {
+      throw new ApiException(422, ErrorCodes.DATA_GAP, "no snapshot for " + q.name());
+    }
+    OffsetDateTime newest = latest.get(0).bucket();
+    LocalDate day = newest.atZoneSameInstant(Ist.ZONE).toLocalDate();
+    OffsetDateTime from = day.atStartOfDay().atOffset(Ist.OFFSET);
+    OffsetDateTime to = newest.plus(q.interval().bucket());
+    List<FuturesSnapshotReader.FutPoint> series = reader.series(q.name(), q.interval(), from, to);
+    List<FuturesSnapshotReader.FutPoint> picked = pickContract(series, q.expiry());
+    return Map.of(
+        "items", picked,
+        "underlying", q.name(),
+        "interval", q.interval().token(),
+        "asOf", newest);
+  }
+
+  /**
+   * Picks ONE contract's points from a multi-contract series: the requested {@code expiry} when given
+   * (empty when no contract matches), else the active front — the tradingsymbol with the most captured
+   * buckets, ties broken by the nearest (earliest) expiry. Deterministic.
+   */
+  private static List<FuturesSnapshotReader.FutPoint> pickContract(
+      List<FuturesSnapshotReader.FutPoint> series, LocalDate expiry) {
+    if (expiry != null) {
+      return series.stream().filter(p -> expiry.equals(p.expiry())).toList();
+    }
+    Map<String, Long> counts = new LinkedHashMap<>();
+    Map<String, LocalDate> exp = new LinkedHashMap<>();
+    for (FuturesSnapshotReader.FutPoint p : series) {
+      counts.merge(p.tradingsymbol(), 1L, Long::sum);
+      exp.putIfAbsent(p.tradingsymbol(), p.expiry());
+    }
+    String front =
+        counts.keySet().stream()
+            .max(
+                Comparator.comparingLong((String s) -> counts.get(s))
+                    .thenComparing(
+                        s -> exp.get(s), Comparator.nullsLast(Comparator.<LocalDate>reverseOrder())))
+            .orElse(null);
+    return front == null
+        ? List.of()
+        : series.stream().filter(p -> front.equals(p.tradingsymbol())).toList();
   }
 
   /** /spurt: futures interval buildup (per contract, 4-state + spurt %). */

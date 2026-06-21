@@ -32,6 +32,7 @@ public class FuturesSnapshotReader {
       BigDecimal dayHigh,
       BigDecimal dayLow,
       BigDecimal prevClose,
+      Long volume,
       LocalDate expiry) {}
 
   /** One contract's per-IST-day EOD rollup (from the intraday snapshots). */
@@ -70,7 +71,7 @@ public class FuturesSnapshotReader {
             + "  public.last(oi_change, ts) AS oi_change, "
             + "  public.last(day_open, ts) AS day_open, public.last(day_high, ts) AS day_high, "
             + "  public.last(day_low, ts) AS day_low, public.last(prev_close, ts) AS prev_close, "
-            + "  public.last(expiry, ts) AS expiry "
+            + "  public.last(volume, ts) AS volume, public.last(expiry, ts) AS expiry "
             + "FROM futures_oi_snapshots "
             + "WHERE underlying IN ("
             + placeholders
@@ -93,6 +94,7 @@ public class FuturesSnapshotReader {
                 rs.getBigDecimal("day_high"),
                 rs.getBigDecimal("day_low"),
                 rs.getBigDecimal("prev_close"),
+                rs.getObject("volume", Long.class),
                 rs.getObject("expiry", LocalDate.class)),
         args.toArray());
   }

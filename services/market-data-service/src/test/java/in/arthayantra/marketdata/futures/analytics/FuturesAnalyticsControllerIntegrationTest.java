@@ -208,6 +208,120 @@ class FuturesAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
         .andExpect(jsonPath("$.items[0].high").value(org.hamcrest.Matchers.startsWith("106")));
   }
 
+  /** Seeds one bucket with DISTINCT volume + day OHLC together (neither insert() nor insertOhlc() does). */
+  private void insertSeries(
+      OffsetDateTime ts,
+      String u,
+      String sym,
+      LocalDate exp,
+      String ltp,
+      long volume,
+      long oi,
+      String dayHigh,
+      String dayLow) {
+    jdbc.update(
+        "INSERT INTO futures_oi_snapshots "
+            + "(ts, underlying, tradingsymbol, expiry, ltp, volume, oi, oi_change, "
+            + " day_open, day_high, day_low) "
+            + "VALUES (?,?,?,?,?::numeric,?,?,?,?::numeric,?::numeric,?::numeric) ON CONFLICT DO NOTHING",
+        java.sql.Timestamp.from(ts.toInstant()),
+        u,
+        sym,
+        java.sql.Date.valueOf(exp),
+        ltp,
+        volume,
+        oi,
+        0L,
+        dayLow, // day_open (unused by the page; a valid numeric)
+        dayHigh,
+        dayLow);
+  }
+
+  @Test
+  void oiAnalysisSeriesReturnsRawBucketsOldestFirstWithVolume() throws Exception {
+    String u = "FUTOIASERIES";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    OffsetDateTime b0 =
+        OffsetDateTime.of(2026, 6, 20, 9, 15, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime b1 = b0.plusMinutes(5);
+    OffsetDateTime b2 = b0.plusMinutes(10);
+    insertSeries(b0, u, u + "26JUNFUT", exp, "100", 10L, 1000L, "101", "99");
+    insertSeries(b1, u, u + "26JUNFUT", exp, "110", 25L, 1200L, "111", "99");
+    insertSeries(b2, u, u + "26JUNFUT", exp, "108", 40L, 1150L, "111", "97");
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/futures/oi-analysis-series")
+                .param("name", u)
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items").isArray())
+        .andExpect(jsonPath("$.items.length()").value(3))
+        .andExpect(jsonPath("$.items[0].oi").value(1000)) // oldest-first
+        .andExpect(jsonPath("$.items[0].volume").value(10)) // the new volume projection
+        .andExpect(jsonPath("$.items[0].dayHigh").value(org.hamcrest.Matchers.startsWith("101")))
+        .andExpect(jsonPath("$.items[2].oi").value(1150))
+        .andExpect(jsonPath("$.interval").value("5m"));
+  }
+
+  @Test
+  void oiAnalysisSeriesPicksTheActiveFrontContract() throws Exception {
+    String u = "FUTOIAFRONT";
+    LocalDate jun = LocalDate.of(2026, 6, 25);
+    LocalDate jul = LocalDate.of(2026, 7, 30);
+    OffsetDateTime b0 =
+        OffsetDateTime.of(2026, 6, 20, 9, 15, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime b1 = b0.plusMinutes(5);
+    // Front (JUN) accrues 2 buckets; far (JUL) only 1 → the page returns the JUN contract alone.
+    insertSeries(b0, u, u + "26JUNFUT", jun, "100", 10L, 1000L, "101", "99");
+    insertSeries(b1, u, u + "26JUNFUT", jun, "110", 25L, 1200L, "111", "99");
+    insertSeries(b1, u, u + "26JULFUT", jul, "105", 5L, 50L, "106", "104");
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/futures/oi-analysis-series")
+                .param("name", u)
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items.length()").value(2))
+        .andExpect(jsonPath("$.items[0].tradingsymbol").value(u + "26JUNFUT"))
+        .andExpect(jsonPath("$.items[1].tradingsymbol").value(u + "26JUNFUT"));
+  }
+
+  @Test
+  void oiAnalysisSeriesTieBreaksToTheNearestExpiry() throws Exception {
+    String u = "FUTOIATIE";
+    LocalDate jun = LocalDate.of(2026, 6, 25);
+    LocalDate jul = LocalDate.of(2026, 7, 30);
+    OffsetDateTime b0 =
+        OffsetDateTime.of(2026, 6, 20, 9, 15, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime b1 = b0.plusMinutes(5);
+    // Both contracts accrue the SAME bucket count (2) → the tie breaks to the NEARER (JUN) expiry.
+    insertSeries(b0, u, u + "26JUNFUT", jun, "100", 10L, 1000L, "101", "99");
+    insertSeries(b1, u, u + "26JUNFUT", jun, "110", 25L, 1200L, "111", "99");
+    insertSeries(b0, u, u + "26JULFUT", jul, "105", 5L, 500L, "106", "104");
+    insertSeries(b1, u, u + "26JULFUT", jul, "106", 8L, 520L, "106", "104");
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/futures/oi-analysis-series")
+                .param("name", u)
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items.length()").value(2))
+        .andExpect(jsonPath("$.items[0].tradingsymbol").value(u + "26JUNFUT"));
+  }
+
+  @Test
+  void oiAnalysisSeriesReturns422WhenNoSnapshot() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/market/futures/oi-analysis-series")
+                .param("name", "FUTOIANONE")
+                .param("interval", "5m"))
+        .andExpect(status().isUnprocessableEntity());
+  }
+
   @Test
   void banksOrderByExpiry() throws Exception {
     String u = "FUTBANKCTRL";

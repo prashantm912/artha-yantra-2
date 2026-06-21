@@ -1986,6 +1986,71 @@
         }
       }
     },
+    "/api/v1/market/futures/oi-analysis-series" : {
+      "get" : {
+        "tags" : [ "futures-analytics-controller" ],
+        "operationId" : "oiAnalysisSeries",
+        "parameters" : [ {
+          "name" : "mode",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "name",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "date",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "interval",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "expiry",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/futures/movers" : {
       "get" : {
         "tags" : [ "futures-analytics-controller" ],

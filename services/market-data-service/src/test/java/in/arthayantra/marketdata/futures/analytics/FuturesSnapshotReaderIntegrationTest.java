@@ -201,6 +201,7 @@ class FuturesSnapshotReaderIntegrationTest extends MarketDataIntegrationTestBase
     assertThat(pts.get(0).dayHigh()).isEqualByComparingTo("101.20");
     assertThat(pts.get(0).dayLow()).isEqualByComparingTo("98.80");
     assertThat(pts.get(0).prevClose()).isEqualByComparingTo("99.00");
+    assertThat(pts.get(0).volume()).isEqualTo(10L); // the series() volume projection (Futures OI Analysis)
   }
 
   @Test

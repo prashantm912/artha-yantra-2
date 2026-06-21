@@ -2398,6 +2398,63 @@
         }
       }
     },
+    "/api/v1/market/connecting-dots" : {
+      "get" : {
+        "tags" : [ "connecting-dots-controller" ],
+        "operationId" : "matrix",
+        "parameters" : [ {
+          "name" : "mode",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "name",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "date",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "interval",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ConnectingDots"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/candles" : {
       "get" : {
         "tags" : [ "candles-controller" ],
@@ -4205,6 +4262,83 @@
           },
           "error" : {
             "type" : "string"
+          }
+        }
+      },
+      "ConnectingDots" : {
+        "type" : "object",
+        "properties" : {
+          "underlying" : {
+            "type" : "string"
+          },
+          "interval" : {
+            "type" : "string"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "rows" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ConnectingDotsRow"
+            }
+          }
+        }
+      },
+      "ConnectingDotsRow" : {
+        "type" : "object",
+        "properties" : {
+          "timeInterval" : {
+            "type" : "string"
+          },
+          "trend" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "dow" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "vix" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "volume" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "activeStrikeIv" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "activeStrikeOi" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "futOi" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "vwap" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "supertrend" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "rsi" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "futPrice" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "dailyTrend" : {
+            "type" : "integer",
+            "format" : "int32"
           }
         }
       },

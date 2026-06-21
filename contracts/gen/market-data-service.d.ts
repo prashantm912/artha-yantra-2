@@ -660,6 +660,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/connecting-dots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["matrix"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/candles": {
         parameters: {
             query?: never;
@@ -1336,6 +1352,40 @@ export interface components {
             /** Format: int32 */
             ratiosDetected?: number;
             error?: string;
+        };
+        ConnectingDots: {
+            underlying?: string;
+            interval?: string;
+            /** Format: date-time */
+            asOf?: string;
+            rows?: components["schemas"]["ConnectingDotsRow"][];
+        };
+        ConnectingDotsRow: {
+            timeInterval?: string;
+            /** Format: int32 */
+            trend?: number;
+            /** Format: int32 */
+            dow?: number;
+            /** Format: int32 */
+            vix?: number;
+            /** Format: int32 */
+            volume?: number;
+            /** Format: int32 */
+            activeStrikeIv?: number;
+            /** Format: int32 */
+            activeStrikeOi?: number;
+            /** Format: int32 */
+            futOi?: number;
+            /** Format: int32 */
+            vwap?: number;
+            /** Format: int32 */
+            supertrend?: number;
+            /** Format: int32 */
+            rsi?: number;
+            /** Format: int32 */
+            futPrice?: number;
+            /** Format: int32 */
+            dailyTrend?: number;
         };
         Candle: {
             exchange?: string;
@@ -3071,6 +3121,40 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["Status"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    matrix: {
+        parameters: {
+            query: {
+                mode?: string;
+                name: string;
+                date?: string;
+                interval?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ConnectingDots"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

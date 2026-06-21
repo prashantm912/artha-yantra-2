@@ -39,6 +39,31 @@ export interface OiStrikePoint {
   spot: string | null;
 }
 
+/** One Connecting Dots interval row: 11 factor codes (0/1/2) + the 5-state composite trend (0..4). */
+export interface ConnectingDotsRow {
+  timeInterval: string;
+  trend: number;
+  dow: number;
+  vix: number;
+  volume: number;
+  activeStrikeIv: number;
+  activeStrikeOi: number;
+  futOi: number;
+  vwap: number;
+  supertrend: number;
+  rsi: number;
+  futPrice: number;
+  dailyTrend: number;
+}
+
+/** GET /api/v1/market/connecting-dots — the per-interval multi-factor sentiment matrix for an index. */
+export interface ConnectingDots {
+  underlying: string;
+  interval: string;
+  asOf: string;
+  rows: ConnectingDotsRow[];
+}
+
 /** GET /api/v1/market/vix — the INDIA VIX quote (pinned index): LTP + day OHLC + change vs prev close. */
 export interface VixQuote {
   ltp: string | null;

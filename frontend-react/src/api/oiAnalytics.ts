@@ -4,6 +4,7 @@ import { useSymbolContext } from '../stores/symbolContext.store.ts';
 import type {
   ActiveStrikes,
   ChainTable,
+  ConnectingDots,
   OiStats,
   OiStrikePoint,
   SpurtChain,
@@ -160,6 +161,17 @@ export function useStraddleChart(
       return oiGet<StraddleChart | null>('/market/options/straddle-chart', p.toString(), null);
     },
     enabled: satisfiable(ctx, true) && !!strike,
+  });
+}
+
+/** Connecting Dots multi-factor matrix (§20.7.8): per-interval rows for the chosen index (no expiry). */
+export function useConnectingDots() {
+  const ctx = useOiCtx();
+  return useQuery({
+    queryKey: ['oi', 'connecting-dots', ctx.name, ctx.interval, ctx.mode, ctx.date],
+    queryFn: () =>
+      oiGet<ConnectingDots | null>('/market/connecting-dots', oiParams(ctx, false), null),
+    enabled: satisfiable(ctx, false),
   });
 }
 

@@ -33,7 +33,13 @@ const SECTIONS: MenuSection[] = [
   { title: 'Futures', items: [{ label: 'OI Analysis' }, { label: 'OI Spurt' }, { label: 'Banks' }] },
   { title: 'Equity', items: [{ label: 'Breadth' }, { label: 'Sector Stats' }] },
   { title: 'FII / DII', items: [{ label: 'Capital Market' }, { label: 'Participant OI' }] },
-  { title: 'Features', items: [{ label: 'Connecting Dots' }, { label: 'Vix & Index' }] },
+  {
+    title: 'Features',
+    items: [
+      { label: 'Connecting Dots', to: '/features/connecting-dots' }, // multi-factor matrix (§20.7.8)
+      { label: 'Vix & Index' },
+    ],
+  },
 ];
 
 export function MegaMenu() {

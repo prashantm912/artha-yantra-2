@@ -6,6 +6,7 @@ import { LoginPage } from './pages/login/LoginPage.tsx';
 import { OptionsChainPage } from './pages/options/OptionsChainPage.tsx';
 import { OptionsSpurtPage } from './pages/options/OptionsSpurtPage.tsx';
 import { OiAnalysisPage } from './pages/options/OiAnalysisPage.tsx';
+import { ConnectingDotsPage } from './pages/options/ConnectingDotsPage.tsx';
 
 // The straddle chart pulls in ECharts (~1 MB) — lazy-load it so that bundle is a separate chunk
 // fetched only when the route is visited, keeping the main payload lean (§20.1).
@@ -26,6 +27,7 @@ export function App() {
           <Route path="/options/options-chain" element={<OptionsChainPage />} />
           <Route path="/options/oi-spurt" element={<OptionsSpurtPage />} />
           <Route path="/options/oi-analysis" element={<OiAnalysisPage />} />
+          <Route path="/features/connecting-dots" element={<ConnectingDotsPage />} />
           <Route
             path="/options/straddle-chart"
             element={

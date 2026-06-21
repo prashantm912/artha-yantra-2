@@ -20,10 +20,28 @@ export interface StrikeView {
   peOi: number;
 }
 
-/** GET /api/v1/market/options/active-strikes — sentiment + top-N strikes; 422 DATA_GAP on empty. */
+/** One Active Strike Sentiment % point per bucket (active-strikes?buckets=N → the RIGHT chart). */
+export interface SentimentPoint {
+  bucket: string;
+  sentimentPct: string | null;
+}
+
+/** One active-strike Call/Put OI point per bucket (active-strikes?buckets=N → the LEFT chart). */
+export interface ActiveStrikeOiPoint {
+  bucket: string;
+  ceOi: number;
+  peOi: number;
+}
+
+/**
+ * GET /api/v1/market/options/active-strikes — sentiment + top-N strikes; 422 DATA_GAP on empty. The two
+ * `*Series` arrays ride the optional `buckets` param (omitted byte-identically when absent).
+ */
 export interface ActiveStrikes {
   sentimentPct: string | null;
   items: StrikeView[];
+  sentimentSeries?: SentimentPoint[] | null;
+  activeStrikeOiSeries?: ActiveStrikeOiPoint[] | null;
   asOf: string;
 }
 

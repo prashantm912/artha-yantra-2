@@ -73,4 +73,59 @@ class ActiveStrikeServiceTest {
   void sentimentSeriesEmptyWhenNoPoints() {
     assertThat(new ActiveStrikeService(5).sentimentSeries(List.of())).isEmpty();
   }
+
+  @Test
+  void activeStrikeOiSeriesReselectsActiveStrikePerBucket() {
+    java.time.OffsetDateTime b0 =
+        java.time.OffsetDateTime.of(
+            2026, 6, 20, 9, 15, 0, 0, java.time.ZoneOffset.ofHoursMinutes(5, 30));
+    java.time.OffsetDateTime b1 = b0.plusMinutes(5);
+    // The active (peak-total-OI) strike FLIPS between buckets: 22500 dominates b0, 22600 dominates b1.
+    // With topN=1 the OI series must follow the per-bucket peak — proving selection is per-bucket, not
+    // chosen once globally (a global pick would report 22500's tiny OI in b1).
+    List<OptionsSnapshotReader.StrikePoint> series =
+        List.of(
+            pt(b0, "22500", "CE", 1000, 0),
+            pt(b0, "22500", "PE", 1000, 0),
+            pt(b0, "22600", "CE", 100, 0),
+            pt(b0, "22600", "PE", 100, 0),
+            pt(b1, "22500", "CE", 100, 0),
+            pt(b1, "22500", "PE", 100, 0),
+            pt(b1, "22600", "CE", 1500, 0),
+            pt(b1, "22600", "PE", 1200, 0));
+    ActiveStrikeService svc = new ActiveStrikeService(1);
+    List<ActiveStrikeService.ActiveStrikeOiPoint> out = svc.activeStrikeOiSeries(series);
+    assertThat(out).hasSize(2);
+    assertThat(out.get(0).bucket()).isEqualTo(b0); // newest-last ordering
+    assertThat(out.get(0).ceOi()).isEqualTo(1000L); // 22500 is the b0 peak
+    assertThat(out.get(0).peOi()).isEqualTo(1000L);
+    assertThat(out.get(1).bucket()).isEqualTo(b1);
+    assertThat(out.get(1).ceOi()).isEqualTo(1500L); // 22600 is the b1 peak (reselected)
+    assertThat(out.get(1).peOi()).isEqualTo(1200L);
+  }
+
+  @Test
+  void activeStrikeOiSeriesSumsTopNWhenMultipleActive() {
+    java.time.OffsetDateTime b0 =
+        java.time.OffsetDateTime.of(
+            2026, 6, 20, 9, 15, 0, 0, java.time.ZoneOffset.ofHoursMinutes(5, 30));
+    // topN=2 over two strikes → the OI line is the aggregate of both active strikes (documented divergence
+    // from oipulse's single peak strike): ceOi = 1000+100, peOi = 1000+100.
+    List<OptionsSnapshotReader.StrikePoint> series =
+        List.of(
+            pt(b0, "22500", "CE", 1000, 0),
+            pt(b0, "22500", "PE", 1000, 0),
+            pt(b0, "22600", "CE", 100, 0),
+            pt(b0, "22600", "PE", 100, 0));
+    List<ActiveStrikeService.ActiveStrikeOiPoint> out =
+        new ActiveStrikeService(2).activeStrikeOiSeries(series);
+    assertThat(out).hasSize(1);
+    assertThat(out.get(0).ceOi()).isEqualTo(1100L);
+    assertThat(out.get(0).peOi()).isEqualTo(1100L);
+  }
+
+  @Test
+  void activeStrikeOiSeriesEmptyWhenNoPoints() {
+    assertThat(new ActiveStrikeService(5).activeStrikeOiSeries(List.of())).isEmpty();
+  }
 }

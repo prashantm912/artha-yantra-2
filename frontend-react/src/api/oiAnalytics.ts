@@ -78,12 +78,18 @@ export function useOiStats() {
   });
 }
 
-export function useActiveStrikes() {
+/**
+ * Active strikes (§options/active-strikes). With `buckets` the response also carries the two per-bucket
+ * series (sentiment % + active-strike Call/Put OI) for the page's two charts — one DB read, one call.
+ */
+export function useActiveStrikes(buckets?: number) {
   const ctx = useOiCtx();
   return useQuery({
-    queryKey: ['oi', 'active-strikes', ctx.name, ctx.expiry, ctx.interval, ctx.mode, ctx.date],
-    queryFn: () =>
-      oiGet<ActiveStrikes | null>('/market/options/active-strikes', oiParams(ctx, true), null),
+    queryKey: ['oi', 'active-strikes', ctx.name, ctx.expiry, ctx.interval, ctx.mode, ctx.date, buckets ?? null],
+    queryFn: () => {
+      const params = buckets ? `${oiParams(ctx, true)}&buckets=${buckets}` : oiParams(ctx, true);
+      return oiGet<ActiveStrikes | null>('/market/options/active-strikes', params, null);
+    },
     enabled: satisfiable(ctx, true),
   });
 }

@@ -233,8 +233,9 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
                 .param("interval", "5m"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.items.length()").value(1))
-        // buckets absent -> response shape UNCHANGED: no sentimentSeries key
-        .andExpect(jsonPath("$.sentimentSeries").doesNotExist());
+        // buckets absent -> response shape UNCHANGED: NEITHER series key present
+        .andExpect(jsonPath("$.sentimentSeries").doesNotExist())
+        .andExpect(jsonPath("$.activeStrikeOiSeries").doesNotExist());
   }
 
   @Test
@@ -261,7 +262,13 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.sentimentSeries.length()").value(2))
         .andExpect(jsonPath("$.sentimentSeries[0].sentimentPct").value("25.00"))
-        .andExpect(jsonPath("$.sentimentSeries[1].sentimentPct").value("-25.00")); // newest-last
+        .andExpect(jsonPath("$.sentimentSeries[1].sentimentPct").value("-25.00")) // newest-last
+        // The LEFT-chart OI series rides the SAME buckets param + same active strike (22500), one DB read.
+        .andExpect(jsonPath("$.activeStrikeOiSeries.length()").value(2))
+        .andExpect(jsonPath("$.activeStrikeOiSeries[0].ceOi").value(1000))
+        .andExpect(jsonPath("$.activeStrikeOiSeries[0].peOi").value(1000))
+        .andExpect(jsonPath("$.activeStrikeOiSeries[1].ceOi").value(900))
+        .andExpect(jsonPath("$.activeStrikeOiSeries[1].peOi").value(1100));
   }
 
   @Test

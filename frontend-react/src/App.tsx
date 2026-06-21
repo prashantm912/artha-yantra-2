@@ -45,6 +45,9 @@ const FuturesOiChartPage = lazy(() =>
 const OptionsChartPage = lazy(() =>
   import('./pages/options/OptionsChartPage.tsx').then((m) => ({ default: m.OptionsChartPage })),
 );
+const MultipleOiChartPage = lazy(() =>
+  import('./pages/options/MultipleOiChartPage.tsx').then((m) => ({ default: m.MultipleOiChartPage })),
+);
 
 function Lazy({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<p className="text-sm text-ay-muted">Loading chart…</p>}>{children}</Suspense>;
@@ -72,6 +75,7 @@ export function App() {
           <Route path="/options/active-strikes" element={<Lazy><ActiveStrikesPage /></Lazy>} />
           <Route path="/options/active-strikes-iv" element={<Lazy><ActiveStrikesIvPage /></Lazy>} />
           <Route path="/options/options-chart" element={<Lazy><OptionsChartPage /></Lazy>} />
+          <Route path="/options/multiple-oi-chart" element={<Lazy><MultipleOiChartPage /></Lazy>} />
           {/* Futures */}
           <Route path="/futures/oi-spurt" element={<FuturesOiSpurtPage />} />
           <Route path="/futures/market-movers" element={<FuturesMoversPage />} />

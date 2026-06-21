@@ -123,6 +123,17 @@ public class OptionsAnalyticsController {
       String interval,
       List<ChainTableRow> rows) {}
 
+  // ── /multiple-oi (oipulse Multiple OI Chart): per-leg OI line + the underlying price line ────────────
+
+  /** One bucket of a leg's OI line (null oi where the leg has no snapshot at that bucket). */
+  public record OiLinePoint(OffsetDateTime bucket, Long oi) {}
+
+  /** One selected leg ("57200 CE") and its per-bucket OI series. */
+  public record OiLeg(String leg, List<OiLinePoint> points) {}
+
+  /** One bucket of the underlying price (spot) reference line. */
+  public record SpotPoint(OffsetDateTime bucket, BigDecimal spot) {}
+
   @GetMapping("/oi-stats")
   public OiStats oiStats(
       @RequestParam(required = false) String mode,
@@ -284,6 +295,95 @@ public class OptionsAnalyticsController {
         "strike", strike,
         "interval", q.interval().token(),
         "asOf", newest);
+  }
+
+  /**
+   * /multiple-oi: the oipulse Multiple OI Chart (plan §options/multiple-oi-chart) — overlay several
+   * user-selected option legs' OI lines (right axis) + the underlying price line (left axis) over the
+   * session. {@code leg} is a REPEATED param ({@code ?leg=57200 CE&leg=57100 PE}). One snapshot read
+   * (all strikes) is folded per leg + a single spot line (the chain-wide underlying price per bucket).
+   * Map envelope. 400 when no leg is given; 422 only when the underlying has no snapshot at all.
+   */
+  @GetMapping("/multiple-oi")
+  public Map<String, Object> multipleOi(
+      @RequestParam(required = false) String mode,
+      @RequestParam String name,
+      @RequestParam(required = false) String date,
+      @RequestParam(required = false) String interval,
+      @RequestParam(required = false) String expiry,
+      @RequestParam(required = false) List<String> leg) {
+    OiQuery q = OiQuery.of(mode, name, date, interval, expiry);
+    LocalDate exp = requireExpiry(q);
+    if (leg == null || leg.isEmpty()) {
+      throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "at least one leg is required");
+    }
+    List<OptionsSnapshotReader.StrikePoint> latest =
+        reader.latest(q.name(), exp, q.interval(), q.date());
+    if (latest.isEmpty()) {
+      throw new ApiException(422, ErrorCodes.DATA_GAP, "no snapshot for " + q.name() + " " + exp);
+    }
+    OffsetDateTime newest = latest.get(0).bucket();
+    LocalDate day = newest.atZoneSameInstant(Ist.ZONE).toLocalDate();
+    OffsetDateTime from = day.atStartOfDay().atOffset(Ist.OFFSET);
+    OffsetDateTime to = newest.plus(q.interval().bucket());
+    List<OptionsSnapshotReader.StrikePoint> series =
+        reader.series(q.name(), exp, q.interval(), from, to);
+
+    // Index the single read: (strike|side) -> bucket -> oi, plus the chain-wide spot per bucket.
+    java.util.TreeSet<OffsetDateTime> buckets = new java.util.TreeSet<>();
+    Map<String, Map<OffsetDateTime, Long>> oiByKey = new HashMap<>();
+    Map<OffsetDateTime, BigDecimal> spotByBucket = new LinkedHashMap<>();
+    for (OptionsSnapshotReader.StrikePoint p : series) {
+      buckets.add(p.bucket());
+      oiByKey
+          .computeIfAbsent(deltaKey(p.strike(), p.optionType()), k -> new HashMap<>())
+          .put(p.bucket(), p.oi());
+      if (spotByBucket.get(p.bucket()) == null && p.spot() != null) {
+        spotByBucket.put(p.bucket(), p.spot());
+      }
+    }
+
+    List<OiLeg> items = new ArrayList<>(leg.size());
+    for (String label : leg) {
+      String key = legKey(label); // throws 400 on a malformed leg
+      Map<OffsetDateTime, Long> byBucket = oiByKey.getOrDefault(key, Map.of());
+      List<OiLinePoint> points = new ArrayList<>(buckets.size());
+      for (OffsetDateTime b : buckets) {
+        points.add(new OiLinePoint(b, byBucket.get(b)));
+      }
+      items.add(new OiLeg(label, points));
+    }
+    List<SpotPoint> spot = new ArrayList<>(buckets.size());
+    for (OffsetDateTime b : buckets) {
+      spot.add(new SpotPoint(b, spotByBucket.get(b)));
+    }
+
+    Map<String, Object> out = new LinkedHashMap<>();
+    out.put("items", items);
+    out.put("spot", spot);
+    out.put("underlying", q.name());
+    out.put("expiry", exp);
+    out.put("interval", q.interval().token());
+    out.put("asOf", newest);
+    return out;
+  }
+
+  /** Parses a leg label ("57200 CE") into the snapshot join key; 400 on a malformed leg. */
+  private static String legKey(String label) {
+    int sp = label == null ? -1 : label.trim().lastIndexOf(' ');
+    if (sp < 0) {
+      throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "leg must be '<strike> CE|PE'");
+    }
+    String trimmed = label.trim();
+    String side = trimmed.substring(sp + 1).trim().toUpperCase(java.util.Locale.ROOT);
+    if (!"CE".equals(side) && !"PE".equals(side)) {
+      throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "leg side must be CE or PE: " + label);
+    }
+    try {
+      return deltaKey(new BigDecimal(trimmed.substring(0, sp).trim()), side);
+    } catch (NumberFormatException badStrike) {
+      throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "leg strike not numeric: " + label);
+    }
   }
 
   /** /spurt: oipulse Options OI Spurt — per-strike interval buildup + the underlying 4-state rollup. */

@@ -3797,6 +3797,35 @@ bundle is a separate chunk, main payload stays ~362 KB).
   W3 header work). The chart-with-DATA pixel render was verified on the mock stack (the live stack had
   an expired Kite session off-hours → `items=[]`; the endpoints degrade cleanly to 200 regardless).
 
+### 20.7.8 Connecting Dots — built + render-verified (2026-06-21)
+
+The faithful oipulse "Connecting Dots" — the per-interval 11-factor sentiment matrix for an index.
+Built to `docs/oipulse-study/features/connecting-dots.md`; full QA log in
+`docs/manual-tests/phase-4-wave1-connecting-dots.md`.
+
+- **Backend** `GET /api/v1/market/connecting-dots` (`ConnectingDotsService` in `options.analytics`, so
+  it can reach the snapshot readers). Each interval row = 11 factors (3-state 0/1/2) + a 5-state
+  composite Trend. Sources route through EXPOSED module APIs only (no cross-module-internal reach): the
+  **front-month FUTURES candle series** (`CandleQueryService`, resampled midnight-IST = pg `time_bucket`
+  parity) drives Price / VWAP / Supertrend / RSI / Volume / OI-Interpretation (candle `oi`); the INDEX
+  daily candle → Daily Trend; INDIA VIX candles → Vix (inverse); option snapshots
+  (`OptionsSnapshotReader` + `ActiveStrikeService`) → Active-Strike OI + ATM-IV. **Dow = Neutral** until
+  an Upstox global feed lands (faithful intraday per the study). Indicators computed locally
+  (`ConnectingDotsIndicators` — Wilder RSI/ATR, session VWAP, Supertrend) since market-data has no ta4j.
+  `OiInterval.M10` added (additive — unblocks 10-min across OiInterval endpoints; pages opt in). Tests:
+  `ConnectingDotsIndicatorsTest` (5) + `ConnectingDotsIntegrationTest` (2); ModularityTest green;
+  springdoc recaptured.
+- **Frontend** `ConnectingDotsPage` (`/features/connecting-dots`, menu wired) + `ConnectingDotsTable`
+  (+spec) + `core/connectingDots.ts` (factor/trend meta). 13-col matrix, newest-first, pagination
+  (25/page), extreme-row maroon tint, 5-pill legend, index-only Name select, 3/5/10/15/30/60 intervals.
+- **Render verified** on the mock stack (NIFTY 50 · 3-min · History → 125 rows = the doc's full-session
+  count): 13 columns in order, 3-state ↑/↓/↔ colour semantics, 5-state Trend, extreme tint, legend — all
+  match. market-data restored to live.
+- **Divergences (intended/phased):** Dow Neutral (Upstox global — funded, not built); Active-Strike
+  IV/OI Neutral without live snapshots; the composite cutoffs + per-factor bands are a documented
+  approximation (oipulse's exact server weights unknown — same class as black76 greeks); FINNIFTY/
+  MIDCPNIFTY pending instrument cover; the "Tool" sub-tab deferred.
+
 ### 20.8 Standing UI-fidelity rules (apply to EVERY page, every wave — AUTHORITATIVE)
 
 1. **UI authority = the oipulse study, NOT the Angular app.** Every React page's layout, columns,

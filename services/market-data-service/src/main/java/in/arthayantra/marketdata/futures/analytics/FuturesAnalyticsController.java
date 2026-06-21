@@ -28,8 +28,10 @@ public class FuturesAnalyticsController {
   private final FuturesBuzzService buzzService;
   private final FuturesBankGridService bankGridService;
   private final FuturesOiChartService oiChartService;
+  private final FuturesBankAnalysisService bankAnalysisService;
   private final int buzzBuckets;
   private final List<String> bankStocks;
+  private final List<String> bankAnalysisStocks;
 
   public FuturesAnalyticsController(
       FuturesSnapshotReader reader,
@@ -38,20 +40,27 @@ public class FuturesAnalyticsController {
       FuturesBuzzService buzzService,
       FuturesBankGridService bankGridService,
       FuturesOiChartService oiChartService,
+      FuturesBankAnalysisService bankAnalysisService,
       @Value("${artha.futures.buzz-buckets:12}") int buzzBuckets,
       @Value(
               "${artha.futures.bank-stocks:HDFCBANK,ICICIBANK,SBIN,AXISBANK,KOTAKBANK,INDUSINDBK,"
                   + "BANKBARODA,PNB,AUBANK,FEDERALBNK,IDFCFIRSTB,CANBK,BANDHANBNK,BANKINDIA,"
                   + "RBLBANK,UNIONBANK,YESBANK}")
-          List<String> bankStocks) {
+          List<String> bankStocks,
+      @Value(
+              "${artha.futures.bank-analysis-stocks:"
+                  + "HDFCBANK,ICICIBANK,AXISBANK,SBIN,KOTAKBANK,INDUSINDBK}")
+          List<String> bankAnalysisStocks) {
     this.reader = reader;
     this.spurtService = spurtService;
     this.moversService = moversService;
     this.buzzService = buzzService;
     this.bankGridService = bankGridService;
     this.oiChartService = oiChartService;
+    this.bankAnalysisService = bankAnalysisService;
     this.buzzBuckets = buzzBuckets;
     this.bankStocks = bankStocks;
+    this.bankAnalysisStocks = bankAnalysisStocks;
   }
 
   @GetMapping("/oi-analysis")
@@ -224,6 +233,48 @@ public class FuturesAnalyticsController {
       throw new ApiException(422, ErrorCodes.DATA_GAP, "no bank-stock futures snapshots");
     }
     return bankGridService.grid(pair);
+  }
+
+  /**
+   * /banks-analysis: the oipulse Banks Analysis matrix (§futures/banks-analysis) — a TIME x 6-BANK pivot
+   * of cumulative-from-day-open (LTP% / OI%) + a per-interval 4-state OI badge. Sector-wide: NO name, NO
+   * expiry (the 6 banks are config-fixed in oipulse column order). Anchors on the newest captured bucket's
+   * IST day, then reads the whole day via {@code seriesAll}. 422 until ≥1 bucket has accrued (forward-only,
+   * matches /banks-grid). Map envelope (no typed schema). {@code interval} 3/5/10/15/30/60 (no 1m).
+   */
+  @GetMapping("/banks-analysis")
+  public Map<String, Object> banksAnalysis(
+      @RequestParam(required = false) String mode,
+      @RequestParam(required = false) String date,
+      @RequestParam(required = false) String interval) {
+    boolean live = mode == null || mode.isBlank() || "live".equalsIgnoreCase(mode);
+    OiInterval iv =
+        interval == null || interval.isBlank() ? OiInterval.M3 : OiInterval.parse(interval);
+    LocalDate d = date == null || date.isBlank() ? null : parseDate(date);
+    if (!live && d == null) {
+      throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "history mode requires date");
+    }
+    List<FuturesSnapshotReader.FutPoint> latest = reader.latestPairAll(bankAnalysisStocks, iv, d);
+    if (latest.isEmpty()) {
+      throw new ApiException(422, ErrorCodes.DATA_GAP, "no bank-stock futures snapshots");
+    }
+    OffsetDateTime newest =
+        latest.stream()
+            .map(FuturesSnapshotReader.FutPoint::bucket)
+            .max(Comparator.naturalOrder())
+            .orElseThrow();
+    LocalDate day = newest.atZoneSameInstant(Ist.ZONE).toLocalDate();
+    OffsetDateTime from = day.atStartOfDay().atOffset(Ist.OFFSET);
+    OffsetDateTime to = newest.plus(iv.bucket());
+    List<FuturesSnapshotReader.FutPoint> series =
+        reader.seriesAll(bankAnalysisStocks, iv, from, to);
+    FuturesBankAnalysisService.BankAnalysisMatrix matrix =
+        bankAnalysisService.matrix(series, bankAnalysisStocks);
+    return Map.of(
+        "banks", matrix.banks(),
+        "rows", matrix.rows(),
+        "interval", iv.token(),
+        "asOf", matrix.asOf());
   }
 
   /** /buzz: a time x contract heatmap of the 4-state OI interpretation over the last N buckets. */

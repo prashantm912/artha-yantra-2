@@ -40,7 +40,7 @@ const SECTIONS: MenuSection[] = [
       { label: 'OI Analysis', to: '/futures/oi-analysis' }, // Wave 3 — per-interval series table
       { label: 'OI Chart', to: '/futures/oi-chart' }, // Wave 3 — candle + OI dual-axis combo
       { label: 'OI Buzz' }, // deferred (constituent treemap)
-      { label: 'Banks' }, // W3
+      { label: 'Banks', to: '/futures/banks' }, // Wave 3 — time × 6-bank OI matrix
     ],
   },
   { title: 'Equity', items: [{ label: 'Breadth' }, { label: 'Sector Stats' }] },

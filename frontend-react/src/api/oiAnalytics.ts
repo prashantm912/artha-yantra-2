@@ -3,6 +3,7 @@ import { ApiError, apiFetch, listItems } from './client.ts';
 import { useSymbolContext } from '../stores/symbolContext.store.ts';
 import type {
   ActiveStrikes,
+  BanksAnalysis,
   ChainTable,
   ConnectingDots,
   FiiDiiRow,
@@ -285,6 +286,24 @@ export function useFuturesOiChart(intervalMinutes: number) {
       return oiGet<FutOiChart | null>('/market/futures/oi-chart', p.toString(), null);
     },
     enabled: satisfiable(ctx, false),
+  });
+}
+
+/**
+ * Banks Analysis (§futures/banks-analysis): the sector-wide time × bank OI matrix. NAME-FREE + expiry-free
+ * (the 6 banks are config-fixed) — so it cannot reuse oiParams/satisfiable (both inject/require a name).
+ * Only mode/date/interval ride; the only enable guard is "history needs a date".
+ */
+export function useBanksAnalysis() {
+  const ctx = useOiCtx();
+  return useQuery({
+    queryKey: ['fut', 'banks-analysis', ctx.interval, ctx.mode, ctx.date],
+    queryFn: () => {
+      const p = new URLSearchParams({ mode: ctx.mode, interval: ctx.interval });
+      if (ctx.date) p.set('date', ctx.date);
+      return oiGet<BanksAnalysis | null>('/market/futures/banks-analysis', p.toString(), null);
+    },
+    enabled: !(ctx.mode === 'history' && !ctx.date),
   });
 }
 

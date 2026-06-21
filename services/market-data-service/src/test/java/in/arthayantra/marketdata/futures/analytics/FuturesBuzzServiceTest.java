@@ -13,7 +13,7 @@ class FuturesBuzzServiceTest {
 
   private static FuturesSnapshotReader.FutPoint p(OffsetDateTime b, String sym, String ltp, long oi) {
     return new FuturesSnapshotReader.FutPoint(
-        b, null, sym, new BigDecimal(ltp), oi, 0L, null, null, null, null, null);
+        b, null, sym, new BigDecimal(ltp), oi, 0L, null, null, null, null, null, null);
   }
 
   @Test

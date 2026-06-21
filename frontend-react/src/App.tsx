@@ -12,6 +12,7 @@ import { BigOiMovementPage } from './pages/options/BigOiMovementPage.tsx';
 import { FuturesOiSpurtPage } from './pages/futures/FuturesOiSpurtPage.tsx';
 import { FuturesMoversPage } from './pages/futures/FuturesMoversPage.tsx';
 import { FuturesEodPage } from './pages/futures/FuturesEodPage.tsx';
+import { FuturesOiAnalysisPage } from './pages/futures/FuturesOiAnalysisPage.tsx';
 import { ParticipantWiseOiPage } from './pages/fiidii/ParticipantWiseOiPage.tsx';
 
 // The ECharts-bearing pages are lazy-loaded so the ~1 MB ECharts bundle is a separate chunk fetched
@@ -67,6 +68,7 @@ export function App() {
           <Route path="/futures/oi-spurt" element={<FuturesOiSpurtPage />} />
           <Route path="/futures/market-movers" element={<FuturesMoversPage />} />
           <Route path="/futures/eod-oi-analyzer" element={<FuturesEodPage />} />
+          <Route path="/futures/oi-analysis" element={<FuturesOiAnalysisPage />} />
           {/* FII / DII */}
           <Route path="/fii-dii/capital-market" element={<Lazy><FiiDiiCapitalMarketPage /></Lazy>} />
           <Route path="/fii-dii/participant-wise-oi" element={<ParticipantWiseOiPage />} />

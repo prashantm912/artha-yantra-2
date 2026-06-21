@@ -7,6 +7,7 @@ import type {
   ConnectingDots,
   FiiDiiRow,
   FutEodRow,
+  FutSeriesPoint,
   FutSpurtChain,
   LongShortRow,
   Movers,
@@ -240,6 +241,25 @@ export function useFuturesSpurt() {
     queryKey: ['fut', 'spurt', ctx.name, ctx.interval, ctx.mode, ctx.date],
     queryFn: () =>
       oiGet<FutSpurtChain | null>('/market/futures/spurt', oiParams(ctx, false), null),
+    enabled: satisfiable(ctx, false),
+  });
+}
+
+/**
+ * Futures OI Analysis series (§futures/oi-analysis): one contract's raw per-bucket points over the
+ * session (no expiry — keyed on the index name; the BE picks the active front). The FE folds the
+ * per-interval table columns. Returns the `{items, interval, asOf}` envelope (interval drives the label).
+ */
+export function useFuturesOiSeries() {
+  const ctx = useOiCtx();
+  return useQuery({
+    queryKey: ['fut', 'oi-series', ctx.name, ctx.interval, ctx.mode, ctx.date],
+    queryFn: () =>
+      oiGet<{ items?: FutSeriesPoint[]; interval?: string; asOf?: string }>(
+        '/market/futures/oi-analysis-series',
+        oiParams(ctx, false),
+        { items: [] },
+      ),
     enabled: satisfiable(ctx, false),
   });
 }

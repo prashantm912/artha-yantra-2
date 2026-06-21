@@ -329,6 +329,25 @@ export interface FutEodRow {
   volume: number;
 }
 
+/**
+ * One raw per-bucket point of GET /api/v1/market/futures/oi-analysis-series `{items}` (mirrors the BE
+ * FutPoint). BigDecimal legs are STRINGS (never parseFloat); `oi`/`oiChange`/`volume` are longs. The
+ * Futures OI Analysis page folds these into the per-interval table (cum ΔOI / Δltp / level break / 4-state).
+ */
+export interface FutSeriesPoint {
+  bucket: string;
+  tradingsymbol: string;
+  ltp: string | null;
+  oi: number | null;
+  oiChange: number | null;
+  dayOpen: string | null;
+  dayHigh: string | null;
+  dayLow: string | null;
+  prevClose: string | null;
+  volume: number | null;
+  expiry: string | null;
+}
+
 /** One row of GET /api/v1/market/fii-dii/cash `{items}` — FII or DII cash buy/sell/net (₹ cr strings). */
 export interface FiiDiiRow {
   tradeDate: string;

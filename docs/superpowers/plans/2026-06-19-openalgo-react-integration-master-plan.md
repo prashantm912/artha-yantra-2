@@ -3616,6 +3616,15 @@ Owner chose a SEQUENCE of smaller PRs (65 routes is unreviewable in one).
   Options Chain (+greeks), Connecting Dots (signal matrix + SentimentBadge3), Straddle/Strangle premium
   (combo candle+line). **2 backend tasks:** greeks-in-chain (black76 server-side) + Connecting-Dots read
   endpoint (expose the per-factor matrix). Both drift springdoc → recapture + `contracts/gen` regen.
+- **Data-foundation milestone (owner-decided 2026-06-21, between PR-W1 and PR-W2)** — the Upstox/
+  OpenAlgo "data foundation": Upstox Plus auth + global instruments (Dow), ExpiryTrack historical-OI
+  backfill, intraday option/futures OHLC capture. Rationale: Wave-1 data pages are built + structure-QA'd
+  but NOT value-verified (mock-synthetic / no live session / Dow absent — see
+  `docs/manual-tests/phase-4-wave1-deferred-ledger.md` Bucket 5). Doing the data lever BEFORE the deeper
+  W2/W3 OI pages lets them build + value-verify against real historical sessions from day one, and
+  backfill-verifies the Wave-1 data pages — clearing the "built-but-unverified" debt in one pass instead
+  of accumulating it. NOT a Wave-1 blocker (the other ~3/4 of deferred items are our-own code / charts /
+  intended divergences, Upstox-irrelevant — ledger Buckets 1–4).
 - **PR-W2 depth (fast, config-only on the library)** — Active Strikes OI, Trending OI/-PA, Big OI,
   Premium, the Futures suite, FII/DII. All ✅ zero-backend.
 - **PR-W3 breadth/equity** — + backend gaps: Vix endpoint, equity sector-stats/heatmap/returns/pre-open,

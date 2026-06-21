@@ -21,10 +21,18 @@ const f2 = (n: number) => n.toFixed(2);
 export function StraddleChart({ items, callStrike, putStrike, underlying }: StraddleChartProps) {
   const series = useMemo(() => toStraddleSeries(items), [items]);
 
+  // oipulse watermark: straddle = "NAME STRIKE"; strangle = "NAME CALL CE x PUT PE".
   const watermark =
     callStrike && putStrike && callStrike === putStrike
       ? `${underlying} ${callStrike}`
-      : `${underlying} ${callStrike ?? '?'}/${putStrike ?? '?'}`;
+      : `${underlying} ${callStrike ?? '?'} CE x ${putStrike ?? '?'} PE`;
+
+  // The fixed latest-candle readout oipulse shows above the chart (its "Last Updated" strip).
+  const last = series.times.length - 1;
+  const readout =
+    last >= 0
+      ? `${series.times[last]} · O ${f2(series.candles[last][0])} · H ${f2(series.candles[last][3])} · L ${f2(series.candles[last][2])} · C ${f2(series.candles[last][1])} · VWAP ${f2(series.vwap[last])} · 20 EMA ${f2(series.ema20[last])}`
+      : '';
 
   const makeOption = useCallback(
     (t: ChartTheme): EChartsOption => {
@@ -160,10 +168,17 @@ export function StraddleChart({ items, callStrike, putStrike, underlying }: Stra
   );
 
   return (
-    <EChart
-      makeOption={makeOption}
-      height={440}
-      ariaLabel={`Straddle premium candlestick for ${watermark} with VWAP, 20 EMA, Call and Put price lines`}
-    />
+    <div>
+      {readout && (
+        <p className="mb-1 text-center text-xs tabular-nums text-ay-muted" aria-live="polite">
+          {readout}
+        </p>
+      )}
+      <EChart
+        makeOption={makeOption}
+        height={440}
+        ariaLabel={`Straddle premium candlestick for ${watermark} with VWAP, 20 EMA, Call and Put price lines`}
+      />
+    </div>
   );
 }

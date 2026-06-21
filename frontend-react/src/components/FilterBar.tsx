@@ -17,6 +17,7 @@ import { DateInput } from './atoms/DateInput.tsx';
 interface FilterBarProps {
   showName?: boolean;
   showExpiry?: boolean;
+  showInterval?: boolean;
   allowedIntervals?: readonly OiInterval[];
 }
 
@@ -25,6 +26,7 @@ const UNDERLYING_FALLBACK = ['NIFTY 50', 'NIFTY BANK'];
 export function FilterBar({
   showName = true,
   showExpiry = true,
+  showInterval = true,
   allowedIntervals = OI_INTERVALS,
 }: FilterBarProps) {
   const name = useSymbolContext((s) => s.name);
@@ -72,12 +74,14 @@ export function FilterBar({
           disabled={!expiries.data?.length}
         />
       )}
-      <Select
-        ariaLabel="Interval"
-        value={interval}
-        options={[...allowedIntervals]}
-        onChange={(v) => setInterval(v as OiInterval)}
-      />
+      {showInterval && (
+        <Select
+          ariaLabel="Interval"
+          value={interval}
+          options={[...allowedIntervals]}
+          onChange={(v) => setInterval(v as OiInterval)}
+        />
+      )}
       <ModeToggle mode={mode} onChange={setMode} />
       {mode === 'history' && (
         <DateInput ariaLabel="History date" value={date} onChange={setDate} />

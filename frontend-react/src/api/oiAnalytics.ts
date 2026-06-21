@@ -122,23 +122,24 @@ export function useStrikeSeries(strike: string | null) {
 
 /**
  * Straddle/Strangle chart feed (§20.7.6): combined CE+PE premium candles for a strike over the
- * session. The straddle interval is RAW MINUTES (parsed from the shared OiInterval token — 10m is the
- * one documented gap), and the BE requires a base {@code strike}; a strangle adds call/put overrides.
+ * session. The interval is RAW MINUTES owned by the page (the oipulse set is 1/3/5/10/15/30/60 —
+ * wider than the shared OiInterval, which lacks 10m). The BE requires a base {@code strike}; a
+ * strangle adds call/put overrides. Name/expiry/mode/date still ride the shared control bar.
  */
 export function useStraddleChart(
   strike: string | null,
   callStrike: string | null,
   putStrike: string | null,
+  intervalMinutes: number,
 ) {
   const ctx = useOiCtx();
-  const minutes = parseInt(ctx.interval, 10) || 3;
   return useQuery({
     queryKey: [
       'oi',
       'straddle',
       ctx.name,
       ctx.expiry,
-      ctx.interval,
+      intervalMinutes,
       ctx.mode,
       ctx.date,
       strike,
@@ -146,7 +147,11 @@ export function useStraddleChart(
       putStrike,
     ],
     queryFn: () => {
-      const p = new URLSearchParams({ mode: ctx.mode, name: ctx.name, interval: String(minutes) });
+      const p = new URLSearchParams({
+        mode: ctx.mode,
+        name: ctx.name,
+        interval: String(intervalMinutes),
+      });
       if (ctx.date) p.set('date', ctx.date);
       if (ctx.expiry) p.set('expiry', ctx.expiry);
       if (strike) p.set('strike', strike);

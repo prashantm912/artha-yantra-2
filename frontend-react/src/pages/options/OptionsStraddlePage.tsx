@@ -1,19 +1,22 @@
 import { useEffect, useMemo, useState } from 'react';
 import { compareDecimal, formatDecimal, isNegative, subtractDecimal } from '../../lib/decimal.ts';
 import { useChainTable, useStraddleChart } from '../../api/oiAnalytics.ts';
-import type { OiInterval } from '../../stores/symbolContext.store.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
-import { Select } from '../../components/atoms/Select.tsx';
+import { Select, type SelectOption } from '../../components/atoms/Select.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { StraddleChart } from '../../components/StraddleChart.tsx';
 
 // Straddle/Strangle Chart (§20.7.6). The combined CE+PE premium candlestick + VWAP/20-EMA/Call/Put
 // overlays. Strike list + ATM default come from the live /chain-table (no snapshot dependency). A
-// "Strangle" toggle splits the single strike into a Call-strike + Put-strike pair. The interval is the
-// shared OiInterval (oipulse adds a 10-min option — the one documented gap). Money = decimal strings.
+// "Strangle" toggle splits the single strike into a Call-strike + Put-strike pair. Money = decimal
+// strings; only the chart COORDINATES cross to numbers (core/straddleSeries).
 
-// oipulse's straddle interval set is 1/3/5/10/15/30/60 min; OiInterval lacks 10m (documented gap).
-const STRADDLE_INTERVALS: readonly OiInterval[] = ['1m', '3m', '5m', '15m', '30m', '60m'];
+// oipulse's straddle interval set — faithful, INCLUDING 10-min (the shared OiInterval lacks it). The BE
+// takes raw minutes, so this page owns its interval selector instead of the shared FilterBar interval.
+const INTERVAL_OPTIONS: SelectOption[] = [1, 3, 5, 10, 15, 30, 60].map((m) => ({
+  value: String(m),
+  label: `${m} min`,
+}));
 
 /** Listed strike nearest the spot (ATM) — exact-decimal distance, never parseFloat. */
 function nearestStrike(strikes: string[], spot: string | null): string | null {
@@ -48,6 +51,7 @@ export function OptionsStraddlePage() {
   const atm = useMemo(() => nearestStrike(strikes, spot), [strikes, spot]);
 
   const [strangle, setStrangle] = useState(false);
+  const [intervalMin, setIntervalMin] = useState(3);
   const [strike, setStrike] = useState<string | null>(null);
   const [callStrike, setCallStrike] = useState<string | null>(null);
   const [putStrike, setPutStrike] = useState<string | null>(null);
@@ -65,6 +69,7 @@ export function OptionsStraddlePage() {
     baseStrike,
     strangle ? callStrike : null,
     strangle ? putStrike : null,
+    intervalMin,
   );
   const data = straddleQ.data ?? null;
 
@@ -73,7 +78,13 @@ export function OptionsStraddlePage() {
       <h1 className="ay-sr-only">Options straddle chart</h1>
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <FilterBar showName showExpiry allowedIntervals={STRADDLE_INTERVALS} />
+        <FilterBar showName showExpiry showInterval={false} />
+        <Select
+          ariaLabel="Time interval"
+          value={String(intervalMin)}
+          options={INTERVAL_OPTIONS}
+          onChange={(v) => setIntervalMin(parseInt(v, 10) || 3)}
+        />
         <label className="flex h-9 items-center gap-1.5 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text">
           <input
             type="checkbox"
@@ -149,12 +160,17 @@ export function OptionsStraddlePage() {
       )}
 
       {data != null && data.items.length > 0 && (
-        <StraddleChart
-          items={data.items}
-          callStrike={data.callStrike}
-          putStrike={data.putStrike}
-          underlying={data.underlying}
-        />
+        <>
+          <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">
+            Options {strangle ? 'Strangle' : 'Straddle'} Chart
+          </h2>
+          <StraddleChart
+            items={data.items}
+            callStrike={data.callStrike}
+            putStrike={data.putStrike}
+            underlying={data.underlying}
+          />
+        </>
       )}
     </div>
   );

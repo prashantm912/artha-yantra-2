@@ -466,3 +466,25 @@ export interface BanksAnalysis {
   asOf: string;
   rows: BankAnalysisRow[];
 }
+
+/** One selected leg's OI line (Multiple OI Chart): one OI value per bucket (null where no snapshot). */
+export interface MultiOiLeg {
+  leg: string;
+  points: { bucket: string; oi: number | null }[];
+}
+
+/** One bucket of the underlying price (spot) reference line — BigDecimal STRING (never parseFloat). */
+export interface MultiOiSpotPoint {
+  bucket: string;
+  spot: string | null;
+}
+
+/** GET /api/v1/market/options/multiple-oi — N selected legs' OI lines + the underlying price line. */
+export interface MultiOi {
+  items: MultiOiLeg[];
+  spot: MultiOiSpotPoint[];
+  underlying: string;
+  expiry: string;
+  interval: string;
+  asOf: string;
+}

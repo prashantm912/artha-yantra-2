@@ -13,6 +13,7 @@ import type {
   FutSpurtChain,
   LongShortRow,
   Movers,
+  MultiOi,
   OiStats,
   OiStrikePoint,
   OptOiChart,
@@ -202,6 +203,32 @@ export function useOptionsChart(strike: string | null, intervalMinutes: number) 
       return oiGet<OptOiChart | null>('/market/options/options-chart', p.toString(), null);
     },
     enabled: satisfiable(ctx, true) && !!strike,
+  });
+}
+
+/**
+ * Multiple OI Chart (§options/multiple-oi-chart): overlay several selected legs' OI lines + the underlying
+ * price. {@code legs} are "57200 CE" labels sent as REPEATED ?leg= params; {@code intervalMinutes} is RAW
+ * MINUTES owned by the page. Disabled until ≥1 leg is selected (the BE 400s on an empty leg list).
+ */
+export function useMultiLegOiChart(legs: string[], intervalMinutes: number) {
+  const ctx = useOiCtx();
+  return useQuery({
+    queryKey: ['oi', 'multiple-oi', ctx.name, ctx.expiry, intervalMinutes, ctx.mode, ctx.date, legs.join(',')],
+    queryFn: () => {
+      const p = new URLSearchParams({
+        mode: ctx.mode,
+        name: ctx.name,
+        // OiInterval TOKEN form ("3m") — this endpoint reads reader.series() and so is OiInterval-bound
+        // (via OiQuery.of/OiInterval.parse), unlike the candle charts whose BE takes a raw int interval.
+        interval: `${intervalMinutes}m`,
+      });
+      if (ctx.date) p.set('date', ctx.date);
+      if (ctx.expiry) p.set('expiry', ctx.expiry);
+      legs.forEach((l) => p.append('leg', l));
+      return oiGet<MultiOi | null>('/market/options/multiple-oi', p.toString(), null);
+    },
+    enabled: satisfiable(ctx, true) && legs.length > 0,
   });
 }
 

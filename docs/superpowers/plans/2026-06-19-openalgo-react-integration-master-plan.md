@@ -3730,6 +3730,33 @@ cells + Go/Column-Setting):
 Live pixel side-by-side (Claude-in-Chrome on the owner's logged-in oipulse) is the visual QA gate when
 building this — the study doc is the authoritative spec until then.
 
+### 20.7.6 Options Chain — built + live-QA'd; remaining-divergence sequencing (LOCKED 2026-06-21)
+
+The faithful Options Chain shipped on `feat/wave1-options` (commits `dbaf6f9` backend `chain-table` +
+`strike-series`; `98d5ecd` FE page; `03afd5f` + `980cde3` fidelity from the live QA). A live
+Claude-in-Chrome QA vs the owner's oipulse SENSEX chain (2026-06-21) confirmed the 18-column order +
+colour semantics match. Three fixes were applied (IV shown as percent ×100; optional cols →
+Delta/Volume/Intrinsic; OI-Int badge → abbreviation `L.B./S.B./S.C./L.U.` + arrow, full label as
+aria-label). The QA checklist + full divergence log live in
+`docs/manual-tests/phase-4-wave1-options-chain.md`. The remaining divergences are sequenced (owner-locked):
+
+- **Permanent / intended (NOT to "fix"):** badge **ring** not solid fill (solid fails WCAG AA on some
+  theme×severity combos); the **`+` prefix** on positive deltas (sign must not be colour-only); **black76
+  greeks** instead of oipulse server values (§17.9 parity).
+- **Already slotted:** **INDIA VIX header** → **PR-W3** (the §20.3 "Vix endpoint" backend gap); the
+  **strike-click chart sub-view** + the **Chart** optional column → **PR-W4** (openalgo-chart).
+- **End-of-Wave-1 polish pass** (pure FE, build-once after the other W1 pages exist): strike-column tan
+  bg · stronger ATM row · max-cell **filled** highlight; **grouped Name select** (Index/Stocks — shared
+  `FilterBar`, benefits every page); **Premium / Combine-Premium** derivable optional cols; header
+  **underlying chg% + timestamp** (`asOf` exists; the chg needs prev-close → its W3 portion rides PR-W3).
+- **PR-W3 backend-dependent** (batch with the W3 backend-gap work): **interval set** Full-Day/2h/4h/10m/
+  custom-time (an `OiInterval` enum extension + custom-time pickers); **IV Chng** optional col (an
+  IV-delta field on `chain-table`); **O=H / O=L** optional cols (a `strike-session-stats` join).
+
+Net: the chain reaches full oipulse fidelity by end of **PR-W3** (+ PR-W4 for the chart click). Nothing
+dropped. This same per-page rhythm — build to the study doc, then a live Claude-in-Chrome QA, then a
+documented fidelity pass — applies to every Wave page (§20.8.2).
+
 ### 20.8 Standing UI-fidelity rules (apply to EVERY page, every wave — AUTHORITATIVE)
 
 1. **UI authority = the oipulse study, NOT the Angular app.** Every React page's layout, columns,

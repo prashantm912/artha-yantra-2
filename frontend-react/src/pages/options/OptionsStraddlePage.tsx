@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { compareDecimal, formatDecimal, isNegative, subtractDecimal } from '../../lib/decimal.ts';
+import { formatDecimal } from '../../lib/decimal.ts';
+import { nearestStrike } from '../../lib/strikes.ts';
 import { useChainTable, useStraddleChart } from '../../api/oiAnalytics.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { Select, type SelectOption } from '../../components/atoms/Select.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
+import { Metric } from '../../components/atoms/Metric.tsx';
 import { StraddleChart } from '../../components/StraddleChart.tsx';
 
 // Straddle/Strangle Chart (§20.7.6). The combined CE+PE premium candlestick + VWAP/20-EMA/Call/Put
@@ -17,31 +19,6 @@ const INTERVAL_OPTIONS: SelectOption[] = [1, 3, 5, 10, 15, 30, 60].map((m) => ({
   value: String(m),
   label: `${m} min`,
 }));
-
-/** Listed strike nearest the spot (ATM) — exact-decimal distance, never parseFloat. */
-function nearestStrike(strikes: string[], spot: string | null): string | null {
-  if (!spot) return strikes[0] ?? null;
-  let best: string | null = null;
-  let bestDist: string | null = null;
-  for (const s of strikes) {
-    const diff = subtractDecimal(s, spot);
-    const dist = isNegative(diff) ? diff.slice(1) : diff;
-    if (bestDist == null || compareDecimal(dist, bestDist) < 0) {
-      bestDist = dist;
-      best = s;
-    }
-  }
-  return best;
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <span className="rounded border border-ay-border bg-surface-1 px-2 py-1 text-xs text-ay-text">
-      <span className="text-ay-muted">{label} </span>
-      <span className="font-semibold tabular-nums">{value}</span>
-    </span>
-  );
-}
 
 export function OptionsStraddlePage() {
   const chainQ = useChainTable();

@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
-import { compareDecimal, formatDecimal, isNegative, subtractDecimal } from '../../lib/decimal.ts';
+import { formatDecimal, isNegative } from '../../lib/decimal.ts';
+import { nearestStrike } from '../../lib/strikes.ts';
 import { useChainTable, useVix } from '../../api/oiAnalytics.ts';
-import type { ChainTableRow } from '../../api/types.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
+import { Metric } from '../../components/atoms/Metric.tsx';
 import { ColumnSettings } from '../../components/ColumnSettings.tsx';
 import { OptionsChainTable } from '../../components/OptionsChainTable.tsx';
 import { OPTIONAL_COLUMN_META } from '../../components/optionsChainColumns.ts';
@@ -14,22 +15,6 @@ import { OPTIONAL_COLUMN_META } from '../../components/optionsChainColumns.ts';
 // Money/IV stay decimal strings (never parseFloat). Header gaps (INDIA VIX, underlying DH/DL/DO,
 // prev-PCR) are marked pending — they need endpoints the chain-table feed does not yet carry.
 
-/** Listed strike nearest the spot (the ATM band) — exact-decimal distance, never parseFloat. */
-function nearestStrike(rows: ChainTableRow[], spot: string | null): string | null {
-  if (!spot) return null;
-  let best: string | null = null;
-  let bestDist: string | null = null;
-  for (const r of rows) {
-    const diff = subtractDecimal(r.strike, spot);
-    const dist = isNegative(diff) ? diff.slice(1) : diff;
-    if (bestDist == null || compareDecimal(dist, bestDist) < 0) {
-      bestDist = dist;
-      best = r.strike;
-    }
-  }
-  return best;
-}
-
 /** Whole calendar days from today (IST-agnostic display) to the ISO expiry date. */
 function daysToExpiry(expiry: string | null): number | null {
   if (!expiry) return null;
@@ -38,18 +23,6 @@ function daysToExpiry(expiry: string | null): number | null {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return Math.max(0, Math.round((exp - today.getTime()) / 86_400_000));
-}
-
-function Metric({ label, value, title }: { label: string; value: string; title?: string }) {
-  return (
-    <span
-      className="rounded border border-ay-border bg-surface-1 px-2 py-1 text-xs text-ay-text"
-      title={title}
-    >
-      <span className="text-ay-muted">{label} </span>
-      <span className="font-semibold tabular-nums">{value}</span>
-    </span>
-  );
 }
 
 /** "12.97 (+2.37%)" from the VIX quote; "—" until it loads. */
@@ -67,7 +40,10 @@ export function OptionsChainPage() {
 
   const chain = chainQ.data ?? null;
   const rows = useMemo(() => chain?.rows ?? [], [chain]);
-  const atm = useMemo(() => nearestStrike(rows, chain?.spot ?? null), [rows, chain]);
+  const atm = useMemo(
+    () => nearestStrike(rows.map((r) => r.strike), chain?.spot ?? null),
+    [rows, chain],
+  );
   const dte = daysToExpiry(chain?.expiry ?? null);
   const optionalKeys = useMemo(
     () => OPTIONAL_COLUMN_META.filter((c) => optional[c.key]).map((c) => c.key),

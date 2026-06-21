@@ -1,10 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import {
-  compareDecimal,
-  formatDecimal,
-  isNegative,
-  subtractDecimal,
-} from '../../lib/decimal.ts';
+import { compareDecimal, formatDecimal } from '../../lib/decimal.ts';
+import { nearestStrike } from '../../lib/strikes.ts';
 import { useOiAnalysis, useStrikeSeries } from '../../api/oiAnalytics.ts';
 import { foldOiAnalysis } from '../../api/oiAnalysisFold.ts';
 import type { OiInterval } from '../../stores/symbolContext.store.ts';
@@ -20,22 +16,6 @@ import { OiAnalysisTable } from '../../components/OiAnalysisTable.tsx';
 // oipulse's OI-Analysis interval set is 3/5/10/15/30/60; our OiInterval lacks 10m, so we offer the
 // supported subset (1m + Full-Day/10m are the documented gaps).
 const ANALYSIS_INTERVALS: readonly OiInterval[] = ['3m', '5m', '15m', '30m', '60m'];
-
-/** Listed strike nearest the spot (ATM) — exact-decimal distance, never parseFloat. */
-function nearestStrike(strikes: string[], spot: string | null): string | null {
-  if (!spot) return strikes[0] ?? null;
-  let best: string | null = null;
-  let bestDist: string | null = null;
-  for (const s of strikes) {
-    const diff = subtractDecimal(s, spot);
-    const dist = isNegative(diff) ? diff.slice(1) : diff;
-    if (bestDist == null || compareDecimal(dist, bestDist) < 0) {
-      bestDist = dist;
-      best = s;
-    }
-  }
-  return best;
-}
 
 export function OiAnalysisPage() {
   const analysisQ = useOiAnalysis();

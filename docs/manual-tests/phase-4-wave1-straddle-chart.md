@@ -75,11 +75,16 @@ underlying header (name + price); the centered "Options Straddle/Strangle Chart"
 cache-first candle series still renders. Verified: `straddle-chart` returns **200** (was 401) with a
 null header off-hours.
 
-**Chart-with-DATA pixel render — deferred (environment, not code):** the live stack ran the **live**
-profile on a Sunday with an **expired Kite session**, and option 1m candles are fetched on demand (not
-pre-captured), so `items=[]` — no candles to draw. The endpoints are DEPLOYED and degrade cleanly
-(200). A full candlestick render needs either a weekday live Kite session or the mock stack (the mock
-historical gateway fabricates option candles); the IT already proves the candle composition + overlays.
+**Chart-with-DATA pixel render — DONE (mock stack, 2026-06-21):** the live stack on a Sunday had an
+expired Kite session (option 1m candles are fetched on demand, not pre-captured → `items=[]`), so the
+render was verified by recreating ONLY `market-data` on the **mock** profile (`artha_mock`/redis-1) —
+the gateway + session stayed live, no re-login. Driving the page (NIFTY 50 · expiry 2026-06-16 ·
+History 2026-06-15 · ATM 24150) rendered the full candlestick chart: **centered "Options Straddle
+Chart" title**, the **latest-candle readout** (`15:27 · O…H…L…C… · VWAP… · 20 EMA…`), all **5 series**
+(Straddle candles · VWAP blue · 20 EMA orange · Call green-dashed · Put red-dashed), **day H/L markers**,
+**dataZoom** slider, **toolbox**, watermark "NIFTY 50 24150", header underlying LTP. Matches the oipulse
+structure. `market-data` was then restored to the live profile. (Mock premiums are synthetic, so the
+absolute candle values aren't realistic — the STRUCTURE/overlays are what this gate verifies.)
 
 ## Documented divergences (surface to owner)
 

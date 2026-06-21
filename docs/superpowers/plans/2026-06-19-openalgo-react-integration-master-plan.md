@@ -3788,14 +3788,14 @@ bundle is a separate chunk, main payload stays ~362 KB).
   already accepted minutes; the shared `OiInterval` gap no longer applies here), a **centered title**, a
   **fixed latest-candle readout**, and the **`CE x PE` watermark** format. A backend robustness bug was
   also fixed: the header quote 401-ed the whole endpoint off-hours (no Kite session) — now best-effort,
-  so the cache-first candle series renders regardless. Full log: `docs/manual-tests/phase-4-wave1-
-  straddle-chart.md`.
+  so the cache-first candle series renders regardless. The full candlestick **rendered + verified** via
+  the mock stack (market-data recreated mock-only; gateway/session stayed live) — all 5 series, day-H/L
+  markers, dataZoom, toolbox, title + readout. Full log: `docs/manual-tests/phase-4-wave1-straddle-chart.md`.
 - **Remaining divergences (intended/deferred):** the **Strategies** sub-tab (separate payoff page);
   Call/Put lines drawn **dashed** in `bull`/`bear` tones (deliberate, theme-aware); header **change%**
   (oipulse shows underlying Chg vs prev-close — needs the W3 prev-close field, batched with the chain's
-  W3 header work). The chart-with-DATA pixel render was environment-blocked (live stack, Sunday, expired
-  Kite session, option 1m candles fetched on demand → `items=[]`); the endpoints deploy + degrade
-  cleanly (200), the IT proves the candle composition, and the render confirms on a weekday/mock session.
+  W3 header work). The chart-with-DATA pixel render was verified on the mock stack (the live stack had
+  an expired Kite session off-hours → `items=[]`; the endpoints degrade cleanly to 200 regardless).
 
 ### 20.8 Standing UI-fidelity rules (apply to EVERY page, every wave — AUTHORITATIVE)
 

@@ -373,6 +373,37 @@ export interface FutOiChart {
   items: FutOiCandle[];
 }
 
+/**
+ * One interval's leg candle of GET /api/v1/market/options/options-chart — real per-bucket OPTION-PREMIUM
+ * OHLC (from the leg's 1m bars) + the leg's OI + IV at that bucket (null when no snapshot sample). OHLC/iv
+ * are decimal STRINGS (only the chart-coordinate fold crosses to Number); oi/volume are longs.
+ */
+export interface OptCandle {
+  time: string;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  volume: number;
+  oi: number | null;
+  iv: string | null;
+}
+
+/** GET /api/v1/market/options/options-chart — one strike's CE + PE premium candle+OI/IV series (one fetch). */
+export interface OptOiChart {
+  underlying: string;
+  expiry: string;
+  strike: string;
+  ceTradingsymbol: string;
+  peTradingsymbol: string;
+  interval: string;
+  underlyingLtp: string | null;
+  underlyingDayOpen: string | null;
+  asOf: string;
+  ce: OptCandle[];
+  pe: OptCandle[];
+}
+
 /** One row of GET /api/v1/market/fii-dii/cash `{items}` — FII or DII cash buy/sell/net (₹ cr strings). */
 export interface FiiDiiRow {
   tradeDate: string;

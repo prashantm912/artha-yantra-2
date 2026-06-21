@@ -3759,6 +3759,34 @@ Net: the chain reaches full oipulse fidelity by end of **PR-W3** (+ PR-W4 for th
 dropped. This same per-page rhythm — build to the study doc, then a live Claude-in-Chrome QA, then a
 documented fidelity pass — applies to every Wave page (§20.8.2).
 
+### 20.7.7 Straddle/Strangle Chart — built (faithful to the study; live-QA pending)
+
+Built on `feat/wave1-options` to `docs/oipulse-study/strategies/straddle-chart.md`. The combined CE+PE
+premium **candlestick** + VWAP / 20-EMA / Call-Price / Put-Price overlays + day-H/L markers + dataZoom +
+toolbox — ECharts via the new lazy `EChart` wrapper (the page is `React.lazy`'d so the ~1 MB ECharts
+bundle is a separate chunk, main payload stays ~362 KB).
+
+- **KEY FINDING (2026-06-21): NO new OHLC capture pipeline.** Per-option intraday OHLC is already
+  fetchable cache-first via the generic `CandleQueryService.read(exchange, tradingsymbol, "1m", …)` (it
+  fetches the missing 1m bars from broker historical on demand for ANY tradingsymbol, option legs
+  included). So the BE just composes the two legs.
+- **Backend** `GET /api/v1/market/options/straddle-chart` (`StraddleChartService`): resolve the CE/PE
+  instruments for the strike(s), read each leg's **1m** OHLC, aggregate session-aligned (09:15 IST) to
+  the requested interval, **sum CE+PE → combined OHLC** per interval + each leg's close + summed volume.
+  `interval` is **raw minutes** (1/3/5/10/15/30/60 — wider than `OiInterval`, which lacks 10m). `strike`
+  is the straddle strike; `callStrike`/`putStrike` override it for a **strangle**. 422 on an unlisted
+  strike, 400 on an off-set interval. IT: `OptionsStraddleChartIntegrationTest` (5 — faithful invariant
+  `close == ceClose + peClose`, strangle dual-strike, REST decimal-strings, 422, 400). Drifts springdoc
+  → recaptured + `contracts/gen` regenned.
+- **Frontend** `OptionsStraddlePage` (`/options/straddle-chart`, menu wired) + `StraddleChart` composite
+  + `core/straddleSeries.ts` (VWAP/EMA/candle maths, the single sanctioned string→number boundary for
+  chart COORDINATES — displayed values stay decimal strings). Strike list + ATM default from the live
+  `/chain-table` (no snapshot dependency). A **Strangle** toggle splits the single strike into Call/Put.
+- **Documented divergences (pending live QA):** interval **10-min** option omitted (the one `OiInterval`
+  gap — same as OI Analysis); the **Strategies** sub-tab not built (separate page); Call/Put lines drawn
+  **dashed** in `bull`/`bear` tones (theme-aware, distinct from the candle bodies). Live Claude-in-Chrome
+  QA vs the owner's oipulse Straddle Chart is the remaining acceptance gate (§20.8.2).
+
 ### 20.8 Standing UI-fidelity rules (apply to EVERY page, every wave — AUTHORITATIVE)
 
 1. **UI authority = the oipulse study, NOT the Angular app.** Every React page's layout, columns,

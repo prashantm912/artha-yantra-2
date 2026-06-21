@@ -22,6 +22,7 @@ const SECTIONS: MenuSection[] = [
       { label: 'Options Chain', to: '/options/options-chain' },
       { label: 'OI Analysis', to: '/options/oi-analysis' }, // per-strike intraday time-rows (§20.7.5)
       { label: 'OI Spurt', to: '/options/oi-spurt' },
+      { label: 'Straddle Chart', to: '/options/straddle-chart' }, // combined CE+PE premium candles (§20.7.6)
       { label: 'OI Statistics' },
       { label: 'Options Premium' },
       { label: 'Trending OI' },

@@ -7,6 +7,7 @@ import type {
   OiStats,
   OiStrikePoint,
   SpurtChain,
+  StraddleChart,
   StrikeSeries,
   VixQuote,
 } from './types.ts';
@@ -115,6 +116,44 @@ export function useStrikeSeries(strike: string | null) {
         `${oiParams(ctx, true)}&strike=${encodeURIComponent(strike ?? '')}`,
         null,
       ),
+    enabled: satisfiable(ctx, true) && !!strike,
+  });
+}
+
+/**
+ * Straddle/Strangle chart feed (§20.7.6): combined CE+PE premium candles for a strike over the
+ * session. The straddle interval is RAW MINUTES (parsed from the shared OiInterval token — 10m is the
+ * one documented gap), and the BE requires a base {@code strike}; a strangle adds call/put overrides.
+ */
+export function useStraddleChart(
+  strike: string | null,
+  callStrike: string | null,
+  putStrike: string | null,
+) {
+  const ctx = useOiCtx();
+  const minutes = parseInt(ctx.interval, 10) || 3;
+  return useQuery({
+    queryKey: [
+      'oi',
+      'straddle',
+      ctx.name,
+      ctx.expiry,
+      ctx.interval,
+      ctx.mode,
+      ctx.date,
+      strike,
+      callStrike,
+      putStrike,
+    ],
+    queryFn: () => {
+      const p = new URLSearchParams({ mode: ctx.mode, name: ctx.name, interval: String(minutes) });
+      if (ctx.date) p.set('date', ctx.date);
+      if (ctx.expiry) p.set('expiry', ctx.expiry);
+      if (strike) p.set('strike', strike);
+      if (callStrike) p.set('callStrike', callStrike);
+      if (putStrike) p.set('putStrike', putStrike);
+      return oiGet<StraddleChart | null>('/market/options/straddle-chart', p.toString(), null);
+    },
     enabled: satisfiable(ctx, true) && !!strike,
   });
 }

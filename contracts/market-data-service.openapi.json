@@ -967,6 +967,93 @@
         }
       }
     },
+    "/api/v1/market/options/straddle-chart" : {
+      "get" : {
+        "tags" : [ "options-analytics-controller" ],
+        "operationId" : "straddleChart",
+        "parameters" : [ {
+          "name" : "mode",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "name",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "date",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "expiry",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "strike",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "number"
+          }
+        }, {
+          "name" : "callStrike",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "number"
+          }
+        }, {
+          "name" : "putStrike",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "number"
+          }
+        }, {
+          "name" : "interval",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 3
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/StraddleChart"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/options/spurt" : {
       "get" : {
         "tags" : [ "options-analytics-controller" ],
@@ -3226,6 +3313,74 @@
             "type" : "array",
             "items" : {
               "$ref" : "#/components/schemas/StrikeSessionStat"
+            }
+          }
+        }
+      },
+      "StraddleCandle" : {
+        "type" : "object",
+        "properties" : {
+          "time" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "open" : {
+            "type" : "number"
+          },
+          "high" : {
+            "type" : "number"
+          },
+          "low" : {
+            "type" : "number"
+          },
+          "close" : {
+            "type" : "number"
+          },
+          "ceClose" : {
+            "type" : "number"
+          },
+          "peClose" : {
+            "type" : "number"
+          },
+          "volume" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "StraddleChart" : {
+        "type" : "object",
+        "properties" : {
+          "underlying" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "callStrike" : {
+            "type" : "number"
+          },
+          "putStrike" : {
+            "type" : "number"
+          },
+          "interval" : {
+            "type" : "string"
+          },
+          "underlyingLtp" : {
+            "type" : "number"
+          },
+          "underlyingDayOpen" : {
+            "type" : "number"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/StraddleCandle"
             }
           }
         }

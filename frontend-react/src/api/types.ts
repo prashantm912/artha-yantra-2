@@ -51,6 +51,31 @@ export interface VixQuote {
   asOf: string;
 }
 
+/** One interval's combined straddle candle (GET /straddle-chart): summed CE+PE OHLC + each leg's close. */
+export interface StraddleCandle {
+  time: string;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  ceClose: string;
+  peClose: string;
+  volume: number;
+}
+
+/** GET /api/v1/market/options/straddle-chart — combined CE+PE premium candles + the header strip. */
+export interface StraddleChart {
+  underlying: string;
+  expiry: string;
+  callStrike: string;
+  putStrike: string;
+  interval: string;
+  underlyingLtp: string | null;
+  underlyingDayOpen: string | null;
+  asOf: string;
+  items: StraddleCandle[];
+}
+
 /** GET /api/v1/market/options/oi-analysis/strike-series — one strike's CE+PE points per session bucket. */
 export interface StrikeSeries {
   underlying: string;

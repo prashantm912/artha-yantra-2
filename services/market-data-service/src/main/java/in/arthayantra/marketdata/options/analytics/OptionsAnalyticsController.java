@@ -36,6 +36,7 @@ public class OptionsAnalyticsController {
   private final OiPremiumService premiumService;
   private final OiTrendingService trendingService;
   private final OpenHighStatsService openHighStats;
+  private final StraddleChartService straddleChartService;
   private final int bigOiTopN;
   private final int trendBuckets;
   private final int premiumBuckets;
@@ -50,6 +51,7 @@ public class OptionsAnalyticsController {
       OiPremiumService premiumService,
       OiTrendingService trendingService,
       OpenHighStatsService openHighStats,
+      StraddleChartService straddleChartService,
       @Value("${artha.options.big-oi-top-n:10}") int bigOiTopN,
       @Value("${artha.options.trend-buckets:20}") int trendBuckets,
       @Value("${artha.options.premium-buckets:60}") int premiumBuckets,
@@ -62,6 +64,7 @@ public class OptionsAnalyticsController {
     this.premiumService = premiumService;
     this.trendingService = trendingService;
     this.openHighStats = openHighStats;
+    this.straddleChartService = straddleChartService;
     this.bigOiTopN = bigOiTopN;
     this.trendBuckets = trendBuckets;
     this.premiumBuckets = premiumBuckets;
@@ -344,6 +347,27 @@ public class OptionsAnalyticsController {
     List<OptionsSnapshotReader.StrikePoint> series =
         reader.series(q.name(), exp, q.interval(), from, newest.plus(q.interval().bucket()));
     return premiumService.premiumSeries(series);
+  }
+
+  /**
+   * /straddle-chart: oipulse Straddle Chart (plan §20.7.6) — the combined CE+PE premium candle series
+   * for a strike over the session. {@code interval} is RAW MINUTES (1/3/5/10/15/30/60 — wider than the
+   * OI pages' {@code OiInterval}); {@code strike} is the straddle strike; {@code callStrike}/
+   * {@code putStrike} override it for a strangle. Live mode → today IST; history → {@code date}.
+   */
+  @GetMapping("/straddle-chart")
+  public StraddleChartService.StraddleChart straddleChart(
+      @RequestParam(required = false) String mode,
+      @RequestParam String name,
+      @RequestParam(required = false) String date,
+      @RequestParam(required = false) String expiry,
+      @RequestParam BigDecimal strike,
+      @RequestParam(required = false) BigDecimal callStrike,
+      @RequestParam(required = false) BigDecimal putStrike,
+      @RequestParam(required = false, defaultValue = "3") int interval) {
+    OiQuery q = OiQuery.of(mode, name, date, null, expiry);
+    return straddleChartService.chart(
+        q.name(), q.expiry(), strike, callStrike, putStrike, interval, q.date());
   }
 
   /** /trending: oipulse OI Trending — per-bucket total/CE/PE OI + UP/DOWN/FLAT over the last N buckets. */

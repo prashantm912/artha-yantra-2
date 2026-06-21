@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { foldActiveStrikeSeries } from './activeStrikesFold.ts';
-import type { ActiveStrikeOiPoint, SentimentPoint } from './types.ts';
+import { foldActiveStrikeIvSeries, foldActiveStrikeSeries } from './activeStrikesFold.ts';
+import type { ActiveStrikeIvPoint, ActiveStrikeOiPoint, SentimentPoint } from './types.ts';
 
 const B0 = '2026-06-20T09:15:00+05:30';
 const B1 = '2026-06-20T09:18:00+05:30';
@@ -42,5 +42,29 @@ describe('foldActiveStrikeSeries', () => {
       putOi: [],
       sentiment: [],
     });
+  });
+});
+
+describe('foldActiveStrikeIvSeries', () => {
+  it('maps the IV series to HH:mm + numeric callIv/putIv/price (decimal strings → number)', () => {
+    const iv: ActiveStrikeIvPoint[] = [
+      { bucket: B0, ceIv: '13.840000', peIv: '19.200000', price: '57700.0000' },
+      { bucket: B1, ceIv: '15.250000', peIv: '21.400000', price: '57750.0000' },
+    ];
+    const r = foldActiveStrikeIvSeries(iv);
+    expect(r.times).toEqual(['09:15', '09:18']);
+    expect(r.callIv).toEqual([13.84, 15.25]);
+    expect(r.putIv).toEqual([19.2, 21.4]);
+    expect(r.price).toEqual([57700, 57750]);
+  });
+
+  it('a null IV leg rides through as null (line gaps, not a zero)', () => {
+    const r = foldActiveStrikeIvSeries([{ bucket: B0, ceIv: null, peIv: '19.20', price: '57700' }]);
+    expect(r.callIv).toEqual([null]);
+    expect(r.putIv).toEqual([19.2]);
+  });
+
+  it('null/undefined input → empty arrays', () => {
+    expect(foldActiveStrikeIvSeries(null)).toEqual({ times: [], callIv: [], putIv: [], price: [] });
   });
 });

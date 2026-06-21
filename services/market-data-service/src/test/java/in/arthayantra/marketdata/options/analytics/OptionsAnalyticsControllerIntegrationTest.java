@@ -233,9 +233,10 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
                 .param("interval", "5m"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.items.length()").value(1))
-        // buckets absent -> response shape UNCHANGED: NEITHER series key present
+        // buckets absent -> response shape UNCHANGED: NONE of the three series keys present
         .andExpect(jsonPath("$.sentimentSeries").doesNotExist())
-        .andExpect(jsonPath("$.activeStrikeOiSeries").doesNotExist());
+        .andExpect(jsonPath("$.activeStrikeOiSeries").doesNotExist())
+        .andExpect(jsonPath("$.activeStrikeIvSeries").doesNotExist());
   }
 
   @Test
@@ -269,6 +270,36 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
         .andExpect(jsonPath("$.activeStrikeOiSeries[0].peOi").value(1000))
         .andExpect(jsonPath("$.activeStrikeOiSeries[1].ceOi").value(900))
         .andExpect(jsonPath("$.activeStrikeOiSeries[1].peOi").value(1100));
+  }
+
+  @Test
+  void activeStrikesAddsIvSeriesWhenBucketsPresent() throws Exception {
+    String u = "ACTIVEIV";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    OffsetDateTime b0 =
+        OffsetDateTime.of(2026, 6, 20, 9, 15, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime b1 = b0.plusMinutes(5);
+    // Single active strike 22500 (iv seeded via the iv-overload): CE IV / PE IV + spot per bucket.
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b0, u, exp, "22500", "CE", "100", 1000L, 0L, 0L, "13.84");
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b0, u, exp, "22500", "PE", "90", 1000L, 0L, 0L, "19.20");
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b1, u, exp, "22500", "CE", "110", 900L, 0L, 0L, "12.50");
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b1, u, exp, "22500", "PE", "80", 1100L, 0L, 0L, "20.10");
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/active-strikes")
+                .param("name", u)
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m")
+                .param("buckets", "20"))
+        .andExpect(status().isOk())
+        // The IV series rides the SAME buckets param; values carry the column scale (iv NUMERIC(12,6),
+        // spot_price NUMERIC(18,4) — both seeded by the iv-overload, spot_price=22480.0000).
+        .andExpect(jsonPath("$.activeStrikeIvSeries.length()").value(2))
+        .andExpect(jsonPath("$.activeStrikeIvSeries[0].ceIv").value("13.840000"))
+        .andExpect(jsonPath("$.activeStrikeIvSeries[0].peIv").value("19.200000"))
+        .andExpect(jsonPath("$.activeStrikeIvSeries[0].price").value("22480.0000"))
+        .andExpect(jsonPath("$.activeStrikeIvSeries[1].ceIv").value("12.500000")); // newest-last
   }
 
   @Test

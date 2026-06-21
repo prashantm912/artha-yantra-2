@@ -1246,6 +1246,13 @@ export interface components {
             oiChange?: number;
             ltp?: number;
         };
+        ActiveStrikeIvPoint: {
+            /** Format: date-time */
+            bucket?: string;
+            ceIv?: number;
+            peIv?: number;
+            price?: number;
+        };
         ActiveStrikeOiPoint: {
             /** Format: date-time */
             bucket?: string;
@@ -1259,6 +1266,7 @@ export interface components {
             items?: components["schemas"]["StrikeView"][];
             sentimentSeries?: components["schemas"]["SentimentPoint"][];
             activeStrikeOiSeries?: components["schemas"]["ActiveStrikeOiPoint"][];
+            activeStrikeIvSeries?: components["schemas"]["ActiveStrikeIvPoint"][];
             /** Format: date-time */
             asOf?: string;
         };

@@ -34,6 +34,18 @@ export interface ActiveStrikeOiPoint {
 }
 
 /**
+ * One active-strike Call/Put IV + price point per bucket (active-strikes?buckets=N → the Active Strikes
+ * IV chart). IV/price are BigDecimal STRINGS (never parseFloat); the chart coordinate is the only number
+ * crossing. The single peak-OI strike's IVs (IV is unsummable — see the BE activeStrikeIvSeries).
+ */
+export interface ActiveStrikeIvPoint {
+  bucket: string;
+  ceIv: string | null;
+  peIv: string | null;
+  price: string | null;
+}
+
+/**
  * GET /api/v1/market/options/active-strikes — sentiment + top-N strikes; 422 DATA_GAP on empty. The two
  * `*Series` arrays ride the optional `buckets` param (omitted byte-identically when absent).
  */
@@ -42,6 +54,7 @@ export interface ActiveStrikes {
   items: StrikeView[];
   sentimentSeries?: SentimentPoint[] | null;
   activeStrikeOiSeries?: ActiveStrikeOiPoint[] | null;
+  activeStrikeIvSeries?: ActiveStrikeIvPoint[] | null;
   asOf: string;
 }
 

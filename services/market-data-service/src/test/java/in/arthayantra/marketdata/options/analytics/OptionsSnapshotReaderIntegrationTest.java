@@ -236,4 +236,37 @@ class OptionsSnapshotReaderIntegrationTest extends MarketDataIntegrationTestBase
         volume,
         "22480.00");
   }
+
+  /** As above, plus an explicit per-leg {@code iv} (the Active Strikes IV series reads it). */
+  static void insertRow(
+      JdbcTemplate jdbc,
+      OffsetDateTime ts,
+      String u,
+      LocalDate exp,
+      String strike,
+      String type,
+      String ltp,
+      Long oi,
+      Long oiChange,
+      Long volume,
+      String iv) {
+    jdbc.update(
+        "INSERT INTO options_chain_snapshots "
+            + "(ts, underlying, expiry, strike, option_type, tradingsymbol, ltp, oi, oi_change, volume,"
+            + " spot_price, iv) "
+            + "VALUES (?,?,?,?::numeric,?,?,?::numeric,?,?,?,?::numeric,?::numeric) "
+            + "ON CONFLICT DO NOTHING",
+        java.sql.Timestamp.from(ts.toInstant()),
+        u,
+        java.sql.Date.valueOf(exp),
+        strike,
+        type,
+        u + strike + type,
+        ltp,
+        oi,
+        oiChange,
+        volume,
+        "22480.00",
+        iv);
+  }
 }

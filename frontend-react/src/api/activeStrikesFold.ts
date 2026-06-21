@@ -1,4 +1,4 @@
-import type { ActiveStrikeOiPoint, SentimentPoint } from './types.ts';
+import type { ActiveStrikeIvPoint, ActiveStrikeOiPoint, SentimentPoint } from './types.ts';
 
 // Fold for the oipulse "Active Strikes OI" page (§options/active-strikes). The endpoint (with buckets=N)
 // returns two per-bucket arrays built from the SAME server-side fold + the same active-strike selection,
@@ -36,5 +36,31 @@ export function foldActiveStrikeSeries(
       const s = sentBy.get(b)?.sentimentPct;
       return s == null ? null : Number(s);
     }),
+  };
+}
+
+export interface ActiveStrikeIvViz {
+  /** "HH:mm", oldest-first. */
+  times: string[];
+  callIv: (number | null)[];
+  putIv: (number | null)[];
+  price: (number | null)[];
+}
+
+/**
+ * Fold the active-strike IV series (single peak strike's CE/PE IV + price per bucket) into the dual-axis
+ * chart's parallel arrays. Decimal strings cross to number ONLY here (the ECharts coordinate boundary);
+ * nulls (an absent IV leg) ride through so the line gaps rather than plots a zero.
+ */
+export function foldActiveStrikeIvSeries(
+  iv: ActiveStrikeIvPoint[] | null | undefined,
+): ActiveStrikeIvViz {
+  const points = iv ?? [];
+  const num = (s: string | null | undefined): number | null => (s == null ? null : Number(s));
+  return {
+    times: points.map((p) => hhmm(p.bucket)),
+    callIv: points.map((p) => num(p.ceIv)),
+    putIv: points.map((p) => num(p.peIv)),
+    price: points.map((p) => num(p.price)),
   };
 }

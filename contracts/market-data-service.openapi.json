@@ -3967,6 +3967,24 @@
           }
         }
       },
+      "ActiveStrikeIvPoint" : {
+        "type" : "object",
+        "properties" : {
+          "bucket" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "ceIv" : {
+            "type" : "number"
+          },
+          "peIv" : {
+            "type" : "number"
+          },
+          "price" : {
+            "type" : "number"
+          }
+        }
+      },
       "ActiveStrikeOiPoint" : {
         "type" : "object",
         "properties" : {
@@ -4006,6 +4024,12 @@
             "type" : "array",
             "items" : {
               "$ref" : "#/components/schemas/ActiveStrikeOiPoint"
+            }
+          },
+          "activeStrikeIvSeries" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ActiveStrikeIvPoint"
             }
           },
           "asOf" : {

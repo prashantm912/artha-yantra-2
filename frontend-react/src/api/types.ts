@@ -39,6 +39,18 @@ export interface OiStrikePoint {
   spot: string | null;
 }
 
+/** GET /api/v1/market/vix — the INDIA VIX quote (pinned index): LTP + day OHLC + change vs prev close. */
+export interface VixQuote {
+  ltp: string | null;
+  dayHigh: string | null;
+  dayLow: string | null;
+  dayOpen: string | null;
+  prevClose: string | null;
+  change: string | null;
+  changePct: string | null;
+  asOf: string;
+}
+
 /** GET /api/v1/market/options/oi-analysis/strike-series — one strike's CE+PE points per session bucket. */
 export interface StrikeSeries {
   underlying: string;

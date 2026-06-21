@@ -3743,8 +3743,10 @@ aria-label). The QA checklist + full divergence log live in
 - **Permanent / intended (NOT to "fix"):** badge **ring** not solid fill (solid fails WCAG AA on some
   theme×severity combos); the **`+` prefix** on positive deltas (sign must not be colour-only); **black76
   greeks** instead of oipulse server values (§17.9 parity).
-- **Already slotted:** **INDIA VIX header** → **PR-W3** (the §20.3 "Vix endpoint" backend gap); the
-  **strike-click chart sub-view** + the **Chart** optional column → **PR-W4** (openalgo-chart).
+- **INDIA VIX header → DONE** (pulled forward from PR-W3, owner-chosen 2026-06-21): new
+  `GET /api/v1/market/vix` (the pinned INDIA VIX index quote → LTP + day OHLC + change) wired into the
+  chain header. The **strike-click chart sub-view** + the **Chart** optional column → **PR-W4**
+  (openalgo-chart).
 - **End-of-Wave-1 polish pass** (pure FE, build-once after the other W1 pages exist): strike-column tan
   bg · stronger ATM row · max-cell **filled** highlight; **grouped Name select** (Index/Stocks — shared
   `FilterBar`, benefits every page); **Premium / Combine-Premium** derivable optional cols; header

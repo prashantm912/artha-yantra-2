@@ -8,6 +8,7 @@ import type {
   OiStrikePoint,
   SpurtChain,
   StrikeSeries,
+  VixQuote,
 } from './types.ts';
 
 // OI-analytics query hooks (master plan §20 / §11.2). The Angular store hand-rolled 13 generation
@@ -115,6 +116,16 @@ export function useStrikeSeries(strike: string | null) {
         null,
       ),
     enabled: satisfiable(ctx, true) && !!strike,
+  });
+}
+
+/** INDIA VIX quote (the pinned index) for the chain header — polls on the live header cadence. */
+export function useVix() {
+  return useQuery({
+    queryKey: ['market', 'vix'],
+    queryFn: () => oiGet<VixQuote | null>('/market/vix', '', null),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
   });
 }
 

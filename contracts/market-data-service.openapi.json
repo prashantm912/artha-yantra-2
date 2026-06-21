@@ -628,6 +628,34 @@
         }
       }
     },
+    "/api/v1/market/vix" : {
+      "get" : {
+        "tags" : [ "market-surface-controller" ],
+        "operationId" : "vix",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/VixQuote"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/ticks/latest" : {
       "get" : {
         "tags" : [ "market-surface-controller" ],
@@ -2992,6 +3020,36 @@
             "type" : "string"
           },
           "tokenValidUntil" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "VixQuote" : {
+        "type" : "object",
+        "properties" : {
+          "ltp" : {
+            "type" : "number"
+          },
+          "dayHigh" : {
+            "type" : "number"
+          },
+          "dayLow" : {
+            "type" : "number"
+          },
+          "dayOpen" : {
+            "type" : "number"
+          },
+          "prevClose" : {
+            "type" : "number"
+          },
+          "change" : {
+            "type" : "number"
+          },
+          "changePct" : {
+            "type" : "number"
+          },
+          "asOf" : {
             "type" : "string",
             "format" : "date-time"
           }

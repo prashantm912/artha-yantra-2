@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { compareDecimal, formatDecimal, isNegative, subtractDecimal } from '../../lib/decimal.ts';
-import { useChainTable } from '../../api/oiAnalytics.ts';
+import { useChainTable, useVix } from '../../api/oiAnalytics.ts';
 import type { ChainTableRow } from '../../api/types.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
@@ -52,8 +52,17 @@ function Metric({ label, value, title }: { label: string; value: string; title?:
   );
 }
 
+/** "12.97 (+2.37%)" from the VIX quote; "—" until it loads. */
+function vixLabel(ltp: string | null | undefined, changePct: string | null | undefined): string {
+  if (!ltp) return '—';
+  if (!changePct) return formatDecimal(ltp, 2);
+  const sign = isNegative(changePct) ? '' : '+';
+  return `${formatDecimal(ltp, 2)} (${sign}${formatDecimal(changePct, 2)}%)`;
+}
+
 export function OptionsChainPage() {
   const chainQ = useChainTable();
+  const vixQ = useVix();
   const [optional, setOptional] = useState<Record<string, boolean>>({});
 
   const chain = chainQ.data ?? null;
@@ -82,7 +91,15 @@ export function OptionsChainPage() {
       {/* Live header strip (§20.7.4). Max-pain/Sentiment intentionally NOT here — they belong to the
           separate OI Statistics / Active Strikes pages. */}
       <div className="mb-3 flex flex-wrap items-center gap-2" aria-live="polite">
-        <Metric label="INDIA VIX" value="—" title="No VIX endpoint yet (Wave-3 gap)" />
+        <Metric
+          label="INDIA VIX"
+          value={vixLabel(vixQ.data?.ltp, vixQ.data?.changePct)}
+          title={
+            vixQ.data?.dayHigh
+              ? `DH ${formatDecimal(vixQ.data.dayHigh, 2)} · DL ${vixQ.data.dayLow ? formatDecimal(vixQ.data.dayLow, 2) : '—'} · DO ${vixQ.data.dayOpen ? formatDecimal(vixQ.data.dayOpen, 2) : '—'}`
+              : undefined
+          }
+        />
         <Metric label="Total PCR" value={chain?.pcr ? formatDecimal(chain.pcr, 2) : '—'} />
         <Metric label="ATM" value={atm ?? '—'} />
         <Metric label="Days to expiry" value={dte != null ? String(dte) : '—'} />

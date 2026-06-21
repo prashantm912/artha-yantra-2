@@ -1,7 +1,13 @@
 package in.arthayantra.marketdata.feed;
 
+import in.arthayantra.common.web.error.ApiException;
+import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketcalendar.MarketCalendar;
+import in.arthayantra.marketdata.kite.InstrumentKey;
+import in.arthayantra.marketdata.kite.QuoteGateway;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -11,20 +17,66 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** The small Phase-17 market surface: last ticks + the calendar status (B-1). */
+/** The small Phase-17 market surface: last ticks + the calendar status (B-1) + the INDIA VIX quote. */
 @RestController
 @RequestMapping("/api/v1/market")
 public class MarketSurfaceController {
 
+  /** INDIA VIX is an ordinary pinned NSE index instrument (FP-14) — no special casing. */
+  private static final InstrumentKey VIX_KEY = new InstrumentKey("NSE", "INDIA VIX");
+  private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
+
   private final LastTickStore lastTickStore;
   private final MarketCalendar calendar;
+  private final QuoteGateway quoteGateway;
   private final Clock clock;
 
   /** Wires the read paths. */
-  public MarketSurfaceController(LastTickStore lastTickStore, MarketCalendar calendar, Clock clock) {
+  public MarketSurfaceController(
+      LastTickStore lastTickStore,
+      MarketCalendar calendar,
+      QuoteGateway quoteGateway,
+      Clock clock) {
     this.lastTickStore = lastTickStore;
     this.calendar = calendar;
+    this.quoteGateway = quoteGateway;
     this.clock = clock;
+  }
+
+  /** INDIA VIX quote: LTP + day OHLC + change vs the previous close (the §20.7.4 header VIX). */
+  public record VixQuote(
+      BigDecimal ltp,
+      BigDecimal dayHigh,
+      BigDecimal dayLow,
+      BigDecimal dayOpen,
+      BigDecimal prevClose,
+      BigDecimal change,
+      BigDecimal changePct,
+      OffsetDateTime asOf) {}
+
+  /** GET /vix: the INDIA VIX quote (the pinned index); 422 DATA_GAP when no quote (off-hours / mock). */
+  @GetMapping("/vix")
+  public VixQuote vix() {
+    QuoteGateway.Quote q = quoteGateway.quotes(List.of(VIX_KEY)).get(VIX_KEY);
+    if (q == null || q.lastPrice() == null) {
+      throw new ApiException(422, ErrorCodes.DATA_GAP, "no INDIA VIX quote");
+    }
+    QuoteGateway.Quote.Ohlc o = q.ohlc();
+    BigDecimal prevClose = o == null ? null : o.close();
+    BigDecimal change = prevClose == null ? null : q.lastPrice().subtract(prevClose);
+    BigDecimal changePct =
+        prevClose == null || prevClose.signum() == 0
+            ? null
+            : change.multiply(HUNDRED).divide(prevClose, 4, RoundingMode.HALF_UP);
+    return new VixQuote(
+        q.lastPrice(),
+        o == null ? null : o.high(),
+        o == null ? null : o.low(),
+        o == null ? null : o.open(),
+        prevClose,
+        change,
+        changePct,
+        q.timestamp());
   }
 
   /** The conflated last-tick MAP, optionally filtered by a symbols CSV (B-1). */

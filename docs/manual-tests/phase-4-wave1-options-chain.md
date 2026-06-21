@@ -57,8 +57,9 @@ ATM cream-tint row; per-strike PCR; signed-toned OI%/LTP%/LTP Chg; Go + Column S
   full label kept as the accessible name (`aria-label`) + tooltip. Remaining divergence: oipulse uses a
   **solid colour fill**; ours keeps a **ring outline** (a deliberate WCAG-contrast choice — solid fills
   fail AA on some theme/severity combos). Colour semantics already matched.
-- **INDIA VIX header** = `—` (gap): oipulse shows `INDIA VIX 12.97, Chg +0.30 (2.35%)`. We capture India
-  VIX as a pinned index but have **no read endpoint** — needs one (Wave-3 §20.2) to fill the slot.
+- **INDIA VIX header** = WIRED (2026-06-21): `GET /api/v1/market/vix` (the pinned INDIA VIX index quote →
+  LTP + day OHLC + change) now fills the header as `INDIA VIX 12.97 (+2.37%)`, with DH/DL/DO in the
+  tooltip. 422 → `—` off-hours / in mock (no VIX quote). Was a Wave-3 gap; pulled forward.
 - **Header detail**: oipulse header = INDIA VIX · Total PCR (+chg) · Underlying (name + LTP + chg% +
   timestamp). It does **NOT** show ATM / Days-to-Expiry chips (ours adds them as extras). Add PCR-change +
   underlying-change% + timestamp; ATM/DTE are an over-spec vs the live page.

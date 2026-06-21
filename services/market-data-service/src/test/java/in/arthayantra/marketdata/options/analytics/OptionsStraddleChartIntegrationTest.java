@@ -7,15 +7,21 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import in.arthayantra.marketdata.instruments.InstrumentRepository;
 import in.arthayantra.marketdata.instruments.InstrumentSyncService;
+import in.arthayantra.marketdata.kite.QuoteGateway;
 import in.arthayantra.marketdata.testsupport.MarketDataIntegrationTestBase;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -39,6 +45,27 @@ class OptionsStraddleChartIntegrationTest extends MarketDataIntegrationTestBase 
   private static final LocalDate EXPIRY = LocalDate.parse("2026-06-16");
   private static final String SESSION = "2026-06-15";
 
+  /**
+   * A spot-quote gateway whose failure mode is switchable: off-hours the live Kite quote throws
+   * (no session), and the chart's candle data must survive that — the header degrades, the chart does
+   * not 401. Defaults to an empty map (header null) so boot never needs a live quote.
+   */
+  @TestConfiguration
+  static class QuoteConfig {
+    static final AtomicBoolean THROW = new AtomicBoolean(false);
+
+    @Bean
+    @Primary
+    QuoteGateway quoteGateway() {
+      return keys -> {
+        if (THROW.get()) {
+          throw new IllegalStateException("no live Kite session for quotes");
+        }
+        return Map.of();
+      };
+    }
+  }
+
   @Autowired private MockMvc mockMvc;
   @Autowired private InstrumentSyncService syncService;
   @Autowired private InstrumentRepository instruments;
@@ -46,6 +73,7 @@ class OptionsStraddleChartIntegrationTest extends MarketDataIntegrationTestBase 
 
   @BeforeEach
   void seedChain() {
+    QuoteConfig.THROW.set(false);
     syncService.runSync();
   }
 
@@ -81,6 +109,20 @@ class OptionsStraddleChartIntegrationTest extends MarketDataIntegrationTestBase 
     assertThat(chart.items())
         .isSortedAccordingTo(java.util.Comparator.comparing(StraddleChartService.StraddleCandle::time));
     assertThat(chart.items().get(0).time().toString()).startsWith(SESSION + "T09:15");
+  }
+
+  @Test
+  void underlyingQuoteFailureDegradesHeaderNotTheChart() {
+    QuoteConfig.THROW.set(true); // off-hours: the live Kite quote throws (KITE_TOKEN_EXPIRED)
+    BigDecimal strike = midStrike();
+
+    StraddleChartService.StraddleChart chart =
+        straddleChartService.chart(UNDERLYING, EXPIRY, strike, null, null, 5, LocalDate.parse(SESSION));
+
+    // the candle series is read cache-first (no live quote) → it MUST still render; the header degrades.
+    assertThat(chart.items()).isNotEmpty();
+    assertThat(chart.underlyingLtp()).isNull();
+    assertThat(chart.underlyingDayOpen()).isNull();
   }
 
   @Test

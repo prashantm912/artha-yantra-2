@@ -199,14 +199,22 @@ public class StraddleChartService {
                     "no " + type + " instrument for " + underlying + " " + expiry + " @ " + strike));
   }
 
-  /** The underlying spot quote (for the header LTP + day-open); null when unavailable. */
+  /**
+   * The underlying spot quote (for the header LTP + day-open) — BEST EFFORT. The chart's candle data
+   * is read cache-first and needs no live quote, so a quote-gateway failure (e.g. no live Kite session
+   * off-hours → {@code KITE_TOKEN_EXPIRED}) must NOT block the chart: swallow it and null the header.
+   */
   private QuoteGateway.Quote underlyingQuote(List<Instrument> chain, String underlying) {
     String exch =
         chain.isEmpty() || chain.get(0).underlyingExchange() == null
             ? "NSE"
             : chain.get(0).underlyingExchange();
     InstrumentKey key = new InstrumentKey(exch, underlying);
-    return Optional.ofNullable(quoteGateway.quotes(List.of(key)).get(key)).orElse(null);
+    try {
+      return Optional.ofNullable(quoteGateway.quotes(List.of(key)).get(key)).orElse(null);
+    } catch (RuntimeException quoteUnavailable) {
+      return null; // header degrades to "—"; the candle series still renders
+    }
   }
 
   /** Mutable OHLCV accumulator for one interval bucket (1m bars folded in time order). */

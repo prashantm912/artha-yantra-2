@@ -37,6 +37,7 @@ public class OptionsAnalyticsController {
   private final OiTrendingService trendingService;
   private final OpenHighStatsService openHighStats;
   private final StraddleChartService straddleChartService;
+  private final OptionsOiChartService optionsOiChartService;
   private final int bigOiTopN;
   private final int trendBuckets;
   private final int premiumBuckets;
@@ -52,6 +53,7 @@ public class OptionsAnalyticsController {
       OiTrendingService trendingService,
       OpenHighStatsService openHighStats,
       StraddleChartService straddleChartService,
+      OptionsOiChartService optionsOiChartService,
       @Value("${artha.options.big-oi-top-n:10}") int bigOiTopN,
       @Value("${artha.options.trend-buckets:20}") int trendBuckets,
       @Value("${artha.options.premium-buckets:60}") int premiumBuckets,
@@ -65,6 +67,7 @@ public class OptionsAnalyticsController {
     this.trendingService = trendingService;
     this.openHighStats = openHighStats;
     this.straddleChartService = straddleChartService;
+    this.optionsOiChartService = optionsOiChartService;
     this.bigOiTopN = bigOiTopN;
     this.trendBuckets = trendBuckets;
     this.premiumBuckets = premiumBuckets;
@@ -379,6 +382,39 @@ public class OptionsAnalyticsController {
     OiQuery q = OiQuery.of(mode, name, date, null, expiry);
     return straddleChartService.chart(
         q.name(), q.expiry(), strike, callStrike, putStrike, interval, q.date());
+  }
+
+  /**
+   * /options-chart: the oipulse Options Chart (plan §options/options-chart) — per LEG (Call + Put of one
+   * {@code strike}) the option-premium candlestick + OI line (the FE adds VWAP + day H/L). One fetch
+   * returns BOTH legs; the FE Show toggle picks which render. {@code interval} is RAW MINUTES
+   * (1/3/5/10/15/30/60). Map envelope (no typed schema). 422 on an unlisted strike, 400 on an off-set
+   * interval. The nullable header quote (off-hours) rides a LinkedHashMap (Map.of rejects nulls).
+   */
+  @GetMapping("/options-chart")
+  public Map<String, Object> optionsChart(
+      @RequestParam(required = false) String mode,
+      @RequestParam String name,
+      @RequestParam(required = false) String date,
+      @RequestParam(required = false) String expiry,
+      @RequestParam BigDecimal strike,
+      @RequestParam(required = false, defaultValue = "3") int interval) {
+    OiQuery q = OiQuery.of(mode, name, date, null, expiry);
+    OptionsOiChartService.OptOiChart chart =
+        optionsOiChartService.chart(q.name(), q.expiry(), strike, interval, q.date());
+    Map<String, Object> out = new LinkedHashMap<>();
+    out.put("ce", chart.ce());
+    out.put("pe", chart.pe());
+    out.put("underlying", chart.underlying());
+    out.put("expiry", chart.expiry());
+    out.put("strike", chart.strike());
+    out.put("ceTradingsymbol", chart.ceTradingsymbol());
+    out.put("peTradingsymbol", chart.peTradingsymbol());
+    out.put("interval", chart.interval());
+    out.put("underlyingLtp", chart.underlyingLtp()); // nullable off-hours
+    out.put("underlyingDayOpen", chart.underlyingDayOpen()); // nullable off-hours
+    out.put("asOf", chart.asOf());
+    return out;
   }
 
   /** /trending: oipulse OI Trending — per-bucket total/CE/PE OI + UP/DOWN/FLAT over the last N buckets. */

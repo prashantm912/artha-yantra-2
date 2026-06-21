@@ -14,6 +14,7 @@ import type {
   Movers,
   OiStats,
   OiStrikePoint,
+  OptOiChart,
   ParticipantOiRow,
   PremiumChain,
   SpurtChain,
@@ -175,6 +176,29 @@ export function useStraddleChart(
       if (callStrike) p.set('callStrike', callStrike);
       if (putStrike) p.set('putStrike', putStrike);
       return oiGet<StraddleChart | null>('/market/options/straddle-chart', p.toString(), null);
+    },
+    enabled: satisfiable(ctx, true) && !!strike,
+  });
+}
+
+/**
+ * Options Chart (§options/options-chart): one strike's CE + PE premium candle + OI/IV series (one fetch,
+ * both legs). {@code intervalMinutes} is RAW MINUTES owned by the page (1/3/5/10/15/30/60). Needs a strike.
+ */
+export function useOptionsChart(strike: string | null, intervalMinutes: number) {
+  const ctx = useOiCtx();
+  return useQuery({
+    queryKey: ['oi', 'options-chart', ctx.name, ctx.expiry, intervalMinutes, ctx.mode, ctx.date, strike],
+    queryFn: () => {
+      const p = new URLSearchParams({
+        mode: ctx.mode,
+        name: ctx.name,
+        interval: String(intervalMinutes),
+      });
+      if (ctx.date) p.set('date', ctx.date);
+      if (ctx.expiry) p.set('expiry', ctx.expiry);
+      if (strike) p.set('strike', strike);
+      return oiGet<OptOiChart | null>('/market/options/options-chart', p.toString(), null);
     },
     enabled: satisfiable(ctx, true) && !!strike,
   });

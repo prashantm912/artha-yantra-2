@@ -36,7 +36,7 @@ function hhmm(iso: string): string {
 }
 
 /** Cumulative volume-weighted average of `closes` (oipulse VWAP); flat-carries across zero-volume. */
-function vwapOf(closes: number[], volumes: number[]): number[] {
+export function vwapOf(closes: number[], volumes: number[]): number[] {
   const out: number[] = [];
   let pv = 0;
   let vol = 0;

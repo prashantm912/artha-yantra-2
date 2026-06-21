@@ -1,0 +1,108 @@
+import { useMemo, useState } from 'react';
+import { useOiAnalysis, useOiStats, useTrendingOi } from '../../api/oiAnalytics.ts';
+import { foldIndividualOi, foldPcrPrice } from '../../api/oiStatsFold.ts';
+import { FilterBar } from '../../components/FilterBar.tsx';
+import { GoButton } from '../../components/atoms/GoButton.tsx';
+import { Metric } from '../../components/atoms/Metric.tsx';
+import {
+  CumulativeOiChart,
+  IndividualOiChart,
+  PcrPriceChart,
+} from '../../components/OiStatsCharts.tsx';
+import { formatDecimal } from '../../lib/decimal.ts';
+
+// Options OI Statistics (oipulse §options/oi-statistics) — the OI-distribution + PCR view. Three charts,
+// all folded from feeds already on the wire (no new backend): Cumulative OI + Individual per-strike OI
+// (from /oi-analysis latest-bucket rows) and the intraday PCR-vs-price line (from /trending). PCR + Max
+// Pain in the header come from /oi-stats (server-side MaxPainCalculator — not re-derived here).
+//
+// Faithful divergences (vs oipulse): the "Select Period" (Full-day / last-N-min window) control maps to
+// the shared Interval cadence here; the underlying DH/DL/DO quote strip is not surfaced (a known
+// cross-page gap — oi-stats serves OI totals, not the underlying OHLC). See the manual-test doc.
+
+const compact = (n: number) => new Intl.NumberFormat('en-IN', { notation: 'compact' }).format(n);
+
+export function OiStatisticsPage() {
+  const statsQ = useOiStats();
+  const analysisQ = useOiAnalysis();
+  const trendingQ = useTrendingOi();
+  const [showChange, setShowChange] = useState(false);
+
+  const stats = statsQ.data ?? null;
+  const points = useMemo(() => analysisQ.data ?? [], [analysisQ.data]);
+
+  // Both bar charts fold the SAME per-strike points so absolute OI and ΔOI stay mutually consistent;
+  // the cumulative totals are the column sums (oi-stats' ceOi/peOi equal these for the absolute view).
+  const individual = useMemo(() => foldIndividualOi(points, showChange), [points, showChange]);
+  const callTotal = useMemo(() => individual.ce.reduce((a, b) => a + b, 0), [individual]);
+  const putTotal = useMemo(() => individual.pe.reduce((a, b) => a + b, 0), [individual]);
+
+  const pcrPrice = useMemo(() => foldPcrPrice(trendingQ.data?.items ?? []), [trendingQ.data]);
+
+  const hasBars = individual.strikes.length > 0;
+
+  return (
+    <div>
+      <h1 className="ay-sr-only">Options OI Statistics</h1>
+
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <FilterBar showName showExpiry />
+        <label className="flex h-9 items-center gap-1.5 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text">
+          <input
+            type="checkbox"
+            checked={showChange}
+            onChange={(e) => setShowChange(e.target.checked)}
+            className="accent-accent"
+          />
+          Show Chg. in OI
+        </label>
+        <GoButton
+          onClick={() => {
+            void statsQ.refetch();
+            void analysisQ.refetch();
+            void trendingQ.refetch();
+          }}
+          loading={statsQ.isFetching || analysisQ.isFetching || trendingQ.isFetching}
+        />
+      </div>
+
+      <div className="mb-4 flex flex-wrap items-center gap-2" aria-live="polite">
+        <Metric label="PCR" value={stats?.pcr ? formatDecimal(stats.pcr, 2) : '—'} />
+        <Metric label="Max Pain" value={stats?.maxPain ? formatDecimal(stats.maxPain, 0) : '—'} />
+        <Metric label="Total Call OI" value={stats ? compact(stats.ceOi) : '—'} />
+        <Metric label="Total Put OI" value={stats ? compact(stats.peOi) : '—'} />
+        <Metric label="Last updated" value={stats?.asOf ? stats.asOf.slice(11, 19) : '—'} />
+      </div>
+
+      {!hasBars && !analysisQ.isLoading && (
+        <p className="mb-3 text-sm text-ay-muted">
+          No OI snapshot — pick an underlying + expiry with captured chain snapshots.
+        </p>
+      )}
+
+      {hasBars && (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <section className="lg:col-span-1">
+            <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">
+              Cumulative OI{showChange ? ' (Chg.)' : ''}
+            </h2>
+            <CumulativeOiChart callOi={callTotal} putOi={putTotal} changeView={showChange} />
+          </section>
+          <section className="lg:col-span-2">
+            <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">
+              Individual OI{showChange ? ' (Chg.)' : ''} — Call (resistance) vs Put (support)
+            </h2>
+            <IndividualOiChart data={individual} changeView={showChange} />
+          </section>
+        </div>
+      )}
+
+      {pcrPrice.length > 0 && (
+        <section className="mt-4">
+          <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">PCR vs Price</h2>
+          <PcrPriceChart points={pcrPrice} />
+        </section>
+      )}
+    </div>
+  );
+}

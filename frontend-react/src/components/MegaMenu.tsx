@@ -26,7 +26,7 @@ const SECTIONS: MenuSection[] = [
       { label: 'Big OI Movement', to: '/options/big-oi-movement' }, // Wave 2
       { label: 'Options Premium', to: '/options/options-premium' }, // Wave 2
       { label: 'Straddle Chart', to: '/options/straddle-chart' }, // combined CE+PE premium candles (§20.7.6)
-      { label: 'OI Statistics' }, // W3
+      { label: 'OI Statistics', to: '/options/oi-statistics' }, // Wave 3 — OI distribution + PCR
       { label: 'Active Strikes OI' }, // W3
     ],
   },

@@ -50,14 +50,13 @@ export function SpurtQuadrant({ title, subtitle, rows }: SpurtQuadrantProps) {
               <th scope="col" className="px-2 py-1 text-left font-medium">Strike</th>
               <th scope="col" className="px-2 py-1 text-left font-medium">Type</th>
               <th scope="col" className="px-2 py-1 text-right font-medium">LTP</th>
-              <th scope="col" className="px-2 py-1 text-right font-medium">Prev</th>
-              <th scope="col" className="px-2 py-1 text-right font-medium">%LTP</th>
-              <th scope="col" className="px-2 py-1 text-right font-medium">LTP Chg</th>
+              <th scope="col" className="px-2 py-1 text-right font-medium">Prev. Close</th>
+              <th scope="col" className="px-2 py-1 text-right font-medium">% Chng. LTP</th>
+              <th scope="col" className="px-2 py-1 text-right font-medium">% Chng. OI</th>
               <th scope="col" className="px-2 py-1 text-right font-medium">New OI</th>
               <th scope="col" className="px-2 py-1 text-right font-medium">Old OI</th>
-              <th scope="col" className="px-2 py-1 text-right font-medium">%OI</th>
-              <th scope="col" className="px-2 py-1 text-right font-medium">OI Chg</th>
-              <th scope="col" className="px-2 py-1 text-right font-medium">Vol</th>
+              <th scope="col" className="px-2 py-1 text-right font-medium">OI Chng.</th>
+              <th scope="col" className="px-2 py-1 text-right font-medium">Volume</th>
             </tr>
           </thead>
           <tbody>
@@ -77,10 +76,9 @@ export function SpurtQuadrant({ title, subtitle, rows }: SpurtQuadrantProps) {
                   <td className="px-2 py-1 text-right tabular-nums">{dec(r.ltp, 2)}</td>
                   <td className="px-2 py-1 text-right tabular-nums text-ay-muted">{dec(r.prevLtp, 2)}</td>
                   <td className="px-2 py-1 text-right"><ValueDeltaCell value={r.ltpChangePct} suffix="%" /></td>
-                  <td className="px-2 py-1 text-right"><ValueDeltaCell value={r.ltpChange} /></td>
+                  <td className="px-2 py-1 text-right"><ValueDeltaCell value={r.spurtPct} suffix="%" /></td>
                   <td className="px-2 py-1 text-right tabular-nums">{num(r.oi)}</td>
                   <td className="px-2 py-1 text-right tabular-nums text-ay-muted">{num(oldOi)}</td>
-                  <td className="px-2 py-1 text-right"><ValueDeltaCell value={r.spurtPct} suffix="%" /></td>
                   <td className={cn('px-2 py-1 text-right tabular-nums', r.oiChange > 0 ? 'text-bull' : r.oiChange < 0 ? 'text-bear' : '')}>
                     {r.oiChange > 0 ? '+' : ''}
                     {r.oiChange.toLocaleString('en-IN')}
@@ -91,7 +89,7 @@ export function SpurtQuadrant({ title, subtitle, rows }: SpurtQuadrantProps) {
             })}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={11} className="px-2 py-3 text-center text-ay-muted">
+                <td colSpan={10} className="px-2 py-3 text-center text-ay-muted">
                   No strikes.
                 </td>
               </tr>

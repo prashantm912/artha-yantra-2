@@ -1,8 +1,10 @@
 import { cn } from '../../lib/cn.ts';
 import { oiIntMeta, type OiInterpretation, type OiSeverity } from '../../core/oiInterpretation.ts';
 
-// 4-state OI interpretation badge (a11y #2: the text label always renders — colour is never the sole
-// signal; the price/OI arrow rides as a tooltip; null → em-dash + sr-only). Ported from oi-int-badge.ts.
+// 4-state OI interpretation badge (oipulse dense-table style): the abbreviation (L.B./S.B./S.C./L.U.)
+// + a price-direction glyph is the VISIBLE non-colour cue, the FULL label rides as the accessible name
+// (aria-label) + tooltip (a11y #2 — distinguishable without colour; null → em-dash + sr-only). The ring
+// (not a solid fill) keeps WCAG contrast safe across themes — the only divergence from oipulse's fill.
 
 const TONE: Record<OiSeverity, string> = {
   success: 'text-bull ring-bull/40',
@@ -25,13 +27,14 @@ export function OiBadge4({ value }: { value: OiInterpretation | null }) {
   const meta = oiIntMeta(value);
   return (
     <span
-      title={meta.arrow}
+      aria-label={meta.label}
+      title={`${meta.label} — ${meta.arrow}`}
       className={cn(
-        'inline-block rounded px-2 py-0.5 text-xs font-medium ring-1',
+        'inline-block whitespace-nowrap rounded px-2 py-0.5 text-xs font-semibold ring-1',
         TONE[meta.severity],
       )}
     >
-      {meta.label}
+      <span aria-hidden="true">{meta.glyph}</span> {meta.abbr}
     </span>
   );
 }

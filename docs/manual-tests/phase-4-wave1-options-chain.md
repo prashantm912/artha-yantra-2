@@ -53,10 +53,10 @@ ATM cream-tint row; per-strike PCR; signed-toned OI%/LTP%/LTP Chg; Go + Column S
 
 ## Remaining divergences / gaps (surface to owner; some need a decision or a backend endpoint)
 
-- **OI-Int badge style** (owner decision — a11y vs fidelity): oipulse uses **abbreviated** labels
-  (`S.B./L.B./S.C./L.U.`) in **filled** coloured badges with an arrow icon. Ours uses the **full** label
-  (`Short Buildup`) in a ring outline — deliberately a11y-strong (PR-F). Colour semantics already match.
-  Pending your call: abbreviate+fill (faithful, keep full label as aria-label) or keep full labels.
+- **OI-Int badge** — FIXED to oipulse's abbreviation + arrow (`↑ L.B.` / `↓ S.B.` / `↑ S.C.` / `↓ L.U.`),
+  full label kept as the accessible name (`aria-label`) + tooltip. Remaining divergence: oipulse uses a
+  **solid colour fill**; ours keeps a **ring outline** (a deliberate WCAG-contrast choice — solid fills
+  fail AA on some theme/severity combos). Colour semantics already matched.
 - **INDIA VIX header** = `—` (gap): oipulse shows `INDIA VIX 12.97, Chg +0.30 (2.35%)`. We capture India
   VIX as a pinned index but have **no read endpoint** — needs one (Wave-3 §20.2) to fill the slot.
 - **Header detail**: oipulse header = INDIA VIX · Total PCR (+chg) · Underlying (name + LTP + chg% +

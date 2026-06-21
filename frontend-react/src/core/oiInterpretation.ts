@@ -15,8 +15,12 @@ export type OiInterpretation =
 export type OiSeverity = 'success' | 'danger' | 'info' | 'warn';
 
 export interface OiIntMeta {
-  /** Human label — the textual (non-colour) cue. */
+  /** Full human label — the accessible name (aria-label) + tooltip. */
   readonly label: string;
+  /** oipulse dense-table abbreviation (the visible cue): L.B. / S.B. / S.C. / L.U. */
+  readonly abbr: string;
+  /** Price-direction glyph: ↑ when price rose (LB/SC), ↓ when it fell (SB/LU). */
+  readonly glyph: string;
   /** Severity → token mapping key. */
   readonly severity: OiSeverity;
   /** Price/OI direction breakdown (tooltip). */
@@ -24,10 +28,10 @@ export interface OiIntMeta {
 }
 
 const META: Record<OiInterpretation, OiIntMeta> = {
-  LONG_BUILDUP: { label: 'Long Buildup', severity: 'success', arrow: 'price up · OI up' },
-  SHORT_BUILDUP: { label: 'Short Buildup', severity: 'danger', arrow: 'price down · OI up' },
-  SHORT_COVERING: { label: 'Short Covering', severity: 'info', arrow: 'price up · OI down' },
-  LONG_UNWINDING: { label: 'Long Unwinding', severity: 'warn', arrow: 'price down · OI down' },
+  LONG_BUILDUP: { label: 'Long Buildup', abbr: 'L.B.', glyph: '↑', severity: 'success', arrow: 'price up · OI up' },
+  SHORT_BUILDUP: { label: 'Short Buildup', abbr: 'S.B.', glyph: '↓', severity: 'danger', arrow: 'price down · OI up' },
+  SHORT_COVERING: { label: 'Short Covering', abbr: 'S.C.', glyph: '↑', severity: 'info', arrow: 'price up · OI down' },
+  LONG_UNWINDING: { label: 'Long Unwinding', abbr: 'L.U.', glyph: '↓', severity: 'warn', arrow: 'price down · OI down' },
 };
 
 export function oiIntMeta(value: OiInterpretation): OiIntMeta {

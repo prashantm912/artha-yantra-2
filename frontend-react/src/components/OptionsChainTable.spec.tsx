@@ -42,7 +42,8 @@ describe('OptionsChainTable', () => {
     render(<OptionsChainTable rows={rows} spot="24150" atmStrike="24150" optionalKeys={[]} />);
     expect(screen.getAllByText('CALL').length).toBeGreaterThan(0);
     expect(screen.getAllByText('PUT').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Long Buildup').length).toBeGreaterThan(0);
+    // OI-Int badge: full label is the accessible name, the abbreviation is the visible cue
+    expect(screen.getAllByLabelText('Long Buildup').length).toBeGreaterThan(0);
   });
 
   it('tints the ATM strike row (sr-only at-the-money cue)', () => {

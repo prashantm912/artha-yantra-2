@@ -16,6 +16,8 @@ export interface OiAnalysisSide {
   interpretation: OiInterpretation | null;
   dhBreak: boolean;
   dlBreak: boolean;
+  /** The prior running extreme that this bucket broke (the level oipulse shows in the badge). */
+  breakLevel: string | null;
 }
 
 export interface OiAnalysisRow {
@@ -33,6 +35,7 @@ const EMPTY_SIDE: OiAnalysisSide = {
   interpretation: null,
   dhBreak: false,
   dlBreak: false,
+  breakLevel: null,
 };
 
 /** Derive one side's per-bucket row, oldest-first; deltas are vs the prior non-null bucket. */
@@ -60,11 +63,21 @@ function foldSide(points: (OiStrikePoint | null)[]): OiAnalysisSide[] {
         ? classifyOi(!isNegative(ltpChange), oiChange >= 0)
         : null;
 
+    // Day-high/low break vs the running extreme of the bucket CLOSE (we capture point-in-time
+    // snapshots, not true intraday OHLC bars — so this is a close-based approximation). breakLevel is
+    // the PRIOR extreme the bucket broke (the value oipulse shows in the badge), captured pre-update.
     let dhBreak = false;
     let dlBreak = false;
+    let breakLevel: string | null = null;
     if (p.ltp != null) {
-      if (runHigh != null && compareDecimal(p.ltp, runHigh) > 0) dhBreak = true;
-      if (runLow != null && compareDecimal(p.ltp, runLow) < 0) dlBreak = true;
+      if (runHigh != null && compareDecimal(p.ltp, runHigh) > 0) {
+        dhBreak = true;
+        breakLevel = runHigh;
+      }
+      if (runLow != null && compareDecimal(p.ltp, runLow) < 0) {
+        dlBreak = true;
+        breakLevel = runLow;
+      }
       if (runHigh == null || compareDecimal(p.ltp, runHigh) > 0) runHigh = p.ltp;
       if (runLow == null || compareDecimal(p.ltp, runLow) < 0) runLow = p.ltp;
     }
@@ -78,6 +91,7 @@ function foldSide(points: (OiStrikePoint | null)[]): OiAnalysisSide[] {
       interpretation,
       dhBreak,
       dlBreak,
+      breakLevel,
     });
     prev = p;
   }

@@ -35,6 +35,7 @@ describe('foldOiAnalysis', () => {
     expect(b1.ce.cumOiChange).toBe(200); // 1200 − first 1000
     expect(b1.ce.interpretation).toBe('LONG_BUILDUP');
     expect(b1.ce.dhBreak).toBe(true); // 110 > prior high 100
+    expect(b1.ce.breakLevel).toBe('100'); // the broken prior extreme (not the current ltp)
     expect(b1.pe.interpretation).toBe('SHORT_BUILDUP'); // 90→85 down, 800→1000 up
 
     const b2 = rows[2];

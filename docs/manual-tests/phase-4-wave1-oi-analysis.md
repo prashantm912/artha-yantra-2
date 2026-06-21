@@ -38,5 +38,15 @@ Strike column; 25-rows pagination.
   with the chain, documented.
 - **Interval set**: oipulse has 3/5/10/15/30/60; our `OiInterval` lacks **10m** (offered 3/5/15/30/60).
 - **EOD label**: oipulse labels the last window `15:30-EOD`; ours computes `15:30-15:35`.
-- **Break-badge price**: oipulse's parenthetical price semantics weren't pinned; we show the bucket ltp.
 - **Header labels** drop the `Call`/`Put` prefix (the CALL/PUT colgroup carries it) — brevity divergence.
+
+## Second QA pass — 2026-06-21 (Historical mode, SENSEX 76200 5-min)
+Owner re-loaded with **Mode = Historical** + a different date/strike. Confirmed: **history mode works**
+(the strike-series date-scopes correctly); both **D.H.B** (green ↑) and **D.L.B** (red ↓) break badges
+render; all four interpretation states + colours match.
+- **Fixed:** the break badge shows the **broken level** — the prior running extreme the bucket crossed
+  (e.g. `D.L.B (534.65)` while the row LTP is 532.00), NOT the current LTP. Added `breakLevel` to the fold.
+- **Known approximation (data limit):** our day-high/low break is computed from the bucket **CLOSE**
+  running extreme, because we capture point-in-time snapshots, not true intraday OHLC bars. So the exact
+  break level can differ from oipulse's (which uses true 1-min highs/lows). Faithful in shape + signal;
+  the level value is approximate until/unless per-bucket OHLC is captured.

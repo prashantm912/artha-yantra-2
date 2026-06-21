@@ -24,19 +24,13 @@ function SignedNum({ n }: { n: number | null }) {
 }
 
 function BreakBadge({ side }: { side: OiAnalysisSide }) {
+  // breakLevel = the prior extreme the bucket broke (oipulse shows that level, not the current LTP).
+  const level = side.breakLevel ? `(${formatDecimal(side.breakLevel, 2)}) ` : '';
   if (side.dhBreak) {
-    return (
-      <span className="rounded bg-bull/15 px-1 text-xs text-bull">
-        D.H.B {side.ltp ? `(${formatDecimal(side.ltp, 2)}) ` : ''}↑
-      </span>
-    );
+    return <span className="rounded bg-bull/15 px-1 text-xs text-bull">D.H.B {level}↑</span>;
   }
   if (side.dlBreak) {
-    return (
-      <span className="rounded bg-bear/15 px-1 text-xs text-bear">
-        D.L.B {side.ltp ? `(${formatDecimal(side.ltp, 2)}) ` : ''}↓
-      </span>
-    );
+    return <span className="rounded bg-bear/15 px-1 text-xs text-bear">D.L.B {level}↓</span>;
   }
   return null; // oipulse renders a blank cell (not an em-dash) when there is no break
 }

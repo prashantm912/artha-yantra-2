@@ -51,9 +51,35 @@ Open the owner's logged-in oipulse Straddle Chart in Chrome (Claude-in-Chrome). 
       legend (Straddle · VWAP · 20 EMA · Call · Put); toolbox (save/zoom/restore); watermark.
 - [ ] **Last Updated At** near the title.
 
-## Live QA results — PENDING
+## Live QA results — 2026-06-21 (Claude-in-Chrome vs live oipulse Strangle Chart)
 
-Not yet run. Build is faithful to the study doc; the live side-by-side is the remaining acceptance gate.
+Owner had the live oipulse **Strangle Chart** (`/app/strategies/strangle-chart`) loaded with real data
+(SENSEX 77500 CE × 76000 PE, 3-min, Historical Jun 19). Side-by-side vs our `OptionsStraddlePage`.
+
+**Confirmed MATCHING** (structure built faithfully): the filter bar set (Mode · Name · Date · Expiry ·
+Time Interval · Strike — and for strangle, **Call Strike + Put Strike** · Go); the **5 chart series**
+exactly (Straddle candles · VWAP · 20 EMA · Call Price · Put Price); candlestick + VWAP(blue) +
+EMA(yellow) + Call/Put lines; **day high/low markers**; **dataZoom** slider; **toolbox**; the
+underlying header (name + price); the centered "Options Straddle/Strangle Chart" title.
+
+**Fixed after this QA** (the live page revealed these — commit `ccdcd1e`):
+- **Interval set now includes 10-min** — oipulse offers 1/3/5/10/15/30/60; our shared `OiInterval` lacks
+  10m, so the page now owns a raw-minutes selector (the BE already accepted raw minutes). Verified live:
+  `straddle-chart?…&interval=10` echoes `"interval":"10m"`.
+- **Centered chart title** + **fixed latest-candle readout** strip (time · O/H/L/C · VWAP · 20 EMA) —
+  oipulse shows this above the chart, not just on hover.
+- **Watermark** format `NAME CALL CE x PUT PE` (strangle) / `NAME STRIKE` (straddle).
+
+**Backend robustness fix found during QA** (commit `679b7a3`): the underlying header quote threw
+`KITE_TOKEN_EXPIRED` off-hours and 401-ed the whole endpoint; now best-effort → header degrades, the
+cache-first candle series still renders. Verified: `straddle-chart` returns **200** (was 401) with a
+null header off-hours.
+
+**Chart-with-DATA pixel render — deferred (environment, not code):** the live stack ran the **live**
+profile on a Sunday with an **expired Kite session**, and option 1m candles are fetched on demand (not
+pre-captured), so `items=[]` — no candles to draw. The endpoints are DEPLOYED and degrade cleanly
+(200). A full candlestick render needs either a weekday live Kite session or the mock stack (the mock
+historical gateway fabricates option candles); the IT already proves the candle composition + overlays.
 
 ## Documented divergences (surface to owner)
 

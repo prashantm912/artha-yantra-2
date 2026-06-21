@@ -3759,7 +3759,7 @@ Net: the chain reaches full oipulse fidelity by end of **PR-W3** (+ PR-W4 for th
 dropped. This same per-page rhythm — build to the study doc, then a live Claude-in-Chrome QA, then a
 documented fidelity pass — applies to every Wave page (§20.8.2).
 
-### 20.7.7 Straddle/Strangle Chart — built (faithful to the study; live-QA pending)
+### 20.7.7 Straddle/Strangle Chart — built + live-QA'd (2026-06-21)
 
 Built on `feat/wave1-options` to `docs/oipulse-study/strategies/straddle-chart.md`. The combined CE+PE
 premium **candlestick** + VWAP / 20-EMA / Call-Price / Put-Price overlays + day-H/L markers + dataZoom +
@@ -3782,10 +3782,20 @@ bundle is a separate chunk, main payload stays ~362 KB).
   + `core/straddleSeries.ts` (VWAP/EMA/candle maths, the single sanctioned string→number boundary for
   chart COORDINATES — displayed values stay decimal strings). Strike list + ATM default from the live
   `/chain-table` (no snapshot dependency). A **Strangle** toggle splits the single strike into Call/Put.
-- **Documented divergences (pending live QA):** interval **10-min** option omitted (the one `OiInterval`
-  gap — same as OI Analysis); the **Strategies** sub-tab not built (separate page); Call/Put lines drawn
-  **dashed** in `bull`/`bear` tones (theme-aware, distinct from the candle bodies). Live Claude-in-Chrome
-  QA vs the owner's oipulse Straddle Chart is the remaining acceptance gate (§20.8.2).
+- **Live QA done (Claude-in-Chrome vs oipulse Strangle Chart, 2026-06-21):** structure matched (filter
+  bar incl Call/Put strikes, the 5 series, candles+VWAP+EMA+Call/Put, day-H/L, dataZoom, toolbox). The
+  live page revealed + we FIXED: **10-min interval** (the page now owns a raw-minutes selector — the BE
+  already accepted minutes; the shared `OiInterval` gap no longer applies here), a **centered title**, a
+  **fixed latest-candle readout**, and the **`CE x PE` watermark** format. A backend robustness bug was
+  also fixed: the header quote 401-ed the whole endpoint off-hours (no Kite session) — now best-effort,
+  so the cache-first candle series renders regardless. Full log: `docs/manual-tests/phase-4-wave1-
+  straddle-chart.md`.
+- **Remaining divergences (intended/deferred):** the **Strategies** sub-tab (separate payoff page);
+  Call/Put lines drawn **dashed** in `bull`/`bear` tones (deliberate, theme-aware); header **change%**
+  (oipulse shows underlying Chg vs prev-close — needs the W3 prev-close field, batched with the chain's
+  W3 header work). The chart-with-DATA pixel render was environment-blocked (live stack, Sunday, expired
+  Kite session, option 1m candles fetched on demand → `items=[]`); the endpoints deploy + degrade
+  cleanly (200), the IT proves the candle composition, and the render confirms on a weekday/mock session.
 
 ### 20.8 Standing UI-fidelity rules (apply to EVERY page, every wave — AUTHORITATIVE)
 

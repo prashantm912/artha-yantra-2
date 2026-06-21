@@ -23,6 +23,8 @@ public class FuturesSpurtService {
   public record FutSpurt(
       String tradingsymbol,
       BigDecimal ltp,
+      BigDecimal prevClose,
+      BigDecimal pricePct,
       long oi,
       long oiChange,
       BigDecimal spurtPct,
@@ -80,6 +82,8 @@ public class FuturesSpurtService {
           new FutSpurt(
               cur.tradingsymbol(),
               cur.ltp(),
+              cur.prevClose(),
+              pricePct(cur, old),
               curOi,
               oiDelta,
               spurtPct,
@@ -87,5 +91,25 @@ public class FuturesSpurtService {
     }
     items.sort(Comparator.comparing(FutSpurt::tradingsymbol));
     return new FutSpurtChain(items, newest);
+  }
+
+  /**
+   * Signed day price % — prefers the captured {@code prevClose} (Stage-G OHLC), falling back to the
+   * prior snapshot bucket's LTP. Null when no usable base or no current LTP (parity with
+   * {@link FuturesMoversService#pricePct}).
+   */
+  private static BigDecimal pricePct(
+      FuturesSnapshotReader.FutPoint cur, FuturesSnapshotReader.FutPoint old) {
+    BigDecimal base =
+        cur.prevClose() != null && cur.prevClose().signum() != 0
+            ? cur.prevClose()
+            : (old.ltp() != null && old.ltp().signum() != 0 ? old.ltp() : null);
+    if (base == null || cur.ltp() == null) {
+      return null;
+    }
+    return cur.ltp()
+        .subtract(base)
+        .multiply(BigDecimal.valueOf(100))
+        .divide(base, 2, RoundingMode.HALF_UP);
   }
 }

@@ -1010,6 +1010,7 @@ export interface components {
             ceOi?: number;
             /** Format: int64 */
             peOi?: number;
+            spot?: number;
             /** @enum {string} */
             trend?: "UP" | "DOWN" | "FLAT";
         };
@@ -1291,6 +1292,8 @@ export interface components {
         FutSpurt: {
             tradingsymbol?: string;
             ltp?: number;
+            prevClose?: number;
+            pricePct?: number;
             /** Format: int64 */
             oi?: number;
             /** Format: int64 */
@@ -1309,6 +1312,9 @@ export interface components {
             ltp?: number;
             pricePct?: number;
             oiPct?: number;
+            dayOpen?: number;
+            dayHigh?: number;
+            dayLow?: number;
             /** @enum {string} */
             interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
         };

@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.options.analytics;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -20,13 +21,15 @@ public class OiTrendingService {
     FLAT
   }
 
-  public record TrendPoint(OffsetDateTime bucket, long totalOi, long ceOi, long peOi, Trend trend) {}
+  public record TrendPoint(
+      OffsetDateTime bucket, long totalOi, long ceOi, long peOi, BigDecimal spot, Trend trend) {}
 
   public record TrendSeries(List<TrendPoint> items, OffsetDateTime asOf) {}
 
   /** {@code series} must be bucket-ordered oldest-first (the OptionsSnapshotReader.series contract). */
   public TrendSeries trending(List<OptionsSnapshotReader.StrikePoint> series) {
     Map<OffsetDateTime, long[]> byBucket = new LinkedHashMap<>(); // [ceOi, peOi]
+    Map<OffsetDateTime, BigDecimal> spotByBucket = new LinkedHashMap<>(); // underlying LTP per bucket
     for (OptionsSnapshotReader.StrikePoint p : series) {
       long[] v = byBucket.computeIfAbsent(p.bucket(), k -> new long[2]);
       long oi = p.oi() == null ? 0 : p.oi();
@@ -34,6 +37,9 @@ public class OiTrendingService {
         v[0] += oi;
       } else {
         v[1] += oi;
+      }
+      if (p.spot() != null) {
+        spotByBucket.putIfAbsent(p.bucket(), p.spot());
       }
     }
     List<TrendPoint> items = new ArrayList<>();
@@ -53,7 +59,7 @@ public class OiTrendingService {
       } else {
         trend = Trend.FLAT;
       }
-      items.add(new TrendPoint(e.getKey(), total, ce, pe, trend));
+      items.add(new TrendPoint(e.getKey(), total, ce, pe, spotByBucket.get(e.getKey()), trend));
       prevTotal = total;
       first = false;
     }

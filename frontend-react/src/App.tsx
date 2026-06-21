@@ -28,6 +28,9 @@ const FiiDiiCapitalMarketPage = lazy(() =>
 const FiiLongShortPage = lazy(() =>
   import('./pages/fiidii/FiiLongShortPage.tsx').then((m) => ({ default: m.FiiLongShortPage })),
 );
+const OiStatisticsPage = lazy(() =>
+  import('./pages/options/OiStatisticsPage.tsx').then((m) => ({ default: m.OiStatisticsPage })),
+);
 
 function Lazy({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<p className="text-sm text-ay-muted">Loading chart…</p>}>{children}</Suspense>;
@@ -51,6 +54,7 @@ export function App() {
           <Route path="/options/big-oi-movement" element={<BigOiMovementPage />} />
           <Route path="/options/options-premium" element={<Lazy><OptionsPremiumPage /></Lazy>} />
           <Route path="/options/straddle-chart" element={<Lazy><OptionsStraddlePage /></Lazy>} />
+          <Route path="/options/oi-statistics" element={<Lazy><OiStatisticsPage /></Lazy>} />
           {/* Futures */}
           <Route path="/futures/oi-spurt" element={<FuturesOiSpurtPage />} />
           <Route path="/futures/market-movers" element={<FuturesMoversPage />} />

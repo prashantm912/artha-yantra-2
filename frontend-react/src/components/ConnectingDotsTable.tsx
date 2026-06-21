@@ -10,24 +10,31 @@ import { FACTOR_COLUMNS, factorMeta, trendMeta } from '../core/connectingDots.ts
 
 const PAGE_SIZE = 25;
 
-/** One 3-state factor cell — coloured glyph + sr/hover label. */
+/** One 3-state factor cell — a solid-filled badge (oipulse), glyph in the contrasting surface tone. */
 function FactorCell({ code }: { code: number }) {
   const m = factorMeta(code);
   return (
-    <span className={cn('font-semibold tabular-nums', m.tone)} aria-label={m.label} title={m.label}>
+    <span
+      className={cn(
+        'inline-flex h-5 min-w-[1.75rem] items-center justify-center rounded text-sm font-bold text-surface-0',
+        m.fill,
+      )}
+      aria-label={m.label}
+      title={m.label}
+    >
       {m.glyph}
     </span>
   );
 }
 
-/** The 5-state composite Trend badge (glyph + label, toned). */
+/** The 5-state composite Trend badge — a solid-filled pill (oipulse), glyph + label. */
 function TrendCell({ code }: { code: number }) {
   const m = trendMeta(code);
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 rounded border border-ay-border px-1.5 py-0.5 text-xs font-medium',
-        m.tone,
+        'inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-semibold text-surface-0',
+        m.fill,
       )}
       aria-label={m.label}
       title={m.label}
@@ -90,6 +97,7 @@ export function ConnectingDotsTable({
         <table className="w-full border-collapse whitespace-nowrap text-xs">
           <thead className="bg-surface-1 text-ay-muted">
             <tr>
+              <th scope="col" className="px-2 py-1 text-right font-medium">#</th>
               <th scope="col" className="px-2 py-1 text-left font-medium">Date Time</th>
               <th scope="col" className="px-2 py-1 text-center font-medium">Trend</th>
               {FACTOR_COLUMNS.map((c) => (
@@ -100,16 +108,16 @@ export function ConnectingDotsTable({
             </tr>
           </thead>
           <tbody>
-            {shown.map((r) => {
+            {shown.map((r, i) => {
               const tm = trendMeta(r.trend);
               return (
                 <tr
                   key={r.timeInterval}
-                  className={cn(
-                    'border-t border-ay-border text-ay-text',
-                    tm.extreme && 'bg-[color-mix(in_srgb,var(--ay-bear)_8%,transparent)]',
-                  )}
+                  className={cn('border-t border-ay-border text-ay-text', tm.tint)}
                 >
+                  <td className="px-2 py-1 text-right tabular-nums text-ay-muted">
+                    {safePage * PAGE_SIZE + i + 1}
+                  </td>
                   <td className="px-2 py-1 text-left font-semibold tabular-nums">{r.timeInterval}</td>
                   <td className="px-2 py-1 text-center"><TrendCell code={r.trend} /></td>
                   {FACTOR_COLUMNS.map((c) => (
@@ -122,7 +130,7 @@ export function ConnectingDotsTable({
             })}
             {shown.length === 0 && (
               <tr>
-                <td colSpan={13} className="px-2 py-4 text-center text-ay-muted">
+                <td colSpan={14} className="px-2 py-4 text-center text-ay-muted">
                   {emptyMessage}
                 </td>
               </tr>

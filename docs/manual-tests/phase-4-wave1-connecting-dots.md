@@ -43,16 +43,24 @@ Open the owner's logged-in oipulse Connecting Dots (`/app/connecting-dots`) and 
 semantics, the 5-state Trend badge, the extreme-row maroon tint, pagination (25/page), and the 5-pill
 legend.
 
-## QA results — 2026-06-21 (vs the study doc; mock render verified)
+## Live QA results — 2026-06-21 (Claude-in-Chrome vs live oipulse, then re-rendered)
 
-Rendered on the mock stack (market-data recreated mock-only; gateway/session stayed live), NIFTY 50 ·
-3-min · History 2026-06-15 → **125 rows** (the doc's "~125 rows/session at 3-min"). Confirmed matching
-the study doc: the **13 columns in exact order**; **newest interval first**; **"HH:MM-HH:MM"** labels;
-the **3-state factor glyphs** (↑ green / ↓ red / ↔ blue); the **5-state Trend** badges; the
-**extreme-trend maroon row tint** (Ext.Bullish/Ext.Bearish rows); the **5-pill legend**; the
-**index-only** Name select (NIFTY 50 / NIFTY BANK); the **3/5/10/15/30/60** interval set (no 1m, incl
-10m). A fresh live side-by-side re-capture is pending the owner's browser (the study doc is itself the
-authoritative live capture, 2026-06-18).
+Captured the owner's logged-in oipulse Connecting Dots (NIFTY · Historical Jun 19, 3-min). **Confirmed
+matching** the structure: the 13 columns in exact order, the Live/Historical · Name · Date · Time
+Interval · Go controls, 25-rows-per-page pagination, the 5-pill Signals legend, the 5-state Trend
+labels, and the 3-state factor colour semantics (↑ green / ↓ red / ↔ blue).
+
+The live page revealed **4 fidelity gaps**, all **FIXED** then re-rendered (mock, NIFTY 50 · 3-min ·
+History → 125 rows = the full-session count):
+1. **Factor cells = solid-filled badges** (green/red/blue squares with the arrow) — ours were bare
+   coloured glyphs. Now solid fills with the glyph in `text-surface-0` (≥AA-contrast in every theme).
+2. **Trend = solid-filled pills** — ours were bordered text. Now solid.
+3. **Extreme-row tint is DIRECTION-coloured** (Ext.Bullish = green tint, Ext.Bearish = red tint) — ours
+   used maroon for both. Now direction-coloured.
+4. **Leading `#` row-number column** added.
+
+Post-fix the page is a near-pixel match to the live oipulse matrix (within the documented divergences
+below). market-data was restored to live after the render.
 
 ## Documented divergences (surface to owner)
 
@@ -69,5 +77,8 @@ authoritative live capture, 2026-06-18).
 - **FINNIFTY / MIDCPNIFTY** indices pending instrument coverage (oipulse offers 4; we ship NIFTY 50 +
   NIFTY BANK today).
 - **Sub-tabs** (`Connecting Dots | Tool`) — the "Tool" builder sub-tab is a separate later page.
-- The `+` prefix / ring-not-fill a11y conventions and our `--ay-*` theming are the standing intended
-  divergences (see the chain QA doc).
+- **Arrow glyph colour** — oipulse uses a white arrow on the saturated fill; ours uses
+  `text-surface-0` (theme-contrasting: near-black on the bright dark-theme fills, near-white on the dark
+  light-theme fills) so it clears AA contrast where white-on-green would not. Fills + colour semantics
+  match; only the glyph colour differs (the standing a11y-driven divergence). Our `--ay-*` theming is
+  the other standing intended divergence (see the chain QA doc).

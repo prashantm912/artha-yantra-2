@@ -52,6 +52,11 @@ artha:
     api-key-file: ${ARTHA_OPENALGO_API_KEY_FILE:/run/secrets/openalgo_api_key}
     # Phase-1 entry gate (§17.11): must be green vs the LIVE appliance before any source.* flips
     contract-canary-enabled: ${ARTHA_OPENALGO_CANARY_ENABLED:false}
+    # Data-foundation milestone (plan §2/§3) — dedicated OpenAlgo clients, INDEPENDENT of source.*
+    # routing. Dormant by default; flipped on the live profile only AFTER an Upstox-backed appliance
+    # is connected (no SDK in this repo; the appliance fronts the broker).
+    oi-backfill-enabled: ${ARTHA_OPENALGO_OI_BACKFILL_ENABLED:false}      # POST /market/admin/oi-backfill 1m-OHLC+OI importer
+    global-quotes-enabled: ${ARTHA_OPENALGO_GLOBAL_QUOTES_ENABLED:false}  # Connecting-Dots Dow factor (DOWJONES@GLOBAL_INDEX)
 
 # B-3: the per-endpoint-family resilience stack — exactly one resilience
 # dependency. Limiter saturation queues up to 5s (virtual threads), then 429

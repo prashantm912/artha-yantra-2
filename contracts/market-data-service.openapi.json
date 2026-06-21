@@ -540,6 +540,47 @@
         }
       }
     },
+    "/api/v1/market/admin/oi-backfill" : {
+      "post" : {
+        "tags" : [ "oi-backfill-controller" ],
+        "operationId" : "backfill",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/BackfillRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : {
+                    "type" : "string"
+                  }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/instruments/sync" : {
       "post" : {
         "tags" : [ "instruments-controller" ],
@@ -3143,6 +3184,22 @@
           "to" : {
             "type" : "string",
             "format" : "date-time"
+          }
+        }
+      },
+      "BackfillRequest" : {
+        "type" : "object",
+        "properties" : {
+          "underlying" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "date" : {
+            "type" : "string",
+            "format" : "date"
           }
         }
       },

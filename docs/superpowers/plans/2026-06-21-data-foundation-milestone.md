@@ -72,14 +72,18 @@ Interest`; ExpiryTrack just wraps the expired one with enumeration + bulk storag
 
 ## Token-gated sequencing
 
-Owner's Upstox account is processing — token ~2 days out, so the appliance can't serve real Upstox data
-yet. The DESIGN is unaffected; the SCHEDULE splits:
+Update 2026-06-21: **owner's Upstox token is now in hand** (no longer ~2 days out), so the post-token
+step is unblocked. The split still held for the build:
 
-- **Now (token-independent):** build the backfill importer + `source` migration + Dow wiring + routing
-  config + canary gate; unit/IT-test against mock/synthetic.
-- **After token (~2 days):** owner connects Upstox in `ay-openalgo` (`deploy/openalgo/.env` — owner-side,
-  no creds in repo); flip the canary-gated `optionchain` routing; run `oi-backfill` on a real recent
-  session; **value-verify** every Wave-1 data page vs oipulse (the acceptance gate).
+- **Now (token-independent) — BUILT (2026-06-21):** the `source` migration (V023) + the dedicated
+  OpenAlgo `/history` client (`OiHistorySource`/`OpenAlgoHistoryClient`) + the `OiBackfillService` +
+  admin endpoint + the Dow global-quote feed (`GlobalQuoteSource`/`OpenAlgoGlobalQuoteClient`) +
+  routing/flag config; unit + mock-IT green (sampler, backfill writes `source='BACKFILL'`, idempotent
+  re-run, admin 202; ConnectingDots/Modulith/contract regressions green).
+- **Next (token in hand):** owner connects Upstox in `ay-openalgo` (`deploy/openalgo/.env` — owner-side,
+  no creds in repo) and flips the live flags (`artha.openalgo.oi-backfill-enabled`,
+  `global-quotes-enabled`, and the canary-gated `source.optionchain=openalgo`); then run `oi-backfill`
+  on a real recent session and **value-verify** every Wave-1 data page vs oipulse (the acceptance gate).
 
 ## Acceptance gate (definition of done)
 
@@ -91,17 +95,23 @@ relevant Bucket-5 ledger rows.
 
 ## Build task breakdown (token-independent first)
 
-1. Flyway: `source` column on `options_chain_snapshots` + `futures_oi_snapshots` (suffix-versioned).
-2. `OpenAlgoHistoryClient` — dedicated OpenAlgo-`/history` fetch client (1m OHLC+OI), isolated from the
-   routed `candles` gateway.
-3. `OiBackfillService` + admin endpoint — enumerate chain legs → fetch 1m OHLC+OI → sample to cadence →
-   idempotent upsert into the snapshot tables (source=`BACKFILL`); futures variant.
-4. Dow factor wiring in `ConnectingDotsService` (live LTP-direction; history Neutral) — replace the
-   hard-coded Neutral.
-5. Routing config + the `optionchain=openalgo` flip behind the canary gate (config + a small wiring/test;
-   not activated until the token lands).
-6. IT/mock coverage for 1–4; springdoc recapture for the new admin endpoint.
-7. **(token-gated)** live flip + backfill + value-verify pass.
+1. ✅ Flyway: `source` column on `options_chain_snapshots` + `futures_oi_snapshots` (V023; compressed-
+   hypertable-safe nullable add + catalog `SET DEFAULT 'LIVE'`).
+2. ✅ `OiHistorySource` (port, in `kite`) + `OpenAlgoHistoryClient` (adapter) — dedicated OpenAlgo
+   `/history` 1m OHLC+OI fetch, its own bean type so it never competes in the `HistoricalCandleGateway`
+   pool; flag-gated `artha.openalgo.oi-backfill-enabled`, live profile.
+3. ✅ `OiBackfillService` + `OiBackfillSampler` + admin endpoint `POST /api/v1/market/admin/oi-backfill`
+   (new top-level `backfill` module — avoids an options↔futures Modulith cycle). Enumerate chain legs →
+   1m OHLC+OI → sample to cadence (options 5-min, futures 3-min) → idempotent `insertBackfill`
+   (source=`BACKFILL`, greeks null, oi_change vs prior bucket, spot from index series).
+4. ✅ Dow factor wiring in `ConnectingDotsService` via `GlobalQuoteSource`/`OpenAlgoGlobalQuoteClient`
+   (live LTP-direction from `DOWJONES@GLOBAL_INDEX`; Neutral in history or when the feed is
+   unconfigured); flag `artha.openalgo.global-quotes-enabled`.
+5. ✅ Routing/flag config (`application.yml`): the two dormant data-foundation flags (default off) +
+   the existing `source.optionchain` knob + canary gate. Activation is an operator action post-token.
+6. ✅ IT/mock coverage (`OiBackfillSamplerTest`, `OiBackfillIntegrationTest`) + springdoc recapture for
+   the new admin endpoint + TS regen.
+7. **(token in hand — next)** live flip + backfill + value-verify pass.
 
 ## Deferred (B) — record for the backtesting milestone
 

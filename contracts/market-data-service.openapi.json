@@ -3332,6 +3332,9 @@
             "type" : "integer",
             "format" : "int64"
           },
+          "spot" : {
+            "type" : "number"
+          },
           "trend" : {
             "type" : "string",
             "enum" : [ "UP", "DOWN", "FLAT" ]
@@ -4088,6 +4091,12 @@
           "ltp" : {
             "type" : "number"
           },
+          "prevClose" : {
+            "type" : "number"
+          },
+          "pricePct" : {
+            "type" : "number"
+          },
           "oi" : {
             "type" : "integer",
             "format" : "int64"
@@ -4133,6 +4142,15 @@
             "type" : "number"
           },
           "oiPct" : {
+            "type" : "number"
+          },
+          "dayOpen" : {
+            "type" : "number"
+          },
+          "dayHigh" : {
+            "type" : "number"
+          },
+          "dayLow" : {
             "type" : "number"
           },
           "interpretation" : {

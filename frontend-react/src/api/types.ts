@@ -212,3 +212,125 @@ export interface ChainTable {
   interval: string;
   rows: ChainTableRow[];
 }
+
+// ── Wave-2 depth pages (master plan §20.3). BigDecimal → string, long → number (see header note).
+
+/** GET /api/v1/market/options/trending — one bucket: total/CE/PE OI + underlying spot + UP/DOWN/FLAT. */
+export interface TrendPoint {
+  bucket: string;
+  totalOi: number;
+  ceOi: number;
+  peOi: number;
+  spot: string | null;
+  trend: 'UP' | 'DOWN' | 'FLAT';
+}
+
+/** GET /api/v1/market/options/trending — per-bucket OI trend series; 422 DATA_GAP on no snapshot. */
+export interface TrendSeries {
+  items: TrendPoint[];
+  asOf: string | null;
+}
+
+/** One strike's straddle premium (GET /api/v1/market/options/premium). */
+export interface PremiumRow {
+  strike: string;
+  straddle: string;
+  ce: string;
+  pe: string;
+}
+
+/** GET /api/v1/market/options/premium — per-strike straddle + the ATM straddle; 422 on no snapshot. */
+export interface PremiumChain {
+  items: PremiumRow[];
+  atmStrike: string | null;
+  atmStraddle: string | null;
+  spot: string | null;
+  asOf: string;
+}
+
+/** One contract of GET /api/v1/market/futures/spurt — interval buildup + day price%. */
+export interface FutSpurt {
+  tradingsymbol: string;
+  ltp: string | null;
+  prevClose: string | null;
+  pricePct: string | null;
+  oi: number;
+  oiChange: number;
+  spurtPct: string | null;
+  interpretation: OiInterpretation;
+}
+
+/** GET /api/v1/market/futures/spurt — per-contract 4-state buildup; 422 on no snapshot. */
+export interface FutSpurtChain {
+  items: FutSpurt[];
+  asOf: string | null;
+}
+
+/** One row of GET /api/v1/market/futures/movers gainers/losers (day OHLC drives the O=H/L flag). */
+export interface MoverRow {
+  tradingsymbol: string;
+  ltp: string | null;
+  pricePct: string | null;
+  oiPct: string | null;
+  dayOpen: string | null;
+  dayHigh: string | null;
+  dayLow: string | null;
+  interpretation: OiInterpretation;
+}
+
+/** GET /api/v1/market/futures/movers — gainers/losers by day price%; 422 on no snapshot. */
+export interface Movers {
+  gainers: MoverRow[];
+  losers: MoverRow[];
+  asOf: string | null;
+}
+
+/** One row of GET /api/v1/market/futures/eod `{items}` — per-contract per-IST-day OHLC + OI rollup. */
+export interface FutEodRow {
+  tradingsymbol: string;
+  tradeDate: string;
+  open: string | null;
+  high: string | null;
+  low: string | null;
+  close: string | null;
+  oiClose: number;
+  oiChange: number;
+  volume: number;
+}
+
+/** One row of GET /api/v1/market/fii-dii/cash `{items}` — FII or DII cash buy/sell/net (₹ cr strings). */
+export interface FiiDiiRow {
+  tradeDate: string;
+  category: string;
+  buyValue: string | null;
+  sellValue: string | null;
+  netValue: string | null;
+}
+
+/** One row of GET /api/v1/market/fii-dii/participant-oi `{items}` — a participant's long/short contracts. */
+export interface ParticipantOiRow {
+  tradeDate: string;
+  clientType: string;
+  futureIndexLong: number;
+  futureIndexShort: number;
+  futureStockLong: number;
+  futureStockShort: number;
+  optionIndexCallLong: number;
+  optionIndexPutLong: number;
+  optionIndexCallShort: number;
+  optionIndexPutShort: number;
+  optionStockCallLong: number;
+  optionStockPutLong: number;
+  optionStockCallShort: number;
+  optionStockPutShort: number;
+  totalLongContracts: number;
+  totalShortContracts: number;
+}
+
+/** One row of GET /api/v1/market/fii-dii/long-short `{items}` — FII index-futures long/short + ratio. */
+export interface LongShortRow {
+  tradeDate: string;
+  fiiLong: number;
+  fiiShort: number;
+  ratio: string | null;
+}

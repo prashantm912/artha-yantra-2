@@ -5,11 +5,19 @@ import type {
   ActiveStrikes,
   ChainTable,
   ConnectingDots,
+  FiiDiiRow,
+  FutEodRow,
+  FutSpurtChain,
+  LongShortRow,
+  Movers,
   OiStats,
   OiStrikePoint,
+  ParticipantOiRow,
+  PremiumChain,
   SpurtChain,
   StraddleChart,
   StrikeSeries,
+  TrendSeries,
   VixQuote,
 } from './types.ts';
 
@@ -193,5 +201,121 @@ export function useChainTable() {
     queryFn: () =>
       oiGet<ChainTable | null>('/market/options/chain-table', oiParams(ctx, true), null),
     enabled: satisfiable(ctx, true),
+  });
+}
+
+// ── Wave-2 depth hooks (§20.3). Symbol-context driven (name/expiry/interval/mode/date from the bar).
+
+/** OI Trending (§20.3): per-bucket total/CE/PE OI + spot + UP/DOWN/FLAT over the last N buckets. */
+export function useTrendingOi() {
+  const ctx = useOiCtx();
+  return useQuery({
+    queryKey: ['oi', 'trending', ctx.name, ctx.expiry, ctx.interval, ctx.mode, ctx.date],
+    queryFn: () => oiGet<TrendSeries | null>('/market/options/trending', oiParams(ctx, true), null),
+    enabled: satisfiable(ctx, true),
+  });
+}
+
+/** Options Premium (§20.3): per-strike straddle premium + the ATM straddle for the latest bucket. */
+export function useOptionsPremium() {
+  const ctx = useOiCtx();
+  return useQuery({
+    queryKey: ['oi', 'premium', ctx.name, ctx.expiry, ctx.interval, ctx.mode, ctx.date],
+    queryFn: () =>
+      oiGet<PremiumChain | null>('/market/options/premium', oiParams(ctx, true), null),
+    enabled: satisfiable(ctx, true),
+  });
+}
+
+/** Futures OI Spurt (§20.3): per-contract interval buildup (no expiry — keyed on the index name). */
+export function useFuturesSpurt() {
+  const ctx = useOiCtx();
+  return useQuery({
+    queryKey: ['fut', 'spurt', ctx.name, ctx.interval, ctx.mode, ctx.date],
+    queryFn: () =>
+      oiGet<FutSpurtChain | null>('/market/futures/spurt', oiParams(ctx, false), null),
+    enabled: satisfiable(ctx, false),
+  });
+}
+
+/** Futures Market Movers (§20.3): gainers/losers by day price% (no expiry — keyed on the index name). */
+export function useFuturesMovers() {
+  const ctx = useOiCtx();
+  return useQuery({
+    queryKey: ['fut', 'movers', ctx.name, ctx.interval, ctx.mode, ctx.date],
+    queryFn: () => oiGet<Movers | null>('/market/futures/movers', oiParams(ctx, false), null),
+    enabled: satisfiable(ctx, false),
+  });
+}
+
+// ── Wave-2 date-range hooks. EOD / FII-DII are date-windowed, NOT symbol-context driven.
+
+function rangeParams(from: string, to: string, name?: string): string {
+  const p = new URLSearchParams({ from, to });
+  if (name) p.set('name', name);
+  return p.toString();
+}
+
+/** Futures EOD OI Analyzer (§20.3): per-contract daily OHLC + OI rollup over [from, to] for one index. */
+export function useFuturesEod(name: string, from: string, to: string) {
+  return useQuery({
+    queryKey: ['fut', 'eod', name, from, to],
+    queryFn: async () => {
+      const res = await oiGet<{ items?: FutEodRow[] }>(
+        '/market/futures/eod',
+        rangeParams(from, to, name),
+        { items: [] },
+      );
+      return listItems(res);
+    },
+    enabled: !!name && !!from,
+  });
+}
+
+/** FII/DII Capital Market (§20.3): FII + DII cash buy/sell/net rows over [from, to]. */
+export function useFiiDiiCash(from: string, to: string) {
+  return useQuery({
+    queryKey: ['fiidii', 'cash', from, to],
+    queryFn: async () => {
+      const res = await oiGet<{ items?: FiiDiiRow[] }>(
+        '/market/fii-dii/cash',
+        rangeParams(from, to),
+        { items: [] },
+      );
+      return listItems(res);
+    },
+    enabled: !!from,
+  });
+}
+
+/** Participant-wise OI (§20.3): FII/DII/Pro/Client long-short contracts over [from, to]. */
+export function useParticipantOi(from: string, to: string) {
+  return useQuery({
+    queryKey: ['fiidii', 'participant-oi', from, to],
+    queryFn: async () => {
+      const res = await oiGet<{ items?: ParticipantOiRow[] }>(
+        '/market/fii-dii/participant-oi',
+        rangeParams(from, to),
+        { items: [] },
+      );
+      return listItems(res);
+    },
+    enabled: !!from,
+  });
+}
+
+/** FII Long-Short Ratio (§20.3): FII index-futures long/short contracts + the ratio over [from, to]. */
+export function useFiiLongShort(from: string, to: string) {
+  return useQuery({
+    queryKey: ['fiidii', 'long-short', from, to],
+    queryFn: async () => {
+      const res = await oiGet<{ items?: LongShortRow[] }>(
+        '/market/fii-dii/long-short',
+        rangeParams(from, to),
+        { items: [] },
+      );
+      return listItems(res);
+    },
+    enabled: !!from,
   });
 }

@@ -22,17 +22,34 @@ const SECTIONS: MenuSection[] = [
       { label: 'Options Chain', to: '/options/options-chain' },
       { label: 'OI Analysis', to: '/options/oi-analysis' }, // per-strike intraday time-rows (§20.7.5)
       { label: 'OI Spurt', to: '/options/oi-spurt' },
+      { label: 'Trending OI', to: '/options/trending-oi' }, // Wave 2
+      { label: 'Big OI Movement', to: '/options/big-oi-movement' }, // Wave 2
+      { label: 'Options Premium', to: '/options/options-premium' }, // Wave 2
       { label: 'Straddle Chart', to: '/options/straddle-chart' }, // combined CE+PE premium candles (§20.7.6)
-      { label: 'OI Statistics' },
-      { label: 'Options Premium' },
-      { label: 'Trending OI' },
-      { label: 'Active Strikes OI' },
-      { label: 'Big OI Movement' },
+      { label: 'OI Statistics' }, // W3
+      { label: 'Active Strikes OI' }, // W3
     ],
   },
-  { title: 'Futures', items: [{ label: 'OI Analysis' }, { label: 'OI Spurt' }, { label: 'Banks' }] },
+  {
+    title: 'Futures',
+    items: [
+      { label: 'OI Spurt', to: '/futures/oi-spurt' }, // Wave 2
+      { label: 'Market Movers', to: '/futures/market-movers' }, // Wave 2
+      { label: 'EOD OI Analyzer', to: '/futures/eod-oi-analyzer' }, // Wave 2
+      { label: 'OI Analysis' }, // W3 (series endpoint)
+      { label: 'OI Buzz' }, // deferred (constituent treemap)
+      { label: 'Banks' }, // W3
+    ],
+  },
   { title: 'Equity', items: [{ label: 'Breadth' }, { label: 'Sector Stats' }] },
-  { title: 'FII / DII', items: [{ label: 'Capital Market' }, { label: 'Participant OI' }] },
+  {
+    title: 'FII / DII',
+    items: [
+      { label: 'Capital Market', to: '/fii-dii/capital-market' }, // Wave 2
+      { label: 'Participant OI', to: '/fii-dii/participant-wise-oi' }, // Wave 2
+      { label: 'Long-Short Ratio', to: '/fii-dii/long-short-ratio' }, // Wave 2
+    ],
+  },
   {
     title: 'Features',
     items: [

@@ -30,6 +30,9 @@ public class FuturesMoversService {
       BigDecimal ltp,
       BigDecimal pricePct,
       BigDecimal oiPct,
+      BigDecimal dayOpen,
+      BigDecimal dayHigh,
+      BigDecimal dayLow,
       OiInterpretation interpretation) {}
 
   public record Movers(List<MoverRow> gainers, List<MoverRow> losers, OffsetDateTime asOf) {}
@@ -76,6 +79,9 @@ public class FuturesMoversService {
               p.cur().ltp(),
               pricePct(p.cur(), p.old()),
               oiPct,
+              p.cur().dayOpen(),
+              p.cur().dayHigh(),
+              p.cur().dayLow(),
               OiInterpretation.classify(ltpDelta, oiDelta)));
     }
     List<MoverRow> gainers =

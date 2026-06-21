@@ -3631,8 +3631,20 @@ Owner chose a SEQUENCE of smaller PRs (65 routes is unreviewable in one).
   backfill-verifies the Wave-1 data pages — clearing the "built-but-unverified" debt in one pass instead
   of accumulating it. NOT a Wave-1 blocker (the other ~3/4 of deferred items are our-own code / charts /
   intended divergences, Upstox-irrelevant — ledger Buckets 1–4).
-- **PR-W2 depth (fast, config-only on the library)** — Active Strikes OI, Trending OI/-PA, Big OI,
-  Premium, the Futures suite, FII/DII. All ✅ zero-backend.
+- **PR-W2 depth (config-only on the library + small faithful BE field-surfacing)** — Active Strikes OI,
+  Trending OI/-PA, Big OI, Premium, the Futures suite, FII/DII. The "all ✅ zero-backend" claim was
+  REFUTED per-field in a 2026-06-21 scope pass: only Options Premium + FII Capital Market are faithful
+  off the raw endpoint; the rest need FE-fold from existing fields OR a small captured-field surface.
+  Owner chose **"Faithful (small BE adds)"** → W2 ships **9 pages**: OI Trending, Big OI Movement,
+  Options Premium (Options); Futures OI Spurt, Market Movers, EOD OI Analyzer (Futures); FII/DII Capital
+  Market, Participant-wise OI, FII Long-Short (FII/DII). BE field-surfacing (data already captured, one
+  springdoc recapture): `TrendPoint+spot`, `FutSpurt+prevClose/pricePct`, `MoverRow+dayOHL`. New generic
+  `DataTable` composite. **DEFERRED to W3:** Futures OI **Buzz** (per-constituent treemap — no captured
+  stock-futures universe), Active Strikes OI/IV, OI Statistics (PCR series), Futures OI Analysis/Chart
+  (series endpoints), Banks matrix, FII Derivative Stats (each needs a NEW endpoint). Universe note:
+  Futures Spurt/Movers cover the captured index + 17 bank-sector futures, not oipulse's all-F&O scan.
+  See `docs/manual-tests/phase-4-wave2-depth.md`. Live value-verify still gated on the data-foundation
+  milestone (same as Wave 1).
 - **PR-W3 breadth/equity** — + backend gaps: Vix endpoint, equity sector-stats/heatmap/returns/pre-open,
   delivery depth, index-contribution.
 - **PR-W4 tools/charts** — adopt openalgo-chart (Advance/Multiframe + builder tools + option-chain-

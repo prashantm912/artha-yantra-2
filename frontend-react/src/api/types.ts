@@ -39,14 +39,90 @@ export interface OiStrikePoint {
   spot: string | null;
 }
 
+/** One Connecting Dots interval row: 11 factor codes (0/1/2) + the 5-state composite trend (0..4). */
+export interface ConnectingDotsRow {
+  timeInterval: string;
+  trend: number;
+  dow: number;
+  vix: number;
+  volume: number;
+  activeStrikeIv: number;
+  activeStrikeOi: number;
+  futOi: number;
+  vwap: number;
+  supertrend: number;
+  rsi: number;
+  futPrice: number;
+  dailyTrend: number;
+}
+
+/** GET /api/v1/market/connecting-dots — the per-interval multi-factor sentiment matrix for an index. */
+export interface ConnectingDots {
+  underlying: string;
+  interval: string;
+  asOf: string;
+  rows: ConnectingDotsRow[];
+}
+
+/** GET /api/v1/market/vix — the INDIA VIX quote (pinned index): LTP + day OHLC + change vs prev close. */
+export interface VixQuote {
+  ltp: string | null;
+  dayHigh: string | null;
+  dayLow: string | null;
+  dayOpen: string | null;
+  prevClose: string | null;
+  change: string | null;
+  changePct: string | null;
+  asOf: string;
+}
+
+/** One interval's combined straddle candle (GET /straddle-chart): summed CE+PE OHLC + each leg's close. */
+export interface StraddleCandle {
+  time: string;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  ceClose: string;
+  peClose: string;
+  volume: number;
+}
+
+/** GET /api/v1/market/options/straddle-chart — combined CE+PE premium candles + the header strip. */
+export interface StraddleChart {
+  underlying: string;
+  expiry: string;
+  callStrike: string;
+  putStrike: string;
+  interval: string;
+  underlyingLtp: string | null;
+  underlyingDayOpen: string | null;
+  asOf: string;
+  items: StraddleCandle[];
+}
+
+/** GET /api/v1/market/options/oi-analysis/strike-series — one strike's CE+PE points per session bucket. */
+export interface StrikeSeries {
+  underlying: string;
+  expiry: string;
+  strike: string;
+  interval: string;
+  asOf: string;
+  items: OiStrikePoint[];
+}
+
 /** One row of GET /api/v1/market/options/spurt `{items}` — per strike·side interval buildup. */
 export interface SpurtRow {
   strike: string;
   optionType: 'CE' | 'PE';
   ltp: string | null;
+  prevLtp: string | null;
   oi: number | null;
   oiChange: number;
   spurtPct: string | null;
+  ltpChange: string | null;
+  ltpChangePct: string | null;
+  volume: number | null;
   interpretation: OiInterpretation;
 }
 
@@ -78,4 +154,61 @@ export interface OiChainRow {
   ce: LegCell | null;
   pe: LegCell | null;
   spot: string | null;
+}
+
+// ── /chain-table — the faithful Options Chain feed (§20.7): live black76 greeks + interval deltas.
+
+/** Interval deltas overlaid on a live leg (null when no prior snapshot bucket for this strike·side). */
+export interface LegDeltas {
+  oiChange: number | null;
+  oiChangePct: string | null;
+  ltpChange: string | null;
+  ltpChangePct: string | null;
+  interpretation: OiInterpretation;
+}
+
+/** A full live chain leg — IV + all 5 greeks computed server-side in black76 (decimal strings). */
+export interface ChainLeg {
+  tradingsymbol: string;
+  ltp: string | null;
+  bid: string | null;
+  ask: string | null;
+  volume: number | null;
+  oi: number | null;
+  iv: string | null;
+  delta: string | null;
+  gamma: string | null;
+  theta: string | null;
+  vega: string | null;
+  rho: string | null;
+  ivReason: string;
+  priceSource: string | null;
+}
+
+/** A live leg plus its interval deltas (deltas null until a snapshot pair has accrued). */
+export interface ChainTableLeg {
+  leg: ChainLeg;
+  deltas: LegDeltas | null;
+}
+
+/** One faithful-chain row: CE | strike | PE, each leg enriched with deltas. */
+export interface ChainTableRow {
+  strike: string;
+  ce: ChainTableLeg | null;
+  pe: ChainTableLeg | null;
+}
+
+/** GET /api/v1/market/options/chain-table — live chain header + enriched rows + the delta interval. */
+export interface ChainTable {
+  underlying: string;
+  expiry: string;
+  spot: string | null;
+  forward: string | null;
+  forwardSource: string | null;
+  riskFreeRate: string | null;
+  pcr: string | null;
+  stale: boolean;
+  asOf: string;
+  interval: string;
+  rows: ChainTableRow[];
 }

@@ -27,6 +27,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -80,6 +81,7 @@ class OptionsChainIntegrationTest extends MarketDataIntegrationTestBase {
   @Autowired private OptionsSnapshotService snapshotService;
   @Autowired private OptionsSnapshotRepository snapshotRepository;
   @Autowired private StringRedisTemplate redis;
+  @Autowired private JdbcTemplate jdbc;
 
   @BeforeEach
   void seedAndOpenMarket() {
@@ -197,6 +199,73 @@ class OptionsChainIntegrationTest extends MarketDataIntegrationTestBase {
                 .content("{\"underlying\":\"NIFTY 50\"}"))
         .andExpect(status().isAccepted())
         .andExpect(jsonPath("$.jobId").isString());
+  }
+
+  @Test
+  void chainTableOverlaysIntervalDeltasOnLiveGreeks() throws Exception {
+    // The live ATM strike of the synced NIFTY 50 chain (resolves to expiry 2026-06-16).
+    OptionsChainService.Chain chain = chainService.chain("NIFTY 50", null);
+    BigDecimal atm =
+        chain.rows().stream()
+            .min(java.util.Comparator.comparing(r -> r.strike().subtract(chain.spot()).abs()))
+            .orElseThrow()
+            .strike();
+    LocalDate exp = chain.expiry();
+    String k = atm.toPlainString();
+
+    // Two 5-min snapshot buckets on an OTHERWISE-UNTOUCHED IST day (2026-06-14); querying the deltas
+    // in history mode date-scopes latestPair to this day, isolating it from the shared NIFTY 50 live
+    // snapshot history (snapshotNow at 11:00, scheduled captures at the mock clock). CE long buildup
+    // (+200 OI, +10 LTP), PE long unwinding (-100 OI, -5 LTP).
+    OffsetDateTime b0 = OffsetDateTime.parse("2026-06-14T11:05:00+05:30");
+    OffsetDateTime b1 = OffsetDateTime.parse("2026-06-14T11:10:00+05:30");
+    insertSnap(b0, exp, k, "CE", "100", 1000L);
+    insertSnap(b1, exp, k, "CE", "110", 1200L);
+    insertSnap(b0, exp, k, "PE", "90", 1200L);
+    insertSnap(b1, exp, k, "PE", "85", 1100L);
+
+    // Wildcard projection over rows omits null leaves (most rows have no snapshot pair → null
+    // deltas), collecting only the present interpretations — robust where a filter predicate that
+    // traverses null siblings is not. The seeded ATM strike is the only one carrying deltas.
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/chain-table")
+                .param("name", "NIFTY 50")
+                .param("interval", "5m")
+                .param("mode", "history")
+                .param("date", "2026-06-14"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.interval").value("5m"))
+        .andExpect(jsonPath("$.spot").isString())
+        // live black76 greeks ride along in the enriched leg shape (ATM CE IV computed)
+        .andExpect(jsonPath("$.rows[*].ce.leg.iv").value(org.hamcrest.Matchers.hasItem(
+            org.hamcrest.Matchers.notNullValue())))
+        .andExpect(
+            jsonPath("$.rows[*].ce.deltas.interpretation")
+                .value(org.hamcrest.Matchers.hasItem("LONG_BUILDUP")))
+        .andExpect(
+            jsonPath("$.rows[*].pe.deltas.interpretation")
+                .value(org.hamcrest.Matchers.hasItem("LONG_UNWINDING")));
+  }
+
+  /** Seeds one option_chain_snapshots row (the chain-table delta overlay needs a captured pair). */
+  private void insertSnap(
+      OffsetDateTime ts, LocalDate exp, String strike, String type, String ltp, Long oi) {
+    jdbc.update(
+        "INSERT INTO options_chain_snapshots "
+            + "(ts, underlying, expiry, strike, option_type, tradingsymbol, ltp, oi, oi_change, volume, spot_price) "
+            + "VALUES (?,?,?,?::numeric,?,?,?::numeric,?,?,?,?::numeric) ON CONFLICT DO NOTHING",
+        java.sql.Timestamp.from(ts.toInstant()),
+        "NIFTY 50",
+        java.sql.Date.valueOf(exp),
+        strike,
+        type,
+        "NIFTY 50" + strike + type,
+        ltp,
+        oi,
+        0L,
+        1000L,
+        "23000.00");
   }
 
   @Test

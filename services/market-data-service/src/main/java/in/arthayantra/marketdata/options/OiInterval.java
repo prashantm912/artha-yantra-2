@@ -10,6 +10,7 @@ public enum OiInterval {
   M1(1),
   M3(3),
   M5(5),
+  M10(10),
   M15(15),
   M30(30),
   M60(60);
@@ -45,6 +46,6 @@ public enum OiInterval {
                 new ApiException(
                     400,
                     ErrorCodes.VALIDATION_INTERVAL_UNSUPPORTED,
-                    "interval must be one of 1m,3m,5m,15m,30m,60m"));
+                    "interval must be one of 1m,3m,5m,10m,15m,30m,60m"));
   }
 }

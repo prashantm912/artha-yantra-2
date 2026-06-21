@@ -164,6 +164,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/vix": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["vix"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/ticks/latest": {
         parameters: {
             query?: never;
@@ -236,6 +252,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["strikeSessionStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/options/straddle-chart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["straddleChart"];
         put?: never;
         post?: never;
         delete?: never;
@@ -324,6 +356,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/options/oi-analysis/strike-series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["strikeSeries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/options/iv-history": {
         parameters: {
             query?: never;
@@ -364,6 +412,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["history"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/options/chain-table": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["chainTable"];
         put?: never;
         post?: never;
         delete?: never;
@@ -588,6 +652,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["status_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/connecting-dots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["matrix"];
         put?: never;
         post?: never;
         delete?: never;
@@ -862,6 +942,17 @@ export interface components {
             /** Format: date-time */
             tokenValidUntil?: string;
         };
+        VixQuote: {
+            ltp?: number;
+            dayHigh?: number;
+            dayLow?: number;
+            dayOpen?: number;
+            prevClose?: number;
+            change?: number;
+            changePct?: number;
+            /** Format: date-time */
+            asOf?: string;
+        };
         NormalizedTick: {
             exchange?: string;
             tradingsymbol?: string;
@@ -933,6 +1024,31 @@ export interface components {
             interval?: number;
             items?: components["schemas"]["StrikeSessionStat"][];
         };
+        StraddleCandle: {
+            /** Format: date-time */
+            time?: string;
+            open?: number;
+            high?: number;
+            low?: number;
+            close?: number;
+            ceClose?: number;
+            peClose?: number;
+            /** Format: int64 */
+            volume?: number;
+        };
+        StraddleChart: {
+            underlying?: string;
+            /** Format: date */
+            expiry?: string;
+            callStrike?: number;
+            putStrike?: number;
+            interval?: string;
+            underlyingLtp?: number;
+            underlyingDayOpen?: number;
+            /** Format: date-time */
+            asOf?: string;
+            items?: components["schemas"]["StraddleCandle"][];
+        };
         SpurtChain: {
             items?: components["schemas"]["StrikeSpurt"][];
             summary?: components["schemas"]["SpurtSummary"];
@@ -952,12 +1068,16 @@ export interface components {
             strike?: number;
             optionType?: string;
             ltp?: number;
+            prevLtp?: number;
             /** Format: int64 */
             oi?: number;
             /** Format: int64 */
             oiChange?: number;
             spurtPct?: number;
+            ltpChange?: number;
             ltpChangePct?: number;
+            /** Format: int64 */
+            volume?: number;
             /** @enum {string} */
             interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
         };
@@ -1054,6 +1174,39 @@ export interface components {
             strike?: number;
             ce?: components["schemas"]["Leg"];
             pe?: components["schemas"]["Leg"];
+        };
+        ChainTable: {
+            underlying?: string;
+            /** Format: date */
+            expiry?: string;
+            spot?: number;
+            forward?: number;
+            forwardSource?: string;
+            riskFreeRate?: number;
+            pcr?: number;
+            stale?: boolean;
+            /** Format: date-time */
+            asOf?: string;
+            interval?: string;
+            rows?: components["schemas"]["ChainTableRow"][];
+        };
+        ChainTableLeg: {
+            leg?: components["schemas"]["Leg"];
+            deltas?: components["schemas"]["LegDeltas"];
+        };
+        ChainTableRow: {
+            strike?: number;
+            ce?: components["schemas"]["ChainTableLeg"];
+            pe?: components["schemas"]["ChainTableLeg"];
+        };
+        LegDeltas: {
+            /** Format: int64 */
+            oiChange?: number;
+            oiChangePct?: number;
+            ltpChange?: number;
+            ltpChangePct?: number;
+            /** @enum {string} */
+            interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
         };
         BigOi: {
             items?: components["schemas"]["BigOiRow"][];
@@ -1199,6 +1352,40 @@ export interface components {
             /** Format: int32 */
             ratiosDetected?: number;
             error?: string;
+        };
+        ConnectingDots: {
+            underlying?: string;
+            interval?: string;
+            /** Format: date-time */
+            asOf?: string;
+            rows?: components["schemas"]["ConnectingDotsRow"][];
+        };
+        ConnectingDotsRow: {
+            timeInterval?: string;
+            /** Format: int32 */
+            trend?: number;
+            /** Format: int32 */
+            dow?: number;
+            /** Format: int32 */
+            vix?: number;
+            /** Format: int32 */
+            volume?: number;
+            /** Format: int32 */
+            activeStrikeIv?: number;
+            /** Format: int32 */
+            activeStrikeOi?: number;
+            /** Format: int32 */
+            futOi?: number;
+            /** Format: int32 */
+            vwap?: number;
+            /** Format: int32 */
+            supertrend?: number;
+            /** Format: int32 */
+            rsi?: number;
+            /** Format: int32 */
+            futPrice?: number;
+            /** Format: int32 */
+            dailyTrend?: number;
         };
         Candle: {
             exchange?: string;
@@ -1877,6 +2064,35 @@ export interface operations {
             };
         };
     };
+    vix: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["VixQuote"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     latestTicks: {
         parameters: {
             query?: {
@@ -2041,6 +2257,44 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["StrikeSessionStats"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    straddleChart: {
+        parameters: {
+            query: {
+                mode?: string;
+                name: string;
+                date?: string;
+                expiry?: string;
+                strike: number;
+                callStrike?: number;
+                putStrike?: number;
+                interval?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["StraddleChart"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -2231,6 +2485,44 @@ export interface operations {
             };
         };
     };
+    strikeSeries: {
+        parameters: {
+            query: {
+                mode?: string;
+                name: string;
+                date?: string;
+                interval?: string;
+                expiry?: string;
+                strike: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     ivHistory: {
         parameters: {
             query: {
@@ -2316,6 +2608,41 @@ export interface operations {
                     "*/*": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    chainTable: {
+        parameters: {
+            query: {
+                mode?: string;
+                name: string;
+                date?: string;
+                interval?: string;
+                expiry?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ChainTable"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -2794,6 +3121,40 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["Status"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    matrix: {
+        parameters: {
+            query: {
+                mode?: string;
+                name: string;
+                date?: string;
+                interval?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ConnectingDots"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

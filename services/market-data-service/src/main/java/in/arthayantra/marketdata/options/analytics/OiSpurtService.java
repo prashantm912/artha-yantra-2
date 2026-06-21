@@ -27,10 +27,13 @@ public class OiSpurtService {
       BigDecimal strike,
       String optionType,
       BigDecimal ltp,
+      BigDecimal prevLtp,
       Long oi,
       long oiChange,
       BigDecimal spurtPct,
+      BigDecimal ltpChange,
       BigDecimal ltpChangePct,
+      Long volume,
       OiInterpretation interpretation) {}
 
   /**
@@ -117,10 +120,13 @@ public class OiSpurtService {
               cur.strike(),
               cur.optionType(),
               cur.ltp(),
+              old.ltp(),
               cur.oi(),
               oiDelta,
               r.spurtPct(),
+              ltpDelta,
               ltpChangePct,
+              cur.volume(),
               r.interpretation()));
       totalOiDelta += oiDelta;
     }

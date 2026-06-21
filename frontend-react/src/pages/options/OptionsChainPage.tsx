@@ -1,97 +1,106 @@
-import { useMemo } from 'react';
-import { cn } from '../../lib/cn.ts';
-import { formatDecimal } from '../../lib/decimal.ts';
-import { chainSpot, foldStrikes } from '../../api/oiFold.ts';
-import {
-  useActiveStrikes,
-  useOiAnalysis,
-  useOiStats,
-  useOptionsSpurt,
-} from '../../api/oiAnalytics.ts';
+import { useMemo, useState } from 'react';
+import { formatDecimal, isNegative } from '../../lib/decimal.ts';
+import { nearestStrike } from '../../lib/strikes.ts';
+import { useChainTable, useVix } from '../../api/oiAnalytics.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
-import { OiBadge4 } from '../../components/atoms/OiBadge4.tsx';
-import { DataBar } from '../../components/atoms/DataBar.tsx';
-import { MirroredCspTable, type CspColumn } from '../../components/MirroredCspTable.tsx';
+import { GoButton } from '../../components/atoms/GoButton.tsx';
+import { Metric } from '../../components/atoms/Metric.tsx';
+import { ColumnSettings } from '../../components/ColumnSettings.tsx';
+import { OptionsChainTable } from '../../components/OptionsChainTable.tsx';
+import { OPTIONAL_COLUMN_META } from '../../components/optionsChainColumns.ts';
 
-// Options Chain — all-strikes mirrored grid (strikes on rows). The PR-F anchor; structurally this IS
-// the oipulse "Options Chain", NOT the per-strike-intraday "Options OI Analysis" (corrected mapping,
-// master plan §20.6). A "lite" chain off the oi-analysis endpoint (9 cols); the full 45-col chain via
-// /chain + black76 greeks is a Wave-1 enhancement. Composes the reusable MirroredCspTable archetype.
-// All money/IV are decimal strings (never parseFloat).
+// Options Chain — the faithful oipulse chain (§20.7): 18 visible cols off /chain-table (live black76
+// greeks + interval deltas), side-coloured OI bars, OI-interpretation badges, ATM/ITM tints, max-cell
+// highlights, LTP flash, per-strike PCR, a Go button + Column-Setting modal, and the live header strip.
+// Money/IV stay decimal strings (never parseFloat). Header gaps (INDIA VIX, underlying DH/DL/DO,
+// prev-PCR) are marked pending — they need endpoints the chain-table feed does not yet carry.
 
-const dec = (v: string | null | undefined, n: number) => (v ? formatDecimal(v, n) : '—');
-const oiFmt = (v: number | null | undefined) => (v != null ? v.toLocaleString('en-IN') : '—');
-const signedOi = (v: number | null | undefined) =>
-  v == null ? '—' : v > 0 ? '+' + v.toLocaleString('en-IN') : v.toLocaleString('en-IN');
-const toneClass = (v: number | null | undefined) =>
-  v == null || v === 0 ? '' : v > 0 ? 'text-bull' : 'text-bear';
+/** Whole calendar days from today (IST-agnostic display) to the ISO expiry date. */
+function daysToExpiry(expiry: string | null): number | null {
+  if (!expiry) return null;
+  const exp = Date.parse(`${expiry}T00:00:00`);
+  if (Number.isNaN(exp)) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.max(0, Math.round((exp - today.getTime()) / 86_400_000));
+}
 
-const barCol = (header: string): CspColumn => ({
-  header,
-  cell: (leg, _row, ctx) => <DataBar value={leg?.oi ?? 0} max={ctx.maxOi} label={oiFmt(leg?.oi)} />,
-});
-const deltaCol = (header: string): CspColumn => ({
-  header,
-  align: 'right',
-  cell: (leg) => (
-    <span className={cn('tabular-nums', toneClass(leg?.oiChange))}>{signedOi(leg?.oiChange)}</span>
-  ),
-});
-const ivCol = (header: string): CspColumn => ({
-  header,
-  align: 'right',
-  cell: (leg) => <span className="tabular-nums">{dec(leg?.iv, 4)}</span>,
-});
-const ltpCol = (header: string): CspColumn => ({
-  header,
-  align: 'right',
-  cellClass: (ctx) => (ctx.itm ? 'bg-accent/10' : ''),
-  cell: (leg, _row, ctx) => (
-    <span className="tabular-nums">
-      {dec(leg?.ltp, 2)}
-      {ctx.itm && <span className="ay-sr-only"> in the money</span>}
-    </span>
-  ),
-});
-
-const CE_COLUMNS = [barCol('CE OI'), deltaCol('CE ΔOI'), ivCol('CE IV'), ltpCol('CE LTP')];
-const PE_COLUMNS = [ltpCol('PE LTP'), ivCol('PE IV'), deltaCol('PE ΔOI'), barCol('PE OI')];
+/** "12.97 (+2.37%)" from the VIX quote; "—" until it loads. */
+function vixLabel(ltp: string | null | undefined, changePct: string | null | undefined): string {
+  if (!ltp) return '—';
+  if (!changePct) return formatDecimal(ltp, 2);
+  const sign = isNegative(changePct) ? '' : '+';
+  return `${formatDecimal(ltp, 2)} (${sign}${formatDecimal(changePct, 2)}%)`;
+}
 
 export function OptionsChainPage() {
-  const stats = useOiStats();
-  const active = useActiveStrikes();
-  const strikesQ = useOiAnalysis();
-  const spurt = useOptionsSpurt();
+  const chainQ = useChainTable();
+  const vixQ = useVix();
+  const [optional, setOptional] = useState<Record<string, boolean>>({});
 
-  const points = useMemo(() => strikesQ.data ?? [], [strikesQ.data]);
-  const rows = useMemo(() => foldStrikes(points), [points]);
-  const spot = useMemo(() => chainSpot(points), [points]);
-  const bias = spurt.data?.summary?.interpretation ?? null;
-  const s = stats.data;
+  const chain = chainQ.data ?? null;
+  const rows = useMemo(() => chain?.rows ?? [], [chain]);
+  const atm = useMemo(
+    () => nearestStrike(rows.map((r) => r.strike), chain?.spot ?? null),
+    [rows, chain],
+  );
+  const dte = daysToExpiry(chain?.expiry ?? null);
+  const optionalKeys = useMemo(
+    () => OPTIONAL_COLUMN_META.filter((c) => optional[c.key]).map((c) => c.key),
+    [optional],
+  );
 
   return (
     <div>
       <h1 className="ay-sr-only">Options chain</h1>
-      <FilterBar showName showExpiry />
 
-      <p className="mb-2 flex items-center gap-2 text-sm text-ay-muted" aria-live="polite">
-        OI bias <OiBadge4 value={bias} />
-      </p>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <FilterBar showName showExpiry />
+        <GoButton onClick={() => chainQ.refetch()} loading={chainQ.isFetching} />
+        <ColumnSettings
+          columns={OPTIONAL_COLUMN_META}
+          visible={optional}
+          onToggle={(key) => setOptional((v) => ({ ...v, [key]: !v[key] }))}
+        />
+      </div>
 
-      {s ? (
-        <p className="mb-3 text-sm text-ay-muted tabular-nums" aria-live="polite">
-          PCR {dec(s.pcr, 4)} · Max pain {dec(s.maxPain, 2)} · CE OI {oiFmt(s.ceOi)} · PE OI{' '}
-          {oiFmt(s.peOi)}
-          {active.data && <> · Sentiment {dec(active.data.sentimentPct, 2)}%</>} · {rows.length}{' '}
-          strike{rows.length === 1 ? '' : 's'}
-        </p>
-      ) : (
+      {/* Live header strip (§20.7.4). Max-pain/Sentiment intentionally NOT here — they belong to the
+          separate OI Statistics / Active Strikes pages. */}
+      <div className="mb-3 flex flex-wrap items-center gap-2" aria-live="polite">
+        <Metric
+          label="INDIA VIX"
+          value={vixLabel(vixQ.data?.ltp, vixQ.data?.changePct)}
+          title={
+            vixQ.data?.dayHigh
+              ? `DH ${formatDecimal(vixQ.data.dayHigh, 2)} · DL ${vixQ.data.dayLow ? formatDecimal(vixQ.data.dayLow, 2) : '—'} · DO ${vixQ.data.dayOpen ? formatDecimal(vixQ.data.dayOpen, 2) : '—'}`
+              : undefined
+          }
+        />
+        <Metric label="Total PCR" value={chain?.pcr ? formatDecimal(chain.pcr, 2) : '—'} />
+        <Metric label="ATM" value={atm ?? '—'} />
+        <Metric label="Days to expiry" value={dte != null ? String(dte) : '—'} />
+        <Metric
+          label={chain?.underlying ?? 'Underlying'}
+          value={chain?.spot ? formatDecimal(chain.spot, 2) : '—'}
+          title="DH/DL/DO pending — underlying OHLC not in the chain-table feed"
+        />
+        {chain?.stale && (
+          <span className="rounded border border-warn/40 px-2 py-1 text-xs text-warn">stale</span>
+        )}
+      </div>
+
+      {chain == null && !chainQ.isLoading && (
         <p className="mb-3 text-sm text-ay-muted">
-          No chain stats — pick an underlying + expiry with captured snapshots.
+          No chain — pick an underlying + expiry with a live option chain.
         </p>
       )}
 
-      <MirroredCspTable rows={rows} spot={spot} ceColumns={CE_COLUMNS} peColumns={PE_COLUMNS} />
+      <OptionsChainTable
+        rows={rows}
+        spot={chain?.spot ?? null}
+        atmStrike={atm}
+        optionalKeys={optionalKeys}
+      />
     </div>
   );
 }

@@ -17,7 +17,10 @@ import { DateInput } from './atoms/DateInput.tsx';
 interface FilterBarProps {
   showName?: boolean;
   showExpiry?: boolean;
+  showInterval?: boolean;
   allowedIntervals?: readonly OiInterval[];
+  /** Restrict the Name select to this exact list (e.g. Connecting Dots = indices only). */
+  names?: readonly string[];
 }
 
 const UNDERLYING_FALLBACK = ['NIFTY 50', 'NIFTY BANK'];
@@ -25,7 +28,9 @@ const UNDERLYING_FALLBACK = ['NIFTY 50', 'NIFTY BANK'];
 export function FilterBar({
   showName = true,
   showExpiry = true,
+  showInterval = true,
   allowedIntervals = OI_INTERVALS,
+  names,
 }: FilterBarProps) {
   const name = useSymbolContext((s) => s.name);
   const expiry = useSymbolContext((s) => s.expiry);
@@ -48,8 +53,11 @@ export function FilterBar({
     }
   }, [showExpiry, expiry, expiries.data, setExpiry]);
 
-  const nameOptions =
-    underlyings.data && underlyings.data.length > 0 ? underlyings.data : UNDERLYING_FALLBACK;
+  const nameOptions = names
+    ? [...names]
+    : underlyings.data && underlyings.data.length > 0
+      ? underlyings.data
+      : UNDERLYING_FALLBACK;
 
   return (
     <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -72,12 +80,14 @@ export function FilterBar({
           disabled={!expiries.data?.length}
         />
       )}
-      <Select
-        ariaLabel="Interval"
-        value={interval}
-        options={[...allowedIntervals]}
-        onChange={(v) => setInterval(v as OiInterval)}
-      />
+      {showInterval && (
+        <Select
+          ariaLabel="Interval"
+          value={interval}
+          options={[...allowedIntervals]}
+          onChange={(v) => setInterval(v as OiInterval)}
+        />
+      )}
       <ModeToggle mode={mode} onChange={setMode} />
       {mode === 'history' && (
         <DateInput ariaLabel="History date" value={date} onChange={setDate} />

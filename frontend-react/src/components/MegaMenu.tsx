@@ -20,8 +20,9 @@ const SECTIONS: MenuSection[] = [
     title: 'Options',
     items: [
       { label: 'Options Chain', to: '/options/options-chain' },
-      { label: 'OI Analysis' }, // per-strike intraday — Wave 1 (§20.6); distinct from the chain
-      { label: 'OI Spurt' },
+      { label: 'OI Analysis', to: '/options/oi-analysis' }, // per-strike intraday time-rows (§20.7.5)
+      { label: 'OI Spurt', to: '/options/oi-spurt' },
+      { label: 'Straddle Chart', to: '/options/straddle-chart' }, // combined CE+PE premium candles (§20.7.6)
       { label: 'OI Statistics' },
       { label: 'Options Premium' },
       { label: 'Trending OI' },
@@ -32,7 +33,13 @@ const SECTIONS: MenuSection[] = [
   { title: 'Futures', items: [{ label: 'OI Analysis' }, { label: 'OI Spurt' }, { label: 'Banks' }] },
   { title: 'Equity', items: [{ label: 'Breadth' }, { label: 'Sector Stats' }] },
   { title: 'FII / DII', items: [{ label: 'Capital Market' }, { label: 'Participant OI' }] },
-  { title: 'Features', items: [{ label: 'Connecting Dots' }, { label: 'Vix & Index' }] },
+  {
+    title: 'Features',
+    items: [
+      { label: 'Connecting Dots', to: '/features/connecting-dots' }, // multi-factor matrix (§20.7.8)
+      { label: 'Vix & Index' },
+    ],
+  },
 ];
 
 export function MegaMenu() {

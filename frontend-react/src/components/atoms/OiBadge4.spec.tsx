@@ -4,18 +4,23 @@ import { OiBadge4 } from './OiBadge4.tsx';
 import type { OiInterpretation } from '../../core/oiInterpretation.ts';
 
 describe('OiBadge4', () => {
-  it('always renders the text label (colour is never the sole cue) for every state', () => {
-    const cases: [OiInterpretation, string][] = [
-      ['LONG_BUILDUP', 'Long Buildup'],
-      ['SHORT_BUILDUP', 'Short Buildup'],
-      ['SHORT_COVERING', 'Short Covering'],
-      ['LONG_UNWINDING', 'Long Unwinding'],
+  it('shows the abbreviation (non-colour cue) and the full label as the accessible name', () => {
+    const cases: [OiInterpretation, string, string][] = [
+      ['LONG_BUILDUP', 'Long Build Up', 'L.B.'],
+      ['SHORT_BUILDUP', 'Short Build Up', 'S.B.'],
+      ['SHORT_COVERING', 'Shorts Covering', 'S.C.'],
+      ['LONG_UNWINDING', 'Long Unwinding', 'L.U.'],
     ];
-    for (const [value, label] of cases) {
+    for (const [value, label, abbr] of cases) {
       const { unmount } = render(<OiBadge4 value={value} />);
-      expect(screen.getByText(label)).toBeInTheDocument();
+      expect(screen.getByLabelText(label)).toHaveTextContent(abbr);
       unmount();
     }
+  });
+
+  it('shows the full label (not the abbreviation) when full', () => {
+    render(<OiBadge4 value="LONG_BUILDUP" full />);
+    expect(screen.getByLabelText('Long Build Up')).toHaveTextContent('Long Build Up');
   });
 
   it('renders an em-dash + sr-only text when null', () => {
@@ -24,8 +29,11 @@ describe('OiBadge4', () => {
     expect(screen.getByText('no interpretation')).toBeInTheDocument();
   });
 
-  it('carries the price/OI arrow as a tooltip', () => {
+  it('carries the full label + price/OI arrow as a tooltip', () => {
     render(<OiBadge4 value="LONG_BUILDUP" />);
-    expect(screen.getByText('Long Buildup')).toHaveAttribute('title', 'price up · OI up');
+    expect(screen.getByLabelText('Long Build Up')).toHaveAttribute(
+      'title',
+      'Long Build Up — price up · OI up',
+    );
   });
 });

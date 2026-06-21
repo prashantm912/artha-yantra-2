@@ -5,7 +5,9 @@ import { create } from 'zustand';
 // localStorage; mode/date are session-transient. The expiry LIST is NOT selection state — it's a
 // TanStack query (useExpiries); setName clears expiry so the new underlying's list reloads.
 
-export const OI_INTERVALS = ['1m', '3m', '5m', '15m', '30m', '60m'] as const; // 60m, NOT 1h
+// 60m, NOT 1h. 10m rides the OiInterval.M10 BE enum; pages opt in via allowedIntervals (only
+// Connecting Dots offers it today), so adding it here doesn't change the other OI pages' UI.
+export const OI_INTERVALS = ['1m', '3m', '5m', '10m', '15m', '30m', '60m'] as const;
 export type OiInterval = (typeof OI_INTERVALS)[number];
 export type OiMode = 'live' | 'history';
 

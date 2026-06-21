@@ -3616,6 +3616,15 @@ Owner chose a SEQUENCE of smaller PRs (65 routes is unreviewable in one).
   Options Chain (+greeks), Connecting Dots (signal matrix + SentimentBadge3), Straddle/Strangle premium
   (combo candle+line). **2 backend tasks:** greeks-in-chain (black76 server-side) + Connecting-Dots read
   endpoint (expose the per-factor matrix). Both drift springdoc → recapture + `contracts/gen` regen.
+- **Data-foundation milestone (owner-decided 2026-06-21, between PR-W1 and PR-W2)** — the Upstox/
+  OpenAlgo "data foundation": Upstox Plus auth + global instruments (Dow), ExpiryTrack historical-OI
+  backfill, intraday option/futures OHLC capture. Rationale: Wave-1 data pages are built + structure-QA'd
+  but NOT value-verified (mock-synthetic / no live session / Dow absent — see
+  `docs/manual-tests/phase-4-wave1-deferred-ledger.md` Bucket 5). Doing the data lever BEFORE the deeper
+  W2/W3 OI pages lets them build + value-verify against real historical sessions from day one, and
+  backfill-verifies the Wave-1 data pages — clearing the "built-but-unverified" debt in one pass instead
+  of accumulating it. NOT a Wave-1 blocker (the other ~3/4 of deferred items are our-own code / charts /
+  intended divergences, Upstox-irrelevant — ledger Buckets 1–4).
 - **PR-W2 depth (fast, config-only on the library)** — Active Strikes OI, Trending OI/-PA, Big OI,
   Premium, the Futures suite, FII/DII. All ✅ zero-backend.
 - **PR-W3 breadth/equity** — + backend gaps: Vix endpoint, equity sector-stats/heatmap/returns/pre-open,
@@ -3729,6 +3738,102 @@ cells + Go/Column-Setting):
 
 Live pixel side-by-side (Claude-in-Chrome on the owner's logged-in oipulse) is the visual QA gate when
 building this — the study doc is the authoritative spec until then.
+
+### 20.7.6 Options Chain — built + live-QA'd; remaining-divergence sequencing (LOCKED 2026-06-21)
+
+The faithful Options Chain shipped on `feat/wave1-options` (commits `dbaf6f9` backend `chain-table` +
+`strike-series`; `98d5ecd` FE page; `03afd5f` + `980cde3` fidelity from the live QA). A live
+Claude-in-Chrome QA vs the owner's oipulse SENSEX chain (2026-06-21) confirmed the 18-column order +
+colour semantics match. Three fixes were applied (IV shown as percent ×100; optional cols →
+Delta/Volume/Intrinsic; OI-Int badge → abbreviation `L.B./S.B./S.C./L.U.` + arrow, full label as
+aria-label). The QA checklist + full divergence log live in
+`docs/manual-tests/phase-4-wave1-options-chain.md`. The remaining divergences are sequenced (owner-locked):
+
+- **Permanent / intended (NOT to "fix"):** badge **ring** not solid fill (solid fails WCAG AA on some
+  theme×severity combos); the **`+` prefix** on positive deltas (sign must not be colour-only); **black76
+  greeks** instead of oipulse server values (§17.9 parity).
+- **INDIA VIX header → DONE** (pulled forward from PR-W3, owner-chosen 2026-06-21): new
+  `GET /api/v1/market/vix` (the pinned INDIA VIX index quote → LTP + day OHLC + change) wired into the
+  chain header. The **strike-click chart sub-view** + the **Chart** optional column → **PR-W4**
+  (openalgo-chart).
+- **End-of-Wave-1 polish pass** (pure FE, build-once after the other W1 pages exist): strike-column tan
+  bg · stronger ATM row · max-cell **filled** highlight; **grouped Name select** (Index/Stocks — shared
+  `FilterBar`, benefits every page); **Premium / Combine-Premium** derivable optional cols; header
+  **underlying chg% + timestamp** (`asOf` exists; the chg needs prev-close → its W3 portion rides PR-W3).
+- **PR-W3 backend-dependent** (batch with the W3 backend-gap work): **interval set** Full-Day/2h/4h/10m/
+  custom-time (an `OiInterval` enum extension + custom-time pickers); **IV Chng** optional col (an
+  IV-delta field on `chain-table`); **O=H / O=L** optional cols (a `strike-session-stats` join).
+
+Net: the chain reaches full oipulse fidelity by end of **PR-W3** (+ PR-W4 for the chart click). Nothing
+dropped. This same per-page rhythm — build to the study doc, then a live Claude-in-Chrome QA, then a
+documented fidelity pass — applies to every Wave page (§20.8.2).
+
+### 20.7.7 Straddle/Strangle Chart — built + live-QA'd (2026-06-21)
+
+Built on `feat/wave1-options` to `docs/oipulse-study/strategies/straddle-chart.md`. The combined CE+PE
+premium **candlestick** + VWAP / 20-EMA / Call-Price / Put-Price overlays + day-H/L markers + dataZoom +
+toolbox — ECharts via the new lazy `EChart` wrapper (the page is `React.lazy`'d so the ~1 MB ECharts
+bundle is a separate chunk, main payload stays ~362 KB).
+
+- **KEY FINDING (2026-06-21): NO new OHLC capture pipeline.** Per-option intraday OHLC is already
+  fetchable cache-first via the generic `CandleQueryService.read(exchange, tradingsymbol, "1m", …)` (it
+  fetches the missing 1m bars from broker historical on demand for ANY tradingsymbol, option legs
+  included). So the BE just composes the two legs.
+- **Backend** `GET /api/v1/market/options/straddle-chart` (`StraddleChartService`): resolve the CE/PE
+  instruments for the strike(s), read each leg's **1m** OHLC, aggregate session-aligned (09:15 IST) to
+  the requested interval, **sum CE+PE → combined OHLC** per interval + each leg's close + summed volume.
+  `interval` is **raw minutes** (1/3/5/10/15/30/60 — wider than `OiInterval`, which lacks 10m). `strike`
+  is the straddle strike; `callStrike`/`putStrike` override it for a **strangle**. 422 on an unlisted
+  strike, 400 on an off-set interval. IT: `OptionsStraddleChartIntegrationTest` (5 — faithful invariant
+  `close == ceClose + peClose`, strangle dual-strike, REST decimal-strings, 422, 400). Drifts springdoc
+  → recaptured + `contracts/gen` regenned.
+- **Frontend** `OptionsStraddlePage` (`/options/straddle-chart`, menu wired) + `StraddleChart` composite
+  + `core/straddleSeries.ts` (VWAP/EMA/candle maths, the single sanctioned string→number boundary for
+  chart COORDINATES — displayed values stay decimal strings). Strike list + ATM default from the live
+  `/chain-table` (no snapshot dependency). A **Strangle** toggle splits the single strike into Call/Put.
+- **Live QA done (Claude-in-Chrome vs oipulse Strangle Chart, 2026-06-21):** structure matched (filter
+  bar incl Call/Put strikes, the 5 series, candles+VWAP+EMA+Call/Put, day-H/L, dataZoom, toolbox). The
+  live page revealed + we FIXED: **10-min interval** (the page now owns a raw-minutes selector — the BE
+  already accepted minutes; the shared `OiInterval` gap no longer applies here), a **centered title**, a
+  **fixed latest-candle readout**, and the **`CE x PE` watermark** format. A backend robustness bug was
+  also fixed: the header quote 401-ed the whole endpoint off-hours (no Kite session) — now best-effort,
+  so the cache-first candle series renders regardless. The full candlestick **rendered + verified** via
+  the mock stack (market-data recreated mock-only; gateway/session stayed live) — all 5 series, day-H/L
+  markers, dataZoom, toolbox, title + readout. Full log: `docs/manual-tests/phase-4-wave1-straddle-chart.md`.
+- **Remaining divergences (intended/deferred):** the **Strategies** sub-tab (separate payoff page);
+  Call/Put lines drawn **dashed** in `bull`/`bear` tones (deliberate, theme-aware); header **change%**
+  (oipulse shows underlying Chg vs prev-close — needs the W3 prev-close field, batched with the chain's
+  W3 header work). The chart-with-DATA pixel render was verified on the mock stack (the live stack had
+  an expired Kite session off-hours → `items=[]`; the endpoints degrade cleanly to 200 regardless).
+
+### 20.7.8 Connecting Dots — built + render-verified (2026-06-21)
+
+The faithful oipulse "Connecting Dots" — the per-interval 11-factor sentiment matrix for an index.
+Built to `docs/oipulse-study/features/connecting-dots.md`; full QA log in
+`docs/manual-tests/phase-4-wave1-connecting-dots.md`.
+
+- **Backend** `GET /api/v1/market/connecting-dots` (`ConnectingDotsService` in `options.analytics`, so
+  it can reach the snapshot readers). Each interval row = 11 factors (3-state 0/1/2) + a 5-state
+  composite Trend. Sources route through EXPOSED module APIs only (no cross-module-internal reach): the
+  **front-month FUTURES candle series** (`CandleQueryService`, resampled midnight-IST = pg `time_bucket`
+  parity) drives Price / VWAP / Supertrend / RSI / Volume / OI-Interpretation (candle `oi`); the INDEX
+  daily candle → Daily Trend; INDIA VIX candles → Vix (inverse); option snapshots
+  (`OptionsSnapshotReader` + `ActiveStrikeService`) → Active-Strike OI + ATM-IV. **Dow = Neutral** until
+  an Upstox global feed lands (faithful intraday per the study). Indicators computed locally
+  (`ConnectingDotsIndicators` — Wilder RSI/ATR, session VWAP, Supertrend) since market-data has no ta4j.
+  `OiInterval.M10` added (additive — unblocks 10-min across OiInterval endpoints; pages opt in). Tests:
+  `ConnectingDotsIndicatorsTest` (5) + `ConnectingDotsIntegrationTest` (2); ModularityTest green;
+  springdoc recaptured.
+- **Frontend** `ConnectingDotsPage` (`/features/connecting-dots`, menu wired) + `ConnectingDotsTable`
+  (+spec) + `core/connectingDots.ts` (factor/trend meta). 13-col matrix, newest-first, pagination
+  (25/page), extreme-row maroon tint, 5-pill legend, index-only Name select, 3/5/10/15/30/60 intervals.
+- **Render verified** on the mock stack (NIFTY 50 · 3-min · History → 125 rows = the doc's full-session
+  count): 13 columns in order, 3-state ↑/↓/↔ colour semantics, 5-state Trend, extreme tint, legend — all
+  match. market-data restored to live.
+- **Divergences (intended/phased):** Dow Neutral (Upstox global — funded, not built); Active-Strike
+  IV/OI Neutral without live snapshots; the composite cutoffs + per-factor bands are a documented
+  approximation (oipulse's exact server weights unknown — same class as black76 greeks); FINNIFTY/
+  MIDCPNIFTY pending instrument cover; the "Tool" sub-tab deferred.
 
 ### 20.8 Standing UI-fidelity rules (apply to EVERY page, every wave — AUTHORITATIVE)
 

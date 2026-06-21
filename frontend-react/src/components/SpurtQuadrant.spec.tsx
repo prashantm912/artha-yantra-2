@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { SpurtQuadrant } from './SpurtQuadrant.tsx';
-import { isStrong } from './spurtStrength.ts';
 import type { SpurtRow } from '../api/types.ts';
 
 function row(
@@ -25,15 +24,6 @@ function row(
     interpretation: 'LONG_BUILDUP',
   };
 }
-
-describe('isStrong (oipulse signal-strength gate)', () => {
-  it('is true only when both |%ΔLTP| > 50 and |%ΔOI| > 50', () => {
-    expect(isStrong(row('1', 1, 1, '60', '70'))).toBe(true);
-    expect(isStrong(row('1', 1, 1, '40', '70'))).toBe(false);
-    expect(isStrong(row('1', 1, 1, '-60', '-70'))).toBe(true); // magnitude
-    expect(isStrong(row('1', 1, 1, null, '70'))).toBe(false);
-  });
-});
 
 describe('SpurtQuadrant', () => {
   it('sorts by |ΔOI| desc and computes Old OI = New OI − ΔOI', () => {

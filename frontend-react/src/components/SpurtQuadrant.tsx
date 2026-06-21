@@ -3,11 +3,9 @@ import { cn } from '../lib/cn.ts';
 import { formatDecimal } from '../lib/decimal.ts';
 import type { SpurtRow } from '../api/types.ts';
 import { ValueDeltaCell } from './atoms/ValueDeltaCell.tsx';
-import { isStrong } from './spurtStrength.ts';
 
 // One OI-Spurt quadrant (oipulse OI Spurt §20.3): a single OI-action bucket's strikes, sorted by
-// |ΔOI| desc, paginated 7/page. The strength filter (%ΔLTP>50 AND %ΔOI>50, in spurtStrength.ts) bolds
-// the qualifying rows (oipulse's "this is actually a signal" rule). Decimal strings — never parseFloat.
+// |ΔOI| desc, paginated 7/page (uniform rows, matching the live page). Decimal strings — never parseFloat.
 
 const PAGE = 7;
 const num = (n: number | null | undefined) => (n != null ? n.toLocaleString('en-IN') : '—');
@@ -62,16 +60,12 @@ export function SpurtQuadrant({ title, subtitle, rows }: SpurtQuadrantProps) {
           <tbody>
             {slice.map((r) => {
               const oldOi = r.oi != null ? r.oi - r.oiChange : null;
-              const strong = isStrong(r);
               return (
                 <tr
                   key={`${r.strike}-${r.optionType}`}
-                  className={cn('border-t border-ay-border text-ay-text', strong && 'font-semibold')}
+                  className="border-t border-ay-border text-ay-text"
                 >
-                  <td className="px-2 py-1 text-left tabular-nums">
-                    {r.strike}
-                    {strong && <span className="ay-sr-only"> signal-strength qualifying</span>}
-                  </td>
+                  <td className="px-2 py-1 text-left tabular-nums">{r.strike}</td>
                   <td className="px-2 py-1 text-left">{r.optionType}</td>
                   <td className="px-2 py-1 text-right tabular-nums">{dec(r.ltp, 2)}</td>
                   <td className="px-2 py-1 text-right tabular-nums text-ay-muted">{dec(r.prevLtp, 2)}</td>

@@ -3967,6 +3967,23 @@
           }
         }
       },
+      "ActiveStrikeOiPoint" : {
+        "type" : "object",
+        "properties" : {
+          "bucket" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "ceOi" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "peOi" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
       "ActiveStrikesResponse" : {
         "type" : "object",
         "properties" : {
@@ -3983,6 +4000,12 @@
             "type" : "array",
             "items" : {
               "$ref" : "#/components/schemas/SentimentPoint"
+            }
+          },
+          "activeStrikeOiSeries" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ActiveStrikeOiPoint"
             }
           },
           "asOf" : {

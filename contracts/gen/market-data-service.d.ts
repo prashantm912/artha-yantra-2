@@ -1246,10 +1246,19 @@ export interface components {
             oiChange?: number;
             ltp?: number;
         };
+        ActiveStrikeOiPoint: {
+            /** Format: date-time */
+            bucket?: string;
+            /** Format: int64 */
+            ceOi?: number;
+            /** Format: int64 */
+            peOi?: number;
+        };
         ActiveStrikesResponse: {
             sentimentPct?: number;
             items?: components["schemas"]["StrikeView"][];
             sentimentSeries?: components["schemas"]["SentimentPoint"][];
+            activeStrikeOiSeries?: components["schemas"]["ActiveStrikeOiPoint"][];
             /** Format: date-time */
             asOf?: string;
         };

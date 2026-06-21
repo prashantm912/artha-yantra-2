@@ -30,6 +30,14 @@ public class ActiveStrikeService {
   /** One active-strike Call/Put OI point per snapshot bucket (newest-last) — the LEFT chart series. */
   public record ActiveStrikeOiPoint(OffsetDateTime bucket, long ceOi, long peOi) {}
 
+  /**
+   * One active-strike Call/Put IV + price point per snapshot bucket (newest-last) — the Active Strike IV
+   * chart. IV is per-strike and cannot be aggregated, so this carries the SINGLE peak-OI strike's IVs
+   * (not the top-N aggregate the OI series uses); {@code price} is that strike's underlying spot.
+   */
+  public record ActiveStrikeIvPoint(
+      OffsetDateTime bucket, BigDecimal ceIv, BigDecimal peIv, BigDecimal price) {}
+
   public List<StrikeOiSnap> activeStrikes(List<StrikeOiSnap> chain) {
     return chain.stream()
         .sorted(Comparator.comparingLong((StrikeOiSnap s) -> s.ceOi() + s.peOi()).reversed())
@@ -121,6 +129,58 @@ public class ActiveStrikeService {
             peOi += s.peOi();
           }
           out.add(new ActiveStrikeOiPoint(bucket, ceOi, peOi));
+        });
+    return out;
+  }
+
+  /** Per-bucket accumulator: total OI (the active-strike selection key) + the strike's CE/PE IV + spot. */
+  private static final class IvAcc {
+    long totalOi;
+    BigDecimal ceIv;
+    BigDecimal peIv;
+    BigDecimal spot;
+  }
+
+  /**
+   * Active-strike Call/Put IV + price per snapshot bucket (the "Active Strike IV" chart). Per bucket it
+   * picks the SINGLE peak-total-OI strike (ties broken by the LOWEST strike, deterministically) and emits
+   * that strike's CE IV, PE IV and underlying spot. IV is per-strike and unsummable, so — unlike
+   * {@link #activeStrikeOiSeries} (top-N aggregate) — this is rank-1 only. One point per bucket,
+   * newest-last; an IV leg absent on the chosen strike rides through as null (the chart gaps it).
+   */
+  public List<ActiveStrikeIvPoint> activeStrikeIvSeries(
+      List<OptionsSnapshotReader.StrikePoint> series) {
+    Map<OffsetDateTime, Map<BigDecimal, IvAcc>> byBucket = new LinkedHashMap<>();
+    for (OptionsSnapshotReader.StrikePoint p : series) {
+      Map<BigDecimal, IvAcc> m = byBucket.computeIfAbsent(p.bucket(), k -> new LinkedHashMap<>());
+      IvAcc a = m.computeIfAbsent(p.strike(), k -> new IvAcc());
+      a.totalOi += p.oi() == null ? 0 : p.oi();
+      if ("CE".equals(p.optionType())) {
+        a.ceIv = p.iv();
+      } else {
+        a.peIv = p.iv();
+      }
+      if (a.spot == null) {
+        a.spot = p.spot();
+      }
+    }
+    List<ActiveStrikeIvPoint> out = new ArrayList<>();
+    byBucket.forEach(
+        (bucket, m) -> {
+          BigDecimal peakStrike = null;
+          IvAcc peak = null;
+          for (Map.Entry<BigDecimal, IvAcc> e : m.entrySet()) {
+            // Highest total OI wins; on a tie the lower strike wins (explicit, not map-order luck).
+            if (peak == null
+                || e.getValue().totalOi > peak.totalOi
+                || (e.getValue().totalOi == peak.totalOi && e.getKey().compareTo(peakStrike) < 0)) {
+              peak = e.getValue();
+              peakStrike = e.getKey();
+            }
+          }
+          if (peak != null) {
+            out.add(new ActiveStrikeIvPoint(bucket, peak.ceIv, peak.peIv, peak.spot));
+          }
         });
     return out;
   }

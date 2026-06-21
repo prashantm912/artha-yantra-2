@@ -128,4 +128,87 @@ class ActiveStrikeServiceTest {
   void activeStrikeOiSeriesEmptyWhenNoPoints() {
     assertThat(new ActiveStrikeService(5).activeStrikeOiSeries(List.of())).isEmpty();
   }
+
+  private static OptionsSnapshotReader.StrikePoint ptIv(
+      java.time.OffsetDateTime b, String strike, String type, long oi, String iv, String spot) {
+    return new OptionsSnapshotReader.StrikePoint(
+        b,
+        new BigDecimal(strike),
+        type,
+        null,
+        oi,
+        0L,
+        iv == null ? null : new BigDecimal(iv),
+        spot == null ? null : new BigDecimal(spot),
+        null);
+  }
+
+  @Test
+  void activeStrikeIvSeriesPicksThePeakStrikeIvPerBucket() {
+    java.time.OffsetDateTime b0 =
+        java.time.OffsetDateTime.of(
+            2026, 6, 20, 9, 15, 0, 0, java.time.ZoneOffset.ofHoursMinutes(5, 30));
+    java.time.OffsetDateTime b1 = b0.plusMinutes(5);
+    // IV is per-strike, unsummable → the series carries the SINGLE peak-OI strike's IVs + price. The peak
+    // flips 22500→22600 between buckets, so the emitted IVs must follow it (not stay on 22500).
+    List<OptionsSnapshotReader.StrikePoint> series =
+        List.of(
+            ptIv(b0, "22500", "CE", 1000, "13.84", "57700"),
+            ptIv(b0, "22500", "PE", 1000, "19.20", "57700"),
+            ptIv(b0, "22600", "CE", 100, "14.50", "57700"),
+            ptIv(b0, "22600", "PE", 100, "20.10", "57700"),
+            ptIv(b1, "22500", "CE", 100, "12.00", "57750"),
+            ptIv(b1, "22500", "PE", 100, "18.00", "57750"),
+            ptIv(b1, "22600", "CE", 1500, "15.25", "57750"),
+            ptIv(b1, "22600", "PE", 1200, "21.40", "57750"));
+    List<ActiveStrikeService.ActiveStrikeIvPoint> out =
+        new ActiveStrikeService(5).activeStrikeIvSeries(series);
+    assertThat(out).hasSize(2);
+    assertThat(out.get(0).bucket()).isEqualTo(b0); // newest-last
+    assertThat(out.get(0).ceIv()).isEqualByComparingTo("13.84"); // 22500 peak in b0
+    assertThat(out.get(0).peIv()).isEqualByComparingTo("19.20");
+    assertThat(out.get(0).price()).isEqualByComparingTo("57700");
+    assertThat(out.get(1).ceIv()).isEqualByComparingTo("15.25"); // 22600 peak in b1 (reselected)
+    assertThat(out.get(1).peIv()).isEqualByComparingTo("21.40");
+    assertThat(out.get(1).price()).isEqualByComparingTo("57750");
+  }
+
+  @Test
+  void activeStrikeIvSeriesTieBreaksToTheLowerStrike() {
+    java.time.OffsetDateTime b0 =
+        java.time.OffsetDateTime.of(
+            2026, 6, 20, 9, 15, 0, 0, java.time.ZoneOffset.ofHoursMinutes(5, 30));
+    // Equal total OI on both strikes → the LOWER strike (22500) must win deterministically. Insert the
+    // higher strike FIRST so a correct tie-break cannot rely on encounter order.
+    List<OptionsSnapshotReader.StrikePoint> series =
+        List.of(
+            ptIv(b0, "22600", "CE", 500, "99.00", "57700"),
+            ptIv(b0, "22600", "PE", 500, "99.00", "57700"),
+            ptIv(b0, "22500", "CE", 500, "13.84", "57700"),
+            ptIv(b0, "22500", "PE", 500, "19.20", "57700"));
+    List<ActiveStrikeService.ActiveStrikeIvPoint> out =
+        new ActiveStrikeService(5).activeStrikeIvSeries(series);
+    assertThat(out).hasSize(1);
+    assertThat(out.get(0).ceIv()).isEqualByComparingTo("13.84"); // 22500, the lower strike
+  }
+
+  @Test
+  void activeStrikeIvSeriesPassesNullIvThrough() {
+    java.time.OffsetDateTime b0 =
+        java.time.OffsetDateTime.of(
+            2026, 6, 20, 9, 15, 0, 0, java.time.ZoneOffset.ofHoursMinutes(5, 30));
+    List<OptionsSnapshotReader.StrikePoint> series =
+        List.of(
+            ptIv(b0, "22500", "CE", 1000, null, "57700"),
+            ptIv(b0, "22500", "PE", 1000, "19.20", "57700"));
+    List<ActiveStrikeService.ActiveStrikeIvPoint> out =
+        new ActiveStrikeService(5).activeStrikeIvSeries(series);
+    assertThat(out.get(0).ceIv()).isNull();
+    assertThat(out.get(0).peIv()).isEqualByComparingTo("19.20");
+  }
+
+  @Test
+  void activeStrikeIvSeriesEmptyWhenNoPoints() {
+    assertThat(new ActiveStrikeService(5).activeStrikeIvSeries(List.of())).isEmpty();
+  }
 }

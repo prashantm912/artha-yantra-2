@@ -34,6 +34,9 @@ const OiStatisticsPage = lazy(() =>
 const ActiveStrikesPage = lazy(() =>
   import('./pages/options/ActiveStrikesPage.tsx').then((m) => ({ default: m.ActiveStrikesPage })),
 );
+const ActiveStrikesIvPage = lazy(() =>
+  import('./pages/options/ActiveStrikesIvPage.tsx').then((m) => ({ default: m.ActiveStrikesIvPage })),
+);
 
 function Lazy({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<p className="text-sm text-ay-muted">Loading chart…</p>}>{children}</Suspense>;
@@ -59,6 +62,7 @@ export function App() {
           <Route path="/options/straddle-chart" element={<Lazy><OptionsStraddlePage /></Lazy>} />
           <Route path="/options/oi-statistics" element={<Lazy><OiStatisticsPage /></Lazy>} />
           <Route path="/options/active-strikes" element={<Lazy><ActiveStrikesPage /></Lazy>} />
+          <Route path="/options/active-strikes-iv" element={<Lazy><ActiveStrikesIvPage /></Lazy>} />
           {/* Futures */}
           <Route path="/futures/oi-spurt" element={<FuturesOiSpurtPage />} />
           <Route path="/futures/market-movers" element={<FuturesMoversPage />} />

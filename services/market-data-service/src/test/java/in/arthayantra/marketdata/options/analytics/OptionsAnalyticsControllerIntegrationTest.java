@@ -207,6 +207,9 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
         .andExpect(jsonPath("$.items[0].spurtPct").value("20.00"))
         // ltp 100 -> 110: ltpChangePct = (110-100)/100*100 = 10.00 (BigDecimal -> string)
         .andExpect(jsonPath("$.items[0].ltpChangePct").value("10.00"))
+        // the faithful-OI-Spurt fields: prior LTP + absolute LTP change (scale-insensitive prefix)
+        .andExpect(jsonPath("$.items[0].prevLtp").value(org.hamcrest.Matchers.startsWith("100")))
+        .andExpect(jsonPath("$.items[0].ltpChange").value(org.hamcrest.Matchers.startsWith("10")))
         .andExpect(jsonPath("$.summary.interpretation").value("LONG_BUILDUP"))
         // single spurt row is the representative: oiChangePct=spurtPct, priceChangePct=ltpChangePct
         .andExpect(jsonPath("$.summary.oiChangePct").value("20.00"))

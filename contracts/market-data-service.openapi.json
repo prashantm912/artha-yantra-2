@@ -3224,6 +3224,9 @@
           "ltp" : {
             "type" : "number"
           },
+          "prevLtp" : {
+            "type" : "number"
+          },
           "oi" : {
             "type" : "integer",
             "format" : "int64"
@@ -3235,8 +3238,15 @@
           "spurtPct" : {
             "type" : "number"
           },
+          "ltpChange" : {
+            "type" : "number"
+          },
           "ltpChangePct" : {
             "type" : "number"
+          },
+          "volume" : {
+            "type" : "integer",
+            "format" : "int64"
           },
           "interpretation" : {
             "type" : "string",

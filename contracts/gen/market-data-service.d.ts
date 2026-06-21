@@ -984,12 +984,16 @@ export interface components {
             strike?: number;
             optionType?: string;
             ltp?: number;
+            prevLtp?: number;
             /** Format: int64 */
             oi?: number;
             /** Format: int64 */
             oiChange?: number;
             spurtPct?: number;
+            ltpChange?: number;
             ltpChangePct?: number;
+            /** Format: int64 */
+            volume?: number;
             /** @enum {string} */
             interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
         };

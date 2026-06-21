@@ -21,7 +21,7 @@ const SECTIONS: MenuSection[] = [
     items: [
       { label: 'Options Chain', to: '/options/options-chain' },
       { label: 'OI Analysis' }, // per-strike intraday — Wave 1 (§20.6); distinct from the chain
-      { label: 'OI Spurt' },
+      { label: 'OI Spurt', to: '/options/oi-spurt' },
       { label: 'OI Statistics' },
       { label: 'Options Premium' },
       { label: 'Trending OI' },

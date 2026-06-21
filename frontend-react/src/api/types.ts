@@ -44,9 +44,13 @@ export interface SpurtRow {
   strike: string;
   optionType: 'CE' | 'PE';
   ltp: string | null;
+  prevLtp: string | null;
   oi: number | null;
   oiChange: number;
   spurtPct: string | null;
+  ltpChange: string | null;
+  ltpChangePct: string | null;
+  volume: number | null;
   interpretation: OiInterpretation;
 }
 

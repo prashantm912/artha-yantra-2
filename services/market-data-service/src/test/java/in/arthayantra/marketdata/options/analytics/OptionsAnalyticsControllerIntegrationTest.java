@@ -157,6 +157,34 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
   }
 
   @Test
+  void strikeSeriesReturnsOnlyTheChosenStrikeBuckets() throws Exception {
+    String u = "STRIKESERIES";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    OffsetDateTime b0 =
+        OffsetDateTime.of(2026, 6, 20, 9, 16, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime b1 = b0.plusMinutes(5); // distinct 5-min bucket
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b0, u, exp, "22500", "CE", "100", 1000L, 0L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b1, u, exp, "22500", "CE", "110", 1200L, 0L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b0, u, exp, "22500", "PE", "90", 1500L, 0L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b1, u, exp, "22500", "PE", "85", 1400L, 0L);
+    // decoy strike — must be excluded by the SQL strike filter
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b1, u, exp, "22600", "CE", "5", 50L, 0L);
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/oi-analysis/strike-series")
+                .param("name", u)
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m")
+                .param("strike", "22500"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.strike").value("22500"))
+        .andExpect(jsonPath("$.interval").value("5m"))
+        // 2 buckets × CE+PE = 4 points; the 22600 decoy excluded
+        .andExpect(jsonPath("$.items.length()").value(4));
+  }
+
+  @Test
   void spurtReturnsRowsAndSummary() throws Exception {
     String u = "SPURTCTRL";
     LocalDate exp = LocalDate.of(2026, 6, 25);

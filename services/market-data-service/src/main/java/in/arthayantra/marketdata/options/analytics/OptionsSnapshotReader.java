@@ -58,6 +58,50 @@ public class OptionsSnapshotReader {
       Long declineVolume,
       BigDecimal prevClose) {}
 
+  /**
+   * As {@link #series} but scoped to a SINGLE {@code strike} (both CE + PE) — the per-strike
+   * intraday time-series the oipulse "Options OI Analysis" page (buckets-on-rows) needs. Filtering
+   * in SQL keeps the read bounded (~buckets × 2 rows) rather than pulling the full chain's session.
+   */
+  public List<StrikePoint> strikeSeries(
+      String underlying,
+      LocalDate expiry,
+      BigDecimal strike,
+      OiInterval interval,
+      OffsetDateTime from,
+      OffsetDateTime to) {
+    String sql =
+        "SELECT public.time_bucket(INTERVAL '"
+            + interval.pgInterval()
+            + "', ts, 'Asia/Kolkata') AS b, "
+            + "  strike, option_type, "
+            + "  public.last(ltp, ts) AS ltp, public.last(oi, ts) AS oi, "
+            + "  public.last(oi_change, ts) AS oi_change, public.last(iv, ts) AS iv, "
+            + "  public.last(spot_price, ts) AS spot, public.last(volume, ts) AS volume "
+            + "FROM options_chain_snapshots "
+            + "WHERE underlying = ? AND expiry = ? AND strike = ? AND ts >= ? AND ts < ? "
+            + "GROUP BY b, strike, option_type "
+            + "ORDER BY b, option_type";
+    return jdbc.query(
+        sql,
+        (rs, n) ->
+            new StrikePoint(
+                rs.getObject("b", OffsetDateTime.class),
+                rs.getBigDecimal("strike"),
+                rs.getString("option_type"),
+                rs.getBigDecimal("ltp"),
+                rs.getObject("oi", Long.class),
+                rs.getObject("oi_change", Long.class),
+                rs.getBigDecimal("iv"),
+                rs.getBigDecimal("spot"),
+                rs.getObject("volume", Long.class)),
+        underlying,
+        java.sql.Date.valueOf(expiry),
+        strike,
+        Timestamp.from(from.toInstant()),
+        Timestamp.from(to.toInstant()));
+  }
+
   public List<StrikePoint> series(
       String underlying,
       LocalDate expiry,

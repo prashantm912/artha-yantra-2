@@ -324,6 +324,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/options/oi-analysis/strike-series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["strikeSeries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/options/iv-history": {
         parameters: {
             query?: never;
@@ -364,6 +380,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["history"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/options/chain-table": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["chainTable"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1054,6 +1086,39 @@ export interface components {
             strike?: number;
             ce?: components["schemas"]["Leg"];
             pe?: components["schemas"]["Leg"];
+        };
+        ChainTable: {
+            underlying?: string;
+            /** Format: date */
+            expiry?: string;
+            spot?: number;
+            forward?: number;
+            forwardSource?: string;
+            riskFreeRate?: number;
+            pcr?: number;
+            stale?: boolean;
+            /** Format: date-time */
+            asOf?: string;
+            interval?: string;
+            rows?: components["schemas"]["ChainTableRow"][];
+        };
+        ChainTableLeg: {
+            leg?: components["schemas"]["Leg"];
+            deltas?: components["schemas"]["LegDeltas"];
+        };
+        ChainTableRow: {
+            strike?: number;
+            ce?: components["schemas"]["ChainTableLeg"];
+            pe?: components["schemas"]["ChainTableLeg"];
+        };
+        LegDeltas: {
+            /** Format: int64 */
+            oiChange?: number;
+            oiChangePct?: number;
+            ltpChange?: number;
+            ltpChangePct?: number;
+            /** @enum {string} */
+            interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
         };
         BigOi: {
             items?: components["schemas"]["BigOiRow"][];
@@ -2231,6 +2296,44 @@ export interface operations {
             };
         };
     };
+    strikeSeries: {
+        parameters: {
+            query: {
+                mode?: string;
+                name: string;
+                date?: string;
+                interval?: string;
+                expiry?: string;
+                strike: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     ivHistory: {
         parameters: {
             query: {
@@ -2316,6 +2419,41 @@ export interface operations {
                     "*/*": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    chainTable: {
+        parameters: {
+            query: {
+                mode?: string;
+                name: string;
+                date?: string;
+                interval?: string;
+                expiry?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ChainTable"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

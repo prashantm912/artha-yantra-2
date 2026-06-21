@@ -1260,6 +1260,78 @@
         }
       }
     },
+    "/api/v1/market/options/oi-analysis/strike-series" : {
+      "get" : {
+        "tags" : [ "options-analytics-controller" ],
+        "operationId" : "strikeSeries",
+        "parameters" : [ {
+          "name" : "mode",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "name",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "date",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "interval",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "expiry",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "strike",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "number"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/options/iv-history" : {
       "get" : {
         "tags" : [ "iv-analytics-controller" ],
@@ -1376,6 +1448,70 @@
                 "schema" : {
                   "type" : "object",
                   "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/options/chain-table" : {
+      "get" : {
+        "tags" : [ "options-analytics-controller" ],
+        "operationId" : "chainTable",
+        "parameters" : [ {
+          "name" : "mode",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "name",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "date",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "interval",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "expiry",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ChainTable"
                 }
               }
             }
@@ -3361,6 +3497,96 @@
           },
           "pe" : {
             "$ref" : "#/components/schemas/Leg"
+          }
+        }
+      },
+      "ChainTable" : {
+        "type" : "object",
+        "properties" : {
+          "underlying" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "spot" : {
+            "type" : "number"
+          },
+          "forward" : {
+            "type" : "number"
+          },
+          "forwardSource" : {
+            "type" : "string"
+          },
+          "riskFreeRate" : {
+            "type" : "number"
+          },
+          "pcr" : {
+            "type" : "number"
+          },
+          "stale" : {
+            "type" : "boolean"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "interval" : {
+            "type" : "string"
+          },
+          "rows" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ChainTableRow"
+            }
+          }
+        }
+      },
+      "ChainTableLeg" : {
+        "type" : "object",
+        "properties" : {
+          "leg" : {
+            "$ref" : "#/components/schemas/Leg"
+          },
+          "deltas" : {
+            "$ref" : "#/components/schemas/LegDeltas"
+          }
+        }
+      },
+      "ChainTableRow" : {
+        "type" : "object",
+        "properties" : {
+          "strike" : {
+            "type" : "number"
+          },
+          "ce" : {
+            "$ref" : "#/components/schemas/ChainTableLeg"
+          },
+          "pe" : {
+            "$ref" : "#/components/schemas/ChainTableLeg"
+          }
+        }
+      },
+      "LegDeltas" : {
+        "type" : "object",
+        "properties" : {
+          "oiChange" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "oiChangePct" : {
+            "type" : "number"
+          },
+          "ltpChange" : {
+            "type" : "number"
+          },
+          "ltpChangePct" : {
+            "type" : "number"
+          },
+          "interpretation" : {
+            "type" : "string",
+            "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
           }
         }
       },

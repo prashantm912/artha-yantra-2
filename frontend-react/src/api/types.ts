@@ -79,3 +79,60 @@ export interface OiChainRow {
   pe: LegCell | null;
   spot: string | null;
 }
+
+// ── /chain-table — the faithful Options Chain feed (§20.7): live black76 greeks + interval deltas.
+
+/** Interval deltas overlaid on a live leg (null when no prior snapshot bucket for this strike·side). */
+export interface LegDeltas {
+  oiChange: number | null;
+  oiChangePct: string | null;
+  ltpChange: string | null;
+  ltpChangePct: string | null;
+  interpretation: OiInterpretation;
+}
+
+/** A full live chain leg — IV + all 5 greeks computed server-side in black76 (decimal strings). */
+export interface ChainLeg {
+  tradingsymbol: string;
+  ltp: string | null;
+  bid: string | null;
+  ask: string | null;
+  volume: number | null;
+  oi: number | null;
+  iv: string | null;
+  delta: string | null;
+  gamma: string | null;
+  theta: string | null;
+  vega: string | null;
+  rho: string | null;
+  ivReason: string;
+  priceSource: string | null;
+}
+
+/** A live leg plus its interval deltas (deltas null until a snapshot pair has accrued). */
+export interface ChainTableLeg {
+  leg: ChainLeg;
+  deltas: LegDeltas | null;
+}
+
+/** One faithful-chain row: CE | strike | PE, each leg enriched with deltas. */
+export interface ChainTableRow {
+  strike: string;
+  ce: ChainTableLeg | null;
+  pe: ChainTableLeg | null;
+}
+
+/** GET /api/v1/market/options/chain-table — live chain header + enriched rows + the delta interval. */
+export interface ChainTable {
+  underlying: string;
+  expiry: string;
+  spot: string | null;
+  forward: string | null;
+  forwardSource: string | null;
+  riskFreeRate: string | null;
+  pcr: string | null;
+  stale: boolean;
+  asOf: string;
+  interval: string;
+  rows: ChainTableRow[];
+}

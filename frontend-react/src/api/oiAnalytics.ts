@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { ApiError, apiFetch, listItems } from './client.ts';
 import { useSymbolContext } from '../stores/symbolContext.store.ts';
-import type { ActiveStrikes, OiStats, OiStrikePoint, SpurtChain } from './types.ts';
+import type { ActiveStrikes, ChainTable, OiStats, OiStrikePoint, SpurtChain } from './types.ts';
 
 // OI-analytics query hooks (master plan §20 / §11.2). The Angular store hand-rolled 13 generation
 // counters for stale-drop — TanStack Query keys subsume that (a late response for an old key can't
@@ -92,6 +92,17 @@ export function useOptionsSpurt() {
   return useQuery({
     queryKey: ['oi', 'spurt', ctx.name, ctx.expiry, ctx.interval, ctx.mode, ctx.date],
     queryFn: () => oiGet<SpurtChain | null>('/market/options/spurt', oiParams(ctx, true), null),
+    enabled: satisfiable(ctx, true),
+  });
+}
+
+/** The faithful Options Chain feed (§20.7): live greeks/IV/OI/LTP/PCR + per-leg interval deltas. */
+export function useChainTable() {
+  const ctx = useOiCtx();
+  return useQuery({
+    queryKey: ['oi', 'chain-table', ctx.name, ctx.expiry, ctx.interval, ctx.mode, ctx.date],
+    queryFn: () =>
+      oiGet<ChainTable | null>('/market/options/chain-table', oiParams(ctx, true), null),
     enabled: satisfiable(ctx, true),
   });
 }

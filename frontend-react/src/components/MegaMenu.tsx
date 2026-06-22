@@ -60,7 +60,7 @@ const SECTIONS: MenuSection[] = [
     title: 'Features',
     items: [
       { label: 'Connecting Dots', to: '/features/connecting-dots' }, // multi-factor matrix (§20.7.8)
-      { label: 'Vix & Index' },
+      { label: 'Vix & Index', to: '/features/vix-index' }, // Wave 3 — VIX vs index dual-axis lines (zero-BE)
     ],
   },
 ];

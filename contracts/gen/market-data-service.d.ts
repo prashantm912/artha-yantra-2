@@ -836,6 +836,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/equity/delivery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["delivery"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/eod-backfill/status": {
         parameters: {
             query?: never;
@@ -1621,6 +1637,28 @@ export interface components {
             oiPct?: number;
             /** @enum {string} */
             interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+        };
+        Delivery: {
+            symbol?: string;
+            /** Format: int32 */
+            days?: number;
+            items?: components["schemas"]["DeliveryDay"][];
+        };
+        DeliveryDay: {
+            /** Format: date */
+            date?: string;
+            open?: number;
+            high?: number;
+            low?: number;
+            close?: number;
+            ltpChangePct?: number;
+            deliveryPct?: number;
+            dayRange?: number;
+            dayRangePct?: number;
+            /** Format: int64 */
+            deliveryQty?: number;
+            /** Format: int64 */
+            totalTradedQty?: number;
         };
         Status: {
             jobId?: string;
@@ -3791,6 +3829,38 @@ export interface operations {
                     "*/*": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delivery: {
+        parameters: {
+            query: {
+                symbol: string;
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["Delivery"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

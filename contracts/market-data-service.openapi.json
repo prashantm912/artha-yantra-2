@@ -3012,6 +3012,51 @@
         }
       }
     },
+    "/api/v1/market/equity/delivery" : {
+      "get" : {
+        "tags" : [ "equity-controller" ],
+        "operationId" : "delivery",
+        "parameters" : [ {
+          "name" : "symbol",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "days",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 15
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Delivery"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/eod-backfill/status" : {
       "get" : {
         "tags" : [ "eod-backfill-controller" ],
@@ -5116,6 +5161,65 @@
           "interpretation" : {
             "type" : "string",
             "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
+          }
+        }
+      },
+      "Delivery" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "days" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/DeliveryDay"
+            }
+          }
+        }
+      },
+      "DeliveryDay" : {
+        "type" : "object",
+        "properties" : {
+          "date" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "open" : {
+            "type" : "number"
+          },
+          "high" : {
+            "type" : "number"
+          },
+          "low" : {
+            "type" : "number"
+          },
+          "close" : {
+            "type" : "number"
+          },
+          "ltpChangePct" : {
+            "type" : "number"
+          },
+          "deliveryPct" : {
+            "type" : "number"
+          },
+          "dayRange" : {
+            "type" : "number"
+          },
+          "dayRangePct" : {
+            "type" : "number"
+          },
+          "deliveryQty" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "totalTradedQty" : {
+            "type" : "integer",
+            "format" : "int64"
           }
         }
       },

@@ -52,6 +52,7 @@ const SECTIONS: MenuSection[] = [
     title: 'Equity',
     items: [
       { label: 'Breadth', to: '/equity/breadth' }, // Wave 3 — advance/decline + delivery leaders (zero-BE)
+      { label: 'Delivery Data', to: '/equity/delivery-data' }, // Wave 3 — per-stock delivery series
       { label: 'Sector Stats' },
     ],
   },

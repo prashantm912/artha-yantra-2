@@ -63,15 +63,16 @@ class UpstoxFiiDerivativeFetcherTest {
 
   @Test
   void mapsFourFnoSegmentsToCroreRowsInIst() {
+    // F&O amounts are in ₹ lakh (÷100 → crore): e.g. 32888 lakh → 328.88 crore.
     String body =
         "{\"status\":\"success\",\"data\":{"
-            + seg("NSE_FO|INDEX_FUTURES", TS, 3288800000.0, 0.0)
+            + seg("NSE_FO|INDEX_FUTURES", TS, 32888.0, 0.0)
             + ","
-            + seg("NSE_FO|INDEX_OPTIONS", TS, 0.0, 54466200000.0)
+            + seg("NSE_FO|INDEX_OPTIONS", TS, 0.0, 544662.0)
             + ","
-            + seg("NSE_FO|STOCK_FUTURES", TS, 273100000.0, 0.0)
+            + seg("NSE_FO|STOCK_FUTURES", TS, 2731.0, 0.0)
             + ","
-            + seg("NSE_FO|STOCK_OPTIONS", TS, 0.0, 5127100000.0)
+            + seg("NSE_FO|STOCK_OPTIONS", TS, 0.0, 51271.0)
             + "}}";
     wireMock.stubFor(
         get(urlPathEqualTo("/v2/market/fii"))
@@ -84,8 +85,8 @@ class UpstoxFiiDerivativeFetcherTest {
         .extracting(FiiDerivativeFetcher.FiiDerivativeRow::segment)
         .containsExactly("INDEX_FUTURES", "INDEX_OPTIONS", "STOCK_FUTURES", "STOCK_OPTIONS");
     assertThat(rows).allSatisfy(r -> assertThat(r.date()).isEqualTo(LocalDate.of(2026, 4, 30)));
-    assertThat(rows.get(0).net()).isEqualByComparingTo("328.88"); // 3_288_800_000 / 1e7
-    assertThat(rows.get(1).net()).isEqualByComparingTo("-5446.62"); // -54_466_200_000 / 1e7
+    assertThat(rows.get(0).net()).isEqualByComparingTo("328.88"); // 32_888 lakh / 100
+    assertThat(rows.get(1).net()).isEqualByComparingTo("-5446.62"); // -544_662 lakh / 100
     assertThat(rows.get(2).net()).isEqualByComparingTo("27.31");
     assertThat(rows.get(3).net()).isEqualByComparingTo("-512.71");
 

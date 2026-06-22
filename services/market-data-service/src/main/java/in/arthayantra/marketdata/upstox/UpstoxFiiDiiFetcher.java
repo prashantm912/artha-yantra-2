@@ -19,9 +19,10 @@ import org.slf4j.LoggerFactory;
  *
  * <p>Upstox is PRIMARY, NSE is the SWAP-OUT FALLBACK: any Upstox failure (transport / HTTP / empty
  * response) transparently delegates to the NSE {@code LiveFiiDiiFetcher}, so an Upstox outage can
- * never starve the page. Cash buy/sell amounts arrive in INR and are converted to the NSE
- * convention of ₹ crore (÷10,000,000, 2 dp); the per-record millisecond timestamp is interpreted in
- * IST to pin the trade date.
+ * never starve the page. Cash buy/sell amounts arrive ALREADY in ₹ crore (the docs mislabel them
+ * "INR"; verified byte-identical to the NSE {@code fiidiiTradeReact} crore figures) — kept as-is,
+ * only scale-normalised; the per-record millisecond timestamp is interpreted in IST to pin the
+ * trade date.
  */
 public final class UpstoxFiiDiiFetcher implements FiiDiiFetcher {
 
@@ -29,8 +30,6 @@ public final class UpstoxFiiDiiFetcher implements FiiDiiFetcher {
   private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
   private static final String CASH = "NSE_EQ|CASH";
   private static final String DAILY = "1D";
-  /** 1 crore = 10,000,000 INR — Upstox reports INR, NSE/the FE expect ₹ crore. */
-  private static final BigDecimal CRORE = BigDecimal.valueOf(10_000_000L);
 
   private final UpstoxAnalyticsClient client;
   private final FiiDiiFetcher fallback;
@@ -78,9 +77,16 @@ public final class UpstoxFiiDiiFetcher implements FiiDiiFetcher {
     return rows;
   }
 
-  private static BigDecimal toCrore(BigDecimal inr) {
-    return inr == null
+  /**
+   * Upstox reports the cash segment ({@code NSE_EQ|CASH}) buy/sell amounts ALREADY in ₹ crore — the
+   * docs label them "INR" but the live values are byte-identical to the NSE {@code fiidiiTradeReact}
+   * crore figures (verified against {@code nse_eod_fii_dii}). So keep the value and only normalise
+   * scale; NO unit division. (F&amp;O segments differ — they arrive in ₹ lakh, see {@code
+   * UpstoxFiiDerivativeFetcher}.)
+   */
+  private static BigDecimal toCrore(BigDecimal crore) {
+    return crore == null
         ? BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP)
-        : inr.divide(CRORE, 2, RoundingMode.HALF_UP);
+        : crore.setScale(2, RoundingMode.HALF_UP);
   }
 }

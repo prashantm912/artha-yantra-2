@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.openalgo.live;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
@@ -35,5 +36,28 @@ public final class OpenAlgoSymbols {
   /** Parses an OpenAlgo {@code DDMMMYY} expiry token back to a {@link LocalDate} (case-insensitive). */
   public static LocalDate parseExpiry(String token) {
     return LocalDate.parse(token, DDMMMYY);
+  }
+
+  /**
+   * OpenAlgo F&amp;O <b>option</b> tradingsymbol: {@code BASE + DDMMMYY + STRIKE + CE/PE} — e.g.
+   * {@code NIFTY30JUN2625000CE} (verified against the live appliance, Phase-1 cutover / Risk R2). This
+   * differs from the Kite grammar ({@code NIFTY26JUN25000CE}) that the instruments table stores, so the
+   * OpenAlgo {@code /history} request must be built from the structured leg fields, never the Kite symbol.
+   */
+  public static String optionSymbol(String base, LocalDate expiry, BigDecimal strike, String optionType) {
+    return base + expiryToken(expiry) + strikeToken(strike) + optionType;
+  }
+
+  /**
+   * OpenAlgo F&amp;O <b>future</b> tradingsymbol: {@code BASE + DDMMMYY + "FUT"} — e.g.
+   * {@code NIFTY30JUN26FUT} (verified live). Kite stores {@code NIFTY26JUNFUT}, hence this translation.
+   */
+  public static String futureSymbol(String base, LocalDate expiry) {
+    return base + expiryToken(expiry) + "FUT";
+  }
+
+  /** Strike as a bare integer token for whole strikes ({@code 25000}), decimal only when fractional. */
+  private static String strikeToken(BigDecimal strike) {
+    return strike.stripTrailingZeros().toPlainString();
   }
 }

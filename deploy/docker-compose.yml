@@ -214,6 +214,14 @@ services:
       SPRING_DATA_REDIS_DATABASE: ${ARTHA_REDIS_DB:-0}
       # OpenAlgo appliance URL (plan §3/§4); read only when a source.* capability = openalgo
       ARTHA_OPENALGO_BASE_URL: ${ARTHA_OPENALGO_BASE_URL:-http://openalgo:5000}
+      # Data-foundation milestone flags (plan §2/§3). Wired here so the application.yml env names
+      # actually reach the container — default-OFF, flipped per docs/manual-tests/data-foundation-activation.md.
+      ARTHA_OPENALGO_OI_BACKFILL_ENABLED: ${ARTHA_OPENALGO_OI_BACKFILL_ENABLED:-false}
+      ARTHA_OPENALGO_GLOBAL_QUOTES_ENABLED: ${ARTHA_OPENALGO_GLOBAL_QUOTES_ENABLED:-false}
+      ARTHA_OPENALGO_CANARY_ENABLED: ${ARTHA_OPENALGO_CANARY_ENABLED:-false}
+      ARTHA_MD_SOURCE_QUOTES: ${ARTHA_MD_SOURCE_QUOTES:-kite}
+      ARTHA_MD_SOURCE_CANDLES: ${ARTHA_MD_SOURCE_CANDLES:-kite}
+      ARTHA_MD_SOURCE_OPTIONCHAIN: ${ARTHA_MD_SOURCE_OPTIONCHAIN:-kite}
     # kite_* + master key + the OpenAlgo API key mount into THIS service only (B-2: the token
     # and the credentials never reach any other container). The openalgo key is read only when
     # capture routes through OpenAlgo (Phase 1); an empty placeholder is harmless otherwise.

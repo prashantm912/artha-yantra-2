@@ -90,14 +90,16 @@ public class OpenAlgoConfig {
       RestClient.Builder restClientBuilder,
       OpenAlgoProperties properties,
       KiteCallExecutor executor,
-      ObjectMapper objectMapper) {
+      ObjectMapper objectMapper,
+      in.arthayantra.marketdata.instruments.InstrumentRepository instruments) {
     return new OpenAlgoHistoryClient(
         new OpenAlgoHistoricalCandleGateway(
             restClientBuilder,
             properties.baseUrl(),
             properties.resolveApiKey(),
             executor,
-            objectMapper));
+            objectMapper),
+        instruments);
   }
 
   /**

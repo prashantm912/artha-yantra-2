@@ -226,6 +226,7 @@ services:
       ARTHA_MD_SOURCE_QUOTES: ${ARTHA_MD_SOURCE_QUOTES:-kite}
       ARTHA_MD_SOURCE_CANDLES: ${ARTHA_MD_SOURCE_CANDLES:-kite}
       ARTHA_MD_SOURCE_OPTIONCHAIN: ${ARTHA_MD_SOURCE_OPTIONCHAIN:-kite}
+      ARTHA_MD_SOURCE_FIIDII: ${ARTHA_MD_SOURCE_FIIDII:-nse}
       # Upstox Market-Information analytics side-channel (ADR-0002) — default-OFF.
       ARTHA_UPSTOX_ANALYTICS_ENABLED: ${ARTHA_UPSTOX_ANALYTICS_ENABLED:-false}
     # kite_* + master key + the OpenAlgo API key mount into THIS service only (B-2: the token

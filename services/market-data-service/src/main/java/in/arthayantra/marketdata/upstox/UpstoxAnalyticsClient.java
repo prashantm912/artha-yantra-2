@@ -1,5 +1,8 @@
 package in.arthayantra.marketdata.upstox;
 
+import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
@@ -13,6 +16,8 @@ import org.springframework.web.client.RestClientResponseException;
  * primary). Typed full-mirror wire DTOs land per consuming step (U2+).
  */
 public final class UpstoxAnalyticsClient {
+
+  private static final Logger log = LoggerFactory.getLogger(UpstoxAnalyticsClient.class);
 
   private final RestClient restClient;
   private final UpstoxAnalyticsProperties properties;
@@ -58,5 +63,44 @@ public final class UpstoxAnalyticsClient {
     } catch (RestClientException e) {
       return new Entitlement(false, 0, "Upstox Market-Information probe failed: " + e.getMessage());
     }
+  }
+
+  /**
+   * Fetches one Market-Information activity series: {@code GET /v2/market/{endpoint}} for a single
+   * {@code data_type} segment and interval (U2 consumes {@code fii}/{@code dii} with {@code
+   * NSE_EQ|CASH} + {@code 1D}). Returns the segment's activity records (empty if Upstox returns no
+   * data for it); transport / HTTP errors propagate so the caller decides whether to fall back.
+   */
+  public List<UpstoxMarketActivity.Activity> marketActivity(
+      String endpoint, String dataType, String interval) {
+    UpstoxMarketActivity response =
+        restClient
+            .get()
+            .uri(
+                builder ->
+                    builder
+                        .path("/v2/market/" + endpoint)
+                        .queryParam("data_type", dataType)
+                        .queryParam("interval", interval)
+                        .build())
+            .header("Authorization", "Bearer " + properties.resolveToken())
+            .header("Accept", "application/json")
+            .retrieve()
+            .body(UpstoxMarketActivity.class);
+    if (response == null || response.data() == null) {
+      return List.of();
+    }
+    List<UpstoxMarketActivity.Activity> series = response.data().get(dataType);
+    if (series == null) {
+      // 200 OK but the requested segment is absent — surface the keys Upstox DID return so a
+      // data_type/key-shape mismatch is diagnosable, not silently swallowed as a fallback.
+      log.warn(
+          "Upstox /v2/market/{} returned no '{}' segment (keys present: {})",
+          endpoint,
+          dataType,
+          response.data().keySet());
+      return List.of();
+    }
+    return series;
   }
 }

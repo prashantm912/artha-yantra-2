@@ -47,6 +47,7 @@ artha:
       quotes: ${ARTHA_MD_SOURCE_QUOTES:kite}             # kite | openalgo
       candles: ${ARTHA_MD_SOURCE_CANDLES:kite}           # kite | openalgo
       optionchain: ${ARTHA_MD_SOURCE_OPTIONCHAIN:kite}   # kite | openalgo (per-strike OI capture; flip ONLY after the live OI-coverage canary is green, §17.11)
+      fiidii: ${ARTHA_MD_SOURCE_FIIDII:nse}              # nse | upstox (ADR-0002 U2; upstox REQUIRES artha.upstox.analytics.enabled=true)
   openalgo:
     base-url: ${ARTHA_OPENALGO_BASE_URL:http://openalgo:5000}
     api-key-file: ${ARTHA_OPENALGO_API_KEY_FILE:/run/secrets/openalgo_api_key}

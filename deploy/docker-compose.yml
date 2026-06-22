@@ -229,6 +229,7 @@ services:
       ARTHA_MD_SOURCE_FIIDII: ${ARTHA_MD_SOURCE_FIIDII:-nse}
       # Upstox Market-Information analytics side-channel (ADR-0002) — default-OFF.
       ARTHA_UPSTOX_ANALYTICS_ENABLED: ${ARTHA_UPSTOX_ANALYTICS_ENABLED:-false}
+      ARTHA_UPSTOX_CANARY_ENABLED: ${ARTHA_UPSTOX_CANARY_ENABLED:-false}
     # kite_* + master key + the OpenAlgo API key mount into THIS service only (B-2: the token
     # and the credentials never reach any other container). The openalgo key is read only when
     # capture routes through OpenAlgo (Phase 1); an empty placeholder is harmless otherwise.

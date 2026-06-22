@@ -1,14 +1,21 @@
 package in.arthayantra.marketdata.upstox;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import in.arthayantra.marketcalendar.MarketCalendar;
+import in.arthayantra.marketdata.alerts.NtfyClient;
 import in.arthayantra.marketdata.nse.FiiDerivativeFetcher;
 import in.arthayantra.marketdata.nse.FiiDiiFetcher;
 import in.arthayantra.marketdata.nse.LiveFiiDiiFetcher;
+import in.arthayantra.marketdata.upstox.canary.UpstoxContractCanary;
+import io.micrometer.core.instrument.MeterRegistry;
+import java.time.Clock;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Profile;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.client.RestClient;
 
 /**
@@ -54,5 +61,27 @@ public class UpstoxAnalyticsConfig {
   @ConditionalOnProperty(name = "artha.upstox.analytics.enabled", havingValue = "true")
   public FiiDerivativeFetcher upstoxFiiDerivativeFetcher(UpstoxAnalyticsClient client) {
     return new UpstoxFiiDerivativeFetcher(client);
+  }
+
+  /**
+   * Daily Upstox Market-Information contract canary (U7) — wired only when {@code
+   * artha.upstox.canary-enabled=true}. Off by default so a stack without the analytics token needs
+   * no Upstox probe. Self-scheduled (daily cron, IST); raw-JSON probes diffed vs the committed
+   * manifest, ntfy on drift. Separate flag from {@code analytics.enabled} so the canary can be left
+   * off (no ntfy noise) even while the analytics consumers run.
+   */
+  @Bean
+  @ConditionalOnProperty(name = "artha.upstox.canary-enabled", havingValue = "true")
+  public UpstoxContractCanary upstoxContractCanary(
+      RestClient.Builder restClientBuilder,
+      UpstoxAnalyticsProperties properties,
+      StringRedisTemplate redis,
+      NtfyClient ntfy,
+      MarketCalendar calendar,
+      Clock clock,
+      ObjectMapper objectMapper,
+      MeterRegistry meterRegistry) {
+    return new UpstoxContractCanary(
+        restClientBuilder, properties, redis, ntfy, calendar, clock, objectMapper, meterRegistry);
   }
 }

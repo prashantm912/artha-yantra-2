@@ -1,0 +1,25 @@
+{
+  "comment": "Upstox Market-Information expected-field sentinels (ADR-0002 U7), the twin of openalgo-contract-manifest.json. CONSUMED fields ONLY (the wire DTO UpstoxMarketActivity is the full mirror, not this). Probes get-fii cash (NSE_EQ|CASH) + get-fii F&O (NSE_FO|INDEX_OPTIONS) + get-dii cash. `*` resolves the first array element. Missing/type-changed consumed field -> ntfy critical; a new top-level block -> warning.",
+  "fii_cash": {
+    "status": "string",
+    "data.NSE_EQ|CASH": "array",
+    "data.NSE_EQ|CASH.*.time_stamp": "number",
+    "data.NSE_EQ|CASH.*.buy_amount": "number",
+    "data.NSE_EQ|CASH.*.sell_amount": "number"
+  },
+  "fii_fno": {
+    "status": "string",
+    "data.NSE_FO|INDEX_OPTIONS": "array",
+    "data.NSE_FO|INDEX_OPTIONS.*.time_stamp": "number",
+    "data.NSE_FO|INDEX_OPTIONS.*.buy_amount": "number",
+    "data.NSE_FO|INDEX_OPTIONS.*.sell_amount": "number",
+    "data.NSE_FO|INDEX_OPTIONS.*.buy_contracts": "number"
+  },
+  "dii_cash": {
+    "status": "string",
+    "data.NSE_EQ|CASH": "array",
+    "data.NSE_EQ|CASH.*.buy_amount": "number",
+    "data.NSE_EQ|CASH.*.sell_amount": "number"
+  },
+  "knownTopLevel": ["status", "data"]
+}

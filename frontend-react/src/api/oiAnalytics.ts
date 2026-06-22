@@ -21,6 +21,8 @@ import type {
   MultiOi,
   OiBuzzHeatmap,
   OiStats,
+  SectorHeatmap,
+  SectorStats,
   OiStrikePoint,
   OptOiChart,
   ParticipantOiRow,
@@ -465,6 +467,29 @@ export function useParticipantOi(from: string, to: string) {
       return listItems(res);
     },
     enabled: !!from,
+  });
+}
+
+/** Sector Heatmap (oipulse): an index's constituents, grouped by sector client-side. */
+export function useSectorHeatmap(index: string | null) {
+  return useQuery({
+    queryKey: ['equity', 'sector-heatmap', index],
+    queryFn: () =>
+      oiGet<SectorHeatmap | null>(
+        '/market/equity/sector-heatmap',
+        new URLSearchParams({ name: index ?? '' }).toString(),
+        null,
+      ),
+    enabled: !!index,
+  });
+}
+
+/** Sector Stats (oipulse): per-sector roll-up cards + the per-stock factor table (no params). */
+export function useSectorStats() {
+  return useQuery({
+    queryKey: ['equity', 'sector-stats'],
+    queryFn: () => oiGet<SectorStats | null>('/market/equity/sector-stats', '', null),
+    staleTime: 60_000,
   });
 }
 

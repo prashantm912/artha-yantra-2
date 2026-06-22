@@ -3012,6 +3012,70 @@
         }
       }
     },
+    "/api/v1/market/equity/sector-stats" : {
+      "get" : {
+        "tags" : [ "equity-controller" ],
+        "operationId" : "sectorStats",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SectorStats"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/equity/sector-heatmap" : {
+      "get" : {
+        "tags" : [ "equity-controller" ],
+        "operationId" : "sectorHeatmap",
+        "parameters" : [ {
+          "name" : "name",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SectorHeatmap"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/equity/returns" : {
       "get" : {
         "tags" : [ "equity-controller" ],
@@ -5189,6 +5253,88 @@
           "interpretation" : {
             "type" : "string",
             "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
+          }
+        }
+      },
+      "SectorAgg" : {
+        "type" : "object",
+        "properties" : {
+          "sector" : {
+            "type" : "string"
+          },
+          "avgChangePct" : {
+            "type" : "number"
+          },
+          "positive" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "negative" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "total" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "SectorStats" : {
+        "type" : "object",
+        "properties" : {
+          "asOf" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "sectors" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SectorAgg"
+            }
+          },
+          "stocks" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/StockChange"
+            }
+          }
+        }
+      },
+      "StockChange" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "sector" : {
+            "type" : "string"
+          },
+          "changePct" : {
+            "type" : "number"
+          },
+          "close" : {
+            "type" : "number"
+          },
+          "prevClose" : {
+            "type" : "number"
+          }
+        }
+      },
+      "SectorHeatmap" : {
+        "type" : "object",
+        "properties" : {
+          "index" : {
+            "type" : "string"
+          },
+          "tiles" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/StockChange"
+            }
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date"
           }
         }
       },

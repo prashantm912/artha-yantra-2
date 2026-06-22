@@ -644,3 +644,35 @@ export interface EquityReturns {
   asOf: string | null;
   items: EquityReturnRow[];
 }
+
+/** One stock's latest-session change + sector — BigDecimal fields are decimal STRINGS. */
+export interface SectorStockChange {
+  symbol: string;
+  sector: string;
+  changePct: string | null;
+  close: string | null;
+  prevClose: string | null;
+}
+
+/** GET /api/v1/market/equity/sector-heatmap?name= — an index's constituents (group by sector client-side). */
+export interface SectorHeatmap {
+  index: string;
+  tiles: SectorStockChange[];
+  asOf: string | null;
+}
+
+/** Per-sector roll-up: avg change + advancer/decliner split. */
+export interface SectorAgg {
+  sector: string;
+  avgChangePct: string | null;
+  positive: number;
+  negative: number;
+  total: number;
+}
+
+/** GET /api/v1/market/equity/sector-stats — per-sector cards + the per-stock factor table. */
+export interface SectorStats {
+  asOf: string | null;
+  sectors: SectorAgg[];
+  stocks: SectorStockChange[];
+}

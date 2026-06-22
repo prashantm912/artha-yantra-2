@@ -836,6 +836,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/equity/sector-stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["sectorStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/equity/sector-heatmap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["sectorHeatmap"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/equity/returns": {
         parameters: {
             query?: never;
@@ -1653,6 +1685,35 @@ export interface components {
             oiPct?: number;
             /** @enum {string} */
             interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+        };
+        SectorAgg: {
+            sector?: string;
+            avgChangePct?: number;
+            /** Format: int32 */
+            positive?: number;
+            /** Format: int32 */
+            negative?: number;
+            /** Format: int32 */
+            total?: number;
+        };
+        SectorStats: {
+            /** Format: date */
+            asOf?: string;
+            sectors?: components["schemas"]["SectorAgg"][];
+            stocks?: components["schemas"]["StockChange"][];
+        };
+        StockChange: {
+            symbol?: string;
+            sector?: string;
+            changePct?: number;
+            close?: number;
+            prevClose?: number;
+        };
+        SectorHeatmap: {
+            index?: string;
+            tiles?: components["schemas"]["StockChange"][];
+            /** Format: date */
+            asOf?: string;
         };
         Returns: {
             /** Format: date */
@@ -3860,6 +3921,66 @@ export interface operations {
                     "*/*": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    sectorStats: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["SectorStats"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    sectorHeatmap: {
+        parameters: {
+            query: {
+                name: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["SectorHeatmap"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

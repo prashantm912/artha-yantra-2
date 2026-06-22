@@ -110,4 +110,42 @@ class EquityControllerIntegrationTest extends MarketDataIntegrationTestBase {
         .andExpect(jsonPath("$.items[?(@.symbol=='AARTIIND')].r1d", hasItem("10.00"))) // (110-100)/100
         .andExpect(jsonPath("$.items[?(@.symbol=='AARTIIND')].r1w", hasItem("25.00"))); // (110-88)/88
   }
+
+  private void insertDay(LocalDate d, String sym, String prevClose, String close) {
+    jdbc.update(
+        "INSERT INTO nse_eod_bhavcopy (trade_date, symbol, series, prev_close, close_price) "
+            + "VALUES (?,?,?,?::numeric,?::numeric) ON CONFLICT DO NOTHING",
+        java.sql.Date.valueOf(d),
+        sym,
+        "EQ",
+        prevClose,
+        close);
+  }
+
+  @Test
+  void sectorStatsGroupsConstituentsBySector() throws Exception {
+    // Fresh, newest date so these rows are rn=1 (the latest session) regardless of other ITs.
+    insertDay(LocalDate.of(2026, 6, 20), "AARTIIND", "100", "105"); // Chemicals, +5%
+
+    mockMvc
+        .perform(get("/api/v1/market/equity/sector-stats"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.stocks[?(@.symbol=='AARTIIND')].sector", hasItem("Chemicals")))
+        .andExpect(jsonPath("$.stocks[?(@.symbol=='AARTIIND')].changePct", hasItem("5.00")))
+        .andExpect(jsonPath("$.sectors[?(@.sector=='Chemicals')].total").exists());
+  }
+
+  @Test
+  void sectorHeatmapPicksIndexConstituents() throws Exception {
+    insertDay(LocalDate.of(2026, 6, 20), "RELIANCE", "1000", "1010"); // NIFTY 50 member, +1%
+
+    mockMvc
+        .perform(get("/api/v1/market/equity/sector-heatmap").param("name", "NIFTY 50"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.index").value("NIFTY 50"))
+        .andExpect(
+            jsonPath(
+                "$.tiles[?(@.symbol=='RELIANCE')].sector",
+                hasItem("Oil Gas & Consumable Fuels")));
+  }
 }

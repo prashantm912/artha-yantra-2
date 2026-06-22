@@ -14,8 +14,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Index-level NSE EOD reads: FII/DII cash (/cash), participant-wise OI (/participant-oi) and a
- * derived FII index-futures long/short ratio (/long-short). Date-ranged (from required, to=from).
+ * Index-level NSE EOD reads: FII/DII cash (/cash), participant-wise OI (/participant-oi), a derived
+ * FII index-futures long/short ratio (/long-short) and FII net activity per F&amp;O derivative
+ * segment (/derivative-stats, ADR-0002 U6). Date-ranged (from required, to=from).
  */
 @RestController
 @RequestMapping("/api/v1/market/fii-dii")
@@ -35,6 +36,14 @@ public class FiiDiiController {
     LocalDate f = parseDate(from);
     LocalDate t = to == null || to.isBlank() ? f : parseDate(to);
     return Map.of("items", reader.fiiDii(f, t));
+  }
+
+  @GetMapping("/derivative-stats")
+  public Map<String, Object> derivativeStats(
+      @RequestParam String from, @RequestParam(required = false) String to) {
+    LocalDate f = parseDate(from);
+    LocalDate t = to == null || to.isBlank() ? f : parseDate(to);
+    return Map.of("items", reader.fiiDerivativeStats(f, t));
   }
 
   @GetMapping("/participant-oi")

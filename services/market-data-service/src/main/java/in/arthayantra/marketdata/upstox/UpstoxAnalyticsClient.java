@@ -1,6 +1,7 @@
 package in.arthayantra.marketdata.upstox;
 
 import java.util.List;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.client.RestClient;
@@ -73,20 +74,7 @@ public final class UpstoxAnalyticsClient {
    */
   public List<UpstoxMarketActivity.Activity> marketActivity(
       String endpoint, String dataType, String interval) {
-    UpstoxMarketActivity response =
-        restClient
-            .get()
-            .uri(
-                builder ->
-                    builder
-                        .path("/v2/market/" + endpoint)
-                        .queryParam("data_type", dataType)
-                        .queryParam("interval", interval)
-                        .build())
-            .header("Authorization", "Bearer " + properties.resolveToken())
-            .header("Accept", "application/json")
-            .retrieve()
-            .body(UpstoxMarketActivity.class);
+    UpstoxMarketActivity response = fetch(endpoint, List.of(dataType), interval);
     if (response == null || response.data() == null) {
       return List.of();
     }
@@ -102,5 +90,32 @@ public final class UpstoxAnalyticsClient {
       return List.of();
     }
     return series;
+  }
+
+  /**
+   * Fetches several segments in ONE call (U6 requests the four {@code NSE_FO|*} F&amp;O segments
+   * together — Upstox accepts repeated {@code data_type} params and returns each keyed in {@code
+   * data}). Returns the whole {@code data} map (segment → activity records), empty on a null body;
+   * transport / HTTP errors propagate so the caller decides whether to skip.
+   */
+  public Map<String, List<UpstoxMarketActivity.Activity>> marketActivitySegments(
+      String endpoint, List<String> dataTypes, String interval) {
+    UpstoxMarketActivity response = fetch(endpoint, dataTypes, interval);
+    return response == null || response.data() == null ? Map.of() : response.data();
+  }
+
+  private UpstoxMarketActivity fetch(String endpoint, List<String> dataTypes, String interval) {
+    return restClient
+        .get()
+        .uri(
+            builder -> {
+              builder.path("/v2/market/" + endpoint);
+              dataTypes.forEach(dt -> builder.queryParam("data_type", dt));
+              return builder.queryParam("interval", interval).build();
+            })
+        .header("Authorization", "Bearer " + properties.resolveToken())
+        .header("Accept", "application/json")
+        .retrieve()
+        .body(UpstoxMarketActivity.class);
   }
 }

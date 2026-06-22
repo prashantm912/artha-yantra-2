@@ -44,6 +44,25 @@ class FiiDiiControllerIntegrationTest extends MarketDataIntegrationTestBase {
   }
 
   @Test
+  void derivativeStatsReturnsFiiSegmentRows() throws Exception {
+    jdbc.update(
+        "INSERT INTO fii_derivative_stats (trade_date, segment, buy_value, sell_value, net_value) "
+            + "VALUES (?,?,?::numeric,?::numeric,?::numeric) ON CONFLICT DO NOTHING",
+        java.sql.Date.valueOf(LocalDate.of(2026, 6, 16)),
+        "INDEX_OPTIONS",
+        "10000.00",
+        "15446.62",
+        "-5446.62");
+
+    mockMvc
+        .perform(get("/api/v1/market/fii-dii/derivative-stats").param("from", "2026-06-16"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items[0].segment").value("INDEX_OPTIONS"))
+        .andExpect(
+            jsonPath("$.items[0].netValue").value(org.hamcrest.Matchers.startsWith("-5446.6")));
+  }
+
+  @Test
   void longShortDerivesFiiIndexFuturesRatio() throws Exception {
     jdbc.update(
         "INSERT INTO nse_eod_participant_oi "

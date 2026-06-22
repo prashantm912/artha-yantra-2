@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.upstox;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
@@ -102,6 +103,47 @@ public final class UpstoxAnalyticsClient {
       String endpoint, List<String> dataTypes, String interval) {
     UpstoxMarketActivity response = fetch(endpoint, dataTypes, interval);
     return response == null || response.data() == null ? Map.of() : response.data();
+  }
+
+  /**
+   * Max-pain for {@code (instrumentKey, expiry, date)} — {@code GET /v2/market/max-pain}. Returns
+   * the {@code data} block (final {@code max_pain} + intraday {@code insights}); {@code null} when
+   * Upstox has no data for that expiry/date (a {@code 200} with {@code data:null}).
+   */
+  public UpstoxOptionAnalytics.Data maxPain(
+      String instrumentKey, LocalDate expiry, LocalDate date, int bucketMinutes) {
+    return optionAnalytics("max-pain", instrumentKey, expiry, date, bucketMinutes);
+  }
+
+  /**
+   * Put-call ratio for {@code (instrumentKey, expiry, date)} — {@code GET /v2/market/pcr}. Returns
+   * the {@code data} block (final {@code pcr} + intraday {@code insights}); {@code null} when Upstox
+   * has no data for that expiry/date.
+   */
+  public UpstoxOptionAnalytics.Data pcr(
+      String instrumentKey, LocalDate expiry, LocalDate date, int bucketMinutes) {
+    return optionAnalytics("pcr", instrumentKey, expiry, date, bucketMinutes);
+  }
+
+  private UpstoxOptionAnalytics.Data optionAnalytics(
+      String endpoint, String instrumentKey, LocalDate expiry, LocalDate date, int bucketMinutes) {
+    UpstoxOptionAnalytics response =
+        restClient
+            .get()
+            .uri(
+                builder ->
+                    builder
+                        .path("/v2/market/" + endpoint)
+                        .queryParam("instrument_key", instrumentKey)
+                        .queryParam("expiry", expiry.toString())
+                        .queryParam("date", date.toString())
+                        .queryParam("bucket_interval", bucketMinutes)
+                        .build())
+            .header("Authorization", "Bearer " + properties.resolveToken())
+            .header("Accept", "application/json")
+            .retrieve()
+            .body(UpstoxOptionAnalytics.class);
+    return response == null ? null : response.data();
   }
 
   private UpstoxMarketActivity fetch(String endpoint, List<String> dataTypes, String interval) {

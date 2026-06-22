@@ -18,6 +18,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -38,6 +39,7 @@ public class OptionsAnalyticsController {
   private final OpenHighStatsService openHighStats;
   private final StraddleChartService straddleChartService;
   private final OptionsOiChartService optionsOiChartService;
+  private final ObjectProvider<UpstoxOptionAnalyticsSource> upstoxOptionAnalytics;
   private final int bigOiTopN;
   private final int trendBuckets;
   private final int premiumBuckets;
@@ -54,6 +56,7 @@ public class OptionsAnalyticsController {
       OpenHighStatsService openHighStats,
       StraddleChartService straddleChartService,
       OptionsOiChartService optionsOiChartService,
+      ObjectProvider<UpstoxOptionAnalyticsSource> upstoxOptionAnalytics,
       @Value("${artha.options.big-oi-top-n:10}") int bigOiTopN,
       @Value("${artha.options.trend-buckets:20}") int trendBuckets,
       @Value("${artha.options.premium-buckets:60}") int premiumBuckets,
@@ -68,6 +71,7 @@ public class OptionsAnalyticsController {
     this.openHighStats = openHighStats;
     this.straddleChartService = straddleChartService;
     this.optionsOiChartService = optionsOiChartService;
+    this.upstoxOptionAnalytics = upstoxOptionAnalytics;
     this.bigOiTopN = bigOiTopN;
     this.trendBuckets = trendBuckets;
     this.premiumBuckets = premiumBuckets;
@@ -157,7 +161,23 @@ public class OptionsAnalyticsController {
       chain.add(new MaxPainCalculator.StrikeOi(e.getKey(), e.getValue()[0], e.getValue()[1]));
     }
     OffsetDateTime asOf = latest.get(latest.size() - 1).bucket();
-    return new OiStats(OptionsChainService.pcr(ce, pe), MaxPainCalculator.maxPain(chain), ce, pe, asOf);
+    BigDecimal pcr = OptionsChainService.pcr(ce, pe);
+    BigDecimal maxPain = MaxPainCalculator.maxPain(chain);
+    // source.optionanalytics=upstox: replace the band-computed PCR/max-pain with Upstox's full-chain
+    // values (ceOi/peOi stay native — Upstox exposes only the ratio). Any Upstox miss keeps native.
+    UpstoxOptionAnalyticsSource upstox = upstoxOptionAnalytics.getIfAvailable();
+    if (upstox != null) {
+      UpstoxOptionAnalyticsSource.Stats s = upstox.statsOrNull(q.name(), exp, q.date());
+      if (s != null) {
+        if (s.pcr() != null) {
+          pcr = s.pcr();
+        }
+        if (s.maxPain() != null) {
+          maxPain = s.maxPain();
+        }
+      }
+    }
+    return new OiStats(pcr, maxPain, ce, pe, asOf);
   }
 
   @GetMapping("/active-strikes")

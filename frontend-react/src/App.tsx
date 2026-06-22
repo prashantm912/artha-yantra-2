@@ -65,6 +65,9 @@ const OptionsOiChartPage = lazy(() =>
 const VixIndexPage = lazy(() =>
   import('./pages/features/VixIndexPage.tsx').then((m) => ({ default: m.VixIndexPage })),
 );
+const BreadthPage = lazy(() =>
+  import('./pages/equity/BreadthPage.tsx').then((m) => ({ default: m.BreadthPage })),
+);
 
 function Lazy({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<p className="text-sm text-ay-muted">Loading chart…</p>}>{children}</Suspense>;
@@ -108,6 +111,8 @@ export function App() {
           <Route path="/fii-dii/fii-derivative-stats" element={<Lazy><FiiDerivativeStatsPage /></Lazy>} />
           <Route path="/fii-dii/participant-wise-oi" element={<ParticipantWiseOiPage />} />
           <Route path="/fii-dii/long-short-ratio" element={<Lazy><FiiLongShortPage /></Lazy>} />
+          {/* Equity */}
+          <Route path="/equity/breadth" element={<Lazy><BreadthPage /></Lazy>} />
           {/* Strategies */}
           <Route path="/strategies/strategy-builder" element={<Lazy><StrategyBuilderPage /></Lazy>} />
           {/* Features */}

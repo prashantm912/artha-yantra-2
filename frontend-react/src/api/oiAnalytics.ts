@@ -4,6 +4,7 @@ import { useSymbolContext } from '../stores/symbolContext.store.ts';
 import type {
   ActiveStrikes,
   BanksAnalysis,
+  Breadth,
   ChainTable,
   ConnectingDots,
   FiiDerivativeRow,
@@ -461,6 +462,21 @@ export function useParticipantOi(from: string, to: string) {
       return listItems(res);
     },
     enabled: !!from,
+  });
+}
+
+/** Market breadth for one date (oipulse Equity → Breadth): advance/decline + delivery-% leaders from
+ * the EQ bhavcopy. 422 DATA_GAP (no bhavcopy for that date) → null → the page renders its empty state. */
+export function useBreadth(date: string | null) {
+  return useQuery({
+    queryKey: ['breadth', date],
+    queryFn: () =>
+      oiGet<Breadth | null>(
+        '/market/breadth',
+        new URLSearchParams({ date: date ?? '' }).toString(),
+        null,
+      ),
+    enabled: !!date,
   });
 }
 

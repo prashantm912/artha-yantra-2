@@ -559,3 +559,28 @@ export interface MultiOi {
   interval: string;
   asOf: string;
 }
+
+/** Market breadth summary for one trade date (advance/decline counts + average delivery%). */
+export interface BreadthSummary {
+  tradeDate: string;
+  advances: number;
+  declines: number;
+  unchanged: number;
+  total: number;
+  avgDeliveryPct: string | null;
+}
+
+/** One delivery-leaders row — BigDecimal fields are decimal STRINGS (never parseFloat for display). */
+export interface BreadthDeliveryRow {
+  symbol: string;
+  deliveryPct: string | null;
+  close: string | null;
+  pctChange: string | null;
+}
+
+/** GET /api/v1/market/breadth?date= — advance/decline + delivery-% leaders from the EQ bhavcopy. */
+export interface Breadth {
+  summary: BreadthSummary;
+  topDelivery: BreadthDeliveryRow[];
+  asOf: string;
+}

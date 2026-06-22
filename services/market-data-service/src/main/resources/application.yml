@@ -66,6 +66,7 @@ artha:
       enabled: ${ARTHA_UPSTOX_ANALYTICS_ENABLED:false}
       base-url: ${ARTHA_UPSTOX_ANALYTICS_BASE_URL:https://api.upstox.com}
       token-file: ${ARTHA_UPSTOX_ANALYTICS_TOKEN_FILE:/run/secrets/upstox_analytics_token}
+    canary-enabled: ${ARTHA_UPSTOX_CANARY_ENABLED:false}   # U7 daily contract drift probe (ntfy on drift)
 
 # B-3: the per-endpoint-family resilience stack — exactly one resilience
 # dependency. Limiter saturation queues up to 5s (virtual threads), then 429

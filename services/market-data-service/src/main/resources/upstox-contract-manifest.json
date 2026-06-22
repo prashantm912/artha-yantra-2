@@ -21,5 +21,21 @@
     "data.NSE_EQ|CASH.*.buy_amount": "number",
     "data.NSE_EQ|CASH.*.sell_amount": "number"
   },
-  "knownTopLevel": ["status", "data"]
+  "max_pain": {
+    "status": "string",
+    "data.max_pain": "number",
+    "data.insights": "array",
+    "data.insights.*.max_pain": "number",
+    "data.insights.*.spot_price": "number",
+    "data.insights.*.time": "string"
+  },
+  "pcr": {
+    "status": "string",
+    "data.pcr": "number",
+    "data.insights": "array",
+    "data.insights.*.pcr": "number",
+    "data.insights.*.spot_price": "number",
+    "data.insights.*.time": "string"
+  },
+  "knownTopLevel": ["status", "data", "data.instrument_key", "data.expiry_date", "data.spot_closing_price"]
 }

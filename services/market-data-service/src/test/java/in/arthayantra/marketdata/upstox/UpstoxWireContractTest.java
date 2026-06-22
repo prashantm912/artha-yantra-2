@@ -100,6 +100,42 @@ class UpstoxWireContractTest {
   }
 
   @Test
+  void optionAnalyticsMirrorsMaxPainAndPcrFields() throws Exception {
+    // get-max-pain / get-pcr share this shape (the irrelevant value field is null per endpoint).
+    String body =
+        """
+        {"status":"success","data":{"instrument_key":"NSE_INDEX|Nifty 50","expiry_date":"23-06-2026",
+         "max_pain":24100.0,"pcr":0.8762,"spot_closing_price":24087.2,
+         "insights":[{"max_pain":24100.0,"pcr":0.7832,"spot_price":24075.1,"time":"09:15"}]}}
+        """;
+
+    UpstoxOptionAnalytics r = mapper.readValue(body, UpstoxOptionAnalytics.class);
+
+    assertThat(r.status()).isEqualTo("success");
+    assertThat(r.data().maxPain()).isEqualByComparingTo("24100.0");
+    assertThat(r.data().pcr()).isEqualByComparingTo("0.8762");
+    assertThat(r.data().spotClosingPrice()).isEqualByComparingTo("24087.2");
+    UpstoxOptionAnalytics.Insight i = r.data().insights().get(0);
+    assertThat(i.maxPain()).isEqualByComparingTo("24100.0");
+    assertThat(i.pcr()).isEqualByComparingTo("0.7832");
+    assertThat(i.spotPrice()).isEqualByComparingTo("24075.1");
+    assertThat(i.time()).isEqualTo("09:15");
+  }
+
+  @Test
+  void optionAnalyticsTolueratesNullDataAndUnknownFields() {
+    assertThatCode(
+            () -> {
+              UpstoxOptionAnalytics r =
+                  mapper.readValue(
+                      "{\"status\":\"success\",\"new_field\":1,\"data\":null}",
+                      UpstoxOptionAnalytics.class);
+              assertThat(r.data()).isNull();
+            })
+        .doesNotThrowAnyException();
+  }
+
+  @Test
   void ignoresUnknownFieldsSoUpstoxAdditionsNeverCrashLive() {
     String withNewFields =
         """

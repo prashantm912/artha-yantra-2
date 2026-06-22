@@ -45,6 +45,13 @@ public class UpstoxContractCanary {
   static final String MARKER_KEY_PREFIX = "upstox:canary:";
   static final String RESULT_KEY = "upstox:contract:check";
 
+  // A fixed known-good HISTORICAL sample for the max-pain/pcr probes — Upstox keeps Market-Information
+  // history from 1 Apr 2026, so this (instrument_key, expiry, date) always returns data: no weekly-
+  // expiry staleness. If Upstox ever purges it (data:null), the probe is skipped, never a false alarm.
+  private static final String OPTION_PROBE_KEY = "NSE_INDEX|Nifty 50";
+  private static final String OPTION_PROBE_EXPIRY = "2026-06-23";
+  private static final String OPTION_PROBE_DATE = "2026-06-22";
+
   private static final Logger log = LoggerFactory.getLogger(UpstoxContractCanary.class);
 
   private final RestClient restClient;
@@ -104,6 +111,8 @@ public class UpstoxContractCanary {
       diffJson("fii_cash", get("fii", "NSE_EQ|CASH"), drift);
       diffJson("fii_fno", get("fii", "NSE_FO|INDEX_OPTIONS"), drift);
       diffJson("dii_cash", get("dii", "NSE_EQ|CASH"), drift);
+      diffOptionAnalytics("max_pain", getOptionAnalytics("max-pain"), drift);
+      diffOptionAnalytics("pcr", getOptionAnalytics("pcr"), drift);
     } catch (Exception probeFailure) {
       drift.add("PROBE_FAILED:" + probeFailure.getMessage());
     }
@@ -132,6 +141,34 @@ public class UpstoxContractCanary {
         .header("Accept", "application/json")
         .retrieve()
         .body(String.class);
+  }
+
+  private String getOptionAnalytics(String endpoint) {
+    return restClient
+        .get()
+        .uri(
+            builder ->
+                builder
+                    .path("/v2/market/" + endpoint)
+                    .queryParam("instrument_key", OPTION_PROBE_KEY)
+                    .queryParam("expiry", OPTION_PROBE_EXPIRY)
+                    .queryParam("date", OPTION_PROBE_DATE)
+                    .queryParam("bucket_interval", 60)
+                    .build())
+        .header("Authorization", "Bearer " + properties.resolveToken())
+        .header("Accept", "application/json")
+        .retrieve()
+        .body(String.class);
+  }
+
+  /** Like {@link #diffJson} but tolerant of {@code data:null} (a purged historical sample) — skip, never alarm. */
+  private void diffOptionAnalytics(String probe, String body, List<String> drift) throws Exception {
+    JsonNode actual = objectMapper.readTree(body);
+    if (actual.path("data").isNull() || actual.path("data").isMissingNode()) {
+      log.info("upstox canary: {} probe has no data (skipped, not drift)", probe);
+      return;
+    }
+    diffJson(probe, body, drift);
   }
 
   private void diffJson(String probe, String body, List<String> drift) throws Exception {

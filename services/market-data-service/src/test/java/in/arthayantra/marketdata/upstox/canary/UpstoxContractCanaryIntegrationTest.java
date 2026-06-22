@@ -86,6 +86,14 @@ class UpstoxContractCanaryIntegrationTest extends MarketDataIntegrationTestBase 
       "{\"status\":\"success\",\"data\":{\"NSE_FO|INDEX_OPTIONS\":[{\"time_stamp\":1750000000000,"
           + "\"buy_amount\":1.0,\"sell_amount\":1.0,\"buy_contracts\":1}]}}";
   private static final String DII_CASH = FII_CASH;
+  private static final String MAX_PAIN =
+      "{\"status\":\"success\",\"data\":{\"instrument_key\":\"NSE_INDEX|Nifty 50\","
+          + "\"expiry_date\":\"23-06-2026\",\"max_pain\":24100.0,\"spot_closing_price\":24087.2,"
+          + "\"insights\":[{\"max_pain\":24100.0,\"spot_price\":24075.1,\"time\":\"09:15\"}]}}";
+  private static final String PCR_OPT =
+      "{\"status\":\"success\",\"data\":{\"instrument_key\":\"NSE_INDEX|Nifty 50\","
+          + "\"expiry_date\":\"23-06-2026\",\"pcr\":0.8762,\"spot_closing_price\":24087.2,"
+          + "\"insights\":[{\"pcr\":0.78,\"spot_price\":24075.1,\"time\":\"09:15\"}]}}";
 
   @Autowired private UpstoxContractCanary canary;
   @Autowired private StringRedisTemplate redis;
@@ -106,6 +114,8 @@ class UpstoxContractCanaryIntegrationTest extends MarketDataIntegrationTestBase 
         get(urlPathEqualTo("/v2/market/dii"))
             .withQueryParam("data_type", equalTo("NSE_EQ|CASH"))
             .willReturn(json(DII_CASH)));
+    WIREMOCK.stubFor(get(urlPathEqualTo("/v2/market/max-pain")).willReturn(json(MAX_PAIN)));
+    WIREMOCK.stubFor(get(urlPathEqualTo("/v2/market/pcr")).willReturn(json(PCR_OPT)));
     WIREMOCK.stubFor(post(urlPathEqualTo("/ay-test-topic")).willReturn(aResponse().withStatus(200)));
   }
 

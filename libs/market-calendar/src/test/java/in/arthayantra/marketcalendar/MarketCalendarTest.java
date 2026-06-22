@@ -29,6 +29,31 @@ class MarketCalendarTest {
   }
 
   @Test
+  void holidayListCarriesNamesDateAscending() {
+    var list = calendar.holidayList();
+    assertThat(list).isNotEmpty();
+    // date-ascending
+    assertThat(list).isSortedAccordingTo((a, b) -> a.date().compareTo(b.date()));
+    // every modeled holiday date has a non-blank published name
+    assertThat(list).allSatisfy(h -> assertThat(h.name()).isNotBlank());
+    // a known entry resolves to its published name
+    assertThat(list)
+        .anySatisfy(
+            h -> {
+              assertThat(h.date()).isEqualTo(LocalDate.parse("2026-01-26"));
+              assertThat(h.name()).isEqualTo("Republic Day");
+            });
+    // the named list and the trading-day holiday set agree
+    assertThat(list).allSatisfy(h -> assertThat(calendar.isTradingDay(h.date())).isFalse());
+  }
+
+  @Test
+  void bareDateCalendarHasNoNamedList() {
+    assertThat(MarketCalendar.of(java.util.List.of(LocalDate.parse("2026-01-26"))).holidayList())
+        .isEmpty();
+  }
+
+  @Test
   void weekendsAndHolidaysAreClosed() {
     assertThat(calendar.isTradingDay(LocalDate.parse("2026-06-13"))).isFalse(); // Saturday
     assertThat(calendar.isTradingDay(LocalDate.parse("2026-06-14"))).isFalse(); // Sunday

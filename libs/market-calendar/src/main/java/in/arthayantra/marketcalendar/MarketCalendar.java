@@ -16,6 +16,7 @@ import java.time.ZonedDateTime;
 import java.time.temporal.ChronoUnit;
 import java.time.temporal.TemporalAdjusters;
 import java.util.Collection;
+import java.util.List;
 import java.util.NavigableSet;
 import java.util.Optional;
 import java.util.TreeSet;
@@ -46,16 +47,27 @@ public final class MarketCalendar {
 
   private static final String HOLIDAY_RESOURCE = "/nse-trading-holidays.csv";
 
+  /** One exchange holiday with its published name (date-ascending list source). */
+  public record Holiday(LocalDate date, String name) {}
+
   private final NavigableSet<LocalDate> holidays;
   private final NavigableSet<Integer> coveredYears;
+  private final List<Holiday> holidayList;
 
   private MarketCalendar(Collection<LocalDate> holidayDates) {
+    this(holidayDates, List.of());
+  }
+
+  /** Names are carried only when built from the bundled resource ({@link #nse()}); the bare-date path
+   * (tests / {@link #of}) leaves the named list empty. */
+  private MarketCalendar(Collection<LocalDate> holidayDates, List<Holiday> named) {
     this.holidays = new TreeSet<>(holidayDates);
     this.coveredYears =
         holidayDates.stream().map(LocalDate::getYear).collect(Collectors.toCollection(TreeSet::new));
     if (coveredYears.isEmpty()) {
       throw new IllegalStateException("holiday calendar resource is empty");
     }
+    this.holidayList = List.copyOf(named);
   }
 
   /** The NSE calendar from the bundled holiday resource. */
@@ -65,13 +77,14 @@ public final class MarketCalendar {
         throw new IllegalStateException("missing resource " + HOLIDAY_RESOURCE);
       }
       try (BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
-        return new MarketCalendar(
+        List<Holiday> named =
             reader
                 .lines()
                 .map(String::trim)
                 .filter(line -> !line.isEmpty() && !line.startsWith("#"))
-                .map(line -> LocalDate.parse(line.substring(0, line.indexOf(','))))
-                .collect(Collectors.toList()));
+                .map(MarketCalendar::parseHoliday)
+                .collect(Collectors.toList());
+        return new MarketCalendar(named.stream().map(Holiday::date).collect(Collectors.toList()), named);
       }
     } catch (IOException e) {
       throw new UncheckedIOException("failed reading " + HOLIDAY_RESOURCE, e);
@@ -81,6 +94,21 @@ public final class MarketCalendar {
   /** Calendar over an explicit holiday set — for tests and future multi-exchange use. */
   public static MarketCalendar of(Collection<LocalDate> holidayDates) {
     return new MarketCalendar(holidayDates);
+  }
+
+  /** Parses one "ISO-date,name" resource line into a {@link Holiday} (name may itself contain commas). */
+  private static Holiday parseHoliday(String line) {
+    int comma = line.indexOf(',');
+    if (comma < 0) {
+      throw new IllegalStateException("malformed holiday line (expected ISO-date,name): " + line);
+    }
+    return new Holiday(
+        LocalDate.parse(line.substring(0, comma).trim()), line.substring(comma + 1).trim());
+  }
+
+  /** The bundled holidays with their published names, date-ascending. Empty for a bare-date calendar. */
+  public List<Holiday> holidayList() {
+    return holidayList;
   }
 
   /** True when {@code date} is a weekday and not an exchange holiday. */

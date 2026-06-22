@@ -1970,6 +1970,35 @@
         }
       }
     },
+    "/api/v1/market/holidays" : {
+      "get" : {
+        "tags" : [ "market-surface-controller" ],
+        "operationId" : "holidays",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/futures/term-structure" : {
       "get" : {
         "tags" : [ "futures-controller" ],

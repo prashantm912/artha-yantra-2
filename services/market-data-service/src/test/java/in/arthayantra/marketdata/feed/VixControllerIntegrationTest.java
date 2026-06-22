@@ -61,6 +61,22 @@ class VixControllerIntegrationTest extends MarketDataIntegrationTestBase {
   @Autowired MockMvc mockMvc;
 
   @Test
+  void holidaysReturnsDatedNamedRows() throws Exception {
+    mockMvc
+        .perform(get("/api/v1/market/holidays"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items").isArray())
+        .andExpect(jsonPath("$.items[0].date").exists())
+        // Republic Day 2026-01-26 is a Monday with its published description.
+        .andExpect(
+            jsonPath(
+                "$.items[?(@.date == '2026-01-26')].description",
+                Matchers.hasItem("Republic Day")))
+        .andExpect(
+            jsonPath("$.items[?(@.date == '2026-01-26')].day", Matchers.hasItem("Monday")));
+  }
+
+  @Test
   void vixReturnsLtpDayOhlcAndChange() throws Exception {
     mockMvc
         .perform(get("/api/v1/market/vix"))

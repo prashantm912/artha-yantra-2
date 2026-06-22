@@ -8,7 +8,8 @@ import org.springframework.stereotype.Repository;
 
 /**
  * Read layer over the NSE EOD tables (write side: the {@code nse} ingest repositories). Index-level,
- * date-ranged: FII/DII cash (V012) and participant-wise OI (V013).
+ * date-ranged: FII/DII cash (V012), participant-wise OI (V013) and FII-derivative net stats (V024,
+ * Upstox-sourced — ADR-0002 U6).
  */
 @Repository
 public class NseEodReader {
@@ -43,6 +44,29 @@ public class NseEodReader {
       long optionStockPutShort,
       long totalLongContracts,
       long totalShortContracts) {}
+
+  public record FiiDerivativeRow(
+      LocalDate tradeDate,
+      String segment,
+      BigDecimal buyValue,
+      BigDecimal sellValue,
+      BigDecimal netValue) {}
+
+  public List<FiiDerivativeRow> fiiDerivativeStats(LocalDate from, LocalDate to) {
+    return jdbc.query(
+        "SELECT trade_date, segment, buy_value, sell_value, net_value "
+            + "FROM fii_derivative_stats WHERE trade_date BETWEEN ? AND ? "
+            + "ORDER BY trade_date, segment",
+        (rs, n) ->
+            new FiiDerivativeRow(
+                rs.getObject("trade_date", LocalDate.class),
+                rs.getString("segment"),
+                rs.getBigDecimal("buy_value"),
+                rs.getBigDecimal("sell_value"),
+                rs.getBigDecimal("net_value")),
+        java.sql.Date.valueOf(from),
+        java.sql.Date.valueOf(to));
+  }
 
   public List<FiiDiiRow> fiiDii(LocalDate from, LocalDate to) {
     return jdbc.query(

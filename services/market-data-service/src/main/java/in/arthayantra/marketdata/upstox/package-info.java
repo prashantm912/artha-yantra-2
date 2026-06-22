@@ -6,6 +6,8 @@
  * the existing NSE scrapers kept as the swap-out fallback. Dormant by default ({@code
  * artha.upstox.analytics.enabled=false}); the U1 entitlement probe gates the rest of the build. U2
  * adds the first consumer — FII/DII cash ({@code source.fiidii=upstox}), Upstox-primary with the NSE
- * {@code LiveFiiDiiFetcher} as fallback, persisted through the existing NSE EOD scheduler/table.
+ * {@code LiveFiiDiiFetcher} as fallback, persisted through the existing NSE EOD scheduler/table. U6
+ * adds FII-derivative net stats (the four {@code NSE_FO|*} segments) — Upstox-ONLY (no NSE source,
+ * no fallback), bound whenever the analytics token is enabled and pulled via the same scheduler.
  */
 package in.arthayantra.marketdata.upstox;

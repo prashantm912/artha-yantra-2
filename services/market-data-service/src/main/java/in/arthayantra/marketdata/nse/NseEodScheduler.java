@@ -2,6 +2,7 @@ package in.arthayantra.marketdata.nse;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -25,16 +26,22 @@ public class NseEodScheduler {
   private final NseEodFiiDiiRepository fiiDiiRepo;
   private final ParticipantOiFetcher participantOi;
   private final NseEodParticipantOiRepository participantOiRepo;
+  private final ObjectProvider<FiiDerivativeFetcher> fiiDerivative;
+  private final NseEodFiiDerivativeRepository fiiDerivativeRepo;
 
   public NseEodScheduler(
       FiiDiiFetcher fiiDii,
       NseEodFiiDiiRepository fiiDiiRepo,
       ParticipantOiFetcher participantOi,
-      NseEodParticipantOiRepository participantOiRepo) {
+      NseEodParticipantOiRepository participantOiRepo,
+      ObjectProvider<FiiDerivativeFetcher> fiiDerivative,
+      NseEodFiiDerivativeRepository fiiDerivativeRepo) {
     this.fiiDii = fiiDii;
     this.fiiDiiRepo = fiiDiiRepo;
     this.participantOi = participantOi;
     this.participantOiRepo = participantOiRepo;
+    this.fiiDerivative = fiiDerivative;
+    this.fiiDerivativeRepo = fiiDerivativeRepo;
   }
 
   /** Pull once on startup so data is present immediately and the NSE fetch path is exercised. */
@@ -52,6 +59,7 @@ public class NseEodScheduler {
   private void pullAll() {
     pullFiiDii();
     pullParticipantOi();
+    pullFiiDerivative();
   }
 
   private void pullFiiDii() {
@@ -72,6 +80,27 @@ public class NseEodScheduler {
     } catch (RuntimeException failed) {
       log.warn(
           "NSE participant-OI EOD pull failed (will retry next schedule): {}", failed.getMessage());
+    }
+  }
+
+  /**
+   * FII derivative net stats (ADR-0002 U6). Upstox-only — no NSE source — so the fetcher bean is
+   * present in {@code live} only when the Upstox analytics token is enabled; its absence is a no-op,
+   * not a failure.
+   */
+  private void pullFiiDerivative() {
+    FiiDerivativeFetcher fetcher = fiiDerivative.getIfAvailable();
+    if (fetcher == null) {
+      return;
+    }
+    try {
+      var rows = fetcher.fetchLatest();
+      fiiDerivativeRepo.upsertAll(rows);
+      log.info("FII derivative-stats EOD upserted {} rows", rows.size());
+    } catch (RuntimeException failed) {
+      log.warn(
+          "FII derivative-stats EOD pull failed (will retry next schedule): {}",
+          failed.getMessage());
     }
   }
 }

@@ -2728,6 +2728,50 @@
         }
       }
     },
+    "/api/v1/market/fii-dii/derivative-stats" : {
+      "get" : {
+        "tags" : [ "fii-dii-controller" ],
+        "operationId" : "derivativeStats",
+        "parameters" : [ {
+          "name" : "from",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "to",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/fii-dii/cash" : {
       "get" : {
         "tags" : [ "fii-dii-controller" ],

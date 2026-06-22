@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.upstox;
 
+import in.arthayantra.marketdata.nse.FiiDerivativeFetcher;
 import in.arthayantra.marketdata.nse.FiiDiiFetcher;
 import in.arthayantra.marketdata.nse.LiveFiiDiiFetcher;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -42,5 +43,16 @@ public class UpstoxAnalyticsConfig {
   public FiiDiiFetcher upstoxFiiDiiFetcher(
       UpstoxAnalyticsClient client, LiveFiiDiiFetcher nseFallback) {
     return new UpstoxFiiDiiFetcher(client, nseFallback);
+  }
+
+  /**
+   * Upstox FII-derivative source (U6) — bound whenever the analytics token is enabled (there is no
+   * NSE equivalent, so no source flag and no fallback). The {@code NseEodScheduler} consumes it via
+   * an {@code ObjectProvider}, so its absence (analytics off) is a no-op.
+   */
+  @Bean
+  @ConditionalOnProperty(name = "artha.upstox.analytics.enabled", havingValue = "true")
+  public FiiDerivativeFetcher upstoxFiiDerivativeFetcher(UpstoxAnalyticsClient client) {
+    return new UpstoxFiiDerivativeFetcher(client);
   }
 }

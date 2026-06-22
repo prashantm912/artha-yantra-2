@@ -836,6 +836,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/equity/returns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["returns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/equity/delivery": {
         parameters: {
             query?: never;
@@ -1637,6 +1653,21 @@ export interface components {
             oiPct?: number;
             /** @enum {string} */
             interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+        };
+        Returns: {
+            /** Format: date */
+            asOf?: string;
+            items?: components["schemas"]["ReturnsRow"][];
+        };
+        ReturnsRow: {
+            symbol?: string;
+            industry?: string;
+            ltp?: number;
+            r1d?: number;
+            r1w?: number;
+            r1m?: number;
+            r6m?: number;
+            r1y?: number;
         };
         Delivery: {
             symbol?: string;
@@ -3829,6 +3860,35 @@ export interface operations {
                     "*/*": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    returns: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["Returns"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

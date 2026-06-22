@@ -74,6 +74,9 @@ const OiBuzzPage = lazy(() =>
 const DeliveryDataPage = lazy(() =>
   import('./pages/equity/DeliveryDataPage.tsx').then((m) => ({ default: m.DeliveryDataPage })),
 );
+const EquityReturnsPage = lazy(() =>
+  import('./pages/equity/EquityReturnsPage.tsx').then((m) => ({ default: m.EquityReturnsPage })),
+);
 
 function Lazy({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<p className="text-sm text-ay-muted">Loading chart…</p>}>{children}</Suspense>;
@@ -121,6 +124,7 @@ export function App() {
           {/* Equity */}
           <Route path="/equity/breadth" element={<Lazy><BreadthPage /></Lazy>} />
           <Route path="/equity/delivery-data" element={<Lazy><DeliveryDataPage /></Lazy>} />
+          <Route path="/equity/equity-returns" element={<Lazy><EquityReturnsPage /></Lazy>} />
           {/* Strategies */}
           <Route path="/strategies/strategy-builder" element={<Lazy><StrategyBuilderPage /></Lazy>} />
           {/* Features */}

@@ -8,6 +8,7 @@ import type {
   ChainTable,
   ConnectingDots,
   EquityDelivery,
+  EquityReturns,
   FiiDerivativeRow,
   FiiDiiRow,
   FutEodRow,
@@ -464,6 +465,15 @@ export function useParticipantOi(from: string, to: string) {
       return listItems(res);
     },
     enabled: !!from,
+  });
+}
+
+/** Equity Returns (oipulse): multi-timeframe returns screener over the EQ universe (no params). */
+export function useEquityReturns() {
+  return useQuery({
+    queryKey: ['equity', 'returns'],
+    queryFn: () => oiGet<EquityReturns | null>('/market/equity/returns', '', null),
+    staleTime: 60_000,
   });
 }
 

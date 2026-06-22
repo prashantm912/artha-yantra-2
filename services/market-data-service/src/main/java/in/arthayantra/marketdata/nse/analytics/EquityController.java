@@ -11,9 +11,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class EquityController {
 
   private final EquityDeliveryService delivery;
+  private final EquityReturnsService returns;
 
-  public EquityController(EquityDeliveryService delivery) {
+  public EquityController(EquityDeliveryService delivery, EquityReturnsService returns) {
     this.delivery = delivery;
+    this.returns = returns;
   }
 
   /** One stock's daily delivery series over the most recent {@code days} sessions (default 15). */
@@ -21,5 +23,11 @@ public class EquityController {
   public EquityDeliveryService.Delivery delivery(
       @RequestParam String symbol, @RequestParam(defaultValue = "15") int days) {
     return delivery.delivery(symbol, days);
+  }
+
+  /** Multi-timeframe returns screener over every EQ stock (Current Day / 1W / 1M / 6M / 1Y). */
+  @GetMapping("/returns")
+  public EquityReturnsService.Returns returns() {
+    return returns.returns();
   }
 }

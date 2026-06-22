@@ -626,3 +626,21 @@ export interface EquityDelivery {
   days: number;
   items: DeliveryDay[];
 }
+
+/** One Equity Returns screener row — LTP + window returns are decimal STRINGS (null = no base close). */
+export interface EquityReturnRow {
+  symbol: string;
+  industry: string | null;
+  ltp: string | null;
+  r1d: string | null;
+  r1w: string | null;
+  r1m: string | null;
+  r6m: string | null;
+  r1y: string | null;
+}
+
+/** GET /api/v1/market/equity/returns — the multi-timeframe returns screener over the EQ universe. */
+export interface EquityReturns {
+  asOf: string | null;
+  items: EquityReturnRow[];
+}

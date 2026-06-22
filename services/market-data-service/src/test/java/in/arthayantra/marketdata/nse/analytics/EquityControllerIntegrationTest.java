@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.nse.analytics;
 
+import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -79,5 +80,34 @@ class EquityControllerIntegrationTest extends MarketDataIntegrationTestBase {
         .perform(get("/api/v1/market/equity/delivery").param("symbol", "NOSUCHSYM").param("days", "15"))
         .andExpect(status().isUnprocessableEntity())
         .andExpect(jsonPath("$.code").value("DATA_GAP"));
+  }
+
+  private void insertClose(LocalDate d, String sym, String close) {
+    jdbc.update(
+        "INSERT INTO nse_eod_bhavcopy (trade_date, symbol, series, close_price) "
+            + "VALUES (?,?,?,?::numeric) ON CONFLICT DO NOTHING",
+        java.sql.Date.valueOf(d),
+        sym,
+        "EQ",
+        close);
+  }
+
+  @Test
+  void returnsComputesWindowsFromRankedCloses() throws Exception {
+    // 6 sessions (rn 1..6 by recency): rn1=110 (latest), rn2=100 (1D base), rn6=88 (1W base).
+    // AARTIIND is in the static sector map (the screener restricts to mapped symbols).
+    String sym = "AARTIIND";
+    insertClose(LocalDate.of(2026, 6, 5), sym, "88"); // rn6 → 1W
+    insertClose(LocalDate.of(2026, 6, 8), sym, "101");
+    insertClose(LocalDate.of(2026, 6, 9), sym, "103");
+    insertClose(LocalDate.of(2026, 6, 10), sym, "105");
+    insertClose(LocalDate.of(2026, 6, 11), sym, "100"); // rn2 → 1D
+    insertClose(LocalDate.of(2026, 6, 12), sym, "110"); // rn1 → LTP
+
+    mockMvc
+        .perform(get("/api/v1/market/equity/returns"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items[?(@.symbol=='AARTIIND')].r1d", hasItem("10.00"))) // (110-100)/100
+        .andExpect(jsonPath("$.items[?(@.symbol=='AARTIIND')].r1w", hasItem("25.00"))); // (110-88)/88
   }
 }

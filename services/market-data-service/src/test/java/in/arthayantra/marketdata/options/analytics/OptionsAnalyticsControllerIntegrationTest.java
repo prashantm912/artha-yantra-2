@@ -217,6 +217,33 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
   }
 
   @Test
+  void intervalWiseOiRanksTopGainersAndLosers() throws Exception {
+    String u = "IWCTRL";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    OffsetDateTime b0 =
+        OffsetDateTime.of(2026, 6, 20, 9, 15, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime b1 = b0.plusMinutes(15); // a distinct 15-min bucket
+    // 22500 CE: OI 1000 -> 1300 (gainer +300; ltp up + oi up -> LONG_BUILDUP)
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b0, u, exp, "22500", "CE", "100", 1000L, 0L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b1, u, exp, "22500", "CE", "110", 1300L, 0L);
+    // 22600 PE: OI 2000 -> 1500 (loser -500)
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b0, u, exp, "22600", "PE", "80", 2000L, 0L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b1, u, exp, "22600", "PE", "70", 1500L, 0L);
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/interval-wise-oi")
+                .param("name", u)
+                .param("expiry", "2026-06-25"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.gainers15[0].strike").value("22500 CE"))
+        .andExpect(jsonPath("$.gainers15[0].oiChange").value(300))
+        .andExpect(jsonPath("$.gainers15[0].interpretation").value("LONG_BUILDUP"))
+        .andExpect(jsonPath("$.losers15[0].strike").value("22600 PE"))
+        .andExpect(jsonPath("$.losers15[0].oiChange").value(-500));
+  }
+
+  @Test
   void activeStrikesOmitsSeriesWhenBucketsAbsent() throws Exception {
     String u = "ACTIVECTRL";
     LocalDate exp = LocalDate.of(2026, 6, 25);

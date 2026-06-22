@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.time.Ist;
+import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.options.OiInterpretation;
 import in.arthayantra.marketdata.options.OiInterval;
 import in.arthayantra.marketdata.options.OiQuery;
@@ -41,6 +42,7 @@ public class OptionsAnalyticsController {
   private final StraddleChartService straddleChartService;
   private final OptionsOiChartService optionsOiChartService;
   private final ObjectProvider<UpstoxOptionAnalyticsSource> upstoxOptionAnalytics;
+  private final MarketCalendar calendar;
   private final int bigOiTopN;
   private final int trendBuckets;
   private final int premiumBuckets;
@@ -58,6 +60,7 @@ public class OptionsAnalyticsController {
       StraddleChartService straddleChartService,
       OptionsOiChartService optionsOiChartService,
       ObjectProvider<UpstoxOptionAnalyticsSource> upstoxOptionAnalytics,
+      MarketCalendar calendar,
       @Value("${artha.options.big-oi-top-n:10}") int bigOiTopN,
       @Value("${artha.options.trend-buckets:20}") int trendBuckets,
       @Value("${artha.options.premium-buckets:60}") int premiumBuckets,
@@ -73,6 +76,7 @@ public class OptionsAnalyticsController {
     this.straddleChartService = straddleChartService;
     this.optionsOiChartService = optionsOiChartService;
     this.upstoxOptionAnalytics = upstoxOptionAnalytics;
+    this.calendar = calendar;
     this.bigOiTopN = bigOiTopN;
     this.trendBuckets = trendBuckets;
     this.premiumBuckets = premiumBuckets;
@@ -225,6 +229,82 @@ public class OptionsAnalyticsController {
               tp.spot()));
     }
     return out;
+  }
+
+  /** One strike's interval OI move for the Interval-wise OI bars (e.g. {@code "57400 PE"}). */
+  public record StrikeMove(String strike, long oiChange, OiInterpretation interpretation) {}
+
+  /** Top OI gainer/loser strikes across three lookbacks (oipulse §options/interval-wise-oi). */
+  public record IntervalWiseOi(
+      List<StrikeMove> gainers15,
+      List<StrikeMove> losers15,
+      List<StrikeMove> gainers60,
+      List<StrikeMove> losers60,
+      List<StrikeMove> gainersDaily,
+      List<StrikeMove> losersDaily,
+      OffsetDateTime asOf) {}
+
+  /**
+   * Top OI gainer/loser strikes across three fixed lookbacks — 15 min, 60 min, and daily (vs the
+   * prior trading day). Each reuses the spurt fold (per-strike OI delta + 4-state interpretation);
+   * the 15m/60m windows are the latest bucket-pair, the daily window pairs the prior trading day's
+   * last bucket with the current one. Empty lists when no snapshot is captured (no 422).
+   */
+  @GetMapping("/interval-wise-oi")
+  public IntervalWiseOi intervalWiseOi(
+      @RequestParam(required = false) String mode,
+      @RequestParam String name,
+      @RequestParam(required = false) String date,
+      @RequestParam(required = false) String interval,
+      @RequestParam(required = false) String expiry) {
+    OiQuery q = OiQuery.of(mode, name, date, interval, expiry);
+    LocalDate exp = requireExpiry(q);
+    OiSpurtService.SpurtChain c15 =
+        spurtService.spurts(reader.latestPair(q.name(), exp, OiInterval.M15, q.date()));
+    OiSpurtService.SpurtChain c60 =
+        spurtService.spurts(reader.latestPair(q.name(), exp, OiInterval.M60, q.date()));
+    OiSpurtService.SpurtChain cDaily = spurtService.spurts(dailyPair(q.name(), exp, q.date()));
+    OffsetDateTime asOf =
+        c15.asOf() != null ? c15.asOf() : c60.asOf() != null ? c60.asOf() : cDaily.asOf();
+    return new IntervalWiseOi(
+        topMoves(c15, true),
+        topMoves(c15, false),
+        topMoves(c60, true),
+        topMoves(c60, false),
+        topMoves(cDaily, true),
+        topMoves(cDaily, false),
+        asOf);
+  }
+
+  /** The daily window: the prior trading day's last bucket paired with the current one. */
+  private List<OptionsSnapshotReader.StrikePoint> dailyPair(String name, LocalDate exp, LocalDate date) {
+    LocalDate today = date != null ? date : LocalDate.now(Ist.ZONE);
+    LocalDate prior;
+    try {
+      prior = calendar.previousTradingDay(today);
+    } catch (IllegalArgumentException uncoveredYear) {
+      return List.of();
+    }
+    List<OptionsSnapshotReader.StrikePoint> pair = new ArrayList<>();
+    pair.addAll(reader.latest(name, exp, OiInterval.M15, prior));
+    pair.addAll(reader.latest(name, exp, OiInterval.M15, date));
+    return pair;
+  }
+
+  /** Top-{@code bigOiTopN} strikes by OI rise (gainer) or fall (loser), largest magnitude first. */
+  private List<StrikeMove> topMoves(OiSpurtService.SpurtChain chain, boolean gainers) {
+    return chain.items().stream()
+        .filter(s -> gainers ? s.oiChange() > 0 : s.oiChange() < 0)
+        .sorted(
+            Comparator.comparingLong((OiSpurtService.StrikeSpurt s) -> Math.abs(s.oiChange()))
+                .reversed())
+        .limit(bigOiTopN)
+        .map(s -> new StrikeMove(strikeLabel(s), s.oiChange(), s.interpretation()))
+        .toList();
+  }
+
+  private static String strikeLabel(OiSpurtService.StrikeSpurt s) {
+    return s.strike().stripTrailingZeros().toPlainString() + " " + s.optionType();
   }
 
   @GetMapping("/active-strikes")

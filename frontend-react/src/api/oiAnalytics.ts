@@ -12,6 +12,7 @@ import type {
   FutOiChart,
   FutSeriesPoint,
   FutSpurtChain,
+  IntervalWiseOi,
   LongShortRow,
   Movers,
   MultiOi,
@@ -274,6 +275,17 @@ export function useTrendingOi() {
   return useQuery({
     queryKey: ['oi', 'trending', ctx.name, ctx.expiry, ctx.interval, ctx.mode, ctx.date],
     queryFn: () => oiGet<TrendSeries | null>('/market/options/trending', oiParams(ctx, true), null),
+    enabled: satisfiable(ctx, true),
+  });
+}
+
+/** Top OI gainer/loser strikes across the 15m/60m/daily lookbacks (oipulse Interval-wise OI). */
+export function useIntervalWiseOi() {
+  const ctx = useOiCtx();
+  return useQuery({
+    queryKey: ['oi', 'interval-wise', ctx.name, ctx.expiry, ctx.mode, ctx.date],
+    queryFn: () =>
+      oiGet<IntervalWiseOi | null>('/market/options/interval-wise-oi', oiParams(ctx, true), null),
     enabled: satisfiable(ctx, true),
   });
 }

@@ -604,3 +604,25 @@ export interface OiBuzzHeatmap {
   tiles: OiBuzzTile[];
   asOf: string | null;
 }
+
+/** One day of a stock's delivery series — BigDecimal fields are decimal STRINGS; qty fields numbers. */
+export interface DeliveryDay {
+  date: string;
+  open: string | null;
+  high: string | null;
+  low: string | null;
+  close: string | null;
+  ltpChangePct: string | null;
+  deliveryPct: string | null;
+  dayRange: string | null;
+  dayRangePct: string | null;
+  deliveryQty: number | null;
+  totalTradedQty: number | null;
+}
+
+/** GET /api/v1/market/equity/delivery?symbol=&days= — a stock's daily delivery series, newest first. */
+export interface EquityDelivery {
+  symbol: string;
+  days: number;
+  items: DeliveryDay[];
+}

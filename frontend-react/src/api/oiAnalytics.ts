@@ -7,6 +7,7 @@ import type {
   Breadth,
   ChainTable,
   ConnectingDots,
+  EquityDelivery,
   FiiDerivativeRow,
   FiiDiiRow,
   FutEodRow,
@@ -463,6 +464,21 @@ export function useParticipantOi(from: string, to: string) {
       return listItems(res);
     },
     enabled: !!from,
+  });
+}
+
+/** Equity Delivery Data (oipulse): one stock's daily delivery series over the most recent N sessions.
+ * 422 DATA_GAP (symbol has no EQ bhavcopy) → null → the page renders its empty state. */
+export function useEquityDelivery(symbol: string | null, days: number) {
+  return useQuery({
+    queryKey: ['equity', 'delivery', symbol, days],
+    queryFn: () =>
+      oiGet<EquityDelivery | null>(
+        '/market/equity/delivery',
+        new URLSearchParams({ symbol: symbol ?? '', days: String(days) }).toString(),
+        null,
+      ),
+    enabled: !!symbol,
   });
 }
 

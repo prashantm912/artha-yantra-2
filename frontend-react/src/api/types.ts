@@ -396,6 +396,14 @@ export interface MarketCandle {
   source: string;
 }
 
+/** One row of GET /api/v1/market/holidays `{items}` — an NSE trading holiday with its weekday + name.
+ * The Passed/Coming validity is derived client-side vs today (not carried on the wire). */
+export interface HolidayRow {
+  date: string;
+  day: string;
+  description: string;
+}
+
 /**
  * One interval's leg candle of GET /api/v1/market/options/options-chart — real per-bucket OPTION-PREMIUM
  * OHLC (from the leg's 1m bars) + the leg's OI + IV at that bucket (null when no snapshot sample). OHLC/iv

@@ -15,6 +15,7 @@ import { FuturesMoversPage } from './pages/futures/FuturesMoversPage.tsx';
 import { FuturesEodPage } from './pages/futures/FuturesEodPage.tsx';
 import { FuturesOiAnalysisPage } from './pages/futures/FuturesOiAnalysisPage.tsx';
 import { BanksAnalysisPage } from './pages/futures/BanksAnalysisPage.tsx';
+import { MarketHolidaysPage } from './pages/features/MarketHolidaysPage.tsx';
 import { ParticipantWiseOiPage } from './pages/fiidii/ParticipantWiseOiPage.tsx';
 
 // The ECharts-bearing pages are lazy-loaded so the ~1 MB ECharts bundle is a separate chunk fetched
@@ -99,6 +100,7 @@ export function App() {
           {/* Features */}
           <Route path="/features/connecting-dots" element={<ConnectingDotsPage />} />
           <Route path="/features/vix-index" element={<Lazy><VixIndexPage /></Lazy>} />
+          <Route path="/features/market-holidays" element={<MarketHolidaysPage />} />
         </Route>
       </Route>
     </Routes>

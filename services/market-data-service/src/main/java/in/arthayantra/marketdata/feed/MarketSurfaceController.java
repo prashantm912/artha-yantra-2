@@ -11,7 +11,9 @@ import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.format.TextStyle;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -124,5 +126,24 @@ public class MarketSurfaceController {
         "sessionOpen", MarketCalendar.SESSION_OPEN.toString(),
         "sessionClose", MarketCalendar.SESSION_CLOSE.toString(),
         "nextTradingDay", nextTradingDay == null ? "" : nextTradingDay.toString());
+  }
+
+  /**
+   * NSE trading holidays the bundled calendar covers, date-ascending. Each row carries the ISO date, the
+   * weekday name, and the published description; the Passed/Coming "validity" is derived client-side vs
+   * today. Map-envelope (springdoc does not enumerate it); the calendar covers only the resource's years.
+   */
+  @GetMapping("/holidays")
+  public Map<String, Object> holidays() {
+    List<Map<String, Object>> items =
+        calendar.holidayList().stream()
+            .map(
+                h ->
+                    Map.<String, Object>of(
+                        "date", h.date().toString(),
+                        "day", h.date().getDayOfWeek().getDisplayName(TextStyle.FULL, Locale.ENGLISH),
+                        "description", h.name()))
+            .toList();
+    return Map.of("items", items, "asOf", OffsetDateTime.now(clock).withOffsetSameInstant(Ist.OFFSET).toString());
   }
 }

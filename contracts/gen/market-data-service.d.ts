@@ -340,6 +340,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/options/pcr-series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["pcrSeries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/options/options-chart": {
         parameters: {
             query?: never;
@@ -1259,6 +1275,11 @@ export interface components {
             bucket?: string;
             atmStrike?: number;
             atmStraddle?: number;
+            spot?: number;
+        };
+        PcrSeriesPoint: {
+            time?: string;
+            pcr?: number;
             spot?: number;
         };
         OiStats: {
@@ -2611,6 +2632,41 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["PremiumSeries"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    pcrSeries: {
+        parameters: {
+            query: {
+                mode?: string;
+                name: string;
+                date?: string;
+                interval?: string;
+                expiry?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PcrSeriesPoint"][];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

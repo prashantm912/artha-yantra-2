@@ -265,6 +265,16 @@ export interface TrendSeries {
   asOf: string | null;
 }
 
+/**
+ * GET /api/v1/market/options/pcr-series — intraday PCR-vs-price (the OI-Statistics chart), source-
+ * aware (native fold or Upstox full-chain). `pcr`/`spot` are decimal strings ("HH:mm" IST `time`).
+ */
+export interface PcrSeriesPoint {
+  time: string;
+  pcr: string | null;
+  spot: string | null;
+}
+
 /** One strike's straddle premium (GET /api/v1/market/options/premium). */
 export interface PremiumRow {
   strike: string;

@@ -12,6 +12,7 @@ import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import in.arthayantra.marketdata.upstox.UpstoxAnalyticsClient;
 import in.arthayantra.marketdata.upstox.UpstoxAnalyticsProperties;
 import java.time.LocalDate;
+import java.util.List;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -97,5 +98,26 @@ class UpstoxOptionAnalyticsSourceTest {
     stub("pcr", "{\"status\":\"success\",\"data\":null}");
 
     assertThat(source().statsOrNull("SENSEX", EXPIRY, DATE)).isNull();
+  }
+
+  @Test
+  void mapsPcrSeriesFromInsights() {
+    stub(
+        "pcr",
+        "{\"status\":\"success\",\"data\":{\"pcr\":0.88,\"insights\":["
+            + "{\"pcr\":0.7832266,\"spot_price\":24075.1,\"time\":\"09:15\"},"
+            + "{\"pcr\":1.05,\"spot_price\":24153.1,\"time\":\"10:15\"}]}}");
+
+    List<PcrSeriesPoint> series = source().pcrSeries("NIFTY 50", EXPIRY, DATE, 60);
+
+    assertThat(series).hasSize(2);
+    assertThat(series.get(0).time()).isEqualTo("09:15");
+    assertThat(series.get(0).pcr()).isEqualByComparingTo("0.7832"); // 4 dp HALF_UP
+    assertThat(series.get(0).spot()).isEqualByComparingTo("24075.1");
+  }
+
+  @Test
+  void pcrSeriesEmptyOnUnknownIndex() {
+    assertThat(source().pcrSeries("NIFTY NEXT 50", EXPIRY, DATE, 60)).isEmpty();
   }
 }

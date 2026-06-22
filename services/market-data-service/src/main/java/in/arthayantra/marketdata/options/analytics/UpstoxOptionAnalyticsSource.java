@@ -6,6 +6,8 @@ import in.arthayantra.marketdata.upstox.UpstoxOptionAnalytics;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -94,4 +96,38 @@ public class UpstoxOptionAnalyticsSource {
     }
     return new Stats(pcr, maxPain);
   }
+
+  /**
+   * Intraday PCR-vs-price series from Upstox {@code /pcr} insights ({@code bucketMinutes}
+   * granularity) — each insight's {@code (time, pcr→4dp, spot_price)}. Empty list on any miss
+   * (unknown index, no data, transport/HTTP error) so the caller falls back to the native fold.
+   */
+  public List<PcrSeriesPoint> pcrSeries(
+      String underlying, LocalDate expiry, LocalDate date, int bucketMinutes) {
+    String key = INSTRUMENT_KEYS.get(underlying);
+    if (key == null) {
+      log.warn("no Upstox instrument_key for underlying '{}' — keeping native PCR series", underlying);
+      return List.of();
+    }
+    LocalDate d = date != null ? date : LocalDate.now(Ist.ZONE);
+    try {
+      UpstoxOptionAnalytics.Data pc = client.pcr(key, expiry, d, bucketMinutes);
+      if (pc == null || pc.insights() == null) {
+        return List.of();
+      }
+      List<PcrSeriesPoint> out = new ArrayList<>();
+      for (UpstoxOptionAnalytics.Insight insight : pc.insights()) {
+        if (insight.pcr() != null) {
+          out.add(
+              new PcrSeriesPoint(
+                  insight.time(), insight.pcr().setScale(4, RoundingMode.HALF_UP), insight.spotPrice()));
+        }
+      }
+      return out;
+    } catch (RuntimeException failed) {
+      log.warn("Upstox pcr-series failed for {} ({}) — keeping native", underlying, failed.getMessage());
+      return List.of();
+    }
+  }
 }
+

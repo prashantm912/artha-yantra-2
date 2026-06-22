@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import { useOiAnalysis, useOiStats, useTrendingOi } from '../../api/oiAnalytics.ts';
-import { foldIndividualOi, foldPcrPrice } from '../../api/oiStatsFold.ts';
+import { useOiAnalysis, useOiStats, usePcrSeries } from '../../api/oiAnalytics.ts';
+import { foldIndividualOi, type PcrPricePoint } from '../../api/oiStatsFold.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
@@ -25,7 +25,7 @@ const compact = (n: number) => new Intl.NumberFormat('en-IN', { notation: 'compa
 export function OiStatisticsPage() {
   const statsQ = useOiStats();
   const analysisQ = useOiAnalysis();
-  const trendingQ = useTrendingOi();
+  const pcrSeriesQ = usePcrSeries();
   const [showChange, setShowChange] = useState(false);
 
   const stats = statsQ.data ?? null;
@@ -37,7 +37,17 @@ export function OiStatisticsPage() {
   const callTotal = useMemo(() => individual.ce.reduce((a, b) => a + b, 0), [individual]);
   const putTotal = useMemo(() => individual.pe.reduce((a, b) => a + b, 0), [individual]);
 
-  const pcrPrice = useMemo(() => foldPcrPrice(trendingQ.data?.items ?? []), [trendingQ.data]);
+  // /pcr-series is source-aware (native fold or Upstox full-chain); map its decimal strings to the
+  // dual-axis chart shape (PCR left, price right).
+  const pcrPrice = useMemo<PcrPricePoint[]>(
+    () =>
+      (pcrSeriesQ.data ?? []).map((p) => ({
+        time: p.time,
+        pcr: p.pcr == null ? null : Number(p.pcr),
+        price: p.spot == null ? null : Number(p.spot),
+      })),
+    [pcrSeriesQ.data],
+  );
 
   const hasBars = individual.strikes.length > 0;
 
@@ -60,9 +70,9 @@ export function OiStatisticsPage() {
           onClick={() => {
             void statsQ.refetch();
             void analysisQ.refetch();
-            void trendingQ.refetch();
+            void pcrSeriesQ.refetch();
           }}
-          loading={statsQ.isFetching || analysisQ.isFetching || trendingQ.isFetching}
+          loading={statsQ.isFetching || analysisQ.isFetching || pcrSeriesQ.isFetching}
         />
       </div>
 

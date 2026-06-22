@@ -18,6 +18,7 @@ import type {
   OiStrikePoint,
   OptOiChart,
   ParticipantOiRow,
+  PcrSeriesPoint,
   PremiumChain,
   SpurtChain,
   StraddleChart,
@@ -272,6 +273,16 @@ export function useTrendingOi() {
   return useQuery({
     queryKey: ['oi', 'trending', ctx.name, ctx.expiry, ctx.interval, ctx.mode, ctx.date],
     queryFn: () => oiGet<TrendSeries | null>('/market/options/trending', oiParams(ctx, true), null),
+    enabled: satisfiable(ctx, true),
+  });
+}
+
+/** Intraday PCR-vs-price (the OI-Statistics chart) — source-aware (native fold or Upstox full-chain). */
+export function usePcrSeries() {
+  const ctx = useOiCtx();
+  return useQuery({
+    queryKey: ['oi', 'pcr-series', ctx.name, ctx.expiry, ctx.interval, ctx.mode, ctx.date],
+    queryFn: () => oiGet<PcrSeriesPoint[]>('/market/options/pcr-series', oiParams(ctx, true), []),
     enabled: satisfiable(ctx, true),
   });
 }

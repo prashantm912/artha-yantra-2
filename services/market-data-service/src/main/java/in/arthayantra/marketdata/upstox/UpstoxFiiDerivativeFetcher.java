@@ -15,7 +15,7 @@ import org.slf4j.LoggerFactory;
  * Upstox Market-Information FII-derivative source (ADR-0002 U6). FII net buy/sell across the four
  * F&amp;O segments (oipulse "FII Derivative Stats") — there is NO NSE EOD equivalent, so this is the
  * sole source (no fallback). Fetched in a single {@code /v2/market/fii} call requesting all four
- * {@code NSE_FO|*} segments; the ₹-lakh amounts convert to ₹ crore (÷100) and the trade date is
+ * {@code NSE_FO|*} segments; the amounts are ALREADY in ₹ crore (kept as-is) and the trade date is
  * pinned from the millisecond timestamp in IST. A fetch failure propagates to the scheduler, which
  * logs and retries next schedule.
  */
@@ -24,8 +24,6 @@ public final class UpstoxFiiDerivativeFetcher implements FiiDerivativeFetcher {
   private static final Logger log = LoggerFactory.getLogger(UpstoxFiiDerivativeFetcher.class);
   private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
   private static final String DAILY = "1D";
-  /** F&O amounts arrive in ₹ lakh (docs mislabel "INR"); 1 crore = 100 lakh, so ÷100 → ₹ crore. */
-  private static final BigDecimal LAKH_PER_CRORE = BigDecimal.valueOf(100L);
 
   /** Upstox segment key → our canonical segment label (stable iteration order). */
   private static final String[][] SEGMENTS = {
@@ -72,13 +70,15 @@ public final class UpstoxFiiDerivativeFetcher implements FiiDerivativeFetcher {
   }
 
   /**
-   * Upstox reports the F&amp;O segments' buy/sell/OI amounts in ₹ lakh (the docs mislabel them
-   * "INR"; the per-contract premium only makes physical sense as lakh — e.g. {@code buy_amount /
-   * buy_contracts ≈ ₹15,800/lot}). 1 crore = 100 lakh, so ÷100 → ₹ crore.
+   * Upstox reports the F&amp;O segment buy/sell amounts ALREADY in ₹ crore (the docs mislabel them
+   * "INR"; verified against oipulse "FII Derivative Stats" — every net matches cell-for-cell, e.g.
+   * 2026-06-22 INDEX_OPTIONS net 3340.90). The {@code buy_amount / buy_contracts} per-lot figure is
+   * the contract NOTIONAL (≈ index × lot ≈ ₹15.8 lakh), not premium — confirming crore, not lakh.
+   * So keep the value and only normalise scale; NO unit division.
    */
-  private static BigDecimal toCrore(BigDecimal lakh) {
-    return lakh == null
+  private static BigDecimal toCrore(BigDecimal crore) {
+    return crore == null
         ? BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP)
-        : lakh.divide(LAKH_PER_CRORE, 2, RoundingMode.HALF_UP);
+        : crore.setScale(2, RoundingMode.HALF_UP);
   }
 }

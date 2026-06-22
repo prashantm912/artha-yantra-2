@@ -52,6 +52,9 @@ const MultipleOiChartPage = lazy(() =>
 const OptionsOiChartPage = lazy(() =>
   import('./pages/options/OptionsOiChartPage.tsx').then((m) => ({ default: m.OptionsOiChartPage })),
 );
+const VixIndexPage = lazy(() =>
+  import('./pages/features/VixIndexPage.tsx').then((m) => ({ default: m.VixIndexPage })),
+);
 
 function Lazy({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<p className="text-sm text-ay-muted">Loading chart…</p>}>{children}</Suspense>;
@@ -95,6 +98,7 @@ export function App() {
           <Route path="/fii-dii/long-short-ratio" element={<Lazy><FiiLongShortPage /></Lazy>} />
           {/* Features */}
           <Route path="/features/connecting-dots" element={<ConnectingDotsPage />} />
+          <Route path="/features/vix-index" element={<Lazy><VixIndexPage /></Lazy>} />
         </Route>
       </Route>
     </Routes>

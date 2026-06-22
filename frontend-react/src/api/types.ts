@@ -377,6 +377,26 @@ export interface FutOiChart {
 }
 
 /**
+ * One OHLCV bar of GET /api/v1/market/candles `{items}` (CandlesController.Candle) — the cache-first
+ * per-symbol candle read. OHLC are decimal STRINGS (only the chart-coordinate fold crosses to Number);
+ * `bucket` is the bar START as an IST-offset ISO datetime ("2026-06-20T09:15:00+05:30"); `volume` is a
+ * primitive long (never null), `oi` is null for non-derivative symbols (e.g. an index).
+ */
+export interface MarketCandle {
+  exchange: string;
+  tradingsymbol: string;
+  interval: string;
+  bucket: string;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  volume: number;
+  oi: number | null;
+  source: string;
+}
+
+/**
  * One interval's leg candle of GET /api/v1/market/options/options-chart — real per-bucket OPTION-PREMIUM
  * OHLC (from the leg's 1m bars) + the leg's OI + IV at that bucket (null when no snapshot sample). OHLC/iv
  * are decimal STRINGS (only the chart-coordinate fold crosses to Number); oi/volume are longs.

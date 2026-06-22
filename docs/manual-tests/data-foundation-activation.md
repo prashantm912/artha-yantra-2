@@ -83,28 +83,45 @@ with `ARTHA_DB_NAME=artha` / `ARTHA_REDIS_DB=0` for live).
 
 ### A1. Flip the flag + redeploy
 
-Set in `.env`: `ARTHA_OPENALGO_OI_BACKFILL_ENABLED=true`. Then rebuild+redeploy `market-data-service`
-(live values `ARTHA_DB_NAME=artha`, `ARTHA_REDIS_DB=0`). The `OiHistorySource` bean now wires; the admin
-endpoint stops returning `503`.
+The data-foundation flags are passed into the market-data container by the compose `environment:` block
+(`ARTHA_OPENALGO_OI_BACKFILL_ENABLED` … added alongside `ARTHA_OPENALGO_BASE_URL`). Set the value and
+recreate the one service (replicating `ay`'s live env — a wrong `ARTHA_DB_NAME` points it at `artha_mock`):
+
+```powershell
+$env:ARTHA_DB_NAME='artha'; $env:ARTHA_REDIS_DB='0'; $env:ARTHA_OPENALGO_OI_BACKFILL_ENABLED='true'
+# IMPORTANT: the running image must be built from a commit that INCLUDES PR #50 (OiBackfillController);
+# an older :dev image 404s the admin route. Rebuild if unsure:
+docker compose -f deploy/docker-compose.yml --env-file .env build market-data-service
+docker compose -f deploy/docker-compose.yml --env-file .env up -d --no-deps --wait market-data-service
+```
+
+`printenv | grep OI_BACKFILL` inside the container should show `true`; the admin endpoint stops returning `503`.
 
 ### A2. Trigger a backfill (one recent trading session)
 
 Pick a session **inside the market-calendar's covered years** (2024–2026) and an expiry live on that date.
-Drive the gateway from PowerShell (PS 5.1 `Invoke-WebRequest -UseBasicParsing` — see CLAUDE.md "Drive the
-gateway API from PowerShell"): POST `/api/v1/auth/login` with the owner password into a `-WebSession $s`, GET
-once to seed the `XSRF-TOKEN` cookie, then echo it as `X-XSRF-TOKEN` (same pattern as `phase-eod-bhavcopy.md`):
+**`underlying` is the index `underlying_tradingsymbol`, not the short name** — `NIFTY 50` / `NIFTY BANK` /
+`SENSEX` (this is also the value live capture stores in the snapshot `underlying` column, so the pages match).
+The gateway is loopback **http on `:8080`**. Drive it from PowerShell (PS 5.1 `Invoke-WebRequest
+-UseBasicParsing`): POST `/api/v1/auth/login` with the owner password into a `-WebSession $s`, GET once to seed
+the `XSRF-TOKEN` cookie, then echo it as the `X-XSRF-TOKEN` header on the mutating POST:
 
 ```powershell
-# $s = the logged-in WebSession; $xsrf = the seeded XSRF-TOKEN cookie value
-$body = '{"underlying":"NIFTY","expiry":"2026-06-30","date":"2026-06-19"}'
-Invoke-WebRequest -UseBasicParsing -Method POST `
-  -Uri https://127.0.0.1:8443/api/v1/market/admin/oi-backfill `
-  -Headers @{ 'X-XSRF-TOKEN' = $xsrf } -WebSession $s `
-  -ContentType 'application/json' -Body $body
+$base = 'http://127.0.0.1:8080'
+$null = Invoke-WebRequest -UseBasicParsing -Method POST -Uri "$base/api/v1/auth/login" `
+  -ContentType 'application/json' -Body '{"password":"<owner password>"}' -SessionVariable s
+$null = Invoke-WebRequest -UseBasicParsing -Uri "$base/api/v1/market/status" -WebSession $s
+$xsrf = ($s.Cookies.GetCookies($base) | Where-Object Name -eq 'XSRF-TOKEN').Value
+$body = '{"underlying":"NIFTY 50","expiry":"2026-06-30","date":"2026-06-19"}'
+Invoke-WebRequest -UseBasicParsing -Method POST -Uri "$base/api/v1/market/admin/oi-backfill" `
+  -Headers @{ 'X-XSRF-TOKEN' = $xsrf } -WebSession $s -ContentType 'application/json' -Body $body
 # → 202 { "jobId": "…" }
 ```
 
-Repeat per (underlying, expiry) you want to verify (NIFTY, BANKNIFTY, SENSEX, …). Re-runs are idempotent.
+The run is async + rate-limited (≈148 `/history` calls at 5/s + Upstox latency ≈ 2–3 min for a full NIFTY
+chain); rows insert as one batch at the end, so the table stays empty until the `oi-backfill … done` log line
+(`docker logs ay-market-data-service | grep oi-backfill`). A second POST while running returns `409`. Repeat
+per (underlying, expiry) — `NIFTY 50` / `NIFTY BANK` / `SENSEX`. Re-runs are idempotent.
 
 ### A3. Confirm rows landed
 

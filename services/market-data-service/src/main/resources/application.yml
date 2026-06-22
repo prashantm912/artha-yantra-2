@@ -57,6 +57,14 @@ artha:
     # is connected (no SDK in this repo; the appliance fronts the broker).
     oi-backfill-enabled: ${ARTHA_OPENALGO_OI_BACKFILL_ENABLED:false}      # POST /market/admin/oi-backfill 1m-OHLC+OI importer
     global-quotes-enabled: ${ARTHA_OPENALGO_GLOBAL_QUOTES_ENABLED:false}  # Connecting-Dots Dow factor (DOWJONES@GLOBAL_INDEX)
+  # Upstox Market-Information analytics side-channel (ADR-0002). A SEPARATE, dedicated analytics token
+  # (NOT the OpenAlgo broker session), read from its secret file. Dormant by default; the U1
+  # entitlement probe (GET /market/admin/upstox-entitlement) gates the rest of the analytics build.
+  upstox:
+    analytics:
+      enabled: ${ARTHA_UPSTOX_ANALYTICS_ENABLED:false}
+      base-url: ${ARTHA_UPSTOX_ANALYTICS_BASE_URL:https://api.upstox.com}
+      token-file: ${ARTHA_UPSTOX_ANALYTICS_TOKEN_FILE:/run/secrets/upstox_analytics_token}
 
 # B-3: the per-endpoint-family resilience stack — exactly one resilience
 # dependency. Limiter saturation queues up to 5s (virtual threads), then 429

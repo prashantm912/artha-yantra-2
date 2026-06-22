@@ -77,6 +77,12 @@ const DeliveryDataPage = lazy(() =>
 const EquityReturnsPage = lazy(() =>
   import('./pages/equity/EquityReturnsPage.tsx').then((m) => ({ default: m.EquityReturnsPage })),
 );
+const SectorHeatmapPage = lazy(() =>
+  import('./pages/equity/SectorHeatmapPage.tsx').then((m) => ({ default: m.SectorHeatmapPage })),
+);
+const SectorStatsPage = lazy(() =>
+  import('./pages/equity/SectorStatsPage.tsx').then((m) => ({ default: m.SectorStatsPage })),
+);
 
 function Lazy({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<p className="text-sm text-ay-muted">Loading chart…</p>}>{children}</Suspense>;
@@ -125,6 +131,8 @@ export function App() {
           <Route path="/equity/breadth" element={<Lazy><BreadthPage /></Lazy>} />
           <Route path="/equity/delivery-data" element={<Lazy><DeliveryDataPage /></Lazy>} />
           <Route path="/equity/equity-returns" element={<Lazy><EquityReturnsPage /></Lazy>} />
+          <Route path="/equity/sector-heatmap" element={<Lazy><SectorHeatmapPage /></Lazy>} />
+          <Route path="/equity/sector-stats" element={<Lazy><SectorStatsPage /></Lazy>} />
           {/* Strategies */}
           <Route path="/strategies/strategy-builder" element={<Lazy><StrategyBuilderPage /></Lazy>} />
           {/* Features */}

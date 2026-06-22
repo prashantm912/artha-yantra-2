@@ -52,6 +52,7 @@ const SECTIONS: MenuSection[] = [
     title: 'FII / DII',
     items: [
       { label: 'Capital Market', to: '/fii-dii/capital-market' }, // Wave 2
+      { label: 'FII Derivative Stats', to: '/fii-dii/fii-derivative-stats' }, // Wave 3
       { label: 'Participant OI', to: '/fii-dii/participant-wise-oi' }, // Wave 2
       { label: 'Long-Short Ratio', to: '/fii-dii/long-short-ratio' }, // Wave 2
     ],

@@ -32,6 +32,9 @@ const FiiDiiCapitalMarketPage = lazy(() =>
 const FiiLongShortPage = lazy(() =>
   import('./pages/fiidii/FiiLongShortPage.tsx').then((m) => ({ default: m.FiiLongShortPage })),
 );
+const FiiDerivativeStatsPage = lazy(() =>
+  import('./pages/fiidii/FiiDerivativeStatsPage.tsx').then((m) => ({ default: m.FiiDerivativeStatsPage })),
+);
 const OiStatisticsPage = lazy(() =>
   import('./pages/options/OiStatisticsPage.tsx').then((m) => ({ default: m.OiStatisticsPage })),
 );
@@ -95,6 +98,7 @@ export function App() {
           <Route path="/futures/banks" element={<BanksAnalysisPage />} />
           {/* FII / DII */}
           <Route path="/fii-dii/capital-market" element={<Lazy><FiiDiiCapitalMarketPage /></Lazy>} />
+          <Route path="/fii-dii/fii-derivative-stats" element={<Lazy><FiiDerivativeStatsPage /></Lazy>} />
           <Route path="/fii-dii/participant-wise-oi" element={<ParticipantWiseOiPage />} />
           <Route path="/fii-dii/long-short-ratio" element={<Lazy><FiiLongShortPage /></Lazy>} />
           {/* Features */}

@@ -48,7 +48,13 @@ const SECTIONS: MenuSection[] = [
       { label: 'Banks', to: '/futures/banks' }, // Wave 3 — time × 6-bank OI matrix
     ],
   },
-  { title: 'Equity', items: [{ label: 'Breadth' }, { label: 'Sector Stats' }] },
+  {
+    title: 'Equity',
+    items: [
+      { label: 'Breadth', to: '/equity/breadth' }, // Wave 3 — advance/decline + delivery leaders (zero-BE)
+      { label: 'Sector Stats' },
+    ],
+  },
   {
     title: 'FII / DII',
     items: [

@@ -454,6 +454,18 @@ export interface FiiDiiRow {
   netValue: string | null;
 }
 
+/**
+ * One row of GET /api/v1/market/fii-dii/derivative-stats `{items}` — a FII F&O segment's net activity
+ * for a trade date (₹ Crore). `segment` ∈ INDEX_FUTURES | INDEX_OPTIONS | STOCK_FUTURES | STOCK_OPTIONS.
+ */
+export interface FiiDerivativeRow {
+  tradeDate: string;
+  segment: string;
+  buyValue: string | null;
+  sellValue: string | null;
+  netValue: string | null;
+}
+
 /** One row of GET /api/v1/market/fii-dii/participant-oi `{items}` — a participant's long/short contracts. */
 export interface ParticipantOiRow {
   tradeDate: string;

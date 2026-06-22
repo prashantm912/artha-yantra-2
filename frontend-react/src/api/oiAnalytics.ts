@@ -6,6 +6,7 @@ import type {
   BanksAnalysis,
   ChainTable,
   ConnectingDots,
+  FiiDerivativeRow,
   FiiDiiRow,
   FutEodRow,
   FutOiChart,
@@ -410,6 +411,22 @@ export function useFiiDiiCash(from: string, to: string) {
     queryFn: async () => {
       const res = await oiGet<{ items?: FiiDiiRow[] }>(
         '/market/fii-dii/cash',
+        rangeParams(from, to),
+        { items: [] },
+      );
+      return listItems(res);
+    },
+    enabled: !!from,
+  });
+}
+
+/** FII net activity across the four F&O derivative segments (oipulse FII Derivative Stats; Upstox-sourced). */
+export function useFiiDerivativeStats(from: string, to: string) {
+  return useQuery({
+    queryKey: ['fiidii', 'derivative-stats', from, to],
+    queryFn: async () => {
+      const res = await oiGet<{ items?: FiiDerivativeRow[] }>(
+        '/market/fii-dii/derivative-stats',
         rangeParams(from, to),
         { items: [] },
       );

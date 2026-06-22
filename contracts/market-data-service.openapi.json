@@ -3670,6 +3670,12 @@
           "trend" : {
             "type" : "string",
             "enum" : [ "UP", "DOWN", "FLAT" ]
+          },
+          "ceLtp" : {
+            "type" : "number"
+          },
+          "peLtp" : {
+            "type" : "number"
           }
         }
       },

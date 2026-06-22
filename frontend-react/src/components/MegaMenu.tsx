@@ -23,6 +23,7 @@ const SECTIONS: MenuSection[] = [
       { label: 'OI Analysis', to: '/options/oi-analysis' }, // per-strike intraday time-rows (§20.7.5)
       { label: 'OI Spurt', to: '/options/oi-spurt' },
       { label: 'Trending OI', to: '/options/trending-oi' }, // Wave 2
+      { label: 'Trending OI - PA', to: '/options/trending-oi-pa' }, // Wave 3 — + premium (PA) columns
       { label: 'Big OI Movement', to: '/options/big-oi-movement' }, // Wave 2
       { label: 'Options Premium', to: '/options/options-premium' }, // Wave 2
       { label: 'Straddle Chart', to: '/options/straddle-chart' }, // combined CE+PE premium candles (§20.7.6)

@@ -6,8 +6,8 @@ import type { TrendSeries } from '../../api/types.ts';
 const data: TrendSeries = {
   asOf: '2026-06-16T09:21:00+05:30',
   items: [
-    { bucket: '2026-06-16T09:18:00+05:30', totalOi: 2000, ceOi: 1000, peOi: 1000, spot: '57100', trend: 'FLAT' },
-    { bucket: '2026-06-16T09:21:00+05:30', totalOi: 2400, ceOi: 1100, peOi: 1300, spot: '57200', trend: 'UP' },
+    { bucket: '2026-06-16T09:18:00+05:30', totalOi: 2000, ceOi: 1000, peOi: 1000, spot: '57100', trend: 'FLAT', ceLtp: null, peLtp: null },
+    { bucket: '2026-06-16T09:21:00+05:30', totalOi: 2400, ceOi: 1100, peOi: 1300, spot: '57200', trend: 'UP', ceLtp: null, peLtp: null },
   ],
 };
 

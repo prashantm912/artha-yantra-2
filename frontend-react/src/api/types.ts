@@ -254,6 +254,9 @@ export interface TrendPoint {
   peOi: number;
   spot: string | null;
   trend: 'UP' | 'DOWN' | 'FLAT';
+  /** Summed CE/PE premium (option ltp) across the chain — the Trending OI - PA price-action columns. */
+  ceLtp: string | null;
+  peLtp: string | null;
 }
 
 /** GET /api/v1/market/options/trending — per-bucket OI trend series; 422 DATA_GAP on no snapshot. */

@@ -1,4 +1,5 @@
 import type { SentimentTone } from '../components/atoms/SentimentBadge.tsx';
+import { addDecimal, subtractDecimal } from '../lib/decimal.ts';
 import type { TrendPoint } from './types.ts';
 
 // Trending OI fold (oipulse §options/trending-oi): the table's derived columns are ALL computed
@@ -43,6 +44,17 @@ export interface TrendingRow {
   /** underlying level at the break (oipulse shows the price beside D.H.B / D.L.B). */
   breakLevel: string | null;
   sentiment: SentimentLevel;
+  // ── Trending OI - PA price-action columns (summed CE/PE premium + deltas vs the session-open baseline).
+  /** Total Call Ltp — summed CE premium across the chain (decimal string). */
+  totalCallLtp: string | null;
+  /** Total Put Ltp — summed PE premium. */
+  totalPutLtp: string | null;
+  /** Δ total CE premium vs the baseline bucket. */
+  callLtpChng: string | null;
+  /** Δ total PE premium vs the baseline bucket. */
+  putLtpChng: string | null;
+  /** Δ (CE+PE) premium = the straddle premium change (callLtpChng + putLtpChng) — the key PA signal. */
+  straddleChng: string | null;
 }
 
 function sentiment(diff: number, dhBreak: boolean, dlBreak: boolean, chngCallOi: number, chngPutOi: number): SentimentLevel {
@@ -63,6 +75,8 @@ export function foldTrending(items: TrendPoint[]): TrendingRow[] {
   if (items.length === 0) return [];
   const baseCe = items[0].ceOi;
   const basePe = items[0].peOi;
+  const baseCeLtp = items[0].ceLtp;
+  const basePeLtp = items[0].peLtp;
 
   let runMax = Number.NEGATIVE_INFINITY;
   let runMin = Number.POSITIVE_INFINITY;
@@ -86,6 +100,14 @@ export function foldTrending(items: TrendPoint[]): TrendingRow[] {
     const directionPct = totalDirectional === 0 ? null : ((diffInOi / totalDirectional) * 100).toFixed(2);
     const netPcr = p.ceOi === 0 ? null : (p.peOi / p.ceOi).toFixed(2);
 
+    // PA premium columns: Δ vs the session-open baseline (same baseline convention as the OI columns).
+    const callLtpChng =
+      p.ceLtp != null && baseCeLtp != null ? subtractDecimal(p.ceLtp, baseCeLtp) : null;
+    const putLtpChng =
+      p.peLtp != null && basePeLtp != null ? subtractDecimal(p.peLtp, basePeLtp) : null;
+    const straddleChng =
+      callLtpChng != null && putLtpChng != null ? addDecimal(callLtpChng, putLtpChng) : null;
+
     const row: TrendingRow = {
       bucket: p.bucket,
       spot: p.spot,
@@ -100,6 +122,11 @@ export function foldTrending(items: TrendPoint[]): TrendingRow[] {
       dlBreak,
       breakLevel: dhBreak || dlBreak ? p.spot : null,
       sentiment: sentiment(diffInOi, dhBreak, dlBreak, chngCallOi, chngPutOi),
+      totalCallLtp: p.ceLtp,
+      totalPutLtp: p.peLtp,
+      callLtpChng,
+      putLtpChng,
+      straddleChng,
     };
     prevDiff = diffInOi;
     return row;

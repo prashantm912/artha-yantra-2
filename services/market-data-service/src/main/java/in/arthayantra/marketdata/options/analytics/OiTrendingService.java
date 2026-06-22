@@ -21,22 +21,39 @@ public class OiTrendingService {
     FLAT
   }
 
+  /**
+   * One bucket's aggregates. {@code ceLtp}/{@code peLtp} are the SUMMED CE/PE premium (option ltp) across
+   * the captured chain — the Price-Action columns the "Trending OI - PA" page adds on top of the OI trend.
+   */
   public record TrendPoint(
-      OffsetDateTime bucket, long totalOi, long ceOi, long peOi, BigDecimal spot, Trend trend) {}
+      OffsetDateTime bucket,
+      long totalOi,
+      long ceOi,
+      long peOi,
+      BigDecimal spot,
+      Trend trend,
+      BigDecimal ceLtp,
+      BigDecimal peLtp) {}
 
   public record TrendSeries(List<TrendPoint> items, OffsetDateTime asOf) {}
 
   /** {@code series} must be bucket-ordered oldest-first (the OptionsSnapshotReader.series contract). */
   public TrendSeries trending(List<OptionsSnapshotReader.StrikePoint> series) {
     Map<OffsetDateTime, long[]> byBucket = new LinkedHashMap<>(); // [ceOi, peOi]
+    Map<OffsetDateTime, BigDecimal[]> ltpByBucket = new LinkedHashMap<>(); // [ceLtp, peLtp] summed premium
     Map<OffsetDateTime, BigDecimal> spotByBucket = new LinkedHashMap<>(); // underlying LTP per bucket
     for (OptionsSnapshotReader.StrikePoint p : series) {
       long[] v = byBucket.computeIfAbsent(p.bucket(), k -> new long[2]);
+      BigDecimal[] lv =
+          ltpByBucket.computeIfAbsent(p.bucket(), k -> new BigDecimal[] {BigDecimal.ZERO, BigDecimal.ZERO});
       long oi = p.oi() == null ? 0 : p.oi();
+      BigDecimal ltp = p.ltp() == null ? BigDecimal.ZERO : p.ltp();
       if ("CE".equals(p.optionType())) {
         v[0] += oi;
+        lv[0] = lv[0].add(ltp);
       } else {
         v[1] += oi;
+        lv[1] = lv[1].add(ltp);
       }
       if (p.spot() != null) {
         spotByBucket.putIfAbsent(p.bucket(), p.spot());
@@ -59,7 +76,10 @@ public class OiTrendingService {
       } else {
         trend = Trend.FLAT;
       }
-      items.add(new TrendPoint(e.getKey(), total, ce, pe, spotByBucket.get(e.getKey()), trend));
+      BigDecimal[] lv = ltpByBucket.get(e.getKey());
+      items.add(
+          new TrendPoint(
+              e.getKey(), total, ce, pe, spotByBucket.get(e.getKey()), trend, lv[0], lv[1]));
       prevTotal = total;
       first = false;
     }

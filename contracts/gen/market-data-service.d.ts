@@ -1093,6 +1093,8 @@ export interface components {
             spot?: number;
             /** @enum {string} */
             trend?: "UP" | "DOWN" | "FLAT";
+            ceLtp?: number;
+            peLtp?: number;
         };
         TrendSeries: {
             items?: components["schemas"]["TrendPoint"][];

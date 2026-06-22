@@ -12,6 +12,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -178,6 +179,52 @@ public class OptionsAnalyticsController {
       }
     }
     return new OiStats(pcr, maxPain, ce, pe, asOf);
+  }
+
+  private static final DateTimeFormatter HHMM = DateTimeFormatter.ofPattern("HH:mm");
+
+  /**
+   * Intraday PCR-vs-price series for the OI-Statistics chart. {@code source.optionanalytics=upstox}:
+   * Upstox {@code /pcr} insights (full chain, 1-min capable); else the native per-bucket fold over
+   * captured snapshots (same windowing as {@code /trending}). Uniform shape {@code (time HH:mm IST,
+   * pcr 4dp, spot)}; a Upstox miss falls back to native.
+   */
+  @GetMapping("/pcr-series")
+  public List<PcrSeriesPoint> pcrSeries(
+      @RequestParam(required = false) String mode,
+      @RequestParam String name,
+      @RequestParam(required = false) String date,
+      @RequestParam(required = false) String interval,
+      @RequestParam(required = false) String expiry) {
+    OiQuery q = OiQuery.of(mode, name, date, interval, expiry);
+    LocalDate exp = requireExpiry(q);
+    UpstoxOptionAnalyticsSource upstox = upstoxOptionAnalytics.getIfAvailable();
+    if (upstox != null) {
+      int bucketMinutes = (int) Math.max(1, q.interval().bucket().toMinutes());
+      List<PcrSeriesPoint> series = upstox.pcrSeries(q.name(), exp, q.date(), bucketMinutes);
+      if (!series.isEmpty()) {
+        return series;
+      }
+    }
+    // Native fold — anchor on the newest captured bucket, span the last trendBuckets buckets.
+    List<OptionsSnapshotReader.StrikePoint> latest = reader.latest(q.name(), exp, q.interval(), q.date());
+    if (latest.isEmpty()) {
+      throw new ApiException(422, ErrorCodes.DATA_GAP, "no snapshot for " + q.name() + " " + exp);
+    }
+    OffsetDateTime newest = latest.get(0).bucket();
+    OffsetDateTime from = newest.minus(q.interval().bucket().multipliedBy(trendBuckets - 1L));
+    OiTrendingService.TrendSeries trend =
+        trendingService.trending(
+            reader.series(q.name(), exp, q.interval(), from, newest.plus(q.interval().bucket())));
+    List<PcrSeriesPoint> out = new ArrayList<>();
+    for (OiTrendingService.TrendPoint tp : trend.items()) {
+      out.add(
+          new PcrSeriesPoint(
+              tp.bucket().atZoneSameInstant(Ist.ZONE).format(HHMM),
+              OptionsChainService.pcr(tp.ceOi(), tp.peOi()),
+              tp.spot()));
+    }
+    return out;
   }
 
   @GetMapping("/active-strikes")

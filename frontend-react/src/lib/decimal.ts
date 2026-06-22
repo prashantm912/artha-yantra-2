@@ -39,6 +39,12 @@ export function subtractDecimal(a: string, b: string): string {
   return fromScaled(toScaled(a, scale) - toScaled(b, scale), scale);
 }
 
+/** Exact decimal addition `a + b` via BigInt scaling — never `parseFloat`. */
+export function addDecimal(a: string, b: string): string {
+  const scale = Math.max(fractionLen(a), fractionLen(b));
+  return fromScaled(toScaled(a, scale) + toScaled(b, scale), scale);
+}
+
 /** Exact decimal × integer (e.g. per-unit P&L × qty, price × qty notional) — never `parseFloat`. */
 export function multiplyByInt(value: string, n: number): string {
   const scale = fractionLen(value);

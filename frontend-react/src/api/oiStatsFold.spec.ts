@@ -13,7 +13,7 @@ function pt(
 }
 
 function tp(bucket: string, ceOi: number, peOi: number, spot: string | null): TrendPoint {
-  return { bucket, totalOi: ceOi + peOi, ceOi, peOi, spot, trend: 'FLAT' };
+  return { bucket, totalOi: ceOi + peOi, ceOi, peOi, spot, trend: 'FLAT', ceLtp: null, peLtp: null };
 }
 
 describe('foldIndividualOi', () => {

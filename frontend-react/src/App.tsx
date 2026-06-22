@@ -8,6 +8,7 @@ import { OptionsSpurtPage } from './pages/options/OptionsSpurtPage.tsx';
 import { OiAnalysisPage } from './pages/options/OiAnalysisPage.tsx';
 import { ConnectingDotsPage } from './pages/options/ConnectingDotsPage.tsx';
 import { TrendingOiPage } from './pages/options/TrendingOiPage.tsx';
+import { TrendingOiPaPage } from './pages/options/TrendingOiPaPage.tsx';
 import { BigOiMovementPage } from './pages/options/BigOiMovementPage.tsx';
 import { FuturesOiSpurtPage } from './pages/futures/FuturesOiSpurtPage.tsx';
 import { FuturesMoversPage } from './pages/futures/FuturesMoversPage.tsx';
@@ -71,6 +72,7 @@ export function App() {
           <Route path="/options/oi-spurt" element={<OptionsSpurtPage />} />
           <Route path="/options/oi-analysis" element={<OiAnalysisPage />} />
           <Route path="/options/trending-oi" element={<TrendingOiPage />} />
+          <Route path="/options/trending-oi-pa" element={<TrendingOiPaPage />} />
           <Route path="/options/big-oi-movement" element={<BigOiMovementPage />} />
           <Route path="/options/options-premium" element={<Lazy><OptionsPremiumPage /></Lazy>} />
           <Route path="/options/straddle-chart" element={<Lazy><OptionsStraddlePage /></Lazy>} />

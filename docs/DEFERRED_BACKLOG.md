@@ -86,6 +86,7 @@ merge)** — items marked `(via #44)` land when it merges.
 | Walk-forward folds + fold-fed MedianPruner live walk | DEFERRED | a real multi-month dataset | Can't be shown on the ~3-day rolling mock window. |
 | `requirements.txt` hash-pinning (optimizer) | DEFERRED | a CI hardening pass | Version-pinned but not hash-locked; add `pip-compile --generate-hashes`. |
 | Recorded Kite binary-frame capture | DEFERRED | first live session | The mixed-frame fixture is synthesized from the documented envelope; commit one real capture. |
+| Upstox `/pcr` live-freshness test → `source.pcr=upstox` switch | DEFERRED | next market-hours session | Upstox `/pcr` gives full-chain, 1-min intraday PCR (verified `bucket_interval=1` → 376 buckets) + history from 1 Apr 2026 → more accurate + parity-clean than native (native is band-biased ~0.1–1.5% low: ATM band misses deep-OTM strikes). Native max-pain is EXACT, keep it. **Gate:** confirm `/pcr` returns FRESH buckets mid-session (call `date=<today>&bucket_interval=1`, last bucket ≈ now, value moves on re-poll). If fresh → add a dormant `artha.marketdata.source.pcr=upstox\|native` flag (mirror `source.fiidii`) and switch live+backtest to Upstox; native stays as free cross-check/fallback. If EOD-only → native for live, Upstox for EOD+pre-capture backtests. PCR feeds NO strategy yet (display-only), so no urgency. |
 
 ---
 

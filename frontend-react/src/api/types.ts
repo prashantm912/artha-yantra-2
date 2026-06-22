@@ -171,6 +171,24 @@ export interface SpurtChain {
   asOf: string | null;
 }
 
+/** One strike's interval OI move (oipulse Interval-wise OI bars) — `strike` = e.g. "57400 PE". */
+export interface StrikeMove {
+  strike: string;
+  oiChange: number;
+  interpretation: OiInterpretation;
+}
+
+/** GET /api/v1/market/options/interval-wise-oi — top OI gainer/loser strikes per 15m/60m/daily lookback. */
+export interface IntervalWiseOi {
+  gainers15: StrikeMove[];
+  losers15: StrikeMove[];
+  gainers60: StrikeMove[];
+  losers60: StrikeMove[];
+  gainersDaily: StrikeMove[];
+  losersDaily: StrikeMove[];
+  asOf: string | null;
+}
+
 /** A CE/PE leg's cell values in the folded strike grid. */
 export interface LegCell {
   oi: number | null;

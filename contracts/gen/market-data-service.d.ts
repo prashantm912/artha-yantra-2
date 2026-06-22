@@ -452,6 +452,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/options/interval-wise-oi": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["intervalWiseOi"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/options/chain": {
         parameters: {
             query?: never;
@@ -1312,6 +1328,23 @@ export interface components {
             /** Format: int32 */
             floorDays?: number;
             insufficientHistory?: boolean;
+        };
+        IntervalWiseOi: {
+            gainers15?: components["schemas"]["StrikeMove"][];
+            losers15?: components["schemas"]["StrikeMove"][];
+            gainers60?: components["schemas"]["StrikeMove"][];
+            losers60?: components["schemas"]["StrikeMove"][];
+            gainersDaily?: components["schemas"]["StrikeMove"][];
+            losersDaily?: components["schemas"]["StrikeMove"][];
+            /** Format: date-time */
+            asOf?: string;
+        };
+        StrikeMove: {
+            strike?: string;
+            /** Format: int64 */
+            oiChange?: number;
+            /** @enum {string} */
+            interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
         };
         Chain: {
             underlying?: string;
@@ -2884,6 +2917,41 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["IvHistory"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    intervalWiseOi: {
+        parameters: {
+            query: {
+                mode?: string;
+                name: string;
+                date?: string;
+                interval?: string;
+                expiry?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["IntervalWiseOi"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

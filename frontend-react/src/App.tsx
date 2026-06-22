@@ -38,6 +38,9 @@ const FiiDerivativeStatsPage = lazy(() =>
 const OiStatisticsPage = lazy(() =>
   import('./pages/options/OiStatisticsPage.tsx').then((m) => ({ default: m.OiStatisticsPage })),
 );
+const IntervalWiseOiPage = lazy(() =>
+  import('./pages/options/IntervalWiseOiPage.tsx').then((m) => ({ default: m.IntervalWiseOiPage })),
+);
 const ActiveStrikesPage = lazy(() =>
   import('./pages/options/ActiveStrikesPage.tsx').then((m) => ({ default: m.ActiveStrikesPage })),
 );
@@ -84,6 +87,7 @@ export function App() {
           <Route path="/options/options-premium" element={<Lazy><OptionsPremiumPage /></Lazy>} />
           <Route path="/options/straddle-chart" element={<Lazy><OptionsStraddlePage /></Lazy>} />
           <Route path="/options/oi-statistics" element={<Lazy><OiStatisticsPage /></Lazy>} />
+          <Route path="/options/interval-wise-oi" element={<Lazy><IntervalWiseOiPage /></Lazy>} />
           <Route path="/options/active-strikes" element={<Lazy><ActiveStrikesPage /></Lazy>} />
           <Route path="/options/active-strikes-iv" element={<Lazy><ActiveStrikesIvPage /></Lazy>} />
           <Route path="/options/options-chart" element={<Lazy><OptionsChartPage /></Lazy>} />

@@ -1740,6 +1740,70 @@
         }
       }
     },
+    "/api/v1/market/options/interval-wise-oi" : {
+      "get" : {
+        "tags" : [ "options-analytics-controller" ],
+        "operationId" : "intervalWiseOi",
+        "parameters" : [ {
+          "name" : "mode",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "name",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "date",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "interval",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "expiry",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/IntervalWiseOi"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/options/chain" : {
       "get" : {
         "tags" : [ "options-chain-controller" ],
@@ -4255,6 +4319,67 @@
           },
           "insufficientHistory" : {
             "type" : "boolean"
+          }
+        }
+      },
+      "IntervalWiseOi" : {
+        "type" : "object",
+        "properties" : {
+          "gainers15" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/StrikeMove"
+            }
+          },
+          "losers15" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/StrikeMove"
+            }
+          },
+          "gainers60" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/StrikeMove"
+            }
+          },
+          "losers60" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/StrikeMove"
+            }
+          },
+          "gainersDaily" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/StrikeMove"
+            }
+          },
+          "losersDaily" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/StrikeMove"
+            }
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "StrikeMove" : {
+        "type" : "object",
+        "properties" : {
+          "strike" : {
+            "type" : "string"
+          },
+          "oiChange" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "interpretation" : {
+            "type" : "string",
+            "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
           }
         }
       },

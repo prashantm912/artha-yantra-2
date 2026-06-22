@@ -31,6 +31,7 @@ const SECTIONS: MenuSection[] = [
       { label: 'Multiple OI Chart', to: '/options/multiple-oi-chart' }, // Wave 3 — multi-leg OI overlay + price
       { label: 'OI Chart', to: '/options/oi-chart' }, // Wave 3 — Call/Put OI + OI-vs-premium (off strike-series)
       { label: 'OI Statistics', to: '/options/oi-statistics' }, // Wave 3 — OI distribution + PCR
+      { label: 'Interval-wise OI', to: '/options/interval-wise-oi' }, // Wave 3 — top OI movers ×15m/60m/daily
       { label: 'Active Strikes OI', to: '/options/active-strikes' }, // Wave 3 — OI + Sentiment series
       { label: 'Active Strikes IV', to: '/options/active-strikes-iv' }, // Wave 3 — IV + price series
     ],

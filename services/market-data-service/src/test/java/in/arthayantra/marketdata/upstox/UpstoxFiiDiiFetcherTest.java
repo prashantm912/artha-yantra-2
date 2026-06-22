@@ -72,8 +72,9 @@ class UpstoxFiiDiiFetcherTest {
 
   @Test
   void mapsUpstoxCashToCroreRowsInIst() {
-    stub("fii", cashBody(TS, 8523456789.0, 7234567890.5));
-    stub("dii", cashBody(TS, 5000000000.0, 4000000000.0));
+    // Upstox cash amounts are ALREADY in ₹ crore (verified byte-identical to NSE) — kept as-is.
+    stub("fii", cashBody(TS, 10082.08, 10717.99));
+    stub("dii", cashBody(TS, 17391.78, 16356.06));
 
     List<FiiDiiFetcher.FiiDiiRow> rows = fetcher(nseSentinel()).fetchLatest();
 
@@ -81,14 +82,14 @@ class UpstoxFiiDiiFetcherTest {
     FiiDiiFetcher.FiiDiiRow fii = rows.get(0);
     assertThat(fii.category()).isEqualTo("FII/FPI");
     assertThat(fii.date()).isEqualTo(LocalDate.of(2026, 4, 30));
-    assertThat(fii.buy()).isEqualByComparingTo("852.35"); // 8_523_456_789 / 1e7
-    assertThat(fii.sell()).isEqualByComparingTo("723.46"); // 7_234_567_890.5 / 1e7
-    assertThat(fii.net()).isEqualByComparingTo("128.89");
+    assertThat(fii.buy()).isEqualByComparingTo("10082.08");
+    assertThat(fii.sell()).isEqualByComparingTo("10717.99");
+    assertThat(fii.net()).isEqualByComparingTo("-635.91");
 
     FiiDiiFetcher.FiiDiiRow dii = rows.get(1);
     assertThat(dii.category()).isEqualTo("DII");
-    assertThat(dii.buy()).isEqualByComparingTo("500.00");
-    assertThat(dii.net()).isEqualByComparingTo("100.00");
+    assertThat(dii.buy()).isEqualByComparingTo("17391.78");
+    assertThat(dii.net()).isEqualByComparingTo("1035.72");
 
     wireMock.verify(
         getRequestedFor(urlPathEqualTo("/v2/market/fii"))

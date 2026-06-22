@@ -15,17 +15,17 @@ import org.slf4j.LoggerFactory;
  * Upstox Market-Information FII-derivative source (ADR-0002 U6). FII net buy/sell across the four
  * F&amp;O segments (oipulse "FII Derivative Stats") — there is NO NSE EOD equivalent, so this is the
  * sole source (no fallback). Fetched in a single {@code /v2/market/fii} call requesting all four
- * {@code NSE_FO|*} segments; INR amounts convert to ₹ crore and the trade date is pinned from the
- * millisecond timestamp in IST. A fetch failure propagates to the scheduler, which logs and retries
- * next schedule.
+ * {@code NSE_FO|*} segments; the ₹-lakh amounts convert to ₹ crore (÷100) and the trade date is
+ * pinned from the millisecond timestamp in IST. A fetch failure propagates to the scheduler, which
+ * logs and retries next schedule.
  */
 public final class UpstoxFiiDerivativeFetcher implements FiiDerivativeFetcher {
 
   private static final Logger log = LoggerFactory.getLogger(UpstoxFiiDerivativeFetcher.class);
   private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
   private static final String DAILY = "1D";
-  /** 1 crore = 10,000,000 INR — Upstox reports INR, the FE/oipulse expect ₹ crore. */
-  private static final BigDecimal CRORE = BigDecimal.valueOf(10_000_000L);
+  /** F&O amounts arrive in ₹ lakh (docs mislabel "INR"); 1 crore = 100 lakh, so ÷100 → ₹ crore. */
+  private static final BigDecimal LAKH_PER_CRORE = BigDecimal.valueOf(100L);
 
   /** Upstox segment key → our canonical segment label (stable iteration order). */
   private static final String[][] SEGMENTS = {
@@ -71,9 +71,14 @@ public final class UpstoxFiiDerivativeFetcher implements FiiDerivativeFetcher {
     return rows;
   }
 
-  private static BigDecimal toCrore(BigDecimal inr) {
-    return inr == null
+  /**
+   * Upstox reports the F&amp;O segments' buy/sell/OI amounts in ₹ lakh (the docs mislabel them
+   * "INR"; the per-contract premium only makes physical sense as lakh — e.g. {@code buy_amount /
+   * buy_contracts ≈ ₹15,800/lot}). 1 crore = 100 lakh, so ÷100 → ₹ crore.
+   */
+  private static BigDecimal toCrore(BigDecimal lakh) {
+    return lakh == null
         ? BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP)
-        : inr.divide(CRORE, 2, RoundingMode.HALF_UP);
+        : lakh.divide(LAKH_PER_CRORE, 2, RoundingMode.HALF_UP);
   }
 }

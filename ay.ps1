@@ -82,7 +82,7 @@ function Initialize-LocalConfig {
     # empty placeholders so compose can mount them; mock mode never reads them,
     # live mode fails fast until the owner fills in real Kite credentials. openalgo_api_key is
     # mounted into market-data-service but read only when capture routes through OpenAlgo (§3/§4).
-    foreach ($name in 'kite_api_key', 'kite_api_secret', 'openalgo_api_key') {
+    foreach ($name in 'kite_api_key', 'kite_api_secret', 'openalgo_api_key', 'upstox_analytics_token') {
         $f = Join-Path $RepoRoot "deploy\secrets\$name"
         if (-not (Test-Path $f)) {
             New-Item -ItemType File -Path $f | Out-Null

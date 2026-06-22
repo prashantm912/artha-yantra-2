@@ -11,6 +11,7 @@ them at `/run/secrets/` per service.
 | `kite_api_secret` | its secret | market-data-service only (live mode) |
 | `artha_master_key` | 256-bit base64 AES-GCM key (Stage B token store) | market-data-service |
 | `openalgo_api_key` | OpenAlgo's OWN generated API key (from its UI; NOT a broker secret) | market-data-service (only when `artha.marketdata.source.*=openalgo`, plan §3/§4) |
+| `upstox_analytics_token` | dedicated long-lived Upstox **analytics** access token (Developer Apps; SEPARATE from any live broker session) | market-data-service (only when `artha.upstox.analytics.enabled=true`, ADR-0002) |
 
 Mock mode (`SPRING_PROFILES_ACTIVE=mock`) needs **only `postgres_password`**
 (the database always requires one); no Kite material is ever present.

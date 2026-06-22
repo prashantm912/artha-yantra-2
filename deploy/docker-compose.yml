@@ -31,6 +31,10 @@ secrets:
   # market-data-service reads it only when a source.* capability is routed to openalgo.
   openalgo_api_key:
     file: ./secrets/openalgo_api_key
+  # Dedicated Upstox Market-Information ANALYTICS token (ADR-0002) — separate from any live broker
+  # session; read only when artha.upstox.analytics.enabled=true. Empty placeholder is harmless.
+  upstox_analytics_token:
+    file: ./secrets/upstox_analytics_token
 
 volumes:
   timescale-data:
@@ -222,10 +226,12 @@ services:
       ARTHA_MD_SOURCE_QUOTES: ${ARTHA_MD_SOURCE_QUOTES:-kite}
       ARTHA_MD_SOURCE_CANDLES: ${ARTHA_MD_SOURCE_CANDLES:-kite}
       ARTHA_MD_SOURCE_OPTIONCHAIN: ${ARTHA_MD_SOURCE_OPTIONCHAIN:-kite}
+      # Upstox Market-Information analytics side-channel (ADR-0002) — default-OFF.
+      ARTHA_UPSTOX_ANALYTICS_ENABLED: ${ARTHA_UPSTOX_ANALYTICS_ENABLED:-false}
     # kite_* + master key + the OpenAlgo API key mount into THIS service only (B-2: the token
     # and the credentials never reach any other container). The openalgo key is read only when
     # capture routes through OpenAlgo (Phase 1); an empty placeholder is harmless otherwise.
-    secrets: [postgres_password, kite_api_key, kite_api_secret, artha_master_key, openalgo_api_key]
+    secrets: [postgres_password, kite_api_key, kite_api_secret, artha_master_key, openalgo_api_key, upstox_analytics_token]
     depends_on:
       flyway-init:
         condition: service_completed_successfully

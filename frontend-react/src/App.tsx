@@ -41,6 +41,9 @@ const OiStatisticsPage = lazy(() =>
 const IntervalWiseOiPage = lazy(() =>
   import('./pages/options/IntervalWiseOiPage.tsx').then((m) => ({ default: m.IntervalWiseOiPage })),
 );
+const StrategyBuilderPage = lazy(() =>
+  import('./pages/strategies/StrategyBuilderPage.tsx').then((m) => ({ default: m.StrategyBuilderPage })),
+);
 const ActiveStrikesPage = lazy(() =>
   import('./pages/options/ActiveStrikesPage.tsx').then((m) => ({ default: m.ActiveStrikesPage })),
 );
@@ -105,6 +108,8 @@ export function App() {
           <Route path="/fii-dii/fii-derivative-stats" element={<Lazy><FiiDerivativeStatsPage /></Lazy>} />
           <Route path="/fii-dii/participant-wise-oi" element={<ParticipantWiseOiPage />} />
           <Route path="/fii-dii/long-short-ratio" element={<Lazy><FiiLongShortPage /></Lazy>} />
+          {/* Strategies */}
+          <Route path="/strategies/strategy-builder" element={<Lazy><StrategyBuilderPage /></Lazy>} />
           {/* Features */}
           <Route path="/features/connecting-dots" element={<ConnectingDotsPage />} />
           <Route path="/features/vix-index" element={<Lazy><VixIndexPage /></Lazy>} />

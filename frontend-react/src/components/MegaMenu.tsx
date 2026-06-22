@@ -59,6 +59,12 @@ const SECTIONS: MenuSection[] = [
     ],
   },
   {
+    title: 'Strategies',
+    items: [
+      { label: 'Strategy Builder', to: '/strategies/strategy-builder' }, // Wave 3 — payoff + greeks
+    ],
+  },
+  {
     title: 'Features',
     items: [
       { label: 'Connecting Dots', to: '/features/connecting-dots' }, // multi-factor matrix (§20.7.8)

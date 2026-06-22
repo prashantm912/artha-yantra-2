@@ -17,6 +17,7 @@ import type {
   LongShortRow,
   Movers,
   MultiOi,
+  OiBuzzHeatmap,
   OiStats,
   OiStrikePoint,
   OptOiChart,
@@ -462,6 +463,33 @@ export function useParticipantOi(from: string, to: string) {
       return listItems(res);
     },
     enabled: !!from,
+  });
+}
+
+/** Futures OI Buzz index selector options (the seeded static-constituent reference keys). */
+export function useOiBuzzIndices() {
+  return useQuery({
+    queryKey: ['oi-buzz', 'indices'],
+    queryFn: async () => {
+      const res = await apiFetch<{ items?: string[] }>('/market/futures/oi-buzz-indices');
+      return res.items ?? [];
+    },
+    staleTime: 60 * 60 * 1000, // static reference — refetch hourly at most
+  });
+}
+
+/** Futures OI Buzz heatmap (oipulse "Futures Heatmap"): constituent %change tiles + advance/decline.
+ * 422 DATA_GAP (no monthly futures resolved) → null → the page renders its empty state. */
+export function useOiBuzz(index: string | null) {
+  return useQuery({
+    queryKey: ['oi-buzz', 'heatmap', index],
+    queryFn: () =>
+      oiGet<OiBuzzHeatmap | null>(
+        '/market/futures/oi-buzz-heatmap',
+        new URLSearchParams({ name: index ?? '' }).toString(),
+        null,
+      ),
+    enabled: !!index,
   });
 }
 

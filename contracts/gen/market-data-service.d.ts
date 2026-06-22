@@ -612,6 +612,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/futures/oi-buzz-indices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["indices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/futures/oi-buzz-heatmap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["heatmap"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/futures/oi-analysis": {
         parameters: {
             query?: never;
@@ -1507,6 +1539,26 @@ export interface components {
             items?: components["schemas"]["FutSpurt"][];
             /** Format: date-time */
             asOf?: string;
+        };
+        Heatmap: {
+            index?: string;
+            /** Format: int32 */
+            advance?: number;
+            /** Format: int32 */
+            decline?: number;
+            tiles?: components["schemas"]["Tile"][];
+            /** Format: date-time */
+            asOf?: string;
+        };
+        Tile: {
+            symbol?: string;
+            changePct?: number;
+            ltp?: number;
+            open?: number;
+            high?: number;
+            low?: number;
+            /** Format: int64 */
+            oi?: number;
         };
         MoverRow: {
             tradingsymbol?: string;
@@ -3259,6 +3311,68 @@ export interface operations {
                     "*/*": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    indices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    heatmap: {
+        parameters: {
+            query: {
+                name: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["Heatmap"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

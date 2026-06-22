@@ -56,9 +56,10 @@ export default async function globalSetup(): Promise<void> {
  * boots compose directly, so CI (and a fresh local clone) has no secrets dir and the bind mount
  * fails before anything starts. Seed the same files `ay` does — idempotent, mock-safe values: a
  * fixed Postgres password (single source of truth for the DB and the services), a valid 32-byte
- * AES-256 master key, empty Kite placeholders, and an empty OpenAlgo API key (all mock-unread — the
- * OpenAlgo key mounts into market-data-service unconditionally since Phase 0, but is read only when a
- * source.* capability routes through OpenAlgo, which the mock stack never does).
+ * AES-256 master key, empty Kite placeholders, an empty OpenAlgo API key, and an empty Upstox
+ * analytics token (all mock-unread — the OpenAlgo key and Upstox token mount into market-data-service
+ * unconditionally, but are read only when a source.* / analytics capability routes through them,
+ * which the mock stack never does).
  */
 function ensureSecrets(): void {
   const dir = join(REPO, 'deploy', 'secrets');
@@ -69,6 +70,7 @@ function ensureSecrets(): void {
     kite_api_key: '',
     kite_api_secret: '',
     openalgo_api_key: '',
+    upstox_analytics_token: '',
   };
   for (const [name, value] of Object.entries(files)) {
     const file = join(dir, name);

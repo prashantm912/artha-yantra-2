@@ -163,9 +163,9 @@ class GatewayIntegrationTest {
 
   @Test
   void t05b_spaShellIsPublicReachesRouterNotAuthGated() {
-    // The Angular shell is served through the SOLE ingress (catch-all -> frontend-ui).
+    // The React SPA shell is served through the SOLE ingress (catch-all -> frontend-react).
     // Unauthenticated SPA paths must NOT be 401 — the login page is the only way to obtain
-    // a session, so it has to load before any auth exists. In this IT the frontend-ui
+    // a session, so it has to load before any auth exists. In this IT the frontend
     // upstream is absent, so a permitted path reaches the router and yields the 503 envelope
     // (proof it passed the security filter rather than being blocked at 401).
     WebTestClient routerClient =

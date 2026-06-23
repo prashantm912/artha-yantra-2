@@ -26,17 +26,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
-          # both npm ci calls below (frontend-ui + e2e) hit the shared npm cache
+          # both npm ci calls below (frontend-react + e2e) hit the shared npm cache
           cache: npm
           cache-dependency-path: |
-            frontend-ui/package-lock.json
+            frontend-react/package-lock.json
             e2e/package-lock.json
 
       - name: Build service jars (host-build pattern)
         run: ./mvnw -ntp -q -DskipTests package
 
+      # React cutover: the gateway catch-all now serves frontend-react; compose builds
+      # its nginx image from this host-built dist (the frontend-react Dockerfile COPYs dist/).
       - name: Build frontend dist
-        working-directory: frontend-ui
+        working-directory: frontend-react
         run: |
           npm ci
           npm run build

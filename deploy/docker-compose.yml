@@ -427,14 +427,15 @@ services:
     restart: unless-stopped
     logging: *default-logging
 
-  # ---- SPA static server (Phase 25 / D1) ----------------------------------
+  # ---- SPA static server (React cutover; was frontend-ui/Angular Phase 25) ----
   # Internal-only; the gateway's catch-all route serves it on / (same origin,
-  # zero CORS anywhere - a Stage C acceptance criterion).
-  frontend-ui:
+  # zero CORS anywhere - a Stage C acceptance criterion). The Angular frontend-ui
+  # is parked (source retained under ../frontend-ui, no longer in the stack).
+  frontend-react:
     build:
-      context: ../frontend-ui
-    image: arthayantra/frontend-ui:dev
-    container_name: ay-frontend-ui
+      context: ../frontend-react
+    image: arthayantra/frontend-react:dev
+    container_name: ay-frontend-react
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/healthz | grep -q ok"]
       interval: 10s

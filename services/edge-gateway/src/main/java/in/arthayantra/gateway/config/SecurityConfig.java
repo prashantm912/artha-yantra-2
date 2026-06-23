@@ -92,8 +92,8 @@ public class SecurityConfig {
                         "/swagger-ui.html",
                         "/swagger-ui/**")
                     .authenticated()
-                    // Everything else is the Angular shell served through the SOLE ingress
-                    // (catch-all route -> frontend-ui). A compiled SPA bundle carries no
+                    // Everything else is the React SPA shell served through the SOLE ingress
+                    // (catch-all route -> frontend-react). A compiled SPA bundle carries no
                     // secrets, and it MUST be reachable unauthenticated or the login page —
                     // the only way to obtain a session — can never load. [Phase 27 / C-2.28]
                     .anyExchange()

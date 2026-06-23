@@ -21,6 +21,7 @@ import type {
   MultiOi,
   IndexContribution,
   OiBuzzHeatmap,
+  OpenHighLow,
   OiStats,
   SectorHeatmap,
   SectorStats,
@@ -468,6 +469,20 @@ export function useParticipantOi(from: string, to: string) {
       return listItems(res);
     },
     enabled: !!from,
+  });
+}
+
+/** Open=High / Open=Low (oipulse): an index's constituents that opened at their day high / low. */
+export function useOpenHighLow(index: string | null) {
+  return useQuery({
+    queryKey: ['equity', 'open-high-low', index],
+    queryFn: () =>
+      oiGet<OpenHighLow | null>(
+        '/market/equity/open-high-low',
+        new URLSearchParams({ name: index ?? '' }).toString(),
+        null,
+      ),
+    enabled: !!index,
   });
 }
 

@@ -3104,6 +3104,42 @@
         }
       }
     },
+    "/api/v1/market/equity/open-high-low" : {
+      "get" : {
+        "tags" : [ "open-high-controller" ],
+        "operationId" : "openHighLow",
+        "parameters" : [ {
+          "name" : "name",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/OpenHigh"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/equity/index-contribution" : {
       "get" : {
         "tags" : [ "equity-controller" ],
@@ -5422,6 +5458,53 @@
             "type" : "number"
           },
           "r1y" : {
+            "type" : "number"
+          }
+        }
+      },
+      "OpenHigh" : {
+        "type" : "object",
+        "properties" : {
+          "index" : {
+            "type" : "string"
+          },
+          "openHigh" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Setup"
+            }
+          },
+          "openLow" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Setup"
+            }
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "Setup" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "dayOpen" : {
+            "type" : "number"
+          },
+          "dayHigh" : {
+            "type" : "number"
+          },
+          "dayLow" : {
+            "type" : "number"
+          },
+          "ltp" : {
+            "type" : "number"
+          },
+          "farPct" : {
             "type" : "number"
           }
         }

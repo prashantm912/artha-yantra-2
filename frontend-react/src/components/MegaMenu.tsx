@@ -57,6 +57,7 @@ const SECTIONS: MenuSection[] = [
       { label: 'Sector Heatmap', to: '/equity/sector-heatmap' }, // Wave 3 — sector-grouped %change treemap
       { label: 'Sector Stats', to: '/equity/sector-stats' }, // Wave 3 — per-sector cards + factor table
       { label: 'Index Contribution', to: '/equity/index-contribution' }, // Wave 3 — weighted contribution
+      { label: 'Open=High/Low', to: '/equity/open-high-low' }, // polish — O=H/O=L live setups
     ],
   },
   {

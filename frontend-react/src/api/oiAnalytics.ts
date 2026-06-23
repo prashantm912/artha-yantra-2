@@ -19,6 +19,7 @@ import type {
   LongShortRow,
   Movers,
   MultiOi,
+  IndexContribution,
   OiBuzzHeatmap,
   OiStats,
   SectorHeatmap,
@@ -467,6 +468,20 @@ export function useParticipantOi(from: string, to: string) {
       return listItems(res);
     },
     enabled: !!from,
+  });
+}
+
+/** Index Contribution (oipulse): per-constituent weighted contribution, split advances/declines. */
+export function useIndexContribution(index: string | null) {
+  return useQuery({
+    queryKey: ['equity', 'index-contribution', index],
+    queryFn: () =>
+      oiGet<IndexContribution | null>(
+        '/market/equity/index-contribution',
+        new URLSearchParams({ name: index ?? '' }).toString(),
+        null,
+      ),
+    enabled: !!index,
   });
 }
 

@@ -56,6 +56,7 @@ const SECTIONS: MenuSection[] = [
       { label: 'Delivery Data', to: '/equity/delivery-data' }, // Wave 3 — per-stock delivery series
       { label: 'Sector Heatmap', to: '/equity/sector-heatmap' }, // Wave 3 — sector-grouped %change treemap
       { label: 'Sector Stats', to: '/equity/sector-stats' }, // Wave 3 — per-sector cards + factor table
+      { label: 'Index Contribution', to: '/equity/index-contribution' }, // Wave 3 — weighted contribution
     ],
   },
   {

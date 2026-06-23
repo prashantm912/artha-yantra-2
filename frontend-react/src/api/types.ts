@@ -676,3 +676,23 @@ export interface SectorStats {
   sectors: SectorAgg[];
   stocks: SectorStockChange[];
 }
+
+/** One constituent's index contribution (weight × %change) — decimal STRINGS. */
+export interface ContribRow {
+  rank: number;
+  symbol: string;
+  contribution: string | null;
+  changePct: string | null;
+  close: string | null;
+}
+
+/** GET /api/v1/market/equity/index-contribution?name= — advances/declines by weighted contribution. */
+export interface IndexContribution {
+  index: string;
+  indexChangePct: string | null;
+  advanceTotal: string | null;
+  declineTotal: string | null;
+  advances: ContribRow[];
+  declines: ContribRow[];
+  asOf: string | null;
+}

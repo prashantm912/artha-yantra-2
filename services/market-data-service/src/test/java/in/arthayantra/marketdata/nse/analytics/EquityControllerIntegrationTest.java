@@ -148,4 +148,17 @@ class EquityControllerIntegrationTest extends MarketDataIntegrationTestBase {
                 "$.tiles[?(@.symbol=='RELIANCE')].sector",
                 hasItem("Oil Gas & Consumable Fuels")));
   }
+
+  @Test
+  void indexContributionWeightsTheChange() throws Exception {
+    // RELIANCE NIFTY-50 weight = 8.27; +2% → contribution = 8.27 * 2 / 100 = 0.1654.
+    insertDay(LocalDate.of(2026, 6, 21), "RELIANCE", "1000", "1020");
+
+    mockMvc
+        .perform(get("/api/v1/market/equity/index-contribution").param("name", "NIFTY 50"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.index").value("NIFTY 50"))
+        .andExpect(jsonPath("$.advances[?(@.symbol=='RELIANCE')].changePct", hasItem("2.00")))
+        .andExpect(jsonPath("$.advances[?(@.symbol=='RELIANCE')].contribution", hasItem("0.1654")));
+  }
 }

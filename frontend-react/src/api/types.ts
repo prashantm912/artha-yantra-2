@@ -691,6 +691,24 @@ export interface ContribRow {
   points: string | null;
 }
 
+/** One Open=High / Open=Low setup — decimal STRINGS; farPct = (ltp − level) / level × 100. */
+export interface OpenHighSetup {
+  symbol: string;
+  dayOpen: string | null;
+  dayHigh: string | null;
+  dayLow: string | null;
+  ltp: string | null;
+  farPct: string | null;
+}
+
+/** GET /api/v1/market/equity/open-high-low?name= — constituents that opened at their day high / low. */
+export interface OpenHighLow {
+  index: string;
+  openHigh: OpenHighSetup[];
+  openLow: OpenHighSetup[];
+  asOf: string | null;
+}
+
 /** GET /api/v1/market/equity/index-contribution?name= — advances/declines by weighted contribution. */
 export interface IndexContribution {
   index: string;

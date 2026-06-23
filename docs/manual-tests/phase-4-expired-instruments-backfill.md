@@ -7,13 +7,25 @@ backtested on real traded option/future prices. This is Part 1 (data → `candle
 
 ## What it does
 - For each underlying (`NIFTY`, `SENSEX`) × expiry in the requested window: enumerate the CE/PE chain
-  + future(s), walk each contract's 1-minute history into `candles` (`source='BACKFILL'`, `interval='1m'`,
-  OHLCV + OI), and register the contract in `expired_contracts`.
+  + future(s), **bound the strikes to ±20% of the underlying's price range over the contract's life**
+  (the expired roster lists EVERY strike that ever existed as spot roamed — ~1020/expiry, almost all
+  deep OTM/ITM with zero volume; the band keeps only the tradeable ~440/expiry), walk each kept
+  contract's 1-minute history into `candles` (`source='BACKFILL'`, `interval='1m'`, OHLCV + OI), and
+  register it in `expired_contracts`.
 - Symbol grammar is the canonical OpenAlgo form (`NIFTY16JUN2625000CE`, `NIFTY26JUNFUT`) — the SAME
   key in `candles` and `expired_contracts` (expired contracts aren't in the active `instruments` master,
   so the registry is the resolver).
 - Exchange = `NFO` (NIFTY) / `BFO` (SENSEX). Re-runs are idempotent + resumable (a registered contract
-  is skipped; the candle upsert merges).
+  is skipped; the candle upsert merges). Contracts are imported by a bounded worker pool (6 concurrent).
+- **No continuous-aggregate refresh** — backtest reads `candles` at `1m` directly. (The earlier
+  per-run cagg refresh over the whole span OOM-crashed the 1 GB DB; higher-timeframe expired views, if
+  ever needed, are a separate throttled admin op.)
+
+## ⚠️ Capacity (learned the hard way)
+The unbounded "all strikes" pull (~106k contracts, ~350M rows) **OOM-crashed the live 1 GB Postgres**.
+Before running: `ay-timescaledb` `mem_limit` is raised to **4 GB** (`deploy/docker-compose.yml`), and
+strikes are bounded to ±20%. Run **off-hours** regardless. Always probe ONE week first + watch
+`docker inspect ay-timescaledb --format '{{.State.OOMKilled}}'` before launching the full year.
 
 ## Prerequisites
 1. **Upstox Plus analytics token** in `deploy/secrets/upstox_analytics_token` (1-yr validity; the

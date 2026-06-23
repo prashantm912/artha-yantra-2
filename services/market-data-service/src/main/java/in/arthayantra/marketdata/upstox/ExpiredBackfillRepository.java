@@ -62,6 +62,29 @@ public class ExpiredBackfillRepository {
   }
 
   /**
+   * The underlying's [min low, max high] over its 1d candles in {@code [from, to)} — the reference for
+   * the ±20% strike band. Returns {@code null} when no daily candles cover the window (the caller then
+   * over-fetches rather than dropping everything).
+   */
+  public BigDecimal[] indexRange(
+      String exchange, String tradingsymbol, LocalDate from, LocalDate to) {
+    return jdbc.query(
+        "SELECT min(low) AS lo, max(high) AS hi FROM candles "
+            + "WHERE exchange = ? AND tradingsymbol = ? AND \"interval\" = '1d' "
+            + "AND bucket >= ? AND bucket < ?",
+        rs -> {
+          if (rs.next() && rs.getBigDecimal("lo") != null) {
+            return new BigDecimal[] {rs.getBigDecimal("lo"), rs.getBigDecimal("hi")};
+          }
+          return null;
+        },
+        exchange,
+        tradingsymbol,
+        java.sql.Date.valueOf(from),
+        java.sql.Date.valueOf(to));
+  }
+
+  /**
    * Whether a contract is already registered — the resumable-skip key. Registration happens only
    * AFTER its candles are fully upserted, so a contract whose candle batch was interrupted has rows
    * but no registry row and is correctly RE-fetched (the candle upsert is idempotent, so the gap

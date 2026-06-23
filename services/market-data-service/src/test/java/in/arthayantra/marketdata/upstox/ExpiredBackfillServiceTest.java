@@ -60,6 +60,9 @@ class ExpiredBackfillServiceTest {
     when(client.expiries(NIFTY_KEY)).thenReturn(List.of(EXPIRY));
     when(client.optionContracts(NIFTY_KEY, EXPIRY)).thenReturn(List.of(ce, pe));
     when(client.futureContracts(NIFTY_KEY, EXPIRY)).thenReturn(List.of());
+    // index range [22000, 24000] → ±20% band [17600, 28800] keeps both test strikes (25000, 21200).
+    when(repo.indexRange(eq("NSE"), eq("NIFTY 50"), any(), any()))
+        .thenReturn(new BigDecimal[] {new BigDecimal("22000"), new BigDecimal("24000")});
     // CE: not yet registered → fetched (a window of data, then two empties → stop). PE: registered → skipped.
     when(repo.isRegistered("NFO", ceSymbol)).thenReturn(false);
     when(repo.isRegistered("NFO", peSymbol)).thenReturn(true);
@@ -94,8 +97,5 @@ class ExpiredBackfillServiceTest {
     verify(repo, never()).upsertContract(
         eq("NFO"), eq(peSymbol), any(), any(), any(), any(), org.mockito.ArgumentMatchers.anyInt(),
         any(), org.mockito.ArgumentMatchers.anyBoolean(), any(), any());
-
-    // candles were written → the derived aggregates are materialized over the backfilled span.
-    verify(candles).refreshDerivedAggregates(any(), any());
   }
 }

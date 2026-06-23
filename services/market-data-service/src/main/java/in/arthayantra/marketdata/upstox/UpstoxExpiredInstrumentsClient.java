@@ -6,6 +6,7 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
 /**
@@ -33,7 +34,12 @@ public final class UpstoxExpiredInstrumentsClient {
   /** Binds the wire client to the configured base URL (real Upstox, or WireMock in tests). */
   public UpstoxExpiredInstrumentsClient(
       RestClient.Builder builder, UpstoxAnalyticsProperties properties) {
-    this.restClient = builder.baseUrl(properties.baseUrl()).build();
+    // Bounded timeouts so a throttled/dead Upstox call fails fast (caught per-leg) rather than
+    // parking a backfill worker forever at the run's barrier.
+    SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+    factory.setConnectTimeout(15_000);
+    factory.setReadTimeout(45_000);
+    this.restClient = builder.baseUrl(properties.baseUrl()).requestFactory(factory).build();
     this.properties = properties;
   }
 

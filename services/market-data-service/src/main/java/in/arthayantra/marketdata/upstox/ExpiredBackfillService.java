@@ -2,21 +2,23 @@ package in.arthayantra.marketdata.upstox;
 
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
-import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketdata.candles.Candle;
 import in.arthayantra.marketdata.candles.CandleRepository;
 import in.arthayantra.marketdata.openalgo.live.OpenAlgoSymbols;
 import in.arthayantra.marketdata.upstox.UpstoxExpiredInstrumentsClient.Bar;
 import in.arthayantra.marketdata.upstox.UpstoxExpiredInstrumentsClient.Leg;
+import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -51,12 +53,28 @@ public class ExpiredBackfillService {
   private static final int CHUNK_DAYS = 28;
   /** Up to ~112 days back — covers a 3-month monthly contract; weeklies stop early when empty. */
   private static final int MAX_WINDOWS = 4;
-  /** Politeness gap between candle calls (≈33 req/s, well under the 45 req/s cap). */
+  /** Politeness gap between candle calls (per worker thread). */
   private static final long THROTTLE_MS = 30;
+  /** Concurrent per-contract workers — sized under the JDBC pool (≈10) + the Upstox 45 req/s cap. */
+  private static final int CONCURRENCY = 6;
+  /**
+   * Strike band: keep only options whose strike is within ±20% of the underlying's price RANGE over
+   * the contract's life — the actually-tradeable set. The expired roster lists EVERY strike that ever
+   * existed as spot roamed (~1020/expiry), almost all deep OTM/ITM with zero volume; bounding cuts the
+   * dead tail (the unbounded pull OOM-crashed the live DB — see the data-foundation incident notes).
+   */
+  private static final BigDecimal BAND_LOW = new BigDecimal("0.80");
+  private static final BigDecimal BAND_HIGH = new BigDecimal("1.20");
+  /** Lookback for the underlying price range (covers a monthly contract's full life). */
+  private static final int INDEX_LOOKBACK_DAYS = 55;
 
   /** The two indices the owner backfills; an explicit map keeps the Upstox instrument_key authoritative. */
   private static final Map<String, String> UNDERLYING_KEYS =
       Map.of("NIFTY", "NSE_INDEX|Nifty 50", "SENSEX", "BSE_INDEX|SENSEX");
+
+  /** Underlying → the {exchange, tradingsymbol} of its index 1d candles (the strike-band reference). */
+  private static final Map<String, String[]> INDEX_SERIES =
+      Map.of("NIFTY", new String[] {"NSE", "NIFTY 50"}, "SENSEX", new String[] {"BSE", "SENSEX"});
 
   /** Outcome of one backfill run — coverage + the candle rows written. */
   public record BackfillSummary(
@@ -136,72 +154,126 @@ public class ExpiredBackfillService {
     return Map.of("jobId", jobId, "status", "started");
   }
 
-  /** One synchronous backfill pass over (underlyings × expiries in [from, to]). Public for tests. */
+  /**
+   * One backfill pass over (underlyings × expiries in [from, to]). Per expiry the strike-bounded
+   * contracts are imported by a bounded worker pool ({@value #CONCURRENCY}); each expiry barriers
+   * before the next so memory stays bounded. The continuous-aggregate refresh is deliberately NOT run
+   * here (it materialized 5 caggs over the whole span and OOM-crashed the live DB; backtest reads 1m
+   * directly — a higher-timeframe refresh, if ever needed, is a separate throttled admin op). Public
+   * for tests.
+   */
   public BackfillSummary run(
       UpstoxExpiredInstrumentsClient client,
       List<String> underlyings,
       LocalDate from,
       LocalDate to,
       String jobId) {
-    int expiries = 0;
-    int contracts = 0;
-    int written = 0;
-    int skipped = 0;
-    int failed = 0;
-    long rows = 0;
+    AtomicInteger expiries = new AtomicInteger();
+    AtomicInteger contracts = new AtomicInteger();
+    AtomicInteger written = new AtomicInteger();
+    AtomicInteger skipped = new AtomicInteger();
+    AtomicInteger failed = new AtomicInteger();
+    AtomicLong rows = new AtomicLong();
 
-    for (String underlying : underlyings) {
-      String underlyingKey = UNDERLYING_KEYS.get(underlying.toUpperCase());
-      if (underlyingKey == null) {
-        throw new ApiException(
-            400, ErrorCodes.VALIDATION_FAILED, "unknown underlying '" + underlying + "' (NIFTY, SENSEX)");
-      }
-      for (LocalDate expiry : client.expiries(underlyingKey)) {
-        if (expiry.isBefore(from) || expiry.isAfter(to)) {
-          continue;
+    ExecutorService pool =
+        Executors.newFixedThreadPool(
+            CONCURRENCY,
+            r -> {
+              Thread t = new Thread(r, "expired-backfill-leg");
+              t.setDaemon(true);
+              return t;
+            });
+    try {
+      for (String underlying : underlyings) {
+        String underlyingKey = UNDERLYING_KEYS.get(underlying.toUpperCase());
+        if (underlyingKey == null) {
+          throw new ApiException(
+              400, ErrorCodes.VALIDATION_FAILED, "unknown underlying '" + underlying + "' (NIFTY, SENSEX)");
         }
-        expiries++;
-        List<Leg> legs = new ArrayList<>();
-        legs.addAll(client.optionContracts(underlyingKey, expiry));
-        legs.addAll(client.futureContracts(underlyingKey, expiry));
-        for (Leg leg : legs) {
-          contracts++;
-          try {
-            int n = backfillLeg(client, underlying, leg);
-            if (n < 0) {
-              skipped++;
-            } else {
-              written++;
-              rows += n;
-            }
-          } catch (RuntimeException e) {
-            failed++;
-            log.warn("expired-backfill {}: leg {} {} failed: {}", jobId, underlying, leg.instrumentKey(), e.toString());
+        String[] indexRef = INDEX_SERIES.get(underlying.toUpperCase());
+        for (LocalDate expiry : client.expiries(underlyingKey)) {
+          if (expiry.isBefore(from) || expiry.isAfter(to)) {
+            continue;
           }
+          expiries.incrementAndGet();
+          List<Leg> legs = new ArrayList<>();
+          legs.addAll(client.optionContracts(underlyingKey, expiry));
+          legs.addAll(client.futureContracts(underlyingKey, expiry));
+          List<Leg> bounded = boundStrikes(legs, indexRef, expiry);
+          contracts.addAndGet(bounded.size());
+
+          List<Future<?>> inflight = new ArrayList<>(bounded.size());
+          for (Leg leg : bounded) {
+            inflight.add(
+                pool.submit(
+                    () -> {
+                      try {
+                        int n = backfillLeg(client, underlying, leg);
+                        if (n < 0) {
+                          skipped.incrementAndGet();
+                        } else {
+                          written.incrementAndGet();
+                          rows.addAndGet(n);
+                        }
+                      } catch (RuntimeException e) {
+                        failed.incrementAndGet();
+                        log.warn(
+                            "expired-backfill {}: leg {} {} failed: {}",
+                            jobId, underlying, leg.instrumentKey(), e.toString());
+                      }
+                    }));
+          }
+          for (Future<?> f : inflight) {
+            try {
+              f.get();
+            } catch (InterruptedException ie) {
+              Thread.currentThread().interrupt();
+              throw new IllegalStateException("expired-backfill interrupted", ie);
+            } catch (java.util.concurrent.ExecutionException ee) {
+              failed.incrementAndGet();
+            }
+          }
+          log.info(
+              "expired-backfill {}: {} {} → {} contracts in band ({} total registered)",
+              jobId, underlying, expiry, bounded.size(), written.get() + skipped.get());
         }
       }
+    } finally {
+      pool.shutdown();
     }
-    if (rows > 0) {
-      refreshAggregates(from, to);
-    }
-    return new BackfillSummary(jobId, expiries, contracts, written, skipped, failed, rows);
+    return new BackfillSummary(
+        jobId, expiries.get(), contracts.get(), written.get(), skipped.get(), failed.get(), rows.get());
   }
 
   /**
-   * Materializes the 5m/15m/1h/1d/1w continuous aggregates over the backfilled span — backfilled 1m
-   * bars are inserted deep behind every cagg watermark, so without this they are invisible to every
-   * non-1m read (the backtest reads 1m directly, but chart overlays + OI pages hit the caggs).
-   * Best-effort: the 1m data backtest needs is already committed, so a refresh hiccup never fails the run.
+   * Keeps only option legs whose strike is within ±20% of the underlying's price RANGE over the
+   * contract's life; futures (no strike) always pass. Falls back to the FULL roster (logged) if no
+   * index range is available so a missing reference over-fetches rather than silently drops everything.
    */
-  private void refreshAggregates(LocalDate from, LocalDate to) {
-    try {
-      OffsetDateTime start =
-          from.minusDays((long) MAX_WINDOWS * CHUNK_DAYS).atStartOfDay().atOffset(Ist.OFFSET);
-      OffsetDateTime end = to.plusDays(1).atStartOfDay().atOffset(Ist.OFFSET);
-      candles.refreshDerivedAggregates(start, end);
-    } catch (RuntimeException e) {
-      log.warn("expired-backfill aggregate refresh failed (1m data is written): {}", e.toString());
+  private List<Leg> boundStrikes(List<Leg> legs, String[] indexRef, LocalDate expiry) {
+    if (indexRef == null) {
+      return legs;
     }
+    BigDecimal[] range =
+        repo.indexRange(indexRef[0], indexRef[1], expiry.minusDays(INDEX_LOOKBACK_DAYS), expiry.plusDays(1));
+    if (range == null) {
+      log.warn("expired-backfill: no index range for {} {} — keeping all strikes", indexRef[1], expiry);
+      return legs;
+    }
+    BigDecimal lo = range[0].multiply(BAND_LOW);
+    BigDecimal hi = range[1].multiply(BAND_HIGH);
+    List<Leg> kept = new ArrayList<>(legs.size());
+    for (Leg leg : legs) {
+      if ("FUT".equals(leg.instrumentType())) {
+        kept.add(leg);
+        continue;
+      }
+      BigDecimal strike = leg.strike();
+      if (strike != null && strike.compareTo(lo) >= 0 && strike.compareTo(hi) <= 0) {
+        kept.add(leg);
+      }
+    }
+    return kept;
   }
 
   /** Backfills one contract's 1m candles + registers it. Returns rows written, or -1 if already covered. */

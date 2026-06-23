@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -186,5 +187,29 @@ class ExpiredBackfillServiceTest {
     // without the retry the first (false-)empty would have yielded zero data; the bar proves the retry.
     assertThat(s.candleRows()).isEqualTo(1);
     verify(candles).upsertAll(any());
+  }
+
+  @Test
+  void farBackEmptyWindowsAreNotRetried() {
+    UpstoxExpiredInstrumentsClient client = mock(UpstoxExpiredInstrumentsClient.class);
+    CandleRepository candles = mock(CandleRepository.class);
+    ExpiredBackfillRepository repo = mock(ExpiredBackfillRepository.class);
+    String ceSymbol = OpenAlgoSymbols.optionSymbol("NIFTY", EXPIRY, new BigDecimal("25000"), "CE");
+
+    when(client.expiries(NIFTY_KEY)).thenReturn(List.of(EXPIRY));
+    when(client.optionContracts(NIFTY_KEY, EXPIRY)).thenReturn(List.of(ce())); // weekly
+    when(client.futureContracts(NIFTY_KEY, EXPIRY)).thenReturn(List.of());
+    stubBand(repo);
+    when(repo.coverage("NFO", ceSymbol)).thenReturn(Coverage.NONE);
+    // window 0 (near expiry) has data; windows 1+2 are far-back (< expiry-35d) and empty.
+    when(client.candles(eq("NSE_FO|CE|16-06-2026"), eq("1minute"), any(), any()))
+        .thenReturn(List.of(barAt("2026-06-16T15:29:00+05:30")), List.of(), List.of());
+
+    ExpiredBackfillService service = new ExpiredBackfillService(provider(), candles, repo, 0L);
+    service.run(client, List.of("NIFTY"), EXPIRY.minusDays(40), EXPIRY, "job-d", false);
+
+    // exactly 3 calls: w0 (data, 1) + w1 (far empty, NOT retried, 1) + w2 (far empty, 1) → 2-empty stop.
+    // The old retry-every-empty behaviour would have made 5. Far-back retries are the wasted quota.
+    verify(client, times(3)).candles(eq("NSE_FO|CE|16-06-2026"), eq("1minute"), any(), any());
   }
 }

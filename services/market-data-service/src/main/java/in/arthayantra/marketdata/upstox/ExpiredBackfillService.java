@@ -8,9 +8,12 @@ import in.arthayantra.marketdata.openalgo.live.OpenAlgoSymbols;
 import in.arthayantra.marketdata.upstox.UpstoxExpiredInstrumentsClient.Bar;
 import in.arthayantra.marketdata.upstox.UpstoxExpiredInstrumentsClient.Leg;
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -20,6 +23,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -105,11 +109,83 @@ public class ExpiredBackfillService {
       int legsFailed,
       long candleRows) {}
 
+  /**
+   * Live + last-run audit, surfaced by {@code GET /api/v1/market/admin/expired-backfill/status} (B1).
+   * While {@code RUNNING} the counters + {@code currentExpiry} climb in real time; {@code recentLogs}
+   * carries the last per-expiry/error lines for the UI log feed. Mirrors the {@code BhavcopyBackfillService.Status}
+   * precedent (state machine NEVER_RUN→RUNNING→OK|FAILED).
+   */
+  public record Status(
+      String jobId,
+      String state, // NEVER_RUN | RUNNING | OK | FAILED
+      Instant startedAt,
+      Instant lastRun,
+      long durationMs,
+      int expiries,
+      int contracts,
+      int legsWritten,
+      int legsSkipped,
+      int legsFailed,
+      long candleRows,
+      String currentExpiry,
+      String error,
+      List<String> recentLogs) {
+
+    static Status neverRun() {
+      return new Status(
+          null, "NEVER_RUN", null, null, 0, 0, 0, 0, 0, 0, 0L, null, null, List.of());
+    }
+  }
+
+  /** Mutable per-run progress the daemon thread updates; {@link #snapshot} builds an immutable {@link Status}. */
+  private static final class RunProgress {
+    private static final int MAX_LOGS = 50;
+    private final String jobId;
+    private final Instant startedAt;
+    private final AtomicInteger expiries = new AtomicInteger();
+    private final AtomicInteger contracts = new AtomicInteger();
+    private final AtomicInteger written = new AtomicInteger();
+    private final AtomicInteger skipped = new AtomicInteger();
+    private final AtomicInteger failed = new AtomicInteger();
+    private final AtomicLong rows = new AtomicLong();
+    private volatile String currentExpiry;
+    private final Deque<String> logs = new ArrayDeque<>();
+
+    RunProgress(String jobId, Instant startedAt) {
+      this.jobId = jobId;
+      this.startedAt = startedAt;
+    }
+
+    void log(String line) {
+      synchronized (logs) {
+        logs.addLast(line);
+        while (logs.size() > MAX_LOGS) {
+          logs.removeFirst();
+        }
+      }
+    }
+
+    private List<String> logsSnapshot() {
+      synchronized (logs) {
+        return List.copyOf(logs);
+      }
+    }
+
+    Status snapshot(String state, Instant lastRun, long durationMs, String error) {
+      return new Status(
+          jobId, state, startedAt, lastRun, durationMs,
+          expiries.get(), contracts.get(), written.get(), skipped.get(), failed.get(), rows.get(),
+          currentExpiry, error, logsSnapshot());
+    }
+  }
+
   private final ObjectProvider<UpstoxExpiredInstrumentsClient> clientProvider;
   private final CandleRepository candles;
   private final ExpiredBackfillRepository repo;
   private final long throttleMs;
   private final AtomicBoolean running = new AtomicBoolean(false);
+  private final AtomicReference<Status> status = new AtomicReference<>(Status.neverRun());
+  private volatile RunProgress progress;
   private final ExecutorService executor =
       Executors.newSingleThreadExecutor(
           r -> {
@@ -156,6 +232,10 @@ public class ExpiredBackfillService {
           409, ErrorCodes.CONFLICT_BACKFILL_RUNNING, "an expired backfill is already in progress");
     }
     String jobId = UUID.randomUUID().toString();
+    Instant started = Instant.now();
+    RunProgress p = new RunProgress(jobId, started);
+    progress = p;
+    status.set(p.snapshot("RUNNING", null, 0, null));
     executor.submit(
         () -> {
           try {
@@ -164,13 +244,28 @@ public class ExpiredBackfillService {
                 "expired-backfill {} done: {} expiries, {} contracts, {} written, {} skipped, {} failed, {} rows",
                 jobId, s.expiries(), s.contracts(),
                 s.legsWritten(), s.legsSkipped(), s.legsFailed(), s.candleRows());
+            Instant ended = Instant.now();
+            status.set(
+                p.snapshot("OK", ended, java.time.Duration.between(started, ended).toMillis(), null));
           } catch (Exception e) {
             log.error("expired-backfill {} failed", jobId, e);
+            Instant ended = Instant.now();
+            status.set(
+                p.snapshot(
+                    "FAILED", ended, java.time.Duration.between(started, ended).toMillis(), e.toString()));
           } finally {
             running.set(false);
+            progress = null;
           }
         });
     return Map.of("jobId", jobId, "status", "started");
+  }
+
+  /** Live progress while RUNNING (rebuilt from the in-flight counters), else the last-run audit (B1). */
+  public Status status() {
+    RunProgress p = progress;
+    Status s = status.get();
+    return (p != null && "RUNNING".equals(s.state())) ? p.snapshot("RUNNING", null, 0, null) : s;
   }
 
   /**
@@ -188,12 +283,16 @@ public class ExpiredBackfillService {
       LocalDate to,
       String jobId,
       boolean force) {
-    AtomicInteger expiries = new AtomicInteger();
-    AtomicInteger contracts = new AtomicInteger();
-    AtomicInteger written = new AtomicInteger();
-    AtomicInteger skipped = new AtomicInteger();
-    AtomicInteger failed = new AtomicInteger();
-    AtomicLong rows = new AtomicLong();
+    RunProgress p =
+        (progress != null && jobId.equals(progress.jobId))
+            ? progress
+            : new RunProgress(jobId, Instant.now());
+    AtomicInteger expiries = p.expiries;
+    AtomicInteger contracts = p.contracts;
+    AtomicInteger written = p.written;
+    AtomicInteger skipped = p.skipped;
+    AtomicInteger failed = p.failed;
+    AtomicLong rows = p.rows;
 
     ExecutorService pool =
         Executors.newFixedThreadPool(
@@ -216,6 +315,7 @@ public class ExpiredBackfillService {
             continue;
           }
           expiries.incrementAndGet();
+          p.currentExpiry = underlying + " " + expiry;
           List<Leg> legs = new ArrayList<>();
           legs.addAll(client.optionContracts(underlyingKey, expiry));
           legs.addAll(client.futureContracts(underlyingKey, expiry));
@@ -256,6 +356,7 @@ public class ExpiredBackfillService {
           log.info(
               "expired-backfill {}: {} {} → {} contracts in band ({} total registered)",
               jobId, underlying, expiry, bounded.size(), written.get() + skipped.get());
+          p.log(underlying + " " + expiry + " → " + bounded.size() + " contracts in band");
         }
       }
     } finally {

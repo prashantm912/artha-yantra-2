@@ -24,6 +24,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -70,6 +71,29 @@ public class OiBackfillService {
       int optionRows,
       int futuresRows) {}
 
+  /**
+   * Live + last-run audit, surfaced by {@code GET /api/v1/market/admin/oi-backfill/status} (B1).
+   * Mirrors the {@code BhavcopyBackfillService.Status} state machine (NEVER_RUN→RUNNING→OK|FAILED).
+   */
+  public record Status(
+      String jobId,
+      String state, // NEVER_RUN | RUNNING | OK | FAILED
+      String underlying,
+      LocalDate expiry,
+      LocalDate session,
+      Instant startedAt,
+      Instant lastRun,
+      long durationMs,
+      int optionRows,
+      int futuresRows,
+      String error) {
+
+    static Status neverRun() {
+      return new Status(null, "NEVER_RUN", null, null, null, null, null, 0, 0, 0, null);
+    }
+  }
+
+  private final AtomicReference<Status> status = new AtomicReference<>(Status.neverRun());
   private final ObjectProvider<OiHistorySource> historySource;
   private final InstrumentRepository instruments;
   private final OptionsSnapshotRepository optionsRepository;
@@ -110,6 +134,10 @@ public class OiBackfillService {
           409, ErrorCodes.CONFLICT_BACKFILL_RUNNING, "an OI backfill is already in progress");
     }
     String jobId = UUID.randomUUID().toString();
+    Instant started = Instant.now();
+    status.set(
+        new Status(
+            jobId, "RUNNING", underlying, expiry, session, started, null, 0, 0, 0, null));
     executor.submit(
         () -> {
           try {
@@ -117,13 +145,29 @@ public class OiBackfillService {
             log.info(
                 "oi-backfill {} done: {} {} {} → {} option rows, {} futures rows",
                 jobId, underlying, expiry, session, result.optionRows(), result.futuresRows());
+            Instant ended = Instant.now();
+            status.set(
+                new Status(
+                    jobId, "OK", underlying, expiry, session, started, ended,
+                    java.time.Duration.between(started, ended).toMillis(),
+                    result.optionRows(), result.futuresRows(), null));
           } catch (Exception e) {
             log.error("oi-backfill {} failed for {} {} {}", jobId, underlying, expiry, session, e);
+            Instant ended = Instant.now();
+            status.set(
+                new Status(
+                    jobId, "FAILED", underlying, expiry, session, started, ended,
+                    java.time.Duration.between(started, ended).toMillis(), 0, 0, e.toString()));
           } finally {
             running.set(false);
           }
         });
     return Map.of("jobId", jobId);
+  }
+
+  /** Last-run audit (state + row tallies), surfaced by {@code GET …/oi-backfill/status} (B1). */
+  public Status status() {
+    return status.get();
   }
 
   /** One synchronous backfill pass (the unit of work the async path wraps). */

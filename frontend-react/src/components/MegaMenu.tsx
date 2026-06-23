@@ -106,6 +106,16 @@ const SECTIONS: MenuSection[] = [
       { label: 'Market Holidays', to: '/features/market-holidays' }, // Wave 3 — NSE holiday reference table
     ],
   },
+  {
+    title: 'Data Ops',
+    items: [
+      { label: 'Collection Status', to: '/data-ops/status' }, // PR-DO1 — live backfill progress + logs
+      { label: 'Coverage', to: '/data-ops/coverage' }, // PR-DO2 — per-underlying contract/candle coverage
+      { label: 'Run Backfill', to: '/data-ops/collection' }, // PR-DO3 — guided collection wizard
+      { label: 'Query Console', to: '/data-ops/query' }, // PR-DO5 — read-only SQL over the candle store
+      { label: 'Export', to: '/data-ops/export' }, // PR-DO6 — per-contract CSV/JSON export
+    ],
+  },
 ];
 
 export function MegaMenu() {

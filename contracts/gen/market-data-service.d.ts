@@ -132,6 +132,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/admin/query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["query"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/admin/query/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["export"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/admin/oi-backfill": {
         parameters: {
             query?: never;
@@ -142,6 +174,22 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["backfill"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/admin/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["export_1"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1028,6 +1076,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/admin/upstox-quota-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["quota"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/admin/upstox-entitlement": {
         parameters: {
             query?: never;
@@ -1036,6 +1100,86 @@ export interface paths {
             cookie?: never;
         };
         get: operations["entitlement"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/admin/oi-backfill/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["status_2"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/admin/export/expiries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["expiries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/admin/export/contracts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["contracts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/admin/expired-backfill/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["status_3"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/admin/coverage-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["coverageSummary"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1083,7 +1227,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["expiries"];
+        get: operations["expiries_1"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1179,7 +1323,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["status_2"];
+        get: operations["status_4"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1269,12 +1413,37 @@ export interface components {
             /** Format: date-time */
             to?: string;
         };
+        QueryRequest: {
+            sql?: string;
+            /** Format: int32 */
+            rowLimit?: number;
+        };
+        QueryResult: {
+            columns?: string[];
+            rows?: string[][];
+            /** Format: int32 */
+            rowCount?: number;
+            truncated?: boolean;
+        };
+        ExportRequest: {
+            sql?: string;
+            format?: string;
+        };
         BackfillRequest: {
             underlying?: string;
             /** Format: date */
             expiry?: string;
             /** Format: date */
             date?: string;
+        };
+        DownloadRequest: {
+            exchange?: string;
+            symbol?: string;
+            /** Format: date */
+            from?: string;
+            /** Format: date */
+            to?: string;
+            format?: string;
         };
         ExpiredBackfillRequest: {
             underlyings?: string[];
@@ -1990,6 +2159,50 @@ export interface components {
             close?: number;
             pctChange?: number;
         };
+        QuotaStatus: {
+            configured?: boolean;
+            windows?: components["schemas"]["WindowStat"][];
+        };
+        WindowStat: {
+            window?: string;
+            /** Format: int32 */
+            used?: number;
+            /** Format: int32 */
+            max?: number;
+            /** Format: int32 */
+            remaining?: number;
+        };
+        ExpiriesResponse: {
+            items?: string[];
+        };
+        ContractsResponse: {
+            items?: components["schemas"]["ExportContract"][];
+        };
+        ExportContract: {
+            exchange?: string;
+            tradingsymbol?: string;
+            strike?: number;
+            instrumentType?: string;
+        };
+        CoverageRow: {
+            underlying?: string;
+            exchange?: string;
+            /** Format: int64 */
+            contracts?: number;
+            /** Format: int64 */
+            complete?: number;
+            /** Format: int64 */
+            partial?: number;
+            /** Format: date */
+            minExpiry?: string;
+            /** Format: date */
+            maxExpiry?: string;
+            /** Format: int64 */
+            candleRows?: number;
+        };
+        CoverageSummary: {
+            items?: components["schemas"]["CoverageRow"][];
+        };
         Instrument: {
             exchange?: string;
             tradingsymbol?: string;
@@ -2523,6 +2736,72 @@ export interface operations {
             };
         };
     };
+    query: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QueryRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["QueryResult"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    export: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExportRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     backfill: {
         parameters: {
             query?: never;
@@ -2545,6 +2824,39 @@ export interface operations {
                     "*/*": {
                         [key: string]: string;
                     };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    export_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DownloadRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -4453,6 +4765,35 @@ export interface operations {
             };
         };
     };
+    quota: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["QuotaStatus"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     entitlement: {
         parameters: {
             query?: never;
@@ -4471,6 +4812,156 @@ export interface operations {
                     "*/*": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    status_2: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["Status"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    expiries: {
+        parameters: {
+            query: {
+                underlying: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ExpiriesResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    contracts: {
+        parameters: {
+            query: {
+                underlying: string;
+                expiry: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ContractsResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    status_3: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["Status"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    coverageSummary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["CoverageSummary"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -4552,7 +5043,7 @@ export interface operations {
             };
         };
     };
-    expiries: {
+    expiries_1: {
         parameters: {
             query?: never;
             header?: never;
@@ -4740,7 +5231,7 @@ export interface operations {
             };
         };
     };
-    status_2: {
+    status_4: {
         parameters: {
             query?: never;
             header?: never;

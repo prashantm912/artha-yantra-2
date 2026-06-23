@@ -52,6 +52,11 @@ public final class UpstoxExpiredInstrumentsClient {
     this.properties = properties;
   }
 
+  /** The shared sliding-window rate limiter — exposed read-only for the B4 quota widget. */
+  public UpstoxRateLimiter rateLimiter() {
+    return limiter;
+  }
+
   /** One expired contract's spec — the orchestration's unit of work (a CE/PE leg or a future). */
   public record Leg(
       String segment,

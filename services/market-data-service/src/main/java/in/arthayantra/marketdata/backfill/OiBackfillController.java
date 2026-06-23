@@ -6,6 +6,7 @@ import java.time.LocalDate;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -40,5 +41,11 @@ public class OiBackfillController {
     }
     return ResponseEntity.status(HttpStatus.ACCEPTED)
         .body(service.triggerAsync(request.underlying(), request.expiry(), request.date()));
+  }
+
+  /** Last-run audit (state + row tallies) for the OI backfill (B1 Collection Status). */
+  @GetMapping("/oi-backfill/status")
+  public OiBackfillService.Status status() {
+    return service.status();
   }
 }

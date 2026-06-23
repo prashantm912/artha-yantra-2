@@ -1,7 +1,9 @@
 package in.arthayantra.marketdata.upstox;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
+import java.util.List;
 
 /**
  * Sliding-window rate limiter for Upstox's per-token caps, shared across the backfill workers. Upstox
@@ -10,14 +12,17 @@ import java.util.Deque;
  * is what exhausted the quota and 429'd. Conservative margins (45 / 450 / 1800), the same three-window
  * model marketcalls/ExpiryTrack uses. {@link #acquire()} blocks until a request fits every window.
  */
-final class UpstoxRateLimiter {
+public final class UpstoxRateLimiter {
 
-  private record Window(int max, long durationMs, Deque<Long> hits) {}
+  private record Window(String label, int max, long durationMs, Deque<Long> hits) {}
+
+  /** Per-window quota usage — the read model for the B4 quota widget. */
+  public record WindowStat(String window, int used, int max, int remaining) {}
 
   private final Window[] windows = {
-    new Window(45, 1_000L, new ArrayDeque<>()),
-    new Window(450, 60_000L, new ArrayDeque<>()),
-    new Window(1_800, 1_800_000L, new ArrayDeque<>())
+    new Window("1s", 45, 1_000L, new ArrayDeque<>()),
+    new Window("1m", 450, 60_000L, new ArrayDeque<>()),
+    new Window("30m", 1_800, 1_800_000L, new ArrayDeque<>())
   };
 
   /** Blocks until a request fits ALL windows, then records its timestamp in each. Thread-safe. */
@@ -49,5 +54,22 @@ final class UpstoxRateLimiter {
         throw new IllegalStateException("interrupted while rate-limiting", e);
       }
     }
+  }
+
+  /**
+   * Current per-window usage (used / max / remaining) after pruning expired hits — a read-only
+   * snapshot for the B4 quota widget. Thread-safe (shares the {@link #acquire} monitor).
+   */
+  public synchronized List<WindowStat> getUsageStats() {
+    long now = System.currentTimeMillis();
+    List<WindowStat> out = new ArrayList<>(windows.length);
+    for (Window w : windows) {
+      while (!w.hits().isEmpty() && now - w.hits().peekFirst() >= w.durationMs()) {
+        w.hits().pollFirst();
+      }
+      int used = w.hits().size();
+      out.add(new WindowStat(w.label(), used, w.max(), Math.max(0, w.max() - used)));
+    }
+    return out;
   }
 }

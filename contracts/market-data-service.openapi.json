@@ -540,6 +540,83 @@
         }
       }
     },
+    "/api/v1/market/admin/query" : {
+      "post" : {
+        "tags" : [ "admin-query-controller" ],
+        "operationId" : "query",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/QueryRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/QueryResult"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/admin/query/export" : {
+      "post" : {
+        "tags" : [ "admin-query-controller" ],
+        "operationId" : "export",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ExportRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "string",
+                  "format" : "byte"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/admin/oi-backfill" : {
       "post" : {
         "tags" : [ "oi-backfill-controller" ],
@@ -564,6 +641,45 @@
                   "additionalProperties" : {
                     "type" : "string"
                   }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/admin/export" : {
+      "post" : {
+        "tags" : [ "export-controller" ],
+        "operationId" : "export_1",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/DownloadRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "string",
+                  "format" : "byte"
                 }
               }
             }
@@ -3510,6 +3626,34 @@
         }
       }
     },
+    "/api/v1/market/admin/upstox-quota-status" : {
+      "get" : {
+        "tags" : [ "quota-controller" ],
+        "operationId" : "quota",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/QuotaStatus"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/admin/upstox-entitlement" : {
       "get" : {
         "tags" : [ "upstox-entitlement-controller" ],
@@ -3522,6 +3666,170 @@
                 "schema" : {
                   "type" : "object",
                   "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/admin/oi-backfill/status" : {
+      "get" : {
+        "tags" : [ "oi-backfill-controller" ],
+        "operationId" : "status_2",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Status"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/admin/export/expiries" : {
+      "get" : {
+        "tags" : [ "export-controller" ],
+        "operationId" : "expiries",
+        "parameters" : [ {
+          "name" : "underlying",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ExpiriesResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/admin/export/contracts" : {
+      "get" : {
+        "tags" : [ "export-controller" ],
+        "operationId" : "contracts",
+        "parameters" : [ {
+          "name" : "underlying",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "expiry",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ContractsResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/admin/expired-backfill/status" : {
+      "get" : {
+        "tags" : [ "expired-backfill-controller" ],
+        "operationId" : "status_3",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Status"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/admin/coverage-summary" : {
+      "get" : {
+        "tags" : [ "coverage-controller" ],
+        "operationId" : "coverageSummary",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CoverageSummary"
                 }
               }
             }
@@ -3657,7 +3965,7 @@
     "/api/v1/instruments/{underlying}/expiries" : {
       "get" : {
         "tags" : [ "instruments-controller" ],
-        "operationId" : "expiries",
+        "operationId" : "expiries_1",
         "parameters" : [ {
           "name" : "underlying",
           "in" : "path",
@@ -3892,7 +4200,7 @@
     "/api/v1/auth/kite/status" : {
       "get" : {
         "tags" : [ "kite-auth-controller" ],
-        "operationId" : "status_2",
+        "operationId" : "status_4",
         "responses" : {
           "200" : {
             "description" : "OK",
@@ -4102,6 +4410,56 @@
           }
         }
       },
+      "QueryRequest" : {
+        "type" : "object",
+        "properties" : {
+          "sql" : {
+            "type" : "string"
+          },
+          "rowLimit" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "QueryResult" : {
+        "type" : "object",
+        "properties" : {
+          "columns" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "rows" : {
+            "type" : "array",
+            "items" : {
+              "type" : "array",
+              "items" : {
+                "type" : "string"
+              }
+            }
+          },
+          "rowCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "truncated" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "ExportRequest" : {
+        "type" : "object",
+        "properties" : {
+          "sql" : {
+            "type" : "string"
+          },
+          "format" : {
+            "type" : "string"
+          }
+        }
+      },
       "BackfillRequest" : {
         "type" : "object",
         "properties" : {
@@ -4115,6 +4473,28 @@
           "date" : {
             "type" : "string",
             "format" : "date"
+          }
+        }
+      },
+      "DownloadRequest" : {
+        "type" : "object",
+        "properties" : {
+          "exchange" : {
+            "type" : "string"
+          },
+          "symbol" : {
+            "type" : "string"
+          },
+          "from" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "to" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "format" : {
+            "type" : "string"
           }
         }
       },
@@ -6048,6 +6428,126 @@
           },
           "pctChange" : {
             "type" : "number"
+          }
+        }
+      },
+      "QuotaStatus" : {
+        "type" : "object",
+        "properties" : {
+          "configured" : {
+            "type" : "boolean"
+          },
+          "windows" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/WindowStat"
+            }
+          }
+        }
+      },
+      "WindowStat" : {
+        "type" : "object",
+        "properties" : {
+          "window" : {
+            "type" : "string"
+          },
+          "used" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "max" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "remaining" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "ExpiriesResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string",
+              "format" : "date"
+            }
+          }
+        }
+      },
+      "ContractsResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ExportContract"
+            }
+          }
+        }
+      },
+      "ExportContract" : {
+        "type" : "object",
+        "properties" : {
+          "exchange" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "strike" : {
+            "type" : "number"
+          },
+          "instrumentType" : {
+            "type" : "string"
+          }
+        }
+      },
+      "CoverageRow" : {
+        "type" : "object",
+        "properties" : {
+          "underlying" : {
+            "type" : "string"
+          },
+          "exchange" : {
+            "type" : "string"
+          },
+          "contracts" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "complete" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "partial" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "minExpiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "maxExpiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "candleRows" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "CoverageSummary" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/CoverageRow"
+            }
           }
         }
       },

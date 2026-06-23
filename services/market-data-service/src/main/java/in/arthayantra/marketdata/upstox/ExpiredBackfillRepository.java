@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -22,6 +23,25 @@ public class ExpiredBackfillRepository {
     PARTIAL,
     COMPLETE
   }
+
+  /**
+   * Per-(underlying, exchange) coverage rollup for the B2 dashboard. {@code candleRows} =
+   * {@code sum(bar_count)} (the registered per-contract candle tally) — far cheaper than scanning the
+   * 15M-row {@code candles} hypertable, and the same provenance the resume logic maintains.
+   */
+  public record CoverageRow(
+      String underlying,
+      String exchange,
+      long contracts,
+      long complete,
+      long partial,
+      LocalDate minExpiry,
+      LocalDate maxExpiry,
+      long candleRows) {}
+
+  /** One registered contract for the B6 export picker (exchange + canonical symbol + strike/type). */
+  public record ExportContract(
+      String exchange, String tradingsymbol, BigDecimal strike, String instrumentType) {}
 
   private static final String UPSERT =
       """
@@ -123,5 +143,58 @@ public class ExpiredBackfillRepository {
       return Coverage.NONE;
     }
     return complete ? Coverage.COMPLETE : Coverage.PARTIAL;
+  }
+
+  /** Per-(underlying, exchange) coverage rollup — the B2 dashboard's read (cheap; no candle scan). */
+  public List<CoverageRow> coverageSummary() {
+    return jdbc.query(
+        """
+        SELECT underlying_symbol, exchange,
+               count(*)                          AS contracts,
+               count(*) FILTER (WHERE complete)  AS complete,
+               count(*) FILTER (WHERE NOT complete) AS partial,
+               min(expiry)                       AS min_expiry,
+               max(expiry)                       AS max_expiry,
+               coalesce(sum(bar_count), 0)       AS candle_rows
+          FROM expired_contracts
+         GROUP BY underlying_symbol, exchange
+         ORDER BY underlying_symbol, exchange
+        """,
+        (rs, n) -> {
+          java.sql.Date min = rs.getDate("min_expiry");
+          java.sql.Date max = rs.getDate("max_expiry");
+          return new CoverageRow(
+              rs.getString("underlying_symbol"),
+              rs.getString("exchange"),
+              rs.getLong("contracts"),
+              rs.getLong("complete"),
+              rs.getLong("partial"),
+              min == null ? null : min.toLocalDate(),
+              max == null ? null : max.toLocalDate(),
+              rs.getLong("candle_rows"));
+        });
+  }
+
+  /** Distinct expiries registered for an underlying, newest first (B6 export expiry picker). */
+  public List<LocalDate> expiriesFor(String underlying) {
+    return jdbc.query(
+        "SELECT DISTINCT expiry FROM expired_contracts WHERE underlying_symbol = ? ORDER BY expiry DESC",
+        (rs, n) -> rs.getDate("expiry").toLocalDate(),
+        underlying);
+  }
+
+  /** Registered contracts for one (underlying, expiry) — the B6 export contract picker. */
+  public List<ExportContract> contractsFor(String underlying, LocalDate expiry) {
+    return jdbc.query(
+        "SELECT exchange, tradingsymbol, strike, instrument_type FROM expired_contracts "
+            + "WHERE underlying_symbol = ? AND expiry = ? ORDER BY instrument_type, strike",
+        (rs, n) ->
+            new ExportContract(
+                rs.getString("exchange"),
+                rs.getString("tradingsymbol"),
+                rs.getBigDecimal("strike"),
+                rs.getString("instrument_type")),
+        underlying,
+        java.sql.Date.valueOf(expiry));
   }
 }

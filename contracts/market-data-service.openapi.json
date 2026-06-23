@@ -581,6 +581,46 @@
         }
       }
     },
+    "/api/v1/market/admin/expired-backfill" : {
+      "post" : {
+        "tags" : [ "expired-backfill-controller" ],
+        "operationId" : "backfill_1",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ExpiredBackfillRequest"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : {
+                    "type" : "string"
+                  }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/instruments/sync" : {
       "post" : {
         "tags" : [ "instruments-controller" ],
@@ -4075,6 +4115,28 @@
           "date" : {
             "type" : "string",
             "format" : "date"
+          }
+        }
+      },
+      "ExpiredBackfillRequest" : {
+        "type" : "object",
+        "properties" : {
+          "underlyings" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "from" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "to" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "interval" : {
+            "type" : "string"
           }
         }
       },

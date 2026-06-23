@@ -18,6 +18,7 @@ import { BanksAnalysisPage } from './pages/futures/BanksAnalysisPage.tsx';
 import { MarketHolidaysPage } from './pages/features/MarketHolidaysPage.tsx';
 import { ParticipantWiseOiPage } from './pages/fiidii/ParticipantWiseOiPage.tsx';
 import { SignalsPage } from './pages/signals/SignalsPage.tsx';
+import { DashboardPage } from './pages/dashboard/DashboardPage.tsx';
 
 // The ECharts-bearing pages are lazy-loaded so the ~1 MB ECharts bundle is a separate chunk fetched
 // only when the route is visited, keeping the main payload lean (§20.1).
@@ -112,6 +113,7 @@ export function App() {
         <Route element={<AppShell />}>
           <Route index element={<Navigate to="/options/options-chain" replace />} />
           {/* Trading (cockpit) */}
+          <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/signals" element={<SignalsPage />} />
           <Route path="/paper" element={<Lazy><PaperPage /></Lazy>} />
           {/* Options */}

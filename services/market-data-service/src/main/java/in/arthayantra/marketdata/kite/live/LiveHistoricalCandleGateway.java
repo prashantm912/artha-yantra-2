@@ -30,8 +30,11 @@ public class LiveHistoricalCandleGateway implements HistoricalCandleGateway {
 
   private static final DateTimeFormatter KITE_PARAM =
       DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-  // continuous=1 ONLY for options: for FUT it is Kite's roll-unaware stitched series, which
-  // B-18/B-19 explicitly forbid — per-contract FUT history must stay per-contract (15A/15B)
+  // continuous=1 ONLY for options AT THE DAY INTERVAL: Kite rejects continuous=1 with the minute
+  // interval ("invalid interval for continuous data", 400), so option 1m fetches (straddle/options
+  // charts) MUST send continuous=0 — a specific live contract's intraday candles want no stitching
+  // anyway. For FUT it is Kite's roll-unaware stitched series, which B-18/B-19 explicitly forbid —
+  // per-contract FUT history must stay per-contract (15A/15B). (live-verified 2026-06-23)
   private static final Set<String> CONTINUOUS_TYPES = Set.of("CE", "PE");
 
   private final RestClient restClient;
@@ -80,7 +83,10 @@ public class LiveHistoricalCandleGateway implements HistoricalCandleGateway {
           case "1d" -> "day";
           default -> throw new IllegalArgumentException("only 1m and 1d are fetched from Kite");
         };
-    boolean derivative = CONTINUOUS_TYPES.contains(info.instrumentType());
+    // continuous=1 is valid only for options on the DAY interval; minute always sends 0 (Kite 400s
+    // "invalid interval for continuous data" otherwise — the bug that blanked the option-premium charts).
+    boolean useContinuous =
+        CONTINUOUS_TYPES.contains(info.instrumentType()) && "day".equals(kiteInterval);
     String fromParam = KITE_PARAM.format(OffsetDateTime.ofInstant(from, in.arthayantra.common.web.time.Ist.ZONE));
     String toParam = KITE_PARAM.format(OffsetDateTime.ofInstant(to, in.arthayantra.common.web.time.Ist.ZONE));
 
@@ -97,7 +103,7 @@ public class LiveHistoricalCandleGateway implements HistoricalCandleGateway {
                                 .queryParam("from", fromParam)
                                 .queryParam("to", toParam)
                                 .queryParam("oi", "1")
-                                .queryParam("continuous", derivative ? "1" : "0")
+                                .queryParam("continuous", useContinuous ? "1" : "0")
                                 .build(info.instrumentToken(), kiteInterval))
                     .header("X-Kite-Version", "3")
                     .header("Authorization", "token " + apiKey + ":" + accessToken)

@@ -1,13 +1,20 @@
 package in.arthayantra.backtest.replay.options;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import in.arthayantra.backtest.replay.CostConfig;
 import in.arthayantra.backtest.replay.EquityCurveDownsampler;
 import in.arthayantra.backtest.replay.EquityPoint;
 import in.arthayantra.backtest.replay.ReplayResult;
 import in.arthayantra.backtest.replay.Trade;
 import in.arthayantra.backtest.replay.options.OptionContractSelector.ExpiryMode;
 import in.arthayantra.backtest.replay.options.OptionContractSelector.OptionContract;
+import in.arthayantra.common.web.error.ApiException;
+import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.strategyengine.config.StrategyDefinition;
+import in.arthayantra.strategyengine.fills.FillSimulator;
+import in.arthayantra.strategyengine.fills.FillSimulator.Fill;
+import in.arthayantra.strategyengine.fills.FillSimulator.FillRequest;
+import in.arthayantra.strategyengine.fills.LtpSlippageV1;
 import in.arthayantra.strategyengine.fills.Side;
 import in.arthayantra.strategyengine.fills.TouchBasis;
 import in.arthayantra.strategyengine.golden.GoldenSignalsJson.SignalEvent;
@@ -46,6 +53,8 @@ public class OptionsPremiumReplay {
 
   private final OptionContractSelector selector;
   private final CandlePremiumReader premiumReader;
+  /** Shared fill model — the SAME one the candle path + paper ledger use (paisa-parity, §D.11). */
+  private final FillSimulator fills = new LtpSlippageV1();
 
   public OptionsPremiumReplay(OptionContractSelector selector, CandlePremiumReader premiumReader) {
     this.selector = selector;
@@ -200,10 +209,12 @@ public class OptionsPremiumReplay {
   public record UniverseSpec(ExpiryMode expiryMode, int expiryOffset, Set<String> optionTypes) {}
 
   /**
-   * Replays the underlying-derived legs into option trades + an equity curve. cash + realized P&L steps
-   * at each trade's exit bar (v1 realized-step equity; per-bar mark-to-market of an open premium is a
-   * follow-up). Signals are paired upstream and passed through onto the result. Deterministic — a
-   * premium golden pins it.
+   * Replays the underlying-derived legs into option trades + a PER-BAR mark-to-market equity curve:
+   * {@code cash} holds settled fills (entry outflow + exit inflow, both slippage+cost inclusive via the
+   * shared {@link FillSimulator}); an open long is marked each bar at its observed premium, so {@code
+   * equity(bar) = cash + Σ open-position marks} — the same MTM shape the candle-path {@code
+   * ReplayEngine} produces. Signals are paired upstream and passed through. Deterministic — a premium
+   * golden pins it.
    */
   public ReplayResult replayLegs(
       List<in.arthayantra.strategyengine.golden.GoldenSignalsJson.SignalEvent> signals,
@@ -215,31 +226,43 @@ public class OptionsPremiumReplay {
       long budgetInr,
       BigDecimal initialEquity) {
     List<Trade> trades = new ArrayList<>();
-    Map<Integer, BigDecimal> pnlByExitBar = new HashMap<>();
+    List<LegResult> priced = new ArrayList<>();
     int seq = 0;
     for (PairedLeg leg : legs) {
-      Optional<Trade> t =
-          tradeForLeg(seq + 1, underlying, underlyingSymbol, leg, spec, rules, budgetInr);
-      if (t.isEmpty()) {
+      Optional<LegResult> r =
+          priceLeg(seq + 1, underlying, underlyingSymbol, leg, spec, rules, budgetInr);
+      if (r.isEmpty()) {
         continue;
       }
       seq++;
-      Trade trade = t.get();
-      trades.add(trade);
-      pnlByExitBar.merge(leg.entryIndex() + trade.barsHeld(), trade.pnl(), BigDecimal::add);
+      priced.add(r.get());
+      trades.add(r.get().trade());
     }
 
     List<EquityPoint> equity = new ArrayList<>(underlying.size());
     List<EquityPoint> drawdown = new ArrayList<>(underlying.size());
-    BigDecimal running = initialEquity;
+    BigDecimal cash = initialEquity;
     BigDecimal peak = initialEquity;
+    BigDecimal finalEquity = initialEquity;
     for (int b = 0; b < underlying.size(); b++) {
-      BigDecimal applied = pnlByExitBar.get(b);
-      if (applied != null) {
-        running = running.add(applied);
+      for (LegResult lr : priced) {
+        if (lr.entryIndex() == b) {
+          cash = cash.add(lr.entryCash());
+        }
+        if (lr.exitIndex() == b) {
+          cash = cash.add(lr.exitCash());
+        }
       }
+      BigDecimal mark = BigDecimal.ZERO;
+      for (LegResult lr : priced) {
+        if (b >= lr.entryIndex() && b < lr.exitIndex()) {
+          mark = mark.add(lr.marks().get(b - lr.entryIndex()).multiply(BigDecimal.valueOf(lr.qty())));
+        }
+      }
+      BigDecimal running = cash.add(mark);
       OffsetDateTime ts = underlying.get(b).bucketStart();
-      equity.add(new EquityPoint(ts, running.setScale(2, RoundingMode.HALF_UP)));
+      finalEquity = running.setScale(2, RoundingMode.HALF_UP);
+      equity.add(new EquityPoint(ts, finalEquity));
       if (running.compareTo(peak) > 0) {
         peak = running;
       }
@@ -256,10 +279,20 @@ public class OptionsPremiumReplay {
         EquityCurveDownsampler.downsample(equity, 500),
         EquityCurveDownsampler.downsample(drawdown, 500),
         initialEquity,
-        running.setScale(2, RoundingMode.HALF_UP),
+        finalEquity,
         underlying.size(),
         barsInPosition);
   }
+
+  /** A priced leg: the {@link Trade} plus the per-bar marking inputs the MTM equity loop needs. */
+  private record LegResult(
+      Trade trade,
+      int entryIndex,
+      int exitIndex,
+      long qty,
+      List<BigDecimal> marks,
+      BigDecimal entryCash,
+      BigDecimal exitCash) {}
 
   /**
    * The premium trade for one leg, or empty when there's no tradeable contract (bias side not allowed,
@@ -282,6 +315,25 @@ public class OptionsPremiumReplay {
       UniverseSpec spec,
       PremiumExitEvaluator.Rules rules,
       long budgetInr) {
+    return priceLeg(seq, underlying, underlyingSymbol, leg, spec, rules, budgetInr)
+        .map(LegResult::trade);
+  }
+
+  /**
+   * Prices one leg into a {@link LegResult} (the {@link Trade} + the per-bar marking inputs), or empty
+   * when there's no tradeable contract for the bias/expiry or the budget can't afford a lot. Entry and
+   * exit fills run through the shared {@link FillSimulator} (slippage + the full statutory cost stack),
+   * so P&L is cost-inclusive and paisa-parity with the candle path + paper ledger. A resolved contract
+   * with NO backfilled premium in the window throws 422 {@code DATA_GAP} (fail-run, not a silent skip).
+   */
+  private Optional<LegResult> priceLeg(
+      int seq,
+      List<EngineCandle> underlying,
+      String underlyingSymbol,
+      PairedLeg leg,
+      UniverseSpec spec,
+      PremiumExitEvaluator.Rules rules,
+      long budgetInr) {
     EngineCandle entryBar = underlying.get(leg.entryIndex());
     boolean longBias = !leg.shortSide();
     Optional<OptionContract> resolved =
@@ -294,14 +346,14 @@ public class OptionsPremiumReplay {
             longBias,
             spec.optionTypes());
     if (resolved.isEmpty()) {
-      return Optional.empty();
+      return Optional.empty(); // no tradeable contract for the bias/expiry — a legit skip
     }
     OptionContract contract = resolved.get();
 
     EngineCandle exitBarSignal = underlying.get(leg.exitIndex());
+    OffsetDateTime to = exitBarSignal.bucketStart().plusMinutes(1);
     NavigableMap<OffsetDateTime, BigDecimal> series =
-        premiumReader.premiumSeries(
-            contract, entryBar.bucketStart(), exitBarSignal.bucketStart().plusMinutes(1));
+        premiumReader.premiumSeries(contract, entryBar.bucketStart(), to);
 
     // align the premium to each underlying bar from entry to the signal-exit (carry-forward)
     List<BigDecimal> premiums = new ArrayList<>(leg.exitIndex() - leg.entryIndex() + 1);
@@ -309,16 +361,28 @@ public class OptionsPremiumReplay {
       premiums.add(CandlePremiumReader.premiumAt(series, underlying.get(j).bucketStart()));
     }
     BigDecimal entryPremium = premiums.get(0);
-    if (entryPremium == null || entryPremium.signum() <= 0) {
-      return Optional.empty(); // no premium has traded at entry — can't price the leg
+    if (series.isEmpty() || entryPremium == null || entryPremium.signum() <= 0) {
+      // FAIL-RUN (owner decision): a resolved contract with no backfilled premium over the run window
+      // is a data gap, not a silent skip. Mirror the §D.6 422 DATA_GAP pre-flight pattern.
+      throw new ApiException(
+          422,
+          ErrorCodes.DATA_GAP,
+          "no backfilled premium coverage for " + contract.exchange() + ":" + contract.tradingsymbol(),
+          Map.of(
+              "exchange", contract.exchange(),
+              "tradingsymbol", contract.tradingsymbol(),
+              "from", entryBar.bucketStart().toString(),
+              "to", to.toString(),
+              "presentBars", series.size()));
     }
 
     long lot = contract.lotSize();
-    long lots = entryPremium.multiply(BigDecimal.valueOf(lot)).signum() == 0
-        ? 0
-        : BigDecimal.valueOf(budgetInr)
-            .divide(entryPremium.multiply(BigDecimal.valueOf(lot)), 0, RoundingMode.DOWN)
-            .longValue();
+    long lots =
+        entryPremium.multiply(BigDecimal.valueOf(lot)).signum() == 0
+            ? 0
+            : BigDecimal.valueOf(budgetInr)
+                .divide(entryPremium.multiply(BigDecimal.valueOf(lot)), 0, RoundingMode.DOWN)
+                .longValue();
     long qty = lots * lot;
     if (qty <= 0) {
       return Optional.empty(); // budget can't afford one lot at this premium
@@ -327,26 +391,31 @@ public class OptionsPremiumReplay {
     int signalExitOffset = leg.exitIndex() - leg.entryIndex();
     PremiumExitEvaluator.Exit exit =
         PremiumExitEvaluator.evaluate(entryPremium, premiums, rules, signalExitOffset);
-    EngineCandle exitBar = underlying.get(leg.entryIndex() + exit.barOffset());
+    int exitIndex = leg.entryIndex() + exit.barOffset();
+    EngineCandle exitBar = underlying.get(exitIndex);
 
+    // Cost-inclusive fills via the shared FillSimulator: BUY at entry (cash out), SELL at exit (cash
+    // in); net P&L = the two signed netValues summed (slippage + brokerage + statutory legs included).
+    CostConfig cost = CostConfig.optionDefaults(lot);
+    Fill entryFill = fill(cost, Side.BUY, qty, entryPremium);
+    Fill exitFill = fill(cost, Side.SELL, qty, exit.premium());
     BigDecimal pnl =
-        exit.premium().subtract(entryPremium).multiply(BigDecimal.valueOf(qty))
-            .setScale(2, RoundingMode.HALF_UP);
+        entryFill.netValue().add(exitFill.netValue()).setScale(2, RoundingMode.HALF_UP);
     BigDecimal notional = entryPremium.multiply(BigDecimal.valueOf(qty));
     BigDecimal pnlPct =
         notional.signum() == 0
             ? BigDecimal.ZERO
             : pnl.multiply(HUNDRED).divide(notional, 6, RoundingMode.HALF_UP);
 
-    return Optional.of(
+    Trade trade =
         new Trade(
             seq,
             Side.BUY,
             qty,
             entryBar.bucketStart(),
-            entryPremium,
+            entryFill.fillPrice(),
             exitBar.bucketStart(),
-            exit.premium(),
+            exitFill.fillPrice(),
             pnl,
             pnlPct,
             exit.reason(),
@@ -356,7 +425,29 @@ public class OptionsPremiumReplay {
             contract.exchange(),
             contract.tradingsymbol(),
             level(entryPremium, rules.stopLossPct(), false),
-            level(entryPremium, rules.takeProfitPct(), true)));
+            level(entryPremium, rules.takeProfitPct(), true));
+
+    List<BigDecimal> marks = new ArrayList<>(premiums.subList(0, exit.barOffset() + 1));
+    return Optional.of(
+        new LegResult(
+            trade, leg.entryIndex(), exitIndex, qty, marks,
+            entryFill.netValue(), exitFill.netValue()));
+  }
+
+  /** One premium-leg fill through the shared model (no quoted spread → the option 1-tick fallback). */
+  private Fill fill(CostConfig cost, Side side, long qty, BigDecimal referencePrice) {
+    return fills.simulate(
+        new FillRequest(
+            side,
+            qty,
+            cost.lotSize(),
+            referencePrice,
+            cost.instrumentClass(),
+            cost.tickSize(),
+            null,
+            cost.slippage(),
+            cost.brokerage(),
+            cost.fees()));
   }
 
   private static BigDecimal level(BigDecimal entry, BigDecimal pct, boolean up) {

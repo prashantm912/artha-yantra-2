@@ -1,6 +1,7 @@
 package in.arthayantra.backtest.replay.options;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -8,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import in.arthayantra.backtest.replay.CandleReader;
 import in.arthayantra.backtest.replay.Trade;
+import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.backtest.replay.options.OptionContractSelector.Catalog;
 import in.arthayantra.backtest.replay.options.OptionContractSelector.Expiry;
 import in.arthayantra.backtest.replay.options.OptionContractSelector.ExpiryMode;
@@ -95,13 +97,14 @@ class OptionsPremiumReplayTest {
     assertThat(trade.side()).isEqualTo(Side.BUY);
     // lots = floor(15000 / (80 × 65)) = 2 → qty 130
     assertThat(trade.qty()).isEqualTo(130);
-    assertThat(trade.entryPrice()).isEqualByComparingTo("80");
-    assertThat(trade.exitPrice()).isEqualByComparingTo("110");
+    // observed 80→110 fill at 80.05/109.95 (1-tick option slippage)
+    assertThat(trade.entryPrice()).isEqualByComparingTo("80.05");
+    assertThat(trade.exitPrice()).isEqualByComparingTo("109.95");
     assertThat(trade.exitReason()).isEqualTo("TAKE_PROFIT");
     assertThat(trade.barsHeld()).isEqualTo(2);
-    // pnl = (110 - 80) × 130 = 3900
-    assertThat(trade.pnl()).isEqualByComparingTo("3900.00");
-    assertThat(trade.pnlPct()).isEqualByComparingTo("37.5");
+    // pnl = gross (109.95-80.05)×130 minus the full options cost stack = 3767.76 (vs +3900 cost-free)
+    assertThat(trade.pnl()).isEqualByComparingTo("3767.76");
+    assertThat(trade.pnlPct()).isEqualByComparingTo("36.228462");
     // entry-time protective levels: 80 × 0.80 = 64 stop, 80 × 1.35 = 108 target
     assertThat(trade.stopLoss()).isEqualByComparingTo("64");
     assertThat(trade.takeProfit()).isEqualByComparingTo("108");
@@ -142,7 +145,31 @@ class OptionsPremiumReplayTest {
   }
 
   @Test
-  void replayLegsBuildsResultWithRealizedStepEquity() {
+  void aResolvedContractWithNoBackfilledPremiumFailsWithDataGap() {
+    // The contract resolves, but its premium series is empty (not backfilled) → fail-run 422 DATA_GAP,
+    // NOT a silent skip (the owner-chosen behavior — a hidden 0-trade run masks a data hole).
+    CandleReader reader = mock(CandleReader.class);
+    when(reader.read(eq("NFO"), eq(CE_SYMBOL), eq("1m"), any(), any())).thenReturn(List.of());
+    OptionsPremiumReplay replay =
+        new OptionsPremiumReplay(
+            new OptionContractSelector(CATALOG), new CandlePremiumReader(reader));
+
+    assertThatThrownBy(
+            () ->
+                replay.tradeForLeg(
+                    1,
+                    List.of(bar("09:15", "24980"), bar("09:16", "24990"), bar("09:17", "25010")),
+                    "NIFTY",
+                    new PairedLeg(false, 0, 2),
+                    new UniverseSpec(ExpiryMode.NEAREST_WEEKLY, 0, Set.of("CE", "PE")),
+                    new PremiumExitEvaluator.Rules(bd("20"), bd("35"), null, null, null),
+                    15_000))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("no backfilled premium coverage");
+  }
+
+  @Test
+  void replayLegsBuildsResultWithPerBarMtmEquity() {
     List<EngineCandle> underlying =
         List.of(
             bar("09:15", "24980"), bar("09:16", "24990"), bar("09:17", "25010"),
@@ -173,11 +200,12 @@ class OptionsPremiumReplayTest {
     assertThat(result.trades()).hasSize(1);
     assertThat(result.barsInPosition()).isEqualTo(2); // TAKE_PROFIT at offset 2
     assertThat(result.totalBars()).isEqualTo(5);
-    // realized step: +3900 at the exit bar (index 2) → final 203900
-    assertThat(result.finalEquity()).isEqualByComparingTo("203900.00");
-    assertThat(result.equityCurve().get(0).equity()).isEqualByComparingTo("200000.00"); // pre-exit
+    // per-bar MTM + the full options cost stack: bar0 marks the open position net of entry cost
+    // (199941.67); the +3767.76 net trade realizes at the exit bar → final 203767.76.
+    assertThat(result.finalEquity()).isEqualByComparingTo("203767.76");
+    assertThat(result.equityCurve().get(0).equity()).isEqualByComparingTo("199941.67"); // bar0: open, marked
     assertThat(result.equityCurve().get(result.equityCurve().size() - 1).equity())
-        .isEqualByComparingTo("203900.00"); // post-exit
+        .isEqualByComparingTo("203767.76"); // post-exit
   }
 
   @Test

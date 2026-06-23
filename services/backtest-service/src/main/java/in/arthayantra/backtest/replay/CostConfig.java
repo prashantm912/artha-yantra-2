@@ -29,4 +29,21 @@ public record CostConfig(
         new Brokerage(null, new BigDecimal("0.03")),
         Fees.DEFAULTS);
   }
+
+  /**
+   * The OPTION analog of {@link #defaults()} for the premium-as-primary leg (Part 2): the per-class
+   * option slippage fallback ({@code max(1 tick, half-spread)} → 1 tick at ₹0.05 with no quoted
+   * spread), ₹20/lot flat brokerage, and the pinned statutory schedule (STT-on-sell, exchange txn,
+   * GST, stamp-on-buy, SEBI). Mirrors the candle path's {@code CostConfig.defaults()} so premium-leg
+   * fills stay paisa-parity with the shared {@code FillSimulator}.
+   */
+  public static CostConfig optionDefaults(long lotSize) {
+    return new CostConfig(
+        InstrumentClass.OPTION,
+        new BigDecimal("0.05"),
+        lotSize,
+        Slippage.NONE,
+        new Brokerage(new BigDecimal("20"), null),
+        Fees.DEFAULTS);
+  }
 }

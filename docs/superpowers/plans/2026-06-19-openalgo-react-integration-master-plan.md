@@ -3532,6 +3532,16 @@ can note "no manual surface — verified by tests" instead.
 > §20, §20 wins.** The React migration is now DRIVEN BY oipulse replication, built component-first,
 > sequenced by scalping value. Decisions below are owner-confirmed unless marked "rec".
 
+> **Implementation status (2026-06-24).** Most of §20 is BUILT + merged: Foundation + cockpit pages
+> (#94–#103), the **React cutover** (#104 — Angular `frontend-ui` parked, `frontend-react` served
+> through the gateway), the scalper cockpit (#105–#110), and oipulse Waves **W1/W2/W3** (depth +
+> breadth + chart pages, through #82–#93/#109). Beyond §20: the **Data Ops Console** (operator UI over
+> the expired/OI backfill) merged as #121 (`docs/superpowers/plans/2026-06-24-data-ops-console-wave.md`).
+> The remaining open Phase-4 work is the **data-foundation value-verify** (§20.8 — render every page
+> in History mode on a real session vs oipulse, gated on the expired/OI backfill now loading), the
+> `/orders` page, and the manual-verification-checklist UI. Pending detail lives in
+> `docs/DEFERRED_BACKLOG.md`; current marker in `PHASE_GATES.md`.
+
 ### 20.0 Headline reframe (what this supersedes)
 - **§18.7 "React = 1:1 current Angular, oipulse deferred" → SUPERSEDED.** oipulse replication is the
   PRIORITY driver. Any page that exists in the oipulse study is built UNDER oipulse replication (to

@@ -19,9 +19,17 @@ forward-work authority (Phases 0–6). The legacy **Stage A–G** system in the 
 PR #6 `a96c99b`; F/G via the market-data + oipulse-parity PRs through #41). Its exit-gate
 checklists stay as the as-built reference; new phase boundaries are tracked by the map below.
 
-**Current = Phase 3 — Track-2 Siva options scalper.** The index-option core (#1/#5/#6/#10) is
-paper-complete + risk-railed + execution-boundaried, with the manual-verification-checklist
-backend done. **Phase 3.5 (branch `feat/phase3.5-oi-and-scalpers`) is COMPLETE**: the Tier-2
+**Current frontier = Phase 4 (React) + Phase 6 (backtest).** As of 2026-06-24 Phases 0–3.5 are
+MERGED and Phase 4 is substantially built (cockpit + React cutover + oipulse W1/W2/W3 + Data Ops
+Console #121). The active open work is the **data-foundation value-verify** (render every OI/data page
+in History mode on a real session vs oipulse — gated on the expired/OI backfill, which is RUNNING) and
+**Part 2's** real-data value-verify (options now backtest on their own premium). Deploy the Data Ops
+Console after the backfill finishes (a market-data restart kills the in-flight job). The full pending
+list is `docs/DEFERRED_BACKLOG.md`.
+
+**Phase 3 — Track-2 Siva options scalper (MERGED #42/#43/#44).** The index-option core (#1/#5/#6/#10)
+is paper-complete + risk-railed + execution-boundaried, with the manual-verification-checklist
+backend done. **Phase 3.5 is COMPLETE**: the Tier-2
 OI-analytics fidelity gaps T2.1–T2.8 are closed (per-side ΔOI cross/widening/drastic, sentiment
 slope, spurt OI%/price%, 6-strike IV pair → 18 confluence dots + the #5 ≥50% ΔOI hard pre-gate),
 and the four feasible index-option intraday strategies are implemented + seeded — **#4 Gap Theory,
@@ -37,12 +45,12 @@ deferred: #3 (stock universe → Track-1), #8 (overnight carry + SPAN), #7/#11 (
 | Phase | Branch | State |
 |---|---|---|
 | 0 — OpenAlgo spine | `feat/openalgo-spine` | **MERGED** (PR #39) |
-| 1 — Data inflow (routing + ExpiryTrack OI + openchart daily) | `feat/openalgo-phase1-phase2`, `feat/eod-bhavcopy-candles` | **PARTIAL** — §4 routing + EOD bhavcopy daily candles merged (#40/#41); §5 intraday-OI backfill + §15 200-day daily history + live OI cutover **DEFERRED** |
-| 2 — Quant libs (greeks + indicators) | `feat/openalgo-phase1-phase2` | **MOSTLY** — §7 scalp indicators merged (#40); §6 higher-order greeks **DEFERRED** (§17.6) |
-| 3 — Scalper engine (§12 + §8 SPAN) | `feat/scalper-track2`, `feat/phase3.5-oi-and-scalpers` | **CURRENT** — core #1/#5/#6/#10 + Tier-2 OI fidelity (T2.1–T2.8) + monthly-expiry OI suppression + #2 (per-strike faithful) /#4/#9/#12 done; #3/#8/#7/#11 + SPAN + live orders + §2 OiPulse badge + checklist UI (Phase 4) **DEFERRED** |
-| 4 — React migration (§10 + §11) | `feat/react-migration` | **NOT STARTED** — owner-deferred; consumes the manual-checklist contract |
-| 5 — Minervini Track-1 screener (§13) | `feat/minervini-track1` | **NOT STARTED** — needs Phase-1 200-day history |
-| 6 — Backtest + forward wiring (§14) | `feat/backtest-wiring` | **NOT STARTED** — needs Phases 3 + 5 |
+| 1 — Data inflow (routing + ExpiryTrack OI + openchart daily) | merged across #40/#41/#112–#116 | **MOSTLY** — §4 routing + EOD bhavcopy daily candles (#40/#41) **and** the §5 expired-instrument OHLCV+OI backfill (#112–#116, first pull RUNNING 2026-06-24) merged; §15 200-day daily history + live OI cutover **DEFERRED** |
+| 2 — Quant libs (greeks + indicators) | merged #40 | **MOSTLY** — §7 scalp indicators merged (#40); §6 higher-order greeks **DEFERRED** (§17.6) |
+| 3 — Scalper engine (§12 + §8 SPAN) | merged #42/#43/#44 | **MERGED** — core #1/#5/#6/#10 + Tier-2 OI fidelity (T2.1–T2.8) + monthly-expiry OI suppression + #2 (per-strike faithful)/#4/#9/#12; #3/#8/#7/#11 + SPAN + live orders + §2 OiPulse badge + checklist UI (Phase 4) **DEFERRED** (see `docs/DEFERRED_BACKLOG.md`) |
+| 4 — React migration (§10 + §11) | merged #82–#110, #121 | **IN PROGRESS** — cockpit + React cutover (Angular parked, #104) + oipulse W1/W2/W3 + Data Ops Console (#121) merged; remaining: **data-foundation value-verify** (gated on the backfill), `/orders` page, manual-checklist UI, OiPulse badge |
+| 5 — Minervini Track-1 screener (§13) | `feat/minervini-track1` | **NOT STARTED** — needs Phase-1 §15 200-day history |
+| 6 — Backtest + forward wiring (§14) | merged #114–#119 | **PARTIAL** — Part 2 premium-as-primary replay landed (options trade their own 1m premium, golden-pinned); remaining: real-data value-verify (gated on backfill), v1 simplifications, forward-test wiring; needs Phases 3 + 5 |
 
 ---
 
@@ -204,6 +212,10 @@ mock window or without an options archive.)*
       **(IT only: byte-identical Greeks + SNAPSHOT/SYNTHETIC tests green; live walk
       DEFERRED — needs an options archive + multi-month window, see parking list)**
       `[Phase 30A]`
+      — **UPDATE 2026-06-24:** Part 2 (#114–#119) landed the **premium-as-primary** replay: an options
+      backtest now trades the option's OWN 1m premium series (`premium_source=CANDLE_1M`), golden-pinned
+      (`OptionsPremiumGoldenTest`), and the expired-contract archive that feeds it is now loading
+      (#112–#116). The SNAPSHOT/SYNTHETIC live walk + the real-data value-verify remain (parking list).
 - [x] **Run analytics live** [FP-31/32]: results carry
       alpha/beta/information-ratio/excess-CAGR + the benchmark buy-and-hold curve
       beside `equityCurve`; `GET /api/v1/backtests/{id}/montecarlo` returns seeded,

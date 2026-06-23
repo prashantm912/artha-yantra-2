@@ -5,6 +5,14 @@ Status: DESIGN LOCKED (grilled with owner 2026-06-21). Sequenced **after PR-W1, 
 verdict) + [ADR-0001](../../adr/0001-broker-coupling-openalgo-live-upstox-historical.md). Backlog source:
 `docs/manual-tests/phase-4-wave1-deferred-ledger.md` (Bucket 5).
 
+> **UPDATE 2026-06-24.** The **Deferred (B) expired-contract archive** (below) is now **BUILT +
+> RUNNING** — the Upstox expired-instruments OHLCV+OI ingester (`ExpiredBackfillService`, #112–#116)
+> is loading NIFTY/SENSEX into `candles` (`source='BACKFILL'`), **Part 2 premium-as-primary backtest
+> replay** (#114–#119) consumes it, and the **Data Ops Console** (#121) is the operator UI over the
+> pull. What REMAINS of this milestone is the **(A) value-verify**: once the backfill completes, render
+> every OI/data page in History mode on a real session and compare value-for-value vs oipulse (per
+> §20.8 / [[oipulse-live-qa-method]]). That is the open Phase-4 gate.
+
 ## Why
 
 Wave-1 shipped six data pages **structure-QA'd** vs oipulse but NOT **value-verified** — mock data is

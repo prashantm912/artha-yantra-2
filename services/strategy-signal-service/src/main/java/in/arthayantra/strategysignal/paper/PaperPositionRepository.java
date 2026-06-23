@@ -27,11 +27,13 @@ public class PaperPositionRepository {
       String status,
       OffsetDateTime openedAt,
       OffsetDateTime closedAt,
-      String closeReason) {}
+      String closeReason,
+      BigDecimal stopLoss,
+      BigDecimal takeProfit) {}
 
   private static final String COLUMNS =
       "id, exchange, tradingsymbol, side, qty, avg_entry_price, realized_pnl, status,"
-          + " opened_at, closed_at, close_reason";
+          + " opened_at, closed_at, close_reason, stop_loss, take_profit";
 
   private final JdbcTemplate jdbc;
 
@@ -52,7 +54,9 @@ public class PaperPositionRepository {
         rs.getString("status"),
         rs.getObject("opened_at", OffsetDateTime.class),
         rs.getObject("closed_at", OffsetDateTime.class),
-        rs.getString("close_reason"));
+        rs.getString("close_reason"),
+        rs.getBigDecimal("stop_loss"),
+        rs.getBigDecimal("take_profit"));
   }
 
   /** The OPEN position for a key+side, if any. */
@@ -77,21 +81,30 @@ public class PaperPositionRepository {
         .findFirst();
   }
 
-  /** Opens a new position; returns the generated id. */
+  /** Opens a new position (optional SL/TP bracket levels); returns the generated id. */
   public long insertOpen(
-      String exchange, String tradingsymbol, String side, long qty, BigDecimal avgEntryPrice) {
+      String exchange,
+      String tradingsymbol,
+      String side,
+      long qty,
+      BigDecimal avgEntryPrice,
+      BigDecimal stopLoss,
+      BigDecimal takeProfit) {
     Long id =
         jdbc.queryForObject(
             """
-            INSERT INTO paper_positions (exchange, tradingsymbol, side, qty, avg_entry_price, status, opened_at)
-            VALUES (?,?,?,?,?, 'OPEN', now()) RETURNING id
+            INSERT INTO paper_positions
+              (exchange, tradingsymbol, side, qty, avg_entry_price, status, opened_at, stop_loss, take_profit)
+            VALUES (?,?,?,?,?, 'OPEN', now(), ?, ?) RETURNING id
             """,
             Long.class,
             exchange,
             tradingsymbol,
             side,
             qty,
-            avgEntryPrice);
+            avgEntryPrice,
+            stopLoss,
+            takeProfit);
     return id == null ? 0 : id;
   }
 

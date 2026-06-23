@@ -35,14 +35,16 @@ public class PaperService {
   private static final Logger log = LoggerFactory.getLogger(PaperService.class);
   private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
-  /** Open-order request (from a signal, or a manual entry). */
+  /** Open-order request (from a signal, or a manual entry); optional SL/TP bracket levels. */
   public record OrderRequest(
       Long signalId,
       String exchange,
       String tradingsymbol,
       String side,
       long qty,
-      BigDecimal price) {}
+      BigDecimal price,
+      BigDecimal stopLoss,
+      BigDecimal takeProfit) {}
 
   /** An open position with its live mark-to-market (and an optional buying-power warning on open). */
   public record PositionDto(
@@ -57,13 +59,15 @@ public class PaperService {
       BigDecimal realizedPnl,
       String status,
       OffsetDateTime openedAt,
+      BigDecimal stopLoss,
+      BigDecimal takeProfit,
       String buyingPowerWarning) {
 
     /** A copy carrying the non-blocking buying-power warning (A12). */
     PositionDto withWarning(String warning) {
       return new PositionDto(
           id, exchange, tradingsymbol, side, qty, avgEntryPrice, markPrice, unrealizedPnl,
-          realizedPnl, status, openedAt, warning);
+          realizedPnl, status, openedAt, stopLoss, takeProfit, warning);
     }
   }
 
@@ -139,7 +143,9 @@ public class PaperService {
     orders.insertFilled(
         request.signalId(), exchange, tradingsymbol, side, request.qty(), fill.fillPrice(),
         fills.simulatorId(), fill.slippageApplied(), null, null);
-    upsertPosition(exchange, tradingsymbol, side, request.qty(), fill.fillPrice());
+    upsertPosition(
+        exchange, tradingsymbol, side, request.qty(), fill.fillPrice(),
+        request.stopLoss(), request.takeProfit());
     String warning =
         accountService.buyingPowerWarning(
             accountService.usageFor(meta, side, fill.fillPrice(), request.qty()));
@@ -150,9 +156,16 @@ public class PaperService {
   }
 
   private void upsertPosition(
-      String exchange, String tradingsymbol, String side, long qty, BigDecimal fillPrice) {
+      String exchange,
+      String tradingsymbol,
+      String side,
+      long qty,
+      BigDecimal fillPrice,
+      BigDecimal stopLoss,
+      BigDecimal takeProfit) {
     Optional<PositionRow> existing = positions.findOpen(exchange, tradingsymbol, side);
     if (existing.isPresent()) {
+      // averaging onto an open position keeps its original bracket levels (set at first open)
       PositionRow row = existing.get();
       long newQty = row.qty() + qty;
       BigDecimal newAvg =
@@ -162,7 +175,7 @@ public class PaperService {
               .divide(BigDecimal.valueOf(newQty), 4, RoundingMode.HALF_UP);
       positions.updateOpen(row.id(), newQty, newAvg);
     } else {
-      positions.insertOpen(exchange, tradingsymbol, side, qty, fillPrice);
+      positions.insertOpen(exchange, tradingsymbol, side, qty, fillPrice, stopLoss, takeProfit);
     }
   }
 
@@ -293,7 +306,8 @@ public class PaperService {
     }
     return new PositionDto(
         row.id(), row.exchange(), row.tradingsymbol(), row.side(), row.qty(), row.avgEntryPrice(),
-        mark, unrealized, row.realizedPnl(), row.status(), row.openedAt(), null);
+        mark, unrealized, row.realizedPnl(), row.status(), row.openedAt(),
+        row.stopLoss(), row.takeProfit(), null);
   }
 
   private TradeDto toTradeDto(PositionRow row) {

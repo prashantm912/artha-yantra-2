@@ -28,6 +28,8 @@ const positions: PaperPosition[] = [
     realizedPnl: '0.00',
     status: 'OPEN',
     openedAt: '2026-06-23T09:40:00+05:30',
+    stopLoss: null,
+    takeProfit: null,
   },
 ];
 const trades: PaperTrade[] = [

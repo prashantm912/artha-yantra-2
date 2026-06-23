@@ -20,6 +20,8 @@ export interface PaperPosition {
   realizedPnl: string;
   status: string;
   openedAt: string;
+  stopLoss: string | null;
+  takeProfit: string | null;
 }
 
 /** A closed trade in the ledger. */
@@ -134,6 +136,8 @@ export interface PaperOrderRequest {
   side?: 'BUY' | 'SELL';
   qty: number;
   price?: string;
+  stopLoss?: string;
+  takeProfit?: string;
 }
 
 export function usePlacePaperOrder() {

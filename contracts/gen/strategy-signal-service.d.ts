@@ -577,6 +577,8 @@ export interface components {
             /** Format: int64 */
             qty?: number;
             price?: number;
+            stopLoss?: number;
+            takeProfit?: number;
         };
         PositionDto: {
             /** Format: int64 */
@@ -593,6 +595,8 @@ export interface components {
             status?: string;
             /** Format: date-time */
             openedAt?: string;
+            stopLoss?: number;
+            takeProfit?: number;
             buyingPowerWarning?: string;
         };
         NotificationRequest: {

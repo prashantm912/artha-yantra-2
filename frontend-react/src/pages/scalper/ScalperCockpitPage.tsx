@@ -29,9 +29,11 @@ interface Ticket {
   side: 'BUY' | 'SELL';
   qty: string;
   price: string; // '' = market
+  sl: string; // '' = none
+  tp: string; // '' = none
 }
 
-const EMPTY: Ticket = { signalId: null, instrument: '', side: 'BUY', qty: '1', price: '' };
+const EMPTY: Ticket = { signalId: null, instrument: '', side: 'BUY', qty: '1', price: '', sl: '', tp: '' };
 
 export function ScalperCockpitPage() {
   const signals = useSignals('ACTIVE');
@@ -80,6 +82,8 @@ export function ScalperCockpitPage() {
       side: 'BUY',
       qty: ticket.qty || '1',
       price: leg.ltp ?? '',
+      sl: '',
+      tp: '',
     });
   };
   const inputCls = 'h-9 w-full rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text';
@@ -91,6 +95,8 @@ export function ScalperCockpitPage() {
       side: s.side,
       qty: s.suggestedQty ?? '1',
       price: s.entryPrice ?? '',
+      sl: s.stopLoss ?? '',
+      tp: s.target ?? '',
     });
 
   const placeOrder = () => {
@@ -104,6 +110,8 @@ export function ScalperCockpitPage() {
         side: ticket.side,
         qty: Number(ticket.qty),
         price: ticket.price || undefined,
+        stopLoss: ticket.sl || undefined,
+        takeProfit: ticket.tp || undefined,
       },
       { onSuccess: () => setTicket((t) => ({ ...t, signalId: null })) },
     );
@@ -236,6 +244,16 @@ export function ScalperCockpitPage() {
                 <input value={ticket.price} onChange={(e) => setTicket((t) => ({ ...t, price: e.target.value }))} aria-label="Price" className={inputCls} />
               </label>
             </div>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-ay-muted">Stop loss (auto-exit)</span>
+                <input value={ticket.sl} onChange={(e) => setTicket((t) => ({ ...t, sl: e.target.value }))} aria-label="Stop loss" placeholder="none" className={inputCls} />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-ay-muted">Take profit (auto-exit)</span>
+                <input value={ticket.tp} onChange={(e) => setTicket((t) => ({ ...t, tp: e.target.value }))} aria-label="Take profit" placeholder="none" className={inputCls} />
+              </label>
+            </div>
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -284,6 +302,7 @@ export function ScalperCockpitPage() {
                   <th className="px-2 py-2 text-right font-medium">Qty</th>
                   <th className="px-2 py-2 text-right font-medium">Mark</th>
                   <th className="px-2 py-2 text-right font-medium">uP&L</th>
+                  <th className="px-2 py-2 text-right font-medium">SL / TP</th>
                   <th className="px-2 py-2"><span className="ay-sr-only">Actions</span></th>
                 </tr>
               </thead>
@@ -301,6 +320,9 @@ export function ScalperCockpitPage() {
                     <td className={cn('px-2 py-2 text-right tabular-nums', m.unrealized && tone(m.unrealized))}>
                       {m.unrealized ? money(m.unrealized) : '—'}
                     </td>
+                    <td className="px-2 py-2 text-right tabular-nums text-xs text-ay-muted">
+                      {p.stopLoss ? money(p.stopLoss) : '—'} / {p.takeProfit ? money(p.takeProfit) : '—'}
+                    </td>
                     <td className="px-2 py-2 text-right">
                       <button type="button" onClick={() => close.mutate({ id: p.id })} className="px-1.5 text-xs text-accent hover:underline">
                         Close
@@ -311,7 +333,7 @@ export function ScalperCockpitPage() {
                 })}
                 {(positions.data?.items ?? []).length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-2 py-6 text-center text-ay-muted">No open positions.</td>
+                    <td colSpan={7} className="px-2 py-6 text-center text-ay-muted">No open positions.</td>
                   </tr>
                 )}
               </tbody>

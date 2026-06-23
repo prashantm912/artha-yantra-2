@@ -22,9 +22,16 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/paper")
 public class PaperController {
 
-  /** Open-order body: from a signal (side derived) or a manual entry. */
+  /** Open-order body: from a signal (side derived) or a manual entry; optional SL/TP bracket levels. */
   public record OrderBody(
-      Long signalId, String exchange, String tradingsymbol, String side, Long qty, BigDecimal price) {}
+      Long signalId,
+      String exchange,
+      String tradingsymbol,
+      String side,
+      Long qty,
+      BigDecimal price,
+      BigDecimal stopLoss,
+      BigDecimal takeProfit) {}
 
   /** Close body: an explicit price overrides the last tick. */
   public record CloseBody(BigDecimal price) {}
@@ -96,7 +103,8 @@ public class PaperController {
     }
     PaperService.OrderRequest request =
         new PaperService.OrderRequest(
-            body.signalId(), body.exchange(), body.tradingsymbol(), body.side(), body.qty(), body.price());
+            body.signalId(), body.exchange(), body.tradingsymbol(), body.side(), body.qty(),
+            body.price(), body.stopLoss(), body.takeProfit());
     return ResponseEntity.status(HttpStatus.CREATED).body(paper.openOrder(request));
   }
 

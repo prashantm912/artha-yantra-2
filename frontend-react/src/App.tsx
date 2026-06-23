@@ -24,6 +24,9 @@ import { StrategyVersionsPage } from './pages/strategies/StrategyVersionsPage.ts
 import { StrategyEditorPage } from './pages/strategies/StrategyEditorPage.tsx';
 import { BacktestRunnerPage } from './pages/backtests/BacktestRunnerPage.tsx';
 import { JobsPage } from './pages/backtests/JobsPage.tsx';
+import { JournalPage } from './pages/journal/JournalPage.tsx';
+import { WatchlistsPage } from './pages/watchlists/WatchlistsPage.tsx';
+import { SettingsPage } from './pages/settings/SettingsPage.tsx';
 
 // The ECharts-bearing pages are lazy-loaded so the ~1 MB ECharts bundle is a separate chunk fetched
 // only when the route is visited, keeping the main payload lean (§20.1).
@@ -130,6 +133,9 @@ export function App() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/signals" element={<SignalsPage />} />
           <Route path="/paper" element={<Lazy><PaperPage /></Lazy>} />
+          <Route path="/journal" element={<JournalPage />} />
+          <Route path="/watchlists" element={<WatchlistsPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
           {/* Options */}
           <Route path="/options/options-chain" element={<OptionsChainPage />} />
           <Route path="/options/oi-spurt" element={<OptionsSpurtPage />} />

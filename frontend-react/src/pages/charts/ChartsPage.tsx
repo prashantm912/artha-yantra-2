@@ -1,17 +1,14 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import type { EChartsOption } from 'echarts';
-import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
+import { CandleChart } from '../../components/charts/CandleChart.tsx';
 import { Select } from '../../components/atoms/Select.tsx';
 import { CHART_INTERVALS, useCandles, useChartSignals, type ChartMark } from '../../api/charts.ts';
 import { useBacktestTrades } from '../../api/backtests.ts';
 
-// /charts (master plan §20 parity, A13): a focused ECharts candlestick + volume view with the
-// interval/instrument toolbar and the engine-overlay marks the "View on chart" deep-links carry —
-// backtest trades (?runId) or signals on the symbol. Indicator overlays + a live streaming datafeed
-// are deferred (the premium chart library — LWC / openalgo-chart / TradingView — is a later swap).
-
-const xlabel = (bucket: string) => bucket.slice(0, 16).replace('T', ' ');
+// /charts (master plan §20 parity, A13): a lightweight-charts candlestick + volume view (the plan's
+// premium chart, MIT — replaced the ECharts MVP) with the interval/instrument toolbar and the
+// engine-overlay marks the "View on chart" deep-links carry — backtest trades (?runId) or signals on
+// the symbol. Indicator overlays + a live streaming datafeed are deferred.
 
 export function ChartsPage() {
   const [params] = useSearchParams();
@@ -37,71 +34,6 @@ export function ChartsPage() {
     }
     return signalMarks.data ?? [];
   }, [runId, trades.data, signalMarks.data]);
-
-  const makeOption = useCallback(
-    (t: ChartTheme): EChartsOption => {
-      const x = bars.map((c) => xlabel(c.bucket));
-      const nearestX = (timeIso: string): string | null => {
-        if (!bars.length) return null;
-        const target = Date.parse(timeIso);
-        let best = bars[0];
-        let bestDiff = Infinity;
-        for (const c of bars) {
-          const diff = Math.abs(Date.parse(c.bucket) - target);
-          if (diff < bestDiff) {
-            bestDiff = diff;
-            best = c;
-          }
-        }
-        return xlabel(best.bucket);
-      };
-      return {
-        textStyle: { color: t.text },
-        tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
-        axisPointer: { link: [{ xAxisIndex: 'all' }] },
-        grid: [
-          { left: 56, right: 16, top: 16, height: '62%' },
-          { left: 56, right: 16, top: '76%', height: '18%' },
-        ],
-        xAxis: [
-          { type: 'category', data: x, axisLine: { lineStyle: { color: t.border } }, axisLabel: { color: t.muted } },
-          { type: 'category', gridIndex: 1, data: x, axisLabel: { show: false }, axisTick: { show: false } },
-        ],
-        yAxis: [
-          { scale: true, axisLabel: { color: t.muted }, splitLine: { lineStyle: { color: t.grid } } },
-          { gridIndex: 1, splitNumber: 2, axisLabel: { color: t.muted }, splitLine: { show: false } },
-        ],
-        dataZoom: [{ type: 'inside', xAxisIndex: [0, 1] }],
-        series: [
-          {
-            type: 'candlestick',
-            data: bars.map((c) => [Number(c.open), Number(c.close), Number(c.low), Number(c.high)]),
-            itemStyle: { color: t.bull, color0: t.bear, borderColor: t.bull, borderColor0: t.bear },
-            markPoint: {
-              symbol: 'pin',
-              symbolSize: 36,
-              data: marks
-                .map((m) => {
-                  const coordX = nearestX(m.timeIso);
-                  return coordX
-                    ? { coord: [coordX, Number(m.price)] as [string, number], value: m.label, itemStyle: { color: m.bullish ? t.bull : t.bear } }
-                    : null;
-                })
-                .filter((d): d is NonNullable<typeof d> => d !== null),
-            },
-          },
-          {
-            type: 'bar',
-            xAxisIndex: 1,
-            yAxisIndex: 1,
-            data: bars.map((c) => c.volume),
-            itemStyle: { color: t.muted },
-          },
-        ] as EChartsOption['series'],
-      };
-    },
-    [bars, marks],
-  );
 
   return (
     <div>
@@ -130,7 +62,7 @@ export function ChartsPage() {
       </div>
 
       {bars.length > 0 ? (
-        <EChart makeOption={makeOption} height={460} ariaLabel={`${symbol} ${interval} candlestick chart`} />
+        <CandleChart bars={bars} marks={marks} height={460} ariaLabel={`${symbol} ${interval} candlestick chart`} />
       ) : (
         <div className="grid h-[460px] place-items-center rounded-lg border border-ay-border text-ay-muted">
           {candles.isLoading ? 'Loading candles…' : `No candles for ${symbol} @ ${interval}.`}

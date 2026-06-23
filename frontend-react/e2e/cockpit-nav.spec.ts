@@ -45,6 +45,17 @@ test('every cockpit route renders its anchor control behind auth', async ({ page
   }
 });
 
+test('the charts page draws the lightweight-charts candlestick for a symbol with data', async ({ page }) => {
+  await page.goto('/charts'); // defaults to NSE:NIFTY 50 @ 1d (has EOD daily candles on the live stack)
+  await expect(page.getByLabel('Instrument')).toBeVisible();
+  // the CandleChart renders role=img only once candles load → proves LWC mounted + drew
+  await expect(page.getByRole('img', { name: /candlestick chart/ })).toBeVisible({ timeout: 20_000 });
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.waitForTimeout(500);
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
 test.describe('mobile (~480px)', () => {
   test.use({ viewport: { width: 480, height: 1010 } });
   test('the scalper cockpit stacks and still renders the ticket', async ({ page }) => {

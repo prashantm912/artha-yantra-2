@@ -17,7 +17,7 @@ vi.mock('../../api/signals.ts', () => ({
   useSignalsLive: () => {},
 }));
 vi.mock('../../api/paper.ts', () => ({
-  usePaperPositions: () => ({ data: { items: [{ id: 3, exchange: 'NSE', tradingsymbol: 'INFY', side: 'SELL', qty: 100, markPrice: '1490.00', unrealizedPnl: '1000.00' }] } }),
+  usePaperPositions: () => ({ data: { items: [{ id: 3, exchange: 'NSE', tradingsymbol: 'INFY', side: 'SELL', qty: 100, avgEntryPrice: '1500.00', markPrice: '1490.00', unrealizedPnl: '1000.00' }] } }),
   usePaperAccount: () => ({ data: { equity: '1010000.00', dayPnl: '2500.00' } }),
   usePlacePaperOrder: () => ({ mutate: place, isPending: false }),
   useClosePosition: () => ({ mutate: close }),
@@ -26,6 +26,7 @@ vi.mock('../../api/instruments.ts', () => ({
   useUnderlyings: () => ({ data: ['NIFTY 50', 'NIFTY BANK'] }),
   useExpiries: () => ({ data: [] }),
 }));
+vi.mock('../../api/ticks.ts', () => ({ useLiveTicks: () => ({}) }));
 vi.mock('../../api/scalper.ts', () => ({
   useOptionChain: () => ({
     data: { underlying: 'NIFTY 50', spot: '24000.00', rows: [{ strike: '24000.00', ce: { tradingsymbol: 'NIFTY24JUN24000CE', ltp: '120.00', oi: 1000 }, pe: { tradingsymbol: 'NIFTY24JUN24000PE', ltp: '100.00', oi: 900 } }] },

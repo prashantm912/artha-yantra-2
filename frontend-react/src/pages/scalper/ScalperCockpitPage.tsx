@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { formatDecimal, isNegative } from '../../lib/decimal.ts';
+import { formatDecimal, isNegative, multiplyByInt, subtractDecimal } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
 import { useSignals, useSignalsLive, type SignalDto } from '../../api/signals.ts';
@@ -9,9 +9,11 @@ import {
   usePaperAccount,
   usePaperPositions,
   usePlacePaperOrder,
+  type PaperPosition,
 } from '../../api/paper.ts';
 import { useExpiries, useUnderlyings } from '../../api/instruments.ts';
-import { optionExchange, useLatestTick, useOptionChain, type ChainLeg } from '../../api/scalper.ts';
+import { optionExchange, useOptionChain, type ChainLeg } from '../../api/scalper.ts';
+import { useLiveTicks } from '../../api/ticks.ts';
 
 // /scalper (master plan §20 / Phase 4b): the scalper cockpit — live ACTIVE signal feed (left), a
 // pre-filled PAPER order ticket (middle; click a signal to load it, or enter an instrument manually),
@@ -49,8 +51,23 @@ export function ScalperCockpitPage() {
   const [expiry, setExpiry] = useState<string | null>(null);
   const chain = useOptionChain(underlying, expiry, qpOpen);
 
-  // live LTP for the ticketed instrument
-  const tick = useLatestTick(ticket.instrument, true);
+  // live ticks (WS bridge) for the open positions + the ticketed instrument
+  const positionSymbols = useMemo(
+    () => (positions.data?.items ?? []).map((p) => `${p.exchange}:${p.tradingsymbol}`),
+    [positions.data],
+  );
+  const live = useLiveTicks([...positionSymbols, ticket.instrument]);
+  const ticketLtp = live[ticket.instrument] ?? null;
+  const mtm = (p: PaperPosition) => {
+    const mark = live[`${p.exchange}:${p.tradingsymbol}`] ?? p.markPrice;
+    let unrealized = p.unrealizedPnl;
+    if (mark) {
+      const perUnit =
+        p.side === 'BUY' ? subtractDecimal(mark, p.avgEntryPrice) : subtractDecimal(p.avgEntryPrice, mark);
+      unrealized = multiplyByInt(perUnit, p.qty);
+    }
+    return { mark, unrealized };
+  };
 
   const feed = useMemo(() => signals.data?.items ?? [], [signals.data]);
   const acct = account.data ?? null;
@@ -183,10 +200,10 @@ export function ScalperCockpitPage() {
             <label className="flex flex-col gap-1">
               <span className="flex items-center justify-between text-xs text-ay-muted">
                 <span>Instrument (EXCHANGE:SYMBOL)</span>
-                {tick.data && (
+                {ticketLtp && (
                   <span className="tabular-nums text-ay-text">
-                    LTP {money(tick.data.lastPrice)}{' '}
-                    <button type="button" onClick={() => setTicket((t) => ({ ...t, price: tick.data!.lastPrice }))} className="text-accent hover:underline">
+                    LTP {money(ticketLtp)}{' '}
+                    <button type="button" onClick={() => setTicket((t) => ({ ...t, price: ticketLtp }))} className="text-accent hover:underline">
                       use
                     </button>
                   </span>
@@ -271,16 +288,18 @@ export function ScalperCockpitPage() {
                 </tr>
               </thead>
               <tbody>
-                {(positions.data?.items ?? []).map((p) => (
+                {(positions.data?.items ?? []).map((p) => {
+                  const m = mtm(p);
+                  return (
                   <tr key={p.id} className="border-t border-ay-border">
                     <td className="px-2 py-2">{p.exchange}:{p.tradingsymbol}</td>
                     <td className="px-2 py-2">
                       <span className={cn('text-xs font-semibold', p.side === 'BUY' ? 'text-bull' : 'text-bear')}>{p.side}</span>
                     </td>
                     <td className="px-2 py-2 text-right tabular-nums">{p.qty}</td>
-                    <td className="px-2 py-2 text-right tabular-nums">{p.markPrice ? money(p.markPrice) : '—'}</td>
-                    <td className={cn('px-2 py-2 text-right tabular-nums', p.unrealizedPnl && tone(p.unrealizedPnl))}>
-                      {p.unrealizedPnl ? money(p.unrealizedPnl) : '—'}
+                    <td className="px-2 py-2 text-right tabular-nums">{m.mark ? money(m.mark) : '—'}</td>
+                    <td className={cn('px-2 py-2 text-right tabular-nums', m.unrealized && tone(m.unrealized))}>
+                      {m.unrealized ? money(m.unrealized) : '—'}
                     </td>
                     <td className="px-2 py-2 text-right">
                       <button type="button" onClick={() => close.mutate({ id: p.id })} className="px-1.5 text-xs text-accent hover:underline">
@@ -288,7 +307,8 @@ export function ScalperCockpitPage() {
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
                 {(positions.data?.items ?? []).length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-2 py-6 text-center text-ay-muted">No open positions.</td>

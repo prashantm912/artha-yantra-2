@@ -42,16 +42,19 @@ test('opting a strategy into notifications reveals its delivery-channel select',
   const notifyToggle = page.getByLabel(`Notifications for ${STRATEGY_NAME}`);
   await expect(notifyToggle).toBeVisible({ timeout: 20_000 });
 
-  // the channel select is gated on the toggle being on; reset to a known-off state if it persisted
+  // the channel select is gated on the toggle being on; reset to a known-off state if it persisted.
+  // NOTE: it is a CONTROLLED React checkbox — its `checked` only flips after the PATCH round-trips +
+  // the list refetches, so `.check()/.uncheck()` (which assert a synchronous state change) flap. Drive
+  // it with `.click()` and use the channel select's visibility as the real success signal.
   const channelSelect = page.getByLabel(`Channel for ${STRATEGY_NAME}`);
   if (await notifyToggle.isChecked()) {
-    await notifyToggle.uncheck();
+    await notifyToggle.click();
     await expect(channelSelect).toBeHidden({ timeout: 20_000 });
   }
   await expect(channelSelect).toBeHidden();
 
-  // opt in → the delivery-channel select appears
-  await notifyToggle.check();
+  // opt in → the delivery-channel select appears (after the PATCH + refetch)
+  await notifyToggle.click();
   await expect(channelSelect).toBeVisible({ timeout: 20_000 });
 
   // and it offers the wired channels (NOTIFY_CHANNELS = NTFY / TELEGRAM)

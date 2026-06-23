@@ -31,12 +31,15 @@ test.describe('strategy editor — author → validate → create draft', () => 
     await expect(yamlInput).toBeVisible({ timeout: 20_000 });
     await expect(createBtn).toBeVisible({ timeout: 20_000 });
 
-    // Unique name so the mock stack's persisted state never collides across suite reruns.
-    const uniqueName = `E2E Editor Draft ${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+    // Unique id AND name so the create never collides with the suite's persisted e2e strategy
+    // (RegistryService.create 409s on a duplicate slug OR name; the slug derives from the YAML id).
+    const slug = `e2e-editor-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+    const uniqueName = `E2E Editor ${slug}`;
+    const uniqueYaml = E2E_STRATEGY_YAML
+      .replace(/^id:.*$/m, `id: ${slug}`)
+      .replace(/^name:.*$/m, `name: "${uniqueName}"`);
     await nameInput.fill(uniqueName);
-
-    // Replace the starter template with the deterministic, known-valid E2E YAML.
-    await yamlInput.fill(E2E_STRATEGY_YAML);
+    await yamlInput.fill(uniqueYaml);
 
     // The validation badge is a small span that renders 'checking' | 'valid' | 'invalid' after the
     // debounced (500ms) server POST /validate resolves — allow 15s for the round-trip. Match the

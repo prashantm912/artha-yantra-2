@@ -267,7 +267,7 @@ export function ScalperCockpitPage() {
                   <th className="px-2 py-2 text-right font-medium">Qty</th>
                   <th className="px-2 py-2 text-right font-medium">Mark</th>
                   <th className="px-2 py-2 text-right font-medium">uP&L</th>
-                  <th className="px-2 py-2" />
+                  <th className="px-2 py-2"><span className="ay-sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody>

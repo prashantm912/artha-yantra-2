@@ -94,7 +94,7 @@ export function JournalPage() {
               <th className="px-2 py-2 text-right font-medium">Disc.</th>
               <th className="px-2 py-2 text-right font-medium">Emo.</th>
               <th className="px-2 py-2 font-medium">Created</th>
-              <th className="px-2 py-2" />
+              <th className="px-2 py-2"><span className="ay-sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody>

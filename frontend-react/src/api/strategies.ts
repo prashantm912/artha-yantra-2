@@ -176,6 +176,113 @@ export function useSetNotifications() {
   });
 }
 
+// --- editor slice (PR-C5) ---
+
+export const VERSION_BUMPS = ['patch', 'minor', 'major'] as const;
+export type VersionBump = (typeof VERSION_BUMPS)[number];
+
+/** Full strategy detail incl. the YAML buffer the editor edits (`GET /strategies/{id}`). */
+export interface StrategyConfig {
+  id: string;
+  name: string;
+  status: string;
+  version: string;
+  configYaml: string;
+}
+
+/** One semantic validation issue (`POST /validate`): a JSON-pointer path + message. */
+export interface ValidationResult {
+  valid: boolean;
+  errors: { path: string; message: string }[];
+  warnings: { path: string; message: string }[];
+}
+
+/** The Phase-44 resolved universe label (`GET /{id}/universe`). */
+export interface UniverseInfo {
+  mode: string;
+  asOf: string | null;
+  constituentCount: number;
+  checksum: string;
+  survivorshipCaveat: string | null;
+}
+
+/** The starter YAML for "Create strategy". */
+export const STARTER_TEMPLATE = `schema: strategy-schema/v1
+id: my-strategy
+name: "My Strategy"
+version: 1.0.0
+universe:
+  mode: explicit
+  instruments:
+    - { exchange: NSE, tradingsymbol: RELIANCE }
+timeframes: { primary: 1d }
+indicators:
+  - { name: EMA, alias: ema_fast, timeframe: 1d, params: { period: 9 }, weight: 1.0 }
+  - { name: EMA, alias: ema_slow, timeframe: 1d, params: { period: 21 }, weight: 1.0 }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - crossover: { fast: ema_fast, slow: ema_slow }
+  scoring: { threshold: 0.5 }
+exit_rules:
+  - { type: stop_loss, params: { basis: premium_pct, value: 50 } }
+risk:
+  position_sizing: { method: fixed_quantity, params: { quantity: 1 } }
+  max_positions: 1
+  session: { style: intraday }
+`;
+
+/** The full strategy incl. its YAML buffer (edit mode seeds the editor draft from this). */
+export function useStrategyEditDetail(id: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['strategy', id, 'config'],
+    queryFn: () => apiFetch<StrategyConfig>(`/strategies/${id}`),
+    enabled: enabled && !!id,
+  });
+}
+
+/** Server-authoritative semantic validation of a draft (called debounced from the editor). */
+export function useValidateStrategy() {
+  return useMutation({
+    mutationFn: (config: string) =>
+      apiFetch<ValidationResult>('/strategies/validate', { method: 'POST', json: { config } }),
+  });
+}
+
+/** Resolve the strategy's pinned universe label (null for explicit universes). */
+export function useStrategyUniverse(id: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['strategy', id, 'universe'],
+    queryFn: () => apiFetch<UniverseInfo>(`/strategies/${id}/universe`),
+    enabled: enabled && !!id,
+    select: (u) => (u.mode === 'explicit' ? null : u),
+  });
+}
+
+/** Persist an existing strategy's draft (auto-bumped version). */
+export function useSaveStrategy(id: string) {
+  const invalidate = useInvalidate(id);
+  return useMutation({
+    mutationFn: (body: { config: string; versionBump: VersionBump; notes?: string }) =>
+      apiFetch<{ id: string; version: string; checksum?: string }>(`/strategies/${id}`, {
+        method: 'PUT',
+        json: body,
+      }),
+    onSuccess: invalidate,
+  });
+}
+
+/** Create a new strategy from the draft. */
+export function useCreateStrategy() {
+  const invalidate = useInvalidate();
+  return useMutation({
+    mutationFn: (body: { name: string; config: string; tags?: string[] }) =>
+      apiFetch<{ id: string; version: string }>('/strategies', { method: 'POST', json: body }),
+    onSuccess: invalidate,
+  });
+}
+
 /** A decimal-string equity series → an SVG polyline points string (display-only scaling). */
 export function sparkPoints(equity: string[], w = 80, h = 22): string {
   if (!equity || equity.length < 2) return '';

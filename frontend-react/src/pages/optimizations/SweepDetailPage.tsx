@@ -112,7 +112,7 @@ export function SweepDetailPage() {
               <th className="px-2 py-2 text-right font-medium">Objective ({metric})</th>
               <th className="px-2 py-2 text-right font-medium">Plateau</th>
               <th className="px-2 py-2 font-medium">Params</th>
-              <th className="px-2 py-2" />
+              <th className="px-2 py-2"><span className="ay-sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody>

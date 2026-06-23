@@ -85,7 +85,7 @@ export function JobsPage() {
               <th className="px-2 py-2 font-medium">Status</th>
               <th className="px-2 py-2 font-medium">Progress</th>
               <th className="px-2 py-2 font-medium">Created</th>
-              <th className="px-2 py-2" />
+              <th className="px-2 py-2"><span className="ay-sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody>

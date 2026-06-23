@@ -84,7 +84,7 @@ export function StrategiesListPage() {
               <th className="px-2 py-2 font-medium">Tags</th>
               <th className="px-2 py-2 font-medium">Notify</th>
               <th className="px-2 py-2 font-medium">Updated</th>
-              <th className="px-2 py-2" />
+              <th className="px-2 py-2"><span className="ay-sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody>

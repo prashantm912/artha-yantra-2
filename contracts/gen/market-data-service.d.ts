@@ -1757,12 +1757,16 @@ export interface components {
             contribution?: number;
             changePct?: number;
             close?: number;
+            points?: number;
         };
         IndexContribution: {
             index?: string;
             indexChangePct?: number;
             advanceTotal?: number;
             declineTotal?: number;
+            indexLevel?: number;
+            advancePoints?: number;
+            declinePoints?: number;
             advances?: components["schemas"]["ContribRow"][];
             declines?: components["schemas"]["ContribRow"][];
             /** Format: date */

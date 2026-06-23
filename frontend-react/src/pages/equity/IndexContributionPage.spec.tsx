@@ -8,11 +8,14 @@ const data: IndexContribution = {
   indexChangePct: '0.45',
   advanceTotal: '0.60',
   declineTotal: '-0.15',
+  indexLevel: '24117.65',
+  advancePoints: '39.89',
+  declinePoints: '-10.66',
   advances: [
-    { rank: 1, symbol: 'RELIANCE', contribution: '0.1654', changePct: '2.00', close: '1020.00' },
+    { rank: 1, symbol: 'RELIANCE', contribution: '0.1654', changePct: '2.00', close: '1020.00', points: '39.89' },
   ],
   declines: [
-    { rank: 1, symbol: 'HINDALCO', contribution: '-0.0451', changePct: '-2.96', close: '983.90' },
+    { rank: 1, symbol: 'HINDALCO', contribution: '-0.0451', changePct: '-2.96', close: '983.90', points: '-10.66' },
   ],
   asOf: '2026-06-22',
 };

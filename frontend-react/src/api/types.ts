@@ -673,9 +673,22 @@ export interface SectorAgg {
   total: number;
 }
 
-/** GET /api/v1/market/equity/sector-stats — per-sector cards + the per-stock factor table. */
+/** One live sector-index card (niftyindices feed) — values are the feed's decimal strings. */
+export interface SectorIndexCard {
+  name: string;
+  last: string | null;
+  changePct: string | null;
+  open: string | null;
+  high: string | null;
+  low: string | null;
+  prevClose: string | null;
+  asOf: string | null;
+}
+
+/** GET /api/v1/market/equity/sector-stats — live sector-index cards + per-sector cards + factor table. */
 export interface SectorStats {
   asOf: string | null;
+  sectorIndices: SectorIndexCard[];
   sectors: SectorAgg[];
   stocks: SectorStockChange[];
 }

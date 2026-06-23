@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useSectorStats } from '../../api/oiAnalytics.ts';
-import type { SectorAgg, SectorStockChange } from '../../api/types.ts';
+import type { SectorAgg, SectorIndexCard, SectorStockChange } from '../../api/types.ts';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
@@ -12,6 +12,22 @@ import { formatDecimal } from '../../lib/decimal.ts';
 
 const num = (s: string | null): number => (s == null ? 0 : Number(s));
 const f2 = (s: string | null) => (s == null ? '—' : formatDecimal(s, 2));
+
+function IndexCard({ c }: { c: SectorIndexCard }) {
+  const chg = num(c.changePct);
+  const tone = chg > 0 ? 'text-bull' : chg < 0 ? 'text-bear' : 'text-ay-muted';
+  return (
+    <div className="rounded-lg border border-ay-border bg-surface-1 p-3">
+      <div className="truncate text-xs font-semibold text-ay-text" title={c.name}>
+        {c.name}
+      </div>
+      <div className="text-base font-bold tabular-nums text-ay-text">{f2(c.last)}</div>
+      <div className={`text-xs font-semibold tabular-nums ${tone}`}>
+        {c.changePct == null ? '—' : `${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%`}
+      </div>
+    </div>
+  );
+}
 
 function SectorCard({ s }: { s: SectorAgg }) {
   const avg = num(s.avgChangePct);
@@ -71,6 +87,19 @@ export function SectorStatsPage() {
         Per-sector average change (from constituents) + the stock factor table
         {data?.asOf ? ` · as on ${data.asOf}` : ''}
       </p>
+
+      {data && data.sectorIndices.length > 0 && (
+        <>
+          <h2 className="mb-1 text-sm font-semibold text-ay-text">
+            Sector Indices <span className="text-xs font-normal text-ay-muted">· live</span>
+          </h2>
+          <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
+            {data.sectorIndices.map((c) => (
+              <IndexCard key={c.name} c={c} />
+            ))}
+          </div>
+        </>
+      )}
 
       {data && (
         <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">

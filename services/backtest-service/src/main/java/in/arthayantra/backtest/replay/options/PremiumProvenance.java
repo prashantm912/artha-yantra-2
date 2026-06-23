@@ -34,18 +34,15 @@ public class PremiumProvenance {
   }
 
   /**
-   * Resolves the provenance for the current Phase-30 candle-replay path: {@link PremiumSource#NA}
-   * for non-options strategies, and {@link PremiumSource#NA} for options strategies too while the
-   * premium-as-primary integration remains the documented deep piece — never {@code SNAPSHOT}, so a
-   * non-snapshot-grade run can never masquerade as snapshot-grade.
+   * Resolves the persisted premium provenance: {@link PremiumSource#CANDLE_1M} for an options strategy
+   * (Part 2 — {@code BacktestRunner} routes it to {@code OptionsPremiumReplay}, which trades the
+   * option's own 1m premium series), and {@link PremiumSource#NA} for a non-options strategy (no
+   * premium series — it trades the underlying candle close).
    *
    * @param config the resolved strategy config (may be null)
    * @return the non-null premium source to persist
    */
   public PremiumSource forCandleReplay(JsonNode config) {
-    // Both branches return NA on the candle path: a non-options run has no premium series, and an
-    // options run trades the underlying candle close here (not the premium series) so it is not
-    // snapshot-grade. The provenance flag stays honest rather than overstating fidelity.
-    return PremiumSource.NA;
+    return isOptionsStrategy(config) ? PremiumSource.CANDLE_1M : PremiumSource.NA;
   }
 }

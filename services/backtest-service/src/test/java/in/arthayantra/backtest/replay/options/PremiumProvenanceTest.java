@@ -34,10 +34,10 @@ class PremiumProvenanceTest {
   }
 
   @Test
-  void candleReplayPathIsNaForOptionsToo() {
-    // honest: the candle path trades the underlying close, not the premium series, so an options
-    // run is NOT snapshot-grade and is recorded NA — never SNAPSHOT — until premium-as-primary lands.
-    assertThat(provenance.forCandleReplay(optionsConfig())).isEqualTo(PremiumSource.NA);
+  void optionsStrategyIsCandle1mNowPremiumAsPrimaryLanded() {
+    // Part 2: an options run is routed to OptionsPremiumReplay (trades the option's own 1m premium
+    // series), so its provenance is CANDLE_1M — not NA, and never SNAPSHOT.
+    assertThat(provenance.forCandleReplay(optionsConfig())).isEqualTo(PremiumSource.CANDLE_1M);
   }
 
   private ObjectNode optionsConfig() {

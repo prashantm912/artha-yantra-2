@@ -93,6 +93,9 @@ const OpenHighLowPage = lazy(() =>
 const NewsPage = lazy(() =>
   import('./pages/equity/NewsPage.tsx').then((m) => ({ default: m.NewsPage })),
 );
+const PaperPage = lazy(() =>
+  import('./pages/paper/PaperPage.tsx').then((m) => ({ default: m.PaperPage })),
+);
 
 function Lazy({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<p className="text-sm text-ay-muted">Loading chart…</p>}>{children}</Suspense>;
@@ -110,6 +113,7 @@ export function App() {
           <Route index element={<Navigate to="/options/options-chain" replace />} />
           {/* Trading (cockpit) */}
           <Route path="/signals" element={<SignalsPage />} />
+          <Route path="/paper" element={<Lazy><PaperPage /></Lazy>} />
           {/* Options */}
           <Route path="/options/options-chain" element={<OptionsChainPage />} />
           <Route path="/options/oi-spurt" element={<OptionsSpurtPage />} />

@@ -3140,6 +3140,42 @@
         }
       }
     },
+    "/api/v1/market/equity/news" : {
+      "get" : {
+        "tags" : [ "equity-news-controller" ],
+        "operationId" : "news",
+        "parameters" : [ {
+          "name" : "symbol",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/News"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/equity/index-contribution" : {
       "get" : {
         "tags" : [ "equity-controller" ],
@@ -5541,6 +5577,44 @@
           },
           "farPct" : {
             "type" : "number"
+          }
+        }
+      },
+      "News" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "available" : {
+            "type" : "boolean"
+          },
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/NewsItem"
+            }
+          }
+        }
+      },
+      "NewsItem" : {
+        "type" : "object",
+        "properties" : {
+          "heading" : {
+            "type" : "string"
+          },
+          "summary" : {
+            "type" : "string"
+          },
+          "thumbnail" : {
+            "type" : "string"
+          },
+          "articleLink" : {
+            "type" : "string"
+          },
+          "publishedTime" : {
+            "type" : "integer",
+            "format" : "int64"
           }
         }
       },

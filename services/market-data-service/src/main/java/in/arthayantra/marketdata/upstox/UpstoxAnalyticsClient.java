@@ -125,6 +125,34 @@ public final class UpstoxAnalyticsClient {
     return optionAnalytics("pcr", instrumentKey, expiry, date, bucketMinutes);
   }
 
+  /**
+   * Recent news for an instrument — {@code GET /v2/news?category=instrument_keys}. Returns the
+   * instrument's last-7-days articles (empty when Upstox returns none); transport / HTTP errors
+   * propagate so the caller decides whether to skip.
+   */
+  public List<UpstoxNews.Article> news(String instrumentKey, int pageSize) {
+    UpstoxNews response =
+        restClient
+            .get()
+            .uri(
+                builder ->
+                    builder
+                        .path("/v2/news")
+                        .queryParam("category", "instrument_keys")
+                        .queryParam("instrument_keys", instrumentKey)
+                        .queryParam("page_size", pageSize)
+                        .build())
+            .header("Authorization", "Bearer " + properties.resolveToken())
+            .header("Accept", "application/json")
+            .retrieve()
+            .body(UpstoxNews.class);
+    if (response == null || response.data() == null) {
+      return List.of();
+    }
+    List<UpstoxNews.Article> articles = response.data().get(instrumentKey);
+    return articles == null ? List.of() : articles;
+  }
+
   private UpstoxOptionAnalytics.Data optionAnalytics(
       String endpoint, String instrumentKey, LocalDate expiry, LocalDate date, int bucketMinutes) {
     UpstoxOptionAnalytics response =

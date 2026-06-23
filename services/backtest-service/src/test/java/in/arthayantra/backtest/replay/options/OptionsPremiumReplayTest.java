@@ -141,6 +141,45 @@ class OptionsPremiumReplayTest {
     assertThat(t).isEmpty();
   }
 
+  @Test
+  void replayLegsBuildsResultWithRealizedStepEquity() {
+    List<EngineCandle> underlying =
+        List.of(
+            bar("09:15", "24980"), bar("09:16", "24990"), bar("09:17", "25010"),
+            bar("09:18", "25020"), bar("09:19", "25030"));
+    CandleReader reader = mock(CandleReader.class);
+    when(reader.read(eq("NFO"), eq(CE_SYMBOL), eq("1m"), any(), any()))
+        .thenReturn(
+            List.of(
+                new EngineCandle(t("09:15"), bd("80"), bd("80"), bd("80"), bd("80"), 0L),
+                new EngineCandle(t("09:16"), bd("90"), bd("90"), bd("90"), bd("90"), 0L),
+                new EngineCandle(t("09:17"), bd("110"), bd("110"), bd("110"), bd("110"), 0L)));
+
+    OptionsPremiumReplay replay =
+        new OptionsPremiumReplay(
+            new OptionContractSelector(CATALOG), new CandlePremiumReader(reader));
+
+    var result =
+        replay.replayLegs(
+            List.of(),
+            underlying,
+            List.of(new PairedLeg(false, 0, 4)),
+            "NIFTY",
+            new UniverseSpec(ExpiryMode.NEAREST_WEEKLY, 0, Set.of("CE", "PE")),
+            new PremiumExitEvaluator.Rules(bd("20"), bd("35"), null, null, null),
+            15_000,
+            new BigDecimal("200000"));
+
+    assertThat(result.trades()).hasSize(1);
+    assertThat(result.barsInPosition()).isEqualTo(2); // TAKE_PROFIT at offset 2
+    assertThat(result.totalBars()).isEqualTo(5);
+    // realized step: +3900 at the exit bar (index 2) → final 203900
+    assertThat(result.finalEquity()).isEqualByComparingTo("203900.00");
+    assertThat(result.equityCurve().get(0).equity()).isEqualByComparingTo("200000.00"); // pre-exit
+    assertThat(result.equityCurve().get(result.equityCurve().size() - 1).equity())
+        .isEqualByComparingTo("203900.00"); // post-exit
+  }
+
   private static BigDecimal bd(String v) {
     return new BigDecimal(v);
   }

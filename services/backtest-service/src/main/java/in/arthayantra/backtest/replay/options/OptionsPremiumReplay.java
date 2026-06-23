@@ -1,5 +1,8 @@
 package in.arthayantra.backtest.replay.options;
 
+import in.arthayantra.backtest.replay.EquityCurveDownsampler;
+import in.arthayantra.backtest.replay.EquityPoint;
+import in.arthayantra.backtest.replay.ReplayResult;
 import in.arthayantra.backtest.replay.Trade;
 import in.arthayantra.backtest.replay.options.OptionContractSelector.ExpiryMode;
 import in.arthayantra.backtest.replay.options.OptionContractSelector.OptionContract;
@@ -10,7 +13,9 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Optional;
 import java.util.Set;
@@ -46,6 +51,68 @@ public class OptionsPremiumReplay {
 
   /** The resolved §D.6 {@code options_of_underlying} selection knobs (strike is always the ATM leg). */
   public record UniverseSpec(ExpiryMode expiryMode, int expiryOffset, Set<String> optionTypes) {}
+
+  /**
+   * Replays the underlying-derived legs into option trades + an equity curve. cash + realized P&L steps
+   * at each trade's exit bar (v1 realized-step equity; per-bar mark-to-market of an open premium is a
+   * follow-up). Signals are paired upstream and passed through onto the result. Deterministic — a
+   * premium golden pins it.
+   */
+  public ReplayResult replayLegs(
+      List<in.arthayantra.strategyengine.golden.GoldenSignalsJson.SignalEvent> signals,
+      List<EngineCandle> underlying,
+      List<PairedLeg> legs,
+      String underlyingSymbol,
+      UniverseSpec spec,
+      PremiumExitEvaluator.Rules rules,
+      long budgetInr,
+      BigDecimal initialEquity) {
+    List<Trade> trades = new ArrayList<>();
+    Map<Integer, BigDecimal> pnlByExitBar = new HashMap<>();
+    int seq = 0;
+    for (PairedLeg leg : legs) {
+      Optional<Trade> t =
+          tradeForLeg(seq + 1, underlying, underlyingSymbol, leg, spec, rules, budgetInr);
+      if (t.isEmpty()) {
+        continue;
+      }
+      seq++;
+      Trade trade = t.get();
+      trades.add(trade);
+      pnlByExitBar.merge(leg.entryIndex() + trade.barsHeld(), trade.pnl(), BigDecimal::add);
+    }
+
+    List<EquityPoint> equity = new ArrayList<>(underlying.size());
+    List<EquityPoint> drawdown = new ArrayList<>(underlying.size());
+    BigDecimal running = initialEquity;
+    BigDecimal peak = initialEquity;
+    for (int b = 0; b < underlying.size(); b++) {
+      BigDecimal applied = pnlByExitBar.get(b);
+      if (applied != null) {
+        running = running.add(applied);
+      }
+      OffsetDateTime ts = underlying.get(b).bucketStart();
+      equity.add(new EquityPoint(ts, running.setScale(2, RoundingMode.HALF_UP)));
+      if (running.compareTo(peak) > 0) {
+        peak = running;
+      }
+      BigDecimal dd =
+          peak.signum() == 0
+              ? BigDecimal.ZERO
+              : peak.subtract(running).multiply(HUNDRED).divide(peak, 6, RoundingMode.HALF_UP);
+      drawdown.add(new EquityPoint(ts, dd));
+    }
+    long barsInPosition = trades.stream().mapToLong(Trade::barsHeld).sum();
+    return new ReplayResult(
+        signals,
+        trades,
+        EquityCurveDownsampler.downsample(equity, 500),
+        EquityCurveDownsampler.downsample(drawdown, 500),
+        initialEquity,
+        running.setScale(2, RoundingMode.HALF_UP),
+        underlying.size(),
+        barsInPosition);
+  }
 
   /**
    * The premium trade for one leg, or empty when there's no tradeable contract (bias side not allowed,

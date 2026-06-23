@@ -6,7 +6,7 @@
 
 import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiFetch } from './client.ts';
+import { ApiError, apiFetch } from './client.ts';
 import { wsClient } from '../lib/wsClient.ts';
 
 export type JobKind = 'BACKTEST' | 'OPTIMIZATION' | 'TRIAL';
@@ -146,4 +146,106 @@ export function useCancelJob() {
 export async function fetchResultRef(jobId: string): Promise<string | null> {
   const job = await apiFetch<{ resultRef?: string | null }>(`/backtests/jobs/${jobId}`);
   return job.resultRef ?? null;
+}
+
+// --- results page slice (PR-C7) — results are keyed by the RUN id (resultRef), not the jobId ---
+
+/** One downsampled curve point (`ts` ISO, `value` decimal string). */
+export interface CurvePoint {
+  ts: string;
+  value: string;
+}
+
+export interface BacktestResults {
+  metrics: Record<string, string | number | null | string[]>;
+  equityCurve: CurvePoint[];
+  drawdownCurve?: CurvePoint[] | null;
+  benchmarkCurve?: CurvePoint[] | null;
+  dataHash?: string;
+  seed?: number;
+  premiumSource?: string;
+  caveats?: string[];
+  exchange?: string | null;
+  tradingsymbol?: string | null;
+}
+
+export interface TradeRow {
+  seq: number;
+  side: 'LONG' | 'SHORT';
+  qty: number;
+  entryTs: string;
+  entryPrice: string;
+  exitTs?: string | null;
+  exitPrice?: string | null;
+  pnl: string;
+  pnlPct: string;
+  exitReason: string;
+  barsHeld: number;
+  touchBasis?: string | null;
+  contributions?: Record<string, unknown> | null;
+  stopLoss?: string | null;
+  takeProfit?: string | null;
+}
+
+export interface FoldRow {
+  fold: { index: number; trainFrom: string; trainTo: string; testFrom: string; testTo: string };
+  trainMetrics: Record<string, string | number | null>;
+  oosMetrics: Record<string, string | number | null>;
+  regimeMix?: Record<string, number> | null;
+}
+
+export interface MonteCarloSummary {
+  n: number;
+  trades: number;
+  insufficientSample: boolean;
+  equityBands: { step: number[]; p5: string[]; p50: string[]; p95: string[] };
+  drawdownDistribution: { p5: string; p50: string; p95: string; mean: string };
+  riskOfRuin: string;
+}
+
+export function useBacktestResults(id: string) {
+  return useQuery({
+    queryKey: ['backtest', id, 'results'],
+    queryFn: () => apiFetch<BacktestResults>(`/backtests/${id}/results`),
+    enabled: !!id,
+  });
+}
+
+export function useBacktestTrades(id: string) {
+  return useQuery({
+    queryKey: ['backtest', id, 'trades'],
+    queryFn: () => apiFetch<{ items: TradeRow[] }>(`/backtests/${id}/trades`),
+    enabled: !!id,
+  });
+}
+
+/** Walk-forward folds — [] when the run had no walk-forward (the endpoint returns []). */
+export function useBacktestFolds(id: string) {
+  return useQuery({
+    queryKey: ['backtest', id, 'folds'],
+    queryFn: async () => {
+      try {
+        return await apiFetch<FoldRow[]>(`/backtests/${id}/folds`);
+      } catch {
+        return [];
+      }
+    },
+    enabled: !!id,
+  });
+}
+
+/** Monte Carlo summary — null when the run is unknown (404) or had no trades (422). */
+export function useBacktestMonteCarlo(id: string) {
+  return useQuery({
+    queryKey: ['backtest', id, 'montecarlo'],
+    queryFn: async () => {
+      try {
+        return await apiFetch<MonteCarloSummary>(`/backtests/${id}/montecarlo`);
+      } catch (err) {
+        if (err instanceof ApiError && (err.status === 404 || err.status === 422)) return null;
+        throw err;
+      }
+    },
+    enabled: !!id,
+  });
 }

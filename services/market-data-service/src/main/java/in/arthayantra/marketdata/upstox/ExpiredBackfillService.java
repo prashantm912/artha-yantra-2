@@ -54,10 +54,19 @@ public class ExpiredBackfillService {
   private static final int CHUNK_DAYS = 28;
   /** Up to ~112 days back — covers a 3-month monthly contract; weeklies stop early when empty. */
   private static final int MAX_WINDOWS = 4;
-  /** Politeness gap between candle calls (per worker thread). */
-  private static final long THROTTLE_MS = 30;
-  /** Concurrent per-contract workers — sized under the JDBC pool (≈10) + the Upstox 45 req/s cap. */
-  private static final int CONCURRENCY = 6;
+  /**
+   * Politeness gap between calls (per worker). 100ms × 2 workers ≈ 8 req/s aggregate — under Upstox's
+   * per-token burst limit (the 30ms × 6 earlier tripped 429 UDAPI10005). The client's 429 backoff is
+   * the reactive safety net on top of this proactive pacing.
+   */
+  private static final long THROTTLE_MS = 100;
+  /**
+   * Concurrent per-contract workers. Kept LOW (2): Upstox throttles a high-volume token by
+   * CONCURRENCY, not raw rate — a single direct call is ~0.17s, but 6 parallel streams get throttled
+   * to ~2.3s each and eventually slow-trickle until the workers hang. Two polite streams stay fast and
+   * stall-free (the 45 req/s cap is never the binding constraint here).
+   */
+  private static final int CONCURRENCY = 2;
   /**
    * Strike band: keep only options whose strike is within ±20% of the underlying's price RANGE over
    * the contract's life — the actually-tradeable set. The expired roster lists EVERY strike that ever

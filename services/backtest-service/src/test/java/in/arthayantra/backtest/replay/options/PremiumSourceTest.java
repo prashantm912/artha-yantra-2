@@ -11,10 +11,20 @@ import org.junit.jupiter.api.Test;
 class PremiumSourceTest {
 
   @Test
-  void enumCarriesTheThreeContractValues() {
+  void enumCarriesTheContractValues() {
     assertThat(PremiumSource.values())
         .containsExactly(
-            PremiumSource.SNAPSHOT, PremiumSource.SYNTHETIC_B76, PremiumSource.NA);
+            PremiumSource.SNAPSHOT,
+            PremiumSource.SYNTHETIC_B76,
+            PremiumSource.CANDLE_1M,
+            PremiumSource.NA);
+  }
+
+  @Test
+  void candleSourceIsLikeForLikeOnlyWithItself() {
+    assertThat(PremiumSource.likeForLike(PremiumSource.CANDLE_1M, PremiumSource.CANDLE_1M)).isTrue();
+    assertThat(PremiumSource.likeForLike(PremiumSource.CANDLE_1M, PremiumSource.SNAPSHOT)).isFalse();
+    assertThat(PremiumSource.likeForLike(PremiumSource.CANDLE_1M, PremiumSource.NA)).isFalse();
   }
 
   @Test

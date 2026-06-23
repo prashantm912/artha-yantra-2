@@ -143,6 +143,24 @@ class LiveHistoricalCandleGatewayTest {
   }
 
   @Test
+  void optionMinuteFetchSendsContinuousZero() {
+    // Kite 400s "invalid interval for continuous data" when continuous=1 is sent with the minute
+    // interval, so option 1m candles (straddle/options-premium charts) MUST send continuous=0.
+    // Regression for the blanked option-premium charts (live-verified 2026-06-23).
+    wireMock.stubFor(
+        get(urlPathEqualTo("/instruments/historical/408065/minute"))
+            .willReturn(aResponse().withBody("{\"status\":\"success\",\"data\":{\"candles\":[]}}")));
+
+    gateway("CE", () -> Optional.of("test-token"))
+        .fetch(new InstrumentKey("NFO", "NIFTY2661624000CE"), "1m", FROM, TO);
+
+    wireMock.verify(
+        getRequestedFor(urlPathEqualTo("/instruments/historical/408065/minute"))
+            .withQueryParam("continuous", equalTo("0"))
+            .withQueryParam("oi", equalTo("1")));
+  }
+
+  @Test
   void kite429WithRetryAfterIsBackedOffThenSucceeds() {
     wireMock.stubFor(
         get(urlPathEqualTo("/instruments/historical/408065/minute"))

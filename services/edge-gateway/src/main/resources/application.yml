@@ -71,8 +71,8 @@ spring:
                 - SetPath=/v3/api-docs
             # everything else -> frontend static files (gateway-local
             # controllers and actuator mappings take precedence over routes)
-            - id: frontend-ui
-              uri: ${ARTHA_ROUTE_FRONTEND:http://frontend-ui:80}
+            - id: frontend
+              uri: ${ARTHA_ROUTE_FRONTEND:http://frontend-react:80}
               order: 10000
               predicates:
                 - Path=/**

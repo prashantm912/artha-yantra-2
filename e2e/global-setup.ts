@@ -92,9 +92,10 @@ async function gatewayHealthy(): Promise<boolean> {
     if (body.status !== 'UP') {
       return false;
     }
-    // the FULL Stage-C stack: the SPA must serve through the catch-all route...
+    // the FULL stack: the SPA must serve through the catch-all route (React cutover — the
+    // served shell is now the Vite `<div id="root">`, was Angular's `<app-root>`).
     const spa = await fetch('http://127.0.0.1:8080/', { signal: AbortSignal.timeout(3_000) });
-    if (!spa.ok || !(await spa.text()).includes('<app-root')) {
+    if (!spa.ok || !(await spa.text()).includes('id="root"')) {
       return false;
     }
     // ...and the upstream services must actually be HEALTHY. /api/v1/strategies returns 401 from

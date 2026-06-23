@@ -28,13 +28,12 @@ export function resetLoginLimiter(): void {
   }
 }
 
-/** UI login through the real form; lands on the shell. */
+/** UI login through the real form; lands on the React app-shell (cutover: was Angular ay-shell). */
 export async function loginThroughForm(page: Page): Promise<void> {
   await page.goto('/login');
-  // target the inner <input>, not the PrimeNG <p-password> host (both mirror the placeholder)
   await page.locator('input[name="password"]').fill(OWNER_PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.locator('ay-shell')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('app-shell')).toBeVisible({ timeout: 20_000 });
 }
 
 /** API login for fixtures; returns a context carrying the SESSION cookie. */

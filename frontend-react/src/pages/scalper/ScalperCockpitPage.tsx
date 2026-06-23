@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { formatDecimal, isNegative, multiplyByInt, subtractDecimal } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
-import { useSignals, useSignalsLive, type SignalDto } from '../../api/signals.ts';
+import { useSignalDetail, useSignals, useSignalsLive, type SignalDto } from '../../api/signals.ts';
+import { ManualVerifyChecklist } from '../../components/ManualVerifyChecklist.tsx';
 import {
   useClosePosition,
   usePaperAccount,
@@ -44,6 +45,13 @@ export function ScalperCockpitPage() {
   const close = useClosePosition();
 
   const [ticket, setTicket] = useState<Ticket>(EMPTY);
+
+  // Hydrate the ticketed signal's scalper detail (the live frame may omit it) → manual-verify checklist.
+  const detail = useSignalDetail(ticket.signalId);
+  const scalperDetail = detail.data?.scalperDetail ?? null;
+  const [confirmed, setConfirmed] = useState(false);
+  const onConfirmedChange = useCallback((v: boolean) => setConfirmed(v), []);
+  const placeBlocked = scalperDetail != null && !confirmed;
 
   // option quick-pick (strike ladder → fills the ticket)
   const [qpOpen, setQpOpen] = useState(false);
@@ -254,11 +262,14 @@ export function ScalperCockpitPage() {
                 <input value={ticket.tp} onChange={(e) => setTicket((t) => ({ ...t, tp: e.target.value }))} aria-label="Take profit" placeholder="none" className={inputCls} />
               </label>
             </div>
+            {scalperDetail && (
+              <ManualVerifyChecklist detail={scalperDetail} onConfirmedChange={onConfirmedChange} />
+            )}
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={placeOrder}
-                disabled={place.isPending || ticket.instrument.indexOf(':') < 0 || !ticket.qty}
+                disabled={place.isPending || ticket.instrument.indexOf(':') < 0 || !ticket.qty || placeBlocked}
                 className={cn(
                   'h-9 flex-1 rounded-md px-4 text-sm font-semibold text-surface-0 hover:opacity-90 disabled:opacity-50',
                   ticket.side === 'BUY' ? 'bg-bull' : 'bg-bear',

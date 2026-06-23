@@ -30,6 +30,41 @@ export interface SignalDto {
   generatedAt: string;
   expiresAt?: string | null;
   suggestedQty?: string | null;
+  /** The directly-tradeable option leg (scalper signals only; null otherwise). */
+  tradeableExchange?: string | null;
+  tradeableTradingsymbol?: string | null;
+  /** Scalper enrichment (option leg + confluence dots + manual-verify checklist); null for non-scalper signals. */
+  scalperDetail?: ScalperDetail | null;
+}
+
+/** One automated confluence dot (read-only): green supports the side, red opposes it. */
+export interface ConfluenceDot {
+  dot: string;
+  weight: number;
+  supports: boolean;
+}
+
+/** One owner manual-verification check (rendered dynamically — do NOT hardcode the set). */
+export interface ManualCheck {
+  key: string;
+  label: string;
+  doc_ref: string;
+  assist: string;
+}
+
+/** Scalper signal enrichment carried by the signal DTO (frozen C-2.6 scalper extension). */
+export interface ScalperDetail {
+  side: 'CE' | 'PE';
+  underlying: string;
+  expiry: string;
+  tradeable: string;
+  strike: number;
+  option_ltp: number;
+  iv: number;
+  delta: number;
+  confluence_aggregate: number;
+  dots: ConfluenceDot[];
+  manual_checks: ManualCheck[];
 }
 
 /** The frozen C-2.6 reasoning contract (composite = Σ contributions ÷ weightDenominator). */
@@ -89,6 +124,19 @@ export function useSignals(status: string | null) {
       if (status) params.set('status', status);
       return apiFetch<SignalPage>(`/signals?${params.toString()}`);
     },
+  });
+}
+
+/**
+ * Hydrates a single signal via GET `/signals/{id}` when its detail view opens. The live STOMP frame
+ * MAY omit `scalperDetail`, so the detail panel/ticket reads from THIS (not the list row) to render the
+ * scalper enrichment + manual-verify checklist. `null` id disables the fetch.
+ */
+export function useSignalDetail(id: number | null) {
+  return useQuery({
+    queryKey: [SIGNALS_KEY, 'detail', id],
+    enabled: id != null,
+    queryFn: () => apiFetch<SignalDto>(`/signals/${id}`),
   });
 }
 

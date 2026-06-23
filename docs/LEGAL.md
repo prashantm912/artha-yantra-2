@@ -57,5 +57,14 @@ output/network API, NEVER merge its source.**
 2. **OpenAlgo-Java SDK** (`in.openalgo:openalgo`, Maven Central, **MIT**) — integration form: **IMPORT**
    (DEFERRED to Phase 3: WS streaming + order placement only; REST capture is hand-rolled per §17.2).
    An MIT client of the AGPL appliance does not infect ArthaYantra. Keep the MIT notice when added.
-3. Future MIT ports/imports under this plan (opengreeks → `libs/black76-math`, pyindicators, marginism,
+3. Future MIT ports/imports under this plan (opengreeks → `libs/black76-math`, pyindicators,
    openalgo-heatmap) record their attribution here as they land; each keeps its MIT copyright notice.
+4. **marginism** (`marketcalls/marginism`, PyPI `marginism==0.1.1`, **MIT**) — integration form:
+   **IMPORT (pinned pip dependency)** in `services/margin-service` (§8 SPAN-margin appliance). Offline
+   NSCCL/CME-SPAN margin calculator; consumed only through the anti-corruption adapter
+   `services/margin-service/app/marginism_adapter.py` (the `SpanEngine` seam). MIT permits free
+   import/modification; we depend on the published wheel, which ships its `LICENSE` (MIT, © 2026
+   span-margin contributors). No source is vendored — if a future pin is unavailable on PyPI, vendor it
+   under `services/margin-service/app/_vendor/marginism/` keeping that `LICENSE` verbatim. SPAN risk
+   figures are only as correct as the loaded daily `.spn` file (broker-parity is a documented VERIFY
+   gate — see `services/margin-service/README.md`).

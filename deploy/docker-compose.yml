@@ -430,6 +430,30 @@ services:
     restart: unless-stopped
     logging: *default-logging
 
+  # ---- margin-service (SPAN margin / position sizing) (§8) ----------------
+  # Python/FastAPI; offline SPAN from daily NSE .spn files (read-only mount).
+  # Internal :8086. No DB, no Redis — stateless; reads /spn, memoizes per file.
+  # Ships DORMANT: strategy-signal only calls it when artha.margin.span-enabled=true
+  # (default false → flat-pct fallback). A missing/stale .spn is visible at /health.
+  margin-service:
+    build:
+      context: ..
+      dockerfile: services/margin-service/Dockerfile
+    image: arthayantra/margin-service:dev
+    container_name: ay-margin-service
+    environment:
+      SPN_DIR: /spn
+    volumes:
+      - ../deploy/span-files:/spn:ro      # daily .spn files, host-fetched, read-only
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8086/health').read() else 1)\""]
+      interval: 10s
+      retries: 12
+      start_period: 20s
+    mem_limit: 192m
+    restart: unless-stopped
+    logging: *default-logging
+
   # ---- SPA static server (React cutover; was frontend-ui/Angular Phase 25) ----
   # Internal-only; the gateway's catch-all route serves it on / (same origin,
   # zero CORS anywhere - a Stage C acceptance criterion). The Angular frontend-ui

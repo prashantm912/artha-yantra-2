@@ -55,6 +55,10 @@ spring:
               uri: ${ARTHA_ROUTE_OPTIMIZER:http://optimizer-service:8084}
               predicates:
                 - Path=/api/v1/optimizations/**
+            - id: margin
+              uri: ${ARTHA_ROUTE_MARGIN:http://margin-service:8086}
+              predicates:
+                - Path=/api/v1/margin/**
             # CD-8 (Phase 24): service api-docs proxied for the aggregated
             # Swagger UI; the UI itself is enabled under mock only (below)
             - id: docs-market-data

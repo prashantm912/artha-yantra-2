@@ -18,6 +18,13 @@ deploy/dev-certs/*.cer
 # --- backups (nightly pg_dump bind mount — A.11) ---
 backups/
 
+# --- SPAN risk files (§8): daily, host-fetched, mounted read-only into
+# margin-service. NEVER committed (they change every trading day). Keep the
+# bind-mount dir + its README; ignore the .spn/.zip payloads. ---
+deploy/span-files/*
+!deploy/span-files/.gitkeep
+!deploy/span-files/README.md
+
 # --- build output ---
 target/
 dist/

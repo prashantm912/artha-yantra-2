@@ -40,6 +40,7 @@ public class PaperAccountService {
   private final PaperPositionRepository positions;
   private final LastTickReader lastTick;
   private final InstrumentMetaClient instruments;
+  private final MarginServiceClient margin;
   private final Clock clock;
   private final BigDecimal futureMarginPct;
   private final BigDecimal shortOptionMarginPct;
@@ -50,6 +51,7 @@ public class PaperAccountService {
       PaperPositionRepository positions,
       LastTickReader lastTick,
       InstrumentMetaClient instruments,
+      MarginServiceClient margin,
       Clock clock,
       @Value("${artha.paper.margin-pct.future:0.15}") BigDecimal futureMarginPct,
       @Value("${artha.paper.margin-pct.short-option:0.12}") BigDecimal shortOptionMarginPct) {
@@ -57,6 +59,7 @@ public class PaperAccountService {
     this.positions = positions;
     this.lastTick = lastTick;
     this.instruments = instruments;
+    this.margin = margin;
     this.clock = clock;
     this.futureMarginPct = futureMarginPct;
     this.shortOptionMarginPct = shortOptionMarginPct;
@@ -79,7 +82,32 @@ public class PaperAccountService {
     return total.setScale(2, RoundingMode.HALF_UP);
   }
 
-  /** Capital usage projected for one order leg (the buying-power input). */
+  /**
+   * Capital usage projected for one order leg (the buying-power input), SPAN-aware.
+   *
+   * <p>When {@code artha.margin.span-enabled=true}, futures &amp; short options are priced via the §8
+   * SPAN appliance ({@code /api/v1/margin/size}); on any miss (flag off, appliance unreachable, no
+   * {@code .spn} loaded, unresolved leg) it falls back to the flat margin-pct approximation. Long
+   * options always use the premium; equities the full notional. Advisory only — never blocks.
+   */
+  public BigDecimal usageFor(
+      InstrumentMeta meta, String exchange, String tradingsymbol, String side, BigDecimal price, long qty) {
+    boolean spanCandidate =
+        meta.instrumentClass() == InstrumentClass.FUTURE
+            || (meta.instrumentClass() == InstrumentClass.OPTION && !Side.BUY.name().equals(side));
+    if (spanCandidate) {
+      BigDecimal span =
+          margin.marginFor(exchange, tradingsymbol, side, price, qty)
+              .map(MarginServiceClient.MarginEstimate::marginRequired)
+              .orElse(null);
+      if (span != null) {
+        return span.setScale(2, RoundingMode.HALF_UP);
+      }
+    }
+    return usageFor(meta, side, price, qty); // flat-pct fallback (disabled/unreachable/long/equity)
+  }
+
+  /** Flat margin-pct approximation (the fallback when SPAN sizing is unavailable). */
   public BigDecimal usageFor(InstrumentMeta meta, String side, BigDecimal price, long qty) {
     BigDecimal notional = price.multiply(BigDecimal.valueOf(qty));
     BigDecimal usage =
@@ -102,7 +130,8 @@ public class PaperAccountService {
     usage.put("futuresAndShortOptions", BigDecimal.ZERO);
     for (PositionRow pos : positions.listOpen()) {
       InstrumentMeta meta = instruments.meta(pos.exchange(), pos.tradingsymbol());
-      BigDecimal amount = usageFor(meta, pos.side(), pos.avgEntryPrice(), pos.qty());
+      BigDecimal amount =
+          usageFor(meta, pos.exchange(), pos.tradingsymbol(), pos.side(), pos.avgEntryPrice(), pos.qty());
       String bucket =
           switch (meta.instrumentClass()) {
             case EQUITY -> "equities";

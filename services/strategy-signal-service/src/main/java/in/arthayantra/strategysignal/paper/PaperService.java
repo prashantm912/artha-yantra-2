@@ -148,7 +148,8 @@ public class PaperService {
         request.stopLoss(), request.takeProfit());
     String warning =
         accountService.buyingPowerWarning(
-            accountService.usageFor(meta, side, fill.fillPrice(), request.qty()));
+            accountService.usageFor(
+                meta, exchange, tradingsymbol, side, fill.fillPrice(), request.qty()));
     return positions
         .findOpen(exchange, tradingsymbol, side)
         .map(row -> toPositionDto(row).withWarning(warning))

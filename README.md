@@ -92,7 +92,8 @@ merge-base, then a fresh-volume run of all four Flyway lineages +
 
 - [`docs/dev-setup.md`](docs/dev-setup.md) — host/container iteration tiers and port map.
 - [`PHASE_GATES.md`](PHASE_GATES.md) — current phase marker, acceptance checklist, parking list.
-- [`docs/LEGAL.md`](docs/LEGAL.md) — chart-library attribution record (lightweight-charts, Apache-2.0).
+- [`docs/LEGAL.md`](docs/LEGAL.md) — third-party attribution record: lightweight-charts (Apache-2.0),
+  the OpenAlgo ecosystem, and **SPAN margin via marginism (MIT, © span-margin contributors)**.
 - Git workflow: trunk-based, short-lived `feat/|fix/|chore/|docs/` branches,
   **Conventional Commits 1.0** (scope = service/lib name), **squash-merge only**.
 

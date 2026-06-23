@@ -52,8 +52,17 @@ public class ExpiredBackfillService {
   private static final String UPSTOX_INTERVAL = "1minute";
   /** ≤ one month per call (the v2 1-minute window cap); walked back from expiry. */
   private static final int CHUNK_DAYS = 28;
-  /** Up to ~112 days back — covers a 3-month monthly contract; weeklies stop early when empty. */
-  private static final int MAX_WINDOWS = 4;
+  /** Walk depth by contract type: a weekly is listed ~5–6 weeks out (≤3×28d), a monthly ~3 months. */
+  private static final int WEEKLY_MAX_WINDOWS = 3;
+  private static final int MONTHLY_MAX_WINDOWS = 4;
+  /**
+   * Retry-on-empty horizon: only retry an empty window whose start is within this many days of expiry
+   * — the tradeable, liquid stretch where a false-empty would lose real data. Far-back windows
+   * (pre-listing / least liquid) trust an empty immediately, cutting the bulk of the wasted dead-window
+   * calls; the 2-consecutive-empty stop still guards a mid-life illiquidity gap, and {@code force}
+   * re-fetches everything if a guaranteed-complete set is ever needed.
+   */
+  private static final int RETRY_HORIZON_DAYS = 35;
   /**
    * Politeness gap between calls (per worker). 100ms × 2 workers ≈ 8 req/s aggregate — under Upstox's
    * per-token burst limit (the 30ms × 6 earlier tripped 429 UDAPI10005). The client's 429 backoff is
@@ -304,7 +313,7 @@ public class ExpiredBackfillService {
       return -1; // already fetched through to the liquid expiry tail (or accepted after a re-fetch)
     }
 
-    List<Bar> bars = fetchLife(client, leg.instrumentKey(), leg.expiry());
+    List<Bar> bars = fetchLife(client, leg.instrumentKey(), leg.expiry(), leg.weekly());
     OffsetDateTime first = null;
     OffsetDateTime last = null;
     List<Candle> candleRows = new ArrayList<>(bars.size());
@@ -336,19 +345,23 @@ public class ExpiredBackfillService {
 
   /**
    * Walks a contract's history newest→oldest in {@value #CHUNK_DAYS}-day windows, stopping after TWO
-   * consecutive empty windows once data has been seen (i.e. we've passed the listing date) — so a
-   * short-lived weekly costs 1–2 calls while a 3-month monthly walks back to {@value #MAX_WINDOWS}.
-   * Two-in-a-row (not one) tolerates a mid-life no-trade gap window without truncating earlier bars.
+   * consecutive empty windows once data has been seen (the mid-life-illiquidity-gap guard), or at the
+   * type-bounded depth ({@value #WEEKLY_MAX_WINDOWS} for a weekly, {@value #MONTHLY_MAX_WINDOWS} for a
+   * monthly). A 28-day window always spans ~18–20 sessions, so weekends/holidays never empty one — an
+   * empty window means no-trade/pre-listing. Only NEAR-expiry empties are retried (see windowCandles).
    */
   private List<Bar> fetchLife(
-      UpstoxExpiredInstrumentsClient client, String expiredKey, LocalDate expiry) {
+      UpstoxExpiredInstrumentsClient client, String expiredKey, LocalDate expiry, boolean weekly) {
+    int maxWindows = weekly ? WEEKLY_MAX_WINDOWS : MONTHLY_MAX_WINDOWS;
+    LocalDate retryFloor = expiry.minusDays(RETRY_HORIZON_DAYS);
     List<Bar> all = new ArrayList<>();
     LocalDate windowTo = expiry;
     boolean sawData = false;
     int consecutiveEmpty = 0;
-    for (int w = 0; w < MAX_WINDOWS; w++) {
+    for (int w = 0; w < maxWindows; w++) {
       LocalDate windowFrom = windowTo.minusDays(CHUNK_DAYS - 1L);
-      List<Bar> bars = windowCandles(client, expiredKey, windowFrom, windowTo);
+      boolean retryOnEmpty = !windowFrom.isBefore(retryFloor);
+      List<Bar> bars = windowCandles(client, expiredKey, windowFrom, windowTo, retryOnEmpty);
       if (bars.isEmpty()) {
         consecutiveEmpty++;
         if (sawData && consecutiveEmpty >= 2) {
@@ -365,16 +378,21 @@ public class ExpiredBackfillService {
   }
 
   /**
-   * One window's candles, retried ONCE on an empty result — a transient Upstox false-empty for a
-   * tradeable window is unlikely to repeat, so the retry distinguishes "genuinely past listing" from
-   * "glitch" and stops a false-empty from silently truncating the contract (the source of the
-   * registered-but-short gap). A hard error propagates (caught per-leg → the leg is retried next run).
+   * One window's candles. A NEAR-expiry empty is retried ONCE — a transient Upstox false-empty for a
+   * tradeable window is unlikely to repeat, so the retry distinguishes "past listing" from "glitch"
+   * and stops a false-empty silently truncating the liquid stretch. A far-back empty ({@code
+   * retryOnEmpty=false}) is trusted immediately — it's pre-listing / least-liquid, so the retry there
+   * is pure wasted quota. A hard error propagates (caught per-leg → the leg is retried next run).
    */
   private List<Bar> windowCandles(
-      UpstoxExpiredInstrumentsClient client, String expiredKey, LocalDate from, LocalDate to) {
+      UpstoxExpiredInstrumentsClient client,
+      String expiredKey,
+      LocalDate from,
+      LocalDate to,
+      boolean retryOnEmpty) {
     List<Bar> bars = client.candles(expiredKey, UPSTOX_INTERVAL, from, to);
     throttle();
-    if (bars.isEmpty()) {
+    if (bars.isEmpty() && retryOnEmpty) {
       bars = client.candles(expiredKey, UPSTOX_INTERVAL, from, to);
       throttle();
     }

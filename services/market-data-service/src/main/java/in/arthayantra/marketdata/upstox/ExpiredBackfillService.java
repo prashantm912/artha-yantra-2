@@ -9,6 +9,7 @@ import in.arthayantra.marketdata.upstox.UpstoxExpiredInstrumentsClient.Bar;
 import in.arthayantra.marketdata.upstox.UpstoxExpiredInstrumentsClient.Leg;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -126,7 +127,7 @@ public class ExpiredBackfillService {
    */
   @SuppressWarnings("FutureReturnValueIgnored")
   public Map<String, String> triggerAsync(
-      List<String> underlyings, LocalDate from, LocalDate to, String interval) {
+      List<String> underlyings, LocalDate from, LocalDate to, String interval, boolean force) {
     UpstoxExpiredInstrumentsClient client = requireClient();
     if (interval != null && !UPSTOX_INTERVAL.equals(interval)) {
       throw new ApiException(
@@ -140,7 +141,7 @@ public class ExpiredBackfillService {
     executor.submit(
         () -> {
           try {
-            BackfillSummary s = run(client, underlyings, from, to, jobId);
+            BackfillSummary s = run(client, underlyings, from, to, jobId, force);
             log.info(
                 "expired-backfill {} done: {} expiries, {} contracts, {} written, {} skipped, {} failed, {} rows",
                 jobId, s.expiries(), s.contracts(),
@@ -167,7 +168,8 @@ public class ExpiredBackfillService {
       List<String> underlyings,
       LocalDate from,
       LocalDate to,
-      String jobId) {
+      String jobId,
+      boolean force) {
     AtomicInteger expiries = new AtomicInteger();
     AtomicInteger contracts = new AtomicInteger();
     AtomicInteger written = new AtomicInteger();
@@ -208,7 +210,7 @@ public class ExpiredBackfillService {
                 pool.submit(
                     () -> {
                       try {
-                        int n = backfillLeg(client, underlying, leg);
+                        int n = backfillLeg(client, underlying, leg, force);
                         if (n < 0) {
                           skipped.incrementAndGet();
                         } else {
@@ -276,19 +278,34 @@ public class ExpiredBackfillService {
     return kept;
   }
 
-  /** Backfills one contract's 1m candles + registers it. Returns rows written, or -1 if already covered. */
-  private int backfillLeg(UpstoxExpiredInstrumentsClient client, String underlying, Leg leg) {
+  /**
+   * Backfills one contract's 1m candles + registers it with coverage. Returns rows written, or -1 if
+   * the contract is already COMPLETE (and not a {@code force} pass). A registered-but-short (PARTIAL)
+   * contract IS re-fetched — that closes a hole left by a transient Upstox false-empty — but is then
+   * marked complete so re-fetches are bounded to ~2 passes; {@code force} re-fetches everything.
+   */
+  private int backfillLeg(
+      UpstoxExpiredInstrumentsClient client, String underlying, Leg leg, boolean force) {
     String exchange = exchangeOf(leg.segment());
     String base = leg.underlyingSymbol() != null ? leg.underlyingSymbol() : underlying.toUpperCase();
     String symbol = symbolOf(base, leg);
 
-    if (repo.isRegistered(exchange, symbol)) {
-      return -1; // a prior run already imported + registered this contract
+    ExpiredBackfillRepository.Coverage cov = repo.coverage(exchange, symbol);
+    if (!force && cov == ExpiredBackfillRepository.Coverage.COMPLETE) {
+      return -1; // already fetched through to the liquid expiry tail (or accepted after a re-fetch)
     }
 
     List<Bar> bars = fetchLife(client, leg.instrumentKey(), leg.expiry());
+    OffsetDateTime first = null;
+    OffsetDateTime last = null;
     List<Candle> candleRows = new ArrayList<>(bars.size());
     for (Bar b : bars) {
+      if (first == null || b.bucket().isBefore(first)) {
+        first = b.bucket();
+      }
+      if (last == null || b.bucket().isAfter(last)) {
+        last = b.bucket();
+      }
       candleRows.add(
           new Candle(
               exchange, symbol, CANDLE_INTERVAL, b.bucket(),
@@ -297,9 +314,14 @@ public class ExpiredBackfillService {
     if (!candleRows.isEmpty()) {
       candles.upsertAll(candleRows);
     }
+    // Complete iff the data reaches the liquid expiry tail, OR this was already a re-attempt of a short
+    // contract (cov != NONE) — accept it then so a genuinely-short or twice-empty leg can't re-fetch forever.
+    boolean reachedExpiry = last != null && !last.toLocalDate().isBefore(leg.expiry().minusDays(1));
+    boolean complete = reachedExpiry || cov != ExpiredBackfillRepository.Coverage.NONE;
     repo.upsertContract(
         exchange, symbol, leg.instrumentType(), base, leg.expiry(), leg.strike(),
-        leg.lotSize(), leg.tickSize(), leg.weekly(), leg.instrumentKey(), leg.underlyingKey());
+        leg.lotSize(), leg.tickSize(), leg.weekly(), leg.instrumentKey(), leg.underlyingKey(),
+        first, last, candleRows.size(), complete);
     return candleRows.size();
   }
 
@@ -317,8 +339,7 @@ public class ExpiredBackfillService {
     int consecutiveEmpty = 0;
     for (int w = 0; w < MAX_WINDOWS; w++) {
       LocalDate windowFrom = windowTo.minusDays(CHUNK_DAYS - 1L);
-      List<Bar> bars = client.candles(expiredKey, UPSTOX_INTERVAL, windowFrom, windowTo);
-      throttle();
+      List<Bar> bars = windowCandles(client, expiredKey, windowFrom, windowTo);
       if (bars.isEmpty()) {
         consecutiveEmpty++;
         if (sawData && consecutiveEmpty >= 2) {
@@ -332,6 +353,23 @@ public class ExpiredBackfillService {
       windowTo = windowFrom.minusDays(1);
     }
     return all;
+  }
+
+  /**
+   * One window's candles, retried ONCE on an empty result — a transient Upstox false-empty for a
+   * tradeable window is unlikely to repeat, so the retry distinguishes "genuinely past listing" from
+   * "glitch" and stops a false-empty from silently truncating the contract (the source of the
+   * registered-but-short gap). A hard error propagates (caught per-leg → the leg is retried next run).
+   */
+  private List<Bar> windowCandles(
+      UpstoxExpiredInstrumentsClient client, String expiredKey, LocalDate from, LocalDate to) {
+    List<Bar> bars = client.candles(expiredKey, UPSTOX_INTERVAL, from, to);
+    throttle();
+    if (bars.isEmpty()) {
+      bars = client.candles(expiredKey, UPSTOX_INTERVAL, from, to);
+      throttle();
+    }
+    return bars;
   }
 
   private static String symbolOf(String base, Leg leg) {

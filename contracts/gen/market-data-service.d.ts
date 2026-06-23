@@ -1283,6 +1283,7 @@ export interface components {
             /** Format: date */
             to?: string;
             interval?: string;
+            force?: boolean;
         };
         SessionRequest: {
             requestToken?: string;

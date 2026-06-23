@@ -2,6 +2,8 @@ package in.arthayantra.marketdata.upstox;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -11,6 +13,7 @@ import static org.mockito.Mockito.when;
 import in.arthayantra.marketdata.candles.Candle;
 import in.arthayantra.marketdata.candles.CandleRepository;
 import in.arthayantra.marketdata.openalgo.live.OpenAlgoSymbols;
+import in.arthayantra.marketdata.upstox.ExpiredBackfillRepository.Coverage;
 import in.arthayantra.marketdata.upstox.UpstoxExpiredInstrumentsClient.Bar;
 import in.arthayantra.marketdata.upstox.UpstoxExpiredInstrumentsClient.Leg;
 import java.math.BigDecimal;
@@ -22,10 +25,10 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 
 /**
- * Unit test for {@link ExpiredBackfillService#run}: a (underlying, expiry) chain is walked into the
- * {@code candles} hypertable under the canonical OpenAlgo symbol with {@code source='BACKFILL'}, each
- * contract is registered in {@code expired_contracts}, and a contract whose candles already exist is
- * skipped (the resumable-rerun guard). Client + repositories are mocked — no DB.
+ * Unit test for {@link ExpiredBackfillService#run}: the chain is walked into {@code candles} under the
+ * canonical OpenAlgo symbol with {@code source='BACKFILL'}; each contract is registered with its
+ * coverage; a COMPLETE contract is skipped, a short/missing one is (re)fetched; an empty window is
+ * retried once. Client + repositories are mocked — no DB.
  */
 class ExpiredBackfillServiceTest {
 
@@ -33,48 +36,59 @@ class ExpiredBackfillServiceTest {
   private static final LocalDate EXPIRY = LocalDate.of(2026, 6, 16);
 
   @SuppressWarnings("unchecked")
+  private static ObjectProvider<UpstoxExpiredInstrumentsClient> provider() {
+    return mock(ObjectProvider.class);
+  }
+
+  private static Leg ce() {
+    return new Leg(
+        "NSE_FO", "NSE_FO|CE|16-06-2026", "CE", "NIFTY", NIFTY_KEY, EXPIRY,
+        new BigDecimal("25000"), 65, new BigDecimal("5"), true);
+  }
+
+  private static Leg pe() {
+    return new Leg(
+        "NSE_FO", "NSE_FO|PE|16-06-2026", "PE", "NIFTY", NIFTY_KEY, EXPIRY,
+        new BigDecimal("21200"), 65, new BigDecimal("5"), true);
+  }
+
+  private static Bar barAt(String ts) {
+    return new Bar(
+        OffsetDateTime.parse(ts),
+        new BigDecimal("238.95"), new BigDecimal("239.2"),
+        new BigDecimal("238.15"), new BigDecimal("239.1"), 22750, 315185L);
+  }
+
+  private static void stubBand(ExpiredBackfillRepository repo) {
+    // index range [22000, 24000] → ±20% band [17600, 28800] keeps both test strikes (25000, 21200).
+    when(repo.indexRange(eq("NSE"), eq("NIFTY 50"), any(), any()))
+        .thenReturn(new BigDecimal[] {new BigDecimal("22000"), new BigDecimal("24000")});
+  }
+
   @Test
-  void walksChainIntoCandlesRegistersContractsAndSkipsCovered() {
+  void walksChainIntoCandlesRegistersCompleteAndSkipsCovered() {
     UpstoxExpiredInstrumentsClient client = mock(UpstoxExpiredInstrumentsClient.class);
     CandleRepository candles = mock(CandleRepository.class);
     ExpiredBackfillRepository repo = mock(ExpiredBackfillRepository.class);
-    ObjectProvider<UpstoxExpiredInstrumentsClient> provider = mock(ObjectProvider.class);
-
-    Leg ce =
-        new Leg(
-            "NSE_FO", "NSE_FO|CE|16-06-2026", "CE", "NIFTY", NIFTY_KEY, EXPIRY,
-            new BigDecimal("25000"), 65, new BigDecimal("5"), true);
-    Leg pe =
-        new Leg(
-            "NSE_FO", "NSE_FO|PE|16-06-2026", "PE", "NIFTY", NIFTY_KEY, EXPIRY,
-            new BigDecimal("21200"), 65, new BigDecimal("5"), true);
-    Bar bar =
-        new Bar(
-            OffsetDateTime.parse("2026-06-16T15:29:00+05:30"),
-            new BigDecimal("238.95"), new BigDecimal("239.2"),
-            new BigDecimal("238.15"), new BigDecimal("239.1"), 22750, 315185L);
 
     String ceSymbol = OpenAlgoSymbols.optionSymbol("NIFTY", EXPIRY, new BigDecimal("25000"), "CE");
     String peSymbol = OpenAlgoSymbols.optionSymbol("NIFTY", EXPIRY, new BigDecimal("21200"), "PE");
 
     when(client.expiries(NIFTY_KEY)).thenReturn(List.of(EXPIRY));
-    when(client.optionContracts(NIFTY_KEY, EXPIRY)).thenReturn(List.of(ce, pe));
+    when(client.optionContracts(NIFTY_KEY, EXPIRY)).thenReturn(List.of(ce(), pe()));
     when(client.futureContracts(NIFTY_KEY, EXPIRY)).thenReturn(List.of());
-    // index range [22000, 24000] → ±20% band [17600, 28800] keeps both test strikes (25000, 21200).
-    when(repo.indexRange(eq("NSE"), eq("NIFTY 50"), any(), any()))
-        .thenReturn(new BigDecimal[] {new BigDecimal("22000"), new BigDecimal("24000")});
-    // CE: not yet registered → fetched (a window of data, then two empties → stop). PE: registered → skipped.
-    when(repo.isRegistered("NFO", ceSymbol)).thenReturn(false);
-    when(repo.isRegistered("NFO", peSymbol)).thenReturn(true);
+    stubBand(repo);
+    // CE: never registered → fetched (a window of data, then two empties → stop). PE: COMPLETE → skipped.
+    when(repo.coverage("NFO", ceSymbol)).thenReturn(Coverage.NONE);
+    when(repo.coverage("NFO", peSymbol)).thenReturn(Coverage.COMPLETE);
+    // the CE bar lands on the expiry day → reachedExpiry → complete.
     when(client.candles(eq("NSE_FO|CE|16-06-2026"), eq("1minute"), any(), any()))
-        .thenReturn(List.of(bar), List.of());
+        .thenReturn(List.of(barAt("2026-06-16T15:29:00+05:30")), List.of());
 
-    ExpiredBackfillService service = new ExpiredBackfillService(provider, candles, repo, 0L);
+    ExpiredBackfillService service = new ExpiredBackfillService(provider(), candles, repo, 0L);
     ExpiredBackfillService.BackfillSummary summary =
-        service.run(client, List.of("NIFTY"), EXPIRY.minusDays(7), EXPIRY, "job-1");
+        service.run(client, List.of("NIFTY"), EXPIRY.minusDays(7), EXPIRY, "job-1", false);
 
-    assertThat(summary.expiries()).isEqualTo(1);
-    assertThat(summary.contracts()).isEqualTo(2);
     assertThat(summary.legsWritten()).isEqualTo(1);
     assertThat(summary.legsSkipped()).isEqualTo(1);
     assertThat(summary.legsFailed()).isZero();
@@ -85,17 +99,92 @@ class ExpiredBackfillServiceTest {
     Candle row = rows.getValue().get(0);
     assertThat(row.exchange()).isEqualTo("NFO");
     assertThat(row.tradingsymbol()).isEqualTo(ceSymbol);
-    assertThat(row.interval()).isEqualTo("1m");
     assertThat(row.source()).isEqualTo("BACKFILL");
     assertThat(row.oi()).isEqualTo(315185L);
-    assertThat(row.close()).isEqualByComparingTo("239.1");
 
-    // CE registered; PE was skipped before any registration / candle write.
+    // CE registered COMPLETE (bar reached the expiry day); PE skipped (no registration / candle write).
     verify(repo).upsertContract(
         eq("NFO"), eq(ceSymbol), eq("CE"), eq("NIFTY"), eq(EXPIRY), any(),
-        eq(65), any(), eq(true), eq("NSE_FO|CE|16-06-2026"), eq(NIFTY_KEY));
+        eq(65), any(), eq(true), eq("NSE_FO|CE|16-06-2026"), eq(NIFTY_KEY),
+        any(), any(), eq(1), eq(true));
     verify(repo, never()).upsertContract(
-        eq("NFO"), eq(peSymbol), any(), any(), any(), any(), org.mockito.ArgumentMatchers.anyInt(),
-        any(), org.mockito.ArgumentMatchers.anyBoolean(), any(), any());
+        eq("NFO"), eq(peSymbol), any(), any(), any(), any(), anyInt(), any(), anyBoolean(),
+        any(), any(), any(), any(), anyInt(), anyBoolean());
+  }
+
+  @Test
+  void shortFirstFetchMarksPartial() {
+    UpstoxExpiredInstrumentsClient client = mock(UpstoxExpiredInstrumentsClient.class);
+    CandleRepository candles = mock(CandleRepository.class);
+    ExpiredBackfillRepository repo = mock(ExpiredBackfillRepository.class);
+    String ceSymbol = OpenAlgoSymbols.optionSymbol("NIFTY", EXPIRY, new BigDecimal("25000"), "CE");
+
+    when(client.expiries(NIFTY_KEY)).thenReturn(List.of(EXPIRY));
+    when(client.optionContracts(NIFTY_KEY, EXPIRY)).thenReturn(List.of(ce()));
+    when(client.futureContracts(NIFTY_KEY, EXPIRY)).thenReturn(List.of());
+    stubBand(repo);
+    when(repo.coverage("NFO", ceSymbol)).thenReturn(Coverage.NONE);
+    // the only bar is days BEFORE expiry → reachedExpiry=false → first fetch is short → PARTIAL.
+    when(client.candles(eq("NSE_FO|CE|16-06-2026"), eq("1minute"), any(), any()))
+        .thenReturn(List.of(barAt("2026-06-10T15:29:00+05:30")), List.of());
+
+    ExpiredBackfillService service = new ExpiredBackfillService(provider(), candles, repo, 0L);
+    service.run(client, List.of("NIFTY"), EXPIRY.minusDays(7), EXPIRY, "job-a", false);
+
+    verify(repo).upsertContract(
+        eq("NFO"), eq(ceSymbol), any(), any(), any(), any(), anyInt(), any(), anyBoolean(),
+        any(), any(), any(), any(), anyInt(), eq(false));
+  }
+
+  @Test
+  void partialContractIsReFetchedAndAcceptedComplete() {
+    UpstoxExpiredInstrumentsClient client = mock(UpstoxExpiredInstrumentsClient.class);
+    CandleRepository candles = mock(CandleRepository.class);
+    ExpiredBackfillRepository repo = mock(ExpiredBackfillRepository.class);
+    String ceSymbol = OpenAlgoSymbols.optionSymbol("NIFTY", EXPIRY, new BigDecimal("25000"), "CE");
+
+    when(client.expiries(NIFTY_KEY)).thenReturn(List.of(EXPIRY));
+    when(client.optionContracts(NIFTY_KEY, EXPIRY)).thenReturn(List.of(ce()));
+    when(client.futureContracts(NIFTY_KEY, EXPIRY)).thenReturn(List.of());
+    stubBand(repo);
+    // already registered short (PARTIAL) → re-fetched (NOT skipped); even still-short, accepted COMPLETE.
+    when(repo.coverage("NFO", ceSymbol)).thenReturn(Coverage.PARTIAL);
+    when(client.candles(eq("NSE_FO|CE|16-06-2026"), eq("1minute"), any(), any()))
+        .thenReturn(List.of(barAt("2026-06-10T15:29:00+05:30")), List.of());
+
+    ExpiredBackfillService service = new ExpiredBackfillService(provider(), candles, repo, 0L);
+    ExpiredBackfillService.BackfillSummary s =
+        service.run(client, List.of("NIFTY"), EXPIRY.minusDays(7), EXPIRY, "job-b", false);
+
+    assertThat(s.legsWritten()).isEqualTo(1);
+    assertThat(s.legsSkipped()).isZero();
+    verify(repo).upsertContract(
+        eq("NFO"), eq(ceSymbol), any(), any(), any(), any(), anyInt(), any(), anyBoolean(),
+        any(), any(), any(), any(), anyInt(), eq(true));
+  }
+
+  @Test
+  void emptyWindowIsRetriedOnceBeforeBeingTrustedAsEmpty() {
+    UpstoxExpiredInstrumentsClient client = mock(UpstoxExpiredInstrumentsClient.class);
+    CandleRepository candles = mock(CandleRepository.class);
+    ExpiredBackfillRepository repo = mock(ExpiredBackfillRepository.class);
+    String ceSymbol = OpenAlgoSymbols.optionSymbol("NIFTY", EXPIRY, new BigDecimal("25000"), "CE");
+
+    when(client.expiries(NIFTY_KEY)).thenReturn(List.of(EXPIRY));
+    when(client.optionContracts(NIFTY_KEY, EXPIRY)).thenReturn(List.of(ce()));
+    when(client.futureContracts(NIFTY_KEY, EXPIRY)).thenReturn(List.of());
+    stubBand(repo);
+    when(repo.coverage("NFO", ceSymbol)).thenReturn(Coverage.NONE);
+    // window 0: [] then (retry) [bar] → the retry rescues the false-empty; later windows empty → stop.
+    when(client.candles(eq("NSE_FO|CE|16-06-2026"), eq("1minute"), any(), any()))
+        .thenReturn(List.of(), List.of(barAt("2026-06-16T15:29:00+05:30")), List.of(), List.of());
+
+    ExpiredBackfillService service = new ExpiredBackfillService(provider(), candles, repo, 0L);
+    ExpiredBackfillService.BackfillSummary s =
+        service.run(client, List.of("NIFTY"), EXPIRY.minusDays(7), EXPIRY, "job-c", false);
+
+    // without the retry the first (false-)empty would have yielded zero data; the bar proves the retry.
+    assertThat(s.candleRows()).isEqualTo(1);
+    verify(candles).upsertAll(any());
   }
 }

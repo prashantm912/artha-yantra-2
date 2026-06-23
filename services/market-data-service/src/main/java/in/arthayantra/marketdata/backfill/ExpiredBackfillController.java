@@ -29,9 +29,11 @@ public class ExpiredBackfillController {
 
   /**
    * Backfill request — all fields optional. Defaults: both indices, the trailing 365 days, 1-minute.
+   * {@code force} = re-fetch + merge even already-complete contracts (a verify pass that closes any
+   * residual holes); default false (normal resume — skip complete, re-fetch only short/missing).
    */
   public record ExpiredBackfillRequest(
-      List<String> underlyings, LocalDate from, LocalDate to, String interval) {}
+      List<String> underlyings, LocalDate from, LocalDate to, String interval, Boolean force) {}
 
   private final ExpiredBackfillService service;
 
@@ -45,12 +47,13 @@ public class ExpiredBackfillController {
   public ResponseEntity<Map<String, String>> backfill(
       @RequestBody(required = false) ExpiredBackfillRequest request) {
     ExpiredBackfillRequest r =
-        request == null ? new ExpiredBackfillRequest(null, null, null, null) : request;
+        request == null ? new ExpiredBackfillRequest(null, null, null, null, null) : request;
     LocalDate to = r.to() != null ? r.to() : LocalDate.now(IST);
     LocalDate from = r.from() != null ? r.from() : to.minusYears(1);
     List<String> underlyings =
         r.underlyings() == null || r.underlyings().isEmpty() ? DEFAULT_UNDERLYINGS : r.underlyings();
+    boolean force = Boolean.TRUE.equals(r.force());
     return ResponseEntity.status(HttpStatus.ACCEPTED)
-        .body(service.triggerAsync(underlyings, from, to, r.interval()));
+        .body(service.triggerAsync(underlyings, from, to, r.interval(), force));
   }
 }

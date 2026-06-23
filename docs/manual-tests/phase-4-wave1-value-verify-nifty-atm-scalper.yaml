@@ -1,0 +1,68 @@
+# Value-verify fixture (NOT a CI/deployed strategy — a one-off Part-2 verification strategy).
+# A tightened nifty-atm-scalper for a single liquid session: ATM±1, single position, simplified
+# exits, smaller budget — fast to walk vs oipulse + isolates signal quality from capital.
+# Import via the React Strategy Editor (or POST the strategy), then reference its id in a backtest run.
+# Authority: docs/manual-tests/phase-4-wave1-value-verify-runbook.md.
+schema: strategy-schema/v1
+id: nifty-atm-value-verify
+name: "NIFTY ATM Value-Verify Scalper"
+version: 1.0.0
+description: "Part-2 value-verify: momentum scalp on nearest-weekly ATM±1 NIFTY options, long premium only"
+author: owner
+tags: [options, scalping, intraday, nifty, value-verify]
+enabled: true
+
+universe:
+  mode: options_of_underlying
+  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  options:
+    expiry: nearest_weekly
+    strikes: { selector: atm_window, width: 1 }   # ATM +/- 1 strike (densest OI capture)
+    option_types: [CE, PE]                         # long bias -> CE, short bias -> PE
+
+timeframes:
+  primary: 1m
+  additional: [5m]
+
+indicators:
+  - { name: EMA,        alias: ema_fast,   timeframe: 1m, params: { period: 9 },  weight: 1.0 }
+  - { name: EMA,        alias: ema_slow,   timeframe: 1m, params: { period: 21 }, weight: 1.0 }
+  - { name: VWAP,       alias: vwap_1m,    timeframe: 1m, weight: 1.0 }
+  - { name: RSI,        alias: rsi_1m,     timeframe: 1m, params: { period: 14 }, weight: 0.8,
+      normalize: { type: rsi_momentum } }
+  - { name: SUPERTREND, alias: st_5m,      timeframe: 5m, params: { period: 10, multiplier: 2.0 },
+      weight: 1.2, normalize: { type: direction } }
+
+entry_rules:
+  direction: both
+  gate:
+    all:
+      - crossover: { fast: ema_fast, slow: ema_slow }
+      - "close > vwap_1m"
+      - not: "rsi_1m > 75"
+  scoring:
+    threshold: 0.65
+    optional_min_score: 0.6
+    optional_gate_margin: 0.15
+
+# Simplified exits for the verify: premium SL/TP + the EMA-crossunder signal exit only
+# (trailing + time-stop dropped so the exit reasons are deterministic + easy to read vs oipulse).
+exit_rules:
+  - { type: stop_loss,   params: { basis: premium_pct, value: 20 } }
+  - { type: take_profit, params: { basis: premium_pct, value: 35 } }
+  - { type: signal_exit, params: { rule: "crossunder(ema_fast, ema_slow)" } }
+
+risk:
+  position_sizing: { method: premium_budget, params: { budget_inr: 7500 } }  # ~3-4 lots at a ~200 premium
+  max_positions: 1
+  max_positions_per_underlying: 1
+  max_daily_loss_pct: 3.0
+  session:
+    style: intraday
+    window: { from: "09:20", to: "15:00" }
+    square_off: "15:12"
+    expiry_day: { allowed: true, window: { from: "09:20", to: "14:30" } }
+
+backtest:
+  defaults: { interval: 1m, lookback_days: 60, initial_capital: 200000,
+              costs: { per_lot_inr: 20, slippage_ticks: 1 } }

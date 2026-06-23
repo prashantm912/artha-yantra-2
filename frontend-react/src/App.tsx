@@ -114,6 +114,9 @@ const BacktestComparePage = lazy(() =>
 const SweepDetailPage = lazy(() =>
   import('./pages/optimizations/SweepDetailPage.tsx').then((m) => ({ default: m.SweepDetailPage })),
 );
+const ChartsPage = lazy(() =>
+  import('./pages/charts/ChartsPage.tsx').then((m) => ({ default: m.ChartsPage })),
+);
 
 function Lazy({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<p className="text-sm text-ay-muted">Loading chart…</p>}>{children}</Suspense>;
@@ -136,6 +139,7 @@ export function App() {
           <Route path="/journal" element={<JournalPage />} />
           <Route path="/watchlists" element={<WatchlistsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/charts" element={<Lazy><ChartsPage /></Lazy>} />
           {/* Options */}
           <Route path="/options/options-chain" element={<OptionsChainPage />} />
           <Route path="/options/oi-spurt" element={<OptionsSpurtPage />} />

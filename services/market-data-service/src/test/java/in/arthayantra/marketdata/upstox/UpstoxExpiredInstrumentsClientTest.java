@@ -1,0 +1,145 @@
+package in.arthayantra.marketdata.upstox;
+
+import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.github.tomakehurst.wiremock.WireMockServer;
+import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
+import in.arthayantra.marketdata.upstox.UpstoxExpiredInstrumentsClient.Bar;
+import in.arthayantra.marketdata.upstox.UpstoxExpiredInstrumentsClient.Leg;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.List;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.web.client.RestClient;
+
+/**
+ * WireMock test for {@link UpstoxExpiredInstrumentsClient}: each of the four expired-instruments
+ * endpoints is parsed into its domain shape, with the Bearer token and request path asserted. The
+ * candle response is the positional {@code [ts,o,h,l,c,v,oi]} array — index 6 is the open interest.
+ */
+class UpstoxExpiredInstrumentsClientTest {
+
+  private static WireMockServer wireMock;
+
+  @BeforeAll
+  static void start() {
+    wireMock = new WireMockServer(WireMockConfiguration.wireMockConfig().dynamicPort());
+    wireMock.start();
+  }
+
+  @AfterAll
+  static void stop() {
+    wireMock.stop();
+  }
+
+  @BeforeEach
+  void reset() {
+    wireMock.resetAll();
+  }
+
+  private static UpstoxExpiredInstrumentsClient client() {
+    return new UpstoxExpiredInstrumentsClient(
+        RestClient.builder(),
+        new UpstoxAnalyticsProperties(wireMock.baseUrl(), null, "test-token"));
+  }
+
+  @Test
+  void expiriesParsesDatesAndSendsBearer() {
+    wireMock.stubFor(
+        get(urlPathEqualTo("/v2/expired-instruments/expiries"))
+            .willReturn(
+                aResponse()
+                    .withHeader("Content-Type", "application/json")
+                    .withBody("{\"status\":\"success\",\"data\":[\"2026-06-16\",\"2026-06-09\"]}")));
+
+    List<LocalDate> expiries = client().expiries("NSE_INDEX|Nifty 50");
+
+    assertThat(expiries).containsExactly(LocalDate.of(2026, 6, 16), LocalDate.of(2026, 6, 9));
+    wireMock.verify(
+        getRequestedFor(urlPathEqualTo("/v2/expired-instruments/expiries"))
+            .withHeader("Authorization", equalTo("Bearer test-token"))
+            .withQueryParam("instrument_key", equalTo("NSE_INDEX|Nifty 50")));
+  }
+
+  @Test
+  void optionContractsParseSpec() {
+    wireMock.stubFor(
+        get(urlPathEqualTo("/v2/expired-instruments/option/contract"))
+            .willReturn(
+                aResponse()
+                    .withHeader("Content-Type", "application/json")
+                    .withBody(
+                        "{\"status\":\"success\",\"data\":[{"
+                            + "\"segment\":\"NSE_FO\",\"instrument_key\":\"NSE_FO|50436|16-06-2026\","
+                            + "\"trading_symbol\":\"NIFTY 21200 PE 16 JUN 26\",\"lot_size\":65,"
+                            + "\"tick_size\":5.0,\"instrument_type\":\"PE\",\"underlying_key\":\"NSE_INDEX|Nifty 50\","
+                            + "\"underlying_symbol\":\"NIFTY\",\"strike_price\":21200.0,\"weekly\":true}]}")));
+
+    List<Leg> legs = client().optionContracts("NSE_INDEX|Nifty 50", LocalDate.of(2026, 6, 16));
+
+    assertThat(legs).hasSize(1);
+    Leg leg = legs.get(0);
+    assertThat(leg.segment()).isEqualTo("NSE_FO");
+    assertThat(leg.instrumentType()).isEqualTo("PE");
+    assertThat(leg.strike()).isEqualByComparingTo("21200");
+    assertThat(leg.lotSize()).isEqualTo(65);
+    assertThat(leg.underlyingSymbol()).isEqualTo("NIFTY");
+    assertThat(leg.weekly()).isTrue();
+    assertThat(leg.expiry()).isEqualTo(LocalDate.of(2026, 6, 16));
+  }
+
+  @Test
+  void futureContractsForceFutType() {
+    wireMock.stubFor(
+        get(urlPathEqualTo("/v2/expired-instruments/future/contract"))
+            .willReturn(
+                aResponse()
+                    .withHeader("Content-Type", "application/json")
+                    .withBody(
+                        "{\"status\":\"success\",\"data\":[{"
+                            + "\"segment\":\"NSE_FO\",\"instrument_key\":\"NSE_FO|54452|24-04-2025\","
+                            + "\"trading_symbol\":\"NIFTY FUT 24 APR 25\",\"lot_size\":75,"
+                            + "\"underlying_symbol\":\"NIFTY\",\"underlying_key\":\"NSE_INDEX|Nifty 50\"}]}")));
+
+    List<Leg> legs = client().futureContracts("NSE_INDEX|Nifty 50", LocalDate.of(2025, 4, 24));
+
+    assertThat(legs).hasSize(1);
+    assertThat(legs.get(0).instrumentType()).isEqualTo("FUT");
+    assertThat(legs.get(0).strike()).isNull();
+  }
+
+  @Test
+  void candlesParseOhlcvAndOi() {
+    wireMock.stubFor(
+        get(urlPathEqualTo("/v2/expired-instruments/historical-candle/NSEFOTESTKEY/1minute/2026-06-16/2026-06-15"))
+            .willReturn(
+                aResponse()
+                    .withHeader("Content-Type", "application/json")
+                    .withBody(
+                        "{\"status\":\"success\",\"data\":{\"candles\":["
+                            + "[\"2026-06-16T15:29:00+05:30\",238.95,239.2,238.15,239.1,22750,315185],"
+                            + "[\"2026-06-16T15:28:00+05:30\",238.65,239.0,238.1,238.5,105690,330005]]}}")));
+
+    List<Bar> bars =
+        client()
+            .candles("NSEFOTESTKEY", "1minute", LocalDate.of(2026, 6, 15), LocalDate.of(2026, 6, 16));
+
+    assertThat(bars).hasSize(2);
+    Bar first = bars.get(0);
+    assertThat(first.open()).isEqualByComparingTo("238.95");
+    assertThat(first.high()).isEqualByComparingTo("239.2");
+    assertThat(first.low()).isEqualByComparingTo("238.15");
+    assertThat(first.close()).isEqualByComparingTo("239.1");
+    assertThat(first.volume()).isEqualTo(22750);
+    assertThat(first.oi()).isEqualTo(315185L);
+    assertThat(first.bucket().toString()).isEqualTo("2026-06-16T15:29+05:30");
+  }
+}

@@ -38,6 +38,18 @@ public class UpstoxAnalyticsConfig {
   }
 
   /**
+   * The Upstox <b>expired-instruments</b> REST client — feeds {@code ExpiredBackfillService} (backtest
+   * data). Same analytics token + base URL as the Market-Information client; bound only when the
+   * analytics token is enabled (else the admin {@code /expired-backfill} trigger 503s as unconfigured).
+   */
+  @Bean
+  @ConditionalOnProperty(name = "artha.upstox.analytics.enabled", havingValue = "true")
+  public UpstoxExpiredInstrumentsClient upstoxExpiredInstrumentsClient(
+      RestClient.Builder restClientBuilder, UpstoxAnalyticsProperties properties) {
+    return new UpstoxExpiredInstrumentsClient(restClientBuilder, properties);
+  }
+
+  /**
    * Upstox-primary FII/DII cash source (U2), bound as {@code @Primary} when {@code
    * artha.marketdata.source.fiidii=upstox} so the NSE scheduler persists Upstox flows; the NSE
    * {@code LiveFiiDiiFetcher} stays the swap-out fallback. REQUIRES {@code

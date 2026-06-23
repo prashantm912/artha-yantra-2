@@ -148,6 +148,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/admin/expired-backfill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["backfill_1"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instruments/sync": {
         parameters: {
             query?: never;
@@ -1259,6 +1275,14 @@ export interface components {
             expiry?: string;
             /** Format: date */
             date?: string;
+        };
+        ExpiredBackfillRequest: {
+            underlyings?: string[];
+            /** Format: date */
+            from?: string;
+            /** Format: date */
+            to?: string;
+            interval?: string;
         };
         SessionRequest: {
             requestToken?: string;
@@ -2508,6 +2532,41 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["BackfillRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    backfill_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ExpiredBackfillRequest"];
             };
         };
         responses: {

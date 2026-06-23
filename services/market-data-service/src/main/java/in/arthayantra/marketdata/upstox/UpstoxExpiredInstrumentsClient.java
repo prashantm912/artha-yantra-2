@@ -6,7 +6,9 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 
 /**
@@ -28,8 +30,15 @@ import org.springframework.web.client.RestClient;
  */
 public final class UpstoxExpiredInstrumentsClient {
 
+  /** 429 backoff: Upstox throttles by burst; on UDAPI10005 we honor Retry-After, else exponential. */
+  private static final int MAX_429_RETRIES = 5;
+  private static final long BASE_BACKOFF_MS = 1_000;
+  private static final long MAX_BACKOFF_MS = 16_000;
+
   private final RestClient restClient;
   private final UpstoxAnalyticsProperties properties;
+  /** Pre-emptive sliding-window pacing (50/s, 500/min, 2000/30min) — the 30-min cap is the binding one. */
+  private final UpstoxRateLimiter limiter = new UpstoxRateLimiter();
 
   /** Binds the wire client to the configured base URL (real Upstox, or WireMock in tests). */
   public UpstoxExpiredInstrumentsClient(
@@ -69,13 +78,15 @@ public final class UpstoxExpiredInstrumentsClient {
   /** All expiry dates Upstox holds for an underlying ({@code instrument_key} e.g. {@code NSE_INDEX|Nifty 50}). */
   public List<LocalDate> expiries(String underlyingKey) {
     UpstoxExpiry response =
-        restClient
-            .get()
-            .uri(b -> b.path("/v2/expired-instruments/expiries").queryParam("instrument_key", underlyingKey).build())
-            .header("Authorization", "Bearer " + properties.resolveToken())
-            .header("Accept", "application/json")
-            .retrieve()
-            .body(UpstoxExpiry.class);
+        withRetry(
+            () ->
+                restClient
+                    .get()
+                    .uri(b -> b.path("/v2/expired-instruments/expiries").queryParam("instrument_key", underlyingKey).build())
+                    .header("Authorization", "Bearer " + properties.resolveToken())
+                    .header("Accept", "application/json")
+                    .retrieve()
+                    .body(UpstoxExpiry.class));
     if (response == null || response.data() == null) {
       return List.of();
     }
@@ -95,18 +106,20 @@ public final class UpstoxExpiredInstrumentsClient {
   private List<Leg> contracts(
       String kind, String underlyingKey, LocalDate expiry, String typeOverride) {
     UpstoxExpiredContract response =
-        restClient
-            .get()
-            .uri(
-                b ->
-                    b.path("/v2/expired-instruments/" + kind + "/contract")
-                        .queryParam("instrument_key", underlyingKey)
-                        .queryParam("expiry_date", expiry.toString())
-                        .build())
-            .header("Authorization", "Bearer " + properties.resolveToken())
-            .header("Accept", "application/json")
-            .retrieve()
-            .body(UpstoxExpiredContract.class);
+        withRetry(
+            () ->
+                restClient
+                    .get()
+                    .uri(
+                        b ->
+                            b.path("/v2/expired-instruments/" + kind + "/contract")
+                                .queryParam("instrument_key", underlyingKey)
+                                .queryParam("expiry_date", expiry.toString())
+                                .build())
+                    .header("Authorization", "Bearer " + properties.resolveToken())
+                    .header("Accept", "application/json")
+                    .retrieve()
+                    .body(UpstoxExpiredContract.class));
     if (response == null || response.data() == null) {
       return List.of();
     }
@@ -135,16 +148,18 @@ public final class UpstoxExpiredInstrumentsClient {
    */
   public List<Bar> candles(String expiredKey, String interval, LocalDate from, LocalDate to) {
     UpstoxExpiredCandles response =
-        restClient
-            .get()
-            .uri(
-                b ->
-                    b.path("/v2/expired-instruments/historical-candle/{key}/{interval}/{to}/{from}")
-                        .build(expiredKey, interval, to.toString(), from.toString()))
-            .header("Authorization", "Bearer " + properties.resolveToken())
-            .header("Accept", "application/json")
-            .retrieve()
-            .body(UpstoxExpiredCandles.class);
+        withRetry(
+            () ->
+                restClient
+                    .get()
+                    .uri(
+                        b ->
+                            b.path("/v2/expired-instruments/historical-candle/{key}/{interval}/{to}/{from}")
+                                .build(expiredKey, interval, to.toString(), from.toString()))
+                    .header("Authorization", "Bearer " + properties.resolveToken())
+                    .header("Accept", "application/json")
+                    .retrieve()
+                    .body(UpstoxExpiredCandles.class));
     if (response == null || response.data() == null || response.data().candles() == null) {
       return List.of();
     }
@@ -162,5 +177,48 @@ public final class UpstoxExpiredInstrumentsClient {
               oi));
     }
     return bars;
+  }
+
+  /**
+   * Runs a call, retrying on Upstox's {@code 429 Too Many Requests} (UDAPI10005) — the token is
+   * throttled by burst, so a brief backoff (the {@code Retry-After} header if present, else 1→16s
+   * exponential) lets it succeed instead of failing the leg. After {@value #MAX_429_RETRIES} retries
+   * the 429 propagates (the leg fails + is retried next run). Other errors propagate immediately.
+   */
+  private <T> T withRetry(Supplier<T> call) {
+    int attempt = 0;
+    while (true) {
+      limiter.acquire(); // pre-emptive pacing so we never burst past the 2000/30min cap
+      try {
+        return call.get();
+      } catch (HttpClientErrorException.TooManyRequests e) {
+        if (++attempt > MAX_429_RETRIES) {
+          throw e;
+        }
+        sleep(backoffMillis(attempt, e));
+      }
+    }
+  }
+
+  private static long backoffMillis(int attempt, HttpClientErrorException e) {
+    String retryAfter =
+        e.getResponseHeaders() == null ? null : e.getResponseHeaders().getFirst("Retry-After");
+    if (retryAfter != null) {
+      try {
+        return Long.parseLong(retryAfter.trim()) * 1_000L;
+      } catch (NumberFormatException ignored) {
+        // not a seconds value — fall through to exponential backoff
+      }
+    }
+    return Math.min(BASE_BACKOFF_MS << (attempt - 1), MAX_BACKOFF_MS);
+  }
+
+  private static void sleep(long ms) {
+    try {
+      Thread.sleep(ms);
+    } catch (InterruptedException ie) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("interrupted during 429 backoff", ie);
+    }
   }
 }

@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -55,5 +56,11 @@ public class ExpiredBackfillController {
     boolean force = Boolean.TRUE.equals(r.force());
     return ResponseEntity.status(HttpStatus.ACCEPTED)
         .body(service.triggerAsync(underlyings, from, to, r.interval(), force));
+  }
+
+  /** Live progress while a run is in flight, else the last-run audit (B1 Collection Status). */
+  @GetMapping("/expired-backfill/status")
+  public ExpiredBackfillService.Status status() {
+    return service.status();
   }
 }

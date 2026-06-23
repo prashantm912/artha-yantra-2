@@ -15,6 +15,7 @@ vi.mock('../../api/signals.ts', () => ({
     },
   }),
   useSignalsLive: () => {},
+  useSignalDetail: () => ({ data: undefined }),
 }));
 vi.mock('../../api/paper.ts', () => ({
   usePaperPositions: () => ({ data: { items: [{ id: 3, exchange: 'NSE', tradingsymbol: 'INFY', side: 'SELL', qty: 100, avgEntryPrice: '1500.00', markPrice: '1490.00', unrealizedPnl: '1000.00' }] } }),

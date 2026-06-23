@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { formatDecimal } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
@@ -6,11 +6,13 @@ import { Select } from '../../components/atoms/Select.tsx';
 import {
   SIGNAL_STATUSES,
   useDismissSignal,
+  useSignalDetail,
   useSignals,
   useSignalsLive,
   useTakeSignal,
   type SignalDto,
 } from '../../api/signals.ts';
+import { ManualVerifyChecklist } from '../../components/ManualVerifyChecklist.tsx';
 import { ReasoningBreakdown } from './ReasoningBreakdown.tsx';
 
 // /signals cockpit page (master plan §20 parity, C-2.24/C-2.26): live feed + history in one
@@ -49,6 +51,14 @@ export function SignalsPage() {
 
   const rows = useMemo(() => q.data?.items ?? [], [q.data]);
   const selected = useMemo(() => rows.find((r) => r.id === selectedId) ?? null, [rows, selectedId]);
+
+  // The live frame may omit scalperDetail — hydrate the selected signal via GET /signals/{id}.
+  const detail = useSignalDetail(selectedId);
+  const scalperDetail = detail.data?.scalperDetail ?? null;
+  const [confirmed, setConfirmed] = useState(false);
+  const onConfirmedChange = useCallback((v: boolean) => setConfirmed(v), []);
+  // A non-scalper signal has no checklist → never gated.
+  const takeBlocked = scalperDetail != null && !confirmed;
 
   const takenQty = (s: SignalDto): number | undefined =>
     s.suggestedQty ? Number(s.suggestedQty) : undefined;
@@ -160,11 +170,16 @@ export function SignalsPage() {
               {selected.target ? formatDecimal(selected.target, 2) : '—'} · suggested qty{' '}
               {selected.suggestedQty ?? '—'}
             </div>
+            {scalperDetail && (
+              <div className="mb-4">
+                <ManualVerifyChecklist detail={scalperDetail} onConfirmedChange={onConfirmedChange} />
+              </div>
+            )}
             <div className="mb-4 flex flex-wrap gap-2">
               <button
                 type="button"
                 onClick={() => take.mutate({ id: selected.id, qty: takenQty(selected) })}
-                disabled={take.isPending}
+                disabled={take.isPending || takeBlocked}
                 className="rounded-md bg-bull/15 px-3 py-1.5 text-sm font-medium text-bull ring-1 ring-bull/40 hover:bg-bull/25 disabled:opacity-50"
               >
                 ✓ Taken

@@ -55,6 +55,7 @@ vi.mock('../../api/signals.ts', () => ({
   SIGNAL_STATUSES: ['ACTIVE', 'EXPIRED', 'TAKEN', 'DISMISSED'],
   useSignals: () => ({ data: { items: [signal] }, isFetching: false, isLoading: false, refetch: () => {} }),
   useSignalsLive: () => {},
+  useSignalDetail: () => ({ data: signal }),
   useTakeSignal: () => ({ mutate: take, isPending: false }),
   useDismissSignal: () => ({ mutate: dismiss, isPending: false }),
 }));

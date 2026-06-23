@@ -19,6 +19,7 @@ import { MarketHolidaysPage } from './pages/features/MarketHolidaysPage.tsx';
 import { ParticipantWiseOiPage } from './pages/fiidii/ParticipantWiseOiPage.tsx';
 import { SignalsPage } from './pages/signals/SignalsPage.tsx';
 import { DashboardPage } from './pages/dashboard/DashboardPage.tsx';
+import { ScalperCockpitPage } from './pages/scalper/ScalperCockpitPage.tsx';
 import { StrategiesListPage } from './pages/strategies/StrategiesListPage.tsx';
 import { StrategyVersionsPage } from './pages/strategies/StrategyVersionsPage.tsx';
 import { StrategyEditorPage } from './pages/strategies/StrategyEditorPage.tsx';
@@ -133,6 +134,7 @@ export function App() {
         <Route element={<AppShell />}>
           <Route index element={<Navigate to="/options/options-chain" replace />} />
           {/* Trading (cockpit) */}
+          <Route path="/scalper" element={<ScalperCockpitPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/signals" element={<SignalsPage />} />
           <Route path="/paper" element={<Lazy><PaperPage /></Lazy>} />

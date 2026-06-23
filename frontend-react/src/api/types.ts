@@ -585,7 +585,8 @@ export interface Breadth {
   asOf: string;
 }
 
-/** One Futures OI Buzz constituent tile — BigDecimal fields are decimal STRINGS; oi is a number. */
+/** One Futures OI Buzz constituent tile — BigDecimal fields are decimal STRINGS; oi/oiChange numbers.
+ * oiChange (vs prev-session close OI) + its 4-state interpretation are null until the prev-OI cache warms. */
 export interface OiBuzzTile {
   symbol: string;
   changePct: string | null;
@@ -594,6 +595,8 @@ export interface OiBuzzTile {
   high: string | null;
   low: string | null;
   oi: number | null;
+  oiChange: number | null;
+  interpretation: OiInterpretation | null;
 }
 
 /** GET /api/v1/market/futures/oi-buzz-heatmap?name= — constituent %change tiles + advance/decline. */

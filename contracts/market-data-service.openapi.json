@@ -5110,6 +5110,14 @@
           "oi" : {
             "type" : "integer",
             "format" : "int64"
+          },
+          "oiChange" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "interpretation" : {
+            "type" : "string",
+            "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
           }
         }
       },

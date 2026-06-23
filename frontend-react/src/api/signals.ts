@@ -1,0 +1,156 @@
+// Signals cockpit data layer (master plan §20 cockpit-parity / C-2.22-2.26). Ports Angular's
+// SignalsStore: REST history page + live unshift from the STOMP `/topic/signals` channel into a
+// BOUNDED ring, deduped by id; on WS reconnect the snapshot re-fetches (gap-heal). Take/Dismiss are
+// the first mutations in the React app — apiFetch echoes XSRF on the POST automatically.
+
+import { useEffect } from 'react';
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { apiFetch } from './client.ts';
+import { wsClient } from '../lib/wsClient.ts';
+
+/** One signal as both the REST snapshot and the live channel deliver it (frozen C-2.6 shape). */
+export interface SignalDto {
+  id: number;
+  strategyVersionId?: string;
+  strategyName?: string;
+  strategyId?: string;
+  version?: string;
+  checksum?: string;
+  exchange: string;
+  tradingsymbol: string;
+  interval: string;
+  signalType: 'ENTRY' | 'EXIT';
+  side: 'BUY' | 'SELL';
+  entryPrice: string | null;
+  stopLoss: string | null;
+  target: string | null;
+  compositeScore: string;
+  scoreBreakdown: ScoreBreakdownDto;
+  status: 'ACTIVE' | 'EXPIRED' | 'TAKEN' | 'DISMISSED';
+  generatedAt: string;
+  expiresAt?: string | null;
+  suggestedQty?: string | null;
+}
+
+/** The frozen C-2.6 reasoning contract (composite = Σ contributions ÷ weightDenominator). */
+export interface ScoreBreakdownDto {
+  composite: number | string;
+  threshold: number | string;
+  passed: boolean;
+  requiredComposite: number | string;
+  optionalMinScore: number | string;
+  optionalGateMargin: number | string;
+  weightDenominator: number | string;
+  gate: GateNodeDto;
+  indicators: IndicatorEntryDto[];
+}
+
+/** Recursive gate-tree node. */
+export interface GateNodeDto {
+  kind: string;
+  rule?: string;
+  passed: boolean;
+  operands?: Record<string, number | string | null>;
+  children?: GateNodeDto[];
+}
+
+/** One scoring-indicator line. */
+export interface IndicatorEntryDto {
+  alias: string;
+  name: string;
+  timeframe: string;
+  score: number | string | null;
+  weight: number | string;
+  contribution: number | string;
+  optional: boolean;
+  activated: boolean;
+  activationReason: 'REQUIRED' | 'ACTIVATED' | 'SCORE_BELOW_MIN' | 'MARGIN_NOT_MET';
+  rawValue: number | string | null;
+  params: Record<string, unknown>;
+}
+
+interface SignalPage {
+  items: SignalDto[];
+}
+
+/** The live feed keeps at most this many rows in memory (bounded ring, C-2.22). */
+export const SIGNAL_RING_LIMIT = 200;
+
+export const SIGNAL_STATUSES = ['ACTIVE', 'EXPIRED', 'TAKEN', 'DISMISSED'] as const;
+
+const SIGNALS_KEY = 'signals';
+
+/** REST history page; the live channel and reconnect heal it. `status=null` = all. */
+export function useSignals(status: string | null) {
+  return useQuery({
+    queryKey: [SIGNALS_KEY, status],
+    queryFn: () => {
+      const params = new URLSearchParams({ limit: '50', offset: '0' });
+      if (status) params.set('status', status);
+      return apiFetch<SignalPage>(`/signals?${params.toString()}`);
+    },
+  });
+}
+
+/**
+ * Subscribes the active query to the `/topic/signals` channel: each frame is merged into the cache
+ * (newest first, deduped by id, ring-bounded). A frame whose status no longer matches the active
+ * filter only updates a row already shown (status transition); a reconnect re-fetches the snapshot.
+ */
+export function useSignalsLive(status: string | null) {
+  const qc = useQueryClient();
+  useEffect(() => {
+    const merge = (body: string) => {
+      let sig: SignalDto;
+      try {
+        sig = JSON.parse(body) as SignalDto;
+      } catch {
+        return; // unparseable frame — the REST snapshot heals
+      }
+      qc.setQueryData<SignalPage>([SIGNALS_KEY, status], (prev) => {
+        const items = prev?.items ?? [];
+        if (status && sig.status !== status) {
+          const next = items.map((i) => (i.id === sig.id ? sig : i));
+          return { items: next };
+        }
+        const without = items.filter((i) => i.id !== sig.id);
+        return { items: [sig, ...without].slice(0, SIGNAL_RING_LIMIT) };
+      });
+    };
+    const offTopic = wsClient.topic('/topic/signals', merge);
+    const offReconnect = wsClient.onReconnect(() =>
+      qc.invalidateQueries({ queryKey: [SIGNALS_KEY] }),
+    );
+    return () => {
+      offTopic();
+      offReconnect();
+    };
+  }, [qc, status]);
+}
+
+/** Replaces a row across every cached signals page (after a take/dismiss round-trip). */
+function replaceInCaches(qc: QueryClient, updated: SignalDto): void {
+  qc.setQueriesData<SignalPage>({ queryKey: [SIGNALS_KEY] }, (prev) =>
+    prev ? { items: prev.items.map((i) => (i.id === updated.id ? updated : i)) } : prev,
+  );
+}
+
+/** Mark a signal taken; a qty opens a paper position (A12 prefill). */
+export function useTakeSignal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, qty }: { id: number; qty?: number }) =>
+      apiFetch<SignalDto>(`/signals/${id}/taken`, { method: 'POST', json: qty ? { qty } : {} }),
+    onSuccess: (updated) => replaceInCaches(qc, updated),
+  });
+}
+
+/** Dismiss (reject) a signal. */
+export function useDismissSignal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) =>
+      apiFetch<SignalDto>(`/signals/${id}/dismiss`, { method: 'POST', json: {} }),
+    onSuccess: (updated) => replaceInCaches(qc, updated),
+  });
+}

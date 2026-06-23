@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { formatDecimal } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
@@ -176,6 +177,12 @@ export function SignalsPage() {
               >
                 ✕ Dismiss
               </button>
+              <Link
+                to={`/charts?symbol=${encodeURIComponent(`${selected.exchange}:${selected.tradingsymbol}`)}&interval=${selected.interval}&signalId=${selected.id}`}
+                className="rounded-md border border-ay-border px-3 py-1.5 text-sm hover:border-accent"
+              >
+                📈 View on chart
+              </Link>
             </div>
             <ReasoningBreakdown breakdown={selected.scoreBreakdown} />
           </>

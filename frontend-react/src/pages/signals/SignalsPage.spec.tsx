@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { SignalDto } from '../../api/signals.ts';
 
@@ -64,7 +65,9 @@ function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <SignalsPage />
+      <MemoryRouter>
+        <SignalsPage />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }

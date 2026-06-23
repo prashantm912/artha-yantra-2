@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import type { EChartsOption } from 'echarts';
 import { formatDecimal } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
@@ -250,6 +250,9 @@ export function BacktestResultsPage() {
             <div className="mt-2 rounded-lg border border-ay-border bg-surface-1 p-3 text-sm">
               <strong>Trade #{selected.seq}</strong> — entry {selected.entryTs.slice(0, 16)} · touch{' '}
               {selected.touchBasis ?? '—'} · stop {price(selected.stopLoss)} · target {price(selected.takeProfit)}
+              <Link to={`/charts?runId=${id}&tradeId=${selected.seq}`} className="ml-2 text-xs text-accent hover:underline">
+                📈 View on chart
+              </Link>
               {contributions.length > 0 && (
                 <div className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 tabular-nums">
                   {contributions.map((c) => (

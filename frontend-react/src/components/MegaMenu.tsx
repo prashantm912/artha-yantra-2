@@ -21,6 +21,7 @@ const SECTIONS: MenuSection[] = [
     items: [
       { label: 'Dashboard', to: '/dashboard' }, // cockpit — at-a-glance status/signals/paper/jobs (E-2)
       { label: 'Signals', to: '/signals' }, // cockpit — live feed + reasoning breakdown (C-2.26)
+      { label: 'Charts', to: '/charts' }, // cockpit — candlestick + trade/signal overlays (A13)
       { label: 'Paper Trading', to: '/paper' }, // cockpit — positions + ledger + risk limits (F-43)
       { label: 'Journal', to: '/journal' }, // cockpit — weekly-review entries (F-44A)
       { label: 'Watchlists', to: '/watchlists' }, // cockpit — named lists + screener (E-8)

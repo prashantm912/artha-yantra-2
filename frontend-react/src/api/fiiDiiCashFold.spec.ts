@@ -30,6 +30,18 @@ describe('foldFiiDiiCash', () => {
     expect(out[0].inMarket).toBe('2058.97'); // −168.71 + 2227.68
   });
 
+  it('matches the Upstox "FII/FPI" category label (not just exact "FII")', () => {
+    // The live Upstox feed labels the FII side "FII/FPI"; an exact === 'FII' match blanked the whole
+    // FII column + In-Market. Prefix match must populate both. (live-verified 2026-06-23)
+    const out = foldFiiDiiCash([
+      r('2026-06-22', 'FII/FPI', '12000.00', '12635.91', '-635.91'),
+      r('2026-06-22', 'DII', '20000.00', '18964.28', '1035.72'),
+    ]);
+    expect(out[0].fiiNet).toBe('-635.91');
+    expect(out[0].diiNet).toBe('1035.72');
+    expect(out[0].inMarket).toBe('399.81'); // −635.91 + 1035.72
+  });
+
   it('sorts dates newest first', () => {
     const out = foldFiiDiiCash([
       r('2026-06-14', 'FII', '1', '1', '0'),

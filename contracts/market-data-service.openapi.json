@@ -5444,6 +5444,9 @@
           },
           "close" : {
             "type" : "number"
+          },
+          "points" : {
+            "type" : "number"
           }
         }
       },
@@ -5460,6 +5463,15 @@
             "type" : "number"
           },
           "declineTotal" : {
+            "type" : "number"
+          },
+          "indexLevel" : {
+            "type" : "number"
+          },
+          "advancePoints" : {
+            "type" : "number"
+          },
+          "declinePoints" : {
             "type" : "number"
           },
           "advances" : {

@@ -35,16 +35,25 @@ public class EquityIndexContributionService {
     this.weights = weights;
   }
 
-  /** One constituent's contribution: weight × % change (percent of the index move). */
+  /** One constituent's contribution: weight × % change. {@code points} = contribution × index level /
+   * 100 (oipulse's index-point form; null when the index daily close isn't in the candle archive). */
   public record ContribRow(
-      int rank, String symbol, BigDecimal contribution, BigDecimal changePct, BigDecimal close) {}
+      int rank,
+      String symbol,
+      BigDecimal contribution,
+      BigDecimal changePct,
+      BigDecimal close,
+      BigDecimal points) {}
 
-  /** Advances + declines, each ranked by |contribution|, with their summed contributions. */
+  /** Advances + declines, each ranked by |contribution|, with their summed contributions + points. */
   public record IndexContribution(
       String index,
       BigDecimal indexChangePct,
       BigDecimal advanceTotal,
       BigDecimal declineTotal,
+      BigDecimal indexLevel,
+      BigDecimal advancePoints,
+      BigDecimal declinePoints,
       List<ContribRow> advances,
       List<ContribRow> declines,
       LocalDate asOf) {}
@@ -56,11 +65,15 @@ public class EquityIndexContributionService {
           ErrorCodes.NOT_FOUND_RESOURCE, "no seeded weights for index '" + index + "'");
     }
     Map<String, Latest> latest = latestChange();
+    LocalDate asOf = asOf();
+    BigDecimal indexLevel = indexClose(index, asOf); // null when the index 1d candle isn't archived
 
     List<ContribRow> advances = new ArrayList<>();
     List<ContribRow> declines = new ArrayList<>();
     BigDecimal advTotal = BigDecimal.ZERO;
     BigDecimal decTotal = BigDecimal.ZERO;
+    BigDecimal advPts = BigDecimal.ZERO;
+    BigDecimal decPts = BigDecimal.ZERO;
     for (Map.Entry<String, BigDecimal> e : w.entrySet()) {
       Latest l = latest.get(e.getKey());
       if (l == null || l.changePct == null) {
@@ -68,13 +81,23 @@ public class EquityIndexContributionService {
       }
       BigDecimal contribution =
           e.getValue().multiply(l.changePct).divide(HUNDRED, 4, RoundingMode.HALF_UP);
-      ContribRow row = new ContribRow(0, e.getKey(), contribution, l.changePct, l.close);
+      BigDecimal points =
+          indexLevel == null
+              ? null
+              : contribution.multiply(indexLevel).divide(HUNDRED, 2, RoundingMode.HALF_UP);
+      ContribRow row = new ContribRow(0, e.getKey(), contribution, l.changePct, l.close, points);
       if (contribution.signum() >= 0) {
         advances.add(row);
         advTotal = advTotal.add(contribution);
+        if (points != null) {
+          advPts = advPts.add(points);
+        }
       } else {
         declines.add(row);
         decTotal = decTotal.add(contribution);
+        if (points != null) {
+          decPts = decPts.add(points);
+        }
       }
     }
     if (advances.isEmpty() && declines.isEmpty()) {
@@ -86,17 +109,35 @@ public class EquityIndexContributionService {
     List<ContribRow> rankedDec = rank(declines);
     BigDecimal indexChangePct = advTotal.add(decTotal).setScale(2, RoundingMode.HALF_UP);
     return new IndexContribution(
-        index, indexChangePct, advTotal.setScale(2, RoundingMode.HALF_UP),
-        decTotal.setScale(2, RoundingMode.HALF_UP), rankedAdv, rankedDec, asOf());
+        index,
+        indexChangePct,
+        advTotal.setScale(2, RoundingMode.HALF_UP),
+        decTotal.setScale(2, RoundingMode.HALF_UP),
+        indexLevel,
+        indexLevel == null ? null : advPts.setScale(2, RoundingMode.HALF_UP),
+        indexLevel == null ? null : decPts.setScale(2, RoundingMode.HALF_UP),
+        rankedAdv,
+        rankedDec,
+        asOf);
   }
 
   private static List<ContribRow> rank(List<ContribRow> rows) {
     List<ContribRow> out = new ArrayList<>(rows.size());
     for (int i = 0; i < rows.size(); i++) {
       ContribRow r = rows.get(i);
-      out.add(new ContribRow(i + 1, r.symbol(), r.contribution(), r.changePct(), r.close()));
+      out.add(new ContribRow(i + 1, r.symbol(), r.contribution(), r.changePct(), r.close(), r.points()));
     }
     return out;
+  }
+
+  /** The index's latest 1d close on/before {@code asOf} from the candle archive, or {@code null}. */
+  private BigDecimal indexClose(String index, LocalDate asOf) {
+    return jdbc.query(
+        "SELECT close FROM candles WHERE interval = '1d' AND tradingsymbol = ? "
+            + "AND bucket::date <= ? ORDER BY bucket DESC LIMIT 1",
+        rs -> rs.next() ? rs.getBigDecimal("close") : null,
+        index,
+        java.sql.Date.valueOf(asOf));
   }
 
   private record Latest(BigDecimal changePct, BigDecimal close) {}

@@ -26,6 +26,12 @@ const columns: DataColumn<ContribRow>[] = [
   { id: 'rank', header: '#', render: (r) => String(r.rank), mobileLabel: '#' },
   { id: 'name', header: 'Name', align: 'left', render: (r) => r.symbol, mobileLabel: 'Name' },
   {
+    id: 'point',
+    header: 'Point',
+    render: (r) => (r.points == null ? '—' : <ValueDeltaCell value={r.points} digits={2} />),
+    mobileLabel: 'Point',
+  },
+  {
     id: 'contrib',
     header: 'Contribution',
     render: (r) => <ValueDeltaCell value={r.contribution} digits={4} suffix="%" />,
@@ -72,7 +78,12 @@ export function IndexContributionPage() {
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <div>
             <h2 className="mb-1 text-sm font-semibold text-bull">
-              Advances: {data.advances.length} · Σ <ValueDeltaCell value={data.advanceTotal} suffix="%" />
+              Advances: {data.advances.length}
+              {data.advancePoints != null ? (
+                <> · Points <ValueDeltaCell value={data.advancePoints} digits={2} /></>
+              ) : (
+                <> · Σ <ValueDeltaCell value={data.advanceTotal} suffix="%" /></>
+              )}
             </h2>
             <DataTable
               columns={columns}
@@ -85,7 +96,12 @@ export function IndexContributionPage() {
           </div>
           <div>
             <h2 className="mb-1 text-sm font-semibold text-bear">
-              Declines: {data.declines.length} · Σ <ValueDeltaCell value={data.declineTotal} suffix="%" />
+              Declines: {data.declines.length}
+              {data.declinePoints != null ? (
+                <> · Points <ValueDeltaCell value={data.declinePoints} digits={2} /></>
+              ) : (
+                <> · Σ <ValueDeltaCell value={data.declineTotal} suffix="%" /></>
+              )}
             </h2>
             <DataTable
               columns={columns}

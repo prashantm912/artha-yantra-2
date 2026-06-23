@@ -680,13 +680,15 @@ export interface SectorStats {
   stocks: SectorStockChange[];
 }
 
-/** One constituent's index contribution (weight × %change) — decimal STRINGS. */
+/** One constituent's index contribution (weight × %change) — decimal STRINGS. {@code points} =
+ * contribution × index level / 100 (oipulse's index-point form; null when the index close is absent). */
 export interface ContribRow {
   rank: number;
   symbol: string;
   contribution: string | null;
   changePct: string | null;
   close: string | null;
+  points: string | null;
 }
 
 /** GET /api/v1/market/equity/index-contribution?name= — advances/declines by weighted contribution. */
@@ -695,6 +697,9 @@ export interface IndexContribution {
   indexChangePct: string | null;
   advanceTotal: string | null;
   declineTotal: string | null;
+  indexLevel: string | null;
+  advancePoints: string | null;
+  declinePoints: string | null;
   advances: ContribRow[];
   declines: ContribRow[];
   asOf: string | null;

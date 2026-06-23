@@ -23,6 +23,13 @@ public enum PremiumSource {
    */
   SYNTHETIC_B76,
 
+  /**
+   * Premiums replayed from the option contract's OWN 1-minute {@code candles} (the backfilled
+   * expired-option series, {@code source='BACKFILL'}) — the highest-fidelity premium source, finer
+   * than {@link #SNAPSHOT}'s 5-minute archive. The premium-as-primary tradeable price (Part 2).
+   */
+  CANDLE_1M,
+
   /** Not applicable — the run is on a non-options strategy (no premium series replayed). */
   NA;
 

@@ -17,6 +17,12 @@ interface MenuSection {
 
 const SECTIONS: MenuSection[] = [
   {
+    title: 'Trading',
+    items: [
+      { label: 'Signals', to: '/signals' }, // cockpit — live feed + reasoning breakdown (C-2.26)
+    ],
+  },
+  {
     title: 'Options',
     items: [
       { label: 'Options Chain', to: '/options/options-chain' },

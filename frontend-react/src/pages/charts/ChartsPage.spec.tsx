@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-vi.mock('../../components/atoms/EChart.tsx', () => ({ EChart: () => <div data-testid="echart" /> }));
+vi.mock('../../components/charts/CandleChart.tsx', () => ({ CandleChart: () => <div data-testid="candlechart" /> }));
 vi.mock('../../api/charts.ts', async (orig) => {
   const actual = await orig<typeof import('../../api/charts.ts')>();
   return {
@@ -34,7 +34,7 @@ describe('ChartsPage', () => {
   it('renders the toolbar and the candlestick chart, and loads a new symbol', () => {
     renderPage();
     expect(screen.getByLabelText('Interval')).toBeInTheDocument();
-    expect(screen.getByTestId('echart')).toBeInTheDocument(); // candles present → chart renders
+    expect(screen.getByTestId('candlechart')).toBeInTheDocument(); // candles present → chart renders
 
     const sym = screen.getByLabelText('Instrument') as HTMLInputElement;
     expect(sym.value).toBe('NSE:NIFTY 50');

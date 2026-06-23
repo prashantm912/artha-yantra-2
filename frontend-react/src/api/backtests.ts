@@ -5,7 +5,7 @@
 // montecarlo (C7) and the sweep trial explorer (C8) build on the same endpoints.
 
 import { useEffect } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, apiFetch } from './client.ts';
 import { wsClient } from '../lib/wsClient.ts';
 
@@ -167,6 +167,7 @@ export interface BacktestResults {
   caveats?: string[];
   exchange?: string | null;
   tradingsymbol?: string | null;
+  universeChecksum?: string | null;
 }
 
 export interface TradeRow {
@@ -231,6 +232,22 @@ export function useBacktestFolds(id: string) {
       }
     },
     enabled: !!id,
+  });
+}
+
+/** Up to 6 runs' results for the comparison matrix (`?ids=a,b,c`); returns [{id, data}]. */
+export function useCompareResults(ids: string[]) {
+  const capped = ids.slice(0, 6);
+  return useQueries({
+    queries: capped.map((id) => ({
+      queryKey: ['backtest', id, 'results'],
+      queryFn: () => apiFetch<BacktestResults>(`/backtests/${id}/results`),
+      enabled: !!id,
+    })),
+    combine: (results) =>
+      capped
+        .map((id, i) => ({ id, data: results[i].data }))
+        .filter((r): r is { id: string; data: BacktestResults } => !!r.data),
   });
 }
 

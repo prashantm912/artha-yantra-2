@@ -884,6 +884,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/equity/index-contribution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["indexContribution"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/equity/delivery": {
         parameters: {
             query?: never;
@@ -1729,6 +1745,24 @@ export interface components {
             r1m?: number;
             r6m?: number;
             r1y?: number;
+        };
+        ContribRow: {
+            /** Format: int32 */
+            rank?: number;
+            symbol?: string;
+            contribution?: number;
+            changePct?: number;
+            close?: number;
+        };
+        IndexContribution: {
+            index?: string;
+            indexChangePct?: number;
+            advanceTotal?: number;
+            declineTotal?: number;
+            advances?: components["schemas"]["ContribRow"][];
+            declines?: components["schemas"]["ContribRow"][];
+            /** Format: date */
+            asOf?: string;
         };
         Delivery: {
             symbol?: string;
@@ -4010,6 +4044,37 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["Returns"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    indexContribution: {
+        parameters: {
+            query: {
+                name: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["IndexContribution"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

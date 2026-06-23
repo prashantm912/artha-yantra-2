@@ -3104,6 +3104,42 @@
         }
       }
     },
+    "/api/v1/market/equity/index-contribution" : {
+      "get" : {
+        "tags" : [ "equity-controller" ],
+        "operationId" : "indexContribution",
+        "parameters" : [ {
+          "name" : "name",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/IndexContribution"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/equity/delivery" : {
       "get" : {
         "tags" : [ "equity-controller" ],
@@ -5379,6 +5415,60 @@
           },
           "r1y" : {
             "type" : "number"
+          }
+        }
+      },
+      "ContribRow" : {
+        "type" : "object",
+        "properties" : {
+          "rank" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "symbol" : {
+            "type" : "string"
+          },
+          "contribution" : {
+            "type" : "number"
+          },
+          "changePct" : {
+            "type" : "number"
+          },
+          "close" : {
+            "type" : "number"
+          }
+        }
+      },
+      "IndexContribution" : {
+        "type" : "object",
+        "properties" : {
+          "index" : {
+            "type" : "string"
+          },
+          "indexChangePct" : {
+            "type" : "number"
+          },
+          "advanceTotal" : {
+            "type" : "number"
+          },
+          "declineTotal" : {
+            "type" : "number"
+          },
+          "advances" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ContribRow"
+            }
+          },
+          "declines" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ContribRow"
+            }
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date"
           }
         }
       },

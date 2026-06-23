@@ -13,12 +13,17 @@ public class EquityController {
   private final EquityDeliveryService delivery;
   private final EquityReturnsService returns;
   private final EquitySectorService sector;
+  private final EquityIndexContributionService contribution;
 
   public EquityController(
-      EquityDeliveryService delivery, EquityReturnsService returns, EquitySectorService sector) {
+      EquityDeliveryService delivery,
+      EquityReturnsService returns,
+      EquitySectorService sector,
+      EquityIndexContributionService contribution) {
     this.delivery = delivery;
     this.returns = returns;
     this.sector = sector;
+    this.contribution = contribution;
   }
 
   /** One stock's daily delivery series over the most recent {@code days} sessions (default 15). */
@@ -44,5 +49,12 @@ public class EquityController {
   @GetMapping("/sector-stats")
   public EquitySectorService.SectorStats sectorStats() {
     return sector.sectorStats();
+  }
+
+  /** Per-constituent index contribution (weight × % change), split advances / declines. */
+  @GetMapping("/index-contribution")
+  public EquityIndexContributionService.IndexContribution indexContribution(
+      @RequestParam String name) {
+    return contribution.contribution(name);
   }
 }

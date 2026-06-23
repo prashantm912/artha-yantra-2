@@ -1,0 +1,130 @@
+package in.arthayantra.marketdata.nse.analytics;
+
+import in.arthayantra.common.web.error.ApiException;
+import in.arthayantra.common.web.error.ErrorCodes;
+import in.arthayantra.common.web.error.NotFoundException;
+import in.arthayantra.marketdata.constituents.StaticIndexWeights;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+
+/**
+ * oipulse "Index Contribution": how much each constituent pushes the index, split into advances and
+ * declines. Contribution is computed weight × % change (free-float weights from {@link
+ * StaticIndexWeights}, % change from the latest EQ bhavcopy). oipulse renders this in index POINTS,
+ * which need the live index level (not captured) — so v1 reports the contribution in PERCENT (the
+ * stock's share of the index's % move; the per-index points scale is a single constant multiple, so
+ * the ranking and sign are identical). The summed contributions equal the index's weighted % change.
+ */
+@Service
+public class EquityIndexContributionService {
+
+  private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
+
+  private final JdbcTemplate jdbc;
+  private final StaticIndexWeights weights;
+
+  public EquityIndexContributionService(JdbcTemplate jdbc, StaticIndexWeights weights) {
+    this.jdbc = jdbc;
+    this.weights = weights;
+  }
+
+  /** One constituent's contribution: weight × % change (percent of the index move). */
+  public record ContribRow(
+      int rank, String symbol, BigDecimal contribution, BigDecimal changePct, BigDecimal close) {}
+
+  /** Advances + declines, each ranked by |contribution|, with their summed contributions. */
+  public record IndexContribution(
+      String index,
+      BigDecimal indexChangePct,
+      BigDecimal advanceTotal,
+      BigDecimal declineTotal,
+      List<ContribRow> advances,
+      List<ContribRow> declines,
+      LocalDate asOf) {}
+
+  public IndexContribution contribution(String index) {
+    Map<String, BigDecimal> w = weights.weights(index);
+    if (w.isEmpty()) {
+      throw new NotFoundException(
+          ErrorCodes.NOT_FOUND_RESOURCE, "no seeded weights for index '" + index + "'");
+    }
+    Map<String, Latest> latest = latestChange();
+
+    List<ContribRow> advances = new ArrayList<>();
+    List<ContribRow> declines = new ArrayList<>();
+    BigDecimal advTotal = BigDecimal.ZERO;
+    BigDecimal decTotal = BigDecimal.ZERO;
+    for (Map.Entry<String, BigDecimal> e : w.entrySet()) {
+      Latest l = latest.get(e.getKey());
+      if (l == null || l.changePct == null) {
+        continue;
+      }
+      BigDecimal contribution =
+          e.getValue().multiply(l.changePct).divide(HUNDRED, 4, RoundingMode.HALF_UP);
+      ContribRow row = new ContribRow(0, e.getKey(), contribution, l.changePct, l.close);
+      if (contribution.signum() >= 0) {
+        advances.add(row);
+        advTotal = advTotal.add(contribution);
+      } else {
+        declines.add(row);
+        decTotal = decTotal.add(contribution);
+      }
+    }
+    if (advances.isEmpty() && declines.isEmpty()) {
+      throw new ApiException(422, ErrorCodes.DATA_GAP, "no bhavcopy for index '" + index + "'");
+    }
+    advances.sort(Comparator.comparing(ContribRow::contribution).reversed()); // biggest pusher first
+    declines.sort(Comparator.comparing(ContribRow::contribution)); // biggest drag first
+    List<ContribRow> rankedAdv = rank(advances);
+    List<ContribRow> rankedDec = rank(declines);
+    BigDecimal indexChangePct = advTotal.add(decTotal).setScale(2, RoundingMode.HALF_UP);
+    return new IndexContribution(
+        index, indexChangePct, advTotal.setScale(2, RoundingMode.HALF_UP),
+        decTotal.setScale(2, RoundingMode.HALF_UP), rankedAdv, rankedDec, asOf());
+  }
+
+  private static List<ContribRow> rank(List<ContribRow> rows) {
+    List<ContribRow> out = new ArrayList<>(rows.size());
+    for (int i = 0; i < rows.size(); i++) {
+      ContribRow r = rows.get(i);
+      out.add(new ContribRow(i + 1, r.symbol(), r.contribution(), r.changePct(), r.close()));
+    }
+    return out;
+  }
+
+  private record Latest(BigDecimal changePct, BigDecimal close) {}
+
+  /** Latest-session % change + close for every EQ symbol (keyed by symbol). */
+  private Map<String, Latest> latestChange() {
+    Map<String, Latest> map = new java.util.HashMap<>();
+    jdbc.query(
+        "WITH ranked AS ("
+            + "  SELECT symbol, close_price, prev_close, "
+            + "    ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY trade_date DESC) AS rn "
+            + "  FROM nse_eod_bhavcopy WHERE series = 'EQ') "
+            + "SELECT symbol, close_price, prev_close FROM ranked WHERE rn = 1",
+        rs -> {
+          String sym = rs.getString("symbol");
+          BigDecimal close = rs.getBigDecimal("close_price");
+          BigDecimal prev = rs.getBigDecimal("prev_close");
+          BigDecimal pct =
+              (prev != null && prev.signum() > 0 && close != null)
+                  ? close.subtract(prev).multiply(HUNDRED).divide(prev, 2, RoundingMode.HALF_UP)
+                  : null;
+          map.put(sym, new Latest(pct, close));
+        });
+    return map;
+  }
+
+  private LocalDate asOf() {
+    return jdbc.queryForObject(
+        "SELECT max(trade_date) FROM nse_eod_bhavcopy WHERE series = 'EQ'", LocalDate.class);
+  }
+}

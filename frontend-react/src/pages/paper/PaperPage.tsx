@@ -1,9 +1,11 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { EChartsOption } from 'echarts';
-import { formatDecimal, isNegative, multiplyByInt } from '../../lib/decimal.ts';
+import { formatDecimal, isNegative, multiplyByInt, subtractDecimal } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
 import { SentimentBadge } from '../../components/atoms/SentimentBadge.tsx';
+import { useLiveTicks } from '../../api/ticks.ts';
+import type { PaperPosition } from '../../api/paper.ts';
 import {
   riskEnabled,
   useClosePosition,
@@ -52,6 +54,23 @@ export function PaperPage() {
 
   const acct = account.data ?? null;
   const summary = pnl.data?.summary ?? null;
+
+  // live MTM overlay — sub-second LTP push over the WS tick bridge, on top of the 5s server mark
+  const positionSymbols = useMemo(
+    () => (positions.data?.items ?? []).map((p) => `${p.exchange}:${p.tradingsymbol}`),
+    [positions.data],
+  );
+  const live = useLiveTicks(positionSymbols);
+  const mtm = (p: PaperPosition) => {
+    const mark = live[`${p.exchange}:${p.tradingsymbol}`] ?? p.markPrice;
+    let unrealized = p.unrealizedPnl;
+    if (mark) {
+      const perUnit =
+        p.side === 'BUY' ? subtractDecimal(mark, p.avgEntryPrice) : subtractDecimal(p.avgEntryPrice, mark);
+      unrealized = multiplyByInt(perUnit, p.qty);
+    }
+    return { mark, unrealized };
+  };
   const riskItems = risk.data?.items;
   const killOn = riskEnabled(riskItems, 'kill_switch');
 
@@ -225,7 +244,9 @@ export function PaperPage() {
                 </tr>
               </thead>
               <tbody>
-                {(positions.data?.items ?? []).map((p) => (
+                {(positions.data?.items ?? []).map((p) => {
+                  const m = mtm(p);
+                  return (
                   <tr key={p.id} className="border-t border-ay-border">
                     <td className="px-2 py-2">
                       {p.exchange}:{p.tradingsymbol}
@@ -235,9 +256,9 @@ export function PaperPage() {
                     </td>
                     <td className="px-2 py-2 text-right tabular-nums">{p.qty}</td>
                     <td className="px-2 py-2 text-right tabular-nums">{money(p.avgEntryPrice)}</td>
-                    <td className="px-2 py-2 text-right tabular-nums">{p.markPrice ? money(p.markPrice) : '—'}</td>
-                    <td className={cn('px-2 py-2 text-right tabular-nums', p.unrealizedPnl && toneClass(p.unrealizedPnl))}>
-                      {p.unrealizedPnl ? money(p.unrealizedPnl) : '—'}
+                    <td className="px-2 py-2 text-right tabular-nums">{m.mark ? money(m.mark) : '—'}</td>
+                    <td className={cn('px-2 py-2 text-right tabular-nums', m.unrealized && toneClass(m.unrealized))}>
+                      {m.unrealized ? money(m.unrealized) : '—'}
                     </td>
                     <td className="px-2 py-2 text-right">
                       <button
@@ -249,7 +270,8 @@ export function PaperPage() {
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
                 {(positions.data?.items ?? []).length === 0 && (
                   <tr>
                     <td colSpan={7} className="px-2 py-6 text-center text-ay-muted">

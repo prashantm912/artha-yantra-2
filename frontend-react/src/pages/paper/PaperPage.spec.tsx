@@ -54,6 +54,7 @@ const closePosition = vi.fn();
 const resetLedger = vi.fn();
 
 vi.mock('../../components/atoms/EChart.tsx', () => ({ EChart: () => null }));
+vi.mock('../../api/ticks.ts', () => ({ useLiveTicks: () => ({}) }));
 vi.mock('../../api/paper.ts', async (orig) => {
   const actual = await orig<typeof import('../../api/paper.ts')>();
   return {

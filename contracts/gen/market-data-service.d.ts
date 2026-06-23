@@ -1639,6 +1639,10 @@ export interface components {
             low?: number;
             /** Format: int64 */
             oi?: number;
+            /** Format: int64 */
+            oiChange?: number;
+            /** @enum {string} */
+            interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
         };
         MoverRow: {
             tradingsymbol?: string;

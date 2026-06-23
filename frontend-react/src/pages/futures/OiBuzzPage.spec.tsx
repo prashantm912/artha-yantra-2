@@ -11,9 +11,9 @@ const heatmap: OiBuzzHeatmap = {
   advance: 2,
   decline: 1,
   tiles: [
-    { symbol: 'TRENT', changePct: '5.06', ltp: '6500.00', open: '6200', high: '6550', low: '6180', oi: 1200000 },
-    { symbol: 'HDFCLIFE', changePct: '4.39', ltp: '720.00', open: '690', high: '725', low: '688', oi: 900000 },
-    { symbol: 'ONGC', changePct: '-1.05', ltp: '270.00', open: '273', high: '274', low: '269', oi: 1500000 },
+    { symbol: 'TRENT', changePct: '5.06', ltp: '6500.00', open: '6200', high: '6550', low: '6180', oi: 1200000, oiChange: 150000, interpretation: 'LONG_BUILDUP' },
+    { symbol: 'HDFCLIFE', changePct: '4.39', ltp: '720.00', open: '690', high: '725', low: '688', oi: 900000, oiChange: -50000, interpretation: 'SHORT_COVERING' },
+    { symbol: 'ONGC', changePct: '-1.05', ltp: '270.00', open: '273', high: '274', low: '269', oi: 1500000, oiChange: null, interpretation: null },
   ],
   asOf: '2026-06-23T12:30:00+05:30',
 };

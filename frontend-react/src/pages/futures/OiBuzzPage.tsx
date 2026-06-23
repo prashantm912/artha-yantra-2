@@ -5,6 +5,7 @@ import type { OiBuzzTile } from '../../api/types.ts';
 import { Select } from '../../components/atoms/Select.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
+import { oiIntMeta } from '../../core/oiInterpretation.ts';
 import { formatDecimal } from '../../lib/decimal.ts';
 
 // Futures OI Buzz (oipulse "Futures Heatmap"): one treemap tile per index constituent, sized + coloured
@@ -77,7 +78,12 @@ export function OiBuzzPage() {
               `O ${f2(d.open)} · H ${f2(d.high)} · L ${f2(d.low)}`,
               `LTP ${f2(d.ltp)}`,
               `OI ${d.oi == null ? '—' : compactInt(d.oi)}`,
-            ].join('<br/>');
+              d.interpretation
+                ? `OI: ${oiIntMeta(d.interpretation).label}${d.oiChange != null ? ` (${d.oiChange >= 0 ? '+' : ''}${compactInt(d.oiChange)})` : ''}`
+                : null,
+            ]
+              .filter(Boolean)
+              .join('<br/>');
           },
         },
         series: [

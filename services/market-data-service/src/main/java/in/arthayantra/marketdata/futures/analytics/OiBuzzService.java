@@ -9,6 +9,7 @@ import in.arthayantra.marketdata.kite.FuturesContractSource;
 import in.arthayantra.marketdata.kite.FuturesContractSource.FutContract;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.QuoteGateway;
+import in.arthayantra.marketdata.options.OiInterpretation;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
@@ -35,20 +36,27 @@ public class OiBuzzService {
   private final StaticIndexConstituents constituents;
   private final FuturesContractSource contracts;
   private final QuoteGateway quoteGateway;
+  private final PrevDayFutureOiCache prevOiCache;
   private final Clock clock;
 
   public OiBuzzService(
       StaticIndexConstituents constituents,
       FuturesContractSource contracts,
       QuoteGateway quoteGateway,
+      PrevDayFutureOiCache prevOiCache,
       Clock clock) {
     this.constituents = constituents;
     this.contracts = contracts;
     this.quoteGateway = quoteGateway;
+    this.prevOiCache = prevOiCache;
     this.clock = clock;
   }
 
-  /** One constituent tile: % change drives size + colour; OHLC + OI back the tooltip. */
+  /**
+   * One constituent tile: % change drives size + colour; OHLC + OI back the tooltip. {@code oiChange}
+   * (current OI − prev-session close OI) + its 4-state {@code interpretation} are {@code null} until
+   * the prev-day OI cache warms (v2 OI-interpretation badge).
+   */
   public record Tile(
       String symbol,
       BigDecimal changePct,
@@ -56,7 +64,9 @@ public class OiBuzzService {
       BigDecimal open,
       BigDecimal high,
       BigDecimal low,
-      Long oi) {}
+      Long oi,
+      Long oiChange,
+      OiInterpretation interpretation) {}
 
   /** The heatmap for one index: tiles (gainers first) + advance/decline counters + the feed time. */
   public record Heatmap(
@@ -115,6 +125,14 @@ public class OiBuzzService {
           decline++;
         }
       }
+      // v2 OI-interpretation: oiChange vs the prev-session close OI (cached/background-warmed) →
+      // Long Buildup / Short Buildup / Long Unwinding / Short Covering. null until the cache warms.
+      Long prevDayOi = prevOiCache.lookup(today, p.symbol());
+      Long oiChange = (prevDayOi != null && q.oi() != null) ? q.oi() - prevDayOi : null;
+      OiInterpretation interpretation =
+          (oiChange != null && prevClose != null)
+              ? OiInterpretation.classify(q.lastPrice().subtract(prevClose), oiChange)
+              : null;
       tiles.add(
           new Tile(
               p.symbol(),
@@ -123,11 +141,21 @@ public class OiBuzzService {
               ohlc == null ? null : ohlc.open(),
               ohlc == null ? null : ohlc.high(),
               ohlc == null ? null : ohlc.low(),
-              q.oi()));
+              q.oi(),
+              oiChange,
+              interpretation));
       if (q.timestamp() != null && (asOf == null || q.timestamp().isAfter(asOf))) {
         asOf = q.timestamp();
       }
     }
+
+    // Kick a background warm of the prev-day OI baseline (idempotent, once/day) so the OI-interp
+    // badge fills in on the next refresh without blocking this request on ~50 historical calls.
+    prevOiCache.ensureWarm(
+        today,
+        pins.stream()
+            .map(p -> new PrevDayFutureOiCache.SymKey(p.symbol(), p.contract().key()))
+            .toList());
 
     // Gainers first; tiles with no % change (no prev close) sink to the bottom.
     tiles.sort(

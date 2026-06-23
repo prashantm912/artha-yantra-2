@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import in.arthayantra.common.web.error.ApiException;
@@ -34,7 +35,9 @@ class OiBuzzServiceTest {
   private final StaticIndexConstituents constituents = mock(StaticIndexConstituents.class);
   private final FuturesContractSource contracts = mock(FuturesContractSource.class);
   private final QuoteGateway quotes = mock(QuoteGateway.class);
-  private final OiBuzzService service = new OiBuzzService(constituents, contracts, quotes, CLOCK);
+  private final PrevDayFutureOiCache prevOiCache = mock(PrevDayFutureOiCache.class);
+  private final OiBuzzService service =
+      new OiBuzzService(constituents, contracts, quotes, prevOiCache, CLOCK);
 
   private static FutContract fut(String symbol) {
     return new FutContract(new InstrumentKey("NFO", symbol + "26JUNFUT"), LocalDate.of(2026, 6, 25));
@@ -65,6 +68,8 @@ class OiBuzzServiceTest {
             Map.of(
                 gain.key(), quote(gain, "110", "100", 50_000L), // +10%
                 lose.key(), quote(lose, "90", "100", 60_000L))); // -10%
+    // GAIN: price up + OI up vs prev-day 40k → +10k → LONG_BUILDUP. LOSE: no cached prev OI → null interp.
+    when(prevOiCache.lookup(any(), eq("GAIN"))).thenReturn(40_000L);
 
     OiBuzzService.Heatmap h = service.heatmap("NIFTY 50");
 
@@ -75,9 +80,13 @@ class OiBuzzServiceTest {
     assertThat(h.tiles().get(0).symbol()).isEqualTo("GAIN");
     assertThat(h.tiles().get(0).changePct()).isEqualByComparingTo("10.00");
     assertThat(h.tiles().get(0).oi()).isEqualTo(50_000L);
+    assertThat(h.tiles().get(0).oiChange()).isEqualTo(10_000L); // 50k − 40k
+    assertThat(h.tiles().get(0).interpretation())
+        .isEqualTo(in.arthayantra.marketdata.options.OiInterpretation.LONG_BUILDUP);
     assertThat(h.tiles().get(1).symbol()).isEqualTo("LOSE");
     assertThat(h.tiles().get(1).changePct()).isEqualByComparingTo("-10.00");
     assertThat(h.asOf()).isEqualTo(TS);
+    verify(prevOiCache).ensureWarm(any(), any()); // background warm kicked
   }
 
   @Test

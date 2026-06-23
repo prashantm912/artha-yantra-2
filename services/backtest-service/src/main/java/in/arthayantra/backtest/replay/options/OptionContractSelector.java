@@ -5,6 +5,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import org.springframework.stereotype.Component;
 
 /**
  * Resolves which option contract a directional signal trades (§D.6 {@code options_of_underlying}), for
@@ -18,6 +19,7 @@ import java.util.Set;
  * strategy can trade different strikes. {@code atm_window} width does not multiply legs here: a single
  * directional scalp trades the ATM strike (the window bounds the loaded data, not the tradeable leg).
  */
+@Component
 public class OptionContractSelector {
 
   /** The schema's {@code expiry} rule. {@code OFFSET} carries the Nth-out index (0 = nearest). */
@@ -51,6 +53,7 @@ public class OptionContractSelector {
 
   private final Catalog catalog;
 
+  /** Wires the registry catalog (the JDBC impl in prod, a fake in tests). */
   public OptionContractSelector(Catalog catalog) {
     this.catalog = catalog;
   }

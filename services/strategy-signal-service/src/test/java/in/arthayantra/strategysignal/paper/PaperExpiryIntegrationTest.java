@@ -99,7 +99,7 @@ class PaperExpiryIntegrationTest extends StrategySignalIntegrationTestBase {
   @Test
   void indexOptionSettlesAtIntrinsicWithCloseReasonAndReleasesTheKey() {
     String sym = "EXPOPT-" + UUID.randomUUID();
-    paper.openOrder(new PaperService.OrderRequest(null, "NFO", sym, "BUY", 50, new BigDecimal("80.00")));
+    paper.openOrder(new PaperService.OrderRequest(null, "NFO", sym, "BUY", 50, new BigDecimal("80.00"), null, null));
     assertThat(positions.findOpen("NFO", sym, "BUY")).isPresent();
 
     assertThat(expiry.settleExpiries()).isEqualTo(1);
@@ -115,7 +115,7 @@ class PaperExpiryIntegrationTest extends StrategySignalIntegrationTestBase {
   void stockFnoClosesWithPhysicalSettlementWarning() {
     String sym = "EXPSTK-" + UUID.randomUUID();
     seedSpot("RELIANCE", "2550.00");
-    paper.openOrder(new PaperService.OrderRequest(null, "NFO", sym, "BUY", 50, new BigDecimal("40.00")));
+    paper.openOrder(new PaperService.OrderRequest(null, "NFO", sym, "BUY", 50, new BigDecimal("40.00"), null, null));
 
     assertThat(expiry.settleExpiries()).isEqualTo(1);
     assertThat(positions.findOpen("NFO", sym, "BUY")).isEmpty();

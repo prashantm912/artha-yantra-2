@@ -18,11 +18,23 @@ public class PaperScheduler {
 
   private final PaperService paper;
   private final PaperExpiryService expiry;
+  private final PaperBracketEvaluator brackets;
 
-  /** Wires the ledger + expiry services. */
-  public PaperScheduler(PaperService paper, PaperExpiryService expiry) {
+  /** Wires the ledger + expiry + bracket services. */
+  public PaperScheduler(
+      PaperService paper, PaperExpiryService expiry, PaperBracketEvaluator brackets) {
     this.paper = paper;
     this.expiry = expiry;
+    this.brackets = brackets;
+  }
+
+  /** Stop-loss / take-profit auto-exit — every 15s during market hours (§4b scalper). */
+  @Scheduled(cron = "*/15 * 9-15 * * MON-FRI", zone = "Asia/Kolkata")
+  public void bracketEvaluation() {
+    int closed = brackets.evaluate();
+    if (closed > 0) {
+      log.info("paper SL/TP auto-exit closed {} position(s)", closed);
+    }
   }
 
   /** 15:30 IST T-1 roll-or-close push for positions expiring tomorrow. */

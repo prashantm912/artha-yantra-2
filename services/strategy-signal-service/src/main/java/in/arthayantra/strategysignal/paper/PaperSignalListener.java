@@ -32,7 +32,7 @@ public class PaperSignalListener {
     try {
       paper.openOrder(
           new PaperService.OrderRequest(
-              event.signalId(), null, null, null, event.qty(), event.fillPrice()));
+              event.signalId(), null, null, null, event.qty(), event.fillPrice(), null, null));
     } catch (Exception e) {
       log.warn("paper position not opened for taken signal {}: {}", event.signalId(), e.getMessage());
     }

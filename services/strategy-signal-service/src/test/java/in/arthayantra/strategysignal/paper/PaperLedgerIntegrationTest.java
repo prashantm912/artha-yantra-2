@@ -52,9 +52,46 @@ class PaperLedgerIntegrationTest extends StrategySignalIntegrationTestBase {
   @Autowired private MockMvc mockMvc;
   @Autowired private PaperPositionRepository positions;
   @Autowired private PaperService paper;
+  @Autowired private PaperBracketEvaluator brackets;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private StringRedisTemplate redis;
   @Autowired private ObjectMapper objectMapper;
+
+  @Test
+  void stopLossBracketAutoClosesOnBreach() throws Exception {
+    String sym = "TESTOPT-" + UUID.randomUUID();
+    // long with SL 90 / TP 120, filled ~100 — the bracket levels are stored + surfaced
+    String body =
+        mockMvc
+            .perform(
+                post("/api/v1/paper/orders")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        json(
+                            Map.of(
+                                "exchange", "NFO", "tradingsymbol", sym, "side", "BUY", "qty", 50,
+                                "price", "100.00", "stopLoss", "90.00", "takeProfit", "120.00"))))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.stopLoss").value("90.0000"))
+            .andExpect(jsonPath("$.takeProfit").value("120.0000"))
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+    long id = objectMapper.readTree(body).get("id").asLong();
+
+    // the LTP drops below the stop → the evaluator auto-closes with close_reason STOP_LOSS
+    redis
+        .opsForHash()
+        .put(
+            "ticks:last",
+            "NFO:" + sym,
+            json(Map.of("exchange", "NFO", "tradingsymbol", sym, "lastPrice", "88.00")));
+    assertThat(brackets.evaluate()).isEqualTo(1);
+
+    assertThat(positions.find(id)).get().extracting(p -> p.status()).isEqualTo("CLOSED");
+    assertThat(positions.find(id)).get().extracting(p -> p.closeReason()).isEqualTo("STOP_LOSS");
+    assertThat(positions.findOpen("NFO", sym, "BUY")).isEmpty();
+  }
 
   @Test
   void openAveragesOntoTheOpenKeyAndStampsTheFillAudit() throws Exception {
@@ -106,8 +143,8 @@ class PaperLedgerIntegrationTest extends StrategySignalIntegrationTestBase {
   @Test
   void partialUniqueOpenKeyRejectsASecondRawOpen() {
     String sym = "TESTOPT-" + UUID.randomUUID();
-    positions.insertOpen("NFO", sym, "SELL", 50, new BigDecimal("99.95"));
-    assertThatThrownBy(() -> positions.insertOpen("NFO", sym, "SELL", 25, new BigDecimal("99.90")))
+    positions.insertOpen("NFO", sym, "SELL", 50, new BigDecimal("99.95"), null, null);
+    assertThatThrownBy(() -> positions.insertOpen("NFO", sym, "SELL", 25, new BigDecimal("99.90"), null, null))
         .isInstanceOf(DataIntegrityViolationException.class);
   }
 
@@ -148,7 +185,7 @@ class PaperLedgerIntegrationTest extends StrategySignalIntegrationTestBase {
   @Test
   void resetRequiresConfirmThenWipesTheLedger() throws Exception {
     String sym = "TESTOPT-" + UUID.randomUUID();
-    paper.openOrder(new PaperService.OrderRequest(null, "NFO", sym, "SELL", 10, new BigDecimal("100.00")));
+    paper.openOrder(new PaperService.OrderRequest(null, "NFO", sym, "SELL", 10, new BigDecimal("100.00"), null, null));
 
     mockMvc
         .perform(

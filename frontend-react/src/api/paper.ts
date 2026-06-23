@@ -125,6 +125,26 @@ export function useUpdateCapital() {
   });
 }
 
+/** Place a paper order — from a signal (signalId) or manual (exchange/tradingsymbol/side). A null
+ * price simulates a market fill. Used by the scalper cockpit's order ticket (Phase 4b). */
+export interface PaperOrderRequest {
+  signalId?: number;
+  exchange?: string;
+  tradingsymbol?: string;
+  side?: 'BUY' | 'SELL';
+  qty: number;
+  price?: string;
+}
+
+export function usePlacePaperOrder() {
+  const invalidate = usePaperInvalidate();
+  return useMutation({
+    mutationFn: (body: PaperOrderRequest) =>
+      apiFetch<PaperPosition>('/paper/orders', { method: 'POST', json: body }),
+    onSuccess: invalidate,
+  });
+}
+
 export function useClosePosition() {
   const invalidate = usePaperInvalidate();
   return useMutation({

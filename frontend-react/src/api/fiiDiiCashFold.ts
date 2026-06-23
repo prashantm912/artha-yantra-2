@@ -2,8 +2,11 @@ import { subtractDecimal } from '../lib/decimal.ts';
 import type { FiiDiiRow } from './types.ts';
 
 // FII/DII Capital Market fold (oipulse §fii-dii/capital-market): the BE /cash feed returns one row per
-// (date, category=FII|DII); the page pivots them to one row per date with both sides + the computed
+// (date, category); the page pivots them to one row per date with both sides + the computed
 // "In Market" = FII Net + DII Net (confirmed live 2026-06-18). Values are ₹ Crore decimal strings.
+// The category label varies by source — native NSE emits "FII", the Upstox source emits "FII/FPI" — so
+// match the side by PREFIX (a `=== 'FII'` exact match silently blanks the whole FII column on the
+// Upstox feed; live-verified 2026-06-23).
 
 export interface FiiDiiCashRow {
   tradeDate: string;
@@ -33,8 +36,9 @@ export function foldFiiDiiCash(rows: FiiDiiRow[]): FiiDiiCashRow[] {
   const byDate = new Map<string, { fii?: FiiDiiRow; dii?: FiiDiiRow }>();
   for (const r of rows) {
     const slot = byDate.get(r.tradeDate) ?? {};
-    if (r.category.toUpperCase() === 'FII') slot.fii = r;
-    else if (r.category.toUpperCase() === 'DII') slot.dii = r;
+    const cat = r.category.toUpperCase();
+    if (cat.startsWith('FII')) slot.fii = r; // "FII" (native) or "FII/FPI" (Upstox)
+    else if (cat.startsWith('DII')) slot.dii = r;
     byDate.set(r.tradeDate, slot);
   }
   return [...byDate.entries()]

@@ -22,6 +22,18 @@ vi.mock('../../api/paper.ts', () => ({
   usePlacePaperOrder: () => ({ mutate: place, isPending: false }),
   useClosePosition: () => ({ mutate: close }),
 }));
+vi.mock('../../api/instruments.ts', () => ({
+  useUnderlyings: () => ({ data: ['NIFTY 50', 'NIFTY BANK'] }),
+  useExpiries: () => ({ data: [] }),
+}));
+vi.mock('../../api/scalper.ts', () => ({
+  useOptionChain: () => ({
+    data: { underlying: 'NIFTY 50', spot: '24000.00', rows: [{ strike: '24000.00', ce: { tradingsymbol: 'NIFTY24JUN24000CE', ltp: '120.00', oi: 1000 }, pe: { tradingsymbol: 'NIFTY24JUN24000PE', ltp: '100.00', oi: 900 } }] },
+    isLoading: false,
+  }),
+  useLatestTick: () => ({ data: null }),
+  optionExchange: (u: string) => (/SENSEX|BANKEX/i.test(u) ? 'BFO' : 'NFO'),
+}));
 
 import { ScalperCockpitPage } from './ScalperCockpitPage.tsx';
 
@@ -57,5 +69,14 @@ describe('ScalperCockpitPage', () => {
     // close a position
     fireEvent.click(screen.getByText('Close'));
     expect(close).toHaveBeenCalledWith({ id: 3 });
+  });
+
+  it('option quick-pick fills the ticket with the NFO leg + its LTP', () => {
+    renderPage();
+    fireEvent.click(screen.getByText(/Option quick-pick/));
+    // CE leg ltp button → fills the instrument with the NFO option symbol
+    fireEvent.click(screen.getByText('120.00'));
+    expect((screen.getByLabelText('Instrument') as HTMLInputElement).value).toBe('NFO:NIFTY24JUN24000CE');
+    expect((screen.getByLabelText('Price') as HTMLInputElement).value).toBe('120.00');
   });
 });

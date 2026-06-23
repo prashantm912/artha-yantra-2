@@ -10,6 +10,8 @@ import {
   usePaperPositions,
   usePlacePaperOrder,
 } from '../../api/paper.ts';
+import { useExpiries, useUnderlyings } from '../../api/instruments.ts';
+import { optionExchange, useLatestTick, useOptionChain, type ChainLeg } from '../../api/scalper.ts';
 
 // /scalper (master plan §20 / Phase 4b): the scalper cockpit — live ACTIVE signal feed (left), a
 // pre-filled PAPER order ticket (middle; click a signal to load it, or enter an instrument manually),
@@ -39,8 +41,30 @@ export function ScalperCockpitPage() {
 
   const [ticket, setTicket] = useState<Ticket>(EMPTY);
 
+  // option quick-pick (strike ladder → fills the ticket)
+  const [qpOpen, setQpOpen] = useState(false);
+  const underlyings = useUnderlyings();
+  const [underlying, setUnderlying] = useState('NIFTY 50');
+  const expiries = useExpiries(qpOpen ? underlying : '');
+  const [expiry, setExpiry] = useState<string | null>(null);
+  const chain = useOptionChain(underlying, expiry, qpOpen);
+
+  // live LTP for the ticketed instrument
+  const tick = useLatestTick(ticket.instrument, true);
+
   const feed = useMemo(() => signals.data?.items ?? [], [signals.data]);
   const acct = account.data ?? null;
+
+  const pickLeg = (leg: ChainLeg) => {
+    if (!leg.tradingsymbol) return;
+    setTicket({
+      signalId: null,
+      instrument: `${optionExchange(underlying)}:${leg.tradingsymbol}`,
+      side: 'BUY',
+      qty: ticket.qty || '1',
+      price: leg.ltp ?? '',
+    });
+  };
   const inputCls = 'h-9 w-full rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text';
 
   const loadSignal = (s: SignalDto) =>
@@ -105,12 +129,69 @@ export function ScalperCockpitPage() {
 
         {/* Order ticket (paper) */}
         <section className="min-w-0">
-          <h2 className="mb-2 text-sm font-semibold">
-            Paper order ticket {ticket.signalId != null && <span className="text-xs text-accent">· signal #{ticket.signalId}</span>}
-          </h2>
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-sm font-semibold">
+              Paper order ticket {ticket.signalId != null && <span className="text-xs text-accent">· signal #{ticket.signalId}</span>}
+            </h2>
+            <button type="button" onClick={() => setQpOpen((v) => !v)} className="text-xs text-accent hover:underline">
+              {qpOpen ? 'Hide chain ▲' : 'Option quick-pick ▾'}
+            </button>
+          </div>
+
+          {qpOpen && (
+            <div className="mb-3 rounded-lg border border-ay-border bg-surface-1 p-2">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <Select value={underlying} options={underlyings.data ?? [underlying]} onChange={(v) => { setUnderlying(v); setExpiry(null); }} ariaLabel="Underlying" />
+                <Select value={expiry} options={expiries.data ?? []} onChange={(v) => setExpiry(v || null)} ariaLabel="Expiry" placeholder="nearest" />
+                {chain.data?.spot && <span className="text-xs text-ay-muted">spot {money(chain.data.spot)}</span>}
+              </div>
+              <div className="max-h-56 overflow-auto rounded border border-ay-border">
+                <table className="w-full border-collapse text-xs">
+                  <thead className="sticky top-0 bg-surface-2 text-ay-muted">
+                    <tr>
+                      <th className="px-2 py-1 text-left font-medium">CE ltp</th>
+                      <th className="px-2 py-1 text-center font-medium">Strike</th>
+                      <th className="px-2 py-1 text-right font-medium">PE ltp</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(chain.data?.rows ?? []).map((r) => (
+                      <tr key={r.strike} className="border-t border-ay-border">
+                        <td className="px-1 py-0.5">
+                          <button type="button" onClick={() => pickLeg(r.ce)} className="w-full rounded px-1 py-0.5 text-left tabular-nums text-bull hover:bg-surface-2">
+                            {r.ce.ltp ? money(r.ce.ltp) : '—'}
+                          </button>
+                        </td>
+                        <td className="px-2 py-0.5 text-center tabular-nums font-semibold">{money(r.strike)}</td>
+                        <td className="px-1 py-0.5">
+                          <button type="button" onClick={() => pickLeg(r.pe)} className="w-full rounded px-1 py-0.5 text-right tabular-nums text-bear hover:bg-surface-2">
+                            {r.pe.ltp ? money(r.pe.ltp) : '—'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {(chain.data?.rows ?? []).length === 0 && (
+                      <tr><td colSpan={3} className="px-2 py-3 text-center text-ay-muted">{chain.isLoading ? 'Loading chain…' : 'No chain.'}</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           <div className="flex flex-col gap-3 rounded-lg border border-ay-border bg-surface-1 p-3">
             <label className="flex flex-col gap-1">
-              <span className="text-xs text-ay-muted">Instrument (EXCHANGE:SYMBOL)</span>
+              <span className="flex items-center justify-between text-xs text-ay-muted">
+                <span>Instrument (EXCHANGE:SYMBOL)</span>
+                {tick.data && (
+                  <span className="tabular-nums text-ay-text">
+                    LTP {money(tick.data.lastPrice)}{' '}
+                    <button type="button" onClick={() => setTicket((t) => ({ ...t, price: tick.data!.lastPrice }))} className="text-accent hover:underline">
+                      use
+                    </button>
+                  </span>
+                )}
+              </span>
               <input
                 value={ticket.instrument}
                 onChange={(e) => setTicket((t) => ({ ...t, instrument: e.target.value, signalId: null }))}

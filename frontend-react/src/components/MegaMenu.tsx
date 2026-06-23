@@ -19,6 +19,7 @@ const SECTIONS: MenuSection[] = [
   {
     title: 'Trading',
     items: [
+      { label: 'Dashboard', to: '/dashboard' }, // cockpit — at-a-glance status/signals/paper/jobs (E-2)
       { label: 'Signals', to: '/signals' }, // cockpit — live feed + reasoning breakdown (C-2.26)
       { label: 'Paper Trading', to: '/paper' }, // cockpit — positions + ledger + risk limits (F-43)
     ],

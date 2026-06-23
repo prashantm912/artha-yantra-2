@@ -1,13 +1,18 @@
-# Deferred / Pending Backlog — Phases 0 → 3.5 (as of 2026-06-21)
+# Deferred / Pending Backlog — Phases 0 → 6 (as of 2026-06-24)
 
-Single source of truth for everything NOT yet done across the OpenAlgo/React master-plan phases 0–3.5.
+Single source of truth for everything NOT yet done across the OpenAlgo/React master-plan phases 0–6.
 The forward-work authority is `superpowers/plans/2026-06-19-openalgo-react-integration-master-plan.md`
 (§16.1 phase map); current phase + the running checklist is `PHASE_GATES.md`. This file consolidates the
 deferrals so a fresh session has one place to look.
 
-**Merge state at writing:** Phase 0–3 + Phase 3.5 Tier-1/Tier-2 are on `main`
-(PR #39/#40/#41/#42/#43). The **#2 Open=High per-strike faithful grading is in PR #44 (OPEN, pending
-merge)** — items marked `(via #44)` land when it merges.
+**Merge state at writing (2026-06-24):** Phase 0–3 + Phase 3.5 are on `main` (#39–#44). **Phase 4
+React is substantially built** — the cockpit pages (Signals/Paper/Dashboard/Strategies/Backtests/
+Journal/Watchlists/Settings/Charts, #94–#103), the **React cutover** (#104, Angular `frontend-ui`
+parked), the scalper cockpit (#105–#110), and oipulse Waves **W1/W2/W3** (most depth + breadth + chart
+pages, through #93/#109) are all merged. **Expired-instruments OHLCV+OI backfill** (the §5 / Bucket-5 /
+data-foundation Part-B archive) is **BUILT + RUNNING** (#112–#116). **Part 2 premium-as-primary
+backtest replay** (options trade their own premium) is merged (#114–#119). The **Data Ops Console**
+(operator UI over the backfill, B1–B6) is merged (#121, deploy pending). What remains is below.
 
 ## Legend
 - **Status:** DONE / PARTIAL / DEFERRED / GATED / NOT STARTED.
@@ -27,7 +32,8 @@ merge)** — items marked `(via #44)` land when it merges.
 
 | Item | Status | Target | Reason |
 |---|---|---|---|
-| §5 intraday-OI backfill (ExpiryTrack historical OI) | DEFERRED | Phase-1 completion, when funded | Needs Upstox Plus subscription + an always-on host; intraday OI history is bought, not free. |
+| §5 expired-instrument OHLCV+OI backfill (ExpiryTrack historical) | **DONE / RUNNING** | — (#112–#116) | Upstox Plus funded; the `ExpiredBackfillService` ingester (bounded strikes + sliding-window limiter + resume) loads NIFTY/SENSEX expired CE/PE/FUT per-min OHLCV+OI into `candles` (`source='BACKFILL'`). First full pull in progress 2026-06-24. See [[upstox-expired-instruments]]. |
+| Native (live) intraday-OI snapshot history depth | PARTIAL | ongoing forward-capture | Live 3-min full-chain OI capture has run since 2026-06-15 (forward-accruing); deep past OI for stocks (non-expired) still bought-only. |
 | §15 200-day daily history (openchart) | DEFERRED | before Phase 5 | Needed by the Minervini screener (N-day high / RS rank); not needed earlier. |
 | Live OI cutover (route live OI through OpenAlgo) | DEFERRED | live bring-up / manual guide | Needs live verification + the OI-coverage contract canary (`chain[].ce.oi/pe.oi`). Offline routing slice is merged. |
 | §6.3 BSM-on-spot seam (stock options) | DEFERRED | future stock-options work | Index path uses Black-76-on-the-forward; no stock-options consumer yet. |
@@ -67,13 +73,33 @@ merge)** — items marked `(via #44)` land when it merges.
 | **drasticFloor per-index tuning** (#6 `drastic_oi`) | DEFERRED | live calibration | The source gives no number; default `50000` is a placeholder; tune per index (NIFTY vs BANKNIFTY) once live OI magnitudes are observed. |
 | **Native 3-min option-snapshot capture** | DEFERRED (config) | when 3-min Table-2 volume fidelity is wanted | 5-min snapshots → 5-min volume candles; native 3-min needs `artha.options.snapshot-interval-ms`=180000 (more storage). The endpoint already serves both via the `interval` param; Table-1 OH/OL is resolution-robust. |
 
+## Phase 4 — React migration (§10/§11) — IN PROGRESS (substantially built)
+
+Cockpit + React cutover + oipulse Waves W1/W2/W3 merged (see the merge-state note above). Remaining:
+
+| Item | Status | Target | Reason |
+|---|---|---|---|
+| **Data-foundation value-verify** — render every OI/data page in History mode on a REAL session + compare value-for-value vs oipulse | GATED | the expired/OI backfill data (NOW loading, #112–#116) | The big open Phase-4 item: pages are structure-QA'd, not value-verified. Authority: `superpowers/plans/2026-06-21-data-foundation-milestone.md` + [[oipulse-live-qa-method]]. |
+| **Data Ops Console deploy** (B1–B6 merged #121) | GATED | after the running backfill finishes | A market-data redeploy restarts it → kills the in-flight backfill job. Deploy + rebuild `ay-frontend-react` once the pull completes. See [[data-ops-console]]. |
+| **`/orders` page** + §18.1 order read endpoints (orderbook/positions/tradebook/funds) | DEFERRED | Phase 4b / live cutover | Sequenced to live order routing. |
+| **Manual-verification checklist UI** (verify + confirm panel) | DEFERRED | Phase 4 | Backend done (7 checks ride V009); `superpowers/plans/2026-06-20-scalper-manual-verification-checklist.md` is the contract. |
+| **OiPulse ≥90% AI badge** (#2) + any tail oipulse-parity polish | DEFERRED | post value-verify | Proprietary oipulse model; our faithful Table-1/2 HIGH tier is the equivalent. |
+
 ## Phases ahead (NOT STARTED — the roadmap, for context)
 
 | Phase | Status | Needs | Notes |
 |---|---|---|---|
-| 4 — React migration (§10/§11) | NOT STARTED | — (owner-deferred sequencing) | Angular `frontend-ui` is throwaway; consumes the manual-checklist + OI/strike-session contracts. Includes the OiPulse-parity OI pages + the `/orders` page (3.5/3 deferrals above). |
 | 5 — Minervini Track-1 screener (§13) | NOT STARTED | Phase-1 §15 200-day history | Daily 8-gate Trend Template + RS rank; VCP/pivot/Cheat/Power-Play deferred (owner accepts manual chart-reading of entries). |
-| 6 — Backtest + forward wiring (§14) | NOT STARTED | Phases 3 + 5 (+ Phase-1 §5 OI) | Scalp historical-backtest fidelity is directional, not P&L-exact (R4); raptorbt cross-check oracle DEFERRED. |
+| 6 — Backtest + forward wiring (§14) | **PARTIAL** | Phases 3 + 5 (+ the §5 OI data now loading) | **Part 2 premium-as-primary replay LANDED** (#114–#119): an options backtest now trades the option's own 1m premium series (`CANDLE_1M`), not the index close — golden-pinned. Remaining: the value-verify on real backfilled premium (gated on the backfill), v1 simplifications (per-bar MTM, premium-leg slippage/costs, coverage pre-flight), forward-test wiring. Scalp historical-backtest fidelity is directional, not P&L-exact (R4); raptorbt cross-check oracle DEFERRED. |
+
+## Data Ops Console — parked decisions (from #121, B1–B6)
+
+| Item | Status | Target | Reason |
+|---|---|---|---|
+| `backfill_jobs` audit table (run history surviving a restart) | DEFERRED | if run history is wanted | B1 status is in-memory (resets on restart); covers the live need today. |
+| B6 per-expiry bulk export + ZIP/Parquet (async streaming) | DEFERRED | when bulk export is needed | v1 is per-contract CSV/JSON (≤100k rows, sync); per-expiry is ~1.3M rows. B5 query console covers arbitrary slices meanwhile. |
+| Contract-type selector in the collection wizard | DEFERRED | only if a CE/PE/FUT filter is wanted | The `expired-backfill` trigger has no contract-type field — it pulls options + futures together. |
+| B1 live updates via STOMP (vs the 2s poll) | DEFERRED | consistency polish | A small poll is simpler; the jobs WS topic is backtest-scoped. |
 
 ## Cross-cutting / legacy parking (lower-priority hardening, from Stage A–G)
 

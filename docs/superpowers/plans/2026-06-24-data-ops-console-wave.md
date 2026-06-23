@@ -1,6 +1,9 @@
 # Data Ops Console — wave feature spec (B1–B6)
 
-- **Status:** PLANNED (forward-work spec; not yet built). Authored 2026-06-24.
+- **Status:** **MERGED 2026-06-24 (PR #121, squash 5e4d5c9)** — all of B1–B6 built + CI-green. NOT yet
+  deployed live (a market-data restart kills the in-flight expired backfill → deploy + rebuild
+  `ay-frontend-react` once the pull finishes). Kept here until deployed + value-verified, then archive.
+  Authored 2026-06-24.
 - **Milestone:** Data Ops Console — operator tooling for the Upstox expired-instruments / OI
   backfill pipeline. PRs `PR-DO1`…`PR-DO6` (one per feature B1–B6).
 - **Route prefix:** `/data-ops/*` — a NEW top-level **Data Ops** section in the React mega-menu

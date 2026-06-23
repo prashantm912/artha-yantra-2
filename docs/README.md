@@ -17,6 +17,8 @@ authority is the OpenAlgo/React master plan; the design authority is `docs/desig
 - `2026-06-20-phase3.5-scalper-oi-analytics-backlog.md` — Tier-2 OI-analytics (MERGED #43; per-strike #44).
 - `2026-06-21-open-high-per-strike-probability.md` — #2 per-strike Table-1/Table-2 faithful grading (MERGED #44).
 - `2026-06-20-scalper-manual-verification-checklist.md` — backend done; the React-UI contract.
+- `2026-06-24-data-ops-console-wave.md` — Data Ops Console (B1–B6): operator UI for the expired/OI
+  backfill (status, coverage, wizard, quota, query, export); PLANNED, PRs `PR-DO0`…`PR-DO6`.
 - `superpowers/plans/archive/` — completed plans (oipulse-parity, stage-g, eod-bhavcopy).
 
 ## Active — operations & references (top level)

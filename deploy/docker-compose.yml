@@ -59,7 +59,10 @@ services:
       test: ["CMD", "pg_isready", "-U", "artha"]
       interval: 5s
       retries: 10
-    mem_limit: 1024m
+    # 4 GB: the 1 GB cap OOM-crashed under the expired-instruments bulk backfill (write flood +
+    # cagg refresh). Host has ~10 GB free; shared_buffers stays 512 MB, leaving headroom for
+    # work_mem/maintenance + page cache during heavy historical loads.
+    mem_limit: 4096m
     restart: unless-stopped
     logging: *default-logging
 

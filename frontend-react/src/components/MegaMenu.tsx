@@ -86,6 +86,13 @@ const SECTIONS: MenuSection[] = [
     ],
   },
   {
+    title: 'Backtests',
+    items: [
+      { label: 'Runner', to: '/backtests/run' }, // cockpit — backtest + sweep launcher (E-8)
+      { label: 'Jobs', to: '/backtests/jobs' }, // cockpit — live job monitor (jobs.progress WS)
+    ],
+  },
+  {
     title: 'Features',
     items: [
       { label: 'Connecting Dots', to: '/features/connecting-dots' }, // multi-factor matrix (§20.7.8)

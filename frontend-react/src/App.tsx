@@ -22,6 +22,8 @@ import { DashboardPage } from './pages/dashboard/DashboardPage.tsx';
 import { StrategiesListPage } from './pages/strategies/StrategiesListPage.tsx';
 import { StrategyVersionsPage } from './pages/strategies/StrategyVersionsPage.tsx';
 import { StrategyEditorPage } from './pages/strategies/StrategyEditorPage.tsx';
+import { BacktestRunnerPage } from './pages/backtests/BacktestRunnerPage.tsx';
+import { JobsPage } from './pages/backtests/JobsPage.tsx';
 
 // The ECharts-bearing pages are lazy-loaded so the ~1 MB ECharts bundle is a separate chunk fetched
 // only when the route is visited, keeping the main payload lean (§20.1).
@@ -162,6 +164,9 @@ export function App() {
           <Route path="/strategies/:id/edit" element={<StrategyEditorPage />} />
           <Route path="/strategies/:id/versions" element={<StrategyVersionsPage />} />
           <Route path="/strategies/strategy-builder" element={<Lazy><StrategyBuilderPage /></Lazy>} />
+          {/* Backtests */}
+          <Route path="/backtests/run" element={<BacktestRunnerPage />} />
+          <Route path="/backtests/jobs" element={<JobsPage />} />
           {/* Features */}
           <Route path="/features/connecting-dots" element={<ConnectingDotsPage />} />
           <Route path="/features/vix-index" element={<Lazy><VixIndexPage /></Lazy>} />

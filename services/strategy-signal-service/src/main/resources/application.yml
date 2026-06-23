@@ -61,6 +61,12 @@ artha:
     margin-pct:
       future: ${ARTHA_PAPER_MARGIN_FUTURE:0.15}
       short-option: ${ARTHA_PAPER_MARGIN_SHORT_OPTION:0.12}
+  margin:
+    # §8 SPAN appliance capability flag (off by default → flat-pct fallback above).
+    # When true, futures & short options price via margin-service /api/v1/margin/size;
+    # any miss (appliance down, no .spn) falls back to flat-pct. Advisory only.
+    span-enabled: ${ARTHA_MARGIN_SPAN_ENABLED:false}
+    base: ${ARTHA_ROUTE_MARGIN:http://margin-service:8086}
 
 management:
   endpoints:

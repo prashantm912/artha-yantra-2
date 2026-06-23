@@ -1,0 +1,6 @@
+[run]
+source = app
+omit =
+    # thin I/O / wiring exercised only on the live mock stack, not in unit tests
+    app/main.py
+    app/settings.py

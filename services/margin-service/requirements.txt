@@ -1,0 +1,10 @@
+# Runtime deps (CD-15: plain pip + ruff). Pinned exact versions; CI regenerates
+# this file with `pip-compile --generate-hashes` so the deployed image installs
+# under --require-hashes (the hash-pinned form is the CI artifact, not edited by hand).
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+httpx==0.28.1
+prometheus-fastapi-instrumentator==7.0.0
+# SPAN margin engine (MIT, marketcalls/marginism). Pure-Python CME-SPAN .spn
+# parser + NSCCL margin algorithm; wrapped behind app/marginism_adapter.py.
+marginism==0.1.1

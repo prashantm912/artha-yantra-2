@@ -49,14 +49,14 @@ backtest replay** (options trade their own premium) is merged (#114–#119). The
 | Item | Status | Target | Reason |
 |---|---|---|---|
 | Strategy **#3 Market Movers** | DEFERRED | Track-1 / Phase-5-adjacent (a screener, not a live signal) | Trades F&O **stocks**; the scalper engine is index-option only; overlaps the Minervini screener + needs N-day-high + daily RSI. |
-| Strategy **#7 Hero-Zero** | GATED | after SPAN (#47) + manual confirm | Short-premium / deep-OTM lottery bet; needs SPAN margin + tiny-profit-slice sizing. |
-| Strategy **#11-short Straddle** | GATED | after SPAN (#47) | Short-premium; needs SPAN margin. |
+| Strategy **#7 Hero-Zero** | GATED | live orders + the `.spn` verify (SPAN appliance now BUILT #126) | Short-premium / deep-OTM lottery bet; the SPAN sizing path exists (dormant) — remaining gate is live-order routing + a real-`.spn` margin check. First short-premium to wire (owner-chosen). |
+| Strategy **#11-short Straddle** | GATED | live orders + the `.spn` verify | Short-premium; SPAN appliance built; needs hedge logic + live orders. |
 | Strategy **#8 BTST/STBT** | DEFERRED | after an overnight position lifecycle + SPAN | Needs **overnight carry** (paper layer force-squares-off 15:45 IST) + the short-PE/CE leg needs SPAN. |
-| **#47 SPAN appliance** (§8 marginism) | DEFERRED | when short-premium #7/#11 land | Index-option core (#1/#5/#6/#10/#2/#4/#9/#12) is CE/PE-**buying** = defined risk (premium paid) → needs no SPAN; SPAN only for short-premium. |
+| **#47 SPAN appliance** (§8 marginism) | **BUILT (dormant)** | live-verify (#126) | `services/margin-service/` (marginism 0.1.1, FastAPI :8086) + advisory paper sizing wire-in, shipped default-off (`artha.margin.span-enabled=false`). VERIFY-pending: a real-`.spn` broker-parity golden + the NSE `.spn` download URL (CI golden tests the real algo vs a synthetic `.spn`). |
 | **OpenAlgoOrderGateway** (live broker order impl) | DEFERRED (gated) | a live-cutover slice | Needs the OpenAlgo order-API verified vs the local checkout + the §17.3 place-ack **latency gate** before any real order routes. The execution BOUNDARY (`OrderGateway` port + `DisabledOrderGateway` fail-safe + semi-auto `LiveOrderService`) is shipped. |
 | **§18.1 order read endpoints** (orderbook/positions/tradebook/funds) + React `/orders` page | DEFERRED | Phase 4b | Sequenced to the React scalper-cockpit split. |
 | **Full-auto execution** (no human "Take") | DEFERRED | a later flag | Semi-auto (human "Take") is the v1 safety boundary. |
-| **Manual-verification checklist UI** (verify + confirm panel) | DEFERRED | Phase 4 (React) | Backend done (7 human checks ride the V009 side-channel); UI is built once in React (Angular `frontend-ui` is throwaway). |
+| **Manual-verification checklist UI** (verify + confirm panel) | **DONE** (#125) | — | React `ManualVerifyChecklist` on `/signals` + `/scalper` (soft-warning + override gating, the 7 V009 checks + confluence dots, client-only). |
 | **Per-check server audit** (which boxes ticked) | DEFERRED | only if an override/exception trail is needed | Would add a `TakenRequest` field (request-schema drift + TS regen). |
 | **Historical scalp backtests** | DEFERRED | Phase 6 | Need Phase-1 §5 intraday-OI data + the §17.5 calendar extension; Phase 3 validates via unit-fired signals + live paper only. |
 
@@ -82,7 +82,7 @@ Cockpit + React cutover + oipulse Waves W1/W2/W3 merged (see the merge-state not
 | **Data-foundation value-verify** — render every OI/data page in History mode on a REAL session + compare value-for-value vs oipulse | GATED | the expired/OI backfill data (NOW loading, #112–#116) | The big open Phase-4 item: pages are structure-QA'd, not value-verified. Authority: `superpowers/plans/2026-06-21-data-foundation-milestone.md` + [[oipulse-live-qa-method]]. |
 | **Data Ops Console deploy** (B1–B6 merged #121) | GATED | after the running backfill finishes | A market-data redeploy restarts it → kills the in-flight backfill job. Deploy + rebuild `ay-frontend-react` once the pull completes. See [[data-ops-console]]. |
 | **`/orders` page** + §18.1 order read endpoints (orderbook/positions/tradebook/funds) | DEFERRED | Phase 4b / live cutover | Sequenced to live order routing. |
-| **Manual-verification checklist UI** (verify + confirm panel) | DEFERRED | Phase 4 | Backend done (7 checks ride V009); `superpowers/plans/2026-06-20-scalper-manual-verification-checklist.md` is the contract. |
+| **Manual-verification checklist UI** (verify + confirm panel) | **DONE** (#125) | — | Built (see the Phase-4 table); the `2026-06-20-scalper-manual-verification-checklist.md` contract is fulfilled. |
 | **OiPulse ≥90% AI badge** (#2) + any tail oipulse-parity polish | DEFERRED | post value-verify | Proprietary oipulse model; our faithful Table-1/2 HIGH tier is the equivalent. |
 
 ## Phases ahead (NOT STARTED — the roadmap, for context)
@@ -90,7 +90,7 @@ Cockpit + React cutover + oipulse Waves W1/W2/W3 merged (see the merge-state not
 | Phase | Status | Needs | Notes |
 |---|---|---|---|
 | 5 — Minervini Track-1 screener (§13) | NOT STARTED | Phase-1 §15 200-day history | Daily 8-gate Trend Template + RS rank; VCP/pivot/Cheat/Power-Play deferred (owner accepts manual chart-reading of entries). |
-| 6 — Backtest + forward wiring (§14) | **PARTIAL** | Phases 3 + 5 (+ the §5 OI data now loading) | **Part 2 premium-as-primary replay LANDED** (#114–#119): an options backtest now trades the option's own 1m premium series (`CANDLE_1M`), not the index close — golden-pinned. Remaining: the value-verify on real backfilled premium (gated on the backfill), v1 simplifications (per-bar MTM, premium-leg slippage/costs, coverage pre-flight), forward-test wiring. Scalp historical-backtest fidelity is directional, not P&L-exact (R4); raptorbt cross-check oracle DEFERRED. |
+| 6 — Backtest + forward wiring (§14) | **PARTIAL** | Phases 3 + 5 (+ the §5 OI data now loading) | **Part 2 premium-as-primary replay LANDED** (#114–#119): an options backtest now trades the option's own 1m premium series (`CANDLE_1M`), not the index close — golden-pinned. The v1 simplifications are now CLOSED (#123): per-bar mark-to-market, FillSimulator slippage+costs on the premium leg, and a 422 DATA_GAP coverage pre-flight. Remaining: the value-verify on real backfilled premium (gated on the backfill), forward-test wiring. Scalp historical-backtest fidelity is directional, not P&L-exact (R4); raptorbt cross-check oracle DEFERRED. |
 
 ## Data Ops Console — parked decisions (from #121, B1–B6)
 

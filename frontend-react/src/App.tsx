@@ -102,6 +102,9 @@ const NewsPage = lazy(() =>
 const PaperPage = lazy(() =>
   import('./pages/paper/PaperPage.tsx').then((m) => ({ default: m.PaperPage })),
 );
+const BacktestResultsPage = lazy(() =>
+  import('./pages/backtests/BacktestResultsPage.tsx').then((m) => ({ default: m.BacktestResultsPage })),
+);
 
 function Lazy({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<p className="text-sm text-ay-muted">Loading chart…</p>}>{children}</Suspense>;
@@ -167,6 +170,7 @@ export function App() {
           {/* Backtests */}
           <Route path="/backtests/run" element={<BacktestRunnerPage />} />
           <Route path="/backtests/jobs" element={<JobsPage />} />
+          <Route path="/backtests/:id" element={<Lazy><BacktestResultsPage /></Lazy>} />
           {/* Features */}
           <Route path="/features/connecting-dots" element={<ConnectingDotsPage />} />
           <Route path="/features/vix-index" element={<Lazy><VixIndexPage /></Lazy>} />

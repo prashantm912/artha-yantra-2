@@ -19,6 +19,7 @@ import type {
   LongShortRow,
   Movers,
   MultiOi,
+  EquityNews,
   IndexContribution,
   OiBuzzHeatmap,
   OpenHighLow,
@@ -469,6 +470,20 @@ export function useParticipantOi(from: string, to: string) {
       return listItems(res);
     },
     enabled: !!from,
+  });
+}
+
+/** Per-stock news / announcements (Upstox /v2/news). available=false when the source isn't live. */
+export function useEquityNews(symbol: string | null) {
+  return useQuery({
+    queryKey: ['equity', 'news', symbol],
+    queryFn: () =>
+      oiGet<EquityNews | null>(
+        '/market/equity/news',
+        new URLSearchParams({ symbol: symbol ?? '' }).toString(),
+        null,
+      ),
+    enabled: !!symbol,
   });
 }
 

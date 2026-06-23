@@ -89,6 +89,9 @@ const IndexContributionPage = lazy(() =>
 const OpenHighLowPage = lazy(() =>
   import('./pages/equity/OpenHighLowPage.tsx').then((m) => ({ default: m.OpenHighLowPage })),
 );
+const NewsPage = lazy(() =>
+  import('./pages/equity/NewsPage.tsx').then((m) => ({ default: m.NewsPage })),
+);
 
 function Lazy({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<p className="text-sm text-ay-muted">Loading chart…</p>}>{children}</Suspense>;
@@ -141,6 +144,7 @@ export function App() {
           <Route path="/equity/sector-stats" element={<Lazy><SectorStatsPage /></Lazy>} />
           <Route path="/equity/index-contribution" element={<Lazy><IndexContributionPage /></Lazy>} />
           <Route path="/equity/open-high-low" element={<Lazy><OpenHighLowPage /></Lazy>} />
+          <Route path="/equity/news" element={<Lazy><NewsPage /></Lazy>} />
           {/* Strategies */}
           <Route path="/strategies/strategy-builder" element={<Lazy><StrategyBuilderPage /></Lazy>} />
           {/* Features */}

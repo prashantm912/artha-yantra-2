@@ -704,6 +704,22 @@ export interface ContribRow {
   points: string | null;
 }
 
+/** One news article (Upstox /v2/news); publishedTime is epoch-millis. */
+export interface NewsItem {
+  heading: string | null;
+  summary: string | null;
+  thumbnail: string | null;
+  articleLink: string | null;
+  publishedTime: number | null;
+}
+
+/** GET /api/v1/market/equity/news?symbol= — a stock's recent news; available=false when source off. */
+export interface EquityNews {
+  symbol: string;
+  available: boolean;
+  items: NewsItem[];
+}
+
 /** One Open=High / Open=Low setup — decimal STRINGS; farPct = (ltp − level) / level × 100. */
 export interface OpenHighSetup {
   symbol: string;

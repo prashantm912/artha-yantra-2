@@ -105,6 +105,12 @@ const PaperPage = lazy(() =>
 const BacktestResultsPage = lazy(() =>
   import('./pages/backtests/BacktestResultsPage.tsx').then((m) => ({ default: m.BacktestResultsPage })),
 );
+const BacktestComparePage = lazy(() =>
+  import('./pages/backtests/BacktestComparePage.tsx').then((m) => ({ default: m.BacktestComparePage })),
+);
+const SweepDetailPage = lazy(() =>
+  import('./pages/optimizations/SweepDetailPage.tsx').then((m) => ({ default: m.SweepDetailPage })),
+);
 
 function Lazy({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<p className="text-sm text-ay-muted">Loading chart…</p>}>{children}</Suspense>;
@@ -170,7 +176,9 @@ export function App() {
           {/* Backtests */}
           <Route path="/backtests/run" element={<BacktestRunnerPage />} />
           <Route path="/backtests/jobs" element={<JobsPage />} />
+          <Route path="/backtests/compare" element={<Lazy><BacktestComparePage /></Lazy>} />
           <Route path="/backtests/:id" element={<Lazy><BacktestResultsPage /></Lazy>} />
+          <Route path="/optimizations/:sweepId" element={<Lazy><SweepDetailPage /></Lazy>} />
           {/* Features */}
           <Route path="/features/connecting-dots" element={<ConnectingDotsPage />} />
           <Route path="/features/vix-index" element={<Lazy><VixIndexPage /></Lazy>} />

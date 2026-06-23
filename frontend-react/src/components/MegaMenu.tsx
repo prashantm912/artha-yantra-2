@@ -90,6 +90,7 @@ const SECTIONS: MenuSection[] = [
     items: [
       { label: 'Runner', to: '/backtests/run' }, // cockpit — backtest + sweep launcher (E-8)
       { label: 'Jobs', to: '/backtests/jobs' }, // cockpit — live job monitor (jobs.progress WS)
+      { label: 'Compare', to: '/backtests/compare' }, // cockpit — up-to-6-run metric matrix + equity overlay
     ],
   },
   {

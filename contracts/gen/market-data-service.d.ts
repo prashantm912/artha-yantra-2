@@ -1732,9 +1732,20 @@ export interface components {
             /** Format: int32 */
             total?: number;
         };
+        SectorIndexCard: {
+            name?: string;
+            last?: string;
+            changePct?: string;
+            open?: string;
+            high?: string;
+            low?: string;
+            prevClose?: string;
+            asOf?: string;
+        };
         SectorStats: {
             /** Format: date */
             asOf?: string;
+            sectorIndices?: components["schemas"]["SectorIndexCard"][];
             sectors?: components["schemas"]["SectorAgg"][];
             stocks?: components["schemas"]["StockChange"][];
         };

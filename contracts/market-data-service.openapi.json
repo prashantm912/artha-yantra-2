@@ -5359,12 +5359,47 @@
           }
         }
       },
+      "SectorIndexCard" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "last" : {
+            "type" : "string"
+          },
+          "changePct" : {
+            "type" : "string"
+          },
+          "open" : {
+            "type" : "string"
+          },
+          "high" : {
+            "type" : "string"
+          },
+          "low" : {
+            "type" : "string"
+          },
+          "prevClose" : {
+            "type" : "string"
+          },
+          "asOf" : {
+            "type" : "string"
+          }
+        }
+      },
       "SectorStats" : {
         "type" : "object",
         "properties" : {
           "asOf" : {
             "type" : "string",
             "format" : "date"
+          },
+          "sectorIndices" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SectorIndexCard"
+            }
           },
           "sectors" : {
             "type" : "array",

@@ -36,11 +36,17 @@ public class EquitySectorService {
   private final StockSectorMap sectors;
   private final StaticIndexConstituents constituents;
 
+  private final SectorIndexWatch indexWatch;
+
   public EquitySectorService(
-      JdbcTemplate jdbc, StockSectorMap sectors, StaticIndexConstituents constituents) {
+      JdbcTemplate jdbc,
+      StockSectorMap sectors,
+      StaticIndexConstituents constituents,
+      SectorIndexWatch indexWatch) {
     this.jdbc = jdbc;
     this.sectors = sectors;
     this.constituents = constituents;
+    this.indexWatch = indexWatch;
   }
 
   /** One stock's latest-session change + its sector. */
@@ -54,8 +60,12 @@ public class EquitySectorService {
   public record SectorAgg(
       String sector, BigDecimal avgChangePct, int positive, int negative, int total) {}
 
-  /** Sector overview: per-sector cards + the flat per-stock factor table. */
-  public record SectorStats(LocalDate asOf, List<SectorAgg> sectors, List<StockChange> stocks) {}
+  /** Sector overview: live sector-index cards + per-sector roll-up + the flat per-stock factor table. */
+  public record SectorStats(
+      LocalDate asOf,
+      List<SectorIndexWatch.SectorIndexCard> sectorIndices,
+      List<SectorAgg> sectors,
+      List<StockChange> stocks) {}
 
   public SectorHeatmap sectorHeatmap(String index) {
     List<String> members = constituents.symbols(index);
@@ -110,7 +120,7 @@ public class EquitySectorService {
     }
     aggs.sort((a, b) -> a.sector().compareTo(b.sector()));
     stocks.sort((a, b) -> a.symbol().compareTo(b.symbol()));
-    return new SectorStats(asOf(), aggs, stocks);
+    return new SectorStats(asOf(), indexWatch.cards(), aggs, stocks);
   }
 
   /** Latest-session change for every sector-mapped EQ stock (unmapped stocks are dropped). */

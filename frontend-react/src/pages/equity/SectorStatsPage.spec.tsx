@@ -5,6 +5,9 @@ import type { SectorStats } from '../../api/types.ts';
 
 const ss: SectorStats = {
   asOf: '2026-06-22',
+  sectorIndices: [
+    { name: 'NIFTY METAL', last: '12664.45', changePct: '-3.26', open: '12987.7', high: '12987.7', low: '12647.85', prevClose: '13091.2', asOf: '23-Jun-2026 13:21' },
+  ],
   sectors: [
     { sector: 'Oil Gas & Consumable Fuels', avgChangePct: '0.50', positive: 3, negative: 1, total: 4 },
   ],
@@ -31,6 +34,9 @@ function renderPage() {
 describe('SectorStatsPage', () => {
   it('renders a sector card and the stock factor table', () => {
     renderPage();
+    // Live sector-index card.
+    expect(screen.getByText('NIFTY METAL')).toBeInTheDocument();
+    expect(screen.getByText('-3.26%')).toBeInTheDocument();
     // Sector card: average change pill.
     expect(screen.getByText('+0.50%')).toBeInTheDocument();
     expect(screen.getAllByText('Oil Gas & Consumable Fuels').length).toBeGreaterThan(0);

@@ -37,6 +37,8 @@ public final class UpstoxExpiredInstrumentsClient {
 
   private final RestClient restClient;
   private final UpstoxAnalyticsProperties properties;
+  /** Pre-emptive sliding-window pacing (50/s, 500/min, 2000/30min) — the 30-min cap is the binding one. */
+  private final UpstoxRateLimiter limiter = new UpstoxRateLimiter();
 
   /** Binds the wire client to the configured base URL (real Upstox, or WireMock in tests). */
   public UpstoxExpiredInstrumentsClient(
@@ -186,6 +188,7 @@ public final class UpstoxExpiredInstrumentsClient {
   private <T> T withRetry(Supplier<T> call) {
     int attempt = 0;
     while (true) {
+      limiter.acquire(); // pre-emptive pacing so we never burst past the 2000/30min cap
       try {
         return call.get();
       } catch (HttpClientErrorException.TooManyRequests e) {

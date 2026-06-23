@@ -47,10 +47,10 @@ deferred: #3 (stock universe → Track-1), #8 (overnight carry + SPAN), #7/#11 (
 | 0 — OpenAlgo spine | `feat/openalgo-spine` | **MERGED** (PR #39) |
 | 1 — Data inflow (routing + ExpiryTrack OI + openchart daily) | merged across #40/#41/#112–#116 | **MOSTLY** — §4 routing + EOD bhavcopy daily candles (#40/#41) **and** the §5 expired-instrument OHLCV+OI backfill (#112–#116, first pull RUNNING 2026-06-24) merged; §15 200-day daily history + live OI cutover **DEFERRED** |
 | 2 — Quant libs (greeks + indicators) | merged #40 | **MOSTLY** — §7 scalp indicators merged (#40); §6 higher-order greeks **DEFERRED** (§17.6) |
-| 3 — Scalper engine (§12 + §8 SPAN) | merged #42/#43/#44 | **MERGED** — core #1/#5/#6/#10 + Tier-2 OI fidelity (T2.1–T2.8) + monthly-expiry OI suppression + #2 (per-strike faithful)/#4/#9/#12; #3/#8/#7/#11 + SPAN + live orders + §2 OiPulse badge + checklist UI (Phase 4) **DEFERRED** (see `docs/DEFERRED_BACKLOG.md`) |
-| 4 — React migration (§10 + §11) | merged #82–#110, #121 | **IN PROGRESS** — cockpit + React cutover (Angular parked, #104) + oipulse W1/W2/W3 + Data Ops Console (#121) merged; remaining: **data-foundation value-verify** (gated on the backfill), `/orders` page, manual-checklist UI, OiPulse badge |
+| 3 — Scalper engine (§12 + §8 SPAN) | merged #42/#43/#44, #126 | **MERGED** — core #1/#5/#6/#10 + Tier-2 OI fidelity (T2.1–T2.8) + monthly-expiry OI suppression + #2 (per-strike faithful)/#4/#9/#12; **SPAN appliance BUILT dormant (#126)** + **checklist UI DONE (#125)**. Still **DEFERRED**: #3/#8/#7/#11 (short-premium — gated on live orders + the real-`.spn` verify), live orders, §2 OiPulse badge (see `docs/DEFERRED_BACKLOG.md`) |
+| 4 — React migration (§10 + §11) | merged #82–#110, #121 | **IN PROGRESS** — cockpit + React cutover (Angular parked, #104) + oipulse W1/W2/W3 + Data Ops Console (#121) merged; remaining: **data-foundation value-verify** (gated on the backfill), `/orders` page, OiPulse badge (manual-checklist UI DONE #125) |
 | 5 — Minervini Track-1 screener (§13) | `feat/minervini-track1` | **NOT STARTED** — needs Phase-1 §15 200-day history |
-| 6 — Backtest + forward wiring (§14) | merged #114–#119 | **PARTIAL** — Part 2 premium-as-primary replay landed (options trade their own 1m premium, golden-pinned); remaining: real-data value-verify (gated on backfill), v1 simplifications, forward-test wiring; needs Phases 3 + 5 |
+| 6 — Backtest + forward wiring (§14) | merged #114–#119 | **PARTIAL** — Part 2 premium-as-primary replay landed (options trade their own 1m premium, golden-pinned); remaining: real-data value-verify (gated on backfill), forward-test wiring (the v1 simplifications — per-bar MTM + premium-leg costs + 422 pre-flight — are CLOSED #123); needs Phases 3 + 5 |
 
 ---
 

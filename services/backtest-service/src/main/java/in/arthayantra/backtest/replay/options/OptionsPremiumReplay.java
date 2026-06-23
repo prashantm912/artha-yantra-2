@@ -1,19 +1,25 @@
 package in.arthayantra.backtest.replay.options;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import in.arthayantra.backtest.replay.EquityCurveDownsampler;
 import in.arthayantra.backtest.replay.EquityPoint;
 import in.arthayantra.backtest.replay.ReplayResult;
 import in.arthayantra.backtest.replay.Trade;
 import in.arthayantra.backtest.replay.options.OptionContractSelector.ExpiryMode;
 import in.arthayantra.backtest.replay.options.OptionContractSelector.OptionContract;
+import in.arthayantra.strategyengine.config.StrategyDefinition;
 import in.arthayantra.strategyengine.fills.Side;
 import in.arthayantra.strategyengine.fills.TouchBasis;
+import in.arthayantra.strategyengine.golden.GoldenSignalsJson.SignalEvent;
+import in.arthayantra.strategyengine.golden.TickwiseGoldenRunner;
 import in.arthayantra.strategyengine.series.EngineCandle;
+import in.arthayantra.strategyengine.series.SeriesKey;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
@@ -44,6 +50,147 @@ public class OptionsPremiumReplay {
   public OptionsPremiumReplay(OptionContractSelector selector, CandlePremiumReader premiumReader) {
     this.selector = selector;
     this.premiumReader = premiumReader;
+  }
+
+  /**
+   * Premium-as-primary replay for an options strategy: signals are generated on the UNDERLYING
+   * (unchanged, parity-preserving), paired, and each leg is replayed as an option trade. The §D.6
+   * options spec + premium_pct exits + premium budget are parsed from the config. The candle-close
+   * {@code ReplayEngine.replay} path is left untouched (its goldens hold).
+   */
+  public ReplayResult replay(
+      StrategyDefinition definition,
+      JsonNode config,
+      String underlyingExchange,
+      String underlyingTradingsymbol,
+      List<EngineCandle> underlyingOneMinute,
+      Map<SeriesKey, List<EngineCandle>> contextCandles,
+      BigDecimal initialEquity) {
+    List<SignalEvent> signals =
+        new TickwiseGoldenRunner(definition, underlyingExchange, underlyingTradingsymbol)
+            .run(underlyingOneMinute, contextCandles, null);
+    List<PairedLeg> legs = pairLegs(signals, underlyingOneMinute);
+    return replayLegs(
+        signals,
+        underlyingOneMinute,
+        legs,
+        registryUnderlying(underlyingTradingsymbol),
+        universeSpec(config),
+        exitRules(config),
+        budgetInr(config),
+        initialEquity);
+  }
+
+  /** Pairs the signal stream into directed legs (entry→exit bar indices), mirroring the candle path. */
+  static List<PairedLeg> pairLegs(List<SignalEvent> signals, List<EngineCandle> underlying) {
+    Map<String, Integer> idx = new HashMap<>();
+    for (int i = 0; i < underlying.size(); i++) {
+      idx.put(underlying.get(i).bucketStart().toString(), i);
+    }
+    int lastBar = Math.max(underlying.size() - 1, 0);
+    List<PairedLeg> legs = new ArrayList<>();
+    SignalEvent open = null;
+    for (SignalEvent ev : signals) {
+      if ("EXIT".equals(ev.direction())) {
+        if (open != null) {
+          legs.add(
+              new PairedLeg(
+                  "SHORT".equals(open.direction()),
+                  idx.getOrDefault(open.timestamp(), 0),
+                  idx.getOrDefault(ev.timestamp(), lastBar)));
+          open = null;
+        }
+      } else if (open == null) {
+        open = ev;
+      }
+    }
+    if (open != null) {
+      legs.add(
+          new PairedLeg("SHORT".equals(open.direction()), idx.getOrDefault(open.timestamp(), 0), lastBar));
+    }
+    return legs;
+  }
+
+  /** The registry underlying symbol (e.g. {@code NIFTY 50} → {@code NIFTY}). */
+  static String registryUnderlying(String tradingsymbol) {
+    int sp = tradingsymbol.indexOf(' ');
+    return sp < 0 ? tradingsymbol : tradingsymbol.substring(0, sp);
+  }
+
+  /** Parses {@code universe.options} → the expiry rule + allowed sides (the traded strike is the ATM). */
+  static UniverseSpec universeSpec(JsonNode config) {
+    JsonNode opts = config.path("universe").path("options");
+    JsonNode expiry = opts.path("expiry");
+    ExpiryMode mode;
+    int offset = 0;
+    if (expiry.isTextual()) {
+      mode =
+          "nearest_monthly".equals(expiry.asText())
+              ? ExpiryMode.NEAREST_MONTHLY
+              : ExpiryMode.NEAREST_WEEKLY;
+    } else {
+      mode = ExpiryMode.OFFSET;
+      offset = expiry.path("offset").asInt(0);
+    }
+    Set<String> types = new HashSet<>();
+    for (JsonNode t : opts.path("option_types")) {
+      types.add(t.asText());
+    }
+    if (types.isEmpty()) {
+      types = Set.of("CE", "PE");
+    }
+    return new UniverseSpec(mode, offset, types);
+  }
+
+  /** Parses {@code exit_rules} → the premium-pct thresholds (signal_exit stays on the signal stream). */
+  static PremiumExitEvaluator.Rules exitRules(JsonNode config) {
+    BigDecimal sl = null;
+    BigDecimal tp = null;
+    BigDecimal trailAt = null;
+    BigDecimal trailBy = null;
+    Integer timeBars = null;
+    for (JsonNode rule : config.path("exit_rules")) {
+      JsonNode p = rule.path("params");
+      switch (rule.path("type").asText()) {
+        case "stop_loss" -> {
+          if (isPremiumPct(p)) {
+            sl = dec(p, "value");
+          }
+        }
+        case "take_profit" -> {
+          if (isPremiumPct(p)) {
+            tp = dec(p, "value");
+          }
+        }
+        case "trailing_stop" -> {
+          trailAt = dec(p, "activate_at");
+          trailBy = dec(p, "trail_by");
+        }
+        case "time_stop" -> {
+          if (p.has("max_bars")) {
+            timeBars = p.path("max_bars").asInt();
+          }
+        }
+        default -> {
+          /* signal_exit etc. — handled by the signal stream */
+        }
+      }
+    }
+    return new PremiumExitEvaluator.Rules(sl, tp, trailAt, trailBy, timeBars);
+  }
+
+  /** The premium budget per trade ({@code risk.position_sizing.params.budget_inr}); 0 ⇒ no trades. */
+  static long budgetInr(JsonNode config) {
+    return config.path("risk").path("position_sizing").path("params").path("budget_inr").asLong(0);
+  }
+
+  private static boolean isPremiumPct(JsonNode params) {
+    return "premium_pct".equals(params.path("basis").asText());
+  }
+
+  private static BigDecimal dec(JsonNode params, String field) {
+    JsonNode n = params.path(field);
+    return n.isMissingNode() || n.isNull() ? null : new BigDecimal(n.asText());
   }
 
   /** An underlying-derived directed leg: the entry/exit bar indices on the underlying 1m series. */

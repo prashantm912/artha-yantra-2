@@ -19,6 +19,7 @@ import in.arthayantra.backtest.regime.RegimeLabeler;
 import in.arthayantra.backtest.regime.RegimePreflight;
 import in.arthayantra.backtest.replay.folds.FoldPersistence;
 import in.arthayantra.backtest.replay.folds.WalkForwardRunner;
+import in.arthayantra.backtest.replay.options.OptionsPremiumReplay;
 import in.arthayantra.backtest.replay.options.PremiumProvenance;
 import in.arthayantra.backtest.replay.options.PremiumSource;
 import in.arthayantra.strategyengine.config.StrategyCompiler;
@@ -53,6 +54,7 @@ public class BacktestRunner {
   private final StrategyVersionClient versions;
   private final CandleReader candleReader;
   private final ReplayEngine replayEngine;
+  private final OptionsPremiumReplay optionsPremiumReplay;
   private final MetricsCalculator metrics;
   private final RunRepository runs;
   private final TradeRepository trades;
@@ -70,6 +72,7 @@ public class BacktestRunner {
       StrategyVersionClient versions,
       CandleReader candleReader,
       ReplayEngine replayEngine,
+      OptionsPremiumReplay optionsPremiumReplay,
       MetricsCalculator metrics,
       RunRepository runs,
       TradeRepository trades,
@@ -84,6 +87,7 @@ public class BacktestRunner {
     this.versions = versions;
     this.candleReader = candleReader;
     this.replayEngine = replayEngine;
+    this.optionsPremiumReplay = optionsPremiumReplay;
     this.metrics = metrics;
     this.runs = runs;
     this.trades = trades;
@@ -141,19 +145,31 @@ public class BacktestRunner {
         contextSeries(definition, signal, from, to);
     checkpoint(cancelled, job.id(), progress, 40);
 
+    // Part 2: an options_of_underlying strategy is replayed premium-as-primary — signals on the
+    // underlying (the signal instrument here), fills/marks/exits on the option's own premium series.
+    // Every other strategy stays on the byte-identical candle-close ReplayEngine path (its goldens hold).
     ReplayResult result =
-        replayEngine.replay(
-            definition,
-            signal.exchange(),
-            signal.tradingsymbol(),
-            primary1m,
-            contexts,
-            initialEquity,
-            CostConfig.defaults(),
-            true,
-            // D17b: smooth intra-replay progress over the 40→80 band so the bar no longer sits at 40
-            // for the whole replay. Pure progress side-channel — replay numerics are unchanged.
-            pct -> progress.accept(40 + pct * 40 / 100));
+        premiumProvenance.isOptionsStrategy(config)
+            ? optionsPremiumReplay.replay(
+                definition,
+                config,
+                signal.exchange(),
+                signal.tradingsymbol(),
+                primary1m,
+                contexts,
+                initialEquity)
+            : replayEngine.replay(
+                definition,
+                signal.exchange(),
+                signal.tradingsymbol(),
+                primary1m,
+                contexts,
+                initialEquity,
+                CostConfig.defaults(),
+                true,
+                // D17b: smooth intra-replay progress over the 40→80 band so the bar no longer sits at 40
+                // for the whole replay. Pure progress side-channel — replay numerics are unchanged.
+                pct -> progress.accept(40 + pct * 40 / 100));
     checkpoint(cancelled, job.id(), progress, 80);
 
     MetricsCalculator.Metrics m =

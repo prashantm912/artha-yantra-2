@@ -180,6 +180,43 @@ class OptionsPremiumReplayTest {
         .isEqualByComparingTo("203900.00"); // post-exit
   }
 
+  @Test
+  void parsesTheOptionsConfigIntoSpecRulesAndBudget() throws Exception {
+    com.fasterxml.jackson.databind.JsonNode config =
+        new com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(
+                """
+                {
+                  "universe": {"mode":"options_of_underlying",
+                    "underlying":{"exchange":"NSE","tradingsymbol":"NIFTY 50"},
+                    "options":{"expiry":"nearest_weekly","strikes":{"selector":"atm"},
+                      "option_types":["CE","PE"]}},
+                  "exit_rules":[
+                    {"type":"stop_loss","params":{"basis":"premium_pct","value":20}},
+                    {"type":"take_profit","params":{"basis":"premium_pct","value":35}},
+                    {"type":"trailing_stop","params":{"basis":"premium_pct","activate_at":20,"trail_by":10}},
+                    {"type":"time_stop","params":{"max_bars":15}},
+                    {"type":"signal_exit","params":{"rule":"x"}}
+                  ],
+                  "risk":{"position_sizing":{"method":"premium_budget","params":{"budget_inr":15000}}}
+                }
+                """);
+
+    UniverseSpec spec = OptionsPremiumReplay.universeSpec(config);
+    assertThat(spec.expiryMode()).isEqualTo(ExpiryMode.NEAREST_WEEKLY);
+    assertThat(spec.optionTypes()).containsExactlyInAnyOrder("CE", "PE");
+
+    PremiumExitEvaluator.Rules rules = OptionsPremiumReplay.exitRules(config);
+    assertThat(rules.stopLossPct()).isEqualByComparingTo("20");
+    assertThat(rules.takeProfitPct()).isEqualByComparingTo("35");
+    assertThat(rules.trailActivatePct()).isEqualByComparingTo("20");
+    assertThat(rules.trailByPct()).isEqualByComparingTo("10");
+    assertThat(rules.timeStopBars()).isEqualTo(15);
+
+    assertThat(OptionsPremiumReplay.budgetInr(config)).isEqualTo(15_000);
+    assertThat(OptionsPremiumReplay.registryUnderlying("NIFTY 50")).isEqualTo("NIFTY");
+  }
+
   private static BigDecimal bd(String v) {
     return new BigDecimal(v);
   }

@@ -28,10 +28,12 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The dedicated premium-as-primary PARITY GOLDEN (fixtures): a deterministic 3-leg scenario pins the
- * exact premium trades + equity curve, separate from the candle-close {@code BacktestParityTest}. Leg
- * A is a long CE take-profit, B a long CE stop-loss (a DIFFERENT ATM strike as spot moved), C a short
- * PE signal-exit. Any change to the premium path that perturbs the numerics fails here; a re-run
- * proves determinism.
+ * exact premium trades + the PER-BAR mark-to-market equity curve, separate from the candle-close
+ * {@code BacktestParityTest}. Leg A is a long CE take-profit, B a long CE stop-loss (a DIFFERENT ATM
+ * strike as spot moved), C a short PE signal-exit. Trades fill through the shared {@code FillSimulator}
+ * (1-tick slippage + the full options cost stack), so P&L is cost-inclusive (TP +3767.76 / SL -2987.51
+ * / signal-exit +401.33, equity 200000→201181.58). Any change to the premium path that perturbs the
+ * numerics fails here; a re-run proves determinism.
  */
 class OptionsPremiumGoldenTest {
 
@@ -107,41 +109,43 @@ class OptionsPremiumGoldenTest {
 
     assertThat(r.trades()).hasSize(3);
 
-    // leg A — long CE 25000, TP: entry 80 → exit 110, qty 130, +3900
+    // leg A — long CE 25000, TP: observed 80→110 fills at 80.05/109.95 (1-tick slippage); net of the
+    // full options cost stack pnl=+3767.76 (gross +3887 − ~₹119 brokerage/STT/txn/GST/stamp).
     Trade a = r.trades().get(0);
     assertThat(a.tradingsymbol()).isEqualTo("NIFTY16JUN2625000CE");
     assertThat(a.side()).isEqualTo(Side.BUY);
     assertThat(a.qty()).isEqualTo(130);
-    assertThat(a.entryPrice()).isEqualByComparingTo("80");
-    assertThat(a.exitPrice()).isEqualByComparingTo("110");
+    assertThat(a.entryPrice()).isEqualByComparingTo("80.05");
+    assertThat(a.exitPrice()).isEqualByComparingTo("109.95");
     assertThat(a.exitReason()).isEqualTo("TAKE_PROFIT");
-    assertThat(a.pnl()).isEqualByComparingTo("3900.00");
+    assertThat(a.pnl()).isEqualByComparingTo("3767.76");
 
-    // leg B — long CE 25500, SL: entry 100 → exit 78, qty 130, -2860
+    // leg B — long CE 25500, SL: 100→78 fills 100.05/77.95, net -2987.51
     Trade b = r.trades().get(1);
     assertThat(b.tradingsymbol()).isEqualTo("NIFTY16JUN2625500CE");
-    assertThat(b.entryPrice()).isEqualByComparingTo("100");
-    assertThat(b.exitPrice()).isEqualByComparingTo("78");
+    assertThat(b.entryPrice()).isEqualByComparingTo("100.05");
+    assertThat(b.exitPrice()).isEqualByComparingTo("77.95");
     assertThat(b.exitReason()).isEqualTo("STOP_LOSS");
-    assertThat(b.pnl()).isEqualByComparingTo("-2860.00");
+    assertThat(b.pnl()).isEqualByComparingTo("-2987.51");
 
-    // leg C — short → PE 24500, signal exit: entry 60 → exit 63, qty 195, +585
+    // leg C — short → PE 24500, signal exit: 60→63 fills 60.05/62.95, qty 195, net +401.33
     Trade c = r.trades().get(2);
     assertThat(c.tradingsymbol()).isEqualTo("NIFTY16JUN2624500PE");
     assertThat(c.qty()).isEqualTo(195);
-    assertThat(c.entryPrice()).isEqualByComparingTo("60");
-    assertThat(c.exitPrice()).isEqualByComparingTo("63");
+    assertThat(c.entryPrice()).isEqualByComparingTo("60.05");
+    assertThat(c.exitPrice()).isEqualByComparingTo("62.95");
     assertThat(c.exitReason()).isEqualTo("SIGNAL_EXIT");
-    assertThat(c.pnl()).isEqualByComparingTo("585.00");
+    assertThat(c.pnl()).isEqualByComparingTo("401.33");
 
-    // equity: 200000 → +3900 @bar2 → -2860 @bar6 → +585 @bar10 = 201625; 6 bars in position
-    assertThat(r.finalEquity()).isEqualByComparingTo("201625.00");
+    // per-bar MTM equity: 200000 → +3767.76 @bar2 → -2987.51 @bar6 → +401.33 @bar10 = 201181.58;
+    // 6 bars in position. The curve dips intra-trade (entry cost+slippage, open mark) not just at exits.
+    assertThat(r.finalEquity()).isEqualByComparingTo("201181.58");
     assertThat(r.barsInPosition()).isEqualTo(6);
     assertThat(r.totalBars()).isEqualTo(11);
-    assertThat(r.equityCurve().get(0).equity()).isEqualByComparingTo("200000.00");
-    assertThat(r.equityCurve().get(5).equity()).isEqualByComparingTo("203900.00"); // after leg A
-    assertThat(r.equityCurve().get(9).equity()).isEqualByComparingTo("201040.00"); // after leg B
-    assertThat(r.equityCurve().get(10).equity()).isEqualByComparingTo("201625.00"); // after leg C
+    assertThat(r.equityCurve().get(0).equity()).isEqualByComparingTo("199941.67"); // bar0: leg A open (entry cost)
+    assertThat(r.equityCurve().get(5).equity()).isEqualByComparingTo("202148.28"); // bar5: leg B open, marked
+    assertThat(r.equityCurve().get(9).equity()).isEqualByComparingTo("201084.50"); // bar9: leg C open, marked
+    assertThat(r.equityCurve().get(10).equity()).isEqualByComparingTo("201181.58"); // bar10: leg C closed
   }
 
   @Test

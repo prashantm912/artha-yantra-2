@@ -8,7 +8,8 @@ test('Options Chain renders the control bar + header, no axe violations', async 
   await page.goto('/options/options-chain');
 
   await expect(page.getByTestId('app-shell')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'All Menu ▾' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Options', exact: true })).toBeVisible();
   await expect(page.getByLabel('Theme')).toBeVisible();
 
   await expect(page.getByLabel('Underlying')).toBeVisible();

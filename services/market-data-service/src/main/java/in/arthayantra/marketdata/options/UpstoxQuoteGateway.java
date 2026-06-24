@@ -1,8 +1,10 @@
 package in.arthayantra.marketdata.options;
 
 import in.arthayantra.marketdata.constituents.StockUpstoxKeyMap;
+import in.arthayantra.marketdata.instruments.InstrumentRepository;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.QuoteGateway;
+import in.arthayantra.marketdata.upstox.UpstoxFnoMasterClient;
 import in.arthayantra.marketdata.upstox.UpstoxQuoteClient;
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -12,8 +14,10 @@ import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
@@ -28,11 +32,11 @@ import org.springframework.stereotype.Component;
  * module-internal {@code upstox.wire} DTO, so no module-boundary violation.
  *
  * <p>Maps the requested {@link InstrumentKey}s to Upstox {@code instrument_key}s (indices + cash
- * equities; {@link UpstoxQuoteInstrumentKeys}), issues ONE batch {@code /v2/market-quote/quotes} call
- * (no fan-out), and maps each {@link UpstoxQuoteClient.Tick} back to the domain {@link Quote}. Keys
- * with no Upstox mapping (notably exchange-traded FUT symbols) are simply omitted from the batch, so
- * the caller treats them as absent — matching the {@code QuoteGateway} contract — and the Kite path
- * remains the source for them.
+ * equities, plus FUT/option via the {@link UpstoxFnoMasterClient} when present; {@link
+ * UpstoxQuoteInstrumentKeys}), issues ONE batch {@code /v2/market-quote/quotes} call (no fan-out), and
+ * maps each {@link UpstoxQuoteClient.Tick} back to the domain {@link Quote}. Keys with no Upstox
+ * mapping are simply omitted from the batch, so the caller treats them as absent — matching the {@code
+ * QuoteGateway} contract — and the Kite path remains the source for them.
  */
 @Component
 @Profile("live")
@@ -47,10 +51,25 @@ public class UpstoxQuoteGateway implements QuoteGateway {
   /**
    * @param client the Upstox direct market-quote client
    * @param stockKeys the existing symbol → {@code NSE_EQ|<ISIN>} reference (reused, not duplicated)
+   * @param instruments the instrument master (re-resolves a FUT/option key to its structured leg)
+   * @param fnoMaster the Upstox F&amp;O instrument master; {@code null} when not bound — then FUT/option
+   *     stays unmapped (pre-U4 behavior) and the Kite path remains the source for it
    */
-  public UpstoxQuoteGateway(UpstoxQuoteClient client, StockUpstoxKeyMap stockKeys) {
+  @Autowired
+  public UpstoxQuoteGateway(
+      UpstoxQuoteClient client,
+      StockUpstoxKeyMap stockKeys,
+      InstrumentRepository instruments,
+      @Autowired(required = false) @Nullable UpstoxFnoMasterClient fnoMaster) {
     this.client = client;
-    this.instrumentKeys = new UpstoxQuoteInstrumentKeys(stockKeys);
+    UpstoxFnoInstrumentKeys fnoKeys =
+        fnoMaster == null ? null : new UpstoxFnoInstrumentKeys(instruments, fnoMaster);
+    this.instrumentKeys = new UpstoxQuoteInstrumentKeys(stockKeys, fnoKeys);
+  }
+
+  /** Index + equity only (the pre-U4 shape; F&amp;O stays unmapped). Used by unit tests. */
+  public UpstoxQuoteGateway(UpstoxQuoteClient client, StockUpstoxKeyMap stockKeys) {
+    this(client, stockKeys, null, null);
   }
 
   @Override

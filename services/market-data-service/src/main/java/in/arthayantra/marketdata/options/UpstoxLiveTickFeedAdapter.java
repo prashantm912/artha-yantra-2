@@ -2,9 +2,11 @@ package in.arthayantra.marketdata.options;
 
 import in.arthayantra.marketdata.constituents.StockUpstoxKeyMap;
 import in.arthayantra.marketdata.instruments.InstrumentRegistry;
+import in.arthayantra.marketdata.instruments.InstrumentRepository;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.RawTick;
 import in.arthayantra.marketdata.kite.UpstoxLiveTickFeed;
+import in.arthayantra.marketdata.upstox.UpstoxFnoMasterClient;
 import in.arthayantra.marketdata.upstox.UpstoxMarketFeedClient;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -20,8 +22,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
@@ -38,11 +42,12 @@ import org.springframework.stereotype.Component;
  * instruments} + {@code constituents} + {@code kite}, so it adds no new module edge.
  *
  * <p>Token→Upstox-key uses the SAME verified map as the U2 quote path ({@link
- * UpstoxQuoteInstrumentKeys}: indices + NSE cash equities; no map duplicated). A token with no
- * derivable Upstox key (notably exchange-traded F&amp;O FUT/option symbols, whose Upstox key is a
- * numeric token) is logged and skipped — it does not stream over Upstox (the documented gap before a
- * full F&amp;O instrument-key map is built; see the U3 runbook). Anti-corruption: it consumes the
- * exposed {@link UpstoxMarketFeedClient.Tick}, never the {@code upstox.ws} protobuf types.
+ * UpstoxQuoteInstrumentKeys}: indices + NSE cash equities; no map duplicated). When the Upstox F&amp;O
+ * instrument master ({@link UpstoxFnoMasterClient}) is bound, FUT/option tokens now RESOLVE to their
+ * {@code NSE_FO|<token>} / {@code BSE_FO|<token>} key too (the Wave-U4 enabler — the full option-strike
+ * scalp A/B); a token still without a derivable Upstox key is logged and skipped (the Kite path stays
+ * its source). Anti-corruption: it consumes the exposed {@link UpstoxMarketFeedClient.Tick}, never the
+ * {@code upstox.ws} protobuf types.
  */
 @Component
 @Profile("live")
@@ -66,19 +71,33 @@ public class UpstoxLiveTickFeedAdapter implements UpstoxLiveTickFeed {
   private final Map<String, Long> tokenByUpstoxKey = new ConcurrentHashMap<>();
   private volatile Consumer<List<RawTick>> sink = t -> {};
 
+  @Autowired
   public UpstoxLiveTickFeedAdapter(
       UpstoxMarketFeedClient client,
       InstrumentRegistry instruments,
+      InstrumentRepository instrumentMaster,
       StockUpstoxKeyMap stockKeys,
-      MeterRegistry meterRegistry) {
+      MeterRegistry meterRegistry,
+      @Autowired(required = false) @Nullable UpstoxFnoMasterClient fnoMaster) {
     this.client = client;
     this.instruments = instruments;
-    this.instrumentKeys = new UpstoxQuoteInstrumentKeys(stockKeys);
+    UpstoxFnoInstrumentKeys fnoKeys =
+        fnoMaster == null ? null : new UpstoxFnoInstrumentKeys(instrumentMaster, fnoMaster);
+    this.instrumentKeys = new UpstoxQuoteInstrumentKeys(stockKeys, fnoKeys);
     // §17.3 scalp-latency-gate instrumentation: tick STALENESS (receive-time − exchange ltt) so a
     // live A/B can compare Upstox-WS vs Kite-WS tick latency over ≥1 session. Counter gives the rate.
     this.tickLatency = meterRegistry.timer("ay_upstox_ws_tick_latency");
     this.ticksReceived = meterRegistry.counter("ay_upstox_ws_ticks_received_total");
     client.onTicks(this::deliver);
+  }
+
+  /** Index + equity only (the pre-U4 shape; F&amp;O stays unmapped). Used by unit tests. */
+  UpstoxLiveTickFeedAdapter(
+      UpstoxMarketFeedClient client,
+      InstrumentRegistry instruments,
+      StockUpstoxKeyMap stockKeys,
+      MeterRegistry meterRegistry) {
+    this(client, instruments, null, stockKeys, meterRegistry, null);
   }
 
   @Override

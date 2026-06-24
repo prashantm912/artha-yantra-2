@@ -11,14 +11,25 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * access token</b> — strictly SEPARATE from any live execution session — read from a Docker secret
  * FILE (never an env var, never logged), mirroring the Kite/OpenAlgo secret-file convention. The
  * base URL is configurable so WireMock can stand in for {@code api.upstox.com} in tests.
+ *
+ * <p>{@code instrumentsBaseUrl} is the SEPARATE host for the public, auth-free instrument master
+ * ({@code assets.upstox.com} — a CDN, not the API host); also configurable so WireMock stands in for
+ * it (see {@link UpstoxFnoMasterClient}).
  */
 @ConfigurationProperties(prefix = "artha.upstox.analytics")
-public record UpstoxAnalyticsProperties(String baseUrl, String tokenFile, String token) {
+public record UpstoxAnalyticsProperties(
+    String baseUrl, String tokenFile, String token, String instrumentsBaseUrl) {
 
-  /** Defaults: real Upstox, the analytics-token Docker secret file. */
+  /** Defaults: real Upstox API, the assets CDN for the master, the analytics-token Docker secret file. */
   public UpstoxAnalyticsProperties {
     baseUrl = baseUrl == null ? "https://api.upstox.com" : baseUrl;
+    instrumentsBaseUrl = instrumentsBaseUrl == null ? "https://assets.upstox.com" : instrumentsBaseUrl;
     tokenFile = tokenFile == null ? "/run/secrets/upstox_analytics_token" : tokenFile;
+  }
+
+  /** The 3-arg shape used before the instrument-master host was added (defaults the CDN host). */
+  public UpstoxAnalyticsProperties(String baseUrl, String tokenFile, String token) {
+    this(baseUrl, tokenFile, token, null);
   }
 
   /** The analytics bearer token — explicit property (tests) or the secret file. */

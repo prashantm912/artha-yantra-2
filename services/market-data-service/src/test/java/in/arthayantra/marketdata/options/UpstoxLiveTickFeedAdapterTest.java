@@ -1,24 +1,40 @@
 package in.arthayantra.marketdata.options;
 
+import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.tomakehurst.wiremock.WireMockServer;
+import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import com.google.protobuf.CodedOutputStream;
 import in.arthayantra.marketdata.constituents.StockUpstoxKeyMap;
+import in.arthayantra.marketdata.instruments.Instrument;
 import in.arthayantra.marketdata.instruments.InstrumentRegistry;
+import in.arthayantra.marketdata.instruments.InstrumentRepository;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.RawTick;
+import in.arthayantra.marketdata.upstox.UpstoxAnalyticsProperties;
+import in.arthayantra.marketdata.upstox.UpstoxFnoMasterClient;
 import in.arthayantra.marketdata.upstox.UpstoxMarketFeedClient;
 import in.arthayantra.marketdata.upstox.ws.UpstoxReconnectPolicy;
 import in.arthayantra.marketdata.upstox.ws.UpstoxWebSocket;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Consumer;
+import java.util.zip.GZIPOutputStream;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.client.RestClient;
 
 /**
  * The Wave-U3 bridge ({@link UpstoxLiveTickFeedAdapter}): asserts it translates Kite tokens to Upstox
@@ -113,6 +129,73 @@ class UpstoxLiveTickFeedAdapterTest {
     f.adapter().subscribe(List.of(999_999L)); // no master entry — left to the Kite path
 
     assertThat(f.socket().sent).isEmpty();
+  }
+
+  // ---- Wave-U4: a FUT/option token now RESOLVES to its Upstox key (previously logged + skipped) ----
+
+  private static final long FUT_TOKEN = 510_001L;
+
+  @Test
+  void futureTokenNowResolvesToItsUpstoxFnoKeyAndSubscribes() {
+    WireMockServer wireMock =
+        new WireMockServer(WireMockConfiguration.wireMockConfig().dynamicPort());
+    wireMock.start();
+    try {
+      String masterJson =
+          """
+          [{"segment":"NSE_FO","asset_symbol":"NIFTY","instrument_key":"NSE_FO|61093",
+            "instrument_type":"FUT","expiry":1785263399000,"strike_price":0.0}]
+          """;
+      wireMock.stubFor(
+          get(urlPathEqualTo("/market-quote/instruments/exchange/complete.json.gz"))
+              .willReturn(aResponse().withBody(gzip(masterJson))));
+
+      FakeSocket socket = new FakeSocket();
+      UpstoxMarketFeedClient client =
+          new UpstoxMarketFeedClient(
+              () -> "wss://x", url -> socket, new UpstoxReconnectPolicy(), millis -> {});
+      InstrumentKey futKey = new InstrumentKey("NFO", "NIFTY26JULFUT");
+      InstrumentRegistry registry = InstrumentRegistry.fixedForTesting(Map.of(FUT_TOKEN, futKey));
+      InstrumentRepository repo = mock(InstrumentRepository.class);
+      when(repo.findByKey("NFO", "NIFTY26JULFUT"))
+          .thenReturn(
+              Optional.of(
+                  new Instrument(
+                      "NFO", "NIFTY26JULFUT", FUT_TOKEN, "NIFTY", "NFO-FUT", "FUT", "NSE", "NIFTY",
+                      LocalDate.of(2026, 7, 28), null, null, 75, true)));
+      UpstoxFnoMasterClient master =
+          new UpstoxFnoMasterClient(
+              RestClient.builder(),
+              new ObjectMapper(),
+              new UpstoxAnalyticsProperties(null, null, null, wireMock.baseUrl()));
+      UpstoxLiveTickFeedAdapter adapter =
+          new UpstoxLiveTickFeedAdapter(
+              client,
+              registry,
+              repo,
+              new StockUpstoxKeyMap(new ObjectMapper()),
+              new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
+              master);
+      client.start();
+
+      adapter.subscribe(List.of(FUT_TOKEN));
+
+      assertThat(socket.sent).as("the FUT token is now subscribed over Upstox").hasSize(1);
+      String msg = new String(socket.sent.get(0), java.nio.charset.StandardCharsets.UTF_8);
+      assertThat(msg).contains("\"mode\":\"full\"").contains("NSE_FO|61093");
+    } finally {
+      wireMock.stop();
+    }
+  }
+
+  private static byte[] gzip(String json) {
+    ByteArrayOutputStream out = new ByteArrayOutputStream();
+    try (GZIPOutputStream gz = new GZIPOutputStream(out)) {
+      gz.write(json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+    return out.toByteArray();
   }
 
   @Test

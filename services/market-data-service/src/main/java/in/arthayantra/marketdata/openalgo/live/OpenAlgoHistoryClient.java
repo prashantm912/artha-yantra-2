@@ -6,6 +6,7 @@ import in.arthayantra.marketdata.kite.HistoricalCandleGateway;
 import in.arthayantra.marketdata.kite.HistoricalCandleGateway.Candle;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.OiHistorySource;
+import in.arthayantra.marketdata.openalgo.OpenAlgoSymbols;
 import java.time.Instant;
 import java.util.List;
 

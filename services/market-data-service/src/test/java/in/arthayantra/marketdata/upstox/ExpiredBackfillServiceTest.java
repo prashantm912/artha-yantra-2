@@ -13,7 +13,7 @@ import static org.mockito.Mockito.when;
 
 import in.arthayantra.marketdata.candles.Candle;
 import in.arthayantra.marketdata.candles.CandleRepository;
-import in.arthayantra.marketdata.openalgo.live.OpenAlgoSymbols;
+import in.arthayantra.marketdata.openalgo.OpenAlgoSymbols;
 import in.arthayantra.marketdata.upstox.ExpiredBackfillRepository.Coverage;
 import in.arthayantra.marketdata.upstox.UpstoxExpiredInstrumentsClient.Bar;
 import in.arthayantra.marketdata.upstox.UpstoxExpiredInstrumentsClient.Leg;

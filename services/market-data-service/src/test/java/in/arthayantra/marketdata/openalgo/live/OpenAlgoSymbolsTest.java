@@ -2,6 +2,7 @@ package in.arthayantra.marketdata.openalgo.live;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import in.arthayantra.marketdata.openalgo.OpenAlgoSymbols;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import org.junit.jupiter.api.Test;

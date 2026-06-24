@@ -44,43 +44,50 @@ class ScalperConfluenceGateTest {
       new ScalperConfig(
           "NSE", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          false, ScalperConfig.StructuralStop.NONE, false, false, false, false, false, false);
+          false, ScalperConfig.StructuralStop.NONE, false, false, false, false, false, false, false);
   private static final ScalperConfig TWO_CANDLE_CFG =
       new ScalperConfig(
           "NSE", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          true, ScalperConfig.StructuralStop.TWO_CANDLE_FIRST, false, false, false, false, false, false);
+          true, ScalperConfig.StructuralStop.TWO_CANDLE_FIRST, false, false, false, false, false, false,
+          false);
   // #5: a strategy with the oi-cross-filter HARD pre-gate enabled.
   private static final ScalperConfig OI_CROSS_CFG =
       new ScalperConfig(
           "NSE", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          false, ScalperConfig.StructuralStop.NONE, true, false, false, false, false, false);
+          false, ScalperConfig.StructuralStop.NONE, true, false, false, false, false, false, false);
   // #4: a strategy with the gap-theory HARD gap-fill pre-gate enabled.
   private static final ScalperConfig GAP_CFG =
       new ScalperConfig(
           "NSE", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          false, ScalperConfig.StructuralStop.GAP_TREND, false, true, false, false, false, false);
+          false, ScalperConfig.StructuralStop.GAP_TREND, false, true, false, false, false, false, false);
   // #12: a strategy with the trend-change HARD pre-gate enabled (structure break + >=50% OI shift).
   private static final ScalperConfig TREND_CHANGE_CFG =
       new ScalperConfig(
           "NSE", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          false, ScalperConfig.StructuralStop.SWING_BREAK, false, false, true, false, false, false);
+          false, ScalperConfig.StructuralStop.SWING_BREAK, false, false, true, false, false, false, false);
   // #2: a strategy with the open-high-low HARD FNO-structure pre-gate enabled.
   private static final ScalperConfig OPEN_HIGH_LOW_CFG =
       new ScalperConfig(
           "NSE", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          false, ScalperConfig.StructuralStop.VWAP, false, false, false, true, false, false);
+          false, ScalperConfig.StructuralStop.VWAP, false, false, false, true, false, false, false);
   // #9: a strategy with the opening-tick (Morning Trade) path enabled — its own opening-tick time
   // window + the VWAP HARD-gate degrade before 10:30 + a FIRST-CANDLE stop anchor.
   private static final ScalperConfig OPENING_TICK_CFG =
       new ScalperConfig(
           "NSE", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          false, ScalperConfig.StructuralStop.FIRST_CANDLE, false, false, false, false, true, false);
+          false, ScalperConfig.StructuralStop.FIRST_CANDLE, false, false, false, false, true, false, false);
+  // #11: a strategy with the straddle (neutral two-leg) path enabled.
+  private static final ScalperConfig STRADDLE_CFG =
+      new ScalperConfig(
+          "NSE", "NIFTY 50", 2,
+          new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
+          false, ScalperConfig.StructuralStop.NONE, false, false, false, false, false, false, true);
 
   // a 3m index-future series: index 2 is the deploy bar; indices 0/1 are the forming candles.
   private static EngineSeries futureSeries(EngineCandle... candles) {
@@ -692,5 +699,115 @@ class ScalperConfluenceGateTest {
             new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL)
                 .evaluate(CFG, closeEqualsVwapBank(), future, 2, NOW, IST_TIME, EOD))
         .isEmpty();
+  }
+
+  // #11 Straddle -----------------------------------------------------------------------------------
+
+  // a chain carrying BOTH legs of three strikes; 20000 is the ATM (forward 20000): a complete CE+PE
+  // pair nearest the forward. 19900/20100 also have both legs (the picker must still choose ATM 20000).
+  private static ChainSnapshot chainWithAtmPair() {
+    List<StrikePicker.Candidate> candidates =
+        List.of(
+            new StrikePicker.Candidate("NIFTY19900CE", bd("19900"), CE, bd("160"), bd("0.14")),
+            new StrikePicker.Candidate(
+                "NIFTY19900PE", bd("19900"), in.arthayantra.black76.Black76.OptionType.PE,
+                bd("70"), bd("0.14")),
+            new StrikePicker.Candidate("NIFTY20000CE", bd("20000"), CE, bd("120"), bd("0.14")),
+            new StrikePicker.Candidate(
+                "NIFTY20000PE", bd("20000"), in.arthayantra.black76.Black76.OptionType.PE,
+                bd("110"), bd("0.14")),
+            new StrikePicker.Candidate("NIFTY20100CE", bd("20100"), CE, bd("80"), bd("0.14")),
+            new StrikePicker.Candidate(
+                "NIFTY20100PE", bd("20100"), in.arthayantra.black76.Black76.OptionType.PE,
+                bd("150"), bd("0.14")));
+    return new ChainSnapshot(EXPIRY, bd("20000"), bd("20000"), candidates);
+  }
+
+  @Test
+  void straddleStrategyPicksBothAtmLegsNeutrallyWithNoStructuralStop() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithAtmPair()));
+    // the seam never reads the OI/macro context for a straddle (no directional confluence) — so the
+    // context mock is deliberately left unstubbed to prove it is not consulted.
+
+    Optional<Decision> decision =
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL)
+            .evaluate(STRADDLE_CFG, bullBank(), null, 0, NOW, IST_TIME, EOD);
+
+    assertThat(decision).isPresent();
+    Decision d = decision.get();
+    assertThat(d.neutral()).isTrue();
+    assertThat(d.side()).isNull(); // direction-neutral
+    assertThat(d.structuralStop()).isNull(); // SL is the combined-premium %, not a future structure
+    // exactly two legs: the ATM 20000 CE + the ATM 20000 PE (same strike, both BUY)
+    assertThat(d.legs()).hasSize(2);
+    assertThat(d.legs().get(0).optionType()).isEqualTo(CE);
+    assertThat(d.legs().get(1).optionType())
+        .isEqualTo(in.arthayantra.black76.Black76.OptionType.PE);
+    assertThat(d.legs().get(0).pick().candidate().tradingsymbol()).isEqualTo("NIFTY20000CE");
+    assertThat(d.legs().get(1).pick().candidate().tradingsymbol()).isEqualTo("NIFTY20000PE");
+    // the same ATM strike on both legs (§3.11)
+    assertThat(d.legs().get(0).pick().candidate().strike())
+        .isEqualByComparingTo(d.legs().get(1).pick().candidate().strike());
+    // pick() returns the primary (CE) leg — the frozen tradeable_* + scalp event read it
+    assertThat(d.pick().candidate().tradingsymbol()).isEqualTo("NIFTY20000CE");
+    org.mockito.Mockito.verify(client, org.mockito.Mockito.never())
+        .context(any(), any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void straddleStrategyBlocksBelowTheVolumeFloor() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithAtmPair()));
+    // volume 1000 is below the NIFTY 125k §0B floor — the side-agnostic rail blocks the straddle too
+    BarValues thin =
+        new BarValues() {
+          @Override
+          public BigDecimal valueAt(String alias, int i) {
+            return bd("98");
+          }
+
+          @Override
+          public BigDecimal previousValueAt(String alias, int i) {
+            return null;
+          }
+
+          @Override
+          public BigDecimal builtin(String name, int i) {
+            return Map.of("close", bd("100"), "vwap", bd("99"), "volume", bd("1000")).get(name);
+          }
+        };
+
+    assertThat(
+            new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL)
+                .evaluate(STRADDLE_CFG, thin, null, 0, NOW, IST_TIME, EOD))
+        .isEmpty();
+  }
+
+  @Test
+  void straddleStrategyBlocksWhenNoCompleteAtmPairExists() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    // only CE legs in the chain → no strike carries BOTH legs → no straddle possible → block
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+
+    assertThat(
+            new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL)
+                .evaluate(STRADDLE_CFG, bullBank(), null, 0, NOW, IST_TIME, EOD))
+        .isEmpty();
+  }
+
+  @Test
+  void nonStraddleStrategyIsUnaffectedByThePresenceOfAnAtmPair() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithAtmPair()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    // CFG carries no straddle tag → the neutral branch is never taken; it picks the directional CE
+    Optional<Decision> decision =
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL)
+            .evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD);
+    assertThat(decision).isPresent();
+    assertThat(decision.get().neutral()).isFalse();
+    assertThat(decision.get().side()).isEqualTo(CE);
+    assertThat(decision.get().legs()).hasSize(1);
   }
 }

@@ -26,7 +26,12 @@ import java.util.Map;
  * ({@link #OPENING_FROM}-{@link #OPENING_TO}), degrades the VWAP HARD gate before 10:30 IST, and
  * anchors the stop on the FIRST session candle's low (CE) / high (PE); {@code hero-zero} (#7) runs the
  * {@link HeroZeroGate} as a hard expiry-day end-of-day pre-gate (after 14:30, &gt;50% OI+price break +
- * short-covering) and anchors the stop on the OPPOSITE session extreme.
+ * short-covering) and anchors the stop on the OPPOSITE session extreme; {@code straddle} (#11) routes the
+ * direction-NEUTRAL §3.11 LONG-straddle path — the gate skips the CE/PE directional split and the
+ * directional confluence and picks BOTH ATM legs ({@link StraddleLegPicker}) on the side-agnostic §0B
+ * time + volume rails (combined-premium-vs-VWAP entry timing / low-IV gate are LIVE market-data series
+ * the deterministic seam cannot recompute → deferred to live management; no structural stop on the
+ * future — the SL is the combined-premium %).
  */
 public record ScalperConfig(
     String underlyingExchange,
@@ -41,7 +46,8 @@ public record ScalperConfig(
     boolean requireTrendChange,
     boolean requireOpenHighLow,
     boolean openingTick,
-    boolean requireHeroZero) {
+    boolean requireHeroZero,
+    boolean requireStraddle) {
 
   /** Where the entry-time structural stop-loss is anchored (none = size off structure/VWAP only). */
   public enum StructuralStop {
@@ -108,6 +114,10 @@ public record ScalperConfig(
     // #7 (section 7): the hero-zero tag arms the HeroZeroGate (expiry-day end-of-day buy) + an
     // OPPOSITE-EXTREME SL anchor (the session extreme opposite the fire direction).
     boolean heroZero = tags.contains("hero-zero");
+    // #11 (section 3.11): the straddle tag routes the direction-NEUTRAL LONG-straddle path (both ATM
+    // legs). It carries NO structural stop on the index future (the SL is the combined-premium %,
+    // managed on the option legs) so it never sets a StructuralStop anchor below.
+    boolean straddle = tags.contains("straddle");
     StructuralStop stop =
         twoCandle
             ? StructuralStop.TWO_CANDLE_FIRST
@@ -128,6 +138,6 @@ public record ScalperConfig(
     boolean callPutDeltaFilter = tags.contains("oi-cross-filter");
     return new ScalperConfig(
         exchange, underlying, rollDays, params, THRESHOLD, twoCandle, stop, callPutDeltaFilter,
-        gapFill, trendChange, openHighLow, openingTick, heroZero);
+        gapFill, trendChange, openHighLow, openingTick, heroZero, straddle);
   }
 }

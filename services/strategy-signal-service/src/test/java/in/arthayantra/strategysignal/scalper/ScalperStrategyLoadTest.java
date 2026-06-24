@@ -38,6 +38,7 @@ class ScalperStrategyLoadTest {
           Map.entry("scalp-open-high-low-nifty", "NIFTY 50"),
           Map.entry("scalp-morning-trade-nifty", "NIFTY 50"),
           Map.entry("scalp-hero-zero-nifty", "NIFTY 50"),
+          Map.entry("scalp-straddle-nifty", "NIFTY 50"),
           Map.entry("scalp-market-movers-nifty", "NIFTY 50"),
           Map.entry("scalp-btst-stbt-nifty", "NIFTY 50"));
 
@@ -48,7 +49,8 @@ class ScalperStrategyLoadTest {
           "scalp-trend-change-banknifty", "trend-change",
           "scalp-open-high-low-nifty", "open-high-low",
           "scalp-morning-trade-nifty", "opening-tick",
-          "scalp-hero-zero-nifty", "hero-zero");
+          "scalp-hero-zero-nifty", "hero-zero",
+          "scalp-straddle-nifty", "straddle");
 
   // the aliases ScalperConfluenceGate reads off the bank — each strategy must declare all four.
   private static final Set<String> SEAM_ALIASES = Set.of("vwma20", "psar", "rsi14", "supertrend");
@@ -102,6 +104,17 @@ class ScalperStrategyLoadTest {
       assertThat(cfg.requireCallPutDeltaFilter())
           .as(id + " oi-cross-filter pre-gate")
           .isEqualTo(isTrendingOi);
+
+      // #11 (section 3.11): only scalp-straddle carries the straddle tag → the NEUTRAL two-leg path.
+      // ScalperConfig.requireStraddle mirrors the tag; the others stay off, and the straddle declares
+      // both option_types (it BUYS the ATM CE + PE) rather than a single directional side.
+      boolean isStraddle = id.equals("scalp-straddle-nifty");
+      assertThat(cfg.requireStraddle()).as(id + " straddle neutral path").isEqualTo(isStraddle);
+      if (isStraddle) {
+        List<String> optTypes = new ArrayList<>();
+        config.path("universe").path("options").path("option_types").forEach(t -> optTypes.add(t.asText()));
+        assertThat(optTypes).as(id + " trades both ATM legs").containsExactlyInAnyOrder("CE", "PE");
+      }
     }
   }
 }

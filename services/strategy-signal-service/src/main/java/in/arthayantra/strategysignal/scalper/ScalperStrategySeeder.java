@@ -40,6 +40,7 @@ public class ScalperStrategySeeder {
           "scalp-open-high-low-nifty",
           "scalp-morning-trade-nifty",
           "scalp-hero-zero-nifty",
+          "scalp-straddle-nifty",
           "scalp-market-movers-nifty",
           "scalp-btst-stbt-nifty");
 

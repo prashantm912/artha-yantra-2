@@ -94,39 +94,36 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
   pytest tests/ -q)` + `python -m ruff check app tests` (Python 3.14 global, no venv). A sweep needs
   the strategy to carry a `backtest.optimize` block (`method`+`max_trials`+`objective`+`parameters`,
   all required) else 422 "no tunable parameters".
-- **Rebuild + redeploy ONE service (no `ay` build verb):** build the artifact (`(cd frontend-ui &&
+- **Rebuild + redeploy ONE service (no `ay` build verb):** build the artifact (`(cd frontend-react &&
   npm run build)` or the service JAR), set `$env:ARTHA_DB_NAME`/`$env:ARTHA_REDIS_DB` to the LIVE
   values (`artha`/`0`, mock `artha_mock`/`1`), then `docker compose -f deploy/docker-compose.yml
   --env-file .env build <svc> && up -d <svc>` — recreates only `<svc>`; unset vars drift the others.
 - **Thread-dump a stalled JVM service:** `docker exec ay-<svc> sh -c 'kill -3 1'` → dump lands in
   `docker logs` (jstack/jcmd absent in the slim image).
 
-## Frontend (Angular 21 zoneless + PrimeNG 21)
-- **Zoneless (D1) breaks several libs** — verify in a prod build, not just dev:
-  - PrimeNG 21 `[virtualScroll]` collapses its viewport → **renders 0 rows**; use a plain
-    `[scrollable]` `p-table` with `scrollHeight`, no virtualization.
-  - `lightweight-charts` paints blank unless `createChart(el,{autoSize:true})` (the
-    afterNextRender width/height measure misses first paint).
-  - `monaco-editor`/`monaco-yaml` workers fail to register → editor/diff blank; the repo
-    uses a `<textarea>` editor + a plain LCS diff (`monaco-diff.ts`) instead.
-- **PrimeNG `darkModeSelector` must be a plain class** (`.ay-dark`) — a `:root`-anchored selector
-  (`:root:not(.ay-light)`) collides with @primeuix's `:root,:host` colour-scheme wrapper, emits a
-  dead `& :root` rule, and the WHOLE app renders the LIGHT PrimeNG scheme on the dark shell (axe +
-  e2e pass it). `SessionStore.applyTheme` toggles `.ay-dark`/`.ay-light` on `<html>`; echarts is
-  themed ONLY via the shared `ay-echart` wrapper (transparent bg). After a rebuild HARD-reload — a
-  stale cached chunk renders the old UI/white charts.
-- **PrimeNG 21 API:** `p-autocomplete` uses `optionLabel`, not `field` (a `field` binding
-  silently renders `[object Object]`).
-- **PrimeNG 21 does NOT `aria-hidden` button icon spans** — bundling `primeicons.css`
-  (angular.json `styles`) makes `icon="pi ..."` glyphs render, but the `::before` PUA glyph
-  then leaks into every icon+label button's *accessible name* (breaks axe + Playwright
-  `getByRole({name,exact:true})`; an icon-only button with `ariaLabel` is immune). Stamp it
-  globally: `providePrimeNG({pt:{button:{icon:{'aria-hidden':'true'}}}})`. All app `pi-*`
-  icons ride `p-button`; other components use built-in SVG icons (no `::before` text, no leak).
+## Frontend (`frontend-react` — React 19 + Vite 6 + Tailwind v4 + shadcn)
+The app is `frontend-react` (the Angular `frontend-ui` was removed after the React cutover, PR #104).
+Stack: React 19, Vite 6, **Tailwind v4 CSS-first** (`@import 'tailwindcss'` + `@theme inline`, NO
+`tailwind.config.js`), Zustand, TanStack Query v5, react-router 7, echarts 5 + lightweight-charts 5,
+shadcn/ui (controls/overlays only). 5 swappable themes via `data-theme` on `<html>`; all colour from
+per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe + Playwright role/name.
+- **Tailwind v4 traps** (each cost a build cycle): `font-size` goes on `<body>` only (on `<html>` it
+  rescales every `rem`); type-ramp vars live in a plain `:root`, NOT `@theme` (else the auto-generated
+  `text-*` utilities collide with the `@utility text-h1` classes); never leave a `*/` substring inside
+  a CSS comment (lightningcss closes the comment early). See [[frontend-revamp-state]].
+- **shadcn bridge:** `accent` is the ONE token name that collides — never re-alias `--color-accent` in
+  the shadcn `@theme inline` bridge (it clobbers the app's brand accent app-wide; axe/e2e miss it, a
+  live old-vs-new screenshot catches it).
+- **lightweight-charts** paints blank unless `createChart(el,{autoSize:true})`; **monaco** workers
+  don't register → the repo uses a `<textarea>` editor + a plain LCS diff instead.
 - **List endpoints return an `{items:[...]}` envelope** (signals/paper/journal/screener/
   watchlists); only `instruments/search` + `instruments/underlyings` return bare arrays.
-- **Verify trio** (PowerShell `Push-Location frontend-ui`): `npm run lint` +
-  `npm run test:ci` + `npm run build`.
+- **Section nav** (`MegaMenu.tsx`): each oipulse section is its own top-level menu-bar trigger (the
+  old single "All Menu" mega-dropdown was split, PR #177).
+- **Verify trio** (PowerShell `Push-Location frontend-react`): `npm run lint` +
+  `npm run test:ci` + `npm run build`. After a rebuild HARD-reload (Ctrl+Shift+R) — a stale cached
+  chunk renders the old UI. **Deploy gotcha:** the Dockerfile COPYs the HOST-built `dist/`, so
+  `npm run build` on the main checkout FIRST, then `docker compose build frontend-react`.
 
 ## Database / migrations
 - **Applied Flyway migrations are checksum-locked** in the dev stack and CI — editing

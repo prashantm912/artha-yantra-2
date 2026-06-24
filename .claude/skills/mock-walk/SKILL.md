@@ -20,11 +20,11 @@ the usual mock setup).
 ```bash
 docker ps --format '{{.Names}}\t{{.Status}}'   # is a stack already up?
 ```
-- `ay-wiremock` + `ay-frontend-ui` present and `market-data-service` **healthy** ⇒ it's the
+- `ay-wiremock` + `ay-frontend-react` present and `market-data-service` **healthy** ⇒ it's the
   **mock** stack (the live profile fail-fasts at boot without Kite secrets, so a healthy
   market-data proves mock). Reuse it — do **not** tear it down.
 - Nothing up ⇒ `.\ay.ps1 up` then `.\ay.ps1 status` (needs `.env` = `SPRING_PROFILES_ACTIVE=mock`).
-  PASS when every container `(healthy)` incl. `ay-wiremock`/`ay-frontend-ui` and
+  PASS when every container `(healthy)` incl. `ay-wiremock`/`ay-frontend-react` and
   `ay-flyway-init` `Exited (0)`.
 
 ## 2. Rebake ONLY if you changed stage code
@@ -37,7 +37,7 @@ artifact bakes in (see [build-service]):
 MVN=$(ls ~/.m2/wrapper/dists/apache-maven-*/*/bin/mvn | head -1)
 MAVEN_OPTS="-Djavax.net.ssl.trustStoreType=Windows-ROOT" \
   "$MVN" -pl services/<changed-svc> -am package -DskipTests      # full reactor + -am
-( cd frontend-ui && npm run build )                              # only if UI changed
+( cd frontend-react && npm run build )                           # only if UI changed
 docker compose -f deploy/docker-compose.yml --env-file .env build <changed-svc>
 docker compose -f deploy/docker-compose.yml --env-file .env up -d <changed-svc>
 # wait for health: until [ "$(docker inspect -f '{{.State.Health.Status}}' ay-<svc>)" = healthy ]; do sleep 3; done

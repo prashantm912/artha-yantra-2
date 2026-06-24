@@ -42,7 +42,6 @@ jobs:
       - name: Production build (tsc -b + vite)
         run: npm run build
 
-      # React cutover: the gateway serves this nginx image; keep the image build green
-      # (mirrors ci-frontend's frontend-ui image step).
+      # The gateway serves this nginx image; keep the image build green.
       - name: nginx image builds
         run: docker build -t arthayantra/frontend-react:ci .

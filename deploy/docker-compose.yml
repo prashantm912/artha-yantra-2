@@ -454,10 +454,10 @@ services:
     restart: unless-stopped
     logging: *default-logging
 
-  # ---- SPA static server (React cutover; was frontend-ui/Angular Phase 25) ----
+  # ---- SPA static server (React) ----
   # Internal-only; the gateway's catch-all route serves it on / (same origin,
-  # zero CORS anywhere - a Stage C acceptance criterion). The Angular frontend-ui
-  # is parked (source retained under ../frontend-ui, no longer in the stack).
+  # zero CORS anywhere - a Stage C acceptance criterion). The original Angular SPA
+  # was removed once the React cutover (Phase 25 / PR #104) was complete.
   frontend-react:
     build:
       context: ../frontend-react

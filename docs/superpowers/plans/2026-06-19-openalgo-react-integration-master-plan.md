@@ -3579,8 +3579,10 @@ can note "no manual surface — verified by tests" instead.
   - **One-offs (inline, no extraction):** strike-window selector · custom-time picker · period selector ·
     payoff/leg-builder/greeks · risk cards · amCharts world map · draw-tools/audio/OI-bar.
 - **Shell = hybrid:** ArthaYantra topbar (IST clock · mock-mode tag · WS pill · theme picker · logout)
-  + oipulse "All Menu" mega-dropdown (grouped by section) + sub-tab row + live ticker strip (wired to
-  our WS). Mega-menu → hamburger drawer on mobile.
+  + oipulse section nav + sub-tab row + live ticker strip (wired to our WS). Nav wraps on mobile.
+  *(2026-06-25, #177: the single "All Menu" mega-dropdown was split into a per-section menu bar — each
+  section (Trading/Options/Futures/Equity/FII-DII/Strategies/Backtests/Features/Data-Ops) is its own
+  top-level trigger with a single-column dropdown; `MegaMenu.tsx` keeps its export name.)*
 - **Mobile = adaptive both, baked in from PR-F.** Component-first makes it affordable: atoms / FilterBar
   / mega-menu / charts are responsive-once; only ~3-4 DENSE archetypes (CSP 16-col table, Options Chain
   45-col, treemap) need a real mobile VARIANT (tab CE/PE, card-per-strike, top-N). Target device =

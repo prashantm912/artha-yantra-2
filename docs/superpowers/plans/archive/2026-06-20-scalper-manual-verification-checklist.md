@@ -2,9 +2,12 @@
 
 **Goal:** Surface the manual-only parts of the Siva scalper method (the parts code cannot decide — news, S/R, regime, parabolic, VIX-abnormal, global cues, "one good trade") so they ride with each scalper signal and a human verifies + confirms before the trade is taken.
 
-**Status (2026-06-20):**
+**Status: DONE / ARCHIVED 2026-06-25.**
 - **Backend = DONE** (committed on `feat/scalper-track2`). The data the frontend needs is produced and exposed.
-- **Frontend = DEFERRED to the React migration (Phase 4).** The existing Angular `frontend-ui` is being replaced (UI locked to React per `docs/superpowers/plans/2026-06-19-openalgo-react-integration-master-plan.md`), so the checklist UI is built **once, in React**, not in throwaway Angular. The consumer contract is specified below for that work to pick up.
+- **Frontend = DONE (#125).** The React `ManualVerifyChecklist.tsx` panel (+ `.spec.tsx`) consumes the
+  `scalperDetail.manual_checks` side-channel exactly per the consumer contract below, and is wired into
+  `SignalsPage`, `ScalperCockpitPage`, and the `SignalTakeTicket` (verify-before-take gate). The contract
+  below is preserved as the as-built record.
 
 **Architecture:** The checklist is a fixed, doc-referenced list the engine stamps onto each scalper signal via the existing V009 `scalper_detail` jsonb side-channel (parity-safe — outside the frozen `score_breakdown`, NULL for non-scalper signals). The signals REST `dto()` returns a `Map<String,Object>`, so exposing the side-channel adds response keys **without** a springdoc spec drift. No engine/golden/ExitEvaluator change; no new Flyway migration; no Kite/OpenAlgo touch.
 

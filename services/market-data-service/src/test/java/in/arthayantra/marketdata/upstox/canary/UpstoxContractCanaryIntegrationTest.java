@@ -29,7 +29,10 @@ import org.springframework.test.context.DynamicPropertySource;
  * Upstox canary IT (live profile vs WireMock, ntfy captured on the same server), twin of {@code
  * OpenAlgoContractCanaryIntegrationTest}: faithful responses -&gt; ZERO drift; a removed consumed
  * {@code buy_amount} -&gt; critical drift + ntfy POST; an added top-level block -&gt; warning; the
- * Redis daily-once marker makes the second run of a day a no-op.
+ * Redis daily-once marker makes the second run of a day a no-op. Also covers the W-U4 live-capture
+ * shapes — a removed consumed {@code option_chain} OI / {@code market_quote} {@code last_price} /
+ * {@code ws_authorize} {@code authorized_redirect_uri} is critical, while an empty option chain (a
+ * stale probe expiry) is skipped, never an alarm.
  */
 @SpringBootTest(
     properties = {
@@ -95,6 +98,35 @@ class UpstoxContractCanaryIntegrationTest extends MarketDataIntegrationTestBase 
           + "\"expiry_date\":\"23-06-2026\",\"pcr\":0.8762,\"spot_closing_price\":24087.2,"
           + "\"insights\":[{\"pcr\":0.78,\"spot_price\":24075.1,\"time\":\"09:15\"}]}}";
 
+  // W-U4 live-capture fixtures (one strike / one tick / the authorize URL — the consumed fields).
+  private static final String OPTION_CHAIN =
+      "{\"status\":\"success\",\"data\":[{\"expiry\":\"2026-06-30\",\"pcr\":1.44,"
+          + "\"strike_price\":25000.0,\"underlying_key\":\"NSE_INDEX|Nifty 50\","
+          + "\"underlying_spot_price\":23845.85,"
+          + "\"call_options\":{\"instrument_key\":\"NSE_FO|58624\",\"market_data\":{\"ltp\":120.5,"
+          + "\"volume\":345600,\"oi\":1820075,\"close_price\":118.0,\"bid_price\":120.0,"
+          + "\"bid_qty\":75,\"ask_price\":121.0,\"ask_qty\":150,\"prev_oi\":1750000},"
+          + "\"option_greeks\":{\"vega\":12.3,\"theta\":-8.1,\"gamma\":0.0004,\"delta\":0.42,"
+          + "\"iv\":13.6,\"pop\":38.2}},"
+          + "\"put_options\":{\"instrument_key\":\"NSE_FO|58625\",\"market_data\":{\"ltp\":255.75,"
+          + "\"volume\":290100,\"oi\":2105500,\"close_price\":260.0,\"bid_price\":255.0,"
+          + "\"bid_qty\":75,\"ask_price\":256.5,\"ask_qty\":225,\"prev_oi\":2200000},"
+          + "\"option_greeks\":{\"vega\":12.1,\"theta\":-7.9,\"gamma\":0.0004,\"delta\":-0.58,"
+          + "\"iv\":14.1,\"pop\":61.8}}}]}";
+  private static final String MARKET_QUOTE =
+      "{\"status\":\"success\",\"data\":{\"NSE_INDEX:Nifty 50\":{"
+          + "\"instrument_token\":\"NSE_INDEX|Nifty 50\",\"symbol\":\"Nifty 50\","
+          + "\"last_price\":23845.85,\"net_change\":120.0,\"volume\":0,\"average_price\":0.0,"
+          + "\"oi\":0,\"oi_day_high\":0,\"oi_day_low\":0,\"total_buy_quantity\":0,"
+          + "\"total_sell_quantity\":0,\"lower_circuit_limit\":21483.0,"
+          + "\"upper_circuit_limit\":26257.0,\"last_trade_time\":\"2026-06-24T15:30:00+05:30\","
+          + "\"ohlc\":{\"open\":23760.0,\"high\":23925.0,\"low\":23740.0,\"close\":23750.5},"
+          + "\"depth\":{\"buy\":[{\"price\":23845.0,\"quantity\":75,\"orders\":3}],"
+          + "\"sell\":[{\"price\":23846.0,\"quantity\":150,\"orders\":5}]}}}}";
+  private static final String WS_AUTHORIZE =
+      "{\"status\":\"success\",\"data\":{\"authorized_redirect_uri\":"
+          + "\"wss://wsfeeder-api.upstox.com/?requestId=abc123\"}}";
+
   @Autowired private UpstoxContractCanary canary;
   @Autowired private StringRedisTemplate redis;
 
@@ -116,6 +148,11 @@ class UpstoxContractCanaryIntegrationTest extends MarketDataIntegrationTestBase 
             .willReturn(json(DII_CASH)));
     WIREMOCK.stubFor(get(urlPathEqualTo("/v2/market/max-pain")).willReturn(json(MAX_PAIN)));
     WIREMOCK.stubFor(get(urlPathEqualTo("/v2/market/pcr")).willReturn(json(PCR_OPT)));
+    WIREMOCK.stubFor(get(urlPathEqualTo("/v2/option/chain")).willReturn(json(OPTION_CHAIN)));
+    WIREMOCK.stubFor(
+        get(urlPathEqualTo("/v2/market-quote/quotes")).willReturn(json(MARKET_QUOTE)));
+    WIREMOCK.stubFor(
+        get(urlPathEqualTo("/v3/feed/market-data-feed/authorize")).willReturn(json(WS_AUTHORIZE)));
     WIREMOCK.stubFor(post(urlPathEqualTo("/ay-test-topic")).willReturn(aResponse().withStatus(200)));
   }
 
@@ -165,6 +202,72 @@ class UpstoxContractCanaryIntegrationTest extends MarketDataIntegrationTestBase 
     assertThat(result.drift()).contains("NEW:fii_cash.new_block");
     assertThat(result.drift()).noneMatch(d -> d.startsWith("MISSING:"));
     WIREMOCK.verify(1, postRequestedFor(urlPathEqualTo("/ay-test-topic")));
+  }
+
+  @Test
+  void removedConsumedOptionChainOiIsCriticalDriftWithNtfyAlert() {
+    // The live-capture /v2/option/chain loses the per-strike call OI — the field source.optionchain
+    // capture depends on. It must surface as critical drift + ntfy, off the live path.
+    WIREMOCK.stubFor(
+        get(urlPathEqualTo("/v2/option/chain"))
+            .willReturn(
+                json(
+                    "{\"status\":\"success\",\"data\":[{\"strike_price\":25000.0,"
+                        + "\"underlying_spot_price\":23845.85,\"call_options\":{\"market_data\":"
+                        + "{\"ltp\":120.5,\"volume\":345600,\"prev_oi\":1750000,\"bid_price\":120.0,"
+                        + "\"ask_price\":121.0}},\"put_options\":{\"market_data\":{\"ltp\":255.75,"
+                        + "\"oi\":2105500,\"prev_oi\":2200000}}}]}")));
+
+    UpstoxContractCanary.CanaryResult result = canary.runNow();
+
+    assertThat(result.drift()).contains("MISSING:option_chain.data.*.call_options.market_data.oi");
+    WIREMOCK.verify(1, postRequestedFor(urlPathEqualTo("/ay-test-topic")));
+  }
+
+  @Test
+  void removedConsumedMarketQuoteLastPriceIsCriticalDriftWithNtfyAlert() {
+    // The live-capture /v2/market-quote/quotes tick loses last_price (the field source.quotes maps).
+    WIREMOCK.stubFor(
+        get(urlPathEqualTo("/v2/market-quote/quotes"))
+            .willReturn(
+                json(
+                    "{\"status\":\"success\",\"data\":{\"NSE_INDEX:Nifty 50\":{\"volume\":0,"
+                        + "\"oi\":0,\"ohlc\":{\"open\":23760.0,\"high\":23925.0,\"low\":23740.0,"
+                        + "\"close\":23750.5},\"depth\":{\"buy\":[{\"price\":23845.0}],"
+                        + "\"sell\":[{\"price\":23846.0}]}}}}")));
+
+    UpstoxContractCanary.CanaryResult result = canary.runNow();
+
+    assertThat(result.drift()).contains("MISSING:market_quote.data.*.last_price");
+    WIREMOCK.verify(1, postRequestedFor(urlPathEqualTo("/ay-test-topic")));
+  }
+
+  @Test
+  void removedAuthorizedRedirectUriIsCriticalDriftWithNtfyAlert() {
+    // The v3 WS authorize-GET loses authorized_redirect_uri — without it the source.ticker WS path
+    // cannot connect; a removal must be caught off-band.
+    WIREMOCK.stubFor(
+        get(urlPathEqualTo("/v3/feed/market-data-feed/authorize"))
+            .willReturn(json("{\"status\":\"success\",\"data\":{}}")));
+
+    UpstoxContractCanary.CanaryResult result = canary.runNow();
+
+    assertThat(result.drift()).contains("MISSING:ws_authorize.data.authorized_redirect_uri");
+    WIREMOCK.verify(1, postRequestedFor(urlPathEqualTo("/ay-test-topic")));
+  }
+
+  @Test
+  void emptyOptionChainFromAStaleExpiryIsSkippedNotDrift() {
+    // A stale weekly expiry returns data:[] — tolerated like the max-pain/pcr historical probes, so
+    // the canary never false-alarms when the fixed probe expiry rolls past.
+    WIREMOCK.stubFor(
+        get(urlPathEqualTo("/v2/option/chain"))
+            .willReturn(json("{\"status\":\"success\",\"data\":[]}")));
+
+    UpstoxContractCanary.CanaryResult result = canary.runNow();
+
+    assertThat(result.drift()).noneMatch(d -> d.contains("option_chain"));
+    WIREMOCK.verify(0, postRequestedFor(urlPathEqualTo("/ay-test-topic")));
   }
 
   @Test

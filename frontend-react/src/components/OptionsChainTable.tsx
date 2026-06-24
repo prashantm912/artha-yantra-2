@@ -230,7 +230,7 @@ export function OptionsChainTable({
         role="region"
         aria-label="Options chain"
       >
-        <table className="w-full border-collapse text-sm">
+        <table aria-label="Options chain" className="w-full border-collapse text-sm">
           <thead className="sticky top-0 z-10 bg-surface-1 text-ay-muted">
             <tr>
               <th colSpan={callColumns.length} scope="colgroup" className="px-2 py-1 text-center text-bear">

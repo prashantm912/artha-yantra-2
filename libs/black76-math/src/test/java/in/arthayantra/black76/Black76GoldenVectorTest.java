@@ -31,7 +31,10 @@ class Black76GoldenVectorTest {
       double gamma,
       double theta,
       double vega,
-      double rho) {}
+      double rho,
+      double vanna,
+      double charm,
+      double vomma) {}
 
   private static final List<Vector> VECTORS = new ArrayList<>();
 
@@ -40,7 +43,8 @@ class Black76GoldenVectorTest {
     try (InputStream in =
         Black76GoldenVectorTest.class.getResourceAsStream("/black76-golden-vectors.json")) {
       JsonNode root = new ObjectMapper().readTree(in);
-      assertThat(root.path("fixtureFormat").asInt()).isEqualTo(1);
+      // fixtureFormat 2 adds the second-order trio (vanna/charm/vomma) to every vector (§17.6).
+      assertThat(root.path("fixtureFormat").asInt()).isEqualTo(2);
       for (JsonNode v : root.path("vectors")) {
         VECTORS.add(
             new Vector(
@@ -55,7 +59,10 @@ class Black76GoldenVectorTest {
                 Double.parseDouble(v.path("gamma").asText()),
                 Double.parseDouble(v.path("theta").asText()),
                 Double.parseDouble(v.path("vega").asText()),
-                Double.parseDouble(v.path("rho").asText())));
+                Double.parseDouble(v.path("rho").asText()),
+                Double.parseDouble(v.path("vanna").asText()),
+                Double.parseDouble(v.path("charm").asText()),
+                Double.parseDouble(v.path("vomma").asText())));
       }
     }
     assertThat(VECTORS).hasSizeGreaterThanOrEqualTo(490);
@@ -85,7 +92,70 @@ class Black76GoldenVectorTest {
       assertWithinTolerance("theta", v, g.theta().doubleValue(), v.theta());
       assertWithinTolerance("vega", v, g.vega().doubleValue(), v.vega());
       assertWithinTolerance("rho", v, g.rho().doubleValue(), v.rho());
+      assertWithinTolerance("vanna", v, g.vanna().doubleValue(), v.vanna());
+      assertWithinTolerance("charm", v, g.charm().doubleValue(), v.charm());
+      assertWithinTolerance("vomma", v, g.vomma().doubleValue(), v.vomma());
     }
+  }
+
+  /**
+   * Independent proof the second-order closed forms are correct: each must match a CENTRAL finite
+   * difference of the first-order greeks the existing golden vectors already pin —
+   * vanna≡∂Δ/∂σ≡∂vega/∂F, charm≡∂Δ/∂t (per day), vomma≡∂vega/∂σ — in the SAME reporting units. Run
+   * only on vectors whose greeks carry meaningful magnitude (FD is dominated by truncation/roundoff
+   * in the far-OTM tails where |reference| ≈ 0), bumping σ/T off the grid so the step is clean.
+   */
+  @Test
+  void secondOrderGreeksMatchFiniteDifferenceOfFirstOrder() {
+    double[][] grid = {{20000, 30.0 / 365}, {22000, 30.0 / 365}, {24000, 7.0 / 365},
+        {22000, 90.0 / 365}, {21000, 60.0 / 365}, {23000, 14.0 / 365}};
+    double f = 22000;
+    double r = 0.065;
+    int checked = 0;
+    for (double sigma : new double[] {0.12, 0.20, 0.35, 0.55}) {
+      for (double[] gk : grid) {
+        double k = gk[0];
+        double t = gk[1];
+        for (Black76.OptionType type : Black76.OptionType.values()) {
+          Black76.Greeks g = Black76.greeks(type, f, k, t, r, sigma);
+
+          double stepSigma = 1e-5;
+          double fdVanna =
+              (Black76.greeks(type, f, k, t, r, sigma + stepSigma).delta().doubleValue()
+                      - Black76.greeks(type, f, k, t, r, sigma - stepSigma).delta().doubleValue())
+                  / (2 * stepSigma)
+                  / 100.0; // delta is unit-less; vanna reports per vol-point
+          double fdVomma =
+              (Black76.greeks(type, f, k, t, r, sigma + stepSigma).vega().doubleValue()
+                      - Black76.greeks(type, f, k, t, r, sigma - stepSigma).vega().doubleValue())
+                  / (2 * stepSigma)
+                  / 100.0; // vega already per vol-point; ∂/∂σ adds one more /100
+          double stepT = 1e-8;
+          double fdCharm =
+              (Black76.greeks(type, f, k, t + stepT, r, sigma).delta().doubleValue()
+                      - Black76.greeks(type, f, k, t - stepT, r, sigma).delta().doubleValue())
+                  / (2 * stepT)
+                  / 365.0; // ∂Δ/∂t per calendar day
+
+          assertCloseToFd("vanna", type, k, t, sigma, g.vanna().doubleValue(), fdVanna);
+          assertCloseToFd("vomma", type, k, t, sigma, g.vomma().doubleValue(), fdVomma);
+          assertCloseToFd("charm", type, k, t, sigma, g.charm().doubleValue(), fdCharm);
+          checked++;
+        }
+      }
+    }
+    assertThat(checked).isEqualTo(48);
+  }
+
+  private static void assertCloseToFd(
+      String what, Black76.OptionType type, double k, double t, double sigma, double analytic,
+      double fd) {
+    // 5e-4 relative absorbs the central-difference truncation error; the grid avoids the near-zero
+    // tails where FD is pure roundoff.
+    assertThat(Math.abs(analytic - fd) / Math.max(Math.abs(fd), 1e-9))
+        .as("%s vs finite-difference for %s K=%.0f T=%.4f sigma=%.2f (analytic %s, fd %s)",
+            what, type, k, t, sigma, analytic, fd)
+        .isLessThanOrEqualTo(5e-4);
   }
 
   @Test

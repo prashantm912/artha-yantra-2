@@ -5471,6 +5471,15 @@
           "rho" : {
             "type" : "number"
           },
+          "vanna" : {
+            "type" : "number"
+          },
+          "charm" : {
+            "type" : "number"
+          },
+          "vomma" : {
+            "type" : "number"
+          },
           "ivReason" : {
             "type" : "string"
           },

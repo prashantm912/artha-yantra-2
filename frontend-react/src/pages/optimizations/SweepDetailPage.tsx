@@ -4,6 +4,7 @@ import type { EChartsOption } from 'echarts';
 import { formatDecimal } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
+import { FoldDrilldownModal } from './FoldDrilldownModal.tsx';
 import {
   paramStr,
   useSweepBest,
@@ -20,7 +21,7 @@ import {
 // FLAGGED, never hidden (guard 3). The leaderboard surfaces the four persisted §D.4 fold guards
 // (regimes covered, min-OOS Sharpe, folds excluded, dataHash flagged on mismatch); a full-window
 // trial shows a "no fold guards" badge. A live sweep stays fresh via refetchInterval. Promote →
-// new draft. The per-trial fold drill-down dialog is deferred.
+// new draft. A row's "Folds" action opens the per-trial fold drill-down (OOS by regime, Phase 39).
 
 const num = (v: number | null | undefined) => (v == null ? '—' : formatDecimal(String(v), 3));
 
@@ -103,6 +104,7 @@ export function SweepDetailPage() {
   const navigate = useNavigate();
   const [sort, setSort] = useState<SortMode>('plateau');
   const [promoteRow, setPromoteRow] = useState<BestRow | null>(null);
+  const [foldsTrial, setFoldsTrial] = useState<number | null>(null);
 
   const best = useSweepBest(sweepId, sort);
   const trials = useSweepTrials(sweepId);
@@ -199,6 +201,14 @@ export function SweepDetailPage() {
                 </td>
                 <td className="px-2 py-2 font-mono text-xs text-ay-muted">{paramStr(row)}</td>
                 <td className="px-2 py-2 text-right">
+                  <button
+                    type="button"
+                    onClick={() => setFoldsTrial(row.trialNumber)}
+                    className="px-1.5 text-xs text-accent hover:underline"
+                    aria-label={`Fold drill-down for trial ${row.trialNumber}`}
+                  >
+                    Folds
+                  </button>
                   {row.backtestRunId && (
                     <button
                       type="button"
@@ -256,6 +266,8 @@ export function SweepDetailPage() {
           </tbody>
         </table>
       </div>
+
+      <FoldDrilldownModal sweepId={sweepId} trialNumber={foldsTrial} onClose={() => setFoldsTrial(null)} />
 
       {promoteRow && (
         <div className="fixed inset-0 z-30 grid place-items-center bg-black/40 p-4">

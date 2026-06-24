@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import {
   STARTER_TEMPLATE,
   VERSION_BUMPS,
@@ -86,7 +87,7 @@ export function StrategyEditorPage() {
   const u = universe.data;
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Strategy editor" subtitle="Author the YAML; save auto-bumps the version" />
 
       {u && (
@@ -141,7 +142,7 @@ export function StrategyEditorPage() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(14rem,18rem)_minmax(0,1fr)]">
+      <BeatBlock className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(14rem,18rem)_minmax(0,1fr)]">
         <aside className="rounded-lg border border-ay-border bg-surface-1 p-3">
           <h3 className="mb-2 text-xs font-semibold uppercase text-ay-muted">Metadata</h3>
           {isNew ? (
@@ -189,7 +190,7 @@ export function StrategyEditorPage() {
             )}
           </div>
         </section>
-      </div>
-    </div>
+      </BeatBlock>
+    </LoadBeat>
   );
 }

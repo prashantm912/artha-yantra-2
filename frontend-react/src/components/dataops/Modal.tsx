@@ -1,7 +1,14 @@
 import { useEffect } from 'react';
+import type { LucideIcon } from 'lucide-react';
 
-export function Modal(props: { open: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
-  const { open, onClose, title, children } = props;
+export function Modal(props: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  icon?: LucideIcon;
+  children: React.ReactNode;
+}) {
+  const { open, onClose, title, icon: Icon, children } = props;
 
   useEffect(() => {
     if (!open) return;
@@ -31,7 +38,10 @@ export function Modal(props: { open: boolean; onClose: () => void; title: string
         className="relative w-[92vw] max-w-3xl max-h-[80vh] overflow-auto rounded-lg border border-ay-border bg-surface-1 p-4"
       >
         <div className="mb-3 flex items-center justify-between gap-4">
-          <h2 className="text-sm font-semibold text-ay-text">{title}</h2>
+          <h2 className="flex items-center gap-1.5 text-h3 text-ay-text">
+            {Icon && <Icon aria-hidden="true" className="size-4 text-ay-muted" />}
+            {title}
+          </h2>
           <button
             type="button"
             aria-label="Close"

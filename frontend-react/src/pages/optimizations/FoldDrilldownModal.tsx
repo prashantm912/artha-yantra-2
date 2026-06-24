@@ -1,3 +1,4 @@
+import { Layers } from 'lucide-react';
 import { formatDecimal } from '../../lib/decimal.ts';
 import { Modal } from '../../components/dataops/Modal.tsx';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
@@ -87,6 +88,7 @@ export function FoldDrilldownModal({ sweepId, trialNumber, onClose }: FoldDrilld
     <Modal
       open={trialNumber != null}
       onClose={onClose}
+      icon={Layers}
       title={`Trial #${trialNumber ?? ''} — fold drill-down (OOS by regime)`}
     >
       {folds.isLoading ? (

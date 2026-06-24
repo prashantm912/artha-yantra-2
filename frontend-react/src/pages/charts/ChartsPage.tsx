@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { CandleChart } from '../../components/charts/CandleChart.tsx';
 import { Select } from '../../components/atoms/Select.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { CHART_INTERVALS, useCandles, useChartSignals, type ChartMark } from '../../api/charts.ts';
 import { useBacktestTrades } from '../../api/backtests.ts';
 
@@ -37,7 +38,7 @@ export function ChartsPage() {
   }, [runId, trades.data, signalMarks.data]);
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Charts" subtitle="Candlestick + volume — backtest-trade & signal overlays via deep-link" />
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <form
@@ -62,13 +63,15 @@ export function ChartsPage() {
         {runId && <span className="text-xs text-ay-muted">overlaying trades from run {runId.slice(0, 8)}</span>}
       </div>
 
-      {bars.length > 0 ? (
-        <CandleChart bars={bars} marks={marks} height={460} ariaLabel={`${symbol} ${interval} candlestick chart`} />
-      ) : (
-        <div className="grid h-[460px] place-items-center rounded-lg border border-ay-border text-ay-muted">
-          {candles.isLoading ? 'Loading candles…' : `No candles for ${symbol} @ ${interval}.`}
-        </div>
-      )}
-    </div>
+      <BeatBlock>
+        {bars.length > 0 ? (
+          <CandleChart bars={bars} marks={marks} height={460} ariaLabel={`${symbol} ${interval} candlestick chart`} />
+        ) : (
+          <div className="grid h-[460px] place-items-center rounded-lg border border-ay-border text-ay-muted">
+            {candles.isLoading ? 'Loading candles…' : `No candles for ${symbol} @ ${interval}.`}
+          </div>
+        )}
+      </BeatBlock>
+    </LoadBeat>
   );
 }

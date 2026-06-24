@@ -7,6 +7,7 @@ import { Metric } from '../../components/atoms/Metric.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { VixIndexChart } from '../../components/VixIndexChart.tsx';
 
 // Vix & Index (§features/vix-index — oipulse "Vix & Price Chart"). Two stacked dual-axis line charts:
@@ -31,7 +32,7 @@ export function VixIndexPage() {
   const updatedAt = q.dataUpdatedAt ? new Date(q.dataUpdatedAt).toLocaleTimeString('en-IN') : '—';
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Vix & Index" subtitle="India VIX vs NIFTY 50 / NIFTY BANK — dual-axis intraday lines for the selected IST day" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -53,23 +54,21 @@ export function VixIndexPage() {
         {() => (
           <>
             {niftyChart.xAxis.length > 0 && (
-              <section className="card shadow-e1">
-                <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">India Vix Vs. Nifty</h2>
+              <BeatBlock className="card shadow-e1">
+                <h2 className="mb-1 text-h3 text-ay-text">India Vix Vs. Nifty</h2>
                 <VixIndexChart series={niftyChart} priceLabel="Nifty" />
-              </section>
+              </BeatBlock>
             )}
 
             {bankChart.xAxis.length > 0 && (
-              <section className="card shadow-e1 mt-4">
-                <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">
-                  India Vix Vs. Banknifty
-                </h2>
+              <BeatBlock className="card shadow-e1 mt-4">
+                <h2 className="mb-1 text-h3 text-ay-text">India Vix Vs. Banknifty</h2>
                 <VixIndexChart series={bankChart} priceLabel="Banknifty" />
-              </section>
+              </BeatBlock>
             )}
           </>
         )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

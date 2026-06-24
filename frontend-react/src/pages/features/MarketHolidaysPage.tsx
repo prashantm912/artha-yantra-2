@@ -4,6 +4,7 @@ import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { cn } from '../../lib/cn.ts';
 import type { HolidayRow } from '../../api/types.ts';
 
@@ -79,7 +80,7 @@ export function MarketHolidaysPage() {
   );
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Market Holidays" subtitle="NSE trading holidays the bundled calendar covers — Passed / Coming vs today" />
 
       <QueryState
@@ -89,17 +90,19 @@ export function MarketHolidaysPage() {
         skeleton={<Skeleton variant="table-rows" rows={10} cols={4} />}
       >
         {() => (
-          <DataTable
-            columns={columns}
-            rows={rows}
-            rowKey={(r) => r.date}
-            pageSize={20}
-            initialSort={{ id: 'date', dir: 'asc' }}
-            emptyMessage="No holidays for the covered years."
-            ariaLabel="NSE trading holidays"
-          />
+          <BeatBlock>
+            <DataTable
+              columns={columns}
+              rows={rows}
+              rowKey={(r) => r.date}
+              pageSize={20}
+              initialSort={{ id: 'date', dir: 'asc' }}
+              emptyMessage="No holidays for the covered years."
+              ariaLabel="NSE trading holidays"
+            />
+          </BeatBlock>
         )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

@@ -8,6 +8,7 @@ import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 
 // FII Derivative Stats (oipulse §fii-dii/fii-derivative-stats): FII net activity across the four F&O
 // segments (Index/Stock × Futures/Options), daily, ₹ Crore. One net-value bar chart per segment (own
@@ -91,7 +92,7 @@ export function FiiDerivativeStatsPage() {
   ];
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader
         title="FII Derivative Stats"
         subtitle="FII net activity across the four F&O segments · Values in ₹ Crore · green = net long, red = net short"
@@ -112,27 +113,29 @@ export function FiiDerivativeStatsPage() {
         {() => (
           <>
             {asc.length > 0 && (
-              <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+              <BeatBlock className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
                 {SEGMENTS.map((s, i) => (
                   <div key={s.label} className="card shadow-e1">
-                    <h2 className="mb-1 text-center text-h3 text-ay-text">{s.label}</h2>
+                    <h2 className="mb-1 text-h3 text-ay-text">{s.label}</h2>
                     <EChart makeOption={options[i]} height={220} ariaLabel={`FII net ${s.label} per day`} />
                   </div>
                 ))}
-              </div>
+              </BeatBlock>
             )}
 
-            <DataTable
-              columns={columns}
-              rows={rows}
-              rowKey={(r) => r.tradeDate}
-              pageSize={25}
-              ariaLabel="Detailed FII derivative segment net activity"
-              emptyMessage="No FII derivative stats for this window."
-            />
+            <BeatBlock>
+              <DataTable
+                columns={columns}
+                rows={rows}
+                rowKey={(r) => r.tradeDate}
+                pageSize={25}
+                ariaLabel="Detailed FII derivative segment net activity"
+                emptyMessage="No FII derivative stats for this window."
+              />
+            </BeatBlock>
           </>
         )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

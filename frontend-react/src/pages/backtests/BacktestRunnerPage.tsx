@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { useStrategies } from '../../api/strategies.ts';
 import {
   DIRECTIONS,
@@ -87,7 +88,7 @@ export function BacktestRunnerPage() {
   };
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Backtest runner" subtitle="Run a full-parameter backtest or launch a parameter sweep" />
       <div role="tablist" className="mb-4 flex gap-1 border-b border-ay-border">
         {(['backtest', 'sweep'] as const).map((t) => (
@@ -107,7 +108,7 @@ export function BacktestRunnerPage() {
         ))}
       </div>
 
-      <div className="grid max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
+      <BeatBlock className="grid max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Strategy">
           <Select
             value={strategyId}
@@ -155,7 +156,7 @@ export function BacktestRunnerPage() {
             </Field>
           </>
         )}
-      </div>
+      </BeatBlock>
 
       <div className="mt-4">
         {tab === 'backtest' ? (
@@ -178,6 +179,6 @@ export function BacktestRunnerPage() {
           </button>
         )}
       </div>
-    </div>
+    </LoadBeat>
   );
 }

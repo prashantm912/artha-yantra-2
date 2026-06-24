@@ -827,3 +827,25 @@ export interface IndexContribution {
   declines: ContribRow[];
   asOf: string | null;
 }
+
+/**
+ * One global index's live snapshot of GET /api/v1/market/world-indices (Upstox GLOBAL_INDEX /
+ * GLOBAL_INDICATOR). Price/change fields are decimal STRINGS (the platform BigDecimal-as-string
+ * convention) and are null when the live quote did not resolve (the row still lists from the master).
+ * changePct is server-derived net_change / prevClose * 100; asOf is the ISO +05:30 snapshot instant.
+ */
+export interface WorldIndex {
+  name: string;
+  country: string | null;
+  key: string;
+  tradingSymbol: string | null;
+  ltp: string | null;
+  prevClose: string | null;
+  netChange: string | null;
+  changePct: string | null;
+  open: string | null;
+  high: string | null;
+  low: string | null;
+  asOf: string;
+  latency: string | null;
+}

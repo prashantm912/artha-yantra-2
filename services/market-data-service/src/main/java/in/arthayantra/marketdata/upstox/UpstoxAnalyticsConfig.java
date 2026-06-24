@@ -63,6 +63,23 @@ public class UpstoxAnalyticsConfig {
   }
 
   /**
+   * Upstox <b>global-instrument</b> client — feeds the World Indices page ({@code GET
+   * /api/v1/market/world-indices}). It downloads the public global instrument master from the assets
+   * CDN ({@code assets.upstox.com}, no token) and live-quotes the {@code GLOBAL_INDEX} /
+   * {@code GLOBAL_INDICATOR} roster via {@code /v2/market-quote/quotes} on the analytics token. Bound
+   * only when the analytics token is enabled; absent ⇒ the page renders empty (the controller resolves
+   * the bean via an {@code ObjectProvider}).
+   */
+  @Bean
+  @ConditionalOnProperty(name = "artha.upstox.analytics.enabled", havingValue = "true")
+  public UpstoxGlobalInstrumentsClient upstoxGlobalInstrumentsClient(
+      RestClient.Builder restClientBuilder,
+      ObjectMapper objectMapper,
+      UpstoxAnalyticsProperties properties) {
+    return new UpstoxGlobalInstrumentsClient(restClientBuilder, objectMapper, properties);
+  }
+
+  /**
    * Direct-Upstox LIVE option-chain client (Wave U1) — the flag-selected {@link
    * in.arthayantra.marketdata.options.OptionChainQuoteSource} for the live OI snapshot. Bound ONLY
    * when {@code artha.marketdata.source.optionchain=upstox}; absent ⇒ {@code OptionsChainService}

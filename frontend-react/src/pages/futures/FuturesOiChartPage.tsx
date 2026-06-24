@@ -5,11 +5,15 @@ import { Select, type SelectOption } from '../../components/atoms/Select.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
 import { FuturesOiChart } from '../../components/FuturesOiChart.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 
 // Futures OI Chart (§futures/oi-chart). The dual-axis OI-vs-price combo for one index future: real price
 // candlesticks (right axis) + the OI line (left axis). Keyed on the index name; the BE picks the active
 // front contract. The interval set is RAW MINUTES owned by the page (oipulse's 1/3/5/10/15/30/60 — the
 // 1-min option is this page's defining feature, served by aggregating the contract's 1m base bars).
+// Revamp rollout: visible display-face H1 (was ay-sr-only — text preserved) + the chart wrapped in a
+// carded surface (card shadow-e1). The chart itself already consumes --ay-chart-*/--ay-bull/--ay-bear
+// via the shared EChart theme; aria/dataZoom stay verbatim. Symbol-gated → existing empty paths kept.
 
 const INTERVAL_OPTIONS: SelectOption[] = [1, 3, 5, 10, 15, 30, 60].map((m) => ({
   value: String(m),
@@ -23,7 +27,10 @@ export function FuturesOiChartPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Futures OI chart</h1>
+      <PageHeader
+        title="Futures OI chart"
+        subtitle="Dual-axis OI-vs-price combo for the active front index future"
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry={false} showInterval={false} />
@@ -56,12 +63,12 @@ export function FuturesOiChartPage() {
       )}
 
       {data != null && data.items.length > 0 && (
-        <>
+        <div className="card shadow-e1">
           <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">
             Futures Oi Vs. Price Analysis
           </h2>
           <FuturesOiChart items={data.items} tradingsymbol={data.tradingsymbol} />
-        </>
+        </div>
       )}
     </div>
   );

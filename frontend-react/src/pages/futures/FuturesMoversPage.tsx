@@ -6,6 +6,9 @@ import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { OiBadge4 } from '../../components/atoms/OiBadge4.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { cn } from '../../lib/cn.ts';
 import { compareDecimal, formatDecimal } from '../../lib/decimal.ts';
 
@@ -13,6 +16,8 @@ import { compareDecimal, formatDecimal } from '../../lib/decimal.ts';
 // the O=H/L open-positioning flag (from the surfaced day OHLC) + OI interpretation. The "Min. B.O.
 // Days" breakout column is DROPPED — it needs a multi-day prior-high/low history we don't yet capture
 // (documented). Universe = index + 17 bank-sector futures (reduced vs oipulse's all-F&O scan).
+// Revamp rollout: visible display-face H1 (was ay-sr-only — text preserved) + QueryState over the
+// gainers/losers region. Search filters client-side, so empty stays per-table.
 
 /** Intraday open-positioning: O=L (open=low, bullish) / O=H (open=high, bearish) / —. */
 function openFlag(r: MoverRow): { text: string; tone: string } {
@@ -57,7 +62,10 @@ export function FuturesMoversPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Futures Market Movers</h1>
+      <PageHeader
+        title="Futures Market Movers"
+        subtitle="Top gainers and losers by day price %, with OI interpretation"
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry={false} showInterval />
@@ -72,16 +80,31 @@ export function FuturesMoversPage() {
         <GoButton onClick={() => q.refetch()} loading={q.isFetching} />
       </div>
 
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <div>
-          <div className="mb-1 text-sm font-semibold text-bull">Top Gainers</div>
-          <DataTable columns={COLUMNS} rows={gainers} rowKey={(r) => r.tradingsymbol} pageSize={8} initialSort={{ id: 'ltpPct', dir: 'desc' }} ariaLabel="Top gainers" emptyMessage="No gainers." />
-        </div>
-        <div>
-          <div className="mb-1 text-sm font-semibold text-bear">Top Losers</div>
-          <DataTable columns={COLUMNS} rows={losers} rowKey={(r) => r.tradingsymbol} pageSize={8} initialSort={{ id: 'ltpPct', dir: 'asc' }} ariaLabel="Top losers" emptyMessage="No losers." />
-        </div>
-      </div>
+      <QueryState
+        query={q}
+        isEmpty={() => (q.data?.gainers.length ?? 0) === 0 && (q.data?.losers.length ?? 0) === 0}
+        empty={{ title: 'No futures movers for this selection.' }}
+        errorTitle="Couldn't load futures movers"
+        skeleton={
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <Skeleton variant="table-rows" rows={8} cols={6} />
+            <Skeleton variant="table-rows" rows={8} cols={6} />
+          </div>
+        }
+      >
+        {() => (
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <div>
+              <div className="mb-1 text-sm font-semibold text-bull">Top Gainers</div>
+              <DataTable columns={COLUMNS} rows={gainers} rowKey={(r) => r.tradingsymbol} pageSize={8} initialSort={{ id: 'ltpPct', dir: 'desc' }} ariaLabel="Top gainers" emptyMessage="No gainers." />
+            </div>
+            <div>
+              <div className="mb-1 text-sm font-semibold text-bear">Top Losers</div>
+              <DataTable columns={COLUMNS} rows={losers} rowKey={(r) => r.tradingsymbol} pageSize={8} initialSort={{ id: 'ltpPct', dir: 'asc' }} ariaLabel="Top losers" emptyMessage="No losers." />
+            </div>
+          </div>
+        )}
+      </QueryState>
     </div>
   );
 }

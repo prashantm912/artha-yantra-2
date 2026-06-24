@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Search } from 'lucide-react';
 import { useEquityDelivery } from '../../api/oiAnalytics.ts';
 import type { DeliveryDay } from '../../api/types.ts';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
@@ -6,6 +7,7 @@ import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { Select } from '../../components/atoms/Select.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { EmptyCard } from '../../components/EmptyCard.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
@@ -89,7 +91,7 @@ export function DeliveryDataPage() {
           onKeyDown={(e) => e.key === 'Enter' && submit()}
           placeholder="Symbol (e.g. AXISBANK)"
           aria-label="Stock symbol"
-          className="h-9 w-48 rounded-md border border-ay-border bg-surface-1 px-2 text-sm uppercase text-ay-text outline-none focus:border-accent"
+          className="h-9 w-full sm:w-48 rounded-md border border-ay-border bg-surface-1 px-2 text-sm uppercase text-ay-text outline-none focus:border-accent"
         />
         <Select
           value={String(days)}
@@ -102,7 +104,7 @@ export function DeliveryDataPage() {
       </div>
 
       {symbol == null ? (
-        <p className="py-8 text-center text-sm text-ay-muted">Enter a stock symbol and press Go.</p>
+        <EmptyCard icon={Search} title="Enter a stock symbol and press Go." />
       ) : (
         <QueryState
           query={q}

@@ -68,7 +68,7 @@ export function JournalPage() {
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-xs text-ay-muted">Tags (comma-sep)</span>
-          <input value={tagsInput} onChange={(e) => setTagsInput(e.target.value)} aria-label="Tags" className={`${inputCls} w-40`} />
+          <input value={tagsInput} onChange={(e) => setTagsInput(e.target.value)} aria-label="Tags" className={`${inputCls} w-full sm:w-40`} />
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-xs text-ay-muted">Disc.</span>

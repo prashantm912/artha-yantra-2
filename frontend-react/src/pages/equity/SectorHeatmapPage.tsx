@@ -93,7 +93,7 @@ export function SectorHeatmapPage() {
             ],
             label: {
               show: true,
-              color: '#ffffff',
+              color: t.text,
               fontSize: 10,
               overflow: 'truncate',
               formatter: (raw: unknown) => {

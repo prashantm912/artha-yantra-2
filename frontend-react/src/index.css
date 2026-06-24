@@ -419,13 +419,23 @@ body {
   }
 }
 
-/* Standard card — replaces repeated `rounded border border-ay-border bg-surface-1 p-2`. (§1.4/§1.5) */
+/* Standard card — replaces repeated `rounded border border-ay-border bg-surface-1 p-2`. (§1.4/§1.5)
+   Lifts to elevation-2 on hover; transition-only so the OS reduced-motion guard below neutralises it. */
 @utility card {
   background: var(--ay-surface-1);
   border: 1px solid var(--ay-border);
   border-radius: var(--radius-md);
   padding: var(--space-card);
   box-shadow: var(--ay-shadow-1);
+  transition: box-shadow var(--duration-base) var(--ease-standard);
+}
+.card:hover {
+  box-shadow: var(--ay-shadow-2);
+}
+
+/* Global data-table row-hover — tbody only, so header rows (thead) keep their flat fill. (§3 polish) */
+tbody tr:hover {
+  background: var(--ay-surface-2);
 }
 
 /* GLOBAL FOCUS — one recipe, all 5 themes; token-driven (high-contrast goes white).

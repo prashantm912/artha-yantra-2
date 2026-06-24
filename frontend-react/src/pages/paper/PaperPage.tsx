@@ -131,7 +131,7 @@ export function PaperPage() {
                 onChange={(e) => setCapitalDraft(e.target.value)}
                 placeholder={acct.startingCapital}
                 aria-label="Starting capital"
-                className="h-9 w-36 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text"
+                className="h-9 w-full sm:w-36 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text"
               />
               <button
                 type="button"

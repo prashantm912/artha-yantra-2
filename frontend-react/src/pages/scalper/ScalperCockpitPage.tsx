@@ -15,11 +15,15 @@ import {
 import { useExpiries, useUnderlyings } from '../../api/instruments.ts';
 import { optionExchange, useOptionChain, type ChainLeg } from '../../api/scalper.ts';
 import { useLiveTicks } from '../../api/ticks.ts';
+import { PageHeader } from '../../components/PageHeader.tsx';
 
 // /scalper (master plan §20 / Phase 4b): the scalper cockpit — live ACTIVE signal feed (left), a
 // pre-filled PAPER order ticket (middle; click a signal to load it, or enter an instrument manually),
 // and open positions + account P&L (right, live-refetched). Paper only — POST /paper/orders simulates
 // the fill; this never places a live broker order.
+// Revamp rollout (Trading screens): the sr-only h1 becomes the visible signature PageHeader (text
+// preserved). The dense 3-column live ticket layout is deliberately NOT restructured — every panel
+// keeps its bespoke live-state copy, WS ticks and the paper-order ticket wiring.
 
 const money = (v: string) => formatDecimal(v, 2);
 const tone = (v: string) => (isNegative(v) ? 'text-bear' : 'text-bull');
@@ -127,7 +131,7 @@ export function ScalperCockpitPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Scalper cockpit</h1>
+      <PageHeader title="Scalper cockpit" subtitle="Live signals · pre-filled paper order ticket · open positions & P&L — paper only, never a live broker order" />
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1fr_1.2fr]">
         {/* Live signals */}
         <section className="min-w-0">

@@ -4,6 +4,10 @@ import { formatDecimal, isNegative, multiplyByInt, subtractDecimal } from '../..
 import { cn } from '../../lib/cn.ts';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
 import { SentimentBadge } from '../../components/atoms/SentimentBadge.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
+import { LoadBeat } from '../../components/LoadBeat.tsx';
 import { useLiveTicks } from '../../api/ticks.ts';
 import type { PaperPosition } from '../../api/paper.ts';
 import {
@@ -23,6 +27,9 @@ import {
 // server-computed mark-to-market (refreshed on a short interval), the closed-trade ledger, the
 // realized-equity curve (ECharts), the account header and the global risk limits (kill switch /
 // max-open / daily-loss). Journal deep-links land with PR-C9.
+// Revamp rollout (Trading screens): the sr-only h1 becomes the visible signature PageHeader (text
+// preserved). The account + summary Stat tiles ride card shadow-e1 + uppercase wide-tracked caption
+// labels + sign-aware mono values. All live MTM / WS ticks / risk-limit / table behaviour unchanged.
 
 const money = (v: string) => formatDecimal(v, 2);
 const pct = (v: string) => `${formatDecimal(multiplyByInt(v, 100), 1)}%`;
@@ -30,9 +37,9 @@ const toneClass = (v: string) => (isNegative(v) ? 'text-bear' : 'text-bull');
 
 function Stat({ label, value, tone }: { label: string; value: string; tone?: boolean }) {
   return (
-    <div className="tabular-nums">
-      <div className="text-xs text-ay-muted">{label}</div>
-      <div className={cn('text-xl font-bold', tone && toneClass(value))}>{value}</div>
+    <div className="card shadow-e1 nums">
+      <div className="text-caption uppercase tracking-wide text-ay-muted">{label}</div>
+      <div className={cn('mt-1 text-xl font-bold', tone && toneClass(value))}>{value}</div>
     </div>
   );
 }
@@ -107,8 +114,8 @@ export function PaperPage() {
   );
 
   return (
-    <div>
-      <h1 className="ay-sr-only">Paper trading</h1>
+    <LoadBeat>
+      <PageHeader title="Paper trading" subtitle="Paper ledger — open positions, closed trades, realized equity and global risk limits" />
 
       {acct && (
         <>
@@ -230,58 +237,61 @@ export function PaperPage() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.5fr_1fr]">
         <section className="min-w-0">
           <h2 className="mb-2 text-base font-semibold">Open positions</h2>
-          <div className="overflow-auto rounded-lg border border-ay-border">
-            <table className="w-full border-collapse text-sm">
-              <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
-                <tr>
-                  <th className="px-2 py-2 font-medium">Instrument</th>
-                  <th className="px-2 py-2 font-medium">Side</th>
-                  <th className="px-2 py-2 text-right font-medium">Qty</th>
-                  <th className="px-2 py-2 text-right font-medium">Avg</th>
-                  <th className="px-2 py-2 text-right font-medium">Mark</th>
-                  <th className="px-2 py-2 text-right font-medium">Unrealized</th>
-                  <th className="px-2 py-2"><span className="ay-sr-only">Actions</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {(positions.data?.items ?? []).map((p) => {
-                  const m = mtm(p);
-                  return (
-                  <tr key={p.id} className="border-t border-ay-border">
-                    <td className="px-2 py-2">
-                      {p.exchange}:{p.tradingsymbol}
-                    </td>
-                    <td className="px-2 py-2">
-                      <SentimentBadge label={p.side} tone={p.side === 'BUY' ? 'bull' : 'bear'} />
-                    </td>
-                    <td className="px-2 py-2 text-right tabular-nums">{p.qty}</td>
-                    <td className="px-2 py-2 text-right tabular-nums">{money(p.avgEntryPrice)}</td>
-                    <td className="px-2 py-2 text-right tabular-nums">{m.mark ? money(m.mark) : '—'}</td>
-                    <td className={cn('px-2 py-2 text-right tabular-nums', m.unrealized && toneClass(m.unrealized))}>
-                      {m.unrealized ? money(m.unrealized) : '—'}
-                    </td>
-                    <td className="px-2 py-2 text-right">
-                      <button
-                        type="button"
-                        onClick={() => closePosition.mutate({ id: p.id })}
-                        className="rounded px-2 py-1 text-xs text-accent hover:underline"
-                      >
-                        Close
-                      </button>
-                    </td>
-                  </tr>
-                  );
-                })}
-                {(positions.data?.items ?? []).length === 0 && (
-                  <tr>
-                    <td colSpan={7} className="px-2 py-6 text-center text-ay-muted">
-                      No open positions — take a signal or place a paper order.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          <QueryState
+            query={positions}
+            isEmpty={(d) => (d.items?.length ?? 0) === 0}
+            empty={{ title: 'No open positions — take a signal or place a paper order.' }}
+            errorTitle="Couldn't load open positions"
+            skeleton={<Skeleton variant="table-rows" rows={4} cols={7} className="rounded-lg border border-ay-border p-2" />}
+          >
+            {(data) => (
+              <div className="overflow-auto rounded-lg border border-ay-border">
+                <table className="w-full border-collapse text-sm">
+                  <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
+                    <tr>
+                      <th className="px-2 py-2 font-medium">Instrument</th>
+                      <th className="px-2 py-2 font-medium">Side</th>
+                      <th className="px-2 py-2 text-right font-medium">Qty</th>
+                      <th className="px-2 py-2 text-right font-medium">Avg</th>
+                      <th className="px-2 py-2 text-right font-medium">Mark</th>
+                      <th className="px-2 py-2 text-right font-medium">Unrealized</th>
+                      <th className="px-2 py-2"><span className="ay-sr-only">Actions</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.items.map((p) => {
+                      const m = mtm(p);
+                      return (
+                      <tr key={p.id} className="border-t border-ay-border">
+                        <td className="px-2 py-2">
+                          {p.exchange}:{p.tradingsymbol}
+                        </td>
+                        <td className="px-2 py-2">
+                          <SentimentBadge label={p.side} tone={p.side === 'BUY' ? 'bull' : 'bear'} />
+                        </td>
+                        <td className="px-2 py-2 text-right nums">{p.qty}</td>
+                        <td className="px-2 py-2 text-right nums">{money(p.avgEntryPrice)}</td>
+                        <td className="px-2 py-2 text-right nums">{m.mark ? money(m.mark) : '—'}</td>
+                        <td className={cn('px-2 py-2 text-right nums', m.unrealized && toneClass(m.unrealized))}>
+                          {m.unrealized ? money(m.unrealized) : '—'}
+                        </td>
+                        <td className="px-2 py-2 text-right">
+                          <button
+                            type="button"
+                            onClick={() => closePosition.mutate({ id: p.id })}
+                            className="rounded px-2 py-1 text-xs text-accent hover:underline"
+                          >
+                            Close
+                          </button>
+                        </td>
+                      </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </QueryState>
 
           <h2 className="mb-2 mt-4 text-base font-semibold">Closed trades</h2>
           <div className="max-h-80 overflow-auto rounded-lg border border-ay-border">
@@ -334,6 +344,6 @@ export function PaperPage() {
           )}
         </section>
       </div>
-    </div>
+    </LoadBeat>
   );
 }

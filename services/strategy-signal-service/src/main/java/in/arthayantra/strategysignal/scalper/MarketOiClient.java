@@ -168,11 +168,33 @@ public class MarketOiClient {
     return t == null ? null : Long.valueOf(t);
   }
 
-  /** The nearest-expiry option chain flattened for {@link StrikePicker}: spot, forward, the candidates. */
-  public record ChainSnapshot(
-      LocalDate expiry, BigDecimal spot, BigDecimal forward, List<StrikePicker.Candidate> candidates) {
+  /**
+   * One strike's CE/PE open interest from the live chain - the LIVE-only per-strike OI ladder the #7
+   * Hero-Zero selector walks to find the max-OI short-covering strike. Never on the parity path (the
+   * chosen leg is persisted at entry, section 12.9).
+   */
+  public record StrikeOi(BigDecimal strike, Long ceOi, Long peOi) {}
 
-    /** Forward − spot — the StrikePicker basis (Black-76 is on the forward). */
+  /**
+   * The nearest-expiry option chain flattened for {@link StrikePicker}: spot, forward, the candidates,
+   * plus the per-strike CE/PE OI ladder ({@link #strikeOi}) used only by the #7 Hero-Zero one-away
+   * strike selection. The OI ladder is live-only - the chosen leg rides the V009 side-channel, so it
+   * never enters deterministic replay.
+   */
+  public record ChainSnapshot(
+      LocalDate expiry,
+      BigDecimal spot,
+      BigDecimal forward,
+      List<StrikePicker.Candidate> candidates,
+      List<StrikeOi> strikeOi) {
+
+    /** Back-compat constructor (no OI ladder) - the per-strike OI defaults to empty. */
+    public ChainSnapshot(
+        LocalDate expiry, BigDecimal spot, BigDecimal forward, List<StrikePicker.Candidate> candidates) {
+      this(expiry, spot, forward, candidates, List.of());
+    }
+
+    /** Forward - spot - the StrikePicker basis (Black-76 is on the forward). */
     public BigDecimal basis() {
       return forward == null || spot == null ? BigDecimal.ZERO : forward.subtract(spot);
     }
@@ -201,6 +223,7 @@ public class MarketOiClient {
     BigDecimal spot = decimal(chain.path("spot"));
     BigDecimal forward = decimal(chain.path("forward"));
     List<StrikePicker.Candidate> candidates = new ArrayList<>();
+    List<StrikeOi> strikeOi = new ArrayList<>();
     for (JsonNode row : chain.path("rows")) {
       BigDecimal strike = decimal(row.path("strike"));
       if (strike == null) {
@@ -208,11 +231,15 @@ public class MarketOiClient {
       }
       addLeg(candidates, strike, Black76.OptionType.CE, row.path("ce"));
       addLeg(candidates, strike, Black76.OptionType.PE, row.path("pe"));
+      // The per-strike OI ladder (#7 Hero-Zero one-away selection) - independent of the tradeable
+      // filter: a strike with no usable (ltp+iv) leg can still be the max-OI SC strike.
+      strikeOi.add(
+          new StrikeOi(strike, longOrNull(row.path("ce").path("oi")), longOrNull(row.path("pe").path("oi"))));
     }
     if (candidates.isEmpty()) {
       return null;
     }
-    return new ChainSnapshot(LocalDate.parse(expiryRaw), spot, forward, candidates);
+    return new ChainSnapshot(LocalDate.parse(expiryRaw), spot, forward, candidates, strikeOi);
   }
 
   private static void addLeg(

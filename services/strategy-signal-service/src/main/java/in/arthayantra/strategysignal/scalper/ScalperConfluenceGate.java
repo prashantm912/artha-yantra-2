@@ -203,10 +203,26 @@ public class ScalperConfluenceGate {
       return Optional.empty();
     }
     BigDecimal stop = structuralStop;
-    return StrikePicker.pick(
-            chain.candidates(), chain.spot(), chain.basis(), side, barInstant, chain.expiry(),
-            cfg.strikeParams())
-        .map(pick -> new Decision(side, pick, conf, chain.expiry(), stop));
+    // #7 (section 7) Hero-Zero buys the option ONE STRIKE INSIDE the short-covering strike (a CALL one
+    // strike below the max-CE-OI strike for a bullish break, a PUT one above the max-PE-OI strike for a
+    // bearish one) - never the already-covered strike. The SC strike + step come from the LIVE per-strike
+    // OI ladder (live-only; the chosen leg is persisted at entry, so a replay reads it back, section
+    // 12.9). The selector degrades to empty when the ladder / target strike is unavailable, so the shared
+    // delta/premium band StrikePicker is the fallback (never a crash).
+    Optional<StrikePicker.Pick> pick = Optional.empty();
+    if (cfg.requireHeroZero()) {
+      pick =
+          HeroZeroStrikeSelector.select(
+              chain.candidates(), chain.strikeOi(), chain.spot(), chain.basis(), side, barInstant,
+              chain.expiry(), cfg.strikeParams().rate());
+    }
+    if (pick.isEmpty()) {
+      pick =
+          StrikePicker.pick(
+              chain.candidates(), chain.spot(), chain.basis(), side, barInstant, chain.expiry(),
+              cfg.strikeParams());
+    }
+    return pick.map(p -> new Decision(side, p, conf, chain.expiry(), stop));
   }
 
   /**

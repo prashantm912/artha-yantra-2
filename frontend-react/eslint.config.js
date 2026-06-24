@@ -51,4 +51,10 @@ export default tseslint.config(
     files: ['src/components/charts/**/*.{ts,tsx}'],
     rules: { 'no-restricted-imports': 'off' },
   },
+  // shadcn/ui copy-in source exports variant objects (cva) alongside components — the
+  // react-refresh "only export components" rule does not apply to this generated primitive layer.
+  {
+    files: ['src/components/ui/**/*.{ts,tsx}'],
+    rules: { 'react-refresh/only-export-components': 'off' },
+  },
 );

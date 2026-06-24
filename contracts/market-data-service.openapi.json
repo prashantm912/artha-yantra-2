@@ -825,6 +825,35 @@
         }
       }
     },
+    "/api/v1/market/world-indices" : {
+      "get" : {
+        "tags" : [ "world-indices-controller" ],
+        "operationId" : "worldIndices",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/vix" : {
       "get" : {
         "tags" : [ "market-surface-controller" ],

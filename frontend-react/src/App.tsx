@@ -96,6 +96,9 @@ const OpenHighStrategyPage = lazy(() =>
 const VixIndexPage = lazy(() =>
   import('./pages/features/VixIndexPage.tsx').then((m) => ({ default: m.VixIndexPage })),
 );
+const WorldIndicesPage = lazy(() =>
+  import('./pages/features/WorldIndicesPage.tsx').then((m) => ({ default: m.WorldIndicesPage })),
+);
 const BreadthPage = lazy(() =>
   import('./pages/equity/BreadthPage.tsx').then((m) => ({ default: m.BreadthPage })),
 );
@@ -226,6 +229,7 @@ export function App() {
           <Route path="/features/connecting-dots" element={<ConnectingDotsPage />} />
           <Route path="/features/vix-index" element={<Lazy><VixIndexPage /></Lazy>} />
           <Route path="/features/market-holidays" element={<MarketHolidaysPage />} />
+          <Route path="/features/world-indices" element={<Lazy><WorldIndicesPage /></Lazy>} />
           {/* Data Ops — operator console for the expired/OI backfill (wave PR-DO) */}
           <Route path="/data-ops/status" element={<StatusPage />} />
           <Route path="/data-ops/coverage" element={<CoveragePage />} />

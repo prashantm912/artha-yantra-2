@@ -109,6 +109,7 @@ const SECTIONS: MenuSection[] = [
       { label: 'Connecting Dots', to: '/features/connecting-dots' }, // multi-factor matrix (§20.7.8)
       { label: 'Vix & Index', to: '/features/vix-index' }, // Wave 3 — VIX vs index dual-axis lines (zero-BE)
       { label: 'Market Holidays', to: '/features/market-holidays' }, // Wave 3 — NSE holiday reference table
+      { label: 'World Indices', to: '/features/world-indices' }, // global-index live quotes (Upstox GLOBAL_INDEX)
     ],
   },
   {

@@ -24,7 +24,9 @@ import java.util.Map;
  * OH/OL + the HIGH probability tier + the &lt;=50% spurt reject rules) and anchors the stop on the VWAP;
  * {@code opening-tick} (#9 Morning Trade) swaps the default time window for the opening-tick window
  * ({@link #OPENING_FROM}-{@link #OPENING_TO}), degrades the VWAP HARD gate before 10:30 IST, and
- * anchors the stop on the FIRST session candle's low (CE) / high (PE).
+ * anchors the stop on the FIRST session candle's low (CE) / high (PE); {@code hero-zero} (#7) runs the
+ * {@link HeroZeroGate} as a hard expiry-day end-of-day pre-gate (after 14:30, &gt;50% OI+price break +
+ * short-covering) and anchors the stop on the OPPOSITE session extreme.
  */
 public record ScalperConfig(
     String underlyingExchange,
@@ -38,7 +40,8 @@ public record ScalperConfig(
     boolean requireGapFill,
     boolean requireTrendChange,
     boolean requireOpenHighLow,
-    boolean openingTick) {
+    boolean openingTick,
+    boolean requireHeroZero) {
 
   /** Where the entry-time structural stop-loss is anchored (none = size off structure/VWAP only). */
   public enum StructuralStop {
@@ -48,7 +51,8 @@ public record ScalperConfig(
     GAP_TREND,
     SWING_BREAK,
     VWAP,
-    FIRST_CANDLE
+    FIRST_CANDLE,
+    OPPOSITE_EXTREME
   }
 
   // #9 (section 3.9) Morning Trade opening-tick window. Held as a constant (not read from the YAML
@@ -101,6 +105,9 @@ public record ScalperConfig(
     // #9 (section 3.9): the opening-tick tag arms the Morning Trade path (opening-tick window + VWAP
     // degrade before 10:30) + a FIRST-CANDLE SL anchor (the 1st session candle low/high).
     boolean openingTick = tags.contains("opening-tick");
+    // #7 (section 7): the hero-zero tag arms the HeroZeroGate (expiry-day end-of-day buy) + an
+    // OPPOSITE-EXTREME SL anchor (the session extreme opposite the fire direction).
+    boolean heroZero = tags.contains("hero-zero");
     StructuralStop stop =
         twoCandle
             ? StructuralStop.TWO_CANDLE_FIRST
@@ -112,13 +119,15 @@ public record ScalperConfig(
                         ? StructuralStop.VWAP
                         : openingTick
                             ? StructuralStop.FIRST_CANDLE
-                            : tags.contains("entry-candle-stop")
-                                ? StructuralStop.ENTRY_CANDLE
-                                : StructuralStop.NONE;
+                            : heroZero
+                                ? StructuralStop.OPPOSITE_EXTREME
+                                : tags.contains("entry-candle-stop")
+                                    ? StructuralStop.ENTRY_CANDLE
+                                    : StructuralStop.NONE;
     // #5 (T2.1): the oi-cross-filter tag makes the >=50% call-put dOI imbalance a HARD pre-gate.
     boolean callPutDeltaFilter = tags.contains("oi-cross-filter");
     return new ScalperConfig(
         exchange, underlying, rollDays, params, THRESHOLD, twoCandle, stop, callPutDeltaFilter,
-        gapFill, trendChange, openHighLow, openingTick);
+        gapFill, trendChange, openHighLow, openingTick, heroZero);
   }
 }

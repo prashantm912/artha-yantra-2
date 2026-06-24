@@ -38,7 +38,8 @@ public class ScalperStrategySeeder {
           "scalp-gap-theory-banknifty",
           "scalp-trend-change-banknifty",
           "scalp-open-high-low-nifty",
-          "scalp-morning-trade-nifty");
+          "scalp-morning-trade-nifty",
+          "scalp-hero-zero-nifty");
 
   private final RegistryService registry;
 

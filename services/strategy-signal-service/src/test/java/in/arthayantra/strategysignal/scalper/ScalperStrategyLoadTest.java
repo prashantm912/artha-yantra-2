@@ -35,7 +35,8 @@ class ScalperStrategyLoadTest {
           "scalp-gap-theory-banknifty", "NIFTY BANK",
           "scalp-trend-change-banknifty", "NIFTY BANK",
           "scalp-open-high-low-nifty", "NIFTY 50",
-          "scalp-morning-trade-nifty", "NIFTY 50");
+          "scalp-morning-trade-nifty", "NIFTY 50",
+          "scalp-hero-zero-nifty", "NIFTY 50");
 
   // Each derived strategy must carry the tag that arms its §12.3 gate (the seeder reads the same tag).
   private static final Map<String, String> EXPECTED_TAG =
@@ -43,7 +44,8 @@ class ScalperStrategyLoadTest {
           "scalp-gap-theory-banknifty", "gap-theory",
           "scalp-trend-change-banknifty", "trend-change",
           "scalp-open-high-low-nifty", "open-high-low",
-          "scalp-morning-trade-nifty", "opening-tick");
+          "scalp-morning-trade-nifty", "opening-tick",
+          "scalp-hero-zero-nifty", "hero-zero");
 
   // the aliases ScalperConfluenceGate reads off the bank — each strategy must declare all four.
   private static final Set<String> SEAM_ALIASES = Set.of("vwma20", "psar", "rsi14", "supertrend");

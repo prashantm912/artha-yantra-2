@@ -1,12 +1,12 @@
 ---
 name: run-artha-yantra
-description: Run, start, build, restart, screenshot, or verify the ArthaYantra application — Docker Compose stack (edge-gateway, market-data-service, strategy-signal-service, backtest-service, optimizer-service, frontend-ui) in live or mock mode. Use when asked to run the app, rebuild and restart services, take a screenshot of the UI, or confirm the stack is healthy.
+description: Run, start, build, restart, screenshot, or verify the ArthaYantra application — Docker Compose stack (edge-gateway, market-data-service, strategy-signal-service, backtest-service, optimizer-service, frontend-react) in live or mock mode. Use when asked to run the app, rebuild and restart services, take a screenshot of the UI, or confirm the stack is healthy.
 ---
 
 # run-artha-yantra
 
 ArthaYantra is a Dockerised multi-service trading platform. The sole ingress is
-`edge-gateway` on `http://localhost:8080`. The Angular SPA, backend services, and
+`edge-gateway` on `http://localhost:8080`. The React SPA, backend services, and
 Postgres/Redis all run inside Docker Compose. Drive it with the Playwright MCP
 (`mcp__playwright__browser_*`) for UI flows or `curl` for API smoke-tests.
 
@@ -35,8 +35,8 @@ if (-not $MVN) { $MVN = ".\mvnw.cmd" }
 $env:MAVEN_OPTS = "-Djavax.net.ssl.trustStoreType=Windows-ROOT"
 & $MVN -pl services/market-data-service,services/edge-gateway,services/strategy-signal-service,services/backtest-service -am package -DskipTests
 
-# Angular frontend
-Push-Location frontend-ui
+# React frontend
+Push-Location frontend-react
 npm run build
 Pop-Location
 ```
@@ -47,7 +47,7 @@ Then rebuild Docker images:
 $env:ARTHA_DB_NAME = 'artha'; $env:ARTHA_REDIS_DB = '0'   # live
 # $env:ARTHA_DB_NAME = 'artha_mock'; $env:ARTHA_REDIS_DB = '1'  # mock
 docker compose -f deploy\docker-compose.yml --env-file .env build `
-  edge-gateway market-data-service strategy-signal-service backtest-service frontend-ui
+  edge-gateway market-data-service strategy-signal-service backtest-service frontend-react
 ```
 
 optimizer-service is Python (FastAPI) — rebuild only if `services/optimizer-service/` changed:
@@ -70,7 +70,7 @@ vars and writes mock data to the live DB.
 # Restart specific services after rebuild
 $env:ARTHA_DB_NAME = 'artha'; $env:ARTHA_REDIS_DB = '0'
 docker compose -f deploy\docker-compose.yml --env-file .env up -d `
-  edge-gateway market-data-service strategy-signal-service backtest-service frontend-ui
+  edge-gateway market-data-service strategy-signal-service backtest-service frontend-react
 ```
 
 ---

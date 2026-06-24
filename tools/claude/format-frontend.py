@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Claude Code PostToolUse hook: run Prettier on edited frontend-ui files.
+"""Claude Code PostToolUse hook: run Prettier on edited frontend-react files.
 
 Best-effort and non-blocking — if Prettier is not installed or errors, it exits
 0 silently so it can never interrupt a Claude turn. Only touches files under
-frontend-ui/ with a front-end extension.
+frontend-react/ with a front-end extension.
 """
 import json
 import os
@@ -27,12 +27,12 @@ def main():
     abspath = os.path.abspath(abspath)
     rel = os.path.relpath(abspath, REPO_ROOT).replace("\\", "/")
 
-    if not rel.startswith("frontend-ui/"):
+    if not rel.startswith("frontend-react/"):
         return
-    if not re.search(r"\.(ts|html|scss|css|json)$", rel):
+    if not re.search(r"\.(tsx?|jsx?|css|json)$", rel):
         return
 
-    fe = os.path.join(REPO_ROOT, "frontend-ui")
+    fe = os.path.join(REPO_ROOT, "frontend-react")
     prettier = os.path.join(fe, "node_modules", ".bin", "prettier" + (".cmd" if os.name == "nt" else ""))
     if not os.path.exists(prettier):
         return  # prettier not installed in this checkout — skip silently

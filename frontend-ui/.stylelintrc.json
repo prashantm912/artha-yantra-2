@@ -1,9 +1,0 @@
-{
-  "extends": "stylelint-config-standard-scss",
-  "rules": {
-    "color-no-hex": [true, { "message": "Raw hex is forbidden in component styles - use var(--ay-*) (C-2.23)" }],
-    "selector-class-pattern": null,
-    "scss/comment-no-empty": null
-  },
-  "ignoreFiles": ["src/styles.scss", "dist/**"]
-}

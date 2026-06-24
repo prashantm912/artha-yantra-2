@@ -49,12 +49,12 @@ backtest replay** (options trade their own premium) is merged (#114–#119). The
 | Item | Status | Target | Reason |
 |---|---|---|---|
 | Strategy **#3 Market Movers** | DEFERRED | Track-1 / Phase-5-adjacent (a screener, not a live signal) | Trades F&O **stocks**; the scalper engine is index-option only; overlaps the Minervini screener + needs N-day-high + daily RSI. |
-| Strategy **#7 Hero-Zero** | GATED | live orders + the `.spn` verify (SPAN appliance now BUILT #126) | Short-premium / deep-OTM lottery bet; the SPAN sizing path exists (dormant) — remaining gate is live-order routing + a real-`.spn` margin check. First short-premium to wire (owner-chosen). |
+| Strategy **#7 Hero-Zero** | **DONE (paper, #130)** | — | **CORRECTION:** #7 is BUY-side (long premium, defined risk) per the Siva cheat sheet ("buy side only"), NOT short-premium — so it needs NEITHER SPAN NOR live orders. Wired as a paper scalper via `HeroZeroGate` + `scalp-hero-zero-nifty.yaml` (expiry-day, 14:30–15:20, >50% OI+price sync, one-away strike via side+delta band). Golden/parity byte-identical. Live-order routing is the only remaining gate for trading it LIVE (shared with the cluster below). |
 | Strategy **#11-short Straddle** | GATED | live orders + the `.spn` verify | Short-premium; SPAN appliance built; needs hedge logic + live orders. |
 | Strategy **#8 BTST/STBT** | DEFERRED | after an overnight position lifecycle + SPAN | Needs **overnight carry** (paper layer force-squares-off 15:45 IST) + the short-PE/CE leg needs SPAN. |
 | **#47 SPAN appliance** (§8 marginism) | **BUILT (dormant)** | live-verify (#126) | `services/margin-service/` (marginism 0.1.1, FastAPI :8086) + advisory paper sizing wire-in, shipped default-off (`artha.margin.span-enabled=false`). VERIFY-pending: a real-`.spn` broker-parity golden + the NSE `.spn` download URL (CI golden tests the real algo vs a synthetic `.spn`). |
 | **OpenAlgoOrderGateway** (live broker order impl) | DEFERRED (gated) | a live-cutover slice | Needs the OpenAlgo order-API verified vs the local checkout + the §17.3 place-ack **latency gate** before any real order routes. The execution BOUNDARY (`OrderGateway` port + `DisabledOrderGateway` fail-safe + semi-auto `LiveOrderService`) is shipped. |
-| **§18.1 order read endpoints** (orderbook/positions/tradebook/funds) + React `/orders` page | DEFERRED | Phase 4b | Sequenced to the React scalper-cockpit split. |
+| **§18.1 order read endpoints** (orderbook/positions/tradebook/funds) + React `/orders` page | **BUILT (dormant, #131)** | live-verify | OpenAlgo `openalgo/wire/` anti-corruption DTOs + gated `RestOpenAlgoOrderReadGateway` + `GET /api/v1/orders/*` + read-only `/orders` page, WireMock-tested, ships off (`artha.openalgo.order-read-enabled=false`). Live-broker verify deferred. |
 | **Full-auto execution** (no human "Take") | DEFERRED | a later flag | Semi-auto (human "Take") is the v1 safety boundary. |
 | **Manual-verification checklist UI** (verify + confirm panel) | **DONE** (#125) | — | React `ManualVerifyChecklist` on `/signals` + `/scalper` (soft-warning + override gating, the 7 V009 checks + confluence dots, client-only). |
 | **Per-check server audit** (which boxes ticked) | DEFERRED | only if an override/exception trail is needed | Would add a `TakenRequest` field (request-schema drift + TS regen). |
@@ -81,7 +81,7 @@ Cockpit + React cutover + oipulse Waves W1/W2/W3 merged (see the merge-state not
 |---|---|---|---|
 | **Data-foundation value-verify** — render every OI/data page in History mode on a REAL session + compare value-for-value vs oipulse | GATED | the expired/OI backfill data (NOW loading, #112–#116) | The big open Phase-4 item: pages are structure-QA'd, not value-verified. Authority: `superpowers/plans/2026-06-21-data-foundation-milestone.md` + [[oipulse-live-qa-method]]. |
 | **Data Ops Console deploy** (B1–B6 merged #121) | GATED | after the running backfill finishes | A market-data redeploy restarts it → kills the in-flight backfill job. Deploy + rebuild `ay-frontend-react` once the pull completes. See [[data-ops-console]]. |
-| **`/orders` page** + §18.1 order read endpoints (orderbook/positions/tradebook/funds) | DEFERRED | Phase 4b / live cutover | Sequenced to live order routing. |
+| **`/orders` page** + §18.1 order read endpoints (orderbook/positions/tradebook/funds) | **BUILT (dormant, #131)** | live-verify | See the Phase-4 table — scaffolded + WireMock-tested; live-broker verify deferred. |
 | **Manual-verification checklist UI** (verify + confirm panel) | **DONE** (#125) | — | Built (see the Phase-4 table); the `2026-06-20-scalper-manual-verification-checklist.md` contract is fulfilled. |
 | **OiPulse ≥90% AI badge** (#2) + any tail oipulse-parity polish | DEFERRED | post value-verify | Proprietary oipulse model; our faithful Table-1/2 HIGH tier is the equivalent. |
 
@@ -120,6 +120,9 @@ Cockpit + React cutover + oipulse Waves W1/W2/W3 merged (see the merge-state not
 - Branch protection on `main` — configured (the 7 CI checks are required; `enforce_admins` deliberately
   OFF so the solo owner can admin-merge — was a solo-owner deadlock).
 - Accepted documented DEVIATIONS (not deferred work): Monaco editor-route chunk ~562 KB gz; the canary
-  Redis key `kite:contract:check`; the ~1.1k-row mock dump fixture; Caffeine (not Redis) indicator cache;
-  optimizer `/best` guard columns surfaced in the fold drill-down. See the `PHASE_GATES.md` stage parking
-  lists for the full rationale.
+  Redis key `kite:contract:check`; the ~1.1k-row mock dump fixture; Caffeine (not Redis) indicator cache.
+  See the `PHASE_GATES.md` stage parking lists for the full rationale.
+- **Optimizer `/best` guard columns** — RESOLVED (#129): per-regime OOS Sharpe (min/mean/max), regimes-covered,
+  folds-excluded, dataHash now surface as a compact `guardMetrics` on `/best` + the React sweep leaderboard
+  (read from the persisted fold/results data, no recompute; legacy full-window trials show "no fold guards").
+- **e2e coverage** for the Data Ops console + scalper checklist — ADDED (#128, Playwright + axe, desktop + 480px).

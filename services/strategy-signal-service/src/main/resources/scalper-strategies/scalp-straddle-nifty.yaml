@@ -1,0 +1,94 @@
+# Siva #11 - Straddle (LONG). The `straddle` tag routes the section-12.3 ScalperConfluenceGate down its
+# direction-NEUTRAL path: it does NOT resolve a single CE/PE side from price-vs-VWAP and does NOT score
+# the directional Connect-the-Dots confluence. Instead it picks BOTH legs of the ATM strike (the Call
+# and the Put of the same strike + expiry) and emits them as a two-leg draft. This is the volatility /
+# event play: profit only when the underlying moves MORE than the combined premium paid, in EITHER
+# direction. Defined risk = the combined premium (both legs BUY).
+#
+# Each rule below is tagged [SOURCED] (from the Consolidated Strategy section 3.11 / 4.15.2) or
+# [ASSUMED] (a faithful default for owner review where the source is silent or the rule is a LIVE
+# market-data concept the deterministic seam cannot recompute).
+#
+# Legs / strike:
+#   - [SOURCED] Both legs = ATM, same strike, same expiry (section 3.11 "Both legs = ATM, same strike,
+#     same expiry"). The ATM strike carries delta ~0.5 on each leg (most extrinsic/time value, most
+#     sensitive to the move). StraddleLegPicker selects the listed strike nearest the forward that has
+#     BOTH a CE and a PE candidate and returns both as BUY legs.
+#   - [SOURCED] Long straddle = BUY the ATM Call + BUY the ATM Put (section 3.11). Short straddle (SELL
+#     both legs) is DEFERRED: it is naked-short, SPAN-margined, and unlimited-risk (section 3.11
+#     "unlimited risk"); StraddleLegPicker only ever returns BUY legs, so this draft can never emit a
+#     short straddle. The short variant unblocks once the #47 SPAN appliance gates short premium.
+#
+# Entry trigger:
+#   - [SOURCED] The TRUE entry is the COMBINED straddle premium (Call+Put as one series) breaking ABOVE
+#     its OWN VWAP with volume (section 3.11 / the section 4.15.2 straddle chart). That combined-premium
+#     series + its VWAP is a LIVE market-data construct the deterministic confluence seam (which reads
+#     only the index-future chart) cannot recompute byte-identically, so it is NOT enforced here.
+#   - [ASSUMED] v1 emits the two-leg DRAFT once the side-agnostic section-0B rails hold (the time window
+#     + the volume floor) and an ATM CE+PE pair exists. The combined-premium-vs-its-VWAP entry timing,
+#     the LOW-IV gate (a long straddle wants low IV/premiums - section 3.11), and the event/budget
+#     ~12:30 PM form are left to LIVE management on the order layer. Documented for owner review.
+#
+# Exit / stop (the real exits are on the COMBINED option premium, LIVE-managed):
+#   - [SOURCED] Long-straddle exit: the combined premium rolling over from its peak / a lower-low
+#     formation; optionally drop the losing leg and hold the winner once the combo is the right side of
+#     VWAP (section 3.11 one-leg management). SL = BELOW the combined-premium VWAP (section 3.11).
+#   - [ASSUMED] The engine-level BOUNDING exits below are a v1 proxy that satisfies the section-0B
+#     hard-stop rule (a scalper MUST carry a fixed SL or a time-stop or it will not load): a
+#     premium_pct stop (50% of the entry reference) + a 30-bar time-stop + the intraday square-off. The
+#     faithful combined-premium-vs-VWAP exit + one-leg management ride live management, not this YAML.
+#
+# `direction: long` - a LONG straddle is a long/defined-risk position (both legs BUY); the signal stays
+# keyed on the NIFTY front future (Model A) and the two ATM legs ride the V009 scalper_detail legs[]
+# side-channel. Seeded as a DRAFT (opt-in) - it never auto-emits; the owner publishes it from the UI.
+schema: strategy-schema/v1
+id: scalp-straddle-nifty
+name: "Scalper · Straddle (Long) · NIFTY"
+version: 1.0.0
+description: "Long-straddle volatility scalp (Siva #11) on the NIFTY 3-min front future: direction-NEUTRAL, BUYS both legs of the ATM strike (Call + Put, same strike/expiry, delta ~0.5 each) on the section-0B time + volume rails; profit when the move exceeds the combined premium. Combined-premium-vs-VWAP entry timing + the low-IV gate + one-leg management are LIVE-managed (ASSUMED); the short straddle (SELL legs) is SPAN-deferred. Defined risk = the combined premium."
+author: owner
+tags: [scalper, options, intraday, nifty, straddle]
+
+universe:
+  mode: options_of_underlying
+  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  options:
+    expiry: nearest_weekly
+    strikes: { selector: atm_window, width: 3 }   # ATM±3; StraddleLegPicker refines to the exact ATM pair
+    option_types: [CE, PE]                          # a straddle trades BOTH legs of the ATM strike
+
+timeframes:
+  primary: 3m
+  additional: [1h]
+
+indicators:
+  - { name: VWMA,       alias: vwma20,    timeframe: 3m, params: { period: 20 } }
+  - { name: PSAR,       alias: psar,      timeframe: 3m }
+  - { name: RSI,        alias: rsi14,     timeframe: 3m, params: { period: 14 }, weight: 1.0,
+      normalize: { type: rsi_momentum } }
+  - { name: SUPERTREND, alias: supertrend, timeframe: 3m, params: { period: 10, multiplier: 2.0 },
+      weight: 1.0, normalize: { type: direction } }
+  - { name: SUPERTREND, alias: bias60m,   timeframe: 1h, params: { period: 7, multiplier: 3.0 } }
+
+entry_rules:
+  direction: long                # a long straddle = both legs BUY (long/defined-risk position)
+  gate:
+    all:
+      - "volume > 0"             # the section-0B volume floor + the neutral straddle path carry the real entry logic
+  scoring:
+    threshold: 0.2               # easy to clear → the neutral seam runs and picks the two ATM legs
+
+exit_rules:
+  - { type: stop_loss,   params: { basis: premium_pct, value: 50 } }   # [ASSUMED] v1 bounding stop proxy (combined-premium SL is LIVE)
+  - { type: time_stop,   params: { max_bars: 30 } }                    # [ASSUMED] ~90 min cap; the real exit is the combined-premium roll-over
+  # NOTE: the faithful exit (combined-premium vs its own VWAP / one-leg management - section 3.11) is LIVE-managed
+
+risk:
+  position_sizing: { method: premium_budget, params: { budget_inr: 15000 } }
+  max_positions: 1
+  max_positions_per_underlying: 1
+  max_daily_loss_pct: 2.0
+  session:
+    style: intraday
+    window: { from: "09:45", to: "15:00" }
+    square_off: "15:15"

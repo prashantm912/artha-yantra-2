@@ -614,7 +614,7 @@ public class SignalEngine {
     if (decision != null) {
       signals.stampScalperDetail(
           id, exchange, decision.pick().candidate().tradingsymbol(),
-          scalperDetailJson(decision, strategy.scalper()));
+          scalperDetailJson(decision, strategy.scalper(), exchange));
     }
     emitted.increment();
     // the channel carries EXACTLY the persisted canonical bytes (divergence = FAIL criterion)
@@ -642,7 +642,7 @@ public class SignalEngine {
             ? null
             : new SignalEmitted.ScalpDetail(
                 strategy.scalper().underlying(),
-                decision.side().name(),
+                decision.neutral() ? "NEUTRAL" : decision.side().name(),
                 decision.pick().candidate().strike(),
                 decision.pick().candidate().tradingsymbol(),
                 decision.pick().candidate().ltp(),
@@ -653,11 +653,18 @@ public class SignalEngine {
             evaluation.breakdown().composite(), evaluation.breakdown().threshold(), scalp));
   }
 
-  /** The §12.9 confluence side-channel JSON — chosen option, |delta|, IV, aggregate, per-dot detail. */
-  private String scalperDetailJson(ScalperConfluenceGate.Decision d, ScalperConfig cfg) {
+  /**
+   * The §12.9 confluence side-channel JSON — chosen option, |delta|, IV, aggregate, per-dot detail.
+   * The directional shape is unchanged (byte-identical). A #11 NEUTRAL straddle ({@code side==null})
+   * stamps {@code side:"NEUTRAL"}, the primary (CE) leg in the legacy {@code tradeable/strike/...}
+   * fields, and a {@code legs[]} array carrying BOTH BUY legs ({exchange, tradingsymbol, side, option_type,
+   * strike, option_ltp, iv, delta}) — the two-leg carrier the order/paper layer reads.
+   */
+  private String scalperDetailJson(
+      ScalperConfluenceGate.Decision d, ScalperConfig cfg, String tradeableExchange) {
     StrikePicker.Candidate c = d.pick().candidate();
     ObjectNode root = objectMapper.createObjectNode();
-    root.put("side", d.side().name());
+    root.put("side", d.neutral() ? "NEUTRAL" : d.side().name());
     root.put("underlying", cfg.underlying());
     root.put("expiry", d.expiry().toString());
     root.put("tradeable", c.tradingsymbol());
@@ -672,6 +679,23 @@ public class SignalEngine {
       n.put("dot", ds.dot());
       n.put("weight", ds.weight());
       n.put("supports", ds.supports());
+    }
+    // #11 (section 3.11) two-leg carrier: only a neutral straddle adds the legs[] array, so the
+    // single-leg directional side-channel stays byte-identical. The order/paper layer trades these.
+    if (d.neutral()) {
+      ArrayNode legs = root.putArray("legs");
+      for (ScalperConfluenceGate.Leg leg : d.legs()) {
+        StrikePicker.Candidate lc = leg.pick().candidate();
+        ObjectNode n = legs.addObject();
+        n.put("exchange", tradeableExchange);
+        n.put("tradingsymbol", lc.tradingsymbol());
+        n.put("side", "BUY"); // long straddle = both legs BUY (short = SELL is SPAN-deferred)
+        n.put("option_type", leg.optionType().name());
+        n.put("strike", lc.strike());
+        n.put("option_ltp", lc.ltp());
+        n.put("iv", lc.iv());
+        n.put("delta", leg.pick().delta());
+      }
     }
     ScalperManualChecks.appendTo(root);
     return root.toString();

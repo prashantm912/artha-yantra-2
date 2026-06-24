@@ -14,6 +14,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.stereotype.Component;
 
@@ -54,16 +55,36 @@ public class ScalperConfluenceGate {
     this.calendar = calendar;
   }
 
+  /** One tradeable option leg the seam picked (the V009 side-channel carrier, §3.11 two-leg). */
+  public record Leg(OptionType optionType, StrikePicker.Pick pick) {}
+
   /**
-   * The chosen option, the side, the confluence that justified it, and the entry-time structural
+   * The chosen option(s), the side, the confluence that justified it, and the entry-time structural
    * stop-loss on the index future ({@code null} when the strategy sizes off structure/VWAP only).
+   *
+   * <p>A directional decision carries ONE leg: {@code side} is CE/PE and {@code legs} = [that leg].
+   * A #11 NEUTRAL straddle carries TWO legs (ATM CE + ATM PE, both BUY): {@code side} is {@code null}
+   * (no direction) and {@code legs} = [CE, PE]. {@code pick()} returns the PRIMARY leg (the CE for a
+   * straddle) — the frozen {@code tradeable_*} columns + the scalp event read it; the full leg list
+   * rides the {@code scalper_detail} JSON side-channel.
    */
   public record Decision(
       OptionType side,
-      StrikePicker.Pick pick,
+      List<Leg> legs,
       Confluence confluence,
       LocalDate expiry,
-      BigDecimal structuralStop) {}
+      BigDecimal structuralStop) {
+
+    /** The directional/primary leg (CE for a straddle) — never empty: every decision has ≥1 leg. */
+    public StrikePicker.Pick pick() {
+      return legs.get(0).pick();
+    }
+
+    /** True for the #11 neutral straddle (two BUY legs, no directional side). */
+    public boolean neutral() {
+      return side == null;
+    }
+  }
 
   /**
    * Confluence-gate one passing chart entry. Empty BLOCKS the signal.
@@ -101,6 +122,29 @@ public class ScalperConfluenceGate {
     }
     ChainSnapshot chain = chainOpt.get();
     Chart chart = chart(bank, index);
+    // #11 (section 3.11) Straddle: a direction-NEUTRAL volatility position trading BOTH legs of the
+    // SAME ATM strike (delta≈0.5 each). It must NOT take the CE/PE directional split below — there is no
+    // single side — so it branches here on the side-agnostic §0B rails (time window already passed +
+    // the volume floor). §3.11 gives no chart-RSI rule for a straddle, and the combined-premium-vs-VWAP
+    // entry trigger + the low-IV gate are LIVE market-data series the deterministic seam cannot recompute
+    // (deferred to live management); v1 emits the two-leg draft once an ATM pair exists. Short straddle
+    // (SELL legs) is SPAN-deferred — StraddleLegPicker only ever returns BUY legs.
+    if (cfg.requireStraddle()) {
+      if (!ScalperGates.volume(cfg.underlying(), chart.volume()).pass()) {
+        return Optional.empty();
+      }
+      return StraddleLegPicker.pick(
+              chain.candidates(), chain.spot(), chain.basis(), barInstant, chain.expiry(),
+              cfg.strikeParams().rate())
+          .map(
+              s ->
+                  new Decision(
+                      null,
+                      List.of(new Leg(OptionType.CE, s.call()), new Leg(OptionType.PE, s.put())),
+                      neutralConfluence(),
+                      chain.expiry(),
+                      null));
+    }
     // §0B VWAP-decisive: CE above VWAP, PE below — the side the rest of the confluence must confirm.
     OptionType side =
         chart.close() != null && chart.vwap() != null && chart.close().compareTo(chart.vwap()) >= 0
@@ -222,7 +266,9 @@ public class ScalperConfluenceGate {
               chain.candidates(), chain.spot(), chain.basis(), side, barInstant, chain.expiry(),
               cfg.strikeParams());
     }
-    return pick.map(p -> new Decision(side, p, conf, chain.expiry(), stop));
+    OptionType decided = side;
+    return pick.map(
+        p -> new Decision(decided, List.of(new Leg(decided, p)), conf, chain.expiry(), stop));
   }
 
   /**
@@ -264,5 +310,15 @@ public class ScalperConfluenceGate {
   private int bias60m(BarValues bank, int index) {
     BigDecimal bias = bank.valueAt(BIAS_60M, index);
     return bias == null ? 0 : bias.signum();
+  }
+
+  /**
+   * The #11 straddle is direction-NEUTRAL — no Connect-the-Dots side was scored. This stand-in carries
+   * a zero aggregate, {@code side=null}, neither bullish nor bearish, and no dots, so the side-channel +
+   * scalp-alert renderers stay uniform without a real directional confluence.
+   */
+  private static Confluence neutralConfluence() {
+    return new Confluence(
+        BigDecimal.ZERO, null, false, false, false, false, false, List.of());
   }
 }

@@ -46,7 +46,7 @@ artha:
     source:
       quotes: ${ARTHA_MD_SOURCE_QUOTES:kite}             # kite | openalgo
       candles: ${ARTHA_MD_SOURCE_CANDLES:kite}           # kite | openalgo
-      optionchain: ${ARTHA_MD_SOURCE_OPTIONCHAIN:kite}   # kite | openalgo (per-strike OI capture; flip ONLY after the live OI-coverage canary is green, §17.11)
+      optionchain: ${ARTHA_MD_SOURCE_OPTIONCHAIN:kite}   # kite | openalgo | upstox (per-strike OI capture; flip ONLY after the live OI-coverage canary is green, §17.11. upstox=Wave U1 direct /v2/option/chain on the login-free 1-yr analytics token, REQUIRES the analytics token file)
       fiidii: ${ARTHA_MD_SOURCE_FIIDII:nse}              # nse | upstox (ADR-0002 U2; upstox REQUIRES artha.upstox.analytics.enabled=true)
       optionanalytics: ${ARTHA_MD_SOURCE_OPTIONANALYTICS:native}  # native | upstox — PCR + max-pain source (upstox = full chain; REQUIRES artha.upstox.analytics.enabled=true)
   openalgo:

@@ -159,8 +159,16 @@ public class OptionsSnapshotService {
       return;
     }
     String oiKey = chain.underlying() + "|" + chain.expiry() + "|" + strike + "|" + optionType;
+    // keep the previous-pass map current on EVERY source so a later flag flip back to Kite is sane
     Long prev = leg.oi() == null ? null : previousOi.put(oiKey, leg.oi());
-    Long oiChange = leg.oi() == null || prev == null ? null : leg.oi() - prev;
+    Long oiChange;
+    if (leg.prevOi() != null && leg.oi() != null) {
+      // Wave U1 (Upstox source): prev_oi is the venue's own previous OI — use it directly
+      oiChange = leg.oi() - leg.prevOi();
+    } else {
+      // default (Kite source): oi_change = oi − the previous snapshot's oi (null on the first pass)
+      oiChange = leg.oi() == null || prev == null ? null : leg.oi() - prev;
+    }
     rows.add(
         new OptionsSnapshotRepository.SnapshotRow(
             ts, chain.underlying(), chain.expiry(), strike, optionType, leg.tradingsymbol(),

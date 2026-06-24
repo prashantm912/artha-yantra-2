@@ -140,9 +140,9 @@ public final class UpstoxGlobalInstrumentsClient {
       try (InputStream in = new GZIPInputStream(new ByteArrayInputStream(gzip))) {
         rows = mapper.readValue(in, new TypeReference<List<UpstoxGlobalInstrument>>() {});
       }
-      master = rows.stream().filter(UpstoxGlobalInstrumentsClient::isGlobalIndexOrIndicator).toList();
+      master = rows.stream().filter(UpstoxGlobalInstrumentsClient::isGlobalIndex).toList();
       loadedAt = Instant.now();
-      log.info("Upstox global instrument master loaded: {} global index/indicator rows", master.size());
+      log.info("Upstox global instrument master loaded: {} global index rows", master.size());
     } catch (IOException | RuntimeException e) {
       // Transport / gunzip / parse failure: keep any prior cache and defer the next attempt by the
       // refresh window so we don't hammer the CDN. NEVER propagates out (the page must still render).
@@ -151,9 +151,12 @@ public final class UpstoxGlobalInstrumentsClient {
     }
   }
 
-  private static boolean isGlobalIndexOrIndicator(UpstoxGlobalInstrument r) {
-    return r.instrumentKey() != null
-        && ("GLOBAL_INDEX".equals(r.segment()) || "GLOBAL_INDICATOR".equals(r.segment()));
+  // GLOBAL_INDEX only. The GLOBAL_INDICATOR rows (USD/INR, Brent, Crude — forex/commodity, not
+  // indices) are NOT quotable via /v2/market-quote/quotes, and Upstox rejects the WHOLE batch
+  // (UDAPI1087) if any key is invalid — so including them blanked every price. Out of scope for a
+  // World Indices page anyway.
+  private static boolean isGlobalIndex(UpstoxGlobalInstrument r) {
+    return r.instrumentKey() != null && "GLOBAL_INDEX".equals(r.segment());
   }
 
   /** Fetches quotes for every key in {@code MAX_BATCH}-sized batches; failed batches are skipped. */

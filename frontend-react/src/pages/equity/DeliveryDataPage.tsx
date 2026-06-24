@@ -8,6 +8,7 @@ import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
 
 // Equity → Delivery Data (oipulse): one stock's daily delivery quantity / % over a relative period (the
@@ -74,7 +75,7 @@ export function DeliveryDataPage() {
   );
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader
         title="Delivery Data"
         subtitle="Daily delivery % & quantity for a stock (high % delivery = institutional conviction)"
@@ -111,17 +112,19 @@ export function DeliveryDataPage() {
           skeleton={<Skeleton variant="table-rows" rows={8} cols={9} />}
         >
           {(d) => (
-            <DataTable
-              columns={columns}
-              rows={d.items ?? []}
-              rowKey={(r) => r.date}
-              pageSize={30}
-              ariaLabel={`${symbol} daily delivery data`}
-              emptyMessage={`No EQ bhavcopy for ${symbol}.`}
-            />
+            <BeatBlock>
+              <DataTable
+                columns={columns}
+                rows={d.items ?? []}
+                rowKey={(r) => r.date}
+                pageSize={30}
+                ariaLabel={`${symbol} daily delivery data`}
+                emptyMessage={`No EQ bhavcopy for ${symbol}.`}
+              />
+            </BeatBlock>
           )}
         </QueryState>
       )}
-    </div>
+    </LoadBeat>
   );
 }

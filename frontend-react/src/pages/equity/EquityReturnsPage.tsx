@@ -7,6 +7,7 @@ import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
 
 // Equity → Equity Returns (oipulse): a multi-timeframe returns screener over the EQ universe — LTP +
@@ -61,7 +62,7 @@ export function EquityReturnsPage() {
   );
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader
         title="Equity Returns"
         subtitle={
@@ -92,16 +93,18 @@ export function EquityReturnsPage() {
         skeleton={<Skeleton variant="table-rows" rows={10} cols={8} />}
       >
         {() => (
-          <DataTable
-            columns={columns}
-            rows={rows}
-            rowKey={(r) => r.symbol}
-            pageSize={50}
-            ariaLabel="Equity returns screener"
-            emptyMessage="No returns data yet."
-          />
+          <BeatBlock>
+            <DataTable
+              columns={columns}
+              rows={rows}
+              rowKey={(r) => r.symbol}
+              pageSize={50}
+              ariaLabel="Equity returns screener"
+              emptyMessage="No returns data yet."
+            />
+          </BeatBlock>
         )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

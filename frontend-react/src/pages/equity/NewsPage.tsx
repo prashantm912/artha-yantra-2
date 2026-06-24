@@ -5,6 +5,7 @@ import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 
 // Equity → News / Announcements (Upstox /v2/news): recent news articles for a stock (last 7 days),
 // keyed by the static symbol → Upstox instrument-key map. available=false when the Upstox news source
@@ -24,7 +25,7 @@ export function NewsPage() {
   };
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="News / Announcements" subtitle="Recent stock news (Upstox, last 7 days)" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -59,28 +60,30 @@ export function NewsPage() {
                 News source is not live right now (Upstox news needs the live stack).
               </p>
             ) : (
-              <ul className="space-y-3">
-                {d.items.map((it, i) => (
-                  <li key={i} className="rounded-lg border border-ay-border bg-surface-1 p-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <a
-                        href={it.articleLink ?? '#'}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-sm font-semibold text-accent hover:underline"
-                      >
-                        {it.heading ?? '—'}
-                      </a>
-                      <span className="shrink-0 text-xs text-ay-muted">{fmtTime(it.publishedTime)}</span>
-                    </div>
-                    {it.summary && <p className="mt-1 text-xs text-ay-muted">{it.summary}</p>}
-                  </li>
-                ))}
-              </ul>
+              <BeatBlock>
+                <ul className="space-y-3">
+                  {d.items.map((it, i) => (
+                    <li key={i} className="rounded-lg border border-ay-border bg-surface-1 p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <a
+                          href={it.articleLink ?? '#'}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm font-semibold text-accent hover:underline"
+                        >
+                          {it.heading ?? '—'}
+                        </a>
+                        <span className="shrink-0 text-xs text-ay-muted">{fmtTime(it.publishedTime)}</span>
+                      </div>
+                      {it.summary && <p className="mt-1 text-xs text-ay-muted">{it.summary}</p>}
+                    </li>
+                  ))}
+                </ul>
+              </BeatBlock>
             )
           }
         </QueryState>
       )}
-    </div>
+    </LoadBeat>
   );
 }

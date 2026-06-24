@@ -9,6 +9,7 @@ import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { oiIntMeta } from '../../core/oiInterpretation.ts';
 import { formatDecimal } from '../../lib/decimal.ts';
 
@@ -120,7 +121,7 @@ export function OiBuzzPage() {
   );
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader
         title="Futures OI Buzz"
         subtitle="Index-constituent heatmap — tile size and colour ∝ near-month future % change"
@@ -166,16 +167,18 @@ export function OiBuzzPage() {
       >
         {() =>
           visibleTiles.length > 0 ? (
-            <EChart
-              makeOption={makeOption}
-              height={520}
-              ariaLabel={`${index} constituent % change heatmap`}
-            />
+            <BeatBlock>
+              <EChart
+                makeOption={makeOption}
+                height={520}
+                ariaLabel={`${index} constituent % change heatmap`}
+              />
+            </BeatBlock>
           ) : (
             <p className="py-12 text-center text-sm text-ay-muted">No matching constituents.</p>
           )
         }
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

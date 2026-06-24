@@ -12,6 +12,7 @@ import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
 
 // Futures EOD OI Analyzer (oipulse §futures/eod-oi-analyzer): day-by-day OHLC + OI + day-over-day
@@ -75,7 +76,7 @@ export function FuturesEodPage() {
   const nameOptions = underlyings.data && underlyings.data.length > 0 ? underlyings.data : ['NIFTY 50', 'NIFTY BANK'];
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader
         title="Futures EOD OI Analyzer"
         subtitle="Day-by-day OHLC, OI and day-over-day deltas for one futures contract"
@@ -97,16 +98,18 @@ export function FuturesEodPage() {
         skeleton={<Skeleton variant="table-rows" rows={10} cols={13} />}
       >
         {() => (
-          <DataTable
-            columns={columns}
-            rows={rows}
-            rowKey={(r) => r.tradeDate}
-            pageSize={25}
-            ariaLabel="Futures EOD OI analyzer"
-            emptyMessage="No EOD data captured for this contract yet."
-          />
+          <BeatBlock>
+            <DataTable
+              columns={columns}
+              rows={rows}
+              rowKey={(r) => r.tradeDate}
+              pageSize={25}
+              ariaLabel="Futures EOD OI analyzer"
+              emptyMessage="No EOD data captured for this contract yet."
+            />
+          </BeatBlock>
         )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

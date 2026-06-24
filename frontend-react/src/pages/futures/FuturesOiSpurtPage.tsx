@@ -10,6 +10,7 @@ import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
 
 // Futures OI Spurt (oipulse §futures/oi-spurt): the 2×2 OI scanner — every captured futures contract
@@ -65,7 +66,7 @@ export function FuturesOiSpurtPage() {
   }, [items, search]);
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader
         title="Futures OI Spurt"
         subtitle="Every captured futures contract bucketed by its 4-state OI interpretation"
@@ -98,7 +99,7 @@ export function FuturesOiSpurtPage() {
         }
       >
         {() => (
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <BeatBlock className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {QUADRANTS.map((qd) => (
               <div key={qd.state} className="rounded border border-ay-border bg-surface-1 p-2">
                 <div className="mb-1 flex items-baseline justify-between">
@@ -119,9 +120,9 @@ export function FuturesOiSpurtPage() {
                 />
               </div>
             ))}
-          </div>
+          </BeatBlock>
         )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

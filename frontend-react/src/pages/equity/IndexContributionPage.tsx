@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { TrendingDown, TrendingUp } from 'lucide-react';
 import { useIndexContribution, useOiBuzzIndices } from '../../api/oiAnalytics.ts';
 import type { ContribRow } from '../../api/types.ts';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
@@ -8,6 +9,7 @@ import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
 
 // Equity → Index Contribution (oipulse): how much each constituent pushes the index, split into
@@ -56,7 +58,7 @@ export function IndexContributionPage() {
   const data = q.data ?? null;
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Index Contribution" />
 
       <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -90,15 +92,18 @@ export function IndexContributionPage() {
         }
       >
         {(data) => (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <BeatBlock className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
-            <h2 className="mb-1 text-sm font-semibold text-bull">
-              Advances: {data.advances.length}
-              {data.advancePoints != null ? (
-                <> · Points <ValueDeltaCell value={data.advancePoints} digits={2} /></>
-              ) : (
-                <> · Σ <ValueDeltaCell value={data.advanceTotal} suffix="%" /></>
-              )}
+            <h2 className="mb-1 flex items-center gap-1.5 text-h3 font-semibold text-bull">
+              <TrendingUp aria-hidden="true" className="size-4" />
+              <span>
+                Advances: {data.advances.length}
+                {data.advancePoints != null ? (
+                  <> · Points <ValueDeltaCell value={data.advancePoints} digits={2} /></>
+                ) : (
+                  <> · Σ <ValueDeltaCell value={data.advanceTotal} suffix="%" /></>
+                )}
+              </span>
             </h2>
             <DataTable
               columns={columns}
@@ -110,13 +115,16 @@ export function IndexContributionPage() {
             />
           </div>
           <div>
-            <h2 className="mb-1 text-sm font-semibold text-bear">
-              Declines: {data.declines.length}
-              {data.declinePoints != null ? (
-                <> · Points <ValueDeltaCell value={data.declinePoints} digits={2} /></>
-              ) : (
-                <> · Σ <ValueDeltaCell value={data.declineTotal} suffix="%" /></>
-              )}
+            <h2 className="mb-1 flex items-center gap-1.5 text-h3 font-semibold text-bear">
+              <TrendingDown aria-hidden="true" className="size-4" />
+              <span>
+                Declines: {data.declines.length}
+                {data.declinePoints != null ? (
+                  <> · Points <ValueDeltaCell value={data.declinePoints} digits={2} /></>
+                ) : (
+                  <> · Σ <ValueDeltaCell value={data.declineTotal} suffix="%" /></>
+                )}
+              </span>
             </h2>
             <DataTable
               columns={columns}
@@ -127,9 +135,9 @@ export function IndexContributionPage() {
               emptyMessage="No decliners."
             />
           </div>
-        </div>
+        </BeatBlock>
         )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

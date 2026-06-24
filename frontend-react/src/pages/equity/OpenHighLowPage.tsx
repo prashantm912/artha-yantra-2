@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { TrendingDown, TrendingUp } from 'lucide-react';
 import { useOiBuzzIndices, useOpenHighLow } from '../../api/oiAnalytics.ts';
 import type { OpenHighSetup } from '../../api/types.ts';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
@@ -8,6 +9,7 @@ import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
 
 // Equity → Open=High / Open=Low (oipulse): which index constituents opened AT their day high (O=H,
@@ -56,7 +58,7 @@ export function OpenHighLowPage() {
   const olCols = useMemo(() => levelTable('low'), []);
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Open = High / Open = Low" />
 
       <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -82,9 +84,12 @@ export function OpenHighLowPage() {
         }
       >
         {(data) => (
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <BeatBlock className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
-              <h2 className="mb-1 text-sm font-semibold text-bear">Open = High (bearish): {data.openHigh.length}</h2>
+              <h2 className="mb-1 flex items-center gap-1.5 text-h3 font-semibold text-bear">
+                <TrendingDown aria-hidden="true" className="size-4" />
+                Open = High (bearish): {data.openHigh.length}
+              </h2>
               <DataTable
                 columns={ohCols}
                 rows={data.openHigh}
@@ -95,7 +100,10 @@ export function OpenHighLowPage() {
               />
             </div>
             <div>
-              <h2 className="mb-1 text-sm font-semibold text-bull">Open = Low (bullish): {data.openLow.length}</h2>
+              <h2 className="mb-1 flex items-center gap-1.5 text-h3 font-semibold text-bull">
+                <TrendingUp aria-hidden="true" className="size-4" />
+                Open = Low (bullish): {data.openLow.length}
+              </h2>
               <DataTable
                 columns={olCols}
                 rows={data.openLow}
@@ -105,9 +113,9 @@ export function OpenHighLowPage() {
                 emptyMessage="None opened at the day low."
               />
             </div>
-          </div>
+          </BeatBlock>
         )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

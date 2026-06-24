@@ -7,6 +7,7 @@ import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
 
 // Equity → Sector Stats (oipulse): a sector overview — per-sector roll-up cards (avg change +
@@ -84,7 +85,7 @@ export function SectorStatsPage() {
   );
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader
         title="Sector Stats"
         subtitle={
@@ -122,7 +123,7 @@ export function SectorStatsPage() {
         {() => (
           <>
             {data && data.sectorIndices.length > 0 && (
-              <>
+              <BeatBlock>
                 <h2 className="mb-1 text-h3 text-ay-text">
                   Sector Indices <span className="text-xs font-normal text-ay-muted">· live</span>
                 </h2>
@@ -131,28 +132,30 @@ export function SectorStatsPage() {
                     <IndexCard key={c.name} c={c} />
                   ))}
                 </div>
-              </>
+              </BeatBlock>
             )}
 
             {data && (
-              <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+              <BeatBlock className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                 {data.sectors.map((s) => (
                   <SectorCard key={s.sector} s={s} />
                 ))}
-              </div>
+              </BeatBlock>
             )}
 
-            <DataTable
-              columns={columns}
-              rows={stocks}
-              rowKey={(r) => r.symbol}
-              pageSize={50}
-              ariaLabel="Stock factors by sector"
-              emptyMessage="No sector data yet."
-            />
+            <BeatBlock>
+              <DataTable
+                columns={columns}
+                rows={stocks}
+                rowKey={(r) => r.symbol}
+                pageSize={50}
+                ariaLabel="Stock factors by sector"
+                emptyMessage="No sector data yet."
+              />
+            </BeatBlock>
           </>
         )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

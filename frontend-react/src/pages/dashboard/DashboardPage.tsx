@@ -1,35 +1,74 @@
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
+import {
+  Activity,
+  ArrowDownRight,
+  ArrowUpRight,
+  CalendarClock,
+  Cog,
+  KeyRound,
+  Radar,
+  Radio,
+  Wallet,
+  type LucideIcon,
+} from 'lucide-react';
 import { formatDecimal, isNegative } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
 import { useSignals } from '../../api/signals.ts';
 import { usePaperAccount, usePaperPnl, usePaperPositions } from '../../api/paper.ts';
 import { JOB_ACTIVE_STATES, useRecentJobs, useSystemStatus } from '../../api/dashboard.ts';
+import { PageHeader, LiveDot } from '../../components/PageHeader.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 
 // /dashboard cockpit page (master plan §20 parity, E-2): the at-a-glance grid — system/market/kite
 // status strip, the newest live signals, the paper-P&L tile and the in-flight jobs. Reuses the
 // signals + paper hooks; the full widget-shell (collapse + persisted layout) is a later polish.
+// Revamp Phase 5 (§4.1): visible title + signature lockup, elevated status/KPI tiles (realized P&L
+// hoisted into the KPI strip — rendered in exactly ONE node), lucide-iconed section cards, a real
+// role="progressbar", and cold-load card skeletons in the same grid.
 
 const money = (v: string) => formatDecimal(v, 2);
 const toneClass = (v: string) => (isNegative(v) ? 'text-bear' : 'text-bull');
 
-function Pill({ label, value, tone }: { label: string; value: string; tone?: string }) {
+function StatusTile({ icon: Icon, label, value, tone }: { icon: LucideIcon; label: string; value: string; tone?: string }) {
   return (
-    <span className="rounded border border-ay-border bg-surface-1 px-2 py-1 text-xs">
-      <span className="text-ay-muted">{label} </span>
-      <span className={cn('font-semibold', tone)}>{value}</span>
-    </span>
+    <div className="card shadow-e1 flex items-center gap-2.5">
+      <Icon aria-hidden="true" className="size-4 shrink-0 text-ay-muted" />
+      <div className="min-w-0">
+        <div className="text-caption uppercase tracking-wide text-ay-muted">{label}</div>
+        <div className={cn('nums font-semibold leading-tight', tone)}>{value}</div>
+      </div>
+    </div>
   );
 }
 
-function Card({ title, to, children }: { title: string; to?: string; children: React.ReactNode }) {
+function Kpi({ label, value, sub, tone, arrow }: { label: string; value: string; sub?: string; tone?: string; arrow?: 'up' | 'down' }) {
+  const Arrow = arrow === 'up' ? ArrowUpRight : arrow === 'down' ? ArrowDownRight : null;
   return (
-    <section className="rounded-lg border border-ay-border bg-surface-1 p-3">
+    <div className="card shadow-e1">
+      <div className="text-caption uppercase tracking-wide text-ay-muted">{label}</div>
+      <div className={cn('mt-1 flex items-center gap-1', tone)}>
+        {Arrow && <Arrow aria-hidden="true" className="size-4" />}
+        <span className="text-h3 nums font-semibold">{value}</span>
+      </div>
+      {sub && <div className="mt-0.5 text-caption text-ay-muted">{sub}</div>}
+    </div>
+  );
+}
+
+function SectionCard({ icon: Icon, title, to, children }: { icon: LucideIcon; title: string; to?: string; children: React.ReactNode }) {
+  return (
+    <section className="card shadow-e1">
       <div className="mb-2 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-ay-text">{title}</h2>
+        <h2 className="flex items-center gap-1.5 text-h3 text-ay-text">
+          <Icon aria-hidden="true" className="size-4 text-ay-muted" />
+          {title}
+        </h2>
         {to && (
-          <Link to={to} className="text-xs text-accent hover:underline">
-            Open →
+          <Link to={to} className="inline-flex items-center gap-0.5 text-caption text-accent hover:underline">
+            Open
+            <ArrowUpRight aria-hidden="true" className="size-3.5" />
           </Link>
         )}
       </div>
@@ -62,96 +101,147 @@ export function DashboardPage() {
   const summary = pnl.data?.summary ?? null;
 
   return (
-    <div>
-      <h1 className="ay-sr-only">Dashboard</h1>
+    <LoadBeat>
+      <PageHeader
+        title="Dashboard"
+        subtitle="Cockpit — system health, signals, paper P&L and in-flight jobs"
+        right={<LiveDot detail={s ? `${s.asOf.slice(11, 19)} IST` : undefined} />}
+      />
 
-      {s && (
-        <section className="mb-4 flex flex-wrap items-center gap-2">
-          <Pill
-            label="System"
-            value={s.overall}
-            tone={s.overall === 'UP' ? 'text-bull' : 'text-warn'}
-          />
-          <Pill label="Market" value={s.market.phase} tone={phaseTone[s.market.phase] ?? 'text-ay-text'} />
-          <Pill
-            label="Kite"
-            value={s.kite.session}
-            tone={s.kite.session === 'VALID' ? 'text-bull' : 'text-warn'}
-          />
-          <Pill label="Ticker" value={s.kite.ticker} />
-          <Pill label="Jobs" value={`${s.jobs.running} running · ${s.jobs.queued} queued`} />
-          <span className="ml-auto text-xs text-ay-muted">as of {s.asOf.slice(11, 19)}</span>
-        </section>
+      {/* B. Elevated status strip */}
+      {s ? (
+        <BeatStrip
+          data-testid="dashboard-status"
+          className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5"
+        >
+          <BeatItem>
+            <StatusTile icon={Activity} label="System" value={s.overall} tone={s.overall === 'UP' ? 'text-bull' : 'text-warn'} />
+          </BeatItem>
+          <BeatItem>
+            <StatusTile icon={CalendarClock} label="Market" value={s.market.phase} tone={phaseTone[s.market.phase] ?? 'text-ay-text'} />
+          </BeatItem>
+          <BeatItem>
+            <StatusTile icon={KeyRound} label="Kite" value={s.kite.session} tone={s.kite.session === 'VALID' ? 'text-bull' : 'text-warn'} />
+          </BeatItem>
+          <BeatItem>
+            <StatusTile icon={Radio} label="Ticker" value={s.kite.ticker} />
+          </BeatItem>
+          <BeatItem>
+            <StatusTile icon={Cog} label="Jobs" value={`${s.jobs.running} running · ${s.jobs.queued} queued`} />
+          </BeatItem>
+        </BeatStrip>
+      ) : (
+        <Skeleton variant="metric-strip" cols={5} className="mb-4" />
       )}
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card title="Active Signals" to="/signals">
+      {/* C. KPI strip — Paper P&L hero numbers (Realized rendered HERE, in exactly one node) */}
+      {summary ? (
+        <BeatStrip data-testid="dashboard-kpis" className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <BeatItem>
+            <Kpi
+              label="Realized P&L"
+              value={money(summary.realizedTotal)}
+              sub="₹ · all sessions"
+              tone={toneClass(summary.realizedTotal)}
+              arrow={isNegative(summary.realizedTotal) ? 'down' : 'up'}
+            />
+          </BeatItem>
+          <BeatItem>
+            <Kpi
+              label="Day P&L"
+              value={account.data ? money(account.data.dayPnl) : '—'}
+              sub="₹ · today"
+              tone={account.data ? toneClass(account.data.dayPnl) : undefined}
+              arrow={account.data ? (isNegative(account.data.dayPnl) ? 'down' : 'up') : undefined}
+            />
+          </BeatItem>
+          <BeatItem>
+            <Kpi
+              label="Open / Closed"
+              value={`${positions.data?.items.length ?? 0} / ${summary.trades}`}
+              sub="positions / trades"
+            />
+          </BeatItem>
+          <BeatItem>
+            <Kpi
+              label="Win rate"
+              value={summary.winRate ? formatDecimal(summary.winRate, 4) : '—'}
+              sub="closed trades"
+            />
+          </BeatItem>
+        </BeatStrip>
+      ) : (
+        <Skeleton variant="metric-strip" cols={4} className="mb-4" />
+      )}
+
+      {/* E. Section cards */}
+      <BeatBlock className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <SectionCard icon={Radar} title="Active Signals" to="/signals">
           {recentSignals.length > 0 ? (
             <ul className="flex flex-col gap-1">
               {recentSignals.map((sig) => (
-                <li key={sig.id} className="grid grid-cols-[3.2rem_1fr_auto] items-center gap-2 text-sm">
-                  <span className="tabular-nums text-ay-muted">{sig.generatedAt.slice(11, 16)}</span>
+                <li key={sig.id} className="grid grid-cols-[3.2rem_1fr_auto] items-center gap-2 text-body-sm">
+                  <span className="nums text-caption text-ay-muted">{sig.generatedAt.slice(11, 16)}</span>
                   <span className="truncate">{sig.tradingsymbol}</span>
-                  <span className={cn('text-xs font-semibold', sig.signalType === 'ENTRY' ? 'text-bull' : 'text-warn')}>
+                  <span className={cn('text-caption font-semibold', sig.signalType === 'ENTRY' ? 'text-bull' : 'text-warn')}>
                     {sig.signalType} {sig.side}
                   </span>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-sm text-ay-muted">No live signals yet — publish a strategy.</p>
+            <p className="text-body-sm text-ay-muted">No live signals yet — publish a strategy.</p>
           )}
-        </Card>
+        </SectionCard>
 
-        <Card title="Paper P&L" to="/paper">
+        <SectionCard icon={Wallet} title="Paper P&L" to="/paper">
           {summary ? (
-            <>
-              <div className={cn('mb-2 text-2xl font-bold tabular-nums', toneClass(summary.realizedTotal))}>
-                {money(summary.realizedTotal)}
-              </div>
-              <dl className="grid grid-cols-2 gap-y-1 text-sm">
-                <dt className="text-ay-muted">Day P&L</dt>
-                <dd className={cn('text-right tabular-nums', account.data && toneClass(account.data.dayPnl))}>
-                  {account.data ? money(account.data.dayPnl) : '—'}
-                </dd>
-                <dt className="text-ay-muted">Closed trades</dt>
-                <dd className="text-right tabular-nums">{summary.trades}</dd>
-                <dt className="text-ay-muted">Open positions</dt>
-                <dd className="text-right tabular-nums">{positions.data?.items.length ?? 0}</dd>
-                <dt className="text-ay-muted">Win rate</dt>
-                <dd className="text-right tabular-nums">
-                  {summary.winRate ? `${formatDecimal(summary.winRate, 4)}` : '—'}
-                </dd>
-              </dl>
-            </>
+            <dl className="grid grid-cols-2 gap-y-1 text-body-sm">
+              <dt className="text-ay-muted">Win rate</dt>
+              <dd className="nums text-right">{summary.winRate ? formatDecimal(summary.winRate, 4) : '—'}</dd>
+              <dt className="text-ay-muted">Closed trades</dt>
+              <dd className="nums text-right">{summary.trades}</dd>
+              <dt className="text-ay-muted">Open positions</dt>
+              <dd className="nums text-right">{positions.data?.items.length ?? 0}</dd>
+            </dl>
           ) : (
-            <p className="text-sm text-ay-muted">No paper activity yet.</p>
+            <p className="text-body-sm text-ay-muted">No paper activity yet.</p>
           )}
-        </Card>
+        </SectionCard>
 
-        <Card title="Jobs">
+        <SectionCard icon={Cog} title="Jobs">
           {activeJobs.length > 0 ? (
             <ul className="flex flex-col gap-2">
               {activeJobs.map((j) => (
-                <li key={j.jobId} className="text-sm">
+                <li key={j.jobId} className="text-body-sm">
                   <div className="flex items-center gap-2">
-                    <span className="rounded bg-surface-2 px-1.5 py-0.5 text-xs text-ay-muted">
+                    <span className="rounded-sm bg-surface-2 px-1.5 py-0.5 text-caption text-ay-muted">
                       {j.kind ?? 'job'}
                     </span>
-                    <span className="tabular-nums">{j.jobId.slice(0, 8)}</span>
-                    <span className="text-xs text-accent">{j.status}</span>
+                    <span className="nums">{j.jobId.slice(0, 8)}</span>
+                    <span className="text-caption text-accent">{j.status}</span>
                   </div>
-                  <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-2">
-                    <div className="h-full bg-accent" style={{ width: `${Math.round(j.progress)}%` }} />
+                  <div
+                    role="progressbar"
+                    aria-label={`${j.kind ?? 'job'} ${j.jobId.slice(0, 8)} progress`}
+                    aria-valuenow={Math.round(j.progress)}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-2"
+                  >
+                    <div
+                      className="h-full bg-accent transition-[width] duration-[var(--duration-base)] ease-[var(--ease-standard)]"
+                      style={{ width: `${Math.round(j.progress)}%` }}
+                    />
                   </div>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-sm text-ay-muted">No jobs running.</p>
+            <p className="text-body-sm text-ay-muted">No jobs running.</p>
           )}
-        </Card>
-      </div>
-    </div>
+        </SectionCard>
+      </BeatBlock>
+    </LoadBeat>
   );
 }

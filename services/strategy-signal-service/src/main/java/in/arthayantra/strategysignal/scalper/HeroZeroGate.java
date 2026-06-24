@@ -42,13 +42,15 @@ import java.time.LocalTime;
  *       overbought (&gt;= the cap); bearish when oversold (&lt;= the floor). A null RSI blocks.
  * </ol>
  *
- * <p><b>One strike from the SC strike (documented, live-managed):</b> the deck buys the option ONE
- * strike BELOW the short-covering CALL strike (bullish) / ONE strike ABOVE the SC PUT strike (bearish)
- * - never the ultra-cheap already-covered strike. The per-strike SC strike is a LIVE-only derivation
- * ({@link MarketOiClient} is never in deterministic replay), so v1 leaves the concrete leg to the
- * shared {@link StrikePicker} delta/premium band (the slightly-ITM 0.6-0.7 strike one step inside the
- * SC strike) and records the "one strike away from the SC strike" rule in the strategy YAML rather than
- * resolving a per-strike SC strike on the parity path.
+ * <p><b>One strike from the SC strike (LIVE one-away pick):</b> the deck buys the option ONE strike
+ * BELOW the short-covering CALL strike (bullish) / ONE strike ABOVE the SC PUT strike (bearish) - never
+ * the ultra-cheap already-covered strike. The per-strike SC strike (the highest-OI strike on the side)
+ * and the strike step are LIVE-only derivations off the chain's per-strike OI ladder ({@link
+ * MarketOiClient} is never in deterministic replay), so {@link HeroZeroStrikeSelector} resolves the
+ * literal leg on the LIVE path and the chosen leg is persisted at entry (the V009 side-channel); a
+ * replay reads the persisted leg, never re-derives the SC strike (parity holds on the persisted leg).
+ * When the SC strike / OI ladder is unavailable the selection degrades to the shared {@link
+ * StrikePicker} delta/premium band (the slightly-ITM 0.6-0.7 strike) - never a block on missing OI.
  *
  * <p><b>Structural stop:</b> the OPPOSITE session extreme - a bullish CE fired toward the day HIGH is
  * invalidated by a fall back to the session LOW; a bearish PE toward the day LOW by a rally back to the

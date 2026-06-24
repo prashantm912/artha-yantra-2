@@ -13,12 +13,14 @@
 # for a bearish PE); (f) RSI not overbought (CE) / not oversold (PE). Any missing leg BLOCKS; a null /
 # inert OI snapshot (the monthly-expiry suppression, or any unavailable read) degrades to a block.
 #
-# Strike (documented, live-managed): the deck buys ONE strike BELOW the short-covering CALL strike
-# (bullish) / ONE strike ABOVE the SC PUT strike (bearish) - never the ultra-cheap already-covered
-# strike. The per-strike SC strike is a LIVE-only derivation (never in deterministic replay), so the
-# concrete leg is the shared StrikePicker delta/premium band (the slightly-ITM 0.6-0.7 strike one step
-# inside the SC strike) and the "one strike away from the SC strike" rule is recorded here, not
-# resolved on the parity path.
+# Strike (LIVE one-away pick): the deck buys ONE strike BELOW the short-covering CALL strike (bullish)
+# / ONE strike ABOVE the SC PUT strike (bearish) - never the ultra-cheap already-covered strike. The SC
+# strike is the highest-OI strike on the side, read off the LIVE per-strike OI ladder; the step is
+# derived from the strike ladder. HeroZeroStrikeSelector resolves that literal leg on the LIVE path; the
+# chosen leg is persisted at entry (the V009 scalper_detail side-channel), so a deterministic replay
+# reads the persisted leg, not this live-only derivation (parity is on the persisted leg). When the SC
+# strike / OI ladder is unavailable the selection degrades to the shared StrikePicker delta/premium band
+# (the slightly-ITM 0.6-0.7 strike) - never a block on missing OI.
 #
 # Stop: SL = 50% of premium (the primary live stop, the stop_loss premium_pct rule below) + the 15:20
 # square-off (no carry into the 3:20 hard close). The HeroZeroGate also returns the OPPOSITE session

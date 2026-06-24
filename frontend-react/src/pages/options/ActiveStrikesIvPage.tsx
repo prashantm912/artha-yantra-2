@@ -4,6 +4,7 @@ import { foldActiveStrikeIvSeries } from '../../api/activeStrikesFold.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 import { ActiveStrikeIvChart } from '../../components/ActiveStrikeCharts.tsx';
 import { formatDecimal, subtractDecimal } from '../../lib/decimal.ts';
 import type { OiInterval } from '../../stores/symbolContext.store.ts';
@@ -40,7 +41,7 @@ export function ActiveStrikesIvPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Active Strikes IV</h1>
+      <PageHeader title="Active Strikes IV" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval allowedIntervals={ACTIVE_INTERVALS} />
@@ -61,8 +62,8 @@ export function ActiveStrikesIvPage() {
       )}
 
       {hasSeries && (
-        <section>
-          <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">Active Strike IV</h2>
+        <section className="card shadow-e1">
+          <h2 className="mb-2 text-h3 text-ay-text">Active Strike IV</h2>
           <ActiveStrikeIvChart data={series} />
         </section>
       )}

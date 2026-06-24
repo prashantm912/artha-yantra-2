@@ -4,6 +4,7 @@ import { useSymbolContext, type OiInterval } from '../../stores/symbolContext.st
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { ConnectingDotsTable } from '../../components/ConnectingDotsTable.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 
 // Connecting Dots (§20.7.8): the per-interval multi-factor sentiment matrix. INDICES only (oipulse has
 // 4; our backend covers NIFTY 50 + NIFTY BANK today — FINNIFTY/MIDCPNIFTY pending instrument cover).
@@ -32,7 +33,7 @@ export function ConnectingDotsPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Connecting Dots</h1>
+      <PageHeader title="Connecting Dots" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry={false} names={INDICES} allowedIntervals={CD_INTERVALS} />

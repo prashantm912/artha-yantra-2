@@ -6,6 +6,7 @@ import { FilterBar } from '../../components/FilterBar.tsx';
 import { Select, type SelectOption } from '../../components/atoms/Select.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 import { StraddleChart } from '../../components/StraddleChart.tsx';
 
 // Straddle/Strangle Chart (§20.7.6). The combined CE+PE premium candlestick + VWAP/20-EMA/Call/Put
@@ -52,7 +53,7 @@ export function OptionsStraddlePage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Options straddle chart</h1>
+      <PageHeader title="Options straddle chart" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval={false} />
@@ -137,8 +138,8 @@ export function OptionsStraddlePage() {
       )}
 
       {data != null && data.items.length > 0 && (
-        <>
-          <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">
+        <section className="card shadow-e1">
+          <h2 className="mb-2 text-h3 text-ay-text">
             Options {strangle ? 'Strangle' : 'Straddle'} Chart
           </h2>
           <StraddleChart
@@ -147,7 +148,7 @@ export function OptionsStraddlePage() {
             putStrike={data.putStrike}
             underlying={data.underlying}
           />
-        </>
+        </section>
       )}
     </div>
   );

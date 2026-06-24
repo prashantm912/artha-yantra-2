@@ -7,6 +7,7 @@ import type { OiInterval } from '../../stores/symbolContext.store.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Select } from '../../components/atoms/Select.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 import { CallPutOiChart, OiVsPriceChart } from '../../components/OptionsOiCharts.tsx';
 
 // Options OI Chart (§options/oi-chart) — the chart counterpart of Options OI Analysis, ZERO new backend:
@@ -37,7 +38,7 @@ export function OptionsOiChartPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Options OI chart</h1>
+      <PageHeader title="Options OI chart" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry allowedIntervals={ANALYSIS_INTERVALS} />
@@ -60,17 +61,19 @@ export function OptionsOiChartPage() {
 
       {hasData && (
         <>
-          <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">Call Vs. Put OI Analysis</h2>
-          <CallPutOiChart viz={viz} />
+          <section className="card shadow-e1">
+            <h2 className="mb-2 text-h3 text-ay-text">Call Vs. Put OI Analysis</h2>
+            <CallPutOiChart viz={viz} />
+          </section>
           <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <div>
-              <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">Call OI Analysis</h2>
+            <section className="card shadow-e1">
+              <h2 className="mb-2 text-h3 text-ay-text">Call OI Analysis</h2>
               <OiVsPriceChart times={viz.times} oi={viz.callOi} price={viz.callPrice} oiTone="bull" legLabel="Call" />
-            </div>
-            <div>
-              <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">Put OI Analysis</h2>
+            </section>
+            <section className="card shadow-e1">
+              <h2 className="mb-2 text-h3 text-ay-text">Put OI Analysis</h2>
               <OiVsPriceChart times={viz.times} oi={viz.putOi} price={viz.putPrice} oiTone="bear" legLabel="Put" />
-            </div>
+            </section>
           </div>
         </>
       )}

@@ -6,6 +6,7 @@ import { FilterBar } from '../../components/FilterBar.tsx';
 import { Select, type SelectOption } from '../../components/atoms/Select.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 import { OptionsLegChart } from '../../components/OptionsLegChart.tsx';
 
 // Options Chart (§options/options-chart). Per leg (Call, Put) of one strike: the option-premium
@@ -51,7 +52,7 @@ export function OptionsChartPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Options chart</h1>
+      <PageHeader title="Options chart" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval={false} />
@@ -94,24 +95,24 @@ export function OptionsChartPage() {
       {data != null && (
         <div className={sideBySide ? 'flex flex-col gap-4 md:flex-row' : 'flex flex-col gap-4'}>
           {showCall && (
-            <div className="flex-1">
-              <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">Call Option Chart</h2>
+            <section className="card shadow-e1 flex-1">
+              <h2 className="mb-2 text-h3 text-ay-text">Call Option Chart</h2>
               {data.ce.length > 0 ? (
                 <OptionsLegChart items={data.ce} tradingsymbol={data.ceTradingsymbol} legLabel="Call" />
               ) : (
                 <p className="text-center text-sm text-ay-muted">No Call bars for this strike/session.</p>
               )}
-            </div>
+            </section>
           )}
           {showPut && (
-            <div className="flex-1">
-              <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">Put Option Chart</h2>
+            <section className="card shadow-e1 flex-1">
+              <h2 className="mb-2 text-h3 text-ay-text">Put Option Chart</h2>
               {data.pe.length > 0 ? (
                 <OptionsLegChart items={data.pe} tradingsymbol={data.peTradingsymbol} legLabel="Put" />
               ) : (
                 <p className="text-center text-sm text-ay-muted">No Put bars for this strike/session.</p>
               )}
-            </div>
+            </section>
           )}
         </div>
       )}

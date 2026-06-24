@@ -6,6 +6,7 @@ import { FilterBar } from '../../components/FilterBar.tsx';
 import { Select, type SelectOption } from '../../components/atoms/Select.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { LegMultiSelect } from '../../components/atoms/LegMultiSelect.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 import { MultiLegOiChart } from '../../components/MultiLegOiChart.tsx';
 import { legHsl, legSwatchClass } from '../../core/legColors.ts';
 
@@ -41,7 +42,7 @@ export function MultipleOiChartPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Multiple OI chart</h1>
+      <PageHeader title="Multiple OI chart" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval={false} />
@@ -85,15 +86,17 @@ export function MultipleOiChartPage() {
         </div>
       )}
 
-      <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">Individual OI</h2>
+      <section className="card shadow-e1">
+        <h2 className="mb-2 text-h3 text-ay-text">Individual OI</h2>
 
-      {selected.length === 0 ? (
-        <p className="text-sm text-ay-muted">Select ≥1 strike to plot its OI.</p>
-      ) : data == null && !q.isLoading ? (
-        <p className="text-sm text-ay-muted">No data for the selected legs/session.</p>
-      ) : (
-        <MultiLegOiChart data={data} />
-      )}
+        {selected.length === 0 ? (
+          <p className="text-sm text-ay-muted">Select ≥1 strike to plot its OI.</p>
+        ) : data == null && !q.isLoading ? (
+          <p className="text-sm text-ay-muted">No data for the selected legs/session.</p>
+        ) : (
+          <MultiLegOiChart data={data} />
+        )}
+      </section>
     </div>
   );
 }

@@ -89,7 +89,11 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
+  /* --color-accent is NOT re-aliased here: the app already owns bg-accent/text-accent/
+     border-accent = brand --ay-accent (first @theme block). Re-aliasing it to the shadcn
+     hover-wash (--accent = surface-2) greyed out every brand accent app-wide (login button,
+     Button primary, signature rule). shadcn overlay components also use bg-accent for their
+     hover wash; when those get wired into pages, swap their wash class to bg-muted/bg-secondary. */
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-border: var(--border);

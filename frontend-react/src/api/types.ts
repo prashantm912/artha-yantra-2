@@ -234,6 +234,37 @@ export interface OiExpiryStrike {
   pe: OiExpiryEodDay[];
 }
 
+/**
+ * One (strike, leg) Open=High/Low scan row of GET /api/v1/market/options/open-high-strategy (oipulse
+ * "Open & High Strategy", Siva #2). Premium OHLC legs are decimal STRINGS; `latestOi` is a long;
+ * `probability`/`fallPctFromHigh` are decimal strings or null (no prior session / absent high). The
+ * latest captured session yields `ohMark`/`olMark`/`triggered`; the prior sessions yield the
+ * `probability` (hit-rate over `sessions - 1` prior days).
+ */
+export interface OpenHighStrategyLeg {
+  optionType: string;
+  latestDate: string;
+  latestOpen: string | null;
+  latestHigh: string | null;
+  latestLow: string | null;
+  latestClose: string | null;
+  latestOi: number | null;
+  ohMark: boolean;
+  olMark: boolean;
+  triggered: boolean;
+  fallPctFromHigh: string | null;
+  sessions: number;
+  hits: number;
+  probability: string | null;
+}
+
+/** One strike's CE + PE Open=High/Low scan (each leg null when that side has no captured session). */
+export interface OpenHighStrategyStrike {
+  strike: string;
+  ce: OpenHighStrategyLeg | null;
+  pe: OpenHighStrategyLeg | null;
+}
+
 /** A CE/PE leg's cell values in the folded strike grid. */
 export interface LegCell {
   oi: number | null;

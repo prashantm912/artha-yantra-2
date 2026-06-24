@@ -25,6 +25,7 @@ import type {
   OiExpiryStrike,
   OiHeatmap,
   OpenHighLow,
+  OpenHighStrategyStrike,
   OiStats,
   SectorHeatmap,
   SectorStats,
@@ -312,6 +313,27 @@ export function useOiExpiry() {
     queryFn: async () => {
       const res = await oiGet<{ items?: OiExpiryStrike[] }>(
         '/market/options/oi-expiry',
+        oiParams(ctx, true),
+        { items: [] },
+      );
+      return listItems(res);
+    },
+    enabled: satisfiable(ctx, true),
+  });
+}
+
+/**
+ * Open & High Strategy (oipulse §strategies/open-high-strategy, Siva #2): per-strike (CE+PE)
+ * Open=High / Open=Low premium-reversion scan with the historical trigger probability, windowed to
+ * the ATM strikes. The `{items}` envelope carries one entry per strike; 422 DATA_GAP → empty.
+ */
+export function useOpenHighStrategy() {
+  const ctx = useOiCtx();
+  return useQuery({
+    queryKey: ['oi', 'open-high-strategy', ctx.name, ctx.expiry, ctx.interval, ctx.mode, ctx.date],
+    queryFn: async () => {
+      const res = await oiGet<{ items?: OpenHighStrategyStrike[] }>(
+        '/market/options/open-high-strategy',
         oiParams(ctx, true),
         { items: [] },
       );

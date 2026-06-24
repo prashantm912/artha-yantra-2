@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { m } from 'motion/react';
 import type { EChartsOption } from 'echarts';
 import { formatDecimal } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
@@ -178,6 +179,7 @@ export function BacktestResultsPage() {
         ))}
       </div>
 
+      <m.div key={tab} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.15 }}>
       {tab === 'overview' && (
         <>
           <BeatStrip className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
@@ -327,6 +329,7 @@ export function BacktestResultsPage() {
           <p className="mt-2 text-xs tabular-nums text-ay-muted">risk of ruin {mcData.riskOfRuin}</p>
         </>
       )}
+      </m.div>
         </>
         )}
       </QueryState>

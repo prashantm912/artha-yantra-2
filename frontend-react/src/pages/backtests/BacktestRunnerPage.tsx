@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { m } from 'motion/react';
 import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
@@ -108,6 +109,7 @@ export function BacktestRunnerPage() {
         ))}
       </div>
 
+      <m.div key={tab} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.15 }}>
       <BeatBlock className="grid max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Strategy">
           <Select
@@ -179,6 +181,7 @@ export function BacktestRunnerPage() {
           </button>
         )}
       </div>
+      </m.div>
     </LoadBeat>
   );
 }

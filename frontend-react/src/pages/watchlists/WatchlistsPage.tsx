@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { m } from 'motion/react';
 import { formatDecimal } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
@@ -66,6 +67,7 @@ export function WatchlistsPage() {
         ))}
       </div>
 
+      <m.div key={tab} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.15 }}>
       {tab === 'lists' && (
         <>
           <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -200,6 +202,7 @@ export function WatchlistsPage() {
           </BeatBlock>
         </>
       )}
+      </m.div>
     </LoadBeat>
   );
 }

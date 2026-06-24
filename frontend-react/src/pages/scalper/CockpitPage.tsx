@@ -17,6 +17,7 @@ import { ConnectingDotsTable } from '../../components/ConnectingDotsTable.tsx';
 import { StraddleChart } from '../../components/StraddleChart.tsx';
 import { CallOiHeatmap, PutOiHeatmap } from '../../components/OiHeatmapChart.tsx';
 import { trendMeta } from '../../core/connectingDots.ts';
+import { PageHeader } from '../../components/PageHeader.tsx';
 import { SignalsFeedPanel } from '../signals/SignalsFeedPanel.tsx';
 import { PaperBookPanel } from './PaperBookPanel.tsx';
 
@@ -27,6 +28,9 @@ import { PaperBookPanel } from './PaperBookPanel.tsx';
 // hook, all of which read the shared SymbolContext store, so one Go fans out to all of them. Read-only,
 // additive — the standalone pages keep working untouched. The whole page is route-lazy in App.tsx, so
 // the ECharts bundle (straddle + heatmap) rides the cockpit chunk, not the main payload.
+// Revamp rollout (Trading screens): the sr-only h1 becomes the visible signature PageHeader (text
+// preserved). The dense multi-panel live layout is deliberately NOT restructured — each panel keeps
+// its bespoke live-state copy + the shared FilterBar fan-out; only the page title lockup changes.
 
 /** A titled cockpit panel card. The optional `to` link deep-links to the panel's full standalone page. */
 function Panel({
@@ -105,7 +109,7 @@ export function CockpitPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Scalping cockpit</h1>
+      <PageHeader title="Scalping cockpit" subtitle="One live operator screen — option chain · OI confluence · straddle · signals · paper book · heatmap" />
 
       {/* The single shared control bar — drives every panel below via the SymbolContext store. */}
       <div className="mb-3 flex flex-wrap items-center gap-2">

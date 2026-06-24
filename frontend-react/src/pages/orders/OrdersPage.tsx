@@ -2,6 +2,8 @@ import { useMemo } from 'react';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { formatDecimal, isNegative } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { LoadBeat } from '../../components/LoadBeat.tsx';
 import {
   useFunds,
   useOrderbook,
@@ -18,6 +20,9 @@ import {
 // path stays separately gated). Decimals format via lib/decimal (never parseFloat). With no broker
 // wired the BE returns empty lists + a NOT_CONFIGURED funds row, so every section shows a clean empty
 // state and the funds card reads "not configured".
+// Revamp rollout (Trading screens): visible signature H1 via PageHeader (text preserved), elevated
+// funds cards (card shadow-e1 + uppercase wide-tracked caption labels, sign-aware mono values). The
+// four read-only DataTables keep their own empty states + selectors untouched.
 
 const money = (v: string | null | undefined) => (v == null ? '—' : formatDecimal(v, 2));
 const toneClass = (v: string | null | undefined) =>
@@ -49,9 +54,9 @@ function FundsCard({ funds }: { funds: Funds | undefined }) {
   return (
     <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
       {rows.map((r) => (
-        <div key={r.label} className="rounded border border-ay-border bg-surface-1 p-3 tabular-nums">
-          <dt className="text-xs text-ay-muted">{r.label}</dt>
-          <dd className={cn('text-lg font-bold', r.tone && toneClass(r.value))}>{money(r.value)}</dd>
+        <div key={r.label} className="card shadow-e1 nums">
+          <dt className="text-caption uppercase tracking-wide text-ay-muted">{r.label}</dt>
+          <dd className={cn('mt-1 text-lg font-bold', r.tone && toneClass(r.value))}>{money(r.value)}</dd>
         </div>
       ))}
     </dl>
@@ -109,8 +114,8 @@ export function OrdersPage() {
   );
 
   return (
-    <div>
-      <h1 className="mb-3 text-center text-sm font-semibold text-ay-text">Orders</h1>
+    <LoadBeat>
+      <PageHeader title="Orders" subtitle="Live broker read surface — Orderbook · Positions · Tradebook · Funds" />
 
       <Section title="Funds">
         {funds.isLoading ? <p className="text-sm text-ay-muted">Loading…</p> : <FundsCard funds={funds.data} />}
@@ -145,6 +150,6 @@ export function OrdersPage() {
           ariaLabel="Tradebook"
         />
       </Section>
-    </div>
+    </LoadBeat>
   );
 }

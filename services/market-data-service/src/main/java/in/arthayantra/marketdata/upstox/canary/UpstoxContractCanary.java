@@ -36,6 +36,17 @@ import org.springframework.web.client.RestClient;
  * type-changed consumed field -&gt; ntfy critical; a newly added top-level block -&gt; warning.
  * Idempotent once per trading day via a Redis marker; the wire SHAPE is also guarded at build time
  * by {@code UpstoxWireContractTest}.
+ *
+ * <p><b>W-U4 cutover-prep:</b> the canary also probes the <b>live-capture</b> shapes the cutover
+ * flips onto — {@code GET /v2/option/chain} (the {@code source.optionchain=upstox} OI capture),
+ * {@code GET /v2/market-quote/quotes} (the {@code source.quotes=upstox} spot/FUT quotes), and {@code
+ * GET /v3/feed/market-data-feed/authorize} (the {@code source.ticker=upstox} v3 WS handshake) — so a
+ * Upstox-side rename/remove/retype of a field the LIVE capture consumes is caught here, off the
+ * critical path, exactly like the Market-Information probes. The WS market-data FEED itself is a
+ * binary protobuf ({@code MarketDataFeedV3.FeedResponse}), NOT JSON, so its field-number drift is
+ * guarded off-band by the {@code .proto} reference + {@code FeedFrameDecoderTest}; only the JSON
+ * authorize-GET is canaried. These probes use known-good index fixtures so a stale weekly expiry is
+ * never a false alarm.
  */
 public class UpstoxContractCanary {
 
@@ -51,6 +62,14 @@ public class UpstoxContractCanary {
   private static final String OPTION_PROBE_KEY = "NSE_INDEX|Nifty 50";
   private static final String OPTION_PROBE_EXPIRY = "2026-06-23";
   private static final String OPTION_PROBE_DATE = "2026-06-22";
+
+  // Live-capture probes (W-U4). The option-chain probe is on the index spot key + a near expiry;
+  // like the max-pain/pcr probes it is TOLERANT of an empty/null `data` (a stale weekly expiry is
+  // skipped, never an alarm) — the shape is still validated whenever the chain returns rows. The
+  // quote + WS-authorize probes are expiry-free.
+  private static final String CHAIN_PROBE_KEY = "NSE_INDEX|Nifty 50";
+  private static final String CHAIN_PROBE_EXPIRY = "2026-06-30";
+  private static final String QUOTE_PROBE_KEYS = "NSE_INDEX|Nifty 50";
 
   private static final Logger log = LoggerFactory.getLogger(UpstoxContractCanary.class);
 
@@ -111,8 +130,12 @@ public class UpstoxContractCanary {
       diffJson("fii_cash", get("fii", "NSE_EQ|CASH"), drift);
       diffJson("fii_fno", get("fii", "NSE_FO|INDEX_OPTIONS"), drift);
       diffJson("dii_cash", get("dii", "NSE_EQ|CASH"), drift);
-      diffOptionAnalytics("max_pain", getOptionAnalytics("max-pain"), drift);
-      diffOptionAnalytics("pcr", getOptionAnalytics("pcr"), drift);
+      diffTolerant("max_pain", getOptionAnalytics("max-pain"), drift);
+      diffTolerant("pcr", getOptionAnalytics("pcr"), drift);
+      // Live-capture shapes (W-U4 cutover-prep). Chain tolerates an empty `data` (stale expiry).
+      diffTolerant("option_chain", getOptionChain(), drift);
+      diffJson("market_quote", getMarketQuote(), drift);
+      diffJson("ws_authorize", getWsAuthorize(), drift);
     } catch (Exception probeFailure) {
       drift.add("PROBE_FAILED:" + probeFailure.getMessage());
     }
@@ -161,10 +184,55 @@ public class UpstoxContractCanary {
         .body(String.class);
   }
 
-  /** Like {@link #diffJson} but tolerant of {@code data:null} (a purged historical sample) — skip, never alarm. */
-  private void diffOptionAnalytics(String probe, String body, List<String> drift) throws Exception {
+  /** The live OI-capture shape — {@code GET /v2/option/chain} the {@code source.optionchain} flip consumes. */
+  private String getOptionChain() {
+    return restClient
+        .get()
+        .uri(
+            builder ->
+                builder
+                    .path("/v2/option/chain")
+                    .queryParam("instrument_key", CHAIN_PROBE_KEY)
+                    .queryParam("expiry_date", CHAIN_PROBE_EXPIRY)
+                    .build())
+        .header("Authorization", "Bearer " + properties.resolveToken())
+        .header("Accept", "application/json")
+        .retrieve()
+        .body(String.class);
+  }
+
+  /** The live spot/FUT quote shape — {@code GET /v2/market-quote/quotes} the {@code source.quotes} flip consumes. */
+  private String getMarketQuote() {
+    return restClient
+        .get()
+        .uri(
+            builder ->
+                builder
+                    .path("/v2/market-quote/quotes")
+                    .queryParam("instrument_key", QUOTE_PROBE_KEYS)
+                    .build())
+        .header("Authorization", "Bearer " + properties.resolveToken())
+        .header("Accept", "application/json")
+        .retrieve()
+        .body(String.class);
+  }
+
+  /** The v3 WS handshake shape — {@code GET /v3/feed/market-data-feed/authorize} the {@code source.ticker} flip consumes. */
+  private String getWsAuthorize() {
+    return restClient
+        .get()
+        .uri("/v3/feed/market-data-feed/authorize")
+        .header("Authorization", "Bearer " + properties.resolveToken())
+        .header("Accept", "application/json")
+        .retrieve()
+        .body(String.class);
+  }
+
+  /** Like {@link #diffJson} but tolerant of {@code data:null}/empty (a purged sample or stale expiry) — skip, never alarm. */
+  private void diffTolerant(String probe, String body, List<String> drift) throws Exception {
     JsonNode actual = objectMapper.readTree(body);
-    if (actual.path("data").isNull() || actual.path("data").isMissingNode()) {
+    JsonNode data = actual.path("data");
+    if (data.isNull() || data.isMissingNode() || (data.isArray() && data.isEmpty())) {
       log.info("upstox canary: {} probe has no data (skipped, not drift)", probe);
       return;
     }

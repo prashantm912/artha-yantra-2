@@ -1,5 +1,6 @@
 {
   "comment": "Upstox Market-Information expected-field sentinels (ADR-0002 U7), the twin of openalgo-contract-manifest.json. CONSUMED fields ONLY (the wire DTO UpstoxMarketActivity is the full mirror, not this). Probes get-fii cash (NSE_EQ|CASH) + get-fii F&O (NSE_FO|INDEX_OPTIONS) + get-dii cash. `*` resolves the first array element. Missing/type-changed consumed field -> ntfy critical; a new top-level block -> warning.",
+  "comment_live_capture": "W-U4 cutover-prep: the option_chain / market_quote / ws_authorize probes guard the LIVE-CAPTURE shapes the cutover flips onto (source.optionchain / source.quotes / source.ticker = upstox). Sentinels are the fields UpstoxOptionChainClient / UpstoxQuoteClient / UpstoxMarketFeedClient actually consume. The WS market-data FEED itself is a binary protobuf (MarketDataFeedV3.FeedResponse), NOT JSON — its field-number drift is guarded off-band by the .proto reference + FeedFrameDecoderTest, so only the JSON authorize-GET is canaried here.",
   "fii_cash": {
     "status": "string",
     "data.NSE_EQ|CASH": "array",
@@ -37,5 +38,49 @@
     "data.insights.*.spot_price": "number",
     "data.insights.*.time": "string"
   },
-  "knownTopLevel": ["status", "data", "data.instrument_key", "data.expiry_date", "data.spot_closing_price"]
+  "option_chain": {
+    "status": "string",
+    "data": "array",
+    "data.*.strike_price": "number",
+    "data.*.underlying_spot_price": "number",
+    "data.*.call_options.market_data.ltp": "number",
+    "data.*.call_options.market_data.oi": "number",
+    "data.*.call_options.market_data.prev_oi": "number",
+    "data.*.call_options.market_data.volume": "number",
+    "data.*.call_options.market_data.bid_price": "number",
+    "data.*.call_options.market_data.ask_price": "number",
+    "data.*.put_options.market_data.ltp": "number",
+    "data.*.put_options.market_data.oi": "number",
+    "data.*.put_options.market_data.prev_oi": "number"
+  },
+  "market_quote": {
+    "status": "string",
+    "data": "object",
+    "data.*.last_price": "number",
+    "data.*.volume": "number",
+    "data.*.oi": "number",
+    "data.*.ohlc.open": "number",
+    "data.*.ohlc.high": "number",
+    "data.*.ohlc.low": "number",
+    "data.*.ohlc.close": "number",
+    "data.*.depth.buy.*.price": "number",
+    "data.*.depth.sell.*.price": "number"
+  },
+  "ws_authorize": {
+    "status": "string",
+    "data.authorized_redirect_uri": "string"
+  },
+  "knownTopLevel": [
+    "status", "data",
+    "data.instrument_key", "data.expiry_date", "data.spot_closing_price",
+    "data.authorized_redirect_uri",
+    "data.*.expiry", "data.*.pcr", "data.*.underlying_key",
+    "data.*.call_options.instrument_key", "data.*.call_options.market_data",
+    "data.*.call_options.option_greeks", "data.*.put_options.instrument_key",
+    "data.*.put_options.market_data", "data.*.put_options.option_greeks",
+    "data.*.instrument_token", "data.*.symbol", "data.*.average_price",
+    "data.*.net_change", "data.*.total_buy_quantity", "data.*.total_sell_quantity",
+    "data.*.lower_circuit_limit", "data.*.upper_circuit_limit", "data.*.last_trade_time",
+    "data.*.oi_day_high", "data.*.oi_day_low", "data.*.ohlc", "data.*.depth"
+  ]
 }

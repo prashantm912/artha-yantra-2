@@ -10,6 +10,7 @@ import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 
 // Interval-wise OI (oipulse §options/interval-wise-oi): top OI gainer/loser strikes across three
 // lookbacks (15 min, 60 min, daily) as bars coloured by the 4-state OI interpretation. Six charts —
@@ -82,7 +83,7 @@ export function IntervalWiseOiPage() {
   const options = useMemo(() => series.map((moves) => makeOption(moves)), [series, makeOption]);
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Interval-wise OI" subtitle="Top OI gainer/loser strikes across 15 min, 60 min and daily lookbacks" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -107,11 +108,11 @@ export function IntervalWiseOiPage() {
         }
       >
         {() => (
-          <>
+          <BeatBlock>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
               {CHARTS.map((c, i) => (
                 <div key={c.title} className="card shadow-e1">
-                  <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">{c.title}</h2>
+                  <h2 className="mb-1 text-h3 text-ay-text">{c.title}</h2>
                   {series[i].length > 0 ? (
                     <EChart makeOption={options[i]} height={240} ariaLabel={`${c.title} top strikes by OI change`} />
                   ) : (
@@ -129,9 +130,9 @@ export function IntervalWiseOiPage() {
                 </span>
               ))}
             </p>
-          </>
+          </BeatBlock>
         )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

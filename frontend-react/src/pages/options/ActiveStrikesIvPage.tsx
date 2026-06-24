@@ -9,6 +9,7 @@ import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { ActiveStrikeIvChart } from '../../components/ActiveStrikeCharts.tsx';
+import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal, subtractDecimal } from '../../lib/decimal.ts';
 import type { OiInterval } from '../../stores/symbolContext.store.ts';
 
@@ -43,7 +44,7 @@ export function ActiveStrikesIvPage() {
     latest?.ceIv && latest?.peIv ? subtractDecimal(latest.peIv, latest.ceIv) : null;
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Active Strikes IV" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -51,12 +52,20 @@ export function ActiveStrikesIvPage() {
         <GoButton onClick={() => q.refetch()} loading={q.isFetching} />
       </div>
 
-      <div className="mb-4 flex flex-wrap items-center gap-2" aria-live="polite">
-        <Metric label="Call IV" value={latest?.ceIv ? formatDecimal(latest.ceIv, 2) : '—'} />
-        <Metric label="Put IV" value={latest?.peIv ? formatDecimal(latest.peIv, 2) : '—'} />
-        <Metric label="IV skew (P−C)" value={skew ? formatDecimal(skew, 2) : '—'} />
-        <Metric label="Last updated" value={data?.asOf ? data.asOf.slice(11, 19) : '—'} />
-      </div>
+      <BeatStrip className="card shadow-e1 mb-4 flex flex-wrap items-center gap-2" aria-live="polite">
+        <BeatItem>
+          <Metric label="Call IV" value={latest?.ceIv ? formatDecimal(latest.ceIv, 2) : '—'} />
+        </BeatItem>
+        <BeatItem>
+          <Metric label="Put IV" value={latest?.peIv ? formatDecimal(latest.peIv, 2) : '—'} />
+        </BeatItem>
+        <BeatItem>
+          <Metric label="IV skew (P−C)" value={skew ? formatDecimal(skew, 2) : '—'} />
+        </BeatItem>
+        <BeatItem>
+          <Metric label="Last updated" value={data?.asOf ? data.asOf.slice(11, 19) : '—'} />
+        </BeatItem>
+      </BeatStrip>
 
       <QueryState
         query={q}
@@ -69,12 +78,14 @@ export function ActiveStrikesIvPage() {
         skeleton={<Skeleton variant="chart-block" height={360} />}
       >
         {() => (
-          <section className="card shadow-e1">
-            <h2 className="mb-2 text-h3 text-ay-text">Active Strike IV</h2>
-            <ActiveStrikeIvChart data={series} />
-          </section>
+          <BeatBlock>
+            <section className="card shadow-e1">
+              <h2 className="mb-2 text-h3 text-ay-text">Active Strike IV</h2>
+              <ActiveStrikeIvChart data={series} />
+            </section>
+          </BeatBlock>
         )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

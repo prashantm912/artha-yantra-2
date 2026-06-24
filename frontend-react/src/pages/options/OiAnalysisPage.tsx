@@ -11,6 +11,7 @@ import { Skeleton } from '../../components/Skeletons.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Select } from '../../components/atoms/Select.tsx';
 import { OiAnalysisTable } from '../../components/OiAnalysisTable.tsx';
+import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 
 // True Options OI Analysis — per-strike intraday, buckets-on-rows (§20.7.5). A Strike selector drives
 // the strike-series feed; the page folds CE+PE per interval into the mirrored time-rows table. The
@@ -45,7 +46,7 @@ export function OiAnalysisPage() {
   );
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Options OI Analysis" subtitle="Per-strike intraday CE+PE OI folded onto mirrored time-rows" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -62,15 +63,20 @@ export function OiAnalysisPage() {
       </div>
 
       {/* Underlying header (§20.7.5). DH/DL/DO pending — strike-series carries spot only. */}
-      <p className="mb-3 flex flex-wrap items-center gap-2 text-sm text-ay-muted" aria-live="polite">
-        <span className="rounded border border-ay-border bg-surface-1 px-2 py-1 text-xs">
-          <span className="text-ay-muted">Underlying </span>
-          <span className="font-semibold tabular-nums">
-            {spot ? formatDecimal(spot, 2) : '—'}
+      <BeatStrip
+        className="card shadow-e1 mb-3 flex flex-wrap items-center gap-2 text-sm text-ay-muted"
+        aria-live="polite"
+      >
+        <BeatItem>
+          <span className="rounded border border-ay-border bg-surface-1 px-2 py-1 text-xs">
+            <span className="text-ay-muted">Underlying </span>
+            <span className="font-semibold tabular-nums">
+              {spot ? formatDecimal(spot, 2) : '—'}
+            </span>
           </span>
-        </span>
+        </BeatItem>
         <span className="text-xs">· DH/DL/DO pending (underlying OHLC not in the feed)</span>
-      </p>
+      </BeatStrip>
 
       <QueryState
         query={seriesQ}
@@ -79,14 +85,16 @@ export function OiAnalysisPage() {
         skeleton={<Skeleton variant="table-rows" rows={10} cols={8} />}
       >
         {() => (
-          <OiAnalysisTable
-            rows={rows}
-            strike={strike}
-            intervalMinutes={intervalMinutes}
-            emptyMessage="No intraday series — pick an underlying + expiry + strike with captured snapshots."
-          />
+          <BeatBlock>
+            <OiAnalysisTable
+              rows={rows}
+              strike={strike}
+              intervalMinutes={intervalMinutes}
+              emptyMessage="No intraday series — pick an underlying + expiry + strike with captured snapshots."
+            />
+          </BeatBlock>
         )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

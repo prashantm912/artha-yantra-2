@@ -11,6 +11,7 @@ import { Skeleton } from '../../components/Skeletons.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { OiBadge4 } from '../../components/atoms/OiBadge4.tsx';
 import { SpurtQuadrant } from '../../components/SpurtQuadrant.tsx';
+import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 
 // Options OI Spurt — the oipulse 4-quadrant OI-action scanner (§20.3). Every CE/PE strike of the
 // expiry is bucketed by its interval interpretation (our 4-state primitive IS the quadrant), each
@@ -54,7 +55,7 @@ export function OptionsSpurtPage() {
   const summary = chain?.summary ?? null;
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Options OI Spurt" subtitle="4-quadrant OI-action scanner — every CE/PE strike bucketed by its interval interpretation" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -70,13 +71,20 @@ export function OptionsSpurtPage() {
         <GoButton onClick={() => spurtQ.refetch()} loading={spurtQ.isFetching} />
       </div>
 
-      <p className="mb-3 flex flex-wrap items-center gap-2 text-sm text-ay-muted" aria-live="polite">
-        OI bias <OiBadge4 value={summary?.interpretation ?? null} />
+      <BeatStrip
+        className="card shadow-e1 mb-3 flex flex-wrap items-center gap-2 text-sm text-ay-muted"
+        aria-live="polite"
+      >
+        <BeatItem>
+          <span className="inline-flex items-center gap-2">
+            OI bias <OiBadge4 value={summary?.interpretation ?? null} />
+          </span>
+        </BeatItem>
         {summary && (
           <span className="tabular-nums">· spot Δ {formatDecimal(summary.spotDelta, 2)}</span>
         )}
         <span className="text-xs">· strength = %ΔLTP &gt; 50 AND %ΔOI &gt; 50 (bold rows)</span>
-      </p>
+      </BeatStrip>
 
       <QueryState
         query={spurtQ}
@@ -88,7 +96,7 @@ export function OptionsSpurtPage() {
         }}
         errorTitle="Couldn't load OI spurt"
         skeleton={
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-2">
             <Skeleton variant="table-rows" rows={6} cols={5} />
             <Skeleton variant="table-rows" rows={6} cols={5} />
             <Skeleton variant="table-rows" rows={6} cols={5} />
@@ -97,7 +105,7 @@ export function OptionsSpurtPage() {
         }
       >
         {() => (
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <BeatBlock className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-2">
             {QUADRANTS.map((q) => (
               <SpurtQuadrant
                 key={q.state}
@@ -106,9 +114,9 @@ export function OptionsSpurtPage() {
                 rows={byQuadrant[q.state]}
               />
             ))}
-          </div>
+          </BeatBlock>
         )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

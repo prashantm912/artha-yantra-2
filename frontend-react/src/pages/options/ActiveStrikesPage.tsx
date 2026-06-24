@@ -12,6 +12,7 @@ import {
   ActiveStrikeOiChart,
   ActiveStrikeSentimentChart,
 } from '../../components/ActiveStrikeCharts.tsx';
+import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
 import type { OiInterval } from '../../stores/symbolContext.store.ts';
 
@@ -44,7 +45,7 @@ export function ActiveStrikesPage() {
   );
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Active Strikes OI" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -52,14 +53,20 @@ export function ActiveStrikesPage() {
         <GoButton onClick={() => q.refetch()} loading={q.isFetching} />
       </div>
 
-      <div className="mb-4 flex flex-wrap items-center gap-2" aria-live="polite">
-        <Metric
-          label="Sentiment %"
-          value={data?.sentimentPct ? formatDecimal(data.sentimentPct, 2) : '—'}
-        />
-        <Metric label="Active strikes" value={activeStrikeLabels || '—'} />
-        <Metric label="Last updated" value={data?.asOf ? data.asOf.slice(11, 19) : '—'} />
-      </div>
+      <BeatStrip className="card shadow-e1 mb-4 flex flex-wrap items-center gap-2" aria-live="polite">
+        <BeatItem>
+          <Metric
+            label="Sentiment %"
+            value={data?.sentimentPct ? formatDecimal(data.sentimentPct, 2) : '—'}
+          />
+        </BeatItem>
+        <BeatItem>
+          <Metric label="Active strikes" value={activeStrikeLabels || '—'} />
+        </BeatItem>
+        <BeatItem>
+          <Metric label="Last updated" value={data?.asOf ? data.asOf.slice(11, 19) : '—'} />
+        </BeatItem>
+      </BeatStrip>
 
       <QueryState
         query={q}
@@ -70,14 +77,14 @@ export function ActiveStrikesPage() {
         }}
         errorTitle="Couldn't load active strikes OI"
         skeleton={
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-2">
             <Skeleton variant="chart-block" height={320} />
             <Skeleton variant="chart-block" height={320} />
           </div>
         }
       >
         {() => (
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <BeatBlock className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-2">
             <section className="card shadow-e1">
               <h2 className="mb-2 text-h3 text-ay-text">Active Strike Change in OI</h2>
               <ActiveStrikeOiChart data={series} />
@@ -86,9 +93,9 @@ export function ActiveStrikesPage() {
               <h2 className="mb-2 text-h3 text-ay-text">Active Strike Sentiment %</h2>
               <ActiveStrikeSentimentChart data={series} />
             </section>
-          </div>
+          </BeatBlock>
         )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

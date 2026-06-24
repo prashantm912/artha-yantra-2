@@ -11,6 +11,7 @@ import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { OptionsLegChart } from '../../components/OptionsLegChart.tsx';
+import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 
 // Options Chart (§options/options-chart). Per leg (Call, Put) of one strike: the option-premium
 // candlestick (right axis) + OI line (left axis) + VWAP overlay + day H/L markers. One fetch returns both
@@ -54,7 +55,7 @@ export function OptionsChartPage() {
   const sideBySide = show === 'both-h';
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Options chart" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -78,16 +79,26 @@ export function OptionsChartPage() {
       </div>
 
       {/* Underlying + strike header strip. */}
-      <div className="mb-3 flex flex-wrap items-center gap-2" aria-live="polite">
-        <Metric
-          label={data?.underlying ?? chainQ.data?.underlying ?? 'Underlying'}
-          value={data?.underlyingLtp ? formatDecimal(data.underlyingLtp, 2) : '—'}
-        />
-        <Metric label="DO" value={data?.underlyingDayOpen ? formatDecimal(data.underlyingDayOpen, 2) : '—'} />
-        <Metric label="Strike" value={strike ?? '—'} />
-        <Metric label="Interval" value={data?.interval ?? '—'} />
-        <Metric label="Last updated" value={data?.asOf ? data.asOf.slice(11, 19) : '—'} />
-      </div>
+      <BeatStrip className="card shadow-e1 mb-3 flex flex-wrap items-center gap-2" aria-live="polite">
+        <BeatItem>
+          <Metric
+            label={data?.underlying ?? chainQ.data?.underlying ?? 'Underlying'}
+            value={data?.underlyingLtp ? formatDecimal(data.underlyingLtp, 2) : '—'}
+          />
+        </BeatItem>
+        <BeatItem>
+          <Metric label="DO" value={data?.underlyingDayOpen ? formatDecimal(data.underlyingDayOpen, 2) : '—'} />
+        </BeatItem>
+        <BeatItem>
+          <Metric label="Strike" value={strike ?? '—'} />
+        </BeatItem>
+        <BeatItem>
+          <Metric label="Interval" value={data?.interval ?? '—'} />
+        </BeatItem>
+        <BeatItem>
+          <Metric label="Last updated" value={data?.asOf ? data.asOf.slice(11, 19) : '—'} />
+        </BeatItem>
+      </BeatStrip>
 
       <QueryState
         query={q}
@@ -106,7 +117,7 @@ export function OptionsChartPage() {
       >
         {() =>
           data != null && (
-            <div className={sideBySide ? 'flex flex-col gap-4 md:flex-row' : 'flex flex-col gap-4'}>
+            <BeatBlock className={sideBySide ? 'flex flex-col gap-4 md:flex-row' : 'flex flex-col gap-4'}>
               {showCall && (
                 <section className="card shadow-e1 flex-1">
                   <h2 className="mb-2 text-h3 text-ay-text">Call Option Chart</h2>
@@ -127,12 +138,12 @@ export function OptionsChartPage() {
                   )}
                 </section>
               )}
-            </div>
+            </BeatBlock>
           )
         }
       </QueryState>
 
       <p className="mt-2 text-xs text-ay-muted">IV + Volume sub-panes are a deferred follow-up.</p>
-    </div>
+    </LoadBeat>
   );
 }

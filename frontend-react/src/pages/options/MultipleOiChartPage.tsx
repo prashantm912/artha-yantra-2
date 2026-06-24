@@ -10,6 +10,7 @@ import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { LegMultiSelect } from '../../components/atoms/LegMultiSelect.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { MultiLegOiChart } from '../../components/MultiLegOiChart.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { legHsl, legSwatchClass } from '../../core/legColors.ts';
 
 // Multiple OI Chart (§options/multiple-oi-chart). Multi-select option legs ("57200 CE") → overlay each
@@ -43,7 +44,7 @@ export function MultipleOiChartPage() {
   const data = q.data ?? null;
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Multiple OI chart" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -88,23 +89,25 @@ export function MultipleOiChartPage() {
         </div>
       )}
 
-      <section className="card shadow-e1">
-        <h2 className="mb-2 text-h3 text-ay-text">Individual OI</h2>
+      <BeatBlock>
+        <section className="card shadow-e1">
+          <h2 className="mb-2 text-h3 text-ay-text">Individual OI</h2>
 
-        {selected.length === 0 ? (
-          <p className="text-sm text-ay-muted">Select ≥1 strike to plot its OI.</p>
-        ) : (
-          <QueryState
-            query={q}
-            isEmpty={() => data == null}
-            empty={{ title: 'No data for the selected legs/session.' }}
-            errorTitle="Couldn't load multiple OI chart"
-            skeleton={<Skeleton variant="chart-block" height={440} />}
-          >
-            {() => <MultiLegOiChart data={data} />}
-          </QueryState>
-        )}
-      </section>
-    </div>
+          {selected.length === 0 ? (
+            <p className="text-sm text-ay-muted">Select ≥1 strike to plot its OI.</p>
+          ) : (
+            <QueryState
+              query={q}
+              isEmpty={() => data == null}
+              empty={{ title: 'No data for the selected legs/session.' }}
+              errorTitle="Couldn't load multiple OI chart"
+              skeleton={<Skeleton variant="chart-block" height={440} />}
+            >
+              {() => <MultiLegOiChart data={data} />}
+            </QueryState>
+          )}
+        </section>
+      </BeatBlock>
+    </LoadBeat>
   );
 }

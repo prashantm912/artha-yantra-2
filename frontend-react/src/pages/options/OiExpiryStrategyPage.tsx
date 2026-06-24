@@ -10,6 +10,7 @@ import { Select } from '../../components/atoms/Select.tsx';
 import { OiBadge4 } from '../../components/atoms/OiBadge4.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
 import type { OiExpiryEodDay } from '../../api/types.ts';
 
@@ -63,7 +64,7 @@ const columns: DataColumn<OiExpiryEodDay>[] = [
 function LegTable({ leg, rows }: { leg: string; rows: OiExpiryEodDay[] }) {
   return (
     <section>
-      <h2 className="mb-1 text-sm font-semibold text-ay-text">{leg}</h2>
+      <h2 className="mb-1 text-h3 text-ay-text">{leg}</h2>
       <DataTable
         columns={columns}
         rows={rows}
@@ -94,7 +95,7 @@ export function OiExpiryStrategyPage() {
   );
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="OI Expiry Strategy" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -115,7 +116,7 @@ export function OiExpiryStrategyPage() {
         }}
         errorTitle="Couldn't load OI expiry strategy"
         skeleton={
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-2">
             <Skeleton variant="table-rows" rows={10} cols={10} />
             <Skeleton variant="table-rows" rows={10} cols={10} />
           </div>
@@ -123,13 +124,13 @@ export function OiExpiryStrategyPage() {
       >
         {() =>
           selected && (
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <BeatBlock className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-2">
               <LegTable leg={`${selected.strike} CE`} rows={selected.ce} />
               <LegTable leg={`${selected.strike} PE`} rows={selected.pe} />
-            </div>
+            </BeatBlock>
           )
         }
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

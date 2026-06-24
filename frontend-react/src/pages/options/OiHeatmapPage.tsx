@@ -7,6 +7,7 @@ import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { CallOiHeatmap, PutOiHeatmap } from '../../components/OiHeatmapChart.tsx';
+import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import type { OiInterval } from '../../stores/symbolContext.store.ts';
 
 // OI Change Heatmap (§20 breadth — oipulse grid-heatmap archetype). A strike × time grid of the
@@ -24,7 +25,7 @@ export function OiHeatmapPage() {
   const hasGrid = !!data && data.buckets.length > 0 && data.strikes.length > 0;
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="OI Change Heatmap" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -32,11 +33,17 @@ export function OiHeatmapPage() {
         <GoButton onClick={() => q.refetch()} loading={q.isFetching} />
       </div>
 
-      <div className="mb-4 flex flex-wrap items-center gap-2" aria-live="polite">
-        <Metric label="Strikes" value={hasGrid ? String(data!.strikes.length) : '—'} />
-        <Metric label="Intervals" value={hasGrid ? String(data!.buckets.length) : '—'} />
-        <Metric label="Last updated" value={data?.asOf ? data.asOf.slice(11, 19) : '—'} />
-      </div>
+      <BeatStrip className="card shadow-e1 mb-4 flex flex-wrap items-center gap-2" aria-live="polite">
+        <BeatItem>
+          <Metric label="Strikes" value={hasGrid ? String(data!.strikes.length) : '—'} />
+        </BeatItem>
+        <BeatItem>
+          <Metric label="Intervals" value={hasGrid ? String(data!.buckets.length) : '—'} />
+        </BeatItem>
+        <BeatItem>
+          <Metric label="Last updated" value={data?.asOf ? data.asOf.slice(11, 19) : '—'} />
+        </BeatItem>
+      </BeatStrip>
 
       <QueryState
         query={q}
@@ -48,7 +55,7 @@ export function OiHeatmapPage() {
         }}
         errorTitle="Couldn't load OI heatmap"
         skeleton={
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-2">
             <Skeleton variant="chart-block" height={420} />
             <Skeleton variant="chart-block" height={420} />
           </div>
@@ -56,7 +63,7 @@ export function OiHeatmapPage() {
       >
         {() =>
           hasGrid && (
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <BeatBlock className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-2">
               <section className="card shadow-e1">
                 <h2 className="mb-2 text-h3 text-ay-text">Call (CE) OI Change</h2>
                 <CallOiHeatmap data={data!} />
@@ -65,10 +72,10 @@ export function OiHeatmapPage() {
                 <h2 className="mb-2 text-h3 text-ay-text">Put (PE) OI Change</h2>
                 <PutOiHeatmap data={data!} />
               </section>
-            </div>
+            </BeatBlock>
           )
         }
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

@@ -5,6 +5,7 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 
 /**
  * Upstox Market-Information analytics settings (ADR-0002). A <b>dedicated, long-lived analytics
@@ -21,6 +22,7 @@ public record UpstoxAnalyticsProperties(
     String baseUrl, String tokenFile, String token, String instrumentsBaseUrl) {
 
   /** Defaults: real Upstox API, the assets CDN for the master, the analytics-token Docker secret file. */
+  @ConstructorBinding
   public UpstoxAnalyticsProperties {
     baseUrl = baseUrl == null ? "https://api.upstox.com" : baseUrl;
     instrumentsBaseUrl = instrumentsBaseUrl == null ? "https://assets.upstox.com" : instrumentsBaseUrl;

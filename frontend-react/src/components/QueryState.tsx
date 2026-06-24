@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react';
 import type { UseQueryResult } from '@tanstack/react-query';
-import { AlertTriangle, Inbox, RefreshCw, type LucideIcon } from 'lucide-react';
+import { AlertTriangle, RefreshCw, type LucideIcon } from 'lucide-react';
 import { Skeleton } from './Skeletons.tsx';
+import { EmptyCard } from './EmptyCard.tsx';
 import { Button } from './atoms/Button.tsx';
 
 // Shared 4-way query wrapper (revamp §3.3.2). Separates ERROR from EMPTY — kills the
@@ -69,17 +70,4 @@ export function QueryState<T>({
   const data = query.data as NonNullable<T>;
   if (isEmpty(data)) return <EmptyCard {...(empty ?? { title: 'No data for this selection.' })} />;
   return <>{children(data)}</>;
-}
-
-function EmptyCard({ icon: Icon = Inbox, title, hint }: { icon?: LucideIcon; title: string; hint?: string }) {
-  return (
-    <div
-      data-testid="qs-empty"
-      className="flex flex-col items-center gap-2 rounded-lg border border-ay-border bg-surface-1 px-4 py-8 text-center"
-    >
-      <Icon aria-hidden="true" className="size-6 text-ay-muted" />
-      <p className="text-body font-medium text-ay-text">{title}</p>
-      {hint && <p className="text-caption text-ay-muted">{hint}</p>}
-    </div>
-  );
 }

@@ -141,7 +141,7 @@ export function OiBuzzPage() {
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search symbol…"
           aria-label="Search symbol"
-          className="h-9 w-40 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text outline-none focus:border-accent"
+          className="h-9 w-full sm:w-40 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text outline-none focus:border-accent"
         />
         <GoButton onClick={() => void q.refetch()} loading={q.isFetching} />
         {data && (

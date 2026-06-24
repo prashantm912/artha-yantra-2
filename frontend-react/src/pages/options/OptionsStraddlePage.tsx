@@ -4,6 +4,7 @@ import { nearestStrike } from '../../lib/strikes.ts';
 import { CandlestickChart } from 'lucide-react';
 import { useChainTable, useStraddleChart } from '../../api/oiAnalytics.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
+import { EmptyCard } from '../../components/EmptyCard.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { Select, type SelectOption } from '../../components/atoms/Select.tsx';
@@ -145,7 +146,8 @@ export function OptionsStraddlePage() {
         isEmpty={() => data == null}
         empty={{
           icon: CandlestickChart,
-          title: 'No straddle data — pick an underlying + expiry + strike.',
+          title: 'Pick an underlying first.',
+          hint: 'Choose an underlying, expiry and strike to load the straddle chart.',
         }}
         errorTitle="Couldn't load straddle chart"
         skeleton={<Skeleton variant="chart-block" height={440} />}
@@ -153,9 +155,11 @@ export function OptionsStraddlePage() {
         {() =>
           data != null &&
           (data.items.length === 0 ? (
-            <p className="mb-3 text-sm text-ay-muted">
-              No candles for this strike/session — pick a strike with intraday option trades.
-            </p>
+            <EmptyCard
+              icon={CandlestickChart}
+              title="No intraday candles (EOD only)."
+              hint="This strike/session has no intraday option trades — pick a strike that traded intraday."
+            />
           ) : (
             <BeatBlock>
               <section className="card shadow-e1">

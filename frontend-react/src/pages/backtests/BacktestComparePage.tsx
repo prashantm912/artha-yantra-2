@@ -4,6 +4,7 @@ import type { EChartsOption } from 'echarts';
 import { formatDecimal } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
+import { WarningBanner } from '../../components/atoms/WarningBanner.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { useCompareResults, type BacktestResults } from '../../api/backtests.ts';
@@ -110,9 +111,9 @@ export function BacktestComparePage() {
         </p>
       )}
       {universeMismatch && (
-        <p className="mb-2 rounded-md bg-warn/15 px-2 py-1 text-sm text-warn ring-1 ring-warn/40">
+        <WarningBanner className="mb-2">
           Runs were pinned to differing universes — not a like-for-like comparison.
-        </p>
+        </WarningBanner>
       )}
 
       <BeatBlock className="overflow-auto rounded-lg border border-ay-border">

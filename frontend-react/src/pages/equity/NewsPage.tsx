@@ -36,7 +36,7 @@ export function NewsPage() {
           onKeyDown={(e) => e.key === 'Enter' && submit()}
           placeholder="Symbol (e.g. RELIANCE)"
           aria-label="Stock symbol"
-          className="h-9 w-48 rounded-md border border-ay-border bg-surface-1 px-2 text-sm uppercase text-ay-text outline-none focus:border-accent"
+          className="h-9 w-full sm:w-48 rounded-md border border-ay-border bg-surface-1 px-2 text-sm uppercase text-ay-text outline-none focus:border-accent"
         />
         <GoButton onClick={submit} loading={q.isFetching} />
       </div>

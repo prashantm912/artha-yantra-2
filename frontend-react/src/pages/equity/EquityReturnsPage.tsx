@@ -80,7 +80,7 @@ export function EquityReturnsPage() {
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search name or sector…"
           aria-label="Search name or sector"
-          className="h-9 w-56 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text outline-none focus:border-accent"
+          className="h-9 w-full sm:w-56 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text outline-none focus:border-accent"
         />
         <GoButton onClick={() => void q.refetch()} loading={q.isFetching} />
       </div>

@@ -53,7 +53,7 @@ export function ChartsPage() {
             onChange={(e) => setSymbolDraft(e.target.value)}
             placeholder="EXCHANGE:SYMBOL"
             aria-label="Instrument"
-            className="h-9 w-56 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text"
+            className="h-9 w-full sm:w-56 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text"
           />
           <button type="submit" className="h-9 rounded-md border border-ay-border px-3 text-sm hover:border-accent">
             Load

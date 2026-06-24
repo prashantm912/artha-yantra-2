@@ -19,6 +19,10 @@ mvnw text eol=lf
 # Maven JAR resource and the on-disk file are identical on all platforms.
 *.json text eol=lf
 
+# Hash-locked Python deps — COPYed into Linux images + installed under
+# --require-hashes; keep LF so the file is byte-stable on all platforms.
+*.lock text eol=lf
+
 # Binary
 *.png binary
 *.jpg binary

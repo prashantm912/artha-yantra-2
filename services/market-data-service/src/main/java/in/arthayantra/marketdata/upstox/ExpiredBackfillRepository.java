@@ -145,6 +145,19 @@ public class ExpiredBackfillRepository {
     return complete ? Coverage.COMPLETE : Coverage.PARTIAL;
   }
 
+  /**
+   * Cheap "is there work left" probe for the auto-resume self-heal ({@link ExpiredBackfillAutoResume}):
+   * does ANY registered expired contract still carry {@code complete = false}? Reads only the small
+   * registry (no candle scan, no per-chunk locks), so it is safe to call while a backfill is actively
+   * ingesting into the {@code candles} hypertable.
+   */
+  public boolean hasIncompleteCoverage() {
+    Boolean any =
+        jdbc.queryForObject(
+            "SELECT EXISTS(SELECT 1 FROM expired_contracts WHERE NOT complete)", Boolean.class);
+    return Boolean.TRUE.equals(any);
+  }
+
   /** Per-(underlying, exchange) coverage rollup — the B2 dashboard's read (cheap; no candle scan). */
   public List<CoverageRow> coverageSummary() {
     return jdbc.query(

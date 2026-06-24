@@ -50,6 +50,15 @@ artha:
       optionchain: ${ARTHA_MD_SOURCE_OPTIONCHAIN:kite}   # kite | openalgo | upstox (per-strike OI capture; flip ONLY after the live OI-coverage canary is green, §17.11. upstox=Wave U1 direct /v2/option/chain on the login-free 1-yr analytics token, REQUIRES the analytics token file)
       fiidii: ${ARTHA_MD_SOURCE_FIIDII:nse}              # nse | upstox (ADR-0002 U2; upstox REQUIRES artha.upstox.analytics.enabled=true)
       optionanalytics: ${ARTHA_MD_SOURCE_OPTIONANALYTICS:native}  # native | upstox — PCR + max-pain source (upstox = full chain; REQUIRES artha.upstox.analytics.enabled=true)
+    # Auto-resume the expired-instruments backfill so it survives restarts WITHOUT a manual re-POST
+    # (the job is an in-memory thread — any market-data/Docker/host restart kills it). On boot it fires
+    # the coverage-aware resume; hourly it self-heals a stalled/idle run + picks up newly-expired
+    # contracts. Double-gated on the analytics client being present, so mock (no Upstox client) no-ops.
+    # See ExpiredBackfillAutoResume.
+    expired-backfill:
+      auto-resume: ${ARTHA_EXPIRED_BACKFILL_AUTORESUME:true}
+      self-heal-cron: ${ARTHA_EXPIRED_BACKFILL_SELFHEAL_CRON:0 17 * * * *}   # second 0, minute 17, every hour
+      catchup-hours: ${ARTHA_EXPIRED_BACKFILL_CATCHUP_HOURS:20}
   openalgo:
     base-url: ${ARTHA_OPENALGO_BASE_URL:http://openalgo:5000}
     api-key-file: ${ARTHA_OPENALGO_API_KEY_FILE:/run/secrets/openalgo_api_key}

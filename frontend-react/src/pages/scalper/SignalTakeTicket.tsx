@@ -69,10 +69,11 @@ export function SignalTakeTicket({
 
   return (
     <div
-      className="flex flex-col gap-2 rounded-md border border-ay-border bg-surface-1 p-2"
+      className="card shadow-e1 flex flex-col gap-2"
       role="group"
       aria-label={`Paper ticket for ${signal.exchange}:${signal.tradingsymbol}`}
     >
+      <h3 className="text-h3 text-ay-text">Take (paper)</h3>
       <div className="flex items-center justify-between text-xs text-ay-muted">
         <span className="truncate">
           {signal.exchange}:{signal.tradingsymbol}{' '}

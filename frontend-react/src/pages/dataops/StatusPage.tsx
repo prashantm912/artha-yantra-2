@@ -12,6 +12,7 @@ import { Modal } from '../../components/dataops/Modal.tsx';
 import { QuotaGauge } from '../../components/dataops/QuotaGauge.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { cn } from '../../lib/cn.ts';
 
 // B1 Collection Status (route /data-ops/status). Read-only progress board over the two backfill jobs
@@ -68,7 +69,7 @@ function ExpiredCard({ expired }: { expired: ExpiredStatus }) {
     <section className="rounded border border-ay-border bg-surface-1 p-3" aria-label="Expired backfill status">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-sm font-semibold text-ay-text">Expired backfill</h2>
+          <h2 className="text-h3 text-ay-text">Expired backfill</h2>
           <StateBadge state={expired.state} />
           {running && expired.currentExpiry && (
             <span className="text-xs text-ay-muted">
@@ -141,7 +142,7 @@ function OiCard({ oi }: { oi: OiStatus }) {
   return (
     <section className="rounded border border-ay-border bg-surface-1 p-3" aria-label="OI backfill status">
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        <h2 className="text-sm font-semibold text-ay-text">OI backfill</h2>
+        <h2 className="text-h3 text-ay-text">OI backfill</h2>
         <StateBadge state={oi.state} />
       </div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -166,10 +167,10 @@ export function StatusPage() {
   const quotaQ = useQuota();
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Collection Status" />
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <BeatBlock className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
           <QueryState query={expiredQ} isEmpty={() => false}>
             {(expired) => <ExpiredCard expired={expired} />}
@@ -183,7 +184,7 @@ export function StatusPage() {
             {(quota) => <QuotaGauge configured={quota.configured} windows={quota.windows} />}
           </QueryState>
         </div>
-      </div>
-    </div>
+      </BeatBlock>
+    </LoadBeat>
   );
 }

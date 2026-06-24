@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Stepper } from '../../components/dataops/Stepper.tsx';
 import { MultiCheckboxGroup } from '../../components/dataops/MultiCheckboxGroup.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { triggerBackfill } from '../../api/dataops.ts';
 import { ApiError } from '../../api/client.ts';
 import { cn } from '../../lib/cn.ts';
@@ -72,13 +73,13 @@ export function CollectionWizardPage() {
   }
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Collection Wizard" />
 
       <div className="mx-auto max-w-2xl space-y-4">
         <Stepper steps={STEPS} current={step} />
 
-        <div className="space-y-4 rounded-md border border-ay-border bg-surface-1 p-4">
+        <BeatBlock className="space-y-4 rounded-md border border-ay-border bg-surface-1 p-4">
           {step === 0 && (
             <MultiCheckboxGroup
               legend="Indices"
@@ -165,7 +166,7 @@ export function CollectionWizardPage() {
               </div>
             </dl>
           )}
-        </div>
+        </BeatBlock>
 
         {error && (
           <p role="alert" className="text-sm text-bear">
@@ -206,6 +207,6 @@ export function CollectionWizardPage() {
           )}
         </div>
       </div>
-    </div>
+    </LoadBeat>
   );
 }

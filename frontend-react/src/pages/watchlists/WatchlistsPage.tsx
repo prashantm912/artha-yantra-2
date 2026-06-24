@@ -5,6 +5,7 @@ import { Select } from '../../components/atoms/Select.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import {
   SCREENER_PRESETS,
   useAddWatchItem,
@@ -45,7 +46,7 @@ export function WatchlistsPage() {
   const inputCls = 'h-9 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text';
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Watchlists & screener" subtitle="Named instrument lists + the preset screener" />
       <div role="tablist" className="mb-4 flex gap-1 border-b border-ay-border">
         {(['lists', 'screener'] as const).map((t) => (
@@ -116,7 +117,7 @@ export function WatchlistsPage() {
                     )}
                   </div>
 
-                  <div className="overflow-auto rounded-lg border border-ay-border">
+                  <BeatBlock className="overflow-auto rounded-lg border border-ay-border">
                     <table className="w-full border-collapse text-sm">
                       <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
                         <tr>
@@ -146,7 +147,7 @@ export function WatchlistsPage() {
                         )}
                       </tbody>
                     </table>
-                  </div>
+                  </BeatBlock>
                 </>
               ) : (
                 <p className="text-sm text-ay-muted">No watchlist selected. Create one to start tracking instruments.</p>
@@ -168,7 +169,7 @@ export function WatchlistsPage() {
               Run
             </button>
           </div>
-          <div className="overflow-auto rounded-lg border border-ay-border">
+          <BeatBlock className="overflow-auto rounded-lg border border-ay-border">
             <table className="w-full border-collapse text-sm">
               <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
                 <tr>
@@ -196,9 +197,9 @@ export function WatchlistsPage() {
                 )}
               </tbody>
             </table>
-          </div>
+          </BeatBlock>
         </>
       )}
-    </div>
+    </LoadBeat>
   );
 }

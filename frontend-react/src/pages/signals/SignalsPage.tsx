@@ -17,6 +17,7 @@ import { ManualVerifyChecklist } from '../../components/ManualVerifyChecklist.ts
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { ReasoningBreakdown } from './ReasoningBreakdown.tsx';
 
 // /signals cockpit page (master plan §20 parity, C-2.24/C-2.26): live feed + history in one
@@ -71,9 +72,10 @@ export function SignalsPage() {
     s.suggestedQty ? Number(s.suggestedQty) : undefined;
 
   return (
-    <div className="flex h-full flex-col">
+    <LoadBeat>
+      <div className="flex h-full flex-col">
       <PageHeader title="Live signals" subtitle="Live feed + history — click a row for the per-indicator reasoning breakdown" />
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[1.4fr_minmax(20rem,1fr)]">
+      <BeatBlock className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[1.4fr_minmax(20rem,1fr)]">
       <section className="min-w-0">
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <Select
@@ -216,7 +218,8 @@ export function SignalsPage() {
           </div>
         )}
       </aside>
+      </BeatBlock>
       </div>
-    </div>
+    </LoadBeat>
   );
 }

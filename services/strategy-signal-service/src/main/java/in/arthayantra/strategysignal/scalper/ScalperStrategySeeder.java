@@ -39,7 +39,9 @@ public class ScalperStrategySeeder {
           "scalp-trend-change-banknifty",
           "scalp-open-high-low-nifty",
           "scalp-morning-trade-nifty",
-          "scalp-hero-zero-nifty");
+          "scalp-hero-zero-nifty",
+          "scalp-market-movers-nifty",
+          "scalp-btst-stbt-nifty");
 
   private final RegistryService registry;
 

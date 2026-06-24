@@ -24,19 +24,22 @@ import org.junit.jupiter.api.Test;
  */
 class ScalperStrategyLoadTest {
 
-  // The full seeded set: 4 core (NIFTY) + 4 derived (#4/#12 BANKNIFTY, #2/#9 NIFTY). Each maps to its
-  // expected underlying so the per-index ScalperConfig assertions hold across both indices.
+  // The full seeded set: 4 core (NIFTY) + derived (#4/#12 BANKNIFTY, #2/#9/#7 NIFTY) + #3 Market
+  // Movers + #8 BTST/STBT (both NIFTY). Each maps to its expected underlying so the per-index
+  // ScalperConfig assertions hold across both indices.
   private static final Map<String, String> UNDERLYING =
-      Map.of(
-          "scalp-connect-the-dots-nifty", "NIFTY 50",
-          "scalp-two-candle-nifty", "NIFTY 50",
-          "scalp-trending-oi-nifty", "NIFTY 50",
-          "scalp-golden-crossover-nifty", "NIFTY 50",
-          "scalp-gap-theory-banknifty", "NIFTY BANK",
-          "scalp-trend-change-banknifty", "NIFTY BANK",
-          "scalp-open-high-low-nifty", "NIFTY 50",
-          "scalp-morning-trade-nifty", "NIFTY 50",
-          "scalp-hero-zero-nifty", "NIFTY 50");
+      Map.ofEntries(
+          Map.entry("scalp-connect-the-dots-nifty", "NIFTY 50"),
+          Map.entry("scalp-two-candle-nifty", "NIFTY 50"),
+          Map.entry("scalp-trending-oi-nifty", "NIFTY 50"),
+          Map.entry("scalp-golden-crossover-nifty", "NIFTY 50"),
+          Map.entry("scalp-gap-theory-banknifty", "NIFTY BANK"),
+          Map.entry("scalp-trend-change-banknifty", "NIFTY BANK"),
+          Map.entry("scalp-open-high-low-nifty", "NIFTY 50"),
+          Map.entry("scalp-morning-trade-nifty", "NIFTY 50"),
+          Map.entry("scalp-hero-zero-nifty", "NIFTY 50"),
+          Map.entry("scalp-market-movers-nifty", "NIFTY 50"),
+          Map.entry("scalp-btst-stbt-nifty", "NIFTY 50"));
 
   // Each derived strategy must carry the tag that arms its §12.3 gate (the seeder reads the same tag).
   private static final Map<String, String> EXPECTED_TAG =

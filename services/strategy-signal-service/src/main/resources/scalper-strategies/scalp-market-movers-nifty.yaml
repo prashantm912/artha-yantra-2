@@ -1,0 +1,97 @@
+# Siva #3 — Market Movers (§3.3, §6.3 `market_movers`). A momentum/breakout scalper over the
+# day-LEADING F&O EQUITY universe (NOT the index): a stock breaking an 8-day/9-day HIGH (long) /
+# LOW (short) tends to continue for a ~1-2% directional move, often ~1% in the first morning hour.
+# The source vehicle is the OI-Pulse "Market Movers" screener (Top Gainers for longs, Top Losers for
+# shorts) over all F&O stocks (filterable to NIFTY 50 / NIFTY BANK constituents); it trades STOCK
+# FUTURES / cash — the source EXPLICITLY excludes stock options ("No stock options").
+#
+# v1 SCOPE — the honest, deterministic, engine-expressible cut (the Step-0 feasibility outcome).
+# strategy-signal-service has NO equity-screener / per-stock-breakout / per-stock-OI feed, and the
+# uniform scalper pipeline (the seeder + ScalperStrategyLoadTest + the §12.3 confluence seam) is built
+# for `options_of_underlying` index scalpers evaluated on the front future. So the screener-specific
+# legs are NOT available here and are DEFERRED (see below). What v1 DOES port faithfully is the
+# strategy's deterministic momentum-continuation CORE, expressed on the NIFTY 50 front future and
+# routed through the shared seam (Model A) like every other seeded scalper:
+#   - trade WITH the trend, ONLY after price reclaims/holds VWAP (the source's literal long trigger:
+#     "long entry after price moves above VWAP", taken on a pullback near VWMA / SuperTrend / VWAP);
+#   - the §0B time gate (after 09:45 — the Market Movers matrix's own floor; by 09:45 much of the move
+#     may be done, so RR stays ~1%);
+#   - the §0B RSI band + the shared confluence (ST/VWMA/PSAR/VWAP + OI/breadth dots) carry validity;
+#   - target ~1-2% (a live-management note, not engine-carried); SL = the entry-candle low (the
+#     source's "1st candle low" practical reference — stocks have NO rigid/native SL, so the
+#     structural entry-candle anchor is the faithful deterministic substitute), via the
+#     `entry-candle-stop` tag.
+#
+# PROVISIONAL ASSUMPTIONS (faithful defaults; this is a PAPER strategy — correctable):
+#   - [ASSUMED] Underlying surrogate = NIFTY 50 front future. The source universe is the F&O EQUITY
+#     list; v1 has no equity-momentum feed, so the index proxy carries the trend-continuation core.
+#     The true stock-universe leg is DEFERRED (see below).
+#   - [ASSUMED] Published side = LONG only (the bullish 8/9-day-high lean — the source's primary,
+#     highest-conviction, most-demonstrated side: "OL in Top Gainers + 8D/9D high = strong opening").
+#     The mirror SHORT (8/9-day-low + OH + Short-Build-up) is faithful but DEFERRED to a second draft.
+#   - [ASSUMED] SL anchor = the entry (breakout) candle's low, reusing the shared `entry-candle-stop`
+#     tag. SOURCED: the §3.3 exit block names "1st candle low (long)" as the practical SL reference.
+#   - [ASSUMED] 09:45 floor + 15:15 square-off intraday window. SOURCED: §3.3 "trade only after
+#     09:45am"; intraday-by-default; the square-off is the shared scalper hygiene default.
+#
+# DEFERRED REFINEMENTS (need a NEW equity-universe / Market-Movers market-data capability):
+#   - the F&O EQUITY universe + the Top-Gainers/Top-Losers screener (Mode=Live, All F&O / N50 / BN);
+#   - the 8-day/9-day HIGH/LOW breakout filter (Min. B.O. Days), the per-stock OH/OL flag, and the
+#     per-stock OI interpretation (LB/SC for longs, SB/LU for shorts) — none has a feed here;
+#   - the RSI(Daily) screen (not past 75 bull / below 40 bear) — only the 3m RSI is wired;
+#   - the SHORT side; the EOD-OI Long-Build-up overnight-carry option (§3.3 "watch EOD OI").
+#
+# Evaluates on the NIFTY 50 front future (Model A); the §12.3 confluence seam buys the nearest-weekly
+# ATM-band CE — the index-option execution surrogate for the deferred stock-futures leg.
+schema: strategy-schema/v1
+id: scalp-market-movers-nifty
+name: "Scalper · Market Movers · NIFTY CE"
+version: 1.0.0
+description: "Market Movers momentum-breakout scalp (Siva #3) — v1 ports the deterministic trend-continuation CORE on the NIFTY 50 3-min front future: trade WITH the trend only after price reclaims VWAP (the source's literal long trigger), after 09:45 (Market Movers matrix floor), RSI in band + shared confluence carry validity, ~1-2% target, SL = entry-candle low (the source's 1st-candle-low reference; stocks have no rigid SL); long-premium CE only. The true F&O-EQUITY universe + the 8/9-day breakout / OH-OL / OI-interpretation screener legs + RSI(Daily) + the SHORT side are DEFERRED (no equity-screener feed in strategy-signal-service); the index future is a faithful momentum surrogate."
+author: owner
+# `entry-candle-stop` anchors the structural stop on the breakout candle's low (§3.3: "1st candle low").
+tags: [scalper, options, intraday, nifty, entry-candle-stop]
+
+universe:
+  mode: options_of_underlying
+  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  options:
+    expiry: nearest_weekly
+    strikes: { selector: atm_window, width: 3 }
+    option_types: [CE]
+
+timeframes:
+  primary: 3m
+  additional: [1h]
+
+indicators:
+  - { name: VWMA,       alias: vwma20,    timeframe: 3m, params: { period: 20 } }
+  - { name: PSAR,       alias: psar,      timeframe: 3m }
+  - { name: RSI,        alias: rsi14,     timeframe: 3m, params: { period: 14 }, weight: 1.0,
+      normalize: { type: rsi_momentum } }
+  - { name: SUPERTREND, alias: supertrend, timeframe: 3m, params: { period: 10, multiplier: 2.0 },
+      weight: 1.0, normalize: { type: direction } }
+  - { name: SUPERTREND, alias: bias60m,   timeframe: 1h, params: { period: 7, multiplier: 3.0 } }
+
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - "close > vwap"           # §3.3: the literal long trigger — "long entry after price moves above VWAP"
+      - "close > vwma20"         # §3.3: pullback-near-VWMA continuation lean (trade WITH the trend)
+  scoring:
+    threshold: 0.2
+
+exit_rules:
+  - { type: signal_exit, params: { rule: "close < vwap" } }   # trend gives way back through VWAP → exit
+  - { type: time_stop,   params: { max_bars: 20 } }           # §3.3: intraday momentum scalp (~1% RR)
+
+risk:
+  position_sizing: { method: premium_budget, params: { budget_inr: 15000 } }
+  max_positions: 1
+  max_positions_per_underlying: 1
+  max_daily_loss_pct: 2.0
+  session:
+    style: intraday
+    window: { from: "09:45", to: "15:00" }   # §3.3: trade only after 09:45 (the Market Movers matrix floor)
+    square_off: "15:15"

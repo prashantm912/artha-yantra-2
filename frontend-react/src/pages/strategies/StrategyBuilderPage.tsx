@@ -14,6 +14,7 @@ import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 
 // Strategy Builder (greeks/payoff pipeline): assemble legs from the live chain, see the expiry payoff
 // curve + net greeks + max-profit/loss/breakevens. Pure client-side math (payoffEngine) over the
@@ -162,7 +163,10 @@ export function StrategyBuilderPage() {
 
   return (
     <div>
-      <h1 className="mb-2 text-base font-semibold text-ay-text">Strategy Builder</h1>
+      <PageHeader
+        title="Strategy Builder"
+        subtitle="Assemble legs from the live chain — expiry payoff, net greeks and breakevens"
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry />
@@ -247,7 +251,7 @@ export function StrategyBuilderPage() {
             <Metric label="Δ / Θ" value={`${g.delta.toFixed(1)} / ${g.theta.toFixed(0)}`} />
             <Metric label="Vega" value={g.vega.toFixed(0)} />
           </div>
-          <div className="mb-4">
+          <div className="card shadow-e1 mb-4">
             <EChart makeOption={makeOption} height={320} ariaLabel="Strategy payoff at expiry vs underlying" />
           </div>
         </>

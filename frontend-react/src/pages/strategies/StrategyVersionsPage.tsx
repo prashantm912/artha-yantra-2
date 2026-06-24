@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import {
   usePublish,
   useRollback,
@@ -64,7 +67,7 @@ export function StrategyVersionsPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Strategy versions</h1>
+      <PageHeader title="Strategy versions" />
       <div className="mb-3 flex items-center gap-2">
         <strong>{detail.data?.name ?? 'Strategy'} — versions</strong>
         <div className="flex-1" />
@@ -80,6 +83,14 @@ export function StrategyVersionsPage() {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(20rem,28rem)_minmax(0,1fr)]">
         <section className="min-w-0">
+          <QueryState
+            query={versions}
+            isEmpty={() => rows.length === 0}
+            empty={{ title: 'No versions.' }}
+            errorTitle="Couldn't load versions"
+            skeleton={<Skeleton variant="table-rows" rows={5} cols={5} />}
+          >
+            {() => (
           <div className="overflow-auto rounded-lg border border-ay-border">
             <table className="w-full border-collapse text-sm">
               <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
@@ -120,16 +131,11 @@ export function StrategyVersionsPage() {
                     </td>
                   </tr>
                 ))}
-                {rows.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="px-2 py-6 text-center text-ay-muted">
-                      No versions.
-                    </td>
-                  </tr>
-                )}
               </tbody>
             </table>
           </div>
+            )}
+          </QueryState>
         </section>
 
         <section className="min-w-0">

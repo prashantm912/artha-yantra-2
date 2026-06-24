@@ -4,6 +4,7 @@ import type { EChartsOption } from 'echarts';
 import { formatDecimal } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 import { useCompareResults, type BacktestResults } from '../../api/backtests.ts';
 
 // /backtests/compare?ids=a,b,c (master plan §20 parity, E-11 screen 5): up to 6 runs — metric matrix
@@ -92,13 +93,16 @@ export function BacktestComparePage() {
 
   if (runs.length === 0) {
     return (
-      <p className="text-ay-muted">Add runs to compare (e.g. /backtests/compare?ids=run1,run2).</p>
+      <div>
+        <PageHeader title="Compare backtests" subtitle="Side-by-side metric matrix and normalized equity curves" />
+        <p className="text-ay-muted">Add runs to compare (e.g. /backtests/compare?ids=run1,run2).</p>
+      </div>
     );
   }
 
   return (
     <div>
-      <h1 className="ay-sr-only">Compare backtests</h1>
+      <PageHeader title="Compare backtests" subtitle="Side-by-side metric matrix and normalized equity curves" />
       {dataHashMismatch && (
         <p className="mb-2 rounded-md bg-warn/15 px-2 py-1 text-sm text-warn ring-1 ring-warn/40">
           Runs have differing dataHash — not a like-for-like comparison.
@@ -140,7 +144,7 @@ export function BacktestComparePage() {
         </table>
       </div>
 
-      <div className="mt-4">
+      <div className="card shadow-e1 mt-4">
         <EChart makeOption={equityOption} height={320} ariaLabel="Normalized equity curves" />
       </div>
     </div>

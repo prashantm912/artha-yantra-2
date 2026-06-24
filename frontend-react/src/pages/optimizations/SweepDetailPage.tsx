@@ -4,6 +4,7 @@ import type { EChartsOption } from 'echarts';
 import { formatDecimal } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 import { FoldDrilldownModal } from './FoldDrilldownModal.tsx';
 import {
   paramStr,
@@ -151,7 +152,7 @@ export function SweepDetailPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Sweep explorer</h1>
+      <PageHeader title="Sweep explorer" subtitle="Guard-aware leaderboard, trial scatter and promote-to-draft" />
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <strong>Sweep {sweepId.slice(0, 8)}</strong>
         <span className="tabular-nums text-sm text-ay-muted">{trialRows.length} trials</span>
@@ -170,7 +171,9 @@ export function SweepDetailPage() {
         </div>
       </div>
 
-      <EChart makeOption={scatterOption} height={280} ariaLabel="Trial objective scatter" />
+      <div className="card shadow-e1">
+        <EChart makeOption={scatterOption} height={280} ariaLabel="Trial objective scatter" />
+      </div>
 
       <h3 className="mb-2 mt-4 text-base font-semibold">Leaderboard ({sort} sort)</h3>
       <div className="overflow-auto rounded-lg border border-ay-border">

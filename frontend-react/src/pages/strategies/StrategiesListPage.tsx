@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import {
   NOTIFY_CHANNELS,
   STRATEGY_STATUSES,
@@ -49,7 +52,7 @@ export function StrategiesListPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Strategies</h1>
+      <PageHeader title="Strategies" subtitle="Published, draft and archived strategies" />
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <input
           value={qInput}
@@ -73,6 +76,14 @@ export function StrategiesListPage() {
         </Link>
       </div>
 
+      <QueryState
+        query={list}
+        isEmpty={() => rows.length === 0}
+        empty={{ title: 'No strategies yet — create one to get started.' }}
+        errorTitle="Couldn't load strategies"
+        skeleton={<Skeleton variant="table-rows" rows={8} cols={8} />}
+      >
+        {() => (
       <div className="overflow-auto rounded-lg border border-ay-border">
         <table className="w-full border-collapse text-sm">
           <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
@@ -160,16 +171,11 @@ export function StrategiesListPage() {
                 </tr>
               );
             })}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={8} className="px-2 py-6 text-center text-ay-muted">
-                  {list.isLoading ? 'Loading…' : 'No strategies yet — create one to get started.'}
-                </td>
-              </tr>
-            )}
           </tbody>
         </table>
       </div>
+        )}
+      </QueryState>
     </div>
   );
 }

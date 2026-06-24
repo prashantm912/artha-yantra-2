@@ -10,6 +10,8 @@ import {
 import { LogFeed } from '../../components/dataops/LogFeed.tsx';
 import { Modal } from '../../components/dataops/Modal.tsx';
 import { QuotaGauge } from '../../components/dataops/QuotaGauge.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
 import { cn } from '../../lib/cn.ts';
 
 // B1 Collection Status (route /data-ops/status). Read-only progress board over the two backfill jobs
@@ -50,9 +52,9 @@ const fmt = (n: number): string => n.toLocaleString();
 /** A label+value stat pill (big tabular value over a small muted label). */
 function StatPill({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded bg-surface-2 p-2">
-      <div className="tabular-nums text-lg font-semibold text-ay-text">{value}</div>
-      <div className="text-xs text-ay-muted">{label}</div>
+    <div className="card shadow-e1">
+      <div className="nums text-lg font-semibold text-ay-text">{value}</div>
+      <div className="text-caption uppercase tracking-wide text-ay-muted">{label}</div>
     </div>
   );
 }
@@ -163,18 +165,20 @@ export function StatusPage() {
   const oiQ = useOiStatus();
   const quotaQ = useQuota();
 
-  const isLoading = expiredQ.isLoading || oiQ.isLoading || quotaQ.isLoading;
-
   return (
     <div>
-      <h1 className="mb-2 text-center text-sm font-semibold text-ay-text">Collection Status</h1>
-
-      {isLoading && <p className="mb-3 text-sm text-ay-muted">Loading…</p>}
+      <PageHeader title="Collection Status" />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
-          {expiredQ.data && <ExpiredCard expired={expiredQ.data} />}
-          {oiQ.data && <OiCard oi={oiQ.data} />}
+          <QueryState query={expiredQ} isEmpty={() => false}>
+            {(expired) => (
+              <>
+                <ExpiredCard expired={expired} />
+                {oiQ.data && <OiCard oi={oiQ.data} />}
+              </>
+            )}
+          </QueryState>
         </div>
         <div>
           <QuotaGauge configured={quotaQ.data?.configured ?? false} windows={quotaQ.data?.windows ?? []} />

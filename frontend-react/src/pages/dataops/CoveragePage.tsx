@@ -2,6 +2,9 @@ import { useMemo } from 'react';
 import { useCoverage, useQuota, type CoverageRow } from '../../api/dataops.ts';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { QuotaGauge } from '../../components/dataops/QuotaGauge.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 
 // B2 Coverage dashboard (route /data-ops/coverage): a per-(underlying, exchange) summary of the
 // expired-contract backfill — how many contracts are registered, how many have complete vs partial
@@ -125,7 +128,7 @@ export function CoveragePage() {
 
   return (
     <div>
-      <h1 className="mb-2 text-center text-sm font-semibold text-ay-text">Data Coverage</h1>
+      <PageHeader title="Data Coverage" />
 
       <dl className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <StatPill label="Contracts" value={totals.contracts} />
@@ -134,19 +137,23 @@ export function CoveragePage() {
         <StatPill label="Candle rows" value={totals.candleRows} />
       </dl>
 
-      {coverage.isLoading ? (
-        <p className="py-6 text-center text-sm text-ay-muted">Loading coverage…</p>
-      ) : (
-        <DataTable
-          columns={columns}
-          rows={rows}
-          rowKey={(r) => r.underlying + r.exchange}
-          pageSize={20}
-          initialSort={{ id: 'candleRows', dir: 'desc' }}
-          ariaLabel="Expired-contract coverage"
-          emptyMessage="No coverage captured yet."
-        />
-      )}
+      <QueryState
+        query={coverage}
+        empty={{ title: 'No coverage captured yet.' }}
+        skeleton={<Skeleton variant="table-rows" rows={8} cols={6} />}
+      >
+        {() => (
+          <DataTable
+            columns={columns}
+            rows={rows}
+            rowKey={(r) => r.underlying + r.exchange}
+            pageSize={20}
+            initialSort={{ id: 'candleRows', dir: 'desc' }}
+            ariaLabel="Expired-contract coverage"
+            emptyMessage="No coverage captured yet."
+          />
+        )}
+      </QueryState>
 
       <div className="mt-3">
         <QuotaGauge configured={quota.data?.configured ?? false} windows={quota.data?.windows ?? []} />
@@ -157,9 +164,9 @@ export function CoveragePage() {
 
 function StatPill(props: { label: string; value: number }) {
   return (
-    <div className="rounded-md border border-ay-border bg-surface-1 px-3 py-2">
-      <dt className="text-xs text-ay-muted">{props.label}</dt>
-      <dd className="text-lg font-semibold tabular-nums text-ay-text">{props.value.toLocaleString()}</dd>
+    <div className="card shadow-e1">
+      <dt className="text-caption uppercase tracking-wide text-ay-muted">{props.label}</dt>
+      <dd className="nums text-lg font-semibold text-ay-text">{props.value.toLocaleString()}</dd>
     </div>
   );
 }

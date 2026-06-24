@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Stepper } from '../../components/dataops/Stepper.tsx';
 import { MultiCheckboxGroup } from '../../components/dataops/MultiCheckboxGroup.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 import { triggerBackfill } from '../../api/dataops.ts';
 import { ApiError } from '../../api/client.ts';
 import { cn } from '../../lib/cn.ts';
@@ -72,7 +73,7 @@ export function CollectionWizardPage() {
 
   return (
     <div>
-      <h1 className="mb-2 text-center text-sm font-semibold text-ay-text">Collection Wizard</h1>
+      <PageHeader title="Collection Wizard" />
 
       <div className="mx-auto max-w-2xl space-y-4">
         <Stepper steps={STEPS} current={step} />

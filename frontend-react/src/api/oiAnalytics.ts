@@ -22,6 +22,7 @@ import type {
   EquityNews,
   IndexContribution,
   OiBuzzHeatmap,
+  OiExpiryStrike,
   OiHeatmap,
   OpenHighLow,
   OiStats,
@@ -295,6 +296,27 @@ export function useOiHeatmap() {
   return useQuery({
     queryKey: ['oi', 'oi-heatmap', ctx.name, ctx.expiry, ctx.interval, ctx.mode, ctx.date],
     queryFn: () => oiGet<OiHeatmap | null>('/market/options/oi-heatmap', oiParams(ctx, true), null),
+    enabled: satisfiable(ctx, true),
+  });
+}
+
+/**
+ * OI Expiry Strategy / "Options EOD OI Analysis" (oipulse §options/oi-expiry-strategy): per-strike
+ * (CE+PE) last-N-session EOD OHLC + OI + Volume tables, windowed to the ATM strikes. The `{items}`
+ * envelope carries one entry per strike; 422 DATA_GAP → empty (the page renders its empty state).
+ */
+export function useOiExpiry() {
+  const ctx = useOiCtx();
+  return useQuery({
+    queryKey: ['oi', 'oi-expiry', ctx.name, ctx.expiry, ctx.interval, ctx.mode, ctx.date],
+    queryFn: async () => {
+      const res = await oiGet<{ items?: OiExpiryStrike[] }>(
+        '/market/options/oi-expiry',
+        oiParams(ctx, true),
+        { items: [] },
+      );
+      return listItems(res);
+    },
     enabled: satisfiable(ctx, true),
   });
 }

@@ -82,6 +82,11 @@ const OptionsOiChartPage = lazy(() =>
 const OiHeatmapPage = lazy(() =>
   import('./pages/options/OiHeatmapPage.tsx').then((m) => ({ default: m.OiHeatmapPage })),
 );
+const OiExpiryStrategyPage = lazy(() =>
+  import('./pages/options/OiExpiryStrategyPage.tsx').then((m) => ({
+    default: m.OiExpiryStrategyPage,
+  })),
+);
 const VixIndexPage = lazy(() =>
   import('./pages/features/VixIndexPage.tsx').then((m) => ({ default: m.VixIndexPage })),
 );
@@ -174,6 +179,7 @@ export function App() {
           <Route path="/options/multiple-oi-chart" element={<Lazy><MultipleOiChartPage /></Lazy>} />
           <Route path="/options/oi-chart" element={<Lazy><OptionsOiChartPage /></Lazy>} />
           <Route path="/options/oi-heatmap" element={<Lazy><OiHeatmapPage /></Lazy>} />
+          <Route path="/options/oi-expiry-strategy" element={<Lazy><OiExpiryStrategyPage /></Lazy>} />
           {/* Futures */}
           <Route path="/futures/oi-spurt" element={<FuturesOiSpurtPage />} />
           <Route path="/futures/market-movers" element={<FuturesMoversPage />} />

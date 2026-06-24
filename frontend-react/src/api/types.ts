@@ -206,6 +206,34 @@ export interface OiHeatmap {
   asOf: string | null;
 }
 
+/**
+ * One EOD daily row of GET /api/v1/market/options/oi-expiry (a strike's CE or PE table). Premium OHLC
+ * legs are decimal STRINGS (never parseFloat); `oi`/`volume` are longs; the day-over-day % changes are
+ * decimal strings or null (the first captured session has no prior). `interpretation` is the 4-state
+ * enum (or null). `allDayHigh`/`allDayLow` flag the date whose High/Low was the window extreme.
+ */
+export interface OiExpiryEodDay {
+  date: string;
+  open: string | null;
+  high: string | null;
+  low: string | null;
+  close: string | null;
+  oi: number | null;
+  volume: number | null;
+  changeInClosePct: string | null;
+  changeInOiPct: string | null;
+  interpretation: OiInterpretation | null;
+  allDayHigh: boolean;
+  allDayLow: boolean;
+}
+
+/** One strike's CE + PE daily tables (oipulse OI Expiry Strategy / "Options EOD OI Analysis"). */
+export interface OiExpiryStrike {
+  strike: string;
+  ce: OiExpiryEodDay[];
+  pe: OiExpiryEodDay[];
+}
+
 /** A CE/PE leg's cell values in the folded strike grid. */
 export interface LegCell {
   oi: number | null;

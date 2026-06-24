@@ -10,16 +10,79 @@ import {
   useSweepTrials,
   usePromoteTrial,
   type BestRow,
+  type GuardMetrics,
   type SortMode,
   type TrialState,
 } from '../../api/optimizations.ts';
 
 // /optimizations/:sweepId (master plan §20 parity, Phase 39): the sweep explorer + guard-aware
 // leaderboard. Plateau sort is the default (raw one click away — guard 4); pruned/failed trials are
-// FLAGGED, never hidden (guard 3). A live sweep stays fresh via refetchInterval. Promote → new draft.
-// The per-trial fold drill-down dialog is deferred.
+// FLAGGED, never hidden (guard 3). The leaderboard surfaces the four persisted §D.4 fold guards
+// (regimes covered, min-OOS Sharpe, folds excluded, dataHash flagged on mismatch); a full-window
+// trial shows a "no fold guards" badge. A live sweep stays fresh via refetchInterval. Promote →
+// new draft. The per-trial fold drill-down dialog is deferred.
 
 const num = (v: number | null | undefined) => (v == null ? '—' : formatDecimal(String(v), 3));
+
+// The most common dataHash among the leaderboard rows that carry one (null when none do). A row whose
+// guard hash differs from this gets the "dataHash≠" flag.
+function modalDataHash(rows: BestRow[]): string | null {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const hash = row.guardMetrics?.dataHash;
+    if (hash) counts.set(hash, (counts.get(hash) ?? 0) + 1);
+  }
+  let best: string | null = null;
+  let bestCount = 0;
+  for (const [hash, count] of counts) {
+    if (count > bestCount) {
+      best = hash;
+      bestCount = count;
+    }
+  }
+  return best;
+}
+
+// The compact guard cell: regimes-covered chips + min-OOS Sharpe + folds-excluded + a dataHash flag
+// shown ONLY when this row diverges from the sweep's modal hash (like BacktestComparePage). A
+// full-window/legacy trial (no guardMetrics) renders the "no fold guards" badge instead.
+function GuardCell({ guard, hashMismatch }: { guard?: GuardMetrics | null; hashMismatch: boolean }) {
+  if (!guard) {
+    return <span className="text-xs text-ay-muted ring-1 ring-ay-border rounded px-1.5 py-0.5">no fold guards</span>;
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {guard.regimesCovered.length > 0 ? (
+        guard.regimesCovered.map((r) => (
+          <span key={r} className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-semibold text-ay-text">
+            {r}
+          </span>
+        ))
+      ) : (
+        <span className="text-[10px] text-ay-muted">no regimes traded</span>
+      )}
+      <span className="tabular-nums text-xs text-ay-muted" title="min per-regime OOS Sharpe">
+        OOS≥ {num(guard.regimeOosMin)}
+      </span>
+      {guard.foldsExcluded != null && guard.foldsExcluded > 0 && (
+        <span
+          className="rounded bg-warn/15 px-1.5 py-0.5 text-[10px] font-semibold text-warn ring-1 ring-warn/40"
+          title="folds dropped under min_trades"
+        >
+          −{guard.foldsExcluded} folds
+        </span>
+      )}
+      {hashMismatch && (
+        <span
+          className="rounded bg-warn/15 px-1.5 py-0.5 text-[10px] font-semibold text-warn ring-1 ring-warn/40"
+          title="dataHash differs from the rest of the sweep — not like-for-like"
+        >
+          dataHash≠
+        </span>
+      )}
+    </div>
+  );
+}
 
 const STATE_TONE: Record<TrialState, string> = {
   COMPLETE: 'text-bull ring-bull/40',
@@ -48,6 +111,10 @@ export function SweepDetailPage() {
   const metric = best.data?.metric ?? 'sharpe';
   const bestRows = useMemo(() => best.data?.items ?? [], [best.data]);
   const trialRows = useMemo(() => trials.data?.items ?? [], [trials.data]);
+
+  // The sweep's modal dataHash, so a single divergent row flags "dataHash≠" (a sweep should run
+  // every trial over the same data window — a mismatch means not like-for-like, like the compare view).
+  const modalHash = useMemo(() => modalDataHash(bestRows), [bestRows]);
 
   const scatterOption = useCallback(
     (t: ChartTheme): EChartsOption => {
@@ -111,6 +178,7 @@ export function SweepDetailPage() {
               <th className="px-2 py-2 font-medium">Trial</th>
               <th className="px-2 py-2 text-right font-medium">Objective ({metric})</th>
               <th className="px-2 py-2 text-right font-medium">Plateau</th>
+              <th className="px-2 py-2 font-medium">Guards</th>
               <th className="px-2 py-2 font-medium">Params</th>
               <th className="px-2 py-2"><span className="ay-sr-only">Actions</span></th>
             </tr>
@@ -121,6 +189,14 @@ export function SweepDetailPage() {
                 <td className="px-2 py-2 tabular-nums">#{row.trialNumber}</td>
                 <td className="px-2 py-2 text-right tabular-nums">{num(row.objective)}</td>
                 <td className="px-2 py-2 text-right tabular-nums">{num(row.plateauObjective)}</td>
+                <td className="px-2 py-2">
+                  <GuardCell
+                    guard={row.guardMetrics}
+                    hashMismatch={
+                      !!row.guardMetrics?.dataHash && !!modalHash && row.guardMetrics.dataHash !== modalHash
+                    }
+                  />
+                </td>
                 <td className="px-2 py-2 font-mono text-xs text-ay-muted">{paramStr(row)}</td>
                 <td className="px-2 py-2 text-right">
                   {row.backtestRunId && (
@@ -144,7 +220,7 @@ export function SweepDetailPage() {
             ))}
             {bestRows.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-2 py-6 text-center text-ay-muted">No completed trials yet.</td>
+                <td colSpan={6} className="px-2 py-6 text-center text-ay-muted">No completed trials yet.</td>
               </tr>
             )}
           </tbody>

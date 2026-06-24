@@ -22,3 +22,22 @@ class BacktestClient:
         resp = self._client.get(f"{self._base}/api/v1/backtests/{run_id}/folds")
         resp.raise_for_status()
         return resp.json()
+
+    def guard_summary(self, run_id: str) -> dict[str, Any] | None:
+        """The persisted §D.4 guard outputs for one run — ``dataHash`` + ``foldsExcluded`` off the
+        run's results payload and each fold's ``regimeOos`` off ``/folds``. Returns ``None`` for a
+        full-window run (no fold structure), so the ``/best`` leaderboard simply omits the nested
+        ``guardMetrics`` for a legacy/full-window trial rather than a hollow one. No recompute —
+        both reads hit persisted §D.5 surfaces."""
+        folds = self.folds(run_id)
+        if not folds:
+            return None
+        resp = self._client.get(f"{self._base}/api/v1/backtests/{run_id}/results")
+        resp.raise_for_status()
+        results = resp.json()
+        metrics = results.get("metrics") or {}
+        return {
+            "dataHash": results.get("dataHash"),
+            "foldsExcluded": metrics.get("foldsExcluded"),
+            "regimeOos": [fold.get("regimeOos") or {} for fold in folds],
+        }

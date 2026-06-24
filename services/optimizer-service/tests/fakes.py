@@ -127,12 +127,18 @@ class FakeStrategy:
 
 
 class FakeBacktest:
-    """Returns a fixed fold array for any run id."""
+    """Returns a fixed fold array (and optional guard summary) for any run id."""
 
-    def __init__(self, folds: Any) -> None:
+    def __init__(self, folds: Any, guard: Any = None) -> None:
         self._folds = folds
+        self._guard = guard
         self.calls: list[str] = []
+        self.guard_calls: list[str] = []
 
     def folds(self, run_id: str) -> Any:
         self.calls.append(run_id)
         return self._folds
+
+    def guard_summary(self, run_id: str) -> Any:
+        self.guard_calls.append(run_id)
+        return self._guard

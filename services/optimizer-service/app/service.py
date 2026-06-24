@@ -192,7 +192,24 @@ class SweepService:
                 }
             )
         ranked = leaderboard.best(items, parameters, top, direction, sort)
+        self._attach_guard_metrics(ranked)
         return {"metric": metric, "sort": "raw" if sort == "raw" else "plateau", "items": ranked}
+
+    def _attach_guard_metrics(self, ranked: list[dict[str, Any]]) -> None:
+        """Surfaces the §D.4 guard outputs (already persisted — never recomputed) as a compact
+        optional ``guardMetrics`` object on each ranked row, only after ranking so the per-run reads
+        stay bounded by ``top``. A full-window/legacy trial (no fold structure, or no backtest
+        client wired) is left without the key — the React leaderboard then shows a 'no fold guards'
+        badge."""
+        if self._backtest is None:
+            return
+        for row in ranked:
+            run_id = row.get("backtestRunId")
+            if run_id is None:
+                continue
+            summary = self._backtest.guard_summary(run_id)
+            if summary is not None:
+                row["guardMetrics"] = leaderboard.guard_metrics(summary)
 
     def trial_folds(self, sweep_id: str, trial_number: int) -> Any:
         """The per-fold metric array for one sweep trial, resolved via its ``backtest_run_id``."""

@@ -5,6 +5,7 @@ import type { OiBuzzTile } from '../../api/types.ts';
 import { Select } from '../../components/atoms/Select.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 import { oiIntMeta } from '../../core/oiInterpretation.ts';
 import { formatDecimal } from '../../lib/decimal.ts';
 
@@ -12,6 +13,8 @@ import { formatDecimal } from '../../lib/decimal.ts';
 // by the near-month future's intraday % change (green gainers → red losers, intensity by magnitude).
 // The raw feed carries no index weight, so v1 sizes by |% change| (owner's call). Header shows the
 // advance/decline split; search locates a symbol; the OI-change interpretation badge is deferred to v2.
+// Revamp rollout: visible display-face H1 (was ay-sr-only — text preserved). The data region stays on
+// its existing empty path — the query is symbol-gated and the empty splits query-gap vs search-miss.
 
 const compactInt = (n: number) => new Intl.NumberFormat('en-IN', { notation: 'compact' }).format(n);
 const num = (s: string | null): number => (s == null ? 0 : Number(s));
@@ -115,7 +118,10 @@ export function OiBuzzPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Futures OI Buzz</h1>
+      <PageHeader
+        title="Futures OI Buzz"
+        subtitle="Index-constituent heatmap — tile size and colour ∝ near-month future % change"
+      />
 
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <Select

@@ -9,6 +9,9 @@ import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { OiBadge4 } from '../../components/atoms/OiBadge4.tsx';
 import { SignedCount } from '../../components/atoms/SignedCount.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
 
 // Futures OI Analysis (oipulse §futures/oi-analysis): the per-interval OI table for ONE futures contract
@@ -88,22 +91,35 @@ export function FuturesOiAnalysisPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Futures OI Analysis</h1>
+      <PageHeader
+        title="Futures OI Analysis"
+        subtitle="Per-interval OI, level breaks and 4-state interpretation for one futures contract"
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry={false} showInterval allowedIntervals={ANALYSIS_INTERVALS} />
         <GoButton onClick={() => q.refetch()} loading={q.isFetching} />
       </div>
 
-      <DataTable
-        columns={columns}
-        rows={rows}
-        rowKey={(r) => r.bucket}
-        pageSize={25}
-        initialSort={{ id: 'time', dir: 'desc' }}
-        ariaLabel="Futures OI analysis"
-        emptyMessage="No intraday futures data for this contract yet."
-      />
+      <QueryState
+        query={q}
+        isEmpty={() => rows.length === 0}
+        empty={{ title: 'No intraday futures data for this contract yet.' }}
+        errorTitle="Couldn't load futures OI analysis"
+        skeleton={<Skeleton variant="table-rows" rows={10} cols={11} />}
+      >
+        {() => (
+          <DataTable
+            columns={columns}
+            rows={rows}
+            rowKey={(r) => r.bucket}
+            pageSize={25}
+            initialSort={{ id: 'time', dir: 'desc' }}
+            ariaLabel="Futures OI analysis"
+            emptyMessage="No intraday futures data for this contract yet."
+          />
+        )}
+      </QueryState>
     </div>
   );
 }

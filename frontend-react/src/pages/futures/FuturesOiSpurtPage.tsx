@@ -7,6 +7,9 @@ import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { SignedCount } from '../../components/atoms/SignedCount.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
 
 // Futures OI Spurt (oipulse §futures/oi-spurt): the 2×2 OI scanner — every captured futures contract
@@ -14,6 +17,8 @@ import { formatDecimal } from '../../lib/decimal.ts';
 // /futures/spurt feed (now carrying prevClose + LTP Chg%). NOTE: our capture universe is the index
 // futures + 17 bank-sector stock futures (not all ~320 F&O stocks oipulse scans) — a structurally
 // faithful, reduced-universe replica (documented; the all-F&O capture is a deferred expansion).
+// Revamp rollout: visible display-face H1 (was ay-sr-only — text preserved) + QueryState over the
+// quadrant grid (error/empty/pending split). Search filters client-side, so emptiness stays per-table.
 
 interface Quadrant {
   state: OiInterpretation;
@@ -61,7 +66,10 @@ export function FuturesOiSpurtPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Futures OI Spurt</h1>
+      <PageHeader
+        title="Futures OI Spurt"
+        subtitle="Every captured futures contract bucketed by its 4-state OI interpretation"
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry={false} showInterval />
@@ -76,28 +84,44 @@ export function FuturesOiSpurtPage() {
         <GoButton onClick={() => q.refetch()} loading={q.isFetching} />
       </div>
 
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        {QUADRANTS.map((qd) => (
-          <div key={qd.state} className="rounded border border-ay-border bg-surface-1 p-2">
-            <div className="mb-1 flex items-baseline justify-between">
-              <div>
-                <span className="text-sm font-semibold text-ay-text">{qd.title}</span>
-                <span className="ml-2 text-xs text-ay-muted">{qd.subtitle}</span>
-              </div>
-              <span className="text-xs text-ay-muted tabular-nums">{byQuadrant[qd.state].length}</span>
-            </div>
-            <DataTable
-              columns={COLUMNS}
-              rows={byQuadrant[qd.state]}
-              rowKey={(r) => r.tradingsymbol}
-              pageSize={8}
-              initialSort={{ id: 'oiChg', dir: 'desc' }}
-              ariaLabel={qd.title}
-              emptyMessage="No contracts."
-            />
+      <QueryState
+        query={q}
+        isEmpty={() => items.length === 0}
+        empty={{ title: 'No futures contracts captured yet.' }}
+        errorTitle="Couldn't load futures OI spurt"
+        skeleton={
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {QUADRANTS.map((qd) => (
+              <Skeleton key={qd.state} variant="table-rows" rows={8} cols={8} />
+            ))}
           </div>
-        ))}
-      </div>
+        }
+      >
+        {() => (
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {QUADRANTS.map((qd) => (
+              <div key={qd.state} className="rounded border border-ay-border bg-surface-1 p-2">
+                <div className="mb-1 flex items-baseline justify-between">
+                  <div>
+                    <span className="text-sm font-semibold text-ay-text">{qd.title}</span>
+                    <span className="ml-2 text-xs text-ay-muted">{qd.subtitle}</span>
+                  </div>
+                  <span className="text-xs text-ay-muted tabular-nums">{byQuadrant[qd.state].length}</span>
+                </div>
+                <DataTable
+                  columns={COLUMNS}
+                  rows={byQuadrant[qd.state]}
+                  rowKey={(r) => r.tradingsymbol}
+                  pageSize={8}
+                  initialSort={{ id: 'oiChg', dir: 'desc' }}
+                  ariaLabel={qd.title}
+                  emptyMessage="No contracts."
+                />
+              </div>
+            ))}
+          </div>
+        )}
+      </QueryState>
     </div>
   );
 }

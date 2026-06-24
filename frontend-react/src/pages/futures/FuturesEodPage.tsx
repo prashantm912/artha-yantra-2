@@ -9,6 +9,9 @@ import { Select } from '../../components/atoms/Select.tsx';
 import { OiBadge4 } from '../../components/atoms/OiBadge4.tsx';
 import { SignedCount } from '../../components/atoms/SignedCount.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
 
 // Futures EOD OI Analyzer (oipulse §futures/eod-oi-analyzer): day-by-day OHLC + OI + day-over-day
@@ -73,7 +76,10 @@ export function FuturesEodPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Futures EOD OI Analyzer</h1>
+      <PageHeader
+        title="Futures EOD OI Analyzer"
+        subtitle="Day-by-day OHLC, OI and day-over-day deltas for one futures contract"
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Select ariaLabel="Underlying" value={name} options={nameOptions} onChange={setName} />
@@ -83,14 +89,24 @@ export function FuturesEodPage() {
         <GoButton onClick={() => q.refetch()} loading={q.isFetching} />
       </div>
 
-      <DataTable
-        columns={columns}
-        rows={rows}
-        rowKey={(r) => r.tradeDate}
-        pageSize={25}
-        ariaLabel="Futures EOD OI analyzer"
-        emptyMessage="No EOD data captured for this contract yet."
-      />
+      <QueryState
+        query={q}
+        isEmpty={() => rows.length === 0}
+        empty={{ title: 'No EOD data captured for this contract yet.' }}
+        errorTitle="Couldn't load futures EOD data"
+        skeleton={<Skeleton variant="table-rows" rows={10} cols={13} />}
+      >
+        {() => (
+          <DataTable
+            columns={columns}
+            rows={rows}
+            rowKey={(r) => r.tradeDate}
+            pageSize={25}
+            ariaLabel="Futures EOD OI analyzer"
+            emptyMessage="No EOD data captured for this contract yet."
+          />
+        )}
+      </QueryState>
     </div>
   );
 }

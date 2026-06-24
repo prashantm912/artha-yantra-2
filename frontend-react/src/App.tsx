@@ -99,6 +99,9 @@ const VixIndexPage = lazy(() =>
 const WorldIndicesPage = lazy(() =>
   import('./pages/features/WorldIndicesPage.tsx').then((m) => ({ default: m.WorldIndicesPage })),
 );
+const PreOpenMarketPage = lazy(() =>
+  import('./pages/equity/PreOpenMarketPage.tsx').then((m) => ({ default: m.PreOpenMarketPage })),
+);
 const BreadthPage = lazy(() =>
   import('./pages/equity/BreadthPage.tsx').then((m) => ({ default: m.BreadthPage })),
 );
@@ -206,6 +209,7 @@ export function App() {
           <Route path="/fii-dii/participant-wise-oi" element={<ParticipantWiseOiPage />} />
           <Route path="/fii-dii/long-short-ratio" element={<Lazy><FiiLongShortPage /></Lazy>} />
           {/* Equity */}
+          <Route path="/equity/pre-open-market" element={<Lazy><PreOpenMarketPage /></Lazy>} />
           <Route path="/equity/breadth" element={<Lazy><BreadthPage /></Lazy>} />
           <Route path="/equity/delivery-data" element={<Lazy><DeliveryDataPage /></Lazy>} />
           <Route path="/equity/equity-returns" element={<Lazy><EquityReturnsPage /></Lazy>} />

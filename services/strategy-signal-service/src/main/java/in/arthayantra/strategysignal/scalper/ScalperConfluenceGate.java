@@ -2,6 +2,7 @@ package in.arthayantra.strategysignal.scalper;
 
 import in.arthayantra.black76.Black76.OptionType;
 import in.arthayantra.common.web.time.Ist;
+import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.strategyengine.eval.BarValues;
 import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategyengine.series.EngineSeries;
@@ -43,11 +44,14 @@ public class ScalperConfluenceGate {
 
   private final MarketOiClient client;
   private final ScalperOiProps oiProps;
+  private final MarketCalendar calendar;
 
-  /** Wires the market-data OI/chain client + the Tier-1 OI-analytics thresholds. */
-  public ScalperConfluenceGate(MarketOiClient client, ScalperOiProps oiProps) {
+  /** Wires the market-data OI/chain client, the Tier-1 OI-analytics thresholds + the NSE calendar. */
+  public ScalperConfluenceGate(
+      MarketOiClient client, ScalperOiProps oiProps, MarketCalendar calendar) {
     this.client = client;
     this.oiProps = oiProps;
+    this.calendar = calendar;
   }
 
   /**
@@ -170,6 +174,22 @@ public class ScalperConfluenceGate {
         return Optional.empty();
       }
       structuralStop = ohl.stopLevel();
+    }
+    // #7 (section 7) Hero-Zero: when the strategy declares it, a HARD expiry-day end-of-day pre-gate -
+    // expiry-day only (monthly-expiry blocks: prior-month OI is corrupt), after 14:30 / before the
+    // 15:20 fresh-entry cap, a >50% OI+price "real move" on the side + short-covering on the side, RSI
+    // not overbought/oversold, and the deploy bar closing toward the matching session extreme. Fail-
+    // closed (any missing leg / null OI / null RSI blocks); the OPPOSITE session extreme becomes the
+    // structural stop. tradeDate is the live bar's IST date (the same one driving the OI suppression).
+    if (cfg.requireHeroZero()) {
+      HeroZeroGate.Verdict hz =
+          HeroZeroGate.evaluate(
+              future, index, side, ctx.oi(), chart.rsi14(), istTime,
+              calendar.isWeeklyIndexExpiryDay(tradeDate), calendar.isMonthlyIndexExpiryDay(tradeDate));
+      if (!hz.pass()) {
+        return Optional.empty();
+      }
+      structuralStop = hz.stopLevel();
     }
     // #9 (section 3.9) Morning Trade: VWAP is "not actionable before 10:30" in the opening tick, so the
     // opening-tick path drops VWAP from the HARD validity gate before 10:30 IST (it stays a soft dot in

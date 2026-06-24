@@ -1,0 +1,83 @@
+# Siva #7 - Hero-Zero. The `hero-zero` tag arms the section-12.3 HeroZeroGate: an EXPIRY-DAY-ONLY,
+# BUY-SIDE-ONLY (long premium - defined risk, NEVER short) end-of-day scalp. After ~14:30 the
+# highest-OI build-up has marked the day's range (the Put strike is support, the Call strike
+# resistance); the trade fires on a REAL break of that range into the close. The hard pre-gate requires
+# ALL of: (a) an index weekly-expiry day - on a MONTHLY expiry the prior-month chain-OI is corrupt so
+# the gate IGNORES OI and blocks (the deck's "ignore OI on monthly expiry" caveat = the S24
+# suppression); (b) the 14:30-15:20 window (the range is only marked after 14:30; no fresh buy in the
+# last minutes); (c) a REAL move - the call/put dOI imbalance % >=50 AND the spurt price move >=50% on
+# the SAME side (OI rising without price following is the deck's explicit skip); (d) short-covering on
+# the side - a drastic FALL in the side's OI (call writers covering for a bullish CE / put writers for
+# a bearish PE) with a SHORT_COVERING quadrant; a both-sides long-unwinding read is skipped; (e) the
+# deploy bar closing toward the matching session extreme (the day HIGH for a bullish CE, the day LOW
+# for a bearish PE); (f) RSI not overbought (CE) / not oversold (PE). Any missing leg BLOCKS; a null /
+# inert OI snapshot (the monthly-expiry suppression, or any unavailable read) degrades to a block.
+#
+# Strike (documented, live-managed): the deck buys ONE strike BELOW the short-covering CALL strike
+# (bullish) / ONE strike ABOVE the SC PUT strike (bearish) - never the ultra-cheap already-covered
+# strike. The per-strike SC strike is a LIVE-only derivation (never in deterministic replay), so the
+# concrete leg is the shared StrikePicker delta/premium band (the slightly-ITM 0.6-0.7 strike one step
+# inside the SC strike) and the "one strike away from the SC strike" rule is recorded here, not
+# resolved on the parity path.
+#
+# Stop: SL = 50% of premium (the primary live stop, the stop_loss premium_pct rule below) + the 15:20
+# square-off (no carry into the 3:20 hard close). The HeroZeroGate also returns the OPPOSITE session
+# extreme as a deterministic index-future structural reference (a bullish CE is invalidated by a fall
+# back to the session low; a bearish PE by a rally back to the session high). Small size (~10% of
+# profits, a risk-layer discipline note - not enforced here), never average a loser.
+#
+# `direction: both` - the side is resolved live (toward the day high => CE, toward the day low => PE).
+# Evaluates on the NIFTY front future (Model A); the confluence seam buys the nearest-weekly ATM-band
+# option on the resolved side.
+schema: strategy-schema/v1
+id: scalp-hero-zero-nifty
+name: "Scalper · Hero Zero · NIFTY"
+version: 1.0.0
+description: "Hero-Zero expiry-day end-of-day scalp (Siva #7) on the NIFTY 3-min front future: index weekly-expiry day only (OI ignored on monthly expiry), after 14:30 in the 14:30-15:20 window, a >50% OI+price range break confirmed by short-covering on the side, RSI not overbought/oversold, closing toward the day extreme; long-premium BUY side only (CE toward the day high / PE toward the day low), SL = 50% of premium + 15:20 square-off, one strike inside the SC strike."
+author: owner
+tags: [scalper, options, intraday, nifty, hero-zero]
+
+universe:
+  mode: options_of_underlying
+  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  options:
+    expiry: nearest_weekly
+    strikes: { selector: atm_window, width: 3 }
+    option_types: [CE, PE]
+
+timeframes:
+  primary: 3m
+  additional: [1h]
+
+indicators:
+  - { name: VWMA,       alias: vwma20,    timeframe: 3m, params: { period: 20 } }
+  - { name: PSAR,       alias: psar,      timeframe: 3m }
+  - { name: RSI,        alias: rsi14,     timeframe: 3m, params: { period: 14 }, weight: 1.0,
+      normalize: { type: rsi_momentum } }
+  - { name: SUPERTREND, alias: supertrend, timeframe: 3m, params: { period: 10, multiplier: 2.0 },
+      weight: 1.0, normalize: { type: direction } }
+  - { name: SUPERTREND, alias: bias60m,   timeframe: 1h, params: { period: 7, multiplier: 3.0 } }
+
+entry_rules:
+  direction: both
+  gate:
+    all:
+      - "volume > 0"             # the section-0B volume/RSI rails + the HeroZeroGate carry the real entry logic
+  scoring:
+    threshold: 0.2
+
+exit_rules:
+  - { type: stop_loss,   params: { basis: premium_pct, value: 50 } }   # section 7: SL = 50% of premium
+  - { type: signal_exit, params: { rule: "close < vwap" } }            # the break failing back through VWAP invalidates
+  - { type: time_stop,   params: { max_bars: 16 } }                    # ~48 min cap into the 15:20 square-off
+
+risk:
+  position_sizing: { method: premium_budget, params: { budget_inr: 2000 } }   # section 7: small size
+  max_positions: 1
+  max_positions_per_underlying: 1
+  max_daily_loss_pct: 2.0
+  session:
+    style: expiry_day
+    window: { from: "14:30", to: "15:20" }   # section 7: the range is marked after 14:30; no fresh buy after 15:20
+    square_off: "15:20"                        # no carry into the 3:20 hard close
+    expiry_day: { allowed: true, window: { from: "14:30", to: "15:20" } }

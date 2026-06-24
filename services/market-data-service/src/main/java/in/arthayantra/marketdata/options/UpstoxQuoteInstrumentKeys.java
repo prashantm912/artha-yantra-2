@@ -17,9 +17,14 @@ import java.util.Map;
  *       it.</li>
  * </ul>
  *
- * <p>Anything else (notably exchange-traded F&amp;O FUT symbols, whose Upstox key is a numeric token
- * not derivable from the tradingsymbol) returns {@code null}; the {@code QuoteGateway} adapter then
- * simply OMITS that key from the batch, so the Kite path stays the source for the unmapped instrument.
+ *   <li><b>FUT / options</b> — when an {@link UpstoxFnoInstrumentKeys} resolver is supplied (the
+ *       Wave-U4 enabler), the F&amp;O leg is resolved to its Upstox {@code NSE_FO|<token>} /
+ *       {@code BSE_FO|<token>} key via the Upstox instrument master. Without the resolver (the
+ *       pre-U4 behavior) F&amp;O still falls through to {@code null}.</li>
+ * </ul>
+ *
+ * <p>Anything still unresolved returns {@code null}; the {@code QuoteGateway} adapter then simply OMITS
+ * that key from the batch, so the Kite path stays the source for the unmapped instrument.
  */
 final class UpstoxQuoteInstrumentKeys {
 
@@ -34,14 +39,23 @@ final class UpstoxQuoteInstrumentKeys {
           "BANKEX", "BSE_INDEX|BANKEX");
 
   private final StockUpstoxKeyMap stockKeys;
+  private final UpstoxFnoInstrumentKeys fnoKeys;
 
+  /** Index + equity only (the pre-U4 shape; F&amp;O stays unmapped). */
   UpstoxQuoteInstrumentKeys(StockUpstoxKeyMap stockKeys) {
+    this(stockKeys, null);
+  }
+
+  /** Index + equity, plus FUT/option coverage via the {@code fnoKeys} resolver when non-null. */
+  UpstoxQuoteInstrumentKeys(StockUpstoxKeyMap stockKeys, UpstoxFnoInstrumentKeys fnoKeys) {
     this.stockKeys = stockKeys;
+    this.fnoKeys = fnoKeys;
   }
 
   /**
    * The Upstox {@code instrument_key} for a domain {@link InstrumentKey}: an index by display name, an
-   * NSE cash equity via the stock reference, else {@code null} (unmappable — left to the Kite path).
+   * NSE cash equity via the stock reference, a FUT/option via the F&amp;O resolver (when supplied),
+   * else {@code null} (unmappable — left to the Kite path).
    */
   String key(InstrumentKey instrument) {
     String index = INDEX_KEYS.get(instrument.tradingsymbol());
@@ -49,8 +63,11 @@ final class UpstoxQuoteInstrumentKeys {
       return index;
     }
     if ("NSE".equals(instrument.exchange())) {
-      return stockKeys.key(instrument.tradingsymbol());
+      String equity = stockKeys.key(instrument.tradingsymbol());
+      if (equity != null) {
+        return equity;
+      }
     }
-    return null;
+    return fnoKeys == null ? null : fnoKeys.key(instrument);
   }
 }

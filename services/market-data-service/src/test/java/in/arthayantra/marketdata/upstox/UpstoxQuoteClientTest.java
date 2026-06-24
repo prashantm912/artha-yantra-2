@@ -6,16 +6,26 @@ import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import in.arthayantra.marketdata.constituents.StockUpstoxKeyMap;
+import in.arthayantra.marketdata.instruments.Instrument;
+import in.arthayantra.marketdata.instruments.InstrumentRepository;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.QuoteGateway;
 import in.arthayantra.marketdata.options.UpstoxQuoteGateway;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.zip.GZIPOutputStream;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -182,5 +192,66 @@ class UpstoxQuoteClientTest {
     // a request of only unmappable FUT keys never reaches Upstox
     assertThat(gateway.quotes(List.of(new InstrumentKey("NFO", "NIFTY26JUNFUT")))).isEmpty();
     assertThat(wireMock.getAllServeEvents()).as("no Upstox call for unmappable batch").isEmpty();
+  }
+
+  @Test
+  void gatewayNowResolvesAFutKeyViaTheUpstoxFnoMaster() {
+    // Wave-U4: with the F&O master bound, a FUT key that the pre-U4 gateway OMITTED now resolves to
+    // NSE_FO|61093, reaches Upstox in the batch, and is mapped back to the domain Quote.
+    wireMock.stubFor(
+        get(urlPathEqualTo("/v2/market-quote/quotes"))
+            .willReturn(
+                aResponse()
+                    .withHeader("Content-Type", "application/json")
+                    .withBody(
+                        "{\"status\":\"success\",\"data\":{\"NSE_FO:61093\":"
+                            + "{\"last_price\":23870.5,\"volume\":12500000,\"oi\":11250000,"
+                            + "\"ohlc\":{\"open\":23760.0,\"high\":23925.0,\"low\":23740.0,\"close\":23750.5},"
+                            + "\"depth\":{\"buy\":[{\"price\":23870.0}],\"sell\":[{\"price\":23871.0}]}}}}")));
+    wireMock.stubFor(
+        get(urlPathEqualTo("/market-quote/instruments/exchange/complete.json.gz"))
+            .willReturn(
+                aResponse()
+                    .withBody(
+                        gzip(
+                            "[{\"segment\":\"NSE_FO\",\"asset_symbol\":\"NIFTY\","
+                                + "\"instrument_key\":\"NSE_FO|61093\",\"instrument_type\":\"FUT\","
+                                + "\"expiry\":1785263399000,\"strike_price\":0.0}]"))));
+
+    InstrumentRepository repo = mock(InstrumentRepository.class);
+    when(repo.findByKey("NFO", "NIFTY26JULFUT"))
+        .thenReturn(
+            Optional.of(
+                new Instrument(
+                    "NFO", "NIFTY26JULFUT", 510_001L, "NIFTY", "NFO-FUT", "FUT", "NSE", "NIFTY",
+                    LocalDate.of(2026, 7, 28), null, null, 75, true)));
+    UpstoxFnoMasterClient master =
+        new UpstoxFnoMasterClient(
+            RestClient.builder(),
+            new ObjectMapper(),
+            new UpstoxAnalyticsProperties(null, null, null, wireMock.baseUrl()));
+    UpstoxQuoteGateway gateway =
+        new UpstoxQuoteGateway(client(), new StockUpstoxKeyMap(new ObjectMapper()), repo, master);
+
+    InstrumentKey fut = new InstrumentKey("NFO", "NIFTY26JULFUT");
+    Map<InstrumentKey, QuoteGateway.Quote> quotes = gateway.quotes(List.of(fut));
+
+    assertThat(quotes).containsOnlyKeys(fut);
+    assertThat(quotes.get(fut).lastPrice()).isEqualByComparingTo("23870.5");
+    assertThat(quotes.get(fut).oi()).isEqualTo(11250000L);
+    // the resolved FUT key reaches Upstox (the pre-U4 path would have sent an empty batch)
+    wireMock.verify(
+        getRequestedFor(urlPathEqualTo("/v2/market-quote/quotes"))
+            .withQueryParam("instrument_key", equalTo("NSE_FO|61093")));
+  }
+
+  private static byte[] gzip(String json) {
+    ByteArrayOutputStream out = new ByteArrayOutputStream();
+    try (GZIPOutputStream gz = new GZIPOutputStream(out)) {
+      gz.write(json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+    return out.toByteArray();
   }
 }

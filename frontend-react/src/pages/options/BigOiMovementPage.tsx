@@ -14,6 +14,7 @@ import { SignedCount } from '../../components/atoms/SignedCount.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { compareDecimal, formatDecimal } from '../../lib/decimal.ts';
 import { nearestStrike } from '../../lib/strikes.ts';
+import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 
 // Big OI Movement (oipulse §options/big-oi-movement): the biggest OI-change strikes, split CE | PE,
 // tagged by moneyness + OI interpretation. The faithful columns need per-leg ΔLTP + interpretation
@@ -72,7 +73,7 @@ export function BigOiMovementPage() {
   ];
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Big OI Movement" subtitle="Biggest OI-change strikes, split CE | PE, tagged by moneyness + OI interpretation" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -80,10 +81,14 @@ export function BigOiMovementPage() {
         <GoButton onClick={() => { spurtQ.refetch(); chainQ.refetch(); }} loading={spurtQ.isFetching} />
       </div>
 
-      <p className="mb-3 flex flex-wrap items-center gap-2 text-sm text-ay-muted">
-        {spot && <Metric label="Spot" value={formatDecimal(spot, 2)} />}
+      <BeatStrip className="card shadow-e1 mb-3 flex flex-wrap items-center gap-2 text-sm text-ay-muted">
+        {spot && (
+          <BeatItem>
+            <Metric label="Spot" value={formatDecimal(spot, 2)} />
+          </BeatItem>
+        )}
         <span className="text-xs">· top {TOP_N} OI moves per side · as of {time}</span>
-      </p>
+      </BeatStrip>
 
       <QueryState
         query={spurtQ}
@@ -91,14 +96,14 @@ export function BigOiMovementPage() {
         empty={{ title: 'No OI moves — pick an underlying + expiry with captured snapshots.' }}
         errorTitle="Couldn't load OI movement"
         skeleton={
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-2">
             <Skeleton variant="table-rows" rows={10} cols={8} />
             <Skeleton variant="table-rows" rows={10} cols={8} />
           </div>
         }
       >
         {() => (
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <BeatBlock className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-2">
             <div>
               <div className="mb-1 text-sm font-semibold text-bear">CALL (CE)</div>
               <DataTable columns={columns('CE')} rows={ce} rowKey={(r) => r.strike} ariaLabel="Big OI movement — calls" emptyMessage="No CE moves." />
@@ -107,9 +112,9 @@ export function BigOiMovementPage() {
               <div className="mb-1 text-sm font-semibold text-bull">PUT (PE)</div>
               <DataTable columns={columns('PE')} rows={pe} rowKey={(r) => r.strike} ariaLabel="Big OI movement — puts" emptyMessage="No PE moves." />
             </div>
-          </div>
+          </BeatBlock>
         )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

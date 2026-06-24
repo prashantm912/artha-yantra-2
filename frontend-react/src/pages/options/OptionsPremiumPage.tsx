@@ -11,6 +11,7 @@ import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
 import { Select } from '../../components/atoms/Select.tsx';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
+import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
 
 // Options Premium (oipulse §options/options-premium): grouped Call/Put premium bars per strike around
@@ -110,7 +111,7 @@ export function OptionsPremiumPage() {
   );
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Options Premium" subtitle="Grouped Call/Put premium bars per strike around ATM — extrinsic value or raw LTP" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -128,14 +129,26 @@ export function OptionsPremiumPage() {
         <GoButton onClick={() => q.refetch()} loading={q.isFetching} />
       </div>
 
-      <p className="mb-3 flex flex-wrap items-center gap-2 text-sm text-ay-muted">
-        {spot && <Metric label="Spot" value={formatDecimal(spot, 2)} />}
-        {chain?.atmStrike && <Metric label="ATM" value={chain.atmStrike} />}
-        {chain?.atmStraddle && <Metric label="ATM straddle" value={formatDecimal(chain.atmStraddle, 2)} />}
+      <BeatStrip className="card shadow-e1 mb-3 flex flex-wrap items-center gap-2 text-sm text-ay-muted">
+        {spot && (
+          <BeatItem>
+            <Metric label="Spot" value={formatDecimal(spot, 2)} />
+          </BeatItem>
+        )}
+        {chain?.atmStrike && (
+          <BeatItem>
+            <Metric label="ATM" value={chain.atmStrike} />
+          </BeatItem>
+        )}
+        {chain?.atmStraddle && (
+          <BeatItem>
+            <Metric label="ATM straddle" value={formatDecimal(chain.atmStraddle, 2)} />
+          </BeatItem>
+        )}
         <span className="text-xs">
           · bars = {showLtp ? 'raw LTP' : 'extrinsic value (LTP − intrinsic)'} · Call green / Put red
         </span>
-      </p>
+      </BeatStrip>
 
       <QueryState
         query={q}
@@ -148,7 +161,7 @@ export function OptionsPremiumPage() {
         skeleton={<Skeleton variant="chart-block" height={440} />}
       >
         {() => (
-          <div className="card shadow-e1">
+          <BeatBlock className="card shadow-e1">
             <div className="mb-2 flex items-center justify-between">
               <h2 className="text-h3 text-ay-text">Premium per strike</h2>
               <div className="flex items-center gap-3 text-caption text-ay-muted">
@@ -167,9 +180,9 @@ export function OptionsPremiumPage() {
               height={440}
               ariaLabel="Call versus Put premium bars per strike around ATM"
             />
-          </div>
+          </BeatBlock>
         )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

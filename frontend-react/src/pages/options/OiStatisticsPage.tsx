@@ -13,6 +13,7 @@ import {
   IndividualOiChart,
   PcrPriceChart,
 } from '../../components/OiStatsCharts.tsx';
+import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
 
 // Options OI Statistics (oipulse §options/oi-statistics) — the OI-distribution + PCR view. Three charts,
@@ -56,7 +57,7 @@ export function OiStatisticsPage() {
   const hasBars = individual.strikes.length > 0;
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Options OI Statistics" subtitle="OI distribution + PCR — cumulative & per-strike OI and the intraday PCR-vs-price line" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -80,13 +81,23 @@ export function OiStatisticsPage() {
         />
       </div>
 
-      <div className="mb-4 flex flex-wrap items-center gap-2" aria-live="polite">
-        <Metric label="PCR" value={stats?.pcr ? formatDecimal(stats.pcr, 2) : '—'} />
-        <Metric label="Max Pain" value={stats?.maxPain ? formatDecimal(stats.maxPain, 0) : '—'} />
-        <Metric label="Total Call OI" value={stats ? compact(stats.ceOi) : '—'} />
-        <Metric label="Total Put OI" value={stats ? compact(stats.peOi) : '—'} />
-        <Metric label="Last updated" value={stats?.asOf ? stats.asOf.slice(11, 19) : '—'} />
-      </div>
+      <BeatStrip className="card shadow-e1 mb-4 flex flex-wrap items-center gap-2" aria-live="polite">
+        <BeatItem>
+          <Metric label="PCR" value={stats?.pcr ? formatDecimal(stats.pcr, 2) : '—'} />
+        </BeatItem>
+        <BeatItem>
+          <Metric label="Max Pain" value={stats?.maxPain ? formatDecimal(stats.maxPain, 0) : '—'} />
+        </BeatItem>
+        <BeatItem>
+          <Metric label="Total Call OI" value={stats ? compact(stats.ceOi) : '—'} />
+        </BeatItem>
+        <BeatItem>
+          <Metric label="Total Put OI" value={stats ? compact(stats.peOi) : '—'} />
+        </BeatItem>
+        <BeatItem>
+          <Metric label="Last updated" value={stats?.asOf ? stats.asOf.slice(11, 19) : '—'} />
+        </BeatItem>
+      </BeatStrip>
 
       <QueryState
         query={analysisQ}
@@ -104,29 +115,29 @@ export function OiStatisticsPage() {
         }
       >
         {() => (
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <BeatBlock className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <section className="card shadow-e1 lg:col-span-1">
-              <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">
+              <h2 className="mb-1 text-h3 text-ay-text">
                 Cumulative OI{showChange ? ' (Chg.)' : ''}
               </h2>
               <CumulativeOiChart callOi={callTotal} putOi={putTotal} changeView={showChange} />
             </section>
             <section className="card shadow-e1 lg:col-span-2">
-              <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">
+              <h2 className="mb-1 text-h3 text-ay-text">
                 Individual OI{showChange ? ' (Chg.)' : ''} — Call (resistance) vs Put (support)
               </h2>
               <IndividualOiChart data={individual} changeView={showChange} />
             </section>
-          </div>
+          </BeatBlock>
         )}
       </QueryState>
 
       {pcrPrice.length > 0 && (
         <section className="card shadow-e1 mt-4">
-          <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">PCR vs Price</h2>
+          <h2 className="mb-1 text-h3 text-ay-text">PCR vs Price</h2>
           <PcrPriceChart points={pcrPrice} />
         </section>
       )}
-    </div>
+    </LoadBeat>
   );
 }

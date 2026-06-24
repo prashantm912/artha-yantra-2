@@ -11,6 +11,7 @@ import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { StraddleChart } from '../../components/StraddleChart.tsx';
+import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 
 // Straddle/Strangle Chart (§20.7.6). The combined CE+PE premium candlestick + VWAP/20-EMA/Call/Put
 // overlays. Strike list + ATM default come from the live /chain-table (no snapshot dependency). A
@@ -55,7 +56,7 @@ export function OptionsStraddlePage() {
   const data = straddleQ.data ?? null;
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Options straddle chart" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -108,26 +109,36 @@ export function OptionsStraddlePage() {
       </div>
 
       {/* Underlying + strike header strip (§20.7.6). */}
-      <div className="mb-3 flex flex-wrap items-center gap-2" aria-live="polite">
-        <Metric
-          label={data?.underlying ?? chainQ.data?.underlying ?? 'Underlying'}
-          value={data?.underlyingLtp ? formatDecimal(data.underlyingLtp, 2) : '—'}
-        />
-        <Metric
-          label="DO"
-          value={data?.underlyingDayOpen ? formatDecimal(data.underlyingDayOpen, 2) : '—'}
-        />
-        <Metric
-          label="Strikes"
-          value={
-            strangle
-              ? `${callStrike ?? '—'} / ${putStrike ?? '—'}`
-              : (strike ?? '—')
-          }
-        />
-        <Metric label="Interval" value={data?.interval ?? '—'} />
-        <Metric label="Last updated" value={data?.asOf ? data.asOf.slice(11, 19) : '—'} />
-      </div>
+      <BeatStrip className="card shadow-e1 mb-3 flex flex-wrap items-center gap-2" aria-live="polite">
+        <BeatItem>
+          <Metric
+            label={data?.underlying ?? chainQ.data?.underlying ?? 'Underlying'}
+            value={data?.underlyingLtp ? formatDecimal(data.underlyingLtp, 2) : '—'}
+          />
+        </BeatItem>
+        <BeatItem>
+          <Metric
+            label="DO"
+            value={data?.underlyingDayOpen ? formatDecimal(data.underlyingDayOpen, 2) : '—'}
+          />
+        </BeatItem>
+        <BeatItem>
+          <Metric
+            label="Strikes"
+            value={
+              strangle
+                ? `${callStrike ?? '—'} / ${putStrike ?? '—'}`
+                : (strike ?? '—')
+            }
+          />
+        </BeatItem>
+        <BeatItem>
+          <Metric label="Interval" value={data?.interval ?? '—'} />
+        </BeatItem>
+        <BeatItem>
+          <Metric label="Last updated" value={data?.asOf ? data.asOf.slice(11, 19) : '—'} />
+        </BeatItem>
+      </BeatStrip>
 
       <QueryState
         query={straddleQ}
@@ -146,20 +157,22 @@ export function OptionsStraddlePage() {
               No candles for this strike/session — pick a strike with intraday option trades.
             </p>
           ) : (
-            <section className="card shadow-e1">
-              <h2 className="mb-2 text-h3 text-ay-text">
-                Options {strangle ? 'Strangle' : 'Straddle'} Chart
-              </h2>
-              <StraddleChart
-                items={data.items}
-                callStrike={data.callStrike}
-                putStrike={data.putStrike}
-                underlying={data.underlying}
-              />
-            </section>
+            <BeatBlock>
+              <section className="card shadow-e1">
+                <h2 className="mb-2 text-h3 text-ay-text">
+                  Options {strangle ? 'Strangle' : 'Straddle'} Chart
+                </h2>
+                <StraddleChart
+                  items={data.items}
+                  callStrike={data.callStrike}
+                  putStrike={data.putStrike}
+                  underlying={data.underlying}
+                />
+              </section>
+            </BeatBlock>
           ))
         }
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

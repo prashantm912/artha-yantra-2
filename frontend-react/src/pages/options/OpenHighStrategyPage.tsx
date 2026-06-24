@@ -7,6 +7,7 @@ import { Skeleton } from '../../components/Skeletons.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { cn } from '../../lib/cn.ts';
 import { formatDecimal } from '../../lib/decimal.ts';
 import type { OpenHighStrategyLeg, OpenHighStrategyStrike } from '../../api/types.ts';
@@ -77,7 +78,7 @@ export function OpenHighStrategyPage() {
   const rows = q.data ?? [];
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Open and High Strategy" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -97,17 +98,19 @@ export function OpenHighStrategyPage() {
         skeleton={<Skeleton variant="table-rows" rows={12} cols={9} />}
       >
         {() => (
-          <DataTable
-            columns={columns}
-            rows={rows}
-            rowKey={(r) => r.strike}
-            pageSize={21}
-            ariaLabel="Open and High Strategy scan"
-            emptyMessage="No Open=High / Open=Low strikes in the ATM window yet."
-            initialSort={{ id: 'strike', dir: 'asc' }}
-          />
+          <BeatBlock>
+            <DataTable
+              columns={columns}
+              rows={rows}
+              rowKey={(r) => r.strike}
+              pageSize={21}
+              ariaLabel="Open and High Strategy scan"
+              emptyMessage="No Open=High / Open=Low strikes in the ATM window yet."
+              initialSort={{ id: 'strike', dir: 'asc' }}
+            />
+          </BeatBlock>
         )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

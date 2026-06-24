@@ -10,6 +10,7 @@ import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { SignedCount } from '../../components/atoms/SignedCount.tsx';
 import { SentimentBadge } from '../../components/atoms/SentimentBadge.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
 
 // OI Trending (oipulse §options/trending-oi): aggregated Call vs Put OI over the session with a
@@ -64,7 +65,7 @@ export function TrendingOiPage() {
   ];
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="OI Trending" subtitle="Call vs Put OI over the session with a derived directional sentiment" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -85,16 +86,18 @@ export function TrendingOiPage() {
         skeleton={<Skeleton variant="table-rows" rows={8} cols={12} />}
       >
         {() => (
-          <DataTable
-            columns={columns}
-            rows={rows}
-            rowKey={(r) => r.bucket}
-            pageSize={100}
-            ariaLabel="OI trending per interval"
-            emptyMessage="No trending data — pick an underlying + expiry with captured snapshots."
-          />
+          <BeatBlock>
+            <DataTable
+              columns={columns}
+              rows={rows}
+              rowKey={(r) => r.bucket}
+              pageSize={100}
+              ariaLabel="OI trending per interval"
+              emptyMessage="No trending data — pick an underlying + expiry with captured snapshots."
+            />
+          </BeatBlock>
         )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

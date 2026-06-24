@@ -12,6 +12,7 @@ import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Select } from '../../components/atoms/Select.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { CallPutOiChart, OiVsPriceChart } from '../../components/OptionsOiCharts.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 
 // Options OI Chart (§options/oi-chart) — the chart counterpart of Options OI Analysis, ZERO new backend:
 // rides the SAME strike-series feed (useStrikeSeries) and folds CE+PE OI + premium into three line charts.
@@ -40,7 +41,7 @@ export function OptionsOiChartPage() {
   const hasData = viz.times.length > 0;
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Options OI chart" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -75,12 +76,12 @@ export function OptionsOiChartPage() {
         }
       >
         {() => (
-          <>
+          <BeatBlock>
             <section className="card shadow-e1">
               <h2 className="mb-2 text-h3 text-ay-text">Call Vs. Put OI Analysis</h2>
               <CallPutOiChart viz={viz} />
             </section>
-            <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-2">
               <section className="card shadow-e1">
                 <h2 className="mb-2 text-h3 text-ay-text">Call OI Analysis</h2>
                 <OiVsPriceChart times={viz.times} oi={viz.callOi} price={viz.callPrice} oiTone="bull" legLabel="Call" />
@@ -90,9 +91,9 @@ export function OptionsOiChartPage() {
                 <OiVsPriceChart times={viz.times} oi={viz.putOi} price={viz.putPrice} oiTone="bear" legLabel="Put" />
               </section>
             </div>
-          </>
+          </BeatBlock>
         )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

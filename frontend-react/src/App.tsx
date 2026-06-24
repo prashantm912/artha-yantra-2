@@ -26,6 +26,7 @@ import { StrategyEditorPage } from './pages/strategies/StrategyEditorPage.tsx';
 import { BacktestRunnerPage } from './pages/backtests/BacktestRunnerPage.tsx';
 import { JobsPage } from './pages/backtests/JobsPage.tsx';
 import { JournalPage } from './pages/journal/JournalPage.tsx';
+import { OrdersPage } from './pages/orders/OrdersPage.tsx';
 import { WatchlistsPage } from './pages/watchlists/WatchlistsPage.tsx';
 import { SettingsPage } from './pages/settings/SettingsPage.tsx';
 import { StatusPage } from './pages/dataops/StatusPage.tsx';
@@ -143,6 +144,7 @@ export function App() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/signals" element={<SignalsPage />} />
           <Route path="/paper" element={<Lazy><PaperPage /></Lazy>} />
+          <Route path="/orders" element={<OrdersPage />} />
           <Route path="/journal" element={<JournalPage />} />
           <Route path="/watchlists" element={<WatchlistsPage />} />
           <Route path="/settings" element={<SettingsPage />} />

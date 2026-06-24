@@ -5,6 +5,9 @@ import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { Select } from '../../components/atoms/Select.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
 
 // Equity → Index Contribution (oipulse): how much each constituent pushes the index, split into
@@ -54,7 +57,7 @@ export function IndexContributionPage() {
 
   return (
     <div>
-      <h1 className="mb-2 text-base font-semibold text-ay-text">Index Contribution</h1>
+      <PageHeader title="Index Contribution" />
 
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <Select value={index} options={indices} onChange={setIndex} ariaLabel="Index" placeholder="Index…" />
@@ -74,7 +77,19 @@ export function IndexContributionPage() {
         Contribution = free-float weight × % change · index points need the live index level (deferred)
       </p>
 
-      {data ? (
+      <QueryState
+        query={q}
+        isEmpty={() => !data}
+        empty={{ title: 'No bhavcopy for this index yet.' }}
+        errorTitle="Couldn't load index contribution"
+        skeleton={
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <Skeleton variant="table-rows" rows={8} cols={5} />
+            <Skeleton variant="table-rows" rows={8} cols={5} />
+          </div>
+        }
+      >
+        {(data) => (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <div>
             <h2 className="mb-1 text-sm font-semibold text-bull">
@@ -113,9 +128,8 @@ export function IndexContributionPage() {
             />
           </div>
         </div>
-      ) : (
-        <p className="py-12 text-center text-sm text-ay-muted">No bhavcopy for this index yet.</p>
-      )}
+        )}
+      </QueryState>
     </div>
   );
 }

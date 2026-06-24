@@ -4,6 +4,9 @@ import type { EquityReturnRow } from '../../api/types.ts';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
 
 // Equity → Equity Returns (oipulse): a multi-timeframe returns screener over the EQ universe — LTP +
@@ -59,11 +62,15 @@ export function EquityReturnsPage() {
 
   return (
     <div>
-      <h1 className="mb-2 text-base font-semibold text-ay-text">Equity Returns</h1>
-      <p className="mb-3 text-xs text-ay-muted">
-        Multi-timeframe % returns over the EQ universe · 6M / 1Y fill in as history accrues
-        {q.data?.asOf ? ` · as on ${q.data.asOf}` : ''}
-      </p>
+      <PageHeader
+        title="Equity Returns"
+        subtitle={
+          <>
+            Multi-timeframe % returns over the EQ universe · 6M / 1Y fill in as history accrues
+            {q.data?.asOf ? ` · as on ${q.data.asOf}` : ''}
+          </>
+        }
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <input
@@ -77,14 +84,24 @@ export function EquityReturnsPage() {
         <GoButton onClick={() => void q.refetch()} loading={q.isFetching} />
       </div>
 
-      <DataTable
-        columns={columns}
-        rows={rows}
-        rowKey={(r) => r.symbol}
-        pageSize={50}
-        ariaLabel="Equity returns screener"
-        emptyMessage="No returns data yet."
-      />
+      <QueryState
+        query={q}
+        isEmpty={(d) => (d.items?.length ?? 0) === 0}
+        empty={{ title: 'No returns data yet.' }}
+        errorTitle="Couldn't load equity returns"
+        skeleton={<Skeleton variant="table-rows" rows={10} cols={8} />}
+      >
+        {() => (
+          <DataTable
+            columns={columns}
+            rows={rows}
+            rowKey={(r) => r.symbol}
+            pageSize={50}
+            ariaLabel="Equity returns screener"
+            emptyMessage="No returns data yet."
+          />
+        )}
+      </QueryState>
     </div>
   );
 }

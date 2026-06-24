@@ -4,6 +4,9 @@ import type { SectorAgg, SectorIndexCard, SectorStockChange } from '../../api/ty
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
 
 // Equity → Sector Stats (oipulse): a sector overview — per-sector roll-up cards (avg change +
@@ -17,7 +20,7 @@ function IndexCard({ c }: { c: SectorIndexCard }) {
   const chg = num(c.changePct);
   const tone = chg > 0 ? 'text-bull' : chg < 0 ? 'text-bear' : 'text-ay-muted';
   return (
-    <div className="rounded-lg border border-ay-border bg-surface-1 p-3">
+    <div className="rounded-lg border border-ay-border bg-surface-1 p-3 shadow-e1">
       <div className="truncate text-xs font-semibold text-ay-text" title={c.name}>
         {c.name}
       </div>
@@ -33,7 +36,7 @@ function SectorCard({ s }: { s: SectorAgg }) {
   const avg = num(s.avgChangePct);
   const tone = avg > 0 ? 'text-bull' : avg < 0 ? 'text-bear' : 'text-ay-muted';
   return (
-    <div className="rounded-lg border border-ay-border bg-surface-1 p-3">
+    <div className="rounded-lg border border-ay-border bg-surface-1 p-3 shadow-e1">
       <div className="truncate text-sm font-semibold text-ay-text" title={s.sector}>
         {s.sector}
       </div>
@@ -82,32 +85,15 @@ export function SectorStatsPage() {
 
   return (
     <div>
-      <h1 className="mb-2 text-base font-semibold text-ay-text">Sector Stats</h1>
-      <p className="mb-3 text-xs text-ay-muted">
-        Per-sector average change (from constituents) + the stock factor table
-        {data?.asOf ? ` · as on ${data.asOf}` : ''}
-      </p>
-
-      {data && data.sectorIndices.length > 0 && (
-        <>
-          <h2 className="mb-1 text-sm font-semibold text-ay-text">
-            Sector Indices <span className="text-xs font-normal text-ay-muted">· live</span>
-          </h2>
-          <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
-            {data.sectorIndices.map((c) => (
-              <IndexCard key={c.name} c={c} />
-            ))}
-          </div>
-        </>
-      )}
-
-      {data && (
-        <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-          {data.sectors.map((s) => (
-            <SectorCard key={s.sector} s={s} />
-          ))}
-        </div>
-      )}
+      <PageHeader
+        title="Sector Stats"
+        subtitle={
+          <>
+            Per-sector average change (from constituents) + the stock factor table
+            {data?.asOf ? ` · as on ${data.asOf}` : ''}
+          </>
+        }
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <input
@@ -121,14 +107,52 @@ export function SectorStatsPage() {
         <GoButton onClick={() => void q.refetch()} loading={q.isFetching} />
       </div>
 
-      <DataTable
-        columns={columns}
-        rows={stocks}
-        rowKey={(r) => r.symbol}
-        pageSize={50}
-        ariaLabel="Stock factors by sector"
-        emptyMessage="No sector data yet."
-      />
+      <QueryState
+        query={q}
+        isEmpty={() => !data}
+        empty={{ title: 'No sector data yet.' }}
+        errorTitle="Couldn't load sector stats"
+        skeleton={
+          <div className="space-y-4">
+            <Skeleton variant="metric-strip" cols={6} />
+            <Skeleton variant="table-rows" rows={8} cols={5} />
+          </div>
+        }
+      >
+        {() => (
+          <>
+            {data && data.sectorIndices.length > 0 && (
+              <>
+                <h2 className="mb-1 text-h3 text-ay-text">
+                  Sector Indices <span className="text-xs font-normal text-ay-muted">· live</span>
+                </h2>
+                <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
+                  {data.sectorIndices.map((c) => (
+                    <IndexCard key={c.name} c={c} />
+                  ))}
+                </div>
+              </>
+            )}
+
+            {data && (
+              <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                {data.sectors.map((s) => (
+                  <SectorCard key={s.sector} s={s} />
+                ))}
+              </div>
+            )}
+
+            <DataTable
+              columns={columns}
+              rows={stocks}
+              rowKey={(r) => r.symbol}
+              pageSize={50}
+              ariaLabel="Stock factors by sector"
+              emptyMessage="No sector data yet."
+            />
+          </>
+        )}
+      </QueryState>
     </div>
   );
 }

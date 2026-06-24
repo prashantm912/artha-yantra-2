@@ -6,6 +6,9 @@ import { DateInput } from '../../components/atoms/DateInput.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { SentimentBadge } from '../../components/atoms/SentimentBadge.tsx';
 import { SignedCount } from '../../components/atoms/SignedCount.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 
 // Participant-wise OI (oipulse §fii-dii/participant-wise-oi): SEBI participant long/short contracts per
 // F&O segment, grouped FII/Pro/DII/Client × 6 segments, with day-over-day change + a Bullish/Bearish
@@ -47,31 +50,37 @@ export function ParticipantWiseOiPage() {
 
   return (
     <div>
-      <h1 className="mb-2 text-base font-semibold text-ay-text">Participant Wise OI (No. of Contracts)</h1>
+      <PageHeader title="Participant Wise OI (No. of Contracts)" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <DateInput ariaLabel="Report date" value={date} onChange={(v) => v && setDate(v)} />
         <GoButton onClick={() => q.refetch()} loading={q.isFetching} />
       </div>
 
-      {groups.length === 0 && !q.isLoading && (
-        <p className="text-sm text-ay-muted">No participant-OI data for this date.</p>
-      )}
-
-      <div className="space-y-4">
-        {groups.map((g) => (
-          <div key={g.participant}>
-            <div className="mb-1 text-sm font-semibold text-accent">{g.participant}</div>
-            <DataTable
-              columns={COLUMNS}
-              rows={g.segments}
-              rowKey={(r) => r.segment}
-              ariaLabel={`Participant OI — ${g.participant}`}
-              emptyMessage="No segments."
-            />
+      <QueryState
+        query={q}
+        isEmpty={() => groups.length === 0}
+        empty={{ title: 'No participant-OI data for this date.' }}
+        errorTitle="Couldn't load participant-wise OI"
+        skeleton={<Skeleton variant="table-rows" rows={6} cols={8} />}
+      >
+        {() => (
+          <div className="space-y-4">
+            {groups.map((g) => (
+              <div key={g.participant}>
+                <div className="mb-1 text-h3 text-accent">{g.participant}</div>
+                <DataTable
+                  columns={COLUMNS}
+                  rows={g.segments}
+                  rowKey={(r) => r.segment}
+                  ariaLabel={`Participant OI — ${g.participant}`}
+                  emptyMessage="No segments."
+                />
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        )}
+      </QueryState>
     </div>
   );
 }

@@ -5,6 +5,9 @@ import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { Select } from '../../components/atoms/Select.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
 
 // Equity → Open=High / Open=Low (oipulse): which index constituents opened AT their day high (O=H,
@@ -54,7 +57,7 @@ export function OpenHighLowPage() {
 
   return (
     <div>
-      <h1 className="mb-2 text-base font-semibold text-ay-text">Open = High / Open = Low</h1>
+      <PageHeader title="Open = High / Open = Low" />
 
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <Select value={index} options={indices} onChange={setIndex} ariaLabel="Index" placeholder="Index…" />
@@ -66,34 +69,45 @@ export function OpenHighLowPage() {
         O=H = opened at the day high (bearish) · O=L = opened at the day low (bullish) · Far % = LTP vs that level
       </p>
 
-      {data ? (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <div>
-            <h2 className="mb-1 text-sm font-semibold text-bear">Open = High (bearish): {data.openHigh.length}</h2>
-            <DataTable
-              columns={ohCols}
-              rows={data.openHigh}
-              rowKey={(r) => r.symbol}
-              pageSize={50}
-              ariaLabel={`${data.index} opened at day high`}
-              emptyMessage="None opened at the day high."
-            />
+      <QueryState
+        query={q}
+        isEmpty={() => !data}
+        empty={{ title: 'No data for this index right now.' }}
+        errorTitle="Couldn't load Open=High / Open=Low"
+        skeleton={
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <Skeleton variant="table-rows" rows={8} cols={5} />
+            <Skeleton variant="table-rows" rows={8} cols={5} />
           </div>
-          <div>
-            <h2 className="mb-1 text-sm font-semibold text-bull">Open = Low (bullish): {data.openLow.length}</h2>
-            <DataTable
-              columns={olCols}
-              rows={data.openLow}
-              rowKey={(r) => r.symbol}
-              pageSize={50}
-              ariaLabel={`${data.index} opened at day low`}
-              emptyMessage="None opened at the day low."
-            />
+        }
+      >
+        {(data) => (
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div>
+              <h2 className="mb-1 text-sm font-semibold text-bear">Open = High (bearish): {data.openHigh.length}</h2>
+              <DataTable
+                columns={ohCols}
+                rows={data.openHigh}
+                rowKey={(r) => r.symbol}
+                pageSize={50}
+                ariaLabel={`${data.index} opened at day high`}
+                emptyMessage="None opened at the day high."
+              />
+            </div>
+            <div>
+              <h2 className="mb-1 text-sm font-semibold text-bull">Open = Low (bullish): {data.openLow.length}</h2>
+              <DataTable
+                columns={olCols}
+                rows={data.openLow}
+                rowKey={(r) => r.symbol}
+                pageSize={50}
+                ariaLabel={`${data.index} opened at day low`}
+                emptyMessage="None opened at the day low."
+              />
+            </div>
           </div>
-        </div>
-      ) : (
-        <p className="py-12 text-center text-sm text-ay-muted">No data for this index right now.</p>
-      )}
+        )}
+      </QueryState>
     </div>
   );
 }

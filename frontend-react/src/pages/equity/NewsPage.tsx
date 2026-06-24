@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useEquityNews } from '../../api/oiAnalytics.ts';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 
 // Equity → News / Announcements (Upstox /v2/news): recent news articles for a stock (last 7 days),
 // keyed by the static symbol → Upstox instrument-key map. available=false when the Upstox news source
@@ -22,8 +23,7 @@ export function NewsPage() {
 
   return (
     <div>
-      <h1 className="mb-2 text-base font-semibold text-ay-text">News / Announcements</h1>
-      <p className="mb-3 text-xs text-ay-muted">Recent stock news (Upstox, last 7 days)</p>
+      <PageHeader title="News / Announcements" subtitle="Recent stock news (Upstox, last 7 days)" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <input

@@ -20,6 +20,7 @@
     "@fontsource-variable/newsreader": "^5.2.10",
     "@stomp/stompjs": "^7.3.0",
     "@tanstack/react-query": "^5.62.0",
+    "@tanstack/react-table": "^8.21.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",

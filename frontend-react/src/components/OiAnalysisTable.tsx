@@ -60,7 +60,7 @@ export function OiAnalysisTable({
         role="region"
         aria-label="Options OI analysis"
       >
-        <table className="w-full border-collapse whitespace-nowrap text-xs">
+        <table aria-label="Options OI analysis" className="w-full border-collapse whitespace-nowrap text-xs">
           <thead className="sticky top-0 z-10 bg-surface-1 text-ay-muted">
             <tr>
               <th colSpan={8} scope="colgroup" className="px-2 py-1 text-center text-bear">CALL</th>

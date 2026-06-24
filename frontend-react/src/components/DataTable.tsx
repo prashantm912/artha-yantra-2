@@ -1,12 +1,37 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import {
+  flexRender,
+  getCoreRowModel,
+  getFacetedRowModel,
+  getFacetedUniqueValues,
+  getFilteredRowModel,
+  getPaginationRowModel,
+  getSortedRowModel,
+  useReactTable,
+  type Column,
+  type ColumnPinningState,
+  type SortingState,
+  type VisibilityState,
+} from '@tanstack/react-table';
+import { ChevronDown, ChevronUp, ChevronsUpDown, Columns3 } from 'lucide-react';
 import { cn } from '../lib/cn.ts';
-import { compareDecimal } from '../lib/decimal.ts';
+import { adaptColumns, type AyColumnMeta } from './columnAdapter.ts';
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu.tsx';
 
-// The generic Wave-2 table composite (master plan §20): one config-driven, client-sorted, paginated
-// table that every depth page's tabular archetype consumes (Trending OI / Big OI / Futures EOD / FII
-// Capital Market / Participant-wise OI). Hand-rolled — no table lib — matching the repo's existing
-// bespoke tables (OiAnalysisTable / SpurtQuadrant): a sticky-header desktop <table> + a md:hidden
-// per-row card list (S24-Ultra ~480px baseline). Money is sorted via compareDecimal — never parseFloat.
+// The generic Wave-2 table composite (master plan §20 / revamp §3.2): one config-driven, client-sorted,
+// paginated table that every depth page's tabular archetype consumes. TanStack Table v8 (headless) drives
+// sort/filter/paginate; the markup is hand-owned so it stays a real <table><thead><th><tbody><td> — never
+// role="grid" — keeping getByRole('table'|'columnheader') green across ~20 pages. A sticky-header desktop
+// table + a md:hidden per-row card list (S24-Ultra ~480px baseline). Money is sorted via compareDecimal
+// (in columnAdapter) — never parseFloat. Every new feature is behind an OPTIONAL prop, so omitting them
+// reproduces today's exact render.
 
 export type ColumnAlign = 'left' | 'right' | 'center';
 
@@ -25,6 +50,16 @@ export interface DataColumn<Row> {
   headerClassName?: string;
   /** Card-mode label; omit to hide this column on phones. */
   mobileLabel?: string;
+  /** Sticky-left pinned column (desktop only; e.g. the STRIKE rail). */
+  pin?: 'left';
+  /** Faceted/text column filter (toolbar control). */
+  filter?: 'text' | 'select';
+  /** Force monospace numerics; defaults true for right-aligned columns. */
+  mono?: boolean;
+  /** Hidden by default (toggled back on via the column-visibility menu). */
+  defaultHidden?: boolean;
+  /** Cannot be hidden via the column-visibility menu. */
+  lockVisible?: boolean;
 }
 
 interface DataTableProps<Row> {
@@ -38,6 +73,20 @@ interface DataTableProps<Row> {
   ariaLabel: string;
   /** Optional per-row class on the desktop <tr> + mobile card (e.g. bold a strong row). */
   rowClassName?: (row: Row) => string;
+  /** Show the toolbar column-visibility menu. */
+  enableColumnVisibility?: boolean;
+  /** Show the comfortable/compact density toggle. */
+  enableDensityToggle?: boolean;
+  /** Density at first render. Default 'comfortable' (today's px-2 py-1 spacing). */
+  initialDensity?: 'comfortable' | 'compact';
+  /** Shift-click multi-sort (default true). */
+  enableMultiSort?: boolean;
+  /** Zebra striping on body rows (default true). */
+  zebra?: boolean;
+  /** Opt-in virtualization above this row count (unimplemented stub — no-op). */
+  virtualizeAfter?: number;
+  /** localStorage key for persisting density/visibility (reserved). */
+  persistKey?: string;
 }
 
 const ALIGN: Record<ColumnAlign, string> = {
@@ -46,20 +95,13 @@ const ALIGN: Record<ColumnAlign, string> = {
   center: 'text-center',
 };
 
-function compareValues(
-  a: number | string | null,
-  b: number | string | null,
-  type: 'number' | 'decimal' | 'text',
-): number {
-  // Nulls sort last in ascending order (and the dir flip pushes them first in descending — oipulse
-  // shows blanks at the bottom of the active sort, which the caller can refine if needed).
-  if (a == null && b == null) return 0;
-  if (a == null) return 1;
-  if (b == null) return -1;
-  if (type === 'decimal') return compareDecimal(String(a), String(b));
-  if (type === 'text') return String(a).localeCompare(String(b));
-  return Number(a) - Number(b);
+/** Sticky-left position for a pinned column (header sticks at z-20, body at z-11). */
+function pinnedStyle<Row>(col: Column<Row, unknown>): CSSProperties | undefined {
+  if (col.getIsPinned() !== 'left') return undefined;
+  return { position: 'sticky', left: col.getStart('left'), zIndex: 11 };
 }
+
+const PINNED_CLASS = 'bg-surface-1 shadow-[inset_-1px_0_0_var(--ay-border)]';
 
 export function DataTable<Row>({
   columns,
@@ -70,46 +112,137 @@ export function DataTable<Row>({
   emptyMessage = 'No data.',
   ariaLabel,
   rowClassName,
+  enableColumnVisibility = false,
+  enableDensityToggle = false,
+  initialDensity = 'comfortable',
+  enableMultiSort = true,
+  zebra = true,
+  // virtualizeAfter (§3.2.5) + persistKey (§3.2.3) are accepted but intentionally unimplemented
+  // no-ops for this phase — left off the destructure so omitting them yields today's exact render.
 }: DataTableProps<Row>) {
-  const [sort, setSort] = useState<{ id: string; dir: 'asc' | 'desc' } | null>(initialSort ?? null);
-  const [page, setPage] = useState(0);
+  const tableColumns = useMemo(() => adaptColumns(columns), [columns]);
 
-  const sorted = useMemo(() => {
-    if (!sort) return rows;
-    const col = columns.find((c) => c.id === sort.id);
-    if (!col?.sortValue) return rows;
-    const accessor = col.sortValue;
-    const type = col.sortType ?? 'number';
-    const factor = sort.dir === 'asc' ? 1 : -1;
-    // Stable sort: decorate with the original index so equal keys keep input order.
-    return [...rows]
-      .map((row, i) => ({ row, i }))
-      .sort((x, y) => {
-        const c = compareValues(accessor(x.row), accessor(y.row), type);
-        return c !== 0 ? c * factor : x.i - y.i;
-      })
-      .map((d) => d.row);
-  }, [rows, columns, sort]);
-
-  // Reset to the first page whenever the row set or the sort changes.
-  useEffect(() => setPage(0), [sorted.length, sort]);
-
+  const [sorting, setSorting] = useState<SortingState>(
+    initialSort ? [{ id: initialSort.id, desc: initialSort.dir === 'desc' }] : [],
+  );
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() =>
+    Object.fromEntries(columns.filter((c) => c.defaultHidden).map((c) => [c.id, false])),
+  );
+  const columnPinning = useMemo<ColumnPinningState>(
+    () => ({ left: columns.filter((c) => c.pin === 'left').map((c) => c.id), right: [] }),
+    [columns],
+  );
+  const hasFilter = columns.some((c) => c.filter);
   const paginated = pageSize > 0;
-  const pages = paginated ? Math.max(1, Math.ceil(sorted.length / pageSize)) : 1;
-  const clamped = Math.min(page, pages - 1);
-  const start = paginated ? clamped * pageSize : 0;
-  const slice = paginated ? sorted.slice(start, start + pageSize) : sorted;
 
-  function toggleSort(id: string) {
-    setSort((s) =>
-      s?.id === id ? { id, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { id, dir: 'desc' },
-    );
-  }
+  const table = useReactTable<Row>({
+    data: rows,
+    columns: tableColumns,
+    state: { sorting, columnVisibility, columnPinning },
+    onSortingChange: setSorting,
+    onColumnVisibilityChange: setColumnVisibility,
+    getRowId: (row) => rowKey(row),
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    ...(hasFilter
+      ? {
+          getFilteredRowModel: getFilteredRowModel(),
+          getFacetedRowModel: getFacetedRowModel(),
+          getFacetedUniqueValues: getFacetedUniqueValues(),
+        }
+      : {}),
+    ...(paginated ? { getPaginationRowModel: getPaginationRowModel() } : {}),
+    sortDescFirst: true, // first click = descending, second = ascending (matches today's render)
+    enableSortingRemoval: false, // never an "off" state — keeps desc↔asc cycle
+    enableMultiSort,
+    maxMultiSortColCount: 3,
+    isMultiSortEvent: (e) => (e as { shiftKey?: boolean }).shiftKey === true,
+    autoResetPageIndex: true,
+    initialState: paginated ? { pagination: { pageIndex: 0, pageSize } } : undefined,
+  });
 
-  const mobileCols = columns.filter((c) => c.mobileLabel);
+  // Reset to the first page whenever the sort changes (TanStack auto-resets on data/filter changes).
+  useEffect(() => {
+    if (paginated) table.setPageIndex(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sorting]);
+
+  const [density, setDensity] = useState<'comfortable' | 'compact'>(initialDensity);
+  const cellPad = density === 'compact' ? 'px-2 py-0.5' : 'px-2 py-1';
+
+  const bodyRows = table.getRowModel().rows;
+  const visibleLeafCount = table.getVisibleLeafColumns().length;
+  const total = table.getFilteredRowModel().rows.length;
+  const empty = bodyRows.length === 0;
+
+  const mobileLeafCols = table
+    .getVisibleLeafColumns()
+    .filter((c) => (c.columnDef.meta as AyColumnMeta<Row> | undefined)?.mobileLabel);
+
+  // Pagination range text (1–2 of N) computed from pagination state to byte-match today's output.
+  const pageIndex = table.getState().pagination.pageIndex;
+  const rangeStart = paginated ? pageIndex * pageSize + 1 : 1;
+  const rangeEnd = paginated ? Math.min(rangeStart + bodyRows.length - 1, total) : total;
+
+  const showToolbar = enableColumnVisibility || enableDensityToggle || hasFilter;
 
   return (
     <div>
+      {showToolbar && (
+        <div className="mb-1.5 flex items-center justify-end gap-1.5">
+          {enableDensityToggle && (
+            <div className="flex gap-1 text-xs">
+              <button
+                type="button"
+                aria-pressed={density === 'comfortable'}
+                onClick={() => setDensity('comfortable')}
+                className="rounded border border-ay-border px-2 py-0.5 hover:border-accent aria-pressed:border-accent aria-pressed:text-accent"
+              >
+                Comfortable
+              </button>
+              <button
+                type="button"
+                aria-pressed={density === 'compact'}
+                onClick={() => setDensity('compact')}
+                className="rounded border border-ay-border px-2 py-0.5 hover:border-accent aria-pressed:border-accent aria-pressed:text-accent"
+              >
+                Compact
+              </button>
+            </div>
+          )}
+          {enableColumnVisibility && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Choose columns"
+                  className="inline-flex items-center rounded border border-ay-border px-1.5 py-0.5 text-ay-muted hover:border-accent hover:text-accent"
+                >
+                  <Columns3 aria-hidden="true" className="size-4" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>Columns</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {table
+                  .getAllLeafColumns()
+                  .filter((c) => c.getCanHide())
+                  .map((c) => (
+                    <DropdownMenuCheckboxItem
+                      key={c.id}
+                      checked={c.getIsVisible()}
+                      onCheckedChange={(v) => c.toggleVisibility(!!v)}
+                      onSelect={(e) => e.preventDefault()}
+                    >
+                      {String((c.columnDef.meta as AyColumnMeta<Row> | undefined)?.mobileLabel ?? c.id)}
+                    </DropdownMenuCheckboxItem>
+                  ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
+      )}
+
       {/* Desktop / landscape: sticky-header sortable table */}
       <div
         className="hidden max-h-[68vh] overflow-auto rounded border border-ay-border md:block"
@@ -117,57 +250,98 @@ export function DataTable<Row>({
         role="region"
         aria-label={ariaLabel}
       >
-        <table className="w-full border-collapse whitespace-nowrap text-xs">
+        <table aria-label={ariaLabel} className="w-full border-collapse whitespace-nowrap text-xs">
           <thead className="sticky top-0 z-10 bg-surface-1 text-ay-muted">
-            <tr>
-              {columns.map((c) => {
-                const active = sort?.id === c.id;
-                const ariaSort = active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none';
-                return (
-                  <th
-                    key={c.id}
-                    scope="col"
-                    aria-sort={c.sortValue ? ariaSort : undefined}
-                    className={cn('px-2 py-1 font-medium', ALIGN[c.align ?? 'right'], c.headerClassName)}
-                  >
-                    {c.sortValue ? (
-                      <button
-                        type="button"
-                        onClick={() => toggleSort(c.id)}
-                        className="inline-flex items-center gap-0.5 hover:text-accent"
-                      >
-                        {c.header}
-                        <span aria-hidden="true" className="text-[0.6rem]">
-                          {active ? (sort.dir === 'asc' ? '▲' : '▼') : '⇅'}
-                        </span>
-                      </button>
-                    ) : (
-                      c.header
-                    )}
-                  </th>
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {slice.map((row) => (
-              <tr
-                key={rowKey(row)}
-                className={cn('border-t border-ay-border text-ay-text', rowClassName?.(row))}
-              >
-                {columns.map((c) => (
-                  <td
-                    key={c.id}
-                    className={cn('px-2 py-1 tabular-nums', ALIGN[c.align ?? 'right'], c.cellClassName?.(row))}
-                  >
-                    {c.render(row)}
-                  </td>
-                ))}
+            {table.getHeaderGroups().map((hg) => (
+              <tr key={hg.id}>
+                {hg.headers.map((h) => {
+                  const col = h.column;
+                  const meta = col.columnDef.meta as AyColumnMeta<Row>;
+                  const sortable = col.getCanSort();
+                  const sortDir = col.getIsSorted();
+                  const ariaSort = sortable
+                    ? sortDir === 'asc'
+                      ? 'ascending'
+                      : sortDir === 'desc'
+                        ? 'descending'
+                        : 'none'
+                    : undefined;
+                  const pinned = col.getIsPinned() === 'left';
+                  const sortIndex = col.getSortIndex();
+                  const Chevron =
+                    sortDir === 'asc' ? ChevronUp : sortDir === 'desc' ? ChevronDown : ChevronsUpDown;
+                  return (
+                    <th
+                      key={h.id}
+                      scope="col"
+                      aria-sort={ariaSort}
+                      style={pinnedStyle(col)}
+                      className={cn(
+                        cellPad,
+                        'font-medium',
+                        ALIGN[meta.align],
+                        pinned && cn(PINNED_CLASS, 'z-20'),
+                        meta.headerClassName,
+                      )}
+                    >
+                      {sortable ? (
+                        <button
+                          type="button"
+                          onClick={col.getToggleSortingHandler()}
+                          className="inline-flex items-center gap-0.5 rounded-sm hover:text-accent focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+                        >
+                          {flexRender(col.columnDef.header, h.getContext())}
+                          <Chevron aria-hidden="true" className="size-3 text-ay-muted" />
+                          {sorting.length > 1 && sortIndex >= 0 && (
+                            <span aria-hidden="true" className="text-dense text-ay-muted">
+                              {sortIndex + 1}
+                            </span>
+                          )}
+                        </button>
+                      ) : (
+                        flexRender(col.columnDef.header, h.getContext())
+                      )}
+                    </th>
+                  );
+                })}
               </tr>
             ))}
-            {sorted.length === 0 && (
+          </thead>
+          <tbody>
+            {bodyRows.map((r, i) => (
+              <tr
+                key={r.id}
+                className={cn(
+                  'border-t border-ay-border text-ay-text transition-colors',
+                  zebra && (i % 2 === 1 ? 'bg-surface-1/40' : 'bg-transparent'),
+                  'hover:bg-surface-2/60',
+                  rowClassName?.(r.original),
+                )}
+              >
+                {r.getVisibleCells().map((cell) => {
+                  const meta = cell.column.columnDef.meta as AyColumnMeta<Row>;
+                  const pinned = cell.column.getIsPinned() === 'left';
+                  return (
+                    <td
+                      key={cell.id}
+                      style={pinnedStyle(cell.column)}
+                      className={cn(
+                        cellPad,
+                        meta.mono && 'tabular-nums',
+                        ALIGN[meta.align],
+                        pinned && PINNED_CLASS,
+                        meta.cellClassName?.(r.original),
+                      )}
+                    >
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+            {empty && (
               <tr>
-                <td colSpan={columns.length} className="px-2 py-4 text-center text-ay-muted">
+                <td colSpan={visibleLeafCount} className="px-2 py-4 text-center text-ay-muted">
                   {emptyMessage}
                 </td>
               </tr>
@@ -178,42 +352,51 @@ export function DataTable<Row>({
 
       {/* Phone (portrait): one card per row, label: value per mobile-visible column */}
       <div className="space-y-2 md:hidden">
-        {slice.map((row) => (
+        {bodyRows.map((r) => (
           <div
-            key={rowKey(row)}
-            className={cn('rounded border border-ay-border bg-surface-1 p-2 text-xs', rowClassName?.(row))}
+            key={r.id}
+            className={cn(
+              'rounded border border-ay-border bg-surface-1 p-2 text-xs',
+              rowClassName?.(r.original),
+            )}
           >
             <dl className="grid grid-cols-2 gap-x-2 gap-y-0.5">
-              {mobileCols.map((c) => (
-                <div key={c.id} className="flex justify-between gap-2">
-                  <dt className="text-ay-muted">{c.mobileLabel}</dt>
-                  <dd className={cn('tabular-nums', c.cellClassName?.(row))}>{c.render(row)}</dd>
-                </div>
-              ))}
+              {mobileLeafCols.map((col) => {
+                const meta = col.columnDef.meta as AyColumnMeta<Row>;
+                const cell = r.getAllCells().find((c) => c.column.id === col.id);
+                return (
+                  <div key={col.id} className="flex justify-between gap-2">
+                    <dt className="text-ay-muted">{meta.mobileLabel}</dt>
+                    <dd className={cn('tabular-nums', meta.cellClassName?.(r.original))}>
+                      {cell && flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </dd>
+                  </div>
+                );
+              })}
             </dl>
           </div>
         ))}
-        {sorted.length === 0 && <p className="text-center text-ay-muted">{emptyMessage}</p>}
+        {empty && <p className="text-center text-ay-muted">{emptyMessage}</p>}
       </div>
 
-      {paginated && sorted.length > pageSize && (
+      {paginated && total > pageSize && (
         <div className="mt-1.5 flex items-center justify-between px-1 text-xs text-ay-muted">
           <span className="tabular-nums">
-            {start + 1}–{Math.min(start + pageSize, sorted.length)} of {sorted.length}
+            {rangeStart}–{rangeEnd} of {total}
           </span>
           <span className="flex gap-1">
             <button
               type="button"
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
-              disabled={clamped === 0}
+              onClick={() => table.previousPage()}
+              disabled={!table.getCanPreviousPage()}
               className="rounded border border-ay-border px-2 py-0.5 hover:border-accent disabled:opacity-40"
             >
               Prev
             </button>
             <button
               type="button"
-              onClick={() => setPage((p) => Math.min(pages - 1, p + 1))}
-              disabled={clamped >= pages - 1}
+              onClick={() => table.nextPage()}
+              disabled={!table.getCanNextPage()}
               className="rounded border border-ay-border px-2 py-0.5 hover:border-accent disabled:opacity-40"
             >
               Next

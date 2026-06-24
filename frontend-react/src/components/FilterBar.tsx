@@ -1,11 +1,12 @@
 import { useEffect } from 'react';
+import { ChevronDown } from 'lucide-react';
 import {
   OI_INTERVALS,
   useSymbolContext,
   type OiInterval,
 } from '../stores/symbolContext.store.ts';
 import { useExpiries, useUnderlyings } from '../api/instruments.ts';
-import { Select } from './atoms/Select.tsx';
+import { cn } from '../lib/cn.ts';
 import { ModeToggle } from './atoms/ModeToggle.tsx';
 import { DateInput } from './atoms/DateInput.tsx';
 
@@ -24,6 +25,58 @@ interface FilterBarProps {
 }
 
 const UNDERLYING_FALLBACK = ['NIFTY 50', 'NIFTY BANK'];
+
+// Bar-local native <select> styled for the revamped control look (§20). Kept native (real <select>):
+// the options-chain e2e drives these with .locator('option')/.selectOption()/.inputValue() + an
+// empty-options regression check + axe — so this MUST stay a true select, NOT a Radix popover. Styled
+// inline here (not via the shared Select atom, which BacktestRunner also uses): appearance-none strips
+// the OS chrome, a pointer-events-none ChevronDown is the custom caret, focus rides the global
+// :focus-visible rule (index.css §1.4).
+function FilterSelect({
+  ariaLabel,
+  value,
+  options,
+  onChange,
+  placeholder,
+  disabled,
+}: {
+  ariaLabel: string;
+  value: string | null;
+  options: readonly string[];
+  onChange: (value: string) => void;
+  placeholder?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="relative">
+      <select
+        aria-label={ariaLabel}
+        disabled={disabled}
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value)}
+        className={cn(
+          'h-9 appearance-none rounded-md border border-ay-border bg-surface-2 pl-2 pr-7',
+          'text-body-sm text-ay-text disabled:opacity-50',
+        )}
+      >
+        {(placeholder || value === null) && (
+          <option value="" disabled>
+            {placeholder ?? 'Select…'}
+          </option>
+        )}
+        {options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+      <ChevronDown
+        aria-hidden="true"
+        className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-ay-muted"
+      />
+    </div>
+  );
+}
 
 export function FilterBar({
   showName = true,
@@ -62,7 +115,7 @@ export function FilterBar({
   return (
     <div className="mb-3 flex flex-wrap items-center gap-2">
       {showName && (
-        <Select
+        <FilterSelect
           ariaLabel="Underlying"
           value={name}
           options={nameOptions}
@@ -71,7 +124,7 @@ export function FilterBar({
         />
       )}
       {showExpiry && (
-        <Select
+        <FilterSelect
           ariaLabel="Expiry"
           value={expiry}
           options={expiries.data ?? []}
@@ -81,7 +134,7 @@ export function FilterBar({
         />
       )}
       {showInterval && (
-        <Select
+        <FilterSelect
           ariaLabel="Interval"
           value={interval}
           options={[...allowedIntervals]}

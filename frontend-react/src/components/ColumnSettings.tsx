@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Columns3 } from 'lucide-react';
 import { cn } from '../lib/cn.ts';
 
 // oipulse "Column Setting" control (§20.7.3): a popover of checkboxes toggling the optional chain
@@ -34,9 +35,10 @@ export function ColumnSettings({ columns, visible, onToggle }: ColumnSettingsPro
         aria-haspopup="true"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="h-9 rounded-md border border-ay-border bg-surface-1 px-3 text-sm text-ay-text hover:border-accent"
+        className="inline-flex h-9 items-center gap-1.5 rounded-md border border-ay-border bg-surface-1 px-3 text-sm text-ay-text hover:border-accent"
       >
-        Column Setting ▾
+        <Columns3 aria-hidden="true" className="size-4" />
+        Columns
       </button>
       {open && (
         <div className="absolute right-0 top-11 z-20 w-56 rounded-lg border border-ay-border bg-surface-1 p-2 shadow-xl">

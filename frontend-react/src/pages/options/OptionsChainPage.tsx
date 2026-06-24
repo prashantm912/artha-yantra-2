@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react';
 import { formatDecimal, isNegative } from '../../lib/decimal.ts';
 import { nearestStrike } from '../../lib/strikes.ts';
+import { loadDensity, saveDensity, type Density } from '../../lib/density.ts';
 import { useChainTable, useVix } from '../../api/oiAnalytics.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { ColumnSettings } from '../../components/ColumnSettings.tsx';
+import { DensityToggle } from '../../components/DensityToggle.tsx';
 import { OptionsChainTable } from '../../components/OptionsChainTable.tsx';
 import { OPTIONAL_COLUMN_META } from '../../components/optionsChainColumns.ts';
 import { PageHeader, LiveDot } from '../../components/PageHeader.tsx';
@@ -54,6 +56,12 @@ export function OptionsChainPage() {
   const chainQ = useChainTable();
   const vixQ = useVix();
   const [optional, setOptional] = useState<Record<string, boolean>>({});
+  const [density, setDensity] = useState<Density>(() => loadDensity());
+
+  const changeDensity = (d: Density) => {
+    setDensity(d);
+    saveDensity(d);
+  };
 
   const chain = chainQ.data ?? null;
   const rows = useMemo(() => chain?.rows ?? [], [chain]);
@@ -91,6 +99,7 @@ export function OptionsChainPage() {
           visible={optional}
           onToggle={(key) => setOptional((v) => ({ ...v, [key]: !v[key] }))}
         />
+        <DensityToggle value={density} onChange={changeDensity} />
       </div>
 
       {/* Live header strip (§20.7.4). Max-pain/Sentiment intentionally NOT here — they belong to the
@@ -132,6 +141,7 @@ export function OptionsChainPage() {
           spot={chain?.spot ?? null}
           atmStrike={atm}
           optionalKeys={optionalKeys}
+          density={density}
         />
       </BeatBlock>
     </LoadBeat>

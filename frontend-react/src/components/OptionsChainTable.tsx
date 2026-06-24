@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { useMemo } from 'react';
 import { cn } from '../lib/cn.ts';
+import type { Density } from '../lib/density.ts';
 import {
   compareDecimal,
   formatDecimal,
@@ -125,6 +126,8 @@ interface OptionsChainTableProps {
   spot: string | null;
   atmStrike: string | null;
   optionalKeys: string[];
+  /** Row density (§4.2/Q4): comfortable `py-1` vs compact `py-0.5`. Defaults to the scalper compact. */
+  density?: Density;
   emptyMessage?: string;
 }
 
@@ -152,8 +155,11 @@ export function OptionsChainTable({
   spot,
   atmStrike,
   optionalKeys,
+  density = 'compact',
   emptyMessage = 'No chain for this selection.',
 }: OptionsChainTableProps) {
+  // Per-row cell padding only (headers stay py-1); compact is the scalper default.
+  const cellPad = density === 'compact' ? 'py-0.5' : 'py-1';
   const enabledOptional = useMemo(
     () => OPTIONAL_COLUMNS.filter((c) => optionalKeys.includes(c.key)),
     [optionalKeys],
@@ -273,23 +279,25 @@ export function OptionsChainTable({
               return (
                 <tr key={row.strike} className="border-t border-ay-border text-ay-text">
                   {callColumns.map((c) => (
-                    <td key={`ce-${c.key}`} className={cn('px-2 py-1 text-right', c.tdClass?.(ce))}>
+                    <td key={`ce-${c.key}`} className={cn('px-2 text-right', cellPad, c.tdClass?.(ce))}>
                       {c.render(row.ce, ce)}
                     </td>
                   ))}
                   <td
-                    className="px-2 py-1 text-center font-semibold"
+                    className={cn('px-2 text-center font-semibold', cellPad)}
                     style={isAtm ? atmStyle : undefined}
                   >
                     {row.strike}
                     {isAtm && <span className="ay-sr-only"> at the money</span>}
                   </td>
                   {putColumns.map((c) => (
-                    <td key={`pe-${c.key}`} className={cn('px-2 py-1 text-right', c.tdClass?.(pe))}>
+                    <td key={`pe-${c.key}`} className={cn('px-2 text-right', cellPad, c.tdClass?.(pe))}>
                       {c.render(row.pe, pe)}
                     </td>
                   ))}
-                  <td className="px-2 py-1 text-right tabular-nums text-ay-muted">{rowPcr(row)}</td>
+                  <td className={cn('px-2 text-right tabular-nums text-ay-muted', cellPad)}>
+                    {rowPcr(row)}
+                  </td>
                 </tr>
               );
             })}

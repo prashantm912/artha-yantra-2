@@ -43,6 +43,50 @@ export interface TrialRow {
   backtestRunId?: string | null;
 }
 
+/** A train/test window bound (ISO timestamps). */
+export interface FoldWindow {
+  from: string;
+  to: string;
+}
+
+/** Per-regime OOS aggregates for one fold (decimals as STRINGS; only labels that traded are present). */
+export interface RegimeOosStat {
+  sharpe: string | null;
+  expectancy: string | null;
+  tradeCount: number;
+}
+
+/** The four canonical regime labels, in display order (BULL/RANGE/BEAR/CRASH). */
+export const REGIME_LABELS = ['BULL', 'RANGE', 'BEAR', 'CRASH'] as const;
+export type RegimeLabel = (typeof REGIME_LABELS)[number];
+
+/**
+ * One fold of a walk-forward (or implicit 70/30) trial run (`GET
+ * /optimizations/{id}/trials/{trial}/folds`). The metric catalogs carry decimals AS STRINGS;
+ * `regimeOos` keys are a subset of {@link REGIME_LABELS} (only labels that actually traded).
+ */
+export interface TrialFold {
+  fold: number;
+  train: FoldWindow;
+  test: FoldWindow;
+  trainMetrics: Record<string, string | null>;
+  oosMetrics: Record<string, string | null>;
+  regimeMix?: Record<string, number>;
+  regimeOos: Partial<Record<RegimeLabel, RegimeOosStat>>;
+}
+
+/**
+ * The per-fold drill-down for one trial — resolved via its backtest_run_id. Returns `[]` for a
+ * full-window trial (no walk-forward structure). Lazy: only fetched when a trial is selected.
+ */
+export function useTrialFolds(sweepId: string, trialNumber: number | null) {
+  return useQuery({
+    queryKey: ['sweep', sweepId, 'trial', trialNumber, 'folds'],
+    queryFn: () => apiFetch<TrialFold[]>(`/optimizations/${sweepId}/trials/${trialNumber}/folds`),
+    enabled: !!sweepId && trialNumber != null,
+  });
+}
+
 const REFETCH_MS = 4000;
 
 export function useSweepBest(sweepId: string, sort: SortMode) {

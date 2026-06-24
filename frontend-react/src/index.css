@@ -433,6 +433,18 @@ body {
   border-radius: var(--radius-sm);
 }
 
+/* ── §3.3.4 Sonner toasts → --ay-* (richColors OFF so our tokens win) ── */
+[data-sonner-toaster] {
+  --normal-bg: var(--ay-surface-1);
+  --normal-border: var(--ay-border);
+  --normal-text: var(--ay-text);
+  --success-bg: var(--ay-surface-1);
+  --success-text: var(--ay-bull);
+  --error-bg: var(--ay-surface-1);
+  --error-text: var(--ay-bear);
+  --border-radius: var(--radius-md);
+}
+
 /* Price-flash pulse (E-3), reduced-motion aware. */
 @keyframes ay-flash {
   0% {
@@ -449,6 +461,9 @@ body {
 /* Blanket OS reduced-motion — every token-driven animation/transition (extends the .ay-pulse guard). (§1.4) */
 @media (prefers-reduced-motion: reduce) {
   .ay-pulse {
+    animation: none;
+  }
+  .ay-skeleton {
     animation: none;
   }
   *,

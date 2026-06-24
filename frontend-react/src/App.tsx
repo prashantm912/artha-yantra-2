@@ -1,5 +1,6 @@
 import { Suspense, lazy } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
+import { Toaster } from './components/ui/sonner.tsx';
 import { RequireAuth } from './auth/RequireAuth.tsx';
 import { AppShell } from './components/AppShell.tsx';
 import { LoginPage } from './pages/login/LoginPage.tsx';
@@ -151,7 +152,9 @@ function Lazy({ children }: { children: React.ReactNode }) {
 // Trending/Premium/Big-OI, Futures Spurt/Movers/EOD, FII/DII Capital-Market/Participant/Long-Short).
 export function App() {
   return (
-    <Routes>
+    <>
+      <Toaster position="top-right" closeButton />
+      <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route element={<RequireAuth />}>
         <Route element={<AppShell />}>
@@ -231,6 +234,7 @@ export function App() {
           <Route path="/data-ops/export" element={<ExportWizardPage />} />
         </Route>
       </Route>
-    </Routes>
+      </Routes>
+    </>
   );
 }

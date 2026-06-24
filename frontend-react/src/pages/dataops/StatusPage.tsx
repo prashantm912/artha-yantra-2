@@ -172,16 +172,16 @@ export function StatusPage() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
           <QueryState query={expiredQ} isEmpty={() => false}>
-            {(expired) => (
-              <>
-                <ExpiredCard expired={expired} />
-                {oiQ.data && <OiCard oi={oiQ.data} />}
-              </>
-            )}
+            {(expired) => <ExpiredCard expired={expired} />}
+          </QueryState>
+          <QueryState query={oiQ} isEmpty={() => false} errorTitle="Couldn't load OI backfill status">
+            {(oi) => <OiCard oi={oi} />}
           </QueryState>
         </div>
         <div>
-          <QuotaGauge configured={quotaQ.data?.configured ?? false} windows={quotaQ.data?.windows ?? []} />
+          <QueryState query={quotaQ} isEmpty={() => false} errorTitle="Couldn't load Upstox quota">
+            {(quota) => <QuotaGauge configured={quota.configured} windows={quota.windows} />}
+          </QueryState>
         </div>
       </div>
     </div>

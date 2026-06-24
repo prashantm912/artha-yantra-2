@@ -1,8 +1,11 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Radio } from 'lucide-react';
 import { formatDecimal, isNegative, multiplyByInt, subtractDecimal } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { useSignalDetail, useSignals, useSignalsLive, type SignalDto } from '../../api/signals.ts';
 import { ManualVerifyChecklist } from '../../components/ManualVerifyChecklist.tsx';
 import {
@@ -137,30 +140,35 @@ export function ScalperCockpitPage() {
         <section className="min-w-0">
           <h2 className="mb-2 text-sm font-semibold">Live signals</h2>
           <div className="max-h-[calc(100vh-12rem)] overflow-auto rounded-lg border border-ay-border">
-            {feed.length > 0 ? (
-              <ul className="divide-y divide-ay-border">
-                {feed.map((s) => (
-                  <li key={s.id}>
-                    <button
-                      type="button"
-                      onClick={() => loadSignal(s)}
-                      className={cn(
-                        'grid w-full grid-cols-[3.2rem_1fr_auto] items-center gap-2 px-2 py-2 text-left text-sm hover:bg-surface-2',
-                        ticket.signalId === s.id && 'bg-surface-2',
-                      )}
-                    >
-                      <span className="tabular-nums text-ay-muted">{s.generatedAt.slice(11, 16)}</span>
-                      <span className="truncate">{s.exchange}:{s.tradingsymbol}</span>
-                      <span className={cn('text-xs font-semibold', s.side === 'BUY' ? 'text-bull' : 'text-bear')}>
-                        {s.signalType} {s.side}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="p-3 text-sm text-ay-muted">No live signals — publish a strategy.</p>
-            )}
+            <QueryState
+              query={signals}
+              skeleton={<Skeleton variant="table-rows" rows={6} cols={1} className="p-3" />}
+              isEmpty={(d) => d.items.length === 0}
+              empty={{ icon: Radio, title: 'No live signals — publish a strategy.' }}
+            >
+              {() => (
+                <ul className="divide-y divide-ay-border">
+                  {feed.map((s) => (
+                    <li key={s.id}>
+                      <button
+                        type="button"
+                        onClick={() => loadSignal(s)}
+                        className={cn(
+                          'grid w-full grid-cols-[3.2rem_1fr_auto] items-center gap-2 px-2 py-2 text-left text-sm hover:bg-surface-2',
+                          ticket.signalId === s.id && 'bg-surface-2',
+                        )}
+                      >
+                        <span className="tabular-nums text-ay-muted">{s.generatedAt.slice(11, 16)}</span>
+                        <span className="truncate">{s.exchange}:{s.tradingsymbol}</span>
+                        <span className={cn('text-xs font-semibold', s.side === 'BUY' ? 'text-bull' : 'text-bear')}>
+                          {s.signalType} {s.side}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </QueryState>
           </div>
         </section>
 

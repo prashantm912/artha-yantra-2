@@ -80,6 +80,21 @@ public class UpstoxAnalyticsConfig {
   }
 
   /**
+   * Upstox <b>market-status + index pre-open</b> client — feeds the Pre-Open Market page ({@code GET
+   * /api/v1/market/market-status} + {@code GET /api/v1/market/pre-open}). It reads the per-exchange session
+   * phase ({@code /v2/market/status/{exchange}}) and batch-quotes the four index keys (Nifty 50 / Bank
+   * / Fin / Sensex via {@code /v2/market-quote/quotes}) on the analytics token. Bound only when the
+   * analytics token is enabled; absent ⇒ the page renders empty / UNKNOWN (the controller resolves the
+   * bean via an {@code ObjectProvider}).
+   */
+  @Bean
+  @ConditionalOnProperty(name = "artha.upstox.analytics.enabled", havingValue = "true")
+  public UpstoxMarketStatusClient upstoxMarketStatusClient(
+      RestClient.Builder restClientBuilder, UpstoxAnalyticsProperties properties) {
+    return new UpstoxMarketStatusClient(restClientBuilder, properties);
+  }
+
+  /**
    * Direct-Upstox LIVE option-chain client (Wave U1) — the flag-selected {@link
    * in.arthayantra.marketdata.options.OptionChainQuoteSource} for the live OI snapshot. Bound ONLY
    * when {@code artha.marketdata.source.optionchain=upstox}; absent ⇒ {@code OptionsChainService}

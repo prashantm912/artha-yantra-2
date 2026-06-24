@@ -1063,6 +1063,35 @@
         }
       }
     },
+    "/api/v1/market/pre-open" : {
+      "get" : {
+        "tags" : [ "pre-open-controller" ],
+        "operationId" : "preOpen",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/options/trending" : {
       "get" : {
         "tags" : [ "options-analytics-controller" ],
@@ -2480,6 +2509,35 @@
         }
       }
     },
+    "/api/v1/market/market-status" : {
+      "get" : {
+        "tags" : [ "pre-open-controller" ],
+        "operationId" : "status_1",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/holidays" : {
       "get" : {
         "tags" : [ "market-surface-controller" ],
@@ -3639,7 +3697,7 @@
     "/api/v1/market/eod-backfill/status" : {
       "get" : {
         "tags" : [ "eod-backfill-controller" ],
-        "operationId" : "status_1",
+        "operationId" : "status_2",
         "responses" : {
           "200" : {
             "description" : "OK",
@@ -3909,7 +3967,7 @@
     "/api/v1/market/admin/oi-backfill/status" : {
       "get" : {
         "tags" : [ "oi-backfill-controller" ],
-        "operationId" : "status_2",
+        "operationId" : "status_3",
         "responses" : {
           "200" : {
             "description" : "OK",
@@ -4017,7 +4075,7 @@
     "/api/v1/market/admin/expired-backfill/status" : {
       "get" : {
         "tags" : [ "expired-backfill-controller" ],
-        "operationId" : "status_3",
+        "operationId" : "status_4",
         "responses" : {
           "200" : {
             "description" : "OK",
@@ -4423,7 +4481,7 @@
     "/api/v1/auth/kite/status" : {
       "get" : {
         "tags" : [ "kite-auth-controller" ],
-        "operationId" : "status_4",
+        "operationId" : "status_5",
         "responses" : {
           "200" : {
             "description" : "OK",

@@ -829,6 +829,47 @@ export interface IndexContribution {
 }
 
 /**
+ * One exchange's live session phase of GET /api/v1/market/market-status `{items}` (Upstox market-status). The
+ * `status` is the raw Upstox phase enum (PRE_OPEN_START / PRE_OPEN_END / NORMAL_OPEN / NORMAL_CLOSE /
+ * CLOSING_START / CLOSING_END), or "UNKNOWN" when the exchange call failed; `preOpen` is server-derived
+ * (the phase starts with "PRE_OPEN"). `asOf` is the Upstox last_updated as an ISO +05:30 instant (null
+ * when unknown).
+ */
+export interface MarketStatus {
+  exchange: string;
+  status: string;
+  preOpen: boolean;
+  asOf: string | null;
+}
+
+/**
+ * One index's pre-open snapshot of GET /api/v1/market/pre-open `indices` (Upstox index quote). Price /
+ * change fields are decimal STRINGS (never parseFloat) and null when the live quote did not resolve (the
+ * row still lists by name). During the 09:00–09:15 IST pre-open window these carry the indicative
+ * pre-open price; otherwise the last / closing price. changePct is server-derived net_change / prevClose
+ * * 100; asOf is the ISO +05:30 snapshot instant.
+ */
+export interface PreOpenIndex {
+  name: string;
+  key: string;
+  ltp: string | null;
+  prevClose: string | null;
+  netChange: string | null;
+  changePct: string | null;
+  asOf: string;
+}
+
+/**
+ * GET /api/v1/market/pre-open — the NSE session phase + the four index quotes (Nifty 50 / Bank / Fin /
+ * Sensex). `phase` is the raw NSE phase enum (or "UNKNOWN"); `preOpen` mirrors the NSE pre-open flag.
+ */
+export interface PreOpenSnapshot {
+  phase: string;
+  preOpen: boolean;
+  indices: PreOpenIndex[];
+}
+
+/**
  * One global index's live snapshot of GET /api/v1/market/world-indices (Upstox GLOBAL_INDEX /
  * GLOBAL_INDICATOR). Price/change fields are decimal STRINGS (the platform BigDecimal-as-string
  * convention) and are null when the live quote did not resolve (the row still lists from the master).

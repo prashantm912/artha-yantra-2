@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Stepper } from '../../components/dataops/Stepper.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 import {
   downloadExport,
   useExportContracts,
@@ -104,7 +105,7 @@ export function ExportWizardPage() {
 
   return (
     <div>
-      <h1 className="mb-2 text-center text-sm font-semibold text-ay-text">Export Wizard</h1>
+      <PageHeader title="Export Wizard" />
 
       <div className="mx-auto max-w-3xl">
         <Stepper steps={STEPS} current={step} />

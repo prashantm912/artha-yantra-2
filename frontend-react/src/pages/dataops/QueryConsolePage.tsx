@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { SqlEditor } from '../../components/dataops/SqlEditor.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 import { cn } from '../../lib/cn.ts';
 import { downloadQueryCsv, runQuery, type QueryResult } from '../../api/dataops.ts';
 
@@ -60,7 +61,7 @@ export function QueryConsolePage() {
 
   return (
     <div>
-      <h1 className="mb-2 text-center text-sm font-semibold text-ay-text">Query / Scan console</h1>
+      <PageHeader title="Query / Scan console" />
 
       <div className="grid gap-3 md:grid-cols-[14rem_1fr]">
         {/* Left: preset list */}

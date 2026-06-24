@@ -3,6 +3,9 @@ import { useTrendingOi } from '../../api/oiAnalytics.ts';
 import { foldTrending, type TrendingRow } from '../../api/trendingOiFold.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { SignedCount } from '../../components/atoms/SignedCount.tsx';
 import { SentimentBadge } from '../../components/atoms/SentimentBadge.tsx';
@@ -62,7 +65,7 @@ export function TrendingOiPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">OI Trending</h1>
+      <PageHeader title="OI Trending" subtitle="Call vs Put OI over the session with a derived directional sentiment" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval allowedIntervals={TRENDING_INTERVALS} />
@@ -74,14 +77,24 @@ export function TrendingOiPage() {
         the session-open baseline.
       </p>
 
-      <DataTable
-        columns={columns}
-        rows={rows}
-        rowKey={(r) => r.bucket}
-        pageSize={100}
-        ariaLabel="OI trending per interval"
-        emptyMessage="No trending data — pick an underlying + expiry with captured snapshots."
-      />
+      <QueryState
+        query={q}
+        isEmpty={() => rows.length === 0}
+        empty={{ title: 'No trending data — pick an underlying + expiry with captured snapshots.' }}
+        errorTitle="Couldn't load trending OI"
+        skeleton={<Skeleton variant="table-rows" rows={8} cols={12} />}
+      >
+        {() => (
+          <DataTable
+            columns={columns}
+            rows={rows}
+            rowKey={(r) => r.bucket}
+            pageSize={100}
+            ariaLabel="OI trending per interval"
+            emptyMessage="No trending data — pick an underlying + expiry with captured snapshots."
+          />
+        )}
+      </QueryState>
     </div>
   );
 }

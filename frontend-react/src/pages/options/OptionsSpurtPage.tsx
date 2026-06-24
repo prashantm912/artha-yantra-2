@@ -4,6 +4,7 @@ import { useOptionsSpurt } from '../../api/oiAnalytics.ts';
 import type { SpurtRow } from '../../api/types.ts';
 import type { OiInterpretation } from '../../core/oiInterpretation.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { OiBadge4 } from '../../components/atoms/OiBadge4.tsx';
 import { SpurtQuadrant } from '../../components/SpurtQuadrant.tsx';
@@ -51,7 +52,7 @@ export function OptionsSpurtPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Options OI Spurt</h1>
+      <PageHeader title="Options OI Spurt" subtitle="4-quadrant OI-action scanner — every CE/PE strike bucketed by its interval interpretation" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry />

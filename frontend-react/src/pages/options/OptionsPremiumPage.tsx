@@ -3,6 +3,7 @@ import type { EChartsOption } from 'echarts';
 import { useOptionsPremium } from '../../api/oiAnalytics.ts';
 import type { PremiumRow } from '../../api/types.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
 import { Select } from '../../components/atoms/Select.tsx';
@@ -107,7 +108,7 @@ export function OptionsPremiumPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Options Premium</h1>
+      <PageHeader title="Options Premium" subtitle="Grouped Call/Put premium bars per strike around ATM — extrinsic value or raw LTP" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval={false} />
@@ -138,11 +139,26 @@ export function OptionsPremiumPage() {
           No premium data — pick an underlying + expiry with a captured snapshot.
         </p>
       ) : (
-        <EChart
-          makeOption={makeOption}
-          height={440}
-          ariaLabel="Call versus Put premium bars per strike around ATM"
-        />
+        <div className="card shadow-e1">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-h3 text-ay-text">Premium per strike</h2>
+            <div className="flex items-center gap-3 text-caption text-ay-muted">
+              <span className="inline-flex items-center gap-1">
+                <span aria-hidden="true" className="inline-block size-2.5 rounded-sm bg-bull" />
+                Call
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span aria-hidden="true" className="inline-block size-2.5 rounded-sm bg-bear" />
+                Put
+              </span>
+            </div>
+          </div>
+          <EChart
+            makeOption={makeOption}
+            height={440}
+            ariaLabel="Call versus Put premium bars per strike around ATM"
+          />
+        </div>
       )}
     </div>
   );

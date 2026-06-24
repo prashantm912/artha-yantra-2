@@ -3,6 +3,9 @@ import { useChainTable, useOptionsSpurt } from '../../api/oiAnalytics.ts';
 import type { SpurtRow } from '../../api/types.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
 import { MoneynessBadge, type Moneyness } from '../../components/atoms/MoneynessBadge.tsx';
@@ -70,7 +73,7 @@ export function BigOiMovementPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Big OI Movement</h1>
+      <PageHeader title="Big OI Movement" subtitle="Biggest OI-change strikes, split CE | PE, tagged by moneyness + OI interpretation" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval />
@@ -82,16 +85,31 @@ export function BigOiMovementPage() {
         <span className="text-xs">· top {TOP_N} OI moves per side · as of {time}</span>
       </p>
 
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <div>
-          <div className="mb-1 text-sm font-semibold text-bear">CALL (CE)</div>
-          <DataTable columns={columns('CE')} rows={ce} rowKey={(r) => r.strike} ariaLabel="Big OI movement — calls" emptyMessage="No CE moves." />
-        </div>
-        <div>
-          <div className="mb-1 text-sm font-semibold text-bull">PUT (PE)</div>
-          <DataTable columns={columns('PE')} rows={pe} rowKey={(r) => r.strike} ariaLabel="Big OI movement — puts" emptyMessage="No PE moves." />
-        </div>
-      </div>
+      <QueryState
+        query={spurtQ}
+        isEmpty={() => items.length === 0}
+        empty={{ title: 'No OI moves — pick an underlying + expiry with captured snapshots.' }}
+        errorTitle="Couldn't load OI movement"
+        skeleton={
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <Skeleton variant="table-rows" rows={10} cols={8} />
+            <Skeleton variant="table-rows" rows={10} cols={8} />
+          </div>
+        }
+      >
+        {() => (
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <div>
+              <div className="mb-1 text-sm font-semibold text-bear">CALL (CE)</div>
+              <DataTable columns={columns('CE')} rows={ce} rowKey={(r) => r.strike} ariaLabel="Big OI movement — calls" emptyMessage="No CE moves." />
+            </div>
+            <div>
+              <div className="mb-1 text-sm font-semibold text-bull">PUT (PE)</div>
+              <DataTable columns={columns('PE')} rows={pe} rowKey={(r) => r.strike} ariaLabel="Big OI movement — puts" emptyMessage="No PE moves." />
+            </div>
+          </div>
+        )}
+      </QueryState>
     </div>
   );
 }

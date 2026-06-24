@@ -5,6 +5,7 @@ import { useOiAnalysis, useStrikeSeries } from '../../api/oiAnalytics.ts';
 import { foldOiAnalysis } from '../../api/oiAnalysisFold.ts';
 import type { OiInterval } from '../../stores/symbolContext.store.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Select } from '../../components/atoms/Select.tsx';
 import { OiAnalysisTable } from '../../components/OiAnalysisTable.tsx';
@@ -43,7 +44,7 @@ export function OiAnalysisPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Options OI Analysis</h1>
+      <PageHeader title="Options OI Analysis" subtitle="Per-strike intraday CE+PE OI folded onto mirrored time-rows" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry allowedIntervals={ANALYSIS_INTERVALS} />

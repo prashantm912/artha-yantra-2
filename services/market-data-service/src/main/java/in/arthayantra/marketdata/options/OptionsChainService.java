@@ -36,7 +36,11 @@ import org.springframework.stereotype.Service;
 @Service
 public class OptionsChainService {
 
-  /** One strike side. {@code prevOi} is non-null ONLY on the Upstox source (its {@code prev_oi}). */
+  /**
+   * One strike side. {@code prevOi} is non-null ONLY on the Upstox source (its {@code prev_oi}).
+   * {@code vanna}/{@code charm}/{@code vomma} are the second-order greeks (§17.6) — additive,
+   * live-only fields surfaced on the chain output; they are NOT persisted to the snapshot table.
+   */
   public record Leg(
       String tradingsymbol,
       BigDecimal ltp,
@@ -51,6 +55,9 @@ public class OptionsChainService {
       BigDecimal theta,
       BigDecimal vega,
       BigDecimal rho,
+      BigDecimal vanna,
+      BigDecimal charm,
+      BigDecimal vomma,
       String ivReason,
       String priceSource) {}
 
@@ -315,6 +322,9 @@ public class OptionsChainService {
     BigDecimal theta = null;
     BigDecimal vega = null;
     BigDecimal rho = null;
+    BigDecimal vanna = null;
+    BigDecimal charm = null;
+    BigDecimal vomma = null;
     String reason;
     String priceSource = null;
 
@@ -365,6 +375,9 @@ public class OptionsChainService {
           theta = greeks.theta();
           vega = greeks.vega();
           rho = greeks.rho();
+          vanna = greeks.vanna();
+          charm = greeks.charm();
+          vomma = greeks.vomma();
         }
       }
     }
@@ -382,6 +395,9 @@ public class OptionsChainService {
         scale6(theta),
         scale6(vega),
         scale6(rho),
+        scale6(vanna),
+        scale6(charm),
+        scale6(vomma),
         reason,
         priceSource);
   }

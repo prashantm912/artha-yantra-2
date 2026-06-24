@@ -1781,6 +1781,9 @@ export interface components {
             theta?: number;
             vega?: number;
             rho?: number;
+            vanna?: number;
+            charm?: number;
+            vomma?: number;
             ivReason?: string;
             priceSource?: string;
         };

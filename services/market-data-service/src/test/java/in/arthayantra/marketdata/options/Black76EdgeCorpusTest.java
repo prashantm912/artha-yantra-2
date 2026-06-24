@@ -56,7 +56,10 @@ class Black76EdgeCorpusTest {
     for (double t : new double[] {5.0 / (365 * 24 * 60), 1.0 / (365 * 24 * 60), 0.0}) {
       Black76.Greeks g = Black76.greeks(Black76.OptionType.CE, F, F, t, R, 0.24);
       for (BigDecimal value :
-          new BigDecimal[] {g.price(), g.delta(), g.gamma(), g.theta(), g.vega(), g.rho()}) {
+          new BigDecimal[] {
+            g.price(), g.delta(), g.gamma(), g.theta(), g.vega(), g.rho(),
+            g.vanna(), g.charm(), g.vomma()
+          }) {
         assertThat(value).as("finite at T=%s", t).isNotNull();
         // BigDecimal.valueOf(NaN/Infinity) would have thrown — reaching here proves finiteness
       }

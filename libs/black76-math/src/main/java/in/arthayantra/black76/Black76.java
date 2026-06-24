@@ -29,14 +29,31 @@ public final class Black76 {
 
   private Black76() {}
 
-  /** Price + the five greeks for one quote. */
+  /**
+   * Price + the five first-order greeks AND the three second-order greeks for one quote.
+   *
+   * <p>The higher-order trio (vanna/charm/vomma, plan §17.6) rides as ADDITIVE fields — the
+   * first-order values are byte-identical to the pre-existing record, so the golden vectors and any
+   * downstream parity stay unchanged. Reporting conventions mirror the first-order scaling:
+   *
+   * <ul>
+   *   <li><b>vanna</b> ∂Δ/∂σ ≡ ∂vega/∂F — per 1 VOL POINT (÷100), like vega; call/put-identical.
+   *   <li><b>charm</b> ∂Δ/∂t — Δ-decay per CALENDAR DAY (÷365), like theta; the discount term flips
+   *       sign by call/put.
+   *   <li><b>vomma</b> (volga) ∂vega/∂σ — per 1 VOL POINT of vega per 1 VOL POINT of σ (÷10 000);
+   *       call/put-identical.
+   * </ul>
+   */
   public record Greeks(
       BigDecimal price,
       BigDecimal delta,
       BigDecimal gamma,
       BigDecimal theta,
       BigDecimal vega,
-      BigDecimal rho) {}
+      BigDecimal rho,
+      BigDecimal vanna,
+      BigDecimal charm,
+      BigDecimal vomma) {}
 
   /** Undiscounted-forward Black-76 price (discounted by {@code e^-rT}). */
   public static double price(OptionType type, double f, double k, double t, double r, double sigma) {
@@ -73,13 +90,33 @@ public final class Black76 {
     // in Black-76 only the discount factor sees r: ∂V/∂r = −T·V, per 1% move
     double rho = -tt * price / 100.0;
 
+    // SECOND-ORDER greeks (§17.6) — closed forms, same scaling family as their first-order parents.
+    // vanna = ∂Δ/∂σ ≡ ∂vega/∂F = −df·φ(d1)·d2/σ; reported per VOL POINT (÷100) like vega. The cross
+    // derivative is call/put-identical (the put/call delta differ only by a σ-independent −df).
+    double vanna = -df * pdfD1 * d2 / sigma / 100.0;
+    // vomma/volga = ∂vega/∂σ = vega_raw·d1·d2/σ where vega_raw = df·F·φ(d1)·√T; reported per VOL
+    // POINT of vega per VOL POINT of σ (÷100 twice ⇒ ÷10 000). Also call/put-identical.
+    double vomma = df * f * pdfD1 * sqrtT * d1 * d2 / sigma / 10000.0;
+    // charm = ∂Δ/∂t (Δ-decay), reported per CALENDAR DAY (÷365) like theta. ∂d1/∂t carries the
+    // forward-moneyness drift; the −r·df·N(±d1) discount term flips sign by call/put (put delta is
+    // call delta − df, whose ∂/∂t is +r·df).
+    double dd1Dt = -Math.log(f / k) / (2.0 * sigma * tt * sqrtT) + 0.25 * sigma / sqrtT;
+    double charm =
+        (type == OptionType.CE
+                ? -r * df * cdf(d1) + df * pdfD1 * dd1Dt
+                : r * df * cdf(-d1) + df * pdfD1 * dd1Dt)
+            / 365.0;
+
     return new Greeks(
         BigDecimal.valueOf(price),
         BigDecimal.valueOf(delta),
         BigDecimal.valueOf(gamma),
         BigDecimal.valueOf(theta),
         BigDecimal.valueOf(vega),
-        BigDecimal.valueOf(rho));
+        BigDecimal.valueOf(rho),
+        BigDecimal.valueOf(vanna),
+        BigDecimal.valueOf(charm),
+        BigDecimal.valueOf(vomma));
   }
 
   /** The Newton denominator: dPrice/dSigma per 1.0 of vol, NOT the per-point reporting vega. */

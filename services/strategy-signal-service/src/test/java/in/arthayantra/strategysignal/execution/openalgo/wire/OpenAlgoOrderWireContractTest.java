@@ -130,4 +130,37 @@ class OpenAlgoOrderWireContractTest {
             })
         .doesNotThrowAnyException();
   }
+
+  @Test
+  void placeOrderResponseMirrorsTheSuccessAndErrorShapes() throws Exception {
+    // §17.3 order-WRITE: success carries orderid+status; an error carries status+message, no orderid.
+    OpenAlgoPlaceOrderResponse ok =
+        mapper.readValue(
+            "{\"orderid\":\"240307000614705\",\"status\":\"success\"}",
+            OpenAlgoPlaceOrderResponse.class);
+    assertThat(ok.status()).isEqualTo("success");
+    assertThat(ok.orderid()).isEqualTo("240307000614705");
+    assertThat(ok.message()).isNull();
+
+    OpenAlgoPlaceOrderResponse err =
+        mapper.readValue(
+            "{\"status\":\"error\",\"message\":\"Invalid openalgo apikey\"}",
+            OpenAlgoPlaceOrderResponse.class);
+    assertThat(err.status()).isEqualTo("error");
+    assertThat(err.orderid()).isNull();
+    assertThat(err.message()).isEqualTo("Invalid openalgo apikey");
+  }
+
+  @Test
+  void placeOrderResponseIgnoresUnknownFieldsSoOpenAlgoAdditionsNeverCrashAplacement() {
+    assertThatCode(
+            () -> {
+              OpenAlgoPlaceOrderResponse r =
+                  mapper.readValue(
+                      "{\"orderid\":\"OA-1\",\"status\":\"success\",\"new_broker_ref\":\"X9\"}",
+                      OpenAlgoPlaceOrderResponse.class);
+              assertThat(r.orderid()).isEqualTo("OA-1");
+            })
+        .doesNotThrowAnyException();
+  }
 }

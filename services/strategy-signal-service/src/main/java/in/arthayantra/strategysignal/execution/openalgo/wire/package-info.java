@@ -1,15 +1,18 @@
 /**
- * OpenAlgo account/order-read wire DTOs — one record per {@code /api/v1} response (orderbook,
- * tradebook, positionbook, funds), mirroring every field OpenAlgo documents (docs.openalgo.in
- * accounts-api), not only the subset we currently consume. This package is the strategy-signal twin
- * of {@code market-data-service}'s {@code openalgo/wire} package and follows the SAME
- * anti-corruption convention (which itself mirrors {@code kite/wire}) so the broker becomes
- * swappable (Kite -&gt; any of the 30+ brokers OpenAlgo fronts) with no change to the domain
- * {@link in.arthayantra.strategysignal.execution.OrderGateway} port records.
+ * OpenAlgo account/order wire DTOs — one record per {@code /api/v1} payload (orderbook, tradebook,
+ * positionbook, funds reads + the placeorder write response), mirroring every field OpenAlgo
+ * documents (docs.openalgo.in accounts-api / orders-api), not only the subset we currently consume.
+ * This package is the strategy-signal twin of {@code market-data-service}'s {@code openalgo/wire}
+ * package and follows the SAME anti-corruption convention (which itself mirrors {@code kite/wire})
+ * so the broker becomes swappable (Kite -&gt; any of the 30+ brokers OpenAlgo fronts) with no change
+ * to the domain {@link in.arthayantra.strategysignal.execution.OrderGateway} port records.
  *
- * <p>These are the §18.1 ORDER-READ surface (orderbook / positions / tradebook / funds) — the
- * documented Phase-4b read deliverable. The order-WRITE path stays gated behind
- * {@link in.arthayantra.strategysignal.execution.OrderGateway#place} and is untouched here.
+ * <p>{@link OpenAlgoOrder}, {@link OpenAlgoTrade}, {@link OpenAlgoPosition} and {@link OpenAlgoFunds}
+ * (with their envelopes) are the §18.1 ORDER-READ surface (orderbook / positions / tradebook /
+ * funds). {@link OpenAlgoPlaceOrderResponse} is the §17.3 order-WRITE response — bound by
+ * {@link in.arthayantra.strategysignal.execution.RestOpenAlgoOrderGateway}, which stays dormant
+ * behind {@code artha.scalper.execution=live} (default OFF). The write REQUEST is a small map the
+ * gateway builds against the documented placeorder schema (no DTO needed for a flat request).
  *
  * <p>AGPL boundary (license filter, master plan §1d / §2): OpenAlgo itself is an AGPL-3.0 appliance
  * consumed ONLY over its {@code /api/v1/} HTTP surface — its source is NEVER merged here. These DTOs

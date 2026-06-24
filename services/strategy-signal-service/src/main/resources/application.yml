@@ -39,6 +39,10 @@ artha:
     order-read-enabled: ${ARTHA_OPENALGO_ORDER_READ_ENABLED:false}
     base-url: ${ARTHA_OPENALGO_BASE_URL:http://openalgo:5000}
     api-key-file: ${ARTHA_OPENALGO_API_KEY_FILE:/run/secrets/openalgo_api_key}
+    # §17.3 order-WRITE strategy tag stamped on every OpenAlgo /api/v1/placeorder (it logs/routes by
+    # it). The WRITE gateway itself is gated ONLY on artha.scalper.execution=live (default `paper` →
+    # the DisabledOrderGateway places nothing); this key just names the tag when that is armed.
+    strategy: ${ARTHA_OPENALGO_STRATEGY:ArthaYantra}
   signals:
     engine-enabled: ${ARTHA_SIGNAL_ENGINE_ENABLED:true}
   notifier:

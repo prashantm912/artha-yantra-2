@@ -36,7 +36,7 @@ import org.springframework.stereotype.Service;
 @Service
 public class OptionsChainService {
 
-  /** One strike side. */
+  /** One strike side. {@code prevOi} is non-null ONLY on the Upstox source (its {@code prev_oi}). */
   public record Leg(
       String tradingsymbol,
       BigDecimal ltp,
@@ -44,6 +44,7 @@ public class OptionsChainService {
       BigDecimal ask,
       Long volume,
       Long oi,
+      Long prevOi,
       BigDecimal iv,
       BigDecimal delta,
       BigDecimal gamma,
@@ -75,6 +76,13 @@ public class OptionsChainService {
   private final Clock clock;
   private final BigDecimal riskFreeRate;
   private final boolean ivEnabled;
+  /**
+   * The flag-selected per-strike LTP+OI+spot source (Wave U1). {@code null} ⇒ the DEFAULT Kite
+   * {@code QuoteGateway} path (unchanged); non-null (when {@code
+   * artha.marketdata.source.optionchain=upstox}) ⇒ source the raw quotes from the direct-Upstox
+   * {@code /v2/option/chain} call instead, with the greeks/IV pipeline downstream untouched.
+   */
+  private final OptionChainQuoteSource optionChainSource;
 
   /** Wires the chain inputs; {@code artha.options.iv-enabled} is the S1-SEQ gate switch. */
   public OptionsChainService(
@@ -83,13 +91,15 @@ public class OptionsChainService {
       MarketCalendar calendar,
       Clock clock,
       @Value("${artha.options.risk-free-rate:0.065}") BigDecimal riskFreeRate,
-      @Value("${artha.options.iv-enabled:true}") boolean ivEnabled) {
+      @Value("${artha.options.iv-enabled:true}") boolean ivEnabled,
+      Optional<OptionChainQuoteSource> optionChainSource) {
     this.instruments = instruments;
     this.quoteGateway = quoteGateway;
     this.calendar = calendar;
     this.clock = clock;
     this.riskFreeRate = riskFreeRate;
     this.ivEnabled = ivEnabled;
+    this.optionChainSource = optionChainSource.orElse(null);
   }
 
   /** Default-expiry resolution: the nearest expiry on/after today. */
@@ -129,26 +139,45 @@ public class OptionsChainService {
     OffsetDateTime now = OffsetDateTime.now(clock);
     boolean open = isOpenSafe(now);
 
-    // spot from the UNDERLYING quote — never a strike average (the v1 defect)
-    InstrumentKey underlyingKey =
-        new InstrumentKey(
-            chainInstruments.get(0).underlyingExchange() == null
-                ? "NSE"
-                : chainInstruments.get(0).underlyingExchange(),
-            underlying);
-    BigDecimal spot =
-        Optional.ofNullable(quoteGateway.quotes(List.of(underlyingKey)).get(underlyingKey))
-            .map(QuoteGateway.Quote::lastPrice)
-            .orElseThrow(
-                () ->
-                    new ApiException(
-                        503, ErrorCodes.DATA_STALE, "no spot quote for " + underlying));
+    // Wave U1: source per-strike LTP+OI+spot from the direct-Upstox chain when the flag selects it
+    // (login-free analytics token), else the DEFAULT Kite QuoteGateway path. prevOi is carried per
+    // (strike,type) so the snapshot's oi_change can use Upstox's prev_oi directly.
+    Optional<OptionChainQuoteSource.ChainQuotes> upstox =
+        optionChainSource == null ? Optional.empty() : optionChainSource.fetch(underlying, expiry);
 
-    Map<InstrumentKey, QuoteGateway.Quote> quotes =
-        quoteGateway.quotes(
-            chainInstruments.stream()
-                .map(i -> new InstrumentKey(i.exchange(), i.tradingsymbol()))
-                .toList());
+    BigDecimal spot;
+    Map<InstrumentKey, QuoteGateway.Quote> quotes;
+    Map<String, Long> prevOiByStrikeType = new java.util.HashMap<>();
+    if (upstox.isPresent()) {
+      OptionChainQuoteSource.ChainQuotes cq = upstox.get();
+      spot =
+          Optional.ofNullable(cq.spot())
+              .orElseThrow(
+                  () ->
+                      new ApiException(
+                          503, ErrorCodes.DATA_STALE, "no Upstox spot for " + underlying));
+      quotes = upstoxQuotes(chainInstruments, cq, now, prevOiByStrikeType);
+    } else {
+      // spot from the UNDERLYING quote — never a strike average (the v1 defect)
+      InstrumentKey underlyingKey =
+          new InstrumentKey(
+              chainInstruments.get(0).underlyingExchange() == null
+                  ? "NSE"
+                  : chainInstruments.get(0).underlyingExchange(),
+              underlying);
+      spot =
+          Optional.ofNullable(quoteGateway.quotes(List.of(underlyingKey)).get(underlyingKey))
+              .map(QuoteGateway.Quote::lastPrice)
+              .orElseThrow(
+                  () ->
+                      new ApiException(
+                          503, ErrorCodes.DATA_STALE, "no spot quote for " + underlying));
+      quotes =
+          quoteGateway.quotes(
+              chainInstruments.stream()
+                  .map(i -> new InstrumentKey(i.exchange(), i.tradingsymbol()))
+                  .toList());
+    }
 
     OptionalDouble yearsOpt = ExpiryClock.yearsToExpiry(now.toInstant(), expiry);
     double t = yearsOpt.orElse(Black76.T_MIN);
@@ -162,7 +191,9 @@ public class OptionsChainService {
     for (Instrument instrument : chainInstruments) {
       QuoteGateway.Quote quote =
           quotes.get(new InstrumentKey(instrument.exchange(), instrument.tradingsymbol()));
-      Leg leg = computeLeg(instrument, quote, forward.forward(), t, expired);
+      Long prevOi =
+          prevOiByStrikeType.get(instrument.strike() + "|" + instrument.instrumentType());
+      Leg leg = computeLeg(instrument, quote, prevOi, forward.forward(), t, expired);
       Leg[] pair = byStrike.computeIfAbsent(instrument.strike(), s -> new Leg[2]);
       if ("CE".equals(instrument.instrumentType())) {
         pair[0] = leg;
@@ -187,6 +218,47 @@ public class OptionsChainService {
         !open,
         now,
         rows);
+  }
+
+  /**
+   * Maps the direct-Upstox chain to the {@code QuoteGateway.Quote} shape the chain pipeline already
+   * consumes, keyed by each instrument's {@code (exchange, tradingsymbol)} so {@code computeLeg} and
+   * {@code resolveForward} run UNCHANGED. The match is by strike + CE/PE (Upstox is keyed by strike,
+   * the instrument master by tradingsymbol). The quote timestamp is {@code now} — the chain call is a
+   * live fetch, so no staleness penalty. {@code prev_oi} is sidelined into {@code prevOiByStrikeType}
+   * for the snapshot's {@code oi_change}; an instrument with no Upstox strike is simply absent (the
+   * downstream {@code computeLeg(null)} drops it, exactly like a Kite quote miss).
+   */
+  private Map<InstrumentKey, QuoteGateway.Quote> upstoxQuotes(
+      List<Instrument> chainInstruments,
+      OptionChainQuoteSource.ChainQuotes cq,
+      OffsetDateTime now,
+      Map<String, Long> prevOiByStrikeType) {
+    Map<InstrumentKey, QuoteGateway.Quote> quotes = new LinkedHashMap<>();
+    for (Instrument instrument : chainInstruments) {
+      boolean ce = "CE".equals(instrument.instrumentType());
+      // scale-insensitive strike match: the Upstox map is keyed by the scale-2 strike (the
+      // instrument master's NUMERIC scale need not equal Upstox's wire scale).
+      OptionChainQuoteSource.Leg leg =
+          (ce ? cq.ce() : cq.pe()).get(instrument.strike().setScale(2, RoundingMode.HALF_UP));
+      if (leg == null) {
+        continue;
+      }
+      quotes.put(
+          new InstrumentKey(instrument.exchange(), instrument.tradingsymbol()),
+          new QuoteGateway.Quote(
+              new InstrumentKey(instrument.exchange(), instrument.tradingsymbol()),
+              leg.ltp(),
+              leg.bid(),
+              leg.ask(),
+              leg.volume(),
+              leg.oi(),
+              now));
+      if (leg.prevOi() != null) {
+        prevOiByStrikeType.put(instrument.strike() + "|" + instrument.instrumentType(), leg.prevOi());
+      }
+    }
+    return quotes;
   }
 
   private ForwardCalculator.ForwardResult resolveForward(
@@ -230,6 +302,7 @@ public class OptionsChainService {
   private Leg computeLeg(
       Instrument instrument,
       QuoteGateway.Quote quote,
+      Long prevOi,
       BigDecimal forward,
       double t,
       boolean expired) {
@@ -302,6 +375,7 @@ public class OptionsChainService {
         quote.ask(),
         quote.volume(),
         quote.oi(),
+        prevOi,
         scale6(iv),
         scale6(delta),
         scale6(gamma),

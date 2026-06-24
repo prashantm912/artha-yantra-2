@@ -50,6 +50,20 @@ public class UpstoxAnalyticsConfig {
   }
 
   /**
+   * Direct-Upstox LIVE option-chain client (Wave U1) — the flag-selected {@link
+   * in.arthayantra.marketdata.options.OptionChainQuoteSource} for the live OI snapshot. Bound ONLY
+   * when {@code artha.marketdata.source.optionchain=upstox}; absent ⇒ {@code OptionsChainService}
+   * keeps sourcing per-strike LTP+OI from the Kite {@code QuoteGateway} (the unchanged default). On
+   * the long-lived 1-yr analytics token, so OI capture survives a missed daily Kite login.
+   */
+  @Bean
+  @ConditionalOnProperty(name = "artha.marketdata.source.optionchain", havingValue = "upstox")
+  public UpstoxOptionChainClient upstoxOptionChainClient(
+      RestClient.Builder restClientBuilder, UpstoxAnalyticsProperties properties) {
+    return new UpstoxOptionChainClient(restClientBuilder, properties);
+  }
+
+  /**
    * Upstox-primary FII/DII cash source (U2), bound as {@code @Primary} when {@code
    * artha.marketdata.source.fiidii=upstox} so the NSE scheduler persists Upstox flows; the NSE
    * {@code LiveFiiDiiFetcher} stays the swap-out fallback. REQUIRES {@code

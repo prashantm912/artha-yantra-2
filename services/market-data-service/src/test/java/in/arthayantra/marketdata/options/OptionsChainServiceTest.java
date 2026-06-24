@@ -26,7 +26,8 @@ class OptionsChainServiceTest {
             return expiries;
           }
         };
-    return new OptionsChainService(stub, null, null, IST_CLOCK, new BigDecimal("0.065"), true);
+    return new OptionsChainService(
+        stub, null, null, IST_CLOCK, new BigDecimal("0.065"), true, java.util.Optional.empty());
   }
 
   @Test

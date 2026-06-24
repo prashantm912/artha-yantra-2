@@ -4,11 +4,24 @@ import { useBreadth } from '../../api/oiAnalytics.ts';
 import type { BreadthDeliveryRow } from '../../api/types.ts';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
-import { Metric } from '../../components/atoms/Metric.tsx';
 import { DateInput } from '../../components/atoms/DateInput.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
+
+// One elevated breadth tile: uppercase wide-tracked caption label / mono value. Counts/percentages
+// (not signed flows), so no sign-tone logic — just the figure.
+function BreadthStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="card shadow-e1">
+      <div className="text-caption uppercase tracking-wide text-ay-muted">{label}</div>
+      <div className="mt-1 text-h3 nums font-semibold text-ay-text">{value}</div>
+    </div>
+  );
+}
 
 // Equity → Breadth (oipulse): advance/decline + average delivery% + the delivery-% leaders for one
 // trade date, read from the NSE EQ-series EOD bhavcopy (BreadthController). EOD only — the date defaults
@@ -102,46 +115,62 @@ export function BreadthPage() {
 
   return (
     <div>
-      <h1 className="mb-2 text-base font-semibold text-ay-text">Market Breadth</h1>
-      <p className="mb-3 text-xs text-ay-muted">
-        NSE EQ-series EOD bhavcopy · advance/decline + delivery-% leaders
-        {data ? ` · ${summary?.tradeDate}` : ''}
-      </p>
+      <PageHeader
+        title="Market Breadth"
+        subtitle={
+          <>
+            NSE EQ-series EOD bhavcopy · advance/decline + delivery-% leaders
+            {data ? ` · ${summary?.tradeDate}` : ''}
+          </>
+        }
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <DateInput value={date} onChange={(v) => setDate(v ?? date)} ariaLabel="Trade date" />
         <GoButton onClick={() => void q.refetch()} loading={q.isFetching} />
       </div>
 
-      {summary ? (
-        <>
-          <div className="mb-4 flex flex-wrap gap-2">
-            <Metric label="Advances" value={String(summary.advances)} />
-            <Metric label="Declines" value={String(summary.declines)} />
-            <Metric label="Unchanged" value={String(summary.unchanged)} />
-            <Metric label="Total" value={String(summary.total)} />
-            <Metric label="Avg Delivery" value={pct(summary.avgDeliveryPct)} />
+      <QueryState
+        query={q}
+        isEmpty={() => !summary}
+        empty={{ title: `No bhavcopy for ${date}. Pick another trade date.` }}
+        errorTitle="Couldn't load market breadth"
+        skeleton={
+          <div className="space-y-4">
+            <Skeleton variant="metric-strip" cols={5} />
+            <Skeleton variant="chart-block" height={180} />
+            <Skeleton variant="table-rows" rows={6} cols={4} />
           </div>
+        }
+      >
+        {() =>
+          summary ? (
+            <>
+              <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                <BreadthStat label="Advances" value={String(summary.advances)} />
+                <BreadthStat label="Declines" value={String(summary.declines)} />
+                <BreadthStat label="Unchanged" value={String(summary.unchanged)} />
+                <BreadthStat label="Total" value={String(summary.total)} />
+                <BreadthStat label="Avg Delivery" value={pct(summary.avgDeliveryPct)} />
+              </div>
 
-          <div className="mb-4">
-            <EChart makeOption={makeOption} height={180} ariaLabel="Advances, declines and unchanged counts" />
-          </div>
+              <div className="card shadow-e1 mb-4">
+                <EChart makeOption={makeOption} height={180} ariaLabel="Advances, declines and unchanged counts" />
+              </div>
 
-          <h2 className="mb-1 text-sm font-semibold text-ay-text">Delivery-% Leaders</h2>
-          <DataTable
-            columns={columns}
-            rows={data?.topDelivery ?? []}
-            rowKey={(r) => r.symbol}
-            pageSize={25}
-            ariaLabel="Delivery percentage leaders"
-            emptyMessage="No delivery data for this date."
-          />
-        </>
-      ) : (
-        <p className="py-8 text-center text-sm text-ay-muted">
-          No bhavcopy for {date}. Pick another trade date.
-        </p>
-      )}
+              <h2 className="mb-1 text-h3 text-ay-text">Delivery-% Leaders</h2>
+              <DataTable
+                columns={columns}
+                rows={data?.topDelivery ?? []}
+                rowKey={(r) => r.symbol}
+                pageSize={25}
+                ariaLabel="Delivery percentage leaders"
+                emptyMessage="No delivery data for this date."
+              />
+            </>
+          ) : null
+        }
+      </QueryState>
     </div>
   );
 }

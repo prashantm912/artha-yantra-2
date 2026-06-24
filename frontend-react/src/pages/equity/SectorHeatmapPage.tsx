@@ -5,6 +5,9 @@ import type { SectorStockChange } from '../../api/types.ts';
 import { Select } from '../../components/atoms/Select.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
 
 // Equity → Sector Heatmap (oipulse): a sector-GROUPED treemap of an index's constituents — sector boxes
@@ -107,7 +110,10 @@ export function SectorHeatmapPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Sector Heatmap</h1>
+      <PageHeader
+        title="Sector Heatmap"
+        subtitle="Constituents grouped by sector · tile size + colour ∝ % change vs prev close"
+      />
 
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <Select value={index} options={indices} onChange={setIndex} ariaLabel="Index" placeholder="Index…" />
@@ -115,15 +121,19 @@ export function SectorHeatmapPage() {
         {q.data?.asOf && <span className="text-xs text-ay-muted">as on {q.data.asOf}</span>}
       </div>
 
-      <p className="mb-2 text-xs text-ay-muted">
-        Constituents grouped by sector · tile size + colour ∝ % change vs prev close
-      </p>
-
-      {tiles.length > 0 ? (
-        <EChart makeOption={makeOption} height={560} ariaLabel={`${index} sector-grouped % change heatmap`} />
-      ) : (
-        <p className="py-12 text-center text-sm text-ay-muted">No bhavcopy for this index yet.</p>
-      )}
+      <QueryState
+        query={q}
+        isEmpty={() => tiles.length === 0}
+        empty={{ title: 'No bhavcopy for this index yet.' }}
+        errorTitle="Couldn't load the sector heatmap"
+        skeleton={<Skeleton variant="chart-block" height={560} />}
+      >
+        {() => (
+          <div className="card shadow-e1">
+            <EChart makeOption={makeOption} height={560} ariaLabel={`${index} sector-grouped % change heatmap`} />
+          </div>
+        )}
+      </QueryState>
     </div>
   );
 }

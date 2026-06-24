@@ -5,6 +5,9 @@ import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { Select } from '../../components/atoms/Select.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
 
 // Equity → Delivery Data (oipulse): one stock's daily delivery quantity / % over a relative period (the
@@ -72,10 +75,10 @@ export function DeliveryDataPage() {
 
   return (
     <div>
-      <h1 className="mb-2 text-base font-semibold text-ay-text">Delivery Data</h1>
-      <p className="mb-3 text-xs text-ay-muted">
-        Daily delivery % &amp; quantity for a stock (high % delivery = institutional conviction)
-      </p>
+      <PageHeader
+        title="Delivery Data"
+        subtitle="Daily delivery % & quantity for a stock (high % delivery = institutional conviction)"
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <input
@@ -100,14 +103,24 @@ export function DeliveryDataPage() {
       {symbol == null ? (
         <p className="py-8 text-center text-sm text-ay-muted">Enter a stock symbol and press Go.</p>
       ) : (
-        <DataTable
-          columns={columns}
-          rows={data?.items ?? []}
-          rowKey={(r) => r.date}
-          pageSize={30}
-          ariaLabel={`${symbol} daily delivery data`}
-          emptyMessage={`No EQ bhavcopy for ${symbol}.`}
-        />
+        <QueryState
+          query={q}
+          isEmpty={(d) => (d.items?.length ?? 0) === 0}
+          empty={{ title: `No EQ bhavcopy for ${symbol}.` }}
+          errorTitle="Couldn't load delivery data"
+          skeleton={<Skeleton variant="table-rows" rows={8} cols={9} />}
+        >
+          {(d) => (
+            <DataTable
+              columns={columns}
+              rows={d.items ?? []}
+              rowKey={(r) => r.date}
+              pageSize={30}
+              ariaLabel={`${symbol} daily delivery data`}
+              emptyMessage={`No EQ bhavcopy for ${symbol}.`}
+            />
+          )}
+        </QueryState>
       )}
     </div>
   );

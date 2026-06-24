@@ -2,6 +2,9 @@ import { useCallback, useMemo } from 'react';
 import type { EChartsOption } from 'echarts';
 import { useFiiLongShort } from '../../api/oiAnalytics.ts';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 
 // FII Long-Short Ratio (oipulse §fii-dii/fii-long-short-ratio): FII index-futures long% over time. LSR%
 // = fiiLong / (fiiLong + fiiShort) × 100 (low = bearish FII, high = bullish). The BE /long-short feed
@@ -86,21 +89,28 @@ export function FiiLongShortPage() {
 
   return (
     <div>
-      <h1 className="mb-2 text-base font-semibold text-ay-text">
-        {lastLsr != null && lastDate
-          ? `FII Long Short Ratio — As on ${lastDate}, FII are long for ${lastLsr.toFixed(2)}%`
-          : 'FII Long Short Ratio'}
-      </h1>
-      <p className="mb-3 text-xs text-ay-muted">
-        LSR % = FII index-futures long ÷ (long + short). Low = FII bearish, high = bullish. Nifty-price
-        overlay deferred (Wave 4).
-      </p>
+      <PageHeader
+        title={
+          lastLsr != null && lastDate
+            ? `FII Long Short Ratio — As on ${lastDate}, FII are long for ${lastLsr.toFixed(2)}%`
+            : 'FII Long Short Ratio'
+        }
+        subtitle="LSR % = FII index-futures long ÷ (long + short). Low = FII bearish, high = bullish. Nifty-price overlay deferred (Wave 4)."
+      />
 
-      {rows.length === 0 && !q.isLoading ? (
-        <p className="text-sm text-ay-muted">No FII participant-OI history captured for this window yet.</p>
-      ) : (
-        <EChart makeOption={makeOption} height={440} ariaLabel="FII index-futures long-short ratio percentage over time" />
-      )}
+      <QueryState
+        query={q}
+        isEmpty={() => rows.length === 0}
+        empty={{ title: 'No FII participant-OI history captured for this window yet.' }}
+        errorTitle="Couldn't load FII long-short ratio"
+        skeleton={<Skeleton variant="chart-block" height={440} />}
+      >
+        {() => (
+          <div className="card shadow-e1">
+            <EChart makeOption={makeOption} height={440} ariaLabel="FII index-futures long-short ratio percentage over time" />
+          </div>
+        )}
+      </QueryState>
     </div>
   );
 }

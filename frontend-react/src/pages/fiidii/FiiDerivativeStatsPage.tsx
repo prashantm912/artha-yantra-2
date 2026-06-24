@@ -5,6 +5,9 @@ import { foldFiiDerivativeStats, type FiiDerivativeStatsRow } from '../../api/fi
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 
 // FII Derivative Stats (oipulse §fii-dii/fii-derivative-stats): FII net activity across the four F&O
 // segments (Index/Stock × Futures/Options), daily, ₹ Crore. One net-value bar chart per segment (own
@@ -89,30 +92,47 @@ export function FiiDerivativeStatsPage() {
 
   return (
     <div>
-      <h1 className="mb-2 text-base font-semibold text-ay-text">FII Derivative Stats</h1>
-      <p className="mb-3 text-xs text-ay-muted">
-        FII net activity across the four F&amp;O segments · Values in ₹ Crore · green = net long, red = net short
-      </p>
-
-      {asc.length > 0 && (
-        <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-          {SEGMENTS.map((s, i) => (
-            <div key={s.label}>
-              <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">{s.label}</h2>
-              <EChart makeOption={options[i]} height={220} ariaLabel={`FII net ${s.label} per day`} />
-            </div>
-          ))}
-        </div>
-      )}
-
-      <DataTable
-        columns={columns}
-        rows={rows}
-        rowKey={(r) => r.tradeDate}
-        pageSize={25}
-        ariaLabel="Detailed FII derivative segment net activity"
-        emptyMessage="No FII derivative stats for this window."
+      <PageHeader
+        title="FII Derivative Stats"
+        subtitle="FII net activity across the four F&O segments · Values in ₹ Crore · green = net long, red = net short"
       />
+
+      <QueryState
+        query={q}
+        isEmpty={() => rows.length === 0}
+        empty={{ title: 'No FII derivative stats for this window.' }}
+        errorTitle="Couldn't load FII derivative stats"
+        skeleton={
+          <div className="space-y-4">
+            <Skeleton variant="chart-block" height={220} />
+            <Skeleton variant="table-rows" rows={6} cols={5} />
+          </div>
+        }
+      >
+        {() => (
+          <>
+            {asc.length > 0 && (
+              <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                {SEGMENTS.map((s, i) => (
+                  <div key={s.label} className="card shadow-e1">
+                    <h2 className="mb-1 text-center text-h3 text-ay-text">{s.label}</h2>
+                    <EChart makeOption={options[i]} height={220} ariaLabel={`FII net ${s.label} per day`} />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <DataTable
+              columns={columns}
+              rows={rows}
+              rowKey={(r) => r.tradeDate}
+              pageSize={25}
+              ariaLabel="Detailed FII derivative segment net activity"
+              emptyMessage="No FII derivative stats for this window."
+            />
+          </>
+        )}
+      </QueryState>
     </div>
   );
 }

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SYNTHETIC NSCCL SPAN file (fileFormat 4.00) for the margin-service parse + golden
+  harness. NOT a real exchange file: hand-authored XML in the documented NSCCL `.spn`
+  shape (top-level fileFormat/date/ec, a phyPf spot, one oopPf series of two ATM
+  options, a ccDef). The 16-element risk arrays are the same deterministic synthetic
+  vectors used by tests/fakes.py::synthetic_span_file so the XML parse path and the
+  in-memory fixture compute the SAME golden margin (span 17250 / exposure 70500 /
+  total 87750 / benefit 10500 for a short ATM straddle, 75 units/leg).
+
+  marginism's parser (parse_spn, iterparse) reads exactly these tags:
+    fileFormat, created, ec, date, isSetl
+    phyPf  -> pfCode/pfId/cvf, phy(cId,pe,p,d,v,cvf,ra)            => underlying spot
+    oopPf  -> pfCode/pfId/cvf, series(pe,cvf, opt(cId,p,d,v,cvf,ra,o,k))
+    ccDef  -> cc/name/currency/somMeth/spotMeth/riskExponent
+  ra = 16 <a> scenario losses (per long unit) + <d> composite delta.
+
+  This is the drop-in template for a REAL broker-parity golden: replace this file with
+  a genuine deploy/span-files/*.spn (or point the harness at one) and set the expected
+  broker total in tests/test_spn_parity.py (that step is OWNER-GATED, see README §8.5).
+-->
+<spanFile>
+  <fileFormat>4.00</fileFormat>
+  <created>20260624</created>
+  <ec>NSCCL</ec>
+  <date>20260624</date>
+  <isSetl>1</isSetl>
+
+  <!-- Physical (spot) portfolio: supplies the underlying price used for the
+       exposure-margin notional (2% of underlying * units for an index option). -->
+  <phyPf>
+    <pfCode>NIFTY</pfCode>
+    <pfId>9</pfId>
+    <cvf>1.0</cvf>
+    <phy>
+      <cId>1</cId><pe>00000000</pe><p>23500.0</p><d>1.0</d><v>0.0</v><cvf>1.0</cvf>
+      <ra><a>0</a><a>0</a><a>0</a><a>0</a><a>0</a><a>0</a><a>0</a><a>0</a><a>0</a><a>0</a><a>0</a><a>0</a><a>0</a><a>0</a><a>0</a><a>0</a><d>1.0</d></ra>
+    </phy>
+  </phyPf>
+
+  <!-- Options-on-physical portfolio: one ATM (23500) CE + PE expiring 20260625. -->
+  <oopPf>
+    <pfCode>NIFTY</pfCode>
+    <pfId>1</pfId>
+    <cvf>1.0</cvf>
+    <series>
+      <pe>20260625</pe>
+      <cvf>1.0</cvf>
+      <opt>
+        <cId>1</cId><p>120.0</p><d>0.5</d><v>0.15</v><cvf>1.0</cvf>
+        <ra><a>10</a><a>5</a><a>40</a><a>30</a><a>-20</a><a>-25</a><a>80</a><a>70</a><a>-40</a><a>-45</a><a>120</a><a>110</a><a>-60</a><a>-65</a><a>150</a><a>-70</a><d>0.5</d></ra>
+        <o>C</o><k>23500</k>
+      </opt>
+      <opt>
+        <cId>2</cId><p>110.0</p><d>-0.5</d><v>0.15</v><cvf>1.0</cvf>
+        <ra><a>10</a><a>5</a><a>-20</a><a>-25</a><a>40</a><a>30</a><a>-40</a><a>-45</a><a>80</a><a>70</a><a>-60</a><a>-65</a><a>120</a><a>110</a><a>-70</a><a>150</a><d>-0.5</d></ra>
+        <o>P</o><k>23500</k>
+      </opt>
+    </series>
+  </oopPf>
+
+  <!-- Combined-commodity definition (currency / methods / risk exponent). -->
+  <ccDef>
+    <cc>NIFTY</cc>
+    <name>NIFTY</name>
+    <currency>INR</currency>
+    <somMeth>GROSS</somMeth>
+    <spotMeth>NORMAL</spotMeth>
+    <riskExponent>0</riskExponent>
+  </ccDef>
+</spanFile>

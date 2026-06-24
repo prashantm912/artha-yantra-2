@@ -120,14 +120,23 @@ class MarginismEngine:
         self._engine = risk_engine
 
     @classmethod
-    def from_file(cls, path: str) -> MarginismEngine:
+    def from_file(
+        cls, path: str, symbols: list[str] | None = None
+    ) -> MarginismEngine:
         """Parse a ``.spn`` file into a production engine (one parse per file).
+
+        ``symbols`` (optional) scopes the streaming parser to the listed combined
+        commodities — a real NSCCL file is ~50 MB / ~2M risk values, so keeping only
+        the underlyings the appliance trades makes the parse fast and light. ``None``
+        keeps every commodity (the loader's default; the parse cost is paid once).
 
         marginism is imported lazily so a missing optional dep never breaks app import.
         """
         from marginism import RiskEngine
 
-        return cls(RiskEngine.from_file(path))
+        if symbols is None:
+            return cls(RiskEngine.from_file(path))
+        return cls(RiskEngine.from_file(path, symbols=symbols))
 
     @property
     def business_date(self) -> str:

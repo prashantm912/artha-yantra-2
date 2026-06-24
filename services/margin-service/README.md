@@ -42,19 +42,42 @@ leaks past that module. The pinned-tag drift canary is `tests/test_marginism_con
   Buying-power warnings never block a paper fill.
 - **Live = the broker's job.** No live hard-gate is added here.
 
+## `.spn` ingest + golden-parity harness
+
+The full ingest path — **`.spn` XML file → `marginism.parse_spn` (iterparse) →
+`RiskEngine.from_file` → SPAN algorithm → `MarginResult`** — is exercised by
+`tests/test_spn_parse.py` against a committed NSCCL-shaped fixture
+(`tests/data/synthetic_nifty.spn`). The fixture is **synthetic** (hand-authored XML in
+the documented fileFormat-4.00 shape) but its risk arrays mirror `tests/fakes.py`, so the
+on-disk parse computes the **same golden** as the in-memory fixture (span 17250 / exposure
+70500 / total 87750 / benefit 10500 for a short ATM straddle). marginism parses the real
+NSCCL `.spn` directly — no converted format and no custom parser needed.
+
+`tests/test_spn_parity.py` is the **broker-parity golden harness**: a parametrized
+`ParityCase` (`.spn` file + basket + expected span/exposure/total/benefit + `tol_pct`).
+A real broker-parity case is a one-row drop-in (see that module's docstring).
+
 ## VERIFY-pending gates (NOT claimed correct yet)
 
-This appliance ships with its wiring + sizing rails proven against a **synthetic `.spn`
-fixture** (`tests/fakes.py`, which drives the *real* marginism algorithm). The following
-are documented manual VERIFY steps before trusting production margins:
+This appliance ships with its wiring + sizing rails + `.spn` XML ingest proven against the
+**synthetic `.spn` fixture** above (which drives the *real* marginism algorithm). The
+following are documented manual VERIFY steps before trusting production margins:
 
-1. **Real `.spn` golden (broker parity).** The CI golden asserts numbers golden to the
-   synthetic fixture, **not** broker parity. Confirm a short NIFTY ATM straddle's `total`
-   against a Zerodha/Upstox SPAN calculator within **±2–3%** (exposure/scan add-ons differ
-   by source) using a real file in `deploy/span-files/`. Record the reference value + source.
-2. **NSE `.spn` download URL/format.** `tools/span-fetch/fetch_spn.ps1` uses the historically
-   documented NSCCL PR archive pattern, marked `(VERIFY)` — NSE rotates archive hosts. Confirm
-   the live URL, then schedule the fetcher (Windows Task Scheduler, 08:30 IST).
+1. **Real `.spn` golden (broker parity) — OWNER-GATED.** The CI golden asserts numbers
+   golden to the *synthetic* fixture, **not** broker parity. To close it: drop a genuine
+   NSCCL `.spn` into `tests/data/` (or `deploy/span-files/`), read that exact basket's
+   margin off a Zerodha/Upstox/Sensibull SPAN calculator on the **same business date**, add
+   a `ParityCase(..., marker="real", tol_pct=0.03)` row in `tests/test_spn_parity.py`, and
+   un-skip `test_real_spn_parity_is_owner_gated`. Record the reference value + source.
+   Confirm within **±2–3%** (exposure/scan add-ons differ by source).
+2. **NSE `.spn` download URL/format.** The dedicated end-of-day SPAN file is named
+   `nsccl.<YYYYMMDD>.s.spn` (gzip: `nsccl.<YYYYMMDD>.s.parallel.spn.gz`), published on the
+   members FAOFTP tree; the public landing page is
+   `nseindia.com/products-services/equity-derivatives-span-risk-parameter-files` (and "All
+   Reports → Derivatives"). `tools/span-fetch/fetch_spn.ps1` currently pulls the
+   `PR_<DDMMYY>.zip` price-report bundle and extracts the first `*.spn` inside (robust to
+   either source), marked `(VERIFY)`. Confirm the exact **public** URL + whether it needs a
+   member login, then schedule the fetcher (Windows Task Scheduler, 08:30 IST).
 3. **marginism pin.** `marginism==0.1.1` is current on PyPI and verified against this code's
    adapter. Bump deliberately (the contract canary pins the version); if a pin ever leaves PyPI,
    vendor the source under `app/_vendor/marginism/` keeping its MIT `LICENSE`.

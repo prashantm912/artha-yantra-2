@@ -25,6 +25,11 @@ def test_riskengine_exposes_consumed_api():
     # from_file(path) -> engine; basket(list[dict]) -> dict
     assert "spn_path" in inspect.signature(marginism.RiskEngine.from_file).parameters
     assert "orders" in inspect.signature(marginism.RiskEngine.basket).parameters
+    # The adapter scopes the .spn parse to chosen underlyings via parse_spn(symbols=...)
+    # (RiskEngine.from_file forwards **kw -> SpanCalculator.from_file -> parse_spn);
+    # the symbols filter is consumed surface, so pin it here too.
+    assert hasattr(marginism, "parse_spn")
+    assert "symbols" in inspect.signature(marginism.parse_spn).parameters
 
 
 def test_basket_dict_carries_the_fields_the_adapter_maps():

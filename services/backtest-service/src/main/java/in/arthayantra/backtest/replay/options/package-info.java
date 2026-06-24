@@ -1,5 +1,5 @@
 /**
- * The §D.15 options replay fidelity contract + synthetic premium mode (Phase 30A).
+ * The §D.15 options replay fidelity contract + the premium-as-primary replay (Part 2).
  *
  * <p><b>What is built in this package (and where each piece is wired):</b>
  *
@@ -11,28 +11,35 @@
  *   <li>{@link in.arthayantra.backtest.replay.options.PremiumProvenance} — resolves the per-run
  *       provenance and is WIRED into {@code BacktestRunner} so every run carries a non-null
  *       {@code premium_source}, echoed (with caveats) by {@code GET /backtests/{id}/results}.
+ *   <li>{@link in.arthayantra.backtest.replay.options.OptionContractSelector} +
+ *       {@link in.arthayantra.backtest.replay.options.CandlePremiumReader} +
+ *       {@link in.arthayantra.backtest.replay.options.PremiumExitEvaluator} +
+ *       {@link in.arthayantra.backtest.replay.options.OptionsPremiumReplay} — the premium-as-primary
+ *       replay (Part 2): the selector resolves the ATM contract at each entry from the spot, the
+ *       reader serves its OWN backfilled 1m premium series ({@code candles}, {@code source='BACKFILL'}),
+ *       and the replay fills/marks/exits on that premium. WIRED into {@code BacktestRunner}, which
+ *       routes an options strategy here (the candle-close {@code ReplayEngine} stays the path for every
+ *       other strategy). Pinned by {@code OptionsPremiumGoldenTest} (its own fixture golden).
  *   <li>{@link in.arthayantra.backtest.replay.options.SnapshotPremiumReader} — reads the premium
  *       series from {@code marketdata.options_chain_snapshots} at the archive's native 5-minute
  *       granularity (never interpolated finer), with the archive-coverage pre-flight (422 {@code
- *       DATA_GAP}) and the sub-5m snapshot-grade refusal. BUILT and unit/IT-tested but NOT YET
- *       invoked by a run path — it becomes live with the premium-as-primary swap below.
+ *       DATA_GAP}) and the sub-5m snapshot-grade refusal. BUILT and unit/IT-tested; an UNWIRED
+ *       alternate source — the active premium path reads the finer {@code CANDLE_1M} series instead.
  *   <li>{@link in.arthayantra.backtest.replay.options.SyntheticPremium} — the clearly-labelled
  *       Black-76 reconstruction of the premium series from underlying 1m candles, with the flat-IV
- *       and nearest-snapshot-IV caveats surfaced as run-level honesty flags. BUILT and unit-tested
- *       but NOT YET invoked by a run path (same deferred swap).
+ *       and nearest-snapshot-IV caveats surfaced as run-level honesty flags. BUILT and unit-tested;
+ *       an UNWIRED alternate source (same as the snapshot reader above).
  * </ul>
  *
- * <p><b>The remaining DEEP piece (premium-as-primary integration).</b> Per the §D.15 deliverable,
- * for an options strategy the replay's tradeable price series should be the option PREMIUM series
- * (snapshot LTP or synthetic) rather than the underlying candle close — while the underlying-side
- * indicators continue to read candles at their declared timeframes (parity-preserving). The
- * Phase-30 candle replay ({@code ReplayEngine}) currently marks-to-market and fills against the
- * underlying candle close. Swapping the fill/mark series to the premium series cannot be done within
- * Phase 30A scope WITHOUT a dedicated premium-as-primary parity golden, because the existing
- * Phase-30 parity goldens ({@code BacktestParityTest}) pin candle-close fills byte-identically and
- * must not be perturbed. Rather than fake snapshot-grade fidelity, the candle-replay path records
- * {@link in.arthayantra.backtest.replay.options.PremiumSource#NA}; the reader + synthetic + provenance
- * machinery here is fully built and tested so the integration is a localized, parity-safe swap of the
- * replay tradeable series once a premium-as-primary golden exists.
+ * <p><b>Premium-as-primary (landed).</b> Per the §D.15 deliverable, an options strategy's replay
+ * tradeable price IS the option PREMIUM series (the contract's own backfilled 1m candles → {@link
+ * in.arthayantra.backtest.replay.options.PremiumSource#CANDLE_1M}) rather than the underlying candle
+ * close, while the underlying-side indicators keep reading candles at their declared timeframes
+ * (parity-preserving — signals are generated on the underlying). This lives in {@link
+ * in.arthayantra.backtest.replay.options.OptionsPremiumReplay}, a SEPARATE path from the candle-close
+ * {@code ReplayEngine}, so the Phase-30 parity goldens ({@code BacktestParityTest}) that pin
+ * candle-close fills byte-identically are never perturbed; the premium path gets its own dedicated
+ * golden ({@code OptionsPremiumGoldenTest}). The path is deterministic — protective levels are
+ * computed at entry, the premium series is read from the store (never random) — so the golden holds.
  */
 package in.arthayantra.backtest.replay.options;

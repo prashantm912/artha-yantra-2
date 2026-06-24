@@ -7,19 +7,20 @@ import org.springframework.stereotype.Component;
  * Resolves the {@link PremiumSource} provenance for a run from the strategy config's universe mode
  * (§D.15). Every run MUST carry a non-null premium source, written before results persist.
  *
- * <p><b>Scope note (Phase 30A).</b> The premium-as-primary integration — replaying the option
- * PREMIUM series (snapshot LTP or synthetic) as the tradeable price instead of the underlying candle
- * close — is the remaining DEEP piece (see {@code OptionsReplayNote}). The Phase-30 candle replay
- * still trades the underlying candle close, so an options run on the current path is NOT
- * snapshot-grade and is recorded as {@link PremiumSource#NA} rather than masquerading as {@code
- * SNAPSHOT}. The {@link SnapshotPremiumReader} archive-coverage pre-flight and {@link
- * SyntheticPremium} reconstruction machinery are nonetheless fully built and unit/IT-tested (their
- * wiring into {@code ReplayEngine} is the deferred swap), so the integration is a localized swap of
- * the replay tradeable series once parity goldens for the premium-as-primary path exist. When that
- * swap lands, the synthetic path MUST merge {@link SyntheticPremium.Result#caveats()} into the
- * metrics JSONB (the {@code caveats} carrier {@code RunRepository.findResult} reads) so the caveats
- * surface in the results payload, and {@code forCandleReplay}'s successor MUST return {@code
- * SNAPSHOT}/{@code SYNTHETIC_B76} for those runs.
+ * <p><b>Part 2 (premium-as-primary, landed).</b> An options strategy is replayed premium-as-primary:
+ * {@code BacktestRunner} routes it (via {@link #isOptionsStrategy}) to {@code OptionsPremiumReplay},
+ * which fills/marks/exits on the option's OWN backfilled 1m premium series, so the run is recorded as
+ * {@link PremiumSource#CANDLE_1M} (see {@link #forCandleReplay}). This path is pinned by the dedicated
+ * {@code OptionsPremiumGoldenTest} parity golden, separate from the candle-close {@code
+ * BacktestParityTest} (which stays byte-identical).
+ *
+ * <p>The {@link SnapshotPremiumReader} archive-coverage pre-flight (5-minute {@code
+ * options_chain_snapshots}) and the {@link SyntheticPremium} Black-76 reconstruction are fully built
+ * and unit/IT-tested but remain UNWIRED alternate sources — the active premium path reads the finer
+ * {@code CANDLE_1M} series. Should a future run route through {@link SyntheticPremium}, that path MUST
+ * merge {@link SyntheticPremium.Result#caveats()} into the metrics JSONB (the {@code caveats} carrier
+ * {@code RunRepository.findResult} reads) and resolve {@link PremiumSource#SNAPSHOT}/{@link
+ * PremiumSource#SYNTHETIC_B76} accordingly.
  */
 @Component
 public class PremiumProvenance {

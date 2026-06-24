@@ -432,4 +432,59 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
         .andExpect(jsonPath("$.items[0].atmStraddle").value(org.hamcrest.Matchers.startsWith("150")))
         .andExpect(jsonPath("$.items[1].atmStraddle").value(org.hamcrest.Matchers.startsWith("170")));
   }
+
+  @Test
+  void oiExpiryRollsUpPerStrikeDailyOhlcWithDayOverDayDeltas() throws Exception {
+    String u = "OIEXPIRY";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    // Two IST sessions, two captures each → daily OHLC of premium (first/max/min/last per day).
+    OffsetDateTime d1a =
+        OffsetDateTime.of(2026, 6, 17, 9, 20, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime d1b = d1a.plusHours(3); // same day
+    OffsetDateTime d2a =
+        OffsetDateTime.of(2026, 6, 18, 9, 20, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime d2b = d2a.plusHours(3);
+    // Day 1 CE: open 100, high 120, low 100, close 110, oi(last)=1000.
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, d1a, u, exp, "22500", "CE", "100", 900L, 0L, 4000L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, d1b, u, exp, "22500", "CE", "110", 1000L, 0L, 5000L);
+    // Day 2 CE: open 110, high 130, low 105, close 125, oi(last)=1200 → +13.64% close, +20% OI.
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, d2a, u, exp, "22500", "CE", "130", 1100L, 0L, 6000L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, d2b, u, exp, "22500", "CE", "125", 1200L, 0L, 7000L);
+    // a PE leg so the strike carries both halves.
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, d2a, u, exp, "22500", "PE", "90", 1500L, 0L, 3000L);
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/oi-expiry")
+                .param("name", u)
+                .param("mode", "history")
+                .param("date", "2026-06-18")
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items.length()").value(1))
+        .andExpect(jsonPath("$.items[0].strike").value("22500.00"))
+        // CE table newest-first: day 2 row carries the day-over-day deltas (decimal-string wire).
+        .andExpect(jsonPath("$.items[0].ce.length()").value(2))
+        .andExpect(jsonPath("$.items[0].ce[0].open").value("130.0000"))
+        .andExpect(jsonPath("$.items[0].ce[0].high").value("130.0000"))
+        .andExpect(jsonPath("$.items[0].ce[0].close").value("125.0000"))
+        .andExpect(jsonPath("$.items[0].ce[0].changeInOiPct").value("20.00"))
+        .andExpect(jsonPath("$.items[0].ce[0].interpretation").value("LONG_BUILDUP"))
+        // the oldest CE row has no prior session → null deltas.
+        .andExpect(jsonPath("$.items[0].ce[1].changeInClosePct").value(org.hamcrest.Matchers.nullValue()))
+        .andExpect(jsonPath("$.items[0].pe.length()").value(1));
+  }
+
+  @Test
+  void oiExpiryEmptyWhenNoSnapshot() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/oi-expiry")
+                .param("name", "NOEXPIRYDATA")
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items.length()").value(0));
+  }
 }

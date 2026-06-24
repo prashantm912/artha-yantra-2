@@ -102,6 +102,57 @@ public class OptionsSnapshotReader {
         Timestamp.from(to.toInstant()));
   }
 
+  /**
+   * Per-(strike, optionType) per-IST-day EOD rollup of the option premium, for the oipulse "Options EOD
+   * OI Analysis" page (plan §options/oi-expiry-strategy). One row per (strike, leg, trade day) over
+   * [{@code from}, {@code to}): {@code open} = first ltp of the day, {@code high}/{@code low} = max/min
+   * ltp, {@code close} = last ltp, {@code oiClose} = last oi, {@code volume} = last cumulative day
+   * volume (Kite quote.volume). Aggregated straight from the day's raw snapshots (no bucketing — the
+   * daily OHLC of premium needs every captured point). Ordered (strike, leg, day) so the caller folds
+   * each leg's day series in chronological order to derive the day-over-day % changes + 4-state
+   * interpretation + all-day-high/low flags.
+   */
+  public record OptionEodRow(
+      BigDecimal strike,
+      String optionType,
+      LocalDate tradeDate,
+      BigDecimal open,
+      BigDecimal high,
+      BigDecimal low,
+      BigDecimal close,
+      Long oiClose,
+      Long volume) {}
+
+  public List<OptionEodRow> eodSeries(
+      String underlying, LocalDate expiry, OffsetDateTime from, OffsetDateTime to) {
+    String sql =
+        "SELECT (ts AT TIME ZONE 'Asia/Kolkata')::date AS d, strike, option_type, "
+            + "  public.first(ltp, ts) AS o, max(ltp) AS h, min(ltp) AS l, "
+            + "  public.last(ltp, ts) AS c, public.last(oi, ts) AS oi_close, "
+            + "  public.last(volume, ts) AS vol "
+            + "FROM options_chain_snapshots "
+            + "WHERE underlying = ? AND expiry = ? AND ts >= ? AND ts < ? "
+            + "GROUP BY d, strike, option_type "
+            + "ORDER BY strike, option_type, d";
+    return jdbc.query(
+        sql,
+        (rs, n) ->
+            new OptionEodRow(
+                rs.getBigDecimal("strike"),
+                rs.getString("option_type"),
+                rs.getObject("d", LocalDate.class),
+                rs.getBigDecimal("o"),
+                rs.getBigDecimal("h"),
+                rs.getBigDecimal("l"),
+                rs.getBigDecimal("c"),
+                rs.getObject("oi_close", Long.class),
+                rs.getObject("vol", Long.class)),
+        underlying,
+        java.sql.Date.valueOf(expiry),
+        Timestamp.from(from.toInstant()),
+        Timestamp.from(to.toInstant()));
+  }
+
   public List<StrikePoint> series(
       String underlying,
       LocalDate expiry,

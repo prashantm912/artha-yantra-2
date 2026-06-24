@@ -42,12 +42,14 @@ public class OptionsAnalyticsController {
   private final StraddleChartService straddleChartService;
   private final OptionsOiChartService optionsOiChartService;
   private final OiHeatmapService heatmapService;
+  private final OiExpiryService expiryService;
   private final ObjectProvider<UpstoxOptionAnalyticsSource> upstoxOptionAnalytics;
   private final MarketCalendar calendar;
   private final int bigOiTopN;
   private final int trendBuckets;
   private final int premiumBuckets;
   private final int heatmapWindow;
+  private final int expiryLookbackDays;
   private final int defaultSessionIntervalMinutes;
 
   public OptionsAnalyticsController(
@@ -62,12 +64,14 @@ public class OptionsAnalyticsController {
       StraddleChartService straddleChartService,
       OptionsOiChartService optionsOiChartService,
       OiHeatmapService heatmapService,
+      OiExpiryService expiryService,
       ObjectProvider<UpstoxOptionAnalyticsSource> upstoxOptionAnalytics,
       MarketCalendar calendar,
       @Value("${artha.options.big-oi-top-n:10}") int bigOiTopN,
       @Value("${artha.options.trend-buckets:20}") int trendBuckets,
       @Value("${artha.options.premium-buckets:60}") int premiumBuckets,
       @Value("${artha.options.heatmap-window:10}") int heatmapWindow,
+      @Value("${artha.options.expiry-lookback-days:15}") int expiryLookbackDays,
       @Value("${artha.options.snapshot-interval-ms:300000}") long snapshotIntervalMs) {
     this.reader = reader;
     this.chainService = chainService;
@@ -80,12 +84,14 @@ public class OptionsAnalyticsController {
     this.straddleChartService = straddleChartService;
     this.optionsOiChartService = optionsOiChartService;
     this.heatmapService = heatmapService;
+    this.expiryService = expiryService;
     this.upstoxOptionAnalytics = upstoxOptionAnalytics;
     this.calendar = calendar;
     this.bigOiTopN = bigOiTopN;
     this.trendBuckets = trendBuckets;
     this.premiumBuckets = premiumBuckets;
     this.heatmapWindow = heatmapWindow;
+    this.expiryLookbackDays = expiryLookbackDays;
     // Default session-stats bucket = the snapshot capture cadence (ms -> minutes), min 1, default 5.
     long minutes = snapshotIntervalMs / 60000L;
     this.defaultSessionIntervalMinutes = minutes <= 0 ? 5 : (int) minutes;
@@ -753,6 +759,66 @@ public class OptionsAnalyticsController {
     BigDecimal spot = latestSpot(latest);
     BigDecimal atm = nearestListedStrike(series, spot);
     return heatmapService.fold(series, atm, heatmapWindow);
+  }
+
+  /**
+   * /oi-expiry: the oipulse "Options EOD OI Analysis" / OI Expiry Strategy (plan
+   * §options/oi-expiry-strategy) — per-strike, last-N-session EOD OHLC + OI + Volume tables (CE and PE)
+   * that feed the expiry-day trading plan. Folds ONE {@link OptionsSnapshotReader#eodSeries} read of
+   * the day-rollup over the last {@code expiry-lookback-days} calendar days up to (and including) the
+   * latest captured session (live) or the {@code date} (history), windowed to the {@code 2*window+1}
+   * strikes nearest the ATM. {@code items} envelope; empty list (not a 422) when no snapshot accrued.
+   */
+  @GetMapping("/oi-expiry")
+  public Map<String, Object> oiExpiry(
+      @RequestParam(required = false) String mode,
+      @RequestParam String name,
+      @RequestParam(required = false) String date,
+      @RequestParam(required = false) String interval,
+      @RequestParam(required = false) String expiry) {
+    OiQuery q = OiQuery.of(mode, name, date, interval, expiry);
+    LocalDate exp = requireExpiry(q);
+    List<OptionsSnapshotReader.StrikePoint> latest =
+        reader.latest(q.name(), exp, q.interval(), q.date());
+    if (latest.isEmpty()) {
+      return Map.of("items", List.of(), "underlying", q.name(), "expiry", exp);
+    }
+    LocalDate lastDay = latest.get(0).bucket().atZoneSameInstant(Ist.ZONE).toLocalDate();
+    OffsetDateTime from =
+        lastDay.minusDays(expiryLookbackDays).atStartOfDay().atOffset(Ist.OFFSET);
+    OffsetDateTime to = lastDay.plusDays(1).atStartOfDay().atOffset(Ist.OFFSET);
+    List<OptionsSnapshotReader.OptionEodRow> eod = reader.eodSeries(q.name(), exp, from, to);
+    List<OiExpiryService.StrikeExpiry> all = expiryService.fold(eod);
+    BigDecimal spot = latestSpot(latest);
+    List<OiExpiryService.StrikeExpiry> windowed = nearestExpiryStrikes(all, spot, heatmapWindow);
+    return Map.of(
+        "items", windowed,
+        "underlying", q.name(),
+        "expiry", exp,
+        "asOf", latest.get(0).bucket());
+  }
+
+  /**
+   * The {@code 2*window+1} folded strikes nearest {@code spot} (by |strike - spot|), returned in
+   * ascending strike order. When {@code spot} is null (or no strikes) the lowest strikes are kept.
+   */
+  private static List<OiExpiryService.StrikeExpiry> nearestExpiryStrikes(
+      List<OiExpiryService.StrikeExpiry> all, BigDecimal spot, int window) {
+    int limit = 2 * window + 1;
+    if (all.size() <= limit) {
+      return all;
+    }
+    Comparator<OiExpiryService.StrikeExpiry> order =
+        spot == null
+            ? Comparator.comparing(OiExpiryService.StrikeExpiry::strike)
+            : Comparator.<OiExpiryService.StrikeExpiry, BigDecimal>comparing(
+                    s -> s.strike().subtract(spot).abs())
+                .thenComparing(OiExpiryService.StrikeExpiry::strike);
+    return all.stream()
+        .sorted(order)
+        .limit(limit)
+        .sorted(Comparator.comparing(OiExpiryService.StrikeExpiry::strike))
+        .toList();
   }
 
   /** The listed strike nearest {@code spot} among the series points; null when spot/strikes absent. */

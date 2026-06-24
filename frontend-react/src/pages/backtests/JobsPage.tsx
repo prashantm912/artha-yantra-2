@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 import {
   JOB_STATUSES,
   fetchResultRef,
@@ -48,7 +49,7 @@ export function JobsPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Jobs</h1>
+      <PageHeader title="Jobs" subtitle="Live backtest and sweep jobs with per-row progress" />
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Select
           value={status}

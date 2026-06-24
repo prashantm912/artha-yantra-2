@@ -4,6 +4,9 @@ import type { EChartsOption } from 'echarts';
 import { formatDecimal } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import {
   useBacktestFolds,
   useBacktestMonteCarlo,
@@ -145,13 +148,17 @@ export function BacktestResultsPage() {
     return Object.entries(c).map(([k, v]) => ({ k, v: String(v) }));
   }, [selected]);
 
-  if (!r) {
-    return <p className="text-ay-muted">{results.isLoading ? 'Loading results…' : 'No results.'}</p>;
-  }
-
   return (
     <div>
-      <h1 className="ay-sr-only">Backtest results</h1>
+      <PageHeader title="Backtest results" subtitle="Metrics, equity and drawdown curves, trades, folds and Monte Carlo" />
+      <QueryState
+        query={results}
+        empty={{ title: 'No results.' }}
+        errorTitle="Couldn't load backtest results"
+        skeleton={<Skeleton variant="chart-block" height={360} />}
+      >
+        {(r) => (
+        <>
       <div role="tablist" className="mb-4 flex gap-1 border-b border-ay-border">
         {tabs.filter((t) => t.show).map((t) => (
           <button
@@ -174,15 +181,15 @@ export function BacktestResultsPage() {
         <>
           <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
             {CORE_METRICS.map((m) => (
-              <div key={m.key} className="rounded-md border border-ay-border bg-surface-1 px-2 py-1.5">
-                <div className="text-xs text-ay-muted">{m.label}</div>
-                <div className="font-semibold tabular-nums">{metric(r, m)}</div>
+              <div key={m.key} className="card shadow-e1">
+                <div className="text-caption uppercase tracking-wide text-ay-muted">{m.label}</div>
+                <div className="nums font-semibold">{metric(r, m)}</div>
               </div>
             ))}
             {BENCH_METRICS.filter((m) => r.metrics[m.key] != null).map((m) => (
-              <div key={m.key} className="rounded-md border border-ay-border bg-surface-1 px-2 py-1.5">
-                <div className="text-xs text-ay-muted">{m.label}</div>
-                <div className="font-semibold tabular-nums">{metric(r, m)}</div>
+              <div key={m.key} className="card shadow-e1">
+                <div className="text-caption uppercase tracking-wide text-ay-muted">{m.label}</div>
+                <div className="nums font-semibold">{metric(r, m)}</div>
               </div>
             ))}
           </div>
@@ -191,7 +198,9 @@ export function BacktestResultsPage() {
               Options premiums are SYNTHETIC_B76 (not snapshot-grade).
             </p>
           )}
-          <EChart makeOption={equityOption} height={320} ariaLabel="Equity, benchmark and drawdown curves" />
+          <div className="card shadow-e1">
+            <EChart makeOption={equityOption} height={320} ariaLabel="Equity, benchmark and drawdown curves" />
+          </div>
           <p className="mt-2 text-xs tabular-nums text-ay-muted">
             dataHash {r.dataHash ?? '—'} · seed {r.seed ?? '—'}
           </p>
@@ -308,11 +317,18 @@ export function BacktestResultsPage() {
               Insufficient sample (&lt; 30 trades) — extend the window.
             </p>
           )}
-          <EChart makeOption={mcFanOption} height={280} ariaLabel="Monte Carlo equity-band fan" />
-          <EChart makeOption={mcDrawdownOption} height={240} ariaLabel="Monte Carlo drawdown distribution" />
+          <div className="card shadow-e1 mb-3">
+            <EChart makeOption={mcFanOption} height={280} ariaLabel="Monte Carlo equity-band fan" />
+          </div>
+          <div className="card shadow-e1">
+            <EChart makeOption={mcDrawdownOption} height={240} ariaLabel="Monte Carlo drawdown distribution" />
+          </div>
           <p className="mt-2 text-xs tabular-nums text-ay-muted">risk of ruin {mcData.riskOfRuin}</p>
         </>
       )}
+        </>
+        )}
+      </QueryState>
     </div>
   );
 }

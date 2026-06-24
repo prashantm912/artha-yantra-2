@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 import { useStrategies } from '../../api/strategies.ts';
 import {
   DIRECTIONS,
@@ -87,7 +88,7 @@ export function BacktestRunnerPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Backtest runner</h1>
+      <PageHeader title="Backtest runner" subtitle="Run a full-parameter backtest or launch a parameter sweep" />
       <div role="tablist" className="mb-4 flex gap-1 border-b border-ay-border">
         {(['backtest', 'sweep'] as const).map((t) => (
           <button

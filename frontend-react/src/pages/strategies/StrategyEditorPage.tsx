@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 import {
   STARTER_TEMPLATE,
   VERSION_BUMPS,
@@ -86,7 +87,7 @@ export function StrategyEditorPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Strategy editor</h1>
+      <PageHeader title="Strategy editor" subtitle="Author the YAML; save auto-bumps the version" />
 
       {u && (
         <div className="mb-2 rounded-lg border border-ay-border bg-surface-1 p-2 text-sm">

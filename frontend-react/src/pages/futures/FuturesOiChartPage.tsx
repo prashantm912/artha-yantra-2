@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { LineChart } from 'lucide-react';
 import { useFuturesOiChart } from '../../api/oiAnalytics.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { Select, type SelectOption } from '../../components/atoms/Select.tsx';
@@ -6,6 +7,8 @@ import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
 import { FuturesOiChart } from '../../components/FuturesOiChart.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 
 // Futures OI Chart (§futures/oi-chart). The dual-axis OI-vs-price combo for one index future: real price
 // candlesticks (right axis) + the OI line (left axis). Keyed on the index name; the BE picks the active
@@ -51,25 +54,29 @@ export function FuturesOiChartPage() {
         <Metric label="Last updated" value={data?.asOf ? data.asOf.slice(11, 19) : '—'} />
       </div>
 
-      {data == null && !q.isLoading && (
-        <p className="mb-3 text-sm text-ay-muted">
-          No futures OI chart — pick an underlying with a listed future.
-        </p>
-      )}
-      {data != null && data.items.length === 0 && !q.isLoading && (
-        <p className="mb-3 text-sm text-ay-muted">
-          No intraday bars for this contract/session yet.
-        </p>
-      )}
-
-      {data != null && data.items.length > 0 && (
-        <div className="card shadow-e1">
-          <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">
-            Futures Oi Vs. Price Analysis
-          </h2>
-          <FuturesOiChart items={data.items} tradingsymbol={data.tradingsymbol} />
-        </div>
-      )}
+      <QueryState
+        query={q}
+        skeleton={<Skeleton variant="chart-block" height={440} />}
+        empty={{
+          icon: LineChart,
+          title: 'No futures OI chart — pick an underlying with a listed future.',
+        }}
+      >
+        {(d) =>
+          d.items.length === 0 ? (
+            <p className="mb-3 text-sm text-ay-muted">
+              No intraday bars for this contract/session yet.
+            </p>
+          ) : (
+            <div className="card shadow-e1">
+              <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">
+                Futures Oi Vs. Price Analysis
+              </h2>
+              <FuturesOiChart items={d.items} tradingsymbol={d.tradingsymbol} />
+            </div>
+          )
+        }
+      </QueryState>
     </div>
   );
 }

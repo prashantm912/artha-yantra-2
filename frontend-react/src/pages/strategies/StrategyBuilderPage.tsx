@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { EChartsOption } from 'echarts';
+import { Layers } from 'lucide-react';
 import { useChainTable } from '../../api/oiAnalytics.ts';
 import { useSymbolContext } from '../../stores/symbolContext.store.ts';
 import type { ChainLeg } from '../../api/types.ts';
@@ -15,6 +16,8 @@ import { Metric } from '../../components/atoms/Metric.tsx';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 
 // Strategy Builder (greeks/payoff pipeline): assemble legs from the live chain, see the expiry payoff
 // curve + net greeks + max-profit/loss/breakevens. Pure client-side math (payoffEngine) over the
@@ -176,18 +179,27 @@ export function StrategyBuilderPage() {
       <div className="mb-4 flex flex-wrap items-end gap-2 rounded-md border border-ay-border bg-surface-1 p-2">
         <label className="flex flex-col text-xs text-ay-muted">
           Strike
-          <select
-            value={form.strike}
-            onChange={(e) => setForm((f) => ({ ...f, strike: e.target.value }))}
-            className="h-9 rounded-md border border-ay-border bg-surface-2 px-2 text-sm text-ay-text"
+          <QueryState
+            query={chainQ}
+            skeleton={<Skeleton variant="card" className="h-9 w-28" />}
+            isEmpty={(c) => c.rows.length === 0}
+            empty={{ icon: Layers, title: 'No strikes for this expiry yet.' }}
           >
-            <option value="">—</option>
-            {strikes.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
+            {() => (
+              <select
+                value={form.strike}
+                onChange={(e) => setForm((f) => ({ ...f, strike: e.target.value }))}
+                className="h-9 rounded-md border border-ay-border bg-surface-2 px-2 text-sm text-ay-text"
+              >
+                <option value="">—</option>
+                {strikes.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            )}
+          </QueryState>
         </label>
         <label className="flex flex-col text-xs text-ay-muted">
           Type

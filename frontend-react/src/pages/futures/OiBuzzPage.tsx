@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { EChartsOption } from 'echarts';
+import { LayoutGrid } from 'lucide-react';
 import { useOiBuzz, useOiBuzzIndices } from '../../api/oiAnalytics.ts';
 import type { OiBuzzTile } from '../../api/types.ts';
 import { Select } from '../../components/atoms/Select.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { oiIntMeta } from '../../core/oiInterpretation.ts';
 import { formatDecimal } from '../../lib/decimal.ts';
 
@@ -153,17 +156,26 @@ export function OiBuzzPage() {
         Oi Buzz (Change in % wise) · tile size + colour ∝ near-month future % change
       </p>
 
-      {data && visibleTiles.length > 0 ? (
-        <EChart
-          makeOption={makeOption}
-          height={520}
-          ariaLabel={`${index} constituent % change heatmap`}
-        />
-      ) : (
-        <p className="py-12 text-center text-sm text-ay-muted">
-          {data ? 'No matching constituents.' : 'No futures data for this index right now.'}
-        </p>
-      )}
+      <QueryState
+        query={q}
+        skeleton={<Skeleton variant="chart-block" height={520} />}
+        empty={{
+          icon: LayoutGrid,
+          title: 'No futures data for this index right now.',
+        }}
+      >
+        {() =>
+          visibleTiles.length > 0 ? (
+            <EChart
+              makeOption={makeOption}
+              height={520}
+              ariaLabel={`${index} constituent % change heatmap`}
+            />
+          ) : (
+            <p className="py-12 text-center text-sm text-ay-muted">No matching constituents.</p>
+          )
+        }
+      </QueryState>
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { useOiHeatmap } from '../../api/oiAnalytics.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 import { CallOiHeatmap, PutOiHeatmap } from '../../components/OiHeatmapChart.tsx';
 import type { OiInterval } from '../../stores/symbolContext.store.ts';
 
@@ -21,7 +22,7 @@ export function OiHeatmapPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">OI Change Heatmap</h1>
+      <PageHeader title="OI Change Heatmap" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval allowedIntervals={HEATMAP_INTERVALS} />
@@ -42,16 +43,12 @@ export function OiHeatmapPage() {
 
       {hasGrid && (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <section>
-            <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">
-              Call (CE) OI Change
-            </h2>
+          <section className="card shadow-e1">
+            <h2 className="mb-2 text-h3 text-ay-text">Call (CE) OI Change</h2>
             <CallOiHeatmap data={data!} />
           </section>
-          <section>
-            <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">
-              Put (PE) OI Change
-            </h2>
+          <section className="card shadow-e1">
+            <h2 className="mb-2 text-h3 text-ay-text">Put (PE) OI Change</h2>
             <PutOiHeatmap data={data!} />
           </section>
         </div>

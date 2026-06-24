@@ -3,6 +3,7 @@ import { FilterBar } from '../../components/FilterBar.tsx';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 import { cn } from '../../lib/cn.ts';
 import { formatDecimal } from '../../lib/decimal.ts';
 import type { OpenHighStrategyLeg, OpenHighStrategyStrike } from '../../api/types.ts';
@@ -74,7 +75,7 @@ export function OpenHighStrategyPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Open and High Strategy</h1>
+      <PageHeader title="Open and High Strategy" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval />

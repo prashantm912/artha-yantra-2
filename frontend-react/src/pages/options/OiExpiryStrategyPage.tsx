@@ -6,6 +6,7 @@ import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Select } from '../../components/atoms/Select.tsx';
 import { OiBadge4 } from '../../components/atoms/OiBadge4.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
 import type { OiExpiryEodDay } from '../../api/types.ts';
 
@@ -91,7 +92,7 @@ export function OiExpiryStrategyPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">OI Expiry Strategy</h1>
+      <PageHeader title="OI Expiry Strategy" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval />

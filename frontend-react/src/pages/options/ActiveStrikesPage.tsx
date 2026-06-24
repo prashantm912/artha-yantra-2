@@ -4,6 +4,7 @@ import { foldActiveStrikeSeries } from '../../api/activeStrikesFold.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 import {
   ActiveStrikeOiChart,
   ActiveStrikeSentimentChart,
@@ -41,7 +42,7 @@ export function ActiveStrikesPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Active Strikes OI</h1>
+      <PageHeader title="Active Strikes OI" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval allowedIntervals={ACTIVE_INTERVALS} />
@@ -65,16 +66,12 @@ export function ActiveStrikesPage() {
 
       {hasSeries && (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <section>
-            <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">
-              Active Strike Change in OI
-            </h2>
+          <section className="card shadow-e1">
+            <h2 className="mb-2 text-h3 text-ay-text">Active Strike Change in OI</h2>
             <ActiveStrikeOiChart data={series} />
           </section>
-          <section>
-            <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">
-              Active Strike Sentiment %
-            </h2>
+          <section className="card shadow-e1">
+            <h2 className="mb-2 text-h3 text-ay-text">Active Strike Sentiment %</h2>
             <ActiveStrikeSentimentChart data={series} />
           </section>
         </div>

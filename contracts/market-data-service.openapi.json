@@ -1648,6 +1648,70 @@
         }
       }
     },
+    "/api/v1/market/options/oi-heatmap" : {
+      "get" : {
+        "tags" : [ "options-analytics-controller" ],
+        "operationId" : "oiHeatmap",
+        "parameters" : [ {
+          "name" : "mode",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "name",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "date",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "interval",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "expiry",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Heatmap"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/options/oi-analysis" : {
       "get" : {
         "tags" : [ "options-analytics-controller" ],
@@ -5021,6 +5085,60 @@
           }
         }
       },
+      "Cell" : {
+        "type" : "object",
+        "properties" : {
+          "x" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "y" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "value" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "Heatmap" : {
+        "type" : "object",
+        "properties" : {
+          "buckets" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "strikes" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "ce" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Cell"
+            }
+          },
+          "pe" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Cell"
+            }
+          },
+          "maxAbs" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
       "HistoryPoint" : {
         "type" : "object",
         "properties" : {
@@ -5198,6 +5316,10 @@
             "format" : "int64"
           },
           "oi" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "prevOi" : {
             "type" : "integer",
             "format" : "int64"
           },
@@ -5574,67 +5696,6 @@
           "asOf" : {
             "type" : "string",
             "format" : "date-time"
-          }
-        }
-      },
-      "Heatmap" : {
-        "type" : "object",
-        "properties" : {
-          "index" : {
-            "type" : "string"
-          },
-          "advance" : {
-            "type" : "integer",
-            "format" : "int32"
-          },
-          "decline" : {
-            "type" : "integer",
-            "format" : "int32"
-          },
-          "tiles" : {
-            "type" : "array",
-            "items" : {
-              "$ref" : "#/components/schemas/Tile"
-            }
-          },
-          "asOf" : {
-            "type" : "string",
-            "format" : "date-time"
-          }
-        }
-      },
-      "Tile" : {
-        "type" : "object",
-        "properties" : {
-          "symbol" : {
-            "type" : "string"
-          },
-          "changePct" : {
-            "type" : "number"
-          },
-          "ltp" : {
-            "type" : "number"
-          },
-          "open" : {
-            "type" : "number"
-          },
-          "high" : {
-            "type" : "number"
-          },
-          "low" : {
-            "type" : "number"
-          },
-          "oi" : {
-            "type" : "integer",
-            "format" : "int64"
-          },
-          "oiChange" : {
-            "type" : "integer",
-            "format" : "int64"
-          },
-          "interpretation" : {
-            "type" : "string",
-            "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
           }
         }
       },

@@ -41,6 +41,15 @@ artha:
     api-key-file: ${ARTHA_OPENALGO_API_KEY_FILE:/run/secrets/openalgo_api_key}
   signals:
     engine-enabled: ${ARTHA_SIGNAL_ENGINE_ENABLED:true}
+  notifier:
+    # Z1 scalp-signal alerts: a richer ntfy/Telegram push (underlying/strike/option-side, entry/SL/
+    # target, confluence) for SCALPER entries, on top of the per-strategy opt-in. Default OFF so a
+    # fresh stack never pushes; when on, the generic per-signal push is skipped for scalper entries
+    # (the scalp alert is the single push). window-seconds dedupes the same leg (strategy+underlying+
+    # side+strike) so a re-printing pattern doesn't re-fire.
+    scalp-alerts:
+      enabled: ${ARTHA_NOTIFIER_SCALP_ALERTS_ENABLED:false}
+      window-seconds: ${ARTHA_NOTIFIER_SCALP_ALERTS_WINDOW_SECONDS:300}
   scalper:
     # Tier-1 OI-analytics thresholds (Phase-3.5 T2.1/T2.6/T2.7/T2.8) read by the confluence scorer
     # and the #5 trending-OI pre-gate. ivPairMinGap/ivBothHighFloor are on the 0..1 IV FRACTION scale

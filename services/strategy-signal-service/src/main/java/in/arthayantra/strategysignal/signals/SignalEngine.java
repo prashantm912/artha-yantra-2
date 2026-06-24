@@ -632,11 +632,25 @@ public class SignalEngine {
         "ENTRY signal #{} {} {}:{} at {} (composite {})",
         id, strategy.slug(), exchange, tradingsymbol, entryPrice,
         evaluation.breakdown().composite());
-    // in-process trigger for the Phase-41 notifier (push only ENTRY signals)
+    // in-process trigger for the Phase-41 notifier (push only ENTRY signals). For a scalper entry
+    // (decision != null) we distil the V009 leg into the LIVE-only scalp side-channel so the Z1
+    // scalp-alert listener renders strike/option-side/confluence without re-querying. This event is
+    // published only on the live emit path — deterministic replay never reaches here, so the
+    // golden vectors stay byte-identical.
+    SignalEmitted.ScalpDetail scalp =
+        decision == null
+            ? null
+            : new SignalEmitted.ScalpDetail(
+                strategy.scalper().underlying(),
+                decision.side().name(),
+                decision.pick().candidate().strike(),
+                decision.pick().candidate().tradingsymbol(),
+                decision.pick().candidate().ltp(),
+                decision.confluence().aggregate());
     events.publishEvent(
         new SignalEmitted(
             id, strategy.versionId(), exchange, tradingsymbol, side, entryPrice, stopLoss, target,
-            evaluation.breakdown().composite(), evaluation.breakdown().threshold()));
+            evaluation.breakdown().composite(), evaluation.breakdown().threshold(), scalp));
   }
 
   /** The §12.9 confluence side-channel JSON — chosen option, |delta|, IV, aggregate, per-dot detail. */

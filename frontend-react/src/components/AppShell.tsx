@@ -5,6 +5,7 @@ import { useWsState } from '../stores/useWsState.ts';
 import { wsClient } from '../lib/wsClient.ts';
 import { THEMES, type ThemeId } from '../lib/theme.ts';
 import { MegaMenu } from './MegaMenu.tsx';
+import { Button } from './atoms/Button.tsx';
 import { cn } from '../lib/cn.ts';
 
 // Hybrid shell (master plan §20): AY topbar (IST clock · mock tag · WS pill · theme picker · logout)
@@ -90,13 +91,9 @@ export function AppShell() {
               </option>
             ))}
           </select>
-          <button
-            type="button"
-            onClick={onLogout}
-            className="h-8 rounded border border-ay-border px-2 text-xs text-ay-text hover:border-accent"
-          >
+          <Button variant="outline" size="sm" onClick={onLogout}>
             Logout
-          </button>
+          </Button>
         </div>
       </header>
 

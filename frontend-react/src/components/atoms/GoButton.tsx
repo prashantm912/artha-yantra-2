@@ -1,7 +1,9 @@
-import { cn } from '../../lib/cn.ts';
+import { RefreshCw } from 'lucide-react';
+import { Button } from './Button.tsx';
 
 // Explicit fetch trigger (oipulse §20.7.3): the chain is reactive (queries refire on context change),
-// so Go just forces a refetch — faithful to the oipulse control bar without abandoning the reactive model.
+// so Go just forces a refetch. Wraps the Button atom — keeps the accessible name "Go" and shows a
+// spinner while loading (text stays mounted, so getByRole('button',{name:'Go'}) is stable).
 interface GoButtonProps {
   onClick: () => void;
   loading?: boolean;
@@ -9,16 +11,8 @@ interface GoButtonProps {
 
 export function GoButton({ onClick, loading }: GoButtonProps) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={loading}
-      className={cn(
-        'h-9 rounded-md bg-accent px-4 text-sm font-medium text-surface-0',
-        'hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-50',
-      )}
-    >
-      {loading ? '…' : 'Go'}
-    </button>
+    <Button variant="primary" size="md" icon={RefreshCw} loading={loading} onClick={onClick}>
+      Go
+    </Button>
   );
 }

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { m } from 'motion/react';
 import { Newspaper } from 'lucide-react';
 import { useEquityNews } from '../../api/oiAnalytics.ts';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
@@ -61,9 +62,21 @@ export function NewsPage() {
               </p>
             ) : (
               <BeatBlock>
-                <ul className="space-y-3">
+                <m.ul
+                  className="space-y-3"
+                  initial="hidden"
+                  animate="show"
+                  variants={{ hidden: {}, show: { transition: { staggerChildren: 0.04 } } }}
+                >
                   {d.items.map((it, i) => (
-                    <li key={i} className="rounded-lg border border-ay-border bg-surface-1 p-3">
+                    <m.li
+                      key={i}
+                      className="rounded-lg border border-ay-border bg-surface-1 p-3"
+                      variants={{
+                        hidden: { opacity: 0, y: 6 },
+                        show: { opacity: 1, y: 0, transition: { duration: 0.16, ease: [0.2, 0, 0, 1] } },
+                      }}
+                    >
                       <div className="flex items-start justify-between gap-3">
                         <a
                           href={it.articleLink ?? '#'}
@@ -76,9 +89,9 @@ export function NewsPage() {
                         <span className="shrink-0 text-xs text-ay-muted">{fmtTime(it.publishedTime)}</span>
                       </div>
                       {it.summary && <p className="mt-1 text-xs text-ay-muted">{it.summary}</p>}
-                    </li>
+                    </m.li>
                   ))}
-                </ul>
+                </m.ul>
               </BeatBlock>
             )
           }

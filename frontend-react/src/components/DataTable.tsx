@@ -251,7 +251,7 @@ export function DataTable<Row>({
         aria-label={ariaLabel}
       >
         <table aria-label={ariaLabel} className="w-full border-collapse whitespace-nowrap text-xs">
-          <thead className="sticky top-0 z-10 bg-surface-1 text-ay-muted">
+          <thead className="sticky top-0 z-10 bg-surface-1 text-ay-muted shadow-[inset_0_-1px_0_var(--ay-border)]">
             {table.getHeaderGroups().map((hg) => (
               <tr key={hg.id}>
                 {hg.headers.map((h) => {

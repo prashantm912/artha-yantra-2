@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import {
   JOB_STATUSES,
   fetchResultRef,
@@ -48,7 +49,7 @@ export function JobsPage() {
   };
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Jobs" subtitle="Live backtest and sweep jobs with per-row progress" />
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Select
@@ -77,7 +78,7 @@ export function JobsPage() {
         </button>
       </div>
 
-      <div className="max-h-[calc(100vh-12rem)] overflow-auto rounded-lg border border-ay-border">
+      <BeatBlock className="max-h-[calc(100vh-12rem)] overflow-auto rounded-lg border border-ay-border">
         <table className="w-full border-collapse text-sm">
           <thead className="sticky top-0 bg-surface-1 text-left text-xs uppercase text-ay-muted">
             <tr>
@@ -149,7 +150,7 @@ export function JobsPage() {
             )}
           </tbody>
         </table>
-      </div>
-    </div>
+      </BeatBlock>
+    </LoadBeat>
   );
 }

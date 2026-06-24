@@ -7,6 +7,7 @@ import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import {
   useBacktestFolds,
   useBacktestMonteCarlo,
@@ -149,7 +150,7 @@ export function BacktestResultsPage() {
   }, [selected]);
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Backtest results" subtitle="Metrics, equity and drawdown curves, trades, folds and Monte Carlo" />
       <QueryState
         query={results}
@@ -179,28 +180,28 @@ export function BacktestResultsPage() {
 
       {tab === 'overview' && (
         <>
-          <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+          <BeatStrip className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
             {CORE_METRICS.map((m) => (
-              <div key={m.key} className="card shadow-e1">
+              <BeatItem key={m.key} className="card shadow-e1">
                 <div className="text-caption uppercase tracking-wide text-ay-muted">{m.label}</div>
                 <div className="nums font-semibold">{metric(r, m)}</div>
-              </div>
+              </BeatItem>
             ))}
             {BENCH_METRICS.filter((m) => r.metrics[m.key] != null).map((m) => (
-              <div key={m.key} className="card shadow-e1">
+              <BeatItem key={m.key} className="card shadow-e1">
                 <div className="text-caption uppercase tracking-wide text-ay-muted">{m.label}</div>
                 <div className="nums font-semibold">{metric(r, m)}</div>
-              </div>
+              </BeatItem>
             ))}
-          </div>
+          </BeatStrip>
           {r.premiumSource === 'SYNTHETIC' && (
             <p className="mb-2 rounded-md bg-warn/15 px-2 py-1 text-sm text-warn ring-1 ring-warn/40">
               Options premiums are SYNTHETIC_B76 (not snapshot-grade).
             </p>
           )}
-          <div className="card shadow-e1">
+          <BeatBlock className="card shadow-e1">
             <EChart makeOption={equityOption} height={320} ariaLabel="Equity, benchmark and drawdown curves" />
-          </div>
+          </BeatBlock>
           <p className="mt-2 text-xs tabular-nums text-ay-muted">
             dataHash {r.dataHash ?? '—'} · seed {r.seed ?? '—'}
           </p>
@@ -317,18 +318,18 @@ export function BacktestResultsPage() {
               Insufficient sample (&lt; 30 trades) — extend the window.
             </p>
           )}
-          <div className="card shadow-e1 mb-3">
+          <BeatBlock className="card shadow-e1 mb-3">
             <EChart makeOption={mcFanOption} height={280} ariaLabel="Monte Carlo equity-band fan" />
-          </div>
-          <div className="card shadow-e1">
+          </BeatBlock>
+          <BeatBlock className="card shadow-e1">
             <EChart makeOption={mcDrawdownOption} height={240} ariaLabel="Monte Carlo drawdown distribution" />
-          </div>
+          </BeatBlock>
           <p className="mt-2 text-xs tabular-nums text-ay-muted">risk of ruin {mcData.riskOfRuin}</p>
         </>
       )}
         </>
         )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

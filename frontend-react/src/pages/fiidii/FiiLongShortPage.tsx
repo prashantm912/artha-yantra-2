@@ -5,6 +5,7 @@ import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 
 // FII Long-Short Ratio (oipulse §fii-dii/fii-long-short-ratio): FII index-futures long% over time. LSR%
 // = fiiLong / (fiiLong + fiiShort) × 100 (low = bearish FII, high = bullish). The BE /long-short feed
@@ -88,7 +89,7 @@ export function FiiLongShortPage() {
   );
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader
         title={
           lastLsr != null && lastDate
@@ -106,11 +107,11 @@ export function FiiLongShortPage() {
         skeleton={<Skeleton variant="chart-block" height={440} />}
       >
         {() => (
-          <div className="card shadow-e1">
+          <BeatBlock className="card shadow-e1">
             <EChart makeOption={makeOption} height={440} ariaLabel="FII index-futures long-short ratio percentage over time" />
-          </div>
+          </BeatBlock>
         )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

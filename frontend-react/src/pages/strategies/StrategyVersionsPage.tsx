@@ -5,6 +5,7 @@ import { Select } from '../../components/atoms/Select.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import {
   usePublish,
   useRollback,
@@ -66,7 +67,7 @@ export function StrategyVersionsPage() {
   };
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Strategy versions" />
       <div className="mb-3 flex items-center gap-2">
         <strong>{detail.data?.name ?? 'Strategy'} — versions</strong>
@@ -91,7 +92,7 @@ export function StrategyVersionsPage() {
             skeleton={<Skeleton variant="table-rows" rows={5} cols={5} />}
           >
             {() => (
-          <div className="overflow-auto rounded-lg border border-ay-border">
+          <BeatBlock className="overflow-auto rounded-lg border border-ay-border">
             <table className="w-full border-collapse text-sm">
               <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
                 <tr>
@@ -133,7 +134,7 @@ export function StrategyVersionsPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </BeatBlock>
             )}
           </QueryState>
         </section>
@@ -212,6 +213,6 @@ export function StrategyVersionsPage() {
           </div>
         </div>
       )}
-    </div>
+    </LoadBeat>
   );
 }

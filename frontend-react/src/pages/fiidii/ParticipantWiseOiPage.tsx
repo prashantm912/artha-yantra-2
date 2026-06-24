@@ -9,6 +9,7 @@ import { SignedCount } from '../../components/atoms/SignedCount.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 
 // Participant-wise OI (oipulse §fii-dii/participant-wise-oi): SEBI participant long/short contracts per
 // F&O segment, grouped FII/Pro/DII/Client × 6 segments, with day-over-day change + a Bullish/Bearish
@@ -49,7 +50,7 @@ export function ParticipantWiseOiPage() {
   const groups = useMemo(() => foldParticipantOi(q.data ?? []), [q.data]);
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Participant Wise OI (No. of Contracts)" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -65,7 +66,7 @@ export function ParticipantWiseOiPage() {
         skeleton={<Skeleton variant="table-rows" rows={6} cols={8} />}
       >
         {() => (
-          <div className="space-y-4">
+          <BeatBlock className="space-y-4">
             {groups.map((g) => (
               <div key={g.participant}>
                 <div className="mb-1 text-h3 text-accent">{g.participant}</div>
@@ -78,9 +79,9 @@ export function ParticipantWiseOiPage() {
                 />
               </div>
             ))}
-          </div>
+          </BeatBlock>
         )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

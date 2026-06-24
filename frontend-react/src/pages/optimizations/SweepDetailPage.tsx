@@ -5,6 +5,7 @@ import { formatDecimal } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { FoldDrilldownModal } from './FoldDrilldownModal.tsx';
 import {
   paramStr,
@@ -151,7 +152,7 @@ export function SweepDetailPage() {
   };
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Sweep explorer" subtitle="Guard-aware leaderboard, trial scatter and promote-to-draft" />
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <strong>Sweep {sweepId.slice(0, 8)}</strong>
@@ -171,12 +172,12 @@ export function SweepDetailPage() {
         </div>
       </div>
 
-      <div className="card shadow-e1">
+      <BeatBlock className="card shadow-e1">
         <EChart makeOption={scatterOption} height={280} ariaLabel="Trial objective scatter" />
-      </div>
+      </BeatBlock>
 
-      <h3 className="mb-2 mt-4 text-base font-semibold">Leaderboard ({sort} sort)</h3>
-      <div className="overflow-auto rounded-lg border border-ay-border">
+      <h3 className="mb-2 mt-4 text-h3">Leaderboard ({sort} sort)</h3>
+      <BeatBlock className="overflow-auto rounded-lg border border-ay-border">
         <table className="w-full border-collapse text-sm">
           <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
             <tr>
@@ -238,10 +239,10 @@ export function SweepDetailPage() {
             )}
           </tbody>
         </table>
-      </div>
+      </BeatBlock>
 
-      <h3 className="mb-2 mt-4 text-base font-semibold">All trials (pruned/failed flagged, never hidden)</h3>
-      <div className="max-h-80 overflow-auto rounded-lg border border-ay-border">
+      <h3 className="mb-2 mt-4 text-h3">All trials (pruned/failed flagged, never hidden)</h3>
+      <BeatBlock className="max-h-80 overflow-auto rounded-lg border border-ay-border">
         <table className="w-full border-collapse text-sm">
           <thead className="sticky top-0 bg-surface-1 text-left text-xs uppercase text-ay-muted">
             <tr>
@@ -268,7 +269,7 @@ export function SweepDetailPage() {
             ))}
           </tbody>
         </table>
-      </div>
+      </BeatBlock>
 
       <FoldDrilldownModal sweepId={sweepId} trialNumber={foldsTrial} onClose={() => setFoldsTrial(null)} />
 
@@ -301,6 +302,6 @@ export function SweepDetailPage() {
           </div>
         </div>
       )}
-    </div>
+    </LoadBeat>
   );
 }

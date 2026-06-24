@@ -5,6 +5,7 @@ import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { PageHeader, LiveDot } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { cn } from '../../lib/cn.ts';
 import { compareDecimal, formatDecimal, isNegative } from '../../lib/decimal.ts';
 import type { WorldIndex } from '../../api/types.ts';
@@ -113,7 +114,7 @@ export function WorldIndicesPage() {
   );
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader
         title="World Indices"
         subtitle="Global index live quotes from Upstox — net change and %change are sign-aware (green up, red down)"
@@ -127,17 +128,19 @@ export function WorldIndicesPage() {
         skeleton={<Skeleton variant="table-rows" rows={12} cols={6} />}
       >
         {() => (
-          <DataTable
-            columns={columns}
-            rows={rows}
-            rowKey={(r) => r.key}
-            pageSize={50}
-            initialSort={{ id: 'changePct', dir: 'desc' }}
-            emptyMessage="No world-index quotes available."
-            ariaLabel="World indices live quotes"
-          />
+          <BeatBlock>
+            <DataTable
+              columns={columns}
+              rows={rows}
+              rowKey={(r) => r.key}
+              pageSize={50}
+              initialSort={{ id: 'changePct', dir: 'desc' }}
+              emptyMessage="No world-index quotes available."
+              ariaLabel="World indices live quotes"
+            />
+          </BeatBlock>
         )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

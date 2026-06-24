@@ -5,6 +5,7 @@ import { Select } from '../../components/atoms/Select.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import {
   NOTIFY_CHANNELS,
   STRATEGY_STATUSES,
@@ -51,7 +52,7 @@ export function StrategiesListPage() {
   };
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Strategies" subtitle="Published, draft and archived strategies" />
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <input
@@ -84,7 +85,7 @@ export function StrategiesListPage() {
         skeleton={<Skeleton variant="table-rows" rows={8} cols={8} />}
       >
         {() => (
-      <div className="overflow-auto rounded-lg border border-ay-border">
+      <BeatBlock className="overflow-auto rounded-lg border border-ay-border">
         <table className="w-full border-collapse text-sm">
           <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
             <tr>
@@ -173,9 +174,9 @@ export function StrategiesListPage() {
             })}
           </tbody>
         </table>
-      </div>
+      </BeatBlock>
         )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

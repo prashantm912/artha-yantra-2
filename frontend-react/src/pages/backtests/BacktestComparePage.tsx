@@ -5,6 +5,7 @@ import { formatDecimal } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { useCompareResults, type BacktestResults } from '../../api/backtests.ts';
 
 // /backtests/compare?ids=a,b,c (master plan §20 parity, E-11 screen 5): up to 6 runs — metric matrix
@@ -101,7 +102,7 @@ export function BacktestComparePage() {
   }
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Compare backtests" subtitle="Side-by-side metric matrix and normalized equity curves" />
       {dataHashMismatch && (
         <p className="mb-2 rounded-md bg-warn/15 px-2 py-1 text-sm text-warn ring-1 ring-warn/40">
@@ -114,7 +115,7 @@ export function BacktestComparePage() {
         </p>
       )}
 
-      <div className="overflow-auto rounded-lg border border-ay-border">
+      <BeatBlock className="overflow-auto rounded-lg border border-ay-border">
         <table className="w-full border-collapse text-sm">
           <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
             <tr>
@@ -142,11 +143,11 @@ export function BacktestComparePage() {
             ))}
           </tbody>
         </table>
-      </div>
+      </BeatBlock>
 
-      <div className="card shadow-e1 mt-4">
+      <BeatBlock className="card shadow-e1 mt-4">
         <EChart makeOption={equityOption} height={320} ariaLabel="Normalized equity curves" />
-      </div>
-    </div>
+      </BeatBlock>
+    </LoadBeat>
   );
 }

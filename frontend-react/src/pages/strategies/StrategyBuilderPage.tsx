@@ -18,6 +18,7 @@ import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 
 // Strategy Builder (greeks/payoff pipeline): assemble legs from the live chain, see the expiry payoff
 // curve + net greeks + max-profit/loss/breakevens. Pure client-side math (payoffEngine) over the
@@ -165,7 +166,7 @@ export function StrategyBuilderPage() {
   const g = payoff?.netGreeks;
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader
         title="Strategy Builder"
         subtitle="Assemble legs from the live chain — expiry payoff, net greeks and breakevens"
@@ -255,17 +256,19 @@ export function StrategyBuilderPage() {
 
       {payoff && g ? (
         <>
-          <div className="mb-3 flex flex-wrap gap-3" aria-live="polite">
-            <Metric label="Net Premium" value={`${payoff.netPremium <= 0 ? 'Dr ' : 'Cr '}${inr(Math.abs(payoff.netPremium))}`} />
-            <Metric label="Max Profit" value={payoff.unboundedProfit ? 'Unlimited' : inr(payoff.maxProfit)} />
-            <Metric label="Max Loss" value={payoff.unboundedLoss ? 'Unlimited' : inr(payoff.maxLoss)} />
-            <Metric label="Breakeven" value={payoff.breakevens.length ? payoff.breakevens.join(' · ') : '—'} />
-            <Metric label="Δ / Θ" value={`${g.delta.toFixed(1)} / ${g.theta.toFixed(0)}`} />
-            <Metric label="Vega" value={g.vega.toFixed(0)} />
+          <div className="mb-3" aria-live="polite">
+            <BeatStrip className="flex flex-wrap gap-3">
+              <BeatItem><Metric label="Net Premium" value={`${payoff.netPremium <= 0 ? 'Dr ' : 'Cr '}${inr(Math.abs(payoff.netPremium))}`} /></BeatItem>
+              <BeatItem><Metric label="Max Profit" value={payoff.unboundedProfit ? 'Unlimited' : inr(payoff.maxProfit)} /></BeatItem>
+              <BeatItem><Metric label="Max Loss" value={payoff.unboundedLoss ? 'Unlimited' : inr(payoff.maxLoss)} /></BeatItem>
+              <BeatItem><Metric label="Breakeven" value={payoff.breakevens.length ? payoff.breakevens.join(' · ') : '—'} /></BeatItem>
+              <BeatItem><Metric label="Δ / Θ" value={`${g.delta.toFixed(1)} / ${g.theta.toFixed(0)}`} /></BeatItem>
+              <BeatItem><Metric label="Vega" value={g.vega.toFixed(0)} /></BeatItem>
+            </BeatStrip>
           </div>
-          <div className="card shadow-e1 mb-4">
+          <BeatBlock className="card shadow-e1 mb-4">
             <EChart makeOption={makeOption} height={320} ariaLabel="Strategy payoff at expiry vs underlying" />
-          </div>
+          </BeatBlock>
         </>
       ) : (
         <p className="mb-4 text-sm text-ay-muted">Add legs from the chain to see the payoff.</p>
@@ -280,6 +283,6 @@ export function StrategyBuilderPage() {
           emptyMessage="No legs."
         />
       )}
-    </div>
+    </LoadBeat>
   );
 }

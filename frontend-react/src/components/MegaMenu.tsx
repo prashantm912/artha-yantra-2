@@ -48,6 +48,7 @@ const SECTIONS: MenuSection[] = [
       { label: 'OI Statistics', to: '/options/oi-statistics' }, // Wave 3 — OI distribution + PCR
       { label: 'OI Heatmap', to: '/options/oi-heatmap' }, // Wave 3 — strike × time ΔOI grid (CE/PE)
       { label: 'OI Expiry Strategy', to: '/options/oi-expiry-strategy' }, // Wave 3 — per-strike EOD OHLC+OI history
+      { label: 'Open & High Strategy', to: '/options/open-high-strategy' }, // Wave 3 — CE/PE Open=High/Low scan + trigger probability
       { label: 'Interval-wise OI', to: '/options/interval-wise-oi' }, // Wave 3 — top OI movers ×15m/60m/daily
       { label: 'Active Strikes OI', to: '/options/active-strikes' }, // Wave 3 — OI + Sentiment series
       { label: 'Active Strikes IV', to: '/options/active-strikes-iv' }, // Wave 3 — IV + price series

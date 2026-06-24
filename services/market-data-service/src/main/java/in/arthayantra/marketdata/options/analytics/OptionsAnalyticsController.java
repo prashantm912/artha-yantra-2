@@ -43,6 +43,7 @@ public class OptionsAnalyticsController {
   private final OptionsOiChartService optionsOiChartService;
   private final OiHeatmapService heatmapService;
   private final OiExpiryService expiryService;
+  private final OpenHighStrategyService openHighStrategyService;
   private final ObjectProvider<UpstoxOptionAnalyticsSource> upstoxOptionAnalytics;
   private final MarketCalendar calendar;
   private final int bigOiTopN;
@@ -65,6 +66,7 @@ public class OptionsAnalyticsController {
       OptionsOiChartService optionsOiChartService,
       OiHeatmapService heatmapService,
       OiExpiryService expiryService,
+      OpenHighStrategyService openHighStrategyService,
       ObjectProvider<UpstoxOptionAnalyticsSource> upstoxOptionAnalytics,
       MarketCalendar calendar,
       @Value("${artha.options.big-oi-top-n:10}") int bigOiTopN,
@@ -85,6 +87,7 @@ public class OptionsAnalyticsController {
     this.optionsOiChartService = optionsOiChartService;
     this.heatmapService = heatmapService;
     this.expiryService = expiryService;
+    this.openHighStrategyService = openHighStrategyService;
     this.upstoxOptionAnalytics = upstoxOptionAnalytics;
     this.calendar = calendar;
     this.bigOiTopN = bigOiTopN;
@@ -818,6 +821,70 @@ public class OptionsAnalyticsController {
         .sorted(order)
         .limit(limit)
         .sorted(Comparator.comparing(OiExpiryService.StrikeExpiry::strike))
+        .toList();
+  }
+
+  /**
+   * /open-high-strategy: the oipulse "Open &amp; High Strategy" (§strategies/open-high-strategy, Siva
+   * #2) — the per-strike Open=High (Call) / Open=Low (Put) premium-reversion scan with the historical
+   * TRIGGER PROBABILITY (hits over the prior captured sessions) that the single-session OH/OL grader
+   * ({@code /strike-session-stats}) cannot carry. Folds ONE {@link OptionsSnapshotReader#eodSeries}
+   * read of the day-rollup over the last {@code expiry-lookback-days} days up to the latest captured
+   * session (live) or the {@code date} (history), windowed to the {@code 2*window+1} ATM strikes.
+   * {@code items} envelope; empty list (not a 422) when no snapshot accrued.
+   */
+  @GetMapping("/open-high-strategy")
+  public Map<String, Object> openHighStrategy(
+      @RequestParam(required = false) String mode,
+      @RequestParam String name,
+      @RequestParam(required = false) String date,
+      @RequestParam(required = false) String interval,
+      @RequestParam(required = false) String expiry) {
+    OiQuery q = OiQuery.of(mode, name, date, interval, expiry);
+    LocalDate exp = requireExpiry(q);
+    List<OptionsSnapshotReader.StrikePoint> latest =
+        reader.latest(q.name(), exp, q.interval(), q.date());
+    if (latest.isEmpty()) {
+      return Map.of("items", List.of(), "underlying", q.name(), "expiry", exp);
+    }
+    LocalDate lastDay = latest.get(0).bucket().atZoneSameInstant(Ist.ZONE).toLocalDate();
+    OffsetDateTime from =
+        lastDay.minusDays(expiryLookbackDays).atStartOfDay().atOffset(Ist.OFFSET);
+    OffsetDateTime to = lastDay.plusDays(1).atStartOfDay().atOffset(Ist.OFFSET);
+    List<OptionsSnapshotReader.OptionEodRow> eod = reader.eodSeries(q.name(), exp, from, to);
+    List<OpenHighStrategyService.StrikeOpenHigh> all = openHighStrategyService.fold(eod);
+    BigDecimal spot = latestSpot(latest);
+    List<OpenHighStrategyService.StrikeOpenHigh> windowed =
+        nearestOpenHighStrikes(all, spot, heatmapWindow);
+    Map<String, Object> out = new LinkedHashMap<>();
+    out.put("items", windowed);
+    out.put("underlying", q.name());
+    out.put("expiry", exp);
+    out.put("spot", spot); // nullable off-hours (LinkedHashMap permits null; Map.of would not)
+    out.put("asOf", latest.get(0).bucket());
+    return out;
+  }
+
+  /**
+   * The {@code 2*window+1} folded Open=High strikes nearest {@code spot}, ascending. When {@code spot}
+   * is null (or no strikes) the lowest strikes are kept. Mirrors {@link #nearestExpiryStrikes}.
+   */
+  private static List<OpenHighStrategyService.StrikeOpenHigh> nearestOpenHighStrikes(
+      List<OpenHighStrategyService.StrikeOpenHigh> all, BigDecimal spot, int window) {
+    int limit = 2 * window + 1;
+    if (all.size() <= limit) {
+      return all;
+    }
+    Comparator<OpenHighStrategyService.StrikeOpenHigh> order =
+        spot == null
+            ? Comparator.comparing(OpenHighStrategyService.StrikeOpenHigh::strike)
+            : Comparator.<OpenHighStrategyService.StrikeOpenHigh, BigDecimal>comparing(
+                    s -> s.strike().subtract(spot).abs())
+                .thenComparing(OpenHighStrategyService.StrikeOpenHigh::strike);
+    return all.stream()
+        .sorted(order)
+        .limit(limit)
+        .sorted(Comparator.comparing(OpenHighStrategyService.StrikeOpenHigh::strike))
         .toList();
   }
 

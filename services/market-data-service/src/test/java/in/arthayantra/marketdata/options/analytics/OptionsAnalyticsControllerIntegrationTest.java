@@ -487,4 +487,63 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.items.length()").value(0));
   }
+
+  @Test
+  void openHighStrategyGradesLatestSessionAndProbability() throws Exception {
+    String u = "OHSTRAT";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    // Three IST sessions, two captures each → daily premium OHLC (first/max/min/last per day).
+    OffsetDateTime d1a =
+        OffsetDateTime.of(2026, 6, 16, 9, 20, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime d2a =
+        OffsetDateTime.of(2026, 6, 17, 9, 20, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime d3a =
+        OffsetDateTime.of(2026, 6, 18, 9, 20, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    // CE d1: open(first capture)=120 == high → Open=High hit (a prior session).
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, d1a, u, exp, "22500", "CE", "120", 900L, 0L, 4000L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, d1a.plusHours(3), u, exp, "22500", "CE", "100", 1000L, 0L, 5000L);
+    // CE d2: open=100, high=118 → not Open=High (a prior miss). Probability = 1/2 = 50%.
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, d2a, u, exp, "22500", "CE", "100", 1100L, 0L, 6000L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, d2a.plusHours(3), u, exp, "22500", "CE", "118", 1150L, 0L, 6500L);
+    // CE d3 (latest): open=125 == high → triggered. close=110 → fall% = (125-110)/125 = 12.00.
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, d3a, u, exp, "22500", "CE", "125", 1200L, 0L, 7000L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, d3a.plusHours(3), u, exp, "22500", "CE", "110", 1250L, 0L, 7500L);
+    // a PE leg so the strike carries both halves (PE latest open==low → triggered OL).
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, d3a, u, exp, "22500", "PE", "90", 1500L, 0L, 3000L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, d3a.plusHours(3), u, exp, "22500", "PE", "130", 1450L, 0L, 3500L);
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/open-high-strategy")
+                .param("name", u)
+                .param("mode", "history")
+                .param("date", "2026-06-18")
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items.length()").value(1))
+        .andExpect(jsonPath("$.items[0].strike").value("22500.00"))
+        .andExpect(jsonPath("$.items[0].ce.optionType").value("CE"))
+        .andExpect(jsonPath("$.items[0].ce.sessions").value(3))
+        .andExpect(jsonPath("$.items[0].ce.ohMark").value(true))
+        .andExpect(jsonPath("$.items[0].ce.triggered").value(true))
+        // probability over the two prior sessions (d1 hit, d2 miss) = 50% (decimal-string wire).
+        .andExpect(jsonPath("$.items[0].ce.probability").value("50.00"))
+        .andExpect(jsonPath("$.items[0].ce.fallPctFromHigh").value("12.00"))
+        // the PE leg grades Open=Low: open(90) == low(90) on the latest session.
+        .andExpect(jsonPath("$.items[0].pe.olMark").value(true))
+        .andExpect(jsonPath("$.items[0].pe.triggered").value(true));
+  }
+
+  @Test
+  void openHighStrategyEmptyWhenNoSnapshot() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/open-high-strategy")
+                .param("name", "NOOHDATA")
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items.length()").value(0));
+  }
 }

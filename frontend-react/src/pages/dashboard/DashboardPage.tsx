@@ -66,9 +66,8 @@ function SectionCard({ icon: Icon, title, to, children }: { icon: LucideIcon; ti
           {title}
         </h2>
         {to && (
-          <Link to={to} className="inline-flex items-center gap-0.5 text-caption text-accent hover:underline">
-            Open
-            <ArrowUpRight aria-hidden="true" className="size-3.5" />
+          <Link to={to} className="text-caption text-accent hover:underline">
+            Open →
           </Link>
         )}
       </div>

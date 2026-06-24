@@ -110,8 +110,8 @@ export function OptionsChartPage() {
         errorTitle="Couldn't load options chart"
         skeleton={
           <div className={sideBySide ? 'flex flex-col gap-4 md:flex-row' : 'flex flex-col gap-4'}>
-            {showCall && <Skeleton variant="chart-block" height={400} className="flex-1" />}
-            {showPut && <Skeleton variant="chart-block" height={400} className="flex-1" />}
+            {showCall && <Skeleton variant="chart-block" className="h-64 sm:h-80 lg:h-[400px] flex-1" />}
+            {showPut && <Skeleton variant="chart-block" className="h-64 sm:h-80 lg:h-[400px] flex-1" />}
           </div>
         }
       >

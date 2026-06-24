@@ -56,8 +56,8 @@ export function OiHeatmapPage() {
         errorTitle="Couldn't load OI heatmap"
         skeleton={
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-2">
-            <Skeleton variant="chart-block" height={420} />
-            <Skeleton variant="chart-block" height={420} />
+            <Skeleton variant="chart-block" className="h-64 sm:h-80 lg:h-[420px]" />
+            <Skeleton variant="chart-block" className="h-64 sm:h-80 lg:h-[420px]" />
           </div>
         }
       >

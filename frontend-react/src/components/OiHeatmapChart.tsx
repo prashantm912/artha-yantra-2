@@ -83,7 +83,7 @@ function LegHeatmap({ data, cells, legLabel, ariaLabel }: LegHeatmapProps) {
     },
     [data, cells, legLabel],
   );
-  return <EChart makeOption={makeOption} height={420} ariaLabel={ariaLabel} />;
+  return <EChart makeOption={makeOption} className="h-64 sm:h-80 lg:h-[420px]" ariaLabel={ariaLabel} />;
 }
 
 /** Call (CE) OI-change heatmap. */

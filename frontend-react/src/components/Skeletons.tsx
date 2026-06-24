@@ -14,7 +14,7 @@ interface SkeletonProps {
   className?: string;
 }
 
-export function Skeleton({ variant = 'card', rows = 6, cols = 4, height = 300, className }: SkeletonProps) {
+export function Skeleton({ variant = 'card', rows = 6, cols = 4, height, className }: SkeletonProps) {
   if (variant === 'metric-strip') {
     return (
       <div className={cn('flex flex-wrap gap-3', className)} aria-hidden="true">
@@ -25,7 +25,14 @@ export function Skeleton({ variant = 'card', rows = 6, cols = 4, height = 300, c
     );
   }
   if (variant === 'chart-block') {
-    return <Base className={cn('w-full', className)} style={{ height }} aria-hidden="true" />;
+    // When `height` is omitted a responsive `h-*` className drives the height (matches its chart).
+    return (
+      <Base
+        className={cn('w-full', height == null && 'h-72', className)}
+        style={height != null ? { height } : undefined}
+        aria-hidden="true"
+      />
+    );
   }
   if (variant === 'table-rows') {
     return (

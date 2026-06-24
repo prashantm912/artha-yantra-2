@@ -67,7 +67,7 @@ export function FuturesOiChartPage() {
 
       <QueryState
         query={q}
-        skeleton={<Skeleton variant="chart-block" height={440} />}
+        skeleton={<Skeleton variant="chart-block" className="h-64 sm:h-80 lg:h-[440px]" />}
         empty={{
           icon: LineChart,
           title: 'No futures OI chart — pick an underlying with a listed future.',

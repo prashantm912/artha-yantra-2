@@ -101,7 +101,7 @@ export function MultipleOiChartPage() {
               isEmpty={() => data == null}
               empty={{ title: 'No data for the selected legs/session.' }}
               errorTitle="Couldn't load multiple OI chart"
-              skeleton={<Skeleton variant="chart-block" height={440} />}
+              skeleton={<Skeleton variant="chart-block" className="h-64 sm:h-80 lg:h-[440px]" />}
             >
               {() => <MultiLegOiChart data={data} />}
             </QueryState>

@@ -44,12 +44,13 @@ function readTheme(el: HTMLElement): ChartTheme {
 interface EChartProps {
   /** Builds the option from the live theme — re-invoked on data change and on data-theme flips. */
   makeOption: (theme: ChartTheme) => EChartsOption;
+  /** Fixed height; pass `undefined` and a responsive `h-*` className to drive height from CSS. */
   height?: number | string;
   ariaLabel: string;
   className?: string;
 }
 
-export function EChart({ makeOption, height = 420, ariaLabel, className }: EChartProps) {
+export function EChart({ makeOption, height, ariaLabel, className }: EChartProps) {
   const elRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<echarts.ECharts | null>(null);
 
@@ -86,7 +87,7 @@ export function EChart({ makeOption, height = 420, ariaLabel, className }: EChar
       role="img"
       aria-label={ariaLabel}
       className={cn('w-full', className)}
-      style={{ height }}
+      style={height != null ? { height } : undefined}
     />
   );
 }

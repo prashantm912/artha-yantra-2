@@ -150,7 +150,7 @@ export function OptionsStraddlePage() {
           hint: 'Choose an underlying, expiry and strike to load the straddle chart.',
         }}
         errorTitle="Couldn't load straddle chart"
-        skeleton={<Skeleton variant="chart-block" height={440} />}
+        skeleton={<Skeleton variant="chart-block" className="h-64 sm:h-80 lg:h-[440px]" />}
       >
         {() =>
           data != null &&

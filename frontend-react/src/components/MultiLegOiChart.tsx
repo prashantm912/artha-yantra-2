@@ -106,7 +106,7 @@ export function MultiLegOiChart({ data }: MultiLegOiChartProps) {
   return (
     <EChart
       makeOption={makeOption}
-      height={440}
+      className="h-64 sm:h-80 lg:h-[440px]"
       ariaLabel="Multiple OI chart: underlying price with one open-interest line per selected option leg"
     />
   );

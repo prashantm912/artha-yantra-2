@@ -1,5 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Select } from '../../components/atoms/Select.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import {
   LINKED_OPTIONS,
   linkLabel,
@@ -50,7 +53,7 @@ export function JournalPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Trade journal</h1>
+      <PageHeader title="Trade journal" subtitle="Weekly-review entries — filter by tag or linked entity, rate discipline & emotion" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <input value={tag} onChange={(e) => setTag(e.target.value)} placeholder="Filter by tag" aria-label="Filter by tag" className={`${inputCls} flex-1`} />
@@ -84,51 +87,53 @@ export function JournalPage() {
         </button>
       </div>
 
-      <div className="overflow-auto rounded-lg border border-ay-border">
-        <table className="w-full border-collapse text-sm">
-          <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
-            <tr>
-              <th className="px-2 py-2 font-medium">Note</th>
-              <th className="px-2 py-2 font-medium">Tags</th>
-              <th className="px-2 py-2 font-medium">Linked</th>
-              <th className="px-2 py-2 text-right font-medium">Disc.</th>
-              <th className="px-2 py-2 text-right font-medium">Emo.</th>
-              <th className="px-2 py-2 font-medium">Created</th>
-              <th className="px-2 py-2"><span className="ay-sr-only">Actions</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((e) => (
-              <tr key={e.id} className="border-t border-ay-border">
-                <td className="px-2 py-2">{e.note}</td>
-                <td className="px-2 py-2">
-                  <span className="flex flex-wrap gap-1">
-                    {e.tags.map((t) => (
-                      <span key={t} className="rounded bg-surface-2 px-1.5 py-0.5 text-xs text-ay-muted">{t}</span>
-                    ))}
-                  </span>
-                </td>
-                <td className="px-2 py-2 text-xs text-ay-muted">{linkLabel(e)}</td>
-                <td className="px-2 py-2 text-right tabular-nums">{e.disciplineRating ?? '—'}</td>
-                <td className="px-2 py-2 text-right tabular-nums">{e.emotionRating ?? '—'}</td>
-                <td className="px-2 py-2 tabular-nums">{e.createdAt?.slice(0, 10)}</td>
-                <td className="px-2 py-2 text-right">
-                  <button type="button" onClick={() => remove.mutate(e.id)} className="px-1.5 text-xs text-bear hover:underline">
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-2 py-6 text-center text-ay-muted">
-                  No journal entries — annotate a signal, paper trade or backtest.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <QueryState
+        query={list}
+        empty={{ title: 'No journal entries — annotate a signal, paper trade or backtest.' }}
+        errorTitle="Couldn't load journal entries"
+        skeleton={<Skeleton variant="table-rows" rows={8} cols={7} />}
+      >
+        {() => (
+          <div className="overflow-auto rounded-lg border border-ay-border">
+            <table className="w-full border-collapse text-sm">
+              <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
+                <tr>
+                  <th className="px-2 py-2 font-medium">Note</th>
+                  <th className="px-2 py-2 font-medium">Tags</th>
+                  <th className="px-2 py-2 font-medium">Linked</th>
+                  <th className="px-2 py-2 text-right font-medium">Disc.</th>
+                  <th className="px-2 py-2 text-right font-medium">Emo.</th>
+                  <th className="px-2 py-2 font-medium">Created</th>
+                  <th className="px-2 py-2"><span className="ay-sr-only">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((e) => (
+                  <tr key={e.id} className="border-t border-ay-border">
+                    <td className="px-2 py-2">{e.note}</td>
+                    <td className="px-2 py-2">
+                      <span className="flex flex-wrap gap-1">
+                        {e.tags.map((t) => (
+                          <span key={t} className="rounded bg-surface-2 px-1.5 py-0.5 text-xs text-ay-muted">{t}</span>
+                        ))}
+                      </span>
+                    </td>
+                    <td className="px-2 py-2 text-xs text-ay-muted">{linkLabel(e)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums">{e.disciplineRating ?? '—'}</td>
+                    <td className="px-2 py-2 text-right tabular-nums">{e.emotionRating ?? '—'}</td>
+                    <td className="px-2 py-2 tabular-nums">{e.createdAt?.slice(0, 10)}</td>
+                    <td className="px-2 py-2 text-right">
+                      <button type="button" onClick={() => remove.mutate(e.id)} className="px-1.5 text-xs text-bear hover:underline">
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </QueryState>
     </div>
   );
 }

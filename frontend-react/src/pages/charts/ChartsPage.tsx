@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { CandleChart } from '../../components/charts/CandleChart.tsx';
 import { Select } from '../../components/atoms/Select.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 import { CHART_INTERVALS, useCandles, useChartSignals, type ChartMark } from '../../api/charts.ts';
 import { useBacktestTrades } from '../../api/backtests.ts';
 
@@ -37,7 +38,7 @@ export function ChartsPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Charts</h1>
+      <PageHeader title="Charts" subtitle="Candlestick + volume — backtest-trade & signal overlays via deep-link" />
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <form
           onSubmit={(e) => {

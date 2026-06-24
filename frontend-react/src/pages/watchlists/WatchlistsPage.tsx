@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { formatDecimal } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import {
   SCREENER_PRESETS,
   useAddWatchItem,
@@ -43,7 +46,7 @@ export function WatchlistsPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Watchlists & screener</h1>
+      <PageHeader title="Watchlists & screener" subtitle="Named instrument lists + the preset screener" />
       <div role="tablist" className="mb-4 flex gap-1 border-b border-ay-border">
         {(['lists', 'screener'] as const).map((t) => (
           <button
@@ -82,65 +85,74 @@ export function WatchlistsPage() {
             </button>
           </div>
 
-          {selected ? (
-            <>
-              <div className="relative mb-3 max-w-md">
-                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Add instrument…" aria-label="Add instrument" className={`${inputCls} w-full`} />
-                {search.trim().length >= 2 && (hits.data?.length ?? 0) > 0 && (
-                  <ul className="absolute z-10 mt-1 max-h-64 w-full overflow-auto rounded-md border border-ay-border bg-surface-1 shadow-lg">
-                    {(hits.data ?? []).slice(0, 20).map((h) => (
-                      <li key={`${h.exchange}:${h.tradingsymbol}`}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            addItem.mutate({ id: selected.id, item: { exchange: h.exchange, tradingsymbol: h.tradingsymbol } });
-                            setSearch('');
-                          }}
-                          className="block w-full px-3 py-1.5 text-left text-sm hover:bg-surface-2"
-                        >
-                          {h.exchange}:{h.tradingsymbol} {h.name && <span className="text-ay-muted">— {h.name}</span>}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-
-              <div className="overflow-auto rounded-lg border border-ay-border">
-                <table className="w-full border-collapse text-sm">
-                  <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
-                    <tr>
-                      <th className="px-2 py-2 font-medium">Instrument</th>
-                      <th className="px-2 py-2"><span className="ay-sr-only">Actions</span></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selected.items.map((it) => (
-                      <tr key={`${it.exchange}:${it.tradingsymbol}`} className="border-t border-ay-border">
-                        <td className="px-2 py-2">{it.exchange}:{it.tradingsymbol}</td>
-                        <td className="px-2 py-2 text-right">
-                          <button
-                            type="button"
-                            onClick={() => removeItem.mutate({ id: selected.id, item: it })}
-                            className="px-1.5 text-xs text-bear hover:underline"
-                          >
-                            Remove
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                    {selected.items.length === 0 && (
-                      <tr>
-                        <td colSpan={2} className="px-2 py-6 text-center text-ay-muted">Empty — add an instrument above.</td>
-                      </tr>
+          <QueryState
+            query={lists}
+            empty={{ title: 'No watchlist selected. Create one to start tracking instruments.' }}
+            errorTitle="Couldn't load watchlists"
+            skeleton={<Skeleton variant="table-rows" rows={6} cols={2} />}
+          >
+            {() =>
+              selected ? (
+                <>
+                  <div className="relative mb-3 max-w-md">
+                    <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Add instrument…" aria-label="Add instrument" className={`${inputCls} w-full`} />
+                    {search.trim().length >= 2 && (hits.data?.length ?? 0) > 0 && (
+                      <ul className="absolute z-10 mt-1 max-h-64 w-full overflow-auto rounded-md border border-ay-border bg-surface-1 shadow-lg">
+                        {(hits.data ?? []).slice(0, 20).map((h) => (
+                          <li key={`${h.exchange}:${h.tradingsymbol}`}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                addItem.mutate({ id: selected.id, item: { exchange: h.exchange, tradingsymbol: h.tradingsymbol } });
+                                setSearch('');
+                              }}
+                              className="block w-full px-3 py-1.5 text-left text-sm hover:bg-surface-2"
+                            >
+                              {h.exchange}:{h.tradingsymbol} {h.name && <span className="text-ay-muted">— {h.name}</span>}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
                     )}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          ) : (
-            <p className="text-sm text-ay-muted">No watchlist selected. Create one to start tracking instruments.</p>
-          )}
+                  </div>
+
+                  <div className="overflow-auto rounded-lg border border-ay-border">
+                    <table className="w-full border-collapse text-sm">
+                      <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
+                        <tr>
+                          <th className="px-2 py-2 font-medium">Instrument</th>
+                          <th className="px-2 py-2"><span className="ay-sr-only">Actions</span></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selected.items.map((it) => (
+                          <tr key={`${it.exchange}:${it.tradingsymbol}`} className="border-t border-ay-border">
+                            <td className="px-2 py-2">{it.exchange}:{it.tradingsymbol}</td>
+                            <td className="px-2 py-2 text-right">
+                              <button
+                                type="button"
+                                onClick={() => removeItem.mutate({ id: selected.id, item: it })}
+                                className="px-1.5 text-xs text-bear hover:underline"
+                              >
+                                Remove
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                        {selected.items.length === 0 && (
+                          <tr>
+                            <td colSpan={2} className="px-2 py-6 text-center text-ay-muted">Empty — add an instrument above.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm text-ay-muted">No watchlist selected. Create one to start tracking instruments.</p>
+              )
+            }
+          </QueryState>
         </>
       )}
 

@@ -4,6 +4,9 @@ import { foldVixIndex } from '../../core/vixIndexSeries.ts';
 import { DateInput } from '../../components/atoms/DateInput.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { VixIndexChart } from '../../components/VixIndexChart.tsx';
 
 // Vix & Index (§features/vix-index — oipulse "Vix & Price Chart"). Two stacked dual-axis line charts:
@@ -29,7 +32,7 @@ export function VixIndexPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Vix &amp; Index</h1>
+      <PageHeader title="Vix & Index" subtitle="India VIX vs NIFTY 50 / NIFTY BANK — dual-axis intraday lines for the selected IST day" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <DateInput ariaLabel="Select date" value={date} onChange={(v) => setDate(v ?? todayIst())} />
@@ -37,30 +40,36 @@ export function VixIndexPage() {
         <Metric label="Data updated at" value={updatedAt} />
       </div>
 
-      {q.isLoading && <p className="mb-3 text-sm text-ay-muted">Loading…</p>}
+      <QueryState
+        query={q}
+        isEmpty={() => empty}
+        empty={{
+          title:
+            'No minute data captured for this day — VIX & index 1m bars accrue from live capture; pick a forward-captured trading day.',
+        }}
+        errorTitle="Couldn't load VIX & index data"
+        skeleton={<Skeleton variant="chart-block" height={360} />}
+      >
+        {() => (
+          <>
+            {niftyChart.xAxis.length > 0 && (
+              <section className="card shadow-e1">
+                <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">India Vix Vs. Nifty</h2>
+                <VixIndexChart series={niftyChart} priceLabel="Nifty" />
+              </section>
+            )}
 
-      {empty && !q.isLoading && (
-        <p className="mb-3 text-sm text-ay-muted">
-          No minute data captured for this day — VIX &amp; index 1m bars accrue from live capture; pick a
-          forward-captured trading day.
-        </p>
-      )}
-
-      {niftyChart.xAxis.length > 0 && (
-        <>
-          <h2 className="mb-1 mt-2 text-center text-sm font-semibold text-ay-text">India Vix Vs. Nifty</h2>
-          <VixIndexChart series={niftyChart} priceLabel="Nifty" />
-        </>
-      )}
-
-      {bankChart.xAxis.length > 0 && (
-        <>
-          <h2 className="mb-1 mt-4 text-center text-sm font-semibold text-ay-text">
-            India Vix Vs. Banknifty
-          </h2>
-          <VixIndexChart series={bankChart} priceLabel="Banknifty" />
-        </>
-      )}
+            {bankChart.xAxis.length > 0 && (
+              <section className="card shadow-e1 mt-4">
+                <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">
+                  India Vix Vs. Banknifty
+                </h2>
+                <VixIndexChart series={bankChart} priceLabel="Banknifty" />
+              </section>
+            )}
+          </>
+        )}
+      </QueryState>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { Select } from '../../components/atoms/Select.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 import { useSession } from '../../stores/session.store.ts';
 import { THEMES } from '../../lib/theme.ts';
 import { fetchKiteLoginUrl, useKiteStatus, useSyncInstruments, useSyncStatus } from '../../api/settings.ts';
@@ -46,7 +47,7 @@ export function SettingsPage() {
 
   return (
     <div className="flex max-w-3xl flex-col gap-4">
-      <h1 className="ay-sr-only">Settings</h1>
+      <PageHeader title="Settings" subtitle="Kite Connect, appearance, instrument data-sync & global risk" />
       {mockMode && (
         <p className="text-sm text-warn">MOCK MODE — credential-free synthetic feed; no Kite session required.</p>
       )}

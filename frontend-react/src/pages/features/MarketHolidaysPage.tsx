@@ -1,6 +1,9 @@
 import { useMemo } from 'react';
 import { useHolidays } from '../../api/holidays.ts';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { cn } from '../../lib/cn.ts';
 import type { HolidayRow } from '../../api/types.ts';
 
@@ -77,19 +80,26 @@ export function MarketHolidaysPage() {
 
   return (
     <div>
-      <h1 className="mb-2 text-center text-sm font-semibold text-ay-text">Market Holidays</h1>
+      <PageHeader title="Market Holidays" subtitle="NSE trading holidays the bundled calendar covers — Passed / Coming vs today" />
 
-      {q.isLoading && <p className="mb-3 text-sm text-ay-muted">Loading…</p>}
-
-      <DataTable
-        columns={columns}
-        rows={rows}
-        rowKey={(r) => r.date}
-        pageSize={20}
-        initialSort={{ id: 'date', dir: 'asc' }}
-        emptyMessage="No holidays for the covered years."
-        ariaLabel="NSE trading holidays"
-      />
+      <QueryState
+        query={q}
+        empty={{ title: 'No holidays for the covered years.' }}
+        errorTitle="Couldn't load market holidays"
+        skeleton={<Skeleton variant="table-rows" rows={10} cols={4} />}
+      >
+        {() => (
+          <DataTable
+            columns={columns}
+            rows={rows}
+            rowKey={(r) => r.date}
+            pageSize={20}
+            initialSort={{ id: 'date', dir: 'asc' }}
+            emptyMessage="No holidays for the covered years."
+            ariaLabel="NSE trading holidays"
+          />
+        )}
+      </QueryState>
     </div>
   );
 }

@@ -24,6 +24,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.web.client.ResourceAccessException;
 
 /**
  * Unit test for {@link ExpiredBackfillService#run}: the chain is walked into {@code candles} under the
@@ -211,5 +212,37 @@ class ExpiredBackfillServiceTest {
     // exactly 3 calls: w0 (data, 1) + w1 (far empty, NOT retried, 1) + w2 (far empty, 1) → 2-empty stop.
     // The old retry-every-empty behaviour would have made 5. Far-back retries are the wasted quota.
     verify(client, times(3)).candles(eq("NSE_FO|CE|16-06-2026"), eq("1minute"), any(), any());
+  }
+
+  @Test
+  void transientErrorOnOneExpirySkipsItAndContinuesTheRun() {
+    UpstoxExpiredInstrumentsClient client = mock(UpstoxExpiredInstrumentsClient.class);
+    CandleRepository candles = mock(CandleRepository.class);
+    ExpiredBackfillRepository repo = mock(ExpiredBackfillRepository.class);
+    LocalDate badExpiry = EXPIRY.minusDays(7);
+    String ceSymbol = OpenAlgoSymbols.optionSymbol("NIFTY", EXPIRY, new BigDecimal("25000"), "CE");
+
+    when(client.expiries(NIFTY_KEY)).thenReturn(List.of(badExpiry, EXPIRY));
+    // first expiry blips (transient DNS/network) on the contract enumeration; the second succeeds.
+    when(client.optionContracts(NIFTY_KEY, badExpiry))
+        .thenThrow(
+            new ResourceAccessException(
+                "I/O error", new java.net.UnknownHostException("api.upstox.com")));
+    when(client.optionContracts(NIFTY_KEY, EXPIRY)).thenReturn(List.of(ce()));
+    when(client.futureContracts(NIFTY_KEY, EXPIRY)).thenReturn(List.of());
+    stubBand(repo);
+    when(repo.coverage("NFO", ceSymbol)).thenReturn(Coverage.NONE);
+    when(client.candles(eq("NSE_FO|CE|16-06-2026"), eq("1minute"), any(), any()))
+        .thenReturn(List.of(barAt("2026-06-16T15:29:00+05:30")), List.of());
+
+    ExpiredBackfillService service = new ExpiredBackfillService(provider(), candles, repo, 0L);
+    // The run does NOT throw despite the transient on the first expiry...
+    ExpiredBackfillService.BackfillSummary s =
+        service.run(client, List.of("NIFTY"), badExpiry.minusDays(7), EXPIRY, "job-e", false);
+
+    // ...the SECOND expiry is still processed (1 leg written) and the blip is counted as a failure.
+    assertThat(s.legsWritten()).isEqualTo(1);
+    assertThat(s.legsFailed()).isGreaterThanOrEqualTo(1);
+    verify(candles).upsertAll(any());
   }
 }

@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@import 'tw-animate-css'; /* shadcn/ui (Tailwind v4) enter/exit animation utilities */
 
 /* ArthaYantra design tokens — ONE consolidated --ay-* palette (ported from frontend-ui
    styles.scss, C-2.23/D2). Raw hex lives HERE AND ONLY HERE. Each named theme is a complete
@@ -47,7 +48,7 @@
 }
 
 /* Scale vars consumed by the @utility type ramp + layout helpers below. Kept as PLAIN custom
-   properties (NOT @theme) so they don't auto-generate conflicting text-*/space-* utilities. (§1.1) */
+   properties (NOT @theme) so they do not auto-generate conflicting text or space utilities. (§1.1) */
 :root {
   --text-display: 1.75rem;     --text-display-lh: 2.125rem;  /* 28/34 — page hero, rare */
   --text-h1: 1.375rem;         --text-h1-lh: 1.75rem;        /* 22/28 — page title      */
@@ -67,6 +68,89 @@
   --space-section: 1.5rem;    /* 24px — gap between page sections   */
   --space-card: 0.75rem;      /* 12px — standard card padding       */
   --space-control: 0.5rem;    /* 8px  — gap inside a control row     */
+}
+
+/* ── §2 shadcn/ui → --ay-* ALIAS BRIDGE ─────────────────────────────────────
+   Every shadcn token aliases an --ay-* var. --ay-* redefines per [data-theme], so the
+   aliases re-resolve on theme switch automatically — declared ONCE at :root, no per-theme
+   duplication. shadcn owns NO hex. No --destructive-foreground (current canary bakes
+   on-destructive text white). chart + sidebar tokens aliased for completeness only.
+   (A) registers the shadcn utility names; (B) is the :root alias layer. */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+/* (B) Alias layer — ONE declaration at :root; inherits the --ay-* cascade (only aliases, no hex). */
+:root {
+  --radius: 0.375rem; /* match rounded-md controls (NOT the chunkier shadcn default) */
+
+  --background: var(--ay-surface-0);
+  --foreground: var(--ay-text);
+  --card: var(--ay-surface-1);
+  --card-foreground: var(--ay-text);
+  --popover: var(--ay-surface-1);
+  --popover-foreground: var(--ay-text);
+
+  --primary: var(--ay-accent);
+  --primary-foreground: var(--ay-surface-0); /* on-accent; AA-verified incl. light */
+  --secondary: var(--ay-surface-2);
+  --secondary-foreground: var(--ay-text);
+  --muted: var(--ay-surface-2);
+  --muted-foreground: var(--ay-text-muted);
+
+  /* accent = shadcn HOVER WASH, deliberately NOT the brand colour */
+  --accent: var(--ay-surface-2);
+  --accent-foreground: var(--ay-text);
+
+  --destructive: var(--ay-bear); /* shadcn bakes on-text white */
+
+  --border: var(--ay-border);
+  --input: var(--ay-border);
+  --ring: var(--ay-accent);
+
+  --chart-1: var(--ay-accent);
+  --chart-2: var(--ay-bull);
+  --chart-3: var(--ay-bear);
+  --chart-4: var(--ay-warn);
+  --chart-5: var(--ay-text-muted);
+  --sidebar: var(--ay-surface-1);
+  --sidebar-foreground: var(--ay-text);
+  --sidebar-primary: var(--ay-accent);
+  --sidebar-primary-foreground: var(--ay-surface-0);
+  --sidebar-accent: var(--ay-surface-2);
+  --sidebar-accent-foreground: var(--ay-text);
+  --sidebar-border: var(--ay-border);
+  --sidebar-ring: var(--ay-accent);
 }
 
 /* ── Dark (default) ── */

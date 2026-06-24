@@ -19,6 +19,7 @@ const SECTIONS: MenuSection[] = [
   {
     title: 'Trading',
     items: [
+      { label: 'Scalping Cockpit', to: '/cockpit' }, // unified live screen — chain · confluence · straddle · signals · OI heatmap
       { label: 'Scalper Cockpit', to: '/scalper' }, // Phase 4b — live signals + paper order ticket + P&L
       { label: 'Dashboard', to: '/dashboard' }, // cockpit — at-a-glance status/signals/paper/jobs (E-2)
       { label: 'Signals', to: '/signals' }, // cockpit — live feed + reasoning breakdown (C-2.26)

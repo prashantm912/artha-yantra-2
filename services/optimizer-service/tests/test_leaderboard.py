@@ -3,7 +3,7 @@ service-level best() that excludes pruned/failed trials from the ranking."""
 
 from app import leaderboard
 from app.service import SweepService
-from tests.fakes import FakeJobs, FakeStrategy, FakeTrials
+from tests.fakes import FakeBacktest, FakeJobs, FakeStrategy, FakeTrials
 
 PARAMS = [{"path": "p", "range": [1, 10], "step": 1}]
 
@@ -35,9 +35,36 @@ def test_choice_neighbors_are_adjacent_only():
     assert scored[2]["plateauObjective"] == 0.4  # 'c' neighbors b,d → median(0.9,0.3,0.4)
 
 
-def _service(jobs, trials):
+def test_guard_metrics_aggregates_per_regime_oos_sharpe():
+    summary = {
+        "dataHash": "abc",
+        "foldsExcluded": 1,
+        "regimeOos": [
+            {"BULL": {"sharpe": "1.0"}, "BEAR": {"sharpe": "0.4"}},
+            {"BULL": {"sharpe": "0.8"}, "RANGE": {"sharpe": None}},  # untraded RANGE skipped
+        ],
+    }
+    out = leaderboard.guard_metrics(summary)
+    assert out["dataHash"] == "abc"
+    assert out["foldsExcluded"] == 1
+    assert out["regimesCovered"] == ["BULL", "BEAR"]  # canonical order, RANGE absent (no Sharpe)
+    assert out["regimeOosMin"] == 0.4
+    assert out["regimeOosMax"] == 1.0
+    assert out["regimeOosMean"] == (1.0 + 0.4 + 0.8) / 3
+
+
+def test_guard_metrics_no_traded_regime_yields_null_aggregates():
+    out = leaderboard.guard_metrics({"dataHash": "h", "foldsExcluded": 0, "regimeOos": [{}]})
+    assert out["regimesCovered"] == []
+    assert out["regimeOosMin"] is None
+    assert out["regimeOosMean"] is None
+    assert out["regimeOosMax"] is None
+
+
+def _service(jobs, trials, backtest=None):
     return SweepService(
         strategy_client=FakeStrategy({}),
+        backtest_client=backtest,
         jobs_factory=lambda: jobs,
         trials_factory=lambda: trials,
         dispatcher=None,
@@ -45,8 +72,7 @@ def _service(jobs, trials):
     )
 
 
-def test_best_excludes_pruned_and_failed():
-    jobs, trials = FakeJobs(), FakeTrials()
+def _seed_one_complete(jobs, trials, run_id="r1"):
     sweep_id = jobs.insert_sweep(
         None,
         {
@@ -55,9 +81,44 @@ def test_best_excludes_pruned_and_failed():
         },
     )
     good = trials.insert(sweep_id, 1, {"indicators[0].params.period": 10})
-    trials.complete(good, {"sharpe": 1.5}, "r1")
+    trials.complete(good, {"sharpe": 1.5}, run_id)
+    return sweep_id
+
+
+def test_best_excludes_pruned_and_failed():
+    jobs, trials = FakeJobs(), FakeTrials()
+    sweep_id = _seed_one_complete(jobs, trials)
     trials.prune(trials.insert(sweep_id, 2, {"indicators[0].params.period": 11}))
     trials.fail(trials.insert(sweep_id, 3, {"indicators[0].params.period": 12}))
     out = _service(jobs, trials).best(sweep_id, top=10, sort="raw")
     assert out["metric"] == "sharpe"
     assert [r["trialNumber"] for r in out["items"]] == [1]
+    assert "guardMetrics" not in out["items"][0]  # no backtest client wired → no enrichment
+
+
+def test_best_attaches_guard_metrics_for_fold_runs():
+    jobs, trials = FakeJobs(), FakeTrials()
+    sweep_id = _seed_one_complete(jobs, trials, run_id="r1")
+    backtest = FakeBacktest(
+        folds=None,
+        guard={
+            "dataHash": "abc",
+            "foldsExcluded": 2,
+            "regimeOos": [{"BULL": {"sharpe": "1.0"}}, {"BEAR": {"sharpe": "0.5"}}],
+        },
+    )
+    out = _service(jobs, trials, backtest).best(sweep_id, top=10, sort="raw")
+    assert backtest.guard_calls == ["r1"]
+    guard = out["items"][0]["guardMetrics"]
+    assert guard["regimesCovered"] == ["BULL", "BEAR"]
+    assert guard["foldsExcluded"] == 2
+    assert guard["regimeOosMin"] == 0.5
+
+
+def test_best_omits_guard_metrics_for_full_window_run():
+    jobs, trials = FakeJobs(), FakeTrials()
+    sweep_id = _seed_one_complete(jobs, trials, run_id="r1")
+    out = _service(jobs, trials, FakeBacktest(folds=None, guard=None)).best(
+        sweep_id, top=10, sort="raw"
+    )
+    assert "guardMetrics" not in out["items"][0]

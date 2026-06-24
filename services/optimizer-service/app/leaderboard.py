@@ -53,6 +53,36 @@ def best(
     return scored[:top]
 
 
+# The four §D.4 regime labels, in the canonical order the fold attributor / React chip render.
+_REGIME_LABELS = ("BULL", "RANGE", "BEAR", "CRASH")
+
+
+def guard_metrics(summary: dict[str, Any]) -> dict[str, Any]:
+    """Condenses a run's persisted guard summary into the compact ``/best`` row object: the
+    ``dataHash`` + ``foldsExcluded`` pass through; ``regimesCovered`` is the union (canonical order)
+    of regimes that traded across folds; ``regimeOosMin/Mean/Max`` aggregate every per-(fold,regime)
+    OOS Sharpe. Sharpes arrive as decimal strings (or null for an untraded regime) — null/absent
+    Sharpes are skipped, so when no regime traded the three aggregates are ``None`` (the badge then
+    shows coverage only)."""
+    sharpes: list[float] = []
+    covered: set[str] = set()
+    for fold in summary.get("regimeOos") or []:
+        for label, stat in (fold or {}).items():
+            sharpe = (stat or {}).get("sharpe")
+            if sharpe is None:
+                continue
+            covered.add(label)
+            sharpes.append(float(sharpe))
+    return {
+        "dataHash": summary.get("dataHash"),
+        "foldsExcluded": summary.get("foldsExcluded"),
+        "regimesCovered": [label for label in _REGIME_LABELS if label in covered],
+        "regimeOosMin": min(sharpes) if sharpes else None,
+        "regimeOosMean": statistics.fmean(sharpes) if sharpes else None,
+        "regimeOosMax": max(sharpes) if sharpes else None,
+    }
+
+
 def _is_neighbor(
     a: dict[str, Any], b: dict[str, Any], specs: dict[str, dict[str, Any]]
 ) -> bool:

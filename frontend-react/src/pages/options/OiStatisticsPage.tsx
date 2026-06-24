@@ -1,8 +1,11 @@
 import { useMemo, useState } from 'react';
+import { PieChart } from 'lucide-react';
 import { useOiAnalysis, useOiStats, usePcrSeries } from '../../api/oiAnalytics.ts';
 import { foldIndividualOi, type PcrPricePoint } from '../../api/oiStatsFold.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
 import {
@@ -85,28 +88,38 @@ export function OiStatisticsPage() {
         <Metric label="Last updated" value={stats?.asOf ? stats.asOf.slice(11, 19) : '—'} />
       </div>
 
-      {!hasBars && !analysisQ.isLoading && (
-        <p className="mb-3 text-sm text-ay-muted">
-          No OI snapshot — pick an underlying + expiry with captured chain snapshots.
-        </p>
-      )}
-
-      {hasBars && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <section className="card shadow-e1 lg:col-span-1">
-            <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">
-              Cumulative OI{showChange ? ' (Chg.)' : ''}
-            </h2>
-            <CumulativeOiChart callOi={callTotal} putOi={putTotal} changeView={showChange} />
-          </section>
-          <section className="card shadow-e1 lg:col-span-2">
-            <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">
-              Individual OI{showChange ? ' (Chg.)' : ''} — Call (resistance) vs Put (support)
-            </h2>
-            <IndividualOiChart data={individual} changeView={showChange} />
-          </section>
-        </div>
-      )}
+      <QueryState
+        query={analysisQ}
+        isEmpty={() => !hasBars}
+        empty={{
+          icon: PieChart,
+          title: 'No OI snapshot — pick an underlying + expiry with captured chain snapshots.',
+        }}
+        errorTitle="Couldn't load OI statistics"
+        skeleton={
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <Skeleton variant="chart-block" height={300} className="lg:col-span-1" />
+            <Skeleton variant="chart-block" height={300} className="lg:col-span-2" />
+          </div>
+        }
+      >
+        {() => (
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <section className="card shadow-e1 lg:col-span-1">
+              <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">
+                Cumulative OI{showChange ? ' (Chg.)' : ''}
+              </h2>
+              <CumulativeOiChart callOi={callTotal} putOi={putTotal} changeView={showChange} />
+            </section>
+            <section className="card shadow-e1 lg:col-span-2">
+              <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">
+                Individual OI{showChange ? ' (Chg.)' : ''} — Call (resistance) vs Put (support)
+              </h2>
+              <IndividualOiChart data={individual} changeView={showChange} />
+            </section>
+          </div>
+        )}
+      </QueryState>
 
       {pcrPrice.length > 0 && (
         <section className="card shadow-e1 mt-4">

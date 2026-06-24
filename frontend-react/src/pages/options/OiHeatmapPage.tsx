@@ -1,5 +1,8 @@
+import { Grid3x3 } from 'lucide-react';
 import { useOiHeatmap } from '../../api/oiAnalytics.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
@@ -35,24 +38,37 @@ export function OiHeatmapPage() {
         <Metric label="Last updated" value={data?.asOf ? data.asOf.slice(11, 19) : '—'} />
       </div>
 
-      {!hasGrid && !q.isLoading && (
-        <p className="mb-3 text-sm text-ay-muted">
-          No OI-change grid — pick an index + expiry with captured chain snapshots for the chosen day.
-        </p>
-      )}
-
-      {hasGrid && (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <section className="card shadow-e1">
-            <h2 className="mb-2 text-h3 text-ay-text">Call (CE) OI Change</h2>
-            <CallOiHeatmap data={data!} />
-          </section>
-          <section className="card shadow-e1">
-            <h2 className="mb-2 text-h3 text-ay-text">Put (PE) OI Change</h2>
-            <PutOiHeatmap data={data!} />
-          </section>
-        </div>
-      )}
+      <QueryState
+        query={q}
+        isEmpty={() => !hasGrid}
+        empty={{
+          icon: Grid3x3,
+          title:
+            'No OI-change grid — pick an index + expiry with captured chain snapshots for the chosen day.',
+        }}
+        errorTitle="Couldn't load OI heatmap"
+        skeleton={
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <Skeleton variant="chart-block" height={420} />
+            <Skeleton variant="chart-block" height={420} />
+          </div>
+        }
+      >
+        {() =>
+          hasGrid && (
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+              <section className="card shadow-e1">
+                <h2 className="mb-2 text-h3 text-ay-text">Call (CE) OI Change</h2>
+                <CallOiHeatmap data={data!} />
+              </section>
+              <section className="card shadow-e1">
+                <h2 className="mb-2 text-h3 text-ay-text">Put (PE) OI Change</h2>
+                <PutOiHeatmap data={data!} />
+              </section>
+            </div>
+          )
+        }
+      </QueryState>
     </div>
   );
 }

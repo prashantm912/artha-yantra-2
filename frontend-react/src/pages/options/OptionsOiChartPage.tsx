@@ -4,7 +4,10 @@ import { nearestStrike } from '../../lib/strikes.ts';
 import { useOiAnalysis, useStrikeSeries } from '../../api/oiAnalytics.ts';
 import { foldOptionsOiChart } from '../../core/optionsOiChartFold.ts';
 import type { OiInterval } from '../../stores/symbolContext.store.ts';
+import { LineChart } from 'lucide-react';
 import { FilterBar } from '../../components/FilterBar.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Select } from '../../components/atoms/Select.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
@@ -53,30 +56,43 @@ export function OptionsOiChartPage() {
         <GoButton onClick={() => seriesQ.refetch()} loading={seriesQ.isFetching} />
       </div>
 
-      {!hasData && !seriesQ.isLoading && (
-        <p className="mb-3 text-sm text-ay-muted">
-          No intraday OI — pick an underlying + expiry + strike with captured snapshots.
-        </p>
-      )}
-
-      {hasData && (
-        <>
-          <section className="card shadow-e1">
-            <h2 className="mb-2 text-h3 text-ay-text">Call Vs. Put OI Analysis</h2>
-            <CallPutOiChart viz={viz} />
-          </section>
-          <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <QueryState
+        query={seriesQ}
+        isEmpty={() => !hasData}
+        empty={{
+          icon: LineChart,
+          title: 'No intraday OI — pick an underlying + expiry + strike with captured snapshots.',
+        }}
+        errorTitle="Couldn't load options OI chart"
+        skeleton={
+          <>
+            <Skeleton variant="chart-block" height={320} />
+            <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <Skeleton variant="chart-block" height={320} />
+              <Skeleton variant="chart-block" height={320} />
+            </div>
+          </>
+        }
+      >
+        {() => (
+          <>
             <section className="card shadow-e1">
-              <h2 className="mb-2 text-h3 text-ay-text">Call OI Analysis</h2>
-              <OiVsPriceChart times={viz.times} oi={viz.callOi} price={viz.callPrice} oiTone="bull" legLabel="Call" />
+              <h2 className="mb-2 text-h3 text-ay-text">Call Vs. Put OI Analysis</h2>
+              <CallPutOiChart viz={viz} />
             </section>
-            <section className="card shadow-e1">
-              <h2 className="mb-2 text-h3 text-ay-text">Put OI Analysis</h2>
-              <OiVsPriceChart times={viz.times} oi={viz.putOi} price={viz.putPrice} oiTone="bear" legLabel="Put" />
-            </section>
-          </div>
-        </>
-      )}
+            <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <section className="card shadow-e1">
+                <h2 className="mb-2 text-h3 text-ay-text">Call OI Analysis</h2>
+                <OiVsPriceChart times={viz.times} oi={viz.callOi} price={viz.callPrice} oiTone="bull" legLabel="Call" />
+              </section>
+              <section className="card shadow-e1">
+                <h2 className="mb-2 text-h3 text-ay-text">Put OI Analysis</h2>
+                <OiVsPriceChart times={viz.times} oi={viz.putOi} price={viz.putPrice} oiTone="bear" legLabel="Put" />
+              </section>
+            </div>
+          </>
+        )}
+      </QueryState>
     </div>
   );
 }

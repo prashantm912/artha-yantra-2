@@ -2,8 +2,11 @@ import { useCallback, useMemo, useState } from 'react';
 import type { EChartsOption } from 'echarts';
 import { useOptionsPremium } from '../../api/oiAnalytics.ts';
 import type { PremiumRow } from '../../api/types.ts';
+import { BarChart3 } from 'lucide-react';
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
 import { Select } from '../../components/atoms/Select.tsx';
@@ -134,32 +137,39 @@ export function OptionsPremiumPage() {
         </span>
       </p>
 
-      {chain == null && !q.isLoading ? (
-        <p className="text-sm text-ay-muted">
-          No premium data — pick an underlying + expiry with a captured snapshot.
-        </p>
-      ) : (
-        <div className="card shadow-e1">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-h3 text-ay-text">Premium per strike</h2>
-            <div className="flex items-center gap-3 text-caption text-ay-muted">
-              <span className="inline-flex items-center gap-1">
-                <span aria-hidden="true" className="inline-block size-2.5 rounded-sm bg-bull" />
-                Call
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <span aria-hidden="true" className="inline-block size-2.5 rounded-sm bg-bear" />
-                Put
-              </span>
+      <QueryState
+        query={q}
+        isEmpty={() => chain == null}
+        empty={{
+          icon: BarChart3,
+          title: 'No premium data — pick an underlying + expiry with a captured snapshot.',
+        }}
+        errorTitle="Couldn't load options premium"
+        skeleton={<Skeleton variant="chart-block" height={440} />}
+      >
+        {() => (
+          <div className="card shadow-e1">
+            <div className="mb-2 flex items-center justify-between">
+              <h2 className="text-h3 text-ay-text">Premium per strike</h2>
+              <div className="flex items-center gap-3 text-caption text-ay-muted">
+                <span className="inline-flex items-center gap-1">
+                  <span aria-hidden="true" className="inline-block size-2.5 rounded-sm bg-bull" />
+                  Call
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span aria-hidden="true" className="inline-block size-2.5 rounded-sm bg-bear" />
+                  Put
+                </span>
+              </div>
             </div>
+            <EChart
+              makeOption={makeOption}
+              height={440}
+              ariaLabel="Call versus Put premium bars per strike around ATM"
+            />
           </div>
-          <EChart
-            makeOption={makeOption}
-            height={440}
-            ariaLabel="Call versus Put premium bars per strike around ATM"
-          />
-        </div>
-      )}
+        )}
+      </QueryState>
     </div>
   );
 }

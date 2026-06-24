@@ -6,6 +6,8 @@ import { foldOiAnalysis } from '../../api/oiAnalysisFold.ts';
 import type { OiInterval } from '../../stores/symbolContext.store.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Select } from '../../components/atoms/Select.tsx';
 import { OiAnalysisTable } from '../../components/OiAnalysisTable.tsx';
@@ -70,13 +72,21 @@ export function OiAnalysisPage() {
         <span className="text-xs">· DH/DL/DO pending (underlying OHLC not in the feed)</span>
       </p>
 
-      {seriesQ.data == null && !seriesQ.isLoading && (
-        <p className="mb-3 text-sm text-ay-muted">
-          No intraday series — pick an underlying + expiry + strike with captured snapshots.
-        </p>
-      )}
-
-      <OiAnalysisTable rows={rows} strike={strike} intervalMinutes={intervalMinutes} />
+      <QueryState
+        query={seriesQ}
+        isEmpty={() => false}
+        errorTitle="Couldn't load OI analysis series"
+        skeleton={<Skeleton variant="table-rows" rows={10} cols={8} />}
+      >
+        {() => (
+          <OiAnalysisTable
+            rows={rows}
+            strike={strike}
+            intervalMinutes={intervalMinutes}
+            emptyMessage="No intraday series — pick an underlying + expiry + strike with captured snapshots."
+          />
+        )}
+      </QueryState>
     </div>
   );
 }

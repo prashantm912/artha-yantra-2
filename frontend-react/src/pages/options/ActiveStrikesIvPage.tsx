@@ -1,7 +1,10 @@
 import { useMemo } from 'react';
 import { useActiveStrikes } from '../../api/oiAnalytics.ts';
 import { foldActiveStrikeIvSeries } from '../../api/activeStrikesFold.ts';
+import { Activity } from 'lucide-react';
 import { FilterBar } from '../../components/FilterBar.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
@@ -55,18 +58,23 @@ export function ActiveStrikesIvPage() {
         <Metric label="Last updated" value={data?.asOf ? data.asOf.slice(11, 19) : '—'} />
       </div>
 
-      {!hasSeries && !q.isLoading && (
-        <p className="mb-3 text-sm text-ay-muted">
-          No active-strike IV series — pick an index + expiry with captured chain snapshots.
-        </p>
-      )}
-
-      {hasSeries && (
-        <section className="card shadow-e1">
-          <h2 className="mb-2 text-h3 text-ay-text">Active Strike IV</h2>
-          <ActiveStrikeIvChart data={series} />
-        </section>
-      )}
+      <QueryState
+        query={q}
+        isEmpty={() => !hasSeries}
+        empty={{
+          icon: Activity,
+          title: 'No active-strike IV series — pick an index + expiry with captured chain snapshots.',
+        }}
+        errorTitle="Couldn't load active strikes IV"
+        skeleton={<Skeleton variant="chart-block" height={360} />}
+      >
+        {() => (
+          <section className="card shadow-e1">
+            <h2 className="mb-2 text-h3 text-ay-text">Active Strike IV</h2>
+            <ActiveStrikeIvChart data={series} />
+          </section>
+        )}
+      </QueryState>
     </div>
   );
 }

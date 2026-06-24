@@ -3,6 +3,8 @@ import { cn } from '../../lib/cn.ts';
 import { nearestStrike } from '../../lib/strikes.ts';
 import { useChainTable, useMultiLegOiChart } from '../../api/oiAnalytics.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { Select, type SelectOption } from '../../components/atoms/Select.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { LegMultiSelect } from '../../components/atoms/LegMultiSelect.tsx';
@@ -91,10 +93,16 @@ export function MultipleOiChartPage() {
 
         {selected.length === 0 ? (
           <p className="text-sm text-ay-muted">Select ≥1 strike to plot its OI.</p>
-        ) : data == null && !q.isLoading ? (
-          <p className="text-sm text-ay-muted">No data for the selected legs/session.</p>
         ) : (
-          <MultiLegOiChart data={data} />
+          <QueryState
+            query={q}
+            isEmpty={() => data == null}
+            empty={{ title: 'No data for the selected legs/session.' }}
+            errorTitle="Couldn't load multiple OI chart"
+            skeleton={<Skeleton variant="chart-block" height={440} />}
+          >
+            {() => <MultiLegOiChart data={data} />}
+          </QueryState>
         )}
       </section>
     </div>

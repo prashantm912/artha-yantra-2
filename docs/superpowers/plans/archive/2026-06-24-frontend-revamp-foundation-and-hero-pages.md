@@ -4,7 +4,7 @@
 |---|---|
 | **Title** | Frontend Revamp — Detailed Design (Phase 1 Foundation + Hero Pages) |
 | **Date** | 2026-06-24 |
-| **Status** | Approved — decisions locked 2026-06-24 (taste pass folded; Q2–Q5, Q10–Q11 resolved: Newsreader display face, signature lockup + radial mesh, motion on, mono numerics, compact-chain, breadcrumb dropped). Implementing all 5 phases. |
+| **Status** | **DONE / ARCHIVED 2026-06-25.** All 5 phases merged (doc #158 · foundation #159 · shadcn bridge #160 · Button/QueryState/Sonner #161 · DataTable #162 · hero pages #163), then the design system **rolled out to 64/65 pages** (#166–#173) + the accent-token fix (#164) + chain polish (#165). Two new Upstox oipulse pages followed — **World Indices** (#174, live-fix #176) + **Pre-Open Market** (#175) — and the nav restructure **"All Menu" → per-section menu bar** (#177). Rebuilt + deployed to `:8080`. Decisions locked 2026-06-24 (Newsreader display face, signature lockup + radial mesh, motion on, mono numerics, compact-chain, breadcrumb dropped). Memory: [[frontend-revamp-state]]. |
 | **Scope** | `frontend-react` design tokens + shadcn bridge + Button/Select/DataTable/QueryState component specs + three hero-page redesigns (Dashboard, Options Chain, FII/DII Capital Market). DESIGN ONLY — no source committed. |
 
 ---

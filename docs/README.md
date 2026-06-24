@@ -16,12 +16,15 @@ authority is the OpenAlgo/React master plan; the design authority is `docs/desig
 *(The master plan above is the authority; these are the open, non-merged plans.)*
 - `2026-06-21-data-foundation-milestone.md` — value-verify every OI/data page in History mode on a
   REAL session vs oipulse (Phase-4 gate). GATED on the expired/OI backfill (now loading, #112–#116).
-- `2026-06-20-scalper-manual-verification-checklist.md` — scalper verify+confirm panel; backend done,
-  the React-UI contract (built once in Phase 4).
 - `2026-06-24-data-ops-console-wave.md` — Data Ops Console (B1–B6) operator UI over the backfill;
   **MERGED #121** (deploy after the backfill finishes; kept active until deployed + value-verified).
+- `2026-06-24-upstox-live-migration.md` — move the live stack (OI/quotes/WS ticker) to the login-free
+  Upstox analytics token; W-U1/U2/U3 **MERGED** flag-gated default-Kite; **W-U4 cutover** (latency A/B +
+  deploy + flip) is the only open wave.
 - `superpowers/plans/archive/` — completed/merged plans (oipulse-parity, stage-g, eod-bhavcopy,
-  phase3-scalper-track2, phase3.5 OI-analytics backlog + tier1, open-high per-strike).
+  phase3-scalper-track2, phase3.5 OI-analytics backlog + tier1, open-high per-strike,
+  **scalper-manual-verification-checklist** (backend + React UI #125 done), **frontend-revamp**
+  (#158–#177 — revamp + 64/65-page rollout + World Indices/Pre-Open + section nav, deployed)).
 
 ## Active — operations & references (top level)
 - `dev-setup.md`, `remote-access.md` — local/dev setup + remote access.

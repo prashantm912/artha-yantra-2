@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { cn } from '../lib/cn.ts';
 
-// oipulse "All Menu" mega-dropdown (master plan §20): full-width panel, columns by section. Opens on
-// click, closes on outside-click / navigation. Sections mirror the oipulse menu map; items fill in
-// per wave — PR-F wires only Options → OI Analysis. Works as a dropdown on mobile too (hybrid shell).
+// oipulse section nav (master plan §20): each top-level section is its OWN menu-bar trigger with a
+// single-column dropdown of its pages (was a single "All Menu" mega-panel — split out so the bar is
+// scannable, not one giant grid). One dropdown open at a time; outside-click / Esc / navigation
+// closes. The bar flex-wraps on mobile (hybrid shell), so it works as dropdowns at 480px too.
 
 interface MenuItem {
   label: string;
@@ -126,46 +127,58 @@ const SECTIONS: MenuSection[] = [
 ];
 
 export function MegaMenu() {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  // null = nothing open; otherwise the title of the one open section.
+  const [openSection, setOpenSection] = useState<string | null>(null);
+  const ref = useRef<HTMLElement>(null);
 
   useEffect(() => {
-    if (!open) return;
+    if (openSection === null) return;
     function onDoc(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpenSection(null);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpenSection(null);
     }
     document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, [open]);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [openSection]);
 
   return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        aria-haspopup="true"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-        className="h-9 rounded-md border border-ay-border bg-surface-1 px-3 text-sm text-ay-text hover:border-accent"
-      >
-        All Menu ▾
-      </button>
-      {open && (
-        <div className="absolute left-0 top-11 z-20 grid w-[min(92vw,52rem)] grid-cols-2 gap-4 rounded-lg border border-ay-border bg-surface-1 p-4 shadow-xl sm:grid-cols-3 md:grid-cols-5">
-          {SECTIONS.map((section) => (
-            <div key={section.title}>
-              <div className="mb-1 text-xs font-semibold uppercase text-ay-muted">
-                {section.title}
-              </div>
-              <ul className="space-y-0.5">
+    <nav ref={ref} aria-label="Main" className="flex flex-wrap items-center gap-0.5">
+      {SECTIONS.map((section) => {
+        const open = openSection === section.title;
+        return (
+          <div key={section.title} className="relative">
+            <button
+              type="button"
+              aria-haspopup="true"
+              aria-expanded={open}
+              onClick={() => setOpenSection((s) => (s === section.title ? null : section.title))}
+              className={cn(
+                'flex h-9 items-center gap-1 rounded-md px-2.5 text-sm hover:bg-surface-2',
+                open ? 'bg-surface-2 text-accent' : 'text-ay-text',
+              )}
+            >
+              {section.title}
+              <span aria-hidden="true" className="text-[0.65rem] text-ay-muted">
+                ▾
+              </span>
+            </button>
+            {open && (
+              <ul className="absolute left-0 top-11 z-30 min-w-52 rounded-lg border border-ay-border bg-surface-1 p-1.5 shadow-xl">
                 {section.items.map((item) => (
                   <li key={item.label}>
                     {item.to ? (
                       <NavLink
                         to={item.to}
-                        onClick={() => setOpen(false)}
+                        onClick={() => setOpenSection(null)}
                         className={({ isActive }) =>
                           cn(
-                            'block rounded px-1.5 py-1 text-sm hover:bg-surface-2',
+                            'block rounded px-2 py-1.5 text-sm hover:bg-surface-2',
                             isActive ? 'text-accent' : 'text-ay-text',
                           )
                         }
@@ -173,17 +186,17 @@ export function MegaMenu() {
                         {item.label}
                       </NavLink>
                     ) : (
-                      <span className="block px-1.5 py-1 text-sm text-ay-muted/60" title="Coming soon">
+                      <span className="block px-2 py-1.5 text-sm text-ay-muted/60" title="Coming soon">
                         {item.label}
                       </span>
                     )}
                   </li>
                 ))}
               </ul>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+            )}
+          </div>
+        );
+      })}
+    </nav>
   );
 }

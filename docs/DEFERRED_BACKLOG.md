@@ -1,4 +1,4 @@
-# Deferred / Pending Backlog — Phases 0 → 6 (as of 2026-06-24)
+# Deferred / Pending Backlog — Phases 0 → 6 (as of 2026-06-25)
 
 Single source of truth for everything NOT yet done across the OpenAlgo/React master-plan phases 0–6.
 The forward-work authority is `superpowers/plans/2026-06-19-openalgo-react-integration-master-plan.md`
@@ -92,9 +92,16 @@ backtest replay** (options trade their own premium) is merged (#114–#119). The
 ## Phase 4 — React migration (§10/§11) — IN PROGRESS (substantially built)
 
 Cockpit + React cutover + oipulse Waves W1/W2/W3 merged (see the merge-state note above). Wave-3 oipulse
-pages added this session: **OI Change Heatmap** (#146), **OI Expiry Strategy** (#150), **Open & High
+pages added: **OI Change Heatmap** (#146), **OI Expiry Strategy** (#150), **Open & High
 Strategy** (#153). The **Scalping Cockpit** (#147) is now a paper-trading console — **take-paper + live
-book/risk panel** (#151) + **scalp-signal alerts** to ntfy/telegram (#152). Remaining:
+book/risk panel** (#151) + **scalp-signal alerts** to ntfy/telegram (#152).
+
+**2026-06-25 frontend pass — all MERGED + DEPLOYED:** the **look/UX revamp** (design tokens + self-hosted
+Newsreader/Inter/JetBrains-Mono fonts + shadcn bridge + DataTable + signature `PageHeader`/`QueryState`/
+motion, #158–#163) rolled out to **64/65 pages** (#166–#173); two new Upstox-backed oipulse pages —
+**World Indices** (#174, fix #176) + **Pre-Open Market** (#175); and the nav restructure — the **"All Menu"
+mega-dropdown split into a per-section menu bar** (#177). Authority for the revamp is now archived at
+`superpowers/plans/archive/2026-06-24-frontend-revamp-foundation-and-hero-pages.md`. Remaining Phase-4:
 
 | Item | Status | Target | Reason |
 |---|---|---|---|

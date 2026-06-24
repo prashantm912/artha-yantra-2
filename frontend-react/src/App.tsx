@@ -127,6 +127,10 @@ const SweepDetailPage = lazy(() =>
 const ChartsPage = lazy(() =>
   import('./pages/charts/ChartsPage.tsx').then((m) => ({ default: m.ChartsPage })),
 );
+// The unified Scalping Cockpit composes the ECharts-bearing panels (straddle + heatmap) → lazy chunk.
+const CockpitPage = lazy(() =>
+  import('./pages/scalper/CockpitPage.tsx').then((m) => ({ default: m.CockpitPage })),
+);
 
 function Lazy({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<p className="text-sm text-ay-muted">Loading chart…</p>}>{children}</Suspense>;
@@ -143,6 +147,7 @@ export function App() {
         <Route element={<AppShell />}>
           <Route index element={<Navigate to="/options/options-chain" replace />} />
           {/* Trading (cockpit) */}
+          <Route path="/cockpit" element={<Lazy><CockpitPage /></Lazy>} />
           <Route path="/scalper" element={<ScalperCockpitPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/signals" element={<SignalsPage />} />

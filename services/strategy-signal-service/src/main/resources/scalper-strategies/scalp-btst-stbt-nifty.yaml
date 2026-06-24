@@ -1,0 +1,106 @@
+# Siva #8 — BTST / STBT (§3.8, §6.8 `btst_stbt`). An OVERNIGHT CARRY: a late-session directional
+# position taken near the close and held overnight, exited the next morning. BTST (Buy Today Sell
+# Tomorrow) = the BULLISH carry; STBT (Sell Today Buy Tomorrow) = the BEARISH carry. The edge is a
+# continuation read built from EOD data at ~3:15-3:20pm — price closing at the day's HIGH (BTST) /
+# LOW (STBT), the matching OI quadrant (BTST: SC=Q3 / LB=Q1; STBT: SB=Q2 / LU=Q4 — resolved S21 Day
+# 12), RSI not overbought >75 (BTST) / oversold (STBT), and aligned global cues — that the move will
+# carry through the overnight gap.
+#
+# OPTION LEGS & THE SELL (short-premium) SIDE (§3.8 / §6.8 "instruments"):
+#   - BTST (bullish): Buy Futures / **Sell PE** / Buy CE.   <- Sell-PE = the bullish short-premium leg
+#   - STBT (bearish): Sell Futures / **Sell CE** / Buy PE.  <- Sell-CE = the bearish short-premium leg
+#   The SELL legs (Sell PE for BTST, Sell CE for STBT) are the SHORT-PREMIUM expression of this carry
+#   and are correctly labelled SELL side. They are NOT seeded as the executable leg in v1 because
+#   short premium needs SPAN/exposure sizing (the dormant margin-service appliance, #47) — OUT OF
+#   SCOPE here and deliberately NOT coupled. v1 seeds the DEFINED-RISK long-premium execution leg
+#   (Buy CE for BTST / Buy PE for STBT — the source's own first listed buy leg), carried overnight via
+#   the engine's `style: btst` clock. SIZING FOLLOW-UP: when margin-service is live, add the Sell-PE
+#   (BTST) / Sell-CE (STBT) short-premium legs with SPAN-advisory sizing — tracked, not built here.
+#
+# v1 SCOPE — the deterministic, replay-safe, engine-expressible CARRY core (Model A). The BTST machinery
+# already exists in the engine (`style: btst` → fill AT_CLOSE to capture the overnight gap a next-open
+# fill misses; the A9 pre-close clock evaluates ONCE/day at `pre_close_at`; the golden runner handles
+# btst). This strategy rides that directly:
+#   - evaluated ONLY at the 15:20 pre-close clock (no fresh intraday entries — it is a carry, not a scalp);
+#   - `direction: both` — the side is resolved LIVE at the seam (closing toward the day HIGH ⇒ CE/BTST,
+#     toward the day LOW ⇒ PE/STBT), matching §3.8's BTST-vs-STBT split off the close location;
+#   - the §0B VWAP-decisive side + the §0B RSI band (BTST source examples RSI>60, STBT RSI<40 — the
+#     shared 60-80/20-40 band is consistent) + the shared confluence (ST/VWMA/PSAR/VWAP + OI/breadth)
+#     carry validity, with the OI/quadrant + global-cue legs riding the LIVE confluence seam;
+#   - SL = 50% of premium (the source's option-leg stop, §3.8 "Stop loss 50%") + the next-morning exit
+#     (the carry is squared off the next session; expressed as the time stop below).
+#
+# PROVISIONAL ASSUMPTIONS (faithful defaults; PAPER strategy — correctable):
+#   - [ASSUMED] Executable leg = the DEFINED-RISK long-premium buy (Buy CE / Buy PE), NOT the short-
+#     premium sell. SOURCED: both legs are in §3.8; the buy leg is chosen because the SELL legs need
+#     SPAN (out of scope). The short-premium SELL side is the documented sizing follow-up above.
+#   - [ASSUMED] `pre_close_at` 15:20 (the engine default + §3.8's 3:15-3:20pm decision clock) and a
+#     1-day overnight carry (`allow_overnight: true`). SOURCED: §3.8 "exit the next morning", "not more
+#     than 1 night risk".
+#   - [ASSUMED] The next-morning exit is expressed as `time_stop max_holding_days: 1` (the canonical
+#     BTST primitive — the golden-btst-preclose shape) — exit after one trading day held. The §3.8
+#     50%-premium SL is the primary stop.
+#   - [ASSUMED] underlying = NIFTY 50 (the source's primary index vehicle alongside Bank Nifty; NIFTY
+#     matches the rest of the seeded NIFTY drafts).
+#
+# DEFERRED REFINEMENTS:
+#   - the SHORT-PREMIUM Sell-PE (BTST) / Sell-CE (STBT) legs — gated on margin-service SPAN sizing (#47);
+#   - the explicit EOD OI-quadrant gate (BTST SC=Q3/LB=Q1, STBT SB=Q2/LU=Q4), the 3:15pm Futures+Option
+#     OI direction check, the global-cue (Dow/Dollar/Asia/Oil) alignment, and the "avoid Friday" weekend-
+#     gap rail — these ride the LIVE confluence seam / live discipline, not a deterministic engine gate;
+#   - the STOCK BTST/STBT variant (8/9-day-low break, Futures OI at day-high + price at day-low) — needs
+#     the deferred equity universe (see #3 Market Movers).
+#
+# Evaluates on the NIFTY 50 front future (Model A); the §12.3 confluence seam buys the nearest-weekly
+# ATM-band option on the resolved side and carries it overnight.
+schema: strategy-schema/v1
+id: scalp-btst-stbt-nifty
+name: "Scalper · BTST / STBT · NIFTY"
+version: 1.0.0
+description: "BTST/STBT overnight carry (Siva #8) on the NIFTY 50 3-min front future, evaluated ONCE at the 15:20 pre-close clock (style: btst, fills AT_CLOSE to capture the overnight gap). direction: both — closing toward the day HIGH ⇒ CE/BTST (bullish carry), toward the day LOW ⇒ PE/STBT (bearish carry); §0B VWAP-decisive side + RSI band (BTST examples >60 / STBT <40) + shared confluence carry validity. v1 seeds the DEFINED-RISK long-premium buy leg (Buy CE / Buy PE); the SHORT-PREMIUM sell legs (BTST Sell PE / STBT Sell CE — correctly SELL side) are the documented sizing follow-up, gated on margin-service SPAN (#47, out of scope). SL = 50% of premium + next-morning exit; 1-night carry."
+author: owner
+tags: [scalper, options, btst, nifty]
+
+universe:
+  mode: options_of_underlying
+  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  options:
+    expiry: nearest_weekly
+    strikes: { selector: atm_window, width: 3 }
+    option_types: [CE, PE]
+
+timeframes:
+  primary: 3m
+  additional: [1h]
+
+indicators:
+  - { name: VWMA,       alias: vwma20,    timeframe: 3m, params: { period: 20 } }
+  - { name: PSAR,       alias: psar,      timeframe: 3m }
+  - { name: RSI,        alias: rsi14,     timeframe: 3m, params: { period: 14 }, weight: 1.0,
+      normalize: { type: rsi_momentum } }
+  - { name: SUPERTREND, alias: supertrend, timeframe: 3m, params: { period: 10, multiplier: 2.0 },
+      weight: 1.0, normalize: { type: direction } }
+  - { name: SUPERTREND, alias: bias60m,   timeframe: 1h, params: { period: 7, multiplier: 3.0 } }
+
+entry_rules:
+  direction: both
+  gate:
+    all:
+      - "volume > 0"             # the §0B volume/RSI rails + the close-location + confluence carry the real carry logic
+  scoring:
+    threshold: 0.2
+
+exit_rules:
+  - { type: stop_loss, params: { basis: premium_pct, value: 50 } }   # §3.8: SL = 50% of the option premium
+  - { type: time_stop, params: { max_holding_days: 1 } }             # §3.8: exit the next morning (1-night carry)
+
+risk:
+  position_sizing: { method: premium_budget, params: { budget_inr: 15000 } }
+  max_positions: 1
+  max_positions_per_underlying: 1
+  max_daily_loss_pct: 2.0
+  session:
+    style: btst
+    allow_overnight: true
+    pre_close_at: "15:20"        # §3.8: the 3:15-3:20pm EOD decision clock; the btst clock evaluates once/day here
+    square_off: "15:20"

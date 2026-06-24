@@ -1,6 +1,9 @@
+import { Target } from 'lucide-react';
 import { useOpenHighStrategy } from '../../api/oiAnalytics.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
@@ -82,24 +85,29 @@ export function OpenHighStrategyPage() {
         <GoButton onClick={() => q.refetch()} loading={q.isFetching} />
       </div>
 
-      {rows.length === 0 && !q.isLoading && (
-        <p className="mb-3 text-sm text-ay-muted">
-          No Open=High / Open=Low history — pick an index + expiry with captured chain snapshots. The
-          probability window accrues from boot, so it is shallow until sessions build up.
-        </p>
-      )}
-
-      {rows.length > 0 && (
-        <DataTable
-          columns={columns}
-          rows={rows}
-          rowKey={(r) => r.strike}
-          pageSize={21}
-          ariaLabel="Open and High Strategy scan"
-          emptyMessage="No Open=High / Open=Low strikes in the ATM window yet."
-          initialSort={{ id: 'strike', dir: 'asc' }}
-        />
-      )}
+      <QueryState
+        query={q}
+        isEmpty={() => rows.length === 0}
+        empty={{
+          icon: Target,
+          title:
+            'No Open=High / Open=Low history — pick an index + expiry with captured chain snapshots. The probability window accrues from boot, so it is shallow until sessions build up.',
+        }}
+        errorTitle="Couldn't load Open and High Strategy"
+        skeleton={<Skeleton variant="table-rows" rows={12} cols={9} />}
+      >
+        {() => (
+          <DataTable
+            columns={columns}
+            rows={rows}
+            rowKey={(r) => r.strike}
+            pageSize={21}
+            ariaLabel="Open and High Strategy scan"
+            emptyMessage="No Open=High / Open=Low strikes in the ATM window yet."
+            initialSort={{ id: 'strike', dir: 'asc' }}
+          />
+        )}
+      </QueryState>
     </div>
   );
 }

@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { formatDecimal } from '../../lib/decimal.ts';
 import { nearestStrike } from '../../lib/strikes.ts';
+import { CandlestickChart } from 'lucide-react';
 import { useChainTable, useStraddleChart } from '../../api/oiAnalytics.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { Select, type SelectOption } from '../../components/atoms/Select.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
@@ -126,30 +129,37 @@ export function OptionsStraddlePage() {
         <Metric label="Last updated" value={data?.asOf ? data.asOf.slice(11, 19) : '—'} />
       </div>
 
-      {data != null && data.items.length === 0 && !straddleQ.isLoading && (
-        <p className="mb-3 text-sm text-ay-muted">
-          No candles for this strike/session — pick a strike with intraday option trades.
-        </p>
-      )}
-      {data == null && !straddleQ.isLoading && (
-        <p className="mb-3 text-sm text-ay-muted">
-          No straddle data — pick an underlying + expiry + strike.
-        </p>
-      )}
-
-      {data != null && data.items.length > 0 && (
-        <section className="card shadow-e1">
-          <h2 className="mb-2 text-h3 text-ay-text">
-            Options {strangle ? 'Strangle' : 'Straddle'} Chart
-          </h2>
-          <StraddleChart
-            items={data.items}
-            callStrike={data.callStrike}
-            putStrike={data.putStrike}
-            underlying={data.underlying}
-          />
-        </section>
-      )}
+      <QueryState
+        query={straddleQ}
+        isEmpty={() => data == null}
+        empty={{
+          icon: CandlestickChart,
+          title: 'No straddle data — pick an underlying + expiry + strike.',
+        }}
+        errorTitle="Couldn't load straddle chart"
+        skeleton={<Skeleton variant="chart-block" height={440} />}
+      >
+        {() =>
+          data != null &&
+          (data.items.length === 0 ? (
+            <p className="mb-3 text-sm text-ay-muted">
+              No candles for this strike/session — pick a strike with intraday option trades.
+            </p>
+          ) : (
+            <section className="card shadow-e1">
+              <h2 className="mb-2 text-h3 text-ay-text">
+                Options {strangle ? 'Strangle' : 'Straddle'} Chart
+              </h2>
+              <StraddleChart
+                items={data.items}
+                callStrike={data.callStrike}
+                putStrike={data.putStrike}
+                underlying={data.underlying}
+              />
+            </section>
+          ))
+        }
+      </QueryState>
     </div>
   );
 }

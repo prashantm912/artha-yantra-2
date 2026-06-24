@@ -1,7 +1,10 @@
 import { useMemo } from 'react';
 import { useActiveStrikes } from '../../api/oiAnalytics.ts';
 import { foldActiveStrikeSeries } from '../../api/activeStrikesFold.ts';
+import { Activity } from 'lucide-react';
 import { FilterBar } from '../../components/FilterBar.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
@@ -58,24 +61,34 @@ export function ActiveStrikesPage() {
         <Metric label="Last updated" value={data?.asOf ? data.asOf.slice(11, 19) : '—'} />
       </div>
 
-      {!hasSeries && !q.isLoading && (
-        <p className="mb-3 text-sm text-ay-muted">
-          No active-strike series — pick an index + expiry with captured chain snapshots.
-        </p>
-      )}
-
-      {hasSeries && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <section className="card shadow-e1">
-            <h2 className="mb-2 text-h3 text-ay-text">Active Strike Change in OI</h2>
-            <ActiveStrikeOiChart data={series} />
-          </section>
-          <section className="card shadow-e1">
-            <h2 className="mb-2 text-h3 text-ay-text">Active Strike Sentiment %</h2>
-            <ActiveStrikeSentimentChart data={series} />
-          </section>
-        </div>
-      )}
+      <QueryState
+        query={q}
+        isEmpty={() => !hasSeries}
+        empty={{
+          icon: Activity,
+          title: 'No active-strike series — pick an index + expiry with captured chain snapshots.',
+        }}
+        errorTitle="Couldn't load active strikes OI"
+        skeleton={
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <Skeleton variant="chart-block" height={320} />
+            <Skeleton variant="chart-block" height={320} />
+          </div>
+        }
+      >
+        {() => (
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <section className="card shadow-e1">
+              <h2 className="mb-2 text-h3 text-ay-text">Active Strike Change in OI</h2>
+              <ActiveStrikeOiChart data={series} />
+            </section>
+            <section className="card shadow-e1">
+              <h2 className="mb-2 text-h3 text-ay-text">Active Strike Sentiment %</h2>
+              <ActiveStrikeSentimentChart data={series} />
+            </section>
+          </div>
+        )}
+      </QueryState>
     </div>
   );
 }

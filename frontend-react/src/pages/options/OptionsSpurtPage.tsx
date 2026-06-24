@@ -3,8 +3,11 @@ import { formatDecimal } from '../../lib/decimal.ts';
 import { useOptionsSpurt } from '../../api/oiAnalytics.ts';
 import type { SpurtRow } from '../../api/types.ts';
 import type { OiInterpretation } from '../../core/oiInterpretation.ts';
+import { Crosshair } from 'lucide-react';
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { OiBadge4 } from '../../components/atoms/OiBadge4.tsx';
 import { SpurtQuadrant } from '../../components/SpurtQuadrant.tsx';
@@ -75,22 +78,37 @@ export function OptionsSpurtPage() {
         <span className="text-xs">· strength = %ΔLTP &gt; 50 AND %ΔOI &gt; 50 (bold rows)</span>
       </p>
 
-      {chain == null && !spurtQ.isLoading && (
-        <p className="mb-3 text-sm text-ay-muted">
-          No spurt data — pick an underlying + expiry with at least two captured snapshot buckets.
-        </p>
-      )}
-
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        {QUADRANTS.map((q) => (
-          <SpurtQuadrant
-            key={q.state}
-            title={q.title}
-            subtitle={q.subtitle}
-            rows={byQuadrant[q.state]}
-          />
-        ))}
-      </div>
+      <QueryState
+        query={spurtQ}
+        isEmpty={() => items.length === 0}
+        empty={{
+          icon: Crosshair,
+          title:
+            'No spurt data — pick an underlying + expiry with at least two captured snapshot buckets.',
+        }}
+        errorTitle="Couldn't load OI spurt"
+        skeleton={
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <Skeleton variant="table-rows" rows={6} cols={5} />
+            <Skeleton variant="table-rows" rows={6} cols={5} />
+            <Skeleton variant="table-rows" rows={6} cols={5} />
+            <Skeleton variant="table-rows" rows={6} cols={5} />
+          </div>
+        }
+      >
+        {() => (
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {QUADRANTS.map((q) => (
+              <SpurtQuadrant
+                key={q.state}
+                title={q.title}
+                subtitle={q.subtitle}
+                rows={byQuadrant[q.state]}
+              />
+            ))}
+          </div>
+        )}
+      </QueryState>
     </div>
   );
 }

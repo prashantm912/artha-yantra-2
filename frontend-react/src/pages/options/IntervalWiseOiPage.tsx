@@ -3,8 +3,11 @@ import type { EChartsOption } from 'echarts';
 import { useIntervalWiseOi } from '../../api/oiAnalytics.ts';
 import type { IntervalWiseOi, StrikeMove } from '../../api/types.ts';
 import { oiIntMeta, type OiSeverity } from '../../core/oiInterpretation.ts';
+import { BarChart3 } from 'lucide-react';
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
 
@@ -87,27 +90,48 @@ export function IntervalWiseOiPage() {
         <GoButton onClick={() => void q.refetch()} loading={q.isFetching} />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {CHARTS.map((c, i) => (
-          <div key={c.title} className="card shadow-e1">
-            <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">{c.title}</h2>
-            {series[i].length > 0 ? (
-              <EChart makeOption={options[i]} height={240} ariaLabel={`${c.title} top strikes by OI change`} />
-            ) : (
-              <p className="py-8 text-center text-xs text-ay-muted">No data for this window.</p>
-            )}
+      <QueryState
+        query={q}
+        isEmpty={() => data == null}
+        empty={{
+          icon: BarChart3,
+          title: 'No interval-wise OI — pick an underlying + expiry with captured snapshots.',
+        }}
+        errorTitle="Couldn't load interval-wise OI"
+        skeleton={
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {CHARTS.map((c) => (
+              <Skeleton key={c.title} variant="chart-block" height={240} />
+            ))}
           </div>
-        ))}
-      </div>
+        }
+      >
+        {() => (
+          <>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {CHARTS.map((c, i) => (
+                <div key={c.title} className="card shadow-e1">
+                  <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">{c.title}</h2>
+                  {series[i].length > 0 ? (
+                    <EChart makeOption={options[i]} height={240} ariaLabel={`${c.title} top strikes by OI change`} />
+                  ) : (
+                    <p className="py-8 text-center text-xs text-ay-muted">No data for this window.</p>
+                  )}
+                </div>
+              ))}
+            </div>
 
-      <p className="mt-3 flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-ay-muted">
-        {LEGEND.map((l) => (
-          <span key={l.label} className="inline-flex items-center gap-1.5">
-            <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: `var(${l.varName})` }} />
-            {l.label}
-          </span>
-        ))}
-      </p>
+            <p className="mt-3 flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-ay-muted">
+              {LEGEND.map((l) => (
+                <span key={l.label} className="inline-flex items-center gap-1.5">
+                  <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: `var(${l.varName})` }} />
+                  {l.label}
+                </span>
+              ))}
+            </p>
+          </>
+        )}
+      </QueryState>
     </div>
   );
 }

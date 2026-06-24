@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
+import { CalendarRange } from 'lucide-react';
 import { useOiExpiry } from '../../api/oiAnalytics.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Select } from '../../components/atoms/Select.tsx';
 import { OiBadge4 } from '../../components/atoms/OiBadge4.tsx';
@@ -102,19 +105,31 @@ export function OiExpiryStrategyPage() {
         <GoButton onClick={() => q.refetch()} loading={q.isFetching} />
       </div>
 
-      {!selected && !q.isLoading && (
-        <p className="mb-3 text-sm text-ay-muted">
-          No EOD OI history — pick an index + expiry with captured chain snapshots. The window accrues
-          from boot, so it is shallow until sessions build up.
-        </p>
-      )}
-
-      {selected && (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <LegTable leg={`${selected.strike} CE`} rows={selected.ce} />
-          <LegTable leg={`${selected.strike} PE`} rows={selected.pe} />
-        </div>
-      )}
+      <QueryState
+        query={q}
+        isEmpty={() => !selected}
+        empty={{
+          icon: CalendarRange,
+          title:
+            'No EOD OI history — pick an index + expiry with captured chain snapshots. The window accrues from boot, so it is shallow until sessions build up.',
+        }}
+        errorTitle="Couldn't load OI expiry strategy"
+        skeleton={
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <Skeleton variant="table-rows" rows={10} cols={10} />
+            <Skeleton variant="table-rows" rows={10} cols={10} />
+          </div>
+        }
+      >
+        {() =>
+          selected && (
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+              <LegTable leg={`${selected.strike} CE`} rows={selected.ce} />
+              <LegTable leg={`${selected.strike} PE`} rows={selected.pe} />
+            </div>
+          )
+        }
+      </QueryState>
     </div>
   );
 }

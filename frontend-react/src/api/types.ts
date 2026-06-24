@@ -189,6 +189,23 @@ export interface IntervalWiseOi {
   asOf: string | null;
 }
 
+/** One heatmap cell: column index `x` (bucket), row index `y` (strike), `value` = interval ΔOI. */
+export interface OiHeatmapCell {
+  x: number;
+  y: number;
+  value: number | null;
+}
+
+/** GET /api/v1/market/options/oi-heatmap — strike × time grid of interval ΔOI, split CE/PE. */
+export interface OiHeatmap {
+  buckets: string[];
+  strikes: string[];
+  ce: OiHeatmapCell[];
+  pe: OiHeatmapCell[];
+  maxAbs: number;
+  asOf: string | null;
+}
+
 /** A CE/PE leg's cell values in the folded strike grid. */
 export interface LegCell {
   oi: number | null;

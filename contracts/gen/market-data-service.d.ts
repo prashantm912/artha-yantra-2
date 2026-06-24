@@ -452,6 +452,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/options/oi-heatmap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["oiHeatmap"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/options/oi-analysis": {
         parameters: {
             query?: never;
@@ -1646,6 +1662,24 @@ export interface components {
             /** Format: date-time */
             asOf?: string;
         };
+        Cell: {
+            /** Format: int32 */
+            x?: number;
+            /** Format: int32 */
+            y?: number;
+            /** Format: int64 */
+            value?: number;
+        };
+        Heatmap: {
+            buckets?: string[];
+            strikes?: string[];
+            ce?: components["schemas"]["Cell"][];
+            pe?: components["schemas"]["Cell"][];
+            /** Format: int64 */
+            maxAbs?: number;
+            /** Format: date-time */
+            asOf?: string;
+        };
         HistoryPoint: {
             /** Format: date */
             date?: string;
@@ -1707,6 +1741,8 @@ export interface components {
             volume?: number;
             /** Format: int64 */
             oi?: number;
+            /** Format: int64 */
+            prevOi?: number;
             iv?: number;
             delta?: number;
             gamma?: number;
@@ -1845,30 +1881,6 @@ export interface components {
             items?: components["schemas"]["FutSpurt"][];
             /** Format: date-time */
             asOf?: string;
-        };
-        Heatmap: {
-            index?: string;
-            /** Format: int32 */
-            advance?: number;
-            /** Format: int32 */
-            decline?: number;
-            tiles?: components["schemas"]["Tile"][];
-            /** Format: date-time */
-            asOf?: string;
-        };
-        Tile: {
-            symbol?: string;
-            changePct?: number;
-            ltp?: number;
-            open?: number;
-            high?: number;
-            low?: number;
-            /** Format: int64 */
-            oi?: number;
-            /** Format: int64 */
-            oiChange?: number;
-            /** @enum {string} */
-            interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
         };
         MoverRow: {
             tradingsymbol?: string;
@@ -3440,6 +3452,41 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["OiStats"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    oiHeatmap: {
+        parameters: {
+            query: {
+                mode?: string;
+                name: string;
+                date?: string;
+                interval?: string;
+                expiry?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["Heatmap"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

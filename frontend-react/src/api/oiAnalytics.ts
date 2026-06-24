@@ -22,6 +22,7 @@ import type {
   EquityNews,
   IndexContribution,
   OiBuzzHeatmap,
+  OiHeatmap,
   OpenHighLow,
   OiStats,
   SectorHeatmap,
@@ -284,6 +285,16 @@ export function useTrendingOi() {
   return useQuery({
     queryKey: ['oi', 'trending', ctx.name, ctx.expiry, ctx.interval, ctx.mode, ctx.date],
     queryFn: () => oiGet<TrendSeries | null>('/market/options/trending', oiParams(ctx, true), null),
+    enabled: satisfiable(ctx, true),
+  });
+}
+
+/** OI-change heatmap (§20 breadth): strike × time grid of interval ΔOI (CE+PE) over the session. */
+export function useOiHeatmap() {
+  const ctx = useOiCtx();
+  return useQuery({
+    queryKey: ['oi', 'oi-heatmap', ctx.name, ctx.expiry, ctx.interval, ctx.mode, ctx.date],
+    queryFn: () => oiGet<OiHeatmap | null>('/market/options/oi-heatmap', oiParams(ctx, true), null),
     enabled: satisfiable(ctx, true),
   });
 }

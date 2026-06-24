@@ -41,11 +41,13 @@ public class OptionsAnalyticsController {
   private final OpenHighStatsService openHighStats;
   private final StraddleChartService straddleChartService;
   private final OptionsOiChartService optionsOiChartService;
+  private final OiHeatmapService heatmapService;
   private final ObjectProvider<UpstoxOptionAnalyticsSource> upstoxOptionAnalytics;
   private final MarketCalendar calendar;
   private final int bigOiTopN;
   private final int trendBuckets;
   private final int premiumBuckets;
+  private final int heatmapWindow;
   private final int defaultSessionIntervalMinutes;
 
   public OptionsAnalyticsController(
@@ -59,11 +61,13 @@ public class OptionsAnalyticsController {
       OpenHighStatsService openHighStats,
       StraddleChartService straddleChartService,
       OptionsOiChartService optionsOiChartService,
+      OiHeatmapService heatmapService,
       ObjectProvider<UpstoxOptionAnalyticsSource> upstoxOptionAnalytics,
       MarketCalendar calendar,
       @Value("${artha.options.big-oi-top-n:10}") int bigOiTopN,
       @Value("${artha.options.trend-buckets:20}") int trendBuckets,
       @Value("${artha.options.premium-buckets:60}") int premiumBuckets,
+      @Value("${artha.options.heatmap-window:10}") int heatmapWindow,
       @Value("${artha.options.snapshot-interval-ms:300000}") long snapshotIntervalMs) {
     this.reader = reader;
     this.chainService = chainService;
@@ -75,11 +79,13 @@ public class OptionsAnalyticsController {
     this.openHighStats = openHighStats;
     this.straddleChartService = straddleChartService;
     this.optionsOiChartService = optionsOiChartService;
+    this.heatmapService = heatmapService;
     this.upstoxOptionAnalytics = upstoxOptionAnalytics;
     this.calendar = calendar;
     this.bigOiTopN = bigOiTopN;
     this.trendBuckets = trendBuckets;
     this.premiumBuckets = premiumBuckets;
+    this.heatmapWindow = heatmapWindow;
     // Default session-stats bucket = the snapshot capture cadence (ms -> minutes), min 1, default 5.
     long minutes = snapshotIntervalMs / 60000L;
     this.defaultSessionIntervalMinutes = minutes <= 0 ? 5 : (int) minutes;
@@ -713,6 +719,53 @@ public class OptionsAnalyticsController {
     BigDecimal atm = atmStrike(stats, spot);
     OffsetDateTime asOf = latest.isEmpty() ? null : latest.get(latest.size() - 1).bucket();
     return openHighStats.grade(underlying, exp, intervalMinutes, spot, atm, win, asOf, stats);
+  }
+
+  /**
+   * /oi-heatmap: the oipulse-style OI-change heatmap (plan §20 breadth, grid-heatmap archetype) — a
+   * strike × time grid of per-bucket interval OI change, split CE/PE, for the {@code 2*window+1}
+   * strikes nearest the ATM over the selected IST session. Folds ONE
+   * {@link OptionsSnapshotReader#series} read of the day's downsampled buckets (zero new capture). The
+   * grid spans the calendar day up to (and including) the newest captured bucket — its first column
+   * carries no delta and so is dropped by the fold. Empty grid (not a 422) when no snapshot has
+   * accrued, so the page renders its empty state.
+   */
+  @GetMapping("/oi-heatmap")
+  public OiHeatmapService.Heatmap oiHeatmap(
+      @RequestParam(required = false) String mode,
+      @RequestParam String name,
+      @RequestParam(required = false) String date,
+      @RequestParam(required = false) String interval,
+      @RequestParam(required = false) String expiry) {
+    OiQuery q = OiQuery.of(mode, name, date, interval, expiry);
+    LocalDate exp = requireExpiry(q);
+    List<OptionsSnapshotReader.StrikePoint> latest =
+        reader.latest(q.name(), exp, q.interval(), q.date());
+    if (latest.isEmpty()) {
+      return heatmapService.fold(List.of(), null, heatmapWindow);
+    }
+    OffsetDateTime newest = latest.get(0).bucket();
+    LocalDate day = newest.atZoneSameInstant(Ist.ZONE).toLocalDate();
+    OffsetDateTime from = day.atStartOfDay().atOffset(Ist.OFFSET);
+    OffsetDateTime to = newest.plus(q.interval().bucket());
+    List<OptionsSnapshotReader.StrikePoint> series =
+        reader.series(q.name(), exp, q.interval(), from, to);
+    BigDecimal spot = latestSpot(latest);
+    BigDecimal atm = nearestListedStrike(series, spot);
+    return heatmapService.fold(series, atm, heatmapWindow);
+  }
+
+  /** The listed strike nearest {@code spot} among the series points; null when spot/strikes absent. */
+  private static BigDecimal nearestListedStrike(
+      List<OptionsSnapshotReader.StrikePoint> series, BigDecimal spot) {
+    if (spot == null) {
+      return null;
+    }
+    return series.stream()
+        .map(OptionsSnapshotReader.StrikePoint::strike)
+        .distinct()
+        .min(Comparator.comparing(s -> s.subtract(spot).abs()))
+        .orElse(null);
   }
 
   private static BigDecimal latestSpot(List<OptionsSnapshotReader.StrikePoint> latest) {

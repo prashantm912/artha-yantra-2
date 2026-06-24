@@ -1,6 +1,9 @@
-# Runtime deps (CD-15: plain pip + ruff). Pinned exact versions; CI regenerates
-# this file with `pip-compile --generate-hashes` so the deployed image installs
-# under --require-hashes (the hash-pinned form is the CI artifact, not edited by hand).
+# Runtime deps (CD-15: plain pip + ruff). Hand-edited source of truth — pinned exact
+# versions. After ANY change here, regenerate the hash-locked install set:
+#   uv pip compile --native-tls --generate-hashes --python-version 3.12 \
+#     -o requirements.lock requirements.txt
+# The Dockerfile installs requirements.lock under --require-hashes (supply-chain guard);
+# CI installs requirements-dev.lock (regen the same way from requirements-dev.txt).
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 optuna==4.9.0

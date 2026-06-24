@@ -101,8 +101,9 @@ class UpstoxGlobalInstrumentsClientTest {
 
     List<WorldIndex> indices = client().worldIndices();
 
-    // The non-global NSE_INDEX row is filtered; the three global rows remain, master order preserved.
-    assertThat(indices).extracting(WorldIndex::tradingSymbol).containsExactly("^HSI", "SGX NIFTY", "BZUSD");
+    // Non-global NSE_INDEX AND GLOBAL_INDICATOR (BZUSD — not quotable) are filtered; the two
+    // GLOBAL_INDEX rows remain, master order preserved.
+    assertThat(indices).extracting(WorldIndex::tradingSymbol).containsExactly("^HSI", "SGX NIFTY");
 
     // HANG SENG: quote resolved via the ':'-keyed response; %change = 239 / (23900-239) * 100 = 1.01.
     WorldIndex hsi = indices.get(0);
@@ -124,19 +125,12 @@ class UpstoxGlobalInstrumentsClientTest {
     assertThat(sgx.netChange()).isEqualByComparingTo("-50.0");
     assertThat(sgx.changePct()).isEqualByComparingTo("-0.21");
 
-    // BRENT: in the master but NOT in the quotes response → price-less row (universe still lists).
-    WorldIndex brent = indices.get(2);
-    assertThat(brent.name()).isEqualTo("BRENT CRUDE");
-    assertThat(brent.ltp()).isNull();
-    assertThat(brent.changePct()).isNull();
-
-    // ONE batch quote call carrying the comma-joined keys + the analytics Bearer token.
+    // ONE batch quote call carrying ONLY the GLOBAL_INDEX keys (indicators excluded) + the Bearer token.
     wireMock.verify(
         getRequestedFor(urlPathEqualTo("/v2/market-quote/quotes"))
             .withHeader("Authorization", equalTo("Bearer test-token"))
             .withQueryParam(
-                "instrument_key",
-                equalTo("GLOBAL_INDEX|^HSI,GLOBAL_INDEX|SGX NIFTY,GLOBAL_INDICATOR|BZUSD")));
+                "instrument_key", equalTo("GLOBAL_INDEX|^HSI,GLOBAL_INDEX|SGX NIFTY")));
   }
 
   @Test
@@ -172,7 +166,7 @@ class UpstoxGlobalInstrumentsClientTest {
 
     List<WorldIndex> indices = client().worldIndices();
 
-    assertThat(indices).extracting(WorldIndex::tradingSymbol).containsExactly("^HSI", "SGX NIFTY", "BZUSD");
+    assertThat(indices).extracting(WorldIndex::tradingSymbol).containsExactly("^HSI", "SGX NIFTY");
     assertThat(indices).allSatisfy(i -> assertThat(i.ltp()).isNull());
   }
 
@@ -184,8 +178,7 @@ class UpstoxGlobalInstrumentsClientTest {
         client().fetchMaster().stream()
             .collect(java.util.stream.Collectors.toMap(UpstoxGlobalInstrument::instrumentKey, i -> i));
 
-    assertThat(byKey).containsOnlyKeys(
-        "GLOBAL_INDEX|^HSI", "GLOBAL_INDEX|SGX NIFTY", "GLOBAL_INDICATOR|BZUSD");
+    assertThat(byKey).containsOnlyKeys("GLOBAL_INDEX|^HSI", "GLOBAL_INDEX|SGX NIFTY");
   }
 
   private static void stubMaster(String json) {

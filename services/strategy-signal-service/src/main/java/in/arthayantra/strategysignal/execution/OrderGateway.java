@@ -1,21 +1,36 @@
 package in.arthayantra.strategysignal.execution;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 /**
- * The broker-agnostic order-placement boundary (master plan §17.3). {@link LiveOrderService} calls
- * this port — never a broker gateway directly — so the broker stays swappable (Kite / OpenAlgo) and
- * no broker types leak into the engine. Read endpoints (orderbook/positions/funds, §18.1) are a later
- * Phase-4b deliverable and are deliberately NOT on this port yet.
+ * The broker-agnostic order boundary (master plan §17.3). {@link LiveOrderService} calls this port —
+ * never a broker gateway directly — so the broker stays swappable (Kite / OpenAlgo) and no broker
+ * types leak into the engine.
  *
- * <p>The default wired implementation is {@link DisabledOrderGateway} — a fail-safe that places
- * nothing. A live broker gateway (OpenAlgo SDK, gated on §S3 + the §17.3 latency gate) replaces it
- * only when live execution is deliberately configured.
+ * <p>The order-WRITE path ({@link #place}) stays gated: even with {@code artha.scalper.execution=live}
+ * the default {@link DisabledOrderGateway} places nothing until a real write gateway is deliberately
+ * wired. The order-READ surface (§18.1 — orderbook / positions / tradebook / funds, the documented
+ * Phase-4b deliverable) is broker-agnostic too: the default {@link DisabledOrderGateway} returns
+ * empty lists / a {@code NOT_CONFIGURED} funds row, and a live
+ * {@link RestOpenAlgoOrderReadGateway} replaces it only when OpenAlgo order-read is configured.
  */
 public interface OrderGateway {
 
   /** Places one order and returns the broker's acknowledgement (mapped to a domain record). */
   OrderAck place(OrderRequest request);
+
+  /** The broker orderbook — every order placed today, newest as the broker returns them (§18.1). */
+  List<OrderbookEntry> orderbook();
+
+  /** The broker net positions with mark-to-market P&amp;L (§18.1). */
+  List<PositionEntry> positions();
+
+  /** The broker tradebook — the executed fills (§18.1). */
+  List<TradebookEntry> tradebook();
+
+  /** The broker funds/margin snapshot, or a {@code NOT_CONFIGURED} sentinel when unavailable (§18.1). */
+  Funds funds();
 
   /** A broker-agnostic order request. {@code product} e.g. MIS (intraday); {@code orderType} MARKET/LIMIT. */
   record OrderRequest(
@@ -29,4 +44,56 @@ public interface OrderGateway {
 
   /** A broker-agnostic order acknowledgement. */
   record OrderAck(String orderId, String status, String message) {}
+
+  /** One orderbook row — a placed order with its lifecycle status. */
+  record OrderbookEntry(
+      String symbol,
+      String exchange,
+      String action,
+      BigDecimal qty,
+      BigDecimal price,
+      BigDecimal triggerPrice,
+      String pricetype,
+      String product,
+      String orderId,
+      String status,
+      String timestamp) {}
+
+  /** One net-position row. {@code qty} is signed (negative = short); {@code side} is its derived BUY/SELL. */
+  record PositionEntry(
+      String symbol,
+      String exchange,
+      String side,
+      BigDecimal qty,
+      String product,
+      BigDecimal avgPrice,
+      BigDecimal ltp,
+      BigDecimal mtmPnl) {}
+
+  /** One tradebook (fill) row. */
+  record TradebookEntry(
+      String symbol,
+      String exchange,
+      String action,
+      BigDecimal qty,
+      BigDecimal price,
+      BigDecimal tradeValue,
+      String product,
+      String orderId,
+      String tradeTime) {}
+
+  /** The funds/margin snapshot. {@code status} is {@code OK} or {@code NOT_CONFIGURED} (sentinel). */
+  record Funds(
+      String status,
+      BigDecimal availableCash,
+      BigDecimal collateral,
+      BigDecimal m2mRealized,
+      BigDecimal m2mUnrealized,
+      BigDecimal utilisedDebits) {
+
+    /** The fail-safe row a disabled gateway returns — all-null amounts, {@code NOT_CONFIGURED}. */
+    public static Funds notConfigured() {
+      return new Funds("NOT_CONFIGURED", null, null, null, null, null);
+    }
+  }
 }

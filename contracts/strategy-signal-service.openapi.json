@@ -1564,6 +1564,121 @@
           }
         }
       }
+    },
+    "/api/v1/orders/tradebook" : {
+      "get" : {
+        "tags" : [ "orders-controller" ],
+        "operationId" : "tradebook",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/orders/positions" : {
+      "get" : {
+        "tags" : [ "orders-controller" ],
+        "operationId" : "positions_1",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/orders/orderbook" : {
+      "get" : {
+        "tags" : [ "orders-controller" ],
+        "operationId" : "orderbook",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/orders/funds" : {
+      "get" : {
+        "tags" : [ "orders-controller" ],
+        "operationId" : "funds",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Funds"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components" : {
@@ -1938,6 +2053,29 @@
           },
           "channel" : {
             "type" : "string"
+          }
+        }
+      },
+      "Funds" : {
+        "type" : "object",
+        "properties" : {
+          "status" : {
+            "type" : "string"
+          },
+          "availableCash" : {
+            "type" : "number"
+          },
+          "collateral" : {
+            "type" : "number"
+          },
+          "m2mRealized" : {
+            "type" : "number"
+          },
+          "m2mUnrealized" : {
+            "type" : "number"
+          },
+          "utilisedDebits" : {
+            "type" : "number"
           }
         }
       },

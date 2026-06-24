@@ -31,6 +31,14 @@ artha:
     # D8: context-instrument existence checks resolve via market-data REST
     # (strategy-signal-service holds NO marketdata grant)
     base-url: ${ARTHA_MARKETDATA_BASE_URL:http://market-data-service:8081}
+  openalgo:
+    # §18.1 order-READ surface (orderbook/positions/tradebook/funds). Default OFF — the
+    # DisabledOrderGateway then returns empty lists + a NOT_CONFIGURED funds row, so a mock or
+    # Kite-only live stack needs no OpenAlgo API key. Flip on the LIVE profile to wire the
+    # RestOpenAlgoOrderReadGateway (reads only — the order-WRITE path stays separately gated).
+    order-read-enabled: ${ARTHA_OPENALGO_ORDER_READ_ENABLED:false}
+    base-url: ${ARTHA_OPENALGO_BASE_URL:http://openalgo:5000}
+    api-key-file: ${ARTHA_OPENALGO_API_KEY_FILE:/run/secrets/openalgo_api_key}
   signals:
     engine-enabled: ${ARTHA_SIGNAL_ENGINE_ENABLED:true}
   scalper:

@@ -24,6 +24,7 @@ const SECTIONS: MenuSection[] = [
       { label: 'Signals', to: '/signals' }, // cockpit — live feed + reasoning breakdown (C-2.26)
       { label: 'Charts', to: '/charts' }, // cockpit — candlestick + trade/signal overlays (A13)
       { label: 'Paper Trading', to: '/paper' }, // cockpit — positions + ledger + risk limits (F-43)
+      { label: 'Orders', to: '/orders' }, // §18.1 — broker orderbook/positions/tradebook/funds (read-only)
       { label: 'Journal', to: '/journal' }, // cockpit — weekly-review entries (F-44A)
       { label: 'Watchlists', to: '/watchlists' }, // cockpit — named lists + screener (E-8)
       { label: 'Settings', to: '/settings' }, // cockpit — Kite/theme/data-sync (E-8)

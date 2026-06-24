@@ -28,6 +28,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.web.client.ResourceAccessException;
 
 /**
  * Expired-instruments backfill importer (data-foundation milestone — backtest data). For each
@@ -317,8 +319,21 @@ public class ExpiredBackfillService {
           expiries.incrementAndGet();
           p.currentExpiry = underlying + " " + expiry;
           List<Leg> legs = new ArrayList<>();
-          legs.addAll(client.optionContracts(underlyingKey, expiry));
-          legs.addAll(client.futureContracts(underlyingKey, expiry));
+          try {
+            legs.addAll(client.optionContracts(underlyingKey, expiry));
+            legs.addAll(client.futureContracts(underlyingKey, expiry));
+          } catch (ResourceAccessException | HttpServerErrorException e) {
+            // Transient network/5xx on the per-expiry contract enumeration: skip THIS expiry and
+            // continue the run instead of aborting hours of in-flight work. The run is resumable +
+            // idempotent, so the skipped expiry is picked up on the next pass. (A single
+            // UnknownHostException here killed the whole 2026-06-24 run — see incident notes.)
+            failed.incrementAndGet();
+            log.warn(
+                "expired-backfill {}: expiry {} {} SKIPPED (transient): {}",
+                jobId, underlying, expiry, e.toString());
+            p.log(underlying + " " + expiry + " SKIPPED (transient): " + e.getMessage());
+            continue;
+          }
           List<Leg> bounded = boundStrikes(legs, indexRef, expiry);
           contracts.addAndGet(bounded.size());
 

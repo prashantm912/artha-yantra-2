@@ -69,6 +69,9 @@ vi.mock('../../components/OiHeatmapChart.tsx', () => ({
 vi.mock('../signals/SignalsFeedPanel.tsx', () => ({
   SignalsFeedPanel: () => <div data-testid="signals-feed" />,
 }));
+vi.mock('./PaperBookPanel.tsx', () => ({
+  PaperBookPanel: () => <div data-testid="paper-book" />,
+}));
 
 const useChainTable = vi.fn();
 const useConnectingDots = vi.fn();
@@ -112,10 +115,12 @@ describe('CockpitPage', () => {
     expect(screen.getByRole('heading', { name: 'OI confluence matrix' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Straddle premium' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Live signals' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Paper book' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'OI change heatmap' })).toBeInTheDocument();
 
-    // The signals feed panel is composed; the header derives the sentiment badge from the matrix.
+    // The signals feed + paper-book panels are composed; the header derives the sentiment from the matrix.
     expect(screen.getByTestId('signals-feed')).toBeInTheDocument();
+    expect(screen.getByTestId('paper-book')).toBeInTheDocument();
     // Trend code 2 → "Bullish" — the header sentiment strip carries the derived badge.
     expect(screen.getByText('Sentiment', { exact: false })).toHaveTextContent('Bullish');
 

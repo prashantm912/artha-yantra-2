@@ -18,6 +18,7 @@ import { StraddleChart } from '../../components/StraddleChart.tsx';
 import { CallOiHeatmap, PutOiHeatmap } from '../../components/OiHeatmapChart.tsx';
 import { trendMeta } from '../../core/connectingDots.ts';
 import { SignalsFeedPanel } from '../signals/SignalsFeedPanel.tsx';
+import { PaperBookPanel } from './PaperBookPanel.tsx';
 
 // Scalping Cockpit (master plan §20 — Cockpit composite): ONE live operator screen that composes the
 // highest-signal scalping views (option chain · OI-confluence/Connecting-Dots matrix + sentiment ·
@@ -183,10 +184,18 @@ export function CockpitPage() {
           )}
         </Panel>
 
-        {/* (d) Live signals feed */}
+        {/* (d) Live signals feed — with the per-signal "Take (paper)" action (paper-trading console). */}
         <Panel title="Live signals" to="/signals" linkLabel="All signals">
-          <SignalsFeedPanel status="ACTIVE" />
+          <SignalsFeedPanel status="ACTIVE" takeable />
         </Panel>
+
+        {/* Paper book — live positions / P&L / exposure + the risk-limit guard (full width). The
+            per-signal "Take (paper)" action above opens a defined-risk paper trade into THIS book. */}
+        <div className="xl:col-span-2">
+          <Panel title="Paper book" to="/paper" linkLabel="Full ledger">
+            <PaperBookPanel />
+          </Panel>
+        </div>
 
         {/* (e) Compact OI heatmap — spans the full width on the two-column layout. */}
         <div className="xl:col-span-2">

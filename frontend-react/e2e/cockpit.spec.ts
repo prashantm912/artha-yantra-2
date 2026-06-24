@@ -12,6 +12,7 @@ const PANELS = [
   'OI confluence matrix',
   'Straddle premium',
   'Live signals',
+  'Paper book',
   'OI change heatmap',
 ];
 
@@ -37,6 +38,11 @@ test('Scalping Cockpit renders the shared control bar + every panel, no axe viol
 
   // The header sentiment strip is present (— until a live matrix accrues).
   await expect(page.getByText('Sentiment', { exact: false })).toBeVisible();
+
+  // The paper-trading console: the risk-limit guard + the book's empty state (mock has no positions).
+  await expect(page.getByLabel('Risk limits')).toBeVisible();
+  await expect(page.getByText('Kill switch:', { exact: false })).toBeVisible();
+  await expect(page.getByText(/No open positions —/)).toBeVisible();
 
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations).toEqual([]);

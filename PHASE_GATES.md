@@ -24,8 +24,15 @@ MERGED and Phase 4 is substantially built (cockpit + React cutover + oipulse W1/
 Console #121). The active open work is the **data-foundation value-verify** (render every OI/data page
 in History mode on a real session vs oipulse — gated on the expired/OI backfill, which is RUNNING) and
 **Part 2's** real-data value-verify (options now backtest on their own premium). Deploy the Data Ops
-Console after the backfill finishes (a market-data restart kills the in-flight job). The full pending
-list is `docs/DEFERRED_BACKLOG.md`.
+Console after the backfill finishes (a market-data restart kills the in-flight job).
+
+**2026-06-24 session (#136–#156):** the **Upstox login-free live migration** (U1 OI capture / U2 quotes /
+U3 v3-WS ticker / F&O key map / cutover-prep), the **scalper registry completed to 12/12** (#3 Market
+Movers + #8 BTST/STBT + **#11 long-straddle via a new two-leg/neutral engine primitive**), the dormant
+**`OpenAlgoOrderGateway`**, **higher-order greeks** (vanna/charm/vomma), the **SPAN `.spn` ingest+golden
+harness**, three more oipulse pages (OI heatmap / OI expiry / Open & High), and the **Scalping Cockpit
+paper-trade panel + scalp-signal alerts** all merged — all flag-gated / paper / default-off, **nothing
+live changed**. The full pending list is `docs/DEFERRED_BACKLOG.md`.
 
 **Phase 3 — Track-2 Siva options scalper (MERGED #42/#43/#44).** The index-option core (#1/#5/#6/#10)
 is paper-complete + risk-railed + execution-boundaried, with the manual-verification-checklist
@@ -36,19 +43,22 @@ and the four feasible index-option intraday strategies are implemented + seeded 
 #12 Trend Change, #2 Open=High/Low (per-strike Table-1/Table-2 faithful grading), #9 Morning Trade
 (opening-tick)**. Golden + Parity stay byte-identical (V009 side-channel). The S24 monthly-expiry OI
 suppression (`isMonthlyIndexExpiryDay` → skip the chain-OI reads) and the #2 per-strike OH/OL faithful
-grading (`/options/strike-session-stats`, branch `feat/open-high-per-strike`) are also done. Still
-deferred: #3 (stock universe → Track-1), #8 (overnight carry + SPAN), #7/#11 (SPAN #47), the §2 OiPulse
-≥90% AI badge, Tier-3 OI history, and the React UI (Phase 4) — see the map.
+grading (`/options/strike-session-stats`, branch `feat/open-high-per-strike`) are also done. **Registry
+now 12/12 (2026-06-24):** #3 Market Movers + #8 BTST/STBT (#148) + #11 long-straddle on a new two-leg/
+neutral primitive (#155) seeded as paper drafts; #7 Hero-Zero done (#130). The **ONLY remaining strategy
+gap = the SHORT-premium SELL legs of #8/#11** (gated on SPAN sizing live + live orders) and the full
+stock-universe #3 (→ Track-1/Phase-5). Still deferred elsewhere: the §2 OiPulse ≥90% AI badge, Tier-3 OI
+history.
 
 ### Master-plan phase map (§16.1)
 
 | Phase | Branch | State |
 |---|---|---|
 | 0 — OpenAlgo spine | `feat/openalgo-spine` | **MERGED** (PR #39) |
-| 1 — Data inflow (routing + ExpiryTrack OI + openchart daily) | merged across #40/#41/#112–#116 | **MOSTLY** — §4 routing + EOD bhavcopy daily candles (#40/#41) **and** the §5 expired-instrument OHLCV+OI backfill (#112–#116, first pull RUNNING 2026-06-24) merged; §15 200-day daily history + live OI cutover **DEFERRED** |
-| 2 — Quant libs (greeks + indicators) | merged #40 | **MOSTLY** — §7 scalp indicators merged (#40); §6 higher-order greeks **DEFERRED** (§17.6) |
-| 3 — Scalper engine (§12 + §8 SPAN) | merged #42/#43/#44, #126 | **MERGED** — core #1/#5/#6/#10 + Tier-2 OI fidelity (T2.1–T2.8) + monthly-expiry OI suppression + #2 (per-strike faithful)/#4/#9/#12; **SPAN appliance BUILT dormant (#126)** + **checklist UI DONE (#125)**. **#7 Hero-Zero DONE (paper, #130)** — it's BUY-side/defined-risk (corrected), no SPAN/live needed. Still **DEFERRED**: #3 (stock), #8/#11 (short-premium — SPAN built, gated on live orders + real-`.spn`), live orders, §2 OiPulse badge (see `docs/DEFERRED_BACKLOG.md`) |
-| 4 — React migration (§10 + §11) | merged #82–#110, #121 | **IN PROGRESS** — cockpit + React cutover (Angular parked, #104) + oipulse W1/W2/W3 + Data Ops Console (#121) merged; remaining: **data-foundation value-verify** (gated on the backfill), OiPulse badge (manual-checklist UI DONE #125; `/orders` read-page BUILT dormant #131, live-verify deferred) |
+| 1 — Data inflow (routing + ExpiryTrack OI + daily) | merged #40/#41/#112–#116, #137–#149 | **MOSTLY** — §4 routing + EOD bhavcopy daily (#40/#41) + §5 expired OHLCV+OI backfill (#112–#116, full pull RUNNING) + **Upstox login-free live capture (OI/quotes/v3-WS, #137/#139/#141/#149) BUILT flag-gated default-Kite** — cutover = deploy + A/B + flip. **DEFERRED**: §15 200-day daily history (Upstox v3 historical-candle can serve it, see backlog) |
+| 2 — Quant libs (greeks + indicators) | merged #40, #156 | **DONE** — §7 scalp indicators (#40); §6 **higher-order greeks vanna/charm/vomma DONE (#156)** on `black76-math` + the chain (FD-cross-checked) |
+| 3 — Scalper engine (§12 + §8 SPAN) | merged #42/#43/#44, #126, #144/#148/#154/#155 | **MERGED — registry 12/12** — core #1/#5/#6/#10 + Tier-2 OI fidelity + #2(faithful)/#4/#9/#12 + #7 Hero-Zero (#130) + **#3/#8 (#148) + #11 long-straddle on a two-leg/neutral primitive (#155)**, all paper drafts. **SPAN appliance dormant (#126) + `.spn` golden harness (#144)**; **`OpenAlgoOrderGateway` dormant (#154)**; checklist UI (#125). Only **DEFERRED**: SHORT-premium SELL legs of #8/#11 (SPAN live + live orders), full stock-universe #3 (→Track-1), §2 OiPulse badge |
+| 4 — React migration (§10 + §11) | merged #82–#110, #121, #146–#153 | **IN PROGRESS** — cockpit + React cutover + oipulse W1/W2/W3 + Data Ops Console (#121) + new pages OI-heatmap/OI-expiry/Open&High (#146/#150/#153) + cockpit paper-trade panel & scalp alerts (#151/#152) merged; remaining: **data-foundation value-verify** (gated on the backfill) + deploy, OiPulse badge, `/orders` live-verify (#131 dormant) |
 | 5 — Minervini Track-1 screener (§13) | `feat/minervini-track1` | **NOT STARTED** — needs Phase-1 §15 200-day history |
 | 6 — Backtest + forward wiring (§14) | merged #114–#119 | **PARTIAL** — Part 2 premium-as-primary replay landed (options trade their own 1m premium, golden-pinned); remaining: real-data value-verify (gated on backfill), forward-test wiring (the v1 simplifications — per-bar MTM + premium-leg costs + 422 pre-flight — are CLOSED #123); needs Phases 3 + 5 |
 

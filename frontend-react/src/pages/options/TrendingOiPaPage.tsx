@@ -3,6 +3,9 @@ import { useTrendingOi } from '../../api/oiAnalytics.ts';
 import { foldTrending, type TrendingRow } from '../../api/trendingOiFold.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { SignedCount } from '../../components/atoms/SignedCount.tsx';
 import { SentimentBadge } from '../../components/atoms/SentimentBadge.tsx';
@@ -69,7 +72,7 @@ export function TrendingOiPaPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Trending OI - PA</h1>
+      <PageHeader title="Trending OI - PA" subtitle="Trending OI plus price-action columns — premium sums confirm OI shifts" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval allowedIntervals={TRENDING_INTERVALS} />
@@ -81,14 +84,24 @@ export function TrendingOiPaPage() {
         session-open baseline. CE+PE Ltp Chng (the straddle change) confirms an OI shift when both move together.
       </p>
 
-      <DataTable
-        columns={columns}
-        rows={rows}
-        rowKey={(r) => r.bucket}
-        pageSize={100}
-        ariaLabel="Trending OI with price action per interval"
-        emptyMessage="No trending data — pick an underlying + expiry with captured snapshots."
-      />
+      <QueryState
+        query={q}
+        isEmpty={() => rows.length === 0}
+        empty={{ title: 'No trending data — pick an underlying + expiry with captured snapshots.' }}
+        errorTitle="Couldn't load trending OI"
+        skeleton={<Skeleton variant="table-rows" rows={8} cols={16} />}
+      >
+        {() => (
+          <DataTable
+            columns={columns}
+            rows={rows}
+            rowKey={(r) => r.bucket}
+            pageSize={100}
+            ariaLabel="Trending OI with price action per interval"
+            emptyMessage="No trending data — pick an underlying + expiry with captured snapshots."
+          />
+        )}
+      </QueryState>
     </div>
   );
 }

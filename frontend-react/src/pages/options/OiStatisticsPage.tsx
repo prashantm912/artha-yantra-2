@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useOiAnalysis, useOiStats, usePcrSeries } from '../../api/oiAnalytics.ts';
 import { foldIndividualOi, type PcrPricePoint } from '../../api/oiStatsFold.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
 import {
@@ -53,7 +54,7 @@ export function OiStatisticsPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Options OI Statistics</h1>
+      <PageHeader title="Options OI Statistics" subtitle="OI distribution + PCR — cumulative & per-strike OI and the intraday PCR-vs-price line" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry />
@@ -92,13 +93,13 @@ export function OiStatisticsPage() {
 
       {hasBars && (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <section className="lg:col-span-1">
+          <section className="card shadow-e1 lg:col-span-1">
             <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">
               Cumulative OI{showChange ? ' (Chg.)' : ''}
             </h2>
             <CumulativeOiChart callOi={callTotal} putOi={putTotal} changeView={showChange} />
           </section>
-          <section className="lg:col-span-2">
+          <section className="card shadow-e1 lg:col-span-2">
             <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">
               Individual OI{showChange ? ' (Chg.)' : ''} — Call (resistance) vs Put (support)
             </h2>
@@ -108,7 +109,7 @@ export function OiStatisticsPage() {
       )}
 
       {pcrPrice.length > 0 && (
-        <section className="mt-4">
+        <section className="card shadow-e1 mt-4">
           <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">PCR vs Price</h2>
           <PcrPriceChart points={pcrPrice} />
         </section>

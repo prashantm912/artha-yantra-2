@@ -4,6 +4,7 @@ import { useIntervalWiseOi } from '../../api/oiAnalytics.ts';
 import type { IntervalWiseOi, StrikeMove } from '../../api/types.ts';
 import { oiIntMeta, type OiSeverity } from '../../core/oiInterpretation.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
 
@@ -79,7 +80,7 @@ export function IntervalWiseOiPage() {
 
   return (
     <div>
-      <h1 className="ay-sr-only">Interval-wise OI</h1>
+      <PageHeader title="Interval-wise OI" subtitle="Top OI gainer/loser strikes across 15 min, 60 min and daily lookbacks" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry />
@@ -88,7 +89,7 @@ export function IntervalWiseOiPage() {
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         {CHARTS.map((c, i) => (
-          <div key={c.title}>
+          <div key={c.title} className="card shadow-e1">
             <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">{c.title}</h2>
             {series[i].length > 0 ? (
               <EChart makeOption={options[i]} height={240} ariaLabel={`${c.title} top strikes by OI change`} />

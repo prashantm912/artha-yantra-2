@@ -158,7 +158,7 @@ export function OptionsPremiumPage() {
           title: 'No premium data — pick an underlying + expiry with a captured snapshot.',
         }}
         errorTitle="Couldn't load options premium"
-        skeleton={<Skeleton variant="chart-block" height={440} />}
+        skeleton={<Skeleton variant="chart-block" className="h-64 sm:h-80 lg:h-[440px]" />}
       >
         {() => (
           <BeatBlock className="card shadow-e1">
@@ -177,7 +177,7 @@ export function OptionsPremiumPage() {
             </div>
             <EChart
               makeOption={makeOption}
-              height={440}
+              className="h-64 sm:h-80 lg:h-[440px]"
               ariaLabel="Call versus Put premium bars per strike around ATM"
             />
           </BeatBlock>

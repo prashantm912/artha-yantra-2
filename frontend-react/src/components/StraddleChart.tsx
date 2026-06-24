@@ -176,7 +176,7 @@ export function StraddleChart({ items, callStrike, putStrike, underlying }: Stra
       )}
       <EChart
         makeOption={makeOption}
-        height={440}
+        className="h-64 sm:h-80 lg:h-[440px]"
         ariaLabel={`Straddle premium candlestick for ${watermark} with VWAP, 20 EMA, Call and Put price lines`}
       />
     </div>

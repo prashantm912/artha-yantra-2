@@ -267,7 +267,11 @@ export function StrategyBuilderPage() {
             </BeatStrip>
           </div>
           <BeatBlock className="card shadow-e1 mb-4">
-            <EChart makeOption={makeOption} height={320} ariaLabel="Strategy payoff at expiry vs underlying" />
+            <EChart
+              makeOption={makeOption}
+              className="h-56 sm:h-72 lg:h-[320px]"
+              ariaLabel="Strategy payoff at expiry vs underlying"
+            />
           </BeatBlock>
         </>
       ) : (

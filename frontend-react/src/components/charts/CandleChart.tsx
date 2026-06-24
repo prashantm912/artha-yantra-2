@@ -38,12 +38,13 @@ function vars(el: HTMLElement) {
 interface Props {
   bars: MarketCandle[];
   marks: ChartMark[];
+  /** Fixed height; pass `undefined` and a responsive `h-*` className to drive height from CSS. */
   height?: number;
   ariaLabel: string;
   className?: string;
 }
 
-export function CandleChart({ bars, marks, height = 460, ariaLabel, className }: Props) {
+export function CandleChart({ bars, marks, height, ariaLabel, className }: Props) {
   const elRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -139,5 +140,13 @@ export function CandleChart({ bars, marks, height = 460, ariaLabel, className }:
     if (bars.length) chartRef.current?.timeScale().fitContent();
   }, [bars, marks]);
 
-  return <div ref={elRef} role="img" aria-label={ariaLabel} className={cn('w-full', className)} style={{ height }} />;
+  return (
+    <div
+      ref={elRef}
+      role="img"
+      aria-label={ariaLabel}
+      className={cn('w-full', className)}
+      style={height != null ? { height } : undefined}
+    />
+  );
 }

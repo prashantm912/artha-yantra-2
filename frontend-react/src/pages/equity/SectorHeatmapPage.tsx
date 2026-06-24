@@ -127,11 +127,15 @@ export function SectorHeatmapPage() {
         isEmpty={() => tiles.length === 0}
         empty={{ title: 'No bhavcopy for this index yet.' }}
         errorTitle="Couldn't load the sector heatmap"
-        skeleton={<Skeleton variant="chart-block" height={560} />}
+        skeleton={<Skeleton variant="chart-block" className="h-80 sm:h-96 lg:h-[560px]" />}
       >
         {() => (
           <BeatBlock className="card shadow-e1">
-            <EChart makeOption={makeOption} height={560} ariaLabel={`${index} sector-grouped % change heatmap`} />
+            <EChart
+              makeOption={makeOption}
+              className="h-80 sm:h-96 lg:h-[560px]"
+              ariaLabel={`${index} sector-grouped % change heatmap`}
+            />
           </BeatBlock>
         )}
       </QueryState>

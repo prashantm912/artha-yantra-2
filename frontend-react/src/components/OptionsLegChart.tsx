@@ -172,7 +172,7 @@ export function OptionsLegChart({ items, tradingsymbol, legLabel }: OptionsLegCh
   return (
     <EChart
       makeOption={makeOption}
-      height={400}
+      className="h-64 sm:h-80 lg:h-[400px]"
       ariaLabel={`${legLabel} option premium candlestick for ${tradingsymbol} with OI line and VWAP`}
     />
   );

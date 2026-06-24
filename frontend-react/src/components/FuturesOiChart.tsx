@@ -167,7 +167,7 @@ export function FuturesOiChart({ items, tradingsymbol }: FuturesOiChartProps) {
   return (
     <EChart
       makeOption={makeOption}
-      height={440}
+      className="h-64 sm:h-80 lg:h-[440px]"
       ariaLabel={`Futures OI versus price for ${tradingsymbol}: price candlesticks on the right axis and open interest line on the left`}
     />
   );

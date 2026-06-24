@@ -104,11 +104,15 @@ export function FiiLongShortPage() {
         isEmpty={() => rows.length === 0}
         empty={{ title: 'No FII participant-OI history captured for this window yet.' }}
         errorTitle="Couldn't load FII long-short ratio"
-        skeleton={<Skeleton variant="chart-block" height={440} />}
+        skeleton={<Skeleton variant="chart-block" className="h-64 sm:h-80 lg:h-[440px]" />}
       >
         {() => (
           <BeatBlock className="card shadow-e1">
-            <EChart makeOption={makeOption} height={440} ariaLabel="FII index-futures long-short ratio percentage over time" />
+            <EChart
+              makeOption={makeOption}
+              className="h-64 sm:h-80 lg:h-[440px]"
+              ariaLabel="FII index-futures long-short ratio percentage over time"
+            />
           </BeatBlock>
         )}
       </QueryState>

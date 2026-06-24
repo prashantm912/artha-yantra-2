@@ -65,9 +65,14 @@ export function ChartsPage() {
 
       <BeatBlock>
         {bars.length > 0 ? (
-          <CandleChart bars={bars} marks={marks} height={460} ariaLabel={`${symbol} ${interval} candlestick chart`} />
+          <CandleChart
+            bars={bars}
+            marks={marks}
+            className="h-72 sm:h-96 lg:h-[460px]"
+            ariaLabel={`${symbol} ${interval} candlestick chart`}
+          />
         ) : (
-          <div className="grid h-[460px] place-items-center rounded-lg border border-ay-border text-ay-muted">
+          <div className="grid h-72 sm:h-96 lg:h-[460px] place-items-center rounded-lg border border-ay-border text-ay-muted">
             {candles.isLoading ? 'Loading candles…' : `No candles for ${symbol} @ ${interval}.`}
           </div>
         )}

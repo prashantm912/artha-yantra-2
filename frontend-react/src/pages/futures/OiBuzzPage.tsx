@@ -159,7 +159,7 @@ export function OiBuzzPage() {
 
       <QueryState
         query={q}
-        skeleton={<Skeleton variant="chart-block" height={520} />}
+        skeleton={<Skeleton variant="chart-block" className="h-72 sm:h-96 lg:h-[520px]" />}
         empty={{
           icon: LayoutGrid,
           title: 'No futures data for this index right now.',
@@ -167,10 +167,10 @@ export function OiBuzzPage() {
       >
         {() =>
           visibleTiles.length > 0 ? (
-            <BeatBlock>
+            <BeatBlock className="card shadow-e1">
               <EChart
                 makeOption={makeOption}
-                height={520}
+                className="h-72 sm:h-96 lg:h-[520px]"
                 ariaLabel={`${index} constituent % change heatmap`}
               />
             </BeatBlock>

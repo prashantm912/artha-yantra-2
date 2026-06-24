@@ -458,10 +458,29 @@ body {
   animation: ay-flash 0.5s ease-out;
 }
 
+/* Live-state dot breathing (§4.0): slow opacity pulse so liveness reads without text.
+   ≥1.5s per the spec; reduced-motion-gated below alongside .ay-pulse. */
+@keyframes ay-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.ay-breathe {
+  animation: ay-breathe 2s var(--ease-standard) infinite;
+}
+
 /* Blanket OS reduced-motion — every token-driven animation/transition (extends the .ay-pulse guard). (§1.4) */
 @media (prefers-reduced-motion: reduce) {
   .ay-pulse {
     animation: none;
+  }
+  .ay-breathe {
+    animation: none;
+    opacity: 1;
   }
   .ay-skeleton {
     animation: none;

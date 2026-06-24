@@ -2,6 +2,7 @@ package in.arthayantra.marketdata.nse;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import in.arthayantra.marketdata.feeds.FiiDiiFetcher;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;

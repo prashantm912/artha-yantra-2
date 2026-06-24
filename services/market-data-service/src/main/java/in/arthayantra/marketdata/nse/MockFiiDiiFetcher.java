@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.nse;
 
+import in.arthayantra.marketdata.feeds.FiiDiiFetcher;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.ZoneOffset;

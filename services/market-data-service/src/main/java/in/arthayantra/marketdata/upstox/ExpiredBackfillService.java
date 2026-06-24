@@ -4,7 +4,7 @@ import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.marketdata.candles.Candle;
 import in.arthayantra.marketdata.candles.CandleRepository;
-import in.arthayantra.marketdata.openalgo.live.OpenAlgoSymbols;
+import in.arthayantra.marketdata.openalgo.OpenAlgoSymbols;
 import in.arthayantra.marketdata.upstox.UpstoxExpiredInstrumentsClient.Bar;
 import in.arthayantra.marketdata.upstox.UpstoxExpiredInstrumentsClient.Leg;
 import java.math.BigDecimal;

@@ -1,10 +1,10 @@
-package in.arthayantra.marketdata.nse;
+package in.arthayantra.marketdata.feeds;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 
-/** Port for the NSE daily FII/DII cash activity (B-1b). */
+/** Port for the daily FII/DII cash activity (B-1b; NSE-primary, Upstox swap-out). */
 public interface FiiDiiFetcher {
 
   /** One category's cash buy/sell/net for a trade date (values in ₹ crore). */

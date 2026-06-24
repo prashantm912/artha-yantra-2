@@ -1,4 +1,4 @@
-package in.arthayantra.marketdata.openalgo.live;
+package in.arthayantra.marketdata.openalgo;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;

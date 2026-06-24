@@ -3,30 +3,29 @@ package in.arthayantra.marketdata.nse.analytics;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.error.NotFoundException;
 import in.arthayantra.marketdata.constituents.StockUpstoxKeyMap;
-import in.arthayantra.marketdata.upstox.UpstoxAnalyticsClient;
-import in.arthayantra.marketdata.upstox.UpstoxNews;
+import in.arthayantra.marketdata.feeds.NewsSource;
 import java.util.List;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 /**
- * Per-stock news / announcements from Upstox {@code GET /v2/news} (the analytics token covers it —
- * verified live). The symbol → Upstox instrument key comes from the static {@link StockUpstoxKeyMap}.
- * The Upstox client is {@code live}-only ({@code @Profile("live")} + {@code analytics.enabled}); when
- * it is absent (mock / not configured) or the call fails, {@code available=false} with no items so the
- * page degrades cleanly rather than erroring.
+ * Per-stock news / announcements via the neutral {@link NewsSource} port (the Upstox adapter wraps
+ * {@code GET /v2/news} — the analytics token covers it, verified live). The symbol → Upstox
+ * instrument key comes from the static {@link StockUpstoxKeyMap}. The Upstox news source is {@code
+ * live}-only ({@code @Profile("live")} + {@code analytics.enabled}); when it is absent (mock / not
+ * configured) or the call fails, {@code available=false} with no items so the page degrades cleanly
+ * rather than erroring.
  */
 @Service
 public class EquityNewsService {
 
   private static final int PAGE_SIZE = 30;
 
-  private final ObjectProvider<UpstoxAnalyticsClient> client;
+  private final ObjectProvider<NewsSource> newsSource;
   private final StockUpstoxKeyMap keyMap;
 
-  public EquityNewsService(
-      ObjectProvider<UpstoxAnalyticsClient> client, StockUpstoxKeyMap keyMap) {
-    this.client = client;
+  public EquityNewsService(ObjectProvider<NewsSource> newsSource, StockUpstoxKeyMap keyMap) {
+    this.newsSource = newsSource;
     this.keyMap = keyMap;
   }
 
@@ -44,15 +43,15 @@ public class EquityNewsService {
       throw new NotFoundException(
           ErrorCodes.NOT_FOUND_INSTRUMENT, "no Upstox instrument key for symbol " + symbol);
     }
-    UpstoxAnalyticsClient upstox = client.getIfAvailable();
-    if (upstox == null) {
-      return new News(symbol, false, List.of()); // Upstox news source not configured (mock / off)
+    NewsSource source = newsSource.getIfAvailable();
+    if (source == null) {
+      return new News(symbol, false, List.of()); // news source not configured (mock / off)
     }
     try {
       List<NewsItem> items =
-          upstox.news(key, PAGE_SIZE).stream()
+          source.news(key, PAGE_SIZE).stream()
               .map(
-                  (UpstoxNews.Article a) ->
+                  (NewsSource.NewsArticle a) ->
                       new NewsItem(
                           a.heading(), a.summary(), a.thumbnail(), a.articleLink(), a.publishedTime()))
               .toList();

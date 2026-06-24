@@ -1,5 +1,7 @@
 package in.arthayantra.marketdata.nse;
 
+import in.arthayantra.marketdata.feeds.FiiDerivativeFetcher;
+import in.arthayantra.marketdata.feeds.FiiDiiFetcher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;

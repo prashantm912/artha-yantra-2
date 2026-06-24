@@ -29,23 +29,31 @@ public class NotifierService {
   private final NotifierClient client;
   private final FloodControl flood;
   private final int retryMax;
+  private final boolean scalpAlertsEnabled;
 
   /** Wires the audit repo, client, flood control + retry budget. */
   public NotifierService(
       NotificationRepository repo,
       NotifierClient client,
       FloodControl flood,
-      @Value("${artha.notifier.retry-max-attempts:3}") int retryMax) {
+      @Value("${artha.notifier.retry-max-attempts:3}") int retryMax,
+      @Value("${artha.notifier.scalp-alerts.enabled:false}") boolean scalpAlertsEnabled) {
     this.repo = repo;
     this.client = client;
     this.flood = flood;
     this.retryMax = retryMax;
+    this.scalpAlertsEnabled = scalpAlertsEnabled;
   }
 
   /** In-process async push for an emitted ENTRY signal (bounded retry, flood-controlled). */
   @Async("notifierExecutor")
   @EventListener
   public void onSignal(SignalEmitted e) {
+    // When scalp alerts (Z1) are on, a scalper entry gets the richer ScalpAlertService push instead
+    // of this generic one — skip it here so the same leg isn't double-pushed. Default OFF ⇒ no-op.
+    if (scalpAlertsEnabled && e.scalp() != null) {
+      return;
+    }
     Target target = repo.targetForVersion(e.strategyVersionId()).orElse(null);
     if (target == null || !target.enabled() || target.channel() == null) {
       return; // not opted in

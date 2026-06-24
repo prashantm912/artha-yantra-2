@@ -74,7 +74,7 @@ class NotifierIntegrationTest extends StrategySignalIntegrationTestBase {
     NotifierClient client = Mockito.mock(NotifierClient.class);
     Mockito.when(client.configured("NTFY")).thenReturn(true);
     FloodControl flood = new FloodControl(600, 30, Clock.systemUTC());
-    NotifierService service = new NotifierService(notificationRepo, client, flood, 3);
+    NotifierService service = new NotifierService(notificationRepo, client, flood, 3, false);
 
     SignalEmitted event =
         new SignalEmitted(

@@ -15,6 +15,9 @@
     "gen:api": "openapi-typescript ../contracts/strategy-signal-service.openapi.json -o ../contracts/gen/strategy-signal-service.d.ts && openapi-typescript ../contracts/market-data-service.openapi.json -o ../contracts/gen/market-data-service.d.ts && openapi-typescript ../contracts/edge-gateway.openapi.json -o ../contracts/gen/edge-gateway.d.ts && openapi-typescript ../contracts/backtest-service.openapi.json -o ../contracts/gen/backtest-service.d.ts && openapi-typescript ../contracts/optimizer-service.openapi.json -o ../contracts/gen/optimizer-service.d.ts"
   },
   "dependencies": {
+    "@fontsource-variable/inter": "^5.2.8",
+    "@fontsource-variable/jetbrains-mono": "^5.2.8",
+    "@fontsource-variable/newsreader": "^5.2.10",
     "@stomp/stompjs": "^7.3.0",
     "@tanstack/react-query": "^5.62.0",
     "clsx": "^2.1.1",

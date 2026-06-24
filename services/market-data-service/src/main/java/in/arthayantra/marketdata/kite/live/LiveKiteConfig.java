@@ -190,9 +190,17 @@ public class LiveKiteConfig {
 
   /**
    * Live ticker feed (Phase 13): KiteTicker behind the TickerHandle seam, created lazily at
-   * start because the day's token cannot exist before the morning ritual.
+   * start because the day's token cannot exist before the morning ritual. Default ticker source;
+   * {@code artha.marketdata.source.ticker=upstox} swaps in the direct-Upstox v3 WS feed (Wave U3,
+   * {@code kite.upstoxfeed.UpstoxMarketFeedConfig}) — Kite stays the default until the §17.3
+   * scalp-latency gate is green and the owner flips it. Exactly ONE {@link MarketFeed} binds (the
+   * two are mutually-exclusive {@code @ConditionalOnProperty} branches).
    */
   @Bean
+  @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+      name = "artha.marketdata.source.ticker",
+      havingValue = "kite",
+      matchIfMissing = true)
   public MarketFeed liveMarketFeed(
       in.arthayantra.marketdata.kite.ticker.SubscriptionRegistry registry,
       in.arthayantra.marketdata.kite.LastSeenProvider lastSeenProvider,

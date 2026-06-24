@@ -23,6 +23,7 @@
     <kiteconnect.version>3.5.1</kiteconnect.version>
     <wiremock.version>3.13.2</wiremock.version>
     <commons-math3.version>3.6.1</commons-math3.version>
+    <protobuf.version>4.33.2</protobuf.version>
   </properties>
 
   <dependencyManagement>
@@ -109,6 +110,16 @@
     <dependency>
       <groupId>com.google.code.gson</groupId>
       <artifactId>gson</artifactId>
+    </dependency>
+    <!-- Upstox v3 market-data-feed frames are binary protobuf (MarketDataFeedV3 /
+         FeedResponse). We decode them with protobuf-java's low-level CodedInputStream
+         (Wave U3) — no protoc / no generated classes / no new build plugin (protoc
+         download is fragile on the TLS-intercepting-AV box). The WS transport reuses
+         nv-websocket-client, already on the classpath transitively via kiteconnect. -->
+    <dependency>
+      <groupId>com.google.protobuf</groupId>
+      <artifactId>protobuf-java</artifactId>
+      <version>${protobuf.version}</version>
     </dependency>
     <!-- Black-76 pricing/IV math hoisted to libs/black76-math (Phase 30A / A10);
          commons-math3 (normal CDF) arrives transitively through it -->

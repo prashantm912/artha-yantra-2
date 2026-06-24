@@ -28,6 +28,18 @@
   SENSEX/BSE F&O SPAN comes from BSE/ICCL via a separate (also VERIFY) URL — out of
   scope for v1 (NIFTY/NSE scalping first).
 
+  (CONFIRMED 2026-06, NSE Clearing circulars / marginism docs) The DEDICATED end-of-day
+  SPAN risk-parameter file is named  nsccl.<YYYYMMDD>.s.spn  (gzip variant
+  nsccl.<YYYYMMDD>.s.parallel.spn.gz), published under the members FAOFTP tree
+  (/FAOFTP/FAOCOMMON/Parameter). The public landing page is
+  https://www.nseindia.com/products-services/equity-derivatives-span-risk-parameter-files
+  ("All Reports" -> Derivatives also lists the intraday + EOD SPAN files). The PR_<DDMMYY>.zip
+  pattern used below is the equities PR (price-report) bundle on nsearchives; it has
+  historically carried a .spn, and this script just extracts the first *.spn from whatever
+  zip it gets, so it is robust to either source. STILL VERIFY the exact public URL + auth
+  (some SPAN files sit behind a member login) before scheduling — do NOT treat the
+  $SpanUrl below as a confirmed unauthenticated endpoint.
+
 .EXAMPLE
   pwsh tools/span-fetch/fetch_spn.ps1
   pwsh tools/span-fetch/fetch_spn.ps1 -Date 2026-06-25 -KeepDays 14

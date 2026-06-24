@@ -19,6 +19,7 @@ import { useExpiries, useUnderlyings } from '../../api/instruments.ts';
 import { optionExchange, useOptionChain, type ChainLeg } from '../../api/scalper.ts';
 import { useLiveTicks } from '../../api/ticks.ts';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 
 // /scalper (master plan §20 / Phase 4b): the scalper cockpit — live ACTIVE signal feed (left), a
 // pre-filled PAPER order ticket (middle; click a signal to load it, or enter an instrument manually),
@@ -133,12 +134,12 @@ export function ScalperCockpitPage() {
   };
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Scalper cockpit" subtitle="Live signals · pre-filled paper order ticket · open positions & P&L — paper only, never a live broker order" />
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1fr_1.2fr]">
+      <BeatBlock className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1fr_1.2fr]">
         {/* Live signals */}
         <section className="min-w-0">
-          <h2 className="mb-2 text-sm font-semibold">Live signals</h2>
+          <h2 className="mb-2 text-h3 text-ay-text">Live signals</h2>
           <div className="max-h-[calc(100vh-12rem)] overflow-auto rounded-lg border border-ay-border">
             <QueryState
               query={signals}
@@ -175,7 +176,7 @@ export function ScalperCockpitPage() {
         {/* Order ticket (paper) */}
         <section className="min-w-0">
           <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-sm font-semibold">
+            <h2 className="text-h3 text-ay-text">
               Paper order ticket {ticket.signalId != null && <span className="text-xs text-accent">· signal #{ticket.signalId}</span>}
             </h2>
             <button type="button" onClick={() => setQpOpen((v) => !v)} className="text-xs text-accent hover:underline">
@@ -304,13 +305,13 @@ export function ScalperCockpitPage() {
         {/* Positions + P&L */}
         <section className="min-w-0">
           <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-sm font-semibold">Positions & P&L</h2>
+            <h2 className="text-h3 text-ay-text">Positions & P&L</h2>
             <Link to="/paper" className="text-xs text-accent hover:underline">
               Ledger →
             </Link>
           </div>
           {acct && (
-            <div className="mb-3 flex flex-wrap gap-x-5 gap-y-1 rounded-lg border border-ay-border bg-surface-1 p-2 text-sm">
+            <div className="card shadow-e1 mb-3 flex flex-wrap gap-x-5 gap-y-1 text-sm">
               <span><span className="text-ay-muted">Equity </span><span className="font-semibold tabular-nums">{money(acct.equity)}</span></span>
               <span><span className="text-ay-muted">Day P&L </span><span className={cn('font-semibold tabular-nums', tone(acct.dayPnl))}>{money(acct.dayPnl)}</span></span>
               <span><span className="text-ay-muted">Open </span><span className="font-semibold tabular-nums">{positions.data?.items.length ?? 0}</span></span>
@@ -363,7 +364,7 @@ export function ScalperCockpitPage() {
             </table>
           </div>
         </section>
-      </div>
-    </div>
+      </BeatBlock>
+    </LoadBeat>
   );
 }

@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Select } from '../../components/atoms/Select.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { useSession } from '../../stores/session.store.ts';
 import { THEMES } from '../../lib/theme.ts';
 import { fetchKiteLoginUrl, useKiteStatus, useSyncInstruments, useSyncStatus } from '../../api/settings.ts';
@@ -12,7 +13,7 @@ import { fetchKiteLoginUrl, useKiteStatus, useSyncInstruments, useSyncStatus } f
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="rounded-xl border border-ay-border bg-surface-1 p-4">
-      <h2 className="mb-3 text-sm font-semibold">{title}</h2>
+      <h2 className="mb-3 text-h3 text-ay-text">{title}</h2>
       {children}
     </section>
   );
@@ -46,12 +47,14 @@ export function SettingsPage() {
   const s = sync.data;
 
   return (
-    <div className="flex max-w-3xl flex-col gap-4">
+    <LoadBeat>
+      <div className="flex max-w-3xl flex-col gap-4">
       <PageHeader title="Settings" subtitle="Kite Connect, appearance, instrument data-sync & global risk" />
       {mockMode && (
         <p className="text-sm text-warn">MOCK MODE — credential-free synthetic feed; no Kite session required.</p>
       )}
 
+      <BeatBlock className="flex flex-col gap-4">
       <Section title="Kite Connect">
         {k && (
           <dl className="mb-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
@@ -113,6 +116,8 @@ export function SettingsPage() {
           Kill switch, daily-loss and max-open limits are managed on the Paper trading page.
         </p>
       </Section>
-    </div>
+      </BeatBlock>
+      </div>
+    </LoadBeat>
   );
 }

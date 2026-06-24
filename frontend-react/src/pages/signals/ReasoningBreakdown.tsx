@@ -64,7 +64,7 @@ export function ReasoningBreakdown({ breakdown }: { breakdown: ScoreBreakdownDto
   return (
     <div className="flex flex-col gap-4">
       <section>
-        <h3 className="mb-1 text-sm font-semibold text-ay-text">Composite vs threshold</h3>
+        <h3 className="mb-1 text-h3 text-ay-text">Composite vs threshold</h3>
         <div className="relative h-3.5 overflow-hidden rounded-full bg-surface-2">
           <div
             className={cn('h-full', breakdown.passed ? 'bg-bull' : 'bg-warn')}
@@ -80,7 +80,7 @@ export function ReasoningBreakdown({ breakdown }: { breakdown: ScoreBreakdownDto
       </section>
 
       <section>
-        <h3 className="mb-1 text-sm font-semibold text-ay-text">Contributions (w·s)</h3>
+        <h3 className="mb-1 text-h3 text-ay-text">Contributions (w·s)</h3>
         <div className="flex h-[18px] overflow-hidden rounded-md bg-surface-2" aria-label="Stacked indicator contributions">
           {breakdown.indicators.map((e, i) =>
             e.activated && activatedTotal > 0 ? (
@@ -124,7 +124,7 @@ export function ReasoningBreakdown({ breakdown }: { breakdown: ScoreBreakdownDto
       </section>
 
       <section>
-        <h3 className="mb-1 text-sm font-semibold text-ay-text">Gate checklist</h3>
+        <h3 className="mb-1 text-h3 text-ay-text">Gate checklist</h3>
         <ul className="flex list-none flex-col gap-1 pl-2 text-sm">
           <GateNode node={breakdown.gate} />
         </ul>

@@ -5,6 +5,7 @@ import { QuotaGauge } from '../../components/dataops/QuotaGauge.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatBlock, BeatItem, BeatStrip, LoadBeat } from '../../components/LoadBeat.tsx';
 
 // B2 Coverage dashboard (route /data-ops/coverage): a per-(underlying, exchange) summary of the
 // expired-contract backfill — how many contracts are registered, how many have complete vs partial
@@ -127,46 +128,56 @@ export function CoveragePage() {
   ];
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Data Coverage" />
 
-      <dl className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <StatPill label="Contracts" value={totals.contracts} />
-        <StatPill label="Complete" value={totals.complete} />
-        <StatPill label="Partial" value={totals.partial} />
-        <StatPill label="Candle rows" value={totals.candleRows} />
-      </dl>
+      <BeatStrip className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <BeatItem>
+          <StatPill label="Contracts" value={totals.contracts} />
+        </BeatItem>
+        <BeatItem>
+          <StatPill label="Complete" value={totals.complete} />
+        </BeatItem>
+        <BeatItem>
+          <StatPill label="Partial" value={totals.partial} />
+        </BeatItem>
+        <BeatItem>
+          <StatPill label="Candle rows" value={totals.candleRows} />
+        </BeatItem>
+      </BeatStrip>
 
-      <QueryState
-        query={coverage}
-        empty={{ title: 'No coverage captured yet.' }}
-        skeleton={<Skeleton variant="table-rows" rows={8} cols={6} />}
-      >
-        {() => (
-          <DataTable
-            columns={columns}
-            rows={rows}
-            rowKey={(r) => r.underlying + r.exchange}
-            pageSize={20}
-            initialSort={{ id: 'candleRows', dir: 'desc' }}
-            ariaLabel="Expired-contract coverage"
-            emptyMessage="No coverage captured yet."
-          />
-        )}
-      </QueryState>
+      <BeatBlock>
+        <QueryState
+          query={coverage}
+          empty={{ title: 'No coverage captured yet.' }}
+          skeleton={<Skeleton variant="table-rows" rows={8} cols={6} />}
+        >
+          {() => (
+            <DataTable
+              columns={columns}
+              rows={rows}
+              rowKey={(r) => r.underlying + r.exchange}
+              pageSize={20}
+              initialSort={{ id: 'candleRows', dir: 'desc' }}
+              ariaLabel="Expired-contract coverage"
+              emptyMessage="No coverage captured yet."
+            />
+          )}
+        </QueryState>
 
-      <div className="mt-3">
-        <QuotaGauge configured={quota.data?.configured ?? false} windows={quota.data?.windows ?? []} />
-      </div>
-    </div>
+        <div className="mt-3">
+          <QuotaGauge configured={quota.data?.configured ?? false} windows={quota.data?.windows ?? []} />
+        </div>
+      </BeatBlock>
+    </LoadBeat>
   );
 }
 
 function StatPill(props: { label: string; value: number }) {
   return (
     <div className="card shadow-e1">
-      <dt className="text-caption uppercase tracking-wide text-ay-muted">{props.label}</dt>
-      <dd className="nums text-lg font-semibold text-ay-text">{props.value.toLocaleString()}</dd>
+      <div className="text-caption uppercase tracking-wide text-ay-muted">{props.label}</div>
+      <div className="nums text-lg font-semibold text-ay-text">{props.value.toLocaleString()}</div>
     </div>
   );
 }

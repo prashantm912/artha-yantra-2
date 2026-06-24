@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Stepper } from '../../components/dataops/Stepper.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import {
   downloadExport,
   useExportContracts,
@@ -104,13 +105,13 @@ export function ExportWizardPage() {
   }
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Export Wizard" />
 
       <div className="mx-auto max-w-3xl">
         <Stepper steps={STEPS} current={step} />
 
-        <div className="mt-4 rounded-md border border-ay-border bg-surface-1 p-4">
+        <BeatBlock className="mt-4 rounded-md border border-ay-border bg-surface-1 p-4">
           {step === 0 && (
             <fieldset>
               <legend className="mb-2 text-xs font-semibold text-ay-muted">
@@ -325,7 +326,7 @@ export function ExportWizardPage() {
               )}
             </div>
           )}
-        </div>
+        </BeatBlock>
 
         <div className="mt-4 flex justify-between">
           <button
@@ -348,6 +349,6 @@ export function ExportWizardPage() {
           )}
         </div>
       </div>
-    </div>
+    </LoadBeat>
   );
 }

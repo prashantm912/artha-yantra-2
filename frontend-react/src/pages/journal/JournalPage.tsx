@@ -3,6 +3,7 @@ import { Select } from '../../components/atoms/Select.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import {
   LINKED_OPTIONS,
   linkLabel,
@@ -52,7 +53,7 @@ export function JournalPage() {
   const inputCls = 'h-9 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text';
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Trade journal" subtitle="Weekly-review entries — filter by tag or linked entity, rate discipline & emotion" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -87,6 +88,7 @@ export function JournalPage() {
         </button>
       </div>
 
+      <BeatBlock>
       <QueryState
         query={list}
         empty={{ title: 'No journal entries — annotate a signal, paper trade or backtest.' }}
@@ -134,6 +136,7 @@ export function JournalPage() {
           </div>
         )}
       </QueryState>
-    </div>
+      </BeatBlock>
+    </LoadBeat>
   );
 }

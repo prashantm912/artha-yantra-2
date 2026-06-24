@@ -85,7 +85,7 @@ export function PaperBookPanel() {
     <div className="flex flex-col gap-3">
       {/* Account header — equity · day P&L · total exposure (capital used) · open count. */}
       {acct && (
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
+        <div className="card shadow-e1 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
           <span>
             <span className="text-ay-muted">Equity </span>
             <span className="font-semibold tabular-nums">{money(acct.equity)}</span>
@@ -115,6 +115,7 @@ export function PaperBookPanel() {
       </div>
 
       {/* Open positions with live MTM. */}
+      <h3 className="text-h3 text-ay-text">Open positions</h3>
       <div className="max-h-[24rem] overflow-auto rounded-lg border border-ay-border">
         <table className="w-full border-collapse text-sm">
           <thead className="sticky top-0 bg-surface-1 text-left text-xs uppercase text-ay-muted">

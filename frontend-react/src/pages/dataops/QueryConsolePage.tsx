@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { SqlEditor } from '../../components/dataops/SqlEditor.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { cn } from '../../lib/cn.ts';
 import { downloadQueryCsv, runQuery, type QueryResult } from '../../api/dataops.ts';
 
@@ -60,7 +61,7 @@ export function QueryConsolePage() {
   }
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Query / Scan console" />
 
       <div className="grid gap-3 md:grid-cols-[14rem_1fr]">
@@ -82,7 +83,7 @@ export function QueryConsolePage() {
         </nav>
 
         {/* Right: editor + controls + results */}
-        <div className="space-y-3">
+        <BeatBlock className="space-y-3">
           <SqlEditor
             value={sql}
             onChange={setSql}
@@ -182,8 +183,8 @@ export function QueryConsolePage() {
               </p>
             </div>
           )}
-        </div>
+        </BeatBlock>
       </div>
-    </div>
+    </LoadBeat>
   );
 }

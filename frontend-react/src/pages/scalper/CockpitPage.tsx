@@ -18,6 +18,7 @@ import { StraddleChart } from '../../components/StraddleChart.tsx';
 import { CallOiHeatmap, PutOiHeatmap } from '../../components/OiHeatmapChart.tsx';
 import { trendMeta } from '../../core/connectingDots.ts';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { SignalsFeedPanel } from '../signals/SignalsFeedPanel.tsx';
 import { PaperBookPanel } from './PaperBookPanel.tsx';
 
@@ -47,7 +48,7 @@ function Panel({
   return (
     <section className="min-w-0 rounded-lg border border-ay-border bg-surface-1 p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold text-ay-text">{title}</h2>
+        <h2 className="text-h3 text-ay-text">{title}</h2>
         {to && (
           <Link to={to} className="whitespace-nowrap text-xs text-accent hover:underline">
             {linkLabel ?? 'Open'} →
@@ -108,7 +109,7 @@ export function CockpitPage() {
     chainQ.isFetching || cdQ.isFetching || straddleQ.isFetching || heatQ.isFetching;
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader title="Scalping cockpit" subtitle="One live operator screen — option chain · OI confluence · straddle · signals · paper book · heatmap" />
 
       {/* The single shared control bar — drives every panel below via the SymbolContext store. */}
@@ -118,7 +119,10 @@ export function CockpitPage() {
       </div>
 
       {/* Live header strip (spot / PCR / ATM / sentiment). */}
-      <div className="mb-3 flex flex-wrap items-center gap-2" aria-live="polite">
+      <div
+        className="card shadow-e1 mb-3 flex flex-wrap items-center gap-2"
+        aria-live="polite"
+      >
         <Metric
           label={chain?.underlying ?? 'Underlying'}
           value={chain?.spot ? formatDecimal(chain.spot, 2) : '—'}
@@ -136,7 +140,7 @@ export function CockpitPage() {
       </div>
 
       {/* Adaptive grid: single scrollable column on narrow viewports, two columns from xl. */}
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <BeatBlock className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         {/* (a) Option chain (compact) */}
         <Panel title="Option chain" to="/options/options-chain" linkLabel="Full chain">
           {chain == null && !chainQ.isLoading ? (
@@ -228,7 +232,7 @@ export function CockpitPage() {
             )}
           </Panel>
         </div>
-      </div>
-    </div>
+      </BeatBlock>
+    </LoadBeat>
   );
 }

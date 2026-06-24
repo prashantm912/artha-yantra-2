@@ -5,6 +5,7 @@ import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { cn } from '../../lib/cn.ts';
 import { compareDecimal, formatDecimal, isNegative } from '../../lib/decimal.ts';
 import type { MarketStatus, PreOpenIndex } from '../../api/types.ts';
@@ -159,7 +160,7 @@ export function PreOpenMarketPage() {
   );
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader
         title="Pre-Open Market"
         subtitle="Exchange session phase + the NSE pre-open index snapshot from Upstox — pre-open is highlighted; net change and %change are sign-aware (green up, red down)"
@@ -174,11 +175,13 @@ export function PreOpenMarketPage() {
           skeleton={<Skeleton variant="card" />}
         >
           {(rows) => (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <BeatStrip className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               {rows.map((s) => (
-                <PhaseCard key={s.exchange} s={s} />
+                <BeatItem key={s.exchange}>
+                  <PhaseCard s={s} />
+                </BeatItem>
               ))}
-            </div>
+            </BeatStrip>
           )}
         </QueryState>
       </section>
@@ -197,17 +200,19 @@ export function PreOpenMarketPage() {
           skeleton={<Skeleton variant="table-rows" rows={4} cols={5} />}
         >
           {() => (
-            <DataTable
-              columns={columns}
-              rows={indices}
-              rowKey={(r) => r.key}
-              pageSize={10}
-              emptyMessage="No index pre-open snapshot available."
-              ariaLabel="Pre-open index snapshot"
-            />
+            <BeatBlock>
+              <DataTable
+                columns={columns}
+                rows={indices}
+                rowKey={(r) => r.key}
+                pageSize={10}
+                emptyMessage="No index pre-open snapshot available."
+                ariaLabel="Pre-open index snapshot"
+              />
+            </BeatBlock>
           )}
         </QueryState>
       </section>
-    </div>
+    </LoadBeat>
   );
 }

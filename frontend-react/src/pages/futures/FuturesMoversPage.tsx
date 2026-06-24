@@ -9,6 +9,7 @@ import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { cn } from '../../lib/cn.ts';
 import { compareDecimal, formatDecimal } from '../../lib/decimal.ts';
 
@@ -61,7 +62,7 @@ export function FuturesMoversPage() {
   );
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader
         title="Futures Market Movers"
         subtitle="Top gainers and losers by day price %, with OI interpretation"
@@ -93,18 +94,18 @@ export function FuturesMoversPage() {
         }
       >
         {() => (
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <BeatBlock className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div>
-              <div className="mb-1 text-sm font-semibold text-bull">Top Gainers</div>
+              <h2 className="mb-1 text-h3 font-semibold text-bull">Top Gainers</h2>
               <DataTable columns={COLUMNS} rows={gainers} rowKey={(r) => r.tradingsymbol} pageSize={8} initialSort={{ id: 'ltpPct', dir: 'desc' }} ariaLabel="Top gainers" emptyMessage="No gainers." />
             </div>
             <div>
-              <div className="mb-1 text-sm font-semibold text-bear">Top Losers</div>
+              <h2 className="mb-1 text-h3 font-semibold text-bear">Top Losers</h2>
               <DataTable columns={COLUMNS} rows={losers} rowKey={(r) => r.tradingsymbol} pageSize={8} initialSort={{ id: 'ltpPct', dir: 'asc' }} ariaLabel="Top losers" emptyMessage="No losers." />
             </div>
-          </div>
+          </BeatBlock>
         )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

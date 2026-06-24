@@ -9,6 +9,7 @@ import { FuturesOiChart } from '../../components/FuturesOiChart.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 
 // Futures OI Chart (§futures/oi-chart). The dual-axis OI-vs-price combo for one index future: real price
 // candlesticks (right axis) + the OI line (left axis). Keyed on the index name; the BE picks the active
@@ -29,7 +30,7 @@ export function FuturesOiChartPage() {
   const data = q.data ?? null;
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader
         title="Futures OI chart"
         subtitle="Dual-axis OI-vs-price combo for the active front index future"
@@ -47,11 +48,21 @@ export function FuturesOiChartPage() {
       </div>
 
       {/* Contract header strip. */}
-      <div className="mb-3 flex flex-wrap items-center gap-2" aria-live="polite">
-        <Metric label="Contract" value={data?.tradingsymbol ?? '—'} />
-        <Metric label="Expiry" value={data?.expiry ?? '—'} />
-        <Metric label="Interval" value={data?.interval ?? '—'} />
-        <Metric label="Last updated" value={data?.asOf ? data.asOf.slice(11, 19) : '—'} />
+      <div className="card shadow-e1 mb-3" aria-live="polite">
+        <BeatStrip className="flex flex-wrap items-center gap-2">
+          <BeatItem>
+            <Metric label="Contract" value={data?.tradingsymbol ?? '—'} />
+          </BeatItem>
+          <BeatItem>
+            <Metric label="Expiry" value={data?.expiry ?? '—'} />
+          </BeatItem>
+          <BeatItem>
+            <Metric label="Interval" value={data?.interval ?? '—'} />
+          </BeatItem>
+          <BeatItem>
+            <Metric label="Last updated" value={data?.asOf ? data.asOf.slice(11, 19) : '—'} />
+          </BeatItem>
+        </BeatStrip>
       </div>
 
       <QueryState
@@ -68,15 +79,15 @@ export function FuturesOiChartPage() {
               No intraday bars for this contract/session yet.
             </p>
           ) : (
-            <div className="card shadow-e1">
-              <h2 className="mb-1 text-center text-sm font-semibold text-ay-text">
+            <BeatBlock className="card shadow-e1">
+              <h2 className="mb-1 text-h3 font-semibold text-ay-text">
                 Futures Oi Vs. Price Analysis
               </h2>
               <FuturesOiChart items={d.items} tradingsymbol={d.tradingsymbol} />
-            </div>
+            </BeatBlock>
           )
         }
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

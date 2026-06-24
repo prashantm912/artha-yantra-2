@@ -7,6 +7,7 @@ import { BanksAnalysisTable } from '../../components/BanksAnalysisTable.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 
 // Banks Analysis (§futures/banks-analysis): the sector-wide time × 6-bank OI matrix. NAME-LESS + expiry-
 // less (always the 6 config banks) — only Mode + Date + Interval + Go. Interval set 3/5/10/15/30/60 (no 1m,
@@ -31,7 +32,7 @@ export function BanksAnalysisPage() {
   const intervalMinutes = useMemo(() => parseInt(q.data?.interval ?? '5m', 10) || 5, [q.data]);
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader
         title="Banks Analysis"
         subtitle="Sector-wide time × 6-bank OI matrix — cumulative LTP % / OI % per interval"
@@ -49,8 +50,12 @@ export function BanksAnalysisPage() {
         errorTitle="Couldn't load the banks matrix"
         skeleton={<Skeleton variant="table-rows" rows={10} cols={8} />}
       >
-        {() => <BanksAnalysisTable banks={banks} rows={rows} intervalMinutes={intervalMinutes} />}
+        {() => (
+          <BeatBlock>
+            <BanksAnalysisTable banks={banks} rows={rows} intervalMinutes={intervalMinutes} />
+          </BeatBlock>
+        )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

@@ -10,6 +10,7 @@ import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
 
 // One elevated breadth tile: uppercase wide-tracked caption label / mono value. Counts/percentages
@@ -114,7 +115,7 @@ export function BreadthPage() {
   );
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader
         title="Market Breadth"
         subtitle={
@@ -146,31 +147,43 @@ export function BreadthPage() {
         {() =>
           summary ? (
             <>
-              <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-                <BreadthStat label="Advances" value={String(summary.advances)} />
-                <BreadthStat label="Declines" value={String(summary.declines)} />
-                <BreadthStat label="Unchanged" value={String(summary.unchanged)} />
-                <BreadthStat label="Total" value={String(summary.total)} />
-                <BreadthStat label="Avg Delivery" value={pct(summary.avgDeliveryPct)} />
-              </div>
+              <BeatStrip className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                <BeatItem>
+                  <BreadthStat label="Advances" value={String(summary.advances)} />
+                </BeatItem>
+                <BeatItem>
+                  <BreadthStat label="Declines" value={String(summary.declines)} />
+                </BeatItem>
+                <BeatItem>
+                  <BreadthStat label="Unchanged" value={String(summary.unchanged)} />
+                </BeatItem>
+                <BeatItem>
+                  <BreadthStat label="Total" value={String(summary.total)} />
+                </BeatItem>
+                <BeatItem>
+                  <BreadthStat label="Avg Delivery" value={pct(summary.avgDeliveryPct)} />
+                </BeatItem>
+              </BeatStrip>
 
-              <div className="card shadow-e1 mb-4">
+              <BeatBlock className="card shadow-e1 mb-4">
                 <EChart makeOption={makeOption} height={180} ariaLabel="Advances, declines and unchanged counts" />
-              </div>
+              </BeatBlock>
 
-              <h2 className="mb-1 text-h3 text-ay-text">Delivery-% Leaders</h2>
-              <DataTable
-                columns={columns}
-                rows={data?.topDelivery ?? []}
-                rowKey={(r) => r.symbol}
-                pageSize={25}
-                ariaLabel="Delivery percentage leaders"
-                emptyMessage="No delivery data for this date."
-              />
+              <BeatBlock>
+                <h2 className="mb-1 text-h3 text-ay-text">Delivery-% Leaders</h2>
+                <DataTable
+                  columns={columns}
+                  rows={data?.topDelivery ?? []}
+                  rowKey={(r) => r.symbol}
+                  pageSize={25}
+                  ariaLabel="Delivery percentage leaders"
+                  emptyMessage="No delivery data for this date."
+                />
+              </BeatBlock>
             </>
           ) : null
         }
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

@@ -12,6 +12,7 @@ import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
 
 // Futures OI Analysis (oipulse §futures/oi-analysis): the per-interval OI table for ONE futures contract
@@ -90,7 +91,7 @@ export function FuturesOiAnalysisPage() {
   ];
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader
         title="Futures OI Analysis"
         subtitle="Per-interval OI, level breaks and 4-state interpretation for one futures contract"
@@ -109,17 +110,19 @@ export function FuturesOiAnalysisPage() {
         skeleton={<Skeleton variant="table-rows" rows={10} cols={11} />}
       >
         {() => (
-          <DataTable
-            columns={columns}
-            rows={rows}
-            rowKey={(r) => r.bucket}
-            pageSize={25}
-            initialSort={{ id: 'time', dir: 'desc' }}
-            ariaLabel="Futures OI analysis"
-            emptyMessage="No intraday futures data for this contract yet."
-          />
+          <BeatBlock>
+            <DataTable
+              columns={columns}
+              rows={rows}
+              rowKey={(r) => r.bucket}
+              pageSize={25}
+              initialSort={{ id: 'time', dir: 'desc' }}
+              ariaLabel="Futures OI analysis"
+              emptyMessage="No intraday futures data for this contract yet."
+            />
+          </BeatBlock>
         )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

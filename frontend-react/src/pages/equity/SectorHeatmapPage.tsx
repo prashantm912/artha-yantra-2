@@ -8,6 +8,7 @@ import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
 
 // Equity → Sector Heatmap (oipulse): a sector-GROUPED treemap of an index's constituents — sector boxes
@@ -109,7 +110,7 @@ export function SectorHeatmapPage() {
   );
 
   return (
-    <div>
+    <LoadBeat>
       <PageHeader
         title="Sector Heatmap"
         subtitle="Constituents grouped by sector · tile size + colour ∝ % change vs prev close"
@@ -129,11 +130,11 @@ export function SectorHeatmapPage() {
         skeleton={<Skeleton variant="chart-block" height={560} />}
       >
         {() => (
-          <div className="card shadow-e1">
+          <BeatBlock className="card shadow-e1">
             <EChart makeOption={makeOption} height={560} ariaLabel={`${index} sector-grouped % change heatmap`} />
-          </div>
+          </BeatBlock>
         )}
       </QueryState>
-    </div>
+    </LoadBeat>
   );
 }

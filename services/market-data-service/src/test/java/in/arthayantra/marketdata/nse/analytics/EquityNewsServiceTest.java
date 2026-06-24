@@ -9,8 +9,7 @@ import static org.mockito.Mockito.when;
 
 import in.arthayantra.common.web.error.NotFoundException;
 import in.arthayantra.marketdata.constituents.StockUpstoxKeyMap;
-import in.arthayantra.marketdata.upstox.UpstoxAnalyticsClient;
-import in.arthayantra.marketdata.upstox.UpstoxNews;
+import in.arthayantra.marketdata.feeds.NewsSource;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
@@ -18,17 +17,20 @@ import org.springframework.beans.factory.ObjectProvider;
 class EquityNewsServiceTest {
 
   @SuppressWarnings("unchecked")
-  private final ObjectProvider<UpstoxAnalyticsClient> provider = mock(ObjectProvider.class);
-  private final UpstoxAnalyticsClient client = mock(UpstoxAnalyticsClient.class);
+  private final ObjectProvider<NewsSource> provider = mock(ObjectProvider.class);
+  private final NewsSource source = mock(NewsSource.class);
   private final StockUpstoxKeyMap keyMap = mock(StockUpstoxKeyMap.class);
   private final EquityNewsService service = new EquityNewsService(provider, keyMap);
 
   @Test
   void mapsUpstoxNewsWhenClientPresent() {
     when(keyMap.key("RELIANCE")).thenReturn("NSE_EQ|INE002A01018");
-    when(provider.getIfAvailable()).thenReturn(client);
-    when(client.news(eq("NSE_EQ|INE002A01018"), anyInt()))
-        .thenReturn(List.of(new UpstoxNews.Article("Reliance up", "summary", "thumb", "http://x", 1782124170137L)));
+    when(provider.getIfAvailable()).thenReturn(source);
+    when(source.news(eq("NSE_EQ|INE002A01018"), anyInt()))
+        .thenReturn(
+            List.of(
+                new NewsSource.NewsArticle(
+                    "Reliance up", "summary", "thumb", "http://x", 1782124170137L)));
 
     EquityNewsService.News n = service.news("reliance");
 

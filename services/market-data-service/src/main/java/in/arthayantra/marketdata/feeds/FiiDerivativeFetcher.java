@@ -1,4 +1,4 @@
-package in.arthayantra.marketdata.nse;
+package in.arthayantra.marketdata.feeds;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;

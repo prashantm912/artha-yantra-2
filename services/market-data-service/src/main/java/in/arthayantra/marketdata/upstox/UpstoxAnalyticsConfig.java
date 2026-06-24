@@ -3,8 +3,9 @@ package in.arthayantra.marketdata.upstox;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.alerts.NtfyClient;
-import in.arthayantra.marketdata.nse.FiiDerivativeFetcher;
-import in.arthayantra.marketdata.nse.FiiDiiFetcher;
+import in.arthayantra.marketdata.feeds.FiiDerivativeFetcher;
+import in.arthayantra.marketdata.feeds.FiiDiiFetcher;
+import in.arthayantra.marketdata.feeds.NewsSource;
 import in.arthayantra.marketdata.nse.LiveFiiDiiFetcher;
 import in.arthayantra.marketdata.upstox.canary.UpstoxContractCanary;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -35,6 +36,18 @@ public class UpstoxAnalyticsConfig {
   public UpstoxAnalyticsClient upstoxAnalyticsClient(
       RestClient.Builder restClientBuilder, UpstoxAnalyticsProperties properties) {
     return new UpstoxAnalyticsClient(restClientBuilder, properties);
+  }
+
+  /**
+   * Upstox per-stock news source — the {@link NewsSource} adapter over {@code GET /v2/news}. Bound
+   * whenever the analytics token is enabled (same gating as the client it wraps); {@code
+   * EquityNewsService} consumes it via an {@code ObjectProvider}, so its absence is what makes the
+   * news page report {@code available=false}.
+   */
+  @Bean
+  @ConditionalOnProperty(name = "artha.upstox.analytics.enabled", havingValue = "true")
+  public NewsSource upstoxNewsSource(UpstoxAnalyticsClient client) {
+    return new UpstoxNewsSource(client);
   }
 
   /**

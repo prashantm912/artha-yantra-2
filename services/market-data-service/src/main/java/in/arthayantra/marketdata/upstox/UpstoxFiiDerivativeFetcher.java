@@ -1,6 +1,6 @@
 package in.arthayantra.marketdata.upstox;
 
-import in.arthayantra.marketdata.nse.FiiDerivativeFetcher;
+import in.arthayantra.marketdata.feeds.FiiDerivativeFetcher;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;

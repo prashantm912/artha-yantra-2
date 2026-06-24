@@ -3,6 +3,7 @@ package in.arthayantra.marketdata.nse;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import in.arthayantra.marketdata.feeds.FiiDiiFetcher;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;

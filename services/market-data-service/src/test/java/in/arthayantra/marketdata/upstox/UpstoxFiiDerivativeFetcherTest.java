@@ -9,7 +9,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
-import in.arthayantra.marketdata.nse.FiiDerivativeFetcher;
+import in.arthayantra.marketdata.feeds.FiiDerivativeFetcher;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;

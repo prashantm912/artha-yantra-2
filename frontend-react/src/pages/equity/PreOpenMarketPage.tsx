@@ -172,7 +172,7 @@ export function PreOpenMarketPage() {
           query={statusQ}
           empty={{ icon: Sunrise, title: 'No market status available.', hint: 'The Upstox market-status feed is not configured on this stack.' }}
           errorTitle="Couldn't load market status"
-          skeleton={<Skeleton variant="card" />}
+          skeleton={<Skeleton variant="metric-strip" cols={3} />}
         >
           {(rows) => (
             <BeatStrip className="grid grid-cols-1 gap-3 sm:grid-cols-3">

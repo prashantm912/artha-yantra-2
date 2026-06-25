@@ -17,7 +17,34 @@ export default defineConfig({
       '/ws': { target: 'http://127.0.0.1:8080', secure: false, ws: true },
     },
   },
-  build: { outDir: 'dist' },
+  build: {
+    outDir: 'dist',
+    // Bucket the big vendor libs into their own cached chunks so the entry `index` chunk stays lean
+    // (heavy libs become separately-cacheable chunks instead of bloating the initial payload). The
+    // ECharts-bearing pages are already React.lazy, so vendor-echarts loads only with those routes.
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          // tslib's TS runtime helpers are shared between zrender (echarts) and radix-ui (eager); keep
+          // them in the common vendor chunk so bucketing echarts can't drag the 1 MB chart lib into the
+          // entry's static graph (the entry uses tslib via radix scroll-lock).
+          if (id.includes('/tslib/')) return 'vendor-react';
+          if (id.includes('echarts') || id.includes('zrender')) return 'vendor-echarts';
+          if (id.includes('lightweight-charts')) return 'vendor-lwc';
+          if (id.includes('@tanstack')) return 'vendor-tanstack';
+          if (id.includes('react-router') || id.includes('/react-dom/') || id.includes('/react/')) {
+            return 'vendor-react';
+          }
+          if (id.includes('/motion/') || id.includes('/framer-motion/')) return 'vendor-motion';
+          return undefined;
+        },
+      },
+    },
+    // vendor-echarts is a single genuinely-irreducible ~1 MB lib chunk (loaded lazily with chart
+    // routes, never in the entry payload), so lift the warning ceiling enough to silence just it.
+    chunkSizeWarningLimit: 1100,
+  },
   test: {
     environment: 'jsdom',
     globals: true,

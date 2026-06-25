@@ -115,6 +115,34 @@ class ExpiredBackfillServiceTest {
   }
 
   @Test
+  @org.junit.jupiter.api.Timeout(15) // MUST never hang — the bug this guards was an unbounded Future.get()
+  void aStuckLegIsBoundedThenCancelledAndCountedFailed() {
+    UpstoxExpiredInstrumentsClient client = mock(UpstoxExpiredInstrumentsClient.class);
+    ExpiredBackfillRepository repo = mock(ExpiredBackfillRepository.class);
+    CandleRepository candles = mock(CandleRepository.class);
+    stubBand(repo);
+    when(client.expiries(NIFTY_KEY)).thenReturn(List.of(EXPIRY));
+    when(client.optionContracts(NIFTY_KEY, EXPIRY)).thenReturn(List.of(ce()));
+    when(client.futureContracts(NIFTY_KEY, EXPIRY)).thenReturn(List.of());
+    when(repo.coverage(any(), any())).thenReturn(Coverage.NONE);
+    // The leg fetch hangs far past the (tiny) per-leg ceiling — simulates a stuck HTTP retry / DB lock.
+    when(client.candles(any(), any(), any(), any()))
+        .thenAnswer(
+            inv -> {
+              Thread.sleep(10_000);
+              return List.of();
+            });
+
+    // legTimeoutSec = 1 → the stuck leg is cancelled + counted failed, and run() returns promptly.
+    ExpiredBackfillService service = new ExpiredBackfillService(provider(), candles, repo, 0L, 1L);
+    ExpiredBackfillService.BackfillSummary summary =
+        service.run(client, List.of("NIFTY"), EXPIRY.minusDays(7), EXPIRY, "job-stuck", false);
+
+    assertThat(summary.legsFailed()).isGreaterThanOrEqualTo(1);
+    verify(candles, never()).upsertAll(any());
+  }
+
+  @Test
   void shortFirstFetchMarksPartial() {
     UpstoxExpiredInstrumentsClient client = mock(UpstoxExpiredInstrumentsClient.class);
     CandleRepository candles = mock(CandleRepository.class);

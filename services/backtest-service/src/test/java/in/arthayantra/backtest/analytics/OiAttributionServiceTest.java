@@ -119,6 +119,19 @@ class OiAttributionServiceTest {
   }
 
   @Test
+  void parsesBothIsoAndPostgresTimestamptzText() {
+    // ISO-8601 (the engine/mock path)
+    assertThat(OiAttributionService.parseEntry("2026-06-23T09:32:00+05:30").toString())
+        .isEqualTo("2026-06-23T09:32+05:30");
+    // Postgres timestamptz text: space separator + 2-digit offset (the live JDBC string)
+    assertThat(OiAttributionService.parseEntry("2026-06-15 04:56:00+00").toInstant())
+        .isEqualTo(java.time.Instant.parse("2026-06-15T04:56:00Z"));
+    // …with a fractional second
+    assertThat(OiAttributionService.parseEntry("2026-06-15 04:56:00.123+00").toInstant())
+        .isEqualTo(java.time.Instant.parse("2026-06-15T04:56:00.123Z"));
+  }
+
+  @Test
   void floorsEntryToTheIntervalBucketLabel() {
     OffsetDateTime e = OffsetDateTime.parse("2026-06-23T09:33:40+05:30");
     assertThat(OiAttributionService.bucketLabel(e, 5)).isEqualTo("09:30-09:35");

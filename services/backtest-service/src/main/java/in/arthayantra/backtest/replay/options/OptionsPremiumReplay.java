@@ -1,6 +1,7 @@
 package in.arthayantra.backtest.replay.options;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import in.arthayantra.backtest.client.MarketDataClient;
 import in.arthayantra.backtest.replay.CostConfig;
 import in.arthayantra.backtest.replay.EquityCurveDownsampler;
 import in.arthayantra.backtest.replay.EquityPoint;
@@ -53,12 +54,23 @@ public class OptionsPremiumReplay {
 
   private final OptionContractSelector selector;
   private final CandlePremiumReader premiumReader;
+  private final MarketDataClient marketData; // null in the golden/unit path (gate never runs there)
   /** Shared fill model — the SAME one the candle path + paper ledger use (paisa-parity, §D.11). */
   private final FillSimulator fills = new LtpSlippageV1();
 
-  public OptionsPremiumReplay(OptionContractSelector selector, CandlePremiumReader premiumReader) {
+  @org.springframework.beans.factory.annotation.Autowired
+  public OptionsPremiumReplay(
+      OptionContractSelector selector,
+      CandlePremiumReader premiumReader,
+      MarketDataClient marketData) {
     this.selector = selector;
     this.premiumReader = premiumReader;
+    this.marketData = marketData;
+  }
+
+  /** Test convenience: no OI-confluence gate (the goldens drive {@code replayLegs} directly). */
+  OptionsPremiumReplay(OptionContractSelector selector, CandlePremiumReader premiumReader) {
+    this(selector, premiumReader, null);
   }
 
   /**
@@ -79,6 +91,10 @@ public class OptionsPremiumReplay {
         new TickwiseGoldenRunner(definition, underlyingExchange, underlyingTradingsymbol)
             .run(underlyingOneMinute, contextCandles, null);
     List<PairedLeg> legs = pairLegs(signals, underlyingOneMinute);
+    OiGate gate = parseOiGate(config);
+    if (gate.enabled() && marketData != null) {
+      legs = filterCounterTrend(legs, underlyingOneMinute, underlyingTradingsymbol, gate);
+    }
     return replayLegs(
         signals,
         underlyingOneMinute,
@@ -120,6 +136,59 @@ public class OptionsPremiumReplay {
           new PairedLeg("SHORT".equals(open.direction()), idx.getOrDefault(open.timestamp(), 0), lastBar));
     }
     return legs;
+  }
+
+  /** Opt-in OI-confluence entry gate (off by default → the existing premium goldens are untouched). */
+  record OiGate(boolean enabled, String interval, int intervalMin) {}
+
+  /** Reads {@code backtest.oi_confluence_gate:{enabled,interval}} (a backtest-only knob, not strategy schema). */
+  static OiGate parseOiGate(JsonNode config) {
+    JsonNode g = config.path("backtest").path("oi_confluence_gate");
+    boolean enabled = g.path("enabled").asBoolean(false);
+    String interval = g.path("interval").asText("5m");
+    String digits = interval.replaceAll("[^0-9]", "");
+    return new OiGate(enabled, interval, digits.isEmpty() ? 5 : Integer.parseInt(digits));
+  }
+
+  /**
+   * Drops legs whose ENTRY fires against the historical OI confluence (long/CE into a Bearish or
+   * Ext.Bearish Connecting-Dots trend; short/PE into a Bullish or Ext.Bullish one) — the
+   * attribution-surface finding that counter-confluence entries lose, turned into a tradeable filter.
+   * The confluence is fetched once per session (deterministic: same stored data → same kept legs). A
+   * bucket with no OI data ({@code trend} missing) does NOT filter — the leg passes through.
+   */
+  List<PairedLeg> filterCounterTrend(
+      List<PairedLeg> legs, List<EngineCandle> underlying, String indexName, OiGate gate) {
+    java.time.ZoneId ist = java.time.ZoneId.of("Asia/Kolkata");
+    Map<java.time.LocalDate, Map<String, Integer>> bySession = new HashMap<>();
+    List<PairedLeg> kept = new ArrayList<>();
+    for (PairedLeg leg : legs) {
+      java.time.OffsetDateTime entry = underlying.get(leg.entryIndex()).bucketStart();
+      java.time.LocalDate session = entry.atZoneSameInstant(ist).toLocalDate();
+      Map<String, Integer> matrix =
+          bySession.computeIfAbsent(
+              session,
+              s -> {
+                Map<String, Integer> m = new HashMap<>();
+                for (in.arthayantra.backtest.client.MarketDataClient.CdRow r :
+                    marketData.connectingDots(indexName, s, gate.interval()).rowsOrEmpty()) {
+                  m.put(r.timeInterval(), r.trend());
+                }
+                return m;
+              });
+      Integer trend =
+          matrix.get(
+              in.arthayantra.backtest.analytics.OiAttributionService.bucketLabel(
+                  entry, gate.intervalMin()));
+      boolean counterTrend =
+          trend != null
+              && ((!leg.shortSide() && (trend == 3 || trend == 4)) // long CE into bearish OI
+                  || (leg.shortSide() && (trend == 1 || trend == 2))); // short PE into bullish OI
+      if (!counterTrend) {
+        kept.add(leg);
+      }
+    }
+    return kept;
   }
 
   /** The registry underlying symbol (e.g. {@code NIFTY 50} → {@code NIFTY}). */

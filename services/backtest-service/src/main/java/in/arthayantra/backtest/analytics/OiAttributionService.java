@@ -238,7 +238,7 @@ public class OiAttributionService {
   }
 
   /** Floors an entry instant to the OI interval bucket and renders the {@code HH:mm-HH:mm} label. */
-  static String bucketLabel(OffsetDateTime entry, int intervalMin) {
+  public static String bucketLabel(OffsetDateTime entry, int intervalMin) {
     LocalTime ist = entry.atZoneSameInstant(IST).toLocalTime();
     int minutesOfDay = ist.getHour() * 60 + ist.getMinute();
     int start = (minutesOfDay / intervalMin) * intervalMin;

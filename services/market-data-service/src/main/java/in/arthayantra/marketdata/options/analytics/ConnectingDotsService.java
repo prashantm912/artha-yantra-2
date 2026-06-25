@@ -165,12 +165,16 @@ public class ConnectingDotsService {
     // ── the other-source factors, keyed by the SAME midnight-IST bucket as the futures spine ──
     int dailyTrend = dailyTrend(underlying, fut, sess);
     int dow = dowFactor(sess); // one global cue per session: live LTP-direction, Neutral in history
-    Map<OffsetDateTime, Double> vixClose = vixByBucket(interval, from, to);
+    // The other-source factor maps are keyed by the bucket INSTANT (not the OffsetDateTime): the
+    // futures-spine bars carry the IST offset while the OI/VIX series come back from JDBC time_bucket
+    // at +00 — same instant, different offset, so an OffsetDateTime key silently misses every lookup
+    // (the OI/IV/VIX factors read NEUTRAL on EVERY history session until this fix).
+    Map<java.time.Instant, Double> vixClose = vixByBucket(interval, from, to);
     // chain OI: captured snapshots when present, else (fully-past session only) reconstructed from
     // per-contract candles — so OI-using history stops reading NEUTRAL. Live never enters the derive.
     ChainSeries chain = chainSeries(underlying, interval, from, to, sess);
-    Map<OffsetDateTime, Integer> activeOi = activeStrikeOiFromSeries(chain.points());
-    Map<OffsetDateTime, Double> atmIv = atmIvFromSeries(chain.points());
+    Map<java.time.Instant, Integer> activeOi = activeStrikeOiFromSeries(chain.points());
+    Map<java.time.Instant, Double> atmIv = atmIvFromSeries(chain.points());
 
     List<ConnectingDotsRow> rows = new ArrayList<>(n);
     Double prevVix = null;
@@ -188,17 +192,17 @@ public class ConnectingDotsService {
       int volF = volumeFactor(b.volume, prevVol, b.close - prevClose);
       int futOiF = futOiFactor(b, first ? null : bars.get(i - 1));
 
-      Double vix = vixClose.get(b.bucket);
+      Double vix = vixClose.get(b.bucket.toInstant());
       int vixF = vixFactor(vix, prevVix);
       if (vix != null) {
         prevVix = vix;
       }
-      Double iv = atmIv.get(b.bucket);
+      Double iv = atmIv.get(b.bucket.toInstant());
       int ivF = ivFactor(iv, prevAtmIv);
       if (iv != null) {
         prevAtmIv = iv;
       }
-      int activeOiF = activeOi.getOrDefault(b.bucket, NEUTRAL);
+      int activeOiF = activeOi.getOrDefault(b.bucket.toInstant(), NEUTRAL);
 
       int[] factors = {dow, vixF, volF, ivF, activeOiF, futOiF, vwapF, stF, rsiF, futPrice, dailyTrend};
       int trend = composite(factors);
@@ -346,7 +350,7 @@ public class ConnectingDotsService {
     return dirOf(last.close().subtract(last.open()).doubleValue());
   }
 
-  private Map<OffsetDateTime, Double> vixByBucket(
+  private Map<java.time.Instant, Double> vixByBucket(
       OiInterval interval, OffsetDateTime from, OffsetDateTime to) {
     List<Candle> vix;
     try {
@@ -355,9 +359,9 @@ public class ConnectingDotsService {
       log.debug("no INDIA VIX candles for connecting-dots: {}", e.getMessage());
       return Map.of();
     }
-    Map<OffsetDateTime, Double> out = new HashMap<>();
+    Map<java.time.Instant, Double> out = new HashMap<>();
     for (Bar b : resample(vix, interval)) {
-      out.put(b.bucket, b.close);
+      out.put(b.bucket.toInstant(), b.close);
     }
     return out;
   }
@@ -410,19 +414,21 @@ public class ConnectingDotsService {
   }
 
   /** Active-Strike Sentiment % per bucket → sign: PE flow (>0) Bullish, CE flow (<0) Bearish. */
-  private Map<OffsetDateTime, Integer> activeStrikeOiFromSeries(
+  private Map<java.time.Instant, Integer> activeStrikeOiFromSeries(
       List<OptionsSnapshotReader.StrikePoint> series) {
-    Map<OffsetDateTime, Integer> out = new HashMap<>();
+    Map<java.time.Instant, Integer> out = new HashMap<>();
     for (ActiveStrikeService.SentimentPoint p : activeStrikeService.sentimentSeries(series)) {
-      out.put(p.bucket(), p.sentimentPct() == null ? NEUTRAL : dirOf(p.sentimentPct().doubleValue()));
+      out.put(
+          p.bucket().toInstant(),
+          p.sentimentPct() == null ? NEUTRAL : dirOf(p.sentimentPct().doubleValue()));
     }
     return out;
   }
 
   /** ATM (nearest-spot strike) average IV per bucket, for the IV-direction factor. */
-  private Map<OffsetDateTime, Double> atmIvFromSeries(
+  private Map<java.time.Instant, Double> atmIvFromSeries(
       List<OptionsSnapshotReader.StrikePoint> series) {
-    Map<OffsetDateTime, Double> out = new LinkedHashMap<>();
+    Map<java.time.Instant, Double> out = new LinkedHashMap<>();
     Map<OffsetDateTime, List<OptionsSnapshotReader.StrikePoint>> byBucket = new LinkedHashMap<>();
     for (OptionsSnapshotReader.StrikePoint p : series) {
       byBucket.computeIfAbsent(p.bucket(), k -> new ArrayList<>()).add(p);
@@ -448,7 +454,7 @@ public class ConnectingDotsService {
             }
           }
           if (count > 0) {
-            out.put(bucket, sum / count);
+            out.put(bucket.toInstant(), sum / count);
           }
         });
     return out;

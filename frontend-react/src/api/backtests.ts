@@ -283,6 +283,7 @@ export interface OiAttribution {
   tradesNoData: number;
   sessionsCovered: number;
   sessionsUncovered: number;
+  oiDerived?: boolean;
   caveat: string | null;
   buckets: OiAttributionBucket[];
   trades: OiAttributionTradeRow[];

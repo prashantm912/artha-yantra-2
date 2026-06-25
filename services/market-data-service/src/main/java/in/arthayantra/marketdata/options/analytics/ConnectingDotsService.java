@@ -77,14 +77,24 @@ public class ConnectingDotsService {
       int futPrice,
       int dailyTrend) {}
 
+  /**
+   * {@code derived} = the OI factors were reconstructed from per-contract candles (no captured
+   * snapshots for the session) — a provenance badge for the OI pages; the ATM-IV factor is then
+   * NEUTRAL (candles carry no IV). False for live/captured sessions.
+   */
   public record ConnectingDots(
-      String underlying, String interval, OffsetDateTime asOf, List<ConnectingDotsRow> rows) {}
+      String underlying,
+      String interval,
+      OffsetDateTime asOf,
+      boolean derived,
+      List<ConnectingDotsRow> rows) {}
 
   private final InstrumentRepository instruments;
   private final CandleQueryService candleQuery;
   private final OptionsChainService chainService;
   private final OptionsSnapshotReader snapshotReader;
   private final ActiveStrikeService activeStrikeService;
+  private final CandleDerivedChainReader derivedChain;
   private final ObjectProvider<GlobalQuoteSource> dowSource;
   private final Clock clock;
 
@@ -94,6 +104,7 @@ public class ConnectingDotsService {
       OptionsChainService chainService,
       OptionsSnapshotReader snapshotReader,
       ActiveStrikeService activeStrikeService,
+      CandleDerivedChainReader derivedChain,
       ObjectProvider<GlobalQuoteSource> dowSource,
       Clock clock) {
     this.instruments = instruments;
@@ -101,6 +112,7 @@ public class ConnectingDotsService {
     this.chainService = chainService;
     this.snapshotReader = snapshotReader;
     this.activeStrikeService = activeStrikeService;
+    this.derivedChain = derivedChain;
     this.dowSource = dowSource;
     this.clock = clock;
   }
@@ -120,7 +132,7 @@ public class ConnectingDotsService {
             : resample(candleQuery.read(fut.exchange(), fut.tradingsymbol(), "1m", from, to).items(),
                 interval);
     if (bars.isEmpty()) {
-      return new ConnectingDots(underlying, interval.token(), now, List.of());
+      return new ConnectingDots(underlying, interval.token(), now, false, List.of());
     }
 
     int n = bars.size();
@@ -142,8 +154,11 @@ public class ConnectingDotsService {
     int dailyTrend = dailyTrend(underlying, fut, sess);
     int dow = dowFactor(sess); // one global cue per session: live LTP-direction, Neutral in history
     Map<OffsetDateTime, Double> vixClose = vixByBucket(interval, from, to);
-    Map<OffsetDateTime, Integer> activeOi = activeStrikeOiByBucket(underlying, interval, from, to);
-    Map<OffsetDateTime, Double> atmIv = atmIvByBucket(underlying, interval, from, to);
+    // chain OI: captured snapshots when present, else (fully-past session only) reconstructed from
+    // per-contract candles — so OI-using history stops reading NEUTRAL. Live never enters the derive.
+    ChainSeries chain = chainSeries(underlying, interval, from, to, sess);
+    Map<OffsetDateTime, Integer> activeOi = activeStrikeOiFromSeries(chain.points());
+    Map<OffsetDateTime, Double> atmIv = atmIvFromSeries(chain.points());
 
     List<ConnectingDotsRow> rows = new ArrayList<>(n);
     Double prevVix = null;
@@ -181,7 +196,8 @@ public class ConnectingDotsService {
               rsiF, futPrice, dailyTrend));
     }
     rows.sort(Comparator.comparing(ConnectingDotsRow::timeInterval).reversed()); // newest interval first
-    return new ConnectingDots(underlying, interval.token(), bars.get(n - 1).bucket, rows);
+    return new ConnectingDots(
+        underlying, interval.token(), bars.get(n - 1).bucket, chain.derived(), rows);
   }
 
   // ── factor classifiers ─────────────────────────────────────────────────────────────────────
@@ -334,18 +350,57 @@ public class ConnectingDotsService {
     return out;
   }
 
-  /** Active-Strike Sentiment % per bucket → sign: PE flow (>0) Bullish, CE flow (<0) Bearish. */
-  private Map<OffsetDateTime, Integer> activeStrikeOiByBucket(
-      String underlying, OiInterval interval, OffsetDateTime from, OffsetDateTime to) {
-    Map<OffsetDateTime, Integer> out = new HashMap<>();
-    LocalDate expiry;
+  /** Captured snapshot series, or candle-derived for a fully-past session with none. */
+  private record ChainSeries(List<OptionsSnapshotReader.StrikePoint> points, boolean derived) {}
+
+  /**
+   * The chain series for the session: captured {@code options_chain_snapshots} when present; else —
+   * ONLY when the whole window is in the past (so the LIVE 5-min refresh never enters this branch) —
+   * reconstructed from per-contract candles via {@link CandleDerivedChainReader}. Empty when neither
+   * has data.
+   */
+  private ChainSeries chainSeries(
+      String underlying, OiInterval interval, OffsetDateTime from, OffsetDateTime to, LocalDate sess) {
+    LocalDate expiry = null;
     try {
       expiry = chainService.resolveExpiry(underlying, null);
-    } catch (RuntimeException e) {
-      return out;
+    } catch (RuntimeException ignore) {
+      // no current chain (e.g. a pure-history index) → fall through to the candle derivation
     }
-    List<OptionsSnapshotReader.StrikePoint> series =
-        snapshotReader.series(underlying, expiry, interval, from, to);
+    if (expiry != null) {
+      List<OptionsSnapshotReader.StrikePoint> captured =
+          snapshotReader.series(underlying, expiry, interval, from, to);
+      if (!captured.isEmpty()) {
+        return new ChainSeries(captured, false);
+      }
+    }
+    if (!fullyHistorical(to)) {
+      return new ChainSeries(List.of(), false); // live/today window — never derive
+    }
+    String eu = CandleDerivedChainReader.expiredUnderlying(underlying);
+    if (eu == null) {
+      return new ChainSeries(List.of(), false);
+    }
+    LocalDate histExpiry = derivedChain.frontExpiry(eu, sess);
+    if (histExpiry == null) {
+      return new ChainSeries(List.of(), false);
+    }
+    List<OptionsSnapshotReader.StrikePoint> derivedPoints =
+        derivedChain.series(eu, histExpiry, interval, from, to);
+    return new ChainSeries(derivedPoints, !derivedPoints.isEmpty());
+  }
+
+  /** True when {@code to} is at/before the start of today (IST) — the whole window is historical. */
+  private boolean fullyHistorical(OffsetDateTime to) {
+    OffsetDateTime todayStart =
+        LocalDate.ofInstant(clock.instant(), Ist.ZONE).atStartOfDay().atOffset(Ist.OFFSET);
+    return !to.isAfter(todayStart);
+  }
+
+  /** Active-Strike Sentiment % per bucket → sign: PE flow (>0) Bullish, CE flow (<0) Bearish. */
+  private Map<OffsetDateTime, Integer> activeStrikeOiFromSeries(
+      List<OptionsSnapshotReader.StrikePoint> series) {
+    Map<OffsetDateTime, Integer> out = new HashMap<>();
     for (ActiveStrikeService.SentimentPoint p : activeStrikeService.sentimentSeries(series)) {
       out.put(p.bucket(), p.sentimentPct() == null ? NEUTRAL : dirOf(p.sentimentPct().doubleValue()));
     }
@@ -353,17 +408,9 @@ public class ConnectingDotsService {
   }
 
   /** ATM (nearest-spot strike) average IV per bucket, for the IV-direction factor. */
-  private Map<OffsetDateTime, Double> atmIvByBucket(
-      String underlying, OiInterval interval, OffsetDateTime from, OffsetDateTime to) {
+  private Map<OffsetDateTime, Double> atmIvFromSeries(
+      List<OptionsSnapshotReader.StrikePoint> series) {
     Map<OffsetDateTime, Double> out = new LinkedHashMap<>();
-    LocalDate expiry;
-    try {
-      expiry = chainService.resolveExpiry(underlying, null);
-    } catch (RuntimeException e) {
-      return out;
-    }
-    List<OptionsSnapshotReader.StrikePoint> series =
-        snapshotReader.series(underlying, expiry, interval, from, to);
     Map<OffsetDateTime, List<OptionsSnapshotReader.StrikePoint>> byBucket = new LinkedHashMap<>();
     for (OptionsSnapshotReader.StrikePoint p : series) {
       byBucket.computeIfAbsent(p.bucket(), k -> new ArrayList<>()).add(p);

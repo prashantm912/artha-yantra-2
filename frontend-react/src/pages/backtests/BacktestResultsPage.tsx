@@ -435,6 +435,11 @@ export function BacktestResultsPage() {
                 </p>
               ) : (
                 <>
+                  {d.oiDerived && (
+                    <p className="mb-2 inline-block rounded-md bg-accent/15 px-2 py-1 text-xs text-accent ring-1 ring-accent/40">
+                      OI reconstructed from per-contract candles (no captured snapshots this period)
+                    </p>
+                  )}
                   {d.caveat && (
                     <p className="mb-3 rounded-md bg-warn/15 px-2 py-1 text-xs text-warn ring-1 ring-warn/40">
                       {d.caveat}

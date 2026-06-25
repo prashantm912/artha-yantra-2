@@ -77,7 +77,7 @@ public class MarketDataClient {
    * session with no backfilled/captured OI returns an empty row list. Best-effort: a transport/4xx
    * failure yields an empty list (the attribution then marks the session uncovered, never throws).
    */
-  public List<CdRow> connectingDots(String name, LocalDate date, String interval) {
+  public CdResponse connectingDots(String name, LocalDate date, String interval) {
     try {
       CdResponse body =
           http.get()
@@ -88,16 +88,27 @@ public class MarketDataClient {
                   interval)
               .retrieve()
               .body(CdResponse.class);
-      return body == null || body.rows() == null ? List.of() : body.rows();
+      return body == null || body.rows() == null ? CdResponse.EMPTY : body;
     } catch (RuntimeException e) {
       log.debug("connecting-dots miss {} {} {}: {}", name, date, interval, e.toString());
-      return List.of();
+      return CdResponse.EMPTY;
     }
   }
 
-  /** Mirror of market-data's {@code ConnectingDots} envelope — only the fields attribution reads. */
+  /**
+   * Mirror of market-data's {@code ConnectingDots} envelope. {@code derived} = the OI factors were
+   * reconstructed from candles (no captured snapshots that session) — surfaced so the attribution can
+   * badge a run whose OI is candle-derived rather than live-captured.
+   */
   @JsonIgnoreProperties(ignoreUnknown = true)
-  public record CdResponse(List<CdRow> rows) {}
+  public record CdResponse(boolean derived, List<CdRow> rows) {
+    public static final CdResponse EMPTY = new CdResponse(false, List.of());
+
+    /** Null-safe row accessor. */
+    public List<CdRow> rowsOrEmpty() {
+      return rows == null ? List.of() : rows;
+    }
+  }
 
   /**
    * One interval row: the {@code HH:mm-HH:mm} IST bucket label, the 5-state composite {@code trend}

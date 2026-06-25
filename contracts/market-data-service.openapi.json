@@ -6520,6 +6520,9 @@
             "type" : "string",
             "format" : "date-time"
           },
+          "derived" : {
+            "type" : "boolean"
+          },
           "rows" : {
             "type" : "array",
             "items" : {

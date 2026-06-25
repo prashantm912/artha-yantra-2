@@ -131,6 +131,18 @@ public class ConnectingDotsService {
             ? List.of()
             : resample(candleQuery.read(fut.exchange(), fut.tradingsymbol(), "1m", from, to).items(),
                 interval);
+    // history fallback: the live instruments table has no EXPIRED futures, so a past session's spine
+    // reads empty — resolve that session's front future from the backfilled expired_contracts and
+    // read its stored candles. Gated to fully-past windows so live is untouched.
+    if (bars.isEmpty() && fullyHistorical(to)) {
+      String eu = CandleDerivedChainReader.expiredUnderlying(underlying);
+      CandleDerivedChainReader.FrontFuture ff = eu == null ? null : derivedChain.frontFuture(eu, sess);
+      if (ff != null) {
+        bars =
+            resample(
+                candleQuery.read(ff.exchange(), ff.tradingsymbol(), "1m", from, to).items(), interval);
+      }
+    }
     if (bars.isEmpty()) {
       return new ConnectingDots(underlying, interval.token(), now, false, List.of());
     }

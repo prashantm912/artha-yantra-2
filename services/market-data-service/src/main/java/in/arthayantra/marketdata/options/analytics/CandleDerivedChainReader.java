@@ -88,6 +88,28 @@ public class CandleDerivedChainReader {
         java.sql.Date.valueOf(session));
   }
 
+  /** The exchange + tradingsymbol of an expired front future, for reading its stored candles. */
+  public record FrontFuture(String exchange, String tradingsymbol) {}
+
+  /**
+   * The front (nearest on-or-after {@code session}) EXPIRED future for {@code expiredUnderlyingSymbol}
+   * with complete coverage; null when none — the historical futures spine for a past ConnectingDots
+   * session (the live instruments table has no expired futures).
+   */
+  public FrontFuture frontFuture(String expiredUnderlyingSymbol, LocalDate session) {
+    return jdbc
+        .query(
+            "SELECT exchange, tradingsymbol FROM expired_contracts "
+                + "WHERE underlying_symbol = ? AND instrument_type = 'FUT' AND expiry >= ? "
+                + "AND complete = true ORDER BY expiry LIMIT 1",
+            (rs, n) -> new FrontFuture(rs.getString("exchange"), rs.getString("tradingsymbol")),
+            expiredUnderlyingSymbol,
+            java.sql.Date.valueOf(session))
+        .stream()
+        .findFirst()
+        .orElse(null);
+  }
+
   /**
    * The candle-derived chain series for ({@code expiredUnderlyingSymbol}, {@code expiry}) over
    * [{@code from}, {@code to}), bucketed to {@code interval}. Oldest-bucket-first, matching {@link

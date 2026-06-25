@@ -195,6 +195,8 @@ class OptionsPremiumReplayTest {
             new UniverseSpec(ExpiryMode.NEAREST_WEEKLY, 0, Set.of("CE", "PE")),
             new PremiumExitEvaluator.Rules(bd("20"), bd("35"), null, null, null),
             15_000,
+            BigDecimal.ZERO, // min-premium floor: permissive (the fixture's 80→110 premium is normal)
+            0, // max-lots: unlimited
             new BigDecimal("200000"));
 
     assertThat(result.trades()).hasSize(1);
@@ -206,6 +208,49 @@ class OptionsPremiumReplayTest {
     assertThat(result.equityCurve().get(0).equity()).isEqualByComparingTo("199941.67"); // bar0: open, marked
     assertThat(result.equityCurve().get(result.equityCurve().size() - 1).equity())
         .isEqualByComparingTo("203767.76"); // post-exit
+  }
+
+  @Test
+  void minPremiumFloorAndMaxLotsTameTheDegenerateTinyPremiumExplosion() {
+    // A ₹0.10 (deep-OTM / expiry-day worthless) premium: budget/premium would buy thousands of lots.
+    List<EngineCandle> underlying =
+        List.of(
+            bar("09:15", "24980"), bar("09:16", "24990"), bar("09:17", "25010"),
+            bar("09:18", "25020"), bar("09:19", "25030"));
+    CandleReader reader = mock(CandleReader.class);
+    when(reader.read(eq("NFO"), eq(CE_SYMBOL), eq("1m"), any(), any()))
+        .thenReturn(
+            List.of(
+                new EngineCandle(t("09:15"), bd("0.10"), bd("0.10"), bd("0.10"), bd("0.10"), 0L),
+                new EngineCandle(t("09:16"), bd("0.10"), bd("0.10"), bd("0.10"), bd("0.10"), 0L)));
+    OptionsPremiumReplay replay =
+        new OptionsPremiumReplay(
+            new OptionContractSelector(CATALOG), new CandlePremiumReader(reader));
+    List<PairedLeg> legs = List.of(new PairedLeg(false, 0, 4));
+    UniverseSpec spec = new UniverseSpec(ExpiryMode.NEAREST_WEEKLY, 0, Set.of("CE", "PE"));
+    PremiumExitEvaluator.Rules rules =
+        new PremiumExitEvaluator.Rules(bd("20"), bd("35"), null, null, null);
+    BigDecimal capital = new BigDecimal("200000");
+
+    // floor ₹1 → the ₹0.10 leg is skipped (legit, no trade, no explosion)
+    assertThat(
+            replay
+                .replayLegs(List.of(), underlying, legs, "NIFTY", spec, rules, 15_000, bd("1"), 0, capital)
+                .trades())
+        .isEmpty();
+
+    // floor 0 (permissive) → it trades AND the lot count explodes: 15000/(0.10×65) ≈ 2307 lots = 149955 qty
+    var permissive =
+        replay.replayLegs(
+            List.of(), underlying, legs, "NIFTY", spec, rules, 15_000, BigDecimal.ZERO, 0, capital);
+    assertThat(permissive.trades()).hasSize(1);
+    assertThat(permissive.trades().get(0).qty()).isGreaterThan(100_000L);
+
+    // max-lots cap (10) bounds the qty to 10 × lot(65) = 650 even at the degenerate premium
+    var capped =
+        replay.replayLegs(
+            List.of(), underlying, legs, "NIFTY", spec, rules, 15_000, BigDecimal.ZERO, 10, capital);
+    assertThat(capped.trades().get(0).qty()).isEqualTo(650);
   }
 
   @Test

@@ -87,6 +87,8 @@ public class OptionsPremiumReplay {
         universeSpec(config),
         exitRules(config),
         budgetInr(config),
+        minPremiumInr(config),
+        maxLots(config),
         initialEquity);
   }
 
@@ -193,6 +195,22 @@ public class OptionsPremiumReplay {
     return config.path("risk").path("position_sizing").path("params").path("budget_inr").asLong(0);
   }
 
+  /**
+   * Minimum entry premium to trade ({@code risk.position_sizing.params.min_premium_inr}, default ₹1).
+   * A near-worthless premium makes {@code lots = budget/premium} explode, so the per-lot cost stack
+   * dwarfs the budget — guard against it. Default ₹1 so existing strategies (which set no floor) are
+   * protected; raise it per-strategy for a tighter liquidity bar.
+   */
+  static BigDecimal minPremiumInr(JsonNode config) {
+    JsonNode n = config.path("risk").path("position_sizing").path("params").path("min_premium_inr");
+    return n.isNumber() ? n.decimalValue() : new BigDecimal("1.0");
+  }
+
+  /** Optional hard cap on lots ({@code risk.position_sizing.params.max_lots}); 0 ⇒ unlimited. */
+  static int maxLots(JsonNode config) {
+    return config.path("risk").path("position_sizing").path("params").path("max_lots").asInt(0);
+  }
+
   private static boolean isPremiumPct(JsonNode params) {
     return "premium_pct".equals(params.path("basis").asText());
   }
@@ -224,13 +242,17 @@ public class OptionsPremiumReplay {
       UniverseSpec spec,
       PremiumExitEvaluator.Rules rules,
       long budgetInr,
+      BigDecimal minPremiumInr,
+      int maxLots,
       BigDecimal initialEquity) {
     List<Trade> trades = new ArrayList<>();
     List<LegResult> priced = new ArrayList<>();
     int seq = 0;
     for (PairedLeg leg : legs) {
       Optional<LegResult> r =
-          priceLeg(seq + 1, underlying, underlyingSymbol, leg, spec, rules, budgetInr);
+          priceLeg(
+              seq + 1, underlying, underlyingSymbol, leg, spec, rules, budgetInr, minPremiumInr,
+              maxLots);
       if (r.isEmpty()) {
         continue;
       }
@@ -315,7 +337,8 @@ public class OptionsPremiumReplay {
       UniverseSpec spec,
       PremiumExitEvaluator.Rules rules,
       long budgetInr) {
-    return priceLeg(seq, underlying, underlyingSymbol, leg, spec, rules, budgetInr)
+    // Single-leg test seam: permissive (no floor / no cap) so the fixture trades exactly as specified.
+    return priceLeg(seq, underlying, underlyingSymbol, leg, spec, rules, budgetInr, BigDecimal.ZERO, 0)
         .map(LegResult::trade);
   }
 
@@ -333,7 +356,9 @@ public class OptionsPremiumReplay {
       PairedLeg leg,
       UniverseSpec spec,
       PremiumExitEvaluator.Rules rules,
-      long budgetInr) {
+      long budgetInr,
+      BigDecimal minPremiumInr,
+      int maxLots) {
     EngineCandle entryBar = underlying.get(leg.entryIndex());
     boolean longBias = !leg.shortSide();
     Optional<OptionContract> resolved =
@@ -376,6 +401,14 @@ public class OptionsPremiumReplay {
               "presentBars", series.size()));
     }
 
+    // Minimum-premium floor: a near-worthless deep-OTM/expiry-day option (e.g. ₹0.10) makes
+    // lots = budget/premium EXPLODE (thousands of lots), so the per-lot cost stack dwarfs the budget
+    // and one trade can lose multiples of the premium paid — physically impossible for a long option.
+    // Below the floor is a legit SKIP (illiquid/degenerate), not a data gap. Default ₹1 (min_premium_inr).
+    if (entryPremium.compareTo(minPremiumInr) < 0) {
+      return Optional.empty();
+    }
+
     long lot = contract.lotSize();
     long lots =
         entryPremium.multiply(BigDecimal.valueOf(lot)).signum() == 0
@@ -383,6 +416,10 @@ public class OptionsPremiumReplay {
             : BigDecimal.valueOf(budgetInr)
                 .divide(entryPremium.multiply(BigDecimal.valueOf(lot)), 0, RoundingMode.DOWN)
                 .longValue();
+    // Optional hard cap on lots (0 = unlimited) — a second bound on degenerate sizing (max_lots).
+    if (maxLots > 0 && lots > maxLots) {
+      lots = maxLots;
+    }
     long qty = lots * lot;
     if (qty <= 0) {
       return Optional.empty(); // budget can't afford one lot at this premium

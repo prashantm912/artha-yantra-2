@@ -84,9 +84,10 @@ class CandleDerivedChainReaderIntegrationTest extends MarketDataIntegrationTestB
     candle("DERIV99CE", ist("09:19"), "50", 1000, 20);
     candle("DERIV99CE", ist("09:22"), "55", 1300, 30);
     candle("DERIV99CE", ist("09:24"), "60", 1500, 45);
-    // PE: bucket1 last(oi)=2000, bucket2 last(oi)=1800 → oi_change -200
-    candle("DERIV99PE", ist("09:19"), "40", 2000, 12);
-    candle("DERIV99PE", ist("09:24"), "45", 1800, 25);
+    // PE: bucket1 last(oi)=2000, bucket2 last(oi)=1800 → oi_change -200. Premium kept realistic for a
+    // 50-pt-OTM 2-day put (forward ~23950) so the read-time IV solve converges inside the bracket.
+    candle("DERIV99PE", ist("09:19"), "12", 2000, 12);
+    candle("DERIV99PE", ist("09:24"), "10", 1800, 25);
     // incomplete strike — must NOT appear
     candle("DERIV99XCE", ist("09:19"), "5", 9999, 1);
     // front-future candles → the derived spot proxy (last close per bucket).
@@ -135,8 +136,17 @@ class CandleDerivedChainReaderIntegrationTest extends MarketDataIntegrationTestB
     assertThat(ce2.ltp()).isEqualByComparingTo("60");
     assertThat(byKey.get(at(b2, "PE")).oiChange()).isEqualTo(-200L);
 
-    // candles carry no IV/greeks → derived points leave them null (factor degrades to NEUTRAL).
-    assertThat(s).allSatisfy(p -> assertThat(p.iv()).isNull());
+  }
+
+  @Test
+  void recomputesAtmBandIvFromPremiumUsingTheFutureForward() {
+    // forward (future close) 23950/23970; the 23900 PE is OTM-by-forward → solvable from its premium.
+    var s = reader.series(EU, EXPIRY, OiInterval.M5, ist("09:00"), ist("15:30"));
+    var pe = s.stream()
+        .filter(p -> "PE".equals(p.optionType()) && p.bucket().toInstant().equals(ist("09:20").toInstant()))
+        .findFirst().orElseThrow();
+    assertThat(pe.iv()).as("ATM-band PE IV solved from candle premium").isNotNull();
+    assertThat(pe.iv().doubleValue()).isBetween(0.0001, 5.0); // a sane vol, inside the solver bracket
   }
 
   @Test

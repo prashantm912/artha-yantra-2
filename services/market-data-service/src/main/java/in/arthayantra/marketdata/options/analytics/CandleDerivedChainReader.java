@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.options.analytics;
 
+import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketdata.options.OiInterval;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
@@ -176,6 +177,93 @@ public class CandleDerivedChainReader {
             .thenComparing(OptionsSnapshotReader.StrikePoint::strike)
             .thenComparing(OptionsSnapshotReader.StrikePoint::optionType));
     return points;
+  }
+
+  /** The IST-day window's bucketed chain — the basis the {@code latest}/{@code latestPair} twins slice. */
+  private List<OptionsSnapshotReader.StrikePoint> daySeries(
+      String eu, LocalDate expiry, OiInterval interval, LocalDate date) {
+    OffsetDateTime start = date.atStartOfDay().atOffset(Ist.OFFSET);
+    return series(eu, expiry, interval, start, start.plusDays(1));
+  }
+
+  /** The newest bucket of {@code date}'s chain (the candle-derived twin of {@code latest(date)}). */
+  public List<OptionsSnapshotReader.StrikePoint> latest(
+      String eu, LocalDate expiry, OiInterval interval, LocalDate date) {
+    List<OptionsSnapshotReader.StrikePoint> day = daySeries(eu, expiry, interval, date);
+    if (day.isEmpty()) {
+      return List.of();
+    }
+    OffsetDateTime newest =
+        day.stream()
+            .map(OptionsSnapshotReader.StrikePoint::bucket)
+            .max(Comparator.naturalOrder())
+            .orElseThrow();
+    return day.stream().filter(p -> p.bucket().equals(newest)).toList();
+  }
+
+  /** The two most-recent buckets of {@code date}'s chain (twin of {@code latestPair(date)}, for deltas). */
+  public List<OptionsSnapshotReader.StrikePoint> latestPair(
+      String eu, LocalDate expiry, OiInterval interval, LocalDate date) {
+    List<OptionsSnapshotReader.StrikePoint> day = daySeries(eu, expiry, interval, date);
+    if (day.isEmpty()) {
+      return List.of();
+    }
+    List<OffsetDateTime> twoNewest =
+        day.stream()
+            .map(OptionsSnapshotReader.StrikePoint::bucket)
+            .distinct()
+            .sorted(Comparator.reverseOrder())
+            .limit(2)
+            .toList();
+    return day.stream().filter(p -> twoNewest.contains(p.bucket())).toList();
+  }
+
+  /** One strike's intraday series (twin of {@code strikeSeries}) — filter the chain series in memory. */
+  public List<OptionsSnapshotReader.StrikePoint> strikeSeries(
+      String eu,
+      LocalDate expiry,
+      BigDecimal strike,
+      OiInterval interval,
+      OffsetDateTime from,
+      OffsetDateTime to) {
+    return series(eu, expiry, interval, from, to).stream()
+        .filter(p -> p.strike().compareTo(strike) == 0)
+        .toList();
+  }
+
+  /** Per-(strike, leg) per-IST-day premium OHLC + oi/volume close (twin of {@code eodSeries}). */
+  public List<OptionsSnapshotReader.OptionEodRow> eodSeries(
+      String eu, LocalDate expiry, OffsetDateTime from, OffsetDateTime to) {
+    String sql =
+        "SELECT (c.bucket AT TIME ZONE 'Asia/Kolkata')::date AS d, ec.strike AS strike, "
+            + "  ec.instrument_type AS option_type, public.first(c.close, c.bucket) AS o, "
+            + "  max(c.close) AS h, min(c.close) AS l, public.last(c.close, c.bucket) AS c, "
+            + "  public.last(c.oi, c.bucket) AS oi_close, public.last(c.volume, c.bucket) AS vol "
+            + "FROM candles c "
+            + "JOIN expired_contracts ec "
+            + "  ON ec.exchange = c.exchange AND ec.tradingsymbol = c.tradingsymbol "
+            + "WHERE ec.underlying_symbol = ? AND ec.expiry = ? AND ec.complete = true "
+            + "  AND ec.instrument_type IN ('CE','PE') "
+            + "  AND c.interval = '1m' AND c.bucket >= ? AND c.bucket < ? "
+            + "GROUP BY d, ec.strike, ec.instrument_type "
+            + "ORDER BY ec.strike, ec.instrument_type, d";
+    return jdbc.query(
+        sql,
+        (rs, n) ->
+            new OptionsSnapshotReader.OptionEodRow(
+                rs.getBigDecimal("strike"),
+                rs.getString("option_type"),
+                rs.getObject("d", LocalDate.class),
+                rs.getBigDecimal("o"),
+                rs.getBigDecimal("h"),
+                rs.getBigDecimal("l"),
+                rs.getBigDecimal("c"),
+                rs.getObject("oi_close", Long.class),
+                rs.getObject("vol", Long.class)),
+        eu,
+        java.sql.Date.valueOf(expiry),
+        Timestamp.from(from.toInstant()),
+        Timestamp.from(to.toInstant()));
   }
 
   private record Raw(

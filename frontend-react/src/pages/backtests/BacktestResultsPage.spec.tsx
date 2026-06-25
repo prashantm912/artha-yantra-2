@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -22,6 +22,37 @@ vi.mock('../../api/backtests.ts', () => ({
 }));
 
 import { BacktestResultsPage } from './BacktestResultsPage.tsx';
+import { exitReasonBreakdown } from './exitReasonBreakdown.ts';
+import type { TradeRow } from '../../api/backtests.ts';
+
+function trade(exitReason: string, pnl: string): TradeRow {
+  return { seq: 0, side: 'LONG', qty: 1, entryTs: '2026-01-01T00:00', entryPrice: '100', exitPrice: '101', pnl, pnlPct: '1', exitReason, barsHeld: 1 };
+}
+
+describe('exitReasonBreakdown', () => {
+  it('aggregates count, total/avg P&L and win-rate per reason, sorted by count desc', () => {
+    const out = exitReasonBreakdown([
+      trade('STOP_LOSS', '-50'),
+      trade('STOP_LOSS', '-30'),
+      trade('TAKE_PROFIT', '120'),
+      trade('TAKE_PROFIT', '80'),
+      trade('TAKE_PROFIT', '-20'),
+    ]);
+    expect(out.map((s) => s.reason)).toEqual(['TAKE_PROFIT', 'STOP_LOSS']);
+    expect(out[0]).toMatchObject({ count: 3, wins: 2, totalPnl: '180', avgPnl: '60.0000' });
+    expect(out[0].winRate).toBeCloseTo((2 / 3) * 100);
+    expect(out[1]).toMatchObject({ count: 2, wins: 0, totalPnl: '-80', avgPnl: '-40.0000', winRate: 0 });
+  });
+
+  it('counts pnl == 0 as a win and maps a blank reason to —', () => {
+    const out = exitReasonBreakdown([trade('', '0')]);
+    expect(out).toEqual([{ reason: '—', count: 1, wins: 1, totalPnl: '0', winRate: 100, avgPnl: '0.0000' }]);
+  });
+
+  it('returns [] for no trades', () => {
+    expect(exitReasonBreakdown([])).toEqual([]);
+  });
+});
 
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -44,7 +75,14 @@ describe('BacktestResultsPage', () => {
     expect(screen.getByText(/dataHash deadbeef/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: 'Trades' }));
-    expect(screen.getByText('TARGET')).toBeInTheDocument();
+    // Exit-reason breakdown summarises the loaded trades above the table (one TARGET bucket here).
+    const breakdown = screen.getByRole('table', { name: 'Exit-reason breakdown' });
+    const reasonCell = within(breakdown).getByText('TARGET');
+    expect(reasonCell).toBeInTheDocument();
+    const row = reasonCell.closest('tr')!;
+    expect(within(row).getByText('100.0%')).toBeInTheDocument(); // 1/1 wins
+    // The per-trade table still lists the trade's reason.
+    expect(screen.getAllByText('TARGET').length).toBe(2);
 
     fireEvent.click(screen.getByRole('tab', { name: 'Folds' }));
     expect(screen.getByText(/2026-03-01 → 2026-04-01/)).toBeInTheDocument();

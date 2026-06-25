@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { EChartsOption } from 'echarts';
 import { formatDecimal } from '../../lib/decimal.ts';
@@ -7,6 +7,7 @@ import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
 import { WarningBanner } from '../../components/atoms/WarningBanner.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
+import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { useCompareResults, type BacktestResults } from '../../api/backtests.ts';
 
 // /backtests/compare?ids=a,b,c (master plan §20 parity, E-11 screen 5): up to 6 runs — metric matrix
@@ -39,6 +40,29 @@ function metricValue(r: BacktestResults, key: string): number | null {
   return raw == null || Array.isArray(raw) ? null : Number(raw);
 }
 
+// Selectable edge metrics for the leaderboard ranking (lower-is-better is flagged so the rank flips).
+interface EdgeMetric {
+  key: string;
+  label: string;
+  dp: number;
+  higherBetter: boolean;
+  suffix?: string;
+}
+const EDGE_METRICS: EdgeMetric[] = [
+  { key: 'totalReturn', label: 'Total return', suffix: '%', dp: 2, higherBetter: true },
+  { key: 'sharpe', label: 'Sharpe', dp: 2, higherBetter: true },
+  { key: 'profitFactor', label: 'Profit factor', dp: 2, higherBetter: true },
+  { key: 'maxDrawdown', label: 'Max drawdown', suffix: '%', dp: 2, higherBetter: false },
+  { key: 'winRate', label: 'Win rate', suffix: '%', dp: 1, higherBetter: true },
+];
+type EdgeKey = string;
+
+interface LeaderRow {
+  id: string;
+  rank: number;
+  score: number | null;
+}
+
 export function BacktestComparePage() {
   const [params] = useSearchParams();
   const ids = useMemo(
@@ -69,6 +93,65 @@ export function BacktestComparePage() {
         };
       }),
     [runs],
+  );
+
+  const [edgeKey, setEdgeKey] = useState<EdgeKey>('totalReturn');
+  const edgeMetric = EDGE_METRICS.find((m) => m.key === edgeKey)!;
+
+  // Ranked leaderboard over the already-fetched results; runs missing the metric rank last (score null).
+  const leaderboard = useMemo<LeaderRow[]>(() => {
+    const scored = runs.map((r) => ({ id: r.id, score: metricValue(r.data, edgeKey) }));
+    scored.sort((a, b) => {
+      if (a.score == null) return b.score == null ? 0 : 1;
+      if (b.score == null) return -1;
+      return edgeMetric.higherBetter ? b.score - a.score : a.score - b.score;
+    });
+    return scored.map((s, i) => ({ ...s, rank: i + 1 }));
+  }, [runs, edgeKey, edgeMetric.higherBetter]);
+
+  const leaderColumns = useMemo<DataColumn<LeaderRow>[]>(
+    () => [
+      {
+        id: 'rank',
+        header: 'Rank',
+        align: 'center',
+        mobileLabel: 'Rank',
+        sortValue: (row) => row.rank,
+        render: (row) =>
+          row.rank <= 3 ? (
+            <span
+              className={cn(
+                'inline-flex size-5 items-center justify-center rounded-full text-xs font-bold',
+                row.rank === 1 ? 'bg-accent/20 text-accent' : 'bg-surface-2 text-ay-text',
+              )}
+              aria-label={`Rank ${row.rank}`}
+            >
+              {row.rank}
+            </span>
+          ) : (
+            <span className="tabular-nums text-ay-muted">{row.rank}</span>
+          ),
+      },
+      {
+        id: 'run',
+        header: 'Run',
+        align: 'left',
+        mobileLabel: 'Run',
+        sortValue: (row) => row.id,
+        sortType: 'text',
+        render: (row) => <span className="font-mono">{row.id.slice(0, 8)}</span>,
+      },
+      {
+        id: 'score',
+        header: edgeMetric.label,
+        align: 'right',
+        mobileLabel: edgeMetric.label,
+        sortValue: (row) => row.score ?? null,
+        render: (row) =>
+          row.score == null ? '—' : `${formatDecimal(String(row.score), edgeMetric.dp)}${edgeMetric.suffix ?? ''}`,
+      },
+    ],
+    [edgeMetric],
   );
 
   const equityOption = useCallback(
@@ -117,7 +200,7 @@ export function BacktestComparePage() {
       )}
 
       <BeatBlock className="overflow-auto rounded-lg border border-ay-border">
-        <table className="w-full border-collapse text-sm">
+        <table className="w-full border-collapse text-sm" aria-label="Metric comparison matrix">
           <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
             <tr>
               <th className="px-2 py-2 font-medium">Metric</th>
@@ -144,6 +227,35 @@ export function BacktestComparePage() {
             ))}
           </tbody>
         </table>
+      </BeatBlock>
+
+      <BeatBlock className="mt-4">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <h2 className="text-h3">Leaderboard</h2>
+          <label className="ml-auto flex items-center gap-1.5 text-xs text-ay-muted">
+            Rank by
+            <select
+              value={edgeKey}
+              onChange={(e) => setEdgeKey(e.target.value as EdgeKey)}
+              className="rounded border border-ay-border bg-surface-1 px-2 py-1 text-ay-text"
+            >
+              {EDGE_METRICS.map((m) => (
+                <option key={m.key} value={m.key}>
+                  {m.label}
+                  {m.higherBetter ? '' : ' (lower better)'}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <DataTable
+          columns={leaderColumns}
+          rows={leaderboard}
+          rowKey={(row) => row.id}
+          initialSort={{ id: 'rank', dir: 'asc' }}
+          ariaLabel="Backtest run leaderboard"
+          emptyMessage="No runs to rank."
+        />
       </BeatBlock>
 
       <BeatBlock className="card shadow-e1 mt-4">

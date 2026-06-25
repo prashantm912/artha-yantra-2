@@ -1,6 +1,9 @@
 # Historical OI for backtests — virtual read-time derivation (not snapshot backfill)
 
-**Status:** DESIGN / proposed · **Date:** 2026-06-25 · **Author:** Claude (workflow: 8-agent recon → 3 designs → 3 adversarial lenses → synthesis + completeness critic)
+**Status:** ✅ IMPLEMENTED + DEPLOYED (2026-06-25) — `CandleDerivedChainReader` + `HistoricalOiReader` facade across
+the whole OI-page suite + ConnectingDots + OI-attribution, PRs #203/#204/#210/#211 (the OI factor virtual-derivation
+chosen here; sessionStats twin + future-close spot proxy shipped in #211). ATM-IV recompute + `iv_daily_summary`
+history remain the only deferred items. · **Date:** 2026-06-25 · **Author:** Claude (workflow: 8-agent recon → 3 designs → 3 adversarial lenses → synthesis + completeness critic)
 
 ## Problem
 

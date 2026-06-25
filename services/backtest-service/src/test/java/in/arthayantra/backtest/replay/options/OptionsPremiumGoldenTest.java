@@ -105,7 +105,10 @@ class OptionsPremiumGoldenTest {
   @Test
   void pinsTheThreeTradesAndEquityCurve() {
     ReplayResult r =
-        replay().replayLegs(List.of(), UNDERLYING, LEGS, "NIFTY", SPEC, RULES, 15_000, new BigDecimal("200000"));
+        replay()
+            .replayLegs(
+                List.of(), UNDERLYING, LEGS, "NIFTY", SPEC, RULES, 15_000, java.math.BigDecimal.ZERO,
+                0, new BigDecimal("200000"));
 
     assertThat(r.trades()).hasSize(3);
 
@@ -151,9 +154,15 @@ class OptionsPremiumGoldenTest {
   @Test
   void isDeterministicAcrossRuns() {
     ReplayResult r1 =
-        replay().replayLegs(List.of(), UNDERLYING, LEGS, "NIFTY", SPEC, RULES, 15_000, new BigDecimal("200000"));
+        replay()
+            .replayLegs(
+                List.of(), UNDERLYING, LEGS, "NIFTY", SPEC, RULES, 15_000, java.math.BigDecimal.ZERO,
+                0, new BigDecimal("200000"));
     ReplayResult r2 =
-        replay().replayLegs(List.of(), UNDERLYING, LEGS, "NIFTY", SPEC, RULES, 15_000, new BigDecimal("200000"));
+        replay()
+            .replayLegs(
+                List.of(), UNDERLYING, LEGS, "NIFTY", SPEC, RULES, 15_000, java.math.BigDecimal.ZERO,
+                0, new BigDecimal("200000"));
     assertThat(r2.trades()).isEqualTo(r1.trades());
     assertThat(r2.finalEquity()).isEqualByComparingTo(r1.finalEquity());
     assertThat(r2.equityCurve()).isEqualTo(r1.equityCurve());

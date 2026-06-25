@@ -54,14 +54,15 @@ class OiAttributionServiceTest {
                 trade(1, "NIFTY26JUN2625000CE", "2026-06-23T09:32:00+05:30", "1500.00"),
                 trade(2, "NIFTY26JUN2625000CE", "2026-06-23T09:47:00+05:30", "-800.00")));
 
-    // both entries land in the SAME Ext.Bullish (trend 4) bucket window of the matrix.
+    // both entries land in the SAME Ext.Bullish bucket — composite trend 1 (NOT 4; the ordinal is
+    // bullish-first: 1 Ext.Bullish … 4 Ext.Bearish, matching ConnectingDotsService.composite).
     when(md.connectingDots(eq("NIFTY 50"), eq(LocalDate.of(2026, 6, 23)), eq("5m")))
         .thenReturn(
             new MarketDataClient.CdResponse(
                 true, // candle-derived OI for this historical session
                 List.of(
-                    row("09:30-09:35", 4, 1, 1, 1), // net +3
-                    row("09:45-09:50", 4, 1, 1, 0))));
+                    row("09:30-09:35", 1, 1, 1, 1), // net +3
+                    row("09:45-09:50", 1, 1, 1, 0))));
 
     OiAttributionService svc = new OiAttributionService(trades, md);
     Map<String, Object> out = svc.attribution(RUN, "5m", null);
@@ -76,7 +77,8 @@ class OiAttributionServiceTest {
     @SuppressWarnings("unchecked")
     List<Map<String, Object>> buckets = (List<Map<String, Object>>) out.get("buckets");
     Map<String, Object> extBull =
-        buckets.stream().filter(b -> Integer.valueOf(4).equals(b.get("trend"))).findFirst().orElseThrow();
+        buckets.stream().filter(b -> Integer.valueOf(1).equals(b.get("trend"))).findFirst().orElseThrow();
+    assertThat(extBull.get("label")).isEqualTo("Ext.Bullish"); // trend 1 → Ext.Bullish (not Ext.Bearish)
     assertThat(extBull.get("count")).isEqualTo(2);
     assertThat(extBull.get("wins")).isEqualTo(1);
     assertThat(extBull.get("winRate")).isEqualTo(new BigDecimal("0.5000"));

@@ -30,6 +30,19 @@ backtest replay** (options trade their own premium) is merged (#114–#119). The
 - Infra: **`nse↔upstox` Modulith cycle fix** (#138, was flaky-masked), **backfill transient-resilience**
   (#140, merged-not-deployed). The per-row tables below are updated to match.
 
+**2026-06-26 update — backtest-realism + historical-OI arc landed (#198–#214, all MERGED + DEPLOYED):**
+the backtester now trades real option premium *with* OI-aware entries (`backtest.oi_confluence_gate`, #208/#209),
+session/square-off enforced in replay (#206), a sweepable optimize block (#207), and a post-hoc **OI-confluence
+trade attribution** surface (#201). The whole oipulse OI suite + Connecting-Dots + attribution now work on HISTORY
+with no snapshot backfill (virtual read-time derivation `CandleDerivedChainReader`/`HistoricalOiReader`, #203/#204/
+#210/#211) + ATM-band IV recompute (#213). **#214 was the keystone fix** — keying the OI/IV/VIX factors by
+`bucket.toInstant()` (they had silently missed via an `OffsetDateTime` key across `+05:30`/`+00` sources) un-NEUTRAL'd
+the factors and validated the OI thesis: April attribution Ext.Bullish 5tr/80%win vs Bearish 1tr/0%win. **Strategy-eval
+learning:** derived history still forces Dow+IV NEUTRAL, so the OI edge reads MUTED on backtests — judge OI-led
+strategies on FORWARD paper with real captured OI, not a weak historical backtest. The expired/OI backfill is
+RUNNING ~99% (self-heal retrying the last failed legs); the Data Ops Console deploy + the scalper tuning sweep
+stay gated until it idles (a market-data restart kills the in-flight job).
+
 ## Legend
 - **Status:** DONE / PARTIAL / DEFERRED / GATED / NOT STARTED.
 - **Target:** the phase (or condition) the work is deferred to.
@@ -48,7 +61,7 @@ backtest replay** (options trade their own premium) is merged (#114–#119). The
 
 | Item | Status | Target | Reason |
 |---|---|---|---|
-| §5 expired-instrument OHLCV+OI backfill (ExpiryTrack historical) | **DONE / RUNNING** | — (#112–#116) | Upstox Plus funded; the `ExpiredBackfillService` ingester (bounded strikes + sliding-window limiter + resume) loads NIFTY/SENSEX expired CE/PE/FUT per-min OHLCV+OI into `candles` (`source='BACKFILL'`). First full pull in progress 2026-06-24. See [[upstox-expired-instruments]]. |
+| §5 expired-instrument OHLCV+OI backfill (ExpiryTrack historical) | **DONE / RUNNING** | — (#112–#116) | Upstox Plus funded; the `ExpiredBackfillService` ingester (bounded strikes + sliding-window limiter + resume) loads NIFTY/SENSEX expired CE/PE/FUT per-min OHLCV+OI into `candles` (`source='BACKFILL'`). First full pull RUNNING ~99% as of 2026-06-26 (~30.6k/31k contracts; `ExpiredBackfillAutoResume` self-heal retrying the last failed legs). See [[upstox-expired-instruments]]. |
 | Native (live) intraday-OI snapshot history depth | PARTIAL | ongoing forward-capture | Live 3-min full-chain OI capture has run since 2026-06-15 (forward-accruing); deep past OI for stocks (non-expired) still bought-only. |
 | §15 200-day daily history | DEFERRED | before Phase 5 | Needed by the Minervini screener (N-day high / RS rank); not needed earlier. SOURCE OPTIONS: (a) **Upstox historical-candle v3** `GET /v3/historical-candle/{key}/days/1/{to}/{from}` on the analytics token — login-free, multi-year daily, the same client family as the expired backfill (recommended — reuse `UpstoxExpiredInstrumentsClient`/`UpstoxFnoMasterClient` pattern); (b) openchart; (c) the EOD-bhavcopy daily candles already captured (forward-only, shallow). |
 | Live OI cutover (login-free capture) | **BUILT — deploy + flip pending (#137/#149)** | deploy after backfill, then A/B + flip | Direct-Upstox analytics-token live OI capture (login-free) shipped flag-gated default-Kite (#137); the cutover canary + runbook + OI A/B-diff tool are done (#149). Remaining: deploy off-hours + reconcile Upstox-vs-Kite per-strike OI for a session + flip `source.optionchain=upstox`. |
@@ -116,7 +129,7 @@ mega-dropdown split into a per-section menu bar** (#177). Authority for the reva
 | Phase | Status | Needs | Notes |
 |---|---|---|---|
 | 5 — Minervini Track-1 screener (§13) | NOT STARTED | Phase-1 §15 200-day history | Daily 8-gate Trend Template + RS rank; VCP/pivot/Cheat/Power-Play deferred (owner accepts manual chart-reading of entries). |
-| 6 — Backtest + forward wiring (§14) | **PARTIAL** | Phases 3 + 5 (+ the §5 OI data now loading) | **Part 2 premium-as-primary replay LANDED** (#114–#119): an options backtest now trades the option's own 1m premium series (`CANDLE_1M`), not the index close — golden-pinned. The v1 simplifications are now CLOSED (#123): per-bar mark-to-market, FillSimulator slippage+costs on the premium leg, and a 422 DATA_GAP coverage pre-flight. Remaining: the value-verify on real backfilled premium (gated on the backfill), forward-test wiring. Scalp historical-backtest fidelity is directional, not P&L-exact (R4); raptorbt cross-check oracle DEFERRED. |
+| 6 — Backtest + forward wiring (§14) | **PARTIAL** | Phases 3 + 5 (+ the §5 OI data now loading) | **Part 2 premium-as-primary replay LANDED** (#114–#119): an options backtest now trades the option's own 1m premium series (`CANDLE_1M`), not the index close — golden-pinned. The v1 simplifications are now CLOSED (#123): per-bar mark-to-market, FillSimulator slippage+costs on the premium leg, and a 422 DATA_GAP coverage pre-flight. **2026-06-25/26:** session/square-off/expiry enforced in replay (#206), an opt-in **OI-confluence entry gate** drops legs entering against the historical Connecting-Dots trend (#208/#209), a sweepable optimize block (#207), and a post-hoc **OI-attribution** surface (#201) all landed — all parity-safe. Remaining: the value-verify on real backfilled premium (gated on the backfill), forward-test wiring. Scalp historical-backtest fidelity is directional, not P&L-exact (R4) — **and OI-led strategies read MUTED on backtests because derived history forces Dow+IV NEUTRAL; judge them on FORWARD paper with real captured OI, not a weak historical backtest** (#214 lesson). raptorbt cross-check oracle DEFERRED. |
 
 ## Data Ops Console — parked decisions (from #121, B1–B6)
 

@@ -70,3 +70,43 @@ capture can run on the long-lived token with NO daily-login dependency** — the
   index/spot A/B is measurable today, a full option-strike scalp A/B needs an **F&O token→Upstox-key map**
   from the instrument master (the token→key bridge currently covers indices + NSE cash only); (3) deploy
   off-hours (a market-data restart kills the running expired backfill).
+
+## Target end-state config — broker-API routing recommendation (2026-06-26)
+
+The end-state the W-U4 cutover should converge to. Recorded now; implement deliberately at the right time
+(gated as below — do NOT flip blind). Goals: stable, non-conflicting, low rate-pressure on BOTH brokers.
+
+**Verdict: keep BOTH Kite + Upstox (dual-provider), split by strength. NOT Upstox-only, NOT Kite-only.**
+- *Not Upstox-only:* would kill the proven low-latency Kite WS scalp feed (Upstox WS scalp latency is
+  unproven — that's what the A/B measures), and it's a single point of failure + a 1-yr-token expiry risk.
+- *Not Kite-only:* the daily OAuth login is the #1 fragility (the FeedRearm incident), tight ~3 req/s REST
+  limits are the usual 429 victim, and Kite is not a source for expired-OI history at all.
+
+**Target routing (the flips W-U4 makes, each behind its own gate):**
+
+| Capability | Target | Rationale |
+|---|---|---|
+| Live WS ticker (`source.ticker`) | **Kite** (keep) | lowest-latency proven scalp path; worth the daily-login cost. Upstox v3 WS = hot standby once latency-A/B-proven |
+| Spot/FUT quotes (`source.quotes`) | **Upstox** | login-free, high headroom; keep Kite fallback for unmapped FUT keys (already designed) |
+| Historical candles (`source.candles`) | **Upstox** | relieves Kite's 3/s bottleneck; also unlocks the §15 200-day history |
+| Live OI chain capture (`source.optionchain`) | **Upstox** (after the OI-coverage canary) | biggest rate consumer (full chain every 3 min) — Upstox one-call chain is far cheaper; the single highest-leverage move for rate relief |
+| FII-DII / PCR-maxpain / World-Indices / Pre-Open / expired-OI backfill | **Upstox** (already) | keep |
+| EOD universe / corp-actions | **NSE/BSE direct** | keep |
+
+**Net effect:** Kite shrinks to ~just the live WS ticker + auth/instruments; all REST-heavy work moves to
+Upstox (where the headroom is). Minimizes Kite REST pressure (frees its quota for the latency-critical
+socket), concentrates polling on the high-limit provider → fewer 429s on both. Redundancy preserved (Kite
+still live as ticker + fallback). **Invariant:** exactly ONE feed per capability (never dual-capture the
+same table); cache-first everywhere; keep BOTH contract canaries running for drift detection.
+
+**OpenAlgo's role — data NO, orders YES.**
+- *Market data: do NOT route through OpenAlgo* — it adds a ~100-150ms broker hop + an extra failure point
+  in front of the feed (wrong for a scalp path); the direct Kite-WS + direct-Upstox-REST paths are already
+  lower-latency and login-free. Keep `source.*` pointed at the direct gateways, not the OpenAlgo adapter.
+- *Order execution: USE OpenAlgo* when real orders go live — broker-agnostic routing + multi-broker
+  insurance is its real value (`OpenAlgoOrderGateway` already built dormant). OpenAlgo's own broker is
+  wired to Upstox, consistent with the data side.
+
+**Net target:** ArthaYantra → **direct Kite (WS) + direct Upstox (REST/analytics/history)** for data;
+**OpenAlgo = orders-only** (broker-swap layer). Reach it by completing W-U4 flip-by-flip, each after its
+canary/A/B passes.

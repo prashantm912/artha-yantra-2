@@ -120,9 +120,13 @@ public class HistoricalOiReader {
     return eu == null ? live : derived.eodSeries(eu, expiry, from, to);
   }
 
-  /** Forwarded as-is for now (candle-derived prev-close twin is a follow-up). */
   public List<PerStrikeSessionStat> sessionStats(
       String name, LocalDate expiry, LocalDate session, int intervalMinutes) {
-    return snap.sessionStats(name, expiry, session, intervalMinutes);
+    List<PerStrikeSessionStat> live = snap.sessionStats(name, expiry, session, intervalMinutes);
+    if (!live.isEmpty() || !historicalDate(session)) {
+      return live;
+    }
+    String eu = CandleDerivedChainReader.expiredUnderlying(name);
+    return eu == null ? live : derived.sessionStats(eu, expiry, session, intervalMinutes);
   }
 }

@@ -1,6 +1,7 @@
 package in.arthayantra.marketdata.options.analytics;
 
 import in.arthayantra.common.web.time.Ist;
+import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.options.OiInterval;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
@@ -8,6 +9,8 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -47,9 +50,11 @@ import org.springframework.stereotype.Repository;
 public class CandleDerivedChainReader {
 
   private final JdbcTemplate jdbc;
+  private final MarketCalendar calendar;
 
-  public CandleDerivedChainReader(JdbcTemplate jdbc) {
+  public CandleDerivedChainReader(JdbcTemplate jdbc, MarketCalendar calendar) {
     this.jdbc = jdbc;
+    this.calendar = calendar;
   }
 
   /**
@@ -154,6 +159,11 @@ public class CandleDerivedChainReader {
             Timestamp.from(from.toInstant()),
             Timestamp.from(to.toInstant()));
 
+    // spot proxy per bucket = the front EXPIRED future's bucketed close (≈ forward) — lets the
+    // ATM-band pages (heatmap/expiry/open-high) centre on the right strikes instead of the lowest.
+    // Empty map when no future candle exists → spot stays null (the prior behaviour).
+    Map<OffsetDateTime, BigDecimal> spotByBucket = futureSpotByBucket(expiredUnderlyingSymbol, interval, from, to);
+
     // oi_change = bucket-over-bucket diff WITHIN each (strike, leg), null on that contract's first
     // bucket in the window (the rows are already ordered strike→leg→bucket).
     List<OptionsSnapshotReader.StrikePoint> points = new ArrayList<>(raw.size());
@@ -167,7 +177,8 @@ public class CandleDerivedChainReader {
       }
       points.add(
           new OptionsSnapshotReader.StrikePoint(
-              r.bucket, r.strike, r.optionType, r.ltp, r.oi, oiChange, null, null, r.volume));
+              r.bucket, r.strike, r.optionType, r.ltp, r.oi, oiChange, null,
+              spotByBucket.get(r.bucket), r.volume));
       prevKey = key;
       prevOi = r.oi;
     }
@@ -264,6 +275,117 @@ public class CandleDerivedChainReader {
         java.sql.Date.valueOf(expiry),
         Timestamp.from(from.toInstant()),
         Timestamp.from(to.toInstant()));
+  }
+
+  /** The front EXPIRED future's bucketed close per interval bucket — the derived spot proxy. */
+  private Map<OffsetDateTime, BigDecimal> futureSpotByBucket(
+      String eu, OiInterval interval, OffsetDateTime from, OffsetDateTime to) {
+    FrontFuture ff = frontFuture(eu, LocalDate.ofInstant(from.toInstant(), Ist.ZONE));
+    if (ff == null) {
+      return Map.of();
+    }
+    String sql =
+        "SELECT public.time_bucket(INTERVAL '"
+            + interval.pgInterval()
+            + "', c.bucket, 'Asia/Kolkata') AS b, public.last(c.close, c.bucket) AS spot "
+            + "FROM candles c WHERE c.exchange = ? AND c.tradingsymbol = ? "
+            + "AND c.interval = '1m' AND c.bucket >= ? AND c.bucket < ? GROUP BY b";
+    Map<OffsetDateTime, BigDecimal> m = new HashMap<>();
+    jdbc.query(
+        sql,
+        (org.springframework.jdbc.core.RowCallbackHandler)
+            rs -> m.put(rs.getObject("b", OffsetDateTime.class), rs.getBigDecimal("spot")),
+        ff.exchange(),
+        ff.tradingsymbol(),
+        Timestamp.from(from.toInstant()),
+        Timestamp.from(to.toInstant()));
+    return m;
+  }
+
+  /**
+   * Per-(strike, leg) session OHLC of the option premium (twin of {@code sessionStats}) — derived from
+   * the session's bucketed premium ({@code ltp}); {@code prevClose} = the prior trading day's newest
+   * bucket ltp (calendar-resolved; an uncovered-year throw degrades it to null, like the snapshot path).
+   */
+  public List<OptionsSnapshotReader.PerStrikeSessionStat> sessionStats(
+      String eu, LocalDate expiry, LocalDate session, int intervalMinutes) {
+    OiInterval interval = OiInterval.parse(intervalMinutes + "m");
+    List<OptionsSnapshotReader.StrikePoint> cur = daySeries(eu, expiry, interval, session);
+    if (cur.isEmpty()) {
+      return List.of();
+    }
+    Map<String, BigDecimal> prevClose = prevCloseByStrike(eu, expiry, session, interval);
+    Map<String, List<OptionsSnapshotReader.StrikePoint>> byStrike = new LinkedHashMap<>();
+    for (OptionsSnapshotReader.StrikePoint p : cur) {
+      byStrike.computeIfAbsent(sKey(p.strike(), p.optionType()), k -> new ArrayList<>()).add(p);
+    }
+    List<OptionsSnapshotReader.PerStrikeSessionStat> out = new ArrayList<>();
+    for (List<OptionsSnapshotReader.StrikePoint> pts : byStrike.values()) {
+      OptionsSnapshotReader.StrikePoint first = pts.get(0);
+      OptionsSnapshotReader.StrikePoint lastPt = pts.get(pts.size() - 1);
+      BigDecimal high = first.ltp();
+      BigDecimal low = first.ltp();
+      BigDecimal runningHigh = first.ltp();
+      Long declineVolume = null;
+      for (int i = 0; i < pts.size(); i++) {
+        BigDecimal ltp = pts.get(i).ltp();
+        if (ltp != null) {
+          if (high == null || ltp.compareTo(high) > 0) {
+            high = ltp;
+          }
+          if (low == null || ltp.compareTo(low) < 0) {
+            low = ltp;
+          }
+        }
+        if (i > 0 && ltp != null && runningHigh != null && ltp.compareTo(runningHigh) < 0) {
+          Long iv = intervalVolume(pts.get(i - 1).volume(), pts.get(i).volume());
+          if (iv != null) {
+            iv = Math.max(0L, iv);
+          }
+          declineVolume = add(declineVolume, iv);
+        }
+        if (ltp != null && (runningHigh == null || ltp.compareTo(runningHigh) > 0)) {
+          runningHigh = ltp;
+        }
+      }
+      Long dayVolume = intervalVolume(first.volume(), lastPt.volume());
+      out.add(
+          new OptionsSnapshotReader.PerStrikeSessionStat(
+              first.strike(), first.optionType(), first.ltp(), high, low, lastPt.ltp(), dayVolume,
+              declineVolume, prevClose.get(sKey(first.strike(), first.optionType()))));
+    }
+    return out;
+  }
+
+  /** Newest-bucket ltp per (strike, leg) of the prior trading session — empty when none/uncovered. */
+  private Map<String, BigDecimal> prevCloseByStrike(
+      String eu, LocalDate expiry, LocalDate session, OiInterval interval) {
+    LocalDate prior;
+    try {
+      prior = calendar.previousTradingDay(session);
+    } catch (IllegalArgumentException uncoveredYear) {
+      return Map.of();
+    }
+    Map<String, BigDecimal> close = new LinkedHashMap<>();
+    for (OptionsSnapshotReader.StrikePoint p : daySeries(eu, expiry, interval, prior)) {
+      close.put(sKey(p.strike(), p.optionType()), p.ltp()); // oldest-first → last write = newest bucket
+    }
+    return close;
+  }
+
+  private static String sKey(BigDecimal strike, String optionType) {
+    return strike.stripTrailingZeros().toPlainString() + "|" + optionType;
+  }
+
+  private static Long intervalVolume(Long a, Long b) {
+    return (a == null || b == null) ? null : b - a;
+  }
+
+  private static Long add(Long acc, Long v) {
+    if (v == null) {
+      return acc;
+    }
+    return acc == null ? v : acc + v;
   }
 
   private record Raw(

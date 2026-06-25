@@ -89,6 +89,9 @@ class CandleDerivedChainReaderIntegrationTest extends MarketDataIntegrationTestB
     candle("DERIV99PE", ist("09:24"), "45", 1800, 25);
     // incomplete strike — must NOT appear
     candle("DERIV99XCE", ist("09:19"), "5", 9999, 1);
+    // front-future candles → the derived spot proxy (last close per bucket).
+    candle("DERIV99FUT", ist("09:19"), "23950", 0, 100);
+    candle("DERIV99FUT", ist("09:24"), "23970", 0, 120);
 
     // equivalent captured snapshots (same oi at the bucket-closing ts) for the parity assertion
     snapshot("DERIV99CE", "CE", 23900, ist("09:19"), 1000);
@@ -181,6 +184,29 @@ class CandleDerivedChainReaderIntegrationTest extends MarketDataIntegrationTestB
     assertThat(reader.frontExpiry(EU, LocalDate.of(2099, 1, 1))).isEqualTo(EXPIRY);
     assertThat(reader.frontExpiry(EU, EXPIRY.plusDays(1))).isEqualTo(EXPIRY2);
     assertThat(reader.frontExpiry("NOPE", LocalDate.of(2099, 1, 1))).isNull();
+  }
+
+  @Test
+  void seriesCarriesTheFutureCloseAsSpotProxy() {
+    var s = reader.series(EU, EXPIRY, OiInterval.M5, ist("09:00"), ist("15:30"));
+    // bucket1 (09:15-09:20) spot = future last close 23950; bucket2 (09:20-09:25) = 23970.
+    var b1 = s.stream().filter(p -> p.bucket().toInstant().equals(ist("09:15").toInstant())).findFirst().orElseThrow();
+    var b2 = s.stream().filter(p -> p.bucket().toInstant().equals(ist("09:20").toInstant())).findFirst().orElseThrow();
+    assertThat(b1.spot()).isEqualByComparingTo("23950");
+    assertThat(b2.spot()).isEqualByComparingTo("23970");
+  }
+
+  @Test
+  void sessionStatsGradesPremiumOhlcPerStrike() {
+    var ss = reader.sessionStats(EU, EXPIRY, LocalDate.of(2099, 1, 13), 5);
+    var ce = ss.stream()
+        .filter(x -> "CE".equals(x.optionType()) && x.strike().intValue() == 23900)
+        .findFirst().orElseThrow();
+    // CE bucketed ltp: bucket1 last 50 (open), bucket2 last 60 → high 60, low 50, last 60.
+    assertThat(ce.open()).isEqualByComparingTo("50");
+    assertThat(ce.high()).isEqualByComparingTo("60");
+    assertThat(ce.low()).isEqualByComparingTo("50");
+    assertThat(ce.last()).isEqualByComparingTo("60");
   }
 
   @Test

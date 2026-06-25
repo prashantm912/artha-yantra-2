@@ -1,5 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useId, useRef } from 'react';
 import type { LucideIcon } from 'lucide-react';
+
+// Tab-focusable descendants of the dialog (used by the focus trap to find the first/last stops).
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function Modal(props: {
   open: boolean;
@@ -9,14 +13,47 @@ export function Modal(props: {
   children: React.ReactNode;
 }) {
   const { open, onClose, title, icon: Icon, children } = props;
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
 
   useEffect(() => {
     if (!open) return;
+    // Restore focus to whatever opened the dialog when it closes.
+    const opener = document.activeElement as HTMLElement | null;
+    // Move focus into the dialog on open (first focusable, else the dialog itself).
+    const dialog = dialogRef.current;
+    const first = dialog?.querySelector<HTMLElement>(FOCUSABLE);
+    (first ?? dialog)?.focus();
+
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab' || !dialog) return;
+      // Trap Tab within the dialog (wrap at both ends).
+      const stops = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE));
+      if (stops.length === 0) {
+        e.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const firstStop = stops[0];
+      const lastStop = stops[stops.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && (active === firstStop || active === dialog)) {
+        e.preventDefault();
+        lastStop.focus();
+      } else if (!e.shiftKey && active === lastStop) {
+        e.preventDefault();
+        firstStop.focus();
+      }
     }
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      opener?.focus?.();
+    };
   }, [open, onClose]);
 
   if (!open) return null;
@@ -32,13 +69,15 @@ export function Modal(props: {
         onClick={onClose}
       />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-labelledby={titleId}
+        tabIndex={-1}
         className="relative w-[92vw] max-w-3xl max-h-[80vh] overflow-auto rounded-lg border border-ay-border bg-surface-1 p-4"
       >
         <div className="mb-3 flex items-center justify-between gap-4">
-          <h2 className="flex items-center gap-1.5 text-h3 text-ay-text">
+          <h2 id={titleId} className="flex items-center gap-1.5 text-h3 text-ay-text">
             {Icon && <Icon aria-hidden="true" className="size-4 text-ay-muted" />}
             {title}
           </h2>

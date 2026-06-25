@@ -14,11 +14,14 @@ import {
   useBacktestMonteCarlo,
   useBacktestResults,
   useBacktestTrades,
+  useOiAttribution,
   type BacktestResults,
   type CurvePoint,
   type TradeRow,
 } from '../../api/backtests.ts';
 import { exitReasonBreakdown } from './exitReasonBreakdown.ts';
+
+const OI_INTERVALS = ['3m', '5m', '10m', '15m'] as const;
 
 // /backtests/:id (master plan §20 parity, E-11 / E-12.5): metric panel (+ benchmark-relative columns
 // when present), scrollable trade table with per-trade contribution drill-down, persisted equity +
@@ -64,7 +67,7 @@ const price = (v: string | null | undefined) => (v == null ? '—' : formatDecim
 const nums = (a: string[] | undefined) => (a ?? []).map(Number);
 const curveNums = (c: CurvePoint[] | null | undefined) => (c ?? []).map((p) => Number(p.value));
 
-type Tab = 'overview' | 'trades' | 'folds' | 'mc';
+type Tab = 'overview' | 'trades' | 'folds' | 'mc' | 'oi';
 
 export function BacktestResultsPage() {
   const { id = '' } = useParams();
@@ -75,6 +78,8 @@ export function BacktestResultsPage() {
 
   const [tab, setTab] = useState<Tab>('overview');
   const [selected, setSelected] = useState<TradeRow | null>(null);
+  const [oiInterval, setOiInterval] = useState<string>('5m');
+  const oi = useOiAttribution(id, oiInterval);
 
   const r = results.data;
   const foldRows = folds.data ?? [];
@@ -138,11 +143,37 @@ export function BacktestResultsPage() {
     [mcData],
   );
 
+  const oiData = oi.data ?? null;
+  const oiWinRateOption = useCallback(
+    (t: ChartTheme): EChartsOption => {
+      const scored = (oiData?.buckets ?? []).filter((b) => b.count > 0);
+      return {
+        textStyle: { color: t.text },
+        tooltip: { trigger: 'axis' },
+        grid: { left: 44, right: 16, top: 24, bottom: 40 },
+        xAxis: { type: 'category', data: scored.map((b) => b.label), axisLabel: { color: t.muted, interval: 0, rotate: 20 } },
+        yAxis: { type: 'value', name: 'win %', max: 100, axisLabel: { color: t.muted }, splitLine: { lineStyle: { color: t.grid } } },
+        series: [
+          {
+            type: 'bar',
+            data: scored.map((b) => ({
+              value: b.winRate == null ? 0 : Math.round(Number(b.winRate) * 1000) / 10,
+              // greener as the confluence turns bullish (trend 0 bearish … 4 ext-bullish); NO_DATA muted.
+              itemStyle: { color: b.trend < 0 ? t.muted : b.trend >= 3 ? t.bull : b.trend === 2 ? t.accent : t.bear },
+            })),
+          },
+        ],
+      };
+    },
+    [oiData],
+  );
+
   const tabs: { id: Tab; label: string; show: boolean }[] = [
     { id: 'overview', label: 'Overview', show: true },
     { id: 'trades', label: 'Trades', show: true },
     { id: 'folds', label: 'Folds', show: foldRows.length > 0 },
     { id: 'mc', label: 'Monte Carlo', show: !!mcData },
+    { id: 'oi', label: 'OI Attribution', show: true },
   ];
 
   const exitStats = useMemo(() => exitReasonBreakdown(trades.data?.items ?? []), [trades.data]);
@@ -365,6 +396,93 @@ export function BacktestResultsPage() {
             <EChart makeOption={mcDrawdownOption} height={240} ariaLabel="Monte Carlo drawdown distribution" />
           </BeatBlock>
           <p className="mt-2 text-xs tabular-nums text-ay-muted">risk of ruin {mcData.riskOfRuin}</p>
+        </>
+      )}
+
+      {tab === 'oi' && (
+        <>
+          <div className="mb-3 flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-sm text-ay-muted">
+              OI interval
+              <select
+                value={oiInterval}
+                onChange={(e) => setOiInterval(e.target.value)}
+                aria-label="OI attribution interval"
+                className="rounded-md border border-ay-border bg-surface-1 px-2 py-1 text-sm text-ay-text"
+              >
+                {OI_INTERVALS.map((iv) => (
+                  <option key={iv} value={iv}>{iv}</option>
+                ))}
+              </select>
+            </label>
+            {oiData?.underlying && (
+              <span className="text-sm text-ay-muted">
+                {oiData.underlying} · {oiData.tradesAttributed}/{oiData.tradeCount} trades scored ·{' '}
+                {oiData.sessionsCovered} sessions covered, {oiData.sessionsUncovered} uncovered
+              </span>
+            )}
+          </div>
+          <QueryState
+            query={oi}
+            empty={{ title: 'No attribution.' }}
+            errorTitle="Couldn't load OI attribution"
+            skeleton={<Skeleton variant="chart-block" height={280} />}
+          >
+            {(d) =>
+              d.tradeCount === 0 ? (
+                <p className="rounded-md border border-ay-border bg-surface-1 px-3 py-6 text-center text-sm text-ay-muted">
+                  {d.caveat ?? 'No trades to attribute.'}
+                </p>
+              ) : (
+                <>
+                  {d.caveat && (
+                    <p className="mb-3 rounded-md bg-warn/15 px-2 py-1 text-xs text-warn ring-1 ring-warn/40">
+                      {d.caveat}
+                    </p>
+                  )}
+                  <BeatBlock className="card shadow-e1 mb-3">
+                    <EChart
+                      makeOption={oiWinRateOption}
+                      height={240}
+                      ariaLabel="Win rate by entry OI-confluence trend"
+                    />
+                  </BeatBlock>
+                  <div className="overflow-auto rounded-lg border border-ay-border">
+                    <table className="w-full border-collapse text-sm" aria-label="OI-confluence attribution buckets">
+                      <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
+                        <tr>
+                          <th scope="col" className="px-2 py-2 font-medium">Entry confluence</th>
+                          <th scope="col" className="px-2 py-2 text-right font-medium">Trades</th>
+                          <th scope="col" className="px-2 py-2 text-right font-medium">Wins</th>
+                          <th scope="col" className="px-2 py-2 text-right font-medium">Win rate</th>
+                          <th scope="col" className="px-2 py-2 text-right font-medium">Total P&L</th>
+                          <th scope="col" className="px-2 py-2 text-right font-medium">Avg P&L</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {d.buckets.filter((b) => b.count > 0).map((b) => (
+                          <tr key={b.label} className="border-t border-ay-border">
+                            <td className="px-2 py-2">{b.label}</td>
+                            <td className="px-2 py-2 text-right tabular-nums">{b.count}</td>
+                            <td className="px-2 py-2 text-right tabular-nums">{b.wins}</td>
+                            <td className="px-2 py-2 text-right tabular-nums">
+                              {b.winRate == null ? '—' : `${formatDecimal(String(b.winRate), 3)}`}
+                            </td>
+                            <td className={cn('px-2 py-2 text-right tabular-nums', isNegative(b.totalPnl) ? 'text-bear' : 'text-bull')}>
+                              {price(b.totalPnl)}
+                            </td>
+                            <td className={cn('px-2 py-2 text-right tabular-nums', isNegative(b.avgPnl ?? '0') ? 'text-bear' : 'text-bull')}>
+                              {price(b.avgPnl)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )
+            }
+          </QueryState>
         </>
       )}
       </m.div>

@@ -19,6 +19,24 @@ vi.mock('../../api/backtests.ts', () => ({
   useBacktestMonteCarlo: () => ({
     data: { n: 1000, trades: 42, insufficientSample: false, equityBands: { step: [0, 1], p5: ['100', '95'], p50: ['100', '105'], p95: ['100', '115'] }, drawdownDistribution: { p5: '-2', p50: '-5', p95: '-10', mean: '-6' }, riskOfRuin: '0.02' },
   }),
+  useOiAttribution: () => ({
+    data: {
+      underlying: 'NIFTY 50',
+      interval: '5m',
+      tradeCount: 3,
+      tradesAttributed: 2,
+      tradesNoData: 1,
+      sessionsCovered: 1,
+      sessionsUncovered: 1,
+      caveat: 'Historical OI-confluence join over captured snapshots.',
+      buckets: [
+        { trend: 4, label: 'Ext.Bullish', count: 2, wins: 2, winRate: '1.0000', totalPnl: '500.00', avgPnl: '250.00' },
+        { trend: -1, label: 'NO_DATA', count: 1, wins: 0, winRate: '0.0000', totalPnl: '-100.00', avgPnl: '-100.00' },
+      ],
+      trades: [],
+    },
+    isLoading: false,
+  }),
 }));
 
 import { BacktestResultsPage } from './BacktestResultsPage.tsx';
@@ -89,5 +107,14 @@ describe('BacktestResultsPage', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: 'Monte Carlo' }));
     expect(screen.getByText(/risk of ruin 0.02/)).toBeInTheDocument();
+  });
+
+  it('OI Attribution tab buckets trades by entry confluence and shows coverage', () => {
+    renderPage();
+    fireEvent.click(screen.getByRole('tab', { name: 'OI Attribution' }));
+    expect(screen.getByText(/2\/3 trades scored/)).toBeInTheDocument();
+    const buckets = screen.getByRole('table', { name: 'OI-confluence attribution buckets' });
+    const row = within(buckets).getByText('Ext.Bullish').closest('tr')!;
+    expect(within(row).getByText('1.000')).toBeInTheDocument(); // win rate
   });
 });

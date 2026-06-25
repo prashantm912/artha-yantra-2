@@ -2172,6 +2172,7 @@ export interface components {
             interval?: string;
             /** Format: date-time */
             asOf?: string;
+            derived?: boolean;
             rows?: components["schemas"]["ConnectingDotsRow"][];
         };
         ConnectingDotsRow: {

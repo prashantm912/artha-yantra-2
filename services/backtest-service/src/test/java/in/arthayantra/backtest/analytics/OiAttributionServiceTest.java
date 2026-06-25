@@ -57,12 +57,15 @@ class OiAttributionServiceTest {
     // both entries land in the SAME Ext.Bullish (trend 4) bucket window of the matrix.
     when(md.connectingDots(eq("NIFTY 50"), eq(LocalDate.of(2026, 6, 23)), eq("5m")))
         .thenReturn(
-            List.of(
-                row("09:30-09:35", 4, 1, 1, 1), // net +3
-                row("09:45-09:50", 4, 1, 1, 0)));
+            new MarketDataClient.CdResponse(
+                true, // candle-derived OI for this historical session
+                List.of(
+                    row("09:30-09:35", 4, 1, 1, 1), // net +3
+                    row("09:45-09:50", 4, 1, 1, 0))));
 
     OiAttributionService svc = new OiAttributionService(trades, md);
     Map<String, Object> out = svc.attribution(RUN, "5m", null);
+    assertThat(out.get("oiDerived")).isEqualTo(true);
 
     assertThat(out.get("underlying")).isEqualTo("NIFTY 50");
     assertThat(out.get("tradeCount")).isEqualTo(2);
@@ -96,7 +99,8 @@ class OiAttributionServiceTest {
     when(trades.findByRun(eq(RUN), org.mockito.ArgumentMatchers.anyInt(),
             org.mockito.ArgumentMatchers.anyInt(), any(), any(), any()))
         .thenReturn(List.of(trade(1, "NIFTY26JUN2625000CE", "2026-04-09T10:00:00+05:30", "200.00")));
-    when(md.connectingDots(any(), any(), any())).thenReturn(List.of()); // no OI for April
+    when(md.connectingDots(any(), any(), any()))
+        .thenReturn(MarketDataClient.CdResponse.EMPTY); // no OI for April
 
     Map<String, Object> out = new OiAttributionService(trades, md).attribution(RUN, "5m", null);
     assertThat(out.get("tradesNoData")).isEqualTo(1);

@@ -1,6 +1,7 @@
 package in.arthayantra.backtest.analytics;
 
 import in.arthayantra.backtest.client.MarketDataClient;
+import in.arthayantra.backtest.client.MarketDataClient;
 import in.arthayantra.backtest.client.MarketDataClient.CdRow;
 import in.arthayantra.backtest.replay.TradeRepository;
 import java.math.BigDecimal;
@@ -94,6 +95,7 @@ public class OiAttributionService {
     Map<LocalDate, Map<String, CdRow>> bySession = new LinkedHashMap<>();
     java.util.Set<LocalDate> covered = new java.util.LinkedHashSet<>();
     java.util.Set<LocalDate> uncovered = new java.util.LinkedHashSet<>();
+    boolean[] anyDerived = {false}; // any covered session's OI was candle-derived (not captured)
 
     List<Map<String, Object>> perTrade = new ArrayList<>();
     Map<Integer, int[]> tally = new LinkedHashMap<>(); // trend(0..4 or -1 NO_DATA) -> [count, wins]
@@ -106,11 +108,19 @@ public class OiAttributionService {
           bySession.computeIfAbsent(
               session,
               s -> {
+                MarketDataClient.CdResponse cd = marketData.connectingDots(underlying, s, interval);
                 Map<String, CdRow> m = new java.util.HashMap<>();
-                for (CdRow r : marketData.connectingDots(underlying, s, interval)) {
+                for (CdRow r : cd.rowsOrEmpty()) {
                   m.put(r.timeInterval(), r);
                 }
-                (m.isEmpty() ? uncovered : covered).add(s);
+                if (m.isEmpty()) {
+                  uncovered.add(s);
+                } else {
+                  covered.add(s);
+                  if (cd.derived()) {
+                    anyDerived[0] = true;
+                  }
+                }
                 return m;
               });
 
@@ -161,6 +171,7 @@ public class OiAttributionService {
     out.put("tradesNoData", tally.getOrDefault(-1, new int[2])[0]);
     out.put("sessionsCovered", covered.size());
     out.put("sessionsUncovered", uncovered.size());
+    out.put("oiDerived", anyDerived[0]);
     out.put(
         "caveat",
         "Historical OI-confluence join over captured/backfilled snapshots; the Dow factor is "

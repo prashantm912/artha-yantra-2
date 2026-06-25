@@ -68,6 +68,13 @@ export function AppShell() {
 
   return (
     <div className="min-h-screen bg-surface-0 text-ay-text">
+      {/* Skip-to-content — first focusable; visually-hidden until keyboard-focused, then jumps to <main>. */}
+      <a
+        href="#main"
+        className="sr-only rounded-md border border-ay-border bg-surface-1 px-3 py-2 text-sm text-ay-text focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-[60]"
+      >
+        Skip to main content
+      </a>
       <header className="flex flex-wrap items-center gap-3 border-b border-ay-border bg-surface-1 px-4 py-2">
         <span className="font-semibold text-accent">ArthaYantra</span>
         <MegaMenu />
@@ -97,7 +104,7 @@ export function AppShell() {
         </div>
       </header>
 
-      <main className="p-4" data-testid="app-shell">
+      <main id="main" tabIndex={-1} className="p-4" data-testid="app-shell">
         <Outlet />
       </main>
     </div>

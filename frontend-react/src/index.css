@@ -231,7 +231,7 @@
   --ay-surface-0: #000000;
   --ay-surface-1: #0a0a0a;
   --ay-surface-2: #161616;
-  --ay-border: #5a5a5a;
+  --ay-border: #767676; /* ≥3:1 vs surface-1 #0a0a0a (was #5a5a5a = 2.87:1, a11y-fail) */
   --ay-text: #ffffff;
   --ay-text-muted: #d4d4d4;
   --ay-bull: #00e676;

@@ -77,5 +77,6 @@ backtest:
       - { path: "indicators[alias=ema_slow].params.period", range: [15, 34], step: 1 }
       - { path: "entry_rules.scoring.threshold",            range: [0.55, 0.80] }
       - { path: "exit_rules[type=stop_loss].params.value",  choices: [15, 20, 25, 30] }
+  oi_confluence_gate: { interval: "5m", enabled: true }
   defaults: { costs: { slippage_ticks: 1, per_lot_inr: 25 }, initial_capital: 200000,
               lookback_days: 60, interval: 1m }

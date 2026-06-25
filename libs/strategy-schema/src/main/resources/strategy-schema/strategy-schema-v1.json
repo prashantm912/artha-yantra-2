@@ -602,6 +602,15 @@
             "costs": { "$ref": "#/$defs/costs" }
           }
         },
+        "oi_confluence_gate": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Backtest-only OI-confluence entry gate: drop option legs whose entry fires against the historical Connecting-Dots trend (long/CE into Bearish, short/PE into Bullish). Opt-in; off by default so existing replays are unaffected.",
+          "properties": {
+            "enabled": { "type": "boolean", "default": false },
+            "interval": { "type": "string", "default": "5m", "description": "OI interval the confluence is read at (e.g. 5m)." }
+          }
+        },
         "optimize": {
           "type": "object",
           "additionalProperties": false,

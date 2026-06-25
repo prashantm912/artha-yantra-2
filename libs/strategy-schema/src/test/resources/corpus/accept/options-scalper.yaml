@@ -67,6 +67,7 @@ risk:
 backtest:
   defaults: { interval: 1m, lookback_days: 60, initial_capital: 200000,
               costs: { per_lot_inr: 25, slippage_ticks: 1 } }
+  oi_confluence_gate: { enabled: true, interval: "5m" }   # drop counter-confluence entries (opt-in)
   optimize:
     parameters:
       - { path: "indicators[alias=ema_fast].params.period", range: [5, 13], step: 1 }

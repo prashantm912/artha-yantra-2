@@ -66,6 +66,10 @@ risk:
 backtest:
   defaults: { interval: 1m, lookback_days: 60, initial_capital: 200000,
               costs: { per_lot_inr: 20, slippage_ticks: 1 } }
+  # OI-confluence entry gate (backtest-only, opt-in): drop legs whose entry fires against the
+  # historical Connecting-Dots trend (long/CE into Bearish, short/PE into Bullish). Acts on the
+  # attribution finding that counter-confluence entries lose. Set enabled:false to A/B without it.
+  oi_confluence_gate: { enabled: true, interval: "5m" }
   # Sweep block (path-based overrides, closed grammar): tunes the entry/exit knobs by alias/type.
   # TPE Bayesian search + walk-forward folds; trials with too few trades are dropped (min_trades).
   optimize:

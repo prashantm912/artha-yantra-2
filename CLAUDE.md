@@ -97,6 +97,19 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
   `KiteWireContractTest`. The WS ticker uses the javakiteconnect SDK; REST is hand-rolled
   `RestClient` because the SDK pins `Routes._rootUrl` (no setter) → unstubbable by WireMock. EVERY
   new Kite call follows this — see `kite/wire/package-info.java`.
+- **Cross-source symbol normalization (Kite / Upstox / OpenAlgo):** ONE canonical key — the `Instrument`
+  record keyed by **`(exchange, tradingsymbol)` in Kite's grammar**, stored in `marketdata.instruments`
+  (PK same). Numeric tokens (Kite `instrument_token`, Upstox `instrument_key`) are source-local session
+  handles, **resolved through the master, never stored as identity / never compared across sources**. Each
+  source has an edge mapper: Kite tradingsymbol IS canonical (token→key via `InstrumentRegistry`); Upstox
+  index/equity via static maps (`NSE_INDEX|Nifty 50` / `NSE_EQ|<ISIN>`) but **F&O key = an opaque numeric
+  token NOT derivable from the symbol** → tuple-looked-up `(segment,underlying,type,expiry,strike)` against
+  Upstox's public instrument-master JSON (`UpstoxFnoMasterClient`); OpenAlgo requests are **built from the
+  structured leg fields, never the Kite symbol** (`OpenAlgoSymbols`, its `DDMMMYY` token differs). Load-bearing
+  reconcilers: `normalizeStrike()` (strip trailing zeros so `18000`≡`18000.00`), per-source expiry conversion
+  (Kite `DDMMMYY` / Upstox epoch-millis / canonical `LocalDate`), `UnderlyingRef` (`NIFTY`→`NIFTY 50`). **Kite
+  is the always-on fallback** (Upstox/OpenAlgo mapping is additive, must never break the feed). Drift caught by
+  3 contract canaries (Kite/Upstox/OpenAlgo, CONSUMED-field sentinels). Full map: `docs/symbol-normalization.md`.
 - **Run the Playwright e2e vs a running mock stack:** `cd e2e &&
   E2E_OWNER_PASSWORD=<your .env owner pw> npx playwright test` — global-setup reuses a
   healthy stack and won't overwrite an existing `.env`; the helper password defaults to

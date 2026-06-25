@@ -30,6 +30,8 @@ authority is the OpenAlgo/React master plan; the design authority is `docs/desig
 - `dev-setup.md`, `remote-access.md` — local/dev setup + remote access.
 - `retention.md`, `runbook-notes.md` — data-retention policy + ops runbook notes.
 - `golden-vectors.md` — golden-vector fixture-format freeze (the parity contract).
+- `symbol-normalization.md` — how instrument/contract naming is reconciled across Kite / Upstox / OpenAlgo
+  (one canonical `(exchange, tradingsymbol)` key; per-source edge mappers; tuple-match + canaries).
 - `LEGAL.md` — attribution / licence record.
 - `strategy-sources.md` — Siva scalper provenance manifest (strategy → source doc + last-ported commit).
 

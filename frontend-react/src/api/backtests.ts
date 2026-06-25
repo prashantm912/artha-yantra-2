@@ -253,6 +253,51 @@ export function useCompareResults(ids: string[]) {
   });
 }
 
+export interface OiAttributionBucket {
+  trend: number;
+  label: string;
+  count: number;
+  wins: number;
+  winRate: string | null;
+  totalPnl: string;
+  avgPnl: string | null;
+}
+
+export interface OiAttributionTradeRow {
+  seq: number;
+  tradingsymbol: string;
+  entryTs: string;
+  bucket: string;
+  trend: number;
+  trendLabel: string;
+  net: number | null;
+  pnl: string;
+  win: boolean;
+}
+
+export interface OiAttribution {
+  underlying: string | null;
+  interval: string;
+  tradeCount: number;
+  tradesAttributed: number;
+  tradesNoData: number;
+  sessionsCovered: number;
+  sessionsUncovered: number;
+  caveat: string | null;
+  buckets: OiAttributionBucket[];
+  trades: OiAttributionTradeRow[];
+}
+
+/** OI-confluence attribution: trades bucketed by the Connecting-Dots trend at each entry. */
+export function useOiAttribution(id: string, interval: string) {
+  return useQuery({
+    queryKey: ['backtest', id, 'oi-attribution', interval],
+    queryFn: () =>
+      apiFetch<OiAttribution>(`/backtests/${id}/oi-attribution?interval=${interval}`),
+    enabled: !!id,
+  });
+}
+
 /** Monte Carlo summary — null when the run is unknown (404) or had no trades (422). */
 export function useBacktestMonteCarlo(id: string) {
   return useQuery({

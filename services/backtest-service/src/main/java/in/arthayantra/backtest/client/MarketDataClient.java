@@ -1,6 +1,9 @@
 package in.arthayantra.backtest.client;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -63,6 +66,75 @@ public class MarketDataClient {
           from,
           to,
           e.toString());
+    }
+  }
+
+  /**
+   * Reads the historical "Connecting Dots" per-interval sentiment matrix for an index session — the
+   * OI-confluence the {@link in.arthayantra.backtest.analytics.OiAttributionService post-hoc trade
+   * attribution} joins each trade's entry against. {@code name} is the index (e.g. {@code NIFTY 50}),
+   * {@code interval} the OI token ({@code 5m}); reads stored snapshots only (no live capture), so a
+   * session with no backfilled/captured OI returns an empty row list. Best-effort: a transport/4xx
+   * failure yields an empty list (the attribution then marks the session uncovered, never throws).
+   */
+  public List<CdRow> connectingDots(String name, LocalDate date, String interval) {
+    try {
+      CdResponse body =
+          http.get()
+              .uri(
+                  "/api/v1/market/connecting-dots?mode=history&name={n}&date={d}&interval={i}",
+                  name,
+                  date.toString(),
+                  interval)
+              .retrieve()
+              .body(CdResponse.class);
+      return body == null || body.rows() == null ? List.of() : body.rows();
+    } catch (RuntimeException e) {
+      log.debug("connecting-dots miss {} {} {}: {}", name, date, interval, e.toString());
+      return List.of();
+    }
+  }
+
+  /** Mirror of market-data's {@code ConnectingDots} envelope — only the fields attribution reads. */
+  @JsonIgnoreProperties(ignoreUnknown = true)
+  public record CdResponse(List<CdRow> rows) {}
+
+  /**
+   * One interval row: the {@code HH:mm-HH:mm} IST bucket label, the 5-state composite {@code trend}
+   * (0 Ext.Bearish … 4 Ext.Bullish), and the 11 three-state factor codes (0 Neutral / 1 Bullish / 2
+   * Bearish) used to derive the net confluence vote.
+   */
+  @JsonIgnoreProperties(ignoreUnknown = true)
+  public record CdRow(
+      String timeInterval,
+      int trend,
+      int dow,
+      int vix,
+      int volume,
+      int activeStrikeIv,
+      int activeStrikeOi,
+      int futOi,
+      int vwap,
+      int supertrend,
+      int rsi,
+      int futPrice,
+      int dailyTrend) {
+
+    /** Net confluence vote = #bullish − #bearish across the 11 factors (factor code 1 vs 2). */
+    public int net() {
+      int[] f = {
+        dow, vix, volume, activeStrikeIv, activeStrikeOi, futOi, vwap, supertrend, rsi, futPrice,
+        dailyTrend
+      };
+      int net = 0;
+      for (int v : f) {
+        if (v == 1) {
+          net++;
+        } else if (v == 2) {
+          net--;
+        }
+      }
+      return net;
     }
   }
 }

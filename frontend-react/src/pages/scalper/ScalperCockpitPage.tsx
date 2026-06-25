@@ -4,6 +4,7 @@ import { Radio } from 'lucide-react';
 import { formatDecimal, isNegative, multiplyByInt, subtractDecimal } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
+import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { useSignalDetail, useSignals, useSignalsLive, type SignalDto } from '../../api/signals.ts';
@@ -89,6 +90,100 @@ export function ScalperCockpitPage() {
 
   const feed = useMemo(() => signals.data?.items ?? [], [signals.data]);
   const acct = account.data ?? null;
+  const posItems = useMemo(() => positions.data?.items ?? [], [positions.data]);
+
+  // Columns re-derive each render so the live `mtm` overlay (reads `live`) stays current — no memo.
+  const posColumns: DataColumn<PaperPosition>[] = [
+    {
+      id: 'instrument',
+      header: 'Instrument',
+      align: 'left',
+      sortValue: (p) => `${p.exchange}:${p.tradingsymbol}`,
+      sortType: 'text',
+      render: (p) => (
+        <>
+          {p.exchange}:{p.tradingsymbol}
+        </>
+      ),
+      // No mobileLabel: the instrument is asserted via a singular getByText in the spec; a mobile-card
+      // cell would duplicate the text in the DOM.
+      mono: false,
+    },
+    {
+      id: 'side',
+      header: 'Side',
+      align: 'left',
+      sortValue: (p) => p.side,
+      sortType: 'text',
+      render: (p) => (
+        <span className={cn('text-xs font-semibold', p.side === 'BUY' ? 'text-bull' : 'text-bear')}>
+          {p.side}
+        </span>
+      ),
+      mobileLabel: 'Side',
+      mono: false,
+    },
+    {
+      id: 'qty',
+      header: 'Qty',
+      sortValue: (p) => p.qty,
+      sortType: 'number',
+      render: (p) => p.qty,
+      mobileLabel: 'Qty',
+    },
+    {
+      id: 'mark',
+      header: 'Mark',
+      sortValue: (p) => mtm(p).mark ?? null,
+      sortType: 'decimal',
+      render: (p) => {
+        const m = mtm(p);
+        return m.mark ? money(m.mark) : '—';
+      },
+      mobileLabel: 'Mark',
+    },
+    {
+      id: 'upnl',
+      header: 'uP&L',
+      sortValue: (p) => mtm(p).unrealized ?? null,
+      sortType: 'decimal',
+      render: (p) => {
+        const m = mtm(p);
+        return m.unrealized ? money(m.unrealized) : '—';
+      },
+      cellClassName: (p) => {
+        const m = mtm(p);
+        return m.unrealized ? tone(m.unrealized) : '';
+      },
+      // No mobileLabel: the uP&L value would duplicate in the mobile card.
+    },
+    {
+      id: 'sltp',
+      header: 'SL / TP',
+      headerClassName: 'whitespace-nowrap',
+      render: (p) => (
+        <span className="text-xs text-ay-muted">
+          {p.stopLoss ? money(p.stopLoss) : '—'} / {p.takeProfit ? money(p.takeProfit) : '—'}
+        </span>
+      ),
+      mobileLabel: 'SL / TP',
+    },
+    {
+      id: 'actions',
+      header: 'Actions',
+      headerClassName: 'ay-sr-only',
+      render: (p) => (
+        <button
+          type="button"
+          onClick={() => close.mutate({ id: p.id })}
+          className="px-1.5 text-xs text-accent hover:underline"
+        >
+          Close
+        </button>
+      ),
+      mono: false,
+    },
+  ];
 
   const pickLeg = (leg: ChainLeg) => {
     if (!leg.tradingsymbol) return;
@@ -317,52 +412,13 @@ export function ScalperCockpitPage() {
               <span><span className="text-ay-muted">Open </span><span className="font-semibold tabular-nums">{positions.data?.items.length ?? 0}</span></span>
             </div>
           )}
-          <div className="max-h-[calc(100vh-16rem)] overflow-auto rounded-lg border border-ay-border">
-            <table className="w-full border-collapse text-sm">
-              <thead className="sticky top-0 bg-surface-1 text-left text-xs uppercase text-ay-muted">
-                <tr>
-                  <th className="px-2 py-2 font-medium">Instrument</th>
-                  <th className="px-2 py-2 font-medium">Side</th>
-                  <th className="px-2 py-2 text-right font-medium">Qty</th>
-                  <th className="px-2 py-2 text-right font-medium">Mark</th>
-                  <th className="px-2 py-2 text-right font-medium">uP&L</th>
-                  <th className="px-2 py-2 text-right font-medium">SL / TP</th>
-                  <th className="px-2 py-2"><span className="ay-sr-only">Actions</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {(positions.data?.items ?? []).map((p) => {
-                  const m = mtm(p);
-                  return (
-                  <tr key={p.id} className="border-t border-ay-border">
-                    <td className="px-2 py-2">{p.exchange}:{p.tradingsymbol}</td>
-                    <td className="px-2 py-2">
-                      <span className={cn('text-xs font-semibold', p.side === 'BUY' ? 'text-bull' : 'text-bear')}>{p.side}</span>
-                    </td>
-                    <td className="px-2 py-2 text-right tabular-nums">{p.qty}</td>
-                    <td className="px-2 py-2 text-right tabular-nums">{m.mark ? money(m.mark) : '—'}</td>
-                    <td className={cn('px-2 py-2 text-right tabular-nums', m.unrealized && tone(m.unrealized))}>
-                      {m.unrealized ? money(m.unrealized) : '—'}
-                    </td>
-                    <td className="px-2 py-2 text-right tabular-nums text-xs text-ay-muted">
-                      {p.stopLoss ? money(p.stopLoss) : '—'} / {p.takeProfit ? money(p.takeProfit) : '—'}
-                    </td>
-                    <td className="px-2 py-2 text-right">
-                      <button type="button" onClick={() => close.mutate({ id: p.id })} className="px-1.5 text-xs text-accent hover:underline">
-                        Close
-                      </button>
-                    </td>
-                  </tr>
-                  );
-                })}
-                {(positions.data?.items ?? []).length === 0 && (
-                  <tr>
-                    <td colSpan={7} className="px-2 py-6 text-center text-ay-muted">No open positions.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            columns={posColumns}
+            rows={posItems}
+            rowKey={(p) => String(p.id)}
+            ariaLabel="Open positions"
+            emptyMessage="No open positions."
+          />
         </section>
       </BeatBlock>
     </LoadBeat>

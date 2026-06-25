@@ -1,19 +1,26 @@
 package in.arthayantra.marketdata.options.analytics;
 
+import in.arthayantra.black76.Black76;
+import in.arthayantra.black76.IvSolver;
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketcalendar.MarketCalendar;
+import in.arthayantra.marketdata.options.ExpiryClock;
 import in.arthayantra.marketdata.options.OiInterval;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
+import java.util.OptionalDouble;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -49,12 +56,21 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class CandleDerivedChainReader {
 
+  /** ATM-band width (strikes either side of the spot) for the read-time IV recompute. */
+  private static final int IV_BAND = 3;
+
   private final JdbcTemplate jdbc;
   private final MarketCalendar calendar;
+  private final double riskFreeRate;
 
-  public CandleDerivedChainReader(JdbcTemplate jdbc, MarketCalendar calendar) {
+  public CandleDerivedChainReader(
+      JdbcTemplate jdbc,
+      MarketCalendar calendar,
+      @org.springframework.beans.factory.annotation.Value("${artha.options.risk-free-rate:0.065}")
+          BigDecimal riskFreeRate) {
     this.jdbc = jdbc;
     this.calendar = calendar;
+    this.riskFreeRate = riskFreeRate.doubleValue();
   }
 
   /**
@@ -187,7 +203,79 @@ public class CandleDerivedChainReader {
         Comparator.comparing(OptionsSnapshotReader.StrikePoint::bucket)
             .thenComparing(OptionsSnapshotReader.StrikePoint::strike)
             .thenComparing(OptionsSnapshotReader.StrikePoint::optionType));
-    return points;
+    return enrichAtmIv(points, expiry);
+  }
+
+  /**
+   * Solves Black-76 IV for the ATM-band strikes per bucket from the candle premium — the future-close
+   * {@code spot} proxy IS the forward, so the only missing solver input is now available. Keeps the
+   * 11th (ATM-IV) Connecting-Dots factor faithful on derived history + populates the OI-page IV columns
+   * near the money. Out-of-band strikes (and any below-intrinsic/zero premium) stay null.
+   */
+  private List<OptionsSnapshotReader.StrikePoint> enrichAtmIv(
+      List<OptionsSnapshotReader.StrikePoint> points, LocalDate expiry) {
+    Map<OffsetDateTime, List<OptionsSnapshotReader.StrikePoint>> byBucket = new LinkedHashMap<>();
+    for (OptionsSnapshotReader.StrikePoint p : points) {
+      byBucket.computeIfAbsent(p.bucket(), k -> new ArrayList<>()).add(p);
+    }
+    Map<String, BigDecimal> ivOverride = new HashMap<>();
+    byBucket.forEach(
+        (bucket, pts) -> {
+          BigDecimal forward =
+              pts.stream()
+                  .map(OptionsSnapshotReader.StrikePoint::spot)
+                  .filter(Objects::nonNull)
+                  .findFirst()
+                  .orElse(null);
+          if (forward == null) {
+            return;
+          }
+          OptionalDouble years = ExpiryClock.yearsToExpiry(bucket.toInstant(), expiry);
+          if (years.isEmpty()) {
+            return;
+          }
+          double t = years.getAsDouble();
+          Set<BigDecimal> band =
+              new HashSet<>(
+                  pts.stream()
+                      .map(OptionsSnapshotReader.StrikePoint::strike)
+                      .distinct()
+                      .sorted(Comparator.comparing(s -> s.subtract(forward).abs()))
+                      .limit(IV_BAND * 2L + 1)
+                      .toList());
+          for (OptionsSnapshotReader.StrikePoint p : pts) {
+            if (!band.contains(p.strike()) || p.ltp() == null || p.ltp().signum() <= 0) {
+              continue;
+            }
+            Black76.OptionType type =
+                "CE".equals(p.optionType()) ? Black76.OptionType.CE : Black76.OptionType.PE;
+            IvSolver.IvResult r =
+                IvSolver.solve(
+                    type, forward.doubleValue(), p.strike().doubleValue(), t, riskFreeRate,
+                    p.ltp().doubleValue());
+            if (r.iv() != null) {
+              ivOverride.put(ivKey(p), r.iv());
+            }
+          }
+        });
+    if (ivOverride.isEmpty()) {
+      return points;
+    }
+    List<OptionsSnapshotReader.StrikePoint> out = new ArrayList<>(points.size());
+    for (OptionsSnapshotReader.StrikePoint p : points) {
+      BigDecimal iv = ivOverride.get(ivKey(p));
+      out.add(
+          iv == null
+              ? p
+              : new OptionsSnapshotReader.StrikePoint(
+                  p.bucket(), p.strike(), p.optionType(), p.ltp(), p.oi(), p.oiChange(), iv,
+                  p.spot(), p.volume()));
+    }
+    return out;
+  }
+
+  private static String ivKey(OptionsSnapshotReader.StrikePoint p) {
+    return p.bucket() + "|" + p.strike().stripTrailingZeros().toPlainString() + "|" + p.optionType();
   }
 
   /** The IST-day window's bucketed chain — the basis the {@code latest}/{@code latestPair} twins slice. */

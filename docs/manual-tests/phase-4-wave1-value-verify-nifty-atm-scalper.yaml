@@ -66,3 +66,20 @@ risk:
 backtest:
   defaults: { interval: 1m, lookback_days: 60, initial_capital: 200000,
               costs: { per_lot_inr: 20, slippage_ticks: 1 } }
+  # Sweep block (path-based overrides, closed grammar): tunes the entry/exit knobs by alias/type.
+  # TPE Bayesian search + walk-forward folds; trials with too few trades are dropped (min_trades).
+  optimize:
+    parameters:
+      - { path: "indicators[alias=ema_fast].params.period",  range: [5, 15], step: 1 }
+      - { path: "indicators[alias=ema_slow].params.period",  range: [18, 34], step: 1 }
+      - { path: "indicators[alias=rsi_1m].params.period",    range: [10, 20], step: 1 }
+      - { path: "indicators[alias=st_5m].params.period",     range: [7, 14], step: 1 }
+      - { path: "indicators[alias=st_5m].params.multiplier", range: [1.5, 3.0] }
+      - { path: "entry_rules.scoring.threshold",             range: [0.55, 0.80] }
+      - { path: "exit_rules[type=stop_loss].params.value",   choices: [15, 20, 25] }
+      - { path: "exit_rules[type=take_profit].params.value", range: [25, 50], step: 5 }
+    method: tpe
+    max_trials: 60
+    objective: { metric: sharpe, direction: maximize }
+    constraints: { min_trades: 15 }
+    walk_forward: { train_days: 30, test_days: 10, step_days: 10, anchored: false }

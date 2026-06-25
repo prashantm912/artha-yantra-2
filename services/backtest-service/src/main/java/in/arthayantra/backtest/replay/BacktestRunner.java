@@ -405,15 +405,28 @@ public class BacktestRunner {
     return contexts;
   }
 
-  private static SeriesKey signalInstrument(JsonNode config) {
+  // Package-visible for BacktestRunnerSignalInstrumentTest.
+  static SeriesKey signalInstrument(JsonNode config) {
     JsonNode instruments = config.path("universe").path("instruments");
     if (instruments.isArray() && !instruments.isEmpty()) {
       JsonNode first = instruments.get(0);
       return new SeriesKey(first.path("exchange").asText(), first.path("tradingsymbol").asText(), "1m");
     }
-    String underlying = config.path("universe").path("underlying").asText(null);
-    if (underlying != null && underlying.contains(":")) {
-      String[] parts = underlying.split(":", 2);
+    // options_of_underlying / futures_of_underlying: the signal instrument IS the underlying spot.
+    // schema-v1's universe.underlying is an instrumentRef OBJECT {exchange, tradingsymbol} — resolve it
+    // (the premium-as-primary replay then routes fills onto the option's own series). The pre-2026-06-25
+    // code only handled a legacy "EXCH:SYMBOL" string, so a schema-valid options strategy threw here.
+    JsonNode underlying = config.path("universe").path("underlying");
+    if (underlying.isObject()
+        && underlying.hasNonNull("exchange")
+        && underlying.hasNonNull("tradingsymbol")) {
+      return new SeriesKey(
+          underlying.get("exchange").asText(), underlying.get("tradingsymbol").asText(), "1m");
+    }
+    // Legacy colon-string form ("NSE:NIFTY 50").
+    String underlyingStr = underlying.asText(null);
+    if (underlyingStr != null && underlyingStr.contains(":")) {
+      String[] parts = underlyingStr.split(":", 2);
       return new SeriesKey(parts[0], parts[1], "1m");
     }
     throw new IllegalArgumentException("backtest needs an explicit single-instrument universe (v1)");

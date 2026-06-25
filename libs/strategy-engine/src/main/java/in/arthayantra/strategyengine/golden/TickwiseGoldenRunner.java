@@ -1,5 +1,6 @@
 package in.arthayantra.strategyengine.golden;
 
+import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.strategyengine.config.StrategyDefinition;
 import in.arthayantra.strategyengine.eval.EntryEvaluator;
 import in.arthayantra.strategyengine.eval.ExitEvaluator;
@@ -112,6 +113,10 @@ public final class TickwiseGoldenRunner {
     LocalTime preCloseAt = LocalTime.parse(definition.session().preCloseAt());
     Duration primaryDuration =
         coarsePrimary ? intervalDuration(definition.primaryTimeframe()) : Duration.ofMinutes(1);
+    // Session enforcement (mirrors the live SignalEngine): entries blocked outside the IST window /
+    // at-or-after square_off / outside the tighter expiry-day window; an open position is force-closed
+    // at square_off. Inert unless the strategy declares those fields → golden fixtures stay byte-identical.
+    SessionGate gate = new SessionGate(definition.session());
 
     int barIndex = 0;
     for (EngineCandle bar : primaryOneMinute) {
@@ -122,6 +127,7 @@ public final class TickwiseGoldenRunner {
       advanceContexts(contexts, contextCursor, contextCandles, bar);
 
       LocalDate barDay = EngineSeries.sessionDate(bar);
+      LocalTime barTime = bar.bucketStart().toLocalTime();
       if (!barDay.equals(currentDay)) {
         currentDay = barDay;
         dayBuffer.clear();
@@ -135,6 +141,10 @@ public final class TickwiseGoldenRunner {
           primary.append(aggregate(bucketBuffer, currentBucketFloor));
           bucketBuffer.clear();
           int primaryIndex = primary.size() - 1;
+          if (open != null && gate.pastSquareOff(barTime)) {
+            events.add(exitEvent(bar.bucketStart(), open));
+            open = null;
+          }
           if (open != null) {
             Optional<ExitEvaluator.ExitDecision> exit =
                 ExitEvaluator.evaluate(
@@ -150,7 +160,7 @@ public final class TickwiseGoldenRunner {
           if (open == null) {
             Optional<EntryEvaluator.Evaluation> evaluation =
                 EntryEvaluator.evaluate(definition, bank, primaryIndex);
-            if (evaluation.isPresent() && evaluation.get().entry()) {
+            if (evaluation.isPresent() && evaluation.get().entry() && gate.entryAllowed(barTime, barDay)) {
               events.add(
                   entryEvent(
                       bar.bucketStart(), evaluation.get(), entryLevels(bank, primary, primaryIndex)));
@@ -188,7 +198,7 @@ public final class TickwiseGoldenRunner {
           primary.append(preCloseDailyBar(dayBuffer));
           Optional<EntryEvaluator.Evaluation> evaluation =
               EntryEvaluator.evaluate(definition, bank, primary.size() - 1);
-          if (evaluation.isPresent() && evaluation.get().entry()) {
+          if (evaluation.isPresent() && evaluation.get().entry() && gate.entryAllowed(barTime, barDay)) {
             events.add(
                 entryEvent(
                     bar.bucketStart(),
@@ -201,6 +211,10 @@ public final class TickwiseGoldenRunner {
 
       // 1m primary: exits resolve before a new entry on the same bar
       int index = primary.size() - 1;
+      if (open != null && gate.pastSquareOff(barTime)) {
+        events.add(exitEvent(bar.bucketStart(), open));
+        open = null;
+      }
       if (open != null) {
         Optional<ExitEvaluator.ExitDecision> exit =
             ExitEvaluator.evaluate(
@@ -216,7 +230,7 @@ public final class TickwiseGoldenRunner {
       if (open == null) {
         Optional<EntryEvaluator.Evaluation> evaluation =
             EntryEvaluator.evaluate(definition, bank, index);
-        if (evaluation.isPresent() && evaluation.get().entry()) {
+        if (evaluation.isPresent() && evaluation.get().entry() && gate.entryAllowed(barTime, barDay)) {
           events.add(
               entryEvent(bar.bucketStart(), evaluation.get(), entryLevels(bank, primary, index)));
           open = openPosition(primary, index, live1m.size() - 1, evaluation.get());
@@ -353,4 +367,56 @@ public final class TickwiseGoldenRunner {
       int entryPrimaryIndex,
       int entryOneMinuteIndex,
       ScoreBreakdown entryBreakdown) {}
+
+  /**
+   * The IST session-time gate (parity-inert unless declared). Entries are allowed only inside the
+   * window and before {@code square_off}; on an index-expiry day the optional tighter expiry window
+   * applies (or all entries are blocked when {@code expiry_day.allowed=false}). The NSE calendar is
+   * loaded ONLY when an {@code expiry_day} block is present, so the common path takes no calendar.
+   */
+  static final class SessionGate {
+    private final LocalTime windowFrom;
+    private final LocalTime windowTo;
+    private final LocalTime squareOff;
+    private final LocalTime expiryFrom;
+    private final LocalTime expiryTo;
+    private final Boolean expiryDayAllowed;
+    private final MarketCalendar calendar; // null unless an expiry_day block was declared
+
+    SessionGate(StrategyDefinition.Session s) {
+      this.windowFrom = parse(s.windowFrom());
+      this.windowTo = parse(s.windowTo());
+      this.squareOff = parse(s.squareOff());
+      this.expiryFrom = parse(s.expiryWindowFrom());
+      this.expiryTo = parse(s.expiryWindowTo());
+      this.expiryDayAllowed = s.expiryDayAllowed();
+      boolean expiryDeclared =
+          s.expiryDayAllowed() != null || expiryFrom != null || expiryTo != null;
+      this.calendar = expiryDeclared ? MarketCalendar.nse() : null;
+    }
+
+    private static LocalTime parse(String v) {
+      return v == null ? null : LocalTime.parse(v);
+    }
+
+    boolean entryAllowed(LocalTime t, LocalDate day) {
+      boolean expiryDay = calendar != null && calendar.isWeeklyIndexExpiryDay(day);
+      if (expiryDay && Boolean.FALSE.equals(expiryDayAllowed)) {
+        return false; // strategy opts out of expiry-day entries entirely
+      }
+      LocalTime from = expiryDay && expiryFrom != null ? expiryFrom : windowFrom;
+      LocalTime to = expiryDay && expiryTo != null ? expiryTo : windowTo;
+      if (from != null && t.isBefore(from)) {
+        return false;
+      }
+      if (to != null && !t.isBefore(to)) {
+        return false;
+      }
+      return squareOff == null || t.isBefore(squareOff);
+    }
+
+    boolean pastSquareOff(LocalTime t) {
+      return squareOff != null && !t.isBefore(squareOff);
+    }
+  }
 }

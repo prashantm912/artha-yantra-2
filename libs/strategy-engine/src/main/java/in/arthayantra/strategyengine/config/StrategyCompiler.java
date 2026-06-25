@@ -182,6 +182,8 @@ public final class StrategyCompiler {
         node.has("exit_intrabar")
             ? node.get("exit_intrabar").asBoolean()
             : !"1m".equals(primary);
+    JsonNode expiry = node.path("expiry_day");
+    Boolean expiryAllowed = expiry.has("allowed") ? expiry.path("allowed").asBoolean() : null;
     return new StrategyDefinition.Session(
         style,
         node.path("window").path("from").asText(null),
@@ -189,7 +191,10 @@ public final class StrategyCompiler {
         node.path("square_off").asText(null),
         node.path("pre_close_at").asText("15:20"),
         fillTiming,
-        exitIntrabar);
+        exitIntrabar,
+        expiryAllowed,
+        expiry.path("window").path("from").asText(null),
+        expiry.path("window").path("to").asText(null));
   }
 
   private static Map<String, Object> paramsMap(JsonNode params) {

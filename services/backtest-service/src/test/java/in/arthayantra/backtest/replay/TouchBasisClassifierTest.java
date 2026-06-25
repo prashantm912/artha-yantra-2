@@ -27,7 +27,7 @@ class TouchBasisClassifierTest {
         null,
         List.of(),
         null,
-        new Session("intraday", null, null, null, "15:20", null, exitIntrabar));
+        new Session("intraday", null, null, null, "15:20", null, exitIntrabar, null, null, null));
   }
 
   @Test

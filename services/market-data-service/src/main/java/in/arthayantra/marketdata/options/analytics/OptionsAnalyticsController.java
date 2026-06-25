@@ -31,7 +31,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/market/options")
 public class OptionsAnalyticsController {
 
-  private final OptionsSnapshotReader reader;
+  // Historical-aware facade: snapshots first, candle-derived fallback for fully-past empties (#4).
+  private final HistoricalOiReader reader;
   private final OptionsChainService chainService;
   private final ActiveStrikeService activeStrikes;
   private final OiSpurtService spurtService;
@@ -54,7 +55,7 @@ public class OptionsAnalyticsController {
   private final int defaultSessionIntervalMinutes;
 
   public OptionsAnalyticsController(
-      OptionsSnapshotReader reader,
+      HistoricalOiReader reader,
       OptionsChainService chainService,
       ActiveStrikeService activeStrikes,
       OiSpurtService spurtService,

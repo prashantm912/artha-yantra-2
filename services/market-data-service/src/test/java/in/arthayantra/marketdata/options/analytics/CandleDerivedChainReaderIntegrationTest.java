@@ -137,6 +137,34 @@ class CandleDerivedChainReaderIntegrationTest extends MarketDataIntegrationTestB
   }
 
   @Test
+  void latestSlicesTheNewestBucketAndLatestPairTheTwoNewest() {
+    LocalDate date = LocalDate.of(2099, 1, 13);
+    var latest = reader.latest(EU, EXPIRY, OiInterval.M5, date);
+    // newest bucket (09:20-09:25) only → CE+PE at 23900 with the later oi.
+    assertThat(latest).hasSize(2);
+    assertThat(latest).allSatisfy(p -> assertThat(p.bucket().toInstant()).isEqualTo(ist("09:20").toInstant()));
+    assertThat(latest.stream().filter(p -> "CE".equals(p.optionType())).findFirst().orElseThrow().oi())
+        .isEqualTo(1500L);
+
+    var pair = reader.latestPair(EU, EXPIRY, OiInterval.M5, date);
+    assertThat(pair).hasSize(4); // both buckets × CE/PE
+  }
+
+  @Test
+  void strikeSeriesFiltersToOneStrikeAndEodSeriesRollsUpPremiumOhlc() {
+    var only23900 = reader.strikeSeries(EU, EXPIRY, new java.math.BigDecimal("23900"), OiInterval.M5, ist("09:00"), ist("15:30"));
+    assertThat(only23900).hasSize(4).allSatisfy(p -> assertThat(p.strike().intValue()).isEqualTo(23900));
+    assertThat(reader.strikeSeries(EU, EXPIRY, new java.math.BigDecimal("99999"), OiInterval.M5, ist("09:00"), ist("15:30"))).isEmpty();
+
+    var eod = reader.eodSeries(EU, EXPIRY, ist("00:00"), ist("23:59"));
+    var ce = eod.stream().filter(r -> "CE".equals(r.optionType())).findFirst().orElseThrow();
+    assertThat(ce.open()).isEqualByComparingTo("48"); // first 1m close of the day
+    assertThat(ce.high()).isEqualByComparingTo("60");
+    assertThat(ce.close()).isEqualByComparingTo("60"); // last 1m close
+    assertThat(ce.oiClose()).isEqualTo(1500L);
+  }
+
+  @Test
   void derivedOiMatchesCapturedSnapshotOi() {
     Map<String, Long> derived =
         reader.series(EU, EXPIRY, OiInterval.M5, ist("09:00"), ist("15:30")).stream()

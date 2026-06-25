@@ -1,9 +1,9 @@
 import { useMemo } from 'react';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
-import { formatDecimal, isNegative } from '../../lib/decimal.ts';
+import { addDecimal, compareDecimal, formatDecimal, isNegative, multiplyByInt } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
 import { PageHeader } from '../../components/PageHeader.tsx';
-import { LoadBeat } from '../../components/LoadBeat.tsx';
+import { BeatStrip, BeatItem, LoadBeat } from '../../components/LoadBeat.tsx';
 import {
   useFunds,
   useOrderbook,
@@ -63,6 +63,104 @@ function FundsCard({ funds }: { funds: Funds | undefined }) {
   );
 }
 
+// Client-side P&L summary derived from the positions read model + funds snapshot — no extra fetch,
+// no backend change. Decimals stay exact (addDecimal / multiplyByInt / compareDecimal, never
+// parseFloat). With no broker wired the positions list is empty → every figure is "0" (no NaN, no
+// divide-by-zero) and the strip still renders alongside the page's existing empty states.
+interface PnlSummary {
+  totalMtm: string; // signed
+  openCount: number;
+  longCount: number;
+  shortCount: number;
+  netExposure: string; // abs(long + short)
+  longExposure: string;
+  shortExposure: string;
+}
+
+const ZERO = '0';
+const isLong = (side: string) => side.toUpperCase() === 'BUY';
+const isShort = (side: string) => side.toUpperCase() === 'SELL';
+
+function summarize(positions: PositionEntry[]): PnlSummary {
+  let totalMtm = ZERO;
+  let longExposure = ZERO;
+  let shortExposure = ZERO;
+  let longCount = 0;
+  let shortCount = 0;
+
+  for (const p of positions) {
+    if (p.mtmPnl != null) totalMtm = addDecimal(totalMtm, p.mtmPnl);
+    // qty is signed; exposure = |qty| * ltp, bucketed by the derived side.
+    if (p.ltp != null) {
+      const qty = Math.abs(Math.trunc(Number(p.qty)));
+      const exposure = multiplyByInt(p.ltp, qty);
+      if (isLong(p.side)) longExposure = addDecimal(longExposure, exposure);
+      else if (isShort(p.side)) shortExposure = addDecimal(shortExposure, exposure);
+    }
+    if (isLong(p.side)) longCount += 1;
+    else if (isShort(p.side)) shortCount += 1;
+  }
+
+  return {
+    totalMtm,
+    openCount: positions.length,
+    longCount,
+    shortCount,
+    netExposure: addDecimal(longExposure, shortExposure),
+    longExposure,
+    shortExposure,
+  };
+}
+
+/** One P&L stat tile — uppercase wide-tracked caption label + mono value, optional sign-tone. */
+function PnlStat({ label, value, tone }: { label: string; value: string; tone?: string | null }) {
+  return (
+    <div className="card shadow-e1">
+      <div className="text-caption uppercase tracking-wide text-ay-muted">{label}</div>
+      <div className={cn('mt-1 text-h3 nums font-semibold text-ay-text', tone && toneClass(tone))}>{value}</div>
+    </div>
+  );
+}
+
+function PnlStrip({
+  positions,
+  funds,
+}: {
+  positions: PositionEntry[];
+  funds: Funds | undefined;
+}) {
+  const s = useMemo(() => summarize(positions), [positions]);
+  const fundsOk = funds?.status === 'OK';
+  // compareDecimal so a "0.00"-formatted total still tones neutral (no false bear on -0).
+  const mtmTone = compareDecimal(s.totalMtm, ZERO) === 0 ? null : s.totalMtm;
+
+  return (
+    <BeatStrip
+      className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5"
+      data-testid="orders-pnl-strip"
+    >
+      <BeatItem>
+        <PnlStat label="Total MTM P&L" value={money(s.totalMtm)} tone={mtmTone} />
+      </BeatItem>
+      <BeatItem>
+        <PnlStat label="Open Positions" value={`${s.openCount}`} />
+      </BeatItem>
+      <BeatItem>
+        <PnlStat label="Long / Short" value={`${s.longCount} / ${s.shortCount}`} />
+      </BeatItem>
+      <BeatItem>
+        <PnlStat label="Net Exposure" value={money(s.netExposure)} />
+      </BeatItem>
+      <BeatItem>
+        <PnlStat
+          label="Avail / Utilised Cash"
+          value={fundsOk ? `${money(funds?.availableCash)} / ${money(funds?.utilisedDebits)}` : '—'}
+        />
+      </BeatItem>
+    </BeatStrip>
+  );
+}
+
 export function OrdersPage() {
   const orderbook = useOrderbook();
   const positions = usePositions();
@@ -116,6 +214,8 @@ export function OrdersPage() {
   return (
     <LoadBeat>
       <PageHeader title="Orders" subtitle="Live broker read surface — Orderbook · Positions · Tradebook · Funds" />
+
+      <PnlStrip positions={positions.data ?? []} funds={funds.data} />
 
       <Section title="Funds">
         {funds.isLoading ? <p className="text-sm text-ay-muted">Loading…</p> : <FundsCard funds={funds.data} />}

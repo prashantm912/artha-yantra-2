@@ -81,6 +81,13 @@ describe('OrdersPage', () => {
     // Funds card surfaces available cash.
     expect(screen.getByText('Available Cash')).toBeInTheDocument();
     expect(screen.getByText('18083.01')).toBeInTheDocument();
+
+    // P&L strip summarises the positions + funds client-side: total MTM, open count, long/short split.
+    const strip = screen.getByTestId('orders-pnl-strip');
+    expect(within(strip).getByText('Total MTM P&L')).toBeInTheDocument();
+    expect(within(strip).getByText('1087.50')).toBeInTheDocument(); // sum of the single position's MTM
+    expect(within(strip).getByText('1 / 0')).toBeInTheDocument(); // one long, no short
+    expect(within(strip).getByText('10125.00')).toBeInTheDocument(); // net exposure = 75 * 135.00
   });
 
   it('shows empty states and a not-configured funds notice when nothing is wired', () => {
@@ -99,5 +106,12 @@ describe('OrdersPage', () => {
     expect(screen.getAllByText('No open positions.').length).toBeGreaterThan(0);
     expect(screen.getAllByText('No trades.').length).toBeGreaterThan(0);
     expect(screen.getByText(/Funds not configured/)).toBeInTheDocument();
+
+    // P&L strip degrades to zeros/dashes on empty positions + NOT_CONFIGURED funds (no NaN).
+    const strip = screen.getByTestId('orders-pnl-strip');
+    expect(within(strip).queryByText(/NaN/)).not.toBeInTheDocument();
+    expect(within(strip).getAllByText('0.00').length).toBe(2); // total MTM + net exposure both 0.00
+    expect(within(strip).getByText('0 / 0')).toBeInTheDocument(); // no longs / shorts
+    expect(within(strip).getByText('—')).toBeInTheDocument(); // funds dash when not configured
   });
 });

@@ -229,6 +229,10 @@ services:
       ARTHA_MD_SOURCE_QUOTES: ${ARTHA_MD_SOURCE_QUOTES:-kite}
       ARTHA_MD_SOURCE_CANDLES: ${ARTHA_MD_SOURCE_CANDLES:-kite}
       ARTHA_MD_SOURCE_OPTIONCHAIN: ${ARTHA_MD_SOURCE_OPTIONCHAIN:-kite}
+      # WS live ticker source (Wave-U4 §C). The application.yml binding existed but this passthrough
+      # was missing, so a .env ARTHA_MD_SOURCE_TICKER never reached the container (default Kite either
+      # way). Added so the owner's ticker flip is a one-line .env change. Default kite (no behaviour change).
+      ARTHA_MD_SOURCE_TICKER: ${ARTHA_MD_SOURCE_TICKER:-kite}
       ARTHA_MD_SOURCE_FIIDII: ${ARTHA_MD_SOURCE_FIIDII:-nse}
       ARTHA_MD_SOURCE_OPTIONANALYTICS: ${ARTHA_MD_SOURCE_OPTIONANALYTICS:-native}
       # Upstox Market-Information analytics side-channel (ADR-0002) — default-OFF.

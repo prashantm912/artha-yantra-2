@@ -12,13 +12,14 @@ This runbook is the exact flip sequence, the validation gates, and the rollback.
 
 ## Hard gate before ANY flip — backfill must be idle
 
-A source flip needs a **market-data restart**, which **kills the running expired-OI backfill**
-(memory [[expired-backfill-live-db-incident]] — a mid-run restart already cost two live-DB OOM
-incidents). **Do NOT flip while the backfill is running.**
+A source flip needs a **market-data restart**, which kills the running expired-OI backfill THREAD.
 
-- Confirm the backfill is idle: `GET /api/v1/market/admin/expired-backfill/status` reports no
-  running job (or check the market-data logs for an active `ExpiredBackfillService` pass).
-- Flip + deploy strictly **off-hours**, after the backfill finishes.
+> **SOFTENED 2026-06-25.** The backfill now **self-resumes** on restart: `ExpiredBackfillAutoResume`
+> (#178) fires a coverage-aware resume on every boot (skips already-complete contracts → no progress
+> lost), and the per-leg-timeout fix (#194) stops a hung leg from stalling the run. So a flip-restart
+> no longer needs a manual re-POST and loses no backfill data — it continues where it left off. Still
+> prefer **off-hours**: the resume re-walks the registry + contends with live capture, and a flip is a
+> deliberate change best done calm. Confirm state with `GET /api/v1/market/admin/expired-backfill/status`.
 
 ## Prereqs (all three flips share these)
 
@@ -39,13 +40,10 @@ incidents). **Do NOT flip while the backfill is running.**
 | Spot/FUT quotes | `…source.quotes` | `ARTHA_MD_SOURCE_QUOTES` | `upstox` | quotes sane vs Kite |
 | WS live ticker | `…source.ticker` | `ARTHA_MD_SOURCE_TICKER` | `upstox` | tick-latency A/B (U3 runbook) |
 
-> **Compose passthrough gap:** `deploy/docker-compose.yml` passes `ARTHA_MD_SOURCE_QUOTES` and
-> `ARTHA_MD_SOURCE_OPTIONCHAIN` into the `market-data-service` env, but **NOT** `ARTHA_MD_SOURCE_TICKER`
-> (the `application.yml` binding exists; only the compose passthrough is missing). Before the ticker
-> flip, add the line under the other `ARTHA_MD_SOURCE_*` entries:
-> `ARTHA_MD_SOURCE_TICKER: ${ARTHA_MD_SOURCE_TICKER:-kite}` — otherwise a `.env` value never reaches
-> the container. (Setting it inline on the `up -d` command, as the U3 runbook shows, also works for a
-> one-off A/B.)
+> **Compose passthrough gap — CLOSED 2026-06-25 (PR #197).** `deploy/docker-compose.yml` now passes
+> `ARTHA_MD_SOURCE_TICKER: ${ARTHA_MD_SOURCE_TICKER:-kite}` alongside the other `ARTHA_MD_SOURCE_*`
+> entries, so the ticker flip is a one-line `.env` change (`ARTHA_MD_SOURCE_TICKER=upstox`) like the
+> other two — no inline `up -d` workaround needed. Default `kite` (no behaviour change until flipped).
 
 ## Recommended cutover ORDER (lowest risk → highest)
 

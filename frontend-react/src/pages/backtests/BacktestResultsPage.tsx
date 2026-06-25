@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { m } from 'motion/react';
 import type { EChartsOption } from 'echarts';
-import { formatDecimal } from '../../lib/decimal.ts';
+import { formatDecimal, isNegative } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
@@ -18,6 +18,7 @@ import {
   type CurvePoint,
   type TradeRow,
 } from '../../api/backtests.ts';
+import { exitReasonBreakdown } from './exitReasonBreakdown.ts';
 
 // /backtests/:id (master plan §20 parity, E-11 / E-12.5): metric panel (+ benchmark-relative columns
 // when present), scrollable trade table with per-trade contribution drill-down, persisted equity +
@@ -144,6 +145,8 @@ export function BacktestResultsPage() {
     { id: 'mc', label: 'Monte Carlo', show: !!mcData },
   ];
 
+  const exitStats = useMemo(() => exitReasonBreakdown(trades.data?.items ?? []), [trades.data]);
+
   const contributions = useMemo(() => {
     const c = selected?.contributions;
     if (!c || typeof c !== 'object') return [];
@@ -212,6 +215,41 @@ export function BacktestResultsPage() {
 
       {tab === 'trades' && (
         <>
+          {exitStats.length > 0 && (
+            <div className="mb-3">
+              <h3 className="mb-1.5 text-caption uppercase tracking-wide text-ay-muted">
+                Exit-reason breakdown <span className="normal-case">(loaded trades)</span>
+              </h3>
+              <div className="overflow-auto rounded-lg border border-ay-border">
+                <table className="w-full border-collapse text-sm" aria-label="Exit-reason breakdown">
+                  <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
+                    <tr>
+                      <th scope="col" className="px-2 py-2 font-medium">Reason</th>
+                      <th scope="col" className="px-2 py-2 text-right font-medium">Count</th>
+                      <th scope="col" className="px-2 py-2 text-right font-medium">Win rate</th>
+                      <th scope="col" className="px-2 py-2 text-right font-medium">Total P&L</th>
+                      <th scope="col" className="px-2 py-2 text-right font-medium">Avg P&L</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {exitStats.map((s) => (
+                      <tr key={s.reason} className="border-t border-ay-border">
+                        <td className="px-2 py-2">{s.reason}</td>
+                        <td className="px-2 py-2 text-right tabular-nums">{s.count}</td>
+                        <td className="px-2 py-2 text-right tabular-nums">{formatDecimal(String(s.winRate), 1)}%</td>
+                        <td className={cn('px-2 py-2 text-right tabular-nums', isNegative(s.totalPnl) ? 'text-bear' : 'text-bull')}>
+                          {price(s.totalPnl)}
+                        </td>
+                        <td className={cn('px-2 py-2 text-right tabular-nums', isNegative(s.avgPnl) ? 'text-bear' : 'text-bull')}>
+                          {price(s.avgPnl)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
           <div className="max-h-[calc(100vh-18rem)] overflow-auto rounded-lg border border-ay-border">
             <table className="w-full border-collapse text-sm">
               <thead className="sticky top-0 bg-surface-1 text-left text-xs uppercase text-ay-muted">

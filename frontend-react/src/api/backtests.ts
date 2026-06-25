@@ -215,7 +215,9 @@ export function useBacktestResults(id: string) {
 export function useBacktestTrades(id: string) {
   return useQuery({
     queryKey: ['backtest', id, 'trades'],
-    queryFn: () => apiFetch<{ items: TradeRow[] }>(`/backtests/${id}/trades`),
+    // Bounded cap so the client-side exit-reason breakdown sees the whole run (a tail past 1000 is
+    // labelled "loaded trades" in the UI rather than silently dropped from the aggregation).
+    queryFn: () => apiFetch<{ items: TradeRow[] }>(`/backtests/${id}/trades?limit=1000&offset=0`),
     enabled: !!id,
   });
 }

@@ -75,6 +75,15 @@ public class ExpiredBackfillService {
    * the reactive safety net on top of this proactive pacing.
    */
   private static final long THROTTLE_MS = 100;
+
+  /**
+   * Per-leg fetch+write ceiling — bounds the {@code Future.get()} below so a hung HTTP retry / saturated
+   * limiter / Timescale chunk-lock on the candle write can't park the whole run forever. (The 2026-06-25
+   * incident: an UNBOUNDED get parked &gt;25 min on one stuck leg; the run held its lock, so the hourly
+   * auto-resume self-heal couldn't recover it.) 180 s is generous — one contract's 1-yr 1m fetch+write,
+   * even with retries, is well under it.
+   */
+  private static final long DEFAULT_LEG_TIMEOUT_SEC = 180;
   /**
    * Concurrent per-contract workers. Kept LOW (2): Upstox throttles a high-volume token by
    * CONCURRENCY, not raw rate — a single direct call is ~0.17s, but 6 parallel streams get throttled
@@ -185,6 +194,7 @@ public class ExpiredBackfillService {
   private final CandleRepository candles;
   private final ExpiredBackfillRepository repo;
   private final long throttleMs;
+  private final long legTimeoutSec;
   private final AtomicBoolean running = new AtomicBoolean(false);
   private final AtomicReference<Status> status = new AtomicReference<>(Status.neverRun());
   private volatile RunProgress progress;
@@ -202,19 +212,30 @@ public class ExpiredBackfillService {
       ObjectProvider<UpstoxExpiredInstrumentsClient> clientProvider,
       CandleRepository candles,
       ExpiredBackfillRepository repo) {
-    this(clientProvider, candles, repo, THROTTLE_MS);
+    this(clientProvider, candles, repo, THROTTLE_MS, DEFAULT_LEG_TIMEOUT_SEC);
   }
 
-  /** Test seam: lets the unit test pass a stub client + zero throttle. */
+  /** Test seam: stub client + zero throttle (default per-leg timeout). */
   ExpiredBackfillService(
       ObjectProvider<UpstoxExpiredInstrumentsClient> clientProvider,
       CandleRepository candles,
       ExpiredBackfillRepository repo,
       long throttleMs) {
+    this(clientProvider, candles, repo, throttleMs, DEFAULT_LEG_TIMEOUT_SEC);
+  }
+
+  /** Test seam: also override the per-leg fetch timeout (to exercise the stuck-leg guard). */
+  ExpiredBackfillService(
+      ObjectProvider<UpstoxExpiredInstrumentsClient> clientProvider,
+      CandleRepository candles,
+      ExpiredBackfillRepository repo,
+      long throttleMs,
+      long legTimeoutSec) {
     this.clientProvider = clientProvider;
     this.candles = candles;
     this.repo = repo;
     this.throttleMs = throttleMs;
+    this.legTimeoutSec = legTimeoutSec;
   }
 
   /**
@@ -360,12 +381,21 @@ public class ExpiredBackfillService {
           }
           for (Future<?> f : inflight) {
             try {
-              f.get();
+              f.get(legTimeoutSec, java.util.concurrent.TimeUnit.SECONDS);
             } catch (InterruptedException ie) {
               Thread.currentThread().interrupt();
               throw new IllegalStateException("expired-backfill interrupted", ie);
             } catch (java.util.concurrent.ExecutionException ee) {
               failed.incrementAndGet();
+            } catch (java.util.concurrent.TimeoutException te) {
+              // One leg's fetch+write exceeded the ceiling (hung HTTP retry / saturated limiter /
+              // Timescale chunk-lock on the candle write). Cancel + count failed so the run keeps moving
+              // instead of parking forever; the next coverage-aware resume retries the leg.
+              f.cancel(true);
+              failed.incrementAndGet();
+              log.warn(
+                  "expired-backfill {}: a leg fetch exceeded {}s — cancelled + skipped (stuck fetch/write)",
+                  jobId, legTimeoutSec);
             }
           }
           log.info(

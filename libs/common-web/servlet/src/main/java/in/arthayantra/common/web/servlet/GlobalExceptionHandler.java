@@ -14,6 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -56,6 +57,16 @@ public class GlobalExceptionHandler {
         .body(
             new ErrorResponse(
                 ErrorCodes.VALIDATION_FAILED, "Invalid parameter value", Map.of("fields", fields)));
+  }
+
+  /** A required query/form param is absent: 400 VALIDATION_FAILED (was falling through to the 500). */
+  @ExceptionHandler(MissingServletRequestParameterException.class)
+  public ResponseEntity<ErrorResponse> handleMissingParam(MissingServletRequestParameterException ex) {
+    Map<String, Object> fields = Map.of(ex.getParameterName(), "required parameter is missing");
+    return ResponseEntity.badRequest()
+        .body(
+            new ErrorResponse(
+                ErrorCodes.VALIDATION_FAILED, "Missing required parameter", Map.of("fields", fields)));
   }
 
   /** Unreadable/malformed request bodies are validation failures, not 500s. */

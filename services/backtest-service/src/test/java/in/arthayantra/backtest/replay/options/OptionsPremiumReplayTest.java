@@ -293,4 +293,57 @@ class OptionsPremiumReplayTest {
   private static BigDecimal bd(String v) {
     return new BigDecimal(v);
   }
+
+  private static in.arthayantra.backtest.client.MarketDataClient.CdRow cdRow(String label, int trend) {
+    return new in.arthayantra.backtest.client.MarketDataClient.CdRow(
+        label, trend, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+  }
+
+  @Test
+  void oiConfluenceGateDropsCounterTrendLegsKeepsAligned() {
+    in.arthayantra.backtest.client.MarketDataClient md =
+        mock(in.arthayantra.backtest.client.MarketDataClient.class);
+    // 2026-06-16, the 10:00-10:05 bucket is Bearish (trend 3).
+    when(md.connectingDots(eq("NIFTY 50"), eq(LocalDate.of(2026, 6, 16)), eq("5m")))
+        .thenReturn(
+            new in.arthayantra.backtest.client.MarketDataClient.CdResponse(
+                true, List.of(cdRow("10:00-10:05", 3))));
+
+    OptionsPremiumReplay replay =
+        new OptionsPremiumReplay(
+            mock(OptionContractSelector.class), mock(CandlePremiumReader.class), md);
+    List<EngineCandle> underlying = List.of(bar("10:02", "25000"), bar("10:30", "25010"));
+
+    PairedLeg longLeg = new PairedLeg(false, 0, 1); // long CE entering into Bearish OI → DROP
+    PairedLeg shortLeg = new PairedLeg(true, 0, 1); // short PE entering into Bearish OI → aligned, KEEP
+    OptionsPremiumReplay.OiGate gate = new OptionsPremiumReplay.OiGate(true, "5m", 5);
+
+    List<PairedLeg> kept =
+        replay.filterCounterTrend(List.of(longLeg, shortLeg), underlying, "NIFTY 50", gate);
+    assertThat(kept).containsExactly(shortLeg); // the counter-trend long is dropped
+  }
+
+  @Test
+  void oiConfluenceGatePassesLegsThroughWhenNoOiData() {
+    in.arthayantra.backtest.client.MarketDataClient md =
+        mock(in.arthayantra.backtest.client.MarketDataClient.class);
+    when(md.connectingDots(any(), any(), any()))
+        .thenReturn(in.arthayantra.backtest.client.MarketDataClient.CdResponse.EMPTY); // no OI → no filter
+    OptionsPremiumReplay replay =
+        new OptionsPremiumReplay(
+            mock(OptionContractSelector.class), mock(CandlePremiumReader.class), md);
+    List<EngineCandle> underlying = List.of(bar("10:02", "25000"), bar("10:30", "25010"));
+    PairedLeg longLeg = new PairedLeg(false, 0, 1);
+    List<PairedLeg> kept =
+        replay.filterCounterTrend(
+            List.of(longLeg), underlying, "NIFTY 50", new OptionsPremiumReplay.OiGate(true, "5m", 5));
+    assertThat(kept).containsExactly(longLeg);
+  }
+
+  @Test
+  void oiGateConfigParsesEnabledAndIntervalDefaultsOff() {
+    com.fasterxml.jackson.databind.node.ObjectNode off =
+        com.fasterxml.jackson.databind.json.JsonMapper.builder().build().createObjectNode();
+    assertThat(OptionsPremiumReplay.parseOiGate(off).enabled()).isFalse(); // default OFF → goldens safe
+  }
 }

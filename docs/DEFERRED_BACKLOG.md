@@ -167,7 +167,12 @@ mega-dropdown split into a per-section menu bar** (#177). Authority for the reva
 - **e2e coverage** for the Data Ops console + scalper checklist — ADDED (#128, Playwright + axe, desktop + 480px).
 - **Upstox login-free live migration** (W-U1…U4) — BUILT flag-gated default-Kite (#137/#139/#141/#145/#149);
   REMAINING = deploy off-hours + the live latency A/B + flip the `source.*` flags (see W-U4 row + the runbook
-  `docs/manual-tests/wave-u4-upstox-cutover.md`).
+  `docs/manual-tests/wave-u4-upstox-cutover.md`). **Target end-state routing (recommendation, 2026-06-26):**
+  keep BOTH brokers, split by strength — Kite = live WS ticker only (+ auth/instruments) + hot-standby; Upstox
+  = all REST/analytics/history (quotes/candles/optionchain/fiidii/analytics); OpenAlgo = orders-only (NOT a
+  data proxy — it adds a broker hop). Minimizes Kite REST pressure, concentrates polling on the high-headroom
+  provider, keeps redundancy. Full rationale + the per-flip gate table: `superpowers/plans/2026-06-24-upstox-live-migration.md`
+  → "Target end-state config".
 - **Scalper registry 12/12** — #3/#8 (#148) + #11 long-straddle via a two-leg/neutral primitive (#155) seeded
   as paper drafts; SHORT-premium SELL legs of #8/#11 remain the only strategy gap (SPAN + live orders).
 - **`OpenAlgoOrderGateway`** (#154) + **higher-order greeks** (#156) + **SPAN `.spn` harness** (#144) — DONE

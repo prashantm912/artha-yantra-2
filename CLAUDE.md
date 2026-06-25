@@ -69,6 +69,23 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
 - **Candle sources split by interval:** `CandleReader.read()` serves the `candles_<iv>`
   caggs (5m/15m/1h/1d/1w), **sparse on a fresh boot**; native daily lives in `candles`@1d
   (dense — `readDailyWithWarmup`). The two diverge for 1d (chart overlays hit this).
+- **Historical OI is VIRTUAL (read-time derived), never a snapshot backfill:** there are no real
+  `options_chain_snapshots` rows before ~2026-06-15 (live capture start). `CandleDerivedChainReader`
+  pivots the per-contract `candles` + `expired_contracts` into the StrikePoint shape on the fly
+  (bucketed `last(oi)`, `oi_change` = bucket-lag, coverage-gated on `complete`); a `HistoricalOiReader`
+  facade (snapshots-first, candle-derived fallback for fully-PAST empties — **LIVE/today never
+  derives**) is swapped into `OptionsAnalyticsController`'s one `reader` field so the whole OI-page
+  suite + Connecting-Dots + OI-attribution work on history with ZERO new rows/migration (materializing
+  ~1.12B snapshot rows would re-OOM the compressed hypertable). Derived rows carry `derived`/`oiDerived`
+  provenance; iv/greeks are null (ATM-band IV is recomputed via Black-76, the future-close `spot` proxy
+  IS the forward), and **Dow + IV factors degrade to NEUTRAL on history** → the composite rarely reaches
+  strong confluence on backtests, so the OI edge reads MUTED on derived history (it's a data-fidelity
+  artifact, not a strategy verdict — judge OI-led strategies on FORWARD paper with real captured OI,
+  not a weak historical backtest). **Timestamp-key trap (root cause of #214):** an `OffsetDateTime`
+  map key SILENTLY misses across data sources with different UTC offsets — the futures-spine bars carry
+  `+05:30` but JDBC `time_bucket` returns `+00`, so `map.get(bar.bucket)` missed EVERY lookup and 3
+  Connecting-Dots factors (activeStrikeOi/IV/VIX) read NEUTRAL on every history session for months. Key
+  cross-source time maps by `.toInstant()`, never the offset-bearing `OffsetDateTime`.
 - **Kite REST → full-mirror DTOs (`kite/wire/`):** one record per endpoint (quote / historical /
   session / profile / instrument-CSV) mirrors **every** documented Kite field, each
   `@JsonIgnoreProperties(ignoreUnknown=true)` so a field Kite ADDS can never crash the live feed.

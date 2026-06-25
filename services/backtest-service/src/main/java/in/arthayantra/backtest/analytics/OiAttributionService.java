@@ -10,6 +10,8 @@ import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
+import java.time.temporal.ChronoField;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -39,6 +41,18 @@ public class OiAttributionService {
 
   private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
   private static final DateTimeFormatter HHMM = DateTimeFormatter.ofPattern("HH:mm");
+
+  // Postgres timestamptz text ("2026-06-15 04:56:00+00" — space separator, optional fraction, a
+  // 2-digit offset like +00) is NOT ISO-8601, so OffsetDateTime.parse rejects it. The repository
+  // hands entry_ts back as that raw driver string, so we parse it tolerantly (ISO first).
+  private static final DateTimeFormatter PG_TS =
+      new DateTimeFormatterBuilder()
+          .appendPattern("yyyy-MM-dd HH:mm:ss")
+          .optionalStart()
+          .appendFraction(ChronoField.NANO_OF_SECOND, 1, 9, true)
+          .optionalEnd()
+          .appendPattern("X")
+          .toFormatter();
   private static final int PAGE = 100_000; // one run's full trade set; runs are far smaller
 
   /** 5-state composite trend labels (market-data's {@code ConnectingDotsService} 0..4 ordinals). */
@@ -86,7 +100,7 @@ public class OiAttributionService {
     Map<Integer, BigDecimal> pnlByTrend = new LinkedHashMap<>();
 
     for (Map<String, Object> t : rows) {
-      OffsetDateTime entry = OffsetDateTime.parse(String.valueOf(t.get("entryTs")));
+      OffsetDateTime entry = parseEntry(String.valueOf(t.get("entryTs")));
       LocalDate session = entry.atZoneSameInstant(IST).toLocalDate();
       Map<String, CdRow> matrix =
           bySession.computeIfAbsent(
@@ -191,6 +205,15 @@ public class OiAttributionService {
     out.put("buckets", List.of());
     out.put("trades", List.of());
     return out;
+  }
+
+  /** Parses an entry timestamp tolerant of both ISO-8601 and Postgres timestamptz text. */
+  static OffsetDateTime parseEntry(String raw) {
+    try {
+      return OffsetDateTime.parse(raw);
+    } catch (java.time.format.DateTimeParseException e) {
+      return OffsetDateTime.parse(raw, PG_TS);
+    }
   }
 
   /** Floors an entry instant to the OI interval bucket and renders the {@code HH:mm-HH:mm} label. */

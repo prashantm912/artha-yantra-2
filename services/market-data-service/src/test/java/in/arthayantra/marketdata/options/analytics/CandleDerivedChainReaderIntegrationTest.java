@@ -77,6 +77,7 @@ class CandleDerivedChainReaderIntegrationTest extends MarketDataIntegrationTestB
     contract("DERIV99PE", "PE", 23900, EXPIRY, true);
     contract("DERIV99XCE", "CE", 24000, EXPIRY, false); // incomplete → coverage-gated out
     contract("DERIV99NEXT", "CE", 23900, EXPIRY2, true); // a later expiry for frontExpiry()
+    contract("DERIV99FUT", "FUT", 0, EXPIRY, true); // the front future for the spine fallback
 
     // CE: bucket1 last(oi)=1000 @09:19, bucket2 last(oi)=1500 @09:24 → oi_change +500
     candle("DERIV99CE", ist("09:17"), "48", 900, 10);
@@ -152,6 +153,14 @@ class CandleDerivedChainReaderIntegrationTest extends MarketDataIntegrationTestB
     assertThat(reader.frontExpiry(EU, LocalDate.of(2099, 1, 1))).isEqualTo(EXPIRY);
     assertThat(reader.frontExpiry(EU, EXPIRY.plusDays(1))).isEqualTo(EXPIRY2);
     assertThat(reader.frontExpiry("NOPE", LocalDate.of(2099, 1, 1))).isNull();
+  }
+
+  @Test
+  void frontFutureResolvesNearestCompleteFut() {
+    assertThat(reader.frontFuture(EU, LocalDate.of(2099, 1, 1)))
+        .extracting(CandleDerivedChainReader.FrontFuture::tradingsymbol)
+        .isEqualTo("DERIV99FUT");
+    assertThat(reader.frontFuture("NOPE", LocalDate.of(2099, 1, 1))).isNull();
   }
 
   @Test

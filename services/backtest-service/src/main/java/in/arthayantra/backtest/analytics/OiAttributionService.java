@@ -56,10 +56,20 @@ public class OiAttributionService {
           .toFormatter();
   private static final int PAGE = 100_000; // one run's full trade set; runs are far smaller
 
-  /** 5-state composite trend labels (market-data's {@code ConnectingDotsService} 0..4 ordinals). */
-  private static final String[] TREND_LABELS = {
-    "Ext.Bearish", "Bearish", "Neutral", "Bullish", "Ext.Bullish"
-  };
+  /**
+   * Composite-trend ordinal → label, matching {@code ConnectingDotsService.composite}: 1 Ext.Bullish,
+   * 2 Bullish, 3 Bearish, 4 Ext.Bearish — bullish-first, and there is NO Neutral composite state
+   * (the net vote never resolves to a neutral bucket). {@code -1} = the entry had no OI to score.
+   */
+  static String labelFor(int trend) {
+    return switch (trend) {
+      case 1 -> "Ext.Bullish";
+      case 2 -> "Bullish";
+      case 3 -> "Bearish";
+      case 4 -> "Ext.Bearish";
+      default -> "NO_DATA";
+    };
+  }
 
   private final TradeRepository trades;
   private final MarketDataClient marketData;
@@ -144,7 +154,7 @@ public class OiAttributionService {
       pt.put("entryTs", t.get("entryTs"));
       pt.put("bucket", label);
       pt.put("trend", trend);
-      pt.put("trendLabel", trend < 0 ? "NO_DATA" : TREND_LABELS[trend]);
+      pt.put("trendLabel", labelFor(trend));
       pt.put("net", net);
       pt.put("pnl", pnl);
       pt.put("win", win);
@@ -152,9 +162,9 @@ public class OiAttributionService {
     }
 
     List<Map<String, Object>> buckets = new ArrayList<>();
-    // present every trend 0..4 (then NO_DATA) so the UI gets a stable, sorted ladder.
-    for (int trend = 0; trend <= 4; trend++) {
-      buckets.add(bucket(trend, TREND_LABELS[trend], tally.get(trend), pnlByTrend.get(trend)));
+    // bullish-first ladder (1 Ext.Bullish … 4 Ext.Bearish), then NO_DATA — a stable, sorted display.
+    for (int trend = 1; trend <= 4; trend++) {
+      buckets.add(bucket(trend, labelFor(trend), tally.get(trend), pnlByTrend.get(trend)));
     }
     if (tally.containsKey(-1)) {
       buckets.add(bucket(-1, "NO_DATA", tally.get(-1), pnlByTrend.get(-1)));

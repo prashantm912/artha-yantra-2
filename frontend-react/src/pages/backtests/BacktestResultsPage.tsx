@@ -158,8 +158,8 @@ export function BacktestResultsPage() {
             type: 'bar',
             data: scored.map((b) => ({
               value: b.winRate == null ? 0 : Math.round(Number(b.winRate) * 1000) / 10,
-              // greener as the confluence turns bullish (trend 0 bearish … 4 ext-bullish); NO_DATA muted.
-              itemStyle: { color: b.trend < 0 ? t.muted : b.trend >= 3 ? t.bull : b.trend === 2 ? t.accent : t.bear },
+              // trend 1 Ext.Bullish / 2 Bullish → bull tone; 3 Bearish / 4 Ext.Bearish → bear; NO_DATA muted.
+              itemStyle: { color: b.trend < 0 ? t.muted : b.trend <= 2 ? t.bull : t.bear },
             })),
           },
         ],

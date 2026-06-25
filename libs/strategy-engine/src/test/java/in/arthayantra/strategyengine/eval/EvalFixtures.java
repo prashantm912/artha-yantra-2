@@ -91,6 +91,7 @@ final class EvalFixtures {
             new BigDecimal(optionalGateMargin)),
         List.of(),
         new StrategyDefinition.SizingSpec("fixed_quantity", Map.of("quantity", 1L)),
-        new StrategyDefinition.Session("intraday", null, null, null, "15:20", "next_open", false));
+        new StrategyDefinition.Session(
+            "intraday", null, null, null, "15:20", "next_open", false, null, null, null));
   }
 }

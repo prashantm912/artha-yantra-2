@@ -60,7 +60,11 @@ public record StrategyDefinition(
   /** risk.position_sizing. */
   public record SizingSpec(String method, Map<String, Object> params) {}
 
-  /** The session knobs the engine reads (A7 [FP-5]/[FP-6]). */
+  /**
+   * The session knobs the engine reads (A7 [FP-5]/[FP-6]). {@code expiryDayAllowed} is null when no
+   * {@code expiry_day} block is declared (no special handling); the optional {@code expiryWindow*}
+   * tightens the entry window on index-expiry days.
+   */
   public record Session(
       String style,
       String windowFrom,
@@ -68,5 +72,8 @@ public record StrategyDefinition(
       String squareOff,
       String preCloseAt,
       String fillTiming,
-      boolean exitIntrabar) {}
+      boolean exitIntrabar,
+      Boolean expiryDayAllowed,
+      String expiryWindowFrom,
+      String expiryWindowTo) {}
 }

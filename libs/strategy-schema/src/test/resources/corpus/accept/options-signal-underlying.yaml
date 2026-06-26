@@ -1,0 +1,53 @@
+# 2b-E2 accept fixture: the SIGNAL runs on the NIFTY continuous front-future while the option legs
+# execute on SENSEX (correlation play). `universe.signal_underlying` decouples the two; absent it
+# defaults to `underlying`, so this only exercises the new optional instrumentRef.
+schema: strategy-schema/v1
+id: sensex-off-nifty-fut-scalper
+name: "SENSEX scalper off NIFTY-future signal"
+version: 1.0.0
+description: "Signal on the NIFTY continuous front-future, execute on SENSEX ATM options"
+author: owner
+tags: [options, scalping, sensex, signal-decoupled]
+enabled: true
+
+universe:
+  mode: options_of_underlying
+  underlying: { exchange: BFO, tradingsymbol: "SENSEX" }            # options-execution root
+  signal_underlying: { exchange: NFO, tradingsymbol: "NIFTY-FUT-CONT" }  # decoupled signal series
+  options:
+    expiry: nearest_weekly
+    strikes: { selector: atm_window, width: 2 }
+    option_types: [CE, PE]
+
+timeframes:
+  primary: 1m
+  additional: [5m]
+
+indicators:
+  - { name: EMA, alias: ema_fast, timeframe: 1m, params: { period: 9 },  weight: 1.0 }
+  - { name: EMA, alias: ema_slow, timeframe: 1m, params: { period: 21 }, weight: 1.0 }
+
+entry_rules:
+  direction: both
+  gate:
+    all:
+      - crossover: { fast: ema_fast, slow: ema_slow }
+  scoring:
+    threshold: 0.6
+
+exit_rules:
+  - { type: stop_loss,   params: { basis: premium_pct, value: 20 } }
+  - { type: take_profit, params: { basis: premium_pct, value: 35 } }
+  - { type: time_stop,   params: { max_bars: 15 } }
+  - { type: signal_exit, params: { rule: "crossunder(ema_fast, ema_slow)" } }
+
+risk:
+  position_sizing: { method: premium_budget, params: { budget_inr: 15000 } }
+  max_positions: 2
+  session:
+    style: intraday
+    window: { from: "09:20", to: "15:00" }
+    square_off: "15:12"
+
+backtest:
+  oi_confluence_gate: { enabled: true, interval: "5m", index: "NIFTY 50" }  # gate on the NIFTY signal-driver OI

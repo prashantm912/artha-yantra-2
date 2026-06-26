@@ -412,6 +412,19 @@ public class BacktestRunner {
       JsonNode first = instruments.get(0);
       return new SeriesKey(first.path("exchange").asText(), first.path("tradingsymbol").asText(), "1m");
     }
+    // 2b-E2: an explicit universe.signal_underlying decouples the SIGNAL series from the
+    // options-execution root in universe.underlying (e.g. signal on NIFTY-FUT-CONT, legs on SENSEX).
+    // Absent → the signal IS the underlying (below), so all existing configs are unchanged.
+    JsonNode signalUnderlying = config.path("universe").path("signal_underlying");
+    if (signalUnderlying.isObject()
+        && signalUnderlying.hasNonNull("exchange")
+        && signalUnderlying.hasNonNull("tradingsymbol")) {
+      return new SeriesKey(
+          signalUnderlying.get("exchange").asText(),
+          signalUnderlying.get("tradingsymbol").asText(),
+          "1m");
+    }
+
     // options_of_underlying / futures_of_underlying: the signal instrument IS the underlying spot.
     // schema-v1's universe.underlying is an instrumentRef OBJECT {exchange, tradingsymbol} — resolve it
     // (the premium-as-primary replay then routes fills onto the option's own series). The pre-2026-06-25

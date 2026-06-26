@@ -316,7 +316,7 @@ class OptionsPremiumReplayTest {
 
     PairedLeg longLeg = new PairedLeg(false, 0, 1); // long CE entering into Bearish OI → DROP
     PairedLeg shortLeg = new PairedLeg(true, 0, 1); // short PE entering into Bearish OI → aligned, KEEP
-    OptionsPremiumReplay.OiGate gate = new OptionsPremiumReplay.OiGate(true, "5m", 5);
+    OptionsPremiumReplay.OiGate gate = new OptionsPremiumReplay.OiGate(true, "5m", 5, "");
 
     List<PairedLeg> kept =
         replay.filterCounterTrend(List.of(longLeg, shortLeg), underlying, "NIFTY 50", gate);
@@ -336,7 +336,7 @@ class OptionsPremiumReplayTest {
     PairedLeg longLeg = new PairedLeg(false, 0, 1);
     List<PairedLeg> kept =
         replay.filterCounterTrend(
-            List.of(longLeg), underlying, "NIFTY 50", new OptionsPremiumReplay.OiGate(true, "5m", 5));
+            List.of(longLeg), underlying, "NIFTY 50", new OptionsPremiumReplay.OiGate(true, "5m", 5, ""));
     assertThat(kept).containsExactly(longLeg);
   }
 
@@ -345,5 +345,38 @@ class OptionsPremiumReplayTest {
     com.fasterxml.jackson.databind.node.ObjectNode off =
         com.fasterxml.jackson.databind.json.JsonMapper.builder().build().createObjectNode();
     assertThat(OptionsPremiumReplay.parseOiGate(off).enabled()).isFalse(); // default OFF → goldens safe
+  }
+
+  @Test
+  void optionRootAndOiGateIndexResolveFromUnderlyingNotTheSignal() throws Exception {
+    // 2b-E2: signal on NIFTY-FUT-CONT, legs on SENSEX. The option root + the default OI-gate index must
+    // resolve from universe.underlying (SENSEX), NEVER from the decoupled signal series.
+    com.fasterxml.jackson.databind.JsonNode config =
+        new com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(
+                "{\"universe\":{\"mode\":\"options_of_underlying\","
+                    + "\"underlying\":{\"exchange\":\"BFO\",\"tradingsymbol\":\"SENSEX\"},"
+                    + "\"signal_underlying\":{\"exchange\":\"NFO\",\"tradingsymbol\":\"NIFTY-FUT-CONT\"}},"
+                    + "\"backtest\":{\"oi_confluence_gate\":{\"enabled\":true,\"interval\":\"5m\"}}}");
+    assertThat(OptionsPremiumReplay.optionRoot(config)).isEqualTo("SENSEX");
+    assertThat(OptionsPremiumReplay.optionRootDisplay(config)).isEqualTo("SENSEX");
+    OptionsPremiumReplay.OiGate gate = OptionsPremiumReplay.parseOiGate(config);
+    assertThat(gate.index()).isEmpty();
+    assertThat(OptionsPremiumReplay.oiGateIndex(config, gate)).isEqualTo("SENSEX");
+  }
+
+  @Test
+  void oiGateIndexHonoursTheExplicitOverride() throws Exception {
+    // A SENSEX-option strategy can gate on its NIFTY signal-driver's OI via the explicit index override.
+    com.fasterxml.jackson.databind.JsonNode config =
+        new com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(
+                "{\"universe\":{\"mode\":\"options_of_underlying\","
+                    + "\"underlying\":{\"exchange\":\"BFO\",\"tradingsymbol\":\"SENSEX\"}},"
+                    + "\"backtest\":{\"oi_confluence_gate\":"
+                    + "{\"enabled\":true,\"interval\":\"5m\",\"index\":\"NIFTY 50\"}}}");
+    OptionsPremiumReplay.OiGate gate = OptionsPremiumReplay.parseOiGate(config);
+    assertThat(gate.index()).isEqualTo("NIFTY 50");
+    assertThat(OptionsPremiumReplay.oiGateIndex(config, gate)).isEqualTo("NIFTY 50");
   }
 }

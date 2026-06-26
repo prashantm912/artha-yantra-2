@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   flexRender,
   getCoreRowModel,
@@ -16,6 +16,7 @@ import {
 import { ChevronDown, ChevronUp, ChevronsUpDown, Columns3 } from 'lucide-react';
 import { cn } from '../lib/cn.ts';
 import { adaptColumns, type AyColumnMeta } from './columnAdapter.ts';
+import { useCenterRowInScroll } from '../lib/scrollToCenter.ts';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -87,6 +88,9 @@ interface DataTableProps<Row> {
   virtualizeAfter?: number;
   /** localStorage key for persisting density/visibility (reserved). */
   persistKey?: string;
+  /** rowKey of the row to centre in the scroll viewport on load / when it changes (e.g. the ATM
+   *  strike). Desktop scroll container only; no-op when unset, paginated off-page, or not found. */
+  scrollToRowKey?: string;
 }
 
 const ALIGN: Record<ColumnAlign, string> = {
@@ -117,6 +121,7 @@ export function DataTable<Row>({
   initialDensity = 'comfortable',
   enableMultiSort = true,
   zebra = true,
+  scrollToRowKey,
   // virtualizeAfter (§3.2.5) + persistKey (§3.2.3) are accepted but intentionally unimplemented
   // no-ops for this phase — left off the destructure so omitting them yields today's exact render.
 }: DataTableProps<Row>) {
@@ -134,6 +139,11 @@ export function DataTable<Row>({
   );
   const hasFilter = columns.some((c) => c.filter);
   const paginated = pageSize > 0;
+
+  // Optional ATM-strike centring: land the keyed row in the middle of the scroll viewport.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const centerRef = useRef<HTMLTableRowElement>(null);
+  useCenterRowInScroll(scrollRef, centerRef, scrollToRowKey);
 
   const table = useReactTable<Row>({
     data: rows,
@@ -245,7 +255,8 @@ export function DataTable<Row>({
 
       {/* Desktop / landscape: sticky-header sortable table */}
       <div
-        className="hidden max-h-[68vh] overflow-auto rounded border border-ay-border md:block"
+        ref={scrollRef}
+        className="ay-table-scroll hidden max-h-[68vh] overflow-auto rounded border border-ay-border md:block"
         tabIndex={0}
         role="region"
         aria-label={ariaLabel}
@@ -311,6 +322,7 @@ export function DataTable<Row>({
             {bodyRows.map((r, i) => (
               <tr
                 key={r.id}
+                ref={scrollToRowKey != null && r.id === scrollToRowKey ? centerRef : null}
                 className={cn(
                   'border-t border-ay-border text-ay-text transition-colors',
                   zebra && (i % 2 === 1 ? 'bg-surface-1/40' : 'bg-transparent'),

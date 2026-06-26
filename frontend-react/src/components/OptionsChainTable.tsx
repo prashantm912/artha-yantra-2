@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { cn } from '../lib/cn.ts';
+import { useCenterRowInScroll } from '../lib/scrollToCenter.ts';
 import type { Density } from '../lib/density.ts';
 import {
   compareDecimal,
@@ -227,11 +228,17 @@ export function OptionsChainTable({
   const colSpan = callColumns.length + 1 + putColumns.length + 1;
   const atmStyle = { background: 'color-mix(in srgb, var(--ay-warn) 22%, transparent)' };
 
+  // Land the ATM strike in the middle of the scroll viewport (on load + when the ATM moves).
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const atmRef = useRef<HTMLTableRowElement>(null);
+  useCenterRowInScroll(scrollRef, atmRef, atmStrike);
+
   return (
     <>
       {/* Desktop / landscape: the dense mirrored grid */}
       <div
-        className="hidden max-h-[64vh] overflow-auto rounded border border-ay-border md:block"
+        ref={scrollRef}
+        className="ay-table-scroll hidden max-h-[64vh] overflow-auto rounded border border-ay-border md:block"
         tabIndex={0}
         role="region"
         aria-label="Options chain"
@@ -277,7 +284,11 @@ export function OptionsChainTable({
               const pe = ctxFor(row, 'PE');
               const isAtm = atmStrike != null && row.strike === atmStrike;
               return (
-                <tr key={row.strike} className="border-t border-ay-border text-ay-text">
+                <tr
+                  key={row.strike}
+                  ref={isAtm ? atmRef : null}
+                  className="border-t border-ay-border text-ay-text"
+                >
                   {callColumns.map((c) => (
                     <td key={`ce-${c.key}`} className={cn('px-2 text-right', cellPad, c.tdClass?.(ce))}>
                       {c.render(row.ce, ce)}

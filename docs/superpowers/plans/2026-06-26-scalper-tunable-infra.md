@@ -36,12 +36,25 @@ blocker is fixed; the remaining build is specced below.
 
 ## Remaining build (4 phases, each its own PR)
 
-### 2b-E1 — NIFTY continuous front-future 1m signal series
-Serve `NIFTY-FUT-CONT` @1m by deriving the front (nearest-unexpired) monthly FUT contract's candles per
-session, rolling on expiry (mirror the `CandleDerivedChainReader` read-time-virtual pattern; the
-`ConnectingDotsService` futures spine #204 already picks frontFuture from `expired_contracts` FUT — reuse).
-`adjust=back|none` per the Stage-B continuous-roll convention; document the roll-day discontinuity.
-Verify: a backtest reading `NIFTY-FUT-CONT` 1m gets a continuous series across a roll.
+### 2b-E1 — NIFTY continuous front-future 1m signal series — BUILT (PR pending)
+**Approach (revised from "read-time virtual"):** the backtest reads its primary 1m via a DIRECT JDBC
+read (`backtest CandleReader` → `marketdata.candles WHERE tradingsymbol=? interval='1m'`), so a read-time
+reader living in market-data would never be seen. AND the continuous-future infra already MATERIALIZES
+(`ContinuousFuturesRoller.stitchInto` writes raw front-segment bars into `NIFTY-FUT-CONT`; `roll_events`
++ `ContBackAdjuster` give `adjust=back`). So 2b-E1 = a HISTORICAL backfill that reuses that exact loop
+but sources the ladder from the FULL roster — `expired_contracts` FUT ∪ live `instruments` futures —
+instead of live-only. Row cost is trivial (one series, ≤~1M bars; 3 orders below the 1.12B OOM case).
+- `ContinuousFuturesRoller.stitch(ladder, underlying, today)` extracted from `rollOne` (shared by the
+  live 16:15 roll and the backfill); gap calc gains a 1m fallback (`closeForRoll`) because expired
+  contracts carry 1m-only bars (no native 1d) → `CandleRepository.lastIntradayClose`.
+- `ContinuousFuturesBackfill` builds the union ladder (live wins on overlap) + runs `stitch`.
+- `ContinuousFuturesBackfillRepository` reads the expired FUT roster (raw JDBC, no upstox-module edge).
+- Admin trigger `POST /api/v1/market/admin/futures/continuous-backfill?root=NIFTY&underlying=NIFTY 50`.
+- `ContinuousFuturesBackfillIntegrationTest`: front-month continuous across a roll + 1m-fallback gap +
+  idempotent re-run. Existing `ContinuousFuturesIntegrationTest` (live path) still green (1d → no fallback).
+Backtests read the UNADJUSTED CONT 1m directly; the one-bar roll-day basis gap (B-19) is documented +
+accepted (intraday scalpers reset daily, so a monthly roll-day discontinuity is a minor known artifact).
+**Run after merge:** `POST .../continuous-backfill` on the live stack to populate `NIFTY-FUT-CONT` 1m.
 
 ### 2b-E2 — decouple signal-underlying from option-execution root
 - Schema (`strategy-schema-v1.json`, additive optional): a signal-underlying override on the options

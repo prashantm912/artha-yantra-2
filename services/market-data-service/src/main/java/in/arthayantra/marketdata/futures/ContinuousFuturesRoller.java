@@ -94,6 +94,17 @@ public class ContinuousFuturesRoller {
     if (ladder.isEmpty()) {
       return;
     }
+    stitch(ladder, underlying, today);
+  }
+
+  /**
+   * Stitches a front-month {@code Instrument} ladder (expiry-ascending) into {@code {root}-FUT-CONT}
+   * through {@code today}: upserts the synthetic instrument, appends a {@code roll_events} row at each
+   * contract's roll date, and extends the UNADJUSTED CONT stitch one front segment at a time. The live
+   * 16:15 roll feeds the currently-listed ladder; {@link ContinuousFuturesBackfill} feeds the full
+   * expired+live roster to reconstruct history for backtests. Idempotent — re-runs append nothing new.
+   */
+  void stitch(List<Instrument> ladder, String underlying, LocalDate today) {
     String root = ladder.get(0).name(); // dump root, e.g. NIFTY
     String contSymbol = root + "-FUT-CONT";
     String exchange = ladder.get(0).exchange();
@@ -109,8 +120,8 @@ public class ContinuousFuturesRoller {
       if (!today.isBefore(roll) && i + 1 < ladder.size()) {
         Instrument next = ladder.get(i + 1);
         OffsetDateTime rollBucket = roll.atStartOfDay().atOffset(Ist.OFFSET);
-        BigDecimal outgoing = candles.closeAt(exchange, contract.tradingsymbol(), "1d", rollBucket);
-        BigDecimal incoming = candles.closeAt(exchange, next.tradingsymbol(), "1d", rollBucket);
+        BigDecimal outgoing = closeForRoll(exchange, contract.tradingsymbol(), roll, rollBucket);
+        BigDecimal incoming = closeForRoll(exchange, next.tradingsymbol(), roll, rollBucket);
         if (outgoing != null && incoming != null) {
           boolean appended =
               rollEvents.append(
@@ -143,6 +154,21 @@ public class ContinuousFuturesRoller {
         break; // later contracts are not active yet
       }
     }
+  }
+
+  /**
+   * The contract's close on the roll date for the gap math: native 1d when present (the live path),
+   * else the last 1m close of the day — {@code expired_contracts} carry 1m-only bars (no native 1d).
+   */
+  private BigDecimal closeForRoll(
+      String exchange, String tradingsymbol, LocalDate rollDate, OffsetDateTime rollBucket) {
+    BigDecimal daily = candles.closeAt(exchange, tradingsymbol, "1d", rollBucket);
+    if (daily != null) {
+      return daily;
+    }
+    OffsetDateTime from = rollDate.atStartOfDay().atOffset(Ist.OFFSET);
+    OffsetDateTime to = rollDate.plusDays(1).atStartOfDay().atOffset(Ist.OFFSET);
+    return candles.lastIntradayClose(exchange, tradingsymbol, from, to);
   }
 
   /** Roll date = {@code rollDaysBeforeExpiry} TRADING days before expiry (holiday-aware). */

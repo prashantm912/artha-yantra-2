@@ -280,4 +280,27 @@ public class CandleRepository {
             exchange, tradingsymbol, interval, Timestamp.from(bucket.toInstant()));
     return rows.isEmpty() ? null : rows.get(0);
   }
+
+  /**
+   * The last 1m close in {@code [from, to)} — the roll-gap fallback for HISTORICAL futures stitched
+   * from {@code expired_contracts}, which carry per-minute bars but NO native 1d (so {@link #closeAt}
+   * with {@code "1d"} returns null). Live contracts have 1d, so this is never reached on that path.
+   */
+  public BigDecimal lastIntradayClose(
+      String exchange, String tradingsymbol, OffsetDateTime from, OffsetDateTime to) {
+    List<BigDecimal> rows =
+        jdbc.query(
+            """
+            SELECT close FROM candles
+            WHERE exchange = ? AND tradingsymbol = ? AND "interval" = '1m'
+              AND bucket >= ? AND bucket < ?
+            ORDER BY bucket DESC LIMIT 1
+            """,
+            (rs, n) -> rs.getBigDecimal(1),
+            exchange,
+            tradingsymbol,
+            Timestamp.from(from.toInstant()),
+            Timestamp.from(to.toInstant()));
+    return rows.isEmpty() ? null : rows.get(0);
+  }
 }

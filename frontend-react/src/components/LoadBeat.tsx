@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { LazyMotion, MotionConfig, domAnimation, m } from 'motion/react';
+import { cn } from '../lib/cn.ts';
 
 // The ONE orchestrated load beat (revamp §4.0): header settles → metric strip staggers in
 // (y 6→0, ~40ms stagger) → chart/table block fades up — total ≤200ms, --ease-standard.
@@ -56,16 +57,10 @@ export function BeatItem({ className, children }: { className?: string; children
   );
 }
 
-/** The chart/table block — fades up once, after the strip. No row-by-row motion. */
+/** The chart/table block — fades up once, after the strip. No row-by-row motion. CSS-driven (not
+ *  motion/react): a starved enter frame on a static, non-refetching page could leave an m.div stuck
+ *  at initial opacity 0 — the table present in the DOM but invisible. The .ay-beat-block keyframe
+ *  (fill-mode both) always settles visible; reduced-motion collapses it via the index.css guard. */
 export function BeatBlock({ className, children }: { className?: string; children: ReactNode }) {
-  return (
-    <m.div
-      className={className}
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.18, ease: EASE, delay: 0.06 }}
-    >
-      {children}
-    </m.div>
-  );
+  return <div className={cn('ay-beat-block', className)}>{children}</div>;
 }

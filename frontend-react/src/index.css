@@ -487,6 +487,25 @@ tbody tr:hover {
   animation: ay-breathe 2s var(--ease-standard) infinite;
 }
 
+/* Load-beat table/chart block reveal (§4.0): a fade-up that ALWAYS settles visible. Driven by CSS
+   (not motion/react) so the end-state holds even when the enter frame is starved under load — a
+   motion opacity tween could stick at 0 on a static page that never re-renders, leaving the table
+   present in the DOM but invisible. fill-mode 'both' applies the start during the delay and holds
+   the end after; the blanket reduced-motion guard below collapses it to an instant snap-to-visible. */
+@keyframes ay-beat-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.ay-beat-block {
+  animation: ay-beat-rise 0.18s var(--ease-standard) 0.06s both;
+}
+
 /* Blanket OS reduced-motion — every token-driven animation/transition (extends the .ay-pulse guard). (§1.4) */
 @media (prefers-reduced-motion: reduce) {
   .ay-pulse {

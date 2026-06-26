@@ -79,13 +79,17 @@ public class MarketOiClient {
    */
   public ScalperGateContext context(
       String underlying,
+      String signalIndex,
       java.time.LocalTime istTime,
       LocalDate eodDate,
       LocalDate expiry,
       LocalDate tradeDate,
       ScalperGateContext.Chart chart) {
+    // OI/macro key off `underlying` (the oi-confluence index); `signalIndex` rides through to the
+    // §0B volume-floor dot (the chart's volume is the signal future's). Equal for a single-index scalper.
     return new ScalperGateContext(
-        underlying, istTime, chart, oi(underlying, expiry, tradeDate), macro(underlying, eodDate));
+        underlying, signalIndex, istTime, chart,
+        oi(underlying, expiry, tradeDate), macro(underlying, eodDate));
   }
 
   /**

@@ -24,7 +24,7 @@ class ConnectTheDotsScorerTest {
   }
 
   private static ScalperGateContext ctx(Chart c, Oi oi, Macro m) {
-    return new ScalperGateContext("NIFTY 50", LocalTime.of(10, 30), c, oi, m);
+    return new ScalperGateContext("NIFTY 50", "NIFTY 50", LocalTime.of(10, 30), c, oi, m);
   }
 
   private static boolean dot(Confluence r, String name) {

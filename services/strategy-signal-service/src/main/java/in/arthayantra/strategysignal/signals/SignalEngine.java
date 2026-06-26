@@ -192,7 +192,7 @@ public class SignalEngine {
         ScalperConfig scalper =
             strategy.tags().contains("scalper")
                     && "options_of_underlying".equals(config.path("universe").path("mode").asText())
-                ? ScalperConfig.from(config.path("universe"), strategy.tags())
+                ? ScalperConfig.from(config, strategy.tags())
                 : null;
         // §0B hard-stop rule: a scalper without a fixed SL or a time-stop could ride an unbounded
         // losing option — refuse to load it rather than emit signals it can never safely exit.
@@ -265,15 +265,19 @@ public class SignalEngine {
               universe.path("underlying").path("tradingsymbol").asText(),
               universe.path("futures").path("contract").asText("front_month"),
               universe.path("futures").path("roll_days_before_expiry").asInt(1));
-      case "options_of_underlying" ->
-          // Phase 3 / Model A: the scalper EVALUATES + CHARTS on the index FRONT FUTURE (it carries
-          // the volume the §0B VWAP/VWMA gates need); the option to TRADE is picked at signal time by
-          // the confluence seam. Same front/next + roll resolution as futures_of_underlying.
-          futuresResolver.resolve(
-              universe.path("underlying").path("exchange").asText(),
-              universe.path("underlying").path("tradingsymbol").asText(),
-              universe.path("futures").path("contract").asText("front_month"),
-              universe.path("futures").path("roll_days_before_expiry").asInt(2));
+      case "options_of_underlying" -> {
+        // Phase 3 / Model A: the scalper EVALUATES + CHARTS on the index FRONT FUTURE (it carries the
+        // volume the §0B VWAP/VWMA gates need); the option to TRADE is picked at signal time by the
+        // confluence seam. 2c decoupling: a SENSEX variant signals on the NIFTY future, so the signal
+        // future is resolved from the SIGNAL index (universe.signal_underlying mapped to its index),
+        // not the option-root underlying. Absent signal_underlying ⇒ the underlying (unchanged).
+        ScalperConfig.IndexRef sig = ScalperConfig.signalIndex(universe);
+        yield futuresResolver.resolve(
+            sig.exchange(),
+            sig.tradingsymbol(),
+            universe.path("futures").path("contract").asText("front_month"),
+            universe.path("futures").path("roll_days_before_expiry").asInt(2));
+      }
       default -> {
         // index_constituents cannot publish until Phase 44 (the registry guard) — defensive
         log.warn("universe mode '{}' is not live-resolvable yet", mode);

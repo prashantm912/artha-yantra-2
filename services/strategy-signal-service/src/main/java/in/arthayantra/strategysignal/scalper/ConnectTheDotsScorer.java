@@ -76,7 +76,7 @@ public final class ConnectTheDotsScorer {
     add(dots, "vwma", W, ce ? gt(c.close(), c.vwma20()) : gt(c.vwma20(), c.close()), "price vs VWMA20");
     add(dots, "psar", W, ce ? gt(c.close(), c.psar()) : gt(c.psar(), c.close()), "price vs PSAR");
     add(dots, "rsi", W, ScalperGates.rsiBand(c.rsi14(), side).pass(), "RSI band");
-    add(dots, "volume", W, ScalperGates.volume(ctx.underlying(), c.volume()).pass(), "volume floor");
+    add(dots, "volume", W, ScalperGates.volume(ctx.signalIndex(), c.volume()).pass(), "volume floor");
     add(dots, "futures_oi", W_OI, ScalperGates.oiQuadrant(oi, side).pass(), "futures OI quadrant");
     add(dots, "underlying_oi", W, ce ? oi.underlying().bullish() : oi.underlying().bearish(), "underlying OI quadrant");
     // T2.2: the trending cross is a CHANGE (PE-OI rising while CE-OI falls), not a static PE-CE tilt.

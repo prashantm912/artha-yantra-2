@@ -36,6 +36,8 @@ import java.util.Map;
 public record ScalperConfig(
     String underlyingExchange,
     String underlying,
+    String signalIndex,
+    String oiIndex,
     int rollDays,
     StrikePicker.Params strikeParams,
     BigDecimal confluenceThreshold,
@@ -95,11 +97,21 @@ public record ScalperConfig(
           "NIFTY BANK", new BigDecimal[] {new BigDecimal("250"), new BigDecimal("400")},
           "SENSEX", new BigDecimal[] {new BigDecimal("300"), new BigDecimal("800")});
 
-  /** Builds the config from a strategy's {@code universe} block + its tags (options_of_underlying). */
-  public static ScalperConfig from(JsonNode universe, List<String> tags) {
+  /** Builds the config from a strategy's full config + its tags (options_of_underlying). */
+  public static ScalperConfig from(JsonNode config, List<String> tags) {
+    JsonNode universe = config.path("universe");
     JsonNode u = universe.path("underlying");
     String underlying = u.path("tradingsymbol").asText();
     String exchange = u.path("exchange").asText("NSE");
+    // 2c three-way decoupling: the option-execution root (underlying) drives the strike chain; the
+    // SIGNAL future's index (the volume floor + future-pattern gates) is the signal_underlying's index
+    // (a *-FUT-CONT maps to its index — the live front future is resolved there); the OI-confluence
+    // index honours backtest.oi_confluence_gate.index (the niftyoi/sensexoi A/B). All default to the
+    // option-root, so a plain single-index scalper is unchanged (signalIndex == oiIndex == underlying).
+    String signalIndex = signalIndex(universe).tradingsymbol();
+    String oiIndexRaw =
+        config.path("backtest").path("oi_confluence_gate").path("index").asText(underlying);
+    String oiIndex = oiIndexRaw.isBlank() ? underlying : oiIndexRaw; // blank index ⇒ the option-root
     int rollDays = universe.path("futures").path("roll_days_before_expiry").asInt(2);
     BigDecimal[] premium = PREMIUM.getOrDefault(underlying, NIFTY_PREMIUM);
     StrikePicker.Params params =
@@ -140,7 +152,34 @@ public record ScalperConfig(
     // #5 (T2.1): the oi-cross-filter tag makes the >=50% call-put dOI imbalance a HARD pre-gate.
     boolean callPutDeltaFilter = tags.contains("oi-cross-filter");
     return new ScalperConfig(
-        exchange, underlying, rollDays, params, THRESHOLD, twoCandle, stop, callPutDeltaFilter,
-        gapFill, trendChange, openHighLow, openingTick, heroZero, straddle);
+        exchange, underlying, signalIndex, oiIndex, rollDays, params, THRESHOLD, twoCandle, stop,
+        callPutDeltaFilter, gapFill, trendChange, openHighLow, openingTick, heroZero, straddle);
+  }
+
+  /** A {@code (exchange, tradingsymbol)} index reference for live front-future resolution. */
+  public record IndexRef(String exchange, String tradingsymbol) {}
+
+  // A continuous-future signal symbol -> the INDEX whose live FRONT FUTURE the signal charts on (the
+  // synthetic *-FUT-CONT series is roller-refreshed daily, not tick-streamed, so live resolves the
+  // front future from the index). Extend when a new continuous future joins the roster.
+  private static final Map<String, IndexRef> FUT_CONT_INDEX =
+      Map.of(
+          "NIFTY-FUT-CONT", new IndexRef("NSE", "NIFTY 50"),
+          "SENSEX-FUT-CONT", new IndexRef("BSE", "SENSEX"));
+
+  /**
+   * The index whose live FRONT FUTURE the signal charts on: {@code universe.signal_underlying} mapped
+   * to its index ({@link #FUT_CONT_INDEX}) when set, else the option-root {@code universe.underlying}.
+   * The live {@code SignalEngine} subscribes the signal series here and {@link #from} keys the volume
+   * floor off it — so a decoupled SENSEX scalper signals on the NIFTY future, not on SENSEX.
+   */
+  public static IndexRef signalIndex(JsonNode universe) {
+    JsonNode sig = universe.path("signal_underlying");
+    String sym = sig.path("tradingsymbol").asText("");
+    if (sym.isEmpty()) {
+      JsonNode u = universe.path("underlying");
+      return new IndexRef(u.path("exchange").asText("NSE"), u.path("tradingsymbol").asText());
+    }
+    return FUT_CONT_INDEX.getOrDefault(sym, new IndexRef(sig.path("exchange").asText("NSE"), sym));
   }
 }

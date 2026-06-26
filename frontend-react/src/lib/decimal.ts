@@ -79,8 +79,41 @@ interface Parts {
   frac: string;
 }
 
+/**
+ * Expands a scientific-notation decimal string (Java `BigDecimal.toString()` emits e.g. `0E-2`,
+ * `1.5E+3`, `-2.5E-3` for some scales) to a plain decimal so the digit-walking parser below can
+ * read it. Plain inputs (no exponent) pass through untouched. Exact — no `parseFloat`.
+ */
+function expandExponent(value: string): string {
+  const e = value.search(/[eE]/);
+  if (e < 0) return value;
+  let sign = '';
+  let mantissa = value.slice(0, e);
+  if (mantissa.startsWith('-')) {
+    sign = '-';
+    mantissa = mantissa.slice(1);
+  } else if (mantissa.startsWith('+')) {
+    mantissa = mantissa.slice(1);
+  }
+  const exp = parseInt(value.slice(e + 1), 10) || 0;
+  const dot = mantissa.indexOf('.');
+  const intPart = dot < 0 ? mantissa : mantissa.slice(0, dot);
+  const fracPart = dot < 0 ? '' : mantissa.slice(dot + 1);
+  const digits = intPart + fracPart;
+  const point = intPart.length + exp; // decimal-point position within `digits`
+  let body: string;
+  if (point <= 0) {
+    body = `0.${'0'.repeat(-point)}${digits}`;
+  } else if (point >= digits.length) {
+    body = digits + '0'.repeat(point - digits.length);
+  } else {
+    body = `${digits.slice(0, point)}.${digits.slice(point)}`;
+  }
+  return sign + body;
+}
+
 function normalize(value: string): Parts {
-  let v = value.trim();
+  let v = expandExponent(value.trim());
   let sign = 1;
   if (v.startsWith('-')) {
     sign = -1;

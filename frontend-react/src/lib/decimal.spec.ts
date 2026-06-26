@@ -43,4 +43,16 @@ describe('decimal utility (exact strings, never parseFloat)', () => {
     expect(multiplyByInt('-0.05', 50)).toBe('-2.5');
     expect(multiplyByInt('100.00', 0)).toBe('0');
   });
+
+  // Java BigDecimal.toString() emits scientific notation for some scales (a zero %-change row on
+  // the breadth page arrived as `0E-2`), which the digit-walking parser mis-read as a non-zero
+  // positive int → a bogus `+0E-2.00%` cell.
+  it('reads scientific-notation strings (BigDecimal.toString edge cases)', () => {
+    expect(compareDecimal('0E-2', '0')).toBe(0);
+    expect(isNegative('0E-2')).toBe(false);
+    expect(formatDecimal('0E-2', 2)).toBe('0.00');
+    expect(formatDecimal('1.5E+3', 2)).toBe('1500.00');
+    expect(formatDecimal('-2.5E-3', 4)).toBe('-0.0025');
+    expect(compareDecimal('1E2', '100')).toBe(0);
+  });
 });

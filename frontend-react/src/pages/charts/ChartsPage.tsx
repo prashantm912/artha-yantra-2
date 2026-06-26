@@ -6,6 +6,7 @@ import { PageHeader } from '../../components/PageHeader.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { CHART_INTERVALS, useCandles, useChartSignals, type ChartMark } from '../../api/charts.ts';
 import { useBacktestTrades } from '../../api/backtests.ts';
+import { useInstrumentSearch } from '../../api/watchlists.ts';
 
 // /charts (master plan §20 parity, A13): a lightweight-charts candlestick + volume view (the plan's
 // premium chart, MIT — replaced the ECharts MVP) with the interval/instrument toolbar and the
@@ -18,6 +19,17 @@ export function ChartsPage() {
   const [symbol, setSymbol] = useState(params.get('symbol') ?? 'NSE:NIFTY 50');
   const [interval, setInterval] = useState(params.get('interval') ?? '1d');
   const [symbolDraft, setSymbolDraft] = useState(symbol);
+
+  // Live instrument typeahead (same /instruments/search as the watchlist picker). The draft also
+  // accepts a raw EXCHANGE:SYMBOL typed + Enter; the dropdown shows when the draft is a search term
+  // (not the already-loaded symbol) and there are hits.
+  const hits = useInstrumentSearch(symbolDraft);
+  const showHits = symbolDraft.trim().length >= 2 && symbolDraft !== symbol && (hits.data?.length ?? 0) > 0;
+  function pick(exchange: string, tradingsymbol: string) {
+    const s = `${exchange}:${tradingsymbol}`;
+    setSymbolDraft(s);
+    setSymbol(s);
+  }
 
   const candles = useCandles(symbol, interval);
   const trades = useBacktestTrades(runId ?? '');
@@ -48,13 +60,30 @@ export function ChartsPage() {
           }}
           className="flex items-center gap-2"
         >
-          <input
-            value={symbolDraft}
-            onChange={(e) => setSymbolDraft(e.target.value)}
-            placeholder="EXCHANGE:SYMBOL"
-            aria-label="Instrument"
-            className="h-9 w-full sm:w-56 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text"
-          />
+          <div className="relative">
+            <input
+              value={symbolDraft}
+              onChange={(e) => setSymbolDraft(e.target.value)}
+              placeholder="Search instrument… or EXCHANGE:SYMBOL"
+              aria-label="Instrument"
+              className="h-9 w-full sm:w-64 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text"
+            />
+            {showHits && (
+              <ul className="absolute z-20 mt-1 max-h-64 w-full min-w-56 overflow-auto rounded-md border border-ay-border bg-surface-1 shadow-lg">
+                {(hits.data ?? []).slice(0, 20).map((h) => (
+                  <li key={`${h.exchange}:${h.tradingsymbol}`}>
+                    <button
+                      type="button"
+                      onClick={() => pick(h.exchange, h.tradingsymbol)}
+                      className="block w-full px-3 py-1.5 text-left text-sm hover:bg-surface-2"
+                    >
+                      {h.exchange}:{h.tradingsymbol} {h.name && <span className="text-ay-muted">— {h.name}</span>}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
           <button type="submit" className="h-9 rounded-md border border-ay-border px-3 text-sm hover:border-accent">
             Load
           </button>

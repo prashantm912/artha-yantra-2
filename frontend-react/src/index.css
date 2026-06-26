@@ -506,6 +506,15 @@ tbody tr:hover {
   animation: ay-beat-rise 0.18s var(--ease-standard) 0.06s both;
 }
 
+/* A vertically-scrolling table region (sticky <thead> + overflow-auto, max-h capped). `contain: paint`
+   stops the position:sticky header from leaking the scroll container's full scrollHeight up to the
+   document root — which otherwise adds a phantom outer page-scroll of empty space below the capped
+   table (#7). Inner scroll + the sticky header are unaffected (containment clips to the box, which is
+   what overflow-auto already paints to). */
+.ay-table-scroll {
+  contain: paint;
+}
+
 /* Blanket OS reduced-motion — every token-driven animation/transition (extends the .ay-pulse guard). (§1.4) */
 @media (prefers-reduced-motion: reduce) {
   .ay-pulse {

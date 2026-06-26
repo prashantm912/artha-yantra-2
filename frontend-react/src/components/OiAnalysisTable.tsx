@@ -55,7 +55,7 @@ export function OiAnalysisTable({
     <>
       {/* Desktop / landscape: the full 16-col mirrored time-rows grid */}
       <div
-        className="hidden max-h-[64vh] overflow-auto rounded border border-ay-border md:block"
+        className="ay-table-scroll hidden max-h-[64vh] overflow-auto rounded border border-ay-border md:block"
         tabIndex={0}
         role="region"
         aria-label="Options OI analysis"

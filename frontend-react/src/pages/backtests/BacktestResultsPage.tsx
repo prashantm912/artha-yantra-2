@@ -17,6 +17,7 @@ import {
   useOiAttribution,
   type BacktestResults,
   type CurvePoint,
+  type OiAttributionTradeRow,
   type TradeRow,
 } from '../../api/backtests.ts';
 import { useStrategies } from '../../api/strategies.ts';
@@ -82,6 +83,14 @@ export function BacktestResultsPage() {
   const [selected, setSelected] = useState<TradeRow | null>(null);
   const [oiInterval, setOiInterval] = useState<string>('5m');
   const oi = useOiAttribution(id, oiInterval);
+
+  // Per-trade OI-confluence verdict (Connecting-Dots trend at entry), joined to each trade by seq.
+  // Empty/“—” for trades with no captured OI at entry (e.g. derived history, where OI is muted).
+  const oiBySeq = useMemo(() => {
+    const map = new Map<number, OiAttributionTradeRow>();
+    for (const t of oi.data?.trades ?? []) map.set(t.seq, t);
+    return map;
+  }, [oi.data]);
 
   const r = results.data;
   const foldRows = folds.data ?? [];
@@ -300,15 +309,21 @@ export function BacktestResultsPage() {
                 <tr>
                   <th className="px-2 py-2 font-medium">#</th>
                   <th className="px-2 py-2 font-medium">Side</th>
+                  <th className="px-2 py-2 font-medium">Time</th>
                   <th className="px-2 py-2 text-right font-medium">Entry</th>
                   <th className="px-2 py-2 text-right font-medium">Exit</th>
                   <th className="px-2 py-2 text-right font-medium">P&L</th>
                   <th className="px-2 py-2 text-right font-medium">%</th>
+                  <th className="px-2 py-2 font-medium">OI Conf.</th>
                   <th className="px-2 py-2 font-medium">Reason</th>
                 </tr>
               </thead>
               <tbody>
-                {(trades.data?.items ?? []).map((tr) => (
+                {(trades.data?.items ?? []).map((tr) => {
+                  const a = oiBySeq.get(tr.seq);
+                  const oiTone =
+                    a == null ? 'text-ay-muted' : a.trend > 0 ? 'text-bull' : a.trend < 0 ? 'text-bear' : 'text-ay-muted';
+                  return (
                   <tr
                     key={tr.seq}
                     role="button"
@@ -325,16 +340,21 @@ export function BacktestResultsPage() {
                     <td className="px-2 py-2">
                       <span className={cn('text-xs font-semibold', tr.side === 'LONG' ? 'text-bull' : 'text-bear')}>{tr.side}</span>
                     </td>
+                    <td className="px-2 py-2 tabular-nums text-ay-muted">{tr.entryTs.slice(5, 16).replace('T', ' ')}</td>
                     <td className="px-2 py-2 text-right tabular-nums">{price(tr.entryPrice)}</td>
                     <td className="px-2 py-2 text-right tabular-nums">{price(tr.exitPrice)}</td>
                     <td className={cn('px-2 py-2 text-right tabular-nums', Number(tr.pnl) < 0 ? 'text-bear' : 'text-bull')}>{price(tr.pnl)}</td>
                     <td className="px-2 py-2 text-right tabular-nums">{price(tr.pnlPct)}</td>
+                    <td className={cn('px-2 py-2 text-xs font-medium', oiTone)} title={a ? `Connecting-Dots trend at entry (${oiInterval})` : 'No captured OI at entry'}>
+                      {a?.trendLabel ?? '—'}
+                    </td>
                     <td className="px-2 py-2">{tr.exitReason}</td>
                   </tr>
-                ))}
+                  );
+                })}
                 {(trades.data?.items ?? []).length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-2 py-6 text-center text-ay-muted">No trades.</td>
+                    <td colSpan={9} className="px-2 py-6 text-center text-ay-muted">No trades.</td>
                   </tr>
                 )}
               </tbody>

@@ -140,6 +140,26 @@ public class RunRepository {
         .orElse(null);
   }
 
+  /**
+   * The {@code total_return} (plain decimal string) of each given job's completed run, for enriching
+   * the jobs-list rows with a returns column. One batch query over the page's job ids; jobs with no
+   * run (queued/running/failed) are simply absent from the map. Empty input ⇒ empty map.
+   */
+  public Map<UUID, String> findReturnsByJobIds(List<UUID> jobIds) {
+    if (jobIds == null || jobIds.isEmpty()) {
+      return Map.of();
+    }
+    String placeholders = String.join(",", java.util.Collections.nCopies(jobIds.size(), "?"));
+    Map<UUID, String> out = new LinkedHashMap<>();
+    jdbc.query(
+        "SELECT job_id, total_return FROM backtest_runs WHERE job_id IN (" + placeholders + ")",
+        rs -> {
+          out.put(UUID.fromString(rs.getString("job_id")), plain(rs.getBigDecimal("total_return")));
+        },
+        jobIds.toArray());
+    return out;
+  }
+
   /** The run id produced by a job (for the {@code resultRef} on the job-status payload). */
   public Optional<UUID> findRunIdByJobId(UUID jobId) {
     return jdbc
@@ -155,9 +175,13 @@ public class RunRepository {
   public Optional<Map<String, Object>> findResult(UUID runId) {
     return jdbc
         .query(
-            "SELECT metrics, equity_curve, drawdown_curve, benchmark_curve, data_hash, seed, "
-                + "premium_source, universe_checksum, exchange, tradingsymbol "
-                + "FROM backtest_runs WHERE id=?",
+            // join jobs for the originating strategyId (the results header maps it to a name
+            // client-side, same schema-boundary discipline as the jobs list) + the run's completion
+            // timestamp ("date when it was run").
+            "SELECT br.metrics, br.equity_curve, br.drawdown_curve, br.benchmark_curve, br.data_hash, "
+                + "br.seed, br.premium_source, br.universe_checksum, br.exchange, br.tradingsymbol, "
+                + "br.completed_at, j.request->>'strategyId' AS strategy_id "
+                + "FROM backtest_runs br LEFT JOIN jobs j ON j.id = br.job_id WHERE br.id=?",
             (rs, n) -> {
               Map<String, Object> out = new LinkedHashMap<>();
               JsonNode metrics = parse(rs.getString("metrics"));
@@ -168,6 +192,10 @@ public class RunRepository {
               out.put("dataHash", rs.getString("data_hash"));
               out.put("seed", rs.getLong("seed"));
               out.put("premiumSource", rs.getString("premium_source"));
+              // The originating strategy (UUID) + when the run finished — the results header shows the
+              // strategy name (mapped client-side) and the run date.
+              out.put("strategyId", rs.getString("strategy_id"));
+              out.put("ranAt", rs.getString("completed_at"));
               // Stage F follow-on: the run's instrument, so the results "View on chart" deep-link
               // and trade-mark filtering carry the right symbol instead of the persisted default.
               out.put("exchange", rs.getString("exchange"));

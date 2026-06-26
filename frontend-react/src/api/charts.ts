@@ -7,6 +7,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from './client.ts';
+import { useCalendarStatus } from './marketCalendar.ts';
 import type { MarketCandle } from './types.ts';
 
 export const CHART_INTERVALS = ['1m', '3m', '5m', '15m', '1h', '1d', '1w'] as const;
@@ -47,11 +48,16 @@ function split(symbol: string) {
 /** Last ~220 bars of the symbol at the interval (cache-first read). */
 export function useCandles(symbol: string, interval: string) {
   const { exchange, tradingsymbol } = split(symbol);
+  // Anchor the window to the last trading session's close, not `now` — the recent [now-N, now] window
+  // is empty on a weekend/holiday, so intraday (1m/5m/…) charts read blank on a non-trading day even
+  // though the bars exist for the last session. Falls back to `now` until the calendar resolves.
+  const lastDay = useCalendarStatus().data?.lastTradingDay;
   return useQuery({
-    queryKey: ['candles', symbol, interval],
+    queryKey: ['candles', symbol, interval, lastDay ?? null],
     queryFn: () => {
       const span = SPAN_MS[interval] ?? SPAN_MS['1d'];
-      const to = new Date();
+      const to =
+        lastDay && lastDay.length === 10 ? new Date(`${lastDay}T15:30:00+05:30`) : new Date();
       const from = new Date(to.getTime() - span * 220);
       const p = new URLSearchParams({
         exchange,

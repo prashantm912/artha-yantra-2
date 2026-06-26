@@ -10,13 +10,12 @@ import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
+import { useDefaultDate } from '../../api/marketCalendar.ts';
 
 // Participant-wise OI (oipulse §fii-dii/participant-wise-oi): SEBI participant long/short contracts per
 // F&O segment, grouped FII/Pro/DII/Client × 6 segments, with day-over-day change + a Bullish/Bearish
 // read. The BE /participant-oi feed gives absolute long/short per (date, participant); we fetch a small
 // window and diff the latest captured date vs the prior (foldParticipantOi) — no trading-calendar logic.
-
-const todayIso = (): string => new Date().toISOString().slice(0, 10);
 
 const isoMinus = (dateStr: string, days: number): string => {
   const d = new Date(`${dateStr}T00:00:00Z`);
@@ -44,7 +43,10 @@ const COLUMNS: DataColumn<ParticipantSegmentRow>[] = [
 ];
 
 export function ParticipantWiseOiPage() {
-  const [date, setDate] = useState<string>(todayIso());
+  // Default to the last trading session (#12) so a weekend/holiday open lands on real data.
+  const defaultDate = useDefaultDate();
+  const [picked, setPicked] = useState<string | null>(null);
+  const date = picked ?? defaultDate;
   const from = useMemo(() => isoMinus(date, 10), [date]);
   const q = useParticipantOi(from, date);
   const groups = useMemo(() => foldParticipantOi(q.data ?? []), [q.data]);
@@ -54,7 +56,7 @@ export function ParticipantWiseOiPage() {
       <PageHeader title="Participant Wise OI (No. of Contracts)" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <DateInput ariaLabel="Report date" value={date} onChange={(v) => v && setDate(v)} />
+        <DateInput ariaLabel="Report date" value={date} onChange={setPicked} />
         <GoButton onClick={() => q.refetch()} loading={q.isFetching} />
       </div>
 

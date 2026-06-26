@@ -123,7 +123,30 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
   (backtest-service owns `/api/v1/backtests/*`). Tests: `(cd services/optimizer-service && python -m
   pytest tests/ -q)` + `python -m ruff check app tests` (Python 3.14 global, no venv). A sweep needs
   the strategy to carry a `backtest.optimize` block (`method`+`max_trials`+`objective`+`parameters`,
-  all required) else 422 "no tunable parameters".
+  all required) else 422 "no tunable parameters in the optimize block".
+- **Backtest/optimizer submission identity + precedence (2b):** `strategyId` is the registry **UUID**
+  (NOT the slug); omit `strategyVersion` → the optimizer/runner pins the latest published, else latest
+  draft. Terminal job status string is `completed`; results are keyed by `resultRef` (the run id), read
+  from `backtest_runs` (`total_return`, `trade_count`) + `backtest_trades`. **The optimizer reads
+  `optimize.parameters` FROM the YAML but takes `walkForward` + `objective` + `maxTrials` FROM the
+  REQUEST** (`service.py`), not the YAML — so OOS fold tuning needs `objective:{metric: oos_fold_mean}`
+  + a `walkForward:{train_days,test_days,step_days}` block in the `POST /optimizations/run` body (a
+  YAML-only `walk_forward` runs as a plain sweep with empty OOS folds).
+- **Scalper three-way instrument decoupling (ADR-0003, #224/#225):** `universe.signal_underlying` /
+  `universe.strike_reference` / `universe.underlying` are 3 independent optional instrumentRefs — the
+  signal/indicator series, the ATM-strike anchor spot, and the option-execution root — each defaulting
+  to the prior so existing configs stay byte-identical. Backtest option legs resolve via
+  `expired_contracts.underlying_symbol` (`"NIFTY"`/`"SENSEX"`); `OptionsPremiumReplay.registryUnderlying`
+  strips at the first space (`"NIFTY 50"`→`"NIFTY"`), so `universe.underlying` carries the INDEX exchange
+  (`NSE` for NIFTY 50, `BSE` for SENSEX) while options resolve to NFO/BFO. The OI-confluence gate index
+  defaults to the option-root, overridable via `oi_confluence_gate.index`; it is MUTED on derived history
+  (Dow+IV → NEUTRAL) so the niftyoi-vs-sensexoi A/B is a FORWARD-paper discriminator (identical on backtests).
+- **3m primary in the tick-wise runner (#228, same parity-safe-additive pattern as above):**
+  `TickwiseGoldenRunner.intervalDuration` rolls a 1m stream up to a coarse primary; it had 5m/15m/1h
+  only, so EVERY 3m-primary scalper backtest failed at submission (`"rolls up 5m/15m/1h primaries; got
+  3m"`). Fixed with an additive `case "3m" -> Duration.ofMinutes(3)` — 3m is a valid aggregate, the
+  bucketing is generic (epoch floor mod interval-seconds) and 09:15 IST aligns to a 3m boundary, so
+  5m/15m/1h goldens stay byte-identical.
 - **Rebuild + redeploy ONE service (no `ay` build verb):** build the artifact (`(cd frontend-react &&
   npm run build)` or the service JAR), set `$env:ARTHA_DB_NAME`/`$env:ARTHA_REDIS_DB` to the LIVE
   values (`artha`/`0`, mock `artha_mock`/`1`), then `docker compose -f deploy/docker-compose.yml

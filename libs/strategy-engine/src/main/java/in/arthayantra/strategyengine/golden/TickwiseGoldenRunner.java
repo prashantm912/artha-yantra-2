@@ -353,11 +353,12 @@ public final class TickwiseGoldenRunner {
 
   private static Duration intervalDuration(String interval) {
     return switch (interval) {
+      case "3m" -> Duration.ofMinutes(3); // the Siva scalper execution clock (candles_3m); 09:15 IST aligns
       case "5m" -> Duration.ofMinutes(5);
       case "15m" -> Duration.ofMinutes(15);
       case "1h" -> Duration.ofHours(1);
       default -> throw new IllegalArgumentException(
-          "tick-wise golden runner rolls up 5m/15m/1h primaries; got " + interval);
+          "tick-wise golden runner rolls up 3m/5m/15m/1h primaries; got " + interval);
     };
   }
 

@@ -9,15 +9,23 @@ authority is the OpenAlgo/React master plan; the design authority is `docs/desig
 - `design/ARTHAYANTRA_2_COMMON_REFERENCE.md` — app-wide design reference (cited as COMMON §n).
 - `design/ARTHAYANTRA_2_STAGE_{A..G}_*.md` — per-stage frozen design (the as-built spec).
 - `design/DECISIONS_LOG.md` — dated ADRs / amendments.
+- `adr/0001`…`adr/0003` — numbered architecture decision records (broker coupling / Upstox side-channel /
+  scalper signal-strike-option three-way decoupling); cited as `ADR-000N` across plans + manual-tests.
 - `superpowers/plans/2026-06-19-openalgo-react-integration-master-plan.md` — the **forward-work
   authority** (Phases 0–6); its §17 Errata + §18 Gap Addendum override §1–§16 on conflict.
 
 ## Active — forward-work plans (`superpowers/plans/`)
 *(The master plan above is the authority; these are the open, non-merged plans.)*
+- `2026-06-26-scalper-tunable-infra.md` — the **2b build**: fold-fix, NIFTY/SENSEX-FUT-CONT continuous
+  signal series, the three-way signal/strike/option decoupling (ADR-0003), and 36 instrument-agnostic
+  scalper variants seeded + functionally backtested. All phases DONE (#220, #222–#230); move to
+  `plans/archive/` once 2c forward paper begins.
 - `2026-06-21-data-foundation-milestone.md` — value-verify every OI/data page in History mode on a
-  REAL session vs oipulse (Phase-4 gate). GATED on the expired/OI backfill (now loading, #112–#116).
+  REAL session vs oipulse (Phase-4 gate). The expired/OI backfill is now COMPLETE; this is the open
+  value-verify gate (needs the owner's oipulse sign-in).
 - `2026-06-24-data-ops-console-wave.md` — Data Ops Console (B1–B6) operator UI over the backfill;
-  **MERGED #121** (deploy after the backfill finishes; kept active until deployed + value-verified).
+  **MERGED #121, now DEPLOYED + live** (backend + `/data-ops` route serve 200; #219 redirect fix).
+  Kept active until value-verified, then archive.
 - `2026-06-24-upstox-live-migration.md` — move the live stack (OI/quotes/WS ticker) to the login-free
   Upstox analytics token; W-U1/U2/U3 **MERGED** flag-gated default-Kite; **W-U4 cutover** (latency A/B +
   deploy + flip) is the only open wave.
@@ -42,6 +50,9 @@ authority is the OpenAlgo/React master plan; the design authority is `docs/desig
 - `manual-tests/phase-4-expired-instruments-backfill.md` — the §5 expired-instruments backfill walk.
 - `manual-tests/phase-4-wave1-*.md`, `phase-4-wave2-depth.md`, `phase-4-wave3-*.md` — the oipulse React page walks (W1/W2/W3).
 - `manual-tests/data-foundation-activation.md`, `data-ops-console.md` — data-foundation activation + Data Ops Console walks.
+- `manual-tests/2b-e1-continuous-future-backfill.md`, `2b-e2b-strike-reference.md`, `2b-1-scalper-variants.md`
+  — the 2b scalper-infra walks (continuous-future backfill, strike-reference spot, the 36-variant functional
+  verify with the 36/36 backtest results).
 - `manual-tests/archive/manual-testing-stage-{a..f}.md` — the legacy Stage A–G walks (historical).
 
 ## Active — consolidated deferred backlog

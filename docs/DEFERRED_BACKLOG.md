@@ -1,4 +1,4 @@
-# Deferred / Pending Backlog — Phases 0 → 6 (as of 2026-06-25)
+# Deferred / Pending Backlog — Phases 0 → 6 (as of 2026-06-26)
 
 Single source of truth for everything NOT yet done across the OpenAlgo/React master-plan phases 0–6.
 The forward-work authority is `superpowers/plans/2026-06-19-openalgo-react-integration-master-plan.md`
@@ -12,7 +12,8 @@ parked), the scalper cockpit (#105–#110), and oipulse Waves **W1/W2/W3** (most
 pages, through #93/#109) are all merged. **Expired-instruments OHLCV+OI backfill** (the §5 / Bucket-5 /
 data-foundation Part-B archive) is **BUILT + RUNNING** (#112–#116). **Part 2 premium-as-primary
 backtest replay** (options trade their own premium) is merged (#114–#119). The **Data Ops Console**
-(operator UI over the backfill, B1–B6) is merged (#121, deploy pending). What remains is below.
+(operator UI over the backfill, B1–B6) is merged (#121) and now **DEPLOYED + live** (deploy unblocked once
+the backfill idled; #219 fixed the bare `/data-ops` route). What remains is below.
 
 **2026-06-24 session update (#136–#156) — moved DONE / changed since the per-row tables below were first written:**
 - **Upstox login-free live migration (W-U1…U4):** direct-Upstox capture on the long-lived analytics token
@@ -39,9 +40,23 @@ with no snapshot backfill (virtual read-time derivation `CandleDerivedChainReade
 `bucket.toInstant()` (they had silently missed via an `OffsetDateTime` key across `+05:30`/`+00` sources) un-NEUTRAL'd
 the factors and validated the OI thesis: April attribution Ext.Bullish 5tr/80%win vs Bearish 1tr/0%win. **Strategy-eval
 learning:** derived history still forces Dow+IV NEUTRAL, so the OI edge reads MUTED on backtests — judge OI-led
-strategies on FORWARD paper with real captured OI, not a weak historical backtest. The expired/OI backfill is
-RUNNING ~99% (self-heal retrying the last failed legs); the Data Ops Console deploy + the scalper tuning sweep
-stay gated until it idles (a market-data restart kills the in-flight job).
+strategies on FORWARD paper with real captured OI, not a weak historical backtest.
+
+**2026-06-26 update — backfill IDLE + 2b scalper tunable-infra COMPLETE (#219–#230, all MERGED + DEPLOYED):**
+the expired/OI backfill is now **COMPLETE/idle** (`ExpiredBackfillAutoResume` self-resume skips all 32,543 legs),
+which unblocked the two formerly-gated items: the **Data Ops Console is DEPLOYED + live** (B1–B6, #121; #219
+fixed the bare `/data-ops` → `/data-ops/status` redirect), and the **scalper tunable-infra (2b) is COMPLETE** —
+the fold-fix routes walk-forward folds through `OptionsPremiumReplay` (#220, `oos_fold_mean` populates), the
+historical **NIFTY-FUT-CONT (NFO) + SENSEX-FUT-CONT (BFO)** continuous front-future 1m signal series are
+backfilled (2b-E1 #222/#223, 2b-E2b #225), a **three-way decoupling** of `signal_underlying` / `strike_reference`
+/ `underlying` landed (ADR-0003: 2b-E2 #224, 2b-E2b #225), the 12 Siva scalpers were forked into **36
+instrument-agnostic tunable variants** (2b-1 #226, seed-flag passthrough #227) seeded LIVE as drafts, the
+tick-wise golden runner gained 3m-primary support (2b-E3 #228 — it had 5m/15m/1h only; parity-safe additive
+`case "3m"`), **36/36 functional backtests ran green** (2b-2 #229), and the backtest jobs/results pages gained a
+strategy-name + returns surface with a strategy filter + pagination (#230). The 36 are **functional-screening
+only** (returns NOT tradeable / overfit) — tune on FORWARD paper (2c). The niftyoi-vs-sensexoi OI-gate A/B is a
+forward-paper discriminator (identical on history, where the gate is muted by Dow+IV → NEUTRAL). **W-U4 (Upstox
+cutover) is now the ONLY remaining pending wave** — prepped, gated on a live market session + the owner's flip.
 
 ## Legend
 - **Status:** DONE / PARTIAL / DEFERRED / GATED / NOT STARTED.
@@ -61,7 +76,7 @@ stay gated until it idles (a market-data restart kills the in-flight job).
 
 | Item | Status | Target | Reason |
 |---|---|---|---|
-| §5 expired-instrument OHLCV+OI backfill (ExpiryTrack historical) | **DONE / RUNNING** | — (#112–#116) | Upstox Plus funded; the `ExpiredBackfillService` ingester (bounded strikes + sliding-window limiter + resume) loads NIFTY/SENSEX expired CE/PE/FUT per-min OHLCV+OI into `candles` (`source='BACKFILL'`). First full pull RUNNING ~99% as of 2026-06-26 (~30.6k/31k contracts; `ExpiredBackfillAutoResume` self-heal retrying the last failed legs). See [[upstox-expired-instruments]]. |
+| §5 expired-instrument OHLCV+OI backfill (ExpiryTrack historical) | **DONE / COMPLETE** | — (#112–#116) | Upstox Plus funded; the `ExpiredBackfillService` ingester (bounded strikes + sliding-window limiter + resume) loads NIFTY/SENSEX expired CE/PE/FUT per-min OHLCV+OI into `candles` (`source='BACKFILL'`). First full pull **COMPLETE/idle** as of 2026-06-26 (`ExpiredBackfillAutoResume` self-resume now skips all 32,543 legs — nothing left to fetch). See [[upstox-expired-instruments]]. |
 | Native (live) intraday-OI snapshot history depth | PARTIAL | ongoing forward-capture | Live 3-min full-chain OI capture has run since 2026-06-15 (forward-accruing); deep past OI for stocks (non-expired) still bought-only. |
 | §15 200-day daily history | DEFERRED | before Phase 5 | Needed by the Minervini screener (N-day high / RS rank); not needed earlier. SOURCE OPTIONS: (a) **Upstox historical-candle v3** `GET /v3/historical-candle/{key}/days/1/{to}/{from}` on the analytics token — login-free, multi-year daily, the same client family as the expired backfill (recommended — reuse `UpstoxExpiredInstrumentsClient`/`UpstoxFnoMasterClient` pattern); (b) openchart; (c) the EOD-bhavcopy daily candles already captured (forward-only, shallow). |
 | Live OI cutover (login-free capture) | **BUILT — deploy + flip pending (#137/#149)** | deploy after backfill, then A/B + flip | Direct-Upstox analytics-token live OI capture (login-free) shipped flag-gated default-Kite (#137); the cutover canary + runbook + OI A/B-diff tool are done (#149). Remaining: deploy off-hours + reconcile Upstox-vs-Kite per-strike OI for a session + flip `source.optionchain=upstox`. |
@@ -87,7 +102,7 @@ stay gated until it idles (a market-data restart kills the in-flight job).
 | **Full-auto execution** (no human "Take") | DEFERRED | a later flag | Semi-auto (human "Take") is the v1 safety boundary. |
 | **Manual-verification checklist UI** (verify + confirm panel) | **DONE** (#125) | — | React `ManualVerifyChecklist` on `/signals` + `/scalper` (soft-warning + override gating, the 7 V009 checks + confluence dots, client-only). |
 | **Per-check server audit** (which boxes ticked) | DEFERRED | only if an override/exception trail is needed | Would add a `TakenRequest` field (request-schema drift + TS regen). |
-| **Historical scalp backtests** | DEFERRED | Phase 6 | Need Phase-1 §5 intraday-OI data + the §17.5 calendar extension; Phase 3 validates via unit-fired signals + live paper only. |
+| **Historical scalp backtests** | **DONE (functional, #226–#229)** | forward-paper tuning (2c) | The 36 instrument-agnostic scalper variants run full-window functional backtests on the complete §5 expired-premium archive (36/36 green, #229) — signal on NIFTY-FUT-CONT, premium-as-primary, three-way decoupled. Returns are functional-screening only (NOT tradeable / overfit); OI-led variants read MUTED on history. Final tuning is on FORWARD paper. |
 
 ## Phase 3.5 — OI-analytics fidelity + faithful strategies (PR #43 done; #44 OPEN)
 
@@ -119,7 +134,7 @@ mega-dropdown split into a per-section menu bar** (#177). Authority for the reva
 | Item | Status | Target | Reason |
 |---|---|---|---|
 | **Data-foundation value-verify** — render every OI/data page in History mode on a REAL session + compare value-for-value vs oipulse | GATED | the expired/OI backfill data (NOW loading, #112–#116) | The big open Phase-4 item: pages are structure-QA'd, not value-verified. Authority: `superpowers/plans/2026-06-21-data-foundation-milestone.md` + [[oipulse-live-qa-method]]. |
-| **Data Ops Console deploy** (B1–B6 merged #121) | GATED | after the running backfill finishes | A market-data redeploy restarts it → kills the in-flight backfill job. Deploy + rebuild `ay-frontend-react` once the pull completes. See [[data-ops-console]]. |
+| **Data Ops Console deploy** (B1–B6 merged #121) | **DONE — DEPLOYED + live** | — | Deployed once the backfill idled; backend (`coverage-summary`/`upstox-quota-status`/`expired-backfill/status`/`query`/`export`) + the `/data-ops` route both serve 200 (#219 fixed the bare `/data-ops` → `/data-ops/status` redirect). See [[data-ops-console]]. |
 | **`/orders` page** + §18.1 order read endpoints (orderbook/positions/tradebook/funds) | **BUILT (dormant, #131)** | live-verify | See the Phase-4 table — scaffolded + WireMock-tested; live-broker verify deferred. |
 | **Manual-verification checklist UI** (verify + confirm panel) | **DONE** (#125) | — | Built (see the Phase-4 table); the `2026-06-20-scalper-manual-verification-checklist.md` contract is fulfilled. |
 | **OiPulse ≥90% AI badge** (#2) + any tail oipulse-parity polish | DEFERRED | post value-verify | Proprietary oipulse model; our faithful Table-1/2 HIGH tier is the equivalent. |

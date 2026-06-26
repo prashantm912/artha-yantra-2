@@ -1,13 +1,23 @@
 # ArthaYantra 2.0
 
-Single-owner trading-strategy research platform: live NSE market data, strategy
-signals, backtesting and optimization — running entirely on one Windows 11
-machine under Docker Desktop, behind a single loopback-bound gateway.
+Single-owner research platform for **Indian index-options scalping** (NIFTY/NSE + SENSEX/BSE):
+live market data (Kite + Upstox, routed through an OpenAlgo appliance), an **options/OI analytics
+suite** (oipulse-style — chain, OI spurt, Connecting-Dots, trending/big OI, active strikes, premium),
+**intraday scalping strategies** with paper trading, **walk-forward backtesting + optimization on a
+real expired-option-premium archive** (~121M bars), and a **SPAN margin** appliance — running entirely
+on one Windows 11 machine under Docker Desktop, behind a single loopback-bound gateway.
 
-> **Design authority.** All build work follows the frozen design set under
-> [`docs/design/`](docs/design/) — `ARTHAYANTRA_2_COMMON_REFERENCE.md` plus the
-> seven stage files (Stage A–G). Stage A is in
-> [`docs/design/ARTHAYANTRA_2_STAGE_A_FOUNDATIONS.md`](docs/design/ARTHAYANTRA_2_STAGE_A_FOUNDATIONS.md).
+> **Current state.** See [`PHASE_GATES.md`](PHASE_GATES.md) for the live phase marker and
+> [`docs/DEFERRED_BACKLOG.md`](docs/DEFERRED_BACKLOG.md) for what's pending. As of 2026-06-26 the
+> scalper tunable-infra (12 Siva scalpers → 36 instrument-agnostic NIFTY/SENSEX variants, functionally
+> backtested) is complete; the remaining frontier is the W-U4 Upstox cutover (live-session gated).
+
+> **Design authority.** The frozen design set under [`docs/design/`](docs/design/) —
+> `ARTHAYANTRA_2_COMMON_REFERENCE.md` plus the seven stage files (Stage A–G) — is the original-design
+> authority and the **historical as-built record** for Stages A–G. **Forward work** (since the 2026-06-19
+> re-platform) follows the OpenAlgo + React master plan at
+> [`docs/superpowers/plans/2026-06-19-openalgo-react-integration-master-plan.md`](docs/superpowers/plans/2026-06-19-openalgo-react-integration-master-plan.md)
+> — read §17 (Errata) + §18 (Gap Addendum) first; they override §1–§16 on conflict.
 >
 > **Adaptation note (Phase 1 deliverable).** The original Phase-1 spec said to
 > copy "the three frozen design docs + the phases document" into `docs/design/`.
@@ -22,7 +32,7 @@ machine under Docker Desktop, behind a single loopback-bound gateway.
 |---|---|---|
 | Windows 11 + Docker Desktop | WSL2 backend | pin `%UserProfile%\.wslconfig`: `memory=10GB`, `processors=6`, `swap=4GB` (COMMON §10.2) |
 | Java (Temurin) | 21 | for host-run inner loop (Tier 2) only — containers bring their own |
-| Node.js | 24.x | frontend + e2e tooling |
+| Node.js | 24.x | `frontend-react` (React 19 + Vite 6 + Tailwind v4 + shadcn) + e2e tooling |
 | Python | 3.12+ | `pre-commit`, optimizer-service tooling (later stage) |
 | git | 2.x | with `pre-commit install` run once after clone |
 

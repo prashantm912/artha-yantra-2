@@ -19,18 +19,33 @@ forward-work authority (Phases 0–6). The legacy **Stage A–G** system in the 
 PR #6 `a96c99b`; F/G via the market-data + oipulse-parity PRs through #41). Its exit-gate
 checklists stay as the as-built reference; new phase boundaries are tracked by the map below.
 
-**Current frontier = Phase 4 (React) + Phase 6 (backtest).** As of 2026-06-25 Phases 0–3.5 are
-MERGED and Phase 4 is substantially built (cockpit + React cutover + oipulse W1/W2/W3 + Data Ops
-Console #121). **2026-06-25 frontend pass (#158–#177) MERGED + DEPLOYED:** the look/UX **revamp**
-(design tokens + self-hosted fonts + shadcn bridge + TanStack DataTable + signature `PageHeader`/
-`QueryState`/motion) rolled out to 64/65 pages, two new Upstox oipulse pages (**World Indices** #174/#176,
-**Pre-Open Market** #175), and the **nav restructure** ("All Menu" mega-dropdown → a per-section menu bar,
-#177). The active open work is the **data-foundation value-verify** (render every OI/data page
-in History mode on a real session vs oipulse — gated on the expired/OI backfill, which is **RUNNING and
-near-complete** (~99%: ~30.6k/31k contracts processed; `ExpiredBackfillAutoResume` self-heal retrying the
-last failed legs)) and **Part 2's** real-data value-verify (options now backtest on their own premium).
-Deploy the Data Ops Console + run the scalper tuning sweep **after the backfill finishes** (a market-data
-restart kills the in-flight job; the sweep's heavy candle/snapshot reads contend with the backfill writes).
+**Current frontier (2026-06-26) = the W-U4 Upstox cutover (the ONLY remaining pending wave) + live-gated
+QA.** Phases 0–3.5 MERGED; Phase 4 substantially built (64/65 pages); the **2b scalper tunable-infra build
+is COMPLETE** (see the block below). The expired/OI backfill is now **COMPLETE/idle** (`ExpiredBackfillAutoResume`
+self-resume skips all 32,543 legs — nothing left to fetch), which unblocked the two formerly-gated items: the
+**Data Ops Console (#121) is DEPLOYED + live** (backend + `/data-ops` route both serve 200; #219 fixed the bare
+route), and the **scalper tuning sweep pipeline is validated**. What remains is live-session/owner-gated:
+**W-U4** (Upstox cutover — OI parity + tick-latency A/B need market hours, then the owner's deliberate flip;
+the END-STATE keeps BOTH brokers split by capability — `ticker=Kite`, `quotes/candles/optionchain/fiidii/
+analytics/expired-backfill=Upstox`, EOD=bhavcopy, orders=OpenAlgo, **not** a full swap), and the
+**data-foundation value-verify** (render every OI page in History mode vs oipulse — the backfill data is now
+ready; the comparison needs the owner's oipulse sign-in).
+
+**2026-06-26 — 2b scalper tunable-infra COMPLETE (#220–#230, all MERGED + DEPLOYED + live-verified):** the
+12 Siva scalpers became 36 instrument-agnostic, tunable, paper-ready variants on the real expired-premium
+archive. Arc: **#220** fold-fix (walk-forward folds route through `OptionsPremiumReplay` → `oos_fold_mean`
+populates, live-verified 942.52); **2b-E1 #222/#223** historical **NIFTY-FUT-CONT** continuous front-future
+1m signal series (reconstructed for backtests; backfill skips the wide cagg refresh); **2b-E2 #224** decouple
+`signal_underlying` from the option-execution root; **2b-E2b #225** `strike_reference` spot + **SENSEX-FUT-CONT**
+(BFO) — the **three-way decoupling** signal / strike-anchor / option-root, all defaulting to the signal series
+so goldens stay byte-identical (ADR-0003); **2b-1 #226 + #227** the 12 scalpers forked into 36 variants
+(×{NIFTY, SENSEX·NIFTY-OI, SENSEX·SENSEX-OI}) seeded LIVE as drafts (`ARTHA_SCALPER_SEED_STRATEGIES`); **2b-E3
+#228** the tick-wise golden runner gained 3m-primary support (it had 5m/15m/1h only → every 3m scalper backtest
+failed at submission; parity-safe additive `case "3m"`); **2b-2 #229** 36/36 full-window functional backtests
+green (zero engine errors), sweep pipeline validated; **#230** backtest jobs/results show strategy name +
+returns + a strategy filter + pagination. The 36 are **functional-screened only** — returns are overfit/NOT
+tradeable, and the OI-confluence gate is MUTED on history (Dow+IV → NEUTRAL) so the niftyoi-vs-sensexoi A/B is a
+FORWARD-paper discriminator (identical on backtests). **Tune on live forward paper (2c), not the backtest.**
 
 **2026-06-25 (cont'd) — backtest-realism + analytics + historical-OI session (#198–#211, all MERGED + DEPLOYED):**
 A coherent arc that made the backtester trade real option premium *with* OI awareness, surfaced the results,
@@ -99,12 +114,12 @@ history.
 | Phase | Branch | State |
 |---|---|---|
 | 0 — OpenAlgo spine | `feat/openalgo-spine` | **MERGED** (PR #39) |
-| 1 — Data inflow (routing + ExpiryTrack OI + daily) | merged #40/#41/#112–#116, #137–#149 | **MOSTLY** — §4 routing + EOD bhavcopy daily (#40/#41) + §5 expired OHLCV+OI backfill (#112–#116, full pull RUNNING ~99% — self-heal retrying the last failed legs) + **Upstox login-free live capture (OI/quotes/v3-WS, #137/#139/#141/#149) BUILT flag-gated default-Kite** — cutover = deploy + A/B + flip. **DEFERRED**: §15 200-day daily history (Upstox v3 historical-candle can serve it, see backlog) |
+| 1 — Data inflow (routing + ExpiryTrack OI + daily) | merged #40/#41/#112–#116, #137–#149 | **MOSTLY** — §4 routing + EOD bhavcopy daily (#40/#41) + §5 expired OHLCV+OI backfill (#112–#116) **COMPLETE/idle** (self-resume skips all 32,543 legs) + **Upstox login-free live capture (OI/quotes/v3-WS, #137/#139/#141/#149) BUILT flag-gated default-Kite** — the broker END-STATE (#217) keeps BOTH brokers split by capability; cutover = W-U4 (deploy + live A/B + owner flip), the only remaining wave. **DEFERRED**: §15 200-day daily history (Upstox v3 historical-candle can serve it — wire `UpstoxDailyHistoryClient`, see backlog) |
 | 2 — Quant libs (greeks + indicators) | merged #40, #156 | **DONE** — §7 scalp indicators (#40); §6 **higher-order greeks vanna/charm/vomma DONE (#156)** on `black76-math` + the chain (FD-cross-checked) |
 | 3 — Scalper engine (§12 + §8 SPAN) | merged #42/#43/#44, #126, #144/#148/#154/#155 | **MERGED — registry 12/12** — core #1/#5/#6/#10 + Tier-2 OI fidelity + #2(faithful)/#4/#9/#12 + #7 Hero-Zero (#130) + **#3/#8 (#148) + #11 long-straddle on a two-leg/neutral primitive (#155)**, all paper drafts. **SPAN appliance dormant (#126) + `.spn` golden harness (#144)**; **`OpenAlgoOrderGateway` dormant (#154)**; checklist UI (#125). Only **DEFERRED**: SHORT-premium SELL legs of #8/#11 (SPAN live + live orders), full stock-universe #3 (→Track-1), §2 OiPulse badge |
-| 4 — React migration (§10 + §11) | merged #82–#110, #121, #146–#177 | **IN PROGRESS** — cockpit + React cutover + oipulse W1/W2/W3 + Data Ops Console (#121) + new pages OI-heatmap/OI-expiry/Open&High (#146/#150/#153) + cockpit paper-trade panel & scalp alerts (#151/#152) merged; **2026-06-25 frontend pass MERGED+DEPLOYED** — look/UX **revamp** (tokens+fonts+shadcn+DataTable+signature header/QueryState/motion, #158–#163) rolled out to 64/65 pages (#166–#173) + **World Indices** (#174/#176) + **Pre-Open Market** (#175) Upstox pages + **"All Menu"→per-section nav bar** (#177); **2026-06-25:** the analytics surfaces shipped (live P&L strip + exit-reason breakdown + compare leaderboard + OI-attribution tab, #199–#201), the **whole OI-page suite is now HISTORY-capable** (candle-derived fallback `HistoricalOiReader`, #210/#211, + ATM-band IV recompute #213 + the #214 `Instant`-key fix that un-NEUTRAL'd the OI/IV/VIX factors and validated the OI-confluence thesis, live-verified), and the `/orders` read-path is verified (stub → broker-gated). Remaining: Data-Ops deploy, OiPulse ≥90% badge, FE history date-pickers where missing |
+| 4 — React migration (§10 + §11) | merged #82–#110, #121, #146–#177 | **IN PROGRESS** — cockpit + React cutover + oipulse W1/W2/W3 + Data Ops Console (#121) + new pages OI-heatmap/OI-expiry/Open&High (#146/#150/#153) + cockpit paper-trade panel & scalp alerts (#151/#152) merged; **2026-06-25 frontend pass MERGED+DEPLOYED** — look/UX **revamp** (tokens+fonts+shadcn+DataTable+signature header/QueryState/motion, #158–#163) rolled out to 64/65 pages (#166–#173) + **World Indices** (#174/#176) + **Pre-Open Market** (#175) Upstox pages + **"All Menu"→per-section nav bar** (#177); **2026-06-25:** the analytics surfaces shipped (live P&L strip + exit-reason breakdown + compare leaderboard + OI-attribution tab, #199–#201), the **whole OI-page suite is now HISTORY-capable** (candle-derived fallback `HistoricalOiReader`, #210/#211, + ATM-band IV recompute #213 + the #214 `Instant`-key fix that un-NEUTRAL'd the OI/IV/VIX factors and validated the OI-confluence thesis, live-verified), and the `/orders` read-path is verified (stub → broker-gated); **Data Ops Console (#121) DEPLOYED + live** (#219 route fix); backtest jobs/results show strategy name + returns + filter + pagination (#230). Remaining: data-foundation value-verify (owner oipulse sign-in), OiPulse ≥90% badge, FE history date-pickers where missing |
 | 5 — Minervini Track-1 screener (§13) | `feat/minervini-track1` | **NOT STARTED** — needs Phase-1 §15 200-day history |
-| 6 — Backtest + forward wiring (§14) | merged #114–#119, #195–#211 | **SUBSTANTIAL** — Part 2 premium-as-primary replay landed (options trade their own 1m premium, golden-pinned). **2026-06-25:** real-data value-verify DONE (scalper ran on backfilled NIFTY premium); sizing guards (#198, min-premium floor + max-lots), **session/square-off/expiry enforcement in replay** (#206), the **OI-confluence entry gate** (`backtest.oi_confluence_gate`, #208/#209), a **sweepable** optimize block (#207), and the **OI-attribution analytics surface** (#201) all landed — backtests now trade real premium with OI-aware entries + post-hoc confluence attribution. Remaining: forward-test wiring; needs Phases 3 + 5 |
+| 6 — Backtest + forward wiring (§14) | merged #114–#119, #195–#211, **#220–#230** | **SUBSTANTIAL** — Part 2 premium-as-primary replay landed (options trade their own 1m premium, golden-pinned). **2026-06-25:** real-data value-verify DONE; sizing guards (#198), session/square-off/expiry enforcement (#206), the **OI-confluence entry gate** (#208/#209), a sweepable optimize block (#207), the **OI-attribution surface** (#201). **2026-06-26 (2b):** the **fold engine routes walk-forward folds through `OptionsPremiumReplay`** (#220 → `oos_fold_mean` populates); backtests read a historical **NIFTY-FUT-CONT / SENSEX-FUT-CONT** continuous front-future 1m signal series (#222/#223/#225); `signal_underlying` / `strike_reference` / option-execution-root are **three independent refs** (ADR-0003, #224/#225); the **tick-wise golden runner supports a 3m primary** (#228 — it had 5m/15m/1h only, so every 3m scalper backtest failed at submission; parity-safe additive `case "3m"`); **36 scalper variants ran 36/36 functional backtests, zero engine errors** (#229). **Backtest API:** `strategyId` is the registry UUID (not the slug), omit `strategyVersion` → latest draft, terminal job status = `completed`, results keyed by `resultRef`; the optimizer reads `optimize.parameters` from the YAML but `walkForward`/`objective`/`maxTrials` from the REQUEST. Remaining: **live forward-paper tuning (2c — backtest sweeps overfit, functional screening only)**, forward-test wiring; needs Phases 3 + 5 |
 
 ---
 

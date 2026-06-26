@@ -46,7 +46,10 @@ export function ActiveStrikesPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Active Strikes OI" />
+      <PageHeader
+        title="Active Strikes OI"
+        help="Tracks the most active strike's Call and Put open interest plus the sentiment % through the session — rising Call OI leans bearish, rising Put OI leans bullish."
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval allowedIntervals={ACTIVE_INTERVALS} />

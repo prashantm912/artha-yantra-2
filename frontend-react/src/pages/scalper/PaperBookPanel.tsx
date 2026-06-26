@@ -11,6 +11,7 @@ import {
   type RiskSetting,
 } from '../../api/paper.ts';
 import { useLiveTicks } from '../../api/ticks.ts';
+import { InfoTip } from '../../components/atoms/InfoTip.tsx';
 
 // The cockpit's live PAPER BOOK panel: the operator's open positions + live P&L + total exposure +
 // the global risk-limit guard, so they watch their book while watching signals. Reuses the SAME paper
@@ -115,7 +116,13 @@ export function PaperBookPanel() {
       </div>
 
       {/* Open positions with live MTM. */}
-      <h3 className="text-h3 text-ay-text">Open positions</h3>
+      <h3 className="flex items-center gap-1.5 text-h3 text-ay-text">
+        Open positions
+        <InfoTip
+          text="Your live paper positions, marked to the latest price — Mark is the current price, uP&L is the open profit/loss, and Close simulates exiting at that mark."
+          label="Open positions"
+        />
+      </h3>
       <div className="max-h-[24rem] overflow-auto rounded-lg border border-ay-border">
         <table className="w-full border-collapse text-sm">
           <thead className="sticky top-0 bg-surface-1 text-left text-xs uppercase text-ay-muted">
@@ -166,6 +173,7 @@ export function PaperBookPanel() {
                     <button
                       type="button"
                       onClick={() => close.mutate({ id: p.id })}
+                      title="Simulate exiting this position at the current mark — paper only, never a live order"
                       className="px-1.5 text-xs text-accent hover:underline"
                     >
                       Close

@@ -40,6 +40,7 @@ function FilterSelect({
   onChange,
   placeholder,
   disabled,
+  title,
 }: {
   ariaLabel: string;
   value: string | null;
@@ -47,11 +48,13 @@ function FilterSelect({
   onChange: (value: string) => void;
   placeholder?: string;
   disabled?: boolean;
+  title?: string;
 }) {
   return (
     <div className="relative">
       <select
         aria-label={ariaLabel}
+        title={title}
         disabled={disabled}
         value={value ?? ''}
         onChange={(e) => onChange(e.target.value)}
@@ -134,6 +137,7 @@ export function FilterBar({
           options={nameOptions}
           onChange={setName}
           placeholder="Underlying"
+          title="The index or stock whose option/OI data this page shows"
         />
       )}
       {showExpiry && (
@@ -144,6 +148,7 @@ export function FilterBar({
           onChange={setExpiry}
           placeholder="Expiry"
           disabled={!expiries.data?.length}
+          title="The options-contract expiry date; nearest weekly is selected by default"
         />
       )}
       {showInterval && (
@@ -152,11 +157,17 @@ export function FilterBar({
           value={interval}
           options={[...allowedIntervals]}
           onChange={(v) => setInterval(v as OiInterval)}
+          title="The candle/aggregation interval used to bucket the series"
         />
       )}
       <ModeToggle mode={mode} onChange={setMode} />
       {mode === 'history' && (
-        <DateInput ariaLabel="History date" value={date} onChange={setDate} />
+        <DateInput
+          ariaLabel="History date"
+          value={date}
+          onChange={setDate}
+          title="The past trading session to replay (defaults to the last market day)"
+        />
       )}
     </div>
   );

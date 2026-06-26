@@ -47,6 +47,7 @@ export function CoveragePage() {
     {
       id: 'underlying',
       header: 'Underlying',
+      help: 'The index whose option/future contracts these rows cover (e.g. NIFTY or SENSEX).',
       align: 'left',
       sortValue: (r) => r.underlying,
       sortType: 'text',
@@ -56,6 +57,7 @@ export function CoveragePage() {
     {
       id: 'exchange',
       header: 'Exchange',
+      help: 'The exchange the contracts trade on (e.g. NFO for NIFTY options, BFO for SENSEX options).',
       align: 'left',
       sortValue: (r) => r.exchange,
       sortType: 'text',
@@ -65,6 +67,7 @@ export function CoveragePage() {
     {
       id: 'contracts',
       header: 'Contracts',
+      help: 'Total number of registered contracts in this group, whether or not their candles have been backfilled yet.',
       align: 'right',
       sortValue: (r) => r.contracts,
       sortType: 'number',
@@ -74,6 +77,7 @@ export function CoveragePage() {
     {
       id: 'complete',
       header: 'Complete',
+      help: 'Contracts whose candle history is fully backfilled end to end.',
       align: 'right',
       sortValue: (r) => r.complete,
       sortType: 'number',
@@ -83,6 +87,7 @@ export function CoveragePage() {
     {
       id: 'partial',
       header: 'Partial',
+      help: 'Contracts with some candles captured but gaps remaining — these still need more backfill.',
       align: 'right',
       sortValue: (r) => r.partial,
       sortType: 'number',
@@ -92,6 +97,7 @@ export function CoveragePage() {
     {
       id: 'completePct',
       header: 'Complete %',
+      help: 'Share of this group’s contracts that are fully backfilled (complete ÷ contracts).',
       align: 'right',
       sortValue: (r) => (r.contracts > 0 ? (r.complete / r.contracts) * 100 : 0),
       sortType: 'number',
@@ -101,6 +107,7 @@ export function CoveragePage() {
     {
       id: 'candleRows',
       header: 'Candle rows',
+      help: 'Total candle bars stored across all contracts in this group — the raw volume of captured price history.',
       align: 'right',
       sortValue: (r) => r.candleRows,
       sortType: 'number',
@@ -110,6 +117,7 @@ export function CoveragePage() {
     {
       id: 'minExpiry',
       header: 'Min expiry',
+      help: 'The earliest contract expiry date captured in this group.',
       align: 'left',
       sortValue: (r) => r.minExpiry,
       sortType: 'text',
@@ -119,6 +127,7 @@ export function CoveragePage() {
     {
       id: 'maxExpiry',
       header: 'Max expiry',
+      help: 'The latest contract expiry date captured in this group.',
       align: 'left',
       sortValue: (r) => r.maxExpiry,
       sortType: 'text',
@@ -129,7 +138,10 @@ export function CoveragePage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Data Coverage" />
+      <PageHeader
+        title="Data Coverage"
+        help="A per-underlying, per-exchange summary of the expired-contract backfill — how many contracts are registered and how many have complete versus partial candle history; the top pills are grand totals."
+      />
 
       <BeatStrip className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <BeatItem>

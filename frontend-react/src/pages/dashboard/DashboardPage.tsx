@@ -104,6 +104,7 @@ export function DashboardPage() {
       <PageHeader
         title="Dashboard"
         subtitle="Cockpit — system health, signals, paper P&L and in-flight jobs"
+        help="A one-glance cockpit: system/market/broker status, the newest live signals, your paper P&L and any running jobs."
         right={<LiveDot detail={s ? `${s.asOf.slice(11, 19)} IST` : undefined} />}
       />
 

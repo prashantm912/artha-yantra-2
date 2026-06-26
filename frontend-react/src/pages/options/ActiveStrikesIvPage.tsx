@@ -45,7 +45,10 @@ export function ActiveStrikesIvPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Active Strikes IV" />
+      <PageHeader
+        title="Active Strikes IV"
+        help="Shows the most active strike's Call and Put implied volatility versus price through the session; the Call−Put IV gap tells you which side is richer."
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval allowedIntervals={ACTIVE_INTERVALS} />

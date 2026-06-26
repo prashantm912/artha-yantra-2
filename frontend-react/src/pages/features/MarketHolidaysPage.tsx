@@ -47,6 +47,7 @@ export function MarketHolidaysPage() {
         sortType: 'text',
         render: (r) => r.date,
         mobileLabel: 'Date',
+        help: 'The calendar date on which the NSE is closed and no trading takes place.',
       },
       {
         id: 'day',
@@ -56,6 +57,7 @@ export function MarketHolidaysPage() {
         sortType: 'text',
         render: (r) => r.day,
         mobileLabel: 'Day',
+        help: 'The day of the week the holiday falls on.',
       },
       {
         id: 'description',
@@ -65,6 +67,7 @@ export function MarketHolidaysPage() {
         sortType: 'text',
         render: (r) => r.description,
         mobileLabel: 'Description',
+        help: 'The name or reason for the holiday (for example a festival or national holiday).',
       },
       {
         id: 'validity',
@@ -74,6 +77,7 @@ export function MarketHolidaysPage() {
         sortType: 'text',
         render: (r) => <ValidityBadge passed={r.date < today} />,
         mobileLabel: 'Validity',
+        help: 'Whether this holiday has already passed or is still coming up, relative to today.',
       },
     ],
     [today],
@@ -81,7 +85,11 @@ export function MarketHolidaysPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Market Holidays" subtitle="NSE trading holidays the bundled calendar covers — Passed / Coming vs today" />
+      <PageHeader
+        title="Market Holidays"
+        subtitle="NSE trading holidays the bundled calendar covers — Passed / Coming vs today"
+        help="Lists the days the NSE is closed for trading, with each marked Passed (already gone by) or Coming (still ahead) relative to today, so you can plan around non-trading sessions."
+      />
 
       <QueryState
         query={q}

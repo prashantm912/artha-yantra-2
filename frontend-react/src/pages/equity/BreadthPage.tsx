@@ -12,6 +12,7 @@ import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
+import { FIELD_HELP } from '../../core/fieldHelp.ts';
 
 // One elevated breadth tile: uppercase wide-tracked caption label / mono value. Counts/percentages
 // (not signed flows), so no sign-tone logic — just the figure.
@@ -88,10 +89,11 @@ export function BreadthPage() {
 
   const columns: DataColumn<BreadthDeliveryRow>[] = useMemo(
     () => [
-      { id: 'symbol', header: 'Symbol', align: 'left', render: (r) => r.symbol, mobileLabel: 'Symbol' },
+      { id: 'symbol', header: 'Symbol', help: 'The NSE stock ticker for this delivery-% leader.', align: 'left', render: (r) => r.symbol, mobileLabel: 'Symbol' },
       {
         id: 'delivery',
         header: 'Delivery %',
+        help: FIELD_HELP.deliveryPct,
         render: (r) => pct(r.deliveryPct),
         sortValue: (r) => Number(r.deliveryPct ?? 0),
         mobileLabel: 'Delivery %',
@@ -99,6 +101,7 @@ export function BreadthPage() {
       {
         id: 'close',
         header: 'Close',
+        help: FIELD_HELP.close,
         render: (r) => (r.close ? formatDecimal(r.close, 2) : '—'),
         sortValue: (r) => Number(r.close ?? 0),
         mobileLabel: 'Close',
@@ -106,6 +109,7 @@ export function BreadthPage() {
       {
         id: 'chg',
         header: '% Chg',
+        help: FIELD_HELP.changePct,
         render: (r) => <ValueDeltaCell value={r.pctChange} suffix="%" />,
         sortValue: (r) => Number(r.pctChange ?? 0),
         mobileLabel: '% Chg',
@@ -118,6 +122,7 @@ export function BreadthPage() {
     <LoadBeat>
       <PageHeader
         title="Market Breadth"
+        help="Counts how many stocks rose vs fell on a session and lists the delivery-% leaders — more advances than declines signals a broadly strong day."
         subtitle={
           <>
             NSE EQ-series EOD bhavcopy · advance/decline + delivery-% leaders
@@ -127,7 +132,7 @@ export function BreadthPage() {
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <DateInput value={date} onChange={(v) => setDate(v ?? date)} ariaLabel="Trade date" />
+        <DateInput value={date} onChange={(v) => setDate(v ?? date)} ariaLabel="Trade date" title="Pick the trade date whose EOD bhavcopy breadth you want to view" />
         <GoButton onClick={() => void q.refetch()} loading={q.isFetching} />
       </div>
 

@@ -45,12 +45,16 @@ export function MultipleOiChartPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Multiple OI chart" />
+      <PageHeader
+        title="Multiple OI chart"
+        help="Overlays the open-interest line of several option legs against the underlying price so you can compare where positions are building across strikes at once."
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval={false} />
         <Select
           ariaLabel="Time interval"
+          title="Candle interval in minutes"
           value={String(intervalMin)}
           options={INTERVAL_OPTIONS}
           onChange={(v) => setIntervalMin(parseInt(v, 10) || 3)}

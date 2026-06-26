@@ -84,7 +84,7 @@ export function IntervalWiseOiPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Interval-wise OI" subtitle="Top OI gainer/loser strikes across 15 min, 60 min and daily lookbacks" />
+      <PageHeader title="Interval-wise OI" help="Shows the strikes adding the most OI (gainers) and shedding the most OI (losers) over 15-minute, 60-minute and daily windows, colour-coded by what the price-vs-OI move implies." subtitle="Top OI gainer/loser strikes across 15 min, 60 min and daily lookbacks" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry />

@@ -66,6 +66,7 @@ export function SignalsFeedPanel({
                   <button
                     type="button"
                     onClick={() => setOpenId(s.id)}
+                    title="Open a prefilled defined-risk paper ticket to log this signal as a simulated trade."
                     className="whitespace-nowrap rounded-md bg-bull/15 px-2 py-1 text-xs font-semibold text-bull ring-1 ring-bull/40 hover:bg-bull/25"
                   >
                     Take (paper)

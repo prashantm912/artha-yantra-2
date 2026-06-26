@@ -10,6 +10,7 @@ import {
   type PayoffLeg,
   type Side,
 } from '../../core/payoffEngine.ts';
+import { FIELD_HELP } from '../../core/fieldHelp.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
@@ -143,10 +144,10 @@ export function StrategyBuilderPage() {
   );
 
   const legColumns: DataColumn<LegRow>[] = [
-    { id: 'side', header: 'Side', align: 'left', render: (l) => l.side, mobileLabel: 'Side' },
-    { id: 'lots', header: 'Lots', render: (l) => String(l.lots), mobileLabel: 'Lots' },
-    { id: 'strike', header: 'Strike', render: (l) => `${l.strike} ${l.type}`, mobileLabel: 'Strike' },
-    { id: 'premium', header: 'Premium', render: (l) => l.premium.toFixed(2), mobileLabel: 'Premium' },
+    { id: 'side', header: 'Side', help: 'Whether this leg is bought (Buy) or sold (Sell).', align: 'left', render: (l) => l.side, mobileLabel: 'Side' },
+    { id: 'lots', header: 'Lots', help: 'Number of lots traded for this leg (each lot is the contract lot size).', render: (l) => String(l.lots), mobileLabel: 'Lots' },
+    { id: 'strike', header: 'Strike', help: 'The strike price and option type (CE call / PE put) of this leg.', render: (l) => `${l.strike} ${l.type}`, mobileLabel: 'Strike' },
+    { id: 'premium', header: 'Premium', help: FIELD_HELP.premium, render: (l) => l.premium.toFixed(2), mobileLabel: 'Premium' },
     {
       id: 'remove',
       header: '',
@@ -170,6 +171,7 @@ export function StrategyBuilderPage() {
       <PageHeader
         title="Strategy Builder"
         subtitle="Assemble legs from the live chain — expiry payoff, net greeks and breakevens"
+        help="Build a multi-leg options position from the live chain and see its payoff at expiry, net greeks, max profit/loss and breakevens."
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -190,6 +192,7 @@ export function StrategyBuilderPage() {
               <select
                 value={form.strike}
                 onChange={(e) => setForm((f) => ({ ...f, strike: e.target.value }))}
+                title="The strike price for the new leg, chosen from the live chain."
                 className="h-9 rounded-md border border-ay-border bg-surface-2 px-2 text-sm text-ay-text"
               >
                 <option value="">—</option>
@@ -207,6 +210,7 @@ export function StrategyBuilderPage() {
           <select
             value={form.type}
             onChange={(e) => setForm((f) => ({ ...f, type: e.target.value as OptionType }))}
+            title="Option type for the new leg: CE (call) or PE (put)."
             className="h-9 rounded-md border border-ay-border bg-surface-2 px-2 text-sm text-ay-text"
           >
             <option value="CE">CE</option>
@@ -218,6 +222,7 @@ export function StrategyBuilderPage() {
           <select
             value={form.side}
             onChange={(e) => setForm((f) => ({ ...f, side: e.target.value as Side }))}
+            title="Direction of the new leg: Buy (long) or Sell (short)."
             className="h-9 rounded-md border border-ay-border bg-surface-2 px-2 text-sm text-ay-text"
           >
             <option value="BUY">Buy</option>
@@ -231,6 +236,7 @@ export function StrategyBuilderPage() {
             min={1}
             value={form.lots}
             onChange={(e) => setForm((f) => ({ ...f, lots: Number(e.target.value) }))}
+            title="How many lots to trade for the new leg."
             className="h-9 w-16 rounded-md border border-ay-border bg-surface-2 px-2 text-sm text-ay-text"
           />
         </label>
@@ -241,6 +247,7 @@ export function StrategyBuilderPage() {
             min={1}
             value={lotSize}
             onChange={(e) => setLotSize(Math.max(1, Number(e.target.value)))}
+            title="Contract lot size (units per lot) used to scale the payoff and greeks."
             className="h-9 w-20 rounded-md border border-ay-border bg-surface-2 px-2 text-sm text-ay-text"
           />
         </label>
@@ -248,6 +255,7 @@ export function StrategyBuilderPage() {
           type="button"
           onClick={addLeg}
           disabled={!form.strike}
+          title="Add the configured leg to the position (needs a strike selected)."
           className="h-9 rounded-md bg-accent px-3 text-sm font-semibold text-white disabled:opacity-40"
         >
           Add leg

@@ -58,11 +58,14 @@ export function OiStatisticsPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Options OI Statistics" subtitle="OI distribution + PCR — cumulative & per-strike OI and the intraday PCR-vs-price line" />
+      <PageHeader title="Options OI Statistics" help="Shows where open interest is concentrated — total call vs put OI, the per-strike OI ladder (call OI marks resistance, put OI marks support), and how the put-call ratio tracks price through the day." subtitle="OI distribution + PCR — cumulative & per-strike OI and the intraday PCR-vs-price line" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry />
-        <label className="flex h-9 items-center gap-1.5 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text">
+        <label
+          className="flex h-9 items-center gap-1.5 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text"
+          title="Plot the change in OI versus the baseline instead of absolute OI"
+        >
           <input
             type="checkbox"
             checked={showChange}

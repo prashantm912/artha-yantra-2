@@ -11,6 +11,7 @@ import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
+import { FIELD_HELP } from '../../core/fieldHelp.ts';
 
 // Equity → Open=High / Open=Low (oipulse): which index constituents opened AT their day high (O=H,
 // bearish — capped at the open) or day low (O=L, bullish). Computed live from the near-month future
@@ -22,18 +23,20 @@ const dec = (s: string | null) => (s == null ? '—' : formatDecimal(s, 2));
 
 function levelTable(level: 'high' | 'low') {
   const cols: DataColumn<OpenHighSetup>[] = [
-    { id: 'symbol', header: 'Name', align: 'left', render: (r) => r.symbol, sortValue: (r) => r.symbol, mobileLabel: 'Name' },
-    { id: 'open', header: 'Day Open', render: (r) => dec(r.dayOpen), mobileLabel: 'Day Open' },
+    { id: 'symbol', header: 'Name', help: 'The index constituent (stock ticker) showing this setup.', align: 'left', render: (r) => r.symbol, sortValue: (r) => r.symbol, mobileLabel: 'Name' },
+    { id: 'open', header: 'Day Open', help: FIELD_HELP.open, render: (r) => dec(r.dayOpen), mobileLabel: 'Day Open' },
     {
       id: 'level',
       header: level === 'high' ? 'Day High' : 'Day Low',
+      help: level === 'high' ? FIELD_HELP.high : FIELD_HELP.low,
       render: (r) => dec(level === 'high' ? r.dayHigh : r.dayLow),
       mobileLabel: level === 'high' ? 'Day High' : 'Day Low',
     },
-    { id: 'ltp', header: 'LTP', render: (r) => dec(r.ltp), mobileLabel: 'LTP' },
+    { id: 'ltp', header: 'LTP', help: FIELD_HELP.ltp, render: (r) => dec(r.ltp), mobileLabel: 'LTP' },
     {
       id: 'far',
       header: 'Far %',
+      help: 'How far the last price now sits from that open=high/low level, as a percentage.',
       render: (r) => <ValueDeltaCell value={r.farPct} suffix="%" />,
       sortValue: (r) => Number(r.farPct ?? 0),
       mobileLabel: 'Far %',
@@ -59,10 +62,13 @@ export function OpenHighLowPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Open = High / Open = Low" />
+      <PageHeader
+        title="Open = High / Open = Low"
+        help="Lists stocks that opened right at their day's high (Open=High, a bearish cap) or day's low (Open=Low, a bullish floor) — a quick read on directional bias from the open."
+      />
 
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        <Select value={index} options={indices} onChange={setIndex} ariaLabel="Index" placeholder="Index…" />
+        <Select value={index} options={indices} onChange={setIndex} ariaLabel="Index" placeholder="Index…" title="Pick the index whose constituents to scan for open=high / open=low setups" />
         <GoButton onClick={() => void q.refetch()} loading={q.isFetching} />
         {data?.asOf && <span className="text-xs text-ay-muted">as on {data.asOf}</span>}
       </div>

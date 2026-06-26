@@ -11,6 +11,7 @@ import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { useDefaultDate } from '../../api/marketCalendar.ts';
+import { FIELD_HELP } from '../../core/fieldHelp.ts';
 
 // Participant-wise OI (oipulse §fii-dii/participant-wise-oi): SEBI participant long/short contracts per
 // F&O segment, grouped FII/Pro/DII/Client × 6 segments, with day-over-day change + a Bullish/Bearish
@@ -26,19 +27,20 @@ const isoMinus = (dateStr: string, days: number): string => {
 const num = (n: number) => n.toLocaleString('en-IN');
 
 const COLUMNS: DataColumn<ParticipantSegmentRow>[] = [
-  { id: 'segment', header: 'Type', align: 'left', render: (r) => r.segment, mobileLabel: 'Type' },
-  { id: 'long', header: 'Long', render: (r) => `${num(r.long)}${r.longPct ? ` (${r.longPct}%)` : ''}`, mobileLabel: 'Long' },
-  { id: 'short', header: 'Short', render: (r) => `${num(r.short)}${r.shortPct ? ` (${r.shortPct}%)` : ''}`, mobileLabel: 'Short' },
-  { id: 'totalDiff', header: 'Total Diff.', render: (r) => <SignedCount value={r.totalDiff} />, mobileLabel: 'Total Diff' },
-  { id: 'chngLong', header: 'Chng. In Long', render: (r) => <SignedCount value={r.chngLong} /> },
-  { id: 'chngShort', header: 'Chng. In Short', render: (r) => <SignedCount value={r.chngShort} /> },
-  { id: 'chngTotal', header: 'Chng. In Total', render: (r) => <SignedCount value={r.chngTotal} /> },
+  { id: 'segment', header: 'Type', align: 'left', render: (r) => r.segment, mobileLabel: 'Type', help: 'The F&O segment this long/short row covers (e.g. index futures, stock options).' },
+  { id: 'long', header: 'Long', render: (r) => `${num(r.long)}${r.longPct ? ` (${r.longPct}%)` : ''}`, mobileLabel: 'Long', help: 'Number of long (buy) contracts this participant holds in the segment, with its share of total in brackets.' },
+  { id: 'short', header: 'Short', render: (r) => `${num(r.short)}${r.shortPct ? ` (${r.shortPct}%)` : ''}`, mobileLabel: 'Short', help: 'Number of short (sell) contracts this participant holds in the segment, with its share of total in brackets.' },
+  { id: 'totalDiff', header: 'Total Diff.', render: (r) => <SignedCount value={r.totalDiff} />, mobileLabel: 'Total Diff', help: 'Long contracts minus short contracts — positive means net long (bullish lean) in the segment.' },
+  { id: 'chngLong', header: 'Chng. In Long', render: (r) => <SignedCount value={r.chngLong} />, help: 'Change in long contracts versus the prior captured session — new longs added (+) or cut (−).' },
+  { id: 'chngShort', header: 'Chng. In Short', render: (r) => <SignedCount value={r.chngShort} />, help: 'Change in short contracts versus the prior captured session — new shorts added (+) or cut (−).' },
+  { id: 'chngTotal', header: 'Chng. In Total', render: (r) => <SignedCount value={r.chngTotal} />, help: 'Day-over-day change in the net (long minus short) position — the direction of the participant shift.' },
   {
     id: 'interp',
     header: 'Interpretation',
     align: 'center',
     render: (r) => (r.interpretation ? <SentimentBadge label={r.interpretation.label} tone={r.interpretation.tone} /> : <span className="text-ay-muted">—</span>),
     mobileLabel: 'Interpretation',
+    help: FIELD_HELP.oiInterpretation,
   },
 ];
 
@@ -53,11 +55,14 @@ export function ParticipantWiseOiPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Participant Wise OI (No. of Contracts)" />
+      <PageHeader
+        title="Participant Wise OI (No. of Contracts)"
+        help="Shows long vs short F&O contract counts for each SEBI participant group (FII, Pro, DII, Client) per segment, with the day-over-day change and a bullish/bearish read."
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <DateInput ariaLabel="Report date" value={date} onChange={setPicked} />
-        <GoButton onClick={() => q.refetch()} loading={q.isFetching} />
+        <DateInput ariaLabel="Report date" value={date} onChange={setPicked} title="Pick the report date; data falls back to the last trading session." />
+        <GoButton onClick={() => q.refetch()} loading={q.isFetching} title="Reload participant OI for the selected date." />
       </div>
 
       <QueryState

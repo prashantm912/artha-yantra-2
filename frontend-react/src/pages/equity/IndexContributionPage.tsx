@@ -11,6 +11,7 @@ import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
+import { FIELD_HELP } from '../../core/fieldHelp.ts';
 
 // Equity → Index Contribution (oipulse): how much each constituent pushes the index, split into
 // Advances and Declines. Contribution = free-float weight × % change (weights seeded from the
@@ -28,21 +29,23 @@ const ltpCell = (r: ContribRow) => (
 );
 
 const columns: DataColumn<ContribRow>[] = [
-  { id: 'rank', header: '#', render: (r) => String(r.rank), mobileLabel: '#' },
-  { id: 'name', header: 'Name', align: 'left', render: (r) => r.symbol, mobileLabel: 'Name' },
+  { id: 'rank', header: '#', help: 'Rank of this stock by how much it moves the index (largest contributor first).', render: (r) => String(r.rank), mobileLabel: '#' },
+  { id: 'name', header: 'Name', help: 'The index constituent (stock ticker).', align: 'left', render: (r) => r.symbol, mobileLabel: 'Name' },
   {
     id: 'point',
     header: 'Point',
+    help: 'How many index points this stock added or subtracted (needs the live index level; shown where available).',
     render: (r) => (r.points == null ? '—' : <ValueDeltaCell value={r.points} digits={2} />),
     mobileLabel: 'Point',
   },
   {
     id: 'contrib',
     header: 'Contribution',
+    help: "This stock's share of the index move = its free-float weight times its % change.",
     render: (r) => <ValueDeltaCell value={r.contribution} digits={4} suffix="%" />,
     mobileLabel: 'Contribution',
   },
-  { id: 'ltp', header: 'LTP', render: ltpCell, mobileLabel: 'LTP' },
+  { id: 'ltp', header: 'LTP', help: FIELD_HELP.ltp, render: ltpCell, mobileLabel: 'LTP' },
 ];
 
 export function IndexContributionPage() {
@@ -59,10 +62,13 @@ export function IndexContributionPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Index Contribution" />
+      <PageHeader
+        title="Index Contribution"
+        help="Breaks down how much each constituent is pushing the index up or down, split into advancers and decliners, so you can see which stocks are driving the move."
+      />
 
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        <Select value={index} options={indices} onChange={setIndex} ariaLabel="Index" placeholder="Index…" />
+        <Select value={index} options={indices} onChange={setIndex} ariaLabel="Index" placeholder="Index…" title="Pick the index to break down by constituent contribution" />
         <GoButton onClick={() => void q.refetch()} loading={q.isFetching} />
         {data && (
           <span className="text-sm">

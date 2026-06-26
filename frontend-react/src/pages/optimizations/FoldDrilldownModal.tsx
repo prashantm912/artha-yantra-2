@@ -3,6 +3,7 @@ import { formatDecimal } from '../../lib/decimal.ts';
 import { Modal } from '../../components/dataops/Modal.tsx';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { REGIME_LABELS, useTrialFolds, type TrialFold } from '../../api/optimizations.ts';
+import { FIELD_HELP } from '../../core/fieldHelp.ts';
 
 // The Phase-39 per-trial fold drill-down (master plan §20, deferred follow-on to PR #129's guard
 // columns). Click a leaderboard row → this read-only modal breaks each walk-forward fold's OOS down
@@ -22,6 +23,7 @@ function regimeColumn(label: string): DataColumn<TrialFold> {
     header: label,
     align: 'right',
     headerClassName: 'text-ay-text',
+    help: `Out-of-sample results for trades that happened in the ${label} market regime, shown as Sharpe / rupee expectancy / trade count.`,
     render: (fold) => {
       const stat = fold.regimeOos[label as keyof TrialFold['regimeOos']];
       if (!stat) return <span className="text-ay-muted">—</span>;
@@ -43,6 +45,7 @@ const COLUMNS: DataColumn<TrialFold>[] = [
     header: 'Fold',
     align: 'left',
     headerClassName: 'text-ay-text',
+    help: 'Walk-forward fold number — each fold trains on an earlier window and tests on the next unseen one.',
     render: (f) => <span className="font-medium text-ay-text">#{f.fold}</span>,
   },
   {
@@ -50,6 +53,7 @@ const COLUMNS: DataColumn<TrialFold>[] = [
     header: 'Test window',
     align: 'left',
     headerClassName: 'text-ay-text',
+    help: 'The out-of-sample date range this fold was tested on (data the tuning never saw).',
     render: (f) => (
       <span className="text-ay-muted">
         {day(f.test.from)} → {day(f.test.to)}
@@ -61,6 +65,7 @@ const COLUMNS: DataColumn<TrialFold>[] = [
     header: 'Train Sharpe',
     align: 'right',
     headerClassName: 'text-ay-text',
+    help: `Sharpe on this fold's training window, where the parameters were fit. ${FIELD_HELP.sharpe}`,
     render: (f) => dec(f.trainMetrics.sharpe, 2),
   },
   {
@@ -68,6 +73,7 @@ const COLUMNS: DataColumn<TrialFold>[] = [
     header: 'OOS Sharpe',
     align: 'right',
     headerClassName: 'text-ay-text',
+    help: `Sharpe on this fold's out-of-sample window — the honest read; a big drop from Train Sharpe signals overfitting. ${FIELD_HELP.sharpe}`,
     render: (f) => <span className="font-medium text-ay-text">{dec(f.oosMetrics.sharpe, 2)}</span>,
   },
   ...REGIME_LABELS.map((r) => regimeColumn(r)),

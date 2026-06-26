@@ -97,6 +97,7 @@ export function FiiLongShortPage() {
             : 'FII Long Short Ratio'
         }
         subtitle="LSR % = FII index-futures long ÷ (long + short). Low = FII bearish, high = bullish. Nifty-price overlay deferred (Wave 4)."
+        help="Plots the share of FII index-futures positions that are long over time — a rising line means foreign investors are leaning more bullish, a falling line more bearish."
       />
 
       <QueryState

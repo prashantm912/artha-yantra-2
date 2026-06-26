@@ -12,6 +12,7 @@ import { SentimentBadge } from '../../components/atoms/SentimentBadge.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
+import { FIELD_HELP } from '../../core/fieldHelp.ts';
 
 // OI Trending (oipulse §options/trending-oi): aggregated Call vs Put OI over the session with a
 // derived directional sentiment. Time-ordered (newest on top), 100/page. All Δ/PCR/sentiment columns
@@ -44,21 +45,22 @@ export function TrendingOiPage() {
   const rows = useMemo(() => foldTrending(q.data?.items ?? []).reverse(), [q.data]);
 
   const columns: DataColumn<TrendingRow>[] = [
-    { id: 'date', header: 'Date', align: 'left', render: (r) => r.bucket.slice(0, 10) },
-    { id: 'time', header: 'Time', align: 'left', render: (r) => r.bucket.slice(11, 16), mobileLabel: 'Time' },
-    { id: 'ltp', header: 'LTP', render: (r) => (r.spot ? formatDecimal(r.spot, 2) : '—'), mobileLabel: 'LTP' },
-    { id: 'break', header: 'Day H/L Break', align: 'center', render: (r) => <BreakCell row={r} /> },
-    { id: 'chngCall', header: 'Chng. In Call OI', render: (r) => <SignedCount value={r.chngCallOi} />, mobileLabel: 'Δ Call OI' },
-    { id: 'chngPut', header: 'Chng. In Put OI', render: (r) => <SignedCount value={r.chngPutOi} />, mobileLabel: 'Δ Put OI' },
-    { id: 'diff', header: 'Diff. in OI', render: (r) => <SignedCount value={r.diffInOi} />, mobileLabel: 'Diff OI' },
-    { id: 'direction', header: 'Direction of chng.', align: 'center', render: (r) => <Direction dir={r.direction} /> },
-    { id: 'chngDir', header: 'Chng. In Direction', render: (r) => <SignedCount value={r.chngInDirection} /> },
-    { id: 'dirPct', header: 'Direction of chng. %', render: (r) => <ValueDeltaCell value={r.directionPct} suffix="%" /> },
-    { id: 'pcr', header: 'Net PCR', render: (r) => r.netPcr ?? '—', mobileLabel: 'PCR' },
+    { id: 'date', header: 'Date', align: 'left', help: 'Calendar date of this interval bucket.', render: (r) => r.bucket.slice(0, 10) },
+    { id: 'time', header: 'Time', align: 'left', help: 'Clock time at the end of this interval bucket.', render: (r) => r.bucket.slice(11, 16), mobileLabel: 'Time' },
+    { id: 'ltp', header: 'LTP', help: FIELD_HELP.spot, render: (r) => (r.spot ? formatDecimal(r.spot, 2) : '—'), mobileLabel: 'LTP' },
+    { id: 'break', header: 'Day H/L Break', align: 'center', help: "Flags when the underlying broke the day's high (D.H.B, bullish) or low (D.L.B, bearish) in this interval.", render: (r) => <BreakCell row={r} /> },
+    { id: 'chngCall', header: 'Chng. In Call OI', help: 'Change in total call Open Interest versus the session-open baseline (added + / closed −).', render: (r) => <SignedCount value={r.chngCallOi} />, mobileLabel: 'Δ Call OI' },
+    { id: 'chngPut', header: 'Chng. In Put OI', help: 'Change in total put Open Interest versus the session-open baseline (added + / closed −).', render: (r) => <SignedCount value={r.chngPutOi} />, mobileLabel: 'Δ Put OI' },
+    { id: 'diff', header: 'Diff. in OI', help: 'ΔPut OI − ΔCall OI; positive leans bullish (puts being added faster than calls).', render: (r) => <SignedCount value={r.diffInOi} />, mobileLabel: 'Diff OI' },
+    { id: 'direction', header: 'Direction of chng.', align: 'center', help: 'Whether the OI difference is pushing the bias up or down this interval.', render: (r) => <Direction dir={r.direction} /> },
+    { id: 'chngDir', header: 'Chng. In Direction', help: 'How much the OI difference moved versus the prior interval.', render: (r) => <SignedCount value={r.chngInDirection} /> },
+    { id: 'dirPct', header: 'Direction of chng. %', help: 'The direction change expressed as a percentage.', render: (r) => <ValueDeltaCell value={r.directionPct} suffix="%" /> },
+    { id: 'pcr', header: 'Net PCR', help: FIELD_HELP.pcr, render: (r) => r.netPcr ?? '—', mobileLabel: 'PCR' },
     {
       id: 'sentiment',
       header: 'Sentiment',
       align: 'center',
+      help: 'Derived directional read (bullish / bearish / neutral) from the OI shifts this interval.',
       render: (r) => <SentimentBadge label={r.sentiment.label} tone={r.sentiment.tone} />,
       mobileLabel: 'Sentiment',
     },
@@ -66,7 +68,7 @@ export function TrendingOiPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="OI Trending" subtitle="Call vs Put OI over the session with a derived directional sentiment" />
+      <PageHeader title="OI Trending" help="Tracks total call versus put OI through the session, interval by interval, and reads a directional bias from which side is being built faster — newest reading on top." subtitle="Call vs Put OI over the session with a derived directional sentiment" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval allowedIntervals={TRENDING_INTERVALS} />

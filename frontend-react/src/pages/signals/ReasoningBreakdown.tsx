@@ -1,5 +1,6 @@
 import { formatDecimal } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
+import { InfoTip } from '../../components/atoms/InfoTip.tsx';
 import type { GateNodeDto, ScoreBreakdownDto } from '../../api/signals.ts';
 
 // Renders the FROZEN Phase-20 reasoning contract (C-2.6/C-2.26), ported from Angular's
@@ -64,7 +65,13 @@ export function ReasoningBreakdown({ breakdown }: { breakdown: ScoreBreakdownDto
   return (
     <div className="flex flex-col gap-4">
       <section>
-        <h3 className="mb-1 text-h3 text-ay-text">Composite vs threshold</h3>
+        <h3 className="mb-1 text-h3 text-ay-text">
+          Composite vs threshold
+          <InfoTip
+            text="The bar is the signal's total score; the marker is the minimum score the strategy needs to fire — score past the marker means the call triggered."
+            label="Composite vs threshold"
+          />
+        </h3>
         <div className="relative h-3.5 overflow-hidden rounded-full bg-surface-2">
           <div
             className={cn('h-full', breakdown.passed ? 'bg-bull' : 'bg-warn')}
@@ -80,7 +87,13 @@ export function ReasoningBreakdown({ breakdown }: { breakdown: ScoreBreakdownDto
       </section>
 
       <section>
-        <h3 className="mb-1 text-h3 text-ay-text">Contributions (w·s)</h3>
+        <h3 className="mb-1 text-h3 text-ay-text">
+          Contributions (w·s)
+          <InfoTip
+            text="Shows how much each indicator added to the score — each indicator's raw signal times its weight — so you can see which ones drove the call."
+            label="Contributions"
+          />
+        </h3>
         <div className="flex h-[18px] overflow-hidden rounded-md bg-surface-2" aria-label="Stacked indicator contributions">
           {breakdown.indicators.map((e, i) =>
             e.activated && activatedTotal > 0 ? (
@@ -124,7 +137,13 @@ export function ReasoningBreakdown({ breakdown }: { breakdown: ScoreBreakdownDto
       </section>
 
       <section>
-        <h3 className="mb-1 text-h3 text-ay-text">Gate checklist</h3>
+        <h3 className="mb-1 text-h3 text-ay-text">
+          Gate checklist
+          <InfoTip
+            text="The pass/fail rules the signal had to clear before firing, each shown with the actual values that were checked."
+            label="Gate checklist"
+          />
+        </h3>
         <ul className="flex list-none flex-col gap-1 pl-2 text-sm">
           <GateNode node={breakdown.gate} />
         </ul>

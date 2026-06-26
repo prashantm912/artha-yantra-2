@@ -56,19 +56,30 @@ export function OptionsChartPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Options chart" />
+      <PageHeader
+        title="Options chart"
+        help="Plots one strike's Call and Put option-premium candles with an OI line and VWAP overlay for the chosen interval — read the candles for price and the OI line for position build-up."
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval={false} />
         <Select
           ariaLabel="Time interval"
+          title="Candle interval in minutes"
           value={String(intervalMin)}
           options={INTERVAL_OPTIONS}
           onChange={(v) => setIntervalMin(parseInt(v, 10) || 3)}
         />
-        <Select ariaLabel="Show" value={show} options={SHOW_OPTIONS} onChange={setShow} />
+        <Select
+          ariaLabel="Show"
+          title="Which legs to display and how to lay them out"
+          value={show}
+          options={SHOW_OPTIONS}
+          onChange={setShow}
+        />
         <Select
           ariaLabel="Strike price"
+          title="Strike to chart (defaults to at-the-money)"
           value={strike}
           options={strikes}
           onChange={setStrike}

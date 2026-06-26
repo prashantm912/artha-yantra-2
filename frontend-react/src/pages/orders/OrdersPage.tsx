@@ -3,6 +3,7 @@ import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { addDecimal, compareDecimal, formatDecimal, isNegative, multiplyByInt } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { FIELD_HELP } from '../../core/fieldHelp.ts';
 import { BeatStrip, BeatItem, LoadBeat } from '../../components/LoadBeat.tsx';
 import {
   useFunds,
@@ -169,24 +170,24 @@ export function OrdersPage() {
 
   const orderColumns = useMemo<DataColumn<OrderbookEntry>[]>(
     () => [
-      { id: 'symbol', header: 'Symbol', align: 'left', sortValue: (r) => r.symbol, sortType: 'text', render: (r) => r.symbol, mobileLabel: 'Symbol' },
-      { id: 'action', header: 'Action', align: 'left', sortValue: (r) => r.action, sortType: 'text', render: (r) => r.action, mobileLabel: 'Action' },
-      { id: 'qty', header: 'Qty', sortValue: (r) => r.qty, sortType: 'decimal', render: (r) => money(r.qty), mobileLabel: 'Qty' },
-      { id: 'price', header: 'Price', sortValue: (r) => r.price, sortType: 'decimal', render: (r) => money(r.price), mobileLabel: 'Price' },
-      { id: 'pricetype', header: 'Type', align: 'left', sortValue: (r) => r.pricetype, sortType: 'text', render: (r) => r.pricetype, mobileLabel: 'Type' },
-      { id: 'status', header: 'Status', align: 'left', sortValue: (r) => r.status, sortType: 'text', render: (r) => r.status, mobileLabel: 'Status' },
-      { id: 'timestamp', header: 'Time', align: 'left', sortValue: (r) => r.timestamp, sortType: 'text', render: (r) => r.timestamp, mobileLabel: 'Time' },
+      { id: 'symbol', header: 'Symbol', align: 'left', sortValue: (r) => r.symbol, sortType: 'text', render: (r) => r.symbol, mobileLabel: 'Symbol', help: 'The instrument this order is for.' },
+      { id: 'action', header: 'Action', align: 'left', sortValue: (r) => r.action, sortType: 'text', render: (r) => r.action, mobileLabel: 'Action', help: 'Whether the order buys or sells.' },
+      { id: 'qty', header: 'Qty', sortValue: (r) => r.qty, sortType: 'decimal', render: (r) => money(r.qty), mobileLabel: 'Qty', help: 'Order quantity (number of shares/lots).' },
+      { id: 'price', header: 'Price', sortValue: (r) => r.price, sortType: 'decimal', render: (r) => money(r.price), mobileLabel: 'Price', help: 'The order price (the limit price, or 0 for a market order).' },
+      { id: 'pricetype', header: 'Type', align: 'left', sortValue: (r) => r.pricetype, sortType: 'text', render: (r) => r.pricetype, mobileLabel: 'Type', help: 'Order type — MARKET, LIMIT, SL or SL-M.' },
+      { id: 'status', header: 'Status', align: 'left', sortValue: (r) => r.status, sortType: 'text', render: (r) => r.status, mobileLabel: 'Status', help: 'Current order state — open, complete, rejected or cancelled.' },
+      { id: 'timestamp', header: 'Time', align: 'left', sortValue: (r) => r.timestamp, sortType: 'text', render: (r) => r.timestamp, mobileLabel: 'Time', help: 'When the order was placed or last updated.' },
     ],
     [],
   );
 
   const positionColumns = useMemo<DataColumn<PositionEntry>[]>(
     () => [
-      { id: 'symbol', header: 'Symbol', align: 'left', sortValue: (r) => r.symbol, sortType: 'text', render: (r) => r.symbol, mobileLabel: 'Symbol' },
-      { id: 'side', header: 'Side', align: 'left', sortValue: (r) => r.side, sortType: 'text', render: (r) => r.side, mobileLabel: 'Side' },
-      { id: 'qty', header: 'Qty', sortValue: (r) => r.qty, sortType: 'decimal', render: (r) => money(r.qty), mobileLabel: 'Qty' },
-      { id: 'avgPrice', header: 'Avg Price', sortValue: (r) => r.avgPrice, sortType: 'decimal', render: (r) => money(r.avgPrice), mobileLabel: 'Avg Price' },
-      { id: 'ltp', header: 'LTP', sortValue: (r) => r.ltp, sortType: 'decimal', render: (r) => money(r.ltp), mobileLabel: 'LTP' },
+      { id: 'symbol', header: 'Symbol', align: 'left', sortValue: (r) => r.symbol, sortType: 'text', render: (r) => r.symbol, mobileLabel: 'Symbol', help: 'The instrument held in this position.' },
+      { id: 'side', header: 'Side', align: 'left', sortValue: (r) => r.side, sortType: 'text', render: (r) => r.side, mobileLabel: 'Side', help: 'Long (BUY) or short (SELL) direction of the position.' },
+      { id: 'qty', header: 'Qty', sortValue: (r) => r.qty, sortType: 'decimal', render: (r) => money(r.qty), mobileLabel: 'Qty', help: 'Net quantity held (shares/lots).' },
+      { id: 'avgPrice', header: 'Avg Price', sortValue: (r) => r.avgPrice, sortType: 'decimal', render: (r) => money(r.avgPrice), mobileLabel: 'Avg Price', help: 'Average price at which the position was built.' },
+      { id: 'ltp', header: 'LTP', sortValue: (r) => r.ltp, sortType: 'decimal', render: (r) => money(r.ltp), mobileLabel: 'LTP', help: FIELD_HELP.ltp },
       {
         id: 'mtmPnl',
         header: 'MTM P&L',
@@ -195,6 +196,7 @@ export function OrdersPage() {
         render: (r) => money(r.mtmPnl),
         cellClassName: (r) => toneClass(r.mtmPnl) ?? '',
         mobileLabel: 'MTM P&L',
+        help: 'Mark-to-market profit/loss — the unrealised gain or loss at the current price.',
       },
     ],
     [],
@@ -202,18 +204,18 @@ export function OrdersPage() {
 
   const tradeColumns = useMemo<DataColumn<TradebookEntry>[]>(
     () => [
-      { id: 'symbol', header: 'Symbol', align: 'left', sortValue: (r) => r.symbol, sortType: 'text', render: (r) => r.symbol, mobileLabel: 'Symbol' },
-      { id: 'action', header: 'Action', align: 'left', sortValue: (r) => r.action, sortType: 'text', render: (r) => r.action, mobileLabel: 'Action' },
-      { id: 'qty', header: 'Qty', sortValue: (r) => r.qty, sortType: 'decimal', render: (r) => money(r.qty), mobileLabel: 'Qty' },
-      { id: 'price', header: 'Price', sortValue: (r) => r.price, sortType: 'decimal', render: (r) => money(r.price), mobileLabel: 'Price' },
-      { id: 'tradeTime', header: 'Trade Time', align: 'left', sortValue: (r) => r.tradeTime, sortType: 'text', render: (r) => r.tradeTime, mobileLabel: 'Trade Time' },
+      { id: 'symbol', header: 'Symbol', align: 'left', sortValue: (r) => r.symbol, sortType: 'text', render: (r) => r.symbol, mobileLabel: 'Symbol', help: 'The instrument that traded.' },
+      { id: 'action', header: 'Action', align: 'left', sortValue: (r) => r.action, sortType: 'text', render: (r) => r.action, mobileLabel: 'Action', help: 'Whether this fill was a buy or a sell.' },
+      { id: 'qty', header: 'Qty', sortValue: (r) => r.qty, sortType: 'decimal', render: (r) => money(r.qty), mobileLabel: 'Qty', help: 'Quantity filled in this trade.' },
+      { id: 'price', header: 'Price', sortValue: (r) => r.price, sortType: 'decimal', render: (r) => money(r.price), mobileLabel: 'Price', help: 'The price at which this trade was executed.' },
+      { id: 'tradeTime', header: 'Trade Time', align: 'left', sortValue: (r) => r.tradeTime, sortType: 'text', render: (r) => r.tradeTime, mobileLabel: 'Trade Time', help: 'When the trade was executed.' },
     ],
     [],
   );
 
   return (
     <LoadBeat>
-      <PageHeader title="Orders" subtitle="Live broker read surface — Orderbook · Positions · Tradebook · Funds" />
+      <PageHeader title="Orders" subtitle="Live broker read surface — Orderbook · Positions · Tradebook · Funds" help="A read-only view of your live broker account: pending/filled orders, open positions, executed trades and available funds." />
 
       <PnlStrip positions={positions.data ?? []} funds={funds.data} />
 

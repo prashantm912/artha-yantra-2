@@ -6,6 +6,7 @@ import { DateInput } from '../../components/atoms/DateInput.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { InfoTip } from '../../components/atoms/InfoTip.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
@@ -33,11 +34,24 @@ export function VixIndexPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Vix & Index" subtitle="India VIX vs NIFTY 50 / NIFTY BANK — dual-axis intraday lines for the selected IST day" />
+      <PageHeader
+        title="Vix & Index"
+        subtitle="India VIX vs NIFTY 50 / NIFTY BANK — dual-axis intraday lines for the selected IST day"
+        help="Plots India VIX (the market's expected volatility) against the NIFTY 50 and NIFTY BANK price for the chosen day, so you can see whether spikes in fear line up with moves in the index."
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <DateInput ariaLabel="Select date" value={date} onChange={setPicked} />
-        <GoButton onClick={() => q.refetch()} loading={q.isFetching} />
+        <DateInput
+          ariaLabel="Select date"
+          value={date}
+          onChange={setPicked}
+          title="Pick the trading day to chart (defaults to the last session)"
+        />
+        <GoButton
+          onClick={() => q.refetch()}
+          loading={q.isFetching}
+          title="Reload the VIX and index minute data for the selected day"
+        />
         <Metric label="Data updated at" value={updatedAt} />
       </div>
 
@@ -55,14 +69,28 @@ export function VixIndexPage() {
           <>
             {niftyChart.xAxis.length > 0 && (
               <BeatBlock className="card shadow-e1">
-                <h2 className="mb-1 text-h3 text-ay-text">India Vix Vs. Nifty</h2>
+                <h2 className="mb-1 text-h3 text-ay-text">
+                  India Vix Vs. Nifty
+                  <InfoTip
+                    text="India VIX (right axis) overlaid on the NIFTY 50 price (left axis) minute by minute — watch for VIX rising while price falls (fear building) or VIX easing while price rises (calm)."
+                    label="India Vix Vs. Nifty"
+                    className="ml-1"
+                  />
+                </h2>
                 <VixIndexChart series={niftyChart} priceLabel="Nifty" />
               </BeatBlock>
             )}
 
             {bankChart.xAxis.length > 0 && (
               <BeatBlock className="card shadow-e1 mt-4">
-                <h2 className="mb-1 text-h3 text-ay-text">India Vix Vs. Banknifty</h2>
+                <h2 className="mb-1 text-h3 text-ay-text">
+                  India Vix Vs. Banknifty
+                  <InfoTip
+                    text="India VIX (right axis) overlaid on the NIFTY BANK price (left axis) minute by minute, showing how the volatility gauge tracks the banking index through the day."
+                    label="India Vix Vs. Banknifty"
+                    className="ml-1"
+                  />
+                </h2>
                 <VixIndexChart series={bankChart} priceLabel="Banknifty" />
               </BeatBlock>
             )}

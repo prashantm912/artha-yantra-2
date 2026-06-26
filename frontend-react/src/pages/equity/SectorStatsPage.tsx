@@ -9,6 +9,7 @@ import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
+import { FIELD_HELP } from '../../core/fieldHelp.ts';
 
 // Equity → Sector Stats (oipulse): a sector overview — per-sector roll-up cards (avg change +
 // advancer/decliner split, computed from constituents since the sector-INDEX level isn't captured) +
@@ -69,17 +70,18 @@ export function SectorStatsPage() {
 
   const columns: DataColumn<SectorStockChange>[] = useMemo(
     () => [
-      { id: 'symbol', header: 'Name', align: 'left', render: (r) => r.symbol, sortValue: (r) => r.symbol, mobileLabel: 'Name' },
+      { id: 'symbol', header: 'Name', help: 'The stock ticker.', align: 'left', render: (r) => r.symbol, sortValue: (r) => r.symbol, mobileLabel: 'Name' },
       {
         id: 'chg',
         header: 'Chg. %',
+        help: FIELD_HELP.changePct,
         render: (r) => <ValueDeltaCell value={r.changePct} suffix="%" />,
         sortValue: (r) => num(r.changePct),
         mobileLabel: 'Chg. %',
       },
-      { id: 'sector', header: 'Sector', align: 'left', render: (r) => r.sector, sortValue: (r) => r.sector, mobileLabel: 'Sector' },
-      { id: 'close', header: 'Close', render: (r) => f2(r.close), sortValue: (r) => num(r.close), mobileLabel: 'Close' },
-      { id: 'prev', header: 'Y.Day Close', render: (r) => f2(r.prevClose), mobileLabel: 'Y.Day Close' },
+      { id: 'sector', header: 'Sector', help: 'The sector / industry the stock belongs to.', align: 'left', render: (r) => r.sector, sortValue: (r) => r.sector, mobileLabel: 'Sector' },
+      { id: 'close', header: 'Close', help: FIELD_HELP.close, render: (r) => f2(r.close), sortValue: (r) => num(r.close), mobileLabel: 'Close' },
+      { id: 'prev', header: 'Y.Day Close', help: FIELD_HELP.prevClose, render: (r) => f2(r.prevClose), mobileLabel: 'Y.Day Close' },
     ],
     [],
   );
@@ -88,6 +90,7 @@ export function SectorStatsPage() {
     <LoadBeat>
       <PageHeader
         title="Sector Stats"
+        help="Rolls every stock up into per-sector cards (average change plus the advancer/decliner split) and a sortable stock table, so you can see which sectors are driving the market today."
         subtitle={
           <>
             Per-sector average change (from constituents) + the stock factor table
@@ -103,6 +106,7 @@ export function SectorStatsPage() {
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search name or sector…"
           aria-label="Search name or sector"
+          title="Filter the stock table by name or sector"
           className="h-9 w-full sm:w-56 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text outline-none focus:border-accent"
         />
         <GoButton onClick={() => void q.refetch()} loading={q.isFetching} />

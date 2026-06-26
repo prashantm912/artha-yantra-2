@@ -54,34 +54,35 @@ export function JournalPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Trade journal" subtitle="Weekly-review entries — filter by tag or linked entity, rate discipline & emotion" />
+      <PageHeader title="Trade journal" subtitle="Weekly-review entries — filter by tag or linked entity, rate discipline & emotion" help="Your trading diary: free-form notes linked to signals, paper trades or backtests, with discipline and emotion ratings for weekly review." />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <input value={tag} onChange={(e) => setTag(e.target.value)} placeholder="Filter by tag" aria-label="Filter by tag" className={`${inputCls} flex-1`} />
-        <Select value={linkedTo} options={LINKED_OPTIONS} onChange={(v) => setLinkedTo(v || null)} ariaLabel="Linked to" placeholder="Linked to" />
+        <input value={tag} onChange={(e) => setTag(e.target.value)} placeholder="Filter by tag" aria-label="Filter by tag" title="Show only entries carrying this tag." className={`${inputCls} flex-1`} />
+        <Select value={linkedTo} options={LINKED_OPTIONS} onChange={(v) => setLinkedTo(v || null)} ariaLabel="Linked to" placeholder="Linked to" title="Filter entries by what they are linked to — a signal, paper trade or backtest." />
       </div>
 
       <div className="mb-4 flex flex-wrap items-end gap-2 rounded-lg border border-ay-border bg-surface-1 p-3">
         <label className="flex flex-1 flex-col gap-1">
           <span className="text-xs text-ay-muted">Note</span>
-          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="What happened / what to improve" aria-label="Note" className={inputCls} />
+          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="What happened / what to improve" aria-label="Note" title="The diary note — what happened and what to do differently next time." className={inputCls} />
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-xs text-ay-muted">Tags (comma-sep)</span>
-          <input value={tagsInput} onChange={(e) => setTagsInput(e.target.value)} aria-label="Tags" className={`${inputCls} w-full sm:w-40`} />
+          <input value={tagsInput} onChange={(e) => setTagsInput(e.target.value)} aria-label="Tags" title="Comma-separated labels to group and later filter this entry." className={`${inputCls} w-full sm:w-40`} />
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-xs text-ay-muted">Disc.</span>
-          <input type="number" min={1} max={5} value={discipline} onChange={(e) => setDiscipline(e.target.value)} aria-label="Discipline rating" className={`${inputCls} w-16`} />
+          <input type="number" min={1} max={5} value={discipline} onChange={(e) => setDiscipline(e.target.value)} aria-label="Discipline rating" title="Rate how well you followed your plan, 1 (poor) to 5 (excellent)." className={`${inputCls} w-16`} />
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-xs text-ay-muted">Emo.</span>
-          <input type="number" min={1} max={5} value={emotion} onChange={(e) => setEmotion(e.target.value)} aria-label="Emotion rating" className={`${inputCls} w-16`} />
+          <input type="number" min={1} max={5} value={emotion} onChange={(e) => setEmotion(e.target.value)} aria-label="Emotion rating" title="Rate your emotional state during the trade, 1 (rattled) to 5 (calm)." className={`${inputCls} w-16`} />
         </label>
         <button
           type="button"
           onClick={submit}
           disabled={!note.trim() || create.isPending}
+          title="Save this journal entry."
           className="h-9 rounded-md bg-accent px-4 text-sm font-medium text-surface-0 hover:opacity-90 disabled:opacity-50"
         >
           + New entry

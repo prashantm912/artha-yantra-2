@@ -8,6 +8,7 @@ import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { cn } from '../../lib/cn.ts';
 import { compareDecimal, formatDecimal, isNegative } from '../../lib/decimal.ts';
+import { FIELD_HELP } from '../../core/fieldHelp.ts';
 import type { MarketStatus, PreOpenIndex } from '../../api/types.ts';
 
 // Pre-Open Market (§equity/pre-open-market). Two Upstox reads: a session-phase banner for NSE/BSE/MCX
@@ -106,6 +107,7 @@ export function PreOpenMarketPage() {
       {
         id: 'name',
         header: 'Index',
+        help: 'The index whose pre-open snapshot this row shows (Nifty 50, Bank, Fin, Sensex).',
         align: 'left',
         pin: 'left',
         sortValue: (r) => r.name,
@@ -116,6 +118,7 @@ export function PreOpenMarketPage() {
       {
         id: 'ltp',
         header: 'LTP',
+        help: FIELD_HELP.ltp,
         align: 'right',
         sortValue: (r) => r.ltp,
         sortType: 'decimal',
@@ -126,6 +129,7 @@ export function PreOpenMarketPage() {
       {
         id: 'prevClose',
         header: 'Prev Close',
+        help: FIELD_HELP.prevClose,
         align: 'right',
         sortValue: (r) => r.prevClose,
         sortType: 'decimal',
@@ -140,6 +144,7 @@ export function PreOpenMarketPage() {
       {
         id: 'netChange',
         header: 'Net Chg',
+        help: FIELD_HELP.netChange,
         align: 'right',
         sortValue: (r) => r.netChange,
         sortType: 'decimal',
@@ -149,6 +154,7 @@ export function PreOpenMarketPage() {
       {
         id: 'changePct',
         header: '% Chg',
+        help: FIELD_HELP.changePct,
         align: 'right',
         sortValue: (r) => r.changePct,
         sortType: 'decimal',
@@ -163,6 +169,7 @@ export function PreOpenMarketPage() {
     <LoadBeat>
       <PageHeader
         title="Pre-Open Market"
+        help="Shows each exchange's current session phase plus the NSE pre-open index snapshot — read net change and %change green-up / red-down to gauge the opening bias."
         subtitle="Exchange session phase + the NSE pre-open index snapshot from Upstox — pre-open is highlighted; net change and %change are sign-aware (green up, red down)"
       />
 

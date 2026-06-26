@@ -89,7 +89,7 @@ export function ChartsPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Charts" subtitle="Candlestick + volume — backtest-trade & signal overlays via deep-link" />
+      <PageHeader title="Charts" subtitle="Candlestick + volume — backtest-trade & signal overlays via deep-link" help="A candlestick + volume price chart for any instrument and interval; markers overlay backtest trades or signals when opened from a deep-link." />
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <form
           onSubmit={(e) => {
@@ -104,6 +104,7 @@ export function ChartsPage() {
               onChange={(e) => setSymbolDraft(e.target.value)}
               placeholder="Search instrument… or EXCHANGE:SYMBOL"
               aria-label="Instrument"
+              title="Search for an instrument, or type EXCHANGE:SYMBOL and press Enter to chart it."
               className="h-9 w-full sm:w-64 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text"
             />
             {showHits && (
@@ -122,11 +123,11 @@ export function ChartsPage() {
               </ul>
             )}
           </div>
-          <button type="submit" className="h-9 rounded-md border border-ay-border px-3 text-sm hover:border-accent">
+          <button type="submit" title="Load the chart for the entered instrument." className="h-9 rounded-md border border-ay-border px-3 text-sm hover:border-accent">
             Load
           </button>
         </form>
-        <Select value={interval} options={[...CHART_INTERVALS]} onChange={setInterval} ariaLabel="Interval" />
+        <Select value={interval} options={[...CHART_INTERVALS]} onChange={setInterval} ariaLabel="Interval" title="Candle timeframe — the time span each candlestick covers." />
         {runId && <span className="text-xs text-ay-muted">overlaying trades from run {runId.slice(0, 8)}</span>}
       </div>
 

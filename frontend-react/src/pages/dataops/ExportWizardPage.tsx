@@ -106,7 +106,10 @@ export function ExportWizardPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Export Wizard" />
+      <PageHeader
+        title="Export Wizard"
+        help="A four-step picker — underlying, expiry, contract, then download — that streams one registered contract's candle history to a CSV or JSON file."
+      />
 
       <div className="mx-auto max-w-3xl">
         <Stepper steps={STEPS} current={step} />
@@ -270,6 +273,7 @@ export function ExportWizardPage() {
                   <input
                     id="export-from"
                     type="date"
+                    title="Start of the date window to export candles from (defaults to 30 days before expiry)"
                     value={from}
                     onChange={(e) => setFrom(e.target.value)}
                     className="rounded border border-ay-border bg-surface-2 px-2 py-1.5 text-sm text-ay-text focus:outline-none focus:ring-1 focus:ring-accent"
@@ -285,6 +289,7 @@ export function ExportWizardPage() {
                   <input
                     id="export-to"
                     type="date"
+                    title="End of the date window to export candles up to (defaults to the contract's expiry)"
                     value={to}
                     onChange={(e) => setTo(e.target.value)}
                     className="rounded border border-ay-border bg-surface-2 px-2 py-1.5 text-sm text-ay-text focus:outline-none focus:ring-1 focus:ring-accent"
@@ -314,6 +319,7 @@ export function ExportWizardPage() {
                 type="button"
                 onClick={handleDownload}
                 disabled={downloading || !from || !to}
+                title="Stream this contract's candles over the chosen date window to a file in the selected format"
                 className="rounded-md bg-accent px-3 py-1.5 text-sm text-surface-0 hover:opacity-90 disabled:opacity-50"
               >
                 {downloading ? 'Downloading…' : 'Download'}

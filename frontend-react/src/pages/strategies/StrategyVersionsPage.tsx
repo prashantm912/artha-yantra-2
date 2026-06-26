@@ -68,7 +68,10 @@ export function StrategyVersionsPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Strategy versions" />
+      <PageHeader
+        title="Strategy versions"
+        help="The immutable version history of this strategy; compare any two versions, publish a draft to the live engine, or roll back to an earlier one."
+      />
       <div className="mb-3 flex items-center gap-2">
         <strong>{detail.data?.name ?? 'Strategy'} — versions</strong>
         <div className="flex-1" />
@@ -76,6 +79,7 @@ export function StrategyVersionsPage() {
           type="button"
           onClick={() => setPublishOpen(true)}
           disabled={!draftVersion}
+          title="Publish the current draft version to the live signal engine (needs a draft to publish)."
           className="h-9 rounded-md bg-accent px-4 text-sm font-medium text-surface-0 hover:opacity-90 disabled:opacity-50"
         >
           Publish…
@@ -142,9 +146,9 @@ export function StrategyVersionsPage() {
         <section className="min-w-0">
           <div className="mb-2 flex items-center gap-2 text-sm">
             <span>Compare</span>
-            <Select value={from || null} options={versionList} onChange={setFrom} ariaLabel="Diff from version" placeholder="from" />
+            <Select value={from || null} options={versionList} onChange={setFrom} ariaLabel="Diff from version" placeholder="from" title="The earlier version to compare from." />
             <span>→</span>
-            <Select value={to || null} options={versionList} onChange={setTo} ariaLabel="Diff to version" placeholder="to" />
+            <Select value={to || null} options={versionList} onChange={setTo} ariaLabel="Diff to version" placeholder="to" title="The later version to compare to." />
           </div>
           {diff.data ? (
             <>
@@ -186,6 +190,7 @@ export function StrategyVersionsPage() {
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Publish notes"
               aria-label="Publish notes"
+              title="Optional note recorded with this publish (e.g. what changed)."
               className="mb-3 w-full rounded-md border border-ay-border bg-surface-1 px-3 py-2 text-sm text-ay-text"
             />
             <div className="mb-4 rounded-md border border-ay-border bg-surface-2 p-2 text-xs text-ay-muted">
@@ -205,6 +210,7 @@ export function StrategyVersionsPage() {
                 type="button"
                 onClick={doPublish}
                 disabled={publish.isPending}
+                title="Confirm and hot-swap the live signal engine to this draft version."
                 className="h-9 rounded-md bg-accent px-4 text-sm font-medium text-surface-0 hover:opacity-90 disabled:opacity-50"
               >
                 Publish

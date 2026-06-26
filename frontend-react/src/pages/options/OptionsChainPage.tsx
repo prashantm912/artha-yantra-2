@@ -83,6 +83,7 @@ export function OptionsChainPage() {
     <LoadBeat>
       <PageHeader
         title="Options chain"
+        help="The full call/put option chain for the chosen underlying and expiry — strikes run down the centre with calls on the left and puts on the right; heavy OI marks likely support (puts) and resistance (calls)."
         subtitle={
           chain
             ? `${chain.underlying} · ${chain.expiry ?? '—'} expiry · black-76 live greeks`

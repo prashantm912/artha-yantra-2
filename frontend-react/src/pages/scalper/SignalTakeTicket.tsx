@@ -4,6 +4,7 @@ import { formatDecimal } from '../../lib/decimal.ts';
 import { useSignalDetail, type SignalDto } from '../../api/signals.ts';
 import { usePlacePaperOrder } from '../../api/paper.ts';
 import { ManualVerifyChecklist } from '../../components/ManualVerifyChecklist.tsx';
+import { InfoTip } from '../../components/atoms/InfoTip.tsx';
 
 // The inline "Take (paper)" ticket for the Scalping Cockpit's signals feed (rendered when its row's
 // trigger is open). DEFINED-RISK and prefilled from the signal — instrument · side · entry · SL ·
@@ -73,7 +74,13 @@ export function SignalTakeTicket({
       role="group"
       aria-label={`Paper ticket for ${signal.exchange}:${signal.tradingsymbol}`}
     >
-      <h3 className="text-h3 text-ay-text">Take (paper)</h3>
+      <h3 className="flex items-center gap-1.5 text-h3 text-ay-text">
+        Take (paper)
+        <InfoTip
+          text="A defined-risk paper ticket pre-filled from this signal — adjust quantity, stop-loss and target, then place a simulated trade into your paper book; never a live broker order."
+          label="Take (paper)"
+        />
+      </h3>
       <div className="flex items-center justify-between text-xs text-ay-muted">
         <span className="truncate">
           {signal.exchange}:{signal.tradingsymbol}{' '}
@@ -95,6 +102,7 @@ export function SignalTakeTicket({
             value={draft.qty}
             onChange={(e) => setDraft((d) => ({ ...d, qty: e.target.value }))}
             aria-label="Qty"
+            title="Number of units to trade (lots × lot size)"
             className={inputCls}
           />
         </label>
@@ -105,6 +113,7 @@ export function SignalTakeTicket({
             onChange={(e) => setDraft((d) => ({ ...d, sl: e.target.value }))}
             aria-label="Stop loss"
             placeholder="none"
+            title="Price at which the position auto-exits to cap your loss; blank for none"
             className={inputCls}
           />
         </label>
@@ -115,6 +124,7 @@ export function SignalTakeTicket({
             onChange={(e) => setDraft((d) => ({ ...d, tp: e.target.value }))}
             aria-label="Take profit"
             placeholder="none"
+            title="Price at which the position auto-exits to lock in your gain; blank for none"
             className={inputCls}
           />
         </label>

@@ -10,6 +10,8 @@ interface SelectProps {
   placeholder?: string;
   disabled?: boolean;
   className?: string;
+  /** Native hover tooltip explaining the control (#16). */
+  title?: string;
 }
 
 function normalize(o: SelectOption): { value: string; label: string } {
@@ -25,10 +27,12 @@ export function Select({
   placeholder,
   disabled,
   className,
+  title,
 }: SelectProps) {
   return (
     <select
       aria-label={ariaLabel}
+      title={title}
       disabled={disabled}
       value={value ?? ''}
       onChange={(e) => onChange(e.target.value)}

@@ -49,7 +49,7 @@ export function SettingsPage() {
   return (
     <LoadBeat>
       <div className="flex max-w-3xl flex-col gap-4">
-      <PageHeader title="Settings" subtitle="Kite Connect, appearance, instrument data-sync & global risk" />
+      <PageHeader title="Settings" subtitle="Kite Connect, appearance, instrument data-sync & global risk" help="Connect your Kite broker login, choose a theme, refresh the instrument master, and find where global risk limits live." />
       {mockMode && (
         <p className="text-sm text-warn">MOCK MODE — credential-free synthetic feed; no Kite session required.</p>
       )}
@@ -71,10 +71,10 @@ export function SettingsPage() {
           </dl>
         )}
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" onClick={connect} className="h-9 rounded-md border border-ay-border px-3 text-sm hover:border-accent">
+          <button type="button" onClick={connect} title="Open the Kite login popup to authorise your broker session." className="h-9 rounded-md border border-ay-border px-3 text-sm hover:border-accent">
             Connect Kite ↗
           </button>
-          <button type="button" onClick={() => kite.refetch()} className="h-9 rounded-md px-3 text-sm text-accent hover:underline">
+          <button type="button" onClick={() => kite.refetch()} title="Re-check the current Kite connection status." className="h-9 rounded-md px-3 text-sm text-accent hover:underline">
             Refresh status
           </button>
         </div>
@@ -83,7 +83,7 @@ export function SettingsPage() {
       <Section title="Appearance">
         <div className="flex items-center gap-3">
           <span className="text-sm text-ay-muted">Theme</span>
-          <Select value={theme} options={THEMES.map((t) => ({ value: t.id, label: t.label }))} onChange={(v) => setTheme(v as typeof theme)} ariaLabel="Theme" />
+          <Select value={theme} options={THEMES.map((t) => ({ value: t.id, label: t.label }))} onChange={(v) => setTheme(v as typeof theme)} ariaLabel="Theme" title="Switch the app colour theme." />
         </div>
       </Section>
 
@@ -101,11 +101,12 @@ export function SettingsPage() {
             type="button"
             onClick={() => syncInstruments.mutate()}
             disabled={syncInstruments.isPending}
+            title="Download the latest tradable-instrument master from the broker."
             className="h-9 rounded-md border border-ay-border px-3 text-sm hover:border-accent disabled:opacity-50"
           >
             Sync instruments
           </button>
-          <button type="button" onClick={() => sync.refetch()} className="h-9 rounded-md px-3 text-sm text-accent hover:underline">
+          <button type="button" onClick={() => sync.refetch()} title="Re-check the last instrument-sync run status." className="h-9 rounded-md px-3 text-sm text-accent hover:underline">
             Sync status
           </button>
         </div>

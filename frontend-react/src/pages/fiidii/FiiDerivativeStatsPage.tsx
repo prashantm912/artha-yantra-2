@@ -84,11 +84,11 @@ export function FiiDerivativeStatsPage() {
 
   // oipulse: read-only table (no column sort) — Date + the four segment NET values.
   const columns: DataColumn<FiiDerivativeStatsRow>[] = [
-    { id: 'date', header: 'Date', align: 'left', render: (r) => r.tradeDate, mobileLabel: 'Date' },
-    { id: 'idxFut', header: 'Index Futures', render: (r) => <ValueDeltaCell value={r.idxFut} />, mobileLabel: 'Index Fut' },
-    { id: 'idxOpt', header: 'Index Options', render: (r) => <ValueDeltaCell value={r.idxOpt} />, mobileLabel: 'Index Opt' },
-    { id: 'stkFut', header: 'Stock Futures', render: (r) => <ValueDeltaCell value={r.stkFut} />, mobileLabel: 'Stock Fut' },
-    { id: 'stkOpt', header: 'Stock Options', render: (r) => <ValueDeltaCell value={r.stkOpt} />, mobileLabel: 'Stock Opt' },
+    { id: 'date', header: 'Date', align: 'left', render: (r) => r.tradeDate, mobileLabel: 'Date', help: 'The trading session this row of FII derivative activity is for.' },
+    { id: 'idxFut', header: 'Index Futures', render: (r) => <ValueDeltaCell value={r.idxFut} />, mobileLabel: 'Index Fut', help: 'FII net position in index futures — positive = net long (bullish), negative = net short (₹ Crore).' },
+    { id: 'idxOpt', header: 'Index Options', render: (r) => <ValueDeltaCell value={r.idxOpt} />, mobileLabel: 'Index Opt', help: 'FII net position in index options — positive = net long, negative = net short (₹ Crore).' },
+    { id: 'stkFut', header: 'Stock Futures', render: (r) => <ValueDeltaCell value={r.stkFut} />, mobileLabel: 'Stock Fut', help: 'FII net position in single-stock futures — positive = net long, negative = net short (₹ Crore).' },
+    { id: 'stkOpt', header: 'Stock Options', render: (r) => <ValueDeltaCell value={r.stkOpt} />, mobileLabel: 'Stock Opt', help: 'FII net position in single-stock options — positive = net long, negative = net short (₹ Crore).' },
   ];
 
   return (
@@ -96,6 +96,7 @@ export function FiiDerivativeStatsPage() {
       <PageHeader
         title="FII Derivative Stats"
         subtitle="FII net activity across the four F&O segments · Values in ₹ Crore · green = net long, red = net short"
+        help="Shows daily FII net positioning across the four F&O segments (index/stock × futures/options) in ₹ Crore — net long is bullish, net short is bearish."
       />
 
       <QueryState

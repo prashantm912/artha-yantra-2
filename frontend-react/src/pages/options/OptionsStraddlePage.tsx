@@ -58,17 +58,21 @@ export function OptionsStraddlePage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Options straddle chart" />
+      <PageHeader title="Options straddle chart" help="Charts the combined call+put premium of a strike (the straddle) as candles with VWAP and moving-average overlays — a falling line means option sellers are winning, a rising line favours buyers; the Strangle toggle splits it into separate call and put strikes." />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval={false} />
         <Select
           ariaLabel="Time interval"
+          title="Candle size for the straddle chart (in minutes)"
           value={String(intervalMin)}
           options={INTERVAL_OPTIONS}
           onChange={(v) => setIntervalMin(parseInt(v, 10) || 3)}
         />
-        <label className="flex h-9 items-center gap-1.5 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text">
+        <label
+          className="flex h-9 items-center gap-1.5 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text"
+          title="Split the single straddle strike into a separate call strike and put strike (a strangle)"
+        >
           <input
             type="checkbox"
             checked={strangle}
@@ -81,6 +85,7 @@ export function OptionsStraddlePage() {
           <>
             <Select
               ariaLabel="Call strike"
+              title="The call leg's strike for the strangle"
               value={callStrike}
               options={strikes}
               onChange={setCallStrike}
@@ -89,6 +94,7 @@ export function OptionsStraddlePage() {
             />
             <Select
               ariaLabel="Put strike"
+              title="The put leg's strike for the strangle"
               value={putStrike}
               options={strikes}
               onChange={setPutStrike}
@@ -99,6 +105,7 @@ export function OptionsStraddlePage() {
         ) : (
           <Select
             ariaLabel="Strike price"
+            title="The strike whose combined call+put (straddle) premium is charted (defaults to at-the-money)"
             value={strike}
             options={strikes}
             onChange={setStrike}

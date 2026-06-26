@@ -113,11 +113,12 @@ export function SectorHeatmapPage() {
     <LoadBeat>
       <PageHeader
         title="Sector Heatmap"
+        help="A treemap of an index's stocks grouped into sector boxes — each tile's size and green-to-red colour scale with its % change, so you can see which sectors are leading or lagging at a glance."
         subtitle="Constituents grouped by sector · tile size + colour ∝ % change vs prev close"
       />
 
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        <Select value={index} options={indices} onChange={setIndex} ariaLabel="Index" placeholder="Index…" />
+        <Select value={index} options={indices} onChange={setIndex} ariaLabel="Index" placeholder="Index…" title="Pick the index whose constituents the heatmap groups by sector" />
         <GoButton onClick={() => void q.refetch()} loading={q.isFetching} />
         {q.data?.asOf && <span className="text-xs text-ay-muted">as on {q.data.asOf}</span>}
       </div>

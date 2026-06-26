@@ -12,6 +12,7 @@ import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
+import { FIELD_HELP } from '../../core/fieldHelp.ts';
 import type { OiExpiryEodDay } from '../../api/types.ts';
 
 // OI Expiry Strategy — oipulse "Options EOD OI Analysis" (§options/oi-expiry-strategy). Per-strike,
@@ -27,11 +28,12 @@ const dec = (s: string | null) => (s ? formatDecimal(s, 2) : '—');
 
 /** Columns for one leg's daily EOD table (shared by the CE and PE tables). */
 const columns: DataColumn<OiExpiryEodDay>[] = [
-  { id: 'date', header: 'Date', align: 'left', sortValue: (r) => r.date, sortType: 'text', render: (r) => r.date, mobileLabel: 'Date' },
+  { id: 'date', header: 'Date', align: 'left', sortValue: (r) => r.date, sortType: 'text', render: (r) => r.date, mobileLabel: 'Date', help: 'The trading session this row summarises.' },
   {
     id: 'open',
     header: 'Open',
     render: (r) => dec(r.open),
+    help: FIELD_HELP.open,
   },
   {
     id: 'high',
@@ -42,6 +44,7 @@ const columns: DataColumn<OiExpiryEodDay>[] = [
         {r.allDayHigh && <span title="window high" aria-label="window high"> ★</span>}
       </span>
     ),
+    help: 'Session high; a ★ marks the highest high across the captured window.',
   },
   {
     id: 'low',
@@ -52,13 +55,14 @@ const columns: DataColumn<OiExpiryEodDay>[] = [
         {r.allDayLow && <span title="window low" aria-label="window low"> ★</span>}
       </span>
     ),
+    help: 'Session low; a ★ marks the lowest low across the captured window.',
   },
-  { id: 'close', header: 'Close', render: (r) => dec(r.close), mobileLabel: 'Close' },
-  { id: 'vol', header: 'Volume', sortValue: (r) => r.volume, render: (r) => num(r.volume), mobileLabel: 'Volume' },
-  { id: 'closePct', header: '% Chg Close', render: (r) => <ValueDeltaCell value={r.changeInClosePct} suffix="%" />, mobileLabel: '% Close' },
-  { id: 'oiPct', header: '% Chg OI', render: (r) => <ValueDeltaCell value={r.changeInOiPct} suffix="%" />, mobileLabel: '% OI' },
-  { id: 'oi', header: 'OI', sortValue: (r) => r.oi, render: (r) => num(r.oi), mobileLabel: 'OI' },
-  { id: 'interp', header: 'OI Interpretation', align: 'center', render: (r) => <OiBadge4 value={r.interpretation} full />, mobileLabel: 'OI Int' },
+  { id: 'close', header: 'Close', render: (r) => dec(r.close), mobileLabel: 'Close', help: FIELD_HELP.close },
+  { id: 'vol', header: 'Volume', sortValue: (r) => r.volume, render: (r) => num(r.volume), mobileLabel: 'Volume', help: FIELD_HELP.volume },
+  { id: 'closePct', header: '% Chg Close', render: (r) => <ValueDeltaCell value={r.changeInClosePct} suffix="%" />, mobileLabel: '% Close', help: 'Percentage change in the close versus the previous session.' },
+  { id: 'oiPct', header: '% Chg OI', render: (r) => <ValueDeltaCell value={r.changeInOiPct} suffix="%" />, mobileLabel: '% OI', help: FIELD_HELP.oiChangePct },
+  { id: 'oi', header: 'OI', sortValue: (r) => r.oi, render: (r) => num(r.oi), mobileLabel: 'OI', help: FIELD_HELP.oi },
+  { id: 'interp', header: 'OI Interpretation', align: 'center', render: (r) => <OiBadge4 value={r.interpretation} full />, mobileLabel: 'OI Int', help: FIELD_HELP.oiInterpretation },
 ];
 
 function LegTable({ leg, rows }: { leg: string; rows: OiExpiryEodDay[] }) {
@@ -96,12 +100,15 @@ export function OiExpiryStrategyPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="OI Expiry Strategy" />
+      <PageHeader
+        title="OI Expiry Strategy"
+        help="Per-strike end-of-day OHLC, volume and open-interest history with day-over-day changes and the OI interpretation — the data behind an expiry-day trading plan."
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval />
         {strikes.length > 0 && (
-          <Select ariaLabel="Strike" value={strike} options={strikes} onChange={setStrike} />
+          <Select ariaLabel="Strike" title="Strike whose Call and Put EOD tables to show" value={strike} options={strikes} onChange={setStrike} />
         )}
         <GoButton onClick={() => q.refetch()} loading={q.isFetching} />
       </div>

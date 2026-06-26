@@ -115,7 +115,7 @@ export function PaperPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Paper trading" subtitle="Paper ledger — open positions, closed trades, realized equity and global risk limits" />
+      <PageHeader title="Paper trading" subtitle="Paper ledger — open positions, closed trades, realized equity and global risk limits" help="Your simulated trading account: live mark-to-market on open positions, the closed-trade ledger, the realized-equity curve and risk limits — no real money." />
 
       {acct && (
         <>
@@ -131,11 +131,13 @@ export function PaperPage() {
                 onChange={(e) => setCapitalDraft(e.target.value)}
                 placeholder={acct.startingCapital}
                 aria-label="Starting capital"
+                title="The opening cash balance of the paper account — sets the baseline for equity and returns."
                 className="h-9 w-full sm:w-36 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text"
               />
               <button
                 type="button"
                 onClick={() => capitalDraft.trim() && updateCapital.mutate(capitalDraft.trim())}
+                title="Apply the new starting capital."
                 className="h-9 rounded-md border border-ay-border px-3 text-sm hover:border-accent"
               >
                 Set
@@ -145,6 +147,7 @@ export function PaperPage() {
             <button
               type="button"
               onClick={() => updateRisk.mutate({ key: 'kill_switch', value: { enabled: !killOn } })}
+              title="Master kill switch — when on, blocks all new paper entries."
               className={cn(
                 'h-9 rounded-md px-3 text-sm font-semibold ring-1',
                 killOn ? 'bg-bear/15 text-bear ring-bear/50' : 'text-ay-muted ring-ay-border hover:border-accent',
@@ -161,6 +164,7 @@ export function PaperPage() {
                 value={maxOpenDraft}
                 onChange={(e) => setMaxOpenDraft(e.target.value)}
                 aria-label="Max open positions"
+                title="The most open paper positions allowed at once — new entries are blocked once this cap is hit."
                 className="h-8 w-20 rounded border border-ay-border bg-surface-1 px-2 text-ay-text"
               />
               <button
@@ -171,6 +175,7 @@ export function PaperPage() {
                     value: { enabled: true, value: Number(maxOpenDraft) },
                   })
                 }
+                title="Turn on the max-open-positions limit at the entered value."
                 className="rounded px-2 py-1 text-accent hover:underline"
               >
                 Apply
@@ -178,6 +183,7 @@ export function PaperPage() {
               <button
                 type="button"
                 onClick={() => updateRisk.mutate({ key: 'max_open_paper_positions', value: { enabled: false } })}
+                title="Disable the max-open-positions limit."
                 className="rounded px-2 py-1 hover:underline"
               >
                 Off
@@ -189,6 +195,7 @@ export function PaperPage() {
                 value={dailyLossDraft}
                 onChange={(e) => setDailyLossDraft(e.target.value)}
                 aria-label="Daily loss limit"
+                title="The most you can lose in a day (in ₹) before new paper entries are blocked."
                 className="h-8 w-24 rounded border border-ay-border bg-surface-1 px-2 text-ay-text"
               />
               <button
@@ -199,6 +206,7 @@ export function PaperPage() {
                     value: { enabled: true, mode: 'inr', value: Number(dailyLossDraft) },
                   })
                 }
+                title="Turn on the daily-loss limit at the entered ₹ amount."
                 className="rounded px-2 py-1 text-accent hover:underline"
               >
                 Apply
@@ -206,6 +214,7 @@ export function PaperPage() {
               <button
                 type="button"
                 onClick={() => updateRisk.mutate({ key: 'daily_loss_limit', value: { enabled: false } })}
+                title="Disable the daily-loss limit."
                 className="rounded px-2 py-1 hover:underline"
               >
                 Off

@@ -12,6 +12,7 @@ import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
+import { FIELD_HELP } from '../../core/fieldHelp.ts';
 
 // Equity → Delivery Data (oipulse): one stock's daily delivery quantity / % over a relative period (the
 // most recent N trading sessions) from the NSE EQ bhavcopy. % delivery is the institutional-conviction
@@ -44,14 +45,15 @@ export function DeliveryDataPage() {
 
   const columns: DataColumn<DeliveryDay>[] = useMemo(
     () => [
-      { id: 'date', header: 'Date', align: 'left', render: (r) => r.date, mobileLabel: 'Date' },
-      { id: 'open', header: 'Open', render: (r) => dec(r.open), mobileLabel: 'Open' },
-      { id: 'high', header: 'High', render: (r) => dec(r.high), mobileLabel: 'High' },
-      { id: 'low', header: 'Low', render: (r) => dec(r.low), mobileLabel: 'Low' },
-      { id: 'close', header: 'Close', render: (r) => dec(r.close), mobileLabel: 'Close' },
+      { id: 'date', header: 'Date', help: 'The trading session this row of delivery data is for.', align: 'left', render: (r) => r.date, mobileLabel: 'Date' },
+      { id: 'open', header: 'Open', help: FIELD_HELP.open, render: (r) => dec(r.open), mobileLabel: 'Open' },
+      { id: 'high', header: 'High', help: FIELD_HELP.high, render: (r) => dec(r.high), mobileLabel: 'High' },
+      { id: 'low', header: 'Low', help: FIELD_HELP.low, render: (r) => dec(r.low), mobileLabel: 'Low' },
+      { id: 'close', header: 'Close', help: FIELD_HELP.close, render: (r) => dec(r.close), mobileLabel: 'Close' },
       {
         id: 'ltpChg',
         header: '% LTP Chg',
+        help: FIELD_HELP.changePct,
         render: (r) => <ValueDeltaCell value={r.ltpChangePct} suffix="%" />,
         sortValue: (r) => Number(r.ltpChangePct ?? 0),
         mobileLabel: '% LTP Chg',
@@ -59,6 +61,7 @@ export function DeliveryDataPage() {
       {
         id: 'deliv',
         header: '% Delivery',
+        help: FIELD_HELP.deliveryPct,
         render: (r) => (r.deliveryPct == null ? '—' : `${formatDecimal(r.deliveryPct, 2)}%`),
         sortValue: (r) => Number(r.deliveryPct ?? 0),
         mobileLabel: '% Delivery',
@@ -66,12 +69,13 @@ export function DeliveryDataPage() {
       {
         id: 'range',
         header: 'Day Range',
+        help: "The session's high-minus-low spread (and that range as a percentage of price).",
         render: (r) =>
           r.dayRange == null ? '—' : `${dec(r.dayRange)} (${dec(r.dayRangePct)}%)`,
         mobileLabel: 'Day Range',
       },
-      { id: 'dq', header: 'Delivery Qty', render: (r) => qty(r.deliveryQty), mobileLabel: 'Delivery Qty' },
-      { id: 'ttq', header: 'Total Traded Qty', render: (r) => qty(r.totalTradedQty), mobileLabel: 'Total Traded Qty' },
+      { id: 'dq', header: 'Delivery Qty', help: 'Number of shares actually taken to delivery (not intraday-squared) that session.', render: (r) => qty(r.deliveryQty), mobileLabel: 'Delivery Qty' },
+      { id: 'ttq', header: 'Total Traded Qty', help: 'Total shares traded in the session, including intraday turns.', render: (r) => qty(r.totalTradedQty), mobileLabel: 'Total Traded Qty' },
     ],
     [],
   );
@@ -80,6 +84,7 @@ export function DeliveryDataPage() {
     <LoadBeat>
       <PageHeader
         title="Delivery Data"
+        help="Shows a single stock's daily delivery percentage and quantity over recent sessions — a high, rising delivery % signals strong-hand (institutional) conviction rather than intraday churn."
         subtitle="Daily delivery % & quantity for a stock (high % delivery = institutional conviction)"
       />
 
@@ -91,6 +96,7 @@ export function DeliveryDataPage() {
           onKeyDown={(e) => e.key === 'Enter' && submit()}
           placeholder="Symbol (e.g. AXISBANK)"
           aria-label="Stock symbol"
+          title="Type an NSE stock symbol (e.g. AXISBANK) and press Go to load its delivery data"
           className="h-9 w-full sm:w-48 rounded-md border border-ay-border bg-surface-1 px-2 text-sm uppercase text-ay-text outline-none focus:border-accent"
         />
         <Select
@@ -98,6 +104,7 @@ export function DeliveryDataPage() {
           options={PERIODS}
           onChange={(v) => setDays(Number(v))}
           ariaLabel="Period"
+          title="How many recent trading sessions to show"
         />
         <GoButton onClick={submit} loading={q.isFetching} />
         {data && <span className="text-xs text-ay-muted">{data.symbol}</span>}

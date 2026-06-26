@@ -3,6 +3,10 @@ import { render, screen, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { WorldIndex } from '../../api/types.ts';
 
+// The page now renders the world map (EChart) above the table; EChart pulls ResizeObserver (absent in
+// jsdom) — stub it, same as every other chart-page spec. This test asserts the table, not the canvas.
+vi.mock('../../components/atoms/EChart.tsx', () => ({ EChart: () => null }));
+
 // A gainer, a loser, and a price-less row (live quote unresolved) so the sign-aware rendering and the
 // muted-dash fallback are both exercised deterministically.
 const data: WorldIndex[] = [

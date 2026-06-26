@@ -22,6 +22,9 @@ export interface JobDto {
   strategyId?: string | null;
   /** The completed run's total return (plain decimal string); null until a run exists. */
   totalReturn?: string | null;
+  /** The tested window [from, to] (a date or ISO datetime); the UI shows the date part as Start/End. */
+  testFrom?: string | null;
+  testTo?: string | null;
   parentJobId?: string | null;
   resultRef?: string | null;
   error?: string | null;
@@ -64,23 +67,37 @@ export const OBJECTIVE_METRICS = ['sharpe', 'cagr', 'totalReturn', 'sortino', 'm
 export const DIRECTIONS = ['maximize', 'minimize'] as const;
 export const FOLD_AGGREGATIONS = ['mean', 'min', 'mean_minus_std'] as const;
 
-export function useJobs(status: string | null, strategyId: string | null, offset: number) {
+export function useJobs(
+  status: string | null,
+  strategyId: string | null,
+  offset: number,
+  sortBy?: string | null,
+  sortDir?: 'asc' | 'desc' | null,
+) {
   return useQuery({
-    queryKey: [JOBS_KEY, 'list', status, strategyId, offset],
+    queryKey: [JOBS_KEY, 'list', status, strategyId, offset, sortBy ?? null, sortDir ?? null],
     queryFn: () => {
       const params = new URLSearchParams({ limit: String(JOBS_PAGE_SIZE), offset: String(offset) });
       if (status) params.set('status', status);
       if (strategyId) params.set('strategyId', strategyId);
+      if (sortBy) params.set('sortBy', sortBy);
+      if (sortDir) params.set('sortDir', sortDir);
       return apiFetch<{ items: JobDto[] }>(`/backtests/jobs?${params.toString()}`);
     },
   });
 }
 
 /** Live progress from `/topic/jobs/stream`: patch the matching row; an unknown job heals via reload. */
-export function useJobsLive(status: string | null, strategyId: string | null, offset: number) {
+export function useJobsLive(
+  status: string | null,
+  strategyId: string | null,
+  offset: number,
+  sortBy?: string | null,
+  sortDir?: 'asc' | 'desc' | null,
+) {
   const qc = useQueryClient();
   useEffect(() => {
-    const key = [JOBS_KEY, 'list', status, strategyId, offset];
+    const key = [JOBS_KEY, 'list', status, strategyId, offset, sortBy ?? null, sortDir ?? null];
     const merge = (body: string) => {
       let f: JobProgressFrame;
       try {
@@ -111,7 +128,7 @@ export function useJobsLive(status: string | null, strategyId: string | null, of
       offTopic();
       offReconnect();
     };
-  }, [qc, status, strategyId, offset]);
+  }, [qc, status, strategyId, offset, sortBy, sortDir]);
 }
 
 export function useSubmitRun() {

@@ -44,11 +44,13 @@ public class JobsController {
   public Map<String, Object> jobs(
       @RequestParam(required = false) String status,
       @RequestParam(required = false) String strategyId,
+      @RequestParam(required = false) String sortBy,
+      @RequestParam(required = false) String sortDir,
       @RequestParam(defaultValue = "50") int limit,
       @RequestParam(defaultValue = "0") int offset) {
     int boundedLimit = Math.min(Math.max(limit, 1), 500);
     int boundedOffset = Math.max(offset, 0);
-    List<Job> jobs = service.list(status, strategyId, boundedLimit, boundedOffset);
+    List<Job> jobs = service.list(status, strategyId, boundedLimit, boundedOffset, sortBy, sortDir);
     // One batch query for the page's completed-run returns, so the list shows a returns column
     // without an N+1 per-row fetch.
     Map<UUID, String> returns =
@@ -86,6 +88,10 @@ public class JobsController {
     // (plain decimal string, null until a run exists) so the list shows strategy + returns columns.
     map.put("strategyId", job.request() == null ? null : job.request().path("strategyId").asText(null));
     map.put("totalReturn", totalReturn);
+    // The tested window [from, to] (the "date the test was run over") — a plain date or full
+    // offset date-time as the request carries it; the UI slices to the date for the Start/End columns.
+    map.put("testFrom", job.request() == null ? null : job.request().path("from").asText(null));
+    map.put("testTo", job.request() == null ? null : job.request().path("to").asText(null));
     return map;
   }
 

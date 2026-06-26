@@ -40,13 +40,31 @@ function statusTone(status: JobStatus): string {
 
 const cancellable = (s: JobStatus) => s === 'queued' || s === 'running';
 
+// DataTable column id → backend sort key (server-side sort so a header click sorts EVERY page, not
+// just the loaded one). Columns without an entry (Test Window, Actions) aren't server-sortable.
+const SORT_API: Record<string, string> = {
+  job: 'id',
+  strategy: 'strategyId',
+  type: 'kind',
+  status: 'status',
+  return: 'totalReturn',
+  progress: 'progress',
+  created: 'createdAt',
+};
+
 export function JobsPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [strategyId, setStrategyId] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
+  const [sort, setSort] = useState<{ id: string; dir: 'asc' | 'desc' } | null>({
+    id: 'created',
+    dir: 'desc',
+  });
   const navigate = useNavigate();
-  const q = useJobs(status, strategyId, offset);
-  useJobsLive(status, strategyId, offset);
+  const apiSortBy = sort ? (SORT_API[sort.id] ?? 'createdAt') : 'createdAt';
+  const apiSortDir = sort?.dir ?? 'desc';
+  const q = useJobs(status, strategyId, offset, apiSortBy, apiSortDir);
+  useJobsLive(status, strategyId, offset, apiSortBy, apiSortDir);
   const cancel = useCancelJob();
   const strategies = useStrategies('', null);
 
@@ -60,8 +78,8 @@ export function JobsPage() {
     [strategies.data],
   );
 
-  // Reset to the first page whenever a filter changes (a stale offset can land past the result set).
-  useEffect(() => setOffset(0), [status, strategyId]);
+  // Reset to the first page whenever a filter OR the sort changes (a stale offset can land past the set).
+  useEffect(() => setOffset(0), [status, strategyId, sort]);
 
   const viewResults = async (jobId: string) => {
     const ref = await fetchResultRef(jobId);
@@ -103,6 +121,21 @@ export function JobsPage() {
           <span className="rounded bg-surface-2 px-1.5 py-0.5 text-xs text-ay-muted">{job.kind}</span>
         ),
         mobileLabel: 'Type',
+        mono: false,
+      },
+      {
+        id: 'window',
+        header: 'Test Window',
+        align: 'left',
+        render: (job) =>
+          job.testFrom || job.testTo ? (
+            <span className="tabular-nums text-xs text-ay-muted">
+              {job.testFrom?.slice(0, 10) ?? '—'} → {job.testTo?.slice(0, 10) ?? '—'}
+            </span>
+          ) : (
+            <span className="text-ay-muted">—</span>
+          ),
+        mobileLabel: 'Test Window',
         mono: false,
       },
       {
@@ -255,6 +288,9 @@ export function JobsPage() {
           rows={rows}
           rowKey={(job) => job.jobId}
           ariaLabel="Jobs"
+          manualSorting
+          sortState={sort}
+          onSortChange={setSort}
           emptyMessage={q.isLoading ? 'Loading…' : 'No jobs yet — launch a backtest or sweep from the runner.'}
         />
       </BeatBlock>

@@ -10,6 +10,7 @@ import {
   useReactTable,
   type Column,
   type ColumnPinningState,
+  type OnChangeFn,
   type SortingState,
   type VisibilityState,
 } from '@tanstack/react-table';
@@ -91,6 +92,12 @@ interface DataTableProps<Row> {
   /** rowKey of the row to centre in the scroll viewport on load / when it changes (e.g. the ATM
    *  strike). Desktop scroll container only; no-op when unset, paginated off-page, or not found. */
   scrollToRowKey?: string;
+  /** Drive sorting server-side: skip the client sort, control the sort state from {@link sortState},
+   *  and emit header-sort changes via {@link onSortChange} so the sort spans EVERY page (the Jobs page),
+   *  not just the loaded one. Single-column; today's behaviour is unchanged unless set. */
+  manualSorting?: boolean;
+  sortState?: { id: string; dir: 'asc' | 'desc' } | null;
+  onSortChange?: (sort: { id: string; dir: 'asc' | 'desc' } | null) => void;
 }
 
 const ALIGN: Record<ColumnAlign, string> = {
@@ -122,14 +129,32 @@ export function DataTable<Row>({
   enableMultiSort = true,
   zebra = true,
   scrollToRowKey,
+  manualSorting = false,
+  sortState,
+  onSortChange,
   // virtualizeAfter (§3.2.5) + persistKey (§3.2.3) are accepted but intentionally unimplemented
   // no-ops for this phase — left off the destructure so omitting them yields today's exact render.
 }: DataTableProps<Row>) {
   const tableColumns = useMemo(() => adaptColumns(columns), [columns]);
 
-  const [sorting, setSorting] = useState<SortingState>(
+  const [internalSorting, setInternalSorting] = useState<SortingState>(
     initialSort ? [{ id: initialSort.id, desc: initialSort.dir === 'desc' }] : [],
   );
+  // Controlled (server-side) sort when manualSorting is set; otherwise the table owns the state.
+  const sorting: SortingState = manualSorting
+    ? sortState
+      ? [{ id: sortState.id, desc: sortState.dir === 'desc' }]
+      : []
+    : internalSorting;
+  const handleSortingChange: OnChangeFn<SortingState> = (updater) => {
+    if (manualSorting) {
+      const next = typeof updater === 'function' ? updater(sorting) : updater;
+      const s = next[0];
+      onSortChange?.(s ? { id: s.id, dir: s.desc ? 'desc' : 'asc' } : null);
+    } else {
+      setInternalSorting(updater);
+    }
+  };
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() =>
     Object.fromEntries(columns.filter((c) => c.defaultHidden).map((c) => [c.id, false])),
   );
@@ -149,8 +174,9 @@ export function DataTable<Row>({
     data: rows,
     columns: tableColumns,
     state: { sorting, columnVisibility, columnPinning },
-    onSortingChange: setSorting,
+    onSortingChange: handleSortingChange,
     onColumnVisibilityChange: setColumnVisibility,
+    manualSorting,
     getRowId: (row) => rowKey(row),
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),

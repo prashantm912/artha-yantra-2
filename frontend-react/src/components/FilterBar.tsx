@@ -6,6 +6,7 @@ import {
   type OiInterval,
 } from '../stores/symbolContext.store.ts';
 import { useExpiries, useUnderlyings } from '../api/instruments.ts';
+import { useDefaultDate } from '../api/marketCalendar.ts';
 import { cn } from '../lib/cn.ts';
 import { ModeToggle } from './atoms/ModeToggle.tsx';
 import { DateInput } from './atoms/DateInput.tsx';
@@ -98,6 +99,7 @@ export function FilterBar({
 
   const underlyings = useUnderlyings();
   const expiries = useExpiries(name);
+  const defaultDate = useDefaultDate();
 
   // Cascade: default expiry to the nearest once the list loads and none is selected.
   useEffect(() => {
@@ -105,6 +107,14 @@ export function FilterBar({
       setExpiry(expiries.data[0]);
     }
   }, [showExpiry, expiry, expiries.data, setExpiry]);
+
+  // Entering history mode with no date picked → default to the last trading session (#12), so a
+  // weekend/holiday History view lands on real data instead of an empty 'today'.
+  useEffect(() => {
+    if (mode === 'history' && !date) {
+      setDate(defaultDate);
+    }
+  }, [mode, date, defaultDate, setDate]);
 
   const nameOptions = names
     ? [...names]

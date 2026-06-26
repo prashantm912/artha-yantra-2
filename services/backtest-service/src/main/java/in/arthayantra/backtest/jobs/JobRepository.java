@@ -162,19 +162,52 @@ public class JobRepository {
     return jdbc.query("SELECT * FROM jobs WHERE id=?", this::mapRow, id).stream().findFirst();
   }
 
-  /** Paged listing, optionally filtered by status and by {@code request->>'strategyId'}. */
-  public List<Job> list(JobStatus status, String strategyId, int limit, int offset) {
-    StringBuilder sql = new StringBuilder("SELECT * FROM jobs WHERE 1=1");
+  /**
+   * Whitelist of FE column-id → SQL sort expression (server-side sort so the header sort spans EVERY
+   * page, not just the loaded one). The completed-run return is sorted via a deduped LEFT JOIN on
+   * {@code backtest_runs} (one row/job by MAX so the join can't inflate the page). Any unlisted key
+   * falls back to {@code created_at}.
+   */
+  private static final java.util.Map<String, String> SORT_COLUMNS =
+      java.util.Map.of(
+          "createdAt", "jobs.created_at",
+          "status", "jobs.status",
+          "kind", "jobs.kind",
+          "progress", "jobs.progress",
+          "startedAt", "jobs.started_at",
+          "finishedAt", "jobs.finished_at",
+          "totalReturn", "r.total_return",
+          "strategyId", "jobs.request->>'strategyId'",
+          "id", "jobs.id");
+
+  /**
+   * Paged listing, optionally filtered by status and {@code request->>'strategyId'} and ordered by a
+   * whitelisted {@code sortBy}/{@code sortDir} (default {@code created_at DESC}). The
+   * {@code backtest_runs} join is for the return-sort only; the row mapping stays {@code jobs.*}.
+   */
+  public List<Job> list(
+      JobStatus status, String strategyId, int limit, int offset, String sortBy, String sortDir) {
+    StringBuilder sql =
+        new StringBuilder(
+            "SELECT jobs.* FROM jobs "
+                + "LEFT JOIN (SELECT job_id, MAX(total_return) AS total_return FROM backtest_runs "
+                + "GROUP BY job_id) r ON r.job_id = jobs.id WHERE 1=1");
     java.util.List<Object> args = new java.util.ArrayList<>();
     if (status != null) {
-      sql.append(" AND status=?");
+      sql.append(" AND jobs.status=?");
       args.add(status.db());
     }
     if (strategyId != null && !strategyId.isBlank()) {
-      sql.append(" AND request->>'strategyId'=?");
+      sql.append(" AND jobs.request->>'strategyId'=?");
       args.add(strategyId);
     }
-    sql.append(" ORDER BY created_at DESC LIMIT ? OFFSET ?");
+    String col = SORT_COLUMNS.getOrDefault(sortBy, "jobs.created_at");
+    String dir = "asc".equalsIgnoreCase(sortDir) ? "ASC" : "DESC";
+    sql.append(" ORDER BY ")
+        .append(col)
+        .append(' ')
+        .append(dir)
+        .append(" NULLS LAST, jobs.created_at DESC LIMIT ? OFFSET ?");
     args.add(limit);
     args.add(offset);
     return jdbc.query(sql.toString(), this::mapRow, args.toArray());

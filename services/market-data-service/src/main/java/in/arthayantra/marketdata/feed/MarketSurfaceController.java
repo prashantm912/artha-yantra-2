@@ -110,14 +110,22 @@ public class MarketSurfaceController {
     boolean tradingDay;
     boolean open;
     LocalDate nextTradingDay;
+    LocalDate previousTradingDay;
+    LocalDate lastTradingDay;
     try {
       tradingDay = calendar.isTradingDay(today);
       open = calendar.isOpen(now.toInstant());
       nextTradingDay = calendar.nextTradingDay(today);
+      previousTradingDay = calendar.previousTradingDay(today);
+      // The most recent completed (or current) session — the sensible default date for history pages
+      // so weekends/holidays don't land on an empty day.
+      lastTradingDay = tradingDay ? today : previousTradingDay;
     } catch (IllegalArgumentException uncoveredYear) {
       tradingDay = false;
       open = false;
       nextTradingDay = null;
+      previousTradingDay = null;
+      lastTradingDay = null;
     }
     return Map.of(
         "serverTime", now.toString(),
@@ -125,7 +133,9 @@ public class MarketSurfaceController {
         "marketOpen", open,
         "sessionOpen", MarketCalendar.SESSION_OPEN.toString(),
         "sessionClose", MarketCalendar.SESSION_CLOSE.toString(),
-        "nextTradingDay", nextTradingDay == null ? "" : nextTradingDay.toString());
+        "nextTradingDay", nextTradingDay == null ? "" : nextTradingDay.toString(),
+        "previousTradingDay", previousTradingDay == null ? "" : previousTradingDay.toString(),
+        "lastTradingDay", lastTradingDay == null ? "" : lastTradingDay.toString());
   }
 
   /**

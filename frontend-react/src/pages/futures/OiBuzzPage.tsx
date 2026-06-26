@@ -103,8 +103,16 @@ export function OiBuzzPage() {
             height: '100%',
             label: {
               show: true,
+              // Bold white text with a thin dark stroke + a soft dark halo (shadow) — readable on bright
+              // green/red AND faint (low-opacity) tiles alike. A flat white label was low-contrast on the
+              // green gainers (#8); the halo gives separation from any tile colour without muddying glyphs.
               color: '#ffffff',
               fontSize: 11,
+              fontWeight: 700,
+              textBorderColor: 'rgba(0,0,0,0.45)',
+              textBorderWidth: 1,
+              textShadowColor: 'rgba(0,0,0,0.85)',
+              textShadowBlur: 4,
               overflow: 'truncate',
               formatter: (raw: unknown) => {
                 const p = raw as { name: string; data: TileDatum };

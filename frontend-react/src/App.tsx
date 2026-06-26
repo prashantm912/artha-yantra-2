@@ -164,7 +164,7 @@ export function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route element={<RequireAuth />}>
         <Route element={<AppShell />}>
-          <Route index element={<Navigate to="/options/options-chain" replace />} />
+          <Route index element={<Navigate to="/dashboard" replace />} />
           {/* Trading (cockpit) */}
           <Route path="/cockpit" element={<Lazy><CockpitPage /></Lazy>} />
           <Route path="/scalper" element={<ScalperCockpitPage />} />

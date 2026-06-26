@@ -96,8 +96,11 @@ export function WorldIndicesMap({ rows }: { rows: WorldIndex[] }) {
         },
         geo: {
           map: 'world',
-          roam: false,
-          silent: true,
+          // Zoomable + pannable: scroll/pinch to zoom, drag to pan (scaleLimit bounds the zoom). The
+          // scatter bubbles share this geo (geoIndex 0) so they zoom/pan in lockstep. `silent` is left
+          // off so the roam controller receives mouse events; country hover-highlight stays disabled.
+          roam: true,
+          scaleLimit: { min: 1, max: 8 },
           left: 0,
           right: 0,
           top: 8,

@@ -34,8 +34,8 @@ rm "$COOKIE"
 # defaults: root=NIFTY, underlyingExchange=NSE, underlying=NIFTY 50
 # → {"root":"NIFTY","contSymbol":"NIFTY-FUT-CONT","contracts":<n>}
 ```
-The call runs synchronously; allow up to a minute (it refreshes continuous aggregates per
-stitched segment).
+The call runs synchronously and is fast (it stitches 1m/1d bars only — it deliberately does NOT
+refresh the mid-interval continuous aggregates; see Notes).
 
 ## Verify the series
 1. **Bars materialised + span the roster:**
@@ -78,3 +78,10 @@ universe pointing at `NIFTY-FUT-CONT` confirms the read path:
   since registered.
 - SENSEX-FUT-CONT is intentionally NOT built: per the locked design, the SENSEX scalper variant
   signals on the NIFTY future (correlation play), so only `NIFTY-FUT-CONT` is needed.
+- **CONT mid-interval caggs (5m/15m/1h/1d/1w) are NOT materialised over history by the backfill.**
+  Stitching months of bars at once invalidates a wide cagg range, and since the expired-OI backfill
+  never materialised those caggs over history, a refresh would re-aggregate ~106k expired contracts'
+  buckets in one lock-holding, OOM-risky call (this stalled the first live run for >4 min and blocked
+  the live refresh policy — terminated, harmless: the 1m bars had already committed). Backtests read
+  CONT **1m from the base table**, so the 1m stitch is all they need; reading CONT at 5m/15m over
+  history returns the real-time-aggregated view (raw 1m unioned in) or empty, not a stalled refresh.

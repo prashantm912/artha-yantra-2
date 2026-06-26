@@ -40,6 +40,32 @@ class BacktestRunnerSignalInstrumentTest {
   }
 
   @Test
+  void prefersSignalUnderlyingOverrideForOptions() {
+    // 2b-E2: signal on the NIFTY continuous front-future, execute on SENSEX option legs. The SIGNAL
+    // instrument is the override; the option-execution root (universe.underlying) is resolved elsewhere.
+    SeriesKey k =
+        BacktestRunner.signalInstrument(
+            cfg(
+                "{\"universe\":{\"mode\":\"options_of_underlying\","
+                    + "\"underlying\":{\"exchange\":\"BFO\",\"tradingsymbol\":\"SENSEX\"},"
+                    + "\"signal_underlying\":{\"exchange\":\"NFO\",\"tradingsymbol\":\"NIFTY-FUT-CONT\"}}}"));
+    assertThat(k.exchange()).isEqualTo("NFO");
+    assertThat(k.tradingsymbol()).isEqualTo("NIFTY-FUT-CONT");
+    assertThat(k.interval()).isEqualTo("1m");
+  }
+
+  @Test
+  void fallsBackToUnderlyingWhenNoSignalUnderlying() {
+    // Absent signal_underlying → the signal IS the underlying (every existing config is unchanged).
+    SeriesKey k =
+        BacktestRunner.signalInstrument(
+            cfg(
+                "{\"universe\":{\"mode\":\"options_of_underlying\","
+                    + "\"underlying\":{\"exchange\":\"NSE\",\"tradingsymbol\":\"NIFTY 50\"}}}"));
+    assertThat(k.tradingsymbol()).isEqualTo("NIFTY 50");
+  }
+
+  @Test
   void resolvesExplicitInstrumentsArray() {
     SeriesKey k =
         BacktestRunner.signalInstrument(

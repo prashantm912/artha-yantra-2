@@ -92,14 +92,19 @@ public class OptionsPremiumReplay {
             .run(underlyingOneMinute, contextCandles, null);
     List<PairedLeg> legs = pairLegs(signals, underlyingOneMinute);
     OiGate gate = parseOiGate(config);
+    // 2b-E2: the option legs + the OI-confluence index resolve from {@code universe.underlying} (the
+    // options-execution ROOT), NOT from the signal-series symbol — which may be a decoupled {@code
+    // signal_underlying} (e.g. NIFTY-FUT-CONT) while the legs trade SENSEX. When no signal_underlying
+    // is set, {@code underlyingTradingsymbol} == the underlying, so this is byte-identical to before
+    // and the premium goldens hold.
     if (gate.enabled() && marketData != null) {
-      legs = filterCounterTrend(legs, underlyingOneMinute, underlyingTradingsymbol, gate);
+      legs = filterCounterTrend(legs, underlyingOneMinute, oiGateIndex(config, gate), gate);
     }
     return replayLegs(
         signals,
         underlyingOneMinute,
         legs,
-        registryUnderlying(underlyingTradingsymbol),
+        optionRoot(config),
         universeSpec(config),
         exitRules(config),
         budgetInr(config),
@@ -139,15 +144,44 @@ public class OptionsPremiumReplay {
   }
 
   /** Opt-in OI-confluence entry gate (off by default → the existing premium goldens are untouched). */
-  record OiGate(boolean enabled, String interval, int intervalMin) {}
+  record OiGate(boolean enabled, String interval, int intervalMin, String index) {}
 
-  /** Reads {@code backtest.oi_confluence_gate:{enabled,interval}} (a backtest-only knob, not strategy schema). */
+  /**
+   * Reads {@code backtest.oi_confluence_gate:{enabled,interval,index}} (a backtest-only knob, not the
+   * strategy schema). {@code index} is an OPTIONAL override of the OI-confluence index (2b-E2): blank →
+   * gate on the options-execution root, set → gate on a different index (e.g. a NIFTY-signal / SENSEX-
+   * option strategy gating on {@code NIFTY 50} OI).
+   */
   static OiGate parseOiGate(JsonNode config) {
     JsonNode g = config.path("backtest").path("oi_confluence_gate");
     boolean enabled = g.path("enabled").asBoolean(false);
     String interval = g.path("interval").asText("5m");
+    String index = g.path("index").asText("");
     String digits = interval.replaceAll("[^0-9]", "");
-    return new OiGate(enabled, interval, digits.isEmpty() ? 5 : Integer.parseInt(digits));
+    return new OiGate(enabled, interval, digits.isEmpty() ? 5 : Integer.parseInt(digits), index);
+  }
+
+  /**
+   * The options-execution root registry symbol (2b-E2): {@code universe.underlying} stripped to its root
+   * (e.g. {@code NIFTY 50} → {@code NIFTY}), DECOUPLED from the signal series. Identical to
+   * {@code registryUnderlying(signal symbol)} whenever no {@code signal_underlying} override is set.
+   */
+  static String optionRoot(JsonNode config) {
+    return registryUnderlying(optionRootDisplay(config));
+  }
+
+  /** The options-execution root display name — {@code universe.underlying.tradingsymbol} (e.g. {@code NIFTY 50}). */
+  static String optionRootDisplay(JsonNode config) {
+    return config.path("universe").path("underlying").path("tradingsymbol").asText();
+  }
+
+  /**
+   * The index for the OI-confluence gate: the explicit {@code oi_confluence_gate.index} override when
+   * set, else the options-execution root display — so a decoupled NIFTY-signal / SENSEX-option strategy
+   * gates on SENSEX OI by default, or on {@code NIFTY 50} OI if it opts in via the override.
+   */
+  static String oiGateIndex(JsonNode config, OiGate gate) {
+    return gate.index().isBlank() ? optionRootDisplay(config) : gate.index();
   }
 
   /**

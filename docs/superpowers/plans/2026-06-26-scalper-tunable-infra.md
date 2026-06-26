@@ -36,7 +36,7 @@ blocker is fixed; the remaining build is specced below.
 
 ## Remaining build (4 phases, each its own PR)
 
-### 2b-E1 — NIFTY continuous front-future 1m signal series — BUILT (PR pending)
+### 2b-E1 — NIFTY continuous front-future 1m signal series — DONE (#222 + fix #223, merged/deployed/live-verified: 106,560 CONT 1m bars 2025-04→2026-06, 12 rolls; fix = backfill skips wide-historical cagg refresh)
 **Approach (revised from "read-time virtual"):** the backtest reads its primary 1m via a DIRECT JDBC
 read (`backtest CandleReader` → `marketdata.candles WHERE tradingsymbol=? interval='1m'`), so a read-time
 reader living in market-data would never be seen. AND the continuous-future infra already MATERIALIZES
@@ -56,7 +56,17 @@ Backtests read the UNADJUSTED CONT 1m directly; the one-bar roll-day basis gap (
 accepted (intraday scalpers reset daily, so a monthly roll-day discontinuity is a minor known artifact).
 **Run after merge:** `POST .../continuous-backfill` on the live stack to populate `NIFTY-FUT-CONT` 1m.
 
-### 2b-E2 — decouple signal-underlying from option-execution root
+### 2b-E2 — decouple signal-underlying from option-execution root — BUILT (PR pending)
+Done: schema `universe.signal_underlying` (optional instrumentRef) + `oi_confluence_gate.index` override;
+`BacktestRunner.signalInstrument` prefers `signal_underlying`; `OptionsPremiumReplay` resolves the option
+root + OI-gate index from `universe.underlying` (helpers `optionRoot`/`optionRootDisplay`/`oiGateIndex`),
+NOT the signal symbol. Parity-verified byte-identical (BacktestParityTest + OptionsPremiumGoldenTest green —
+absent the override, signal symbol == underlying → no behaviour change). Fold path needs no change (it
+already threads config + the signal instrument). Tests: signalInstrument override + decouple helpers +
+accept-corpus fixture. **OI-gate index defaults to the option-execution root**; a SENSEX-option/NIFTY-signal
+strategy gates on NIFTY OI via the explicit `index` override.
+
+Original design notes:
 - Schema (`strategy-schema-v1.json`, additive optional): a signal-underlying override on the options
   universe, e.g. `universe.signal_underlying: {exchange, tradingsymbol}` (default = `universe.underlying`).
 - `BacktestRunner.signalInstrument`: prefer the override for the signal series.

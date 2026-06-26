@@ -99,6 +99,10 @@
           "properties": {
             "mode": { "const": "options_of_underlying" },
             "underlying": { "$ref": "#/$defs/instrumentRef" },
+            "signal_underlying": {
+              "$ref": "#/$defs/instrumentRef",
+              "description": "Optional: the instrument the SIGNAL/indicators run on, decoupled from the options-execution root in `underlying` (2b-E2). Defaults to `underlying` when absent. Used for e.g. signal on the NIFTY continuous front-future while executing SENSEX option legs (correlation play)."
+            },
             "options": {
               "type": "object",
               "additionalProperties": false,
@@ -608,7 +612,8 @@
           "description": "Backtest-only OI-confluence entry gate: drop option legs whose entry fires against the historical Connecting-Dots trend (long/CE into Bearish, short/PE into Bullish). Opt-in; off by default so existing replays are unaffected.",
           "properties": {
             "enabled": { "type": "boolean", "default": false },
-            "interval": { "type": "string", "default": "5m", "description": "OI interval the confluence is read at (e.g. 5m)." }
+            "interval": { "type": "string", "default": "5m", "description": "OI interval the confluence is read at (e.g. 5m)." },
+            "index": { "type": "string", "description": "Optional (2b-E2): the index whose OI confluence gates entries. Defaults to the options-execution root (universe.underlying); set it to gate a decoupled signal/option pair on the signal-driver's OI (e.g. a SENSEX-option strategy gating on 'NIFTY 50')." }
           }
         },
         "optimize": {

@@ -118,11 +118,20 @@ the rest; re-home gap-theory + trend-change off BankNifty. Plus: `ScalperConfig`
 (300–800), `ScalperStrategySeeder` 36-id list, `ScalperStrategyLoadTest` maps (underlying + gate-tag +
 trending-oi/straddle id checks cover all 36). All schema-valid + load-test green.
 
-### 2b-2 — register + functional-verify
-Register each of the 36 via the seeder/registry; run a FULL-WINDOW functional backtest on each (executes +
-trades sanely, no engine errors); flag any strategy whose features the engine can't replay (per-strike
-grading, two-leg straddle) as needing more engine work. Then → 2c paper (live OI-gate index override +
-verified SENSEX premium band + the OI-index A/B).
+### 2b-2 — register + functional-verify — DONE (2026-06-26, live stack)
+36 drafts seeded (`ARTHA_SCALPER_SEED_STRATEGIES=true`, #227); **36/36 full-window backtests completed, zero
+engine errors** (window 2026-02-02→06-13). First run surfaced the only engine gap — the tick-wise runner
+rejected a 3m primary — fixed in **2b-E3** (#228, parity-safe `case "3m"`); all 36 then ran clean. E2b
+decoupling proven on live (SENSEX variants trade real SENSEX legs off the NIFTY-FUT-CONT signal). OI-gate
+A/B behaves: the 4 gate-ENABLED OI-led differ niftyoi≠sensexoi; the 8 dormant are identical (gate muted on
+history, wiring correct → forward-paper discriminator). Returns NOT tradeable (functional only). Flagged
+engine-unfaithful (live-only §12.3 seam, judge on forward paper): morning-trade / btst-stbt / hero-zero /
+straddle (`volume>0` gate + two-leg). Full results: `docs/manual-tests/2b-1-scalper-variants.md`. → 2c paper.
+
+Original scope: Register each of the 36 via the seeder/registry; run a FULL-WINDOW functional backtest on
+each (executes + trades sanely, no engine errors); flag any strategy whose features the engine can't replay
+(per-strike grading, two-leg straddle) as needing more engine work. Then → 2c paper (live OI-gate index
+override + verified SENSEX premium band + the OI-index A/B).
 
 ### Optional — optimizer guardrail
 `optimizer service.py`: when a fold-context sweep (`walkForward` present) is submitted with

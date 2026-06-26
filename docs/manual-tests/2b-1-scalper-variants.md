@@ -48,3 +48,25 @@ backtest variants are unaffected. Refine the band on 2c live paper.
    (no engine error). The `volume > 0`-gated strategies (hero-zero, straddle, btst-stbt) fire near every
    in-window bar in backtest because their real gate is the live-only §12.3 seam — expected; flag them as
    needing live evaluation, not backtest tuning.
+
+## 2b-2 functional-verify run (2026-06-26, live stack, window 2026-02-02 → 2026-06-13)
+
+All 36 submitted via `POST /api/v1/backtests/run` → **36/36 completed, zero engine errors**. (First run
+surfaced one engine gap — the tick-wise runner rejected a 3m primary — fixed in **2b-E3** [#228]; all 36
+then ran clean.) This is a FUNCTIONAL pass (executes + trades, no error); returns are NOT tradeable
+(overfit + OI muted on history — tune on live forward paper, per `scalper-tuning-findings`).
+
+- **E2b decoupling proven on live:** every SENSEX variant trades real SENSEX option legs (e.g.
+  `SENSEX12FEB2684500CE`) off the NIFTY-FUT-CONT signal with SENSEX-fut strike anchoring; `backtest_runs`
+  carries `NIFTY-FUT-CONT` as the signal series for all 36 (the option legs live in `backtest_trades`).
+- **OI-gate A/B behaves as designed:** the 4 gate-ENABLED OI-led bases (connect-the-dots, trending-oi,
+  two-candle, open-high-low) show `niftyoi ≠ sensexoi` (different trade counts/returns — the gate drops
+  legs per its index); the 8 gate-DORMANT bases show `niftyoi == sensexoi` identical (gate off). The gate
+  is muted on history but the wiring is correct → it is a FORWARD-paper discriminator, not a backtest one.
+- **Trade counts (NIFTY variant):** connect-the-dots 293, two-candle 281, trending-oi 319, golden-crossover
+  242, gap-theory 255, trend-change 212, open-high-low 95, morning-trade 922, hero-zero 30, straddle 192,
+  market-movers 255, btst-stbt 1.
+- **Flagged engine-unfaithful (real gate is the live-only §12.3 seam → judge on FORWARD paper, not this
+  backtest):** morning-trade (`volume>0` fires every open → 922 trades, deeply negative), btst-stbt (1
+  trade — the once/day carry barely fires without the live close-location/OI gate), hero-zero + straddle
+  (`volume>0` + two-leg straddle replay). These RAN without error; their backtest P&L is not meaningful.

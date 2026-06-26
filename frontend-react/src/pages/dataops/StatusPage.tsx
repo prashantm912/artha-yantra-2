@@ -80,6 +80,7 @@ function ExpiredCard({ expired }: { expired: ExpiredStatus }) {
         <button
           type="button"
           onClick={() => setDetailsOpen(true)}
+          title="Open the full job detail panel (job ID, state, and recent logs)"
           className="rounded-md border border-ay-border bg-surface-1 px-3 py-1.5 text-sm text-ay-text hover:border-accent"
         >
           Details
@@ -168,7 +169,10 @@ export function StatusPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Collection Status" />
+      <PageHeader
+        title="Collection Status"
+        help="Live progress of the expired-contract and OI backfill jobs, with your Upstox data quota; a running job shows an indeterminate bar because the total work isn't known until it finishes."
+      />
 
       <BeatBlock className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">

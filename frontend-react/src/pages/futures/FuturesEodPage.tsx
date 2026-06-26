@@ -14,6 +14,7 @@ import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
+import { FIELD_HELP } from '../../core/fieldHelp.ts';
 
 // Futures EOD OI Analyzer (oipulse §futures/eod-oi-analyzer): day-by-day OHLC + OI + day-over-day
 // deltas + interpretation for one futures contract. The BE /eod feed returns every captured contract
@@ -58,19 +59,19 @@ export function FuturesEodPage() {
   );
 
   const columns: DataColumn<FuturesEodRow>[] = [
-    { id: 'date', header: 'Date', align: 'left', sortValue: (r) => r.tradeDate, sortType: 'text', render: (r) => r.tradeDate, mobileLabel: 'Date' },
-    { id: 'oi', header: 'Total OI', sortValue: (r) => r.totalOi, render: (r) => num(r.totalOi), mobileLabel: 'Total OI' },
-    { id: 'open', header: 'Day Open', render: (r) => dec(r.dayOpen) },
-    { id: 'high', header: 'Day High', render: (r) => dec(r.dayHigh) },
-    { id: 'low', header: 'Day Low', render: (r) => dec(r.dayLow) },
-    { id: 'vol', header: 'Volume', sortValue: (r) => r.volume, render: (r) => num(r.volume) },
-    { id: 'ltp', header: 'LTP', render: (r) => dec(r.ltp), mobileLabel: 'LTP' },
-    { id: 'range', header: 'Day Range', render: (r) => (r.dayRange ? `${formatDecimal(r.dayRange, 2)}${r.dayRangePct ? ` (${r.dayRangePct}%)` : ''}` : '—') },
-    { id: 'ltpChg', header: 'LTP Change', render: (r) => <ValueDeltaCell value={r.ltpChange} />, mobileLabel: 'LTP Chg' },
-    { id: 'oiChg', header: 'OI Change', sortValue: (r) => r.oiChange, render: (r) => <SignedCount value={r.oiChange} />, mobileLabel: 'OI Chg' },
-    { id: 'ltpPct', header: '% Chng. in LTP', render: (r) => <ValueDeltaCell value={r.ltpChangePct} suffix="%" /> },
-    { id: 'oiPct', header: '% Chng. in OI', render: (r) => <ValueDeltaCell value={r.oiChangePct} suffix="%" /> },
-    { id: 'interp', header: 'OI Interpretation', align: 'center', render: (r) => <OiBadge4 value={r.interpretation} full />, mobileLabel: 'OI Int' },
+    { id: 'date', header: 'Date', align: 'left', sortValue: (r) => r.tradeDate, sortType: 'text', render: (r) => r.tradeDate, mobileLabel: 'Date', help: 'The trading session this row summarises.' },
+    { id: 'oi', header: 'Total OI', sortValue: (r) => r.totalOi, render: (r) => num(r.totalOi), mobileLabel: 'Total OI', help: FIELD_HELP.oi },
+    { id: 'open', header: 'Day Open', render: (r) => dec(r.dayOpen), help: FIELD_HELP.open },
+    { id: 'high', header: 'Day High', render: (r) => dec(r.dayHigh), help: FIELD_HELP.high },
+    { id: 'low', header: 'Day Low', render: (r) => dec(r.dayLow), help: FIELD_HELP.low },
+    { id: 'vol', header: 'Volume', sortValue: (r) => r.volume, render: (r) => num(r.volume), help: FIELD_HELP.volume },
+    { id: 'ltp', header: 'LTP', render: (r) => dec(r.ltp), mobileLabel: 'LTP', help: FIELD_HELP.ltp },
+    { id: 'range', header: 'Day Range', render: (r) => (r.dayRange ? `${formatDecimal(r.dayRange, 2)}${r.dayRangePct ? ` (${r.dayRangePct}%)` : ''}` : '—'), help: 'The session high-minus-low range, with its size as a percentage of price.' },
+    { id: 'ltpChg', header: 'LTP Change', render: (r) => <ValueDeltaCell value={r.ltpChange} />, mobileLabel: 'LTP Chg', help: FIELD_HELP.netChange },
+    { id: 'oiChg', header: 'OI Change', sortValue: (r) => r.oiChange, render: (r) => <SignedCount value={r.oiChange} />, mobileLabel: 'OI Chg', help: FIELD_HELP.oiChange },
+    { id: 'ltpPct', header: '% Chng. in LTP', render: (r) => <ValueDeltaCell value={r.ltpChangePct} suffix="%" />, help: FIELD_HELP.changePct },
+    { id: 'oiPct', header: '% Chng. in OI', render: (r) => <ValueDeltaCell value={r.oiChangePct} suffix="%" />, help: FIELD_HELP.oiChangePct },
+    { id: 'interp', header: 'OI Interpretation', align: 'center', render: (r) => <OiBadge4 value={r.interpretation} full />, mobileLabel: 'OI Int', help: FIELD_HELP.oiInterpretation },
   ];
 
   const nameOptions = underlyings.data && underlyings.data.length > 0 ? underlyings.data : ['NIFTY 50', 'NIFTY BANK'];
@@ -80,12 +81,13 @@ export function FuturesEodPage() {
       <PageHeader
         title="Futures EOD OI Analyzer"
         subtitle="Day-by-day OHLC, OI and day-over-day deltas for one futures contract"
+        help="Shows the end-of-day history for one futures contract — each row is a session with its OHLC, total OI and day-over-day price/OI changes, so you can track how positioning evolved."
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <Select ariaLabel="Underlying" value={name} options={nameOptions} onChange={setName} />
+        <Select ariaLabel="Underlying" value={name} options={nameOptions} onChange={setName} title="Pick the index or stock whose futures history to view" />
         {contracts.length > 1 && (
-          <Select ariaLabel="Contract" value={contract} options={contracts} onChange={setContract} />
+          <Select ariaLabel="Contract" value={contract} options={contracts} onChange={setContract} title="Pick which futures expiry contract to analyse" />
         )}
         <GoButton onClick={() => q.refetch()} loading={q.isFetching} />
       </div>

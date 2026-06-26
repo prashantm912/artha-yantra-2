@@ -7,6 +7,7 @@ import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
 import { FuturesOiChart } from '../../components/FuturesOiChart.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { InfoTip } from '../../components/atoms/InfoTip.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
@@ -34,6 +35,7 @@ export function FuturesOiChartPage() {
       <PageHeader
         title="Futures OI chart"
         subtitle="Dual-axis OI-vs-price combo for the active front index future"
+        help="Overlays the index future's price candles against its open-interest line on a dual axis, so you can see whether OI is rising or falling as price moves."
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -43,6 +45,7 @@ export function FuturesOiChartPage() {
           value={String(intervalMin)}
           options={INTERVAL_OPTIONS}
           onChange={(v) => setIntervalMin(parseInt(v, 10) || 3)}
+          title="Choose the candle/OI aggregation interval, from 1 to 60 minutes"
         />
         <GoButton onClick={() => q.refetch()} loading={q.isFetching} />
       </div>
@@ -80,8 +83,12 @@ export function FuturesOiChartPage() {
             </p>
           ) : (
             <BeatBlock className="card shadow-e1">
-              <h2 className="mb-1 text-h3 font-semibold text-ay-text">
+              <h2 className="mb-1 flex items-center gap-1.5 text-h3 font-semibold text-ay-text">
                 Futures Oi Vs. Price Analysis
+                <InfoTip
+                  text="Price candles (right axis) plotted against the open-interest line (left axis); divergence between the two hints at whether a move is backed by fresh positions."
+                  label="Futures OI vs. price analysis"
+                />
               </h2>
               <FuturesOiChart items={d.items} tradingsymbol={d.tradingsymbol} />
             </BeatBlock>

@@ -26,7 +26,10 @@ export function OiHeatmapPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="OI Change Heatmap" />
+      <PageHeader
+        title="OI Change Heatmap"
+        help="A strike-by-time grid showing where open interest is building or unwinding through the session — green cells mark fresh OI being added, red cells mark OI being closed."
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval allowedIntervals={HEATMAP_INTERVALS} />

@@ -36,6 +36,7 @@ export function BanksAnalysisPage() {
       <PageHeader
         title="Banks Analysis"
         subtitle="Sector-wide time × 6-bank OI matrix — cumulative LTP % / OI % per interval"
+        help="A time-by-bank grid for the six banking futures, each cell showing that bank's cumulative price % and OI % at the interval — to read banking-sector positioning at a glance."
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">

@@ -53,13 +53,18 @@ export function StrategiesListPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Strategies" subtitle="Published, draft and archived strategies" />
+      <PageHeader
+        title="Strategies"
+        subtitle="Published, draft and archived strategies"
+        help="Your saved trading strategies, each showing its status, version, last-backtest Sharpe and equity sparkline; edit a strategy or open its version history."
+      />
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <input
           value={qInput}
           onChange={(e) => setQInput(e.target.value)}
           placeholder="Search name / slug"
           aria-label="Search strategies"
+          title="Filter the list by strategy name or slug as you type."
           className="h-9 flex-1 rounded-md border border-ay-border bg-surface-1 px-3 text-sm text-ay-text"
         />
         <Select
@@ -68,9 +73,11 @@ export function StrategiesListPage() {
           onChange={(v) => setStatus(v || null)}
           ariaLabel="Status filter"
           placeholder="All statuses"
+          title="Show only strategies in the chosen status (published, draft or archived)."
         />
         <Link
           to="/strategies/new/edit"
+          title="Start a new strategy in the YAML editor."
           className="h-9 rounded-md bg-accent px-4 text-sm font-medium leading-9 text-surface-0 hover:opacity-90"
         >
           + Create

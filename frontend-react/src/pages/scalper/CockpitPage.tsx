@@ -110,12 +110,12 @@ export function CockpitPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Scalping cockpit" subtitle="One live operator screen — option chain · OI confluence · straddle · signals · paper book · heatmap" />
+      <PageHeader title="Scalping cockpit" subtitle="One live operator screen — option chain · OI confluence · straddle · signals · paper book · heatmap" help="One live screen that fans out a single underlying/expiry/interval selection across every scalping view — option chain, OI-confluence matrix, straddle premium, signals, paper book and OI heatmap; pick a symbol and press Go to refresh them all." />
 
       {/* The single shared control bar — drives every panel below via the SymbolContext store. */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval />
-        <GoButton onClick={refetchAll} loading={fetching} />
+        <GoButton onClick={refetchAll} loading={fetching} title="Refresh every panel for the selected underlying, expiry and interval" />
       </div>
 
       {/* Live header strip (spot / PCR / ATM / sentiment). */}
@@ -126,9 +126,10 @@ export function CockpitPage() {
         <Metric
           label={chain?.underlying ?? 'Underlying'}
           value={chain?.spot ? formatDecimal(chain.spot, 2) : '—'}
+          title="Live spot price of the selected underlying index or stock"
         />
-        <Metric label="Total PCR" value={chain?.pcr ? formatDecimal(chain.pcr, 2) : '—'} />
-        <Metric label="ATM" value={atm ?? '—'} />
+        <Metric label="Total PCR" value={chain?.pcr ? formatDecimal(chain.pcr, 2) : '—'} title="Put-Call Ratio — total put OI ÷ total call OI; above 1 leans bearish positioning, below 1 leans bullish" />
+        <Metric label="ATM" value={atm ?? '—'} title="At-the-money strike — the strike closest to the current spot price" />
         <span className="flex items-center gap-1.5 text-xs text-ay-muted">
           Sentiment
           {sentiment ? (

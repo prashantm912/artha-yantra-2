@@ -10,6 +10,7 @@ import type { ColumnAlign, DataColumn } from './DataTable.tsx';
 export interface AyColumnMeta<Row> {
   align: ColumnAlign;
   mono: boolean;
+  help?: string;
   headerClassName?: string;
   cellClassName?: (row: Row) => string;
   mobileLabel?: string;
@@ -35,6 +36,7 @@ export function adaptColumns<Row>(cols: DataColumn<Row>[]): ColumnDef<Row>[] {
     meta: {
       align: c.align ?? 'right',
       mono: c.mono ?? (c.align ?? 'right') === 'right',
+      help: c.help,
       headerClassName: c.headerClassName,
       cellClassName: c.cellClassName,
       mobileLabel: c.mobileLabel,

@@ -12,6 +12,7 @@ import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { cn } from '../../lib/cn.ts';
 import { compareDecimal, formatDecimal } from '../../lib/decimal.ts';
+import { FIELD_HELP } from '../../core/fieldHelp.ts';
 
 // Futures Market Movers (oipulse §futures/market-movers): Top Gainers | Top Losers by day price%, with
 // the O=H/L open-positioning flag (from the surfaced day OHLC) + OI interpretation. The "Min. B.O.
@@ -28,10 +29,10 @@ function openFlag(r: MoverRow): { text: string; tone: string } {
 }
 
 const COLUMNS: DataColumn<MoverRow>[] = [
-  { id: 'name', header: 'Name', align: 'left', sortValue: (r) => r.tradingsymbol, sortType: 'text', render: (r) => r.tradingsymbol, mobileLabel: 'Name' },
-  { id: 'ltp', header: 'LTP', sortValue: (r) => r.ltp, sortType: 'decimal', render: (r) => (r.ltp ? formatDecimal(r.ltp, 2) : '—'), mobileLabel: 'LTP' },
-  { id: 'ltpPct', header: 'LTP Chg %', sortValue: (r) => r.pricePct, sortType: 'decimal', render: (r) => <ValueDeltaCell value={r.pricePct} suffix="%" />, mobileLabel: 'LTP %' },
-  { id: 'oiPct', header: 'OI Chg %', sortValue: (r) => r.oiPct, sortType: 'decimal', render: (r) => <ValueDeltaCell value={r.oiPct} suffix="%" />, mobileLabel: 'OI %' },
+  { id: 'name', header: 'Name', align: 'left', sortValue: (r) => r.tradingsymbol, sortType: 'text', render: (r) => r.tradingsymbol, mobileLabel: 'Name', help: 'The futures contract trading symbol.' },
+  { id: 'ltp', header: 'LTP', sortValue: (r) => r.ltp, sortType: 'decimal', render: (r) => (r.ltp ? formatDecimal(r.ltp, 2) : '—'), mobileLabel: 'LTP', help: FIELD_HELP.ltp },
+  { id: 'ltpPct', header: 'LTP Chg %', sortValue: (r) => r.pricePct, sortType: 'decimal', render: (r) => <ValueDeltaCell value={r.pricePct} suffix="%" />, mobileLabel: 'LTP %', help: FIELD_HELP.changePct },
+  { id: 'oiPct', header: 'OI Chg %', sortValue: (r) => r.oiPct, sortType: 'decimal', render: (r) => <ValueDeltaCell value={r.oiPct} suffix="%" />, mobileLabel: 'OI %', help: FIELD_HELP.oiChangePct },
   {
     id: 'ohl',
     header: 'O=H/L',
@@ -40,8 +41,9 @@ const COLUMNS: DataColumn<MoverRow>[] = [
       const f = openFlag(r);
       return <span className={cn('font-semibold', f.tone)}>{f.text}</span>;
     },
+    help: 'Open-vs-extreme flag: O=L (open equals the day low, bullish) or O=H (open equals the day high, bearish).',
   },
-  { id: 'interp', header: 'Oi Int.', align: 'center', render: (r) => <OiBadge4 value={r.interpretation} />, mobileLabel: 'OI Int' },
+  { id: 'interp', header: 'Oi Int.', align: 'center', render: (r) => <OiBadge4 value={r.interpretation} />, mobileLabel: 'OI Int', help: FIELD_HELP.oiInterpretation },
 ];
 
 export function FuturesMoversPage() {
@@ -66,6 +68,7 @@ export function FuturesMoversPage() {
       <PageHeader
         title="Futures Market Movers"
         subtitle="Top gainers and losers by day price %, with OI interpretation"
+        help="Ranks captured futures contracts into top gainers and losers by the day's price change, alongside their OI action and open-positioning flag."
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -76,6 +79,7 @@ export function FuturesMoversPage() {
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search symbol"
           aria-label="Search symbol"
+          title="Filter the gainers and losers to contracts whose symbol contains this text"
           className="h-9 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text outline-none focus:border-accent"
         />
         <GoButton onClick={() => q.refetch()} loading={q.isFetching} />

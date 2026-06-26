@@ -9,6 +9,7 @@ import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
+import { FIELD_HELP } from '../../core/fieldHelp.ts';
 
 // Equity → Equity Returns (oipulse): a multi-timeframe returns screener over the EQ universe — LTP +
 // % return over Current Day / 1 Week / 1 Month / 6 Months / 1 Year, with the stock's sector. Restricted
@@ -17,12 +18,12 @@ import { formatDecimal } from '../../lib/decimal.ts';
 
 const num = (s: string | null): number => (s == null ? 0 : Number(s));
 
-const RET_COLS: { id: string; header: string; pick: (r: EquityReturnRow) => string | null }[] = [
-  { id: 'r1d', header: 'Current Day', pick: (r) => r.r1d },
-  { id: 'r1w', header: '1 Week', pick: (r) => r.r1w },
-  { id: 'r1m', header: '1 Month', pick: (r) => r.r1m },
-  { id: 'r6m', header: '6 Months', pick: (r) => r.r6m },
-  { id: 'r1y', header: '1 Year', pick: (r) => r.r1y },
+const RET_COLS: { id: string; header: string; help: string; pick: (r: EquityReturnRow) => string | null }[] = [
+  { id: 'r1d', header: 'Current Day', help: "Price return so far today versus the previous session's close.", pick: (r) => r.r1d },
+  { id: 'r1w', header: '1 Week', help: 'Price return over the past week.', pick: (r) => r.r1w },
+  { id: 'r1m', header: '1 Month', help: 'Price return over the past month.', pick: (r) => r.r1m },
+  { id: 'r6m', header: '6 Months', help: 'Price return over the past six months (blank until enough history accrues).', pick: (r) => r.r6m },
+  { id: 'r1y', header: '1 Year', help: 'Price return over the past year (blank until enough history accrues).', pick: (r) => r.r1y },
 ];
 
 export function EquityReturnsPage() {
@@ -45,13 +46,14 @@ export function EquityReturnsPage() {
 
   const columns: DataColumn<EquityReturnRow>[] = useMemo(
     () => [
-      { id: 'symbol', header: 'Name', align: 'left', render: (r) => r.symbol, sortValue: (r) => r.symbol, mobileLabel: 'Name' },
-      { id: 'industry', header: 'Industry', align: 'left', render: (r) => r.industry ?? '—', sortValue: (r) => r.industry ?? '', mobileLabel: 'Industry' },
-      { id: 'ltp', header: 'LTP', render: (r) => (r.ltp ? formatDecimal(r.ltp, 2) : '—'), sortValue: (r) => num(r.ltp), mobileLabel: 'LTP' },
+      { id: 'symbol', header: 'Name', help: 'The stock ticker.', align: 'left', render: (r) => r.symbol, sortValue: (r) => r.symbol, mobileLabel: 'Name' },
+      { id: 'industry', header: 'Industry', help: 'The sector / industry the stock is mapped to.', align: 'left', render: (r) => r.industry ?? '—', sortValue: (r) => r.industry ?? '', mobileLabel: 'Industry' },
+      { id: 'ltp', header: 'LTP', help: FIELD_HELP.ltp, render: (r) => (r.ltp ? formatDecimal(r.ltp, 2) : '—'), sortValue: (r) => num(r.ltp), mobileLabel: 'LTP' },
       ...RET_COLS.map(
         (c): DataColumn<EquityReturnRow> => ({
           id: c.id,
           header: c.header,
+          help: c.help,
           render: (r) => <ValueDeltaCell value={c.pick(r)} suffix="%" />,
           sortValue: (r) => num(c.pick(r)),
           mobileLabel: c.header,
@@ -65,6 +67,7 @@ export function EquityReturnsPage() {
     <LoadBeat>
       <PageHeader
         title="Equity Returns"
+        help="A screener ranking stocks by their price return across several timeframes (today through 1 year) so you can spot momentum leaders and laggards at a glance."
         subtitle={
           <>
             Multi-timeframe % returns over the EQ universe · 6M / 1Y fill in as history accrues
@@ -80,6 +83,7 @@ export function EquityReturnsPage() {
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search name or sector…"
           aria-label="Search name or sector"
+          title="Filter the rows by stock name or sector"
           className="h-9 w-full sm:w-56 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text outline-none focus:border-accent"
         />
         <GoButton onClick={() => void q.refetch()} loading={q.isFetching} />

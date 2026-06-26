@@ -12,6 +12,7 @@ import { SentimentBadge } from '../../components/atoms/SentimentBadge.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
+import { FIELD_HELP } from '../../core/fieldHelp.ts';
 
 // Trending OI - PA (oipulse §options/trending-oi-pa): the Trending OI table PLUS price-action columns —
 // the summed Call/Put premium (Total Call/Put Ltp) and its deltas (Call/Put Ltp chng + the CE+PE straddle
@@ -45,27 +46,28 @@ export function TrendingOiPaPage() {
   const rows = useMemo(() => foldTrending(q.data?.items ?? []).reverse(), [q.data]); // newest on top
 
   const columns: DataColumn<TrendingRow>[] = [
-    { id: 'date', header: 'Date', align: 'left', render: (r) => r.bucket.slice(0, 10) },
-    { id: 'time', header: 'Time', align: 'left', render: (r) => r.bucket.slice(11, 16), mobileLabel: 'Time' },
-    { id: 'ltp', header: 'LTP', render: (r) => (r.spot ? formatDecimal(r.spot, 2) : '—'), mobileLabel: 'LTP' },
-    { id: 'break', header: 'Day H/L Break', align: 'center', render: (r) => <BreakCell row={r} /> },
-    { id: 'chngCall', header: 'Chng. In Call OI', render: (r) => <SignedCount value={r.chngCallOi} />, mobileLabel: 'Δ Call OI' },
-    { id: 'chngPut', header: 'Chng. In Put OI', render: (r) => <SignedCount value={r.chngPutOi} />, mobileLabel: 'Δ Put OI' },
-    { id: 'diff', header: 'Diff. in OI', render: (r) => <SignedCount value={r.diffInOi} /> },
-    { id: 'direction', header: 'Direction of chng.', align: 'center', render: (r) => <Direction dir={r.direction} /> },
-    { id: 'chngDir', header: 'Chng. In Direction', render: (r) => <SignedCount value={r.chngInDirection} /> },
+    { id: 'date', header: 'Date', align: 'left', help: 'Calendar date of this interval bucket.', render: (r) => r.bucket.slice(0, 10) },
+    { id: 'time', header: 'Time', align: 'left', help: 'Clock time at the end of this interval bucket.', render: (r) => r.bucket.slice(11, 16), mobileLabel: 'Time' },
+    { id: 'ltp', header: 'LTP', help: FIELD_HELP.spot, render: (r) => (r.spot ? formatDecimal(r.spot, 2) : '—'), mobileLabel: 'LTP' },
+    { id: 'break', header: 'Day H/L Break', align: 'center', help: "Flags when the underlying broke the day's high (D.H.B, bullish) or low (D.L.B, bearish) in this interval.", render: (r) => <BreakCell row={r} /> },
+    { id: 'chngCall', header: 'Chng. In Call OI', help: 'Change in total call Open Interest versus the session-open baseline (added + / closed −).', render: (r) => <SignedCount value={r.chngCallOi} />, mobileLabel: 'Δ Call OI' },
+    { id: 'chngPut', header: 'Chng. In Put OI', help: 'Change in total put Open Interest versus the session-open baseline (added + / closed −).', render: (r) => <SignedCount value={r.chngPutOi} />, mobileLabel: 'Δ Put OI' },
+    { id: 'diff', header: 'Diff. in OI', help: 'ΔPut OI − ΔCall OI; positive leans bullish (puts being added faster than calls).', render: (r) => <SignedCount value={r.diffInOi} /> },
+    { id: 'direction', header: 'Direction of chng.', align: 'center', help: 'Whether the OI difference is pushing the bias up or down this interval.', render: (r) => <Direction dir={r.direction} /> },
+    { id: 'chngDir', header: 'Chng. In Direction', help: 'How much the OI difference moved versus the prior interval.', render: (r) => <SignedCount value={r.chngInDirection} /> },
     // ── Price-action (premium) columns ──
-    { id: 'totCall', header: 'Total Call Ltp', render: (r) => dec(r.totalCallLtp), mobileLabel: 'Call Ltp' },
-    { id: 'callChng', header: 'Call Ltp chng.', render: (r) => <ValueDeltaCell value={r.callLtpChng} /> },
-    { id: 'straddle', header: 'CE + PE Ltp Chng.', render: (r) => <ValueDeltaCell value={r.straddleChng} />, mobileLabel: 'CE+PE Δ' },
-    { id: 'putChng', header: 'Put Ltp chng.', render: (r) => <ValueDeltaCell value={r.putLtpChng} /> },
-    { id: 'totPut', header: 'Total Put Ltp', render: (r) => dec(r.totalPutLtp), mobileLabel: 'Put Ltp' },
+    { id: 'totCall', header: 'Total Call Ltp', help: 'Summed call premium across the chain — total premium buyers are paying on the call side.', render: (r) => dec(r.totalCallLtp), mobileLabel: 'Call Ltp' },
+    { id: 'callChng', header: 'Call Ltp chng.', help: 'Change in summed call premium versus the session-open baseline.', render: (r) => <ValueDeltaCell value={r.callLtpChng} /> },
+    { id: 'straddle', header: 'CE + PE Ltp Chng.', help: 'Change in the combined call+put (straddle) premium — rising means the market is pricing in more movement.', render: (r) => <ValueDeltaCell value={r.straddleChng} />, mobileLabel: 'CE+PE Δ' },
+    { id: 'putChng', header: 'Put Ltp chng.', help: 'Change in summed put premium versus the session-open baseline.', render: (r) => <ValueDeltaCell value={r.putLtpChng} /> },
+    { id: 'totPut', header: 'Total Put Ltp', help: 'Summed put premium across the chain — total premium buyers are paying on the put side.', render: (r) => dec(r.totalPutLtp), mobileLabel: 'Put Ltp' },
     // ──
-    { id: 'pcr', header: 'Net PCR', render: (r) => r.netPcr ?? '—', mobileLabel: 'PCR' },
+    { id: 'pcr', header: 'Net PCR', help: FIELD_HELP.pcr, render: (r) => r.netPcr ?? '—', mobileLabel: 'PCR' },
     {
       id: 'sentiment',
       header: 'Sentiment',
       align: 'center',
+      help: 'Derived directional read (bullish / bearish / neutral) from the OI shifts this interval.',
       render: (r) => <SentimentBadge label={r.sentiment.label} tone={r.sentiment.tone} />,
       mobileLabel: 'Sentiment',
     },
@@ -73,7 +75,7 @@ export function TrendingOiPaPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Trending OI - PA" subtitle="Trending OI plus price-action columns — premium sums confirm OI shifts" />
+      <PageHeader title="Trending OI - PA" help="The Trending OI table with added premium columns — it shows whether each OI shift is confirmed by call/put premium moving in step, a stronger signal than OI alone." subtitle="Trending OI plus price-action columns — premium sums confirm OI shifts" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval allowedIntervals={TRENDING_INTERVALS} />

@@ -7,11 +7,20 @@ import { Button } from './Button.tsx';
 interface GoButtonProps {
   onClick: () => void;
   loading?: boolean;
+  /** Native hover tooltip (#16); defaults to a generic refresh hint. */
+  title?: string;
 }
 
-export function GoButton({ onClick, loading }: GoButtonProps) {
+export function GoButton({ onClick, loading, title }: GoButtonProps) {
   return (
-    <Button variant="primary" size="md" icon={RefreshCw} loading={loading} onClick={onClick}>
+    <Button
+      variant="primary"
+      size="md"
+      icon={RefreshCw}
+      loading={loading}
+      onClick={onClick}
+      title={title ?? 'Fetch the latest data for the current selection'}
+    >
       Go
     </Button>
   );

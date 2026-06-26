@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { AlertTriangle, Circle } from 'lucide-react';
 import { cn } from '../lib/cn.ts';
+import { InfoTip } from './atoms/InfoTip.tsx';
 
 // The ONE signature header lockup (revamp §1.7.2 / §4.0), reused by every hero page: a display-face
 // <h1> (Newsreader via the text-h1 token) behind a 2px --ay-accent left-rule, an optional muted
@@ -12,15 +13,21 @@ interface PageHeaderProps {
   title: string;
   /** Optional one-line muted subtitle under the title. */
   subtitle?: ReactNode;
+  /** Optional plain-language explanation of what the page shows + how to read it (#16) — rendered as
+   *  a focusable ⓘ tooltip beside the title. */
+  help?: string;
   /** Optional right-aligned slot (as-of stamp, freshness chip, range label). */
   right?: ReactNode;
 }
 
-export function PageHeader({ title, subtitle, right }: PageHeaderProps) {
+export function PageHeader({ title, subtitle, help, right }: PageHeaderProps) {
   return (
     <header className="mb-4 flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
       <div className="border-l-2 border-accent pl-3">
-        <h1 className="text-h1 text-ay-text">{title}</h1>
+        <h1 className="flex items-center gap-1.5 text-h1 text-ay-text">
+          {title}
+          {help && <InfoTip text={help} label={title} iconClassName="size-4" />}
+        </h1>
         {subtitle && <p className="mt-0.5 text-body-sm text-ay-muted">{subtitle}</p>}
       </div>
       {right && <div className="flex shrink-0 items-center gap-2 self-start">{right}</div>}

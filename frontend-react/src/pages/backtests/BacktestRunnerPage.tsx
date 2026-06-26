@@ -90,7 +90,7 @@ export function BacktestRunnerPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Backtest runner" subtitle="Run a full-parameter backtest or launch a parameter sweep" />
+      <PageHeader title="Backtest runner" subtitle="Run a full-parameter backtest or launch a parameter sweep" help="Run a strategy over a past window to see how it would have performed, or launch a sweep that tries many parameter sets to find the best." />
       <div role="tablist" className="mb-4 flex gap-1 border-b border-ay-border">
         {(['backtest', 'sweep'] as const).map((t) => (
           <button
@@ -118,43 +118,44 @@ export function BacktestRunnerPage() {
             onChange={setStrategyId}
             ariaLabel="Strategy"
             placeholder="Select strategy"
+            title="The strategy to backtest (its latest published, else latest draft, version is used)."
           />
         </Field>
         <Field label="Interval">
-          <Select value={interval} options={[...INTERVALS]} onChange={setInterval} ariaLabel="Interval" />
+          <Select value={interval} options={[...INTERVALS]} onChange={setInterval} ariaLabel="Interval" title="The candle timeframe the strategy runs on (e.g. 1m, 5m, 1d)." />
         </Field>
         <Field label="From">
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="From" className={numberCls} />
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="From" title="Start date of the backtest window." className={numberCls} />
         </Field>
         <Field label="To">
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="To" className={numberCls} />
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="To" title="End date of the backtest window." className={numberCls} />
         </Field>
         <Field label="Initial capital (₹)">
-          <input type="number" min={1000} value={capital} onChange={(e) => setCapital(e.target.value)} aria-label="Initial capital" className={numberCls} />
+          <input type="number" min={1000} value={capital} onChange={(e) => setCapital(e.target.value)} aria-label="Initial capital" title="Starting cash for the run; returns are measured against this base." className={numberCls} />
         </Field>
         <Field label="Seed">
-          <input type="number" value={seed} onChange={(e) => setSeed(e.target.value)} aria-label="Seed" className={numberCls} />
+          <input type="number" value={seed} onChange={(e) => setSeed(e.target.value)} aria-label="Seed" title="Random seed — fixing it makes the run reproducible (same inputs give the same result)." className={numberCls} />
         </Field>
 
         {tab === 'sweep' && (
           <>
             <Field label="Method">
-              <Select value={method} options={[...SWEEP_METHODS]} onChange={setMethod} ariaLabel="Method" />
+              <Select value={method} options={[...SWEEP_METHODS]} onChange={setMethod} ariaLabel="Method" title="How the sweep searches the parameter space (e.g. TPE Bayesian search, random, grid)." />
             </Field>
             <Field label="Max trials">
-              <input type="number" min={2} value={maxTrials} onChange={(e) => setMaxTrials(e.target.value)} aria-label="Max trials" className={numberCls} />
+              <input type="number" min={2} value={maxTrials} onChange={(e) => setMaxTrials(e.target.value)} aria-label="Max trials" title="How many parameter combinations the sweep will test — more trials search harder but take longer." className={numberCls} />
             </Field>
             <Field label="Objective metric">
-              <Select value={objMetric} options={[...OBJECTIVE_METRICS]} onChange={setObjMetric} ariaLabel="Objective metric" />
+              <Select value={objMetric} options={[...OBJECTIVE_METRICS]} onChange={setObjMetric} ariaLabel="Objective metric" title="The metric the sweep optimizes for (e.g. Sharpe, total return) when picking the best parameters." />
             </Field>
             <Field label="Direction">
-              <Select value={direction} options={[...DIRECTIONS]} onChange={setDirection} ariaLabel="Direction" />
+              <Select value={direction} options={[...DIRECTIONS]} onChange={setDirection} ariaLabel="Direction" title="Whether to maximize or minimize the objective metric (maximize Sharpe, minimize drawdown)." />
             </Field>
             <Field label="Fold aggregation">
-              <Select value={foldAgg} options={[...FOLD_AGGREGATIONS]} onChange={setFoldAgg} ariaLabel="Fold aggregation" />
+              <Select value={foldAgg} options={[...FOLD_AGGREGATIONS]} onChange={setFoldAgg} ariaLabel="Fold aggregation" title="How per-fold scores are combined into one number across walk-forward out-of-sample folds (e.g. mean)." />
             </Field>
             <Field label="Min trades">
-              <input type="number" min={1} value={minTrades} onChange={(e) => setMinTrades(e.target.value)} aria-label="Min trades" className={numberCls} />
+              <input type="number" min={1} value={minTrades} onChange={(e) => setMinTrades(e.target.value)} aria-label="Min trades" title="A trial is rejected if it produced fewer than this many trades — guards against curve-fit results on too few trades." className={numberCls} />
             </Field>
           </>
         )}
@@ -166,6 +167,7 @@ export function BacktestRunnerPage() {
             type="button"
             onClick={runBacktest}
             disabled={!strategyId || submitRun.isPending}
+            title="Submit the backtest and jump to the Jobs monitor to watch its progress."
             className="h-9 rounded-md bg-accent px-4 text-sm font-medium text-surface-0 hover:opacity-90 disabled:opacity-50"
           >
             ▶ Run backtest
@@ -175,6 +177,7 @@ export function BacktestRunnerPage() {
             type="button"
             onClick={launchSweep}
             disabled={!strategyId || submitSweep.isPending}
+            title="Submit the parameter sweep and jump to the Jobs monitor to watch its progress."
             className="h-9 rounded-md bg-accent px-4 text-sm font-medium text-surface-0 hover:opacity-90 disabled:opacity-50"
           >
             ⚙ Launch sweep

@@ -88,7 +88,11 @@ export function StrategyEditorPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Strategy editor" subtitle="Author the YAML; save auto-bumps the version" />
+      <PageHeader
+        title="Strategy editor"
+        subtitle="Author the YAML; save auto-bumps the version"
+        help="Write your strategy as YAML here; it is validated live against the server, and saving creates a new auto-bumped version."
+      />
 
       {u && (
         <div className="mb-2 rounded-lg border border-ay-border bg-surface-1 p-2 text-sm">
@@ -130,12 +134,13 @@ export function StrategyEditorPage() {
         )}
         <div className="flex-1" />
         {!isNew && (
-          <Select value={bump} options={[...VERSION_BUMPS]} onChange={(v) => setBump(v as VersionBump)} ariaLabel="Version bump" />
+          <Select value={bump} options={[...VERSION_BUMPS]} onChange={(v) => setBump(v as VersionBump)} ariaLabel="Version bump" title="How much to bump the version number when you save (major / minor / patch)." />
         )}
         <button
           type="button"
           onClick={onSave}
           disabled={saveDisabled || save.isPending || create.isPending}
+          title="Save the YAML as a new draft version (disabled while validation is failing)."
           className="h-9 rounded-md bg-accent px-4 text-sm font-medium text-surface-0 hover:opacity-90 disabled:opacity-50"
         >
           {isNew ? 'Create draft' : 'Save draft'}
@@ -153,6 +158,7 @@ export function StrategyEditorPage() {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Strategy name (required)"
                 aria-label="Strategy name"
+                title="A display name for this strategy (required to create it)."
                 className="w-full rounded-md border border-ay-border bg-surface-1 px-2 py-1.5 text-sm text-ay-text"
               />
             </label>

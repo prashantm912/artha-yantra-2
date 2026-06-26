@@ -116,6 +116,7 @@ export function BacktestComparePage() {
         header: 'Rank',
         align: 'center',
         mobileLabel: 'Rank',
+        help: 'Position of the run when ordered by the selected ranking metric (1 = best).',
         sortValue: (row) => row.rank,
         render: (row) =>
           row.rank <= 3 ? (
@@ -137,6 +138,7 @@ export function BacktestComparePage() {
         header: 'Run',
         align: 'left',
         mobileLabel: 'Run',
+        help: 'Short id of the backtest run — the first 8 characters of its run reference.',
         sortValue: (row) => row.id,
         sortType: 'text',
         render: (row) => <span className="font-mono">{row.id.slice(0, 8)}</span>,
@@ -146,6 +148,7 @@ export function BacktestComparePage() {
         header: edgeMetric.label,
         align: 'right',
         mobileLabel: edgeMetric.label,
+        help: 'The value of the selected ranking metric for this run — the number the leaderboard is sorted by.',
         sortValue: (row) => row.score ?? null,
         render: (row) =>
           row.score == null ? '—' : `${formatDecimal(String(row.score), edgeMetric.dp)}${edgeMetric.suffix ?? ''}`,
@@ -179,7 +182,7 @@ export function BacktestComparePage() {
   if (runs.length === 0) {
     return (
       <div>
-        <PageHeader title="Compare backtests" subtitle="Side-by-side metric matrix and normalized equity curves" />
+        <PageHeader title="Compare backtests" subtitle="Side-by-side metric matrix and normalized equity curves" help="Stacks several backtest runs side by side — best metric per row is highlighted, equity curves are rebased to 100 so different capital sizes compare fairly." />
         <p className="text-ay-muted">Add runs to compare (e.g. /backtests/compare?ids=run1,run2).</p>
       </div>
     );
@@ -237,6 +240,7 @@ export function BacktestComparePage() {
             <select
               value={edgeKey}
               onChange={(e) => setEdgeKey(e.target.value as EdgeKey)}
+              title="Choose which metric ranks the leaderboard (e.g. total return, Sharpe, drawdown)."
               className="rounded border border-ay-border bg-surface-1 px-2 py-1 text-ay-text"
             >
               {EDGE_METRICS.map((m) => (

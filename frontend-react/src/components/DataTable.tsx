@@ -16,6 +16,7 @@ import {
 } from '@tanstack/react-table';
 import { ChevronDown, ChevronUp, ChevronsUpDown, Columns3 } from 'lucide-react';
 import { cn } from '../lib/cn.ts';
+import { InfoTip } from './atoms/InfoTip.tsx';
 import { adaptColumns, type AyColumnMeta } from './columnAdapter.ts';
 import { useCenterRowInScroll } from '../lib/scrollToCenter.ts';
 import {
@@ -40,6 +41,9 @@ export type ColumnAlign = 'left' | 'right' | 'center';
 export interface DataColumn<Row> {
   id: string;
   header: string;
+  /** Optional plain-language explanation of this field (#16) — rendered as a focusable ⓘ tooltip
+   *  beside the header. Omit to render the header exactly as today. */
+  help?: string;
   align?: ColumnAlign;
   /** Returns the sort key; a column is sortable iff this is defined. null sorts last either way. */
   sortValue?: (row: Row) => number | string | null;
@@ -307,6 +311,10 @@ export function DataTable<Row>({
                   const sortIndex = col.getSortIndex();
                   const Chevron =
                     sortDir === 'asc' ? ChevronUp : sortDir === 'desc' ? ChevronDown : ChevronsUpDown;
+                  // The header label is a plain string (DataColumn.header) → use it to name the ⓘ
+                  // trigger for screen readers ("Open Interest — help").
+                  const headerText =
+                    typeof col.columnDef.header === 'string' ? col.columnDef.header : undefined;
                   return (
                     <th
                       key={h.id}
@@ -321,23 +329,28 @@ export function DataTable<Row>({
                         meta.headerClassName,
                       )}
                     >
-                      {sortable ? (
-                        <button
-                          type="button"
-                          onClick={col.getToggleSortingHandler()}
-                          className="inline-flex items-center gap-0.5 rounded-sm hover:text-accent focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
-                        >
-                          {flexRender(col.columnDef.header, h.getContext())}
-                          <Chevron aria-hidden="true" className="size-3 text-ay-muted" />
-                          {sorting.length > 1 && sortIndex >= 0 && (
-                            <span aria-hidden="true" className="text-dense text-ay-muted">
-                              {sortIndex + 1}
-                            </span>
-                          )}
-                        </button>
-                      ) : (
-                        flexRender(col.columnDef.header, h.getContext())
-                      )}
+                      {/* header label (+ optional sort affordance) and an optional ⓘ help tooltip
+                          ride together in one inline-flex group so the icon never triggers a sort. */}
+                      <span className="inline-flex items-center gap-1">
+                        {sortable ? (
+                          <button
+                            type="button"
+                            onClick={col.getToggleSortingHandler()}
+                            className="inline-flex items-center gap-0.5 rounded-sm hover:text-accent focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+                          >
+                            {flexRender(col.columnDef.header, h.getContext())}
+                            <Chevron aria-hidden="true" className="size-3 text-ay-muted" />
+                            {sorting.length > 1 && sortIndex >= 0 && (
+                              <span aria-hidden="true" className="text-dense text-ay-muted">
+                                {sortIndex + 1}
+                              </span>
+                            )}
+                          </button>
+                        ) : (
+                          flexRender(col.columnDef.header, h.getContext())
+                        )}
+                        {meta.help && <InfoTip text={meta.help} label={headerText} />}
+                      </span>
                     </th>
                   );
                 })}
@@ -404,7 +417,10 @@ export function DataTable<Row>({
                 const cell = r.getAllCells().find((c) => c.column.id === col.id);
                 return (
                   <div key={col.id} className="flex justify-between gap-2">
-                    <dt className="text-ay-muted">{meta.mobileLabel}</dt>
+                    <dt className="inline-flex items-center gap-1 text-ay-muted">
+                      {meta.mobileLabel}
+                      {meta.help && <InfoTip text={meta.help} label={meta.mobileLabel} />}
+                    </dt>
                     <dd className={cn('tabular-nums', meta.cellClassName?.(r.original))}>
                       {cell && flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </dd>

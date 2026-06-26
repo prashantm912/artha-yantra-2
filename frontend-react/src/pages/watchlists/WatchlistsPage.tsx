@@ -48,7 +48,7 @@ export function WatchlistsPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Watchlists & screener" subtitle="Named instrument lists + the preset screener" />
+      <PageHeader title="Watchlists & screener" subtitle="Named instrument lists + the preset screener" help="Build named lists of instruments to track, and run preset screens that surface instruments matching a rule (e.g. momentum)." />
       <div role="tablist" className="mb-4 flex gap-1 border-b border-ay-border">
         {(['lists', 'screener'] as const).map((t) => (
           <button
@@ -77,11 +77,13 @@ export function WatchlistsPage() {
               onChange={setSelectedId}
               ariaLabel="Watchlist"
               placeholder="Watchlist"
+              title="Pick which watchlist to view and edit."
             />
-            <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="New watchlist name" aria-label="New watchlist name" className={inputCls} />
+            <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="New watchlist name" aria-label="New watchlist name" title="Name for a new watchlist to create." className={inputCls} />
             <button
               type="button"
               onClick={() => newName.trim() && createList.mutate(newName.trim(), { onSuccess: (l) => { setSelectedId(l.id); setNewName(''); } })}
+              title="Create a new watchlist with the entered name."
               className="h-9 rounded-md bg-accent px-3 text-sm font-medium text-surface-0 hover:opacity-90"
             >
               Create
@@ -98,7 +100,7 @@ export function WatchlistsPage() {
               selected ? (
                 <>
                   <div className="relative mb-3 max-w-md">
-                    <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Add instrument…" aria-label="Add instrument" className={`${inputCls} w-full`} />
+                    <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Add instrument…" aria-label="Add instrument" title="Type to search instruments, then click one to add it to this watchlist." className={`${inputCls} w-full`} />
                     {search.trim().length >= 2 && (hits.data?.length ?? 0) > 0 && (
                       <ul className="absolute z-10 mt-1 max-h-64 w-full overflow-auto rounded-md border border-ay-border bg-surface-1 shadow-lg">
                         {(hits.data ?? []).slice(0, 20).map((h) => (
@@ -162,10 +164,11 @@ export function WatchlistsPage() {
       {tab === 'screener' && (
         <>
           <div className="mb-3 flex flex-wrap items-center gap-2">
-            <Select value={preset} options={[...SCREENER_PRESETS]} onChange={setPreset} ariaLabel="Preset" />
+            <Select value={preset} options={[...SCREENER_PRESETS]} onChange={setPreset} ariaLabel="Preset" title="Choose which screening rule to run." />
             <button
               type="button"
               onClick={() => setRunPreset(preset)}
+              title="Run the selected screener preset."
               className="h-9 rounded-md bg-accent px-3 text-sm font-medium text-surface-0 hover:opacity-90"
             >
               Run

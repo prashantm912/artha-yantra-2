@@ -27,7 +27,11 @@ export function NewsPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="News / Announcements" subtitle="Recent stock news (Upstox, last 7 days)" />
+      <PageHeader
+        title="News / Announcements"
+        help="Pulls the last seven days of news headlines for a stock from Upstox so you can scan recent catalysts before trading it."
+        subtitle="Recent stock news (Upstox, last 7 days)"
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <input
@@ -37,6 +41,7 @@ export function NewsPage() {
           onKeyDown={(e) => e.key === 'Enter' && submit()}
           placeholder="Symbol (e.g. RELIANCE)"
           aria-label="Stock symbol"
+          title="Type an NSE stock symbol (e.g. RELIANCE) and press Go to load its recent news"
           className="h-9 w-full sm:w-48 rounded-md border border-ay-border bg-surface-1 px-2 text-sm uppercase text-ay-text outline-none focus:border-accent"
         />
         <GoButton onClick={submit} loading={q.isFetching} />

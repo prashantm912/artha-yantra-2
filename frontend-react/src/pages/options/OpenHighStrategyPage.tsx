@@ -10,6 +10,7 @@ import { PageHeader } from '../../components/PageHeader.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { cn } from '../../lib/cn.ts';
 import { formatDecimal } from '../../lib/decimal.ts';
+import { FIELD_HELP } from '../../core/fieldHelp.ts';
 import type { OpenHighStrategyLeg, OpenHighStrategyStrike } from '../../api/types.ts';
 
 // Open & High Strategy — oipulse §strategies/open-high-strategy (Siva #2). Mirrored CE | Strike | PE
@@ -54,10 +55,10 @@ function ProbabilityCell({ leg }: { leg: OpenHighStrategyLeg | null }) {
 
 /** Symmetric CE | Strike | PE columns: a Call (CE) half, the centre Strike, then a mirrored Put (PE) half. */
 const columns: DataColumn<OpenHighStrategyStrike>[] = [
-  { id: 'ceProb', header: 'Call Prob', render: (r) => <ProbabilityCell leg={r.ce} />, mobileLabel: 'Call Prob' },
-  { id: 'cePattern', header: 'Call O=H', align: 'center', render: (r) => <PatternBadge leg={r.ce} />, mobileLabel: 'Call O=H' },
-  { id: 'ceFall', header: 'Call Fall%', render: (r) => <ValueDeltaCell value={r.ce?.fallPctFromHigh ?? null} suffix="%" />, mobileLabel: 'Call Fall%' },
-  { id: 'ceClose', header: 'Call LTP', render: (r) => dec(r.ce?.latestClose ?? null), mobileLabel: 'Call LTP' },
+  { id: 'ceProb', header: 'Call Prob', render: (r) => <ProbabilityCell leg={r.ce} />, mobileLabel: 'Call Prob', help: 'Historical odds the Call formed the Open=High pattern, over prior captured sessions.' },
+  { id: 'cePattern', header: 'Call O=H', align: 'center', render: (r) => <PatternBadge leg={r.ce} />, mobileLabel: 'Call O=H', help: 'Shows O=H when the Call opened at its session high; "Hit" marks the reversion trade triggering.' },
+  { id: 'ceFall', header: 'Call Fall%', render: (r) => <ValueDeltaCell value={r.ce?.fallPctFromHigh ?? null} suffix="%" />, mobileLabel: 'Call Fall%', help: 'How far the Call has fallen below its session high, in percent — the reversion gauge.' },
+  { id: 'ceClose', header: 'Call LTP', render: (r) => dec(r.ce?.latestClose ?? null), mobileLabel: 'Call LTP', help: FIELD_HELP.ltp },
   {
     id: 'strike',
     header: 'Strike',
@@ -66,11 +67,12 @@ const columns: DataColumn<OpenHighStrategyStrike>[] = [
     sortType: 'decimal',
     render: (r) => <span className="font-semibold text-ay-text">{dec(r.strike)}</span>,
     mobileLabel: 'Strike',
+    help: FIELD_HELP.strike,
   },
-  { id: 'peClose', header: 'Put LTP', render: (r) => dec(r.pe?.latestClose ?? null), mobileLabel: 'Put LTP' },
-  { id: 'peFall', header: 'Put Fall%', render: (r) => <ValueDeltaCell value={r.pe?.fallPctFromHigh ?? null} suffix="%" />, mobileLabel: 'Put Fall%' },
-  { id: 'pePattern', header: 'Put O=L', align: 'center', render: (r) => <PatternBadge leg={r.pe} />, mobileLabel: 'Put O=L' },
-  { id: 'peProb', header: 'Put Prob', render: (r) => <ProbabilityCell leg={r.pe} />, mobileLabel: 'Put Prob' },
+  { id: 'peClose', header: 'Put LTP', render: (r) => dec(r.pe?.latestClose ?? null), mobileLabel: 'Put LTP', help: FIELD_HELP.ltp },
+  { id: 'peFall', header: 'Put Fall%', render: (r) => <ValueDeltaCell value={r.pe?.fallPctFromHigh ?? null} suffix="%" />, mobileLabel: 'Put Fall%', help: 'How far the Put has fallen below its session high, in percent — the reversion gauge.' },
+  { id: 'pePattern', header: 'Put O=L', align: 'center', render: (r) => <PatternBadge leg={r.pe} />, mobileLabel: 'Put O=L', help: 'Shows O=L when the Put opened at its session low; "Hit" marks the reversion trade triggering.' },
+  { id: 'peProb', header: 'Put Prob', render: (r) => <ProbabilityCell leg={r.pe} />, mobileLabel: 'Put Prob', help: 'Historical odds the Put formed the Open=Low pattern, over prior captured sessions.' },
 ];
 
 export function OpenHighStrategyPage() {
@@ -79,7 +81,10 @@ export function OpenHighStrategyPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Open and High Strategy" />
+      <PageHeader
+        title="Open and High Strategy"
+        help="Scans each strike for the premium-reversion setup where a Call opens at its high (or a Put at its low), with the historical hit-rate and how far price has reverted since."
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval />

@@ -47,12 +47,13 @@ export function OiAnalysisPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Options OI Analysis" subtitle="Per-strike intraday CE+PE OI folded onto mirrored time-rows" />
+      <PageHeader title="Options OI Analysis" help="Tracks how call and put OI at one chosen strike has built or unwound through the day, with each time bucket on its own row so you can read the intraday story of that strike." subtitle="Per-strike intraday CE+PE OI folded onto mirrored time-rows" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry allowedIntervals={ANALYSIS_INTERVALS} />
         <Select
           ariaLabel="Strike price"
+          title="Pick the strike whose intraday CE+PE OI you want to inspect (defaults to at-the-money)"
           value={strike}
           options={strikes}
           onChange={setStrike}

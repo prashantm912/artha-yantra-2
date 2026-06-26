@@ -112,17 +112,18 @@ export function OptionsPremiumPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Options Premium" subtitle="Grouped Call/Put premium bars per strike around ATM — extrinsic value or raw LTP" />
+      <PageHeader title="Options Premium" help="Bars the call and put premium at each strike around at-the-money — by default the extrinsic (time) value, with a toggle for raw price — so you can see where the market is pricing the most expectation." subtitle="Grouped Call/Put premium bars per strike around ATM — extrinsic value or raw LTP" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval={false} />
         <Select
           ariaLabel="Show strikes"
+          title="How many strikes around at-the-money to plot"
           value={win}
           options={[...WINDOWS]}
           onChange={(v) => setWin(v as Window)}
         />
-        <label className="flex items-center gap-1 text-sm text-ay-text">
+        <label className="flex items-center gap-1 text-sm text-ay-text" title="Plot raw option price instead of extrinsic (time) value">
           <input type="checkbox" checked={showLtp} onChange={(e) => setShowLtp(e.target.checked)} />
           Show LTP
         </label>

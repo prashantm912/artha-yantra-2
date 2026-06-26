@@ -42,12 +42,16 @@ export function OptionsOiChartPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Options OI chart" />
+      <PageHeader
+        title="Options OI chart"
+        help="Charts one strike's Call and Put open interest against its option price through the session — read OI rising with price as fresh positions and OI falling as positions being closed."
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry allowedIntervals={ANALYSIS_INTERVALS} />
         <Select
           ariaLabel="Strike price"
+          title="Strike to chart (defaults to at-the-money)"
           value={strike}
           options={strikes}
           onChange={setStrike}

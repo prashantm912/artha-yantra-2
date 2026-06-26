@@ -208,7 +208,7 @@ export function BacktestResultsPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Backtest results" subtitle={headerSubtitle} />
+      <PageHeader title="Backtest results" subtitle={headerSubtitle} help="Full report for one backtest run — headline metrics, equity and drawdown curves, every trade, walk-forward folds, Monte Carlo, and OI-confluence attribution." />
       <QueryState
         query={results}
         empty={{ title: 'No results.' }}
@@ -441,6 +441,7 @@ export function BacktestResultsPage() {
                 value={oiInterval}
                 onChange={(e) => setOiInterval(e.target.value)}
                 aria-label="OI attribution interval"
+                title="Candle interval used to read the OI-confluence trend at each trade's entry."
                 className="rounded-md border border-ay-border bg-surface-1 px-2 py-1 text-sm text-ay-text"
               >
                 {OI_INTERVALS.map((iv) => (

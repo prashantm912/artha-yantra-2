@@ -12,6 +12,7 @@ import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
+import { FIELD_HELP } from '../../core/fieldHelp.ts';
 
 // Futures OI Spurt (oipulse §futures/oi-spurt): the 2×2 OI scanner — every captured futures contract
 // bucketed by its 4-state interpretation, each quadrant a sortable, paginated (8) table. Off the
@@ -37,14 +38,14 @@ const QUADRANTS: Quadrant[] = [
 const num = (n: number) => n.toLocaleString('en-IN');
 
 const COLUMNS: DataColumn<FutSpurt>[] = [
-  { id: 'name', header: 'Name', align: 'left', sortValue: (r) => r.tradingsymbol, sortType: 'text', render: (r) => r.tradingsymbol, mobileLabel: 'Name' },
-  { id: 'ltp', header: 'LTP', sortValue: (r) => r.ltp, sortType: 'decimal', render: (r) => (r.ltp ? formatDecimal(r.ltp, 2) : '—'), mobileLabel: 'LTP' },
-  { id: 'prev', header: 'Prev. Close', sortValue: (r) => r.prevClose, sortType: 'decimal', render: (r) => (r.prevClose ? formatDecimal(r.prevClose, 2) : '—'), cellClassName: () => 'text-ay-muted' },
-  { id: 'ltpPct', header: 'LTP Chg %', sortValue: (r) => r.pricePct, sortType: 'decimal', render: (r) => <ValueDeltaCell value={r.pricePct} suffix="%" />, mobileLabel: 'LTP %' },
-  { id: 'oiPct', header: 'OI Chg %', sortValue: (r) => r.spurtPct, sortType: 'decimal', render: (r) => <ValueDeltaCell value={r.spurtPct} suffix="%" />, mobileLabel: 'OI %' },
-  { id: 'newOi', header: 'New OI', sortValue: (r) => r.oi, render: (r) => num(r.oi) },
-  { id: 'oldOi', header: 'Old OI', sortValue: (r) => r.oi - r.oiChange, render: (r) => <span className="text-ay-muted">{num(r.oi - r.oiChange)}</span> },
-  { id: 'oiChg', header: 'OI Chg.', sortValue: (r) => r.oiChange, render: (r) => <SignedCount value={r.oiChange} />, mobileLabel: 'OI Chg' },
+  { id: 'name', header: 'Name', align: 'left', sortValue: (r) => r.tradingsymbol, sortType: 'text', render: (r) => r.tradingsymbol, mobileLabel: 'Name', help: 'The futures contract trading symbol.' },
+  { id: 'ltp', header: 'LTP', sortValue: (r) => r.ltp, sortType: 'decimal', render: (r) => (r.ltp ? formatDecimal(r.ltp, 2) : '—'), mobileLabel: 'LTP', help: FIELD_HELP.ltp },
+  { id: 'prev', header: 'Prev. Close', sortValue: (r) => r.prevClose, sortType: 'decimal', render: (r) => (r.prevClose ? formatDecimal(r.prevClose, 2) : '—'), cellClassName: () => 'text-ay-muted', help: FIELD_HELP.prevClose },
+  { id: 'ltpPct', header: 'LTP Chg %', sortValue: (r) => r.pricePct, sortType: 'decimal', render: (r) => <ValueDeltaCell value={r.pricePct} suffix="%" />, mobileLabel: 'LTP %', help: FIELD_HELP.changePct },
+  { id: 'oiPct', header: 'OI Chg %', sortValue: (r) => r.spurtPct, sortType: 'decimal', render: (r) => <ValueDeltaCell value={r.spurtPct} suffix="%" />, mobileLabel: 'OI %', help: FIELD_HELP.oiChangePct },
+  { id: 'newOi', header: 'New OI', sortValue: (r) => r.oi, render: (r) => num(r.oi), help: 'Open Interest at the latest reading — the current outstanding contracts.' },
+  { id: 'oldOi', header: 'Old OI', sortValue: (r) => r.oi - r.oiChange, render: (r) => <span className="text-ay-muted">{num(r.oi - r.oiChange)}</span>, help: 'Open Interest at the prior reading — the baseline the change is measured against.' },
+  { id: 'oiChg', header: 'OI Chg.', sortValue: (r) => r.oiChange, render: (r) => <SignedCount value={r.oiChange} />, mobileLabel: 'OI Chg', help: FIELD_HELP.oiChange },
 ];
 
 export function FuturesOiSpurtPage() {
@@ -70,6 +71,7 @@ export function FuturesOiSpurtPage() {
       <PageHeader
         title="Futures OI Spurt"
         subtitle="Every captured futures contract bucketed by its 4-state OI interpretation"
+        help="Sorts every captured futures contract into four OI-action quadrants (long buildup, short buildup, short covering, long unwinding) so you can spot where fresh positions are being added or unwound."
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -80,6 +82,7 @@ export function FuturesOiSpurtPage() {
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search symbol"
           aria-label="Search symbol"
+          title="Filter the quadrants to contracts whose symbol contains this text"
           className="h-9 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text outline-none focus:border-accent"
         />
         <GoButton onClick={() => q.refetch()} loading={q.isFetching} />

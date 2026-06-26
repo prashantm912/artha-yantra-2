@@ -14,6 +14,7 @@ import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
+import { FIELD_HELP } from '../../core/fieldHelp.ts';
 
 // Futures OI Analysis (oipulse §futures/oi-analysis): the per-interval OI table for ONE futures contract
 // — descending intervals, each row carrying Total OI / cum ΔOI / day H-L / level break / interval volume /
@@ -54,25 +55,28 @@ export function FuturesOiAnalysisPage() {
       sortType: 'text',
       render: (r) => bucketWindow(r.bucket, intervalMinutes),
       mobileLabel: 'Time',
+      help: 'The intraday interval window this row covers.',
     },
-    { id: 'oi', header: 'Total OI', sortValue: (r) => r.totalOi, render: (r) => num(r.totalOi), mobileLabel: 'Total OI' },
+    { id: 'oi', header: 'Total OI', sortValue: (r) => r.totalOi, render: (r) => num(r.totalOi), mobileLabel: 'Total OI', help: FIELD_HELP.oi },
     {
       id: 'cumOi',
       header: 'Total Chng. In OI',
       sortValue: (r) => r.totalChngInOi,
       render: (r) => <SignedCount value={r.totalChngInOi} />,
       mobileLabel: 'Chng OI',
+      help: 'Cumulative change in OI since the session start — the running net positions added or closed today.',
     },
-    { id: 'high', header: 'Day High', sortValue: (r) => r.dayHigh, sortType: 'decimal', render: (r) => dec(r.dayHigh) },
-    { id: 'low', header: 'Day Low', sortValue: (r) => r.dayLow, sortType: 'decimal', render: (r) => dec(r.dayLow) },
-    { id: 'break', header: 'Level Break', align: 'center', render: (r) => <BreakBadge row={r} /> },
-    { id: 'vol', header: 'Volume', sortValue: (r) => r.volume, render: (r) => num(r.volume), mobileLabel: 'Vol' },
-    { id: 'ltp', header: 'LTP', sortValue: (r) => r.ltp, sortType: 'decimal', render: (r) => dec(r.ltp), mobileLabel: 'LTP' },
+    { id: 'high', header: 'Day High', sortValue: (r) => r.dayHigh, sortType: 'decimal', render: (r) => dec(r.dayHigh), help: FIELD_HELP.high },
+    { id: 'low', header: 'Day Low', sortValue: (r) => r.dayLow, sortType: 'decimal', render: (r) => dec(r.dayLow), help: FIELD_HELP.low },
+    { id: 'break', header: 'Level Break', align: 'center', render: (r) => <BreakBadge row={r} />, help: "Flags when this interval broke the session's high (D.H.B, bullish) or low (D.L.B, bearish), with the broken level." },
+    { id: 'vol', header: 'Volume', sortValue: (r) => r.volume, render: (r) => num(r.volume), mobileLabel: 'Vol', help: FIELD_HELP.volume },
+    { id: 'ltp', header: 'LTP', sortValue: (r) => r.ltp, sortType: 'decimal', render: (r) => dec(r.ltp), mobileLabel: 'LTP', help: FIELD_HELP.ltp },
     {
       id: 'ltpChg',
       header: 'LTP Change',
       render: (r) => <ValueDeltaCell value={r.ltpChange} />,
       mobileLabel: 'LTP Chg',
+      help: 'Price change over this interval versus the prior interval.',
     },
     {
       id: 'oiChg',
@@ -80,6 +84,7 @@ export function FuturesOiAnalysisPage() {
       sortValue: (r) => r.oiChange,
       render: (r) => <SignedCount value={r.oiChange} />,
       mobileLabel: 'OI Chg',
+      help: FIELD_HELP.oiChange,
     },
     {
       id: 'interp',
@@ -87,6 +92,7 @@ export function FuturesOiAnalysisPage() {
       align: 'center',
       render: (r) => <OiBadge4 value={r.interpretation} full />,
       mobileLabel: 'OI Int',
+      help: FIELD_HELP.oiInterpretation,
     },
   ];
 
@@ -95,6 +101,7 @@ export function FuturesOiAnalysisPage() {
       <PageHeader
         title="Futures OI Analysis"
         subtitle="Per-interval OI, level breaks and 4-state interpretation for one futures contract"
+        help="Breaks one futures contract's session into intervals, each row showing total OI, the cumulative OI change, any high/low break and the OI action — to read intraday positioning as it builds."
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">

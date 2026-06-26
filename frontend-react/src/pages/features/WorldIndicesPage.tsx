@@ -2,12 +2,14 @@ import { useMemo } from 'react';
 import { Globe, TrendingDown, TrendingUp } from 'lucide-react';
 import { useWorldIndices } from '../../api/worldIndices.ts';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
+import { WorldIndicesMap } from '../../components/WorldIndicesMap.tsx';
 import { PageHeader, LiveDot } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { cn } from '../../lib/cn.ts';
 import { compareDecimal, formatDecimal, isNegative } from '../../lib/decimal.ts';
+import { FIELD_HELP } from '../../core/fieldHelp.ts';
 import type { WorldIndex } from '../../api/types.ts';
 
 // World Indices (§features/world-indices). A sortable, read-only table of Upstox global indices (+ a
@@ -54,6 +56,7 @@ export function WorldIndicesPage() {
         header: 'Index',
         align: 'left',
         pin: 'left',
+        help: 'The global stock-market index (e.g. S&P 500, Nikkei 225, FTSE 100).',
         sortValue: (r) => r.name,
         sortType: 'text',
         render: (r) => (
@@ -68,6 +71,7 @@ export function WorldIndicesPage() {
         id: 'country',
         header: 'Country',
         align: 'left',
+        help: 'The country the index belongs to.',
         sortValue: (r) => r.country ?? '',
         sortType: 'text',
         render: (r) => r.country ?? '—',
@@ -77,6 +81,7 @@ export function WorldIndicesPage() {
         id: 'ltp',
         header: 'LTP',
         align: 'right',
+        help: FIELD_HELP.ltp,
         sortValue: (r) => r.ltp,
         sortType: 'decimal',
         render: (r) => (r.ltp == null ? <span className="text-ay-muted">—</span> : <span className="nums">{formatDecimal(r.ltp, 2)}</span>),
@@ -86,6 +91,7 @@ export function WorldIndicesPage() {
         id: 'netChange',
         header: 'Net Chg',
         align: 'right',
+        help: FIELD_HELP.netChange,
         sortValue: (r) => r.netChange,
         sortType: 'decimal',
         render: (r) => <ChangeCell value={r.netChange} />,
@@ -95,6 +101,7 @@ export function WorldIndicesPage() {
         id: 'changePct',
         header: '% Chg',
         align: 'right',
+        help: FIELD_HELP.changePct,
         sortValue: (r) => r.changePct,
         sortType: 'decimal',
         render: (r) => <ChangeCell value={r.changePct} suffix="%" />,
@@ -104,6 +111,7 @@ export function WorldIndicesPage() {
         id: 'asOf',
         header: 'As Of',
         align: 'right',
+        help: 'The timestamp of the latest quote for this index (global feeds carry a publication delay).',
         sortValue: (r) => r.asOf,
         sortType: 'text',
         render: (r) => <span className="nums text-ay-muted">{asOfClock(r.asOf) ?? '—'}</span>,
@@ -118,6 +126,7 @@ export function WorldIndicesPage() {
       <PageHeader
         title="World Indices"
         subtitle="Global index live quotes from Upstox — net change and %change are sign-aware (green up, red down)"
+        help="Live quotes for the major global stock indices. The map plots each index at its home country (green up, red down, bubble size by move); the table below has the exact numbers. Global feeds carry a publication delay, so quotes lag the live market."
         right={<LiveDot detail={asOfClock(asOf)} />}
       />
 
@@ -128,17 +137,22 @@ export function WorldIndicesPage() {
         skeleton={<Skeleton variant="table-rows" rows={12} cols={6} />}
       >
         {() => (
-          <BeatBlock>
-            <DataTable
-              columns={columns}
-              rows={rows}
-              rowKey={(r) => r.key}
-              pageSize={50}
-              initialSort={{ id: 'changePct', dir: 'desc' }}
-              emptyMessage="No world-index quotes available."
-              ariaLabel="World indices live quotes"
-            />
-          </BeatBlock>
+          <div className="space-y-3">
+            <BeatBlock className="card shadow-e1">
+              <WorldIndicesMap rows={rows} />
+            </BeatBlock>
+            <BeatBlock>
+              <DataTable
+                columns={columns}
+                rows={rows}
+                rowKey={(r) => r.key}
+                pageSize={50}
+                initialSort={{ id: 'changePct', dir: 'desc' }}
+                emptyMessage="No world-index quotes available."
+                ariaLabel="World indices live quotes"
+              />
+            </BeatBlock>
+          </div>
         )}
       </QueryState>
     </LoadBeat>

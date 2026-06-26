@@ -153,7 +153,7 @@ export function SweepDetailPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Sweep explorer" subtitle="Guard-aware leaderboard, trial scatter and promote-to-draft" />
+      <PageHeader title="Sweep explorer" subtitle="Guard-aware leaderboard, trial scatter and promote-to-draft" help="Shows every parameter combination an optimization sweep tried, ranked on the leaderboard so you can spot the best trial and promote it to a new strategy draft." />
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <strong>Sweep {sweepId.slice(0, 8)}</strong>
         <span className="tabular-nums text-sm text-ay-muted">{trialRows.length} trials</span>
@@ -164,6 +164,7 @@ export function SweepDetailPage() {
               key={s}
               type="button"
               onClick={() => setSort(s)}
+              title={s === 'plateau' ? 'Rank by plateau-robust objective (params that hold up across nearby values)' : 'Rank by the raw single-best objective value'}
               className={cn('px-3 py-1.5 capitalize', sort === s ? 'bg-accent text-surface-0' : 'text-ay-text hover:bg-surface-2')}
             >
               {s}
@@ -208,6 +209,7 @@ export function SweepDetailPage() {
                   <button
                     type="button"
                     onClick={() => setFoldsTrial(row.trialNumber)}
+                    title="Break this trial's out-of-sample results down by walk-forward fold and regime"
                     className="px-1.5 text-xs text-accent hover:underline"
                     aria-label={`Fold drill-down for trial ${row.trialNumber}`}
                   >
@@ -217,6 +219,7 @@ export function SweepDetailPage() {
                     <button
                       type="button"
                       onClick={() => navigate(`/backtests/${row.backtestRunId}`)}
+                      title="Open the full backtest results for this trial"
                       className="px-1.5 text-xs text-accent hover:underline"
                     >
                       Results
@@ -225,6 +228,7 @@ export function SweepDetailPage() {
                   <button
                     type="button"
                     onClick={() => setPromoteRow(row)}
+                    title="Apply this trial's parameter values onto the source strategy as a new draft"
                     className="px-1.5 text-xs text-accent hover:underline"
                   >
                     Promote

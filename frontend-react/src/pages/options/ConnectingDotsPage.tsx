@@ -33,7 +33,10 @@ export function ConnectingDotsPage() {
 
   return (
     <div>
-      <PageHeader title="Connecting Dots" />
+      <PageHeader
+        title="Connecting Dots"
+        help="A per-interval grid of OI, price, IV and breadth factors for an index — each cell leans bullish or bearish, and agreement across factors is the conviction signal."
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry={false} names={INDICES} allowedIntervals={CD_INTERVALS} />

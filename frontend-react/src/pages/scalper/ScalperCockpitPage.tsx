@@ -21,6 +21,7 @@ import { optionExchange, useOptionChain, type ChainLeg } from '../../api/scalper
 import { useLiveTicks } from '../../api/ticks.ts';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
+import { FIELD_HELP } from '../../core/fieldHelp.ts';
 
 // /scalper (master plan §20 / Phase 4b): the scalper cockpit — live ACTIVE signal feed (left), a
 // pre-filled PAPER order ticket (middle; click a signal to load it, or enter an instrument manually),
@@ -97,6 +98,7 @@ export function ScalperCockpitPage() {
     {
       id: 'instrument',
       header: 'Instrument',
+      help: 'The exchange and trading symbol of the open paper position.',
       align: 'left',
       sortValue: (p) => `${p.exchange}:${p.tradingsymbol}`,
       sortType: 'text',
@@ -112,6 +114,7 @@ export function ScalperCockpitPage() {
     {
       id: 'side',
       header: 'Side',
+      help: 'Whether you are long (BUY) or short (SELL) this position.',
       align: 'left',
       sortValue: (p) => p.side,
       sortType: 'text',
@@ -126,6 +129,7 @@ export function ScalperCockpitPage() {
     {
       id: 'qty',
       header: 'Qty',
+      help: 'Number of units (lots × lot size) held in this position.',
       sortValue: (p) => p.qty,
       sortType: 'number',
       render: (p) => p.qty,
@@ -134,6 +138,7 @@ export function ScalperCockpitPage() {
     {
       id: 'mark',
       header: 'Mark',
+      help: FIELD_HELP.ltp,
       sortValue: (p) => mtm(p).mark ?? null,
       sortType: 'decimal',
       render: (p) => {
@@ -145,6 +150,7 @@ export function ScalperCockpitPage() {
     {
       id: 'upnl',
       header: 'uP&L',
+      help: 'Unrealised profit or loss — the open gain/loss at the current mark, before you close the position.',
       sortValue: (p) => mtm(p).unrealized ?? null,
       sortType: 'decimal',
       render: (p) => {
@@ -160,6 +166,7 @@ export function ScalperCockpitPage() {
     {
       id: 'sltp',
       header: 'SL / TP',
+      help: 'Stop-loss and take-profit levels — the auto-exit prices that close the position if hit.',
       headerClassName: 'whitespace-nowrap',
       render: (p) => (
         <span className="text-xs text-ay-muted">
@@ -171,6 +178,7 @@ export function ScalperCockpitPage() {
     {
       id: 'actions',
       header: 'Actions',
+      help: 'Close simulates exiting the position at the current mark — paper only, never a live broker order.',
       headerClassName: 'ay-sr-only',
       render: (p) => (
         <button
@@ -230,7 +238,7 @@ export function ScalperCockpitPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Scalper cockpit" subtitle="Live signals · pre-filled paper order ticket · open positions & P&L — paper only, never a live broker order" />
+      <PageHeader title="Scalper cockpit" subtitle="Live signals · pre-filled paper order ticket · open positions & P&L — paper only, never a live broker order" help="Trade scalps from one screen: click a live signal on the left to pre-fill the paper ticket, place it, and watch your open positions and P&L update live on the right — all simulated, never a real broker order." />
       <BeatBlock className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1fr_1.2fr]">
         {/* Live signals */}
         <section className="min-w-0">
@@ -282,8 +290,8 @@ export function ScalperCockpitPage() {
           {qpOpen && (
             <div className="mb-3 rounded-lg border border-ay-border bg-surface-1 p-2">
               <div className="mb-2 flex flex-wrap items-center gap-2">
-                <Select value={underlying} options={underlyings.data ?? [underlying]} onChange={(v) => { setUnderlying(v); setExpiry(null); }} ariaLabel="Underlying" />
-                <Select value={expiry} options={expiries.data ?? []} onChange={(v) => setExpiry(v || null)} ariaLabel="Expiry" placeholder="nearest" />
+                <Select value={underlying} options={underlyings.data ?? [underlying]} onChange={(v) => { setUnderlying(v); setExpiry(null); }} ariaLabel="Underlying" title="Pick the index/stock whose option chain you want to pick a strike from" />
+                <Select value={expiry} options={expiries.data ?? []} onChange={(v) => setExpiry(v || null)} ariaLabel="Expiry" placeholder="nearest" title="Choose the contract expiry; blank uses the nearest expiry" />
                 {chain.data?.spot && <span className="text-xs text-ay-muted">spot {money(chain.data.spot)}</span>}
               </div>
               <div className="max-h-56 overflow-auto rounded border border-ay-border">
@@ -299,13 +307,13 @@ export function ScalperCockpitPage() {
                     {(chain.data?.rows ?? []).map((r) => (
                       <tr key={r.strike} className="border-t border-ay-border">
                         <td className="px-1 py-0.5">
-                          <button type="button" onClick={() => pickLeg(r.ce)} className="w-full rounded px-1 py-0.5 text-left tabular-nums text-bull hover:bg-surface-2">
+                          <button type="button" onClick={() => pickLeg(r.ce)} title="Load this call (CE) strike into the order ticket" className="w-full rounded px-1 py-0.5 text-left tabular-nums text-bull hover:bg-surface-2">
                             {r.ce.ltp ? money(r.ce.ltp) : '—'}
                           </button>
                         </td>
                         <td className="px-2 py-0.5 text-center tabular-nums font-semibold">{money(r.strike)}</td>
                         <td className="px-1 py-0.5">
-                          <button type="button" onClick={() => pickLeg(r.pe)} className="w-full rounded px-1 py-0.5 text-right tabular-nums text-bear hover:bg-surface-2">
+                          <button type="button" onClick={() => pickLeg(r.pe)} title="Load this put (PE) strike into the order ticket" className="w-full rounded px-1 py-0.5 text-right tabular-nums text-bear hover:bg-surface-2">
                             {r.pe.ltp ? money(r.pe.ltp) : '—'}
                           </button>
                         </td>
@@ -338,6 +346,7 @@ export function ScalperCockpitPage() {
                 onChange={(e) => setTicket((t) => ({ ...t, instrument: e.target.value, signalId: null }))}
                 placeholder="NSE:RELIANCE"
                 aria-label="Instrument"
+                title="The instrument to trade, as EXCHANGE:SYMBOL (e.g. NSE:RELIANCE)"
                 className={inputCls}
               />
             </label>
@@ -349,25 +358,26 @@ export function ScalperCockpitPage() {
                   options={['BUY', 'SELL']}
                   onChange={(v) => setTicket((t) => ({ ...t, side: v as 'BUY' | 'SELL' }))}
                   ariaLabel="Side"
+                  title="BUY to go long, SELL to go short"
                 />
               </div>
               <label className="flex flex-col gap-1">
                 <span className="text-xs text-ay-muted">Qty</span>
-                <input type="number" min={1} value={ticket.qty} onChange={(e) => setTicket((t) => ({ ...t, qty: e.target.value }))} aria-label="Qty" className={inputCls} />
+                <input type="number" min={1} value={ticket.qty} onChange={(e) => setTicket((t) => ({ ...t, qty: e.target.value }))} aria-label="Qty" title="Number of units to trade (lots × lot size)" className={inputCls} />
               </label>
               <label className="flex flex-col gap-1">
                 <span className="text-xs text-ay-muted">Price (blank=mkt)</span>
-                <input value={ticket.price} onChange={(e) => setTicket((t) => ({ ...t, price: e.target.value }))} aria-label="Price" className={inputCls} />
+                <input value={ticket.price} onChange={(e) => setTicket((t) => ({ ...t, price: e.target.value }))} aria-label="Price" title="Limit price for the fill; leave blank to fill at market" className={inputCls} />
               </label>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <label className="flex flex-col gap-1">
                 <span className="text-xs text-ay-muted">Stop loss (auto-exit)</span>
-                <input value={ticket.sl} onChange={(e) => setTicket((t) => ({ ...t, sl: e.target.value }))} aria-label="Stop loss" placeholder="none" className={inputCls} />
+                <input value={ticket.sl} onChange={(e) => setTicket((t) => ({ ...t, sl: e.target.value }))} aria-label="Stop loss" placeholder="none" title="Price at which the position auto-exits to cap your loss; blank for none" className={inputCls} />
               </label>
               <label className="flex flex-col gap-1">
                 <span className="text-xs text-ay-muted">Take profit (auto-exit)</span>
-                <input value={ticket.tp} onChange={(e) => setTicket((t) => ({ ...t, tp: e.target.value }))} aria-label="Take profit" placeholder="none" className={inputCls} />
+                <input value={ticket.tp} onChange={(e) => setTicket((t) => ({ ...t, tp: e.target.value }))} aria-label="Take profit" placeholder="none" title="Price at which the position auto-exits to lock in your gain; blank for none" className={inputCls} />
               </label>
             </div>
             {scalperDetail && (

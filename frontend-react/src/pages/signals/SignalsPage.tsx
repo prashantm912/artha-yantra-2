@@ -74,7 +74,7 @@ export function SignalsPage() {
   return (
     <LoadBeat>
       <div className="flex h-full flex-col">
-      <PageHeader title="Live signals" subtitle="Live feed + history — click a row for the per-indicator reasoning breakdown" />
+      <PageHeader title="Live signals" subtitle="Live feed + history — click a row for the per-indicator reasoning breakdown" help="Shows your strategies' buy/sell calls as they fire plus past ones; click any row to see why the signal triggered and take or dismiss it." />
       <BeatBlock className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[1.4fr_minmax(20rem,1fr)]">
       <section className="min-w-0">
         <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -84,11 +84,13 @@ export function SignalsPage() {
             onChange={(v) => setStatus(v || null)}
             ariaLabel="Status filter"
             placeholder="All statuses"
+            title="Filter the feed to signals that are still active, already taken, or dismissed."
           />
           {status && (
             <button
               type="button"
               onClick={() => setStatus(null)}
+              title="Clear the status filter and show signals of every status."
               className="h-9 rounded-md border border-ay-border px-3 text-sm text-ay-muted hover:border-accent"
             >
               Clear
@@ -98,6 +100,7 @@ export function SignalsPage() {
             type="button"
             onClick={() => q.refetch()}
             disabled={q.isFetching}
+            title="Re-fetch the signal feed from the server right now."
             className="h-9 rounded-md border border-ay-border px-3 text-sm text-ay-text hover:border-accent disabled:opacity-50"
           >
             {q.isFetching ? '…' : '↻ Reload'}
@@ -191,6 +194,7 @@ export function SignalsPage() {
                 type="button"
                 onClick={() => take.mutate({ id: selected.id, qty: takenQty(selected) })}
                 disabled={take.isPending || takeBlocked}
+                title="Mark this signal as acted on, recording it at the suggested quantity."
                 className="rounded-md bg-bull/15 px-3 py-1.5 text-sm font-medium text-bull ring-1 ring-bull/40 hover:bg-bull/25 disabled:opacity-50"
               >
                 ✓ Taken
@@ -199,6 +203,7 @@ export function SignalsPage() {
                 type="button"
                 onClick={() => dismiss.mutate(selected.id)}
                 disabled={dismiss.isPending}
+                title="Discard this signal so it drops out of the active feed."
                 className="rounded-md bg-bear/15 px-3 py-1.5 text-sm font-medium text-bear ring-1 ring-bear/40 hover:bg-bear/25 disabled:opacity-50"
               >
                 ✕ Dismiss

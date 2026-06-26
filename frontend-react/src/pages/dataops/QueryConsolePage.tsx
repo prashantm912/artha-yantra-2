@@ -62,7 +62,10 @@ export function QueryConsolePage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Query / Scan console" />
+      <PageHeader
+        title="Query / Scan console"
+        help="Run read-only SQL against the market-data tables to inspect backfilled candles and contracts; pick a preset or write your own SELECT, then Run or download the results as CSV."
+      />
 
       <div className="grid gap-3 md:grid-cols-[14rem_1fr]">
         {/* Left: preset list */}
@@ -99,6 +102,7 @@ export function QueryConsolePage() {
               <input
                 id="row-limit"
                 type="number"
+                title="Maximum number of rows to return in the on-screen results grid (1–1000)"
                 min={ROW_LIMIT_MIN}
                 max={ROW_LIMIT_MAX}
                 value={rowLimit}
@@ -111,6 +115,7 @@ export function QueryConsolePage() {
               type="button"
               onClick={run}
               disabled={busy}
+              title="Execute the SQL above and show the results below (also Cmd/Ctrl+Enter in the editor)"
               className="rounded-md bg-accent px-3 py-1.5 text-sm text-surface-0 hover:opacity-90 disabled:opacity-50"
             >
               {busy ? 'Running…' : 'Run'}
@@ -119,6 +124,7 @@ export function QueryConsolePage() {
             <button
               type="button"
               onClick={download}
+              title="Download the full query result as a CSV file (not limited by the row-limit above)"
               className="rounded-md border border-ay-border bg-surface-1 px-3 py-1.5 text-sm text-ay-text hover:border-accent"
             >
               Download CSV

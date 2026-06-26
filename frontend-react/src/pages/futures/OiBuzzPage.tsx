@@ -9,6 +9,7 @@ import { DateInput } from '../../components/atoms/DateInput.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { InfoTip } from '../../components/atoms/InfoTip.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
@@ -155,6 +156,7 @@ export function OiBuzzPage() {
       <PageHeader
         title="Futures OI Buzz"
         subtitle="Index-constituent heatmap — tile size and colour ∝ near-month future % change"
+        help="A heatmap of an index's constituent futures — each tile sized and coloured by its % change (green up, red down), so you can scan sector strength at a glance."
       />
 
       <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -164,6 +166,7 @@ export function OiBuzzPage() {
           onChange={setIndex}
           ariaLabel="Index"
           placeholder="Index…"
+          title="Pick the index whose constituents to display in the heatmap"
         />
         <input
           type="search"
@@ -171,9 +174,10 @@ export function OiBuzzPage() {
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search symbol…"
           aria-label="Search symbol"
+          title="Filter the heatmap to constituents whose symbol contains this text"
           className="h-9 w-full sm:w-40 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text outline-none focus:border-accent"
         />
-        <DateInput ariaLabel="Date" value={date} onChange={setPicked} />
+        <DateInput ariaLabel="Date" value={date} onChange={setPicked} title="Pick the trading session to show — defaults to the last trading day" />
         <GoButton onClick={() => void q.refetch()} loading={q.isFetching} />
         {data && (
           <span className="ml-auto text-sm">
@@ -184,8 +188,12 @@ export function OiBuzzPage() {
         )}
       </div>
 
-      <p className="mb-2 text-xs text-ay-muted">
+      <p className="mb-2 flex items-center gap-1 text-xs text-ay-muted">
         Oi Buzz (Change in % wise) · tile size + colour ∝ near-month future % change
+        <InfoTip
+          text="Bigger, brighter tiles are the larger movers; green is up and red is down — hover a tile for its OHLC, LTP and OI."
+          label="OI Buzz heatmap"
+        />
       </p>
 
       <QueryState

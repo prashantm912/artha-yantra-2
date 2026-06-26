@@ -74,7 +74,10 @@ export function CollectionWizardPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Collection Wizard" />
+      <PageHeader
+        title="Collection Wizard"
+        help="A guided four-step setup that kicks off the expired-contract backfill: pick the indices and date range, confirm the fixed options/futures settings, then start the job."
+      />
 
       <div className="mx-auto max-w-2xl space-y-4">
         <Stepper steps={STEPS} current={step} />
@@ -98,6 +101,7 @@ export function CollectionWizardPage() {
                 <input
                   id="backfill-from"
                   type="date"
+                  title="Earliest date to collect contract history from (must be on or before the To date)"
                   value={from}
                   max={to}
                   onChange={(e) => setFrom(e.target.value)}
@@ -111,6 +115,7 @@ export function CollectionWizardPage() {
                 <input
                   id="backfill-to"
                   type="date"
+                  title="Latest date to collect contract history up to (must be on or after the From date)"
                   value={to}
                   min={from}
                   onChange={(e) => setTo(e.target.value)}
@@ -129,6 +134,7 @@ export function CollectionWizardPage() {
                 <input
                   type="checkbox"
                   className="accent-accent"
+                  title="Re-download contracts even if they're already marked complete (slower; use to repair suspect data)"
                   checked={force}
                   onChange={(e) => setForce(e.target.checked)}
                 />

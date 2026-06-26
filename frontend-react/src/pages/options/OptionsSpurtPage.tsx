@@ -56,7 +56,7 @@ export function OptionsSpurtPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Options OI Spurt" subtitle="4-quadrant OI-action scanner — every CE/PE strike bucketed by its interval interpretation" />
+      <PageHeader title="Options OI Spurt" help="Sorts every call and put strike into four OI-action buckets — Long Build Up, Short Build Up, Short Unwinding, Long Unwinding — so you can see at a glance where money is entering or exiting." subtitle="4-quadrant OI-action scanner — every CE/PE strike bucketed by its interval interpretation" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry />
@@ -66,6 +66,7 @@ export function OptionsSpurtPage() {
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search strike"
           aria-label="Search strike"
+          title="Filter all four quadrants to strikes containing this number"
           className="h-9 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text outline-none focus:border-accent"
         />
         <GoButton onClick={() => spurtQ.refetch()} loading={spurtQ.isFetching} />

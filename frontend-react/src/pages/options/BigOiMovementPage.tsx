@@ -15,6 +15,7 @@ import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { compareDecimal, formatDecimal } from '../../lib/decimal.ts';
 import { nearestStrike } from '../../lib/strikes.ts';
 import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
+import { FIELD_HELP } from '../../core/fieldHelp.ts';
 
 // Big OI Movement (oipulse §options/big-oi-movement): the biggest OI-change strikes, split CE | PE,
 // tagged by moneyness + OI interpretation. The faithful columns need per-leg ΔLTP + interpretation
@@ -56,25 +57,26 @@ export function BigOiMovementPage() {
   const time = asOf ? asOf.slice(11, 16) : '—';
 
   const columns = (side: 'CE' | 'PE'): DataColumn<SpurtRow>[] => [
-    { id: 'time', header: 'Time', align: 'left', render: () => time, mobileLabel: 'Time' },
-    { id: 'asset', header: 'Asset Price', render: () => (spot ? formatDecimal(spot, 2) : '—'), mobileLabel: 'Asset' },
-    { id: 'strike', header: 'Strike Price', render: (r) => <span className="font-semibold">{r.strike}</span>, mobileLabel: 'Strike' },
+    { id: 'time', header: 'Time', align: 'left', help: 'Clock time of this OI-movement snapshot.', render: () => time, mobileLabel: 'Time' },
+    { id: 'asset', header: 'Asset Price', help: FIELD_HELP.spot, render: () => (spot ? formatDecimal(spot, 2) : '—'), mobileLabel: 'Asset' },
+    { id: 'strike', header: 'Strike Price', help: FIELD_HELP.strike, render: (r) => <span className="font-semibold">{r.strike}</span>, mobileLabel: 'Strike' },
     {
       id: 'moneyness',
       header: 'Moneyness',
       align: 'center',
+      help: FIELD_HELP.moneyness,
       render: (r) => <MoneynessBadge value={moneyness(r.strike, spot, atm, side)} />,
       mobileLabel: 'Moneyness',
     },
-    { id: 'close', header: 'Close Price', render: (r) => (r.ltp ? formatDecimal(r.ltp, 2) : '—'), mobileLabel: 'Close' },
-    { id: 'ltpChg', header: 'LTP Chg.', render: (r) => <ValueDeltaCell value={r.ltpChange} />, mobileLabel: 'LTP Chg' },
-    { id: 'oiChg', header: 'OI Chg.', render: (r) => <SignedCount value={r.oiChange} />, mobileLabel: 'OI Chg' },
-    { id: 'interp', header: 'OI Interpretation', align: 'center', render: (r) => <OiBadge4 value={r.interpretation} full />, mobileLabel: 'OI Int' },
+    { id: 'close', header: 'Close Price', help: 'Latest traded price (LTP) of this option contract.', render: (r) => (r.ltp ? formatDecimal(r.ltp, 2) : '—'), mobileLabel: 'Close' },
+    { id: 'ltpChg', header: 'LTP Chg.', help: "Change in the option's premium versus its baseline reading.", render: (r) => <ValueDeltaCell value={r.ltpChange} />, mobileLabel: 'LTP Chg' },
+    { id: 'oiChg', header: 'OI Chg.', help: FIELD_HELP.oiChange, render: (r) => <SignedCount value={r.oiChange} />, mobileLabel: 'OI Chg' },
+    { id: 'interp', header: 'OI Interpretation', align: 'center', help: FIELD_HELP.oiInterpretation, render: (r) => <OiBadge4 value={r.interpretation} full />, mobileLabel: 'OI Int' },
   ];
 
   return (
     <LoadBeat>
-      <PageHeader title="Big OI Movement" subtitle="Biggest OI-change strikes, split CE | PE, tagged by moneyness + OI interpretation" />
+      <PageHeader title="Big OI Movement" help="Lists the strikes with the largest OI changes, calls and puts side by side, tagged with moneyness and a price-vs-OI read so you can spot where big positions are being placed." subtitle="Biggest OI-change strikes, split CE | PE, tagged by moneyness + OI interpretation" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval />

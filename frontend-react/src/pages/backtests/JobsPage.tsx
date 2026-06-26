@@ -15,6 +15,7 @@ import {
 } from '../../components/ui/dropdown-menu.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
+import { FIELD_HELP } from '../../core/fieldHelp.ts';
 import { useStrategies } from '../../api/strategies.ts';
 import {
   JOB_STATUSES,
@@ -122,6 +123,7 @@ export function JobsPage() {
         id: 'job',
         header: 'Job',
         align: 'left',
+        help: 'Short id of this job — the first 8 characters of its full identifier.',
         sortValue: (job) => job.jobId,
         sortType: 'text',
         render: (job) => <span className="font-mono text-xs">{job.jobId.slice(0, 8)}</span>,
@@ -131,6 +133,7 @@ export function JobsPage() {
         id: 'strategy',
         header: 'Strategy',
         align: 'left',
+        help: 'The strategy this job is testing.',
         sortValue: (job) => strategyName(job),
         sortType: 'text',
         render: (job) => <span className="text-sm">{strategyName(job)}</span>,
@@ -141,6 +144,7 @@ export function JobsPage() {
         id: 'type',
         header: 'Type',
         align: 'left',
+        help: 'Job kind — a single Backtest run or an Optimization sweep over many parameter sets.',
         sortValue: (job) => job.kind,
         sortType: 'text',
         render: (job) => (
@@ -153,6 +157,7 @@ export function JobsPage() {
         id: 'window',
         header: 'Test Window',
         align: 'left',
+        help: 'The date range the run was tested over (from → to).',
         render: (job) =>
           job.testFrom || job.testTo ? (
             <span className="tabular-nums text-xs text-ay-muted">
@@ -168,6 +173,7 @@ export function JobsPage() {
         id: 'status',
         header: 'Status',
         align: 'left',
+        help: 'Current state of the job — queued, running, completed, cancelling, or failed.',
         sortValue: (job) => job.status,
         sortType: 'text',
         render: (job) => (
@@ -182,6 +188,7 @@ export function JobsPage() {
         id: 'return',
         header: 'Return',
         align: 'right',
+        help: FIELD_HELP.totalReturn,
         sortValue: (job) => (job.totalReturn == null ? Number.NEGATIVE_INFINITY : Number(job.totalReturn)),
         sortType: 'number',
         render: (job) =>
@@ -198,6 +205,7 @@ export function JobsPage() {
         id: 'progress',
         header: 'Progress',
         align: 'left',
+        help: 'How far the job has run, 0 to 100% — updates live without refreshing.',
         sortValue: (job) => job.progress,
         sortType: 'number',
         render: (job) => (
@@ -215,6 +223,7 @@ export function JobsPage() {
         id: 'created',
         header: 'Created',
         align: 'left',
+        help: 'When the job was submitted.',
         sortValue: (job) => job.createdAt,
         sortType: 'text',
         render: (job) => (
@@ -226,6 +235,7 @@ export function JobsPage() {
         id: 'actions',
         header: 'Actions',
         align: 'right',
+        help: 'Open the run results or sweep explorer, or cancel a queued/running job.',
         headerClassName: 'ay-sr-only',
         render: (job) => (
           <>
@@ -269,7 +279,7 @@ export function JobsPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Jobs" subtitle="Live backtest and sweep jobs with per-row progress" />
+      <PageHeader title="Jobs" subtitle="Live backtest and sweep jobs with per-row progress" help="Tracks every backtest and sweep you've launched with live progress; completed runs link to their results or sweep explorer." />
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Select
           value={status}
@@ -277,6 +287,7 @@ export function JobsPage() {
           onChange={(v) => setStatus(v || null)}
           ariaLabel="Status filter"
           placeholder="All statuses"
+          title="Show only jobs in the chosen state (e.g. running, completed)."
         />
         <Select
           value={strategyId}
@@ -285,6 +296,7 @@ export function JobsPage() {
           ariaLabel="Strategy filter"
           placeholder="All strategies"
           className="max-w-[16rem]"
+          title="Show only jobs for the chosen strategy."
         />
         {allTags.length > 0 && (
           <DropdownMenu>
@@ -292,6 +304,7 @@ export function JobsPage() {
               <button
                 type="button"
                 aria-label="Filter by strategy tag"
+                title="Show only jobs whose strategy carries any of the selected tags."
                 className="flex h-9 items-center gap-1.5 rounded-md border border-ay-border px-3 text-sm hover:border-accent"
               >
                 <Tags className="size-4 text-ay-muted" aria-hidden="true" />

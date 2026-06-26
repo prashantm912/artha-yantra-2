@@ -123,14 +123,14 @@ export function FiiDiiCapitalMarketPage() {
   // oipulse: "No sort on any column" — columns omit sortValue so the table is read-only. Date is pinned
   // sticky-left (§4.3.E) — additive, no selector change (still <th scope="col">).
   const columns: DataColumn<FiiDiiCashRow>[] = [
-    { id: 'date', header: 'Date', align: 'left', pin: 'left', render: (r) => r.tradeDate, mobileLabel: 'Date' },
-    { id: 'fiiBuy', header: 'FII Buy', render: (r) => cr(r.fiiBuy), mobileLabel: 'FII Buy' },
-    { id: 'fiiSell', header: 'FII Sell', render: (r) => cr(r.fiiSell), mobileLabel: 'FII Sell' },
-    { id: 'fiiNet', header: 'FII Net', render: (r) => <ValueDeltaCell value={r.fiiNet} />, mobileLabel: 'FII Net' },
-    { id: 'inMarket', header: 'In Market', render: (r) => <ValueDeltaCell value={r.inMarket} />, mobileLabel: 'In Market' },
-    { id: 'diiNet', header: 'DII Net', render: (r) => <ValueDeltaCell value={r.diiNet} />, mobileLabel: 'DII Net' },
-    { id: 'diiBuy', header: 'DII Buy', render: (r) => cr(r.diiBuy), mobileLabel: 'DII Buy' },
-    { id: 'diiSell', header: 'DII Sell', render: (r) => cr(r.diiSell), mobileLabel: 'DII Sell' },
+    { id: 'date', header: 'Date', align: 'left', pin: 'left', render: (r) => r.tradeDate, mobileLabel: 'Date', help: 'The trading session this cash-flow row is for.' },
+    { id: 'fiiBuy', header: 'FII Buy', render: (r) => cr(r.fiiBuy), mobileLabel: 'FII Buy', help: 'Total value foreign investors bought in the cash market that day (₹ Crore).' },
+    { id: 'fiiSell', header: 'FII Sell', render: (r) => cr(r.fiiSell), mobileLabel: 'FII Sell', help: 'Total value foreign investors sold in the cash market that day (₹ Crore).' },
+    { id: 'fiiNet', header: 'FII Net', render: (r) => <ValueDeltaCell value={r.fiiNet} />, mobileLabel: 'FII Net', help: 'FII Buy minus FII Sell — positive means foreign investors were net buyers (₹ Crore).' },
+    { id: 'inMarket', header: 'In Market', render: (r) => <ValueDeltaCell value={r.inMarket} />, mobileLabel: 'In Market', help: 'Combined net flow into the cash market = FII Net + DII Net (₹ Crore).' },
+    { id: 'diiNet', header: 'DII Net', render: (r) => <ValueDeltaCell value={r.diiNet} />, mobileLabel: 'DII Net', help: 'DII Buy minus DII Sell — positive means domestic institutions were net buyers (₹ Crore).' },
+    { id: 'diiBuy', header: 'DII Buy', render: (r) => cr(r.diiBuy), mobileLabel: 'DII Buy', help: 'Total value domestic institutions bought in the cash market that day (₹ Crore).' },
+    { id: 'diiSell', header: 'DII Sell', render: (r) => cr(r.diiSell), mobileLabel: 'DII Sell', help: 'Total value domestic institutions sold in the cash market that day (₹ Crore).' },
   ];
 
   const dateSub = latest ? `₹ Cr · ${latest.tradeDate}` : '₹ Cr';
@@ -140,6 +140,7 @@ export function FiiDiiCapitalMarketPage() {
       <PageHeader
         title="FII/DII Capital Market Activity"
         subtitle="Values in ₹ Crore · In Market = FII Net + DII Net · green = net buy, red = net sell"
+        help="Shows daily cash-market buy/sell/net flows for foreign (FII) and domestic (DII) institutions in ₹ Crore — sustained net buying is bullish, net selling is bearish."
         right={<LiveDot detail={latest ? `as on ${latest.tradeDate} · 420d` : '420d'} />}
       />
 

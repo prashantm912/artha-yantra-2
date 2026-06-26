@@ -130,7 +130,7 @@ public class ScalperConfluenceGate {
     // (deferred to live management); v1 emits the two-leg draft once an ATM pair exists. Short straddle
     // (SELL legs) is SPAN-deferred — StraddleLegPicker only ever returns BUY legs.
     if (cfg.requireStraddle()) {
-      if (!ScalperGates.volume(cfg.underlying(), chart.volume()).pass()) {
+      if (!ScalperGates.volume(cfg.signalIndex(), chart.volume()).pass()) {
         return Optional.empty();
       }
       return StraddleLegPicker.pick(
@@ -158,7 +158,7 @@ public class ScalperConfluenceGate {
         cfg.requireOpenHighLow()
             ? ScalperGates.rsiAbove(chart.rsi14(), oiProps.openHighRsiFloor()).pass()
             : ScalperGates.rsiBand(chart.rsi14(), side).pass();
-    if (!ScalperGates.volume(cfg.underlying(), chart.volume()).pass() || !rsiOk) {
+    if (!ScalperGates.volume(cfg.signalIndex(), chart.volume()).pass() || !rsiOk) {
       return Optional.empty();
     }
     // §3.1 Two-Candle: when the strategy declares it, the multi-bar formation is a HARD entry gate
@@ -171,7 +171,7 @@ public class ScalperConfluenceGate {
     // the entry until it fills; once filled the with-trend entry passes and the pre-gap extreme
     // becomes the stop. No significant gap => the gate is INERT and leaves the entry to the confluence.
     if (cfg.requireGapFill()) {
-      GapTheoryGate.Verdict gap = GapTheoryGate.evaluate(future, index, side, cfg.underlying());
+      GapTheoryGate.Verdict gap = GapTheoryGate.evaluate(future, index, side, cfg.signalIndex());
       if (!gap.pass()) {
         return Optional.empty();
       }
@@ -180,8 +180,16 @@ public class ScalperConfluenceGate {
     // The live bar's IST date drives the S24 monthly-expiry OI suppression (distinct from eodDate,
     // the prior completed session used for breadth/FII).
     LocalDate tradeDate = barInstant.atZone(Ist.ZONE).toLocalDate();
+    // 2c: the OI confluence reads the configured oi-index (the niftyoi/sensexoi A/B), which may differ
+    // from the option-execution root. When it does, fetch THAT index's chain for its expiry (the OI
+    // read is expiry-specific); if unavailable, fall back to the option-root expiry so the OI factors
+    // degrade to NEUTRAL rather than block. Same index ⇒ reuse the chain already fetched (parity-identical).
+    LocalDate oiExpiry =
+        cfg.oiIndex().equals(cfg.underlying())
+            ? chain.expiry()
+            : client.chain(cfg.oiIndex()).map(ChainSnapshot::expiry).orElse(chain.expiry());
     ScalperGateContext ctx =
-        client.context(cfg.underlying(), istTime, eodDate, chain.expiry(), tradeDate, chart);
+        client.context(cfg.oiIndex(), cfg.signalIndex(), istTime, eodDate, oiExpiry, tradeDate, chart);
     // #5 (T2.1): the oi-cross-filter strategies HARD-require a >=50% call-put dOI imbalance before
     // the confluence is even consulted. Fail-closed like the volume/RSI rails; a null imbalance
     // (data unavailable / flat-OI caveat) DEGRADES to pass inside the gate, so it never blocks then.
@@ -195,7 +203,7 @@ public class ScalperConfluenceGate {
     // block); the broken swing pivot becomes the structural stop.
     if (cfg.requireTrendChange()) {
       TrendChangeGate.Verdict tc =
-          TrendChangeGate.evaluate(future, index, side, cfg.underlying(), ctx.oi(), istTime);
+          TrendChangeGate.evaluate(future, index, side, cfg.signalIndex(), ctx.oi(), istTime);
       if (!tc.pass()) {
         return Optional.empty();
       }
@@ -280,7 +288,7 @@ public class ScalperConfluenceGate {
   private static BigDecimal structuralStop(
       ScalperConfig cfg, EngineSeries future, int index, OptionType side) {
     if (cfg.requireTwoCandle()) {
-      return TwoCandleGate.detect(future, index, side, cfg.underlying()).stopLevel();
+      return TwoCandleGate.detect(future, index, side, cfg.signalIndex()).stopLevel();
     }
     if (cfg.structuralStop() == StructuralStop.ENTRY_CANDLE && future != null && index >= 0) {
       return side == OptionType.CE ? future.candle(index).low() : future.candle(index).high();

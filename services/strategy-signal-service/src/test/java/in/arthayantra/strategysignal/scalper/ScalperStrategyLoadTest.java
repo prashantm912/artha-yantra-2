@@ -127,10 +127,19 @@ class ScalperStrategyLoadTest {
       StrategyDefinition def = StrategyCompiler.compile(config);
       assertThat(def.primaryTimeframe()).as(id + " scalps on 3m").isEqualTo("3m");
 
-      ScalperConfig cfg = ScalperConfig.from(config.path("universe"), tags);
+      ScalperConfig cfg = ScalperConfig.from(config, tags);
       assertThat(cfg.underlying()).as(id + " underlying").isEqualTo(UNDERLYING.get(id));
       assertThat(cfg.strikeParams().deltaLo()).isEqualTo(0.6);
       assertThat(cfg.confluenceThreshold()).isEqualByComparingTo("0.6");
+      // 2c three-way decoupling: every variant SIGNALS on the NIFTY future (signalIndex "NIFTY 50",
+      // mapped from signal_underlying NFO/NIFTY-FUT-CONT); the OI-confluence index is the option-root
+      // for a NIFTY variant, else the backtest.oi_confluence_gate.index ("NIFTY 50" or "SENSEX").
+      assertThat(cfg.signalIndex()).as(id + " signals on the NIFTY future").isEqualTo("NIFTY 50");
+      String expectedOi =
+          id.endsWith("-sensex-niftyoi")
+              ? "NIFTY 50"
+              : id.endsWith("-sensex-sensexoi") ? "SENSEX" : UNDERLYING.get(id);
+      assertThat(cfg.oiIndex()).as(id + " oi-confluence index").isEqualTo(expectedOi);
 
       Set<String> declared = new HashSet<>();
       config.path("indicators").forEach(i -> declared.add(i.path("alias").asText()));

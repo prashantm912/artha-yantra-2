@@ -10,7 +10,12 @@ import java.time.LocalTime;
  * so the deterministic replay recomputes it byte-identically (the parity rule, §12.9).
  */
 public record ScalperGateContext(
-    String underlying, LocalTime istTime, Chart chart, Oi oi, Macro macro) {
+    String underlying, String signalIndex, LocalTime istTime, Chart chart, Oi oi, Macro macro) {
+
+  // `underlying` = the index whose OI/macro this context carries (the oi-confluence index, 2c). The
+  // `chart` (and its volume) come from the SIGNAL future, so the §0B volume-floor dot keys off
+  // `signalIndex` (the signal future's index), not `underlying` — they differ for a decoupled SENSEX
+  // scalper (signalIndex NIFTY 50 / oiIndex SENSEX). Single-index scalpers have them equal.
 
   /** Chart dots from the engine {@code IndicatorBank} (already computed per bar). */
   public record Chart(

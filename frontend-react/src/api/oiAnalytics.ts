@@ -631,15 +631,14 @@ export function useOiBuzzIndices() {
 
 /** Futures OI Buzz heatmap (oipulse "Futures Heatmap"): constituent %change tiles + advance/decline.
  * 422 DATA_GAP (no monthly futures resolved) → null → the page renders its empty state. */
-export function useOiBuzz(index: string | null) {
+export function useOiBuzz(index: string | null, date?: string | null) {
   return useQuery({
-    queryKey: ['oi-buzz', 'heatmap', index],
-    queryFn: () =>
-      oiGet<OiBuzzHeatmap | null>(
-        '/market/futures/oi-buzz-heatmap',
-        new URLSearchParams({ name: index ?? '' }).toString(),
-        null,
-      ),
+    queryKey: ['oi-buzz', 'heatmap', index, date ?? null],
+    queryFn: () => {
+      const p = new URLSearchParams({ name: index ?? '' });
+      if (date) p.set('date', date); // a past date → the historical spot-1d %change map
+      return oiGet<OiBuzzHeatmap | null>('/market/futures/oi-buzz-heatmap', p.toString(), null);
+    },
     enabled: !!index,
   });
 }

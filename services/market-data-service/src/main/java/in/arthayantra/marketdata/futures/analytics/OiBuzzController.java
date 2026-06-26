@@ -1,9 +1,11 @@
 package in.arthayantra.marketdata.futures.analytics;
 
 import in.arthayantra.marketdata.constituents.StaticIndexConstituents;
+import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -30,9 +32,14 @@ public class OiBuzzController {
     return response;
   }
 
-  /** The constituent heatmap for one index: tiles (gainers first) + advance/decline + feed time. */
+  /**
+   * The constituent heatmap for one index: tiles (gainers first) + advance/decline + feed time.
+   * Optional {@code date} → the historical spot-1d %change map (live quote is flat on a closed day).
+   */
   @GetMapping("/oi-buzz-heatmap")
-  public OiBuzzService.Heatmap heatmap(@RequestParam String name) {
-    return service.heatmap(name);
+  public OiBuzzService.Heatmap heatmap(
+      @RequestParam String name,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+    return service.heatmap(name, date);
   }
 }

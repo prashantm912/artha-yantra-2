@@ -64,6 +64,7 @@ public class FoldEvaluator {
       String exchange,
       String tradingsymbol,
       List<EngineCandle> primary1m,
+      List<EngineCandle> strikeRef1m,
       Map<SeriesKey, List<EngineCandle>> contexts,
       BigDecimal initialEquity,
       CostConfig costs,
@@ -75,6 +76,7 @@ public class FoldEvaluator {
           replay(
               options, config, definition, exchange, tradingsymbol,
               slice(primary1m, fold.trainFrom(), fold.trainTo()),
+              slice(strikeRef1m, fold.trainFrom(), fold.trainTo()),
               sliceContexts(contexts, fold.trainFrom(), fold.trainTo()),
               initialEquity, costs, oneMinuteCovered);
       Metrics train = metricsFor(trainResult, definition);
@@ -82,6 +84,7 @@ public class FoldEvaluator {
           replay(
               options, config, definition, exchange, tradingsymbol,
               slice(primary1m, fold.testFrom(), fold.testTo()),
+              slice(strikeRef1m, fold.testFrom(), fold.testTo()),
               sliceContexts(contexts, fold.testFrom(), fold.testTo()),
               initialEquity, costs, oneMinuteCovered);
       Metrics oos = metricsFor(oosResult, definition);
@@ -101,13 +104,14 @@ public class FoldEvaluator {
       String exchange,
       String tradingsymbol,
       List<EngineCandle> primary,
+      List<EngineCandle> strikeRef,
       Map<SeriesKey, List<EngineCandle>> contexts,
       BigDecimal initialEquity,
       CostConfig costs,
       boolean oneMinuteCovered) {
     return options
         ? optionsPremiumReplay.replay(
-            definition, config, exchange, tradingsymbol, primary, contexts, initialEquity)
+            definition, config, exchange, tradingsymbol, primary, strikeRef, contexts, initialEquity)
         : replayEngine.replay(
             definition, exchange, tradingsymbol, primary, contexts, initialEquity, costs,
             oneMinuteCovered);

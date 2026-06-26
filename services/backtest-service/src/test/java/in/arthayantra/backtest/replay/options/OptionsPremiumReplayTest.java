@@ -197,7 +197,8 @@ class OptionsPremiumReplayTest {
             15_000,
             BigDecimal.ZERO, // min-premium floor: permissive (the fixture's 80→110 premium is normal)
             0, // max-lots: unlimited
-            new BigDecimal("200000"));
+            new BigDecimal("200000"),
+            underlying); // 2b-E2b strike reference = the signal series (anchor on the entry bar's close)
 
     assertThat(result.trades()).hasSize(1);
     assertThat(result.barsInPosition()).isEqualTo(2); // TAKE_PROFIT at offset 2
@@ -235,21 +236,22 @@ class OptionsPremiumReplayTest {
     // floor ₹1 → the ₹0.10 leg is skipped (legit, no trade, no explosion)
     assertThat(
             replay
-                .replayLegs(List.of(), underlying, legs, "NIFTY", spec, rules, 15_000, bd("1"), 0, capital)
+                .replayLegs(
+                    List.of(), underlying, legs, "NIFTY", spec, rules, 15_000, bd("1"), 0, capital, underlying)
                 .trades())
         .isEmpty();
 
     // floor 0 (permissive) → it trades AND the lot count explodes: 15000/(0.10×65) ≈ 2307 lots = 149955 qty
     var permissive =
         replay.replayLegs(
-            List.of(), underlying, legs, "NIFTY", spec, rules, 15_000, BigDecimal.ZERO, 0, capital);
+            List.of(), underlying, legs, "NIFTY", spec, rules, 15_000, BigDecimal.ZERO, 0, capital, underlying);
     assertThat(permissive.trades()).hasSize(1);
     assertThat(permissive.trades().get(0).qty()).isGreaterThan(100_000L);
 
     // max-lots cap (10) bounds the qty to 10 × lot(65) = 650 even at the degenerate premium
     var capped =
         replay.replayLegs(
-            List.of(), underlying, legs, "NIFTY", spec, rules, 15_000, BigDecimal.ZERO, 10, capital);
+            List.of(), underlying, legs, "NIFTY", spec, rules, 15_000, BigDecimal.ZERO, 10, capital, underlying);
     assertThat(capped.trades().get(0).qty()).isEqualTo(650);
   }
 
@@ -378,5 +380,55 @@ class OptionsPremiumReplayTest {
     OptionsPremiumReplay.OiGate gate = OptionsPremiumReplay.parseOiGate(config);
     assertThat(gate.index()).isEqualTo("NIFTY 50");
     assertThat(OptionsPremiumReplay.oiGateIndex(config, gate)).isEqualTo("NIFTY 50");
+  }
+
+  @Test
+  void strikeIsAnchoredOnTheStrikeReferenceNotTheSignal() {
+    // 2b-E2b: signal series ~25000 (NIFTY-fut), strike reference ~80000 (SENSEX-fut), same minutes.
+    // The ATM strike MUST be selected from the strike-reference price, never the signal bar's close.
+    List<EngineCandle> signal = List.of(bar("09:15", "25000"), bar("09:16", "25010"));
+    List<EngineCandle> strikeReference =
+        List.of(
+            new EngineCandle(t("09:15"), bd("80000"), bd("80000"), bd("80000"), bd("80000"), 0L),
+            new EngineCandle(t("09:16"), bd("80010"), bd("80010"), bd("80010"), bd("80010"), 0L));
+    java.util.concurrent.atomic.AtomicReference<BigDecimal> seenSpot =
+        new java.util.concurrent.atomic.AtomicReference<>();
+    Catalog capturing =
+        new Catalog() {
+          @Override
+          public List<Expiry> expiriesOnOrAfter(String u, LocalDate d) {
+            return List.of(new Expiry(W, true));
+          }
+
+          @Override
+          public Optional<OptionContract> nearestStrike(
+              String u, LocalDate e, String type, BigDecimal spot) {
+            seenSpot.set(spot);
+            return Optional.of(new OptionContract("NFO", CE_SYMBOL, bd("25000"), e, type, 65));
+          }
+        };
+    CandleReader reader = mock(CandleReader.class);
+    when(reader.read(eq("NFO"), eq(CE_SYMBOL), eq("1m"), any(), any()))
+        .thenReturn(
+            List.of(
+                new EngineCandle(t("09:15"), bd("100"), bd("100"), bd("100"), bd("100"), 0L),
+                new EngineCandle(t("09:16"), bd("100"), bd("100"), bd("100"), bd("100"), 0L)));
+    OptionsPremiumReplay replay =
+        new OptionsPremiumReplay(new OptionContractSelector(capturing), new CandlePremiumReader(reader));
+
+    replay.replayLegs(
+        List.of(),
+        signal,
+        List.of(new PairedLeg(false, 0, 1)),
+        "SENSEX",
+        new UniverseSpec(ExpiryMode.NEAREST_WEEKLY, 0, Set.of("CE", "PE")),
+        new PremiumExitEvaluator.Rules(bd("20"), bd("99"), null, null, null),
+        15_000,
+        BigDecimal.ZERO,
+        0,
+        new BigDecimal("200000"),
+        strikeReference);
+
+    assertThat(seenSpot.get()).isEqualByComparingTo("80000"); // anchored on the SENSEX-fut, not 25000
   }
 }

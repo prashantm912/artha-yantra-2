@@ -56,7 +56,7 @@ Backtests read the UNADJUSTED CONT 1m directly; the one-bar roll-day basis gap (
 accepted (intraday scalpers reset daily, so a monthly roll-day discontinuity is a minor known artifact).
 **Run after merge:** `POST .../continuous-backfill` on the live stack to populate `NIFTY-FUT-CONT` 1m.
 
-### 2b-E2 — decouple signal-underlying from option-execution root — BUILT (PR pending)
+### 2b-E2 — decouple signal-underlying from option-execution root — DONE (#224 merged)
 Done: schema `universe.signal_underlying` (optional instrumentRef) + `oi_confluence_gate.index` override;
 `BacktestRunner.signalInstrument` prefers `signal_underlying`; `OptionsPremiumReplay` resolves the option
 root + OI-gate index from `universe.underlying` (helpers `optionRoot`/`optionRootDisplay`/`oiGateIndex`),
@@ -76,18 +76,46 @@ Original design notes:
   absent in all existing configs → no behaviour change → parity holds).
 - Verify: a config with signal=NIFTY-FUT-CONT, options=SENSEX backtests + trades SENSEX legs off NIFTY signal.
 
-### 2b-1 — rewrite the 12 scalper YAMLs (instrument-agnostic, tunable)
-Per strategy, 2 variants (NIFTY-options, SENSEX-options), both with `signal_underlying: NIFTY-FUT-CONT`:
-- universe.underlying = NIFTY 50 (NIFTY variant) / SENSEX (SENSEX variant); `signal_underlying` = NIFTY-FUT-CONT.
-- tailored `backtest.optimize` per the proven recipe (objective.metric `expectancy`, `min_trades` ~10,
-  `walk_forward` train30/test30/step20, parameters = each strategy's real indicator/exit knobs).
-- `oi_confluence_gate` on the OI-led ones (connect-the-dots, trending-oi, two-candle, open-high-low).
-- re-home gap-theory + trend-change off BankNifty. All `validate` (POST /strategies/validate) green.
+## GRILLED DECISIONS (2026-06-26) — see [ADR-0003](../../adr/0003-scalper-signal-strike-option-decoupling.md)
+Owner /grill resolved the SENSEX design. Five locked decisions:
+1. **SENSEX strike = SENSEX-fut spot ref** — each index anchors strikes on its OWN front future (the rule
+   NIFTY already uses). Build `SENSEX-FUT-CONT` (2b-E1 backfill is generic on underlying). Rejected
+   options-parity ATM (a second divergent rule).
+2. **Strike-reference wiring = explicit schema field** `universe.strike_reference` (optional, default =
+   the signal series → existing goldens byte-identical). Rejected derive-from-option-root (breaks
+   index-signal goldens).
+3. **Fork ALL 12 → 36 variants**: each strategy registers {NIFTY-options, SENSEX-options/NIFTY-OI,
+   SENSEX-options/SENSEX-OI}. The two SENSEX versions differ only in `oi_confluence_gate.index` (NIFTY vs
+   SENSEX) — an A/B for forward paper. Slots pre-created even where the gate is currently off (future regimes).
+4. **SENSEX premium band hardcoded 300–800** in `ScalperConfig` §0B (live `StrikePicker` only; the backtest
+   selector ignores the band — nearest-strike-to-spot). Added now for live-readiness; refined on 2c paper.
+5. **Build order**: 2b-E2b (engine, its own PR) FIRST, then 2b-1 (the 36 YAMLs), then 2b-2.
+
+### 2b-E2b — strike-reference spot (signal/strike/option three-way split)
+- Build `SENSEX-FUT-CONT` (admin `POST .../continuous-backfill?root=SENSEX&underlyingExchange=BSE&underlying=SENSEX`).
+- Schema: optional `universe.strike_reference` (instrumentRef) on the options branch (default = signal series).
+- `BacktestRunner`/`OptionsPremiumReplay`: load the strike-reference series, align to signal bars, pass the
+  strike-ref price at the entry instant to `OptionContractSelector` (instead of `entryBar.close()`).
+- Parity: absent → signal price (today) → goldens byte-identical. Own PR + tests + adversarial review.
+
+### 2b-1 — rewrite the 12 scalper YAMLs → 36 variants (instrument-agnostic, tunable)
+Per strategy, 3 versions, all `signal_underlying: NFO/NIFTY-FUT-CONT`:
+- **NIFTY** (`-nifty`): underlying NSE/NIFTY 50; OI-gate index NIFTY (when on).
+- **SENSEX·NIFTY-OI** (`-sensex-niftyoi`): underlying BSE/SENSEX; `strike_reference` BFO/SENSEX-FUT-CONT (SENSEX F&O = BFO);
+  `oi_confluence_gate.index: "NIFTY 50"`.
+- **SENSEX·SENSEX-OI** (`-sensex-sensexoi`): same but `oi_confluence_gate.index: "SENSEX"`.
+Each: tailored `backtest.optimize` (objective.metric `expectancy`, `min_trades` ~10, `walk_forward`
+train30/test30/step20, parameters = that strategy's real indicator/exit knobs); `oi_confluence_gate.enabled`
+true on the 4 OI-led (connect-the-dots, trending-oi, two-candle, open-high-low), false (dormant index) on
+the rest; re-home gap-theory + trend-change off BankNifty. Plus: `ScalperConfig` SENSEX premium band
+(300–800), `ScalperStrategySeeder` 36-id list, `ScalperStrategyLoadTest` maps (underlying + gate-tag +
+trending-oi/straddle id checks cover all 36). All schema-valid + load-test green.
 
 ### 2b-2 — register + functional-verify
-Register each variant (~24) via PUT/POST; run a FULL-WINDOW functional backtest on each (confirm it
-executes + trades sanely, no engine errors); flag any strategy whose features the engine can't replay
-(e.g. per-strike grading, two-leg straddle) as needing more engine work. Then → 2c paper.
+Register each of the 36 via the seeder/registry; run a FULL-WINDOW functional backtest on each (executes +
+trades sanely, no engine errors); flag any strategy whose features the engine can't replay (per-strike
+grading, two-leg straddle) as needing more engine work. Then → 2c paper (live OI-gate index override +
+verified SENSEX premium band + the OI-index A/B).
 
 ### Optional — optimizer guardrail
 `optimizer service.py`: when a fold-context sweep (`walkForward` present) is submitted with

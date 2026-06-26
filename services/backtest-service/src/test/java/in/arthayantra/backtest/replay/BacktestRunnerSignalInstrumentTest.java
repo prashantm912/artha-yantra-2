@@ -82,6 +82,25 @@ class BacktestRunnerSignalInstrumentTest {
   }
 
   @Test
+  void strikeReferencePrefersTheOverrideElseTheSignal() {
+    // 2b-E2b: strike_reference decouples the ATM-strike spot from the signal (e.g. SENSEX-fut anchor).
+    SeriesKey signal = new SeriesKey("NFO", "NIFTY-FUT-CONT", "1m");
+    SeriesKey withRef =
+        BacktestRunner.strikeReferenceInstrument(
+            cfg(
+                "{\"universe\":{\"strike_reference\":"
+                    + "{\"exchange\":\"BFO\",\"tradingsymbol\":\"SENSEX-FUT-CONT\"}}}"),
+            signal);
+    assertThat(withRef.exchange()).isEqualTo("BFO");
+    assertThat(withRef.tradingsymbol()).isEqualTo("SENSEX-FUT-CONT");
+    assertThat(withRef.interval()).isEqualTo("1m");
+
+    // absent → the signal instrument itself (strike anchored on the signal series → parity-safe)
+    assertThat(BacktestRunner.strikeReferenceInstrument(cfg("{\"universe\":{}}"), signal))
+        .isEqualTo(signal);
+  }
+
+  @Test
   void throwsWhenNoResolvableInstrument() {
     assertThatThrownBy(() -> BacktestRunner.signalInstrument(cfg("{\"universe\":{\"mode\":\"index\"}}")))
         .isInstanceOf(IllegalArgumentException.class)

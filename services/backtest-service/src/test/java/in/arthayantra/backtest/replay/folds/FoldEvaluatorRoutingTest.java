@@ -78,7 +78,7 @@ class FoldEvaluatorRoutingTest {
 
   @Test
   void optionsStrategyFoldRoutesThroughPremiumReplay() {
-    when(premium.replay(any(), any(), any(), any(), any(), any(), any())).thenReturn(empty());
+    when(premium.replay(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(empty());
     when(metrics.compute(any(), any(), any(), any(), any(), anyLong(), anyLong()))
         .thenReturn(FoldTestFixtures.metricsWithSharpe(1.0));
 
@@ -89,13 +89,14 @@ class FoldEvaluatorRoutingTest {
         "NSE",
         "NIFTY 50",
         List.<EngineCandle>of(),
+        List.<EngineCandle>of(),
         Map.of(),
         EQUITY,
         CostConfig.defaults(),
         true);
 
     // train + OOS = two premium replays per fold; the bare candle-close engine is never touched.
-    verify(premium, times(2)).replay(any(), any(), any(), any(), any(), any(), any());
+    verify(premium, times(2)).replay(any(), any(), any(), any(), any(), any(), any(), any());
     verifyNoInteractions(plain);
   }
 
@@ -112,6 +113,7 @@ class FoldEvaluatorRoutingTest {
         def(),
         "NSE",
         "RELIANCE",
+        List.<EngineCandle>of(),
         List.<EngineCandle>of(),
         Map.of(),
         EQUITY,

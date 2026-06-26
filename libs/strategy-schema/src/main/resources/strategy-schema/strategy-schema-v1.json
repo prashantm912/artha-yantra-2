@@ -103,6 +103,10 @@
               "$ref": "#/$defs/instrumentRef",
               "description": "Optional: the instrument the SIGNAL/indicators run on, decoupled from the options-execution root in `underlying` (2b-E2). Defaults to `underlying` when absent. Used for e.g. signal on the NIFTY continuous front-future while executing SENSEX option legs (correlation play)."
             },
+            "strike_reference": {
+              "$ref": "#/$defs/instrumentRef",
+              "description": "Optional (2b-E2b): the spot series the ATM strike is anchored on, decoupled from the signal. Defaults to the signal series when absent (so existing configs are byte-identical). Used when the signal is on one index but the options are on another (e.g. signal NIFTY-FUT-CONT, options SENSEX → strike_reference NFO/SENSEX-FUT-CONT, so the SENSEX strike is picked from the SENSEX price, not the NIFTY-future price)."
+            },
             "options": {
               "type": "object",
               "additionalProperties": false,

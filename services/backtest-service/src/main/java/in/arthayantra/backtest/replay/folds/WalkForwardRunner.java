@@ -84,6 +84,7 @@ public class WalkForwardRunner {
       String exchange,
       String tradingsymbol,
       List<EngineCandle> primary1m,
+      List<EngineCandle> strikeRef1m,
       Map<SeriesKey, List<EngineCandle>> contexts,
       BigDecimal initialEquity,
       CostConfig costs,
@@ -104,8 +105,8 @@ public class WalkForwardRunner {
 
     List<FoldResult> results =
         evaluator.evaluate(
-            config, folds, definition, exchange, tradingsymbol, primary1m, contexts, initialEquity,
-            costs, oneMinuteCovered);
+            config, folds, definition, exchange, tradingsymbol, primary1m, strikeRef1m, contexts,
+            initialEquity, costs, oneMinuteCovered);
 
     FoldAggregate aggregate =
         aggregator.aggregate(results, objectiveMetric, minTrades, aggregation, 0);

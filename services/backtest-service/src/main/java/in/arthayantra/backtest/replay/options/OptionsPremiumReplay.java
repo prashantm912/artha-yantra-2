@@ -85,6 +85,7 @@ public class OptionsPremiumReplay {
       String underlyingExchange,
       String underlyingTradingsymbol,
       List<EngineCandle> underlyingOneMinute,
+      List<EngineCandle> strikeReferenceOneMinute,
       Map<SeriesKey, List<EngineCandle>> contextCandles,
       BigDecimal initialEquity) {
     List<SignalEvent> signals =
@@ -110,7 +111,8 @@ public class OptionsPremiumReplay {
         budgetInr(config),
         minPremiumInr(config),
         maxLots(config),
-        initialEquity);
+        initialEquity,
+        strikeReferenceOneMinute);
   }
 
   /** Pairs the signal stream into directed legs (entry→exit bar indices), mirroring the candle path. */
@@ -347,7 +349,12 @@ public class OptionsPremiumReplay {
       long budgetInr,
       BigDecimal minPremiumInr,
       int maxLots,
-      BigDecimal initialEquity) {
+      BigDecimal initialEquity,
+      List<EngineCandle> strikeReferenceOneMinute) {
+    // 2b-E2b: anchor the ATM strike on the strike-reference series' price at the entry instant (e.g.
+    // SENSEX-fut for a SENSEX-options strategy), not the signal bar's close. When the strike reference
+    // IS the signal series, the lookup returns the entry bar's own close → byte-identical to before.
+    NavigableMap<java.time.Instant, BigDecimal> strikeRef = strikeReferenceByInstant(strikeReferenceOneMinute);
     List<Trade> trades = new ArrayList<>();
     List<LegResult> priced = new ArrayList<>();
     int seq = 0;
@@ -355,7 +362,7 @@ public class OptionsPremiumReplay {
       Optional<LegResult> r =
           priceLeg(
               seq + 1, underlying, underlyingSymbol, leg, spec, rules, budgetInr, minPremiumInr,
-              maxLots);
+              maxLots, strikeRef);
       if (r.isEmpty()) {
         continue;
       }
@@ -441,8 +448,32 @@ public class OptionsPremiumReplay {
       PremiumExitEvaluator.Rules rules,
       long budgetInr) {
     // Single-leg test seam: permissive (no floor / no cap) so the fixture trades exactly as specified.
-    return priceLeg(seq, underlying, underlyingSymbol, leg, spec, rules, budgetInr, BigDecimal.ZERO, 0)
+    // The strike reference is the signal series itself → the strike is anchored on the entry bar's close.
+    return priceLeg(
+            seq, underlying, underlyingSymbol, leg, spec, rules, budgetInr, BigDecimal.ZERO, 0,
+            strikeReferenceByInstant(underlying))
         .map(LegResult::trade);
+  }
+
+  /** Strike-reference price lookup keyed by INSTANT (cross-source-safe — the #214 offset-key lesson). */
+  private static NavigableMap<java.time.Instant, BigDecimal> strikeReferenceByInstant(
+      List<EngineCandle> strikeReferenceOneMinute) {
+    java.util.TreeMap<java.time.Instant, BigDecimal> map = new java.util.TreeMap<>();
+    for (EngineCandle c : strikeReferenceOneMinute) {
+      map.put(c.bucketStart().toInstant(), c.close());
+    }
+    return map;
+  }
+
+  /**
+   * The strike-anchor spot at the entry bar: the strike-reference close at/just-before the entry instant
+   * (carry-forward), falling back to the signal bar's own close when the reference has no covering bar.
+   * When the reference IS the signal series, this is exactly the entry bar's close → parity-preserving.
+   */
+  private static BigDecimal strikeSpotAt(
+      NavigableMap<java.time.Instant, BigDecimal> strikeRef, EngineCandle entryBar) {
+    var e = strikeRef.floorEntry(entryBar.bucketStart().toInstant());
+    return e != null ? e.getValue() : entryBar.close();
   }
 
   /**
@@ -461,13 +492,17 @@ public class OptionsPremiumReplay {
       PremiumExitEvaluator.Rules rules,
       long budgetInr,
       BigDecimal minPremiumInr,
-      int maxLots) {
+      int maxLots,
+      NavigableMap<java.time.Instant, BigDecimal> strikeRef) {
     EngineCandle entryBar = underlying.get(leg.entryIndex());
+    // 2b-E2b: anchor the ATM strike on the strike-reference price (e.g. SENSEX-fut for SENSEX options),
+    // not the signal bar's close. Reference == signal series → identical (the entry bar's own close).
+    BigDecimal strikeSpot = strikeSpotAt(strikeRef, entryBar);
     boolean longBias = !leg.shortSide();
     Optional<OptionContract> resolved =
         selector.select(
             underlyingSymbol,
-            entryBar.close(),
+            strikeSpot,
             entryBar.bucketStart().toLocalDate(),
             spec.expiryMode(),
             spec.expiryOffset(),

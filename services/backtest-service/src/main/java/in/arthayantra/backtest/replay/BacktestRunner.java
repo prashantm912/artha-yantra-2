@@ -22,6 +22,8 @@ import in.arthayantra.backtest.replay.folds.WalkForwardRunner;
 import in.arthayantra.backtest.replay.options.OptionsPremiumReplay;
 import in.arthayantra.backtest.replay.options.PremiumProvenance;
 import in.arthayantra.backtest.replay.options.PremiumSource;
+import in.arthayantra.common.web.error.ApiException;
+import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.strategyengine.config.StrategyCompiler;
 import in.arthayantra.strategyengine.config.StrategyDefinition;
 import in.arthayantra.strategyengine.series.EngineCandle;
@@ -143,6 +145,29 @@ public class BacktestRunner {
         candleReader.read(signal.exchange(), signal.tradingsymbol(), "1m", from, to);
     Map<SeriesKey, List<EngineCandle>> contexts =
         contextSeries(definition, signal, from, to);
+    // 2b-E2b: the strike-reference spot the ATM strike anchors on (e.g. SENSEX-fut for SENSEX options).
+    // Absent universe.strike_reference -> the signal series itself, so the read is reused and behaviour
+    // is byte-identical to before. Only the options path consumes it (the candle path ignores it).
+    SeriesKey strikeRef = strikeReferenceInstrument(config, signal);
+    List<EngineCandle> strikeRef1m =
+        strikeRef.equals(signal)
+            ? primary1m
+            : candleReader.read(strikeRef.exchange(), strikeRef.tradingsymbol(), "1m", from, to);
+    // 2b-E2b: a configured strike_reference with NO coverage would SILENTLY fall back to the signal
+    // price (anchoring SENSEX strikes on the NIFTY-future price) -> a wrong strike, not a clear error.
+    // Fail loud at DATA_GAP instead (e.g. SENSEX-FUT-CONT not backfilled, or the wrong exchange).
+    if (!strikeRef.equals(signal) && strikeRef1m.isEmpty()) {
+      throw new ApiException(
+          422,
+          ErrorCodes.DATA_GAP,
+          "strike_reference " + strikeRef.exchange() + ":" + strikeRef.tradingsymbol()
+              + " has no candle coverage over the run window",
+          Map.of(
+              "exchange", strikeRef.exchange(),
+              "tradingsymbol", strikeRef.tradingsymbol(),
+              "from", from.toString(),
+              "to", to.toString()));
+    }
     checkpoint(cancelled, job.id(), progress, 40);
 
     // Part 2: an options_of_underlying strategy is replayed premium-as-primary — signals on the
@@ -156,6 +181,7 @@ public class BacktestRunner {
                 signal.exchange(),
                 signal.tradingsymbol(),
                 primary1m,
+                strikeRef1m,
                 contexts,
                 initialEquity)
             : replayEngine.replay(
@@ -198,6 +224,7 @@ public class BacktestRunner {
                 signal.exchange(),
                 signal.tradingsymbol(),
                 primary1m,
+                strikeRef1m,
                 contexts,
                 initialEquity,
                 CostConfig.defaults(),
@@ -443,6 +470,20 @@ public class BacktestRunner {
       return new SeriesKey(parts[0], parts[1], "1m");
     }
     throw new IllegalArgumentException("backtest needs an explicit single-instrument universe (v1)");
+  }
+
+  /**
+   * The strike-reference instrument (2b-E2b): {@code universe.strike_reference} if set, else the signal
+   * instrument. Absent the override the ATM strike is anchored on the signal series (byte-identical to
+   * the pre-2b-E2b behaviour). Used so a SENSEX-options strategy signalling on NIFTY-FUT-CONT anchors its
+   * strike on SENSEX-FUT-CONT, not the NIFTY-future price.
+   */
+  static SeriesKey strikeReferenceInstrument(JsonNode config, SeriesKey signal) {
+    JsonNode ref = config.path("universe").path("strike_reference");
+    if (ref.isObject() && ref.hasNonNull("exchange") && ref.hasNonNull("tradingsymbol")) {
+      return new SeriesKey(ref.get("exchange").asText(), ref.get("tradingsymbol").asText(), "1m");
+    }
+    return signal;
   }
 
   private static String dateTime(String value) {

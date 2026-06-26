@@ -1,3 +1,4 @@
+# AUTO-DERIVED (2b-1) variant of the scalp-trend-change family — signal on NFO/NIFTY-FUT-CONT. Re-homed off BankNifty (now monthly-expiry) per the 2b LOCKED decision.
 # Siva #12 - Trend Change. The `trend-change` tag arms the §12.3 TrendChangeGate: a reversal-capture
 # strategy that trades a SHIFT in direction (sideways->up / down->up, and the mirror) rather than a
 # continuation breakout. The hard pre-gate requires ALL of: (a) a price market-structure break in the
@@ -21,19 +22,20 @@
 # defend/patience line (a VWAP break WITH volume invalidates; do NOT enter on a VWAP break without
 # volume - the volume floor + RSI bands are the §0B rails the confluence already enforces).
 #
-# Evaluates on the NIFTY BANK front future (Model A); the confluence seam buys the nearest-weekly
+# Evaluates on the NIFTY front future (Model A); the confluence seam buys the nearest-weekly
 # ATM-band CE.
 schema: strategy-schema/v1
-id: scalp-trend-change-banknifty
-name: "Scalper · Trend Change · BANKNIFTY CE"
+id: scalp-trend-change-nifty
+name: "Scalper · Trend Change · NIFTY CE"
 version: 1.0.0
-description: "Trend-change / reversal-capture scalp (Siva #12) on the NIFTY BANK 3-min front future: a price swing-structure break + a >=50% Trending-OI momentum shift + the §3.1 2-candle 3rd-candle confirm, capped to the 09:45-14:30 window (no fresh down-reversal after ~14:30); broken-swing-pivot SL; long-premium CE only."
+description: "Trend-change / reversal-capture scalp (Siva #12) on the NIFTY 3-min front future: a price swing-structure break + a >=50% Trending-OI momentum shift + the §3.1 2-candle 3rd-candle confirm, capped to the 09:45-14:30 window (no fresh down-reversal after ~14:30); broken-swing-pivot SL; long-premium CE only."
 author: owner
-tags: [scalper, options, intraday, banknifty, trend-change]
+tags: [scalper, options, intraday, nifty, trend-change]
 
 universe:
   mode: options_of_underlying
-  underlying: { exchange: NSE, tradingsymbol: "NIFTY BANK" }
+  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  signal_underlying: { exchange: NFO, tradingsymbol: "NIFTY-FUT-CONT" }
   options:
     expiry: nearest_weekly
     strikes: { selector: atm_window, width: 3 }
@@ -73,3 +75,20 @@ risk:
     style: intraday
     window: { from: "09:45", to: "14:30" }   # §3.12: trend-change window 09:45-14:30
     square_off: "15:15"
+
+backtest:
+  defaults: { interval: 1m, lookback_days: 120, initial_capital: 200000, costs: { per_lot_inr: 20, slippage_ticks: 1 } }
+  oi_confluence_gate: { enabled: false, interval: "5m" }
+  optimize:
+    parameters:
+      - { path: "indicators[alias=vwma20].params.period",         range: [10, 30], step: 1 }
+      - { path: "indicators[alias=rsi14].params.period",          range: [9, 21], step: 1 }
+      - { path: "indicators[alias=supertrend].params.period",     range: [7, 14], step: 1 }
+      - { path: "indicators[alias=supertrend].params.multiplier", range: [1.5, 3.5] }
+      - { path: "entry_rules.scoring.threshold",                  range: [0.1, 0.5] }
+      - { path: "exit_rules[type=time_stop].params.max_bars",   range: [20, 42], step: 1 }
+    method: tpe
+    max_trials: 40
+    objective: { metric: expectancy, direction: maximize, fold_aggregation: mean }
+    constraints: { min_trades: 10 }
+    walk_forward: { train_days: 30, test_days: 30, step_days: 20, anchored: false }

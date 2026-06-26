@@ -1,21 +1,27 @@
-# AUTO-DERIVED (2b-1) variant of the scalp-two-candle family — signal on NFO/NIFTY-FUT-CONT.
-# Siva #1 — Two-Candle Theory. The `two-candle-pattern` tag arms the §12.3 TwoCandleGate: entry
-# requires two consecutive same-colour candles (each above the volume floor) with a strong 2nd
-# candle, deploying on the 3rd — the multi-bar pattern the chart-only gate grammar cannot express.
-# The 1st candle's low is the structural stop (§3.1). Evaluates on the NIFTY front future (Model A);
-# the confluence seam buys the nearest-weekly ATM-band CE.
+# AUTO-DERIVED (2b-1) variant of the scalp-morning-trade family — signal on NFO/NIFTY-FUT-CONT. Executes on SENSEX options (strike anchored on BFO/SENSEX-FUT-CONT).
+# Siva #9 — Morning Trade (section 3.9). The `opening-tick` tag arms the §12.3 Morning Trade path: an
+# OPENING-TICK scalp executed in the FIRST candle(s) at ~09:16-09:18, governed by its own opening-tick
+# window (the general "after 09:45" cross-strategy rule does NOT apply — owner-confirmed). The view is
+# EOD-FORMED the prior evening (prior-day Futures positioning + Trending OI + Sentiment + FII/DII —
+# already read into the confluence ctx); the global cues (Dow / Asian / USD) are a MANUAL checklist
+# item, not automated here. VWAP is "not actionable before 10:30", so in the opening window VWAP is NOT
+# the hard gate — the OI/sentiment/FII confluence carries the signal and VWAP stays a SOFT dot in the
+# aggregate. SL = the FIRST session candle's low (CE) / high (PE). Small size, profits-only (a risk-
+# layer discipline note, not enforced here). Index-option intraday — squared off same day, NO carry.
+# Evaluates on the NIFTY front future (Model A); the confluence seam buys the nearest-weekly ATM-band CE.
 schema: strategy-schema/v1
-id: scalp-two-candle-nifty
-name: "Scalper · Two-Candle · NIFTY CE"
+id: scalp-morning-trade-sensex-sensexoi
+name: "Scalper · Morning Trade · SENSEX CE (SENSEX-OI)"
 version: 1.0.0
-description: "Two-candle scalp (Siva #1) on the NIFTY front future; 2-candle pattern + 1st-candle SL; long-premium CE only."
+description: "Morning Trade opening-tick scalp (Siva #9) on the NIFTY front future at ~09:16; EOD-formed OI/sentiment/FII view carries the signal, VWAP is degraded (soft, not hard) before 10:30, SL = first session candle low; long-premium CE only; profits-only small size; global cues (Dow/Asian/USD) are a MANUAL checklist item."
 author: owner
-tags: [scalper, options, intraday, nifty, two-candle-pattern]
+tags: [scalper, options, intraday, sensex, opening-tick]
 
 universe:
   mode: options_of_underlying
-  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  underlying: { exchange: BSE, tradingsymbol: "SENSEX" }
   signal_underlying: { exchange: NFO, tradingsymbol: "NIFTY-FUT-CONT" }
+  strike_reference: { exchange: BFO, tradingsymbol: "SENSEX-FUT-CONT" }
   options:
     expiry: nearest_weekly
     strikes: { selector: atm_window, width: 3 }
@@ -38,8 +44,7 @@ entry_rules:
   direction: long
   gate:
     all:
-      - "close > vwap"
-      - "close > vwma20"         # momentum continuation: price leading both VWAP and VWMA
+      - "close > vwma20"          # opening-tick momentum lean; VWAP is a soft confluence dot before 10:30
   scoring:
     threshold: 0.2
 
@@ -54,12 +59,12 @@ risk:
   max_daily_loss_pct: 2.0
   session:
     style: intraday
-    window: { from: "09:45", to: "15:00" }
+    window: { from: "09:16", to: "15:00" }
     square_off: "15:15"
 
 backtest:
   defaults: { interval: 1m, lookback_days: 120, initial_capital: 200000, costs: { per_lot_inr: 20, slippage_ticks: 1 } }
-  oi_confluence_gate: { enabled: true, interval: "5m" }
+  oi_confluence_gate: { enabled: false, interval: "5m", index: "SENSEX" }
   optimize:
     parameters:
       - { path: "indicators[alias=vwma20].params.period",         range: [10, 30], step: 1 }

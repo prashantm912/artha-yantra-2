@@ -1,3 +1,4 @@
+# AUTO-DERIVED (2b-1) variant of the scalp-connect-the-dots family — signal on NFO/NIFTY-FUT-CONT.
 # Siva #10 — Connect-the-Dots framework (the master confluence). Phase 3 / Model A:
 # evaluates on the NIFTY FRONT FUTURE; the confluence seam buys the nearest-weekly
 # ATM-band CE on full chart+OI+macro confluence. Chart gate is deliberately permissive
@@ -13,6 +14,7 @@ tags: [scalper, options, intraday, nifty]
 universe:
   mode: options_of_underlying
   underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  signal_underlying: { exchange: NFO, tradingsymbol: "NIFTY-FUT-CONT" }
   options:
     expiry: nearest_weekly
     strikes: { selector: atm_window, width: 3 }   # ATM±3; the StrikePicker delta/premium band refines
@@ -52,3 +54,20 @@ risk:
     style: intraday
     window: { from: "09:45", to: "15:00" }
     square_off: "15:15"
+
+backtest:
+  defaults: { interval: 1m, lookback_days: 120, initial_capital: 200000, costs: { per_lot_inr: 20, slippage_ticks: 1 } }
+  oi_confluence_gate: { enabled: true, interval: "5m" }
+  optimize:
+    parameters:
+      - { path: "indicators[alias=vwma20].params.period",         range: [10, 30], step: 1 }
+      - { path: "indicators[alias=rsi14].params.period",          range: [9, 21], step: 1 }
+      - { path: "indicators[alias=supertrend].params.period",     range: [7, 14], step: 1 }
+      - { path: "indicators[alias=supertrend].params.multiplier", range: [1.5, 3.5] }
+      - { path: "entry_rules.scoring.threshold",                  range: [0.1, 0.5] }
+      - { path: "exit_rules[type=time_stop].params.max_bars",   range: [6, 16], step: 1 }
+    method: tpe
+    max_trials: 40
+    objective: { metric: expectancy, direction: maximize, fold_aggregation: mean }
+    constraints: { min_trades: 10 }
+    walk_forward: { train_days: 30, test_days: 30, step_days: 20, anchored: false }

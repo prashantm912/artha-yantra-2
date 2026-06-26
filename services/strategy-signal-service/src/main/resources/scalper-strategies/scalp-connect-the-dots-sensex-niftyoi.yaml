@@ -1,28 +1,29 @@
-# AUTO-DERIVED (2b-1) variant of the scalp-trending-oi family — signal on NFO/NIFTY-FUT-CONT.
-# Siva #5 — Trending-OI Crossover. The directional edge is the OI cross (PE writers
-# building support → bullish), confirmed by the §12.3 confluence seam's futures-OI /
-# trending dots; the chart pre-gate is just the VWMA trend. NO native numeric SL/target
-# (size off structure + VWAP) — exits are structural. Evaluates on the NIFTY front future.
+# AUTO-DERIVED (2b-1) variant of the scalp-connect-the-dots family — signal on NFO/NIFTY-FUT-CONT. Executes on SENSEX options (strike anchored on BFO/SENSEX-FUT-CONT).
+# Siva #10 — Connect-the-Dots framework (the master confluence). Phase 3 / Model A:
+# evaluates on the NIFTY FRONT FUTURE; the confluence seam buys the nearest-weekly
+# ATM-band CE on full chart+OI+macro confluence. Chart gate is deliberately permissive
+# (close > VWAP) — the §12.3 ScalperConfluenceGate does the real gating.
 schema: strategy-schema/v1
-id: scalp-trending-oi-nifty
-name: "Scalper · Trending-OI Crossover · NIFTY CE"
+id: scalp-connect-the-dots-sensex-niftyoi
+name: "Scalper · Connect-the-Dots · SENSEX CE (NIFTY-OI)"
 version: 1.0.0
-description: "Trending-OI crossover scalp (Siva #5) on the NIFTY front future; long-premium CE, OI-led via the confluence."
+description: "Master Connect-the-Dots confluence scalp (Siva #10) on the NIFTY front future; long-premium CE only."
 author: owner
-tags: [scalper, options, intraday, nifty, oi-cross-filter]
+tags: [scalper, options, intraday, sensex]
 
 universe:
   mode: options_of_underlying
-  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  underlying: { exchange: BSE, tradingsymbol: "SENSEX" }
   signal_underlying: { exchange: NFO, tradingsymbol: "NIFTY-FUT-CONT" }
+  strike_reference: { exchange: BFO, tradingsymbol: "SENSEX-FUT-CONT" }
   options:
     expiry: nearest_weekly
-    strikes: { selector: atm_window, width: 3 }
+    strikes: { selector: atm_window, width: 3 }   # ATM±3; the StrikePicker delta/premium band refines
     option_types: [CE]
 
 timeframes:
-  primary: 3m
-  additional: [1h]
+  primary: 3m                    # the Siva scalp clock
+  additional: [1h]               # the 60-minute bias the confluence requires to agree
 
 indicators:
   - { name: VWMA,       alias: vwma20,    timeframe: 3m, params: { period: 20 } }
@@ -34,16 +35,16 @@ indicators:
   - { name: SUPERTREND, alias: bias60m,   timeframe: 1h, params: { period: 7, multiplier: 3.0 } }
 
 entry_rules:
-  direction: long
+  direction: long                # long bias → CE (the seam derives CE/PE from price vs VWAP)
   gate:
     all:
-      - "close > vwma20"         # trend confirmation; the OI cross lives in the confluence seam
+      - "close > vwap"           # coarse pre-gate; the confluence seam is the real filter
   scoring:
-    threshold: 0.2
+    threshold: 0.2               # easy to clear → the seam runs; §0B + confluence then decide
 
 exit_rules:
-  - { type: signal_exit, params: { rule: "close < vwma20" } }   # trend break exit
-  - { type: time_stop,   params: { max_bars: 12 } }
+  - { type: signal_exit, params: { rule: "close < vwap" } }   # structural exit on the future
+  - { type: time_stop,   params: { max_bars: 10 } }           # scalps go stale fast
 
 risk:
   position_sizing: { method: premium_budget, params: { budget_inr: 15000 } }
@@ -57,7 +58,7 @@ risk:
 
 backtest:
   defaults: { interval: 1m, lookback_days: 120, initial_capital: 200000, costs: { per_lot_inr: 20, slippage_ticks: 1 } }
-  oi_confluence_gate: { enabled: true, interval: "5m" }
+  oi_confluence_gate: { enabled: true, interval: "5m", index: "NIFTY 50" }
   optimize:
     parameters:
       - { path: "indicators[alias=vwma20].params.period",         range: [10, 30], step: 1 }
@@ -65,7 +66,7 @@ backtest:
       - { path: "indicators[alias=supertrend].params.period",     range: [7, 14], step: 1 }
       - { path: "indicators[alias=supertrend].params.multiplier", range: [1.5, 3.5] }
       - { path: "entry_rules.scoring.threshold",                  range: [0.1, 0.5] }
-      - { path: "exit_rules[type=time_stop].params.max_bars",   range: [8, 18], step: 1 }
+      - { path: "exit_rules[type=time_stop].params.max_bars",   range: [6, 16], step: 1 }
     method: tpe
     max_trials: 40
     objective: { metric: expectancy, direction: maximize, fold_aggregation: mean }

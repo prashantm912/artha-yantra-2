@@ -29,20 +29,48 @@ public class ScalperStrategySeeder {
 
   private static final Logger log = LoggerFactory.getLogger(ScalperStrategySeeder.class);
 
+  // 2b-1: each of the 12 Siva scalpers forked into 3 instrument-agnostic variants (all signal on
+  // NFO/NIFTY-FUT-CONT): -nifty (NIFTY options), -sensex-niftyoi + -sensex-sensexoi (SENSEX options,
+  // the two differ only in the OI-confluence gate index — a forward-paper A/B). The 2 ex-BankNifty
+  // strategies (gap-theory, trend-change) are re-homed to NIFTY/SENSEX (BankNifty is now monthly-expiry).
   private static final List<String> STRATEGIES =
       List.of(
           "scalp-connect-the-dots-nifty",
+          "scalp-connect-the-dots-sensex-niftyoi",
+          "scalp-connect-the-dots-sensex-sensexoi",
           "scalp-two-candle-nifty",
+          "scalp-two-candle-sensex-niftyoi",
+          "scalp-two-candle-sensex-sensexoi",
           "scalp-trending-oi-nifty",
+          "scalp-trending-oi-sensex-niftyoi",
+          "scalp-trending-oi-sensex-sensexoi",
           "scalp-golden-crossover-nifty",
-          "scalp-gap-theory-banknifty",
-          "scalp-trend-change-banknifty",
+          "scalp-golden-crossover-sensex-niftyoi",
+          "scalp-golden-crossover-sensex-sensexoi",
+          "scalp-gap-theory-nifty",
+          "scalp-gap-theory-sensex-niftyoi",
+          "scalp-gap-theory-sensex-sensexoi",
+          "scalp-trend-change-nifty",
+          "scalp-trend-change-sensex-niftyoi",
+          "scalp-trend-change-sensex-sensexoi",
           "scalp-open-high-low-nifty",
+          "scalp-open-high-low-sensex-niftyoi",
+          "scalp-open-high-low-sensex-sensexoi",
           "scalp-morning-trade-nifty",
+          "scalp-morning-trade-sensex-niftyoi",
+          "scalp-morning-trade-sensex-sensexoi",
           "scalp-hero-zero-nifty",
+          "scalp-hero-zero-sensex-niftyoi",
+          "scalp-hero-zero-sensex-sensexoi",
           "scalp-straddle-nifty",
+          "scalp-straddle-sensex-niftyoi",
+          "scalp-straddle-sensex-sensexoi",
           "scalp-market-movers-nifty",
-          "scalp-btst-stbt-nifty");
+          "scalp-market-movers-sensex-niftyoi",
+          "scalp-market-movers-sensex-sensexoi",
+          "scalp-btst-stbt-nifty",
+          "scalp-btst-stbt-sensex-niftyoi",
+          "scalp-btst-stbt-sensex-sensexoi");
 
   private final RegistryService registry;
 

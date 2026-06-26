@@ -1,4 +1,4 @@
-# AUTO-DERIVED (2b-1) variant of the scalp-hero-zero family — signal on NFO/NIFTY-FUT-CONT.
+# AUTO-DERIVED (2b-1) variant of the scalp-hero-zero family — signal on NFO/NIFTY-FUT-CONT. Executes on SENSEX options (strike anchored on BFO/SENSEX-FUT-CONT).
 # Siva #7 - Hero-Zero. The `hero-zero` tag arms the section-12.3 HeroZeroGate: an EXPIRY-DAY-ONLY,
 # BUY-SIDE-ONLY (long premium - defined risk, NEVER short) end-of-day scalp. After ~14:30 the
 # highest-OI build-up has marked the day's range (the Put strike is support, the Call strike
@@ -33,17 +33,18 @@
 # Evaluates on the NIFTY front future (Model A); the confluence seam buys the nearest-weekly ATM-band
 # option on the resolved side.
 schema: strategy-schema/v1
-id: scalp-hero-zero-nifty
-name: "Scalper · Hero Zero · NIFTY"
+id: scalp-hero-zero-sensex-sensexoi
+name: "Scalper · Hero Zero · SENSEX (SENSEX-OI)"
 version: 1.0.0
 description: "Hero-Zero expiry-day end-of-day scalp (Siva #7) on the NIFTY 3-min front future: index weekly-expiry day only (OI ignored on monthly expiry), after 14:30 in the 14:30-15:20 window, a >50% OI+price range break confirmed by short-covering on the side, RSI not overbought/oversold, closing toward the day extreme; long-premium BUY side only (CE toward the day high / PE toward the day low), SL = 50% of premium + 15:20 square-off, one strike inside the SC strike."
 author: owner
-tags: [scalper, options, intraday, nifty, hero-zero]
+tags: [scalper, options, intraday, sensex, hero-zero]
 
 universe:
   mode: options_of_underlying
-  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  underlying: { exchange: BSE, tradingsymbol: "SENSEX" }
   signal_underlying: { exchange: NFO, tradingsymbol: "NIFTY-FUT-CONT" }
+  strike_reference: { exchange: BFO, tradingsymbol: "SENSEX-FUT-CONT" }
   options:
     expiry: nearest_weekly
     strikes: { selector: atm_window, width: 3 }
@@ -88,7 +89,7 @@ risk:
 
 backtest:
   defaults: { interval: 1m, lookback_days: 120, initial_capital: 200000, costs: { per_lot_inr: 20, slippage_ticks: 1 } }
-  oi_confluence_gate: { enabled: false, interval: "5m" }
+  oi_confluence_gate: { enabled: false, interval: "5m", index: "SENSEX" }
   optimize:
     parameters:
       - { path: "indicators[alias=vwma20].params.period",         range: [10, 30], step: 1 }

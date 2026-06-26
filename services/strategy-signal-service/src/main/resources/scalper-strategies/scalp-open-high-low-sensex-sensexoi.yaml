@@ -1,4 +1,4 @@
-# AUTO-DERIVED (2b-1) variant of the scalp-open-high-low family — signal on NFO/NIFTY-FUT-CONT.
+# AUTO-DERIVED (2b-1) variant of the scalp-open-high-low family — signal on NFO/NIFTY-FUT-CONT. Executes on SENSEX options (strike anchored on BFO/SENSEX-FUT-CONT).
 # Siva #2 - Open=High / Open=Low (O=H / O=L). The `open-high-low` tag arms the section-12.3
 # OpenHighLowGate: a momentum scalp that reads big-players' intent - a strike opening at its high
 # (Open=High on Calls, bullish) or its low (Open=Low on Puts, bearish) is a magnet the institution will
@@ -41,17 +41,18 @@
 # Evaluates on the NIFTY 50 front future (Model A); the confluence seam buys the nearest-weekly
 # ATM-band CE.
 schema: strategy-schema/v1
-id: scalp-open-high-low-nifty
-name: "Scalper · Open=High / Open=Low · NIFTY CE"
+id: scalp-open-high-low-sensex-sensexoi
+name: "Scalper · Open=High / Open=Low · SENSEX CE (SENSEX-OI)"
 version: 1.0.0
 description: "Open=High/Open=Low momentum scalp (Siva #2) on the NIFTY 50 3-min front future. Gates on the SOURCE-FAITHFUL FNO-structure probability tier (Table-1: Futures-OH + >=3 ATM+-3 Call strikes Open=High + Put Open=Low -> HIGH; few strikes -> MILD; both-sides OH -> stand aside) refined by the Table-2 price/volume modifier (a CE-OH premium falling on >=50k volume, or a >50% fall vs prev close, downgrades to LOW). Only HIGH fires. Per-strike OH/OL + volume come from /options/strike-session-stats (5-min snapshot resolution; native 3-min needs 3-min capture). RSI>50 entry; section-3.2 <=50% premium/OI spurt reject; 1st-half (no fresh entry after ~12:00) window; VWAP stop; exit ~5pts inside the OH/OL, never beyond it. The OiPulse >=90% AI badge stays external/unavailable (optional, degraded around)."
 author: owner
-tags: [scalper, options, intraday, nifty, open-high-low]
+tags: [scalper, options, intraday, sensex, open-high-low]
 
 universe:
   mode: options_of_underlying
-  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  underlying: { exchange: BSE, tradingsymbol: "SENSEX" }
   signal_underlying: { exchange: NFO, tradingsymbol: "NIFTY-FUT-CONT" }
+  strike_reference: { exchange: BFO, tradingsymbol: "SENSEX-FUT-CONT" }
   options:
     expiry: nearest_weekly
     strikes: { selector: atm_window, width: 3 }
@@ -94,7 +95,7 @@ risk:
 
 backtest:
   defaults: { interval: 1m, lookback_days: 120, initial_capital: 200000, costs: { per_lot_inr: 20, slippage_ticks: 1 } }
-  oi_confluence_gate: { enabled: true, interval: "5m" }
+  oi_confluence_gate: { enabled: true, interval: "5m", index: "SENSEX" }
   optimize:
     parameters:
       - { path: "indicators[alias=vwma20].params.period",         range: [10, 30], step: 1 }

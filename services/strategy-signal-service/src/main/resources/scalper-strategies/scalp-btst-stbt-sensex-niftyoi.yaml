@@ -1,4 +1,4 @@
-# AUTO-DERIVED (2b-1) variant of the scalp-btst-stbt family — signal on NFO/NIFTY-FUT-CONT.
+# AUTO-DERIVED (2b-1) variant of the scalp-btst-stbt family — signal on NFO/NIFTY-FUT-CONT. Executes on SENSEX options (strike anchored on BFO/SENSEX-FUT-CONT).
 # Siva #8 — BTST / STBT (§3.8, §6.8 `btst_stbt`). An OVERNIGHT CARRY: a late-session directional
 # position taken near the close and held overnight, exited the next morning. BTST (Buy Today Sell
 # Tomorrow) = the BULLISH carry; STBT (Sell Today Buy Tomorrow) = the BEARISH carry. The edge is a
@@ -55,17 +55,18 @@
 # Evaluates on the NIFTY 50 front future (Model A); the §12.3 confluence seam buys the nearest-weekly
 # ATM-band option on the resolved side and carries it overnight.
 schema: strategy-schema/v1
-id: scalp-btst-stbt-nifty
-name: "Scalper · BTST / STBT · NIFTY"
+id: scalp-btst-stbt-sensex-niftyoi
+name: "Scalper · BTST / STBT · SENSEX (NIFTY-OI)"
 version: 1.0.0
 description: "BTST/STBT overnight carry (Siva #8) on the NIFTY 50 3-min front future, evaluated ONCE at the 15:20 pre-close clock (style: btst, fills AT_CLOSE to capture the overnight gap). direction: both — closing toward the day HIGH ⇒ CE/BTST (bullish carry), toward the day LOW ⇒ PE/STBT (bearish carry); §0B VWAP-decisive side + RSI band (BTST examples >60 / STBT <40) + shared confluence carry validity. v1 seeds the DEFINED-RISK long-premium buy leg (Buy CE / Buy PE); the SHORT-PREMIUM sell legs (BTST Sell PE / STBT Sell CE — correctly SELL side) are the documented sizing follow-up, gated on margin-service SPAN (#47, out of scope). SL = 50% of premium + next-morning exit; 1-night carry."
 author: owner
-tags: [scalper, options, btst, nifty]
+tags: [scalper, options, btst, sensex]
 
 universe:
   mode: options_of_underlying
-  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  underlying: { exchange: BSE, tradingsymbol: "SENSEX" }
   signal_underlying: { exchange: NFO, tradingsymbol: "NIFTY-FUT-CONT" }
+  strike_reference: { exchange: BFO, tradingsymbol: "SENSEX-FUT-CONT" }
   options:
     expiry: nearest_weekly
     strikes: { selector: atm_window, width: 3 }
@@ -109,7 +110,7 @@ risk:
 
 backtest:
   defaults: { interval: 1m, lookback_days: 120, initial_capital: 200000, costs: { per_lot_inr: 20, slippage_ticks: 1 } }
-  oi_confluence_gate: { enabled: false, interval: "5m" }
+  oi_confluence_gate: { enabled: false, interval: "5m", index: "NIFTY 50" }
   optimize:
     parameters:
       - { path: "indicators[alias=vwma20].params.period",         range: [10, 30], step: 1 }

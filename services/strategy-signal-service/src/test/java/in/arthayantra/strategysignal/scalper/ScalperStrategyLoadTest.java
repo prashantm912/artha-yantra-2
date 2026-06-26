@@ -24,33 +24,71 @@ import org.junit.jupiter.api.Test;
  */
 class ScalperStrategyLoadTest {
 
-  // The full seeded set: 4 core (NIFTY) + derived (#4/#12 BANKNIFTY, #2/#9/#7 NIFTY) + #3 Market
-  // Movers + #8 BTST/STBT (both NIFTY). Each maps to its expected underlying so the per-index
-  // ScalperConfig assertions hold across both indices.
+  // The full seeded set (2b-1): each of the 12 Siva scalpers × {NIFTY, SENSEX·NIFTY-OI, SENSEX·SENSEX-OI}
+  // = 36 variants, all signal on NFO/NIFTY-FUT-CONT. Each maps to its option-execution underlying so the
+  // per-index ScalperConfig assertions hold (NIFTY variant → "NIFTY 50"; both SENSEX variants → "SENSEX").
+  // This list MUST stay in lockstep with ScalperStrategySeeder's STRATEGIES.
   private static final Map<String, String> UNDERLYING =
       Map.ofEntries(
           Map.entry("scalp-connect-the-dots-nifty", "NIFTY 50"),
+          Map.entry("scalp-connect-the-dots-sensex-niftyoi", "SENSEX"),
+          Map.entry("scalp-connect-the-dots-sensex-sensexoi", "SENSEX"),
           Map.entry("scalp-two-candle-nifty", "NIFTY 50"),
+          Map.entry("scalp-two-candle-sensex-niftyoi", "SENSEX"),
+          Map.entry("scalp-two-candle-sensex-sensexoi", "SENSEX"),
           Map.entry("scalp-trending-oi-nifty", "NIFTY 50"),
+          Map.entry("scalp-trending-oi-sensex-niftyoi", "SENSEX"),
+          Map.entry("scalp-trending-oi-sensex-sensexoi", "SENSEX"),
           Map.entry("scalp-golden-crossover-nifty", "NIFTY 50"),
-          Map.entry("scalp-gap-theory-banknifty", "NIFTY BANK"),
-          Map.entry("scalp-trend-change-banknifty", "NIFTY BANK"),
+          Map.entry("scalp-golden-crossover-sensex-niftyoi", "SENSEX"),
+          Map.entry("scalp-golden-crossover-sensex-sensexoi", "SENSEX"),
+          Map.entry("scalp-gap-theory-nifty", "NIFTY 50"),
+          Map.entry("scalp-gap-theory-sensex-niftyoi", "SENSEX"),
+          Map.entry("scalp-gap-theory-sensex-sensexoi", "SENSEX"),
+          Map.entry("scalp-trend-change-nifty", "NIFTY 50"),
+          Map.entry("scalp-trend-change-sensex-niftyoi", "SENSEX"),
+          Map.entry("scalp-trend-change-sensex-sensexoi", "SENSEX"),
           Map.entry("scalp-open-high-low-nifty", "NIFTY 50"),
+          Map.entry("scalp-open-high-low-sensex-niftyoi", "SENSEX"),
+          Map.entry("scalp-open-high-low-sensex-sensexoi", "SENSEX"),
           Map.entry("scalp-morning-trade-nifty", "NIFTY 50"),
+          Map.entry("scalp-morning-trade-sensex-niftyoi", "SENSEX"),
+          Map.entry("scalp-morning-trade-sensex-sensexoi", "SENSEX"),
           Map.entry("scalp-hero-zero-nifty", "NIFTY 50"),
+          Map.entry("scalp-hero-zero-sensex-niftyoi", "SENSEX"),
+          Map.entry("scalp-hero-zero-sensex-sensexoi", "SENSEX"),
           Map.entry("scalp-straddle-nifty", "NIFTY 50"),
+          Map.entry("scalp-straddle-sensex-niftyoi", "SENSEX"),
+          Map.entry("scalp-straddle-sensex-sensexoi", "SENSEX"),
           Map.entry("scalp-market-movers-nifty", "NIFTY 50"),
-          Map.entry("scalp-btst-stbt-nifty", "NIFTY 50"));
+          Map.entry("scalp-market-movers-sensex-niftyoi", "SENSEX"),
+          Map.entry("scalp-market-movers-sensex-sensexoi", "SENSEX"),
+          Map.entry("scalp-btst-stbt-nifty", "NIFTY 50"),
+          Map.entry("scalp-btst-stbt-sensex-niftyoi", "SENSEX"),
+          Map.entry("scalp-btst-stbt-sensex-sensexoi", "SENSEX"));
 
   // Each derived strategy must carry the tag that arms its §12.3 gate (the seeder reads the same tag).
+  // Every variant of each gated base carries the same tag (the gate behaviour is instrument-agnostic).
   private static final Map<String, String> EXPECTED_TAG =
-      Map.of(
-          "scalp-gap-theory-banknifty", "gap-theory",
-          "scalp-trend-change-banknifty", "trend-change",
-          "scalp-open-high-low-nifty", "open-high-low",
-          "scalp-morning-trade-nifty", "opening-tick",
-          "scalp-hero-zero-nifty", "hero-zero",
-          "scalp-straddle-nifty", "straddle");
+      Map.ofEntries(
+          Map.entry("scalp-gap-theory-nifty", "gap-theory"),
+          Map.entry("scalp-gap-theory-sensex-niftyoi", "gap-theory"),
+          Map.entry("scalp-gap-theory-sensex-sensexoi", "gap-theory"),
+          Map.entry("scalp-trend-change-nifty", "trend-change"),
+          Map.entry("scalp-trend-change-sensex-niftyoi", "trend-change"),
+          Map.entry("scalp-trend-change-sensex-sensexoi", "trend-change"),
+          Map.entry("scalp-open-high-low-nifty", "open-high-low"),
+          Map.entry("scalp-open-high-low-sensex-niftyoi", "open-high-low"),
+          Map.entry("scalp-open-high-low-sensex-sensexoi", "open-high-low"),
+          Map.entry("scalp-morning-trade-nifty", "opening-tick"),
+          Map.entry("scalp-morning-trade-sensex-niftyoi", "opening-tick"),
+          Map.entry("scalp-morning-trade-sensex-sensexoi", "opening-tick"),
+          Map.entry("scalp-hero-zero-nifty", "hero-zero"),
+          Map.entry("scalp-hero-zero-sensex-niftyoi", "hero-zero"),
+          Map.entry("scalp-hero-zero-sensex-sensexoi", "hero-zero"),
+          Map.entry("scalp-straddle-nifty", "straddle"),
+          Map.entry("scalp-straddle-sensex-niftyoi", "straddle"),
+          Map.entry("scalp-straddle-sensex-sensexoi", "straddle"));
 
   // the aliases ScalperConfluenceGate reads off the bank — each strategy must declare all four.
   private static final Set<String> SEAM_ALIASES = Set.of("vwma20", "psar", "rsi14", "supertrend");
@@ -98,17 +136,17 @@ class ScalperStrategyLoadTest {
       config.path("indicators").forEach(i -> declared.add(i.path("alias").asText()));
       assertThat(declared).as(id + " declares the seam aliases").containsAll(SEAM_ALIASES);
 
-      // #5 (T2.1): only scalp-trending-oi carries the oi-cross-filter tag → the HARD call-put dOI
-      // pre-gate. ScalperConfig.requireCallPutDeltaFilter mirrors the tag; the others stay off.
-      boolean isTrendingOi = id.equals("scalp-trending-oi-nifty");
+      // #5 (T2.1): only the scalp-trending-oi family carries the oi-cross-filter tag → the HARD call-put
+      // dOI pre-gate. ScalperConfig.requireCallPutDeltaFilter mirrors the tag; the others stay off.
+      boolean isTrendingOi = id.startsWith("scalp-trending-oi-");
       assertThat(cfg.requireCallPutDeltaFilter())
           .as(id + " oi-cross-filter pre-gate")
           .isEqualTo(isTrendingOi);
 
-      // #11 (section 3.11): only scalp-straddle carries the straddle tag → the NEUTRAL two-leg path.
-      // ScalperConfig.requireStraddle mirrors the tag; the others stay off, and the straddle declares
-      // both option_types (it BUYS the ATM CE + PE) rather than a single directional side.
-      boolean isStraddle = id.equals("scalp-straddle-nifty");
+      // #11 (section 3.11): only the scalp-straddle family carries the straddle tag → the NEUTRAL two-leg
+      // path. ScalperConfig.requireStraddle mirrors the tag; the others stay off, and the straddle
+      // declares both option_types (it BUYS the ATM CE + PE) rather than a single directional side.
+      boolean isStraddle = id.startsWith("scalp-straddle-");
       assertThat(cfg.requireStraddle()).as(id + " straddle neutral path").isEqualTo(isStraddle);
       if (isStraddle) {
         List<String> optTypes = new ArrayList<>();

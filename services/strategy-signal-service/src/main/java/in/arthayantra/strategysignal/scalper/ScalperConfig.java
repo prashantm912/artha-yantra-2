@@ -84,13 +84,16 @@ public record ScalperConfig(
   private static final double RATE = 0.065;
   // v1 confluence aggregate a valid signal must reach (≥ ~60% of the weighted dots).
   private static final BigDecimal THRESHOLD = new BigDecimal("0.6");
-  // §0B premium bands (VERIFIED: NIFTY 100–250, BANKNIFTY 250–400). Unknown indices fall to NIFTY's
-  // band conservatively (a narrower band rejects more strikes — never falsely admits one).
+  // §0B premium bands (VERIFIED: NIFTY 100–250, BANKNIFTY 250–400; SENSEX 300–800, the 2b grill-locked
+  // band for the higher-priced SENSEX premium — live StrikePicker only, the backtest selector ignores
+  // the band and picks nearest-strike-to-spot). Unknown indices fall to NIFTY's band conservatively (a
+  // narrower band rejects more strikes — never falsely admits one).
   private static final BigDecimal[] NIFTY_PREMIUM = {new BigDecimal("100"), new BigDecimal("250")};
   private static final Map<String, BigDecimal[]> PREMIUM =
       Map.of(
           "NIFTY 50", NIFTY_PREMIUM,
-          "NIFTY BANK", new BigDecimal[] {new BigDecimal("250"), new BigDecimal("400")});
+          "NIFTY BANK", new BigDecimal[] {new BigDecimal("250"), new BigDecimal("400")},
+          "SENSEX", new BigDecimal[] {new BigDecimal("300"), new BigDecimal("800")});
 
   /** Builds the config from a strategy's {@code universe} block + its tags (options_of_underlying). */
   public static ScalperConfig from(JsonNode universe, List<String> tags) {

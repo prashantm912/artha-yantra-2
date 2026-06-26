@@ -1,20 +1,21 @@
-# AUTO-DERIVED (2b-1) variant of the scalp-trending-oi family — signal on NFO/NIFTY-FUT-CONT.
+# AUTO-DERIVED (2b-1) variant of the scalp-trending-oi family — signal on NFO/NIFTY-FUT-CONT. Executes on SENSEX options (strike anchored on BFO/SENSEX-FUT-CONT).
 # Siva #5 — Trending-OI Crossover. The directional edge is the OI cross (PE writers
 # building support → bullish), confirmed by the §12.3 confluence seam's futures-OI /
 # trending dots; the chart pre-gate is just the VWMA trend. NO native numeric SL/target
 # (size off structure + VWAP) — exits are structural. Evaluates on the NIFTY front future.
 schema: strategy-schema/v1
-id: scalp-trending-oi-nifty
-name: "Scalper · Trending-OI Crossover · NIFTY CE"
+id: scalp-trending-oi-sensex-niftyoi
+name: "Scalper · Trending-OI Crossover · SENSEX CE (NIFTY-OI)"
 version: 1.0.0
 description: "Trending-OI crossover scalp (Siva #5) on the NIFTY front future; long-premium CE, OI-led via the confluence."
 author: owner
-tags: [scalper, options, intraday, nifty, oi-cross-filter]
+tags: [scalper, options, intraday, sensex, oi-cross-filter]
 
 universe:
   mode: options_of_underlying
-  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  underlying: { exchange: BSE, tradingsymbol: "SENSEX" }
   signal_underlying: { exchange: NFO, tradingsymbol: "NIFTY-FUT-CONT" }
+  strike_reference: { exchange: BFO, tradingsymbol: "SENSEX-FUT-CONT" }
   options:
     expiry: nearest_weekly
     strikes: { selector: atm_window, width: 3 }
@@ -57,7 +58,7 @@ risk:
 
 backtest:
   defaults: { interval: 1m, lookback_days: 120, initial_capital: 200000, costs: { per_lot_inr: 20, slippage_ticks: 1 } }
-  oi_confluence_gate: { enabled: true, interval: "5m" }
+  oi_confluence_gate: { enabled: true, interval: "5m", index: "NIFTY 50" }
   optimize:
     parameters:
       - { path: "indicators[alias=vwma20].params.period",         range: [10, 30], step: 1 }

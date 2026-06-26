@@ -658,6 +658,60 @@
         }
       }
     },
+    "/api/v1/market/admin/futures/continuous-backfill" : {
+      "post" : {
+        "tags" : [ "continuous-futures-admin-controller" ],
+        "operationId" : "continuousBackfill",
+        "parameters" : [ {
+          "name" : "root",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "default" : "NIFTY"
+          }
+        }, {
+          "name" : "underlyingExchange",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "default" : "NSE"
+          }
+        }, {
+          "name" : "underlying",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "default" : "NIFTY 50"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/admin/export" : {
       "post" : {
         "tags" : [ "export-controller" ],

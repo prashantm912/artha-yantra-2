@@ -48,10 +48,13 @@ public class JobsController {
       @RequestParam(defaultValue = "0") int offset) {
     int boundedLimit = Math.min(Math.max(limit, 1), 500);
     int boundedOffset = Math.max(offset, 0);
+    List<Job> jobs = service.list(status, strategyId, boundedLimit, boundedOffset);
+    // One batch query for the page's completed-run returns, so the list shows a returns column
+    // without an N+1 per-row fetch.
+    Map<UUID, String> returns =
+        runs.findReturnsByJobIds(jobs.stream().map(Job::id).toList());
     List<Map<String, Object>> items =
-        service.list(status, strategyId, boundedLimit, boundedOffset).stream()
-            .map(JobsController::summary)
-            .toList();
+        jobs.stream().map(job -> summary(job, returns.get(job.id()))).toList();
     return Map.of("items", items, "limit", boundedLimit, "offset", boundedOffset);
   }
 
@@ -72,13 +75,17 @@ public class JobsController {
     return ResponseEntity.accepted().body(Map.of("status", "cancelling"));
   }
 
-  private static Map<String, Object> summary(Job job) {
+  private static Map<String, Object> summary(Job job, String totalReturn) {
     Map<String, Object> map = new LinkedHashMap<>();
     map.put("jobId", job.id().toString());
     map.put("kind", job.kind().name());
     map.put("status", job.status().db());
     map.put("progress", job.progress());
     map.put("createdAt", job.createdAt());
+    // The originating strategy (UUID; the UI maps it to a name) + the completed run's total return
+    // (plain decimal string, null until a run exists) so the list shows strategy + returns columns.
+    map.put("strategyId", job.request() == null ? null : job.request().path("strategyId").asText(null));
+    map.put("totalReturn", totalReturn);
     return map;
   }
 

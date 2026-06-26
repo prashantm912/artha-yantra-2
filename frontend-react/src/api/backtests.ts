@@ -18,6 +18,10 @@ export interface JobDto {
   status: JobStatus;
   progress: number;
   createdAt: string;
+  /** Originating strategy id (the UI maps it to a name); null on legacy rows. */
+  strategyId?: string | null;
+  /** The completed run's total return (plain decimal string); null until a run exists. */
+  totalReturn?: string | null;
   parentJobId?: string | null;
   resultRef?: string | null;
   error?: string | null;
@@ -50,6 +54,8 @@ export interface SweepRequest extends Omit<RunRequest, 'seed'> {
 
 const JOBS_KEY = 'jobs';
 const JOBS_TOPIC = '/topic/jobs/stream';
+/** Page size for the jobs list (offset pagination). */
+export const JOBS_PAGE_SIZE = 25;
 
 export const JOB_STATUSES = ['queued', 'running', 'completed', 'failed', 'cancelled'] as const;
 export const INTERVALS = ['1m', '5m', '15m', '1h', '1d', '1w'] as const;
@@ -58,21 +64,23 @@ export const OBJECTIVE_METRICS = ['sharpe', 'cagr', 'totalReturn', 'sortino', 'm
 export const DIRECTIONS = ['maximize', 'minimize'] as const;
 export const FOLD_AGGREGATIONS = ['mean', 'min', 'mean_minus_std'] as const;
 
-export function useJobs(status: string | null) {
+export function useJobs(status: string | null, strategyId: string | null, offset: number) {
   return useQuery({
-    queryKey: [JOBS_KEY, 'list', status],
+    queryKey: [JOBS_KEY, 'list', status, strategyId, offset],
     queryFn: () => {
-      const params = new URLSearchParams({ limit: '50', offset: '0' });
+      const params = new URLSearchParams({ limit: String(JOBS_PAGE_SIZE), offset: String(offset) });
       if (status) params.set('status', status);
+      if (strategyId) params.set('strategyId', strategyId);
       return apiFetch<{ items: JobDto[] }>(`/backtests/jobs?${params.toString()}`);
     },
   });
 }
 
 /** Live progress from `/topic/jobs/stream`: patch the matching row; an unknown job heals via reload. */
-export function useJobsLive(status: string | null) {
+export function useJobsLive(status: string | null, strategyId: string | null, offset: number) {
   const qc = useQueryClient();
   useEffect(() => {
+    const key = [JOBS_KEY, 'list', status, strategyId, offset];
     const merge = (body: string) => {
       let f: JobProgressFrame;
       try {
@@ -80,11 +88,11 @@ export function useJobsLive(status: string | null) {
       } catch {
         return;
       }
-      qc.setQueryData<{ items: JobDto[] }>([JOBS_KEY, 'list', status], (prev) => {
+      qc.setQueryData<{ items: JobDto[] }>(key, (prev) => {
         if (!prev) return prev;
         const idx = prev.items.findIndex((j) => j.jobId === f.jobId);
         if (idx < 0) {
-          void qc.invalidateQueries({ queryKey: [JOBS_KEY, 'list', status] });
+          void qc.invalidateQueries({ queryKey: key });
           return prev;
         }
         const items = prev.items.slice();
@@ -103,7 +111,7 @@ export function useJobsLive(status: string | null) {
       offTopic();
       offReconnect();
     };
-  }, [qc, status]);
+  }, [qc, status, strategyId, offset]);
 }
 
 export function useSubmitRun() {
@@ -168,6 +176,10 @@ export interface BacktestResults {
   exchange?: string | null;
   tradingsymbol?: string | null;
   universeChecksum?: string | null;
+  /** Originating strategy id (the header maps it to a name); null on legacy rows. */
+  strategyId?: string | null;
+  /** When the run completed (ISO) — the "date when it was run". */
+  ranAt?: string | null;
 }
 
 export interface TradeRow {

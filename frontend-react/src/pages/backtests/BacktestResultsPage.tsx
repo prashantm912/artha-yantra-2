@@ -19,6 +19,7 @@ import {
   type CurvePoint,
   type TradeRow,
 } from '../../api/backtests.ts';
+import { useStrategies } from '../../api/strategies.ts';
 import { exitReasonBreakdown } from './exitReasonBreakdown.ts';
 
 const OI_INTERVALS = ['3m', '5m', '10m', '15m'] as const;
@@ -72,6 +73,7 @@ type Tab = 'overview' | 'trades' | 'folds' | 'mc' | 'oi';
 export function BacktestResultsPage() {
   const { id = '' } = useParams();
   const results = useBacktestResults(id);
+  const strategies = useStrategies('', null);
   const trades = useBacktestTrades(id);
   const folds = useBacktestFolds(id);
   const mc = useBacktestMonteCarlo(id);
@@ -84,6 +86,17 @@ export function BacktestResultsPage() {
   const r = results.data;
   const foldRows = folds.data ?? [];
   const mcData = mc.data ?? null;
+
+  // Header context: the originating strategy name (mapped from its id, schema-boundary intact) + the
+  // run date. Falls back to the static blurb until results load.
+  const headerSubtitle = useMemo(() => {
+    if (!r) return 'Metrics, equity and drawdown curves, trades, folds and Monte Carlo';
+    const name = r.strategyId
+      ? ((strategies.data?.items ?? []).find((s) => s.id === r.strategyId)?.name ?? r.strategyId.slice(0, 8))
+      : 'Strategy';
+    const ranAt = r.ranAt ? ` · ran ${r.ranAt.slice(0, 19).replace('T', ' ')}` : '';
+    return `${name}${ranAt}`;
+  }, [r, strategies.data]);
 
   const equityOption = useCallback(
     (t: ChartTheme): EChartsOption => ({
@@ -186,7 +199,7 @@ export function BacktestResultsPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Backtest results" subtitle="Metrics, equity and drawdown curves, trades, folds and Monte Carlo" />
+      <PageHeader title="Backtest results" subtitle={headerSubtitle} />
       <QueryState
         query={results}
         empty={{ title: 'No results.' }}

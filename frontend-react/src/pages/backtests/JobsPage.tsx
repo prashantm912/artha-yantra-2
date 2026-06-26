@@ -1,12 +1,15 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '../../lib/cn.ts';
+import { formatDecimal, isNegative } from '../../lib/decimal.ts';
 import { Select } from '../../components/atoms/Select.tsx';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
+import { useStrategies } from '../../api/strategies.ts';
 import {
   JOB_STATUSES,
+  JOBS_PAGE_SIZE,
   fetchResultRef,
   useCancelJob,
   useJobs,
@@ -16,7 +19,8 @@ import {
 } from '../../api/backtests.ts';
 
 // /backtests/jobs (master plan §20 parity, E-11 screen 4): every backtest/sweep job with live
-// progress bars (driven by the `jobs.progress` topic — no polling) and per-row cancel. Completed
+// progress bars (driven by the `jobs.progress` topic — no polling) and per-row cancel. Filterable by
+// status + strategy, paginated; rows carry the strategy name + the completed run's return. Completed
 // backtests link to results (PR-C7); optimization jobs link to the sweep explorer (PR-C8).
 
 function statusTone(status: JobStatus): string {
@@ -38,17 +42,35 @@ const cancellable = (s: JobStatus) => s === 'queued' || s === 'running';
 
 export function JobsPage() {
   const [status, setStatus] = useState<string | null>(null);
+  const [strategyId, setStrategyId] = useState<string | null>(null);
+  const [offset, setOffset] = useState(0);
   const navigate = useNavigate();
-  const q = useJobs(status);
-  useJobsLive(status);
+  const q = useJobs(status, strategyId, offset);
+  useJobsLive(status, strategyId, offset);
   const cancel = useCancelJob();
+  const strategies = useStrategies('', null);
 
   const rows = useMemo(() => q.data?.items ?? [], [q.data]);
+  const stratOptions = useMemo(
+    () => (strategies.data?.items ?? []).map((s) => ({ value: s.id, label: s.name })),
+    [strategies.data],
+  );
+  const nameById = useMemo(
+    () => new Map((strategies.data?.items ?? []).map((s) => [s.id, s.name])),
+    [strategies.data],
+  );
+
+  // Reset to the first page whenever a filter changes (a stale offset can land past the result set).
+  useEffect(() => setOffset(0), [status, strategyId]);
 
   const viewResults = async (jobId: string) => {
     const ref = await fetchResultRef(jobId);
     if (ref) navigate(`/backtests/${ref}`);
   };
+
+  const strategyName = (job: JobDto) =>
+    (job.strategyId ? nameById.get(job.strategyId) : null) ??
+    (job.strategyId ? job.strategyId.slice(0, 8) : '—');
 
   const columns = useMemo<DataColumn<JobDto>[]>(
     () => [
@@ -59,8 +81,16 @@ export function JobsPage() {
         sortValue: (job) => job.jobId,
         sortType: 'text',
         render: (job) => <span className="font-mono text-xs">{job.jobId.slice(0, 8)}</span>,
-        // No mobileLabel: the truncated jobId is asserted via a singular getByText in the spec, and
-        // DataTable renders mobile-card cells in the DOM too — a mobileLabel would duplicate the text.
+        mono: false,
+      },
+      {
+        id: 'strategy',
+        header: 'Strategy',
+        align: 'left',
+        sortValue: (job) => strategyName(job),
+        sortType: 'text',
+        render: (job) => <span className="text-sm">{strategyName(job)}</span>,
+        mobileLabel: 'Strategy',
         mono: false,
       },
       {
@@ -88,6 +118,22 @@ export function JobsPage() {
         ),
         mobileLabel: 'Status',
         mono: false,
+      },
+      {
+        id: 'return',
+        header: 'Return',
+        align: 'right',
+        sortValue: (job) => (job.totalReturn == null ? Number.NEGATIVE_INFINITY : Number(job.totalReturn)),
+        sortType: 'number',
+        render: (job) =>
+          job.totalReturn == null ? (
+            <span className="text-ay-muted">—</span>
+          ) : (
+            <span className={cn('tabular-nums', isNegative(job.totalReturn) ? 'text-bear' : 'text-bull')}>
+              {formatDecimal(job.totalReturn, 2)}%
+            </span>
+          ),
+        mobileLabel: 'Return',
       },
       {
         id: 'progress',
@@ -155,9 +201,12 @@ export function JobsPage() {
         mono: false,
       },
     ],
-    // navigate/cancel/viewResults are stable enough for this page's lifetime; rows drive re-render.
-    [], // eslint-disable-line react-hooks/exhaustive-deps
+    // nameById drives the strategy column's label; navigate/cancel/viewResults are stable.
+    [nameById], // eslint-disable-line react-hooks/exhaustive-deps
   );
+
+  const page = Math.floor(offset / JOBS_PAGE_SIZE) + 1;
+  const hasNext = rows.length === JOBS_PAGE_SIZE;
 
   return (
     <LoadBeat>
@@ -170,10 +219,21 @@ export function JobsPage() {
           ariaLabel="Status filter"
           placeholder="All statuses"
         />
-        {status && (
+        <Select
+          value={strategyId}
+          options={stratOptions}
+          onChange={(v) => setStrategyId(v || null)}
+          ariaLabel="Strategy filter"
+          placeholder="All strategies"
+          className="max-w-[16rem]"
+        />
+        {(status || strategyId) && (
           <button
             type="button"
-            onClick={() => setStatus(null)}
+            onClick={() => {
+              setStatus(null);
+              setStrategyId(null);
+            }}
             className="h-9 rounded-md border border-ay-border px-3 text-sm text-ay-muted hover:border-accent"
           >
             Clear
@@ -198,6 +258,26 @@ export function JobsPage() {
           emptyMessage={q.isLoading ? 'Loading…' : 'No jobs yet — launch a backtest or sweep from the runner.'}
         />
       </BeatBlock>
+
+      <div className="mt-3 flex items-center justify-end gap-2 text-sm">
+        <span className="text-ay-muted">Page {page}</span>
+        <button
+          type="button"
+          onClick={() => setOffset((o) => Math.max(0, o - JOBS_PAGE_SIZE))}
+          disabled={offset === 0 || q.isFetching}
+          className="h-9 rounded-md border border-ay-border px-3 hover:border-accent disabled:opacity-40"
+        >
+          ‹ Prev
+        </button>
+        <button
+          type="button"
+          onClick={() => setOffset((o) => o + JOBS_PAGE_SIZE)}
+          disabled={!hasNext || q.isFetching}
+          className="h-9 rounded-md border border-ay-border px-3 hover:border-accent disabled:opacity-40"
+        >
+          Next ›
+        </button>
+      </div>
     </LoadBeat>
   );
 }

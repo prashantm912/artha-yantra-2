@@ -104,8 +104,8 @@ public class WalkForwardRunner {
 
     List<FoldResult> results =
         evaluator.evaluate(
-            folds, definition, exchange, tradingsymbol, primary1m, contexts, initialEquity, costs,
-            oneMinuteCovered);
+            config, folds, definition, exchange, tradingsymbol, primary1m, contexts, initialEquity,
+            costs, oneMinuteCovered);
 
     FoldAggregate aggregate =
         aggregator.aggregate(results, objectiveMetric, minTrades, aggregation, 0);

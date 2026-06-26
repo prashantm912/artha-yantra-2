@@ -9,10 +9,11 @@ import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from './client.ts';
 import type { MarketCandle } from './types.ts';
 
-export const CHART_INTERVALS = ['1m', '5m', '15m', '1h', '1d', '1w'] as const;
+export const CHART_INTERVALS = ['1m', '3m', '5m', '15m', '1h', '1d', '1w'] as const;
 
 const SPAN_MS: Record<string, number> = {
   '1m': 60_000,
+  '3m': 180_000,
   '5m': 300_000,
   '15m': 900_000,
   '1h': 3_600_000,

@@ -96,7 +96,7 @@ export function MarketHolidaysPage() {
               rows={rows}
               rowKey={(r) => r.date}
               pageSize={20}
-              initialSort={{ id: 'date', dir: 'asc' }}
+              initialSort={{ id: 'date', dir: 'desc' }}
               emptyMessage="No holidays for the covered years."
               ariaLabel="NSE trading holidays"
             />

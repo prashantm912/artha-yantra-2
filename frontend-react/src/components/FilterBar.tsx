@@ -113,7 +113,10 @@ export function FilterBar({
       : UNDERLYING_FALLBACK;
 
   return (
-    <div className="mb-3 flex flex-wrap items-center gap-2">
+    // No own bottom margin: every page wraps FilterBar in an `mb-3 flex items-center` row alongside
+    // GoButton etc. A bottom margin here would inflate FilterBar's flex margin-box, pushing the
+    // marginless siblings (Go, ColumnSettings) ~6px lower under items-center. Spacing is the wrapper's.
+    <div className="flex flex-wrap items-center gap-2">
       {showName && (
         <FilterSelect
           ariaLabel="Underlying"

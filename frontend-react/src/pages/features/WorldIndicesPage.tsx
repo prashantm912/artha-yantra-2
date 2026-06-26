@@ -140,6 +140,7 @@ export function WorldIndicesPage() {
           <div className="space-y-3">
             <BeatBlock className="card shadow-e1">
               <WorldIndicesMap rows={rows} />
+              <p className="mt-1 text-caption text-ay-muted">Scroll to zoom · drag to pan</p>
             </BeatBlock>
             <BeatBlock>
               <DataTable

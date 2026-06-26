@@ -16,6 +16,7 @@ export function DensityToggle({ value, onChange }: DensityToggleProps) {
       <button
         type="button"
         aria-label="Comfortable density"
+        title="Comfortable rows — more spacing, fewer rows on screen"
         aria-pressed={value === 'comfortable'}
         onClick={() => onChange('comfortable')}
         className={cn(
@@ -28,6 +29,7 @@ export function DensityToggle({ value, onChange }: DensityToggleProps) {
       <button
         type="button"
         aria-label="Compact density"
+        title="Compact rows — tighter spacing, more rows on screen"
         aria-pressed={value === 'compact'}
         onClick={() => onChange('compact')}
         className={cn(

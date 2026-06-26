@@ -5,6 +5,7 @@ parent OPTIMIZATION job, and runs the ask/tell loop in a background thread."""
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from collections.abc import Callable
 from typing import Any
@@ -14,6 +15,8 @@ from app.errors import ApiError
 
 _METHODS = {"grid", "random", "tpe", "nsga2"}
 _PROMOTABLE = "COMPLETE"
+_OOS_METRIC = "oos_fold_mean"
+_LOG = logging.getLogger(__name__)
 
 
 def resolve_parameters(config: dict[str, Any], override: list[dict] | None) -> list[dict]:
@@ -22,6 +25,28 @@ def resolve_parameters(config: dict[str, Any], override: list[dict] | None) -> l
         return override
     optimize = config.get("backtest", {}).get("optimize") or config.get("optimize") or {}
     return optimize.get("parameters", [])
+
+
+def _fold_objective_guard(
+    objective: dict[str, Any], walk_forward: Any
+) -> tuple[dict[str, Any], str | None]:
+    """Steer a WALK-FORWARD sweep to the out-of-sample objective (the silent in-sample trap).
+
+    A fold sweep that optimizes an IN-SAMPLE metric (e.g. ``sharpe``) across folds curve-fits each
+    fold's train window and ignores OOS — the exact footgun behind the overfit scalper sweeps. When
+    ``walk_forward`` is present and the objective is not already ``oos_fold_mean``, override it to
+    ``{metric: oos_fold_mean, direction: maximize}`` and return a warning to log. No-op for plain
+    (foldless) sweeps and for sweeps already on ``oos_fold_mean``.
+    """
+    if not walk_forward or (objective or {}).get("metric") == _OOS_METRIC:
+        return objective, None
+    overridden = {"metric": _OOS_METRIC, "direction": "maximize"}
+    warning = (
+        f"walk-forward sweep submitted with objective {objective!r}; overriding to "
+        f"{overridden!r} (an in-sample fold objective overfits — pass objective.metric="
+        f"{_OOS_METRIC!r} to silence)."
+    )
+    return overridden, warning
 
 
 class SweepService:
@@ -64,9 +89,18 @@ class SweepService:
         for parameter in parameters:
             path_grammar.validate(parameter["path"])  # raises InvalidParameterPath -> 400 handler
 
+        # Fold-sweep objective guard: a walk-forward sweep on an in-sample metric overfits — steer
+        # it to oos_fold_mean (+ warn). Run before the echo so the job records the EFFECTIVE
+        # objective, not the as-submitted one.
+        objective = request.get("objective", {"metric": "sharpe", "direction": "maximize"})
+        walk_forward = request.get("walkForward")
+        objective, fold_warning = _fold_objective_guard(objective, walk_forward)
+        if fold_warning:
+            _LOG.warning(fold_warning)
+
         jobs = self._jobs_factory()
         try:
-            sweep_id = jobs.insert_sweep(None, _sweep_echo(request, parameters))
+            sweep_id = jobs.insert_sweep(None, _sweep_echo(request, parameters, objective))
         finally:
             jobs.close()
 
@@ -87,11 +121,9 @@ class SweepService:
                 "parameters": parameters,
                 "method": method,
                 "max_trials": int(request.get("maxTrials", 100)),
-                "objective": request.get(
-                    "objective", {"metric": "sharpe", "direction": "maximize"}
-                ),
+                "objective": objective,
                 "seed": int(request.get("seed", 0)),
-                "walk_forward": request.get("walkForward"),
+                "walk_forward": walk_forward,
                 "request_base": request_base,
                 "early_stopping": _early_stopping(request),
             },
@@ -274,9 +306,14 @@ class SweepService:
             jobs.close()
 
 
-def _sweep_echo(request: dict[str, Any], parameters: list[dict]) -> dict[str, Any]:
+def _sweep_echo(
+    request: dict[str, Any], parameters: list[dict], objective: dict[str, Any] | None = None
+) -> dict[str, Any]:
     echo = {k: request[k] for k in request if k != "parameters"}
     echo["parameters"] = parameters
+    # Record the EFFECTIVE objective (post fold-guard) so the job reflects what actually ran.
+    if objective is not None:
+        echo["objective"] = objective
     return echo
 
 

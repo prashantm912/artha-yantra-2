@@ -1,27 +1,29 @@
-# Siva #4 - Gap Theory. The `gap-theory` tag arms the §12.3 GapTheoryGate: on the 3-min Bank Nifty
+# AUTO-DERIVED (2b-1) variant of the scalp-gap-theory family — signal on NFO/NIFTY-FUT-CONT. Re-homed off BankNifty (now monthly-expiry) per the 2b LOCKED decision.
+# Siva #4 - Gap Theory. The `gap-theory` tag arms the §12.3 GapTheoryGate: on the 3-min NIFTY
 # future a significant (>3 pt / 60 tick) gap fills ~90% of the time same-day, so a fresh entry is
 # BLOCKED while the gap is still open and PASSES only once it has filled, then trades WITH the
 # prevailing trend via the normal confluence (Session-24 time box: the gap is a 30-60 min play; if
 # unfilled on volume by ~40 min, trade the prevailing trend anyway). The structural stop is anchored
 # on the candle BEFORE the gap candle (the matrix SL alternative; the doc's preferred SuperTrend-level
 # SL is a deferred refinement because the engine exposes SuperTrend only as a direction, not a level).
-# Evaluates on the NIFTY BANK front future (Model A); the confluence seam buys the nearest-weekly
+# Evaluates on the NIFTY front future (Model A); the confluence seam buys the nearest-weekly
 # ATM-band CE.
 #
 # DEFERRED (manual only, not automated in v1): the counter-trend "trade TOWARD the gap" gap-fill
 # scalp (entry on rejection toward the gap, target = the gap level, SL = day-high/day-low) is
 # explicitly labelled risky / scalping-only in §3.4 and is NOT wired here.
 schema: strategy-schema/v1
-id: scalp-gap-theory-banknifty
-name: "Scalper · Gap Theory · BANKNIFTY CE"
+id: scalp-gap-theory-nifty
+name: "Scalper · Gap Theory · NIFTY CE"
 version: 1.0.0
-description: "Gap-fill scalp (Siva #4) on the NIFTY BANK 3-min front future; wait for the >3 pt gap to fill, then trade WITH the prevailing trend; pre-gap candle SL; long-premium CE only. The counter-trend gap-fill variant (SL = day-high/low) is a DEFERRED manual-only play, not automated."
+description: "Gap-fill scalp (Siva #4) on the NIFTY 3-min front future; wait for the >3 pt gap to fill, then trade WITH the prevailing trend; pre-gap candle SL; long-premium CE only. The counter-trend gap-fill variant (SL = day-high/low) is a DEFERRED manual-only play, not automated."
 author: owner
-tags: [scalper, options, intraday, banknifty, gap-theory]
+tags: [scalper, options, intraday, nifty, gap-theory]
 
 universe:
   mode: options_of_underlying
-  underlying: { exchange: NSE, tradingsymbol: "NIFTY BANK" }
+  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  signal_underlying: { exchange: NFO, tradingsymbol: "NIFTY-FUT-CONT" }
   options:
     expiry: nearest_weekly
     strikes: { selector: atm_window, width: 3 }
@@ -62,3 +64,20 @@ risk:
     style: intraday
     window: { from: "09:45", to: "15:00" }
     square_off: "15:15"
+
+backtest:
+  defaults: { interval: 1m, lookback_days: 120, initial_capital: 200000, costs: { per_lot_inr: 20, slippage_ticks: 1 } }
+  oi_confluence_gate: { enabled: false, interval: "5m" }
+  optimize:
+    parameters:
+      - { path: "indicators[alias=vwma20].params.period",         range: [10, 30], step: 1 }
+      - { path: "indicators[alias=rsi14].params.period",          range: [9, 21], step: 1 }
+      - { path: "indicators[alias=supertrend].params.period",     range: [7, 14], step: 1 }
+      - { path: "indicators[alias=supertrend].params.multiplier", range: [1.5, 3.5] }
+      - { path: "entry_rules.scoring.threshold",                  range: [0.1, 0.5] }
+      - { path: "exit_rules[type=time_stop].params.max_bars",   range: [12, 28], step: 1 }
+    method: tpe
+    max_trials: 40
+    objective: { metric: expectancy, direction: maximize, fold_aggregation: mean }
+    constraints: { min_trades: 10 }
+    walk_forward: { train_days: 30, test_days: 30, step_days: 20, anchored: false }

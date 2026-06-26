@@ -1,4 +1,4 @@
-# AUTO-DERIVED (2b-1) variant of the scalp-straddle family — signal on NFO/NIFTY-FUT-CONT.
+# AUTO-DERIVED (2b-1) variant of the scalp-straddle family — signal on NFO/NIFTY-FUT-CONT. Executes on SENSEX options (strike anchored on BFO/SENSEX-FUT-CONT).
 # Siva #11 - Straddle (LONG). The `straddle` tag routes the section-12.3 ScalperConfluenceGate down its
 # direction-NEUTRAL path: it does NOT resolve a single CE/PE side from price-vs-VWAP and does NOT score
 # the directional Connect-the-Dots confluence. Instead it picks BOTH legs of the ATM strike (the Call
@@ -43,17 +43,18 @@
 # keyed on the NIFTY front future (Model A) and the two ATM legs ride the V009 scalper_detail legs[]
 # side-channel. Seeded as a DRAFT (opt-in) - it never auto-emits; the owner publishes it from the UI.
 schema: strategy-schema/v1
-id: scalp-straddle-nifty
-name: "Scalper · Straddle (Long) · NIFTY"
+id: scalp-straddle-sensex-sensexoi
+name: "Scalper · Straddle (Long) · SENSEX (SENSEX-OI)"
 version: 1.0.0
 description: "Long-straddle volatility scalp (Siva #11) on the NIFTY 3-min front future: direction-NEUTRAL, BUYS both legs of the ATM strike (Call + Put, same strike/expiry, delta ~0.5 each) on the section-0B time + volume rails; profit when the move exceeds the combined premium. Combined-premium-vs-VWAP entry timing + the low-IV gate + one-leg management are LIVE-managed (ASSUMED); the short straddle (SELL legs) is SPAN-deferred. Defined risk = the combined premium."
 author: owner
-tags: [scalper, options, intraday, nifty, straddle]
+tags: [scalper, options, intraday, sensex, straddle]
 
 universe:
   mode: options_of_underlying
-  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  underlying: { exchange: BSE, tradingsymbol: "SENSEX" }
   signal_underlying: { exchange: NFO, tradingsymbol: "NIFTY-FUT-CONT" }
+  strike_reference: { exchange: BFO, tradingsymbol: "SENSEX-FUT-CONT" }
   options:
     expiry: nearest_weekly
     strikes: { selector: atm_window, width: 3 }   # ATM±3; StraddleLegPicker refines to the exact ATM pair
@@ -97,7 +98,7 @@ risk:
 
 backtest:
   defaults: { interval: 1m, lookback_days: 120, initial_capital: 200000, costs: { per_lot_inr: 20, slippage_ticks: 1 } }
-  oi_confluence_gate: { enabled: false, interval: "5m" }
+  oi_confluence_gate: { enabled: false, interval: "5m", index: "SENSEX" }
   optimize:
     parameters:
       - { path: "indicators[alias=vwma20].params.period",         range: [10, 30], step: 1 }

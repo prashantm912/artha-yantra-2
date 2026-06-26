@@ -1,20 +1,22 @@
-# AUTO-DERIVED (2b-1) variant of the scalp-trending-oi family — signal on NFO/NIFTY-FUT-CONT.
-# Siva #5 — Trending-OI Crossover. The directional edge is the OI cross (PE writers
-# building support → bullish), confirmed by the §12.3 confluence seam's futures-OI /
-# trending dots; the chart pre-gate is just the VWMA trend. NO native numeric SL/target
-# (size off structure + VWAP) — exits are structural. Evaluates on the NIFTY front future.
+# AUTO-DERIVED (2b-1) variant of the scalp-two-candle family — signal on NFO/NIFTY-FUT-CONT. Executes on SENSEX options (strike anchored on BFO/SENSEX-FUT-CONT).
+# Siva #1 — Two-Candle Theory. The `two-candle-pattern` tag arms the §12.3 TwoCandleGate: entry
+# requires two consecutive same-colour candles (each above the volume floor) with a strong 2nd
+# candle, deploying on the 3rd — the multi-bar pattern the chart-only gate grammar cannot express.
+# The 1st candle's low is the structural stop (§3.1). Evaluates on the NIFTY front future (Model A);
+# the confluence seam buys the nearest-weekly ATM-band CE.
 schema: strategy-schema/v1
-id: scalp-trending-oi-nifty
-name: "Scalper · Trending-OI Crossover · NIFTY CE"
+id: scalp-two-candle-sensex-niftyoi
+name: "Scalper · Two-Candle · SENSEX CE (NIFTY-OI)"
 version: 1.0.0
-description: "Trending-OI crossover scalp (Siva #5) on the NIFTY front future; long-premium CE, OI-led via the confluence."
+description: "Two-candle scalp (Siva #1) on the NIFTY front future; 2-candle pattern + 1st-candle SL; long-premium CE only."
 author: owner
-tags: [scalper, options, intraday, nifty, oi-cross-filter]
+tags: [scalper, options, intraday, sensex, two-candle-pattern]
 
 universe:
   mode: options_of_underlying
-  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  underlying: { exchange: BSE, tradingsymbol: "SENSEX" }
   signal_underlying: { exchange: NFO, tradingsymbol: "NIFTY-FUT-CONT" }
+  strike_reference: { exchange: BFO, tradingsymbol: "SENSEX-FUT-CONT" }
   options:
     expiry: nearest_weekly
     strikes: { selector: atm_window, width: 3 }
@@ -37,13 +39,14 @@ entry_rules:
   direction: long
   gate:
     all:
-      - "close > vwma20"         # trend confirmation; the OI cross lives in the confluence seam
+      - "close > vwap"
+      - "close > vwma20"         # momentum continuation: price leading both VWAP and VWMA
   scoring:
     threshold: 0.2
 
 exit_rules:
-  - { type: signal_exit, params: { rule: "close < vwma20" } }   # trend break exit
-  - { type: time_stop,   params: { max_bars: 12 } }
+  - { type: signal_exit, params: { rule: "close < vwap" } }
+  - { type: time_stop,   params: { max_bars: 10 } }
 
 risk:
   position_sizing: { method: premium_budget, params: { budget_inr: 15000 } }
@@ -57,7 +60,7 @@ risk:
 
 backtest:
   defaults: { interval: 1m, lookback_days: 120, initial_capital: 200000, costs: { per_lot_inr: 20, slippage_ticks: 1 } }
-  oi_confluence_gate: { enabled: true, interval: "5m" }
+  oi_confluence_gate: { enabled: true, interval: "5m", index: "NIFTY 50" }
   optimize:
     parameters:
       - { path: "indicators[alias=vwma20].params.period",         range: [10, 30], step: 1 }
@@ -65,7 +68,7 @@ backtest:
       - { path: "indicators[alias=supertrend].params.period",     range: [7, 14], step: 1 }
       - { path: "indicators[alias=supertrend].params.multiplier", range: [1.5, 3.5] }
       - { path: "entry_rules.scoring.threshold",                  range: [0.1, 0.5] }
-      - { path: "exit_rules[type=time_stop].params.max_bars",   range: [8, 18], step: 1 }
+      - { path: "exit_rules[type=time_stop].params.max_bars",   range: [6, 16], step: 1 }
     method: tpe
     max_trials: 40
     objective: { metric: expectancy, direction: maximize, fold_aggregation: mean }

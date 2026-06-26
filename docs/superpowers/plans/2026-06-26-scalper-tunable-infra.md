@@ -98,7 +98,14 @@ Owner /grill resolved the SENSEX design. Five locked decisions:
   strike-ref price at the entry instant to `OptionContractSelector` (instead of `entryBar.close()`).
 - Parity: absent → signal price (today) → goldens byte-identical. Own PR + tests + adversarial review.
 
-### 2b-1 — rewrite the 12 scalper YAMLs → 36 variants (instrument-agnostic, tunable)
+### 2b-1 — rewrite the 12 scalper YAMLs → 36 variants — DONE (`feat/2b-1-scalper-yamls`)
+36 YAMLs generated (deterministic codegen, preserves each annotated header); `ScalperConfig` SENSEX band
+300–800; `ScalperStrategySeeder` 36-id list; `ScalperStrategyLoadTest` maps (UNDERLYING ×36 + EXPECTED_TAG
+×18 + trending-oi/straddle family checks) — load test + full scalper-package suite green (52 tests). The 2
+ex-BankNifty bases re-homed (sources deleted; stale "NIFTY BANK" wording scrubbed from body+description).
+Adversarial review: universe trio / OI-gate index / gate-enabled set / optimize-path resolution / name
+uniqueness / ScalperConfig band all clean. Manual test: `docs/manual-tests/2b-1-scalper-variants.md`.
+
 Per strategy, 3 versions, all `signal_underlying: NFO/NIFTY-FUT-CONT`:
 - **NIFTY** (`-nifty`): underlying NSE/NIFTY 50; OI-gate index NIFTY (when on).
 - **SENSEX·NIFTY-OI** (`-sensex-niftyoi`): underlying BSE/SENSEX; `strike_reference` BFO/SENSEX-FUT-CONT (SENSEX F&O = BFO);

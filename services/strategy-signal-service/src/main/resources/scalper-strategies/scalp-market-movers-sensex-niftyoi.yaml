@@ -1,4 +1,4 @@
-# AUTO-DERIVED (2b-1) variant of the scalp-market-movers family — signal on NFO/NIFTY-FUT-CONT.
+# AUTO-DERIVED (2b-1) variant of the scalp-market-movers family — signal on NFO/NIFTY-FUT-CONT. Executes on SENSEX options (strike anchored on BFO/SENSEX-FUT-CONT).
 # Siva #3 — Market Movers (§3.3, §6.3 `market_movers`). A momentum/breakout scalper over the
 # day-LEADING F&O EQUITY universe (NOT the index): a stock breaking an 8-day/9-day HIGH (long) /
 # LOW (short) tends to continue for a ~1-2% directional move, often ~1% in the first morning hour.
@@ -45,18 +45,19 @@
 # Evaluates on the NIFTY 50 front future (Model A); the §12.3 confluence seam buys the nearest-weekly
 # ATM-band CE — the index-option execution surrogate for the deferred stock-futures leg.
 schema: strategy-schema/v1
-id: scalp-market-movers-nifty
-name: "Scalper · Market Movers · NIFTY CE"
+id: scalp-market-movers-sensex-niftyoi
+name: "Scalper · Market Movers · SENSEX CE (NIFTY-OI)"
 version: 1.0.0
 description: "Market Movers momentum-breakout scalp (Siva #3) — v1 ports the deterministic trend-continuation CORE on the NIFTY 50 3-min front future: trade WITH the trend only after price reclaims VWAP (the source's literal long trigger), after 09:45 (Market Movers matrix floor), RSI in band + shared confluence carry validity, ~1-2% target, SL = entry-candle low (the source's 1st-candle-low reference; stocks have no rigid SL); long-premium CE only. The true F&O-EQUITY universe + the 8/9-day breakout / OH-OL / OI-interpretation screener legs + RSI(Daily) + the SHORT side are DEFERRED (no equity-screener feed in strategy-signal-service); the index future is a faithful momentum surrogate."
 author: owner
 # `entry-candle-stop` anchors the structural stop on the breakout candle's low (§3.3: "1st candle low").
-tags: [scalper, options, intraday, nifty, entry-candle-stop]
+tags: [scalper, options, intraday, sensex, entry-candle-stop]
 
 universe:
   mode: options_of_underlying
-  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  underlying: { exchange: BSE, tradingsymbol: "SENSEX" }
   signal_underlying: { exchange: NFO, tradingsymbol: "NIFTY-FUT-CONT" }
+  strike_reference: { exchange: BFO, tradingsymbol: "SENSEX-FUT-CONT" }
   options:
     expiry: nearest_weekly
     strikes: { selector: atm_window, width: 3 }
@@ -100,7 +101,7 @@ risk:
 
 backtest:
   defaults: { interval: 1m, lookback_days: 120, initial_capital: 200000, costs: { per_lot_inr: 20, slippage_ticks: 1 } }
-  oi_confluence_gate: { enabled: false, interval: "5m" }
+  oi_confluence_gate: { enabled: false, interval: "5m", index: "NIFTY 50" }
   optimize:
     parameters:
       - { path: "indicators[alias=vwma20].params.period",         range: [10, 30], step: 1 }

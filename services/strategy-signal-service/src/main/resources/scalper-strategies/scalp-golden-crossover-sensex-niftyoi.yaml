@@ -1,20 +1,24 @@
-# AUTO-DERIVED (2b-1) variant of the scalp-trending-oi family — signal on NFO/NIFTY-FUT-CONT.
-# Siva #5 — Trending-OI Crossover. The directional edge is the OI cross (PE writers
-# building support → bullish), confirmed by the §12.3 confluence seam's futures-OI /
-# trending dots; the chart pre-gate is just the VWMA trend. NO native numeric SL/target
-# (size off structure + VWAP) — exits are structural. Evaluates on the NIFTY front future.
+# AUTO-DERIVED (2b-1) variant of the scalp-golden-crossover family — signal on NFO/NIFTY-FUT-CONT. Executes on SENSEX options (strike anchored on BFO/SENSEX-FUT-CONT).
+# Siva #6 — Golden Crossover. Siva's golden cross is NOT a generic EMA cross: it is the
+# Supertrend AND VWMA(20) lines piercing VWAP together on the same candle (§3.6/§4.2). The
+# chart gate encodes the golden-cross STATE (VWMA above VWAP + Supertrend bullish — the engine
+# crossover op can't take VWAP, a built-in, as an operand); the §12.3
+# confluence seam then confirms OI/macro (drastic two-sided OI) and buys the nearest-weekly
+# ATM-band NIFTY CE. Evaluates on the NIFTY front future (Model A).
 schema: strategy-schema/v1
-id: scalp-trending-oi-nifty
-name: "Scalper · Trending-OI Crossover · NIFTY CE"
+id: scalp-golden-crossover-sensex-niftyoi
+name: "Scalper · Golden Crossover · SENSEX CE (NIFTY-OI)"
 version: 1.0.0
-description: "Trending-OI crossover scalp (Siva #5) on the NIFTY front future; long-premium CE, OI-led via the confluence."
+description: "Golden-crossover scalp (Siva #6) on the NIFTY front future; ST+VWMA pierce VWAP + confluence; long-premium CE only."
 author: owner
-tags: [scalper, options, intraday, nifty, oi-cross-filter]
+# `entry-candle-stop` anchors the structural stop on the crossover candle's low (§3.6 breakout form).
+tags: [scalper, options, intraday, sensex, entry-candle-stop]
 
 universe:
   mode: options_of_underlying
-  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  underlying: { exchange: BSE, tradingsymbol: "SENSEX" }
   signal_underlying: { exchange: NFO, tradingsymbol: "NIFTY-FUT-CONT" }
+  strike_reference: { exchange: BFO, tradingsymbol: "SENSEX-FUT-CONT" }
   options:
     expiry: nearest_weekly
     strikes: { selector: atm_window, width: 3 }
@@ -37,12 +41,13 @@ entry_rules:
   direction: long
   gate:
     all:
-      - "close > vwma20"         # trend confirmation; the OI cross lives in the confluence seam
+      - "vwma20 > vwap"      # VWMA(20) above VWAP — the VWMA leg of Siva's golden cross
+      - "supertrend > 0"     # Supertrend bullish — the ST leg (both lines on VWAP's bull side)
   scoring:
     threshold: 0.2
 
 exit_rules:
-  - { type: signal_exit, params: { rule: "close < vwma20" } }   # trend break exit
+  - { type: signal_exit, params: { rule: "vwma20 < vwap" } }   # VWMA falls back below VWAP (cross undone)
   - { type: time_stop,   params: { max_bars: 12 } }
 
 risk:
@@ -57,7 +62,7 @@ risk:
 
 backtest:
   defaults: { interval: 1m, lookback_days: 120, initial_capital: 200000, costs: { per_lot_inr: 20, slippage_ticks: 1 } }
-  oi_confluence_gate: { enabled: true, interval: "5m" }
+  oi_confluence_gate: { enabled: false, interval: "5m", index: "NIFTY 50" }
   optimize:
     parameters:
       - { path: "indicators[alias=vwma20].params.period",         range: [10, 30], step: 1 }

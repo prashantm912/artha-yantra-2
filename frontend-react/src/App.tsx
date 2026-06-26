@@ -235,6 +235,7 @@ export function App() {
           <Route path="/features/market-holidays" element={<MarketHolidaysPage />} />
           <Route path="/features/world-indices" element={<Lazy><WorldIndicesPage /></Lazy>} />
           {/* Data Ops — operator console for the expired/OI backfill (wave PR-DO) */}
+          <Route path="/data-ops" element={<Navigate to="/data-ops/status" replace />} />
           <Route path="/data-ops/status" element={<StatusPage />} />
           <Route path="/data-ops/coverage" element={<CoveragePage />} />
           <Route path="/data-ops/collection" element={<CollectionWizardPage />} />

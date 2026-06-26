@@ -1,10 +1,13 @@
 package in.arthayantra.backtest.replay.folds;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import in.arthayantra.backtest.replay.CostConfig;
 import in.arthayantra.backtest.replay.MetricsCalculator;
 import in.arthayantra.backtest.replay.MetricsCalculator.Metrics;
 import in.arthayantra.backtest.replay.ReplayEngine;
 import in.arthayantra.backtest.replay.ReplayResult;
+import in.arthayantra.backtest.replay.options.OptionsPremiumReplay;
+import in.arthayantra.backtest.replay.options.PremiumProvenance;
 import in.arthayantra.strategyengine.config.StrategyDefinition;
 import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategyengine.series.SeriesKey;
@@ -32,16 +35,30 @@ import org.springframework.stereotype.Component;
 public class FoldEvaluator {
 
   private final ReplayEngine replayEngine;
+  private final OptionsPremiumReplay optionsPremiumReplay;
+  private final PremiumProvenance premiumProvenance;
   private final MetricsCalculator metrics;
 
-  /** Wires the replay engine + metrics calculator. */
-  public FoldEvaluator(ReplayEngine replayEngine, MetricsCalculator metrics) {
+  /** Wires the candle + premium replay engines, the options routing predicate, and metrics. */
+  public FoldEvaluator(
+      ReplayEngine replayEngine,
+      OptionsPremiumReplay optionsPremiumReplay,
+      PremiumProvenance premiumProvenance,
+      MetricsCalculator metrics) {
     this.replayEngine = replayEngine;
+    this.optionsPremiumReplay = optionsPremiumReplay;
+    this.premiumProvenance = premiumProvenance;
     this.metrics = metrics;
   }
 
-  /** Evaluates every fold; returns per-fold train/OOS metric sets in fold order. */
+  /**
+   * Evaluates every fold; returns per-fold train/OOS metric sets in fold order. An options strategy
+   * routes through {@link OptionsPremiumReplay} (premium-as-primary) exactly like the full-window
+   * {@code BacktestRunner} path — without this an OOS fold replays the underlying candles, produces
+   * ~0 option trades, and is excluded under {@code min_trades}, so no OOS objective is ever computed.
+   */
   public List<FoldResult> evaluate(
+      JsonNode config,
       List<Fold> folds,
       StrategyDefinition definition,
       String exchange,
@@ -51,37 +68,23 @@ public class FoldEvaluator {
       BigDecimal initialEquity,
       CostConfig costs,
       boolean oneMinuteCovered) {
+    boolean options = premiumProvenance.isOptionsStrategy(config);
     List<FoldResult> results = new ArrayList<>(folds.size());
     for (Fold fold : folds) {
-      Metrics train =
-          metricsFor(
-              definition,
-              exchange,
-              tradingsymbol,
+      ReplayResult trainResult =
+          replay(
+              options, config, definition, exchange, tradingsymbol,
               slice(primary1m, fold.trainFrom(), fold.trainTo()),
               sliceContexts(contexts, fold.trainFrom(), fold.trainTo()),
-              initialEquity,
-              costs,
-              oneMinuteCovered);
+              initialEquity, costs, oneMinuteCovered);
+      Metrics train = metricsFor(trainResult, definition);
       ReplayResult oosResult =
-          replayEngine.replay(
-              definition,
-              exchange,
-              tradingsymbol,
+          replay(
+              options, config, definition, exchange, tradingsymbol,
               slice(primary1m, fold.testFrom(), fold.testTo()),
               sliceContexts(contexts, fold.testFrom(), fold.testTo()),
-              initialEquity,
-              costs,
-              oneMinuteCovered);
-      Metrics oos =
-          metrics.compute(
-              oosResult.trades(),
-              oosResult.equityCurve(),
-              oosResult.initialEquity(),
-              oosResult.finalEquity(),
-              definition.primaryTimeframe(),
-              oosResult.totalBars(),
-              oosResult.barsInPosition());
+              initialEquity, costs, oneMinuteCovered);
+      Metrics oos = metricsFor(oosResult, definition);
       int oosTradeCount = closedTrades(oosResult);
       results.add(
           new FoldResult(
@@ -90,7 +93,10 @@ public class FoldEvaluator {
     return results;
   }
 
-  private Metrics metricsFor(
+  /** Routes one slice replay to the premium-as-primary engine for options, else the candle engine. */
+  private ReplayResult replay(
+      boolean options,
+      JsonNode config,
       StrategyDefinition definition,
       String exchange,
       String tradingsymbol,
@@ -99,10 +105,15 @@ public class FoldEvaluator {
       BigDecimal initialEquity,
       CostConfig costs,
       boolean oneMinuteCovered) {
-    ReplayResult result =
-        replayEngine.replay(
+    return options
+        ? optionsPremiumReplay.replay(
+            definition, config, exchange, tradingsymbol, primary, contexts, initialEquity)
+        : replayEngine.replay(
             definition, exchange, tradingsymbol, primary, contexts, initialEquity, costs,
             oneMinuteCovered);
+  }
+
+  private Metrics metricsFor(ReplayResult result, StrategyDefinition definition) {
     return metrics.compute(
         result.trades(),
         result.equityCurve(),

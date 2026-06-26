@@ -87,7 +87,10 @@ public class ContinuousFuturesBackfill {
       return 0;
     }
     LocalDate today = LocalDate.now(clock.withZone(Ist.ZONE));
-    roller.stitch(ladder, underlyingDisplay, today);
+    // refreshAggregates=false: stitching the whole history at once would refresh a wide cagg range
+    // (~106k expired contracts' mid-interval buckets) — minutes-long + OOM-risky on the live instance.
+    // Backtests read CONT 1m from the base table, so the 1m stitch is sufficient (see stitch() Javadoc).
+    roller.stitch(ladder, underlyingDisplay, today, false);
     return ladder.size();
   }
 }

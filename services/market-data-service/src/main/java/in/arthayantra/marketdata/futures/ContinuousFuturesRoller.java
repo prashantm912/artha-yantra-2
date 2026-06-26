@@ -94,7 +94,9 @@ public class ContinuousFuturesRoller {
     if (ladder.isEmpty()) {
       return;
     }
-    stitch(ladder, underlying, today);
+    // Live: refresh the CONT mid-interval caggs per segment — the daily increment only invalidates
+    // today's narrow window, so the refresh is cheap and live charts need the fresh 5m/15m/… bars.
+    stitch(ladder, underlying, today, true);
   }
 
   /**
@@ -103,8 +105,17 @@ public class ContinuousFuturesRoller {
    * contract's roll date, and extends the UNADJUSTED CONT stitch one front segment at a time. The live
    * 16:15 roll feeds the currently-listed ladder; {@link ContinuousFuturesBackfill} feeds the full
    * expired+live roster to reconstruct history for backtests. Idempotent — re-runs append nothing new.
+   *
+   * <p>{@code refreshAggregates} drives the continuous-aggregate refresh after each stitched segment.
+   * The live path passes {@code true} (a narrow daily invalidation → cheap). The historical backfill
+   * passes {@code false}: stitching months of bars at once invalidates a WIDE cagg range, and because
+   * the expired-OI backfill never materialised the mid-interval caggs over history, a refresh there
+   * re-aggregates ~106k expired contracts' buckets in one call — minutes-long, lock-holding (it blocks
+   * the live refresh policy), and an OOM risk on the 1 GB instance. Backtests read CONT 1m from the
+   * base {@code candles} table (NOT the caggs), so the 1m stitch alone is what they need; CONT
+   * mid-interval history stays unmaterialised by design, exactly like the rest of the historical data.
    */
-  void stitch(List<Instrument> ladder, String underlying, LocalDate today) {
+  void stitch(List<Instrument> ladder, String underlying, LocalDate today, boolean refreshAggregates) {
     String root = ladder.get(0).name(); // dump root, e.g. NIFTY
     String contSymbol = root + "-FUT-CONT";
     String exchange = ladder.get(0).exchange();
@@ -143,9 +154,9 @@ public class ContinuousFuturesRoller {
         OffsetDateTime from = segmentStart.atStartOfDay().atOffset(Ist.OFFSET);
         OffsetDateTime to = segmentEnd.plusDays(1).atStartOfDay().atOffset(Ist.OFFSET);
         int stitched = candles.stitchInto(contSymbol, exchange, contract.tradingsymbol(), from, to);
-        if (stitched > 0) {
+        if (stitched > 0 && refreshAggregates) {
           // stitched 1m/1d rows behind a cagg watermark are invisible until refreshed —
-          // CONT mid-interval reads (5m/15m/1h/1w) must see the new segment
+          // CONT mid-interval reads (5m/15m/1h/1w) must see the new segment (live path only)
           candles.refreshDerivedAggregates(from, to);
         }
       }

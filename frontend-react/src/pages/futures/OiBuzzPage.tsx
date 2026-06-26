@@ -24,6 +24,23 @@ const compactInt = (n: number) => new Intl.NumberFormat('en-IN', { notation: 'co
 const num = (s: string | null): number => (s == null ? 0 : Number(s));
 const f2 = (s: string | null) => (s == null ? '—' : formatDecimal(s, 2));
 
+/** Darken a hex/rgb colour toward black by factor `f` (0..1). Darker tiles keep the white labels
+ *  readable (#8) — white-on-bright-green was low-contrast, and echarts treemap labels ignore a
+ *  background plate, so the fix is the tile colour, not the label. */
+function darken(color: string, f: number): string {
+  const hex = /^#([0-9a-f]{6})$/i.exec(color);
+  if (hex) {
+    const n = parseInt(hex[1], 16);
+    return `rgb(${Math.round(((n >> 16) & 255) * f)},${Math.round(((n >> 8) & 255) * f)},${Math.round((n & 255) * f)})`;
+  }
+  const rgb = /rgba?\(([^)]+)\)/i.exec(color);
+  if (rgb) {
+    const [r, g, b] = rgb[1].split(',').map((x) => Math.round(Number(x.trim()) * f));
+    return `rgb(${r},${g},${b})`;
+  }
+  return color;
+}
+
 interface TileDatum {
   name: string;
   value: number;
@@ -66,7 +83,7 @@ export function OiBuzzPage() {
           value: Math.abs(pct) + 0.3, // size floor so flat movers still render
           pctLabel: `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`,
           tile,
-          itemStyle: { color: pct >= 0 ? t.bull : t.bear, opacity: 0.3 + 0.7 * ratio },
+          itemStyle: { color: darken(pct >= 0 ? t.bull : t.bear, 0.6), opacity: 0.45 + 0.55 * ratio },
         };
       });
       return {
@@ -103,16 +120,13 @@ export function OiBuzzPage() {
             height: '100%',
             label: {
               show: true,
-              // Bold white text with a thin dark stroke + a soft dark halo (shadow) — readable on bright
-              // green/red AND faint (low-opacity) tiles alike. A flat white label was low-contrast on the
-              // green gainers (#8); the halo gives separation from any tile colour without muddying glyphs.
+              // Bold white + a thin dark stroke on the now-darkened tiles (see `darken` above) — the
+              // contrast comes from the darker tile, not a label plate (which echarts treemap ignores).
               color: '#ffffff',
               fontSize: 11,
               fontWeight: 700,
-              textBorderColor: 'rgba(0,0,0,0.45)',
+              textBorderColor: 'rgba(0,0,0,0.5)',
               textBorderWidth: 1,
-              textShadowColor: 'rgba(0,0,0,0.85)',
-              textShadowBlur: 4,
               overflow: 'truncate',
               formatter: (raw: unknown) => {
                 const p = raw as { name: string; data: TileDatum };

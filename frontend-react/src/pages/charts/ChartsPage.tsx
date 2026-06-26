@@ -1,12 +1,19 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { CandleChart } from '../../components/charts/CandleChart.tsx';
 import { Select } from '../../components/atoms/Select.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
-import { CHART_INTERVALS, useCandles, useChartSignals, type ChartMark } from '../../api/charts.ts';
+import {
+  CHART_INTERVALS,
+  fetchOlderCandles,
+  useCandles,
+  useChartSignals,
+  type ChartMark,
+} from '../../api/charts.ts';
 import { useBacktestTrades } from '../../api/backtests.ts';
 import { useInstrumentSearch } from '../../api/watchlists.ts';
+import type { MarketCandle } from '../../api/types.ts';
 
 // /charts (master plan §20 parity, A13): a lightweight-charts candlestick + volume view (the plan's
 // premium chart, MIT — replaced the ECharts MVP) with the interval/instrument toolbar and the
@@ -35,7 +42,38 @@ export function ChartsPage() {
   const trades = useBacktestTrades(runId ?? '');
   const signalMarks = useChartSignals(symbol, !runId);
 
-  const bars = useMemo(() => candles.data?.items ?? [], [candles.data]);
+  // Lazy-loaded older bars (#D), prepended to the primary window. Reset whenever the primary query
+  // changes (new symbol / interval / last-session window).
+  const [older, setOlder] = useState<MarketCandle[]>([]);
+  const loadingOlder = useRef(false);
+  const noMoreOlder = useRef(false);
+  useEffect(() => {
+    setOlder([]);
+    loadingOlder.current = false;
+    noMoreOlder.current = false;
+  }, [symbol, interval, candles.data]);
+
+  const bars = useMemo(() => {
+    const base = candles.data?.items ?? [];
+    if (!older.length) return base;
+    const byBucket = new Map<string, MarketCandle>();
+    for (const b of older) byBucket.set(b.bucket, b);
+    for (const b of base) byBucket.set(b.bucket, b);
+    return [...byBucket.values()].sort((a, b) => Date.parse(a.bucket) - Date.parse(b.bucket));
+  }, [candles.data, older]);
+
+  const loadOlder = useCallback(() => {
+    if (loadingOlder.current || noMoreOlder.current || !bars.length) return;
+    loadingOlder.current = true;
+    void fetchOlderCandles(symbol, interval, new Date(bars[0].bucket))
+      .then((more) => {
+        if (more.length) setOlder((prev) => [...more, ...prev]);
+        else noMoreOlder.current = true;
+      })
+      .finally(() => {
+        loadingOlder.current = false;
+      });
+  }, [bars, symbol, interval]);
 
   const marks: ChartMark[] = useMemo(() => {
     if (runId) {
@@ -97,6 +135,8 @@ export function ChartsPage() {
           <CandleChart
             bars={bars}
             marks={marks}
+            intraday={interval !== '1d' && interval !== '1w'}
+            onReachStart={loadOlder}
             className="h-72 sm:h-96 lg:h-[460px]"
             ariaLabel={`${symbol} ${interval} candlestick chart`}
           />

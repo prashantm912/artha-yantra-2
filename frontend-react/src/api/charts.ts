@@ -45,6 +45,35 @@ function split(symbol: string) {
   return { exchange: symbol.slice(0, sep), tradingsymbol: symbol.slice(sep + 1) };
 }
 
+// Intervals the /market/candles endpoint serves natively (native 1m + the caggs). 3m is NOT one of
+// them (no candles_3m cagg), so the chart fetches the base 1m and rolls it up client-side.
+const ROLLUP: Record<string, { base: string; factor: number }> = {
+  '3m': { base: '1m', factor: 3 },
+};
+
+/** Aggregate ascending base bars into `factor`-minute OHLCV candles (epoch-floored buckets). */
+function rollupCandles(bars: MarketCandle[], factor: number, label: string): MarketCandle[] {
+  const groups = new Map<number, MarketCandle[]>();
+  for (const b of bars) {
+    const key = Math.floor(Math.floor(Date.parse(b.bucket) / 60000) / factor);
+    const g = groups.get(key);
+    if (g) g.push(b);
+    else groups.set(key, [b]);
+  }
+  return [...groups.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, g]) => ({
+      ...g[0],
+      interval: label,
+      open: g[0].open,
+      high: String(Math.max(...g.map((x) => Number(x.high)))),
+      low: String(Math.min(...g.map((x) => Number(x.low)))),
+      close: g[g.length - 1].close,
+      volume: g.reduce((s, x) => s + (Number(x.volume) || 0), 0),
+      oi: g[g.length - 1].oi,
+    }));
+}
+
 /** Last ~220 bars of the symbol at the interval (cache-first read). */
 export function useCandles(symbol: string, interval: string) {
   const { exchange, tradingsymbol } = split(symbol);
@@ -52,9 +81,10 @@ export function useCandles(symbol: string, interval: string) {
   // is empty on a weekend/holiday, so intraday (1m/5m/…) charts read blank on a non-trading day even
   // though the bars exist for the last session. Falls back to `now` until the calendar resolves.
   const lastDay = useCalendarStatus().data?.lastTradingDay;
+  const roll = ROLLUP[interval];
   return useQuery({
     queryKey: ['candles', symbol, interval, lastDay ?? null],
-    queryFn: () => {
+    queryFn: async () => {
       const span = SPAN_MS[interval] ?? SPAN_MS['1d'];
       const to =
         lastDay && lastDay.length === 10 ? new Date(`${lastDay}T15:30:00+05:30`) : new Date();
@@ -62,15 +92,40 @@ export function useCandles(symbol: string, interval: string) {
       const p = new URLSearchParams({
         exchange,
         tradingsymbol,
-        interval,
+        interval: roll ? roll.base : interval,
         from: from.toISOString(),
         to: to.toISOString(),
-        limit: '250',
+        limit: String(roll ? 220 * roll.factor + 10 : 250),
       });
-      return apiFetch<{ items: MarketCandle[] }>(`/market/candles?${p.toString()}`);
+      const res = await apiFetch<{ items: MarketCandle[] }>(`/market/candles?${p.toString()}`);
+      return roll ? { ...res, items: rollupCandles(res.items, roll.factor, interval) } : res;
     },
     enabled: !!exchange && !!tradingsymbol,
   });
+}
+
+/** Fetch ~220 bars ending just before `before` — the lazy-load-older window (#D). Empty when none. */
+export async function fetchOlderCandles(
+  symbol: string,
+  interval: string,
+  before: Date,
+): Promise<MarketCandle[]> {
+  const { exchange, tradingsymbol } = split(symbol);
+  if (!exchange || !tradingsymbol) return [];
+  const span = SPAN_MS[interval] ?? SPAN_MS['1d'];
+  const roll = ROLLUP[interval];
+  const to = new Date(before.getTime() - 1000); // exclusive of the earliest loaded bar
+  const from = new Date(to.getTime() - span * 220);
+  const p = new URLSearchParams({
+    exchange,
+    tradingsymbol,
+    interval: roll ? roll.base : interval,
+    from: from.toISOString(),
+    to: to.toISOString(),
+    limit: String(roll ? 220 * roll.factor + 10 : 250),
+  });
+  const res = await apiFetch<{ items: MarketCandle[] }>(`/market/candles?${p.toString()}`);
+  return roll ? rollupCandles(res.items, roll.factor, interval) : res.items;
 }
 
 /** Signals on this symbol → entry marks (the no-runId deep-link path). */

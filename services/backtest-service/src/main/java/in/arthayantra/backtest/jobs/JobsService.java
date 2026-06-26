@@ -140,10 +140,16 @@ public class JobsService {
         .orElseThrow(() -> new NotFoundException(ErrorCodes.NOT_FOUND_JOB, "job not found: " + id));
   }
 
-  /** Paged listing filtered by optional status + strategyId, ordered by a whitelisted sort key. */
+  /** Paged listing filtered by optional status + strategyId (+ a strategyIds CSV), ordered by a key. */
   public List<Job> list(
-      String status, String strategyId, int limit, int offset, String sortBy, String sortDir) {
-    return repository.list(parseStatus(status), strategyId, limit, offset, sortBy, sortDir);
+      String status,
+      String strategyId,
+      String strategyIds,
+      int limit,
+      int offset,
+      String sortBy,
+      String sortDir) {
+    return repository.list(parseStatus(status), strategyId, strategyIds, limit, offset, sortBy, sortDir);
   }
 
   /** Cancels a job: queued → 204 cancelled now; running → 202 flag set for the checkpoint. */

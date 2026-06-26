@@ -1,9 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Tags } from 'lucide-react';
 import { cn } from '../../lib/cn.ts';
 import { formatDecimal, isNegative } from '../../lib/decimal.ts';
 import { Select } from '../../components/atoms/Select.tsx';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '../../components/ui/dropdown-menu.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { useStrategies } from '../../api/strategies.ts';
@@ -55,20 +64,37 @@ const SORT_API: Record<string, string> = {
 export function JobsPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [strategyId, setStrategyId] = useState<string | null>(null);
+  const [tags, setTags] = useState<string[]>([]);
   const [offset, setOffset] = useState(0);
   const [sort, setSort] = useState<{ id: string; dir: 'asc' | 'desc' } | null>({
     id: 'created',
     dir: 'desc',
   });
   const navigate = useNavigate();
+  const strategies = useStrategies('', null);
   const apiSortBy = sort ? (SORT_API[sort.id] ?? 'createdAt') : 'createdAt';
   const apiSortDir = sort?.dir ?? 'desc';
-  const q = useJobs(status, strategyId, offset, apiSortBy, apiSortDir);
-  useJobsLive(status, strategyId, offset, apiSortBy, apiSortDir);
+
+  // Tag multi-select → the matching strategies' ids, filtered server-side (spans every page).
+  // '__none__' = tags chosen but no strategy matched → the list comes back empty (not unfiltered).
+  const tagStrategyIds = useMemo(() => {
+    if (!tags.length) return null;
+    const ids = (strategies.data?.items ?? [])
+      .filter((s) => (s.tags ?? []).some((t) => tags.includes(t)))
+      .map((s) => s.id);
+    return ids.length ? ids.join(',') : '__none__';
+  }, [tags, strategies.data]);
+
+  const q = useJobs(status, strategyId, offset, apiSortBy, apiSortDir, tagStrategyIds);
+  useJobsLive(status, strategyId, offset, apiSortBy, apiSortDir, tagStrategyIds);
   const cancel = useCancelJob();
-  const strategies = useStrategies('', null);
 
   const rows = useMemo(() => q.data?.items ?? [], [q.data]);
+  const allTags = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of strategies.data?.items ?? []) for (const t of s.tags ?? []) set.add(t);
+    return [...set].sort();
+  }, [strategies.data]);
   const stratOptions = useMemo(
     () => (strategies.data?.items ?? []).map((s) => ({ value: s.id, label: s.name })),
     [strategies.data],
@@ -79,7 +105,7 @@ export function JobsPage() {
   );
 
   // Reset to the first page whenever a filter OR the sort changes (a stale offset can land past the set).
-  useEffect(() => setOffset(0), [status, strategyId, sort]);
+  useEffect(() => setOffset(0), [status, strategyId, tags, sort]);
 
   const viewResults = async (jobId: string) => {
     const ref = await fetchResultRef(jobId);
@@ -260,12 +286,43 @@ export function JobsPage() {
           placeholder="All strategies"
           className="max-w-[16rem]"
         />
-        {(status || strategyId) && (
+        {allTags.length > 0 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label="Filter by strategy tag"
+                className="flex h-9 items-center gap-1.5 rounded-md border border-ay-border px-3 text-sm hover:border-accent"
+              >
+                <Tags className="size-4 text-ay-muted" aria-hidden="true" />
+                {tags.length ? `${tags.length} tag${tags.length > 1 ? 's' : ''}` : 'Tags'}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="max-h-72 overflow-auto">
+              <DropdownMenuLabel>Filter by strategy tag</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {allTags.map((t) => (
+                <DropdownMenuCheckboxItem
+                  key={t}
+                  checked={tags.includes(t)}
+                  onCheckedChange={(c) =>
+                    setTags((prev) => (c ? [...prev, t] : prev.filter((x) => x !== t)))
+                  }
+                  onSelect={(e) => e.preventDefault()}
+                >
+                  {t}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+        {(status || strategyId || tags.length > 0) && (
           <button
             type="button"
             onClick={() => {
               setStatus(null);
               setStrategyId(null);
+              setTags([]);
             }}
             className="h-9 rounded-md border border-ay-border px-3 text-sm text-ay-muted hover:border-accent"
           >

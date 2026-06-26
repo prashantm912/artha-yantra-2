@@ -42,14 +42,25 @@ interface Props {
   height?: number;
   ariaLabel: string;
   className?: string;
+  /** Intraday interval (sub-daily) → the time axis shows HH:MM; daily/weekly shows dates. Without
+   *  this, lightweight-charts labels every intraday bar with its date (e.g. "25 25 25…"). */
+  intraday?: boolean;
+  /** Called when the user scrolls/zooms near the LEFT edge — the page fetches + prepends older bars. */
+  onReachStart?: () => void;
 }
 
-export function CandleChart({ bars, marks, height, ariaLabel, className }: Props) {
+export function CandleChart({ bars, marks, height, ariaLabel, className, intraday = false, onReachStart }: Props) {
   const elRef = useRef<HTMLDivElement>(null);
+  // Latest callback in a ref so the once-only chart-init effect never closes over a stale onReachStart.
+  const onReachStartRef = useRef(onReachStart);
+  onReachStartRef.current = onReachStart;
   const chartRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+  // The last bar (right edge) we fit to — so a lazy-load PREPEND (older bars, same right edge) doesn't
+  // re-fit and zoom out; only a fresh dataset (new symbol/interval/window) re-fits.
+  const lastFitRef = useRef<string | null>(null);
 
   // init once + theme (re-applied on data-theme flips)
   useEffect(() => {
@@ -83,6 +94,11 @@ export function CandleChart({ bars, marks, height, ariaLabel, className }: Props
     applyTheme();
     const mo = new MutationObserver(applyTheme);
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+    // Lazy-load older history when the user scrolls/zooms within ~10 bars of the left edge.
+    chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+      if (range && range.from < 10) onReachStartRef.current?.();
+    });
     return () => {
       mo.disconnect();
       chart.remove();
@@ -95,10 +111,14 @@ export function CandleChart({ bars, marks, height, ariaLabel, className }: Props
     const candles = candleRef.current;
     const volume = volRef.current;
     if (!candles || !volume) return;
+    // lightweight-charts renders the axis in UTC; shift intraday bars by the IST offset so a 09:15
+    // session bar reads "09:15", not "03:45" (daily/weekly keep their date label, no shift).
+    const istShift = intraday ? 19800 : 0;
+    const tOf = (b: MarketCandle) => (sec(b.bucket) + istShift) as UTCTimestamp;
     candles.setData(
-      bars.map((b) => ({ time: sec(b.bucket), open: Number(b.open), high: Number(b.high), low: Number(b.low), close: Number(b.close) })),
+      bars.map((b) => ({ time: tOf(b), open: Number(b.open), high: Number(b.high), low: Number(b.low), close: Number(b.close) })),
     );
-    volume.setData(bars.map((b) => ({ time: sec(b.bucket), value: b.volume })));
+    volume.setData(bars.map((b) => ({ time: tOf(b), value: b.volume })));
 
     // map each mark to the nearest bar's time; markers must be unique-sorted ascending
     const nearestTime = (iso: string): UTCTimestamp | null => {
@@ -113,7 +133,7 @@ export function CandleChart({ bars, marks, height, ariaLabel, className }: Props
           best = b;
         }
       }
-      return sec(best.bucket);
+      return (sec(best.bucket) + istShift) as UTCTimestamp;
     };
     const el = elRef.current;
     const t = el ? vars(el) : { bull: '#16a34a', bear: '#ef4444' };
@@ -137,8 +157,19 @@ export function CandleChart({ bars, marks, height, ariaLabel, className }: Props
       }));
     markersRef.current ??= createSeriesMarkers(candles, []);
     markersRef.current.setMarkers(seriesMarks);
-    if (bars.length) chartRef.current?.timeScale().fitContent();
-  }, [bars, marks]);
+    // Fit only when the right edge changed (a fresh dataset) — NOT when older bars are prepended,
+    // which would zoom out to fit everything and yank the user's scroll position.
+    const lastBucket = bars.length ? bars[bars.length - 1].bucket : null;
+    if (lastBucket && lastBucket !== lastFitRef.current) {
+      chartRef.current?.timeScale().fitContent();
+      lastFitRef.current = lastBucket;
+    }
+  }, [bars, marks, intraday]);
+
+  // Intraday → show HH:MM on the time axis (daily/weekly keeps date labels).
+  useEffect(() => {
+    chartRef.current?.timeScale().applyOptions({ timeVisible: intraday, secondsVisible: false });
+  }, [intraday]);
 
   return (
     <div

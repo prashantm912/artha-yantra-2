@@ -186,7 +186,13 @@ public class JobRepository {
    * {@code backtest_runs} join is for the return-sort only; the row mapping stays {@code jobs.*}.
    */
   public List<Job> list(
-      JobStatus status, String strategyId, int limit, int offset, String sortBy, String sortDir) {
+      JobStatus status,
+      String strategyId,
+      String strategyIds,
+      int limit,
+      int offset,
+      String sortBy,
+      String sortDir) {
     StringBuilder sql =
         new StringBuilder(
             "SELECT jobs.* FROM jobs "
@@ -201,7 +207,15 @@ public class JobRepository {
       sql.append(" AND jobs.request->>'strategyId'=?");
       args.add(strategyId);
     }
-    String col = SORT_COLUMNS.getOrDefault(sortBy, "jobs.created_at");
+    // CSV of strategy UUIDs (the Jobs page's tag filter resolves selected tags → matching strategies).
+    // = ANY(string_to_array(...)) keeps the bind a single CSV param (no dynamic placeholder count).
+    if (strategyIds != null && !strategyIds.isBlank()) {
+      sql.append(" AND jobs.request->>'strategyId' = ANY(string_to_array(?, ','))");
+      args.add(strategyIds);
+    }
+    // NB: Map.of#getOrDefault throws on a null key — guard before the lookup (a no-sortBy request,
+    // e.g. a tag-only filter call, otherwise NPEs).
+    String col = sortBy == null ? "jobs.created_at" : SORT_COLUMNS.getOrDefault(sortBy, "jobs.created_at");
     String dir = "asc".equalsIgnoreCase(sortDir) ? "ASC" : "DESC";
     sql.append(" ORDER BY ")
         .append(col)

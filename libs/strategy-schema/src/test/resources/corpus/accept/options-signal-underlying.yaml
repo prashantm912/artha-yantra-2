@@ -12,8 +12,9 @@ enabled: true
 
 universe:
   mode: options_of_underlying
-  underlying: { exchange: BFO, tradingsymbol: "SENSEX" }            # options-execution root
-  signal_underlying: { exchange: NFO, tradingsymbol: "NIFTY-FUT-CONT" }  # decoupled signal series
+  underlying: { exchange: BSE, tradingsymbol: "SENSEX" }            # options-execution root
+  signal_underlying: { exchange: NFO, tradingsymbol: "NIFTY-FUT-CONT" }    # decoupled signal series
+  strike_reference: { exchange: BFO, tradingsymbol: "SENSEX-FUT-CONT" }    # SENSEX strike anchor (2b-E2b; BFO = SENSEX F&O)
   options:
     expiry: nearest_weekly
     strikes: { selector: atm_window, width: 2 }

@@ -4,6 +4,8 @@ import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.error.NotFoundException;
 import in.arthayantra.common.web.time.Ist;
+import in.arthayantra.marketdata.candles.Candle;
+import in.arthayantra.marketdata.candles.CandleRepository;
 import in.arthayantra.marketdata.constituents.StaticIndexConstituents;
 import in.arthayantra.marketdata.kite.FuturesContractSource;
 import in.arthayantra.marketdata.kite.FuturesContractSource.FutContract;
@@ -37,6 +39,7 @@ public class OiBuzzService {
   private final FuturesContractSource contracts;
   private final QuoteGateway quoteGateway;
   private final PrevDayFutureOiCache prevOiCache;
+  private final CandleRepository candles;
   private final Clock clock;
 
   public OiBuzzService(
@@ -44,11 +47,13 @@ public class OiBuzzService {
       FuturesContractSource contracts,
       QuoteGateway quoteGateway,
       PrevDayFutureOiCache prevOiCache,
+      CandleRepository candles,
       Clock clock) {
     this.constituents = constituents;
     this.contracts = contracts;
     this.quoteGateway = quoteGateway;
     this.prevOiCache = prevOiCache;
+    this.candles = candles;
     this.clock = clock;
   }
 
@@ -73,6 +78,20 @@ public class OiBuzzService {
       String index, int advance, int decline, List<Tile> tiles, OffsetDateTime asOf) {}
 
   public Heatmap heatmap(String index) {
+    return heatmap(index, null);
+  }
+
+  /**
+   * Live (null/today date) → one batched live-quote call. A PAST date → the constituents' spot 1d
+   * %change from the dense EQ bhavcopy (there is no live quote on a closed day, and the per-constituent
+   * near-month-FUTURE 1d history is not backfilled — spot %change is the dense, ~basis-equal proxy).
+   */
+  public Heatmap heatmap(String index, LocalDate date) {
+    LocalDate today = OffsetDateTime.now(clock).atZoneSameInstant(Ist.ZONE).toLocalDate();
+    return (date == null || !date.isBefore(today)) ? live(index) : historical(index, date);
+  }
+
+  private Heatmap live(String index) {
     List<String> symbols = constituents.symbols(index);
     if (symbols.isEmpty()) {
       throw new NotFoundException(
@@ -162,5 +181,66 @@ public class OiBuzzService {
         Comparator.comparing(
             Tile::changePct, Comparator.nullsLast(Comparator.reverseOrder())));
     return new Heatmap(index, advance, decline, tiles, asOf);
+  }
+
+  /** Past-date heatmap: each constituent's spot close-vs-prior-close %change from the EQ 1d bhavcopy. */
+  private Heatmap historical(String index, LocalDate date) {
+    List<String> symbols = constituents.symbols(index);
+    if (symbols.isEmpty()) {
+      throw new NotFoundException(
+          ErrorCodes.NOT_FOUND_RESOURCE, "no constituent reference for index '" + index + "'");
+    }
+    // A ~12-day window of EQ 1d bars (covers the prior session even across a long holiday weekend).
+    OffsetDateTime from = date.minusDays(12).atStartOfDay().atOffset(Ist.OFFSET);
+    OffsetDateTime to = date.plusDays(1).atStartOfDay().atOffset(Ist.OFFSET);
+    List<Tile> tiles = new ArrayList<>();
+    int advance = 0;
+    int decline = 0;
+    for (String symbol : symbols) {
+      List<Candle> bars;
+      try {
+        bars = candles.range("NSE", symbol, "1d", from, to);
+      } catch (RuntimeException read) {
+        continue;
+      }
+      Candle onDate = null;
+      Candle prior = null;
+      for (Candle b : bars) { // ascending by bucket
+        LocalDate bd = b.bucket().atZoneSameInstant(Ist.ZONE).toLocalDate();
+        if (bd.isAfter(date)) {
+          break;
+        }
+        if (bd.equals(date)) {
+          onDate = b;
+        } else {
+          prior = b; // last session strictly before the date
+        }
+      }
+      if (onDate == null || prior == null || prior.close() == null || prior.close().signum() == 0) {
+        continue;
+      }
+      BigDecimal changePct =
+          onDate
+              .close()
+              .subtract(prior.close())
+              .multiply(HUNDRED)
+              .divide(prior.close(), 2, RoundingMode.HALF_UP);
+      if (changePct.signum() > 0) {
+        advance++;
+      } else if (changePct.signum() < 0) {
+        decline++;
+      }
+      tiles.add(
+          new Tile(
+              symbol, changePct, onDate.close(), onDate.open(), onDate.high(), onDate.low(),
+              onDate.oi(), null, null));
+    }
+    if (tiles.isEmpty()) {
+      throw new ApiException(
+          422, ErrorCodes.DATA_GAP, "no 1d candles for index '" + index + "' on " + date);
+    }
+    tiles.sort(
+        Comparator.comparing(Tile::changePct, Comparator.nullsLast(Comparator.reverseOrder())));
+    return new Heatmap(index, advance, decline, tiles, to);
   }
 }

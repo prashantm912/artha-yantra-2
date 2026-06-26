@@ -115,14 +115,18 @@ export async function fetchOlderCandles(
   const span = SPAN_MS[interval] ?? SPAN_MS['1d'];
   const roll = ROLLUP[interval];
   const to = new Date(before.getTime() - 1000); // exclusive of the earliest loaded bar
-  const from = new Date(to.getTime() - span * 220);
+  // Look back far enough to cross the overnight/weekend gap — an intraday window of span*220 lands in
+  // pre-market and returns NOTHING (that's why minute charts wouldn't scroll back; daily worked because
+  // its 220-day window has data). The backend returns ALL bars in [from,to] (gaps are empty), so a wide
+  // window + a high limit yields the previous session(s), contiguous with the current earliest.
+  const from = new Date(to.getTime() - Math.max(span * 220, 5 * 86_400_000));
   const p = new URLSearchParams({
     exchange,
     tradingsymbol,
     interval: roll ? roll.base : interval,
     from: from.toISOString(),
     to: to.toISOString(),
-    limit: String(roll ? 220 * roll.factor + 10 : 250),
+    limit: '5000',
   });
   const res = await apiFetch<{ items: MarketCandle[] }>(`/market/candles?${p.toString()}`);
   return roll ? rollupCandles(res.items, roll.factor, interval) : res.items;

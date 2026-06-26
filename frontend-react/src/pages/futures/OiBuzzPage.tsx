@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { EChartsOption } from 'echarts';
 import { LayoutGrid } from 'lucide-react';
 import { useOiBuzz, useOiBuzzIndices } from '../../api/oiAnalytics.ts';
+import { useDefaultDate } from '../../api/marketCalendar.ts';
 import type { OiBuzzTile } from '../../api/types.ts';
 import { Select } from '../../components/atoms/Select.tsx';
+import { DateInput } from '../../components/atoms/DateInput.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
@@ -55,12 +57,18 @@ export function OiBuzzPage() {
   const [index, setIndex] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
+  // Default to the last trading session (#8) — the live quote is flat (all 0) on a closed day, so the
+  // BE serves the historical spot-1d %change for a past date. `picked` is the user's explicit choice.
+  const defaultDate = useDefaultDate();
+  const [picked, setPicked] = useState<string | null>(null);
+  const date = picked ?? defaultDate;
+
   // Default to the first seeded index once the selector options arrive.
   useEffect(() => {
     if (!index && indices.length) setIndex(indices[0]);
   }, [index, indices]);
 
-  const q = useOiBuzz(index);
+  const q = useOiBuzz(index, date);
   const data = q.data ?? null;
 
   const visibleTiles = useMemo(() => {
@@ -165,6 +173,7 @@ export function OiBuzzPage() {
           aria-label="Search symbol"
           className="h-9 w-full sm:w-40 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text outline-none focus:border-accent"
         />
+        <DateInput ariaLabel="Date" value={date} onChange={setPicked} />
         <GoButton onClick={() => void q.refetch()} loading={q.isFetching} />
         {data && (
           <span className="ml-auto text-sm">

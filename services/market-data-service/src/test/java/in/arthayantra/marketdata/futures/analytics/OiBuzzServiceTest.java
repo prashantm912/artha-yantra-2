@@ -36,8 +36,10 @@ class OiBuzzServiceTest {
   private final FuturesContractSource contracts = mock(FuturesContractSource.class);
   private final QuoteGateway quotes = mock(QuoteGateway.class);
   private final PrevDayFutureOiCache prevOiCache = mock(PrevDayFutureOiCache.class);
+  private final in.arthayantra.marketdata.candles.CandleRepository candles =
+      mock(in.arthayantra.marketdata.candles.CandleRepository.class);
   private final OiBuzzService service =
-      new OiBuzzService(constituents, contracts, quotes, prevOiCache, CLOCK);
+      new OiBuzzService(constituents, contracts, quotes, prevOiCache, candles, CLOCK);
 
   private static FutContract fut(String symbol) {
     return new FutContract(new InstrumentKey("NFO", symbol + "26JUNFUT"), LocalDate.of(2026, 6, 25));

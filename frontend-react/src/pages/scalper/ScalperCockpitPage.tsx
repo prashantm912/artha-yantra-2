@@ -380,6 +380,19 @@ export function ScalperCockpitPage() {
                 <input value={ticket.tp} onChange={(e) => setTicket((t) => ({ ...t, tp: e.target.value }))} aria-label="Take profit" placeholder="none" title="Price at which the position auto-exits to lock in your gain; blank for none" className={inputCls} />
               </label>
             </div>
+            {scalperDetail?.oh_tier && (
+              <div className="flex items-center gap-2 text-xs" data-testid="oip-badge">
+                <span className="text-ay-muted">OIP-AI</span>
+                <span
+                  className={cn(
+                    'rounded px-1.5 py-0.5 font-semibold',
+                    scalperDetail.badge ? 'text-bull ring-1 ring-bull/40' : 'text-ay-muted',
+                  )}
+                >
+                  {scalperDetail.oh_tier} · {scalperDetail.oh_prob_pct}%
+                </span>
+              </div>
+            )}
             {scalperDetail && (
               <ManualVerifyChecklist detail={scalperDetail} onConfirmedChange={onConfirmedChange} />
             )}

@@ -122,7 +122,9 @@ public class ScalpAlertService {
         + " · target "
         + nz(e.target())
         + " · confluence "
-        + nz(s.confluence());
+        + nz(s.confluence())
+        // W4 6c: the Open=High probability read rides the alert when an open-high-low strategy graded it.
+        + (s.ohTier() == null ? "" : " · OIP " + s.ohTier() + " " + s.ohProbPct() + "%");
   }
 
   private void backoff(int attempt) {

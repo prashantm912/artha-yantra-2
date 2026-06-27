@@ -39,7 +39,9 @@ public record SignalEmitted(
       BigDecimal strike,
       String tradeable,
       BigDecimal optionLtp,
-      BigDecimal confluence) {}
+      BigDecimal confluence,
+      String ohTier,
+      Integer ohProbPct) {}
 
   /** Back-compat constructor for non-scalper emits (no scalp side-channel). */
   public SignalEmitted(

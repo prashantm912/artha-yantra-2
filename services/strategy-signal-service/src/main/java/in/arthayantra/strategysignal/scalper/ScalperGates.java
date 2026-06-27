@@ -5,6 +5,7 @@ import in.arthayantra.strategysignal.scalper.ScalperGateContext.Chart;
 import in.arthayantra.strategysignal.scalper.ScalperGateContext.Macro;
 import in.arthayantra.strategysignal.scalper.ScalperGateContext.Oi;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalTime;
 import java.util.Map;
 
@@ -28,6 +29,12 @@ public final class ScalperGates {
   private static final BigDecimal NIFTY_VOL = new BigDecimal("125000");
   private static final BigDecimal INDEX_VOL = new BigDecimal("50000");
   private static final Map<String, BigDecimal> VOL_FLOOR = Map.of("NIFTY 50", NIFTY_VOL);
+
+  // W4 PARAM #5 (S24 §3.10 "indicators far from candles = avoid"): the overextension band — block when
+  // the NEAREST indicator is farther than this fraction of the close. The source gives NO number; 1.5%
+  // is a deliberately wide v1 default that rarely fires on an index future (forward-paper-tunable). Tag
+  // default-OFF, so this constant only bites for an armed strategy. Package-visible for the seam.
+  static final BigDecimal INDICATOR_DISTANCE_MAX_PCT = new BigDecimal("0.015");
 
   /** ≥09:45 (ideal 09:15–10:00), block the 11:00–13:00 sideways window, no fresh entry after 15:30. */
   public static GateOutcome timeWindow(LocalTime ist) {
@@ -186,6 +193,54 @@ public final class ScalperGates {
     }
     boolean ok = side == OptionType.CE ? basis.signum() > 0 : basis.signum() < 0;
     return new GateOutcome(ok, basis, "basis " + basis.toPlainString() + (ok ? " supports " : " opposes ") + side);
+  }
+
+  /**
+   * W4 PARAM #5 (tag {@code indicator-distance-veto}, S24 §3.10 "indicators far from candles = avoid"):
+   * price is OVEREXTENDED when it has run away from the whole {@code vwap / vwma20 / psar} cluster, so a
+   * mean-reversion snap is likely. PASS (ok to trade) when the NEAREST available indicator sits within
+   * {@code maxPct} (a fraction of close) of the close; FAIL (block) when every available indicator is
+   * farther. A null/zero close or a fully-absent cluster DEGRADES to pass — missing data never blocks.
+   * (SuperTrend is excluded: its indicator outputs only the +-1 direction, no price level.)
+   */
+  public static GateOutcome indicatorDistance(Chart c, BigDecimal maxPct) {
+    BigDecimal close = c.close();
+    if (close == null || close.signum() == 0) {
+      return GateOutcome.pass(null, "close unavailable (degrade -> pass)");
+    }
+    BigDecimal abs = close.abs();
+    BigDecimal nearest = null;
+    for (BigDecimal ind : new BigDecimal[] {c.vwap(), c.vwma20(), c.psar()}) {
+      if (ind == null) {
+        continue;
+      }
+      BigDecimal distPct = ind.subtract(close).abs().divide(abs, 6, RoundingMode.HALF_UP);
+      if (nearest == null || distPct.compareTo(nearest) < 0) {
+        nearest = distPct;
+      }
+    }
+    if (nearest == null) {
+      return GateOutcome.pass(null, "no indicator cluster (degrade -> pass)");
+    }
+    boolean ok = nearest.compareTo(maxPct) <= 0;
+    return new GateOutcome(
+        ok,
+        nearest,
+        "nearest-indicator dist " + nearest.toPlainString() + (ok ? " <= " : " > ") + maxPct.toPlainString());
+  }
+
+  /**
+   * W4 PARAM #10 (tag {@code divergence-vol-gate}, S24 Day-21 Trend-Change counter-trend confirm): a
+   * counter-trend divergence entry needs a heavyweight ~125k bar REGARDLESS of the index's own §0B floor
+   * (NIFTY 125k / others 50k) — so it is a stricter sibling of {@link #volume}. PASS at/above 125k; a
+   * null volume FAILS (the confirm is required, unlike the degrade-to-pass OI gates).
+   */
+  public static GateOutcome divergenceVolume(BigDecimal volume) {
+    boolean ok = volume != null && volume.compareTo(NIFTY_VOL) >= 0;
+    return new GateOutcome(
+        ok,
+        volume,
+        (ok ? "volume >= " : "volume < ") + NIFTY_VOL.toPlainString() + " (divergence confirm)");
   }
 
   private static boolean gt(BigDecimal a, BigDecimal b) {

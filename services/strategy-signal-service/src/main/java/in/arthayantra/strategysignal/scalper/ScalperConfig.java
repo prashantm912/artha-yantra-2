@@ -51,7 +51,8 @@ public record ScalperConfig(
     boolean requireHeroZero,
     boolean requireStraddle,
     boolean requireRsiS24Bands,
-    boolean requireOpenHighOiVeto) {
+    boolean requireOpenHighOiVeto,
+    List<String> tags) {
 
   /** Where the entry-time structural stop-loss is anchored (none = size off structure/VWAP only). */
   public enum StructuralStop {
@@ -63,6 +64,43 @@ public record ScalperConfig(
     VWAP,
     FIRST_CANDLE,
     OPPOSITE_EXTREME
+  }
+
+  /**
+   * Legacy 18-arg form (pre-W4): defaults {@code tags} to empty. The W4 extension gates are armed via
+   * {@link #has(String)} against the raw YAML tag list, which only the canonical 19-arg constructor
+   * (used by {@link #from}) carries — so a config built without tags arms NO W4 gate (default path,
+   * byte-identical). Keeps the direct-construction test fixtures unchanged.
+   */
+  public ScalperConfig(
+      String underlyingExchange,
+      String underlying,
+      String signalIndex,
+      String oiIndex,
+      int rollDays,
+      StrikePicker.Params strikeParams,
+      BigDecimal confluenceThreshold,
+      boolean requireTwoCandle,
+      StructuralStop structuralStop,
+      boolean requireCallPutDeltaFilter,
+      boolean requireGapFill,
+      boolean requireTrendChange,
+      boolean requireOpenHighLow,
+      boolean openingTick,
+      boolean requireHeroZero,
+      boolean requireStraddle,
+      boolean requireRsiS24Bands,
+      boolean requireOpenHighOiVeto) {
+    this(
+        underlyingExchange, underlying, signalIndex, oiIndex, rollDays, strikeParams,
+        confluenceThreshold, requireTwoCandle, structuralStop, requireCallPutDeltaFilter, requireGapFill,
+        requireTrendChange, requireOpenHighLow, openingTick, requireHeroZero, requireStraddle,
+        requireRsiS24Bands, requireOpenHighOiVeto, List.of());
+  }
+
+  /** Whether the strategy carries a (W4) behaviour tag (the raw YAML tag list from {@link #from}). */
+  public boolean has(String tag) {
+    return tags.contains(tag);
   }
 
   // #9 (section 3.9) Morning Trade opening-tick window. Held as a constant (not read from the YAML
@@ -187,7 +225,7 @@ public record ScalperConfig(
     return new ScalperConfig(
         exchange, underlying, signalIndex, oiIndex, rollDays, params, THRESHOLD, twoCandle, stop,
         callPutDeltaFilter, gapFill, trendChange, openHighLow, openingTick, heroZero, straddle,
-        rsiS24Bands, openHighOiVeto);
+        rsiS24Bands, openHighOiVeto, List.copyOf(tags));
   }
 
   /** A {@code (exchange, tradingsymbol)} index reference for live front-future resolution. */

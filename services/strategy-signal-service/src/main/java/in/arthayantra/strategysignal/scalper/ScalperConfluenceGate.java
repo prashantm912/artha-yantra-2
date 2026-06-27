@@ -164,6 +164,18 @@ public class ScalperConfluenceGate {
     if (!ScalperGates.volume(cfg.signalIndex(), chart.volume()).pass() || !rsiOk) {
       return Optional.empty();
     }
+    // W4 PARAM #5 (tag indicator-distance-veto): a chart-only overextension veto — block when price has
+    // run far from the vwap/vwma/psar cluster (mean-reversion risk). Default-OFF; a null/absent cluster
+    // degrades to pass inside the gate, so it never blocks on missing data.
+    if (cfg.has("indicator-distance-veto")
+        && !ScalperGates.indicatorDistance(chart, ScalperGates.INDICATOR_DISTANCE_MAX_PCT).pass()) {
+      return Optional.empty();
+    }
+    // W4 PARAM #10 (tag divergence-vol-gate): the S24 Day-21 counter-trend confirm — a heavyweight ~125k
+    // bar regardless of the index floor. Default-OFF; pairs with trend-change but is independent.
+    if (cfg.has("divergence-vol-gate") && !ScalperGates.divergenceVolume(chart.volume()).pass()) {
+      return Optional.empty();
+    }
     // §3.1 Two-Candle: when the strategy declares it, the multi-bar formation is a HARD entry gate
     // (the chart-only YAML grammar cannot express it). The 1st-candle extreme becomes the stop.
     BigDecimal structuralStop = structuralStop(cfg, future, index, side);

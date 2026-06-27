@@ -183,6 +183,30 @@ class ScalperGatesTest {
     assertThat(ScalperGates.divergenceVolume(null).pass()).isFalse(); // confirm required -> null fails
   }
 
+  @Test
+  void overboughtDeferBlocksTheExhaustionExtremePerSide() {
+    // CE defers at >=85; PE defers at <=15; just inside the cap trades.
+    assertThat(ScalperGates.overboughtDefer(bd("84"), CE).pass()).isTrue();
+    assertThat(ScalperGates.overboughtDefer(bd("85"), CE).pass()).isFalse();
+    assertThat(ScalperGates.overboughtDefer(bd("16"), PE).pass()).isTrue();
+    assertThat(ScalperGates.overboughtDefer(bd("15"), PE).pass()).isFalse();
+    // a null RSI degrades to pass (the veto never blocks on missing data).
+    assertThat(ScalperGates.overboughtDefer(null, CE).pass()).isTrue();
+  }
+
+  @Test
+  void directionalChangeRequiresAnOiTiltCrossThisWindow() {
+    assertThat(ScalperGates.directionalChange(crossed(true)).pass()).isTrue();
+    assertThat(ScalperGates.directionalChange(crossed(false)).pass()).isFalse();
+    assertThat(ScalperGates.directionalChange(null).pass()).isFalse(); // precondition unmet
+  }
+
+  private static Oi crossed(boolean crossedThisWindow) {
+    return new Oi(
+        OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("0"), bd("5"), null, null, null,
+        crossedThisWindow, false, null, null, null);
+  }
+
   private static Oi imbalance(BigDecimal pct) {
     return new Oi(
         OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("0"), bd("5"),

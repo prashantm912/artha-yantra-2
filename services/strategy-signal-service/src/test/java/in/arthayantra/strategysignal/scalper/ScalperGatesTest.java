@@ -73,6 +73,25 @@ class ScalperGatesTest {
   }
 
   @Test
+  void rsiS24BandShiftsBuyTo50To75AndSellTo25To40() {
+    // S24 ratified band (tag rsi-s24-bands, owner U1/U2/U3): CE buy 50-75, PE sell 25-40, 40-50 no-trade.
+    assertThat(ScalperGates.rsiS24Band(bd("50"), CE).pass()).isFalse(); // floor exclusive
+    assertThat(ScalperGates.rsiS24Band(bd("51"), CE).pass()).isTrue();
+    assertThat(ScalperGates.rsiS24Band(bd("74"), CE).pass()).isTrue();
+    assertThat(ScalperGates.rsiS24Band(bd("75"), CE).pass()).isFalse();
+    assertThat(ScalperGates.rsiS24Band(bd("44"), CE).pass()).isFalse(); // 40-50 no-trade
+    // PE sell 25-40
+    assertThat(ScalperGates.rsiS24Band(bd("40"), PE).pass()).isFalse();
+    assertThat(ScalperGates.rsiS24Band(bd("39"), PE).pass()).isTrue();
+    assertThat(ScalperGates.rsiS24Band(bd("26"), PE).pass()).isTrue();
+    assertThat(ScalperGates.rsiS24Band(bd("25"), PE).pass()).isFalse();
+    // the S24/legacy divergence: RSI 55 CE trades under S24 but is in the legacy 40-60 no-trade gap.
+    assertThat(ScalperGates.rsiS24Band(bd("55"), CE).pass()).isTrue();
+    assertThat(ScalperGates.rsiBand(bd("55"), CE).pass()).isFalse();
+    assertThat(ScalperGates.rsiS24Band(null, CE).pass()).isFalse(); // null rsi -> fail
+  }
+
+  @Test
   void rsiAboveIsTheRelaxedOpenHighFloor() {
     // #2 (open-high-low) gates on the source's "RSI >50" floor, not the 60-80 band.
     assertThat(ScalperGates.rsiAbove(bd("50"), bd("50")).pass()).isFalse(); // exactly 50 -> not >

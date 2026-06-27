@@ -49,7 +49,8 @@ public record ScalperConfig(
     boolean requireOpenHighLow,
     boolean openingTick,
     boolean requireHeroZero,
-    boolean requireStraddle) {
+    boolean requireStraddle,
+    boolean requireRsiS24Bands) {
 
   /** Where the entry-time structural stop-loss is anchored (none = size off structure/VWAP only). */
   public enum StructuralStop {
@@ -151,9 +152,13 @@ public record ScalperConfig(
                                     : StructuralStop.NONE;
     // #5 (T2.1): the oi-cross-filter tag makes the >=50% call-put dOI imbalance a HARD pre-gate.
     boolean callPutDeltaFilter = tags.contains("oi-cross-filter");
+    // W3 (S24 ratification U1/U2/U3): the rsi-s24-bands tag swaps the hard RSI rail to the 50-75 /
+    // 40-50 / 40-25 band (default-OFF; absent => legacy 60-80 / 20-40 band, byte-identical).
+    boolean rsiS24Bands = tags.contains("rsi-s24-bands");
     return new ScalperConfig(
         exchange, underlying, signalIndex, oiIndex, rollDays, params, THRESHOLD, twoCandle, stop,
-        callPutDeltaFilter, gapFill, trendChange, openHighLow, openingTick, heroZero, straddle);
+        callPutDeltaFilter, gapFill, trendChange, openHighLow, openingTick, heroZero, straddle,
+        rsiS24Bands);
   }
 
   /** A {@code (exchange, tradingsymbol)} index reference for live front-future resolution. */

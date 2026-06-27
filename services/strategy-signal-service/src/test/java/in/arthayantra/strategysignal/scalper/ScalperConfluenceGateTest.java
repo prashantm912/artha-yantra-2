@@ -44,50 +44,65 @@ class ScalperConfluenceGateTest {
       new ScalperConfig(
           "NSE", "NIFTY 50", "NIFTY 50", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          false, ScalperConfig.StructuralStop.NONE, false, false, false, false, false, false, false);
+          false, ScalperConfig.StructuralStop.NONE, false, false, false, false, false, false, false,
+          false);
   private static final ScalperConfig TWO_CANDLE_CFG =
       new ScalperConfig(
           "NSE", "NIFTY 50", "NIFTY 50", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
           true, ScalperConfig.StructuralStop.TWO_CANDLE_FIRST, false, false, false, false, false, false,
-          false);
+          false, false);
   // #5: a strategy with the oi-cross-filter HARD pre-gate enabled.
   private static final ScalperConfig OI_CROSS_CFG =
       new ScalperConfig(
           "NSE", "NIFTY 50", "NIFTY 50", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          false, ScalperConfig.StructuralStop.NONE, true, false, false, false, false, false, false);
+          false, ScalperConfig.StructuralStop.NONE, true, false, false, false, false, false, false,
+          false);
   // #4: a strategy with the gap-theory HARD gap-fill pre-gate enabled.
   private static final ScalperConfig GAP_CFG =
       new ScalperConfig(
           "NSE", "NIFTY 50", "NIFTY 50", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          false, ScalperConfig.StructuralStop.GAP_TREND, false, true, false, false, false, false, false);
+          false, ScalperConfig.StructuralStop.GAP_TREND, false, true, false, false, false, false, false,
+          false);
   // #12: a strategy with the trend-change HARD pre-gate enabled (structure break + >=50% OI shift).
   private static final ScalperConfig TREND_CHANGE_CFG =
       new ScalperConfig(
           "NSE", "NIFTY 50", "NIFTY 50", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          false, ScalperConfig.StructuralStop.SWING_BREAK, false, false, true, false, false, false, false);
+          false, ScalperConfig.StructuralStop.SWING_BREAK, false, false, true, false, false, false, false,
+          false);
   // #2: a strategy with the open-high-low HARD FNO-structure pre-gate enabled.
   private static final ScalperConfig OPEN_HIGH_LOW_CFG =
       new ScalperConfig(
           "NSE", "NIFTY 50", "NIFTY 50", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          false, ScalperConfig.StructuralStop.VWAP, false, false, false, true, false, false, false);
+          false, ScalperConfig.StructuralStop.VWAP, false, false, false, true, false, false, false,
+          false);
   // #9: a strategy with the opening-tick (Morning Trade) path enabled — its own opening-tick time
   // window + the VWAP HARD-gate degrade before 10:30 + a FIRST-CANDLE stop anchor.
   private static final ScalperConfig OPENING_TICK_CFG =
       new ScalperConfig(
           "NSE", "NIFTY 50", "NIFTY 50", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          false, ScalperConfig.StructuralStop.FIRST_CANDLE, false, false, false, false, true, false, false);
+          false, ScalperConfig.StructuralStop.FIRST_CANDLE, false, false, false, false, true, false, false,
+          false);
   // #11: a strategy with the straddle (neutral two-leg) path enabled.
   private static final ScalperConfig STRADDLE_CFG =
       new ScalperConfig(
           "NSE", "NIFTY 50", "NIFTY 50", "NIFTY 50", 2,
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
-          false, ScalperConfig.StructuralStop.NONE, false, false, false, false, false, false, true);
+          false, ScalperConfig.StructuralStop.NONE, false, false, false, false, false, false, true,
+          false);
+  // W3 (rsi-s24-bands): a strategy carrying the S24 RSI-band tag — routes the hard RSI rail through
+  // rsiS24Band (CE 50-75 / PE 25-40) instead of the legacy 60-80 / 20-40 band.
+  private static final ScalperConfig RSI_S24_CFG =
+      new ScalperConfig(
+          "NSE", "NIFTY 50", "NIFTY 50", "NIFTY 50", 2,
+          new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
+          false, ScalperConfig.StructuralStop.NONE, false, false, false, false, false, false, false,
+          true);
 
   // a 3m index-future series: index 2 is the deploy bar; indices 0/1 are the forming candles.
   private static EngineSeries futureSeries(EngineCandle... candles) {
@@ -113,9 +128,14 @@ class ScalperConfluenceGateTest {
   // a bank whose close (100) sits above VWAP (99) → CE side; RSI 65 (in 60–80) + volume 130k (above
   // the NIFTY 125k floor) clear the §0B hard pre-flight gates the seam now enforces.
   private static BarValues bullBank() {
+    return bullBankRsi(bd("65"));
+  }
+
+  // bullBank with a caller-chosen RSI (the §0B hard RSI rail reads chart.rsi14() off the bank).
+  private static BarValues bullBankRsi(BigDecimal rsi) {
     Map<String, BigDecimal> builtins = Map.of("close", bd("100"), "vwap", bd("99"), "volume", bd("130000"));
     Map<String, BigDecimal> aliases =
-        Map.of("vwma20", bd("98"), "psar", bd("97"), "rsi14", bd("65"), "supertrend", bd("1"));
+        Map.of("vwma20", bd("98"), "psar", bd("97"), "rsi14", rsi, "supertrend", bd("1"));
     return new BarValues() {
       @Override
       public BigDecimal valueAt(String alias, int i) {
@@ -177,6 +197,24 @@ class ScalperConfluenceGateTest {
     assertThat(decision.get().side()).isEqualTo(CE);
     assertThat(decision.get().pick().candidate().tradingsymbol()).isEqualTo("NIFTY19850CE");
     assertThat(decision.get().confluence().bullish()).isTrue();
+  }
+
+  @Test
+  void rsiS24BandsTagRoutesTheHardRailThroughTheNewBand() {
+    // RSI 55: inside the S24 buy band (50-75) but in the LEGACY 40-60 no-trade gap. The hard RSI
+    // rail must BLOCK a legacy strategy and PASS one carrying the rsi-s24-bands tag — chain +
+    // confluence identical, the only difference is the tag-selected band.
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+
+    // legacy band: RSI 55 is in the 40-60 no-trade zone → the hard rail blocks.
+    assertThat(gate.evaluate(CFG, bullBankRsi(bd("55")), null, 0, NOW, IST_TIME, EOD)).isEmpty();
+    // rsi-s24-bands armed: RSI 55 is in the 50-75 buy band → the rail passes and the signal fires.
+    Optional<Decision> s24 = gate.evaluate(RSI_S24_CFG, bullBankRsi(bd("55")), null, 0, NOW, IST_TIME, EOD);
+    assertThat(s24).isPresent();
+    assertThat(s24.get().confluence().bullish()).isTrue();
   }
 
   @Test

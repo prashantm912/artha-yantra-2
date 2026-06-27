@@ -152,12 +152,15 @@ public class ScalperConfluenceGate {
             : OptionType.PE;
     // §0B hard "no trade" rails: volume floor + the RSI gate (both are blocks, not the soft dots the
     // scorer also weighs — a strong-everything-else signal must still respect them). #2 (open-high-low)
-    // relaxes RSI to the source's ">50" floor instead of the shared 60-80/20-40 band; the shared
-    // rsiBand is unchanged for every other strategy.
+    // relaxes RSI to the source's ">50" floor; a strategy carrying the W3 rsi-s24-bands tag uses the
+    // ratified 50-75 / 40-50 / 40-25 band (rsiS24Band); both are per-strategy overrides — the shared
+    // rsiBand (60-80 / 20-40) is unchanged for every other strategy, so the goldens never move.
     boolean rsiOk =
         cfg.requireOpenHighLow()
             ? ScalperGates.rsiAbove(chart.rsi14(), oiProps.openHighRsiFloor()).pass()
-            : ScalperGates.rsiBand(chart.rsi14(), side).pass();
+            : cfg.requireRsiS24Bands()
+                ? ScalperGates.rsiS24Band(chart.rsi14(), side).pass()
+                : ScalperGates.rsiBand(chart.rsi14(), side).pass();
     if (!ScalperGates.volume(cfg.signalIndex(), chart.volume()).pass() || !rsiOk) {
       return Optional.empty();
     }

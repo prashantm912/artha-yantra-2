@@ -117,7 +117,7 @@ Pick the value the W1 doc adopts. "My rec" copies the comparison's "Which to tru
 |---:|---|---|---|---|---|---|---|---|
 | D1 | Shared-S2 | RSI no-trade zone | 40-60 | 40-50 | **40-60 (engine = OLD)** | Engine = OLD (40-60) |  | yes |
 | D2 | Shared-S2 | Advance/Decline breadth | explicit >32 | breadth row, drops >32 number | **>32 (engine FULL = OLD)** | Engine = OLD (>32 live) |  | yes |
-| D3 | Shared-S2 / S5 / S9 / S10 | Buyer/strike delta floor (UMBRELLA — = D26/D29/D41) | 0.6-0.7 | ≥0.7 (+ phase conditioning) | **0.6-0.7 (engine = OLD)** | S24 raises floor; engine on OLD (RECONCILE in code). ONE ruling here propagates to D26 (S9), D29 (S10), D41 (Shared-S5) — same physical drift, not 4 independent ones (see L170 count-note) |  | yes |
+| D3 | Shared-S2 / S5 / S9 / S10 | Buyer/strike delta floor (UMBRELLA — = D26/D29/D41) | 0.6-0.7 | ≥0.7 (+ phase conditioning) | **0.6-0.7 (engine = OLD)** | S24 raises floor; engine on OLD (RECONCILE in code). ONE ruling here propagates to D26 (S9), D29 (S10), D41 (Shared-S5) — same physical drift, not 4 independent ones (see L170 count-note) | **S24 ≥0.7 — owner 2026-06-27 (W3 code task)** | yes |
 | D4 | Shared-S1-risk | Daily loss cap | 2-3% (S20 rule13; YAML 2.0) | 10-12% single-day | **2-3% (engine = OLD)** | Reconcile (doc 10-12 vs engine 2) |  | yes |
 | D5 | Shared-S5 | Premium band | N 100-250/BN 250-400 (engine) vs N 150-350/BN 250-550 (S22 doc) | no band; qualitative "avoid 120-130, 150+" | **N 100-250/BN 250-400 (engine, stale)** | S22-operative band (backlog PR-2 swaps engine) |  | yes |
 
@@ -145,10 +145,10 @@ Pick the value the W1 doc adopts. "My rec" copies the comparison's "Which to tru
 | D23 | S8 | Instrument vehicle | index F&O + stock/cash carry leg | index options only | — | S24 (index-only) |  | yes |
 | D24 | S9 Morning Trade | Scalp worked example | 9:16→9:18 / 250pts/2min | 9:15:02→9:16:13 / >1%/~1min | — | Either (illustrative) |  | no |
 | D25 | S9 | SL reference level | first-candle low/high (engine) | strike's prior-day VWAP / bounce bottom | first-candle low/high | Engine uses OLD; reconcile |  | yes |
-| D26 | S9 | Strike/delta selection | delta 0.6-0.7 + N 100-250/BN 250-400 + ATM±3 | 2-3 strikes from settle, slight ITM, delta ~0.80 (estimation) | delta 0.6-0.7 / premium band | Reconcile (purpose differs) |  | yes |
+| D26 | S9 | Strike/delta selection | delta 0.6-0.7 + N 100-250/BN 250-400 + ATM±3 | 2-3 strikes from settle, slight ITM, delta ~0.80 (estimation) | delta 0.6-0.7 / premium band | Reconcile (purpose differs) | **S24 ≥0.7 delta floor — owner 2026-06-27** | yes |
 | D27 | S9 | Morning RSI band | morning-specific CE 60+/not>75/40-60 no-trade | inherits framework 40-50 no-trade / buy 50-75 | CE 60+/40-60 (per shared engine) | Reconcile (S24 defers to §3.10) |  | yes |
 | D28 | S10 Connect-the-Dots | RSI entry band (doc vs engine) | doc 50-75 / no-trade 40-50 | engine CE 60-80 / no-trade 40-60 | CE 60-80 / 40-60 | UNCERTAIN_OWNER (see P3) |  | yes |
-| D29 | S10 | Buy-side delta | 0.6-0.7 (engine) | ≥0.7 + VIX/expiry conditioning | 0.6-0.7 | S24 (raises floor); engine on OLD |  | yes |
+| D29 | S10 | Buy-side delta | 0.6-0.7 (engine) | ≥0.7 + VIX/expiry conditioning | 0.6-0.7 | S24 (raises floor); engine on OLD | **S24 ≥0.7 — owner 2026-06-27 (W3 code task)** | yes |
 | D30 | S10 | Stop-loss philosophy | structural 1st-candle + 5pt gap-trail | wide point SLs (N 50-60/BN 100/Sensex 200-250) | structural 1st-candle | Both (different SL modes) |  | yes |
 | D31 | S10 | Intraday window close | after 9:45, avoid after 3:30 | 9:45-2:30 (post-2:30 = next-day) | — | S24 (tightens close) |  | yes |
 | D32 | Shared-S2 | Parabolic SAR notation | 0.02, 0.2 (two-value; engine) | 0.02, 0.02, 0.2 (three-value) | 0.02, 0.2 (two-value) | Engine = OLD two-value |  | no |
@@ -160,7 +160,7 @@ Pick the value the W1 doc adopts. "My rec" copies the comparison's "Which to tru
 | D38 | Shared-S3-oi | Monthly-expiry OI handling | confirm both positional+intraday (S21) | IGNORE the OI data | engine suppresses | S24/engine (suppress) |  | yes |
 | D39 | Shared-S4 | IV directional gap floor | 10pt (S20) / 7-10pt (S22) | 8-10pt | 0.10 | S24 8-10 between OLD anchors |  | yes |
 | D40 | Shared-S4 | India VIX upper bands | 15-16 / 17+ (S21) | 15-18 / 18-20+ / 20-25+ | — | S24 (latest) |  | yes |
-| D41 | Shared-S5 | Buy-strike delta | 0.6-0.7 (engine, picks 0.65) | ≥0.7 floor + scaling | 0.6-0.7 (picks 0.65) | S24 raises floor; engine on OLD |  | yes |
+| D41 | Shared-S5 | Buy-strike delta | 0.6-0.7 (engine, picks 0.65) | ≥0.7 floor + scaling | 0.6-0.7 (picks 0.65) | S24 raises floor; engine on OLD | **S24 ≥0.7 — owner 2026-06-27 (W3 code task)** | yes |
 | D42 | Shared-S5 | Time rails | after 9:45 / midday 11-13 block / 15:30 cap (engine) | 9:45-2:30 soft 2:30 cutoff | midday 11-13 block / 15:30 cap | Reconcile (engine keeps midday block) |  | yes |
 | D43 | Shared-S5 | Sensex point-scaling | ~3x (exact % figures) | ~3-4x (+ single-candle ~5000pt note) | — | S24 (wider/latest) |  | yes |
 | D44 | Shared-S6 | India VIX bands | 10-11/12-14/15-16/17+ | 10-11/12-14/15-18/18-20+/20-25+ | — | S24 (latest) |  | yes |

@@ -4,15 +4,19 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 vi.mock('../../components/charts/CandleChart.tsx', () => ({ CandleChart: () => <div data-testid="candlechart" /> }));
+// STABLE references — the page's #D older-bars effect depends on `candles.data`, so a fresh object per
+// render (TanStack Query memoizes in prod) would fire the effect every render → setOlder → re-render →
+// infinite loop that hangs the worker. Hoisting the payloads keeps the reference identity stable.
+const CANDLES = {
+  items: [{ exchange: 'NSE', tradingsymbol: 'NIFTY 50', interval: '1d', bucket: '2026-06-23T09:15:00+05:30', open: '100', high: '110', low: '95', close: '105', volume: 1000, oi: null, source: 'LIVE' }],
+};
+const NO_SIGNALS: never[] = [];
 vi.mock('../../api/charts.ts', async (orig) => {
   const actual = await orig<typeof import('../../api/charts.ts')>();
   return {
     ...actual, // keep CHART_INTERVALS
-    useCandles: () => ({
-      data: { items: [{ exchange: 'NSE', tradingsymbol: 'NIFTY 50', interval: '1d', bucket: '2026-06-23T09:15:00+05:30', open: '100', high: '110', low: '95', close: '105', volume: 1000, oi: null, source: 'LIVE' }] },
-      isLoading: false,
-    }),
-    useChartSignals: () => ({ data: [] }),
+    useCandles: () => ({ data: CANDLES, isLoading: false }),
+    useChartSignals: () => ({ data: NO_SIGNALS }),
   };
 });
 vi.mock('../../api/backtests.ts', () => ({ useBacktestTrades: () => ({ data: { items: [] } }) }));

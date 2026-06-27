@@ -112,7 +112,10 @@ public class MarketOiClient {
       BigDecimal open,
       BigDecimal high,
       Long declineVolume,
-      BigDecimal fallPctFromPrevClose) {}
+      BigDecimal fallPctFromPrevClose,
+      // W3 PR-6: per-strike session change-in-OI % (the Day-14 p20 AVOID veto operand). Nullable —
+      // a market-data without the field (older deploy) maps to null, so the veto degrades to safe.
+      BigDecimal oiChangePct) {}
 
   /**
    * The #2-only per-strike OH/OL footprint for {@code underlying}'s {@code expiry} chain over the
@@ -152,7 +155,8 @@ public class MarketOiClient {
               decimal(row.path("open")),
               decimal(row.path("high")),
               longOrNull(row.path("declineVolume")),
-              decimal(row.path("fallPctFromPrevClose"))));
+              decimal(row.path("fallPctFromPrevClose")),
+              decimal(row.path("oiChangePct"))));
     }
     return new OpenHighStats(atm, items);
   }

@@ -50,7 +50,8 @@ public record ScalperConfig(
     boolean openingTick,
     boolean requireHeroZero,
     boolean requireStraddle,
-    boolean requireRsiS24Bands) {
+    boolean requireRsiS24Bands,
+    boolean requireOpenHighOiVeto) {
 
   /** Where the entry-time structural stop-loss is anchored (none = size off structure/VWAP only). */
   public enum StructuralStop {
@@ -180,10 +181,13 @@ public record ScalperConfig(
     // W3 (S24 ratification U1/U2/U3): the rsi-s24-bands tag swaps the hard RSI rail to the 50-75 /
     // 40-50 / 40-25 band (default-OFF; absent => legacy 60-80 / 20-40 band, byte-identical).
     boolean rsiS24Bands = tags.contains("rsi-s24-bands");
+    // W3 PR-6 (#2 open-high-low): the open-high-oi-veto tag adds the per-strike >50% change-in-OI
+    // AVOID veto to the OpenHighLowGate (default-OFF; absent => no per-strike veto, byte-identical).
+    boolean openHighOiVeto = tags.contains("open-high-oi-veto");
     return new ScalperConfig(
         exchange, underlying, signalIndex, oiIndex, rollDays, params, THRESHOLD, twoCandle, stop,
         callPutDeltaFilter, gapFill, trendChange, openHighLow, openingTick, heroZero, straddle,
-        rsiS24Bands);
+        rsiS24Bands, openHighOiVeto);
   }
 
   /** A {@code (exchange, tradingsymbol)} index reference for live front-future resolution. */

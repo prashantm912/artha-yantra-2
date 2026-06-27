@@ -89,7 +89,8 @@ public final class OpenHighLowGate {
       ScalperOiProps props,
       Oi oi,
       BigDecimal vwap,
-      LocalTime istTime) {
+      LocalTime istTime,
+      boolean perStrikeOiVeto) {
     if (oi == null) {
       return block(null, "no OI snapshot"); // cannot run the spurt reject -> never fire
     }
@@ -107,6 +108,16 @@ public final class OpenHighLowGate {
     // Reuse the Tier-1 spurt magnitudes; a null magnitude is unavailable and does NOT block.
     if (exceedsReject(oi.spurtPricePct()) || exceedsReject(oi.spurtOiPct())) {
       return block(tier, "spurt >50% reject");
+    }
+    // W3 PR-6 (tag open-high-oi-veto, default-OFF): the deck p20 PER-STRIKE AVOID veto — the
+    // identified OH strike's OWN change-in-OI > 50% means a bigger player took the opposite side.
+    // More precise than the chain-wide spurt reject above; only applied when the strategy is armed,
+    // so an unarmed strategy is byte-identical.
+    if (perStrikeOiVeto) {
+      BigDecimal strikeOiChange = OpenHighLow.representativeOiChangePct(stats, side);
+      if (strikeOiChange != null && strikeOiChange.abs().compareTo(REJECT_PCT) > 0) {
+        return block(Tier.AVOID, "per-strike OI change >50% (AVOID)");
+      }
     }
     return new Verdict(true, vwap, tier, "HIGH footprint");
   }

@@ -62,4 +62,14 @@ class ScalperConfigTest {
     assertThat(sensex.strikeParams().premiumLo()).isEqualByComparingTo("300");
     assertThat(sensex.strikeParams().premiumHi()).isEqualByComparingTo("800");
   }
+
+  @Test
+  void openHighOiVetoTagBindsTheFlag() {
+    assertThat(ScalperConfig.from(config("NIFTY 50"), List.of("scalper")).requireOpenHighOiVeto())
+        .isFalse();
+    assertThat(
+            ScalperConfig.from(config("NIFTY 50"), List.of("scalper", "open-high-oi-veto"))
+                .requireOpenHighOiVeto())
+        .isTrue();
+  }
 }

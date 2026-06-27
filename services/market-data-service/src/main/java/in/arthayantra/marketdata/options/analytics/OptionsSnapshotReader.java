@@ -4,6 +4,7 @@ import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.options.OiInterval;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -56,7 +57,11 @@ public class OptionsSnapshotReader {
       BigDecimal last,
       Long dayVolume,
       Long declineVolume,
-      BigDecimal prevClose) {}
+      BigDecimal prevClose,
+      // W3 PR-6: the per-strike session change-in-OI % (last-bucket OI vs first-bucket OI), for the
+      // Day-14 p20 AVOID veto (ΔOI > 50% = a bigger player took the opposite side). Folded from the
+      // StrikePoint OI already read for this session — no second DB read. Null when OI is unavailable.
+      BigDecimal oiChangePct) {}
 
   /**
    * As {@link #series} but scoped to a SINGLE {@code strike} (both CE + PE) — the per-strike
@@ -269,9 +274,24 @@ public class OptionsSnapshotReader {
               lastPt.ltp(),
               dayVolume,
               declineVolume,
-              prevClose.get(key(first.strike(), first.optionType()))));
+              prevClose.get(key(first.strike(), first.optionType())),
+              sessionOiChangePct(first.oi(), lastPt.oi())));
     }
     return out;
+  }
+
+  /**
+   * W3 PR-6: the per-strike session change-in-OI % — (last-bucket OI - first-bucket OI) / first-bucket
+   * OI * 100, scale 4 HALF_UP — for the Day-14 p20 AVOID veto. Null when either OI is absent or the
+   * first-bucket OI is zero (no base to divide by).
+   */
+  private static BigDecimal sessionOiChangePct(Long firstOi, Long lastOi) {
+    if (firstOi == null || lastOi == null || firstOi == 0L) {
+      return null;
+    }
+    return BigDecimal.valueOf(lastOi - firstOi)
+        .multiply(BigDecimal.valueOf(100))
+        .divide(BigDecimal.valueOf(firstOi), 4, RoundingMode.HALF_UP);
   }
 
   /** Session buckets oldest-first via the IST-day window of {@link #series}. */

@@ -129,7 +129,10 @@ class ScalperStrategyLoadTest {
 
       ScalperConfig cfg = ScalperConfig.from(config, tags);
       assertThat(cfg.underlying()).as(id + " underlying").isEqualTo(UNDERLYING.get(id));
-      assertThat(cfg.strikeParams().deltaLo()).isEqualTo(0.6);
+      // S24 arming: a strategy that carries the ratified delta-s24-floor tag resolves the >=0.7 band
+      // (0.7-0.8); the unarmed default stays the legacy 0.6-0.7. Both are valid post-arming states.
+      double expectedDeltaLo = tags.contains("delta-s24-floor") ? 0.7 : 0.6;
+      assertThat(cfg.strikeParams().deltaLo()).as(id + " delta floor (s24 vs legacy)").isEqualTo(expectedDeltaLo);
       assertThat(cfg.confluenceThreshold()).isEqualByComparingTo("0.6");
       // 2c three-way decoupling: every variant SIGNALS on the NIFTY future (signalIndex "NIFTY 50",
       // mapped from signal_underlying NFO/NIFTY-FUT-CONT); the OI-confluence index is the option-root

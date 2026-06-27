@@ -119,6 +119,36 @@ class HeroZeroGateTest {
   }
 
   @Test
+  void w4SideOiTagRaisesThePutSideFloorToSeventyButLeavesTheCallSideAtFifty() {
+    // W4 #3 (tag herozero-side-oi, S24 Day-17): the PUT side's OI confirm rises to ~70% when armed.
+    // unarmed (8-arg): the PE imbalance-60 real-move fires.
+    assertThat(
+            HeroZeroGate.evaluate(
+                    towardLowFuture(), 2, PE, bearishOi(), RSI_OK_PE, FIRE_TIME, true, false)
+                .pass())
+        .isTrue();
+    // armed (9-arg true): the same PE imbalance-60 now BLOCKS (60 < 70 put-side floor).
+    assertThat(
+            HeroZeroGate.evaluate(
+                    towardLowFuture(), 2, PE, bearishOi(), RSI_OK_PE, FIRE_TIME, true, false, true)
+                .pass())
+        .isFalse();
+    // armed: a PE imbalance-70 clears the raised floor.
+    Oi strongPe = oi(PE, "-200", "70", "-60", OiQuadrant.SHORT_COVERING);
+    assertThat(
+            HeroZeroGate.evaluate(
+                    towardLowFuture(), 2, PE, strongPe, RSI_OK_PE, FIRE_TIME, true, false, true)
+                .pass())
+        .isTrue();
+    // armed: the CALL side is UNCHANGED — imbalance-60 still fires (the asymmetry is PE-only).
+    assertThat(
+            HeroZeroGate.evaluate(
+                    towardHighFuture(), 2, CE, bullishOi(), RSI_OK_CE, FIRE_TIME, true, false, true)
+                .pass())
+        .isTrue();
+  }
+
+  @Test
   void blocksWhenNotAnExpiryDay() {
     assertThat(
             HeroZeroGate.evaluate(

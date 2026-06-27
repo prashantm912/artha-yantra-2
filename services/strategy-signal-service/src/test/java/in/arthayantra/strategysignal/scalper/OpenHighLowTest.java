@@ -34,7 +34,7 @@ class OpenHighLowTest {
   /** A plain OH/OL footprint leg with no price/volume modifier (last==open==high, no decline). */
   private static StrikeStat leg(String strike, OptionType type, boolean oh, boolean ol) {
     return new StrikeStat(
-        bd(strike), type, oh, ol, bd("100"), bd("100"), bd("100"), null, null);
+        bd(strike), type, oh, ol, bd("100"), bd("100"), bd("100"), null, null, null);
   }
 
   /** A leg that FELL (last below open/high) with an explicit declineVolume + prev-close fall %. */
@@ -49,7 +49,8 @@ class OpenHighLowTest {
         bd("100"),
         bd("100"),
         declineVol,
-        prevCloseFallPct == null ? null : bd(prevCloseFallPct));
+        prevCloseFallPct == null ? null : bd(prevCloseFallPct),
+        null);
   }
 
   private static OpenHighStats stats(String atm, StrikeStat... legs) {

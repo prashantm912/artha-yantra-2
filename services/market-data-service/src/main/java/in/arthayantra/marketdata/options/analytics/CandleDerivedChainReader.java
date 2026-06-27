@@ -440,7 +440,10 @@ public class CandleDerivedChainReader {
       out.add(
           new OptionsSnapshotReader.PerStrikeSessionStat(
               first.strike(), first.optionType(), first.ltp(), high, low, lastPt.ltp(), dayVolume,
-              declineVolume, prevClose.get(sKey(first.strike(), first.optionType()))));
+              declineVolume, prevClose.get(sKey(first.strike(), first.optionType())),
+              // Derived-history path: OI is virtual/muted (CLAUDE.md), so the per-strike ΔOI veto is a
+              // FORWARD-paper feature — leave oiChangePct null here (the veto degrades to safe).
+              null));
     }
     return out;
   }

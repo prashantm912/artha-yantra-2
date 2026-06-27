@@ -87,6 +87,19 @@ public final class OpenHighLow {
     return tier == Tier.HIGH;
   }
 
+  /**
+   * W3 PR-6: the representative OH strike's per-strike session change-in-OI % on {@code side} (the
+   * strike nearest the ATM among the side's OH-marked legs), or null when none / unavailable. The
+   * Day-14 p20 AVOID veto reads this — a &gt;50% rise means a bigger player took the opposite side.
+   */
+  public static BigDecimal representativeOiChangePct(OpenHighStats stats, OptionType side) {
+    if (stats == null || stats.items() == null) {
+      return null;
+    }
+    StrikeStat rep = representativeOh(stats, side);
+    return rep == null ? null : rep.oiChangePct();
+  }
+
   /** The front-future open-extreme marks for the session containing the deploy bar. */
   public record Marks(boolean openHigh, boolean openLow) {}
 

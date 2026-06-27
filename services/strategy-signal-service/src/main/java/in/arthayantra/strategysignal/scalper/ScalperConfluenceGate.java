@@ -224,7 +224,8 @@ public class ScalperConfluenceGate {
           client.openHighStats(cfg.underlying(), chain.expiry(), oiProps.openHighWindow().intValue());
       OpenHighLowGate.Verdict ohl =
           OpenHighLowGate.evaluate(
-              futureMarks, stats, side, oiProps, ctx.oi(), ctx.chart().vwap(), istTime);
+              futureMarks, stats, side, oiProps, ctx.oi(), ctx.chart().vwap(), istTime,
+              cfg.requireOpenHighOiVeto());
       if (!ohl.pass()) {
         return Optional.empty();
       }

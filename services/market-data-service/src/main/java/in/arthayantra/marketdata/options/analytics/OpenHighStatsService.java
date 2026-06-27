@@ -41,7 +41,9 @@ public class OpenHighStatsService {
       boolean ohMark,
       boolean olMark,
       BigDecimal fallPctFromOpen,
-      BigDecimal fallPctFromPrevClose) {}
+      BigDecimal fallPctFromPrevClose,
+      // W3 PR-6: per-strike session change-in-OI % (for the Day-14 p20 AVOID veto).
+      BigDecimal oiChangePct) {}
 
   public record StrikeSessionStats(
       OffsetDateTime asOf,
@@ -89,7 +91,8 @@ public class OpenHighStatsService {
               ohMark(s.open(), s.high()),
               olMark(s.open(), s.low()),
               fallPct(s.last(), s.open()),
-              fallPct(s.last(), s.prevClose())));
+              fallPct(s.last(), s.prevClose()),
+              s.oiChangePct()));
     }
     return new StrikeSessionStats(asOf, underlying, expiry, spot, atmStrike, interval, items);
   }

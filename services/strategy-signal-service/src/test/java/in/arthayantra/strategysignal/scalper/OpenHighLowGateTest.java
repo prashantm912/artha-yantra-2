@@ -42,7 +42,13 @@ class OpenHighLowGateTest {
   }
 
   private static StrikeStat leg(String strike, OptionType type, boolean oh, boolean ol) {
-    return new StrikeStat(bd(strike), type, oh, ol, bd("100"), bd("100"), bd("100"), null, null);
+    return new StrikeStat(bd(strike), type, oh, ol, bd("100"), bd("100"), bd("100"), null, null, null);
+  }
+
+  // An OH leg carrying a specific per-strike change-in-OI % (the W3 PR-6 per-strike AVOID veto operand).
+  private static StrikeStat legOi(String strike, OptionType type, String oiChangePct) {
+    return new StrikeStat(
+        bd(strike), type, true, false, bd("100"), bd("100"), bd("100"), null, null, bd(oiChangePct));
   }
 
   // A bullish HIGH footprint: 3 CE OH strikes + 1 PE OL, ATM 20000.
@@ -67,7 +73,7 @@ class OpenHighLowGateTest {
   @Test
   void passesABullishHighTierAndAnchorsTheVwapStop() {
     OpenHighLowGate.Verdict v =
-        OpenHighLowGate.evaluate(FUTURE_OH, bullishHigh(), CE, PROPS, oi("10", "20"), VWAP, MORNING);
+        OpenHighLowGate.evaluate(FUTURE_OH, bullishHigh(), CE, PROPS, oi("10", "20"), VWAP, MORNING, false);
     assertThat(v.pass()).isTrue();
     assertThat(v.tier()).isEqualTo(OpenHighLow.Tier.HIGH);
     assertThat(v.stopLevel()).isEqualByComparingTo("97");
@@ -76,7 +82,7 @@ class OpenHighLowGateTest {
   @Test
   void passesABearishHighTier() {
     OpenHighLowGate.Verdict v =
-        OpenHighLowGate.evaluate(FUTURE_OL, bearishHigh(), PE, PROPS, oi("-10", "-20"), VWAP, MORNING);
+        OpenHighLowGate.evaluate(FUTURE_OL, bearishHigh(), PE, PROPS, oi("-10", "-20"), VWAP, MORNING, false);
     assertThat(v.pass()).isTrue();
   }
 
@@ -87,14 +93,14 @@ class OpenHighLowGateTest {
             bd("20000"),
             List.of(leg("19900", CE, true, false), leg("19900", PE, false, true)));
     assertThat(
-            OpenHighLowGate.evaluate(FUTURE_OH, few, CE, PROPS, oi("10", "20"), VWAP, MORNING).pass())
+            OpenHighLowGate.evaluate(FUTURE_OH, few, CE, PROPS, oi("10", "20"), VWAP, MORNING, false).pass())
         .isFalse();
   }
 
   @Test
   void blocksAtStandAsideWhenThereIsNoMarkOnTheSide() {
     assertThat(
-            OpenHighLowGate.evaluate(FUTURE_OH, bearishHigh(), PE, PROPS, oi("10", "20"), VWAP, MORNING)
+            OpenHighLowGate.evaluate(FUTURE_OH, bearishHigh(), PE, PROPS, oi("10", "20"), VWAP, MORNING, false)
                 .pass())
         .isFalse();
   }
@@ -103,12 +109,12 @@ class OpenHighLowGateTest {
   void blocksAtTheLowTierFromAFallOnHeavyVolume() {
     List<StrikeStat> legs = new ArrayList<>();
     legs.add(leg("19900", CE, true, false));
-    legs.add(new StrikeStat(bd("20000"), CE, true, false, bd("90"), bd("100"), bd("100"), 60_000L, null));
+    legs.add(new StrikeStat(bd("20000"), CE, true, false, bd("90"), bd("100"), bd("100"), 60_000L, null, null));
     legs.add(leg("20100", CE, true, false));
     legs.add(leg("19900", PE, false, true));
     OpenHighStats s = new OpenHighStats(bd("20000"), legs);
     OpenHighLowGate.Verdict v =
-        OpenHighLowGate.evaluate(FUTURE_OH, s, CE, PROPS, oi("10", "20"), VWAP, MORNING);
+        OpenHighLowGate.evaluate(FUTURE_OH, s, CE, PROPS, oi("10", "20"), VWAP, MORNING, false);
     assertThat(v.pass()).isFalse();
     assertThat(v.tier()).isEqualTo(OpenHighLow.Tier.LOW);
   }
@@ -116,7 +122,7 @@ class OpenHighLowGateTest {
   @Test
   void blocksWhenThePremiumSpurtExceedsFiftyPercent() {
     assertThat(
-            OpenHighLowGate.evaluate(FUTURE_OH, bullishHigh(), CE, PROPS, oi("10", "50.1"), VWAP, MORNING)
+            OpenHighLowGate.evaluate(FUTURE_OH, bullishHigh(), CE, PROPS, oi("10", "50.1"), VWAP, MORNING, false)
                 .pass())
         .isFalse();
   }
@@ -124,7 +130,7 @@ class OpenHighLowGateTest {
   @Test
   void blocksWhenTheOiSpurtExceedsFiftyPercent() {
     assertThat(
-            OpenHighLowGate.evaluate(FUTURE_OH, bullishHigh(), CE, PROPS, oi("-60", "20"), VWAP, MORNING)
+            OpenHighLowGate.evaluate(FUTURE_OH, bullishHigh(), CE, PROPS, oi("-60", "20"), VWAP, MORNING, false)
                 .pass())
         .isFalse();
   }
@@ -132,7 +138,7 @@ class OpenHighLowGateTest {
   @Test
   void passesAtExactlyFiftyPercentSpurt() {
     assertThat(
-            OpenHighLowGate.evaluate(FUTURE_OH, bullishHigh(), CE, PROPS, oi("50", "50"), VWAP, MORNING)
+            OpenHighLowGate.evaluate(FUTURE_OH, bullishHigh(), CE, PROPS, oi("50", "50"), VWAP, MORNING, false)
                 .pass())
         .isTrue();
   }
@@ -140,7 +146,7 @@ class OpenHighLowGateTest {
   @Test
   void doesNotBlockOnNullSpurtMagnitudes() {
     assertThat(
-            OpenHighLowGate.evaluate(FUTURE_OH, bullishHigh(), CE, PROPS, oi(null, null), VWAP, MORNING)
+            OpenHighLowGate.evaluate(FUTURE_OH, bullishHigh(), CE, PROPS, oi(null, null), VWAP, MORNING, false)
                 .pass())
         .isTrue();
   }
@@ -149,12 +155,12 @@ class OpenHighLowGateTest {
   void blocksAFreshEntryInTheSecondHalf() {
     assertThat(
             OpenHighLowGate.evaluate(
-                    FUTURE_OH, bullishHigh(), CE, PROPS, oi("10", "20"), VWAP, LocalTime.of(12, 0))
+                    FUTURE_OH, bullishHigh(), CE, PROPS, oi("10", "20"), VWAP, LocalTime.of(12, 0), false)
                 .pass())
         .isFalse();
     assertThat(
             OpenHighLowGate.evaluate(
-                    FUTURE_OH, bullishHigh(), CE, PROPS, oi("10", "20"), VWAP, LocalTime.of(11, 59))
+                    FUTURE_OH, bullishHigh(), CE, PROPS, oi("10", "20"), VWAP, LocalTime.of(11, 59), false)
                 .pass())
         .isTrue();
   }
@@ -162,19 +168,19 @@ class OpenHighLowGateTest {
   @Test
   void degradesToABlockWhenTheOiSnapshotIsNull() {
     assertThat(
-            OpenHighLowGate.evaluate(FUTURE_OH, bullishHigh(), CE, PROPS, null, VWAP, MORNING).pass())
+            OpenHighLowGate.evaluate(FUTURE_OH, bullishHigh(), CE, PROPS, null, VWAP, MORNING, false).pass())
         .isFalse();
   }
 
   @Test
   void degradesToABlockWhenTheStatsAreNullOrEmpty() {
     assertThat(
-            OpenHighLowGate.evaluate(FUTURE_OH, null, CE, PROPS, oi("10", "20"), VWAP, MORNING).pass())
+            OpenHighLowGate.evaluate(FUTURE_OH, null, CE, PROPS, oi("10", "20"), VWAP, MORNING, false).pass())
         .isFalse();
     assertThat(
             OpenHighLowGate.evaluate(
                     FUTURE_OH, new OpenHighStats(bd("20000"), List.of()), CE, PROPS, oi("10", "20"),
-                    VWAP, MORNING)
+                    VWAP, MORNING, false)
                 .pass())
         .isFalse();
   }
@@ -182,8 +188,30 @@ class OpenHighLowGateTest {
   @Test
   void passesWithANullVwapButYieldsANullStop() {
     OpenHighLowGate.Verdict v =
-        OpenHighLowGate.evaluate(FUTURE_OH, bullishHigh(), CE, PROPS, oi("10", "20"), null, MORNING);
+        OpenHighLowGate.evaluate(FUTURE_OH, bullishHigh(), CE, PROPS, oi("10", "20"), null, MORNING, false);
     assertThat(v.pass()).isTrue();
     assertThat(v.stopLevel()).isNull();
+  }
+
+  @Test
+  void perStrikeOiVetoBlocksAnArmedHighWhenTheStrikeOiChangeExceedsFiftyPercent() {
+    // W3 PR-6: a HIGH footprint whose representative ATM CE strike has its OWN change-in-OI > 50%.
+    // Chain-wide spurts are within 50% (the existing reject does not fire), so only the per-strike
+    // veto can catch it — and only when armed.
+    List<StrikeStat> legs = new ArrayList<>();
+    legs.add(legOi("19900", CE, "10"));
+    legs.add(legOi("20000", CE, "60")); // the ATM CE strike: ΔOI 60% > 50
+    legs.add(legOi("20100", CE, "10"));
+    legs.add(leg("19900", PE, false, true));
+    OpenHighStats s = new OpenHighStats(bd("20000"), legs);
+    // unarmed: the per-strike veto is OFF -> the HIGH footprint passes (chain-wide spurts within 50%).
+    assertThat(
+            OpenHighLowGate.evaluate(FUTURE_OH, s, CE, PROPS, oi("10", "20"), VWAP, MORNING, false).pass())
+        .isTrue();
+    // armed: the ATM strike's ΔOI > 50% vetoes to AVOID.
+    OpenHighLowGate.Verdict v =
+        OpenHighLowGate.evaluate(FUTURE_OH, s, CE, PROPS, oi("10", "20"), VWAP, MORNING, true);
+    assertThat(v.pass()).isFalse();
+    assertThat(v.tier()).isEqualTo(OpenHighLow.Tier.AVOID);
   }
 }

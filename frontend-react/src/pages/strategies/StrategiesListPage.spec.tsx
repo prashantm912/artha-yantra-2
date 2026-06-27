@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -29,7 +29,20 @@ vi.mock('../../api/strategies.ts', async (orig) => {
       isLoading: false,
     }),
     useBacktestSummaries: () => ({
-      data: { 'v-pub': { strategyVersionId: 'v-pub', runId: 'r1', sharpe: '1.85', totalReturn: '0.12', maxDrawdown: '-0.05', equity: ['100', '110', '105', '120'] } },
+      data: {
+        'v-pub': { strategyVersionId: 'v-pub', runId: 'r1', sharpe: '1.85', totalReturn: '0.12', maxDrawdown: '-0.05', equity: ['100', '110', '105', '120'] },
+        'v-old': { strategyVersionId: 'v-old', runId: 'r0', sharpe: '0.50', totalReturn: '0.03', maxDrawdown: '-0.09', equity: ['100', '101', '99', '102'] },
+      },
+    }),
+    // s1's timeline: the published 1.1.0 (shown on the main row) + an older 1.0.0 (an "old" sub-row).
+    useManyStrategyVersions: () => ({
+      byId: {
+        s1: [
+          { versionId: 'v-pub', version: '1.1.0', status: 'published', checksum: 'c1' },
+          { versionId: 'v-old', version: '1.0.0', status: 'archived', checksum: 'c0' },
+        ],
+      },
+      isLoading: false,
     }),
     useSetNotifications: () => ({ mutate: vi.fn() }),
   };
@@ -56,5 +69,19 @@ describe('StrategiesListPage', () => {
     expect(screen.getByText('1.1.0')).toBeInTheDocument(); // published version
     expect(screen.getByText(/Sharpe 1.85/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'History' })).toHaveAttribute('href', '/strategies/s1/versions');
+  });
+
+  it('"Show old versions" expands older versions with their last backtest and a disabled Edit', () => {
+    renderPage();
+    // hidden by default — only the current version row
+    expect(screen.queryByText('1.0.0')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('Show old versions'));
+    expect(screen.getByText('1.0.0')).toBeInTheDocument(); // older version sub-row
+    expect(screen.getByText(/Sharpe 0.50/)).toBeInTheDocument(); // its last backtest
+    // the current version (1.1.0) is shown on the main row, not duplicated as an old sub-row
+    expect(screen.getAllByText('1.1.0')).toHaveLength(1);
+    // the sub-row's Edit is a disabled span, not a link (only the main row has an Edit link)
+    expect(screen.getAllByRole('link', { name: 'Edit' })).toHaveLength(1);
   });
 });

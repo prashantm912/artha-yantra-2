@@ -4,7 +4,7 @@
 // and the publish / rollback / archive / notification-toggle / delete mutations. The Monaco editor
 // slice (validate / save / create / schema) lands with PR-C5.
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from './client.ts';
 
 /** Strategy list-row summary (`GET /strategies`). */
@@ -36,6 +36,8 @@ export interface BacktestSummary {
 
 /** One row of the immutable version timeline (`GET /{id}/versions`). */
 export interface VersionRow {
+  /** The version-row UUID (keys the last-backtest summary lookup); absent on legacy responses. */
+  versionId?: string;
   version: string;
   status: string;
   checksum: string;
@@ -106,6 +108,29 @@ export function useStrategyVersions(id: string) {
     queryKey: ['strategy', id, 'versions'],
     queryFn: () => apiFetch<{ items: VersionRow[] }>(`/strategies/${id}/versions`),
     enabled: !!id,
+  });
+}
+
+/**
+ * Version timelines for MANY strategies at once (lazy — only fetched when `enabled`, e.g. the
+ * strategies list expands old versions). Shares the per-strategy `['strategy', id, 'versions']` cache
+ * key with {@link useStrategyVersions}. Returns `{ byId, isLoading }`.
+ */
+export function useManyStrategyVersions(ids: string[], enabled: boolean) {
+  const uniq = [...new Set(ids)];
+  return useQueries({
+    queries: uniq.map((id) => ({
+      queryKey: ['strategy', id, 'versions'],
+      queryFn: () => apiFetch<{ items: VersionRow[] }>(`/strategies/${id}/versions`),
+      enabled: enabled && !!id,
+    })),
+    combine: (results) => {
+      const byId: Record<string, VersionRow[]> = {};
+      uniq.forEach((id, i) => {
+        if (results[i].data) byId[id] = results[i].data!.items ?? [];
+      });
+      return { byId, isLoading: results.some((r) => r.isLoading) };
+    },
   });
 }
 

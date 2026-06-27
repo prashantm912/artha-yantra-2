@@ -439,6 +439,9 @@ public class RegistryService {
     List<Map<String, Object>> items = new ArrayList<>();
     for (StrategyRepository.VersionRow row : repository.versions(id, limit, offset)) {
       Map<String, Object> item = new LinkedHashMap<>();
+      // The version-row UUID — lets the UI fetch each version's last-backtest summary (keyed by
+      // strategyVersionId) when expanding old versions on the strategies list.
+      item.put("versionId", row.id().toString());
       item.put("version", row.version());
       item.put("status", row.status());
       item.put("checksum", row.checksum());

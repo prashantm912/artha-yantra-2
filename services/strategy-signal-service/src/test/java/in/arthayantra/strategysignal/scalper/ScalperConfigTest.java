@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.math.BigDecimal;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -61,6 +62,26 @@ class ScalperConfigTest {
     ScalperConfig sensex = ScalperConfig.from(config("SENSEX"), List.of("scalper", "premium-s24-band"));
     assertThat(sensex.strikeParams().premiumLo()).isEqualByComparingTo("300");
     assertThat(sensex.strikeParams().premiumHi()).isEqualByComparingTo("800");
+  }
+
+  @Test
+  void w4BehaviourTagsBindThroughHas() {
+    // from() carries the raw tag list (canonical 19-arg ctor) so the W4 extension gates read has().
+    ScalperConfig armed =
+        ScalperConfig.from(config("NIFTY 50"), List.of("scalper", "indicator-distance-veto"));
+    assertThat(armed.has("indicator-distance-veto")).isTrue();
+    assertThat(armed.has("divergence-vol-gate")).isFalse();
+    // an untagged scalper arms nothing.
+    assertThat(ScalperConfig.from(config("NIFTY 50"), List.of("scalper")).has("indicator-distance-veto"))
+        .isFalse();
+    // the legacy 18-arg constructor (test fixtures / back-compat) defaults tags to empty -> has() false.
+    ScalperConfig legacy =
+        new ScalperConfig(
+            "NSE", "NIFTY 50", "NIFTY 50", "NIFTY 50", 2,
+            new StrikePicker.Params(0.6, 0.7, new BigDecimal("100"), new BigDecimal("250"), 0.065),
+            new BigDecimal("0.6"), false, ScalperConfig.StructuralStop.NONE, false, false, false, false,
+            false, false, false, false, false);
+    assertThat(legacy.has("indicator-distance-veto")).isFalse();
   }
 
   @Test

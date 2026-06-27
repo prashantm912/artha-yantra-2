@@ -159,6 +159,30 @@ class ScalperGatesTest {
     assertThat(ScalperGates.callPutDeltaFilter(imbalance(null), floor).pass()).isTrue();
   }
 
+  @Test
+  void indicatorDistanceBlocksWhenPriceRanFarFromTheWholeCluster() {
+    BigDecimal max = bd("0.015"); // 1.5%
+    // the nearest indicator (vwap, 0.5% away) is within the band -> not overextended -> pass.
+    Chart near = new Chart(bd("100"), bd("99.5"), bd("130"), bd("70"), 1, bd("65"), bd("60000"));
+    assertThat(ScalperGates.indicatorDistance(near, max).pass()).isTrue();
+    // every indicator is > 1.5% away (nearest is vwap at 3%) -> overextended -> block.
+    Chart farFromAll = new Chart(bd("100"), bd("97"), bd("130"), bd("70"), 1, bd("65"), bd("60000"));
+    assertThat(ScalperGates.indicatorDistance(farFromAll, max).pass()).isFalse();
+    // null close degrades to pass (never blocks on missing data).
+    Chart noClose = new Chart(null, bd("97"), bd("130"), bd("70"), 1, bd("65"), bd("60000"));
+    assertThat(ScalperGates.indicatorDistance(noClose, max).pass()).isTrue();
+    // a fully-absent cluster degrades to pass.
+    Chart noCluster = new Chart(bd("100"), null, null, null, 1, bd("65"), bd("60000"));
+    assertThat(ScalperGates.indicatorDistance(noCluster, max).pass()).isTrue();
+  }
+
+  @Test
+  void divergenceVolumeNeedsTheHeavyweightBarRegardlessOfIndex() {
+    assertThat(ScalperGates.divergenceVolume(bd("125000")).pass()).isTrue();
+    assertThat(ScalperGates.divergenceVolume(bd("124999")).pass()).isFalse();
+    assertThat(ScalperGates.divergenceVolume(null).pass()).isFalse(); // confirm required -> null fails
+  }
+
   private static Oi imbalance(BigDecimal pct) {
     return new Oi(
         OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("0"), bd("5"),

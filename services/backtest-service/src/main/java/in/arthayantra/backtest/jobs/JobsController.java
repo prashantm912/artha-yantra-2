@@ -89,6 +89,9 @@ public class JobsController {
     // The originating strategy (UUID; the UI maps it to a name) + the completed run's total return
     // (plain decimal string, null until a run exists) so the list shows strategy + returns columns.
     map.put("strategyId", job.request() == null ? null : job.request().path("strategyId").asText(null));
+    // The resolved version this job ran (pinned into the request JSONB at submit, JobsService.submit);
+    // the UI compares it to the strategy's latest version to flag is-latest + filter old-version jobs.
+    map.put("strategyVersion", job.request() == null ? null : job.request().path("strategyVersion").asText(null));
     map.put("totalReturn", totalReturn);
     // The tested window [from, to] (the "date the test was run over") — a plain date or full
     // offset date-time as the request carries it; the UI slices to the date for the Start/End columns.

@@ -239,7 +239,7 @@ Open=High / Open=Low is a **purely intraday options-scalping** read for **index 
 - **Sizing (Day 14 deck).** Never deploy more than **30% of capital** on this trade — these are highly risky trades.
 - **When to avoid / abort (Day 14 deck).** Analyse Open Interest: if the option premium **decreases by more than 50%** AND/OR the **change in OI for the identified strike increases by 50%**, avoid/exit the setup — it means a bigger player has taken the opposite view.
 - [keep-rail] Stop: trail behind VWAP — exit if price closes back below VWAP after entry (VWAP-as-stop, the implemented SL).
-- **Tooling (Day 14 deck).** The setup is flagged from ~9:16 AM; the OI-confluence gate grades it low / mid / high (high = high chance of success).
+- **Tooling (Day 14 deck) — our OIP probability.** The setup is flagged from ~9:16 AM; our **OH-probability model** (the deck's Table-1 FNO-footprint + Table-2 price/volume read, implemented as `OpenHighLow.tier`) grades it **LOW / MILD / HIGH ≈ 30 / 60 / 90%** success-probability (STAND-ASIDE / AVOID = no-trade). HIGH = high chance the premium reaches back to its high. This is our transparent rule-based replacement for the oipulse "AI probability" (no black-box; >90% = the strong/"badge" read).
 
 #### S24 Refinements
 
@@ -855,7 +855,7 @@ The OI-Pulse / OSPL tool platform supports several shared reads:
 - **"Show OI Bar" on the 50-50 chart** plots OI support / resistance — the largest put bar = support, the largest call bar = resistance; a **shrinking put-OI bar on a fall signals a reversal** (Days 8, 9, 11).
 - **"Disable trading in 1 Cliq"** locks broker access once the target is hit (Days 1, 21).
 - The **risk calculator** outputs price / high-range / low-range / SL / target per strike (Day 8).
-- The **OI-confluence gate** replaces the old OSPL/OIP-AI signal feed: instead of a red/green percentage read, our gate outputs a **LOW / MID / HIGH** confluence response (bearish vs bullish is the gate's directional read); avoid the high-risk 1-min "quick scalp" timing (Day 8).
+- The two oipulse "AI" features map to our own **transparent, rule-based** equivalents (no black-box AI): (a) the **OSPL chart signal** → our SuperTrend(10,2)-derived directional signal (spec: `docs/oipulse-study/advance-chart/ospl-signal.md`); (b) the **OIP-AI probability** (the Open=High success %) → our **OH-probability tier** (the Day-14 Table-1/Table-2 model, `OpenHighLow.tier`: **LOW / MILD / HIGH ≈ 30 / 60 / 90%**, with an **AVOID** veto on a >50% premium-fall or >50% ΔOI-rise). The general scalp **OI-confluence gate** (the connect-the-dots composite) likewise reads a **LOW / MID / HIGH** response, not a percentage (bearish vs bullish is its directional read). Avoid the high-risk 1-min "quick scalp" timing (Day 8).
 - A **forthcoming asset-based SL tool** sets exits off chart levels instead of the option price (Day 20).
 - [keep-rail] **ScalperManualChecks card (7-item operator pre-trade checklist):** before firing, confirm the live S24 gates as a one-glance card — (1) OI quadrant / trending-OI direction, (2) ≥50% OI+price confirmation, (3) VWAP side & defence ladder, (4) RSI band, (5) IV / VIX regime, (6) global cue + FII-DII direction, (7) time-of-day window (9:45–2:30). This is the implementation operator surface mapping to the live rules — keep regardless of doc edition.
 
@@ -1006,7 +1006,7 @@ One JSON object per strategy (consistent schema) for backtest/bot implementation
   ],
   "timeframe": "Intraday options scalping; data visible only after the open (~9:16, not pre-market); first-half-of-session bias (level usually hit by ~9:45/10:00/10:30, avoid late entries after ~11:00-12:30)",
   "indicators": [
-    "Open=High / Open=Low flag per strike and on futures (from ~9:16 AM); OI-confluence gate grades the setup low / mid / high (high = high chance of success)",
+    "Open=High / Open=Low flag per strike and on futures (from ~9:16 AM); the OH-probability model (Day-14 Table-1/Table-2, OpenHighLow.tier) grades the setup LOW / MILD / HIGH ~30/60/90% (STAND-ASIDE/AVOID = no-trade) = our rule-based OIP probability",
     "Option premium vs previous close (>50% fall = invalidation gate)",
     "Open Interest (change in OI for the identified strike)",
     "Volume per candle (50K Bank Nifty / 125K Nifty thresholds)",
@@ -1061,7 +1061,7 @@ One JSON object per strategy (consistent schema) for backtest/bot implementation
     "Probability is higher in the 1st half; avoid the 2nd half (time value / premium erosion) (Day 14 deck)",
     "Prefer ITM over OTM on the paired put side (Day 14)",
     "Volume-direction filter: a CALL Open=High that falls on <50K volume (or stays flat on flat volume) = probability increases; a fall on >50K volume = probability decreases. PUT Open=High (rising premium): rise on <50K = probability increases, rise on >50K = probability decreases (Day 14 deck subsequent-candle table)",
-    "The setup is flagged from ~9:16 AM; the OI-confluence gate grades it low / mid / high (high = high chance of success) (Day 14 deck)",
+    "The setup is flagged from ~9:16 AM; the OH-probability model (Day-14 Table-1/Table-2, OpenHighLow.tier) grades it LOW / MILD / HIGH ~30/60/90% (STAND-ASIDE/AVOID = no-trade) — our rule-based OIP probability (Day 14 deck)",
     "Positional/F&O data can override the Open=High setup (e.g. bearish positional data overriding an otherwise-chaseable futures Open=High) (Day 14)"
   ],
   "edge_cases": [

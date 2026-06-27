@@ -24,6 +24,12 @@ public final class ScalperGates {
   static final LocalTime MIDDAY_BLOCK_FROM = LocalTime.of(11, 0);
   static final LocalTime MIDDAY_BLOCK_TO = LocalTime.of(13, 0);
   static final LocalTime NO_FRESH_ENTRY_AFTER = LocalTime.of(15, 30);
+  // W4 (tag s24-trade-window, S24 Shared-S2): the explicit 09:45-14:30 window — no midday block, hard
+  // 14:30 cap. The 09:45 floor reuses NO_TRADE_BEFORE; this is the upper bound when armed.
+  static final LocalTime S24_WINDOW_TO = LocalTime.of(14, 30);
+  // W4 (tag gap-size-side-gate, S24 #9 "300-400 gap-down -> no-put"): a gap-down at/above this many
+  // index points suppresses the PE (put-buy) side. Index-absolute; default-OFF until armed.
+  static final BigDecimal GAP_SIDE_SUPPRESS_PTS = new BigDecimal("300");
 
   // Volume-candle floors (§0B): NIFTY 125k; BANKNIFTY / SENSEX / other F&O indices 50k.
   private static final BigDecimal NIFTY_VOL = new BigDecimal("125000");
@@ -279,6 +285,27 @@ public final class ScalperGates {
         ok,
         oi == null ? null : oi.sentimentPct(),
         ok ? "OI tilt crossed this window" : "no OI directional change this window");
+  }
+
+  /**
+   * W4 (tag {@code gap-size-side-gate}, S24 #9 Morning Trade "300-400 gap-down -&gt; no-put"): a large
+   * gap-DOWN (a present, bearish, {@code >= suppressPts}-point session gap) suppresses the PE (put-buy)
+   * side — the down-move is over-extended / mean-reverting, so a fresh PUT is stood aside. PASS for the
+   * CE side, for the unarmed/no-gap case, and for a small or up gap; a {@code null} gap PASSES. (The
+   * "30-40 gap-up short-once" cap is per-session state, deferred to live management.)
+   */
+  public static GateOutcome gapSizeSide(GapState.Gap gap, OptionType side, BigDecimal suppressPts) {
+    boolean suppressed =
+        side == OptionType.PE
+            && gap != null
+            && gap.present()
+            && !gap.bullish()
+            && gap.sizePoints() != null
+            && gap.sizePoints().compareTo(suppressPts) >= 0;
+    return new GateOutcome(
+        !suppressed,
+        gap == null ? null : gap.sizePoints(),
+        suppressed ? "large gap-down suppresses PE (no-put)" : "gap-size side ok");
   }
 
   private static boolean gt(BigDecimal a, BigDecimal b) {

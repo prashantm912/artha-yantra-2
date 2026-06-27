@@ -201,6 +201,36 @@ class ScalperGatesTest {
     assertThat(ScalperGates.directionalChange(null).pass()).isFalse(); // precondition unmet
   }
 
+  @Test
+  void gapSizeSideSuppressesThePutSideOnlyOnALargeGapDown() {
+    BigDecimal cap = bd("300");
+    GapState.Gap bigDown = new GapState.Gap(true, false, bd("350"), bd("20000"), false);
+    // a >=300pt gap-down blocks the PE (put-buy) side...
+    assertThat(ScalperGates.gapSizeSide(bigDown, PE, cap).pass()).isFalse();
+    // ...but never the CE side.
+    assertThat(ScalperGates.gapSizeSide(bigDown, CE, cap).pass()).isTrue();
+    // a smaller gap-down (250 < 300) does not suppress.
+    GapState.Gap smallDown = new GapState.Gap(true, false, bd("250"), bd("20000"), false);
+    assertThat(ScalperGates.gapSizeSide(smallDown, PE, cap).pass()).isTrue();
+    // a large gap-UP does not suppress the put side (only gap-down -> no-put).
+    GapState.Gap bigUp = new GapState.Gap(true, true, bd("350"), bd("20000"), false);
+    assertThat(ScalperGates.gapSizeSide(bigUp, PE, cap).pass()).isTrue();
+    // a null/absent gap passes.
+    assertThat(ScalperGates.gapSizeSide(null, PE, cap).pass()).isTrue();
+  }
+
+  @Test
+  void s24TradeWindowBoundsAre0945To1430() {
+    // the s24-trade-window tag reuses the 3-arg timeWindow overload: 09:45 inclusive, 14:30 exclusive,
+    // no 11:00-13:00 midday block (a 12:00 entry that the default window blocks is admitted here).
+    assertThat(ScalperGates.timeWindow(LocalTime.of(9, 44), ScalperGates.NO_TRADE_BEFORE, ScalperGates.S24_WINDOW_TO).pass())
+        .isFalse();
+    assertThat(ScalperGates.timeWindow(LocalTime.of(12, 0), ScalperGates.NO_TRADE_BEFORE, ScalperGates.S24_WINDOW_TO).pass())
+        .isTrue();
+    assertThat(ScalperGates.timeWindow(LocalTime.of(14, 30), ScalperGates.NO_TRADE_BEFORE, ScalperGates.S24_WINDOW_TO).pass())
+        .isFalse();
+  }
+
   private static Oi crossed(boolean crossedThisWindow) {
     return new Oi(
         OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("0"), bd("5"), null, null, null,

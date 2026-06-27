@@ -82,6 +82,12 @@ public record ScalperConfig(
   // case", so this fixed band is a doc-sanctioned v1 simplification, not an oversight.
   private static final double DELTA_LO = 0.6;
   private static final double DELTA_HI = 0.7;
+  // W3 PR-2 (tag delta-s24-floor): the S24-ratified slightly-deeper-ITM band (owner rulings
+  // D3/D26/D29/D41 = >=0.7 delta floor; 0.7-0.8 admits the band and recenters deltaTarget to 0.75).
+  // Default-OFF — untagged strategies keep 0.6-0.7, byte-identical. Live StrikePicker only (the
+  // backtest selector ignores the delta band, so this has no backtest effect — forward-paper tuning).
+  private static final double DELTA_S24_LO = 0.7;
+  private static final double DELTA_S24_HI = 0.8;
   // Black-76 risk-free rate; delta is near rate-insensitive for short-dated options, so a fixed
   // value is immaterial to strike selection.
   private static final double RATE = 0.065;
@@ -115,8 +121,13 @@ public record ScalperConfig(
     String oiIndex = oiIndexRaw.isBlank() ? underlying : oiIndexRaw; // blank index ⇒ the option-root
     int rollDays = universe.path("futures").path("roll_days_before_expiry").asInt(2);
     BigDecimal[] premium = PREMIUM.getOrDefault(underlying, NIFTY_PREMIUM);
+    // W3 PR-2: the delta-s24-floor tag swaps the strike delta band to the ratified >=0.7 floor
+    // (0.7-0.8); absent => legacy 0.6-0.7. Carried on the StrikePicker.Params (no record field), so
+    // untagged strategies build the identical params and the deterministic seam is unchanged.
+    double deltaLo = tags.contains("delta-s24-floor") ? DELTA_S24_LO : DELTA_LO;
+    double deltaHi = tags.contains("delta-s24-floor") ? DELTA_S24_HI : DELTA_HI;
     StrikePicker.Params params =
-        new StrikePicker.Params(DELTA_LO, DELTA_HI, premium[0], premium[1], RATE);
+        new StrikePicker.Params(deltaLo, deltaHi, premium[0], premium[1], RATE);
     boolean twoCandle = tags.contains("two-candle-pattern");
     // #4 (section 3.4): the gap-theory tag arms the gap-fill pre-gate (GapTheoryGate) + a pre-gap SL anchor.
     boolean gapFill = tags.contains("gap-theory");

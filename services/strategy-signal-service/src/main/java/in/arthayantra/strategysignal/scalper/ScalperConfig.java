@@ -103,6 +103,15 @@ public record ScalperConfig(
           "NIFTY 50", NIFTY_PREMIUM,
           "NIFTY BANK", new BigDecimal[] {new BigDecimal("250"), new BigDecimal("400")},
           "SENSEX", new BigDecimal[] {new BigDecimal("300"), new BigDecimal("800")});
+  // W3 PR-3 (tag premium-s24-band): the S24-ratified premium bands (owner ruling D5: NIFTY 150-350,
+  // BANKNIFTY 250-550). SENSEX is unchanged (300-800 — no S24 ruling). Default-OFF — untagged
+  // strategies keep the legacy band, byte-identical. Live StrikePicker only (no backtest effect).
+  private static final BigDecimal[] NIFTY_PREMIUM_S24 = {new BigDecimal("150"), new BigDecimal("350")};
+  private static final Map<String, BigDecimal[]> PREMIUM_S24 =
+      Map.of(
+          "NIFTY 50", NIFTY_PREMIUM_S24,
+          "NIFTY BANK", new BigDecimal[] {new BigDecimal("250"), new BigDecimal("550")},
+          "SENSEX", new BigDecimal[] {new BigDecimal("300"), new BigDecimal("800")});
 
   /** Builds the config from a strategy's full config + its tags (options_of_underlying). */
   public static ScalperConfig from(JsonNode config, List<String> tags) {
@@ -120,7 +129,12 @@ public record ScalperConfig(
         config.path("backtest").path("oi_confluence_gate").path("index").asText(underlying);
     String oiIndex = oiIndexRaw.isBlank() ? underlying : oiIndexRaw; // blank index ⇒ the option-root
     int rollDays = universe.path("futures").path("roll_days_before_expiry").asInt(2);
-    BigDecimal[] premium = PREMIUM.getOrDefault(underlying, NIFTY_PREMIUM);
+    // W3 PR-3: the premium-s24-band tag swaps the strike premium band to the ratified N 150-350 /
+    // BN 250-550; absent => legacy 100-250 / 250-400. Carried on the Params, no record field.
+    BigDecimal[] premium =
+        tags.contains("premium-s24-band")
+            ? PREMIUM_S24.getOrDefault(underlying, NIFTY_PREMIUM_S24)
+            : PREMIUM.getOrDefault(underlying, NIFTY_PREMIUM);
     // W3 PR-2: the delta-s24-floor tag swaps the strike delta band to the ratified >=0.7 floor
     // (0.7-0.8); absent => legacy 0.6-0.7. Carried on the StrikePicker.Params (no record field), so
     // untagged strategies build the identical params and the deterministic seam is unchanged.

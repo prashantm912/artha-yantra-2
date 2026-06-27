@@ -93,6 +93,26 @@ class RegistryLifecycleIntegrationTest extends StrategySignalIntegrationTestBase
   }
 
   @Test
+  @Order(20)
+  void rowTagResyncIsMetadataOnlyAndRoundTripsTheTextArray() {
+    String yaml =
+        BASE_YAML.replace("lifecycle-walk", "tags-resync-walk").replace("Lifecycle Walk", "Tags Resync");
+    UUID id =
+        (UUID) service.create("Tags Resync", null, List.of("scalper", "two-candle-pattern"), yaml).get("id");
+
+    // ARM: the real text[] UPDATE round-trips back through the JDBC driver (validates createArrayOf).
+    List<String> armed = List.of("scalper", "two-candle-pattern", "rsi-s24-bands", "overbought-defer");
+    assertThat(service.updateTags(id, armed)).isTrue();
+    assertThat(repository.findById(id).orElseThrow().tags()).isEqualTo(armed);
+
+    // idempotent: a second identical resync (by slug) is a no-op.
+    assertThat(service.resyncTags("tags-resync-walk", armed)).isFalse();
+
+    // metadata only: NO new version was minted (still the single draft 1.0.0).
+    assertThat(repository.versions(id, 10, 0)).hasSize(1);
+  }
+
+  @Test
   @Order(1)
   void fullLifecycleWithAuditTrail() {
     // CREATE -> draft 1.0.0

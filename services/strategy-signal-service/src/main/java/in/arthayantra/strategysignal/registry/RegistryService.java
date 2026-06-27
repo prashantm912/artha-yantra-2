@@ -374,6 +374,38 @@ public class RegistryService {
     return response;
   }
 
+  /**
+   * Re-sync the strategy ROW tags — the §12.3 scalper-gate arming the engine reads from the strategy
+   * IDENTITY row via {@code strategy.tags()}, NOT the versioned config. Like {@link #updateNotifications}
+   * this is strategy METADATA: it mints NO version, changes NO D18 checksum, and never perturbs the
+   * published version or its backtest-run links. Idempotent — returns {@code false} (no-op) when the
+   * tags already match. When the strategy is already PUBLISHED a CHANGED event hot-swaps the live engine
+   * so it re-reads the tags at the next bar boundary; a DRAFT needs none (the engine skips unpublished).
+   */
+  @Transactional
+  public boolean updateTags(UUID id, List<String> tags) {
+    StrategyRepository.StrategyRow strategy = strategyOrThrow(id);
+    List<String> next = tags == null ? List.of() : tags;
+    if (strategy.tags().equals(next)) {
+      return false;
+    }
+    repository.updateTags(id, next);
+    if (strategy.publishedVersionId() != null) {
+      String publishedVersion =
+          repository.findVersionById(strategy.publishedVersionId())
+              .map(StrategyRepository.VersionRow::version)
+              .orElse(null);
+      changedPublisher.publish(id, strategy.slug(), "TAGS", publishedVersion);
+    }
+    return true;
+  }
+
+  /** Re-sync a strategy's row tags BY SLUG (the seeder's idempotent re-arm path); false when absent. */
+  public boolean resyncTags(String slug, List<String> tags) {
+    Optional<StrategyRepository.StrategyRow> existing = repository.findBySlug(slug);
+    return existing.isPresent() && updateTags(existing.get().id(), tags);
+  }
+
   /** Version history page. */
   public List<Map<String, Object>> versions(UUID id, int limit, int offset) {
     strategyOrThrow(id);

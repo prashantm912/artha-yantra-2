@@ -69,16 +69,4 @@ class RegistryServiceTagsTest {
     verify(repo).updateTags(eq(id), any());
     verify(changed).publish(eq(id), eq("scalp-x"), eq("TAGS"), eq("1.0.0"));
   }
-
-  @Test
-  void resyncTagsResolvesBySlugAndIsFalseWhenAbsent() {
-    when(repo.findBySlug("scalp-missing")).thenReturn(Optional.empty());
-    assertThat(service.resyncTags("scalp-missing", List.of("scalper"))).isFalse();
-
-    UUID id = UUID.randomUUID();
-    when(repo.findBySlug("scalp-y")).thenReturn(Optional.of(row(id, List.of("scalper"), null)));
-    when(repo.findById(id)).thenReturn(Optional.of(row(id, List.of("scalper"), null)));
-    assertThat(service.resyncTags("scalp-y", List.of("scalper", "rsi-s24-bands"))).isTrue();
-    verify(repo).updateTags(id, List.of("scalper", "rsi-s24-bands"));
-  }
 }

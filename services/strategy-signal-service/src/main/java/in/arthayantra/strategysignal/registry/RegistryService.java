@@ -97,6 +97,17 @@ public class RegistryService {
         id, next, configYaml, parsed.canonicalJson(), StrategySchemaV1.SCHEMA_VERSION,
         parsed.checksum(), "draft", notes, "owner");
     repository.touch(id);
+    // (b) keep the identity-row tags (which drive the list/filters) in lockstep with the config tags —
+    // the config is the source of truth the engine arms from, so an edited YAML re-syncs the row and the
+    // list can never diverge from the editor. Metadata only; mints no extra version. Guarded on an
+    // explicit `tags:` block so a tags-less config never WIPES the row's tags.
+    if (parsed.config().has("tags")) {
+      List<String> configTags = new ArrayList<>();
+      parsed.config().path("tags").forEach(t -> configTags.add(t.asText()));
+      if (!strategy.tags().equals(configTags)) {
+        repository.updateTags(id, configTags);
+      }
+    }
     List<ConfigDiff.Op> ops = ConfigDiff.diff(latest.config(), parsed.config());
     repository.audit(
         id, "UPDATE_DRAFT", latest.version(), next, ConfigDiff.summary(ops), "owner");
@@ -400,10 +411,26 @@ public class RegistryService {
     return true;
   }
 
-  /** Re-sync a strategy's row tags BY SLUG (the seeder's idempotent re-arm path); false when absent. */
-  public boolean resyncTags(String slug, List<String> tags) {
+  /**
+   * Re-sync a strategy's CONFIG from the repo YAML BY SLUG (the seeder's idempotent re-arm under the
+   * config-is-source-of-truth model): mints a new DRAFT version when the content changed — which also
+   * re-syncs the identity-row tags via {@link #update} — and is a no-op (returns {@code false}) on
+   * identical content (the D18 checksum dedupe) or an absent slug.
+   */
+  public boolean resyncConfig(String slug, String configYaml) {
     Optional<StrategyRepository.StrategyRow> existing = repository.findBySlug(slug);
-    return existing.isPresent() && updateTags(existing.get().id(), tags);
+    if (existing.isEmpty()) {
+      return false;
+    }
+    try {
+      update(existing.get().id(), configYaml, null, "S24 gate-arming sync (config = source of truth)");
+      return true;
+    } catch (ApiException e) {
+      if (e.httpStatus() == 409) {
+        return false; // identical content already stored (D18 checksum dedupe) — nothing to re-sync
+      }
+      throw e;
+    }
   }
 
   /** Version history page. */

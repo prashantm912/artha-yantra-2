@@ -94,22 +94,35 @@ class RegistryLifecycleIntegrationTest extends StrategySignalIntegrationTestBase
 
   @Test
   @Order(20)
-  void rowTagResyncIsMetadataOnlyAndRoundTripsTheTextArray() {
-    String yaml =
-        BASE_YAML.replace("lifecycle-walk", "tags-resync-walk").replace("Lifecycle Walk", "Tags Resync");
+  void editingConfigTagsReSyncsTheRowAndResyncConfigIsIdempotent() {
+    // a config that DECLARES a `tags:` block (the scalper shape) — config is the source of truth (b).
+    String base =
+        BASE_YAML
+            .replace("lifecycle-walk", "tags-source-walk")
+            .replace("Lifecycle Walk", "Tags Source")
+            .replace("version: 1.0.0", "version: 1.0.0\ntags: [scalper, two-candle-pattern]");
     UUID id =
-        (UUID) service.create("Tags Resync", null, List.of("scalper", "two-candle-pattern"), yaml).get("id");
+        (UUID) service.create("Tags Source", null, List.of("scalper", "two-candle-pattern"), base).get("id");
+    assertThat(repository.findById(id).orElseThrow().tags())
+        .containsExactly("scalper", "two-candle-pattern");
 
-    // ARM: the real text[] UPDATE round-trips back through the JDBC driver (validates createArrayOf).
-    List<String> armed = List.of("scalper", "two-candle-pattern", "rsi-s24-bands", "overbought-defer");
-    assertThat(service.updateTags(id, armed)).isTrue();
-    assertThat(repository.findById(id).orElseThrow().tags()).isEqualTo(armed);
+    // (b) editing the config's tags re-syncs the IDENTITY ROW (the list source) from the config — a real
+    // text[] round-trip through the driver — without a separate metadata call.
+    String armed =
+        base.replace(
+            "tags: [scalper, two-candle-pattern]",
+            "tags: [scalper, two-candle-pattern, rsi-s24-bands, overbought-defer]");
+    service.update(id, armed, null, "arm via config");
+    assertThat(repository.findById(id).orElseThrow().tags())
+        .containsExactly("scalper", "two-candle-pattern", "rsi-s24-bands", "overbought-defer");
 
-    // idempotent: a second identical resync (by slug) is a no-op.
-    assertThat(service.resyncTags("tags-resync-walk", armed)).isFalse();
+    // resyncConfig by slug is idempotent on identical content (the D18 checksum dedupe).
+    assertThat(service.resyncConfig("tags-source-walk", armed)).isFalse();
 
-    // metadata only: NO new version was minted (still the single draft 1.0.0).
-    assertThat(repository.versions(id, 10, 0)).hasSize(1);
+    // a fresh armed edit re-syncs again (mints a draft + re-syncs the row).
+    String more = armed.replace("overbought-defer]", "overbought-defer, s24-trade-window]");
+    assertThat(service.resyncConfig("tags-source-walk", more)).isTrue();
+    assertThat(repository.findById(id).orElseThrow().tags()).contains("s24-trade-window");
   }
 
   @Test

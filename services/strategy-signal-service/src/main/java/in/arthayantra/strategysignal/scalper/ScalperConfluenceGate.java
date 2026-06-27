@@ -112,7 +112,10 @@ public class ScalperConfluenceGate {
     boolean timeOk =
         cfg.openingTick()
             ? ScalperGates.timeWindow(istTime, ScalperConfig.OPENING_FROM, ScalperConfig.OPENING_TO).pass()
-            : ScalperGates.timeWindow(istTime).pass();
+            : cfg.has("s24-trade-window")
+                // W4 (S24 Shared-S2): the explicit 09:45-14:30 window — no 11:00-13:00 midday block, cap 14:30.
+                ? ScalperGates.timeWindow(istTime, ScalperGates.NO_TRADE_BEFORE, ScalperGates.S24_WINDOW_TO).pass()
+                : ScalperGates.timeWindow(istTime).pass();
     if (!timeOk) {
       return Optional.empty();
     }
@@ -150,6 +153,13 @@ public class ScalperConfluenceGate {
         chart.close() != null && chart.vwap() != null && chart.close().compareTo(chart.vwap()) >= 0
             ? OptionType.CE
             : OptionType.PE;
+    // W4 (tag gap-size-side-gate, S24 #9): a large gap-down suppresses the PE (put-buy) side
+    // ("300-400 gap-down no-put"). Default-OFF; reads the same session gap GapState detects (pure).
+    if (cfg.has("gap-size-side-gate")
+        && !ScalperGates.gapSizeSide(GapState.detect(future, index), side, ScalperGates.GAP_SIDE_SUPPRESS_PTS)
+            .pass()) {
+      return Optional.empty();
+    }
     // §0B hard "no trade" rails: volume floor + the RSI gate (both are blocks, not the soft dots the
     // scorer also weighs — a strong-everything-else signal must still respect them). #2 (open-high-low)
     // relaxes RSI to the source's ">50" floor; a strategy carrying the W3 rsi-s24-bands tag uses the

@@ -37,6 +37,14 @@ is dispositioned PARTIAL→AUTOMATE and is the only one with a parity question �
 **NOT** wiring the dead YAML keys into the compiler (which would be `[P]`) and instead formally
 binding the runtime DB limits, keeping it `[S]`.
 
+> **Count reconciliation (audit pass 2).** The `daily-target-caps` "7 gaps" here counts the **7 distinct
+> disposition table LINES** (`risk-framework.md` L25/L26/L27/L28/L35/L45/L52, each verified to carry the
+> `daily-target-caps` package in its Disposition column). The disposition's own theme rollup
+> (`risk-framework.md` L76) labels `daily-target-caps` as **"(6 rows)"** — an undercount in the source
+> doc (it folds the r66 reference that appears on both L28 and L52). This is a pre-existing
+> source-doc inconsistency, not a defect in this plan; the 7 cited lines each independently check out.
+> The stream-total "11" is unaffected either way (the three other packages are 2/1/1).
+
 ### Why these belong together
 They all read the **same closed-paper-trade ledger** (`paper_positions`) and the **same capital
 base** (`paper_account`), and they all gate the **same two ENTRY seams** already in place:
@@ -146,13 +154,32 @@ if (enabled(profit)) {
 ```
 
 Refactor `dailyLossLimitInr(node)` (L72-78) into a shared `limitInr(node)` (identical math: `pct`
-→ `equity * value / 100`, else the raw INR) so loss and profit share one resolver. Generalize
-`recordTrip` to take the `key` so the audit row names which cap fired.
+→ `equity * value / 100`, else the raw INR — `node.path("value").decimalValue()` reads the value as
+in the current method) so loss and profit share one resolver. Generalize `recordTrip` (currently
+`recordTrip(BigDecimal dayPnl, BigDecimal limit)`, L80-90) to take a leading `String key` so the
+audit row names which cap fired.
 
-**(b) New limit key `max_deployment_pct`** (closes r6 ≤10-20%/trade + ≤20%/day; also the §2.10
-"survive the day" r41 `L45` and the §2.14 10-12% blowout `L52`). A per-trade + per-day capital
-*deployment* cap (vs the loss cap which is a P&L cap). This one gates `entryAllowed()` on
-`capitalUsed()` (already on `PaperAccountService` L147):
+> **Per-cap trip dedup (audit pass 1 add).** `recordTrip` dedups via the single instance field
+> `dailyLossTrippedOn` (L37) and `update(key,…)` re-arms it ONLY on a `DAILY_LOSS` change (L106-108).
+> A profit-target trip needs its OWN per-day dedup field (e.g. `dailyProfitTrippedOn`) AND `update()`
+> must re-arm it on a `daily_profit_target` change — otherwise a re-armed-loss edit would silently
+> un-dedup the profit trip (or vice-versa). Generalize to a `Map<String,LocalDate> trippedOn` keyed by
+> the cap key, re-armed for whatever key `update()` writes. The deployment cap (b) does NOT need a
+> dedup (it is a live capital-state check, not a one-shot day event) — do not route it through
+> `recordTrip`'s dedup; audit it directly each time it blocks, or accept un-deduped audit noise.
+
+**(b) New limit key `max_deployment_pct`** (closes the §2.10 "never entertain the big loss" r41
+`L45` and the §2.14 10-12% blowout r62 `L52` — both `daily-target-caps` rows that ask to "seed/clamp
+the daily loss cap ≤10-12%/day so no single day blows out"). A per-day capital *deployment* cap (vs
+the loss cap which is a P&L cap). This one gates `entryAllowed()` on `capitalUsed()` (already on
+`PaperAccountService` L147):
+
+> **Cite correction (audit pass 1):** the ≤10-20%/trade + ≤20%/day rule (r6, `risk-framework.md`
+> L19) is dispositioned to a DIFFERENT package — `probability-graded-sizing` ("cap premium_budget at
+> a % of equity") — NOT `daily-target-caps`. It is out of scope for this stream. `max_deployment_pct`
+> here closes only the two `daily-target-caps` deployment rows r41 (L45) and r62 (L52), which speak of
+> the ≤10-12%/day blowout cap. The 20.0% default in §3.1(d) is therefore the OUTER deployment guard,
+> not the doc's r6 10-20% per-trade figure (see Open Point 1 + 9).
 
 ```java
 public static final String MAX_DEPLOYMENT_PCT = "max_deployment_pct"; // NEW
@@ -160,9 +187,16 @@ public static final String MAX_DEPLOYMENT_PCT = "max_deployment_pct"; // NEW
 
 Optional<Setting> deploy = settings.get(MAX_DEPLOYMENT_PCT);
 if (enabled(deploy)) {
-  BigDecimal cap = account.equity().multiply(value(deploy)).divide(HUNDRED);
+  // value() = node.path("value").decimalValue(); deployment is ALWAYS a % of equity (no mode
+  // field), so do NOT route it through limitInr() — limitInr defaults an absent mode to "inr"
+  // (RiskService L74 asText("inr")) and would treat 20.0 as ₹20, not 20% of equity.
+  BigDecimal value = deploy.get().value().path("value").decimalValue();
+  BigDecimal cap = account.equity().multiply(value).divide(BigDecimal.valueOf(100));
   if (account.capitalUsed().compareTo(cap) >= 0) {
-    recordTrip(MAX_DEPLOYMENT_PCT, account.capitalUsed(), cap);
+    // capitalUsed() is a live capital-state read, not a one-shot day event — see the
+    // per-cap-dedup note under (a); audit directly, do not use recordTrip's per-day dedup.
+    settings.audit(MAX_DEPLOYMENT_PCT, "TRIP",
+        "open deployment " + account.capitalUsed().toPlainString() + " ≥ cap " + cap.toPlainString());
     return false;
   }
 }
@@ -196,9 +230,9 @@ migration** that INSERTs the documented defaults as `risk_settings` rows so the 
 ```sql
 -- V011__seed_risk_defaults.sql  (additive; risk_settings created in V006)
 INSERT INTO risk_settings (key, value) VALUES
-  ('daily_loss_limit',   '{"enabled":true,"mode":"pct","value":2.0}'),   -- §2.3 r13 2-3%/day
-  ('daily_profit_target','{"enabled":true,"mode":"pct","value":1.5}'),   -- §2.3 r14 1-2%/day
-  ('max_deployment_pct', '{"enabled":true,"value":20.0}')                -- §2.2 r6 ≤20%/day
+  ('daily_loss_limit',   '{"enabled":true,"mode":"pct","value":2.0}'),   -- §2.3 r13 (L27) 2-3%/day
+  ('daily_profit_target','{"enabled":true,"mode":"pct","value":1.5}'),   -- §2.3 r14 (L28) 1-2%/day
+  ('max_deployment_pct', '{"enabled":true,"value":20.0}')                -- §2.14 r62 (L52) ≤10-12% blowout guard; NOTE: no "mode" key (always % of equity)
 ON CONFLICT (key) DO NOTHING;
 ```
 
@@ -210,6 +244,16 @@ ON CONFLICT (key) DO NOTHING;
 **Data flow:** YAML never involved. `RiskController.KEYS` (L27-28) gains the two new keys so the
 React Paper/Settings panel can PUT them; `GET /settings` already returns all rows. The trip writes
 a `risk_audit` row (existing append-only log) named by the cap that fired.
+
+> **FE binding is NOT free (audit pass 1 — missing step).** `frontend-react/src/pages/paper/PaperPage.tsx`
+> renders the risk limits as **hardcoded per-key blocks** (`kill_switch` ~L149,
+> `max_open_paper_positions` ~L161-185, `daily_loss_limit` ~L192-216 — each a bespoke toggle/input),
+> NOT a generic loop over the `{items}` envelope. So `daily_profit_target` + `max_deployment_pct` will
+> **not appear in the UI** until two new hardcoded blocks (toggle + value/mode input + a PUT via the
+> existing `updateRisk.mutate({key, value})` seam) are added there, plus the `riskEnabled(...)`
+> helper usage. This FE work is required for the §5.5 e2e assertion ("render + editable") to pass and
+> must be a line item in PR-1 (it currently is not). The `frontend-react/src/api/paper.ts` PUT body
+> shape (`{key, value}`) already supports any key, so only the render blocks are new.
 
 ### 3.2 `five-account-ledgers` (2 gaps) — `[S]`
 
@@ -249,11 +293,45 @@ GRANT SELECT ON scalper_subaccount TO ay_strategy;
   aggregate-freeze semantics as the degenerate case), so existing `ScalperRiskIntegrationTest`
   behaviour (5 losses → frozen) still holds — but now each loss freezes a *specific* account.
 
+> **Backward-compat trap (audit pass 1 — load-bearing).** The existing `ScalperRiskIntegrationTest`
+> helpers insert closed trades with **NO `subaccount_idx`** (NULL) — `fiveLossesFreezeAllSubAccounts`
+> (L37-43), `fiveWinsBankTheDay` (L45-51), `winsAndLossesBelowBothCapsStillAllow` (L54-57),
+> `aFlatTradeCountsAgainstTheAccounts` (L60-65) all rely on the day-granularity COUNT over ALL closed
+> trades. If the rewritten model counts **only** `subaccount_idx IS NOT NULL` rows ("Non-scalper
+> trades leave `subaccount_idx` NULL and are invisible" — below), then 5 NULL-idx losses freeze ZERO
+> accounts and **these four existing tests FAIL** (`scalperEntryAllowed()` stays true). This is a real
+> behaviour regression, not just a test edit. **Resolution (pick one, recommend (a)):**
+> (a) keep a NULL-idx **aggregate fallback**: when no trade carries an idx, fall back to today's
+>     win/loss COUNT (the legacy path), so old rows + old tests behave identically; per-account freeze
+>     only engages once trades carry an idx. The existing four tests then pass UNCHANGED.
+> (b) update the four existing tests to stamp `subaccount_idx` — but then the "must still pass
+>     unchanged" claim in §4 + §5.2 is false (the tests changed), and any real NULL-idx history (every
+>     paper trade taken before V012) silently stops counting toward the scalper freeze.
+> Choose (a) so neither the goldens NOR the legacy ledger semantics shift. This MUST be stated in the
+> PR and is added as Open Point 10.
+
 **Stamping the sub-account at open** needs the entry path to know the assignment. The cleanest
 seam: `PaperSignalListener.onSignalTaken` (L27-39) → `PaperService.openOrder` already opens the
-position; add an optional `subaccountIdx` to `OrderRequest` set from
-`ScalperAccountModel.nextFreeAccount()` when the originating signal is a scalper. (Non-scalper
-trades leave `subaccount_idx` NULL and are invisible to this model.)
+position; add an optional `subaccountIdx` to `OrderRequest` (the record at `PaperService.java`
+L39-47 — extend it by one field) set from `ScalperAccountModel.nextFreeAccount()` when the
+originating signal is a scalper. (Non-scalper trades leave `subaccount_idx` NULL and are invisible to
+this model — see the backward-compat trap above for the NULL-idx fallback.)
+
+> **Two missing wires (audit pass 1):**
+> 1. **"Is this signal a scalper?"** Neither `SignalTaken` (`signals/SignalTaken.java`:
+>    `record SignalTaken(long signalId, Integer qty, BigDecimal fillPrice)`) nor `OrderRequest`
+>    carries a scalper flag, so `onSignalTaken` cannot tell a scalper entry from a non-scalper one. The
+>    plan MUST add a resolution step: look up the signal's strategy and test whether it is a scalper
+>    (the engine already distinguishes via `strategy.scalper() != null`, `SignalEngine.java`:430). The
+>    simplest seam is a new repository read (does the signal's `strategy_version` carry a `scalper`
+>    block?) consulted in `onSignalTaken` (or a `scalper` boolean added to `SignalTaken`, which is a
+>    `signals`-module change — additive, the record is in `signals`). Without this, EVERY paper open
+>    (including non-scalper) would get an idx, polluting the ledger.
+> 2. **The actual DB write.** `OrderRequest.subaccountIdx` must flow through
+>    `PaperService.upsertPosition` (L159-181) → `PaperPositionRepository.insertOpen` (L85-109), which
+>    today has **no `subaccount_idx` parameter or column in its INSERT** (L96-99). Add the column to
+>    that INSERT (and stamp only on the `insertOpen` branch, not the averaging `updateOpen` branch —
+>    averaging keeps the original account). This repository change is currently unstated in the plan.
 
 **Data flow:** entirely account-side. The 5-account state is derived from `paper_positions` rows
 (survives restart, no in-memory state — preserving the existing design note `ScalperAccountModel`
@@ -273,11 +351,18 @@ enforces globally. That is duplicative and risky. Instead:
 1. **Bind the documented per-strategy intent to the global DB rail.** The §3.1(d) seed makes
    `daily_loss_limit pct:2.0` the default — exactly the `max_daily_loss_pct: 2.0` every YAML
    declares. So the *behaviour* the dead key intended is now live, account-wide.
-2. **Mark the YAML keys as advisory/dead in the schema doc** (a comment in
-   `strategy-schema-v1.json` near L552 and the scalper YAML headers) so a future reader does not
-   re-add a compiler read expecting enforcement. Do **not** delete them (CLAUDE.md: leave
-   pre-existing dead code; the schema validates them and removing the schema entry is a contract
-   change).
+2. **Mark the YAML keys as advisory/dead.** JSON has no comment syntax, so do **not** try to add a
+   `//` comment near `strategy-schema-v1.json:550-552` (it would break `flyway`-unrelated JSON-Schema
+   parsing). Two valid options: (a) add a `"description"` string to each of the three property
+   schemas (`max_positions`/`max_positions_per_underlying`/`max_daily_loss_pct`) reading e.g.
+   `"advisory/descriptive only — NOT read by the compiler; enforcement is the paper-runtime
+   risk_settings rows"` — `description` is a first-class JSON-Schema keyword and changing it does NOT
+   change validation behaviour, but **CHECK whether it drifts the springdoc contract**
+   (`ContractCaptureTest`): the schema is a resource, not a `@*Mapping`, so it should not, but re-run
+   ci-contracts to confirm; or (b) leave the schema untouched and put the advisory note ONLY in the
+   scalper YAML headers + the schema README. Do **not** delete the keys (CLAUDE.md: leave pre-existing
+   dead code; the schema validates them and removing a schema entry IS a contract change). Recommend
+   (a)-with-contract-recheck, falling back to (b) if any drift appears.
 3. **`max_positions` / `max_positions_per_underlying`** are already enforced structurally
    (`SignalEngine.java:398-400` single-active-entry per `(version, symbol)`). Document that the
    YAML value is descriptive; the structural cap is the enforcer. No code change.
@@ -294,8 +379,25 @@ so each trade lands a linked journal entry the trader then annotates (discipline
 
 **Hook point:** `PaperService.doSettle` (L208-224) is the single close choke point. After
 `positions.close(pos.id(), realized, closeReason)` (L222), publish a `PaperPositionClosed` event
-(id, realized, closeReason) — mirroring the existing `SignalTaken` event pattern that
+(`positionId`, `realized`, `closeReason`) — mirroring the existing `SignalTaken` event pattern that
 `PaperSignalListener` consumes.
+
+> **Three wiring facts (audit pass 1):**
+> 1. **Inject the publisher.** `PaperService` does NOT currently hold an `ApplicationEventPublisher`
+>    (its constructor L95-110 wires only the ledger collaborators). Add it as a new constructor arg —
+>    additive. (`SignalEngine`/`SignalsController` already inject one; the bean exists.)
+> 2. **Event field name.** The listener below uses `e.positionId()` — name the record field
+>    `positionId` (not `id`) so the accessor matches. Record:
+>    `record PaperPositionClosed(long positionId, BigDecimal realized, String closeReason)`.
+> 3. **Transaction + rollback.** `doSettle` runs inside the caller's `@Transactional`
+>    (`closePosition` L184, `settle`/`markToCloseIntraday` L274/284). A **synchronous** `@EventListener`
+>    runs in that SAME transaction, so a journal-insert failure would **roll back the trade close** —
+>    unacceptable (the close must win even if journaling fails). Either (a) make the listener
+>    `@TransactionalEventListener(phase = AFTER_COMMIT)` so it fires only after the close commits and a
+>    failure cannot roll the close back (matches "a paper-open failure is logged, never propagated"
+>    philosophy in `PaperSignalListener`), or (b) wrap the insert in try/catch + log. Recommend (a)
+>    AFTER_COMMIT + try/catch. Note this means the auto-journal IT must commit (not rely on a
+>    rolled-back test tx) to observe the row.
 
 **New listener** `journal/AutoJournalListener.java` (journal module, same schema as `JournalRepository`):
 
@@ -303,7 +405,9 @@ so each trade lands a linked journal entry the trader then annotates (discipline
 @Component
 public class AutoJournalListener {
   private final JournalRepository journal;
-  @EventListener
+  // AFTER_COMMIT so a journal failure can never roll back the trade close (see §3.4 fact 3);
+  // wrap the body in try/catch + log (mirrors PaperSignalListener's "logged, never propagated").
+  @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
   public void onPaperPositionClosed(PaperPositionClosed e) {
     // one auto-stub per closed trade, linked to the position; tags mark it machine-created
     journal.insert(new JournalRepository.EntryInput(
@@ -319,7 +423,22 @@ public class AutoJournalListener {
 `artha.paper.auto-journal-enabled` (default true) so it can be disabled, and the
 `tags: [auto]` marks machine entries so the React Journal can filter them. No schema change needed
 — `journal_entries` already accepts a `paper_position_id`-linked entry with null ratings (V008
-L9-16). Same-schema FK is validated by `paperPositionExists` already.
+L9-16, and the `discipline_rating`/`emotion_rating` CHECKs at V008 L15-16 permit NULL).
+
+> **Modulith placement (audit pass 1).** This service runs full `ApplicationModules…verify()`
+> (`ModularityTest.java`). The `journal` module today does **not** import `paper`
+> (verified: no `import …strategysignal.paper` in `journal/`). Placing `AutoJournalListener` in
+> `journal` and the `PaperPositionClosed` event in `paper` makes `journal` reference a `paper` type —
+> a NEW module edge. Spring Modulith treats event-listening as decoupled IFF the event is an exposed
+> module API, but the listener still needs the type on its classpath. Mirror the working
+> `SignalTaken` precedent (event lives in the PUBLISHER's module, `signals`, consumed by `paper` →
+> `paper`-depends-on-`signals`, allowed): put `PaperPositionClosed` in the `paper` module and accept a
+> `journal → paper` dependency, **then re-run `ModularityTest`** to confirm it still verifies (it is
+> not in the plan's §5 test list — added below). If `verify()` rejects the new edge, fall back to
+> putting the event in a neutral module both can see (as `SignalTaken` sits in `signals`).
+> **`paperPositionExists` is NOT auto-called by `insert()`** (it is a controller-layer validator); the
+> FK still holds because the listener links a just-closed real position, but do not claim `insert`
+> validates it.
 
 **Data flow:** closed paper trade → `PaperPositionClosed` event → `AutoJournalListener` →
 `journal_entries` row → existing Journal API (`JournalController`) → React Journal page. No
@@ -340,8 +459,8 @@ stay byte-identical). `[S]` = read-only / account-side / new path with no existi
 | `daily-target-caps` (b) `max_deployment_pct` | **[S]** | Same: a global `entryAllowed()` suppressor reading `capitalUsed()`. Account-side. | None. |
 | `daily-target-caps` (c) afternoon taper | **[S]** | Scalper-path-only (`ScalperAccountModel`, consulted at `scalperEntry` L454). The scalper confluence gate is LIVE-only and never on the golden/parity harness (`ScalperConfluenceGate` is `Optional<>`, the FEATURES YAMLs carry no scalper). Suppresses an entry; never alters a computed signal. | None. |
 | `daily-target-caps` (d) seed migration | **[S]** | DB rows only. Per A12 (`V006` L4-5) a `risk_settings` change never mints a version or perturbs a checksum. **Behavioural note:** seeding the loss cap ON-by-default WILL change live paper behaviour (good — it's the documented intent) but NOT any golden (no harness reads it). | None — but flag the behaviour change in the PR description (Open Point 2). |
-| `five-account-ledgers` schema + ledger | **[S]** | New table + nullable `paper_positions` column + scalper-path assignment. Account-side; the gate still only SUPPRESSES scalper entries. No emission change. | None. |
-| `daily-loss-maxpositions-wiring` (option ii) | **[S]** | Resolved as doc-correction + the §3.1 seed — NO compiler read added. (Option i, wiring the YAML keys into `StrategyCompiler`, WOULD be `[P]` and is explicitly rejected — Open Point 3.) | None (because we do NOT take option i). |
+| `five-account-ledgers` schema + ledger | **[S]** | New table + nullable `paper_positions` column + scalper-path assignment. Account-side; the gate still only SUPPRESSES scalper entries. No emission change. (GAP-DISPOSITION L147 also labels it `[S]`.) **But** the count→ledger rewrite must keep the NULL-idx aggregate fallback (§3.2 backward-compat trap) or it silently changes `scalperEntryAllowed()` for legacy/no-idx rows — that is an account-side behaviour shift, still NOT a golden change, but it WOULD break 4 existing ITs if mishandled. | None — but keep the NULL-idx fallback (Open Point 10). |
+| `daily-loss-maxpositions-wiring` (option ii) | **[S]** | Resolved as doc-correction + the §3.1 seed — NO compiler read added. **Note:** the source `GAP-DISPOSITION.md` lists this package under the **Parity-sensitive `[P]`** heading (L153/L167) precisely because option (i) is `[P]`. This plan's `[S]` is a deliberate *reclassification* earned by taking option (ii) (no compiler read); the `[P]` label only ever applied to option (i). (Option i, wiring the YAML keys into `StrategyCompiler`, WOULD be `[P]` and is explicitly rejected — Open Point 3.) | None (because we do NOT take option i). |
 | `auto-journal` | **[S]** | A post-close `@EventListener` writing a `journal_entries` row. Off the signal path entirely; closing a trade is not emission. | None. |
 
 **Net: every change in this stream is `[S]`.** No new strategy tag, no new golden variant, no
@@ -392,11 +511,19 @@ Reuse the `insertClosed(realized)` helper (L76-84), adding a `subaccount_idx`:
   `loss`.
 - `JournalIntegrationTest` (existing) must stay green — manual entries unaffected.
 
-### 5.4 Golden / parity tripwires (MUST stay byte-identical — regression only)
+### 5.4 Golden / parity / boundary tripwires (MUST stay green — regression only)
 - `GoldenDeterminismTest` (`libs/strategy-engine`) — re-run; assert byte-identical. **Do NOT
-  regenerate.** (No scalper / no `RiskService` on the harness path.)
-- `BacktestParityTest` (`services/backtest-service`) — re-run; the three byte-match asserts stay
-  green.
+  regenerate.** (Verified: the test harness instantiates neither `RiskService` nor
+  `ScalperAccountModel` nor `EmissionGuard` — `EmissionGuard`/`ScalperConfluenceGate` are
+  `Optional<>` in `SignalEngine` L101/L104 and absent on the replay path.)
+- `BacktestParityTest` (`services/backtest-service`) — re-run; the three byte-match asserts
+  (two-replay determinism L68, trades-equality L72, replay==golden L77) stay green.
+- `ModularityTest` (`services/strategy-signal-service`) — re-run after the auto-journal +
+  five-account-ledger module wiring. The new `journal → paper` (event) edge and the
+  `paper`-internal `PaperPositionClosed` event MUST still pass `ApplicationModules…verify()`.
+- **ci-contracts** — if §3.3 step 2(a) adds `description` strings to the schema, re-run
+  `ContractCaptureTest` / ci-contracts to confirm no spec drift (resource schema, not a `@*Mapping` —
+  expected no drift, but verify).
 
 ### 5.5 e2e (`e2e/tests/`)
 - `paper.spec.ts` (existing Paper-page flow): assert the new `daily_profit_target` /
@@ -442,8 +569,8 @@ V008 journal_entries (exists) ─► auto-journal (§3.4: PaperPositionClosed ev
 
 | Package | Effort | PR |
 |---|:--:|---|
-| `daily-target-caps` | **S** | **PR-1** `feat(strategy-signal): daily profit/loss/deployment caps + seed (account-side)` — `RiskService` (3 keys + shared `limitInr` + generalized `recordTrip`), `RiskController.KEYS`, `V011__seed_risk_defaults.sql`, the afternoon taper in `ScalperAccountModel`, IT + e2e. |
-| `daily-loss-maxpositions-wiring` | **S** | **folded into PR-1** — the schema-doc comment + scalper-YAML-header note that the keys are advisory (the seed in PR-1 is the enforcer). One-line doc change, no code. |
+| `daily-target-caps` | **S→M** | **PR-1** `feat(strategy-signal): daily profit/loss/deployment caps + seed (account-side)` — `RiskService` (2 new keys + shared `limitInr` + generalized per-cap-keyed `recordTrip` + per-cap dedup field), `RiskController.KEYS`, `V011__seed_risk_defaults.sql`, the afternoon taper in `ScalperAccountModel` (needs a `LocalTime` import + the existing `clock`), **the two new FE risk blocks in `PaperPage.tsx`**, IT + e2e. (Effort bumped S→M: the FE blocks + per-cap dedup were under-counted.) |
+| `daily-loss-maxpositions-wiring` | **S** | **folded into PR-1** — the advisory note on the dead keys (a `description` string in `strategy-schema-v1.json` per §3.3 step 2(a), re-running ci-contracts, OR a scalper-YAML-header-only note per 2(b); the PR-1 seed is the enforcer). Doc/string change, no compiler code. |
 | `five-account-ledgers` | **L** | **PR-2** `feat(strategy-signal): per-account scalper ledgers (5-account split + 1% target + first-loss freeze)` — `V012__scalper_account_ledger.sql`, `ScalperAccountModel` rewrite (count→ledger), the `openOrder` sub-account stamp seam, IT. The largest item (schema + assignment + freeze logic + the round-robin). |
 | `auto-journal` | **S** | **PR-3** `feat(strategy-signal): auto-journal closed paper trades` — `PaperPositionClosed` event, `AutoJournalListener`, flag, IT + e2e. Independent, smallest. |
 
@@ -506,3 +633,233 @@ granularity is wanted. Total stream effort: **M-L** (one L, three S).
 8. **Does `auto-journal` backfill historical closed trades?** The listener only fires on NEW
    closes. **Options:** (a) forward-only (recommended — simplest, no backfill job); (b) a one-shot
    admin backfill of existing closed `paper_positions`. **Recommended default: (a) forward-only.**
+
+9. **(audit pass 1) Where does the per-trade ≤10-20% (r6) cap live, if at all?** `max_deployment_pct`
+   here is the *per-day* deployment guard (r41/r62), and r6 is dispositioned to the SEPARATE
+   `probability-graded-sizing` package — out of THIS stream. **Options:** (a) leave r6 entirely to
+   `probability-graded-sizing` (recommended — keeps package boundaries clean; this stream does not
+   touch sizing); (b) add a non-blocking per-order deployment warning here as a convenience (overlaps
+   Open Point 1's "warn" recommendation). **Recommended default: (a)** — do NOT pull r6 in; if a
+   per-order warn is wanted, it is the (a)-warn option of Open Point 1, not a new cap.
+
+10. **(audit pass 1, load-bearing) NULL-`subaccount_idx` fallback in the ledger rewrite.** The 4
+    existing `ScalperRiskIntegrationTest` methods insert closed trades with no `subaccount_idx`. If the
+    rewritten `ScalperAccountModel` counts only idx-stamped rows, those tests FAIL and any pre-V012
+    paper history stops counting toward the freeze. **Options:** (a) keep a NULL-idx aggregate fallback
+    (when no row carries an idx, use today's day-granularity win/loss COUNT) so legacy rows + the 4
+    existing ITs behave identically and per-account freeze engages only once idx-stamped trades exist
+    (recommended); (b) update the 4 tests to stamp idx (drops the "unchanged" guarantee + the legacy
+    semantics). **Recommended default: (a).** This is the single biggest correctness risk in the
+    stream — call it out in PR-2.
+
+11. **(audit pass 1) How does `onSignalTaken` know the signal is a scalper (to stamp an idx)?**
+    `SignalTaken` + `OrderRequest` carry no scalper marker. **Options:** (a) add a `boolean scalper`
+    to the `SignalTaken` record (a `signals`-module change, additive — the engine already knows via
+    `strategy.scalper() != null`) and thread it to `OrderRequest` (recommended — single source of
+    truth, no extra DB read); (b) a new `PaperSignalListener` repository read resolving the signal's
+    strategy-version `scalper` block at open time. **Recommended default: (a).** Without this, every
+    paper open (incl. non-scalper) gets an idx and pollutes the ledger.
+
+---
+
+## Audit pass 1 findings
+
+Audited 2026-06-27 by opening every cited file. **Verdict: SOUND WITH OPEN POINTS** — the architecture
+is correct and genuinely parity-safe (all four packages are account-side; the golden/parity harness
+provably cannot see them), but four real implementation gaps and one cite misattribution had to be
+fixed before this is developer-ready. Corrections applied in place above; summary:
+
+**Citations — all spot-checked, mostly accurate.** Verified and CONFIRMED: `RiskService`
+KILL_SWITCH/MAX_OPEN/DAILY_LOSS L25-27, `entryAllowed` L52-70, `dailyLossLimitInr` L72-78, `recordTrip`
+L80-90, `update` L103-109; `ScalperAccountModel` ACCOUNTS=5 L32 / MAX_WINS=5 L35 / `scalperEntryAllowed`
+L50-62 / day-count javadoc L17-22 / restart-state note L25; `PaperAccountService` equity L69 / dayPnl
+L170-173 / capitalUsed L147 / buyingPowerWarning L157-167; `PaperPositionRepository` realizedOn
+L221-227 / winLossOn L236-244 / openCount L209-212; `PaperService.doSettle` L208-224 (realized L218,
+`positions.close` L222); `EmissionGuard` L15/L22-24/L31; `PaperEmissionGuard` L36-38/L41-43;
+`SignalEngine` activeEntry L398-400 / scalperEntry-gate L454 / emitEntry-gate L578 — **and confirmed
+`emissionGuard`+`scalperGate` are `Optional<>` (L101/L104), which is the linchpin of the parity claim**;
+`JournalRepository` EntryInput 8-arg record L38-46 (the auto-journal `new EntryInput(...)` call has the
+right 8 args in the right order — compiles) / insert L68-94 / paperPositionExists L62-65; `RiskController`
+KEYS L27-28 / GET L43-60 / PUT L63-74 (non-key 400s); dead YAML keys `scalp-two-candle-nifty.yaml`
+L52-54; schema `max_daily_loss_pct` at **`strategy-schema-v1.json:552`** (and L550/L551 siblings);
+`StrategyCompiler` reads only `position_sizing` L66-69 + `session` L82; V006 risk_settings L4-5 A12 note;
+V008 journal_entries L7-19 / nullable links L9-16; disposition `risk-framework.md` L25/26/27/28/35/41/45/52,
+`trend-change.md` L40 (two-option text) + theme-rollup L56, audit `trend-change.md` L88/L118-119,
+`GAP-DISPOSITION.md` L147 (five-account `[S]`/L), L167 (`daily-loss-maxpositions-wiring`), L177
+(`auto-journal` `[S]`). Strategy lineage's latest applied migration is V010 → V011/V012 are correctly
+the next two versions. All five cited test files exist; `PaperAccountRiskIntegrationTest` trip test
+L84-92 + reset L57-67, `ScalperRiskIntegrationTest` insertClosed L76-84 + fiveLosses L37-43,
+golden/parity byte-match asserts — all confirmed.
+
+**One cite misattribution (FIXED):** §3.1(b)/§3.1(d) claimed `max_deployment_pct` "closes r6
+≤10-20%/trade". r6 (`risk-framework.md` L19) is dispositioned to **`probability-graded-sizing`**, a
+DIFFERENT package out of this stream; this package's deployment rows are r41 (L45) + r62 (L52). The
+seed comment and the (b) prose were corrected, and Open Point 9 added.
+
+**Soundness (FIXED in place):**
+- §3.1(a) profit-trip needs its OWN per-day dedup field + an `update()` re-arm for `daily_profit_target`
+  (the single `dailyLossTrippedOn` field + the `DAILY_LOSS`-only re-arm at L106-108 would cross-wire the
+  two trips). Generalize to a key-keyed map. Noted inline + the deployment cap must NOT use that dedup.
+- §3.1(b) deployment code must read `value` directly, NOT route through the mode-aware `limitInr`
+  (absent `mode` defaults to `inr` at L74 → 20.0 read as ₹20 not 20%). Corrected the snippet.
+- §3.1(c) afternoon taper needs a `LocalTime` import (not currently imported in `ScalperAccountModel`);
+  the `Clock` is already present. Flagged in PR-1.
+
+**Parity (CONFIRMED + tightened):** every change is genuinely `[S]` — the engine/replay harness
+instantiates none of `RiskService`/`ScalperAccountModel`/`EmissionGuard` (all `Optional`, absent on the
+golden path), so `GoldenDeterminismTest` + `BacktestParityTest` stay byte-identical. **Tightened two
+points:** (1) GAP-DISPOSITION lists `daily-loss-maxpositions-wiring` under the `[P]` heading (L153/167) —
+the plan's `[S]` is a justified *reclassification* (only option-i is `[P]`); §4 now says so. (2) the
+five-account count→ledger rewrite is `[S]` to goldens but WILL shift account-side behaviour for legacy
+NULL-idx rows unless the fallback is kept (next bullet).
+
+**Completeness (gaps ADDED):**
+- **NULL-idx backward-compat trap (§3.2):** the 4 existing scalper ITs insert idx-less trades; the
+  ledger rewrite must keep a NULL-idx aggregate fallback or it breaks them and silently drops pre-V012
+  history from the freeze. Added a resolution subsection + Open Point 10 (biggest correctness risk).
+- **Two missing five-account wires (§3.2):** (1) nothing tells `onSignalTaken` the signal is a scalper
+  (added Open Point 11 + a resolution step); (2) `PaperPositionRepository.insertOpen` (L85-109) has no
+  `subaccount_idx` column/param — the actual DB write was unstated. Both added.
+- **Auto-journal wiring (§3.4):** `PaperService` has no `ApplicationEventPublisher` (new ctor arg);
+  the listener runs inside the close `@Transactional` so it MUST be `@TransactionalEventListener
+  AFTER_COMMIT` (+ try/catch) or a journal failure rolls back the trade close; the `journal→paper`
+  module edge + `PaperPositionClosed` placement must re-pass `ModularityTest`. All three added; the
+  event field renamed `positionId` to match the listener accessor.
+- **FE binding missing (§3.1 / §7):** `PaperPage.tsx` renders risk limits as **hardcoded per-key
+  blocks**, not a generic `{items}` loop — the two new caps need two new render blocks or they never
+  appear in the UI (breaking the §5.5 e2e). Added to §3.1 data-flow + PR-1; effort bumped S→M.
+- **Schema "comment" is invalid JSON (§3.3 step 2):** JSON has no `//` comments — replaced with a
+  `description`-string option (with a ci-contracts recheck) or a YAML-header-only note.
+- **Test list (§5.4):** added `ModularityTest` + a ci-contracts recheck as regression tripwires (both
+  required by CLAUDE.md but absent from the plan).
+
+**Open points:** the plan's 8 were genuine and well-reasoned; added 9 (r6 scope), 10 (NULL-idx
+fallback — load-bearing), 11 (scalper-ness resolution at open). Open Point 4 (seed-vs-reset) is real and
+correctly captured — note the reset at L61 re-arms only `daily_loss_limit`'s dedup, so once a profit
+dedup exists the reset must clear it too (covered by the §3.1(a) note).
+
+**Net:** safe to hand to a developer AFTER the five completeness gaps are read as part of the design
+(they are now inline). No change is mis-marked `[P]`-as-`[S]`; nothing in the stream perturbs a golden.
+
+---
+
+## Audit pass 2 findings
+
+Independent second pass, 2026-06-27. I re-opened every load-bearing source file myself (not trusting
+pass 1's transcription) and re-derived the parity argument from the engine source. **Verdict: SOUND
+WITH OPEN POINTS — readiness CONFIRMED.** The architecture holds, pass 1's five completeness gaps and
+its one cite correction are all genuine and correctly resolved, and I found NO new soundness defect, NO
+mis-marked `[P]`-as-`[S]`, and NO broken data-flow step. One source-doc counting inconsistency and two
+low-severity observations are added below; none blocks the work.
+
+**Citations re-verified independently (sampled ~30, all CONFIRMED).** Re-read and matched to byte:
+`RiskService` keys L25-27, `entryAllowed` L52-70, `dailyLossLimitInr` L72-78 (and the `mode` default
+`asText("inr")` at L74 — the linchpin of pass-1's deployment-snippet fix), `recordTrip` L80-90 (single
+`dailyLossTrippedOn` field L37), `update` re-arm `DAILY_LOSS`-only L106-108; `ScalperAccountModel`
+ACCOUNTS=5 L32/MAX_WINS=5 L35/`scalperEntryAllowed` L50-62/day-count javadoc L17-22/restart-state L25;
+`PaperAccountService` equity L69/dayPnl L170-173/capitalUsed L147/buyingPowerWarning L157-167;
+`PaperPositionRepository` insertOpen L85-109 (NO `subaccount_idx` — confirmed)/updateOpen L112-118
+(averaging branch)/realizedOn L221-227/winLossOn L236-244/openCount L209-212; `PaperService` ctor
+L95-110 (NO `ApplicationEventPublisher` — confirmed)/OrderRequest 8-field L39-47/doSettle L208-224
+(realized L218, positions.close L222); `PaperSignalListener.onSignalTaken` L27-39 (synchronous, no
+scalper marker); `SignalTaken` L10 = `(long signalId, Integer qty, BigDecimal fillPrice)` (confirmed no
+scalper flag); `EmissionGuard` SPI in `signals`, `scalperEntryAllowed` default-true L22-24;
+`JournalRepository.EntryInput` 8-arg L38-46 (the auto-journal `new EntryInput(null, e.positionId(),
+null, null, note, tags, null, null)` call has the right 8 args/order — compiles) / insert L68-94 does
+NOT call `paperPositionExists` (confirmed); `RiskController.KEYS` L27-28 + non-key 400 L65-66 + GET
+items-envelope L43-60; dead YAML keys L52-54 in `scalp-two-candle-nifty.yaml`; schema
+`max_daily_loss_pct` at **L552** (siblings L550/L551); `StrategyCompiler` reads only `position_sizing`
+L66-69 + `session` L82; V005 `paper_positions` GRANT L51, V006 risk_settings L4-5 A12 note + L40 grant,
+V008 journal_entries L7-19 (CHECK 1-5, NULL-permitting, L15-16). Migrations: latest applied is **V010**
+→ V011/V012 correct. Disposition rows re-read in full: `risk-framework.md` L25/26/27/28/35/45/52 all
+carry `daily-target-caps`, L29/L31 `five-account-ledgers`, L41 `auto-journal`; `trend-change.md` L40 is
+the two-option `daily-loss-maxpositions-wiring` row (the "(or formally rely on the paper-runtime
+`daily_loss_limit`)" clause is verbatim — option (ii) is a faithful read); `GAP-DISPOSITION.md`
+**L147** `five-account-ledgers [S]`, **L153/L167** `daily-loss-maxpositions-wiring` under the `[P]`
+heading, **L177** `auto-journal` under `[S]`. All four cited test files exist; `ScalperRiskIntegrationTest`
+and `PaperAccountRiskIntegrationTest` internals re-read (next bullet).
+
+**The parity claim re-derived from source (CONFIRMED, strongest evidence).** I read `SignalEngine`
+directly: `emissionGuard` is `Optional<EmissionGuard>` (L101) and `scalperGate` is
+`Optional<ScalperConfluenceGate>` (L104); the global gate fires at `emitEntry` **L578**
+(`emissionGuard.isPresent() && !emissionGuard.get().entryAllowed()`) and the scalper gate at
+`scalperEntry` **L454** — both **suppress** an entry, neither alters a computed signal, and the comment
+at L576-577 confirms exits (`emit()`) are deliberately NOT gated. The structural single-active-entry
+check (`activeEntry` L398-400, scalper-distinguished by `strategy.scalper() != null` L405/L430) is the
+real `max_positions` enforcer, exactly as §3.3 claims. **Grep proof of the central safety claim:**
+`max_daily_loss_pct` / `max_positions*` are read in ZERO Java files across `libs/strategy-engine` AND
+`services/strategy-signal-service` — the only Java hit is a *comment* in `scalper/ScalperRisk.java:13`,
+not a read. So option (i) genuinely is the only `[P]` path and the plan's option (ii) avoids it. Every
+`[S]` mark in the §4 table is correct.
+
+**Pass-1's corrections re-checked — all RIGHT, none introduced a new error:**
+- The `max_deployment_pct` mode-default trap is real: `dailyLossLimitInr` (L74) defaults an absent
+  `mode` to `"inr"`, so routing the no-`mode` deployment row through `limitInr` would read `20.0` as
+  ₹20. The corrected snippet reads `value` directly and does `equity*value/100` — correct. (`20.0`
+  parses as a Jackson `DoubleNode`; `.decimalValue()` → `BigDecimal 20.0`, the same proven path the
+  existing loss cap uses for `value:2.0`. No new issue.)
+- The cite re-attribution (r6 → `probability-graded-sizing`, NOT this stream) matches
+  `risk-framework.md` L19 verbatim; this package's rows are r41 (L45) + r62 (L52). Correct.
+- The NULL-`subaccount_idx` backward-compat trap is the single biggest risk and is **fully
+  confirmed**: `ScalperRiskIntegrationTest.insertClosed` (L76-84) inserts closed rows with NO
+  `subaccount_idx`, and `fiveLossesFreezeAllSubAccounts`/`fiveWinsBankTheDay`/
+  `winsAndLossesBelowBothCapsStillAllow`/`aFlatTradeCountsAgainstTheAccounts` rely on the
+  day-granularity COUNT over ALL closed rows. The recommended NULL-idx aggregate fallback (Open
+  Point 10) is the correct fix. (Minor: a couple of pass-1's method line-refs are off by 1-2 lines —
+  annotation vs signature line — immaterial.)
+- The auto-journal AFTER_COMMIT requirement is correct: `doSettle` runs inside the caller's
+  `@Transactional` (`closePosition` L184, `markToCloseIntraday` L284), so a synchronous same-tx
+  listener failure would roll back the close. `@TransactionalEventListener(AFTER_COMMIT)` + try/catch
+  is the right shape.
+
+**New observations (audit pass 2) — all LOW severity, none blocking:**
+1. **Count reconciliation (FIXED inline §1):** the plan's `daily-target-caps` "7 gaps" counts 7
+   disposition table LINES; the disposition's own rollup (`risk-framework.md` L76) says "(6 rows)". A
+   pre-existing inconsistency in the SOURCE doc, not a plan defect — the 7 cited lines each check out
+   and the stream total (11) is unaffected. Added a reconciliation note to §1.
+2. **AFTER_COMMIT batches journal writes on the 15:45 sweep (note, not a defect).** Because
+   `markToCloseIntraday` (`PaperService` L284) is a single `@Transactional` that settles EVERY
+   intraday position in one tx, an `AFTER_COMMIT` auto-journal listener fires its inserts *after the
+   whole sweep commits*, not per-position — N closes → N journal rows, all written post-commit in one
+   burst. Functionally correct (each closed position still gets exactly one linked stub) and the
+   `AutoJournalIntegrationTest` should still observe them, but the IT must let the sweep tx COMMIT (the
+   §3.4 fact-3 note already says "must commit, not a rolled-back test tx"). No change needed; flagging
+   so the test author expects post-commit, possibly-batched, inserts.
+3. **Pre-existing latent bug in `PaperPositionRepository.intradayOpen()` (OUT OF SCOPE — do NOT fix
+   here).** That query (L160-174) hand-lists columns and omits `stop_loss`/`take_profit`, yet maps with
+   `PaperPositionRepository::map`, which reads `rs.getBigDecimal("stop_loss")`/`take_profit` by name —
+   on a ResultSet that didn't SELECT them this throws `SQLException`. This predates this plan and the
+   plan never touches `intradayOpen`, so per CLAUDE.md (leave pre-existing dead/buggy code, mention it)
+   it is noted, not fixed. Relevant only to confirm V012's `subaccount_idx` add does NOT need to touch
+   `intradayOpen` (it doesn't — the column is nullable, the mapper is name-based and reads neither the
+   new column nor relies on it). Added as Open Point 12 so it is not silently inherited.
+
+**Schema / grants re-checked (no gap).** V012 adds `subaccount_idx` to `paper_positions`; PG table-level
+GRANTs (V005 L51: SELECT/INSERT/UPDATE/DELETE to `ay_strategy`) auto-extend to new columns, and the
+service writes as `artha` (single writer) anyway — no re-grant needed. V012 grants only `SELECT` on the
+new `scalper_subaccount` table, consistent (the model reads capital fractions; the only write is the
+`paper_positions.subaccount_idx` stamp). V011 seed runs as the migration user, unaffected by the
+`ay_strategy` read-only convention. Migration ordering (V011/V012 after V010, independent) holds.
+
+**Dependency order re-checked (correct).** `daily-loss-maxpositions-wiring` AFTER `daily-target-caps`
+(its resolution IS the §3.1(d) seed) is right; `five-account-ledgers` and `auto-journal` independent
+is right. The PR-1-folds-the-wiring-doc-note packaging is sound (the wiring "package" is a
+description-string + the seed, no code).
+
+**Open points:** pass 1's 11 are well-reasoned and I concur with every recommended default. Added Open
+Point 12 (the pre-existing `intradayOpen` column-list bug — explicitly OUT of scope, flagged so it is
+not mistaken for a regression introduced by V012).
+
+**Readiness verdict (pass 2):** READY to hand to a developer. Every signal-affecting surface is
+account-side and provably invisible to the golden/parity harness (`emissionGuard`/`scalperGate` are
+`Optional`, absent on the replay path; the dead YAML keys are read by zero Java). The only behaviour
+changes are intentional and account-side (the seed turns caps on; the ledger rewrite must keep the
+NULL-idx fallback). Nothing perturbs a golden, no contract drift beyond the optional schema-`description`
+re-check (§3.3/§5.4), and the five pass-1 completeness gaps plus the three pass-2 notes are now inline.
+
+> **Open Point 12 (audit pass 2) — pre-existing `intradayOpen` column-list bug (OUT OF SCOPE).**
+> `PaperPositionRepository.intradayOpen()` (L160-174) SELECTs an explicit column list that omits
+> `stop_loss`/`take_profit` but maps via `PaperPositionRepository::map` (which reads them by name) —
+> a latent `SQLException` on the 15:45-MTM path that predates this stream. Do NOT fix it in this plan
+> (CLAUDE.md: leave pre-existing code; surgical changes only). Recorded so V012's column add is not
+> blamed for it and so a future cleanup can pick it up. **Recommended: leave untouched; file separately.**

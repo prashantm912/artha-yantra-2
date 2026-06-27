@@ -21,13 +21,21 @@ This stream automates the **VWAP-proximity and probability-graded sizing** half 
 management layer: *don't enter when price is too far from VWAP/Supertrend* (a skip / wait), *deploy
 more size near VWAP and less when the confluence is weak / VIX is high / the OI-gap is thin*, and *prefer
 the high-probability time-of-day windows* (best 10:00-11:30, ease off after ~13:30). Today the scalper
-sizes with a flat `premium_budget: budget_inr 15000` (the §3.5 audit calls this "fixed ₹15k") and VWAP is
-a boolean side/hard-gate only — its DISTANCE is never read.
+sizes with a flat `premium_budget` (the §3.5 audit calls this "fixed ₹15k") and VWAP is
+a boolean side/hard-gate only — its DISTANCE is never read. (**AUDIT pass 2:** 33 of the 36 shipped
+YAMLs use `budget_inr: 15000`; the 3 hero-zero / §7 variants use the smaller `budget_inr: 2000` — so
+"flat ₹15k" is the dominant-but-not-universal case. Immaterial to the design: the §3.2 multiplier
+defaults to `1.0` and rides on top of whatever budget the YAML carries.)
+
+> **Source-row path (audit-corrected):** every `file:line` below is a row in
+> `docs/strategy-audit/disposition/<file>.md` — the disposition tables, NOT the bare
+> `docs/strategy-audit/<file>.md` audit tables (those carry different line numbers). `session-additions.md`
+> is shorthand for `session-additions-and-manual-coverage.md` (the only file whose name is abbreviated).
 
 | Package | gap count | Source disposition rows (file:line) | Doc-§ |
 |---|---:|---|---|
-| **`vwap-distance-sizing`** | 7 | connect-the-dots.md L33 (S22(a)); gap-theory.md L25 (§3.4 L606); hero-zero.md L29 (§3.7 filters); intro-terminology.md L15 (§1.2); morning-trade.md L21 (§3.9 S21/S22); risk-framework.md L21 (§2.2 r8); session-additions.md L35 (§4.15.3) | §1.2, §2.2, §3.4/3.7/3.9/3.10, §4.15.3 |
-| **`probability-graded-sizing`** | 13 | risk-framework.md L18,L19,L22,L23,L24,L44,L49,L53 (§2.2/2.3/2.10/2.12-14); open-high-low.md L27 (§3.2 risk[0]); trending-oi.md L24,L38 (§3.5 Risk/6.5); morning-trade.md L30 (§3.9 S21(d)); session-additions.md L29 (§4.14.9) | §2.2/2.3/2.10/2.12/2.13/2.14, §3.2/3.5/3.9, §4.14.9 |
+| **`vwap-distance-sizing`** | 7 | connect-the-dots.md L33 (S22(a)); gap-theory.md L25 (§3.4 L606); hero-zero.md L29 (§3.7 filters); intro-terminology.md L15 (§1.2); morning-trade.md L21 (§3.9 S21/S22); risk-framework.md L21 (§2.2 r8); session-additions-and-manual-coverage.md L35 (§4.15.3) | §1.2, §2.2, §3.4/3.7/3.9/3.10, §4.15.3 |
+| **`probability-graded-sizing`** | 13 | risk-framework.md L18,L19,L22,L23,L24,L44,L49,L53 (§2.2/2.3/2.10/2.12-14); open-high-low.md L27 (§3.2 risk[0]); trending-oi.md L24,L38 (§3.5 Risk/6.5); morning-trade.md L30 (§3.9 S21(d)); session-additions-and-manual-coverage.md L29 (§4.14.9) | §2.2/2.3/2.10/2.12/2.13/2.14, §3.2/3.5/3.9, §4.14.9 |
 | **`time-of-day-preference`** | 1 | trending-oi.md L37 (§3.5 Setup.3 / S21(b) / Filters / 6.5) | §3.5; (also intro §1.2 ideal 9:15-10:00 — ACCEPT_BY_DESIGN) |
 
 Stream total: **21 AUTOMATE_PKG gap rows** (`7 + 13 + 1`). Many `probability-graded-sizing` rows
@@ -39,8 +47,14 @@ so the *code surface* is far smaller than 13 — the count is gaps-closed, not f
   `five-account-ledgers` package (2 gaps: per-account split + first-loss freeze) are **account-side rails
   in a SEPARATE stream** — several risk-framework rows that *mention* sizing are dispositioned there, not
   here. This stream owns only the rows whose disposition cell literally says `probability-graded-sizing`
-  or `vwap-distance-sizing` (risk-framework.md AUTOMATE_PKG-themes block L72-77 enumerates them: 9 rows →
-  `probability-graded-sizing`, 1 → `vwap-distance-sizing`).
+  or `vwap-distance-sizing` (risk-framework.md AUTOMATE_PKG-themes block L72-77 enumerates them).
+  (**AUDIT pass 2 — count reconciliation:** the themes block at risk-framework.md L72 *labels*
+  `probability-graded-sizing` "(9 rows)", but only **8** rows in that disposition table literally carry
+  the tag (L18,19,22,23,24,44,49,53 — verified by grep); the "(9 rows)" is the disposition doc's own
+  self-count and is off by one. This plan's §1 citation table cites those 8 risk-framework rows + 5 from
+  the other files = the **13-gap** `probability-graded-sizing` total, which is internally consistent. Use
+  8, not 9, for the risk-framework slice.) `vwap-distance-sizing` = 1 risk-framework row (L21) + 6 from
+  the other files = 7.
 - The `scale-in-ladder` package (smallest-first multi-leg deployment) is dispositioned to the
   trade-management stream (it needs a multi-leg entry engine the signal seam does not have).
 - The FU1 `time_of_day_vwap` manual check (a parity-neutral on-card reminder) ALREADY covers the
@@ -107,8 +121,11 @@ changes signal emission (and only when an opt-in tag is armed).
 - **Constructor arity is coupled** to the 8 `new ScalperConfig(...)` literals in
   `ScalperConfluenceGateTest` (L43-90: CFG, TWO_CANDLE, OI_CROSS, GAP, TREND_CHANGE, OPEN_HIGH_LOW,
   OPENING_TICK, STRADDLE) — adding a field forces a compile-time update to all 8 (a fan-out, not a parity
-  risk; the two `ScalperConfig.from(...)` call sites do NOT break on arity). This is the same fan-out FU2
-  documents.
+  risk). **Two more producers of the canonical constructor must also change:** the `from(...)` factory's own
+  `new ScalperConfig(...)` at **L154-156** (pass the new flag positionally) and the `record` header at
+  L36-52. The two EXTERNAL `ScalperConfig.from(...)` call sites (`ScalperStrategyLoadTest.java:130`,
+  `SignalEngine.java:195` — verified) do NOT break, because `from(...)`'s signature is unchanged. This is
+  the same fan-out FU2 documents.
 
 ### 2.5 The sizing path — `SignalEngine.emitEntry` + `PositionSizer`
 - `SignalEngine.emitEntry` (L573-658). After the insert it stamps the advisory qty L605-614:
@@ -174,7 +191,7 @@ changes signal emission (and only when an opt-in tag is armed).
    parity-irrelevant — see §4). A conservative default of multiplier `1.0` keeps the stamped qty
    byte-identical to today unless the strategy opts into grading via a knob.
 3. **All new thresholds ride `ScalperOiProps`** (DB-/config-tunable), matching the established rule that
-   freshly-derived tuning knobs live there, not as Java constants (`ScalperOiProps` javadoc L6-12).
+   freshly-derived tuning knobs live there, not as Java constants (`ScalperOiProps` javadoc L6-16).
 
 ---
 
@@ -210,8 +227,11 @@ public static GateOutcome vwapDistance(
       + (ok ? " within band" : tooFar ? " too far from VWAP" : " too close (VWAP pin)"));
 }
 ```
-*(Reuse the existing `RoundingMode` import; `GateOutcome` carries the `frac` so the reason rides the
-side-channel, like every other gate.)*
+*(**AUDIT-CORRECTED:** `ScalperGates.java` does NOT currently import `java.math.RoundingMode` (only
+`ConnectTheDotsScorer`/`MarketOiClient` do) — ADD the import. `GateOutcome(boolean pass, BigDecimal
+operand, String reason)` carries the `frac` as the operand so the reason rides the side-channel, like
+every other gate; `GateOutcome.pass(null, …)` and the 3-arg constructor used above are both real
+accessors — verified against `GateOutcome.java`.)*
 
 **File 2 — `ScalperOiProps.java`: two tunable knobs + defaults.**
 ```java
@@ -223,9 +243,17 @@ BigDecimal vwapMaxDistanceFrac,
 // chop. Default 0 (the min clause OFF) so only the #7 variant that wants it sets it.
 BigDecimal vwapMinDistanceFrac,
 ```
-*(Add to the record header + the compact-constructor null-fill block + the `defaults()` all-null literal,
-matching the existing 11-field pattern L18-78. DEFAULT_VWAP_MAX = `new BigDecimal("0.004")`,
-DEFAULT_VWAP_MIN = `BigDecimal.ZERO`.)*
+*(Add to the record header (L18-29) + the compact-constructor null-fill block (L57-73) + the `defaults()`
+all-null literal (L77, which must grow from 11 to 13 nulls), matching the existing 11-field pattern.
+DEFAULT_VWAP_MAX = `new BigDecimal("0.004")`, DEFAULT_VWAP_MIN = `BigDecimal.ZERO`.)*
+> **AUDIT note (comment vs pattern):** the established `ScalperOiProps` pattern null-fills every field to a
+> default in the compact constructor, so `vwapMaxDistanceFrac` is NEVER null at runtime — it defaults to
+> 0.004, not "inert". The "Null => inert" wording above is therefore inaccurate; correct it to "the gate is
+> only consulted when `requireVwapDistance` is armed (default OFF), so the 0.004 default is dormant until a
+> variant opts in." (No parity impact — the gate is tag-gated OFF.) **Scale caveat:** these two knobs are
+> FRACTIONS (0.004 = 0.4 %), unlike the sibling `crossFilterPct`/`spurt*` knobs which are PERCENT-scale
+> (50 = 50 %). Keep the units straight: `frac` (a fraction) is compared against `vwapMaxDistanceFrac`
+> (also a fraction) — internally consistent — but do NOT reuse a percent-scale default here.
 
 **File 3 — `ScalperConfig.java`: the arming tag.**
 - Add `boolean requireVwapDistance` to the record (after `requireStraddle`, the FU2 placement
@@ -317,25 +345,54 @@ Grading rules (each a `ScalperOiProps` knob, default a no-op):
   to today** until the owner tunes a knob (the "advisory, doesn't change emission" guarantee, and even the
   *number* is unchanged at defaults).
 
-**File 2 — `EmissionGuard` SPI + `PaperEmissionGuard`.** Extend `suggestedQty` to accept the multiplier
-(or apply it at the call site — see below). Cleanest: keep `PositionSizer` unchanged and apply the
-multiplier in `SignalEngine.emitEntry`:
+**File 2 — `EmissionGuard` SPI + `PaperEmissionGuard` (AUDIT-CORRECTED — the multiplier MUST be applied
+inside the paper adapter, not in `SignalEngine.emitEntry`).**
+
+> **Why the original "apply it in `SignalEngine.emitEntry`" was wrong (two hard blockers, both verified):**
+> 1. **No `lotSize` / lot-round helper at that call site.** Lot size lives only in `InstrumentMetaClient`
+>    (`meta.lotSize()`), which is in the **paper** module and reached ONLY through `PaperEmissionGuard`
+>    (`PaperEmissionGuard.java:52-55`). `SignalEngine` (the **signals** module) must NOT import paper — the
+>    `EmissionGuard` SPI exists precisely to keep the module graph acyclic (`EmissionGuard.java:7-10`). So
+>    `lotRoundDown(qty.multiply(m), lotSize)` simply cannot be written in `emitEntry`; there is no `lotSize`
+>    nor a `lotRoundDown` there, and re-rounding off-lot would also diverge from `PositionSizer`'s own
+>    rounding.
+> 2. **No `oiProps` in scope.** `SignalEngine` holds no `ScalperOiProps` bean (verified — its ctor/fields
+>    carry none). Threading the grading knobs in would mean a NEW `SignalEngine` dependency just for sizing.
+>
+> **Correct design:** add a nullable `BigDecimal multiplier` parameter to the `EmissionGuard.suggestedQty`
+> SPI; `PaperEmissionGuard` already has `meta.lotSize()` and calls `PositionSizer.size(...)`, so it applies
+> the multiplier and re-lot-rounds DOWN there (one rounding authority). `SignalEngine.emitEntry` only
+> COMPUTES the multiplier (pure arithmetic on the in-scope `decision`) and passes it through:
+
 ```java
-// probability-graded sizing: scale the advisory qty by the confluence/OI-gap/VIX multiplier
-// (§2.14 r65). Advisory only — never changes whether the signal fired. Default 1.0 => no change.
-if (suggestedQty != null && decision != null) {
-  BigDecimal m = ScalperSizing.sizeMultiplier(
-      decision.confluence().aggregate(), /* oi imbalance + vix from the decision/ctx */ …, oiProps);
-  BigDecimal graded = lotRoundDown(suggestedQty.multiply(m), lotSize);   // never round UP
-  suggestedQty = graded.signum() > 0 ? graded : suggestedQty;           // never zero out an entry
-}
+// in SignalEngine.emitEntry, at the existing L605-614 sizing block (decision is in scope):
+BigDecimal multiplier =
+    decision == null ? null : ScalperSizing.sizeMultiplier(decision /* aggregate + the §3.2-File-2 scalars */);
+BigDecimal suggestedQty =
+    emissionGuard.get().suggestedQty(
+        strategy.definition().sizing(), exchange, tradingsymbol, entryPrice, stopDistance, multiplier);
+// PaperEmissionGuard.suggestedQty(...) now:
+//   long base = PositionSizer.size(sizing, new Inputs(equity, price, stopDistance, lot));
+//   long graded = multiplier == null ? base
+//       : Math.max(lot, /* lot-round-down */ BigDecimal.valueOf(base).multiply(multiplier)…);  // never 0 an entry, never round UP
+//   return graded <= 0 ? null : BigDecimal.valueOf(graded);
 ```
-*(Wrinkle: the OI-imbalance % and VIX live on the `ScalperGateContext`, which is built inside the seam and
-not currently returned on the `Decision`. To keep `emitEntry` pure of market-data, surface the two scalar
-operands on the `Decision` record (additive fields `oiImbalancePct`, `vixLevel`/`vixRising`) — they are
-ALSO `[S]` since `Decision` is not a golden-serialized type. Alternatively read them off
-`decision.confluence().dots()` which already carries the scored values. See Open Point #3 for the cleaner
-of the two.)*
+> **`ScalperSizing` needs `ScalperOiProps`** for its knobs. Either (a) make `sizeMultiplier` a method on a
+> Spring-managed `ScalperSizing` bean that is constructor-injected with the `ScalperOiProps` bean and wire
+> THAT bean into `SignalEngine` (one new ctor dep on `SignalEngine`, holding `ScalperSizing`, not raw
+> `oiProps`) — **recommended, keeps the knob source single**; or (b) pass a pre-resolved `ScalperOiProps`
+> into `emitEntry`. Either way the parameter shape above is the load-bearing fix; the original snippet's
+> in-`emitEntry` lot-round does not compile.
+
+*(Wrinkle: the OI-imbalance % and VIX live on the in-seam `ScalperGateContext`, which is built inside the
+seam and NOT returned on the `Decision` (verified: `Decision` = `(side, legs, confluence, expiry,
+structuralStop)` only). `confluence().aggregate()` IS on the decision, but the OI-imbalance % / VIX are
+not. To keep `emitEntry` free of market-data, surface the two scalar operands on the `Decision` record
+(additive fields `oiImbalancePct`, `vixLevel`/`vixRising`) — they are ALSO `[S]` since `Decision` is not a
+golden-serialized type. Alternatively read them off `decision.confluence().dots()` (the per-dot
+`DotScore{dot,weight,supports}` carries support-booleans, NOT the raw imbalance/VIX scalars — so this
+fallback can only re-derive a coarse boolean, not the % — making option (a) the only faithful path). See
+Open Point #3.)*
 
 **Specific rows folded in (all advisory annotations on the same multiplier or a side-channel note):**
 - *0.5%-risk-off-stop* sizing (risk-framework.md L18, §2.2 r5): this is already `atr_risk` in
@@ -381,15 +438,19 @@ Two faithful options; recommend **(a)** for v1:
 **(b) A soft time-of-day SKIP gate behind a default-OFF tag (recommended):** mirror 3.1a — a
 `ScalperGates.timeOfDayPreference(istTime, from, to)` that PASSES inside the preferred window and FAILS
 (skips the entry) outside it, armed by a `time-of-day-preference` tag, with the window as `ScalperOiProps`
-`LocalTime` knobs (`preferFrom` 10:00 / `preferTo` 13:30). Insert as an early-return after the existing
-`timeWindow` check (L116). Because it is tag-gated default-OFF and is an early-return (not a scorer term),
+`LocalTime` knobs (`preferFrom` 10:00 / `preferTo` 13:30). Insert as an early-return immediately AFTER the
+existing `timeWindow` block closes (after L118 — **AUDIT pass 2:** the block is `if (!timeOk) {` at L116,
+the inner `return Optional.empty();` at **L117**, the closing `}` at L118; the new gate goes after that `}`
+at L118, before the chain fetch at L119. Pass 1 mis-attributed the inner `return` to L116 — the insertion
+point is unchanged, only the line label was off by one). Because it is tag-gated
+default-OFF and is an early-return (not a scorer term),
 it is parity-safe exactly like #5/FU2.
 - Trade-off: (b) is a HARD skip, not a soft preference — it converts "prefer" into "only". The doc's intent
   is a *preference*, so the honest v1 is to make the window a tunable skip a variant opts into, and leave
   the genuine soft-weighting to the scorer-dot redesign (Open Point #5). Recorded so the owner picks.
 
 **Files:** `ScalperGates.java` (the new gate), `ScalperConfig.java` (`requireTimeOfDayPreference` +
-`time-of-day-preference` parse), `ScalperConfluenceGate.java` (early-return after L116), `ScalperOiProps`
+`time-of-day-preference` parse), `ScalperConfluenceGate.java` (early-return after L118 — the `}` that closes the `if (!timeOk)` block; the inner `return` is L117, not L116 — AUDIT pass 2 fix), `ScalperOiProps`
 (the two `LocalTime` knobs — or hold them as `ScalperConfig` constants like `OPENING_FROM` L72, since
 they are clock bounds not OI knobs; recommend `ScalperConfig` constants for consistency).
 
@@ -404,7 +465,7 @@ they are clock bounds not OI knobs; recommend `ScalperConfig` constants for cons
 | 3.1b prior-day-VWAP **gate-switch** (feed the 3.1a gate from prior-day VWAP < 10:30) | **[P]** | Rides the `vwap-distance` tag + a default-OFF `prior-day-vwap` sub-flag. Same golden-invisible argument. |
 | 3.2 probability-graded size **multiplier** (+ `max_deploy_pct` clamp, RSI/OI-gap/VIX factors) | **[S]** | Annotates the advisory `suggested_qty` ONLY (stamped outside the frozen `ScoreBreakdown`/`GoldenSignalsJson`); defaults to `1.0` → stamped qty byte-identical until a knob is tuned. Never changes which signal fires. |
 | 3.2 new `atr_risk` 0.5%-risk YAML **variant** | **[S]** | Brand-new strategy file → no existing golden to perturb; `atr_risk` already in `PositionSizer`. |
-| 3.2 additive `Decision`/SPI scalar fields (`oiImbalancePct`, `vixLevel`) | **[S]** | `Decision` is not golden-serialized; the SPI is a live-only port. |
+| 3.2 additive `Decision`/SPI scalar fields (`oiImbalancePct`, `vixLevel`) + new `multiplier` param on `EmissionGuard.suggestedQty` | **[S]** | `Decision` is not golden-serialized; the SPI is a live-only port (paper module) — neither is touched by `GoldenSignalsJson`/`ScoreBreakdownJson`. The SPI arity change is a compile-time fan-out (the one `PaperEmissionGuard` impl + the `emitEntry` call site), NOT a parity risk. |
 | 3.3 time-of-day skip gate (option b) | **[P]** | NEW tag **`time-of-day-preference`**, default-OFF, early-return (not a scorer term) → golden-invisible like 3.1a. |
 | 3.3 time-of-day scorer **dot** (option a) | **[P], REJECTED** | Would change the aggregate denominator for every bar (the FU2 Dow-dot failure mode) → not parity-safe without a scorer-signature redesign. Deferred (Open Point #5). |
 
@@ -443,9 +504,14 @@ at L216 shows the `LocalTime` override pattern):
   is never consulted; vwap stays a soft dot).
 - `timeOfDayPreferenceStrategySkipsAfterCutoff` — pass `LocalTime.of(14,0)` with the time-of-day CFG →
   `.isEmpty()`; `LocalTime.of(10,30)` → `.isPresent()`. Bare `CFG` at 14:00 still passes the §0B window.
-- **Sizing seam:** `ScalperRiskIntegrationTest` / `PaperAccountRiskIntegrationTest` (the existing
-  `suggestedQty` ITs) get a case asserting the multiplied qty: a weak-confluence decision stamps a
-  REDUCED `suggested_qty` vs a strong one, and a default-props decision stamps the SAME qty as today.
+- **Sizing seam:** `ScalperRiskIntegrationTest` / `PaperAccountRiskIntegrationTest` (both verified to
+  exist; **AUDIT pass 2:** `PaperAccountRiskIntegrationTest` is the one that actually exercises the
+  `suggestedQty` stamp — put the multiplier assertion there) get a case asserting the multiplied qty: a weak-confluence
+  decision stamps a REDUCED `suggested_qty` vs a strong one, and a default-props decision stamps the SAME
+  qty as today. **Also add a `PaperEmissionGuard` unit/IT case** for the new SPI `multiplier` param: a
+  `null` multiplier returns the un-graded qty (byte-identical to today's signature behaviour) and a 0.5
+  multiplier returns a lot-rounded-DOWN, never-zero qty — this is the seam where the multiplier is actually
+  applied (NOT `emitEntry`), so it must be covered there.
 
 ### 5.3 Load test (`ScalperStrategyLoadTest.java`)
 After the seed loop, add OFF assertions (the regression tripwire that no tag is silently armed):
@@ -535,11 +601,29 @@ with the full reactor + `-am` (`-pl services/strategy-signal-service -am verify`
    Recommend (a) for v1, (b) as a tunable superset later.
 
 3. **How `emitEntry` reads the OI-imbalance % / VIX for the multiplier (3.2).** The operands live on the
-   in-seam `ScalperGateContext`, not on the returned `Decision`. **Options:** (a) add additive scalar
-   fields (`oiImbalancePct`, `vixLevel`, `vixRising`) to the `Decision` record — explicit, typed,
-   `[S]` (not golden-serialized) — **recommended**; (b) parse them back out of
-   `decision.confluence().dots()` (already carried) — avoids touching `Decision` but is stringly-typed and
-   fragile. Recommend (a).
+   in-seam `ScalperGateContext`, not on the returned `Decision` (verified: `Decision` = `(side, legs,
+   confluence, expiry, structuralStop)`). **Options:** (a) add additive scalar fields (`oiImbalancePct`,
+   `vixLevel`, `vixRising`) to the `Decision` record — explicit, typed, `[S]` (not golden-serialized) —
+   **recommended**; (b) parse them back out of `decision.confluence().dots()` — **AUDIT-CORRECTED: this
+   fallback is NOT viable for the raw scalars.** `DotScore` is `(String dot, double weight, boolean
+   supports)` — it carries only the support BOOLEAN, never the raw imbalance % or VIX level. So (b) can at
+   best recover a coarse "OI-gap dot supported / not", not the magnitude the §2.14-r65 graded factor needs.
+   Recommend (a) — it is the only faithful path. **Also note (relates to §3.2 File 2):** whichever path,
+   the multiplier is COMPUTED in `emitEntry` from the (now-enriched) `decision` and APPLIED inside
+   `PaperEmissionGuard` via the new SPI `multiplier` param — never lot-rounded in `emitEntry` (no `lotSize`
+   there; signals must not import paper).
+   **AUDIT pass 2 — `Decision` constructor fan-out the plan under-stated (the parallel of the §2.4
+   `ScalperConfig` fan-out):** option (a) adds fields to the `Decision` record, so BOTH `new Decision(...)`
+   call sites in `ScalperConfluenceGate` must change positionally — the directional one at **L279** and the
+   #11 straddle one at **L141-146** (verified: exactly 2 sites; the `ExitEvaluator` `Decision(...)` is an
+   unrelated engine type). The straddle path branches and RETURNS *before* `ctx` is built (`ctx` is L191-192,
+   the straddle return is L136-146), so it has **no `ctx.oi()`/`ctx.macro()`** — it must pass `null` for the
+   new `oiImbalancePct`/`vixLevel`/`vixRising` scalars (a neutral straddle would size at the multiplier
+   floor/neutral, which is acceptable — a direction-neutral position carries no OI-imbalance side read).
+   The directional path at L279 DOES have `ctx` in scope, so it passes
+   `ctx.oi().callPutDeltaImbalancePct()` + `ctx.macro().vixLevel()`/`vixRising()`. This is a `[S]`
+   compile-time fan-out (Decision is not golden-serialized), not a parity risk — but enumerate it so the
+   executor doesn't hit a surprise compile error or try to source OI scalars on the straddle path.
 
 4. **Day-P&L-aware sizing factors (recycle-profit / win=loss symmetry / Hero-Zero low-delta cap).** These
    need `dayPnl`, which is an account-side feed owned by the `daily-target-caps`/ledger stream. **Options:**
@@ -566,3 +650,227 @@ with the full reactor + `-am` (`-pl services/strategy-signal-service -am verify`
    number ("too wide"). **Options:** (a) ship 0.4% as a cautious DB-tunable default and calibrate on
    forward paper (recommended — never armed by default anyway); (b) leave it null so the tag is inert until
    the owner sets it. Recommend (a) so an armed variant has a sane starting band.
+
+8. **(ADDED, audit) The `max_deploy_pct` per-trade cap is NOT part of `sizeMultiplier` — it lives where
+   equity + lotSize do.** `ScalperSizing.sizeMultiplier(aggregate, oiImbalance, vix, props)` is pure on
+   confluence/OI/VIX scalars and knows neither account equity nor the option premium-per-lot, so it CANNOT
+   evaluate "deployed % of capital ≤ 30%". That clamp is `qty × price × lot ≤ equity × maxDeployPct`, which
+   only `PaperEmissionGuard` can compute (it holds `account.equity()` + `meta.lotSize()` + `price`). **Plan
+   correction:** apply the `max_deploy_pct` ceiling in `PaperEmissionGuard.suggestedQty` AFTER the
+   multiplier + lot-round (clamp DOWN, never raise), reading the ceiling from a `ScalperOiProps` knob
+   (Open Point #6 option a). The §3.2 prose that folds `max_deploy_pct` "onto the same multiplier" is
+   imprecise — it is a separate clamp at the paper adapter, not a factor inside `sizeMultiplier`.
+
+---
+
+## Audit pass 1 findings
+
+**Verdict: sound-with-open-points.** Every load-bearing citation was opened and verified against source;
+the parity argument is correct and the [P]/[S] classification holds. Two real soundness defects in the
+§3.2 sizing wiring were corrected in place (they would not have compiled as written), plus several cite
+imprecisions. No change moves an existing signal at defaults; all `[P]` changes are tag-gated default-OFF
+and the goldens stay byte-identical.
+
+**Citations — verified correct (opened the real files):**
+- `ScalperConfluenceGate.java`: `evaluate` L100-280, class-javadoc L21-33 (LIVE-only firewall), `Chart`
+  built L124, `chart(...)` L304-316 (close L309 / vwap L310), side L149-152, volume/RSI rails L157-163,
+  two-candle L167-169, gap-fill L173-179, #5 delta-filter L196-199, trend-change L204-211, open-high-low
+  L218-229, hero-zero L236-245, ctx L191-192, `Decision` record L71-87 (no sizing field), `vwapHardGate`
+  L249. ALL correct.
+- `ScalperGateContext.java`: `Chart(close, vwap, vwma20, psar, supertrendDir, rsi14, volume)` L21-28; `Oi`
+  carries `callPutDeltaImbalancePct`/`ceOiDelta`/`peOiDelta`/`trendingPeMinusCePct` (L39-52); `Macro`
+  carries `vixLevel`/`vixRising`/`advances`/`declines` (L59-68). ALL correct.
+- `ScalperGates.java`: `volume` L64-68, `rsiBand` L76-84, `indicatorAlignment` L102-118,
+  `callPutDeltaFilter` L151-161, `gt` L173-175, `timeWindow` L33-44. ALL correct. `GateOutcome` is
+  `(boolean pass, BigDecimal operand, String reason)` with `pass(...)`/`fail(...)` — the §3.1a gate code is
+  type-sound.
+- `ScalperConfig.java`: record L36-52, `requireCallPutDeltaFilter` L46, `requireStraddle` L52, constants
+  L82-98, `from(...)` L101-157, `oi-cross-filter` L153, `two-candle-pattern` L119, `open-high-low` L125,
+  ctor return L154-156, `VWAP_ACTIONABLE_FROM`=10:30 L76, `OPENING_FROM` L72. ALL correct.
+- `ScalperOiProps.java`: 11-field record (L18-29), compact-constructor null-fill (L57-73), `defaults()`
+  all-null (L77); `crossFilterPct` default 50 (percent scale). Javadoc is L6-16 (plan said L6-12 — fixed).
+- `SignalEngine.emitEntry` L573-658; the L605-614 sizing block quoted in §2.5 matches byte-for-byte;
+  `scalperDetailJson` L667-706. `EmissionGuard.suggestedQty(...)` L31-36; `PaperEmissionGuard.suggestedQty`
+  L45-57 (lot-round actually inside `PositionSizer`, a harmless attribution slip); `PositionSizer.size`
+  L26-62 with `atr_risk` at L45-54 reading `risk_pct_equity` — all correct, `atr_risk` 0.5%-off-stop sizing
+  confirmed present-but-unused.
+- Tests: `ScalperConfluenceGateTest` 8 literals L43-90 (positional booleans — adding `requireVwapDistance`
+  after `requireStraddle` forces +1 `false` to each, confirmed), `bullBank()` L115, `bullContext()` L137,
+  time-block test L216; `ScalperGatesTest.breadthThirtyTwoCutoff` L110; `ScalperStrategyLoadTest` OFF-assert
+  pattern L148-159; `from(...)` external call sites = exactly 2 (`ScalperStrategyLoadTest.java:130`,
+  `SignalEngine.java:195`). `GoldenDeterminismTest.FEATURES` + `BacktestParityTest.FEATURES` = the same 5
+  pure-engine YAMLs (`ema-crossover`, `optional-indicator-activation`, `btst-preclose`, `exit-intrabar`,
+  `context-series`), NO scalper; `BacktestParityTest` has the three byte-match asserts. ALL correct.
+- Disposition source rows (all in `docs/strategy-audit/disposition/`): connect-the-dots L33, gap-theory
+  L25, hero-zero L29, intro-terminology L15, morning-trade L21/L30, risk-framework L18/19/21/22/23/24/44/49/53,
+  open-high-low L27, trending-oi L24/37/38, session-additions-and-manual-coverage L29/35 — every disposition
+  cell verified to read the package the plan claims. The risk-framework AUTOMATE_PKG-themes block L72-77
+  exists and tags `probability-graded-sizing` ("9 rows") + `vwap-distance-sizing` (1 row).
+  *(**AUDIT pass 2 correction:** the block's "(9 rows)" label is the disposition doc's own self-count and is
+  off by one — only **8** rows literally carry the `probability-graded-sizing` tag; see pass-2 finding NEW-D.)*
+- No shipped scalper YAML carries `vwap-distance`/`time-of-day-preference`/`prior-day-vwap` (grep clean);
+  all 36 use `position_sizing: { method: premium_budget, params: { budget_inr: 15000 } }` — confirms the
+  "flat ₹15k" premise and the `atr_risk` variant's YAML key.
+  *(**AUDIT pass 2 correction:** the budget is NOT uniform — 33 use 15000, **3** (hero-zero/§7) use 2000;
+  see pass-2 finding NEW-B. The "flat premium_budget" / `atr_risk`-key premise is otherwise intact.)*
+
+**Cite imprecisions corrected in place:**
+1. §1 table filename `session-additions.md` → `session-additions-and-manual-coverage.md`; added a note that
+   all source rows live in `docs/strategy-audit/disposition/` (the bare `docs/strategy-audit/` files carry
+   different line numbers). [FIXED]
+2. §3.0.3 `ScalperOiProps` javadoc L6-12 → L6-16. [FIXED]
+3. §3.1a "Reuse the existing `RoundingMode` import" — FALSE for `ScalperGates.java` (it imports no
+   `RoundingMode`; only `ConnectTheDotsScorer`/`MarketOiClient` do). Corrected to "ADD the import". [FIXED]
+4. §3.3 / §3.3-Files "early-return after L116" — L116 is the inner `return Optional.empty();`; the gate
+   inserts after the block's `}` at L118 (before the chain fetch at L119). [FIXED]
+
+**Soundness defects corrected (would not have compiled):**
+5. **§3.2 File 2 multiplier-in-`emitEntry` is architecturally impossible.** (a) There is no `lotSize` /
+   `lotRoundDown` at that call site — lot size is `meta.lotSize()` in the **paper** module, and `SignalEngine`
+   (signals module) must not import paper (the `EmissionGuard` SPI exists to keep the graph acyclic,
+   `EmissionGuard.java:7-10`). (b) `SignalEngine` holds no `ScalperOiProps`. Rewrote File 2: add a nullable
+   `multiplier` param to the `EmissionGuard.suggestedQty` SPI, COMPUTE it in `emitEntry` (pure on
+   `decision`), APPLY + re-lot-round-down inside `PaperEmissionGuard`; wire the knobs via a Spring
+   `ScalperSizing` bean injected into `SignalEngine`. [FIXED]
+6. **§3.2 fallback "read OI-imbalance/VIX off `decision.confluence().dots()`" cannot work** — `DotScore` is
+   `(dot, weight, supports)`, carrying only a boolean, never the raw % / VIX level. Open Point #3 corrected:
+   the additive `Decision` fields are the only faithful path. [FIXED]
+7. **§3.1a `vwapMaxDistanceFrac` "Null => inert" contradicts the null-fill pattern** — the compact ctor
+   defaults it to 0.004; it is never null at runtime. Reworded ("dormant because tag-gated OFF, not null").
+   Added the fraction-vs-percent scale caveat (these knobs are fractions; `crossFilterPct`/`spurt*` are
+   percent). [FIXED]
+8. **§3.2 `max_deploy_pct` is a separate clamp, not a `sizeMultiplier` factor** — it needs equity + lotSize,
+   which live only in `PaperEmissionGuard`. Added as Open Point #8 with the corrected placement. [FIXED]
+
+**Completeness additions:**
+- §2.4: named the two OTHER producers of the canonical constructor the executor must update — the `from(...)`
+  factory's own `new ScalperConfig(...)` (L154-156) and the record header (L36-52) — not just the 8 test
+  literals.
+- §5.2: added a `PaperEmissionGuard` test case for the new SPI `multiplier` param (null → un-graded;
+  0.5 → lot-rounded-down, never-zero), since that adapter — not `emitEntry` — is where the multiplier applies.
+
+**Parity (critical) — confirmed safe.** `GoldenDeterminismTest` / `BacktestParityTest` would still pass:
+their FEATURES carry no scalper, neither harness instantiates the scalper seam, and `suggested_qty` +
+`scalper_detail` are stamped OUTSIDE the frozen `ScoreBreakdownJson`/`GoldenSignalsJson` serializers. The
+three `[P]` tags (`vwap-distance`, `prior-day-vwap`, `time-of-day-preference`) are absent from all 36
+shipped YAMLs, so every existing config compiles byte-identical. The §3.3-rejected scorer-dot (option a) is
+correctly flagged [P]-REJECTED — it would change the unconditional `den` sum (L100-107) for every bar, the
+documented FU2 Dow-dot failure mode.
+
+**Dependency sequencing — correct.** 3.1a / 3.3 have no upstream dep (chart + clock in-hand); 3.2's VIX
+factor is dormant until the macro-vix stream lands (degrades to 1.0); 3.1b prior-day VWAP is correctly
+sequenced LAST behind a new market-data read + Open Point #1; day-P&L factors correctly deferred to the
+ledger stream (Open Point #4). No SPAN / equity-universe coupling (index-options long-premium only). The
+one subtlety the audit added: the SPI/bean wiring for 3.2 (above) is a prerequisite the original sequencing
+under-stated — fold it into PR-3.
+
+**Residual open points the executor still owns:** Open Points #1-#8 (including the two added by this audit,
+#8 and the dots-fallback note in #3). None blocks PR-1 (3.1a), the lowest-risk slice.
+
+---
+
+## Audit pass 2 findings
+
+**Verdict: sound-with-open-points (independently re-confirmed).** I re-opened every load-bearing source
+file from scratch (not trusting pass 1's line numbers) and re-verified the parity argument end to end. All
+8 pass-1 corrections are correct against source and introduced no new error. The [P]/[S] split holds: the
+ONLY signal-affecting changes are the two tag-gated entry-skip gates (3.1a `vwap-distance`, 3.3
+`time-of-day-preference`) + the 3.1b prior-day-VWAP gate-switch, each default-OFF and absent from all 36
+shipped YAMLs (grep-confirmed), so every existing config stays byte-identical and the goldens are re-run
+(not regenerated). Five new imprecisions were found and corrected in place — all cosmetic/completeness, none
+a soundness defect.
+
+**Independently re-verified (opened the real files, byte-checked line numbers):**
+- `ScalperConfluenceGate.java`: `evaluate` L100-280, LIVE-only class-javadoc L21-33, `Chart` L124,
+  `chart(...)` L304-316 (close L309 / vwap L310), side L149-152, volume/RSI L157-163, #5 delta L196-199,
+  ctx L191-192, `Decision` L71-87, `vwapHardGate` L249, the `if (!timeOk)` block L116-118. **All exact.**
+  The §3.1a insertion (after the side at L152) sits AFTER the straddle branch (L132-147), so a straddle —
+  which has no directional side — correctly never reaches the VWAP-distance gate. ✓
+- `ScalperGates.java`: `volume` L64-68, `rsiBand` L76-84, `indicatorAlignment` L102-118,
+  `callPutDeltaFilter` L151-161, `gt` L173-175, `timeWindow` L33-44; imports only `BigDecimal`/`LocalTime`/
+  `Map` (NO `RoundingMode` — pass-1's "ADD the import" is right). `GateOutcome` is `(boolean pass, BigDecimal
+  operand, String reason)` with `pass`/`fail` statics — the §3.1a `vwapDistance` gate is type-sound. ✓
+- `ScalperGateContext.java` `Chart`/`Oi`/`Macro` records (L21-28 / L39-52 / L59-68) — every field the plan
+  reads (`close`,`vwap`,`callPutDeltaImbalancePct`,`vixLevel`,`vixRising`) is present. ✓
+- `ScalperConfig.java`: record L36-52, `requireStraddle` is the LAST field (so the new `requireVwapDistance`
+  appends cleanly), constants L82-98, `from(...)` L101-157, tag parses L119/125/153, canonical ctor L154-156.
+  Exactly **2** external `from(...)` call sites (`ScalperStrategyLoadTest:130`, `SignalEngine:195`) — neither
+  breaks on a record-field add. ✓
+- `ScalperOiProps.java`: 11-field record L18-29, null-fill compact ctor L57-73, `defaults()` 11 nulls L77
+  (→ 13 after the 2 VWAP knobs), `crossFilterPct` default 50. The class javadoc (L13-15) confirms the
+  fraction-vs-percent scale split pass 1 flagged: IV/VWAP knobs are 0..1 fractions, `crossFilterPct`/`spurt*`
+  are percent. ✓
+- `SignalEngine`: sizing block L605-614 byte-matches; `decision` is a method param (L575, in scope);
+  **no `ScalperOiProps` bean in the fields/ctor (L90-158)** — pass-1 defect #5 confirmed; `scalperDetailJson`
+  L667-706; `DotScore` is `(dot, weight, supports)` (L683-685) — confirms Open Point #3's
+  dots-fallback-not-viable correction. ✓
+- `EmissionGuard` (SPI, signals module, L31-36) + `PaperEmissionGuard` (L46-57, holds `meta.lotSize()` via
+  `InstrumentMetaClient`, calls `PositionSizer.size`) — the SPI-keeps-the-graph-acyclic claim and the
+  "multiplier must apply in the paper adapter, not `emitEntry`" rewrite are both correct. `PositionSizer`
+  has `atr_risk` at L45-54 reading `risk_pct_equity`, and **lot-rounds internally** (its `lotRound` is
+  `private` L71) — so `PaperEmissionGuard` will need its OWN lot-round-down on `meta.lotSize()` after the
+  multiply (the plan's `/* lot-round-down */` placeholder is right to flag it; it can't reuse PositionSizer's
+  private helper). `atr_risk` yields 0 without a positive `stopDistance` (L47-49) — confirms §6 dep #4. ✓
+- `ConnectTheDotsScorer.score(...)` L63-65 is a pure function with no conditional-dot flag; `den` accumulates
+  EVERY dot's weight unconditionally (L100-107) — so the §3.3-rejected scorer dot WOULD shift the
+  denominator for every bar. The [P]-REJECTED classification is correct, and the FU2 precedent it cites
+  (FU2 L648-650, the Dow-dot denominator failure) is real. ✓
+- `MarketOiClient` javadoc: **"Live-feed only … never part of a deterministic replay"** — confirms §3.1b's
+  "a prior-day VWAP read there keeps the seam pure" (parity held via the V009 persisted-confluence replay).
+  `seriesStore` is `LiveSeriesStore` (SignalEngine L94). ✓
+- Disposition rows (re-opened `docs/strategy-audit/disposition/`): every cited `file:line` reads the package
+  the plan claims — `vwap-distance-sizing` = connect-the-dots L33, gap-theory L25, hero-zero L29, intro L15,
+  morning-trade L21, risk-framework L21, session-additions L35 (**7**); `probability-graded-sizing` =
+  risk-framework L18/19/22/23/24/44/49/53 (**8**) + open-high-low L27 + trending-oi L24/L38 + morning-trade
+  L30 + session-additions L29 (**5**) = **13**; `time-of-day-preference` = trending-oi L37 (**1**). The
+  hero-zero L29 "VWAP-pin sit-out" maps to the §3.1a minFrac clause; the Open-Point-#1 10:30-vs-11:00
+  disagreement is real (morning-trade L21 says "before 10:30", session-additions L23 / intro L14 say "until
+  11 AM"). ✓
+- Tests: 8 `new ScalperConfig(...)` literals at L43-90, `bullBank()` L115 / `bullContext()` L137,
+  `breadthThirtyTwoCutoff` L110, `ScalperStrategyLoadTest` OFF-assert pattern L151-153;
+  `GoldenDeterminismTest`/`BacktestParityTest` FEATURES = the same 5 pure-engine YAMLs (no scalper), with
+  `BacktestParityTest`'s three byte-match asserts at L68-78. `PaperAccountRiskIntegrationTest` +
+  `ScalperRiskIntegrationTest` both exist; `signals.spec.ts` exists; `ScalperSizing.java` does not (it's the
+  new class). ✓
+
+**New issues found by pass 2 (missed by both author and pass 1) — all corrected in place:**
+1. **(citation, NEW-A) Pass-1's own correction #4 is off by one.** In `ScalperConfluenceGate.java` L116 is
+   `if (!timeOk) {`, the inner `return Optional.empty();` is **L117**, the closing `}` is L118. Pass 1 (and
+   §3.3 + the §3.3-Files line) said "L116 is the inner return". The **insertion point is unchanged** (after
+   the `}` at L118, before L119); only the line label was wrong. Fixed in both spots. [FIXED]
+2. **(factual, NEW-B) "All 36 YAMLs use `budget_inr: 15000`" is wrong** — 33 use 15000, **3** (hero-zero/§7)
+   use `budget_inr: 2000` (grep-confirmed). The plan §1 premise and pass-1's "all 36 … 15000" over-generalize.
+   Immaterial to the design (multiplier defaults 1.0 over whatever budget the YAML sets), but the literal
+   claim was false. Reworded §1. [FIXED]
+3. **(completeness, NEW-C) The `Decision` constructor fan-out for §3.2 option (a) was under-stated.** Adding
+   scalar fields to the `Decision` record forces updating BOTH `new Decision(...)` sites — directional
+   **L279** and #11 straddle **L141-146** (exactly 2, verified). The straddle path RETURNS before `ctx` is
+   built (ctx L191-192), so it has no OI/VIX scalars and must pass `null` (a neutral straddle carries no
+   directional OI read — acceptable). This is the analogue of the §2.4 `ScalperConfig` arity fan-out the plan
+   documents meticulously; it's `[S]` (Decision isn't golden-serialized), not a parity risk, but omitting it
+   would surprise the executor with a compile error. Added to Open Point #3. [FIXED]
+4. **(count, NEW-D) §1.2 said risk-framework "9 rows → probability-graded-sizing"; only 8 rows literally
+   carry the tag.** The "(9 rows)" is the disposition doc's own self-count at risk-framework.md L72 and is
+   off by one against its own table (8 tagged rows: L18,19,22,23,24,44,49,53). The plan's 13-gap total
+   (8+5) is internally consistent with its §1 citation table, so only the §1.2 prose was wrong. Reconciled
+   to 8. [FIXED]
+5. **(over-claim, NEW-E) §5.2 called BOTH ITs "the existing `suggestedQty` ITs"** — only
+   `PaperAccountRiskIntegrationTest` exercises the `suggestedQty` stamp (`ScalperRiskIntegrationTest` exists
+   but doesn't). Both are valid homes; clarified which to put the multiplier assertion in. [FIXED]
+
+**Parity (critical) — re-confirmed safe end to end.** Every signal-affecting change is tag-gated default-OFF
+behind a NEW tag absent from all 36 shipped YAMLs, lives in the LIVE-only `ScalperConfluenceGate`/
+`MarketOiClient` seam (never on the deterministic replay path), and the sizing annotation is stamped
+OUTSIDE the frozen `ScoreBreakdownJson`/`GoldenSignalsJson`. `GoldenDeterminismTest` + `BacktestParityTest`
+carry no scalper in FEATURES and never instantiate the scalper seam → they stay byte-identical without
+regeneration. The one scorer-dot option (3.3a) that WOULD perturb the unconditional denominator is correctly
+[P]-REJECTED. The plan creates **no** new golden variant in any default-OFF PR — correct, because no golden
+YAML is a scalper.
+
+**Readiness verdict.** Implementation-ready as written after these fixes. The PR-1 (3.1a) and PR-2 (3.3)
+slices are the cleanest #5/FU2 copies and carry no residual unknowns. PR-3 (3.2 multiplier) is sound but
+the executor must (a) apply the multiplier + max_deploy_pct clamp + lot-round inside `PaperEmissionGuard`
+(its own lot-round helper — PositionSizer's is private), and (b) thread the additive `Decision` scalars
+through BOTH constructor sites with the straddle passing nulls (NEW-C). PR-5 (3.1b prior-day VWAP) remains
+correctly deferred behind Open Point #1 (the 10:30-vs-11:00 switch-time disagreement is genuine). No
+blocker found; the open points are owner decisions, not defects.

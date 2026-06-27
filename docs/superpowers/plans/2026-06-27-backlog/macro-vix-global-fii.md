@@ -23,13 +23,20 @@ read-only analytics it depends on. The unifying theme: the `ScalperGateContext.M
 producer passes `null`/unread values, so the corresponding dots/gates degrade to pass (no-ops). This
 stream populates them and adds the two missing dots (FII, constituent), each parity-gated.
 
-| Package | # gaps | Doc § | Disposition source rows |
+> **AUDIT pass 1 — source-row line numbers CORRECTED.** The original `<doc>.md Lxx` pointers below
+> were stale (the strategy-audit files were regenerated; their line numbering drifted). The
+> *package counts* are taken from the authoritative, current `GAP-DISPOSITION.md` and were verified
+> correct (`directional-vix-gate` 11 @ GAP-DISPOSITION L118; `fii-dii-bias` 6 @ L126;
+> `volume-pump-attribution` / `constituent-contribution` / `global-cues-feed` single-gap @ L157/L165/L173).
+> The per-doc `Lxx` cites are now re-pointed to the actual rows (opened + confirmed 2026-06-27).
+
+| Package | # gaps | Doc § | Disposition source rows (audit-corrected) |
 |---|---:|---|---|
-| **`directional-vix-gate`** | 11 | 4.5 / 4.14.1 / 4.14.5 / 4.17.5 / 3.10 / 3.12 / §7 | `indicators-oi-vix-iv.md` L25,L27 (2); `gates-strike-sr-fiidii.md` L27 (1); `connect-the-dots.md` L23 (1); `trend-change.md` L27 (1); `completeness-sweep.md` L34 (1); + the `open-high-low` / `two-candle` / `intro-terminology` / `session-additions` directional-VIX rows tallied in GAP-DISPOSITION §3a (11 total) |
-| **`global-cues-feed`** | 1 (+ tail) | 3.10 / 4.7 | `connect-the-dots.md` L24 (Dow dot, AUTOMATE) + L25 (Dollar/Asian/Crude — KEEP_MANUAL); `gates-strike-sr-fiidii.md` L14 + `completeness-sweep.md` L36 reference it (rows themselves COVERED_EXISTING). The single-gap `[P]` package is the **Dow dot**. |
-| **`fii-dii-bias`** | 6 | 4.13 / 4.17.4 / 3.10 / 3.12 | `gates-strike-sr-fiidii.md` L28,L29,L30,L31 (4); `connect-the-dots.md` L26 (1); `completeness-sweep.md` L35 (1) |
-| **`constituent-contribution`** | 1 | 3.12 / 4.14.4 | `trend-change.md` L29 (data-side AUTOMATE; FU1 carries the manual reminder) |
-| **`volume-pump-attribution`** | 1 | 4.15.3 | `indicators-oi-vix-iv.md` L32 |
+| **`directional-vix-gate`** | 11 | 4.5 / 4.14.1 / 4.14.5 / 4.17.5 / 3.10 / 3.12 / §7 | `indicators-oi-vix-iv.md` **L42** (VIX directional grid), **L43** (regime bands), **L44** (fresh-shorts/longs-exiting inferences), **L45** (vs prev-close) (4); `gates-strike-sr-fiidii.md` **L34** (VIX confluence) (1); `connect-the-dots.md` **L31** (VIX directional rule) (1); + the `open-high-low` / `two-candle` / `intro-terminology` / `session-additions` directional-VIX rows tallied in GAP-DISPOSITION L118 (11 total) |
+| **`global-cues-feed`** | 1 (+ tail) | 3.10 / 4.7 | `connect-the-dots.md` **L33** (Dow dot, AUTOMATE — "scalper scorer Macro has NO dow field"); `gates-strike-sr-fiidii.md` **L14** (Dollar/Asian/Crude — KEEP_MANUAL, "Dollar Index / Asian / Oil are nowhere"). The single-gap `[P]` package is the **Dow dot** (GAP-DISPOSITION L173). |
+| **`fii-dii-bias`** | 6 | 4.13 / 4.17.4 / 3.10 / 3.12 | `gates-strike-sr-fiidii.md` **L35** (participant-OI dot + FII>Pro>DII>Client), **L36** (L/U/B/C change-in-OI classifier), **L37** (leg-level seller read), **L38** (next-morning-only validity) (4); `connect-the-dots.md` **L36** (FII-DII not scored) (1) (GAP-DISPOSITION L126) |
+| **`constituent-contribution`** | 1 | 3.12 / 4.14.4 | `trend-change.md` **L34** (Index-contribution / heavyweights must support the direction; data-side AUTOMATE; FU1 carries the manual reminder) (GAP-DISPOSITION L165) |
+| **`volume-pump-attribution`** | 1 | 4.15.3 | GAP-DISPOSITION L157 (single-gap `AUTOMATE_PKG`). **Note:** the original `indicators-oi-vix-iv.md L32` cite is WRONG — L32 is the OI-Spurts 4-quadrant row (FULL coverage). The volume rows in that doc (L27/L38) are both FULL; the volume-pump *attribution* gap is the package-backlog row, not a per-doc gap row. Cite GAP-DISPOSITION, not the doc line. |
 
 **Total: 20 AUTOMATE gaps** (11 + 1 + 6 + 1 + 1), all in the GAP-DISPOSITION §3 `AUTOMATE_PKG`
 backlog, none in FU1/FU2. The FU1 manual reminders that shadow these (`vix_regime_bands`,
@@ -58,14 +65,20 @@ public record Macro(
     BigDecimal ceIvAvg6, BigDecimal peIvAvg6) {}
 ```
 
-### 2.2 The producer — `MarketOiClient.macro(...)` (L350-398)
+### 2.2 The producer — `MarketOiClient.macro(String underlying, LocalDate tradeDate)` (L351-398)
 - Reads `atmIv`, `ivRank` (`/options/iv-history`), breadth (`/breadth` → `advances/declines`),
-  `fiiLongPct` (`/fii-dii/long-short` → `latestFiiLongPct` L625-641), the IV pair (`/options/chain`).
-- **L394-397 the VIX gap:** `return new Macro(atmIv, ivRank, null, null, breadth[0], breadth[1],
+  `fiiLongPct` (`/fii-dii/long-short` → `latestFiiLongPct` **L626-641**), the IV pair (`/options/chain`).
+- **L396-397 the VIX gap:** `return new Macro(atmIv, ivRank, null, null, breadth[0], breadth[1],
   fiiLongPct, ...)` — the comment at L394-395 states "VIX has no market-data endpoint yet (§12.2
   follow-up)". **This is the root of `directional-vix-gate`.** (NB: a `/vix` endpoint *does* exist —
   see 2.6 — so the comment is stale; the gap is that `macro()` never calls it.)
-- `advanceDecline` L619-623, `latestFiiLongPct` L625-641 already map the JSON.
+- `advanceDecline` **L620-623**, `latestFiiLongPct` **L626-641** already map the JSON.
+- **AUDIT pass 1:** the cite was `L350-398` / `L619-623` / `L625-641`; corrected to the lines above
+  (the method body is L351-398; `advanceDecline` L620-623; `latestFiiLongPct` L626-641). The JSON keys
+  `latestFiiLongPct` reads — `items[].fiiLong` / `items[].fiiShort` — match the `LongShortRow` record
+  (`FiiDiiController` L31 `fiiLong, fiiShort`), confirmed. **Note for the executor:** `macro()` has
+  NO monthly-expiry early branch (that suppression lives in `oi()`, L267-274), so threading
+  `vixEnabled` into `macro()` is a clean single return-site change.
 
 ### 2.3 The scorer — `ConnectTheDotsScorer.score(...)` (L63-118)
 The 18-dot list (L74-98). Relevant rows:
@@ -84,19 +97,31 @@ The 18-dot list (L74-98). Relevant rows:
 - **No `dow`, `fii`, `constituent` gate fns exist.**
 
 ### 2.5 The tag → gate wiring — `ScalperConfig.java`
-- `record ScalperConfig(...)` L36-52 (15 fields today, ending `requireStraddle`).
+- `record ScalperConfig(...)` L36-52 (**16 fields** today: exchange, underlying, signalIndex, oiIndex,
+  rollDays, strikeParams, confluenceThreshold, requireTwoCandle, structuralStop,
+  requireCallPutDeltaFilter, requireGapFill, requireTrendChange, requireOpenHighLow, openingTick,
+  requireHeroZero, requireStraddle — ending `requireStraddle`). **AUDIT pass 1:** the original cite
+  said "15 fields"; it is 16. The 5 new `requireXxx` booleans take it to 21.
 - `from(JsonNode, List<String> tags)` L101-157: each `tags.contains("<tag>")` parse (L119-153) +
-  the single canonical `new ScalperConfig(...)` at L154-156.
+  the single canonical `new ScalperConfig(...)` at L154-156. **Each new tag adds one
+  `boolean requireXxx = tags.contains("<tag>")` line + one trailing arg in the canonical constructor.**
 - 36 YAMLs under `services/strategy-signal-service/src/main/resources/scalper-strategies/` (12
   strategies × {nifty, sensex-niftyoi, sensex-sensexoi}); the arming field is the top-level `tags:`
   list. None carry any tag this stream introduces.
 
 ### 2.6 Market-data feeds that ALREADY exist (the data is captured; only the wiring is missing)
-- **INDIA VIX:** `MarketSurfaceController.vix()` (`feed/MarketSurfaceController.java` L59-74) →
-  `GET /api/v1/market/vix` returns `{ltp, prevClose, change, changePct, asOf}` from the pinned
-  `INDIA VIX` quote. The 1m candle series `read("NSE","INDIA VIX","1m",...)` is read by
-  `ConnectingDotsService.vixByBucket` (`options/analytics/ConnectingDotsService.java` L353-367).
-  **So the VIX feed exists end-to-end; `macro()` just never calls it.**
+- **INDIA VIX:** `MarketSurfaceController.vix()` (`feed/MarketSurfaceController.java` **L60-82**) →
+  `GET /api/v1/market/vix` returns `VixQuote{ltp, dayHigh, dayLow, dayOpen, prevClose, change,
+  changePct, asOf}` from the pinned `INDIA VIX` quote. **AUDIT pass 1:** the response carries MORE
+  fields than the original cite listed (dayHigh/dayLow/dayOpen too), but the `ltp` + `change` the
+  `vixDirection()` reader (3.1) consumes are both present. **Critical wiring fact the reader must
+  handle:** when there is no quote (off-hours / mock) `vix()` THROWS `ApiException(422, DATA_GAP)`
+  — it does NOT return a null/empty body. The `MarketOiClient.get(...)` helper (L647-663) catches the
+  HTTP error and returns the fallback, so a 422 degrades to `VixRead.EMPTY` (null/null → fail-open),
+  exactly as 3.1 intends — but the executor must NOT assume a 200-with-null-fields body. The 1m
+  candle series `read("NSE","INDIA VIX","1m",...)` is read by `ConnectingDotsService.vixByBucket`
+  (`options/analytics/ConnectingDotsService.java` L353-367). **So the VIX feed exists end-to-end;
+  `macro()` just never calls it.**
 - **Dow:** `GlobalQuoteSource.latest(DOW)` (`kite/GlobalQuoteSource.java`) →
   `DOWJONES@GLOBAL_INDEX` LTP+prevClose, flag-gated (`artha.openalgo.global-quotes-enabled`).
   Consumed by `ConnectingDotsService.dowFactor` (L310-326, `int dow` L167). **No market-data
@@ -108,10 +133,19 @@ The 18-dot list (L74-98). Relevant rows:
   pure data already present.** The `/long-short` endpoint (L57-78) already derives the FII
   index-future L/S ratio that `fiiLongPct` reads.
 - **Constituent contribution:** `EquityIndexContributionService`
-  (`nse/analytics/EquityIndexContributionService.java`) computes per-constituent `weight × %change`
-  → `IndexContribution{indexChangePct, advanceTotal, declineTotal, advances[], declines[]}` from
-  `StaticIndexWeights` + the EQ bhavcopy. **The directional read (advanceTotal vs declineTotal sign)
-  is exactly the `constituent-contribution` signal — needs only an endpoint + a macro field.**
+  (`nse/analytics/EquityIndexContributionService.java`, method `contribution(String index)` L61)
+  computes per-constituent `weight × %change`
+  → `IndexContribution{indexChangePct, advanceTotal, declineTotal, advances[], declines[]}` (record
+  L49-53) from `StaticIndexWeights` + the EQ bhavcopy. **The directional read (advanceTotal vs
+  declineTotal sign) is exactly the `constituent-contribution` signal.** **AUDIT pass 1 — the
+  endpoint ALREADY EXISTS:** `EquityController.indexContribution` (`nse/analytics/EquityController.java`
+  L54-59) maps `GET /api/v1/market/equity/index-contribution?name=<index>` → the `IndexContribution`.
+  TWO consequences the original §3.4/§5.7 got wrong: (a) the query param is **`name`**, NOT `index`,
+  and there is **NO `date` param** — `contribution(String)` reads the LATEST EQ bhavcopy internally
+  (`max(trade_date)`, L169); (b) since it is a **pre-existing path**, adding the macro gate does NOT
+  add a new `@GetMapping` → **the springdoc contract does NOT drift for this package** (correction to
+  §5.7). So `constituent-contribution`'s `[S]` market-data work is effectively ZERO (reuse the
+  endpoint as-is); only the macro-field + gate (`[P]`) remains.
 - **Volume pump:** `ConnectingDotsService.volumeFactor(vol, prevVol, priceDelta)` L240-246 already
   signs a rising-volume bucket by price direction (bull/bear). The scalper's `volume` dot does NOT —
   that is the entire `volume-pump-attribution` gap (lift the same price-signed logic into the dot).
@@ -164,6 +198,17 @@ parity-safe on its own because **nothing reads `vixRising` until the `vix-gate` 
 existing `vix` *soft dot* (scorer L92) currently reads `m.vixRising()`, so populating it WOULD change
 that dot. See the critical carve-out in 3.1.
 
+> **AUDIT pass 2 — straddle short-circuits BEFORE the macro gates (placement constraint).** All five
+> early-return gates land *after* `ctx = client.context(...)` (the `~L192` insert, the #5 template
+> site). But the neutral-straddle path (`cfg.requireStraddle()`) returns at `ScalperConfluenceGate`
+> **L132-147 — BEFORE `ctx` is built AND before `side` is decided** (`verify(client, never()).context(...)`
+> at the test L754 proves a straddle never calls `context()`). Two consequences: (a) every macro gate is
+> side-based, so it could never have run for a direction-neutral straddle anyway — correct; (b) **arming
+> a macro tag (`vix-gate`/`fii-dii-gate`/`constituent-gate`/`global-cues-gate`/`volume-pump`) on a
+> `scalp-straddle-*` variant is a SILENT NO-OP** (the macro read + gate never execute). Harmless for
+> parity, but the PR-X arming step must NOT arm a macro gate on a straddle variant expecting it to bite.
+> Recorded as Open Point §8.14.
+
 ### 3.1 `directional-vix-gate` (11 gaps) — `[P]`
 
 **The carve-out that makes this non-trivial:** the scorer ALREADY has a `vix` soft dot (L92) reading
@@ -175,8 +220,24 @@ EVERY scalper → **non-parity-safe even without any new tag.** So the producer 
 `vixLevel/vixRising` when the calling strategy opts in. Since `macro()` does not know the strategy's
 tags, thread a flag from the seam:
 
-- `MarketOiClient.context(...)` (the assembler, ~L88-92) already takes the oi-index/signal-index; add a
-  `boolean vixEnabled` param it forwards to `macro(underlying, eodDate, vixEnabled)`.
+- `MarketOiClient.context(...)` (the assembler, **L80-93**, signature
+  `context(underlying, signalIndex, istTime, eodDate, expiry, tradeDate, chart)` — 7 args today,
+  call site `macro(underlying, eodDate)` at L92) already takes the oi-index/signal-index; add a
+  `boolean vixEnabled` param it forwards to `macro(underlying, eodDate, vixEnabled)`. **The macro
+  fan-out (3.2/3.3/3.4) adds three more booleans (`dowEnabled`/`fiiEnabled`/`constituentEnabled`),
+  so the final `context(...)` signature gains FOUR trailing booleans.** To avoid a four-arg
+  positional soup, the executor SHOULD pass a single `EnumSet<MacroFeed>` or a small
+  `record MacroFeeds(boolean vix, boolean dow, boolean fii, boolean constituent)` instead of four
+  loose `boolean`s — decided in Open Point §8.11. (The plan body below shows the loose-boolean form
+  for clarity; collapse to one param at implementation time.)
+- **AUDIT pass 1 — TEST-CALL-SITE FAN-OUT (do not miss):** `ScalperConfluenceGateTest` has **24**
+  references to `client.context(...)` (every `when(client.context(eq("NIFTY 50"), any() ×6))` stub
+  PLUS the straddle `verify(client, never()).context(any() ×7)` at L754-755). Adding even ONE param to
+  `context()` breaks ALL 24 — each needs an extra `any()` matcher (and the `verify` an extra `any()`).
+  This is a pure compile-time fan-out but it is invisible from §5.2's "8 ScalperConfig literals" note,
+  which is a DIFFERENT fan-out. Both must land in the same PR or the test module won't compile. (If the
+  signature is collapsed to ONE `MacroFeeds` param per §8.11, the fan-out is the SAME 24 sites but only
+  one extra matcher each — strictly simpler, another reason to prefer the single-param form.)
 - New helper `MarketOiClient.vixDirection(LocalDate tradeDate)`:
   ```java
   /** Live INDIA VIX level + intra-session direction for the directional-vix-gate. Reads GET /vix
@@ -314,11 +375,25 @@ YAML header when PR-3 arms it.
 directional read: `advanceTotal > |declineTotal|` ⇒ heavyweights pushing up (CE-favouring), mirror PE.
 
 **Wiring:**
-- **Market-data:** the service exists; confirm/add a controller endpoint
-  `GET /api/v1/market/equity/index-contribution?index=<NIFTY 50>&date=<T>` returning the
-  `IndexContribution` (advanceTotal/declineTotal/indexChangePct). (If the endpoint already exists from
-  the oipulse wave, reuse it — grep `EquityIndexContributionService` controller; otherwise add a thin
-  `@GetMapping`.)
+- **Market-data:** the endpoint **already exists** (AUDIT pass 1 — verified):
+  `GET /api/v1/market/equity/index-contribution?name=<NIFTY 50>` (`EquityController` L54-59) returning
+  the `IndexContribution` (advanceTotal/declineTotal/indexChangePct). **Reuse it as-is.** Param is
+  `name` (not `index`); there is **no `date` param** (it serves the latest EQ bhavcopy — fine for the
+  live macro read, which only ever wants the most-recent completed session). **No new `@GetMapping`,
+  so no contract drift for this package.** `MarketOiClient` reads it via a new
+  `constituentBias(String underlying)` helper that maps the `IndexContribution` to a +1/-1/0 sign.
+  **Underlying-name caveat:** the seam threads the oi/option-root underlying (e.g. `"NIFTY 50"`); pass
+  that name straight through — `contribution(String)` keys off the same index names `StaticIndexWeights`
+  carries. **AUDIT pass 2 — seed verified:** `reference/index-weights.json` seeds exactly `"NIFTY 50"`,
+  `"NIFTY BANK"`, `"NIFTY 200"` — **`"SENSEX"` is NOT seeded.** So a NIFTY `constituent-gate` fires;
+  a SENSEX one is a silent no-op until BSE weights land (see Open Point §8.10). **404-not-null degrade
+  (AUDIT pass 2):** `EquityIndexContributionService.contribution(String)` THROWS
+  `NotFoundException(404, NOT_FOUND_RESOURCE)` when `weights(index)` is empty (L63-66) — it does NOT
+  return a null/empty body. Exactly like the `/vix` 422, the `MarketOiClient.get(...)` catch (L659)
+  degrades that 404 to the fallback, so `constituentBias(...)` must use the `get(...)` helper (or
+  otherwise catch the HTTP error) → +0 sign → the gate fail-opens. The "fail-open on null" wording in
+  the gate row below therefore covers BOTH a null body and a 404 throw, but the reader must NOT assume a
+  200-with-empty body.
 - **Strategy-signal:** add `BigDecimal constituentBiasSign` to `Macro` (+1/-1/0 from
   `signum(advanceTotal + declineTotal)` or `signum(indexChangePct)` weighted by breadth), populated by
   `macro()` only when `constituentEnabled`.
@@ -401,9 +476,21 @@ yields `vixRising == null` (a producer-level tripwire, not just a config-flag on
   null open → pass). Add `macro(...)`/`chart(...)` builder overloads for the new `Macro` fields.
 
 ### 5.2 Unit — seam wiring (`ScalperConfluenceGateTest.java`)
-- **Arity fan-out:** the 5 new `requireXxx` fields force updating **all 8** existing
+- **Arity fan-out #1 (ScalperConfig):** the 5 new `requireXxx` fields force updating **all 8** existing
   `new ScalperConfig(...)` literals (L44,49,56,62,68,74,81,87) — append 5 trailing `false`s to each
-  (none arm the new gates). Pure compile-time fan-out (FU2 §2.4 precedent: 8 literals, confirmed).
+  (none arm the new gates). Pure compile-time fan-out (FU2 §2.4 precedent: 8 literals, confirmed by
+  audit against the live file).
+- **Arity fan-out #2 (client.context mock — AUDIT pass 1, MUST land in the same PR):** adding the
+  macro-feed param(s) to `MarketOiClient.context(...)` breaks **all 24** `client.context(...)` call
+  sites in this test (the `when(...)` stubs use `eq("NIFTY 50"), any() ×6`; the straddle test's
+  `verify(client, never()).context(any() ×7)` at L754-755). Each stub gains one extra `any()` matcher
+  and the `verify` one extra `any()`. (See §3.1 step 1.) Forgetting this is a compile failure, not a
+  silent parity bug — but it WILL block the build, so call it out in the PR checklist.
+- **Forwarding assertion:** add a focused test asserting the macro-feed flag is forwarded — capture the
+  `context(...)` call (Mockito `ArgumentCaptor` or a matcher on the new param position) and assert the
+  vix-feed boolean is `true` ONLY for `VIX_CFG` and `false` for the bare `CFG`. (Originally phrased as
+  "the 8th arg"; with the single-`MacroFeeds` form per §8.11 it is the LAST arg's `.vix()` — assert on
+  the field, not a positional index.)
 - For **each** of `vix-gate`, `global-cues-gate`, `fii-dii-gate`, `constituent-gate`, `volume-pump`
   add a CFG literal + the FU2 triple (pass / block / non-armed-unaffected), mirroring the #5
   `oi-cross-filter` template (the `confluenceConfirmsAndPicksTheInBandCe` + block + `nonXxxUnaffected`
@@ -459,11 +546,16 @@ behaviour change. Re-run `e2e/tests/signals.spec.ts` as a regression check only.
 (deferred) later arms a tag, add an assertion there that the confluence chip row still renders.
 
 ### 5.7 Contracts (`ContractCaptureTest`)
-The new market-data GET paths (`/global-cues`, `/fii-dii/bias`, optionally `/equity/index-contribution`)
-ADD `@GetMapping` paths → **springdoc spec DOES drift** (per CLAUDE.md: new paths drift, generic Map
-returns do not). Re-capture with `-Dcontracts.capture=true`, regen TS via
-`npx openapi-typescript@7` → `contracts/gen/*.d.ts`, `tsc --strict`. The `/vix` direction fields ride
-the existing `/vix` response (a generic shape) — confirm whether it drifts.
+The new market-data GET paths — **`/global-cues` (Dow) and `/fii-dii/bias`** — ADD `@GetMapping`
+paths → **springdoc spec DOES drift** (per CLAUDE.md: new paths drift, generic Map returns do not).
+Re-capture with `-Dcontracts.capture=true`, regen TS via `npx openapi-typescript@7` →
+`contracts/gen/*.d.ts`, `tsc --strict`.
+- **AUDIT pass 1 — `/equity/index-contribution` does NOT drift:** that path already exists
+  (`EquityController` L54-59) and is NOT modified by this stream → no new path, no spec change for
+  the constituent package. (Original §5.7 wrongly hedged "optionally `/equity/index-contribution`".)
+- **`/vix` does NOT drift:** this stream adds no field to `VixQuote` and no new `/vix` path — it only
+  *reads* the existing endpoint. No re-capture needed for VIX.
+- Net: exactly **two** new paths drift the spec — `/global-cues` and `/fii-dii/bias`, both in PR-2.
 
 ---
 
@@ -578,6 +670,239 @@ PR-1 and PR-4 are independent of PR-2/PR-3 (PR-4 needs no feed). PR-3 hard-depen
    all five (fewer config tokens, no per-gate A/B). Recommend (a).
 
 9. **Does the existing `/vix` response shape drift the springdoc contract?** §3.1 reads existing
-   `/vix` fields (`ltp`, `change`); no new path, so likely no drift — but `/global-cues` and
-   `/fii-dii/bias` ARE new paths and DO drift. **Action:** run `ContractCaptureTest` after PR-2 and
-   re-capture; confirm `/vix` itself is unchanged. (Not a decision — a verification reminder.)
+   `/vix` fields (`ltp`, `change`); no new path, so **no drift** (AUDIT pass 1: confirmed — the
+   stream adds no field to `VixQuote` and no new `/vix` path). `/global-cues` and `/fii-dii/bias`
+   ARE new paths and DO drift. **Action:** run `ContractCaptureTest` after PR-2 and re-capture.
+
+10. **(AUDIT pass 1) `StaticIndexWeights` coverage for SENSEX constituent-contribution.**
+    `EquityIndexContributionService.contribution(String)` keys off `StaticIndexWeights` + the EQ
+    bhavcopy. NIFTY 50 constituents are NSE-EQ; **SENSEX constituents are BSE.** Before arming
+    `constituent-gate` on a SENSEX variant, confirm `StaticIndexWeights` carries `"SENSEX"` and that
+    the bhavcopy table the service reads has BSE EQ rows — else the SENSEX read returns empty and the
+    gate fail-opens (harmless but a no-op). **Decision:** v1 arms `constituent-gate` on NIFTY variants
+    only; defer SENSEX until BSE constituent coverage is confirmed. (Open for owner sign-off.)
+
+11. **(AUDIT pass 1) Collapse the four macro-feed booleans into one param.** §3.1/§3.2/§3.3/§3.4 each
+    thread a `boolean xxxEnabled` into `MarketOiClient.context(...)`/`macro(...)`. Four loose trailing
+    booleans is a positional-soup smell and multiplies the 24-call-site test fan-out. **Options:**
+    (a) one `record MacroFeeds(boolean vix, boolean dow, boolean fii, boolean constituent)` (or an
+    `EnumSet<MacroFeed>`) passed as the single last param — **recommended default**; (b) four loose
+    booleans (matches the plan-body sketch but worse). Recommend (a). Either way the
+    `MarketOiClient.macro(...)` return-site stays a single `new Macro(...)`.
+
+12. **(AUDIT pass 1) `ScalperGates.volumePump` signature uses `open`, not `prevClose`.** §3.5's design
+    text grades on close-vs-bar-`open` (the §4.15.3 dark-green/dark-red pump direction) and the "Note
+    on the open price" reads `future.candle(index).open()` — but the sketched signature still lists
+    `BigDecimal prevClose`. The implemented signature should be
+    `volumePump(BigDecimal close, BigDecimal open, BigDecimal volume, String underlying, OptionType side)`
+    (or take a `Chart` for close/volume + the `open` from `future`). Drop the `prevClose` param — it is
+    a leftover from the floor-gate shape and is not what the pump rule tests.
+
+13. **(AUDIT pass 1) FII `/fii-dii/bias` index-future-only vs full participant matrix.** §3.3 derives
+    `fiiBiasSign` from the FII `ParticipantOiRow` (futures L/S + option-leg net). The existing
+    `/long-short` (which `fiiLongPct` already reads) is **FII index-FUTURES only**; the new
+    `ParticipantBiasService` must read the full `participant-oi` rows (it has the option-leg columns)
+    for the leg-level seller read. Confirm the writer (`ParticipantOiFetcher` →
+    `nse_eod_participant_oi`) populates the `optionIndexCall/PutLong/Short` columns (not just futures)
+    for two consecutive days before relying on the leg-level term. If only futures are populated
+    historically, the leg-level read degrades to neutral on those dates (fail-open, harmless).
+
+14. **(AUDIT pass 2) Macro gates are inert on the straddle family.** The neutral-straddle path returns
+    at `ScalperConfluenceGate` L132-147 BEFORE `ctx`/`side` exist, so a macro tag armed on a
+    `scalp-straddle-*` variant never fires (silent no-op). **Decision:** PR-X arms macro gates on
+    DIRECTIONAL families only (connect-the-dots, trending-oi, etc.) — never a straddle variant. If a
+    volatility-direction confirm for straddles is ever wanted it needs a SEPARATE pre-`ctx` gate, out of
+    scope. (No code change needed now; a documentation guardrail for the arming step.)
+
+---
+
+## Audit pass 1 findings
+
+Auditor opened every cited file in the working tree on 2026-06-27. **Verdict: SOUND-WITH-OPEN-POINTS.**
+The architecture is correct, compiles as described, and is parity-safe (every signal-altering change is
+behind a NEW default-OFF tag + early-return hard gate, scorer untouched → existing goldens byte-identical).
+Corrections were applied in place; the residue is open points, not blockers.
+
+### Citations checked (✓ = confirmed exact / accurate after correction)
+- ✓ `ScalperGateContext.Macro` L59-68 — record + fields exactly as claimed (`vixLevel/vixRising` null today).
+- ✓ `MarketOiClient.macro(...)` — body L351-398, VIX gap return L396-397, comment L394-395. **Corrected:**
+  signature is `macro(String, LocalDate)`; `latestFiiLongPct` L626-641 (was L625-641); `advanceDecline`
+  L620-623 (was L619-623). `macro()` has no monthly-expiry branch (clean for `vixEnabled` threading).
+- ✓ `ConnectTheDotsScorer.score` L63-118 — 18-dot list confirmed; `volume` L79, `breadth` L91, `vix` L92;
+  Σweights = 19.6 recomputed exactly (2.5 + 14×1.0 + 1.5 + 0.8 + 0.8).
+- ✓ `ScalperGates` — `vix` L136-143 (unknown PASSES L137-138), `breadth` L128-133, `volume` L64-68,
+  `callPutDeltaFilter` L151-161 (the #5 fail-open precedent). `GateOutcome.pass/fail(BigDecimal,String)`
+  exist (L13-20) → the proposed gate fns are type-correct.
+- ✓ `ScalperConfig` — `from(...)` L101-157, canonical `new ScalperConfig(...)` L154-156, `oi-cross-filter`
+  tag L153. **Corrected:** the record has **16** fields (not 15), ending `requireStraddle`.
+- ✓ `ScalperConfluenceGate.evaluate` — `client.context(...)` IS at L191-192 (the plan's "~L192" insert
+  point for the VIX early-return is correct); `eodDate` param threaded; structural-stop `future.candle(index)`
+  precedent at L293-294.
+- ✓ `EngineCandle` has `.open()` (L13) → §3.5 `future.candle(index).open()` is sound.
+- ✓ `GoldenDeterminismTest.FEATURES` = 5 pure-engine YAMLs, no scalper (L33-36); `BacktestParityTest`
+  FEATURES likewise (L35-38). The byte-identity proof holds: no golden/parity YAML can carry a new tag.
+- ✓ `ScalperStrategyLoadTest` — 36 variants (12×3), `requireCallPutDeltaFilter` per-family assertion
+  L151-153; the 5 OFF-assertions slot into the per-strategy loop (L106-165) cleanly.
+- ✓ `ScalperConfluenceGateTest` — **8** `ScalperConfig` literals at exactly L44/49/56/62/68/74/81/87
+  (matches FU2 §2.4 precedent).
+- ✓ Market-data feeds: `MarketSurfaceController.vix()` (`/vix`, L60-82); `GlobalQuoteSource` interface +
+  `ConnectingDotsService.dowFactor` L316-333 / `DOW=DOWJONES@GLOBAL_INDEX` L58 / `volumeFactor` L240-246 /
+  `vixByBucket` L353-367; `FiiDiiController` `/participant-oi` L49-55, `/long-short` L57-78, `LongShortRow` L31;
+  `NseEodReader.ParticipantOiRow` L30-46 (all option-leg fields present); `EquityIndexContributionService`
+  `IndexContribution` L49-53.
+- ✓ GAP-DISPOSITION package counts: directional-vix 11 (L118), fii-dii 6 (L126), volume-pump /
+  constituent / global-cues single-gap (L157/L165/L173). VIX+Dow "explicitly OUT of FU2" — corroborated
+  by FU2 plan L51-53 + L648-653 (the Dow-dot-denominator trap the §3.0 mechanism avoids).
+
+### Wrong / stale cites — CORRECTED
+1. **§1 per-doc source-row line numbers were systematically stale.** The strategy-audit files were
+   regenerated and their line numbering drifted. The plan pointed at the WRONG rows: e.g.
+   `indicators-oi-vix-iv.md L25/L27` are "Daily-RSI" / "Volume-threshold" (the actual VIX rows are
+   **L42-45**); `connect-the-dots.md L23/L24/L25/L26` are RSI/PSAR/Volume/Two-candle (the actual
+   VIX/Dow/FII rows are **L31/L33/L36**); `gates-strike-sr-fiidii.md L27-L31` are time-cap/expiry/S&R/OIP
+   (the actual VIX row is **L34**, FII rows **L35-L38**); `trend-change.md L29` → actual constituent row
+   is **L34**. Re-pointed in §1. The *content* of every row matches the plan's claims — only the pointers
+   were wrong. (The package-level tallies, taken from the current GAP-DISPOSITION, were correct.)
+2. **`volume-pump-attribution` doc cite `indicators-oi-vix-iv.md L32` is wrong** — L32 is the OI-Spurts
+   4-quadrant row (FULL coverage). The volume rows there (L27/L38) are both FULL. The package is the
+   single-gap `AUTOMATE_PKG` row in GAP-DISPOSITION L157; re-cited to the disposition, not a doc line.
+3. **`/equity/index-contribution` ALREADY EXISTS** (`EquityController` L54-59) — param is **`name`**
+   (NOT `index`) and there is **NO `date` param** (the service reads the latest EQ bhavcopy). §2.6/§3.4/§5.7
+   corrected: the constituent package adds NO new path → NO contract drift; its `[S]` market-data work is ~zero.
+4. **`/vix` throws 422 on no-quote** (not a null body) — the `MarketOiClient.get(...)` catch degrades it to
+   `VixRead.EMPTY`, so fail-open still holds, but §2.6 now states this so the reader is implemented correctly.
+5. **Field-count + minor line drifts** (§2.5 16-not-15 fields; §2.2 fii/breadth line numbers) corrected.
+
+### Completeness gaps added
+- **The 24 `client.context(...)` test call sites** (`ScalperConfluenceGateTest`) all break when `context()`
+  gains a macro-feed param — invisible from the original §5.2 "8 literals" note. Added to §3.1 step 1 + §5.2
+  as a same-PR compile-time fan-out. (Recommend collapsing the 4 feed booleans to one `MacroFeeds` param —
+  Open Point §8.11.)
+- **`/vix` and `/equity/index-contribution` do NOT drift the contract**; only `/global-cues` + `/fii-dii/bias`
+  do (§5.7 tightened).
+
+### Parity assessment (the critical axis) — PASS
+- Every `[P]` change is on the **LIVE-only `ScalperConfluenceGate`** path (class javadoc L31-35 confirms
+  OI/macro/chain reads never run on deterministic replay); golden/parity FEATURES carry zero scalper YAMLs;
+  no shipped YAML carries any new tag (grep-confirmed empty). So `GoldenDeterminismTest` / `BacktestParityTest`
+  stay byte-identical.
+- The one **non-tagged** parity trap — populating `Macro.vixRising` would flip the EXISTING `vix` soft dot
+  (scorer L92) for every scalper — is correctly carved out in §3.1 step 1 (gate the producer read on
+  `vixEnabled`), and §4 + §5.3 add the producer-level tripwire (`macro(...,false)` ⇒ `vixRising==null`).
+  This is the load-bearing parity decision and it is sound. **No new golden variant is required** (no `[P]`
+  change runs on the replay path) — correctly argued in §4.
+- Classification table (§4) is correct: the read-only analytics are `[S]`; the gate additions are `[P]`
+  behind their own tag. No `[P]` change is mis-marked `[S]`.
+
+### Dependency sequencing — correct
+VIX spine first (establishes the feed-threading signature) → market-data analytic PR (PR-2) before the
+gate PR that consumes it (PR-3) → volume-pump self-contained (PR-4). No SPAN / equity-universe dependency
+(this is index-level macro, no sell legs) — correctly noted in §6.6. Arming on real YAMLs deferred to the
+owner-driven forward-paper PR-X.
+
+### Residual open points (do not block the developer)
+The 13 Open Points (§8) capture the genuine unknowns; pass 1 added §8.10 (SENSEX `StaticIndexWeights`
+coverage), §8.11 (collapse the 4 feed booleans to one `MacroFeeds` param), §8.12 (`volumePump` signature
+uses `open` not `prevClose`), §8.13 (FII bias needs the full participant matrix, not just index-futures L/S).
+None are blockers; all have a recommended default that ships safely (fail-open).
+
+---
+
+## Audit pass 2 findings
+
+INDEPENDENT second audit, 2026-06-27. The auditor re-opened the working tree from scratch (did not trust
+pass 1's pointers), re-verified a fresh sample of citations, re-checked the parity firewall end-to-end,
+confirmed the pass-1 corrections, and hunted for anything both the author and pass 1 missed.
+**Verdict: SOUND-WITH-OPEN-POINTS — implementation-ready.**
+
+### Citations re-verified independently (✓ exact in the working tree)
+- ✓ `ScalperGateContext.Macro` — record + slots (`vixLevel`/`vixRising`/`fiiLongPct`) exactly as cited;
+  the package is `in.arthayantra.strategysignal.scalper` (the plan's `.../scalper/X.java` shorthand is
+  fine — the `com.arthayantra.strategy.scalper` FQN that appears in §2.1's prose is cosmetic, not a path
+  the executor uses).
+- ✓ `MarketOiClient.macro(String, LocalDate)` L351-398, VIX-gap return L396-397, stale comment L394-395;
+  `advanceDecline` L620-623, `latestFiiLongPct` L626-641 (keys `fiiLong`/`fiiShort`), `get(...)` helper
+  L647-663 (`catch (Exception)` → fallback, L659 — so the 422/404 degrade arguments hold).
+- ✓ `context(...)` L80-93 — the 7-arg signature + the `macro(underlying, eodDate)` call at L92.
+- ✓ `ConnectTheDotsScorer.score` L63-118; weights W_VWAP=2.5/W_OI=1.5/W_IV=0.8/W=1.0 (L32-35);
+  **Σweights = 19.6 recomputed = 2.5 + 1.5 + 0.8 + 0.8 + 14×1.0** (18 dots). `volume` L79, `breadth` L91,
+  `vix` L92.
+- ✓ `ScalperGates.vix` L136-143 (unknown PASSES, L137-138); `breadth` L128-133; `volume` L64-68;
+  `callPutDeltaFilter` L151-161 (the #5 fail-open template).
+- ✓ `ScalperConfig` — **16 fields** (re-counted, ending `requireStraddle`), `from(...)` L101-157,
+  canonical ctor L154-156, `oi-cross-filter` tag L153.
+- ✓ `ScalperConfluenceGate` LIVE-only javadoc L29-33; `client.context(...)` call L191-192 (the `~L192`
+  insert is right); structural-stop `future.candle(index)` precedent L293-294; `evaluate(...)` has
+  `future`/`index` in scope (L100-107) so `future.candle(index).open()` is reachable.
+- ✓ `EngineCandle.open()` L13.
+- ✓ Market-data feeds: `/vix` THROWS `ApiException(422, DATA_GAP)` on no-quote (L63-65), `change =
+  ltp − prevClose` (L68); `EquityController.indexContribution` L54-59 (param **`name`**, **no `date`**,
+  path PRE-EXISTS → no contract drift); `FiiDiiController` `/participant-oi` L49-55, `/long-short` L57-78
+  (FII index-FUTURES only, confirming §8.13); `NseEodReader.ParticipantOiRow` L30-46 (option-leg columns
+  `optionIndexCallLong/PutLong/CallShort/PutShort` present); `GlobalQuoteSource` flag-gated
+  (`global-quotes-enabled`); `ConnectingDotsService.volumeFactor` L240-246 (`priceDelta>0?BULL:BEAR`).
+- ✓ Tests: **24** `.context(` references in `ScalperConfluenceGateTest` (23 `client.context(` stubs + the
+  `verify(client, never()).context(...)` at L754); **8** `new ScalperConfig(` literals
+  L44/49/56/62/68/74/81/87; `ScalperStrategyLoadTest` iterates a **36-entry** `UNDERLYING` map (12×3,
+  re-counted) with the `requireCallPutDeltaFilter` OFF-pattern at L151-153.
+- ✓ GAP-DISPOSITION counts: `directional-vix-gate` 11 @ L118 ("explicitly OUT of FU2"), `fii-dii-bias`
+  6 @ L126, `volume-pump-attribution`/`constituent-contribution`/`global-cues-feed` single-gap
+  `[P]` @ L157/L165/L173. **20-gap total (11+1+6+1+1) confirmed.**
+- ✓ FU2 plan corroboration: VIX+Dow "explicitly out of scope" (FU2 L51-54); FU2's own Dow note (L648-654)
+  proposed adding a *scored dot* "accepting the live-confluence shift" — **this plan's §3.0 hard-gate
+  early-return mechanism is a deliberate, STRICTLY BETTER choice** (scorer denominator untouched →
+  byte-identical when unarmed). The load-bearing parity decision is correct.
+
+### Pass-1 corrections re-checked — all correct, no new error introduced
+Every pass-1 correction (16-not-15 fields; `macro()` body lines; `latestFiiLongPct`/`advanceDecline`
+lines; `/vix` 422-not-null; `/equity/index-contribution` already-exists + `name`-not-`index` + no-date +
+no-contract-drift; the 24 `context()` test sites; the volume-pump cite re-pointed to GAP-DISPOSITION; the
+§1 per-doc row re-pointers) was re-verified against the tree and is accurate. Pass 1 introduced no
+regressions.
+
+### New issues pass 1 + the author BOTH missed — corrected in place
+1. **Straddle short-circuits before the macro gates (placement constraint).** The `requireStraddle` path
+   returns at `ScalperConfluenceGate` L132-147 — BEFORE `ctx`/`side` exist and before `client.context(...)`
+   is even called (the test's `verify(client, never()).context(...)` proves it). So arming ANY macro tag
+   on a `scalp-straddle-*` variant is a SILENT NO-OP. Harmless for parity, but a real arming trap. Added a
+   note to §3.0 + Open Point §8.14 (PR-X arms macro gates on DIRECTIONAL families only).
+2. **The constituent reader degrades on HTTP 404, not a null body.**
+   `EquityIndexContributionService.contribution(String)` THROWS `NotFoundException(404)` when
+   `StaticIndexWeights.weights(index)` is empty (L63-66) — it never returns an empty `IndexContribution`.
+   The `MarketOiClient.get(...)` catch degrades that 404 to the fallback (same shape as `/vix`'s 422), so
+   `constituentBias(...)` MUST route through `get(...)` (or catch the HTTP error) to fail-open. §3.4's
+   "fail-open on null" wording silently assumed a null body. Corrected §3.4 to state the 404-throw path.
+3. **`StaticIndexWeights` seed confirmed: `NIFTY 50` / `NIFTY BANK` / `NIFTY 200` only — NO `SENSEX`**
+   (`reference/index-weights.json`, verified). This upgrades §8.10 from "confirm before arming" to a hard
+   fact: a NIFTY `constituent-gate` fires; a SENSEX one is a no-op (404 → fail-open) until BSE weights are
+   seeded. Corrected §3.4 with the concrete seed keys.
+
+### Parity re-assessment (end-to-end) — PASS
+Walked the full `evaluate(...)` order: time-window → chain fetch → **straddle return (L147)** → `side`
+(L149-152) → volume/RSI rails (L157-163) → two-candle/gap (L164-179) → `ctx = context(...)` (L191-192) →
+the existing hard gates (`callPutDeltaFilter` L196, `trendChange` L204, `openHighLow` L218, `heroZero`
+L236) → **`ConnectTheDotsScorer.score(...)` (L250-252)**. Every existing hard gate early-returns BEFORE
+`score()`; the five new macro early-returns slot into the same band (after `ctx`, before `score()`), so
+the **scorer list/denominator is never touched** and the aggregate is byte-identical for the 36 shipped
+(un-armed) configs. The one non-tagged trap (populating `vixRising` would flip the existing `vix` soft
+dot) is correctly carved out by gating the producer read on `vixEnabled`, with the §5.3 producer-tripwire
+(`macro(...,false) ⇒ vixRising==null`) as the guard. No `[P]` change runs on the deterministic-replay path
+(`ScalperConfluenceGate` is LIVE-only), and no golden/parity FEATURES YAML is a scalper, so
+`GoldenDeterminismTest` + `BacktestParityTest` stay byte-identical with no new golden vector. Classification
+table (§4) maps `[S]`/`[P]` correctly. **No parity hole found.**
+
+### Dependency / automatability re-check — correct
+VIX spine first → market-data analytic (PR-2) before the consuming gate (PR-3) → volume-pump self-contained
+(PR-4); PR-3 hard-depends on PR-2; PR-1/PR-4 independent. No SPAN / equity-universe dependency (index-level
+macro, no sell legs). The "20 AUTOMATE gaps" are genuinely automatable EXCEPT the Dollar/Asian/Crude leg of
+`global-cues-feed`, which the plan already (correctly) marks `[S]` KEEP_MANUAL (no live feed) — not
+over-claimed. The lone genuinely-new analytic (the FII L/U/B/C classifier) is correctly sized M; everything
+else is wiring existing feeds.
+
+### Readiness verdict
+**SOUND-WITH-OPEN-POINTS — ready to implement.** The four pass-2 corrections (straddle no-op guardrail;
+constituent 404-degrade; the concrete SENSEX-absent seed fact; Open Point §8.14) are documentation
+precision, not architectural changes. No blocker remains. The executor must honour: (a) the same-PR
+24-site `context()` test fan-out; (b) route the constituent + VIX reads through the `get(...)` helper so
+the 404/422 fail-open holds; (c) NEVER arm a macro tag on a straddle variant; (d) the §5.3 producer
+tripwire proving `macro(...,false) ⇒ vixRising==null`.

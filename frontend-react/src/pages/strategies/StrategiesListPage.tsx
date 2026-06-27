@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
@@ -11,9 +11,12 @@ import {
   STRATEGY_STATUSES,
   sparkPoints,
   useBacktestSummaries,
+  useManyStrategyVersions,
   useSetNotifications,
   useStrategies,
+  type BacktestSummary,
   type StrategySummary,
+  type VersionRow,
 } from '../../api/strategies.ts';
 
 // /strategies (master plan §20 parity, E-11 screen 1): published / draft / archived strategies with
@@ -30,6 +33,9 @@ export function StrategiesListPage() {
   const [qInput, setQInput] = useState('');
   const [q, setQ] = useState('');
   const [status, setStatus] = useState<string | null>(null);
+  // Off by default: the table shows only each strategy's current version. When on, every older version
+  // is lazily fetched and shown as an indented sub-row (Edit disabled — older versions are immutable).
+  const [showOld, setShowOld] = useState(false);
 
   // debounce the search box so typing doesn't fire a request per keystroke
   useEffect(() => {
@@ -43,13 +49,35 @@ export function StrategiesListPage() {
     () => rows.map((s) => s.publishedVersionId ?? s.currentVersionId).filter((v): v is string => !!v),
     [rows],
   );
-  const summaries = useBacktestSummaries(versionIds);
   const setNotifications = useSetNotifications();
 
-  const summaryFor = (s: StrategySummary) => {
-    const id = s.publishedVersionId ?? s.currentVersionId;
-    return id ? (summaries.data?.[id] ?? null) : null;
-  };
+  // The version a strategy shows on its main row (published if any, else the newest).
+  const shownVersion = (s: StrategySummary) => s.publishedVersion ?? s.currentVersion;
+
+  // Lazily load every strategy's version timeline only while old versions are expanded.
+  const allVersions = useManyStrategyVersions(
+    rows.map((s) => s.id),
+    showOld,
+  );
+  const oldVersionsFor = (s: StrategySummary): VersionRow[] =>
+    (allVersions.byId[s.id] ?? []).filter((v) => v.version !== shownVersion(s));
+
+  // Old versions' UUIDs → batched into the same last-backtest summary fetch as the current versions.
+  const oldVersionIds = useMemo(() => {
+    if (!showOld) return [];
+    return rows.flatMap((s) =>
+      (allVersions.byId[s.id] ?? [])
+        .filter((v) => v.version !== shownVersion(s))
+        .map((v) => v.versionId)
+        .filter((x): x is string => !!x),
+    );
+  }, [showOld, rows, allVersions.byId]);
+
+  const summaries = useBacktestSummaries(useMemo(() => [...versionIds, ...oldVersionIds], [versionIds, oldVersionIds]));
+
+  const summaryById = (id?: string | null): BacktestSummary | null =>
+    id ? (summaries.data?.[id] ?? null) : null;
+  const summaryFor = (s: StrategySummary) => summaryById(s.publishedVersionId ?? s.currentVersionId);
 
   return (
     <LoadBeat>
@@ -75,6 +103,19 @@ export function StrategiesListPage() {
           placeholder="All statuses"
           title="Show only strategies in the chosen status (published, draft or archived)."
         />
+        <label
+          className="flex h-9 cursor-pointer items-center gap-1.5 rounded-md border border-ay-border px-3 text-sm hover:border-accent"
+          title="Expand each strategy's older versions as indented rows, each with its last backtest. Editing is disabled for old versions (they're immutable)."
+        >
+          <input
+            type="checkbox"
+            checked={showOld}
+            onChange={(e) => setShowOld(e.target.checked)}
+            className="size-4 accent-accent"
+            aria-label="Show old versions"
+          />
+          Show old versions
+        </label>
         <Link
           to="/strategies/new/edit"
           title="Start a new strategy in the YAML editor."
@@ -110,8 +151,10 @@ export function StrategiesListPage() {
             {rows.map((s) => {
               const bt = summaryFor(s);
               const pts = bt ? sparkPoints(bt.equity) : '';
+              const olds = showOld ? oldVersionsFor(s) : [];
               return (
-                <tr key={s.id} className="border-t border-ay-border">
+                <Fragment key={s.id}>
+                <tr className="border-t border-ay-border">
                   <td className="px-2 py-2 font-medium">{s.name}</td>
                   <td className="px-2 py-2">
                     <span className={cn('rounded px-1.5 py-0.5 text-xs font-semibold ring-1', statusTone(s.status))}>
@@ -177,6 +220,47 @@ export function StrategiesListPage() {
                     </Link>
                   </td>
                 </tr>
+                {olds.map((v) => {
+                  const obt = summaryById(v.versionId);
+                  const opts = obt ? sparkPoints(obt.equity) : '';
+                  return (
+                    <tr key={`${s.id}:${v.version}`} className="border-t border-ay-border/50 bg-surface-1/40 text-ay-muted">
+                      <td className="px-2 py-1.5 pl-6 text-xs">↳ {s.name}</td>
+                      <td className="px-2 py-1.5">
+                        <span className={cn('rounded px-1.5 py-0.5 text-xs font-semibold ring-1', statusTone(v.status))}>
+                          {v.status}
+                        </span>
+                      </td>
+                      <td className="px-2 py-1.5 tabular-nums text-xs">{v.version}</td>
+                      <td className="px-2 py-1.5 text-xs">
+                        {obt ? (
+                          <span className="flex items-center gap-2 whitespace-nowrap">
+                            <span className="tabular-nums">Sharpe {obt.sharpe ?? '—'}</span>
+                            {opts && (
+                              <svg viewBox="0 0 80 22" width="80" height="22" aria-hidden="true" className="text-accent">
+                                <polyline points={opts} fill="none" stroke="currentColor" strokeWidth="1.5" />
+                              </svg>
+                            )}
+                          </span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td className="px-2 py-1.5" />
+                      <td className="px-2 py-1.5" />
+                      <td className="px-2 py-1.5 tabular-nums text-xs">{v.createdAt ? v.createdAt.slice(0, 10) : '—'}</td>
+                      <td className="px-2 py-1.5 text-right">
+                        <span
+                          className="cursor-not-allowed px-1.5 text-xs text-ay-muted/50"
+                          title="Older versions are immutable — edit the current version instead."
+                        >
+                          Edit
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+                </Fragment>
               );
             })}
           </tbody>

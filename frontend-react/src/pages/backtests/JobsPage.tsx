@@ -89,18 +89,20 @@ export function JobsPage() {
     return ids.length ? ids.join(',') : '__none__';
   }, [tags, strategies.data]);
 
-  // "Latest version only" → every strategy's current-version UUID; the server keeps jobs whose
-  // strategy_version_id is in this set. '__none__' = on but no current versions → empty (not unfiltered).
-  const latestVersionIds = useMemo(() => {
+  // "Latest version only" → "strategyId:version" pairs, one per strategy's CURRENT version. The server
+  // matches these against the job request JSONB (NOT the strategy_version_id column, which TRIAL +
+  // OPTIMIZATION rows leave NULL), so the filter spans every page AND keeps trials/sweeps — exactly
+  // what the row's is-latest badge shows. '__none__' = on but nothing to match → empty (not unfiltered).
+  const currentVersionPairs = useMemo(() => {
     if (!latestOnly) return null;
-    const ids = (strategies.data?.items ?? [])
-      .map((s) => s.currentVersionId)
-      .filter((v): v is string => !!v);
-    return ids.length ? ids.join(',') : '__none__';
+    const pairs = (strategies.data?.items ?? [])
+      .filter((s) => s.currentVersion)
+      .map((s) => `${s.id}:${s.currentVersion}`);
+    return pairs.length ? pairs.join(',') : '__none__';
   }, [latestOnly, strategies.data]);
 
-  const q = useJobs(status, strategyId, offset, apiSortBy, apiSortDir, tagStrategyIds, latestVersionIds);
-  useJobsLive(status, strategyId, offset, apiSortBy, apiSortDir, tagStrategyIds, latestVersionIds);
+  const q = useJobs(status, strategyId, offset, apiSortBy, apiSortDir, tagStrategyIds, currentVersionPairs);
+  useJobsLive(status, strategyId, offset, apiSortBy, apiSortDir, tagStrategyIds, currentVersionPairs);
   const cancel = useCancelJob();
 
   const nameById = useMemo(

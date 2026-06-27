@@ -29,12 +29,13 @@ degrade to NEUTRAL on backtests), but status below is judged by CODE PRESENCE, n
 | Global cues match direction (Dow/Dow30 futures, Dollar index, Asian markets, Oil) | 3.9 Setup 5 / Filters 2 (L988,L1020); §6.9 filters | MANUAL_COVERED | `ScalperManualChecks` `global_cues_ok` L51-55 (doc_ref 4.7): "Global cues are not against the trade (DOW futures, Asian indices, crude, USD)". NOT a scored dot — `ConnectTheDotsScorer` has no Dow/global field; `Macro` has none | Manual: check DOW futures + Asian index + crude + USD direction (checklist item). Automatable: partial (Dow live-LTP is wired in market-data `ConnectingDotsService`, task #13, but is NOT fed to the scalper scorer; Dollar/Asian/Oil are not ingested). |
 | Breadth — Nifty advance/decline must match (adv>32 = CE, dec>32 = PE) | 3.9 Setup 5 / Filters 3 (L988,L1021); §6.9 filters | FULL | `ScalperGates.breadth` `ScalperGates.java:127-133` (>32); scored dot `ConnectTheDotsScorer.java:91`; fed by `/api/v1/market/breadth` `MarketOiClient.java:368-373` (EOD bhavcopy date) | EOD-sourced (today's date 422s until post-close bhavcopy → degrades to 0/0). Soft dot, never a hard block. |
 | OI confluence — Futures OI + Option OI (Trending OI + Sentiment) confirmed at the prior-day 3:20 PM OI-Pulse | 3.9 Setup 6 / Filters 4 (L989,L1022); §6.9 setup/filters | PARTIAL | Live OI quadrant/sentiment/trending-cross dots ARE scored (`ConnectTheDotsScorer.java:80-90`; `ScalperGates.oiQuadrant`; `MarketOiClient.oi`). BUT the read is the CURRENT bar's OI, NOT a prior-day-3:20-PM snapshot | The specific "prior-day 3:20 PM OI-Pulse alignment" check is not modelled as a point-in-time gate. Manual: at 3:20 PM the prior session confirm Futures OI + Option OI align with tomorrow's intended direction. Automatable: true (snapshot the 3:20 PM OI state and gate the next open). |
-| FII/DII activity feeds the EOD morning view | 3.9 Setup 3 / data points (L986,L987); §6.9 setup | PARTIAL | `fiiLongPct` is READ into `Macro` (`MarketOiClient.java:375-383`) but is NOT scored — no `fii` reference in `ConnectTheDotsScorer`; it never influences the signal | FII is fetched but unused by the confluence. Manual: review FII/DII positioning in the prior-evening view. Automatable: true (add an FII dot to the scorer). |
+| FII/DII activity feeds the EOD morning view | 3.9 Setup 3 / data points (L986); §6.9 setup | PARTIAL | `fiiLongPct` is READ into `Macro` (`MarketOiClient.java:375-383`) but is NOT scored — no `fii` reference in `ConnectTheDotsScorer`; it never influences the signal | FII is fetched but unused by the confluence. Manual: review FII/DII positioning in the prior-evening view. Automatable: true (add an FII dot to the scorer). |
 | India VIX not abnormally spiking (gap/whipsaw risk) | (Common/§4.5 via checklist) | MANUAL_COVERED + PARTIAL | `ScalperManualChecks` `vix_normal` L46-50 (doc_ref 4.5). VIX dot exists in the scorer (`ConnectTheDotsScorer.java:92`) but `MarketOiClient.macro` returns `null` VIX level+direction (`MarketOiClient.java:394-397`) → the VIX gate always degrades to pass | Manual: glance at India VIX vs recent sessions (checklist). Automatable: true (wire a VIX endpoint — flagged a v1 gap in code). |
 | EOD data must be CONVINCING and the market must have closed at the day's HIGH or LOW (inside/near-open close = no trade) | 3.9 Setup 4 (L987); §6.9 setup_preconditions | NONE | No prior-day "closed at high/low" convincing-close gate anywhere in the scalper package (grep: no `dayHigh`/`convincing`/`closed at` logic on the morning path) | Manual: only take the trade if the prior session closed at its high (for CE) or low (for PE); skip an inside/near-open close. Automatable: true (prior-day OHLC is available). |
 | Stand aside if post-close news invalidates the EOD positioning | 3.9 Setup 2 / Filters 8 (L985,L1026); §6.9 filters | MANUAL_COVERED | `ScalperManualChecks` `news_clear` L26-30 (doc_ref 2.13): "No market-moving news or event against this trade (news overrides the data)" | Manual: scan news + the economic calendar; if post-close news invalidates the EOD view, stand aside (checklist). Automatable: false. |
 | Strike & delta selection — AI-suggested strike, ATM±3, delta 0.6–0.7, premium band (Nifty 100–250) | 3.9 Setup 7 (L990); §6.9 setup | FULL | `strikes:{selector:atm_window,width:3}` (YAML); `StrikePicker` delta band 0.6–0.7 + premium band `ScalperConfig.java:82-98`; `StrikePicker.pick` `ScalperConfluenceGate.java:271-276` | Doc marks the premium/ATM/delta values UNCERTAIN (§6.9 uncertain[2]); the code uses the verified §0B band. SENSEX band 300–800 is grill-locked, not in the §3.9 doc. |
 | Small position size / profits-only (deploy only a portion of profits, never core capital) | 3.9 Risk 2 / S21 (L975,L1013); §6.9 risk | PARTIAL | `position_sizing:{premium_budget, budget_inr:15000}` + `max_positions:1` + `max_daily_loss_pct:2.0` (YAML). A fixed budget, not a "% of profits" rule | The "deploy only a portion of profits, never core capital" discipline is NOT enforced (YAML comment L9 admits "not enforced here"). Manual: size off profits only. Automatable: partial (no realized-profit-pool sizing method exists). |
+| Take EVERY signal but modulate the lot to risk-reward — normal lot when the signal aligns with the overall market, reduced lot when it opposes or is neutral (S21 refinement) | 3.9 S21 update (d) (L975) | NONE | No align/oppose lot-modulation on the morning path: `position_sizing:{method:premium_budget, budget_inr:15000}` is a FIXED budget (YAML); the confluence emits a single uniform-size draft and nothing scales the lot down on an opposing/neutral read (`ConnectTheDotsScorer` returns only a validity verdict, no size multiplier) | Manual: take the signal but size it to the conviction — full lot when it aligns with the broader market, reduced lot when it opposes or is neutral. Automatable: partial (a confluence-strength→size multiplier would need a sizing primitive that does not exist; budget is fixed). |
 | Profit-trail-to-breakeven once price runs in your favour (S22 refinement) | 3.9 S22 update (b) (L977) | NONE | No trailing-stop / breakeven-move on the morning path; the stop is the static first-candle level | Manual: once in profit, trail the stop to your buy price. Automatable: true (a trailing/breakeven exit rule). |
 | RSI secondary exit confirmation — in the worked short, RSI dropping below 30 was a reason to exit | 3.9 Time exit (L1009) | NONE | No RSI-based exit on the morning/opening-tick path. The morning YAMLs declare `exit_rules:[signal_exit:"close < vwap", time_stop:max_bars:10]` only (no RSI exit); RSI(14) is used as an ENTRY band/dot (`ScalperGates.rsiBand`), never as an exit trigger | Manual: on a CE/long use RSI re-crossing back overbought→down (and for the worked PE, RSI<30) as a secondary exit confirmation alongside target/SL. Automatable: true (add an RSI-cross exit rule to `exit_rules`). |
 | Add to the position ONLY around the previous-day close, nowhere else (S22 refinement) | 3.9 S22 update (d) (L977) | NONE | No scale-in / averaging logic on the morning path at all: `max_positions_per_underlying:1` (YAML) + the no-averaging rule (`ScalperRisk.java:13`) preclude any add. The doc's "add only around prev-day close" location rule is therefore moot in the automation (single-entry only) | Manual: if averaging in, do so only around the previous-day close. Automatable: partial (would need a scale-in engine primitive, which does not exist — single-entry is enforced). |
@@ -59,6 +60,7 @@ degrade to NEUTRAL on backtests), but status below is judged by CODE PRESENCE, n
 - **Profits-only sizing + trail-to-breakeven + opposite-side Open=High exit/hedge (§3.9 S21/S22 refinements)** — none enforced. Partly automatable.
 - **RSI secondary exit confirmation (§3.9 Time exit L1009)** — RSI is an entry band/dot only; no RSI-cross exit rule in `exit_rules`. Automatable.
 - **"Add only around the previous-day close" (§3.9 S22 update d)** — no scale-in/averaging exists (`max_positions_per_underlying:1`, no-averaging enforced); the location rule is moot under single-entry. Partly automatable.
+- **Align/oppose lot-modulation (§3.9 S21 update d, L975)** — "normal lot when the signal aligns with the overall market, reduced lot when it opposes or is neutral"; the YAML sizing is a fixed `budget_inr:15000` and the confluence emits a single uniform-size draft. Partly automatable (no confluence-strength→size primitive exists).
 
 ### v2 review notes
 
@@ -94,3 +96,58 @@ and verified each cited file:line). Changes:
 
 - **CONFIRMED.** All pre-existing v1 rows (incl. the `n/a` automation-note row) stand as written; v1
   quality is high.
+
+### v3 review notes
+
+Third-pass = citation re-validation (opened EVERY cited file:line / yaml key / doc line) + a fresh
+convergence read of §3.9 + §6.9. Nearly clean — the table converged after two passes. Two changes:
+
+- **BAD CITATION fixed (1).** Row *"FII/DII activity feeds the EOD morning view"* cited `3.9 Setup 3 /
+  data points (L986,L987)`. The FII/DII rule lives WHOLLY at **L986** (Setup 3 "Data points to study:
+  … (d) FII/DII activity"); **L987 is Setup 4** (the convincing-close "closed at day's high/low" rule —
+  a DIFFERENT rule, already audited as its own row at §3.9 Setup 4). The stray `L987` did not contain
+  the cited FII/DII rule. Corrected the cite to `(L986)`. Status (PARTIAL) unaffected — `fiiLongPct` is
+  still read into `Macro` (`MarketOiClient.java:375-383`) and never scored, exactly as stated.
+
+- **STILL-MISSING rule added (1).** §3.9 S21 update (d), L975: *"take **every** signal but size to
+  risk-reward — normal lot when the signal aligns with the overall market, **reduced lot** when it
+  opposes or is neutral."* Two passes captured "profits-only small size" (row, L975/L1013) but not this
+  distinct align/oppose **lot-modulation** directive. Added as a new **NONE** row: the YAML sizing is a
+  fixed `position_sizing:{method:premium_budget, budget_inr:15000}` and `ConnectTheDotsScorer` returns
+  only a validity verdict (no confluence-strength→size multiplier), so nothing reduces the lot on an
+  opposing/neutral read. Automatable: partial (needs a sizing primitive that does not exist).
+
+- **VALIDATED, no change (everything else).** Re-opened and confirmed accurate, at the cited lines:
+  - YAML keys across all three variants (`-nifty`, `-sensex-niftyoi`, `-sensex-sensexoi` — read the
+    first two; the third mirrors): `tags:[…opening-tick]`, `option_types:[CE]`, `signal_underlying:{NFO,
+    NIFTY-FUT-CONT}`, `strikes:{selector:atm_window,width:3}`, `entry_rules.gate.all:["close > vwma20"]`
+    + `scoring.threshold:0.2`, `exit_rules:[signal_exit "close < vwap", time_stop max_bars:10]`,
+    `position_sizing budget_inr:15000`, `max_positions(_per_underlying):1`, `max_daily_loss_pct:2.0`,
+    `oi_confluence_gate.enabled:false`, `session.style:intraday`/`square_off:15:15`.
+  - `ScalperConfig.java`: `OPENING_FROM/TO 09:15/09:30` (72-73), `VWAP_ACTIONABLE_FROM 10:30` (76),
+    delta+premium band (82-98), `openingTick` parse (128), `FIRST_CANDLE` anchor (145-146).
+  - `ScalperConfluenceGate.java`: opening-tick window swap (112-115), RSI hard gate (157-163), VWAP
+    soft-degrade `vwapHardGate=false` (249), `StrikePicker.pick` (271-276), `structuralStop` first-candle
+    (297-300), `chart(...)` dots (304-316).
+  - `ScalperGates.java`: `rsiBand` CE 60-80 / PE 20-40 (76-84), `breadth >32` (127-133),
+    `callPutDeltaFilter` (151-161).
+  - `ConnectTheDotsScorer.java`: OI/sentiment/trending-cross dots (80-90), `breadth` dot (91), `vix`
+    dot (92), VWAP soft-dot `valid` calc (113-115).
+  - `MarketOiClient.java`: `/api/v1/market/breadth` fetch (368-373), `fiiLongPct` into `Macro`
+    (375-383), null VIX level+dir in the `new Macro(...)` (394-397).
+  - `ScalperManualChecks.java`: `news_clear` 26-30 (2.13), `level_respected` 31-35 (4.11),
+    `not_parabolic` 36-40, `regime_ok` 41-45, `vix_normal` 46-50 (4.5), `global_cues_ok` 51-55 (4.7),
+    `clean_setup` 56-60 (3.1) — every doc_ref matches the row.
+  - `ScalperRisk.java:13` (no-averaging javadoc), `HeroZeroGate.java:120-122` (oversold cap — a
+    DIFFERENT strategy, as the row states), `SignalEngine.java:405-408` (structural-stop exit-first) +
+    `:587-588` (structuralStop captured at entry) — note SignalEngine lives under `…/signals/`, the bare
+    filename cite is still unambiguous.
+  - Cross-checks: §4.14.5 (L1572) DOES carry the pre-open data feed row-28 references; `ConnectingDotsService`
+    DOES wire a live-LTP Dow factor (`DOWJONES@GLOBAL_INDEX`, L58/L167) that is NOT fed to the scalper
+    scorer (row 29) — both confirmed.
+  - All other §3.9 / §6.9 doc-line cites (L975/L977/L981/L988-990/L994-995/L1001-1004/L1007-1009/L1012-1013/
+    L1019-1026) land on the quoted rule.
+
+- **CONVERGENCE: stable.** After three passes the only residual was the one S21 lot-modulation rule
+  (now added) and one stray doc line (now fixed); no false-coverage, no invented figure, no wrong code
+  cite. The table is converged.

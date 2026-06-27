@@ -122,8 +122,10 @@ false-coverage and no invented figure was found in any v1 row, and the README's 
 (every §1–§7 heading claimed; §6 a JSON mirror) is correct as written.
 
 The one real shortfall was **completeness of the §7 audit itself** — v1's scope note ("the audit targets those
-values + the §7 resolutions") meant it enumerated all five §7 **[RESOLVED]** items as rows but only sampled the
-~38 UNCERTAIN bullets (4 rows), and it omitted two §7 conflicts that §5 actually **resolves**. Four rows added:
+values + the §7 resolutions") meant it enumerated all four in-§7 **[RESOLVED]** markers (doc lines 2954 Open=High /
+2977 Golden Crossover / 2982 Hero-Zero / 2988 BTST) as rows but only sampled the ~38 UNCERTAIN bullets (4 rows),
+and it omitted two further §7 conflicts that §5 actually **resolves** (Sell-PE/CE @§5.10 line 1734, Morning-Trade
+Q3 @§5.9 line 1725) — taking the *full* resolution count to 4 in-§7 + 2 §5-resolves-§7 = six. Four rows added:
 
 - **MISSED — S7 Two-Candle bullish RSI cap "75 or 80?"** (doc line 2948). A distinct §7 UNCERTAIN co-located with
   the 5m-vs-3m item v1 *did* capture (row 33). It has a concrete code answer — `ScalperGates.java:81` uses the
@@ -140,6 +142,54 @@ values + the §7 resolutions") meant it enumerated all five §7 **[RESOLVED]** i
   point-targets row (this table, the `S5.x latest-wins POINT targets` row) and the "no `take_profit`" gap — left
   there rather than duplicated, but called out here so the §7 reader can find it.
 
-These corrections take the §7 [RESOLVED] coverage from 4/5 to **5/5** and the §5-resolves-a-§7-item coverage from
-2 (Open=High bands, Hero-Zero SL — both already rows) to **4** (adding the Sell-PE/CE and Morning-Trade Q3
-resolutions). All correct v1 rows were retained unchanged; no row was deleted.
+These corrections take the in-§7 [RESOLVED]-marker coverage to **4/4** (all four were already rows) and the
+§5-resolves-a-§7-item coverage from 2 (Open=High bands, Hero-Zero SL — both already rows) to **4** (adding the
+Sell-PE/CE and Morning-Trade Q3 resolutions) — six resolutions in total. All correct v1 rows were retained
+unchanged; no row was deleted.
+
+## v3 review notes
+
+Third-pass **citation validation** — every cited evidence in this file was RE-OPENED and confirmed against the code/doc
+at/near the cited line. **Every code file:line, yaml-key, and doc-line citation validated — one prose imprecision fixed,
+no table-row citation was wrong.** Convergence is **stable**: no new still-missing rule.
+
+Code/yaml citations re-opened and confirmed:
+- `ScalperConfig.java` — premium bands `:93-98` (NIFTY 100–250 / NIFTY BANK 250–400 / SENSEX 300–800); Hero-Zero
+  `OPPOSITE_EXTREME` `:147-148`; `entry-candle-stop → ENTRY_CANDLE` `:149-150`; gap-theory arm `:121` + `GAP_TREND` `:139`;
+  opening-tick/VWAP-degrade comment `:126-127`. All accurate.
+- `ScalperGates.java` — `volume` `:64-68` + NIFTY 125k/index 50k floors `:27-30`; `rsiBand` CE 60–80/PE 20–40 `:81`,
+  §4.2-governs javadoc `:70-74`; `callPutDeltaFilter` `:151-161`. All accurate.
+- `MarketOiClient.java` — monthly-expiry suppress `:268-269` (block `:268-273`); null-VIX `:396-397` + §12.2 note `:394`;
+  `fiiLongPct` read `:375-383`. Re-grepped `fiiLongPct`: zero readers outside the record/assignment/tests — the
+  "populated-but-unused" claim is exact.
+- `ScalperConfluenceGate.java` — straddle branch `:132-147` (both ATM legs `:143`); BUY-only comment `:130-131`; volume
+  hard-rail `:161`; `ENTRY_CANDLE` structural stop `:293-295`. All accurate.
+- `ScalperOiProps.java:32` `DEFAULT_CROSS_FILTER_PCT = 50`; `ConnectTheDotsScorer.java:92` vix dot;
+  `ConnectingDotsService.java:316` `dowFactor` (live LTP-vs-close, NEUTRAL in history); `ScalperManualChecks.java`
+  `regime_ok` `:41-45`, `vix_normal` `:46-50`, `global_cues_ok` `:51-55`. All accurate.
+- `StraddleLegPicker.java:23-24` "Both legs are BUYs … SHORT straddle (SELL legs) is SPAN-deferred"; `TrendChangeGate.java`
+  javadoc — keys on structure-break + ≥50% OI-shift + 2-candle + a 14:30 cap, **no counter-move volume veto** (row 29 NONE
+  re-confirmed); `HeroZeroStrikeSelector.java` one-strike-inside-SC per side (row 36 re-confirmed). `scalp-btst-stbt-nifty.yaml`
+  — quadrants `:6` + DEFERRED gate `:49` + SPAN-deferred SELL legs `:48`. All accurate.
+- Re-grepped all `scalp-*.yaml` exit types: only `signal_exit` / `stop_loss` / `time_stop` (no `take_profit`/`target`) —
+  row 32 "no `take_profit`" is exact. Tick-wise runner: `TickwiseGoldenRunner.java:354-361` now rolls 3m/5m/15m/1h (row 33).
+
+Doc quotes re-opened and confirmed VERBATIM at the cited lines: §7 — 2948 (RSI 75/80 "Day-5 manual says 50-75; chess
+slides say 50-75/80"), 2949 (5m TF), 2954 (Open=High BN 250–550 / N 150–350), 2970 (Trending-OI "1-2% vs 30-50 index
+points"), 2976 (Golden-Crossover RSI >25 vs <25), 2977 (Golden SL = Supertrend), 2982 (Hero-Zero BN ~75 / N ~30 + 3:10
+no-move + 10% profits), 2983 (Hero-Zero bearish mirror), 2988 (STBT LU=Q4/SB=Q2; BTST SC=Q3/LB=Q1), 3000 (Sell-PE/CE);
+§5 — 1649 (Two-Candle RSI>85 cool-to-70–80/75), 1679 (Gap 30–60-min + 50–60-pt SL), 1699 (Golden +200–300 BN/+50–100 N),
+1719 (BTST 5–10% size + VWAP/ST hold), 1725 (Morning-Trade Q3 resolution), 1734 (Sell-PE/CE buy-side resolution), 1738
+(Connect-the-Dots RSI table + hourly cadence + volume-mandatory + no-trade box), 1750 (Trend-Change monthly-expiry ignore-OI
++ counter-trend >125K veto). All present and exact.
+
+CHANGED (one fix, prose only): the v2 notes said "v1 enumerated all five §7 **[RESOLVED]** items" — there are exactly
+**four** `[RESOLVED]` markers inside §7 (lines 2954/2977/2982/2988); the "five/six" only holds once the two
+§5-resolves-a-§7 items (lines 1734, 1725) are added. Re-worded the v2 "four/five → 5/5" prose to "four in-§7 markers + two
+§5-resolves-§7 = six resolutions" and the dependent "4/5 → 5/5" sentence to "4/4 in-§7 + 4 §5-resolves-§7" for arithmetic
+consistency. No table row, status, or evidence cell was altered — every row's citation was already correct.
+
+Convergence (Part A): **no genuinely-still-missing rule.** All rule-bearing §5 refined values and §7 resolutions are either
+rowed here or correctly delegated to a per-strategy dimension per the orphan map (§5.2 chase-system → open-high-low, §5.3
+futures-not-options / daily-RSI → market-movers, §5.5 15-strike/PCR → trending-oi, §5.7 → hero-zero); the orphan map and the
+§6-is-a-JSON-mirror finding hold. This is the expected two-pass convergence signal.

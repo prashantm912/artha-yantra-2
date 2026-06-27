@@ -24,7 +24,7 @@ factors are not even consulted on the BTST path regardless of fidelity.)
 | Executable leg: BTST Buy CE / STBT Buy PE (long-premium); short legs (Sell PE / Sell CE) deferred to SPAN | §3.8 instruments; §6.8 instruments | PARTIAL | YAML header lines 10–19 seed only the long buy leg; `option_types: [CE, PE]`; SELL legs explicitly deferred to margin-service #47 | Manual: the short-premium Sell-PE (BTST)/Sell-CE (STBT) leg is not built; size/execute manually if traded. Automatable: true once #47 SPAN sizing is live. |
 | Side split: close toward day HIGH ⇒ BTST/CE, toward day LOW ⇒ STBT/PE | §3.8 entry triggers; §6.8 entry_conditions | NONE | YAML uses `direction: both` + `scoring.threshold: 0.2`; the close-location→side rule has no engine gate. `ScalperConfluenceGate` has a VWAP-decisive side picker (`:149`) but is **not invoked** on the BTST pre-close path. **v2 reinforcement:** the side is not resolved bidirectionally at all — `direction: both` collapses to LONG/BUY everywhere: live emit hard-codes `side = "BUY"` unless `direction == SHORT` (`SignalEngine.java:591-592`), and the backtest/golden runner emits LONG unless `direction == SHORT` (`TickwiseGoldenRunner.java:269,284-286,297-299`). `OptionsPremiumReplay` then buys ATM CE for long / PE for short (`OptionsPremiumReplay.java:41-42,132,143`), so STBT (the PE/bearish carry) is **never executed in replay** — the strategy is effectively CE-long-only. The YAML header's "side resolved LIVE at the seam off the close location" is aspirational, not coded | Manual: only carry BTST if the day closed at/near its HIGH (STBT at/near its LOW), AND manually take the PE/STBT side — the engine will only ever signal the CE/BTST (BUY) side. Automatable: true (a close-vs-day-high/low gate + a `both`→side resolver). |
 | OI-quadrant confirm — BTST SC=Q3/LB=Q1, STBT SB=Q2/LU=Q4 (mapped from close vs OI day-high/low) | §3.8 entry OI-quadrant; §6.8 entry_conditions | NONE | `ScalperGates.oiQuadrant` (`ScalperGates.java:121`) exists but checks the generic futures bull/bear quadrant, not the close-vs-OI BTST mapping, and is not reached on the BTST path | Manual: map the close + OI position to the correct quadrant per §3.8 before carrying. Automatable: partial (the literal SC/LB/SB/LU close-vs-OI-extreme mapping is not coded; generic quadrant data exists). |
-| 3:15pm Futures-OI direction = bullish (BTST) / bearish (STBT) | §3.8 setup 5; entry 3:15 checks | NONE | the `OiQuadrant` enum (`SHORT_COVERING`/`SHORT_BUILDUP`, in `OiQuadrant.java:10`, used by `HeroZeroGate`) / `futures_oi` dot exist in the scorer but the BTST path never calls the gate | Manual: confirm 3:15pm Futures OI direction matches the carry side. Automatable: true (data exists in `ConnectingDotsService` `futOi` factor). |
+| 3:15pm Futures-OI direction = bullish (BTST) / bearish (STBT) | §3.8 setup 5; entry 3:15 checks | NONE | the `OiQuadrant` enum (`SHORT_COVERING`/`SHORT_BUILDUP` constants `OiQuadrant.java:14,16`; `.bullish()`/`.bearish()` at `:28,33`, used by `HeroZeroGate`) / `futures_oi` dot (`ConnectTheDotsScorer.java:80`) exist in the scorer but the BTST path never calls the gate | Manual: confirm 3:15pm Futures OI direction matches the carry side. Automatable: true (data exists in `ConnectingDotsService` `futOi` factor). |
 | 3:15pm Option-OI direction via Trending OI + Sentiment | §3.8 setup 6; entry 3:15 | NONE | `trending_cross` + `sentiment` dots exist in `ConnectTheDotsScorer.java:83-88`; not invoked for BTST | Manual: confirm Trending OI + Sentiment graph agree with the side at 3:15. Automatable: true. |
 | 3:20pm view matches OI-Pulse / OIP AI direction | §3.8 setup 9; entry 3:20 | NONE | No OIP-AI-direction input is wired into any scalper gate | Manual: confirm your view matches the OI-Pulse AI read at 3:20. Automatable: uncertain (no OIP-AI-direction feed in repo). |
 | Observe short covering (BTST) / short build-up (STBT) between 2:30–3:00pm around support/resistance | §3.8 setup 4, entry; filters time-of-day | NONE | **v2 MISSED row.** No gate observes a 2:30–3:00pm SC/SB window; the BTST clock fires a single evaluation at `pre_close_at: "15:20"` (`SignalEngine.java:511,518`) and the entry gate is only `volume > 0`. The `ScalperGates.oiQuadrant` SC/SB classification is in the bypassed confluence gate | Manual: watch for short covering (BTST) / short build-up (STBT) around the OI S/R between 2:30 and 3:00pm before deciding the carry. Automatable: partial (SC/SB classification exists in `ScalperGates`; the 2:30–3:00 window is not coded). |
@@ -40,6 +40,7 @@ factors are not even consulted on the BTST path regardless of fidelity.)
 | No improper BTST near expiry against the trend; don't BTST after a parabolic close | §3.8 risk, S22 note; §6.8 edge_cases | MANUAL_COVERED (partial) | `ScalperManualChecks` key `not_parabolic` (`:36-40`, doc_ref 3.1) covers the parabolic case; no expiry-vs-trend block | Manual: skip BTST near expiry against trend and after a parabolic up-close. Automatable: partial. |
 | STBT stock short-sell penalty in monthly expiry (delivery/square-off) | §3.8 risk; §6.8 risk_management | NONE | stock universe deferred (#3); not modelled | Manual: STBT in stocks risks a delivery penalty in monthly expiry — index-only here. Automatable: n/a (stock universe deferred). |
 | Next-day continuation read: BTST confirmed if prev-day high NOT tested; STBT if prev-day low IS tested; trail winners next day | §3.8 exit, edge cases; §6.8 exit/edge | NONE | exit is a flat `time_stop max_holding_days: 1`; no prev-day-level read or next-day trailing | Manual: next morning, confirm the prev-day level read and trail winners; the engine just time-exits after 1 day. Automatable: partial (prev-day level read codable; trailing not modelled). |
+| Morning re-confirm before continuing the hold: keep the carry only if yesterday's 3:20pm view + the morning-trade read + premarket + global cues all match (else manage out) | §3.8 exit "Confirmation before continuing the hold"; §6.8 stop_loss ("Manage out if next-day premarket / global cues / morning-trade read do not align with prior 3:20pm view") | NONE | **v3 MISSED row.** §3.8 Exit Rules line 933 makes the next-morning hold conditional on a 4-way re-alignment (prior 3:20 view + morning read + premarket + global cues); §6.8 `stop_loss` repeats it. The engine just `time_stop max_holding_days: 1` exits — no next-morning re-confirm gate, and none of these inputs (premarket / global cues / prior-3:20 view) is wired into any scalper gate or `ScalperManualChecks` for the carry path | Manual: next morning, only continue the hold if yesterday's 3:20pm read, the morning-trade view, premarket and global cues all agree; otherwise manage out. Automatable: partial (the global-cue/premarket inputs are not coded for the carry; the re-alignment is a discretionary read). |
 | Stock BTST/STBT 8/9-day-low (or 15-day-low) break candidate | §3.8 setup 11, S22; §6.8 entry bearish | NONE | stock universe deferred (#3, Market Movers); YAML header lines 52–53 explicitly defer it | Manual: the stock variant (n-day-low break + Futures OI at day-high/price at day-low) is not built. Automatable: false until the equity universe exists. |
 | Strike guidance: Put-as-support / Call-as-resistance read off OI build-up | §3.8 setup 3 | NONE | not coded | Manual: identify max-OI S/R before the carry. Automatable: true (chain data exists). |
 
@@ -81,3 +82,49 @@ Changes made:
   fixed 50%-premium stop (a defined stop, not the doc's wide gap-tolerant one) and there is no probability-signal feed.
 
 All other v1 rows and gap bullets are CONFIRMED accurate as written.
+
+## v3 review notes
+
+Third-pass citation-validation. I re-opened EVERY cited file:line, yaml key and doc-§ against the three
+YAMLs, the strategy-signal scalper sources, `TickwiseGoldenRunner`, `OptionsPremiumReplay`,
+`ConnectingDotsService`, and the consolidated doc §3.8 (lines 874–967) / §6.8 (line 2506) / §6.9 (line 2535).
+
+**Citations validated — all clean (no drift found):**
+- `SignalEngine.java:510` (`@Scheduled` cron `preCloseClock`, MON-FRI), `:518` (`pre_close_at` match), `:522`
+  (once/day `preCloseDone` guard), `:567-569` (`emitEntry(..., null)` — the confluence/StrikePicker bypass),
+  `:591-592` (`side = SHORT ? "SELL" : "BUY"`). All exact.
+- `ScalperGates.java:64` (volume floor NIFTY 125k/index 50k), `:76` (`rsiBand` CE 60-80/PE 20-40), `:121`
+  (`oiQuadrant` — generic futures bull/bear, NOT close-vs-OI), `:128` (`breadth` >32). All exact.
+- `ScalperConfluenceGate.java:149` (VWAP-decisive side picker). Exact.
+- `ScalperConfig.java:82-83` (DELTA_LO/HI 0.6/0.7), `:93-98` (premium map; SENSEX 300–800). Exact.
+- `ScalperManualChecks.java` keys: `news_clear` `:26-30`/2.13, `not_parabolic` `:36-40`/3.1, `vix_normal`
+  `:46-50`/4.5, `global_cues_ok` `:51-55`/4.7. All exact (key, line range AND doc_ref).
+- `TickwiseGoldenRunner.java:269` ("SHORT":"LONG"), `:284-286`, `:297-299` (LONG unless SHORT). Exact.
+- `OptionsPremiumReplay.java:41-42` (javadoc "long buys ATM CE, short ATM PE"), `:132,143` (`"SHORT".equals(
+  open.direction())` → isShort). Exact — confirms STBT/PE is never executed in replay since every signal emits LONG.
+- `ConnectTheDotsScorer.java:83-88` (`trending_cross`/`sentiment` dots; `futures_oi` is at :80). Present.
+- `ConnectingDotsService.java`: `futOiFactor` (:249), `dowFactor` (:316), `vixFactor` (:263) — the `futOi`/`dow`/`vix`
+  factors the rows reference all exist. Present.
+- All YAML keys re-confirmed in all three scalp-btst-stbt-*.yaml (style: btst, pre_close_at 15:20, strikes
+  atm_window width 3, stop_loss premium_pct 50, time_stop max_holding_days 1, direction: both, threshold 0.2,
+  oi_confluence_gate.enabled: false). The two SENSEX variants also carry `strike_reference: BFO/SENSEX-FUT-CONT`
+  (a 2b-E2b addition the v2 note did not mention) and differ from each other only by id/name + `oi_confluence_gate.index`.
+- All doc-§ pointers (§3.8 setup 1–12 / entry / exit / risk / filters / edge cases; §6.8 fields; the §6.9 line-2535
+  adv>32/dec>32 quote) re-read and confirmed verbatim, including the S21-update (b) "320 Strategy"/wide-SL and
+  S22-note (d) parabolic-close citations.
+
+**Changes made (3):**
+- **Citation tightened (row "3:15pm Futures-OI direction"):** the `SHORT_COVERING`/`SHORT_BUILDUP` constants were
+  cited to `OiQuadrant.java:10` (the `public enum` line); the named constants are at `:14,16` and `.bullish()`/
+  `.bearish()` at `:28,33`. Corrected the line refs and added the `futures_oi` dot's exact site (`ConnectTheDotsScorer.java:80`).
+  Status unchanged (NONE).
+- **MISSED (1 new row, NONE):** §3.8 Exit Rules line 933 ("Confirmation before continuing the hold: if yesterday's
+  3:20pm view, the morning trade read, premarket, and global cues all match...") + §6.8 `stop_loss` ("Manage out if
+  next-day premarket / global cues / morning-trade read do not align with prior 3:20pm view") is a discrete
+  next-morning re-alignment gate not represented by any prior row (row 42 covers only the prev-day-level continuation
+  read + trailing). The engine just `time_stop`-exits after 1 day; the premarket/global-cue/prior-3:20 inputs are not
+  wired into any carry-path gate or `ScalperManualChecks`. Added as a NONE row.
+- No status overturns: every FULL/PARTIAL/NONE/MANUAL_COVERED verdict survived citation validation unchanged.
+
+Convergence: stable. Beyond the one missed §3.8-exit re-confirm rule, no genuinely-unrepresented doc rule remains;
+the "best setups" ranking (§3.8 line 910) is a soft preference subsumed by the OI-quadrant row, not a discrete gate.

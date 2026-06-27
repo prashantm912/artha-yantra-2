@@ -63,12 +63,14 @@ coverage/gap, invented figure). `Confirmed accurate` = v1 rows the re-audit re-v
   rules (radar staging, the OI-Spurt cue, the New-High/Low maker panel, large-cap/operator-trap, STBT
   carry).
 
-The corrected document totals (building on the README's published per-dimension base of 499 rules / 382
-gaps): **544 rules** (+45 missed) and **420 gaps** (+38 net — 45 missed minus the 7 that turned out to be
-already-FULL/automated, with the two status flips netting to zero). No headline conclusion of the v1 audit
-moved: the engine still automates the mechanical core (entries, structural stops, the soft confluence
-dots) and still leaves the management layer, the cross-source reads (FII/DII, VIX, per-stock screeners),
-and the discretionary discipline to the human checklist.
+The corrected document totals (building on the **re-counted** v1 base of 521 rules — the §1 table above,
+not the README's earlier-published 499/382): **566 rules** (+45 missed) and **420 gaps** (+38 net — 45
+missed minus the 7 that turned out to be already-FULL/automated, with the two status flips netting to
+zero). A subsequent third (citation-validation) pass then added **4** more genuinely-missed rows (all
+gaps), taking the current published totals to **570 rules / 424 gaps** (the README §1/§2 figures). No
+headline conclusion of the v1 audit moved: the engine still automates the mechanical core (entries,
+structural stops, the soft confluence dots) and still leaves the management layer, the cross-source reads
+(FII/DII, VIX, per-stock screeners), and the discretionary discipline to the human checklist.
 
 **Why one dimension is MEDIUM, not HIGH.** [Connect the Dots](./connect-the-dots.md) is the framework
 hub, so it accumulated both 3 missed rules (the 5m/Daily RSI multi-timeframe cross-check, the

@@ -16,14 +16,14 @@ dots that degrade to NEUTRAL on derived history).
 | OH on Futures (3-min) — open == running session high (mirror OL) | §3.2 L441,L451 / §6.2 setup[0] | FULL | `OpenHighLow.marks` (OpenHighLow.java:78-100), 1-pt tolerance L68; wired ScalperConfluenceGate.java:219 | — |
 | ≥3 strikes above/below ATM matching OH (CE) / OL (PE); "very high" at 4-5 | §3.2 L442,L452 setup[1] | FULL | `OpenHighLow.tier` minStrikes (OpenHighLow.java:151-160); `openHighMinStrikes` default 3 (ScalperOiProps.java:45); per-strike via `openHighStats` (MarketOiClient.java:123) | Per-strike OHLC is 5-min snapshot resolution (yaml `oi_confluence_gate.interval:"5m"`), not native 3-min — manual: eyeball the OH/OL strike count on the live chain |
 | Probability tiers: OH-Fut+OH-Call+OL-Put=HIGH; few=MILD; both-OH=stand-aside | §3.2 L489 / §6.2 edge_cases[2] | FULL | `OpenHighLow.tier` (OpenHighLow.java:112-174); only HIGH fires (OpenHighLowGate.java:103-105) | — |
-| Restrict to ATM and ITM strikes, ATM ±3; avoid OTM / deep ITM | §3.2 L443,L483 setup[2] | PARTIAL | yaml `strikes:{selector:atm_window,width:3}`; window via `openHighWindow` default 3 (ScalperOiProps.java:52) | Footprint window is symmetric ATM±3; doc says ATM/ITM-only — OTM legs are NOT excluded from selection. Manual: confirm the picked strike is ATM/ITM, not OTM. Automatable: true |
+| Restrict to ATM and ITM strikes, ATM ±3; avoid OTM / deep ITM | §3.2 L443,L483 / §6.2 setup[3] | PARTIAL | yaml `strikes:{selector:atm_window,width:3}`; window via `openHighWindow` default 3 (ScalperOiProps.java:52) | Footprint window is symmetric ATM±3; doc says ATM/ITM-only — OTM legs are NOT excluded from selection. Manual: confirm the picked strike is ATM/ITM, not OTM. Automatable: true |
 | Identified-strike premium not fallen >50% from prev close (mirror PE not risen >50%) | §3.2 L444,L456,L472 setup[4] | FULL | `exceedsPrevCloseFall` → Tier.LOW (OpenHighLow.java:223-226); `openHighMaxPrevCloseFallPct` default 50 (ScalperOiProps.java:50); plus spurt reject OpenHighLowGate.java:108 | Null value does not block (degrade-around). Per-strike prevclose-fall via strike-session-stats |
 | Change in OI on identified strike not increased >50% (>50% = opposite player) | §3.2 L445,L456,L472 setup[5] | PARTIAL | spurt reject reuses Tier-1 `spurtOiPct` magnitude (OpenHighLowGate.java:108, ScalperOiProps.java:42) | Reject uses the chain-wide OI-spurt %, NOT the per-strike OI-change; a null magnitude does NOT block. Manual: check the identified strike's own ΔOI% < 50. Automatable: true (needs per-strike ΔOI in strike-session-stats) |
 | Table-2 modifier: OH strike fell on ≥50K (BN)/125K (N) volume → downgrade probability | §3.2 L490 / §6.2 edge_cases[3] | FULL | `fellOnHeavyVolume` → Tier.LOW (OpenHighLow.java:205-217); `openHighFallVolumeFloor` default 50000 (ScalperOiProps.java:48) | Floor is a single 50000, not the per-index 50K-BN / 125K-N split |
 | Momentum up: RSI > 50 and moving above 50 (RSI5m <75/80, RSI-D <75) | §3.2 L454,L479 entry[3] | PARTIAL | RSI>50 floor: `rsiAbove(openHighRsiFloor)` default 50 (ScalperConfluenceGate.java:157-160, ScalperOiProps.java:54); yaml `rsi14` 3m | Only the >50 floor on the 3-min RSI is gated. The <75/80 overbought cap and the daily-RSI<75 cap are NOT enforced. Manual: confirm RSI5m<75/80 and RSI(D)<75. Automatable: true |
 | All indicators (VWAP/Supertrend 10,2/VWMA) below price for a CE (above for PE) | §3.2 L454,L484 entry[3] | PARTIAL | hard VWAP gate (yaml `gate: close > vwap`; ScalperConfluenceGate.java:149-152); supertrend/vwma/psar are SOFT dots (ConnectTheDotsScorer.java:75-77) | Only VWAP is a hard gate; ST/VWMA/PSAR alignment is weighed in the aggregate, not required. Manual: confirm price is above ALL three. Automatable: true |
 | OI build-up Call OI declining / Put OI increasing (bullish) | §3.2 L456,L480 entry[5] filters | PARTIAL | `underlying_oi` / `trending_cross` / `futures_oi` soft dots (ConnectTheDotsScorer.java:80-83) | Folded into the confluence aggregate (threshold 0.2 yaml), not a hard OH-specific requirement; degrades to NEUTRAL on derived history. Manual: confirm the OI build-up direction on the live chain |
-| VWAP is the stop-loss on a live OH momentum scalp | §3.2 L434(d) S22 / §6.2 stop_loss | FULL | structural stop = front-future VWAP (OpenHighLowGate.java:228, .Verdict stopLevel); yaml `exit_rules: signal_exit close < vwap` | — |
+| VWAP is the stop-loss on a live OH momentum scalp | §3.2 L434(d) S22 | FULL | structural stop = front-future VWAP returned as the `Verdict.stopLevel` (OpenHighLowGate.java:64,111 — `new Verdict(true, vwap, …)`), wired into `structuralStop` (ScalperConfluenceGate.java:228 `structuralStop = ohl.stopLevel()`); yaml `exit_rules: signal_exit close < vwap` | — |
 | 1st-half preference; avoid INITIATING in 2nd half (time-value erosion) | §3.2 L446,L471 setup[6] | FULL | `FIRST_HALF_CUTOFF` 12:00 (OpenHighLowGate.java:72,97-99); yaml session `window:{from:09:45,to:12:00}` | — |
 | Trade in the ideal 9:15–10:00 window; ~90% of OH hit before 10:30 | §3.2 L451,L477; S22 L434(a) | NONE | yaml session window is `09:45`–`12:00`; the general ≥09:45 pre-flight (ScalperGates.timeWindow) applies, no 9:15–10:00 narrowing, no 10:30 freshness cut | The doc's IDEAL window (9:15–10:00) and the "if not hit by 10:30 it's low-probability" rule are not encoded. Manual: prefer entries 9:15–10:00; deprioritise after 10:30. Automatable: true |
 | OI Pulse probability ≥90% WITH badge (red dot); do not chase below 90% | §3.2 L448,L453,L462; §6.2 entry bullish[2] | NONE | NOT automated — explicitly an unavailable Phase-4 OiPulse-parity model, "OPTIONAL, currently-unavailable, NEVER required" (yaml header L8-11; OpenHighLow.java class doc) | The single hardest doc gate (≥90% badge) is degraded around. Manual: read the OI-Pulse AI badge ≥90% (red dot) on oipulse before entering. Automatable: false (no parity model / external feed) |
@@ -96,3 +96,40 @@ rows quote (50% reject, ATM±3, 30%-capital, 50K/125K volume, 0.6–0.7 delta, 1
    `clean_setup` + the RSI>50 / hard-VWAP momentum rails).
 
 No rows were deleted or re-statused; the diff is purely additive (28→30 doc rows in the body table).
+
+### v3 review notes
+
+Third-pass **citation validation** — every `file:line`, yaml key and doc `§`/array-index in all 30 body rows
+re-opened against the live code, the three `scalp-open-high-low-*.yaml` and the doc §3.2 (L428–L498) + §6.2
+(L1872–L1976). The audit is converged: **no still-missing doc rule** (Part A — §3.2/§6.2 are fully represented;
+the only nuances not given their own row, e.g. S22 L434 "skip the day when an ATM strike needs ~100% premium
+movement to reach the OH" and S21 L432(d) "skip OH/OL on a strong trend day unless calls already fell >50%", are
+discretionary sub-cases of the ≥90%-probability NONE row and the trend-alignment PARTIAL row, deliberately not
+churned). **Two stale/wrong citations fixed; no status overturned:**
+
+1. **Row "VWAP is the stop-loss"** — cited `OpenHighLowGate.java:228`, but that file is only **118 lines** (no
+   L228). The VWAP stop is returned as the `Verdict.stopLevel` at `OpenHighLowGate.java:111`
+   (`new Verdict(true, vwap, …)`, record at :64) and wired into the structural stop at
+   `ScalperConfluenceGate.java:228` (`structuralStop = ohl.stopLevel()`). Corrected the cite to those real lines.
+   Also dropped the secondary `§6.2 stop_loss` doc-cite from that row: §6.2 `stop_loss` (L1931) carries the
+   abort/>50%/~5-pt-inside rules, NOT the VWAP-stop (which is §3.2 L434(d) only). Status stays **FULL** (the VWAP
+   stop IS encoded — only the line number was stale).
+2. **Row "Restrict to ATM and ITM strikes"** — cited `§6.2 setup[2]`, off by one: `setup[2]` (L1902) is the
+   "rare 4-5 strikes very-high-probability" rule; the ATM/ITM-only + ATM±3 rule is `setup[3]` (L1903). Corrected
+   to `§6.2 setup[3]`. The `§3.2 L443,L483` part was already correct. Status stays **PARTIAL**.
+
+**Spot-checked correct (no change):** OpenHighLow.java marks :78-100 / tier :112-174 / tolerance :68 / minStrikes
+:151-160 / both-sides STAND_ASIDE :147-148 / fellOnHeavyVolume :205-217 / exceedsPrevCloseFall :223-226;
+OpenHighLowGate.java FIRST_HALF_CUTOFF :72,97-99 / tier-HIGH :103-105 / spurt-reject :108 / exit-target javadoc
+:48-51; ScalperOiProps.java openHighMinStrikes :45 / window :52 / maxPrevCloseFallPct :50 / spurtOiPct :42 /
+fallVolumeFloor :48 / rsiFloor :54 / ivPair :38-40; ScalperConfig.java DELTA :82-83 / NIFTY band 100–250 :93,96 /
+SENSEX 300–800 :98; StrikePicker.pick :99-105; ScalperConfluenceGate OH/OL wiring :219, rsiAbove :157-160,
+VWAP-decisive :149-152, volume gate :161; ConnectTheDotsScorer soft dots :75-77,80-83,92,94-98 / bias60m
+:111,114; MarketOiClient.openHighStats :123; ScalperGates.oiQuadrant :121-125; ScalperManualChecks
+vix_normal/news_clear/global_cues_ok/not_parabolic/clean_setup :27-60. All yaml keys
+(`oi_confluence_gate.interval:"5m"`, `strikes.width:3`, `gate: close > vwap`, `threshold:0.2`, `signal_exit`,
+`time_stop.max_bars:20`, `window 09:45–12:00`, `budget_inr:15000`, `max_daily_loss_pct:2.0`, `bias60m`) present in
+all three variants (SENSEX-niftyoi/sensexoi carry the additional `oi_confluence_gate.index` per the 2c A/B). Every
+doc number the rows quote (50% reject, ATM±3, ≥3 strikes/4-5, 50K-BN/125K-N volume, 0.6–0.7 delta, 100–250 older /
+150–350 S22 bands, 9:15–10:00, 10:30, ≥90% badge, 30–50pt target, ~5-pt-inside, 30%-capital) matches verbatim.
+**Convergence: stable** (2 cosmetic citation fixes, 0 added rows, 0 status changes).

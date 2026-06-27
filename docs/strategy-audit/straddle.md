@@ -20,7 +20,7 @@ not the lens here — code presence is.)
 | Short straddle = SELL ATM Call + ATM Put (range/decay play) | 3.11 / 6.11 | NONE | `StraddleLegPicker.java:24` only ever returns BUY legs; yaml header lines 18-21 "Short straddle … DEFERRED" | Short variant not built — SPAN-deferred (#47). To run a short straddle the trader must place/manage it entirely manually. Automatable: true (once #47 SPAN appliance gates short premium). |
 | Entry trigger: combined straddle premium breaks ABOVE its own VWAP **with volume** (long) | 3.11 / 4.15.2 / 6.11 | NONE | NOT in gate — `ScalperConfluenceGate.java:128-131` states the combined-premium-vs-VWAP series "the deterministic seam cannot recompute … NOT enforced". Engine emits draft on time+volume only | Manual: on the combined Call+Put premium chart, enter only when it closes above its own VWAP on volume. Automatable: true (combined-premium straddle chart already exists FE-side, task #6) — but not in the deterministic gate. |
 | Short entry trigger: after 9:30 AM, price FALLS BELOW the VWAP of both Call and Put | 3.11 / 6.11 | NONE | No short path exists; engine time window is the generic ≥09:45 (`ScalperGates.java:33-43`), not 09:30 | Manual: short straddle entered only when combined premium is below both legs' VWAP after 09:30. Automatable: true. |
-| Event/budget long form: after ~12:30 PM, price CLOSES ABOVE the VWAP of both legs | 3.11 / 6.11 | NONE | Not encoded. Worse, the engine time gate BLOCKS the 11:00–13:00 midday window (`ScalperGates.java:32`), which *conflicts* with the ~12:30 PM event entry | Manual: event long straddle entered ~12:30 PM on the both-leg VWAP close — and the trader must override the engine's midday block. Automatable: true (needs an event-aware window). |
+| Event/budget long form: after ~12:30 PM, price CLOSES ABOVE the VWAP of both legs | 3.11 / 6.11 | NONE | Not encoded. Worse, the engine time gate BLOCKS the 11:00–13:00 midday window (`ScalperGates.java:23-24,37-39` — the `MIDDAY_BLOCK_FROM/TO` constants + the `timeWindow` block clause), which *conflicts* with the ~12:30 PM event entry | Manual: event long straddle entered ~12:30 PM on the both-leg VWAP close — and the trader must override the engine's midday block. Automatable: true (needs an event-aware window). |
 | Long SL = BELOW the (combined) VWAP; Short SL = ABOVE the VWAP | 3.11 / 6.11 | NONE | Engine SL is `stop_loss basis: premium_pct value: 50` (yaml line 84) — a 50% premium proxy, explicitly "[ASSUMED] v1 bounding stop (combined-premium SL is LIVE)" | Manual: set/trail the real SL on the combined-premium VWAP (long: below; short: above). Automatable: true. |
 | Long exit: lower-low candle / combined premium peaks and rolls over | 3.11 / 6.11 | PARTIAL | Only a generic `time_stop max_bars: 30` (~90 min, yaml line 85) + 15:15 square-off; yaml line 86 "the faithful exit … is LIVE-managed" | Manual: exit when the combined premium rolls over from its peak / lower-low forms; book, don't wait for full reversal. Automatable: true (rollover/lower-low on the combined series is computable). |
 | Short exit: considerable premium decay / EOD / immediately if price breaks back through VWAP | 3.11 / 6.11 | NONE | No short path; no VWAP-break exit in the gate | Manual: exit short on decay, at EOD, or instantly on a VWAP re-break. Automatable: true. |
@@ -47,7 +47,7 @@ not the lens here — code presence is.)
 - **No volatility gating** — LOW-IV-for-long, both-side-IV-similar-for-short, IV>40-stay-away / 40-40-go-short, and the long-vs-short variant decision are not in the gate, though per-strike IV and VIX feeds exist (`ConnectingDotsService`).
 - **No breakeven / expected-move sizing** — the "underlying must move > combined premium" check (don't pay ~1000 for a 100-200-pt move) is not computed; sizing is a flat premium budget.
 - **Trending-OI variant confirmation** (together = short / divergence = long) is skipped — the neutral path uses a NEUTRAL stand-in confluence and disables the OI gate.
-- **Timeframe / chart mismatch** — engine runs 3m on the index-future chart; the doc's tool is the 5-min combined-premium straddle chart. The event-long ~12:30 PM entry additionally collides with the engine's 11:00-13:00 midday block.
+- **Timeframe / chart mismatch** — engine runs 3m on the index-future chart; the doc's tool is the 5-min combined-premium straddle chart. The event-long ~12:30 PM entry additionally collides with the engine's 11:00-13:00 midday block (`ScalperGates.java:23-24,37-39`).
 - **VIX/global-cue/news checks ARE covered** by `ScalperManualChecks`, but those are the *global* gates; the straddle's *own* IV gates are not.
 
 ### v2 review notes
@@ -77,3 +77,43 @@ Changes made:
 No row was deleted. All other v1 rows confirmed accurate as written. README §5 raised no false-coverage flag
 against this dimension; its one straddle parking item (combined-premium VWAP entry + LOW IV + combined-VWAP SL,
 LIVE-deferred) is correctly reflected by v1 rows for the entry-trigger / SL / LOW-IV gaps.
+
+### v3 review notes
+
+Citation-validation pass: opened every cited file:line / yaml key / doc-§ in the table and re-confirmed it
+proves the row's claim. The state is **converged** — no still-missing doc rule, no overturned status, only one
+citation sharpened.
+
+Validated (all real and accurate as cited):
+- **Code citations.** `StraddleLegPicker.java:52-93,78-84` (ATM nearest-forward pick, both legs BUY), `:24`
+  (javadoc "SHORT … never picked here"); `ScalperConfluenceGate.java:128-131` (combined-premium-vs-VWAP NOT
+  enforced), `:132-135` (straddle path volume gate on `cfg.signalIndex()`), `:143` (`Leg(CE)`+`Leg(PE)`),
+  `:144,328` (`neutralConfluence()` call site + def); `ScalperGates.java:28,30,64-68` (NIFTY-50 → 125,000 floor),
+  `:33-43` (≥09:45 window); `ScalperManualChecks.java:26-30` (`news_clear` §2.13), `:46-50` (`vix_normal` §4.5),
+  `:51-55` (`global_cues_ok` §4.7); `RiskService.java:26` (`max_open_paper_positions`), `:27,60-69`
+  (`daily_loss_limit`, off-by-default via `asBoolean(false)`); `ScalperRisk.java:21-24` (`hasBoundingExit`);
+  `ConnectingDotsService.java:37,71` (`activeStrikeIv` factor + source javadoc). Also independently confirmed
+  `ScalperConfig.java:167` maps `NIFTY-FUT-CONT → NSE/NIFTY 50`, so the volume-floor-keyed-on-signal-index claim
+  (row 34, all three variants) holds.
+- **YAML citations.** `scalp-straddle-nifty.yaml` line 84 (`stop_loss premium_pct value:50`), 85 (`time_stop
+  max_bars:30`), 86 (LIVE-managed NOTE), 89 (`premium_budget budget_inr:15000`), 90/92 (`max_positions:1` /
+  `max_daily_loss_pct:2.0` — the DEAD keys), header 18-21 (short DEFERRED), and the `volume > 0` /
+  `oi_confluence_gate.enabled:false` keys — all present in all three drafts (header 18-21 identical across nifty
+  / sensex-niftyoi / sensex-sensexoi).
+- **Doc citations.** §3.11 (md lines 1144-1200) + §4.15.2 (1555-1556) confirm every quoted rule verbatim: ATM/OTM
+  setup #4 (1158), long BUY / short SELL (1149-1150), combined-premium-VWAP-with-volume entry (1162), short
+  after-09:30 / event-long after-~12:30 (1162, 1168), SL below/above VWAP (1178-1179), exits (1173-1174), one-leg
+  management (1163), LOW-IV / both-side-IV / IV>40-&-40/40 (1149,1167,1187), breakeven "don't pay 1000 for a
+  100-200pt move" (1156,1184), Trending-OI together=short/divergence=long (1157,1188), 5-min straddle chart
+  (1152), hard-SL-above-VWAP / freak-candle-4× (1182), slice-of-profits (1184). §6.11 is the JSON mirror (md 2755).
+
+Change made (1, cosmetic-precision only — no status/verdict change):
+1. **Citation sharpened (midday-block).** Rows for the event-long ~12:30 entry and the "Not automated" timeframe
+   bullet cited `ScalperGates.java:32` for the 11:00-13:00 block — but line 32 is the *javadoc comment*; the
+   executable gate is the `MIDDAY_BLOCK_FROM/TO` constants (`:23-24`) + the `timeWindow` clause (`:37-39`).
+   Re-pointed both to `:23-24,37-39`. The claim was always correct; the line now lands on the code, not the doc-comment.
+
+Convergence: **stable.** Every v2 row's citation re-opened and confirmed; no false-coverage, no drifted line that
+changes a verdict, no doc rule left unrepresented. The one DEAD-key correction v2 made (row 37) re-verified — the
+`max_daily_loss_pct` / `max_positions` YAML keys are still unread by `StrategyCompiler` / `strategy-engine`, and
+the real enforcer is account-side `RiskService`.

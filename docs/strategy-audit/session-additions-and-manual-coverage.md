@@ -29,7 +29,7 @@ backtests) — judged here by code presence, not backtest behaviour.
 | **Strike/delta by expiry phase** (0.7–0.8 near weekly-end; ~0.5 first day) and VIX (low→lower-premium / high→higher) | 4.14.7 / 4.15.4 | PARTIAL | Fixed delta band 0.6–0.7 only (`ScalperConfig.java:82-83`); the expiry-phase + VIX-conditional delta/premium are DEFERRED by explicit code comment (`ScalperConfig.java:78-81`) | Manually shift delta toward 0.7–0.8 near weekly-end / 0.5 on day 1; manually choose premium by VIX. **Automatable** (expiry clock + VIX feed) — doc-sanctioned v1 simplification, not a gap per se. |
 | Read IV only at ~3 LTPs around ATM; ignore deep ITM/OTM IV | 4.14.7 | FULL | `deriveIvPair` uses exactly the 3-above + 3-below ATM strikes (`MarketOiClient.java:567-617`) | — |
 | **Options selling / hedging** (never naked; short straddle/strangle; SL = straddle VWAP +10–15pt) | 4.14.8 | NONE (SPAN-deferred) | `StraddleLegPicker` only ever returns BUY legs (`scalp-straddle-nifty.yaml:18-21`); short premium SPAN-gated (#47, dormant) | Short-side selling is not automated at all; manual only until SPAN appliance live. **Automatable** post-SPAN. |
-| **Scalping cadence & discipline** (hold seconds–~3 min; SL always small + cut immediately; a missed/delayed entry is **let go, not chased**; multi-lot for small per-trade targets) | 4.14.9 | PARTIAL | The 3-min hold maps to `primary: 3m` + `time_stop max_bars` (`scalp-connect-the-dots-nifty.yaml:24,47`); a scalp signal is per-bar so there is no "chase" path (a missed bar simply does not emit). Small-SL-cut-immediately = the structural stops; the **multi-lot / per-trade-target sizing is NOT encoded** (flat `premium_budget`, `:49`) | Cadence/no-chase are implicit in the per-bar engine; the multi-lot small-target sizing is manual. **Automatable** (sizing) but unbuilt. |
+| **Scalping cadence & discipline** (hold seconds–~3 min; SL always small + cut immediately; a missed/delayed entry is **let go, not chased**; multi-lot for small per-trade targets) | 4.14.9 | PARTIAL | The 3-min hold maps to `primary: 3m` + `time_stop max_bars` (`scalp-connect-the-dots-nifty.yaml:24,46`); a scalp signal is per-bar so there is no "chase" path (a missed bar simply does not emit). Small-SL-cut-immediately = the structural stops; the **multi-lot / per-trade-target sizing is NOT encoded** (flat `premium_budget`, `:49`) | Cadence/no-chase are implicit in the per-bar engine; the multi-lot small-target sizing is manual. **Automatable** (sizing) but unbuilt. |
 | **Account size & order mechanics** (1% rule, ~5–6 lakh for consistency, trade from withdrawn profits; **basket orders** to punch large qty; recommended small-capital set = OSPL/Trending-OI/Open=High/2-Candle) | 4.14.9 | NONE | No capital-tier sizing, no basket-order grouping, no "recommended-set" gating in the scalper engine | Account sizing + basket orders are an account/order-layer concern; the recommended-set is owner judgement. Not a signal gate. |
 | **Trending-OI + PA** (LTP change beside ΔOI; "LTP not moving = premium erosion not a real move") | 4.15.1 | PARTIAL | Trending cross requires real ΔOI signs (`trendingCross`, `ConnectTheDotsScorer.java:125`) and OI-spurt requires a price% move (:159) — so a flat-LTP/erosion case is non-confirming. But the explicit "gradual drop in negative LTP-change flags a buyer" PA read is NOT modelled | Manually confirm LTP follow-through on a Trending-OI signal. **Automatable** (LTP-change series exists on the OI page). |
 | **Straddle chart** = combined Call+Put premium vs its own VWAP, entry = VWAP break **with volume**; one-leg management | 4.15.2 / 3.11 | NONE (LIVE-deferred) | Explicitly NOT enforced — the combined-premium-vs-VWAP entry + low-IV gate are "LIVE market-data the deterministic seam cannot recompute" (`ScalperConfluenceGate.java:128-131`, `scalp-straddle-nifty.yaml:24-31,86`); v1 emits a two-leg draft only | Manually time the straddle entry off the combined-premium VWAP break and manage one-leg. **Automatable** on a live (non-replay) seam only. |
@@ -50,7 +50,7 @@ backtests) — judged here by code presence, not backtest behaviour.
 | Sensex strike & SL ladder near VWAP; point-SL scales ~3× | 4.16.4 | PARTIAL | Structural VWAP/swing stops scale with the instrument; no explicit 3× ladder or multi-level pyramiding in the signal (single position, `max_positions_per_underlying: 1`) | Manually ladder quantity across levels for Sensex. **Automatable** but the no-averaging rule is intentional. |
 | **Sensex participation / volume gate** (skip thin Sensex, prefer Nifty; pick by nearer expiry/richer premium) | 4.17.2 | NONE | No Sensex-vs-Nifty participation comparator; the niftyoi/sensexoi variants are a static A/B (`ScalperStrategySeeder` :38-73), not a runtime "skip Sensex when thin" switch | Manually skip Sensex on thin-volume days, prefer Nifty. **Automatable** (compare both chains' OI/volume at runtime). |
 | Monitor Nifty AND Sensex on a Sensex expiry; pre-open NSE-vs-BSE gap = HFT arb not retail | 4.17.2 | NONE | Not encoded | Manual cross-index alignment + HFT-gap judgement. Partly **automatable** (spread compute), partly judgement. |
-| **Trending-OI 15-strike read** (7 above + ATM + 7 below; tested vs 5/9/11) | 4.17.3 | PARTIAL | The trending/active-strikes reads use server-side windows (`active-strikes?buckets`, `MarketOiClient.java:301`); the strike-window count (15 vs 5–7) is set by the market-data endpoint, not a scalper-config knob | Confirm the OI dashboard is on the 15-strike window. **Automatable** (window param) but not surfaced as a scalper knob. |
+| **Trending-OI 15-strike read** (7 above + ATM + 7 below; tested vs 5/9/11) | 4.17.3 | PARTIAL | The trending/active-strikes reads use server-side windows (`active-strikes?buckets`, `MarketOiClient.java:299-302`, the `buckets` param at :302); the strike-window count (15 vs 5–7) is set by the market-data endpoint, not a scalper-config knob | Confirm the OI dashboard is on the 15-strike window. **Automatable** (window param) but not surfaced as a scalper knob. |
 | **Intraday vs positional OI must agree** (>50% call-vs-put gap on BOTH; PCR 1.2→1.5→2; ~5cr call vs 10–12cr put) | 4.17.3 | PARTIAL | Single intraday trending/imbalance read (`callPutDeltaFilter` ≥50%, `imbalancePct`); there is NO intraday-vs-positional (today vs yesterday+today) two-window agreement, no PCR-level (1.2/1.5/2) ladder, no absolute cr-OI compare | Manually cross-check positional (yesterday+today) OI agreement + PCR progression. **Automatable** (positional series is derivable). |
 | **FII futures Long/Short-ratio gate** (~87–94% short = sell every level; crossing ~50% = short-covering trigger; DII-buy-alone may not lift) | 4.17.4 | NONE (plumbed-but-dead) | `fiiLongPct` is FETCHED and carried in `Macro` (`MarketOiClient.java:375-383,397`) but **never consumed by any confluence dot or gate** — no reference in `ConnectTheDotsScorer`/`ScalperGates`. No ~50% crossover trigger, no 87–94% short read, no DII compare | Manually read the FII L/S ratio + the ~50% crossover. **Automatable** — the value is already fetched; only a dot/gate consuming it is missing. |
 | IV crashes 2nd-half of expiry day (call IVs fall); IV crashes post-event; CE-vs-PE TV diff demand-driven (10–20%, up to 40%) | 4.17.5 | NONE | Not modelled (no time-of-day/expiry IV-decay logic) | Manually expect IV crush late on expiry / post-event. **Automatable** in part (expiry-day + IV series) but unbuilt. |
@@ -152,3 +152,36 @@ All v1 rows verified CONFIRMED otherwise (no status flips). The Q1/Q2 FULL row (
 doc frames "both >50% price AND OI" as a hard buyer-conviction gate, while the faithful encoding (the `oiSpurt`
 dot needing both ≥50 floors) is *soft* (weighted) on non-`oi-cross-filter` strategies; v1 already caveats this
 in its gap cell, so the status is left as FULL.
+
+## v3 review notes
+
+Third-pass CITATION VALIDATION (Pass B): re-opened EVERY `file:line` / `yaml key` / `doc §` cited across all
+rows + the checklist-coverage table, against the live source. Files re-read in full: `MarketOiClient`,
+`ConnectTheDotsScorer`, `ScalperGates`, `ScalperConfig`, `ScalperConfluenceGate`, `ScalperManualChecks`,
+`ScalperOiProps`, `ScalperStrategySeeder`, `scalp-straddle-nifty.yaml`, `scalp-connect-the-dots-nifty.yaml`,
+`scalp-market-movers-nifty.yaml` (line 6 "constituents"); targeted greps in `ConnectingDotsService`,
+`MarketCalendar`, `HeroZeroGate`; and the consolidated doc §4.14.1–§4.17.6 (lines 1505–1633) + §7 (lines
+2943–2988). **Result: the file is converged.** Every code citation resolves to the claimed behaviour and
+every quoted doc number is verbatim-correct — including the load-bearing ones re-confirmed at the source:
+VIX `null,null` (`MarketOiClient.java:397`), `fiiLongPct` fetched (`:375-383`) and consumed by NO dot/gate,
+the static A/B (`ScalperStrategySeeder.java:38-73`, 36 = 12×3 strategies — matches the 36 YAMLs on disk),
+`ivPairMinGap`=0.10 / `ivBothHighFloor`=0.40 (`ScalperOiProps.java:38,40`), Hero-Zero `RANGE_FROM` 14:30
+(`HeroZeroGate.java:75` — confirms the "after 14:30 not ~14:00" row-59 note), the §7 [RESOLVED-S22] doc line
+itself naming Nifty 100-250 as "the older/general case" (doc line 2954 — corroborates the superseded-band
+finding in the Open=High row and row 59). The 7 checklist `doc_ref`s (`ScalperManualChecks.java:26-60`) all
+match (news_clear 2.13 / level_respected 4.11 / not_parabolic 3.1 / regime_ok 3.10 / vix_normal 4.5 /
+global_cues_ok 4.7 / clean_setup 3.1).
+
+Two STALE line numbers fixed (both right-file, ≤3-line drift, no status/picture change):
+1. **Row §4.14.9 cadence** — `time_stop max_bars` was cited at `scalp-connect-the-dots-nifty.yaml:47`; the
+   `time_stop max_bars: 10` line is **:46** (line 47 is blank). Corrected to `:24,46`.
+2. **Row §4.17.3 15-strike** — the `buckets` query param was cited at `MarketOiClient.java:301`; line 301 is
+   the `expiry` param, the `buckets` param is at **:302** (the active-strikes block spans :299-302). Corrected
+   to `:299-302` (buckets at :302).
+
+CONVERGENCE (Pass A): no genuinely-still-missing §4.14–§4.17/§7 rule. Every sub-section 4.14.1→4.17.6 maps to a
+row and §7's four [RESOLVED] items + open ambiguities are carried by row 59. The one residual doc phrase not
+given its own row — §4.14.7 "around expiry avoid far-OTM strikes (demand collapses)" — sits inside the
+deferred fixed-delta-band scope of the §4.14.7/§4.15.4 strike-delta row, not a distinct mechanic. No new rows
+added. No status flips (Pass C): the two citation fixes are pure line-drift; the code behaviour each row
+asserts is unchanged.

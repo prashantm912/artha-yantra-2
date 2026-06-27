@@ -58,7 +58,33 @@ public final class OpenHighLow {
     /** The price/volume modifier or the &gt;50% prev-close fall flagged an opposite player - block. */
     LOW,
     /** Two-sided OH footprint, or no mark on the side - sideways/nothing to trade - block. */
-    STAND_ASIDE
+    STAND_ASIDE,
+    /**
+     * The deck p20 AVOID veto - a bigger player took the opposite side (premium fell &gt;50% AND/OR
+     * the identified strike's change-in-OI rose &gt;50%). Produced only by the W3 PR-6 veto; here it
+     * maps to a 0% probability (a hard no-trade), distinct from the sideways {@link #STAND_ASIDE}.
+     */
+    AVOID
+  }
+
+  /**
+   * W3 PR-5 (S24 "OIP-AI probability", owner tier-&gt;%): our own deterministic Open=High success
+   * probability from the Day-14 Table-1/Table-2 read, replacing oipulse's proprietary AI percentage.
+   * HIGH 90, MILD 60, LOW 30, STAND_ASIDE/AVOID 0 (a no-trade). See
+   * {@code docs/superpowers/plans/2026-06-27-oip-ai-probability-spec.md}.
+   */
+  public static int probabilityPct(Tier tier) {
+    return switch (tier) {
+      case HIGH -> 90;
+      case MILD -> 60;
+      case LOW -> 30;
+      case STAND_ASIDE, AVOID -> 0;
+    };
+  }
+
+  /** The strong / "badge" read (oipulse's &gt;90%): true only for the HIGH (90%) tier. */
+  public static boolean badge(Tier tier) {
+    return tier == Tier.HIGH;
   }
 
   /** The front-future open-extreme marks for the session containing the deploy bar. */

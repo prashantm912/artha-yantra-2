@@ -173,4 +173,17 @@ class OpenHighLowTest {
     OpenHighStats s = new OpenHighStats(bd("20000"), legs);
     assertThat(OpenHighLow.tier(FUTURE_OH, s, CE, PROPS)).isEqualTo(Tier.LOW);
   }
+
+  @Test
+  void probabilityPctMapsTheTiersAndBadgeIsHighOnly() {
+    // W3 PR-5 OIP-AI probability: HIGH 90 / MILD 60 / LOW 30 / STAND_ASIDE+AVOID 0 (no-trade).
+    assertThat(OpenHighLow.probabilityPct(Tier.HIGH)).isEqualTo(90);
+    assertThat(OpenHighLow.probabilityPct(Tier.MILD)).isEqualTo(60);
+    assertThat(OpenHighLow.probabilityPct(Tier.LOW)).isEqualTo(30);
+    assertThat(OpenHighLow.probabilityPct(Tier.STAND_ASIDE)).isEqualTo(0);
+    assertThat(OpenHighLow.probabilityPct(Tier.AVOID)).isEqualTo(0);
+    assertThat(OpenHighLow.badge(Tier.HIGH)).isTrue();
+    assertThat(OpenHighLow.badge(Tier.MILD)).isFalse();
+    assertThat(OpenHighLow.badge(Tier.AVOID)).isFalse();
+  }
 }

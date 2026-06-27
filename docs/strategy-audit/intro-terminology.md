@@ -14,6 +14,8 @@ backtests) — automation is judged by code presence, not backtest behaviour.
 
 | Rule | Doc § | Status | Evidence (file:line / yaml key) | Gap / manual-check |
 |---|---|---|---|---|
+| **Primary chart = 3-minute; 60-minute chart for the broad view** | 1.1 (line 46) | FULL | yaml `timeframes: { primary: 3m, additional: [1h] }` (`scalp-connect-the-dots-nifty.yaml:23-25`); the 3m series drives every chart dot and the 1h `bias60m` Supertrend is the agree-with-the-60m gate (`ConnectTheDotsScorer.java:111,114-115`). The doc's secondary timeframe is "60-minute"; the YAML uses `1h` (= 60m). | — |
+| **Futures Premium/Discount used to read direction** — "Futures above spot = bullish; futures below spot = bearish near-term" | 1.2 Moneyness & Pricing (line 79) | FULL | `ScalperGates.futuresBasis` (`ScalperGates.java:163-171`): basis > 0 (premium) supports CE, basis < 0 (discount) supports PE; scored as the `basis` dot (`ConnectTheDotsScorer.java:93`). Basis is also the StrikePicker forward input (`StrikePicker.java:86`). Soft confluence dot, not a hard gate; `null` basis degrades to pass. | — |
 | **VWAP** — "Default" setting; cumulative session VWAP, pullback-entry + alternate SL reference | 1.2 Chart Indicators | FULL | `IndicatorRegistry.java:41` (`VWAP` → `SessionIndicators.sessionVwap`); `vwap` is a hard decisive gate in `ConnectTheDotsScorer.java:74` (W_VWAP=2.5) and `ScalperConfluenceGate.java:149` | — |
 | **VWAP** — "Use **yesterday's VWAP** from open until **~10:30 AM**, then today's morning VWAP" | 1.2 Chart Indicators | NONE | `SessionIndicators.sessionVwap` is today-session-only (cumulative from session start). No prior-session-VWAP overlay before 10:30. The #9 path only *degrades* VWAP before 10:30 (`ScalperConfig.VWAP_ACTIONABLE_FROM=10:30`, `ScalperConfluenceGate.java:249`), it does not substitute yesterday's VWAP. | Before ~10:30, eyeball yesterday's VWAP level on the chart as the defended reference; the engine's VWAP is unreliable that early. Automatable: **true** (compute prior-session VWAP and switch at 10:30). |
 | **VWAP** — "Wider candle-to-VWAP gap = stronger trend" | 1.2 Chart Indicators | NONE | No gap-magnitude factor; `vwap` dot is a boolean side check only (`ConnectTheDotsScorer.java:71,74`). | Judge trend strength by how far price has separated from VWAP. Automatable: **true** (distance/ATR ratio). |
@@ -37,6 +39,8 @@ backtests) — automation is judged by code presence, not backtest behaviour.
 | **India VIX — directional gate + levels (10–11 low/bullish, 12–14 med, 15–16, 17+ active shorts) + correlation rules** | 1.2 Volatility (dup §4.5) | NONE | **VIX is a v1 gap in the live scalper path** — `MarketOiClient.macro` returns `null` VIX level + `null` direction (`MarketOiClient.java:394-397`); the `vix` gate treats unknown direction as **non-blocking** (`ScalperGates.java:136-143`). No band classification (10/12/15/17) anywhere in the scalper. Covered manually by `ScalperManualChecks` `vix_normal` (§4.5). | `vix_normal` manual check ("India VIX is not abnormally spiking"). The doc's specific bands/correlation are NOT encoded — read India VIX level & direction yourself before entry. Automatable: **true** (needs a VIX market-data endpoint — explicitly noted as a §12.2 follow-up). |
 | **IV — averaged over 6 strikes (3 above + 3 below per side); 10–12 IV good for trend; IV higher on trending side** | 1.2 Volatility (dup §4.6) | PARTIAL | 6-strike CE/PE IV pair IS derived (`MarketOiClient.deriveIvPair`, called at `MarketOiClient.java:385-392`) and feeds the `iv_pair` / stand-aside dots (`ConnectTheDotsScorer.java:97,173-195`); `ivPairMinGap=0.10`, `ivBothHighFloor=0.40` (`ScalperOiProps.java:38-40`). **The "10–12 IV good for trend play" absolute band is NOT a gate** (no absolute-IV trend-play threshold; only the CE-vs-PE gap is used). | Confirm absolute ATM IV is in a tradeable range (Siva's ~10–12 "good for trend") — only the directional IV gap is automated. Automatable: **true** (add an absolute-IV band gate). |
 | **Falling Knife — never catch a sharply falling market when VIX is extreme (e.g., 41)** | 1.2 Volatility | NONE | No extreme-VIX falling-knife block (and VIX itself is null in the scalper path, see above). | In an extreme-VIX crash, stand aside — not enforced. Automatable: **true** (once VIX feed exists). |
+| **Basket Order Selling — investors offload multiple sectors at once; begins as VIX rises above ~17, widespread above ~25** | 1.2 Volatility (line 117) | NONE | No basket-selling / VIX-level (17 / 25) detector anywhere in the scalper path; VIX level itself is null (`MarketOiClient.java:394-397`), so neither the ~17 onset nor the ~25 widespread band can be tested. Closest manual coverage is `ScalperManualChecks` `vix_normal` (§4.5). | `vix_normal` manual check ("India VIX is not abnormally spiking"). The specific 17/25 basket-selling bands are NOT encoded — watch VIX rising through ~17/25 yourself. Automatable: **true** (once a VIX feed + level bands exist). |
+| **IV Crash — sharp drop in IV when buyers exit/unwind (typically after an event); severely hurts buyers holding high-IV premiums** | 1.2 Volatility (line 114) | NONE | No IV-crash (IV-slope-collapse) detector. The scalper derives a CE/PE 6-strike IV *pair* and a 40/40 both-high stand-aside (`ConnectTheDotsScorer.java:97,173-195`; `ScalperOiProps.java:38-40`), but that is a cross-sectional CE-vs-PE gap, NOT a time-series IV-drop guard — a collapsing-IV bar is not flagged. | Avoid buying into a post-event IV crash (high premium about to deflate) — not enforced. Automatable: **true** (an IV-slope / IV-rank-falling factor; gated on richer IV history). |
 | **OI Spurts — action threshold >50% change in both OI and LTP; be a buyer only when both 50% met** | 1.2 OI (dup §4.3.2) | FULL | `ConnectTheDotsScorer.oiSpurt` requires both OI% and price% ≥ floors (`ConnectTheDotsScorer.java:159-167`); floors `spurtOiPct=50`, `spurtPricePct=50` (`ScalperOiProps.java:42-43`). The #5 cross-filter ≥50% imbalance is a hard pre-gate (`ScalperGates.callPutDeltaFilter`, `crossFilterPct=50`, `ScalperOiProps.java:32`). | — |
 | **OI Spurts — extreme ~200% OI / 300% price = strong confirmation** | 1.2 OI | NONE | Only the 50% floor is encoded; no 200%/300% "strong confirmation" escalation tier. | Treat ~200% OI / ~300% price spurts as extra-strong — not separately scored. Automatable: **true** (add an escalation band). |
 | **Trending OI — 5–15 min OI graph, must be unidirectional; whipsaws = caution** | 1.2 OI (dup §4.4) | FULL | `ConnectTheDotsScorer.trendingCross` requires a directional dOI cross / widening gap (`ConnectTheDotsScorer.java:125-134`); slope dot `sentiment_slope` (`ConnectTheDotsScorer.java:88`). | — |
@@ -70,3 +74,37 @@ backtests) — automation is judged by code presence, not backtest behaviour.
   14:30 (`HeroZeroGate.RANGE_FROM`) — flag to the hero-zero dimension.
 - **Lot sizes** in §1.2 are doc-flagged UNCERTAIN and stale; sizing is premium-budget-based, so
   verify current exchange lot sizes manually.
+- **Basket Order Selling VIX bands (~17 onset / ~25 widespread)** and **IV Crash** (post-event IV
+  collapse) are §1.2 volatility rules with NO automation — both ride the VIX-feed gap (VIX level is
+  null) and the absence of a time-series IV-slope factor; only the `vix_normal` manual check is near.
+
+## v2 review notes
+
+Independent second pass. Re-derived every tradeable item in §1.1–§1.2 and re-traced the cited code.
+Changes:
+
+- **+4 MISSED rows added** (real §1 rules v1 never enumerated):
+  1. **Primary 3-minute / 60-minute broad-view chart** (§1.1 line 46) — FULL: yaml
+     `timeframes: { primary: 3m, additional: [1h] }` + the 1h `bias60m` agree-gate
+     (`ConnectTheDotsScorer.java:111,114-115`). v1 only referenced the timeframes inside the two
+     Supertrend rows, never as the standalone primary-clock rule.
+  2. **Futures Premium/Discount as a direction read** (§1.2 Moneyness, line 79) — FULL:
+     `ScalperGates.futuresBasis` + the `basis` confluence dot (`ConnectTheDotsScorer.java:93`). A
+     genuine §1.2 glossary rule with live automation that v1 omitted.
+  3. **Basket Order Selling — VIX >~17 / >~25** (§1.2 line 117) — NONE (rides the VIX-feed gap).
+  4. **IV Crash** (§1.2 line 114) — NONE: the CE/PE IV-pair gap is cross-sectional, not a
+     time-series IV-drop guard, so a collapsing-IV bar is unflagged.
+
+- **No INACCURATE rows.** Every v1 file:line citation was spot-checked and holds: VWAP
+  `IndicatorRegistry.java:41`/`ScalperConfluenceGate.java:149`/`:249`; Supertrend, RSI, VWMA, PSAR,
+  ATM±3, premium-budget yaml lines (`scalp-connect-the-dots-nifty.yaml:20,28,30,32,34,49`); PSAR
+  defaults `IndicatorRegistry.java:87-88`; VIX-null `MarketOiClient.java:394-397`; breadth `:368-373`;
+  IV-pair `:385-392`; `ScalperOiProps.java:32,38-40,42-43`; Hero-Zero `HeroZeroGate.java:75` (14:30 vs
+  doc 14:00). Statuses (FULL/PARTIAL/NONE/UNCERTAIN/MANUAL_COVERED) are all defensible as written.
+
+- **README "Audit-quality flags" raised nothing for this dimension** (its false-coverage items target
+  gap-theory / btst-stbt / connect-the-dots / risk-framework). The one nearby concern — the
+  Hero-Zero "after 2:00 PM" (14:00) vs code 14:30 discrepancy — is already correctly flagged in the v1
+  row and the gaps list, deferred to the hero-zero dimension.
+
+- **Confirmed accurate as-is:** all 29 original v1 rows.

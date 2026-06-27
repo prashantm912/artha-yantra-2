@@ -39,6 +39,8 @@ dots that degrade to NEUTRAL on derived history).
 | IV rising (bull) / falling (bear) in that strike; IV-rank low = cheap premium | §3.2 L484; §6.2 indicators/filters | PARTIAL | `iv_rank` + `iv_pair` SOFT dots (ConnectTheDotsScorer.java:94-98); `ivPairMinGap`/`ivBothHighFloor` (ScalperOiProps.java:38-40) | Per-strike IV direction (rising for the bought strike) is not gated; IV pair/rank are aggregate dots that degrade to NEUTRAL on derived history. Manual: confirm IV is rising in the bought strike. Automatable: true |
 | Volume floor confirmation (50K BN / 125K N) for the breakout entry | §3.2 L457,L478; §6.2 filters | PARTIAL | `ScalperGates.volume(signalIndex, volume)` hard gate (ScalperConfluenceGate.java:161) | A signal-index volume floor is enforced, but it is the index-future volume, not the per-strike option breakout volume the doc means. Manual: confirm the breakout candle has volume. Automatable: true |
 | Two-sided OH+OL both Call & Put = sideways, stand aside | §3.2 L487; §6.2 edge_cases[0] | FULL | both-sides OH footprint → Tier.STAND_ASIDE (OpenHighLow.java:147-148) | — |
+| Confirm OH on Futures with **Long Build-up (preferred) or Short Covering** (mirror PE: Short Build-up / Long Unwinding) | §3.2 L451,L460 entry[0]; §6.2 entry bullish[0]/bearish[0] | PARTIAL | NOT in the OH/OL hard pre-gate — `OpenHighLow.tier` grades only the per-strike footprint × the bare futures OH/OL mark (OpenHighLow.java:112-160), it does **not** read the futures OI quadrant. The LB/SC (CE) / SB/LU (PE) build-up survives only as the SOFT `futures_oi` dot (ConnectTheDotsScorer.java:80 → `ScalperGates.oiQuadrant` ScalperGates.java:121-125) folded into the threshold-0.2 aggregate; degrades to NEUTRAL on derived history | The futures-side build-up is the doc's explicit OH-confirmation but is only a weighed dot, not a hard OH gate. Manual: confirm the futures OH carries Long Build-up / Short Covering (CE). Automatable: true (promote the `futures_oi` quadrant to a hard OH leg) |
+| Do not jump straight to buying on seeing OH on CE/PE — time the entry to confirmed probability/momentum | §3.2 L492; §6.2 edge_cases[5] | MANUAL_COVERED | discipline rule — no engine equivalent; the momentum rails (RSI>50 + VWAP hard gate, ScalperConfluenceGate.java:157-163) plus the checklist `not_parabolic` / `clean_setup` (ScalperManualChecks.java:36-44,56-60) cover "don't chase, wait for confirmation" | Manual: do not buy on the bare OH sighting — wait for the probability/momentum confirmation |
 | Trend alignment: OH on the side WITH the market trend = high-prob; opposite trend = low-prob | §3.2 L447; setup[7] | PARTIAL | optional 60-min `bias60m` SUPERTREND must agree (ConnectTheDotsScorer.java:111,114; yaml `bias60m` 1h) | The 60-min bias is the only trend filter and only when present (absent ⇒ never blocks). Manual: confirm the OH side aligns with the day's trend. Automatable: true |
 | No market-moving news against the trade (news overrides data) | §2.13 (cross-strategy) | MANUAL_COVERED | checklist `news_clear` (ScalperManualChecks.java:27-30) | Manual: scan news/economic calendar before entry |
 | Global cues not against the trade (DOW futures, Asian indices, crude, USD) | §4.7 (cross-strategy) | MANUAL_COVERED | checklist `global_cues_ok` (ScalperManualChecks.java:51-55) | Manual: check DOW futures + Asian index direction |
@@ -66,3 +68,31 @@ dots that degrade to NEUTRAL on derived history).
   are not gated (only RSI>50 and VWAP are hard); the rest are soft dots. Automatable.
 - **Per-strike granularity caveats** — the per-strike footprint is 5-min snapshot resolution (not native
   3-min), the OI-change reject is chain-wide (not per-strike), and OTM legs are not excluded from selection.
+- **Futures OI build-up (LB/SC for CE, SB/LU for PE)** — the doc's explicit OH confirmation on the futures
+  leg; the OH/OL hard pre-gate dropped the quadrant, so it survives only as the soft `futures_oi` dot.
+  Automatable (promote to a hard OH leg).
+
+### v2 review notes
+
+Independent second-pass review (fresh-derived doc §3.2 + §6.2, then diffed against v1). **The v1 audit is
+high-quality**: all 30 original rows were re-verified against the cited code and every `file:line` / yaml
+key was confirmed accurate (`OpenHighLow.java`, `OpenHighLowGate.java`, `ScalperOiProps.java`,
+`ScalperConfig.java`, `StrikePicker.java`, `ScalperConfluenceGate.java`, `ConnectTheDotsScorer.java`,
+`ScalperManualChecks.java`). **No false-coverage, no false-gap, no wrong-cite, no invented figures** were
+found, and the README "Audit-quality flags" tail raises no item for this dimension. Every doc number the v1
+rows quote (50% reject, ATM±3, 30%-capital, 50K/125K volume, 0.6–0.7 delta, 100–250 / 150–350 premium bands,
+9:15–10:00 window, ≥90% badge, 30–50 pt target, ~5 pt-inside) matches the doc verbatim.
+
+**Two MISSED rules added** (real doc rules with no v1 row):
+1. *Confirm OH on Futures with Long Build-up (preferred) or Short Covering* (§3.2 L451; mirror SB/LU for PE
+   L460; §6.2 entry bullish[0]/bearish[0]). v1's existing "Call OI declining / Put OI increasing" row covers
+   the **option-side** build-up; the doc separately makes the **futures-side** OI quadrant an explicit OH
+   confirmation. The source-faithful refactor of `OpenHighLow.tier` grades only the per-strike footprint ×
+   the bare futures OH/OL mark (OpenHighLow.java:112-160) and does **not** read the futures OI quadrant in the
+   OH/OL hard pre-gate — so this leg is only the soft `futures_oi` dot (ConnectTheDotsScorer.java:80 →
+   ScalperGates.java:121-125). Status PARTIAL.
+2. *Do not jump straight to buying on seeing OH; time the entry to confirmed probability/momentum* (§3.2 L492;
+   §6.2 edge_cases[5]) — a discrete discipline edge-case. Status MANUAL_COVERED (`not_parabolic` /
+   `clean_setup` + the RSI>50 / hard-VWAP momentum rails).
+
+No rows were deleted or re-statused; the diff is purely additive (28→30 doc rows in the body table).

@@ -35,6 +35,12 @@ status below is judged by code presence, not backtest behaviour.
 | **Short side** (8/9-day low + OH + Short Build-up / Long Unwinding) | §3.3 Entry — Bearish; §6.3 `entry_conditions.bearish` | NONE | `entry_rules.direction: long`, `option_types: [CE]` only (`scalp-market-movers-nifty.yaml:64,80`); YAML header lines 30-32 mark the SHORT mirror "faithful but DEFERRED" | The entire bearish path is unautomated; trade shorts manually (or via a future PE/short variant). Automatable=true (mirror of the long side). |
 | Edge case: **if the trade goes against you, check volume — high volume = exit, low volume = may pursue** | §3.3 Execution/Edge; §6.3 `edge_cases` | NONE | No volume-conditional exit logic; only `close < vwap` and a 20-bar time stop | Manual on adverse moves: high volume → cut, low volume → may hold. Automatable=partly (volume on the stock is needed). |
 | Edge case: **avoid names with OI heavily populated on both call and put sides** (ambiguous) | §3.3 Execution/Edge; §6.3 `edge_cases` | NONE | No CE/PE both-sides-loaded ambiguity check per stock | Manually skip ambiguous-positioning names. Automatable=true given per-stock chain OI. |
+| **Alternative entry trigger** — "considerable change in OI **and more than 1% change in price**" (or intraday S/R trades) | §3.3 Entry Bull 5 / Bear 5; §6.3 `entry_conditions` ("Alternative: considerable OI change + >1% price change") | NONE | The only entry gate is `close > vwap` AND `close > vwma20` (`scalp-market-movers-nifty.yaml:81-83`); no >1% price-move threshold and no per-bar ΔOI trigger is wired into the gate. The shared OI dots are soft confluence (`ConnectTheDotsScorer.java:80-90`), not a ">1% price + drastic-OI" entry condition | Manually require a >1% intraday price move with a clear OI shift (or an S/R trade) before entry. Automatable=partly (a >1% price-change gate is trivial; the ΔOI leg needs per-stock OI). **MISSED by v1.** |
+| **Radar-building progression** — add at a 1–2-day high/low, confirm momentum at a 3–4-day high with OL (bull)/OH (bear), full conviction at the 8–9-day breakout | §3.3 Setup 7; §6.3 `setup_preconditions` | NONE | No multi-day-extreme staging or radar/watchlist progression anywhere in the scalper engine; no N-day high/low is computed at all | Manually build the radar at the 1–2-day stage and escalate conviction toward the 8–9-day breakout. Automatable=true once per-stock candles exist (rolling N-day extremes). **MISSED by v1.** |
+| **OI Spurt 4-quadrant cue** (refer the stock's OI Spurt quadrants for an extra entry cue) | §3.3 Filters (screener-structure note); §6.3 `indicators`, `filters` | PARTIAL | An `oi_spurt` dot IS computed and scored — the spurt quadrant must match the side AND both ΔOI% and price% magnitudes clear their floors (`ConnectTheDotsScorer.java:89-90,159-166`) — but on the **option-root index**, not the picked stock; it is a soft confluence dot, not a per-stock cue | The spurt-quadrant cue is automated at index level only; manually read the **stock's** OI Spurt 4-quadrant panel. Automatable=true once equity OI is captured. **MISSED by v1** (v1 listed no row for the OI-Spurt cue although the §0B confluence scores it). |
+| **Right-side "New High/Low Maker" panel** — use live new intraday highs/lows for support (bullish, in Gainers) or rejection (bearish, in Losers) trades | §3.3 Filters (screener-structure note); §6.3 `filters` | NONE | No intraday-new-high/low maker panel or per-stock support/rejection trade input in the scalper engine | Manually watch the New High/Low Maker panel and take support (Gainers)/rejection (Losers) trades. Automatable=partly (needs the equity-screener live high/low feed). **MISSED by v1.** |
+| **Large-cap-only filter + operator low-volume trap** — trade only liquid large-caps; a name that gave its whole move on no intraday volume then ranges traps late entrants; stay long only while price holds the intraday VWAP | §3.3 S22 update (a)/(b); §5.3 (S22/S24 liquidity reads) | NONE | No market-cap classification and no operator-trap / VWAP-hold-only-above filter per stock; the only liquidity rule is the static index volume floor (`ScalperGates.volume`, `ScalperGates.java:64-68`) on the surrogate future | Manually restrict to liquid large-caps and abandon a name that ran on no volume; hold long only above the stock's VWAP. Automatable=partly (needs a large-cap list + per-stock intraday volume). **MISSED by v1.** |
+| **Short-side overnight (STBT)** — an 8/9-day-low Short-Build-up name is an ideal STBT, carried only if Futures OI is **closing at the day's high with price at the day's low** | §3.3 S22 update (f); §5.3 | NONE | The short side itself is unautomated (`direction: long`, CE only, `scalp-market-movers-nifty.yaml:64,80`); no STBT overnight-carry-on-close-OI-extreme logic exists | Manually evaluate the STBT carry on the close (OI at day-high + price at day-low). Automatable=true given a short variant + EOD per-stock OI. **MISSED by v1** (v1's "short side" row covers the intraday mirror; the STBT overnight-carry condition is a distinct deferred rule). |
 
 ### Not automated (gaps)
 
@@ -55,7 +61,63 @@ status below is judged by code presence, not backtest behaviour.
 - **EOD-OI overnight-carry rule** (carry only on Long Build-up): deferred.
 - **Top-constituent / index-weightage direction cue** and **S/R-line breakout / both-sides-OI
   ambiguity** checks: not automated.
+- **Alternative ">1% price change + considerable OI change" entry trigger:** not gated — the only entry
+  condition is the VWAP/VWMA reclaim.
+- **Radar-building progression** (1–2-day → 3–4-day → 8–9-day extreme staging): no N-day extreme is
+  computed at all.
+- **OI Spurt 4-quadrant cue:** scored as a soft `oi_spurt` confluence dot but at the **option-root
+  index**, never the picked stock.
+- **Right-side New High/Low Maker panel** (support/rejection trades): no live intraday-extreme maker feed.
+- **Large-cap-only filter + operator low-volume trap** (hold long only above the stock's VWAP): no
+  market-cap class and no per-stock operator-trap filter; only the static index volume floor.
+- **Short-side overnight (STBT)** carry-on-close-OI-extreme (OI at day-high + price at day-low): the
+  short side is unseeded and the STBT overnight condition is unautomated.
 - **Manual checklist coverage:** `ScalperManualChecks.CHECKS` is a fixed, strategy-agnostic 7-item list
   (news / level / not-parabolic / regime / VIX / global-cues / clean-setup) — **none** of its items
   covers any of the Market-Movers-specific gaps above (no breakout-day, OH/OL, per-stock OI, daily-RSI,
   or equity-universe item). So these gaps are true NONE gaps, not MANUAL_COVERED.
+
+## v2 review notes
+
+Independent second-pass review (fresh-derived from §3.3 + §6.3, then diffed against v1). **v1 is high
+quality:** every spot-checked file:line cite was verified accurate against the code, with no
+false-coverage, no false-gap, and no invented figures. The 19 original rows stand as written. The
+review added the rules v1 had not enumerated and noted one omission of an automated cue.
+
+**Cite-checks confirmed (no change):** the 09:45 floor + the 11:00–13:00 / post-15:30 stricter blocks
+(`ScalperGates.java:22-25,34,37-42`); the RSI band CE 60–80 / PE 20–40 (`ScalperGates.java:76-84`); the
+futures-OI quadrant (`ScalperGates.java:121`); breadth adv/dec > 32 (`ScalperGates.java:128-133`); the
+`entry-candle-stop` → `StructuralStop.ENTRY_CANDLE` anchor (`ScalperConfig.java:149-150`,
+`ScalperConfluenceGate.java:293-295`); index-level IV in `Macro` (`ScalperGateContext.java:59-68`); and
+`FuturesMoversService`'s index-only-capture javadoc + `OiInterpretation.classify` at line 85. The
+`scalp-market-movers-*.yaml` set carries ONLY the `entry-candle-stop` tag — confirming the screener
+gates (`open-high-low`, `oi-cross-filter`, `two-candle-pattern`) are genuinely NOT armed, so the
+NONE/PARTIAL verdicts on those legs are correct.
+
+**MISSED rules added (6 new rows):**
+1. **Alternative entry trigger** — "considerable OI change + **>1% price change**" (§3.3 Bull/Bear 5;
+   §6.3 `entry_conditions`). Distinct from the VWAP/VWMA reclaim that v1 row 8 covered; **NONE** — no
+   >1% price-move or per-bar ΔOI entry gate is wired (only `close > vwap` AND `close > vwma20`).
+2. **Radar-building progression** (1–2-day → 3–4-day → 8–9-day extreme staging) — §3.3 Setup 7; §6.3
+   `setup_preconditions`. **NONE** — no N-day extreme is computed at all.
+3. **OI Spurt 4-quadrant cue** — §3.3 Filters; §6.3 `indicators`/`filters`. v1 listed no row, yet the
+   §0B confluence **does** score an `oi_spurt` dot (`ConnectTheDotsScorer.java:89-90,159-166`) — at the
+   option-root index, not the picked stock → **PARTIAL** (a soft index-level dot exists; per-stock absent).
+4. **Right-side "New High/Low Maker" panel** (support/rejection trades) — §3.3 Filters; §6.3 `filters`.
+   **NONE** — no live intraday-extreme maker feed.
+5. **Large-cap-only filter + operator low-volume trap** (hold long only above the stock's VWAP) — §3.3
+   S22 update (a)/(b); §5.3. **NONE** — only the static index volume floor exists.
+6. **Short-side overnight (STBT)** — carry only on close OI-at-day-high + price-at-day-low (§3.3 S22 (f);
+   §5.3). **NONE**; distinct from v1's intraday short-side mirror row (the STBT close condition is a
+   separate deferred rule).
+
+(Row 3 above is the one place v1 under-listed an *automated* cue; the others are genuine gaps v1 simply
+did not enumerate. None changes a v1 verdict — they extend coverage of the doc rule set.)
+
+**Caveat carried forward (not a correction):** the **Breadth** row is marked FULL (index level) while
+the doc states no advance-decline rule *specific* to Market Movers — the §0B breadth gate is real and
+the cite is accurate, and v1 already hedges this ("UNCERTAIN whether it even belongs here"), so the row
+is left intact rather than re-flagged. Likewise the 5m-vs-3m primary-timeframe ambiguity (§6.3
+`uncertain`) is a documented doc-side UNCERTAIN, not an automation gap: the engine runs a 3m primary
+while the worked examples cite a 5m chart — a faithful divergence, already reflected in the RSI(5m) and
+indicator-settings PARTIAL rows.

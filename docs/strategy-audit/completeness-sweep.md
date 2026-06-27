@@ -34,6 +34,9 @@ factor is judged by code presence, not backtest behaviour.
 | **S7 Trending-OI ">=50% Call-vs-Put filter: day-cumulative or 5–15 min interval?" — UNCERTAIN** | 7 | UNCERTAIN | `ScalperGates.callPutDeltaFilter` (`ScalperGates.java:151-161`) uses the windowed dOI imbalance (interval), floor 50% (`ScalperOiProps.java:32`) | Code chose the interval reading; doc leaves it open. Manual-check: confirm the 50% gap is the intended (interval) reading. Automatable: n/a (resolved by choice; flag for owner sign-off). |
 | **S7 Golden Crossover bearish RSI ">25 vs <25" — UNCERTAIN** | 7 | PARTIAL | `ScalperGates.rsiBand` PE band 20–40 (`ScalperGates.java:81`) — neither the deck's >25 nor the grid's <25 verbatim | Manual-check: confirm the bearish RSI cut governing a golden-crossover short. Automatable: n/a (doc conflict). |
 | **S7 Hero-Zero bearish mirror (exact PE RSI band, strike offset, PE triggers) — UNCERTAIN** | 7 | PARTIAL | `HeroZeroGate.java` mirrors the side; `HeroZeroStrikeSelector.java` picks one strike inside the SC strike per side | Doc says only "vice versa for put side". Manual-check: verify the PE mirror band/offset on a put-side hero-zero. Automatable: n/a (doc silent on exacts). |
+| **S7 Two-Candle bullish RSI upper cap "75 or 80?": "Day-5 manual says 50-75; chess slides say 50-75/80" — UNCERTAIN** | 7 | PARTIAL | `ScalperGates.rsiBand` CE band is **60–80** (`ScalperGates.java:81`), governed by §4.2 per the javadoc (`ScalperGates.java:70-74`) — neither the doc's 50-75 nor 50-75/80 verbatim | The code picked a band (60–80) that does not match either §7 reading (the §3.1 50-75 OR the chess 50-75/80); both the **floor (50 vs 60)** and the **cap (75 vs 80)** diverge. Manual-check: confirm you accept the §4.2 60–80 band for two-candle, not the §3.1 50–75 the card states. Automatable: n/a (doc-internal conflict; resolved by code choice, flag for owner sign-off). |
+| **S22-RESOLVED Connect-the-Dots "Sell PE / Sell CE = naked option writing?": buy-side confirmed** — §5.10 S22 "**Resolves the §7 'Sell PE/CE = naked selling?' question** (buy-side confirmed)" | 5.10 / 7 | FULL | Every scalper leg is BUY-only: `StraddleLegPicker` returns only BUY legs (`ScalperConfluenceGate.java:130-131` comment + `:143` `new Leg(...)` legs are bought); the SELL/short-premium legs are SPAN-deferred (`scalp-btst-stbt-nifty.yaml:48`); the YAMLs are CE-LONG/buy-premium | (covered) — the engine never writes naked: it always BUYS the CE/PE leg, exactly the S22 resolution. The §7 "Sell PE/CE" wording is a directional synonym, not option writing. Short-premium selling is the SPAN-#47-deferred path, not this gap. |
+| **S22-RESOLVED Morning-Trade "how to trade when morning data is unhelpful" (Q3): act off previous-day closed data + today's open** — §5.9 S22 "**Resolves 'how to trade when morning data is unhelpful'** (Q3: act off previous-day closed data + today's open)" | 5.9 / 7 | PARTIAL | The opening-tick path drops the current VWAP from the hard gate before 10:30 (keeps it a soft dot) (`ScalperConfig.java:126-127` opening-tick arms the Morning-Trade path + a FIRST-CANDLE SL; the pre-10:30 current-VWAP suppression is automated) | The "use yesterday's closed EOD data + today's open to form direction" decision is a *discretionary read*, not a scored gate — the engine only suppresses the unreliable current-day VWAP before 10:30 and anchors a first-candle SL; it does not itself score the prior-day-EOD-vs-open direction. Manual-check: form the morning direction from the prior session's closed OI/price + today's open, per the S22 Q3 resolution. Automatable: partial (the prior-EOD OI read is not modelled in the live macro). |
 
 ## Completeness critic — every rule-bearing section mapped to a dimension
 
@@ -106,3 +109,37 @@ the live source); that is a documented design choice (it is "for backtest/bot im
   `signal_exit` + `stop_loss`/`time_stop` + square-off only (§7 confirms most targets are unspecified/structural).
 - **Straddle combined-premium-vs-VWAP entry + low-IV gate + short straddle** — deferred to live management / SPAN
   (a genuine seam limitation: the deterministic replay cannot recompute the combined-premium series).
+
+## v2 review notes
+
+Independent second-pass review of §1/§5/§7 + the orphan check. The verdict: **v1's evidence is sound** — every
+file:line / yaml key it cited was re-checked against the code and confirmed (`ScalperConfig.java:93-98` premium
+bands, `:147-150` Hero-Zero/Golden-Crossover stops; `ScalperGates.java:64-68/81/151-161` volume/RSI/callPut;
+`MarketOiClient.java:268-273` monthly-expiry suppress, `:396-397` null-VIX, `:375-383` fetched-but-unused
+`fiiLongPct`; `ScalperConfluenceGate.java:132-147/293-295`; `scalp-btst-stbt-nifty.yaml:6,48-49`). No
+false-coverage and no invented figure was found in any v1 row, and the README's only §-mislabel flags target
+*other* dimensions (gap-theory / btst-stbt / connect-the-dots / risk-framework), not this one. The orphan map
+(every §1–§7 heading claimed; §6 a JSON mirror) is correct as written.
+
+The one real shortfall was **completeness of the §7 audit itself** — v1's scope note ("the audit targets those
+values + the §7 resolutions") meant it enumerated all five §7 **[RESOLVED]** items as rows but only sampled the
+~38 UNCERTAIN bullets (4 rows), and it omitted two §7 conflicts that §5 actually **resolves**. Four rows added:
+
+- **MISSED — S7 Two-Candle bullish RSI cap "75 or 80?"** (doc line 2948). A distinct §7 UNCERTAIN co-located with
+  the 5m-vs-3m item v1 *did* capture (row 33). It has a concrete code answer — `ScalperGates.java:81` uses the
+  §4.2 **60–80** band, matching *neither* §7 reading (floor 50→60 AND cap 75→80 both diverge). Added as PARTIAL.
+- **MISSED — S22-RESOLVED Connect-the-Dots "Sell PE/CE = naked writing?" → buy-side confirmed** (§5.10 S22, doc
+  line 1734; §7 doc line 3000). v1 listed four of the five §7 resolutions but skipped this one. The engine BUYS
+  every leg (`ScalperConfluenceGate.java:130-131,143`; SELL legs SPAN-deferred) — so it is FULL, a resolution the
+  code already honours. Added.
+- **MISSED — S22-RESOLVED Morning-Trade Q3 "trade when morning data is unhelpful" → act off prior-day EOD + open**
+  (§5.9 S22, doc line 1725; §7 doc line 2993, the "convincing EOD close" / Q3 thread). v1 omitted it. PARTIAL:
+  the pre-10:30 prev-day-VWAP degrade is automated (`ScalperConfig.java:126-127`) but the prior-EOD-vs-open
+  *direction read* is discretionary, not scored. Added.
+- **MISSED — S7 Trending-OI target "1-2% vs 30-50 index points" (doc line 2970)** is folded into the existing
+  point-targets row (this table, the `S5.x latest-wins POINT targets` row) and the "no `take_profit`" gap — left
+  there rather than duplicated, but called out here so the §7 reader can find it.
+
+These corrections take the §7 [RESOLVED] coverage from 4/5 to **5/5** and the §5-resolves-a-§7-item coverage from
+2 (Open=High bands, Hero-Zero SL — both already rows) to **4** (adding the Sell-PE/CE and Morning-Trade Q3
+resolutions). All correct v1 rows were retained unchanged; no row was deleted.

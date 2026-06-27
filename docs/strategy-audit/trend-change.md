@@ -14,10 +14,11 @@ swing/OI-defined reversal direction.**
 
 | Rule | Doc § | Status | Evidence (file:line / yaml key) | Gap / manual-check |
 |------|-------|--------|----------------------------------|--------------------|
-| Identify prevailing trend (up/down/sideways) first via trend lines / price-action swings; reversal only meaningful vs a defined prior trend | 3.12 Setup 1 | NONE | no trend-classification code; `MarketStructure` only detects a single fractal-pivot break | Manually classify the prevailing trend (trendline + HH/HL vs LH/LL) before trusting a signal. Automatable: partly (trend classifier on the future series) |
+| Identify prevailing trend (up/down/sideways) first via trend lines / price-action swings; reversal only meaningful vs a defined prior trend | 3.12 Setup 1 | PARTIAL | no full trend-classification/trendline engine, but the 1h `bias60m` = `SUPERTREND@1h (7,3.0)` IS a hard live validity AND-term: `ScalperConfluenceGate` L252 passes `bias60m(bank,index)` → `ConnectTheDotsScorer` L111 (`biasAligned`) + L114-115 (in `valid`). All 3 trend-change YAMLs declare it (e.g. `scalp-trend-change-nifty.yaml` L55). v2: this is the same live-only `bias60m` gate the README §5 false-coverage flag #1 corrected for gap-theory. | The 1h-Supertrend prevailing-trend bias IS gated live (unknown ⇒ never blocks; the **backtest** lacks it). What is NOT automated: explicit up/down/sideways classification + trendline structure. Manually classify the prevailing trend. Automatable: partly |
 | Swing-structure break: HH/HL→LH/LL (down) or LL/LH→HL/HH (up) **OR** a trendline break in the reversal direction | 3.12 Setup 2-3, Entry b.1 | PARTIAL | `MarketStructure.detect` L41-61 (3-bar fractal swing-high/low taken out by the close); armed via `TrendChangeGate.evaluate` L86-89 | Swing-break is automated; the **trendline-break alternative is NOT** (no diagonal/horizontal trendline engine). Manually confirm a trendline break if no fractal-pivot break printed. Automatable: trendline detection is hard but feasible |
 | Trending-OI momentum shift, **≥50% quantified** (CE: call-OI falling + put-OI rising; PE mirror) — the primary confirmation | 3.12 Entry b.2, Filters; 6.12 | FULL | `TrendChangeGate.oiShift` L98-110 + `MIN_SHIFT_PCT="50"` L47; reads `Oi.ceOiDelta/peOiDelta/callPutDeltaImbalancePct` (`ScalperGateContext` L39-52) | Direction + ≥50% imbalance encoded; null deltas block (L102-104). Derived-history caveat: degrades to NEUTRAL on backtests so it never fires there. |
 | RSI **above 60** for up-reversal (CE); **below ~40** for down-reversal (PE); 40-60 no-trade band | 3.12 Entry b.3 / r.3, Filters; 4.2 | FULL (CE) / dead (PE) | `ScalperGates.rsiBand` L76-84 (CE 60-80, PE 20-40), wired at `ScalperConfluenceGate` L160 (non-#2 path uses the band). PE branch never reached: YAMLs are CE-only | RSI band is encoded but the gate uses the §4.2 60-80/20-40 band, not a bare ">60"; the PE <40 path is unreachable in these CE-only YAMLs. No manual check needed for CE. |
+| **Chart indicators** — Supertrend (10,2), VWMA, Parabolic SAR (0.02,0.2) alignment relative to VWAP/price (the §4.2 "5 Chart Dots") | 6.12 indicators; 3.12 Instruments/Filters; 4.2 | PARTIAL | v2 MISSED-by-v1 row. All 3 YAMLs declare the set on the 3m future: `SUPERTREND (10,2.0)` + `VWMA (20)` + `PSAR` (e.g. `scalp-trend-change-nifty.yaml` L49-54). Each is a SOFT confluence dot in `ConnectTheDotsScorer` — `supertrend` L75, `vwma` L76, `psar` L77 — weighed into the aggregate threshold, not hard gates. (VWAP is the one decisive/hard chart term, L114-115.) | The named §4.2 indicators ARE computed + scored as soft dots, but the doc's "all indicators below/above price" Golden-Cross **alignment** is NOT a hard gate here (`ScalperGates.indicatorAlignment` exists L101-118 but is unused on this path). Manually confirm ST/VWMA/PSAR sit on the correct side. |
 | Confirm with **volume increase + follow-up bars** (50K BN / 125K N) on the break | 3.12 Entry b.4 / r.4; 4.2 | PARTIAL | `TwoCandleGate.detect` L52 requires BOTH prior bars over the floor; `ScalperGates.volume` L64-68 (NIFTY 125k / others 50k); also a soft `volume` dot in `ConnectTheDotsScorer` L79 | Per-bar floor on the 2 confirmation candles is enforced, but "**increase** in volume + follow-up bars" (a rising-volume sequence) is NOT modelled — only an absolute floor. Manually confirm volume is expanding, not just above floor. Automatable: yes |
 | **2-candle (true-candle) confirmation — enter on the 3rd candle** | 3.12 Entry b.5 / r.5; 3.1 | FULL | `TwoCandleGate.detect` L41-59 (two same-colour bars over floor + strong 2nd body, enter on 3rd) called by `TrendChangeGate.evaluate` L82-84 | Encoded as a hard leg of the gate. |
 | Timing window **09:45-14:30** (can print any time 09:45-2:30; avoid morning prints) | 3.12 Setup 6, Filters; 6.12 | PARTIAL | YAML `risk.session.window {from: "09:45", to: "14:30"}`; but the live gate uses `ScalperGates.timeWindow` L33-44 (≥09:45, **blocks 11:00-13:00**, no fresh entry after 15:30) | The live gate's hard 09:45 floor + **11:00-13:00 midday block** + 15:30 cap are STRICTER and differ from the doc's continuous 09:45-2:30 window; a valid ~11:00-13:00 OI-flip reversal (the doc's own Day-10 ~11:00 example!) would be blocked. Manually note: a midday reversal will not auto-fire. |
@@ -41,7 +42,7 @@ swing/OI-defined reversal direction.**
 | Post-vertical bounce caution: after a vertical fall, don't reverse until **RSI recovers toward ~40** and a defined level prints | 3.12 Edge-cases (Day 07) | NONE | the CE RSI band (60-80) is unrelated; no oversold-recovery sequencing | Manually wait for RSI recovery toward ~40 + a level after a vertical fall. Automatable: yes |
 | Don't chase a side when **premiums are higher on that side with no positive cues** | 3.12 Risk; 6.12 | NONE | no per-side-premium-skew warning in the trend-change path (IV-pair dot L97 is a different signal) | Manually avoid chasing into a higher-premium side without cues. Automatable: yes (per-side premium/IV skew) |
 | Scale expectations to regime (low-VIX expiry: a 10-15pt move is "a big hit") | 3.12 Risk; 6.12 | MANUAL_COVERED | `ScalperManualChecks` `regime_ok` (§3.10) + `vix_normal` (§4.5) | Covered by the regime/VIX manual checks. |
-| Global risk: sizing + daily-loss cap | 3.12 Risk (Global §2) | FULL | YAML `risk.position_sizing {premium_budget 15000}`, `max_daily_loss_pct: 2.0`, `max_positions: 1` | Encoded. |
+| Global risk: sizing + daily-loss cap | 3.12 Risk (Global §2) | PARTIAL | YAML `risk.position_sizing {premium_budget 15000}` IS read (`StrategyCompiler` L66-69 → `SizingSpec`). v2 correction: `max_daily_loss_pct: 2.0` + `max_positions: 1` / `max_positions_per_underlying: 1` are **DEAD YAML keys** — `StrategyCompiler` reads ONLY `position_sizing.method`/`params` from the risk block (L65-69); no read of `max_positions*` or `max_daily_loss_pct` anywhere in `strategy-engine` / `strategy-signal-service`. The only daily-loss mechanism is the separate paper-runtime `RiskService.DAILY_LOSS = "daily_loss_limit"` setting (off by default), not this YAML key. | Position-SIZING is encoded; the **daily-loss cap + max-positions are not enforced from the YAML** (dead keys, per README §4). Manually rely on the paper-trade `daily_loss_limit` runtime setting for a daily cap. Automatable: yes (wire the keys) |
 | Instruments: buy CE / sell PE / buy futures (up); buy PE / sell CE / sell futures (down) | 3.12 Entry b.6 / r.6; 6.12 | PARTIAL | YAMLs are `direction: long`, `option_types: [CE]` (long-premium CE only) | Only the **buy-CE** up-reversal leg is automated; sell-PE, buy/sell-futures, and the entire **down-reversal (buy-PE)** are NOT shipped. Manually trade the bearish side / futures legs if desired. Automatable: yes (a PE-direction YAML) |
 
 ### Not automated (gaps)
@@ -56,3 +57,37 @@ swing/OI-defined reversal direction.**
 - **Max-OI S/R range as a hard gate** (§3.12 Filters) — only the generic `level_respected` manual check covers it.
 - **Edge-case detectors**: 1-2-3 failed-attempt reversal, both-sides-building consolidation / hourly-unwinding-volume, post-vertical RSI-recovery sequencing, and the higher-premium-no-cues warning — none are automated.
 - **Midday-window mismatch**: the live `ScalperGates.timeWindow` blocks 11:00-13:00, contradicting the doc's continuous 09:45-2:30 window — the doc's own Day-10 ~11:00 reversal example would be blocked. (Not a gap to fill, but a documented behaviour divergence the trader must know.)
+- **Daily-loss cap + max-positions are dead YAML keys** (v2): `max_daily_loss_pct: 2.0`, `max_positions: 1`, `max_positions_per_underlying: 1` are present in all 3 YAMLs but read by NO compiler/engine code (`StrategyCompiler` reads only `position_sizing`). The only live daily-loss cap is the paper-runtime `daily_loss_limit` setting (off by default). Wire the YAML keys, or rely on the runtime setting.
+- **Golden-Cross indicator alignment as a hard gate** (v2): the §4.2 "all indicators below/above price" alignment exists as `ScalperGates.indicatorAlignment` but is UNUSED on the scalper confluence path; ST/VWMA/PSAR are only soft dots. Promoting alignment to a hard AND-term would match the doc's "all soldiers on the far side" framing.
+
+### v2 review notes
+
+Independent second-pass review of the §3.12 / §6.12 Trend-Change audit. v1 was strong: the 4-leg
+`TrendChangeGate` (structure break + ≥50% OI shift + 2-candle + 14:30 down-cap), the CE-only / live-only /
+VWAP-decides-side structural facts, and all spot-checked file:line citations in v1 (`TrendChangeGate`,
+`MarketStructure`, `TwoCandleGate`, `ConnectTheDotsScorer` L74-97/L114-115, `ScalperGates.vix` L136-143,
+the `ScalperManualChecks` codes) were re-verified as accurate. Changes made:
+
+- **MISSED — added 1 row:** the §4.2 / §6.12 **core chart-indicator set (Supertrend 10,2 / VWMA / PSAR)**.
+  v1 listed PSAR only inside a Day-12 edge-case row but never credited the named indicator family that
+  §6.12's `indicators` array calls out and that all 3 YAMLs declare + the scorer scores (soft dots, L75-77).
+  Marked PARTIAL: computed/scored as soft dots, but the doc's "all indicators on the far side" alignment is
+  not a hard gate (`indicatorAlignment` exists but is unused on this path).
+
+- **INACCURATE (false-gap) — "Identify prevailing trend first" NONE → PARTIAL.** v1 missed that the 1h
+  `bias60m = SUPERTREND@1h` IS a hard live validity AND-term (`ScalperConfluenceGate` L252 →
+  `ConnectTheDotsScorer` L111,L114-115), declared by all 3 YAMLs. This is the SAME live-only `bias60m`
+  automation the audit README §5 false-coverage flag #1 corrected for gap-theory; it applies identically
+  here (a directional-trend bias the doc's Setup-1 asks for). The trendline/structure-classification half
+  remains unautomated, hence PARTIAL not FULL. (Backtest still lacks `bias60m`.)
+
+- **INACCURATE (false-coverage) — "Global risk: sizing + daily-loss cap" FULL → PARTIAL.** v1 cited
+  `max_daily_loss_pct: 2.0` + `max_positions: 1` as encoded. Verified against `StrategyCompiler` L65-69:
+  only `position_sizing.method`/`params` is read from the risk block; `max_daily_loss_pct` and
+  `max_positions*` are **dead YAML keys** (no read anywhere in `strategy-engine` / `strategy-signal-service`;
+  the only daily-loss cap is the separate paper-runtime `RiskService.DAILY_LOSS = "daily_loss_limit"`,
+  off by default). Matches the audit README §4 dead-key note. Position-sizing alone is genuinely encoded.
+
+No v1 rows were deleted; the two corrected rows keep their original doc-§ and now carry corrected
+status + evidence. Two gap-list bullets were added (dead daily-loss/max-positions keys; unused
+Golden-Cross alignment). All claims trace to a re-read file:line or YAML key.

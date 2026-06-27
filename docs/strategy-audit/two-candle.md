@@ -52,6 +52,7 @@ presence**, not backtest behaviour.
 | Sensex application: read setup on NIFTY chart, ~3× point scaling, ITM Sensex options | 3.1 S23 / 5.1 / 4.16 | PARTIAL | `scalp-two-candle-sensex-*.yaml` signal on `NIFTY-FUT-CONT`, strike anchor `SENSEX-FUT-CONT`, execute SENSEX CE (`yaml universe`) | Signal-on-NIFTY/execute-on-SENSEX decoupling IS automated; the ~3× point-scaling of SL/target is NOT (no scaled SL). Manual: scale SL/target ~3× for Sensex. Automatable |
 | News/event overrides the data — keep off on impending events | 3.1 filters / 2.13 / 4.10 | MANUAL_COVERED | `ScalperManualChecks.java:26-30` key `news_clear` (doc_ref 2.13) | Manual checklist item; not automated |
 | Direction: CE-only / PE-only per YAML (no two-sided) | 3.1 bull/bear / 6.1 | PARTIAL | each YAML is `direction: long` + `option_types: [CE]` only; PE variants are not seeded | Only the CE (bullish) leg of two-candle is registered; the bearish PUT path exists in code (`side==PE` branches) but no `scalp-two-candle-*-pe` YAML. Manual: trade the bearish two-candle by hand, or add PE YAMLs |
+| Multi-TF RSI cross-check: CE RSI(5m) <75/80 & RSI(Daily) <75; PE RSI(5m) >25/20 & RSI(Daily) >25 | 3.1 filters / 4.2 / 6.1 timeframe | NONE | only the single 3m `rsi14` band is gated (`ScalperGates.rsiBand` `:76-84`); no 5m / Daily RSI series is read or checked anywhere in the scalper seam | v3-added MISS. §4.2 L1308 "Daily RSI cross-check: CE side RSI(D) below 75; PE side RSI(D) above 25" + §3.1 L402 "RSI(5m) below 75/80 … RSI(5m) above 25/20" + §6.1 L1770 "matrix RSI checks on 5m and Daily" — the higher-TF RSI confirmation is not encoded. Manual: confirm the 5m and Daily RSI are not past their caps. Automatable (multi-TF RSI series) |
 
 ### Not automated (gaps)
 
@@ -67,6 +68,7 @@ presence**, not backtest behaviour.
 - **RSI band mismatch (§3.1 vs §4.2):** the live gate uses §4.2's CE 60–80 / PE 20–40, not §3.1's 50–75 — verify this is the intended band.
 - **1st+3rd candle volume substitution (§3.1 S21a):** the gate requires BOTH the 1st and 2nd candle above the floor; a light 2nd candle always blocks (no 1st/3rd fallback).
 - **Trader-type SL mode (§5.1 S24b):** only the positional 1st-candle anchor is encoded; the scalper's previous-candle trail is absent (no trailing exit exists).
+- **Multi-TF RSI cross-check (§4.2 / §3.1 filters / §6.1):** only the 3m `rsi14` band is gated; the 5m and Daily RSI confirmation (CE RSI(D) <75, PE RSI(D) >25) is not read or checked.
 
 ## v2 review notes
 
@@ -95,3 +97,48 @@ Three doc rules v1 MISSED, now added as rows:
 
 No v1 row was downgraded or corrected for inaccuracy — all CONFIRMED. The three additions are net-new
 gaps (two NONE, one FULL); they do not overturn any existing verdict.
+
+## v3 review notes
+
+Third-pass focus: re-opened every cited `file:line` / `yaml key` / `doc line` and confirmed each
+proves what the row claims. **All citations validated — no stale/wrong cite, no status overturned.**
+
+Citations re-opened and confirmed accurate (file:line still points at the claimed code):
+- `TwoCandleGate.java` — `:46-52` both candles same-colour + above floor; `:55-56,72-79` strongBody
+  (combined shadow < 2× body, doji rejected); `:58` returns `first.low()`(CE)/`first.high()`(PE); `detect`
+  keys off `entryIndex-2/-1`. All exact.
+- `ScalperGates.java` — `:22,33-44` `NO_TRADE_BEFORE=09:45` + `timeWindow`; `:23-24,37-39` midday block;
+  `:25,40-42` `>=15:30`; `:64-68` volume + `:28-30` floors (NIFTY 125k / index 50k); `:76-84` `rsiBand`
+  CE 60-80 / PE 20-40; `:81` PE `>20`; `:102-118` `indicatorAlignment` (confirmed NOT called in
+  `evaluate`); `:128-133` breadth `>32`; `:136-143` vix; `:151-161` `callPutDeltaFilter`. All exact.
+- `ConnectTheDotsScorer.java` — `:74-77` chart dots; `:80` `futures_oi` weight `W_OI=1.5`; `:91` breadth;
+  `:92` vix; `:94-98` iv_rank/iv_pair; `:96,186-195` 40/40 stand-aside. All exact.
+- `ScalperConfluenceGate.java` — `:100-107,124` evaluate-on-future + chart read; `:149-152` side off
+  close-vs-VWAP; `:166-169,290-292` two-candle structural stop wiring. All exact.
+- `ScalperConfig.java` — `:82-83` delta 0.6-0.7; `:93-98` premium bands (N 100-250 / BN 250-400 / SENSEX
+  300-800) + `:89-92` "backtest selector ignores the band" comment; `:153` `oi-cross-filter` tag;
+  `signalIndex` at `:176-184` (cited in row 1). All exact.
+- `StrikePicker.java` — `:98-101,102-106` delta-band + nearest-midpoint selection; `deltaTarget()` =
+  `(0.6+0.7)/2` = 0.65, confirming "0.7-preferred not honoured". Exact.
+- `ScalperManualChecks.java` — `:26-30` news_clear (2.13); `:32-35` level_respected (4.11); `:36-40`
+  not_parabolic (3.1); `:46-50` vix_normal (4.5); `:51-55` global_cues_ok (4.7). All keys + doc_refs exact.
+- Doc numbers re-quoted from source: §3.1 L350 S21(a)-(g), L356 (3-min Futures chart), L364/L371 RSI,
+  L388-392 exits; §4.2 L1305-1308 (40-60 no-trade, CE >60, PE <40, Daily cross-check); §4.8 L1417-1418
+  (Adv/Dec >32); §4.16.4 L1600 (Sensex ~3× point scaling); §5.1 L1647-1649 (S23/S24 — window 9:45-2:30,
+  S24b scalper-trail vs positional, S24c deep-SL); §6.1 L1770/L1802 (delta 0.6-0.7 0.7-preferred). All present.
+- YAML keys re-checked against all three `scalp-two-candle-*.yaml`: `timeframes.primary: 3m`,
+  `signal_underlying: NIFTY-FUT-CONT`, sensex `strike_reference: SENSEX-FUT-CONT`,
+  `exit_rules` (signal_exit close<vwap + time_stop max_bars:10), `risk` (premium_budget 15000,
+  max_positions:1, session.window.to 15:00), `oi_confluence_gate.index: "NIFTY 50"` on the niftyoi variant.
+  No `oi-cross-filter` tag on any two-candle YAML (confirms rows 29-30). All exact.
+
+Convergence (A): after two passes the table was already near-complete; ONE genuinely-still-missing doc
+rule surfaced and was added — the **multi-timeframe RSI cross-check** (5m + Daily RSI confirmation, §4.2
+L1308 / §3.1 L402 / §6.1 L1770). The automation gates only the single 3m `rsi14` (`ScalperGates.rsiBand`);
+no 5m or Daily RSI series is read anywhere in the scalper seam → NONE. Added as a new row + a "Not
+automated" bullet. No other doc rule (incl. the "60-min bias" — covered by the bias60m indicator/row 1,
+and "trend-day recurrence ~45min-1hr" — an informational observation, not an automatable gate) was found
+unrepresented.
+
+Changes: +1 row (multi-TF RSI cross-check, NONE), +1 gap bullet. Zero citation corrections, zero status
+changes. Convergence is STABLE — the v1/v2 table held under full citation re-validation.

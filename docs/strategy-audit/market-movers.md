@@ -32,7 +32,7 @@ status below is judged by code presence, not backtest behaviour.
 | **Target = 1–2%** ("aim not more than 1–2%"); ~1% in first morning hour | §3.3 Exit (Target); §6.3 `exit_conditions.target` | NONE | No percent-target encoded; exits are `signal_exit: close < vwap` + `time_stop: max_bars 20` (`scalp-market-movers-nifty.yaml:88-89`); YAML header line 21 calls the 1–2% target "a live-management note, not engine-carried" | Manually book ~1–2% on the stock. Automatable=true (a percent-target exit rule is a standard primitive). |
 | **Stop-loss = no rigid SL / no fixed OI% threshold**; practical reference = 1st-candle low (long) / 1st-candle high (short) | §3.3 Exit (Stop-loss) + Risk; §6.3 `exit_conditions.stop_loss` | PARTIAL | The `entry-candle-stop` tag anchors the stop on the entry (breakout) candle's low (`ScalperConfig.java:149-150`, `ScalperConfluenceGate.java:293-295`) — the doc's "1st candle low" reference; but it is on the **NIFTY future**, not the stock, and "no rigid SL / risk-appetite sizing" is inherently manual | Set SL by own risk appetite on the stock; the automated structural stop is on the index surrogate. Automatable=partly (the structural anchor exists; discretionary sizing cannot be). |
 | Time / hold: **intraday by default**; can be positional but **watch EOD OI** (carry only if closing OI = Long Build-up; avoid through Long Unwinding) | §3.3 Exit (Time/Positional) + Risk; §6.3 `exit_conditions.time_exit`, `risk_management` | PARTIAL | Intraday window + `square_off: "15:15"` (`scalp-market-movers-nifty.yaml:97-100`) encode the intraday default; the **overnight-carry-on-LB** logic is **not** automated (YAML header line 43 lists "the EOD-OI Long-Build-up overnight-carry option" as DEFERRED) | If carrying overnight, manually verify the close shows Long Build-up. Automatable=true given EOD per-stock OI. |
-| **Short side** (8/9-day low + OH + Short Build-up / Long Unwinding) | §3.3 Entry — Bearish; §6.3 `entry_conditions.bearish` | NONE | `entry_rules.direction: long`, `option_types: [CE]` only (`scalp-market-movers-nifty.yaml:64,80`); YAML header lines 30-32 mark the SHORT mirror "faithful but DEFERRED" | The entire bearish path is unautomated; trade shorts manually (or via a future PE/short variant). Automatable=true (mirror of the long side). |
+| **Short side** (8/9-day low + OH + Short Build-up / Long Unwinding) | §3.3 Entry — Bearish; §6.3 `entry_conditions.bearish` | NONE | `entry_rules.direction: long`, `option_types: [CE]` only (`scalp-market-movers-nifty.yaml:63,79`); YAML header lines 30-32 mark the SHORT mirror "faithful but DEFERRED" | The entire bearish path is unautomated; trade shorts manually (or via a future PE/short variant). Automatable=true (mirror of the long side). |
 | Edge case: **if the trade goes against you, check volume — high volume = exit, low volume = may pursue** | §3.3 Execution/Edge; §6.3 `edge_cases` | NONE | No volume-conditional exit logic; only `close < vwap` and a 20-bar time stop | Manual on adverse moves: high volume → cut, low volume → may hold. Automatable=partly (volume on the stock is needed). |
 | Edge case: **avoid names with OI heavily populated on both call and put sides** (ambiguous) | §3.3 Execution/Edge; §6.3 `edge_cases` | NONE | No CE/PE both-sides-loaded ambiguity check per stock | Manually skip ambiguous-positioning names. Automatable=true given per-stock chain OI. |
 | **Alternative entry trigger** — "considerable change in OI **and more than 1% change in price**" (or intraday S/R trades) | §3.3 Entry Bull 5 / Bear 5; §6.3 `entry_conditions` ("Alternative: considerable OI change + >1% price change") | NONE | The only entry gate is `close > vwap` AND `close > vwma20` (`scalp-market-movers-nifty.yaml:81-83`); no >1% price-move threshold and no per-bar ΔOI trigger is wired into the gate. The shared OI dots are soft confluence (`ConnectTheDotsScorer.java:80-90`), not a ">1% price + drastic-OI" entry condition | Manually require a >1% intraday price move with a clear OI shift (or an S/R trade) before entry. Automatable=partly (a >1% price-change gate is trivial; the ΔOI leg needs per-stock OI). **MISSED by v1.** |
@@ -40,7 +40,7 @@ status below is judged by code presence, not backtest behaviour.
 | **OI Spurt 4-quadrant cue** (refer the stock's OI Spurt quadrants for an extra entry cue) | §3.3 Filters (screener-structure note); §6.3 `indicators`, `filters` | PARTIAL | An `oi_spurt` dot IS computed and scored — the spurt quadrant must match the side AND both ΔOI% and price% magnitudes clear their floors (`ConnectTheDotsScorer.java:89-90,159-166`) — but on the **option-root index**, not the picked stock; it is a soft confluence dot, not a per-stock cue | The spurt-quadrant cue is automated at index level only; manually read the **stock's** OI Spurt 4-quadrant panel. Automatable=true once equity OI is captured. **MISSED by v1** (v1 listed no row for the OI-Spurt cue although the §0B confluence scores it). |
 | **Right-side "New High/Low Maker" panel** — use live new intraday highs/lows for support (bullish, in Gainers) or rejection (bearish, in Losers) trades | §3.3 Filters (screener-structure note); §6.3 `filters` | NONE | No intraday-new-high/low maker panel or per-stock support/rejection trade input in the scalper engine | Manually watch the New High/Low Maker panel and take support (Gainers)/rejection (Losers) trades. Automatable=partly (needs the equity-screener live high/low feed). **MISSED by v1.** |
 | **Large-cap-only filter + operator low-volume trap** — trade only liquid large-caps; a name that gave its whole move on no intraday volume then ranges traps late entrants; stay long only while price holds the intraday VWAP | §3.3 S22 update (a)/(b); §5.3 (S22/S24 liquidity reads) | NONE | No market-cap classification and no operator-trap / VWAP-hold-only-above filter per stock; the only liquidity rule is the static index volume floor (`ScalperGates.volume`, `ScalperGates.java:64-68`) on the surrogate future | Manually restrict to liquid large-caps and abandon a name that ran on no volume; hold long only above the stock's VWAP. Automatable=partly (needs a large-cap list + per-stock intraday volume). **MISSED by v1.** |
-| **Short-side overnight (STBT)** — an 8/9-day-low Short-Build-up name is an ideal STBT, carried only if Futures OI is **closing at the day's high with price at the day's low** | §3.3 S22 update (f); §5.3 | NONE | The short side itself is unautomated (`direction: long`, CE only, `scalp-market-movers-nifty.yaml:64,80`); no STBT overnight-carry-on-close-OI-extreme logic exists | Manually evaluate the STBT carry on the close (OI at day-high + price at day-low). Automatable=true given a short variant + EOD per-stock OI. **MISSED by v1** (v1's "short side" row covers the intraday mirror; the STBT overnight-carry condition is a distinct deferred rule). |
+| **Short-side overnight (STBT)** — an 8/9-day-low Short-Build-up name is an ideal STBT, carried only if Futures OI is **closing at the day's high with price at the day's low** | §3.3 S22 update (f); §5.3 | NONE | The short side itself is unautomated (`direction: long`, CE only, `scalp-market-movers-nifty.yaml:63,79`); no STBT overnight-carry-on-close-OI-extreme logic exists | Manually evaluate the STBT carry on the close (OI at day-high + price at day-low). Automatable=true given a short variant + EOD per-stock OI. **MISSED by v1** (v1's "short side" row covers the intraday mirror; the STBT overnight-carry condition is a distinct deferred rule). |
 
 ### Not automated (gaps)
 
@@ -121,3 +121,54 @@ is left intact rather than re-flagged. Likewise the 5m-vs-3m primary-timeframe a
 `uncertain`) is a documented doc-side UNCERTAIN, not an automation gap: the engine runs a 3m primary
 while the worked examples cite a 5m chart — a faithful divergence, already reflected in the RSI(5m) and
 indicator-settings PARTIAL rows.
+
+## v3 review notes
+
+Third-pass **citation-validation** sweep: re-opened every cited `file:line`, every YAML key, and every
+`doc §` for all 25 rows + the v2 notes. The set is overwhelmingly clean — **all status verdicts stand,
+no row was re-flagged, and no still-missing doc rule was found** (convergence is stable). One drifted
+citation was corrected.
+
+**Bad citation fixed (off-by-one line drift in the *nifty* YAML):**
+- `scalp-market-movers-nifty.yaml:64,80` → **`:63,79`** in the Short-side row and the STBT row. In
+  `scalp-market-movers-nifty.yaml` `option_types: [CE]` is line **63** (line 64 is blank) and
+  `direction: long` is line **79** (line 80 is `gate:`). The `:64,80` pair is correct only for the two
+  SENSEX variants (`scalp-market-movers-sensex-*.yaml`, where the extra `signal_underlying` comment line
+  shifts both down one), but both rows name the *nifty* file, so the cite was wrong there. Status
+  (NONE) unchanged — `direction: long` / CE-only is still the code, just at the corrected lines.
+
+**Citations re-opened and CONFIRMED accurate (no change):**
+- `ScalperGates.java`: `NO_TRADE_BEFORE = 09:45` (22) + the floor check (34); the 11:00–13:00 / post-15:30
+  blocks (37–42); `rsiBand` CE 60–80 / PE 20–40 (76–84); `oiQuadrant` (121); `breadth` adv/dec > 32
+  (128–133); `volume` floor (64–68). All exact.
+- `ConnectTheDotsScorer.java`: the `oi_spurt` dot `add(...)` (90, comment 89) + the `oiSpurt` method
+  body — quadrant-match AND both ΔOI%/price% magnitudes past their floors (159–166); the soft OI dots
+  span (80–90). Exact.
+- `ScalperConfig.java:149-150` (`entry-candle-stop` → `StructuralStop.ENTRY_CANDLE`) and
+  `ScalperConfluenceGate.java:293-295` (the ENTRY_CANDLE branch returning `future.candle(index).low()`/
+  `.high()`). Exact.
+- `ScalperGateContext.java:59-68` — the `Macro` record carrying `atmIv` (60) and `ceIvAvg6` (67). Exact.
+- `FuturesMoversService` — the index-only-capture javadoc ("only index futures … captured; a
+  bank-stock futures grid needs a capture expansion", lines 21–23) and `OiInterpretation.classify`
+  (line 85). Exact.
+- `ScalperManualChecks.CHECKS` — the fixed 7-item list (news/level/not-parabolic/regime/VIX/global-cues/
+  clean-setup, lines 24–60) carries no Market-Movers-specific item, so the gaps are true NONE, not
+  MANUAL_COVERED. Confirmed.
+- The remaining nifty-YAML point/range cites (`:54` tags; `:70-75`/`:71,74` indicators; `:72` rsi14 3m;
+  `:81-83`/`:82-83` gate; `:88-89` exits; `:97-100` square-off; `:98` 09:45 window; `:57-64` universe
+  span) all resolve to the claimed content. (`:57-64` ends one blank line past `option_types`@63 but
+  correctly spans the universe block — left intact, not a mis-point.)
+- **Doc side:** §3.3 and §6.3 re-read in full. Every quoted number/phrase verified verbatim — the
+  "Aim not more than 1-2%" target (§3.3 Exit; §6.3 `exit_conditions.target`), "VWAP, VWMA 20,
+  SuperTrend (10,2), RSI 14, Volume 20" (§3.3 Filters line 560; §6.3 `indicators`), "examples cite
+  >60" (§3.3 Bull 4 line 530; §6.3 line 2018), HDFC Bank "29.46% of Nifty Bank" (§3.3 S21 (c) line 506;
+  §4.14 ref), the STBT "Futures OI closing at the day's high and price at the day's low" (§3.3 S22 (f)
+  line 508), the "considerable OI change + >1% price change" alternative trigger (§3.3 Bull/Bear 5
+  lines 531/539; §6.3 line 2020), radar-building 1-2d→3-4d→8-9d (§3.3 Setup 7 line 524; §6.3
+  `setup_preconditions` line 2011), the OI-Spurt 4-quadrant cue (§3.3 Filters line 561; §6.3 line 2000),
+  and the New High/Low Maker panel (§3.3 Filters line 561; §6.3 `filters` line 2053). All present.
+
+**Convergence:** stable. After three passes no genuine §3.3/§6.3 Market-Movers rule remains
+unrepresented. (The only un-rowed doc line is the §6.3 `risk_management` "not more than 1 night risk /
+avoid Friday" — but that is an explicit *Global Risk Framework* cross-reference, not a Market-Movers-
+specific rule, and is audited under the common-components dimension; correctly out of scope here.)

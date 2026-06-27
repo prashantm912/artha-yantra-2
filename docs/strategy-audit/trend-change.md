@@ -16,7 +16,7 @@ swing/OI-defined reversal direction.**
 |------|-------|--------|----------------------------------|--------------------|
 | Identify prevailing trend (up/down/sideways) first via trend lines / price-action swings; reversal only meaningful vs a defined prior trend | 3.12 Setup 1 | PARTIAL | no full trend-classification/trendline engine, but the 1h `bias60m` = `SUPERTREND@1h (7,3.0)` IS a hard live validity AND-term: `ScalperConfluenceGate` L252 passes `bias60m(bank,index)` → `ConnectTheDotsScorer` L111 (`biasAligned`) + L114-115 (in `valid`). All 3 trend-change YAMLs declare it (e.g. `scalp-trend-change-nifty.yaml` L55). v2: this is the same live-only `bias60m` gate the README §5 false-coverage flag #1 corrected for gap-theory. | The 1h-Supertrend prevailing-trend bias IS gated live (unknown ⇒ never blocks; the **backtest** lacks it). What is NOT automated: explicit up/down/sideways classification + trendline structure. Manually classify the prevailing trend. Automatable: partly |
 | Swing-structure break: HH/HL→LH/LL (down) or LL/LH→HL/HH (up) **OR** a trendline break in the reversal direction | 3.12 Setup 2-3, Entry b.1 | PARTIAL | `MarketStructure.detect` L41-61 (3-bar fractal swing-high/low taken out by the close); armed via `TrendChangeGate.evaluate` L86-89 | Swing-break is automated; the **trendline-break alternative is NOT** (no diagonal/horizontal trendline engine). Manually confirm a trendline break if no fractal-pivot break printed. Automatable: trendline detection is hard but feasible |
-| Trending-OI momentum shift, **≥50% quantified** (CE: call-OI falling + put-OI rising; PE mirror) — the primary confirmation | 3.12 Entry b.2, Filters; 6.12 | FULL | `TrendChangeGate.oiShift` L98-110 + `MIN_SHIFT_PCT="50"` L47; reads `Oi.ceOiDelta/peOiDelta/callPutDeltaImbalancePct` (`ScalperGateContext` L39-52) | Direction + ≥50% imbalance encoded; null deltas block (L102-104). Derived-history caveat: degrades to NEUTRAL on backtests so it never fires there. |
+| Trending-OI momentum shift, **≥50% quantified** (CE: call-OI falling + put-OI rising; PE mirror) — the primary confirmation | 3.12 Entry b.2, Filters; 4.3.2 / Day-12; 6.12 | FULL | `TrendChangeGate.oiShift` L98-110 + `MIN_SHIFT_PCT="50"` L47; reads `Oi.ceOiDelta/peOiDelta/callPutDeltaImbalancePct` (`ScalperGateContext` L39-52) | Direction + ≥50% imbalance encoded; null deltas block (L102-104). v3 doc-cite fix: the DIRECTION (call-OI falling/put-OI rising) is §3.12 Entry b.2 (doc L1222), but the literal "**50%**" number is NOT in §3.12 Entry b.2 — it lives in §4.3.2 OI-Spurts (doc L1338-1339, "50% increase in OI") + the §3.12 Day-12 source-ref ">50% call/put OI demarcation confirms direction" (doc L1278). Derived-history caveat: degrades to NEUTRAL on backtests so it never fires there. |
 | RSI **above 60** for up-reversal (CE); **below ~40** for down-reversal (PE); 40-60 no-trade band | 3.12 Entry b.3 / r.3, Filters; 4.2 | FULL (CE) / dead (PE) | `ScalperGates.rsiBand` L76-84 (CE 60-80, PE 20-40), wired at `ScalperConfluenceGate` L160 (non-#2 path uses the band). PE branch never reached: YAMLs are CE-only | RSI band is encoded but the gate uses the §4.2 60-80/20-40 band, not a bare ">60"; the PE <40 path is unreachable in these CE-only YAMLs. No manual check needed for CE. |
 | **Chart indicators** — Supertrend (10,2), VWMA, Parabolic SAR (0.02,0.2) alignment relative to VWAP/price (the §4.2 "5 Chart Dots") | 6.12 indicators; 3.12 Instruments/Filters; 4.2 | PARTIAL | v2 MISSED-by-v1 row. All 3 YAMLs declare the set on the 3m future: `SUPERTREND (10,2.0)` + `VWMA (20)` + `PSAR` (e.g. `scalp-trend-change-nifty.yaml` L49-54). Each is a SOFT confluence dot in `ConnectTheDotsScorer` — `supertrend` L75, `vwma` L76, `psar` L77 — weighed into the aggregate threshold, not hard gates. (VWAP is the one decisive/hard chart term, L114-115.) | The named §4.2 indicators ARE computed + scored as soft dots, but the doc's "all indicators below/above price" Golden-Cross **alignment** is NOT a hard gate here (`ScalperGates.indicatorAlignment` exists L101-118 but is unused on this path). Manually confirm ST/VWMA/PSAR sit on the correct side. |
 | Confirm with **volume increase + follow-up bars** (50K BN / 125K N) on the break | 3.12 Entry b.4 / r.4; 4.2 | PARTIAL | `TwoCandleGate.detect` L52 requires BOTH prior bars over the floor; `ScalperGates.volume` L64-68 (NIFTY 125k / others 50k); also a soft `volume` dot in `ConnectTheDotsScorer` L79 | Per-bar floor on the 2 confirmation candles is enforced, but "**increase** in volume + follow-up bars" (a rising-volume sequence) is NOT modelled — only an absolute floor. Manually confirm volume is expanding, not just above floor. Automatable: yes |
@@ -41,6 +41,7 @@ swing/OI-defined reversal direction.**
 | Consolidation: OI added on BOTH sides after a flip = pause (not continuation); genuine reversal needs hourly unwinding-volume beaten + LB/SC | 3.12 Edge-cases (Day 07) | NONE | no both-sides-building / hourly-unwinding-volume detector | Manually check OI is not building on both sides (consolidation). Automatable: partly |
 | Post-vertical bounce caution: after a vertical fall, don't reverse until **RSI recovers toward ~40** and a defined level prints | 3.12 Edge-cases (Day 07) | NONE | the CE RSI band (60-80) is unrelated; no oversold-recovery sequencing | Manually wait for RSI recovery toward ~40 + a level after a vertical fall. Automatable: yes |
 | Don't chase a side when **premiums are higher on that side with no positive cues** | 3.12 Risk; 6.12 | NONE | no per-side-premium-skew warning in the trend-change path (IV-pair dot L97 is a different signal) | Manually avoid chasing into a higher-premium side without cues. Automatable: yes (per-side premium/IV skew) |
+| **Strong-trend / late entry is hard to catch — wait for pullbacks to support, do NOT chase** (once you miss the move) | 3.12 Exec notes; 6.12 edge-cases | MANUAL_COVERED | v3 still-missing add. No "missed-the-move ⇒ wait for a pullback" detector in the scalper path; the discretion is covered by `ScalperManualChecks` `not_parabolic` (§3.1) + `clean_setup` (§3.1) | Doc §3.12 Exec-notes (doc L1270) / §6.12 edge_cases (doc L2916): on a strong reversal day, once the move is missed, wait for a pullback to support — don't chase. Covered only by the not-parabolic / clean-setup manual checks. Manually wait for a pullback rather than chasing a strong-trend entry. |
 | Scale expectations to regime (low-VIX expiry: a 10-15pt move is "a big hit") | 3.12 Risk; 6.12 | MANUAL_COVERED | `ScalperManualChecks` `regime_ok` (§3.10) + `vix_normal` (§4.5) | Covered by the regime/VIX manual checks. |
 | Global risk: sizing + daily-loss cap | 3.12 Risk (Global §2) | PARTIAL | YAML `risk.position_sizing {premium_budget 15000}` IS read (`StrategyCompiler` L66-69 → `SizingSpec`). v2 correction: `max_daily_loss_pct: 2.0` + `max_positions: 1` / `max_positions_per_underlying: 1` are **DEAD YAML keys** — `StrategyCompiler` reads ONLY `position_sizing.method`/`params` from the risk block (L65-69); no read of `max_positions*` or `max_daily_loss_pct` anywhere in `strategy-engine` / `strategy-signal-service`. The only daily-loss mechanism is the separate paper-runtime `RiskService.DAILY_LOSS = "daily_loss_limit"` setting (off by default), not this YAML key. | Position-SIZING is encoded; the **daily-loss cap + max-positions are not enforced from the YAML** (dead keys, per README §4). Manually rely on the paper-trade `daily_loss_limit` runtime setting for a daily cap. Automatable: yes (wire the keys) |
 | Instruments: buy CE / sell PE / buy futures (up); buy PE / sell CE / sell futures (down) | 3.12 Entry b.6 / r.6; 6.12 | PARTIAL | YAMLs are `direction: long`, `option_types: [CE]` (long-premium CE only) | Only the **buy-CE** up-reversal leg is automated; sell-PE, buy/sell-futures, and the entire **down-reversal (buy-PE)** are NOT shipped. Manually trade the bearish side / futures legs if desired. Automatable: yes (a PE-direction YAML) |
@@ -91,3 +92,52 @@ the `ScalperManualChecks` codes) were re-verified as accurate. Changes made:
 No v1 rows were deleted; the two corrected rows keep their original doc-§ and now carry corrected
 status + evidence. Two gap-list bullets were added (dead daily-loss/max-positions keys; unused
 Golden-Cross alignment). All claims trace to a re-read file:line or YAML key.
+
+### v3 review notes
+
+Third-pass citation-validation. Every row's `file:line` / `yaml key` / `doc-§` was re-opened and confirmed.
+The v2 state was strong; the body is **stable / converged**.
+
+**Citation validation — all code/YAML citations re-opened and confirmed accurate** (line numbers were
+verified, not assumed):
+- `TrendChangeGate`: `oiShift` L98-110, `MIN_SHIFT_PCT="50"` L47, null-delta block L102-104, the CE
+  `peDelta>0 && ceDelta<0` test L105-109, `DOWN_REVERSAL_CAP=14:30` L49 + bearish-only `!ce` cap L73-75,
+  `evaluate` legs L78-89, `structure.pivot()` returned L90 — all present and accurate.
+- `MarketStructure.detect` L41-61 (3-bar fractal swing, close beyond recent opposing pivot) ✓.
+- `TwoCandleGate.detect` L41-59, both-bars floor `||` at L52, called from `TrendChangeGate` L82-84 ✓.
+- `ScalperConfluenceGate`: VWAP-decides-side L149-152, `rsiBand` wired L160, trend-change branch +
+  `structuralStop = tc.stopLevel()` L210, `bias60m(bank,index)` → scorer L252, `indicatorAlignment`
+  exists but **unused on this path** (confirmed: the only `requireXxx` branches in `evaluate` are
+  twoCandle/gapFill/trendChange/openHighLow/heroZero — `indicatorAlignment` is never called) ✓.
+- `ConnectTheDotsScorer`: soft dots `supertrend` L75, `vwma` L76, `psar` L77, `volume` L79,
+  `trending_cross` L83 (method L125-134), `iv_pair` L97; `biasAligned` L111; `valid` (hard VWAP + bias +
+  threshold) L114-115 — all accurate.
+- `ScalperGates`: `timeWindow` ≥09:45 / 11:00-13:00 block / 15:30 cap L33-44, `volume` L64-68,
+  `rsiBand` 60-80/20-40 L76-84, `indicatorAlignment` L101-118, `vix` (unknown never blocks) L136-143 ✓.
+- `ScalperGateContext` Oi record (`ceOiDelta`/`peOiDelta`/`callPutDeltaImbalancePct`) L39-52 ✓.
+- `StrategyCompiler` L65-69 reads ONLY `risk.position_sizing.method`/`params` (+ `risk.session` L82);
+  re-confirmed **no read** of `max_positions*` / `max_daily_loss_pct` — the v2 dead-key finding holds.
+- `ConnectingDotsService.vixFactor` L263-270 ✓.
+- `ScalperManualChecks` codes: `news_clear` §2.13, `level_respected` §4.11, `not_parabolic` §3.1,
+  `regime_ok` §3.10, `vix_normal` §4.5 — all present at the cited keys/§.
+- All 3 YAMLs re-opened: `bias60m = SUPERTREND@1h(7,3.0)` (nifty L55), the §4.2 indicator set
+  (nifty L49-54), `direction: long`/`option_types:[CE]`, `close > vwap` gate, `signal_exit close<vwap` +
+  `time_stop max_bars:30`, the dead `max_positions`/`max_daily_loss_pct:2.0` keys, the SL-leeway header
+  comment (nifty L19-21), and `position_sizing premium_budget budget_inr:15000` (L70) — all confirmed.
+  (The two SENSEX YAMLs carry the same keys shifted +1 line by an extra `strike_reference` universe
+  entry — the rows cite the named nifty file, so the line numbers are correct as written.)
+
+**Changes made:**
+- **Doc-cite fix (row "Trending-OI ≥50% shift")**: added `4.3.2 / Day-12` to the doc-§. The DIRECTION
+  is §3.12 Entry b.2 (doc L1222), but the literal **"50%"** number is NOT in §3.12 Entry b.2 — it lives
+  in §4.3.2 OI-Spurts (doc L1338-1339) + the §3.12 Day-12 source-ref ">50% call/put OI demarcation"
+  (doc L1278). Status stays FULL (`MIN_SHIFT_PCT=50` is genuinely encoded); only the citation was made
+  provable. No status overturned by any validation.
+- **Still-missing rule added (1 new row)**: "**strong-trend / late entry — wait for pullbacks, don't
+  chase**" (§3.12 Exec-notes doc L1270 / §6.12 edge_cases doc L2916). Both prior passes omitted it; it is
+  a discretionary "missed-the-move ⇒ wait for a pullback" cue with no detector — marked MANUAL_COVERED
+  (the `not_parabolic` + `clean_setup` manual checks carry the don't-chase discipline).
+
+**Convergence:** stable. No status was overturned by citation validation; the v1/v2 body is accurate.
+Only one doc-§ precision fix + one genuinely-still-missing discretionary rule. The remaining §3.12
+doc rules are all represented.

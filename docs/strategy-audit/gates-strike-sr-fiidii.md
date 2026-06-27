@@ -15,7 +15,7 @@ historical replay) is noted where relevant but does not lower a FULL rating.
 | Re-check global cues at **3:15 PM** for EOD / next-day setups | 4.7 | NONE | no time-triggered 15:15 re-check anywhere in the scalper package | Live scalper is intraday-only; the BTST/next-day 3:15 PM cue re-check is not modelled. Manual-check: at 15:15 re-confirm global cues for any overnight setup. Automatable: false (no scheduled EOD-cue evaluator; needs the missing global feeds first). |
 | **Advances > 32 → CE; Declines > 32 → PE**; A/D must match direction | 4.8 | FULL | `ScalperGates.breadth` (lines 127-133) hard-codes the `> 32` test (CE reads `m.advances()`, PE `m.declines()`, line 129); wired as the `breadth` dot in `ConnectTheDotsScorer.score` line 91; data from `MarketOiClient.macro` → `/api/v1/market/breadth?date=` (lines 368-373) via `advanceDecline` (`MarketOiClient.java:619-623`, reads `summary.advances`/`summary.declines`) | A *soft dot*, not a hard gate (a non-confirming breadth lowers the aggregate but never blocks alone). Breadth is EOD-bhavcopy-sourced (`MarketOiClient.context` javadoc lines 73-76): an intraday bar reads the prior session, so it is a day-bias not a live intraday A/D. The breadth endpoint is keyed by date only (a whole-market A/D), so the "Nifty"-specificity of §4.8 is not enforced index-wise. Manual-check: glance at live Nifty A/D > 32 on the trade side. Automatable: true (intraday breadth feed would replace the EOD proxy). |
 | Strikes within **ATM ± 3** only | 4.9 | FULL | yaml `universe.options.strikes: { selector: atm_window, width: 3 }` (e.g. `scalp-connect-the-dots-nifty.yaml:20`); the band is the candidate window handed to `StrikePicker.pick` | — |
-| **Delta 0.6–0.7** for the strike to buy | 4.9 | FULL | `ScalperConfig.DELTA_LO=0.6 / DELTA_HI=0.7` (lines 82-83), Black-76 |delta| band enforced in `StrikePicker.pick` lines 99-101 (picks nearest the 0.65 midpoint) | Expiry-phase refinements (0.7–0.8 near expiry end, ~0.5 first day) are doc-sanctioned-DEFERRED (`ScalperConfig.java:78-81`). |
+| **Delta 0.6–0.7** for the strike to buy | 4.9 | FULL | `ScalperConfig.DELTA_LO=0.6 / DELTA_HI=0.7` (lines 82-83), Black-76 |delta| band enforced in `StrikePicker.pick` lines 99-101 (then picks nearest the 0.65 midpoint, lines 102-106, via `Params.deltaTarget()` lines 57-60) | Expiry-phase refinements (0.7–0.8 near expiry end, ~0.5 first day) are doc-sanctioned-DEFERRED (`ScalperConfig.java:78-81`). |
 | **Premium range: Nifty 100–250, Bank Nifty 250–400** | 4.9 | FULL | `ScalperConfig.PREMIUM` map (lines 93-98): NIFTY 50 → 100–250, NIFTY BANK → 250–400 (SENSEX 300–800 added per 2b grill); enforced in `StrikePicker.pick` lines 93-95 | Backtest selector ignores the band (nearest-strike); live StrikePicker enforces it (per `ScalperConfig.java:89-92`). |
 | Choose the **AI-suggested strike** within the price range | 4.9 / 4.12 | NONE | no OIP/AI-suggested-strike source is consumed; `StrikePicker` selects purely on delta+premium | The doc's "AI-suggested strike" (oipulse OIP recommendation) is not ingested. Manual-check: confirm the chosen strike matches the OIP AI suggestion. Automatable: false (no OIP recommendation feed). |
 | **Avoid** strikes with OI liberally populated on **both** call AND put sides ("Desirables" avoid) | 4.9 | PARTIAL | only the #2 open-high-low path has a *both-sides* stand-aside, and it keys off the per-strike OH *footprint*, not chain OI: `OpenHighLow.java:32,146` ("Both-sides OH footprint ... sideways stand-aside") via `OpenHighLowGate` | Not a general rule for the other 11 strategies, and it is OH-footprint not "OI on both sides". Manual-check: skip strikes with heavy CE and PE OI together. Automatable: true (chain CE/PE OI per strike is already fetched in `MarketOiClient.toChainSnapshot`). |
@@ -105,3 +105,58 @@ AI-strike-NONE / both-sides-OI-PARTIAL / open=high-confirm-PARTIAL / freshness-P
 09:45 / 11:00-13:00 / 15:30 verified, Hero-Zero 14:30 vs doc-2:00 discrepancy correctly surfaced via
 `HeroZeroGate.RANGE_FROM` line 75); §4.11 S&R-NONE; §4.12 OIP-AI-NONE + the re-implemented-dots FULL +
 the VIX-starved PARTIAL (`MarketOiClient.macro` null VIX, lines 394-397, verified).
+
+## v3 review notes
+
+Third-pass CITATION VALIDATION: opened EVERY cited `file:line` / yaml key / doc line and
+confirmed the code/text at the cite does what the row claims. Convergence is **stable** — no
+status overturned, no still-missing doc rule found; the two prior passes converged correctly.
+
+**Citations re-opened and confirmed accurate (no change):**
+- §4.7 `ConnectingDotsService.dowFactor` lines **316-333** — verified the `dowFactor` method is exactly
+  at those lines (live DOW LTP-vs-prev-close, history→NEUTRAL). `ScalperManualChecks.java:51-55`
+  (`global_cues_ok`) verified. No Dow dot in `ConnectTheDotsScorer` (dot list 74-98) confirmed.
+- §4.8 breadth: `ScalperGates.breadth` **127-133** (the `> 32` test at line 130, CE `m.advances()` /
+  PE `m.declines()` at line 129) verified; dot at `ConnectTheDotsScorer` line **91** verified;
+  `MarketOiClient.macro` breadth GET **368-373** + `advanceDecline` **619-623** (reads
+  `summary.advances`/`declines`) verified.
+- §4.9 ATM±3: `scalp-connect-the-dots-nifty.yaml:20` is exactly `strikes: { selector: atm_window,
+  width: 3 }` — verified. Delta band `ScalperConfig.DELTA_LO/HI` lines **82-83** + `StrikePicker.pick`
+  **99-101** verified (PRECISION-tightened: the nearest-midpoint pick is at 102-106 via
+  `deltaTarget()` 57-60, not 99-101 — added to the row). Premium `ScalperConfig.PREMIUM` **93-98**
+  (NIFTY 100–250 / NIFTY BANK 250–400 / SENSEX 300–800) + `StrikePicker.pick` **93-95** verified.
+  Both-sides-avoid `OpenHighLow.java:32,146` verified (`if (ceOhCount>=1 && peOhCount>=1) return
+  STAND_ASIDE` at 146-148). open=high `ScalperConfluenceGate.java:218-229` → `OpenHighLowGate` +
+  `openHighStats` verified. Freshness `OpenHighLowGate.java:69,106-114` verified (REJECT_PCT=50 at
+  line 70, `exceedsReject(spurtPricePct/spurtOiPct)` at 106-110).
+- §4.10 all four time rails verified in `ScalperGates`: `NO_TRADE_BEFORE=09:45` (22, 33-35),
+  `MIDDAY_BLOCK_FROM/TO=11:00/13:00` (23-24, 37-39), `NO_FRESH_ENTRY_AFTER=15:30` (25, 40-42),
+  opening-tick midday-omit javadoc (46-52); pre-flight at `ScalperConfluenceGate.evaluate` **112-118**
+  verified. Hero-Zero `HeroZeroGate.RANGE_FROM=14:30` line **75** (+ enforced at 112) verified — the
+  deck-14:30-vs-doc-2:00 discrepancy is real and correctly surfaced. `ScalperManualChecks` `news_clear`
+  (26-30) verified.
+- §4.11 S&R: `Grep` of `libs/strategy-engine` for support/resistance/pivot RE-RUN — hits only
+  `EngineSeries.java` + `IndicatorBank.java` (unrelated), confirming NO S/R detection.
+  `level_respected` (`ScalperManualChecks.java:31-35`) verified.
+- §4.12 VIX: `ScalperGates.vix` **135-143** + `vix` dot `ConnectTheDotsScorer.java:92` +
+  `MarketOiClient.macro` null VIX **394-397** ("VIX has no market-data endpoint yet") all verified.
+  `vix_normal` (`ScalperManualChecks.java:46-50`) verified.
+- §4.13 FII (all 4 rows): `fiiLongPct` GET `MarketOiClient.java:375-383` + `latestFiiLongPct`
+  **625-641** + `Macro` field `ScalperGateContext.java:66` verified; `/long-short` `FiiDiiController.java:57`,
+  `LongShortRow` record line **31**, `/participant-oi` line **49** all verified. **`grep fiiLongPct`
+  over `scalper/` RE-RUN** — hits ONLY the `Macro` declaration (`ScalperGateContext.java:66`) +
+  assignment (`MarketOiClient.java:375,397`), zero consumer → the "dead-wired" claim holds.
+  Change-in-OI 4×2 table doc lines **1486-1491** (Aggressively Bullish = Long "Increase (≈LB)" +
+  Short "Decrease (≈SC)" at line 1488), leg-level seller doc line **1493**, next-morning validity doc
+  line **1495** all verified verbatim. Importance "FII > Pro > DII > Client" doc line **1480** verified.
+
+**Doc numbers spot-checked verbatim against the consolidated doc:** `>32` (1417-1418), `0.6–0.7`
+(1426), `100–250 / 250–400` (1428-1429), `~90% / red dot` (1432), `>50%` freshness (1433), `9:45`
+(1439), `9:15–10:00 / RR ~1%` (1440), `11:00–1:00` (1441), `after 3:30 keep off` (1442), `expiry day
+after 2:00 PM / SC 2:30–3:00` (1444), `3:20 PM` (1465) — every figure matches its row.
+
+**Change applied (1, precision-only):** tightened the §4.9 delta row's `StrikePicker` cite —
+the band-reject is at 99-101 but the "nearest-the-0.65-midpoint" selection is at 102-106
+(`deltaTarget()` 57-60); the old row attributed the midpoint pick to 99-101. No status change.
+
+**Verdict: all citations validated; convergence stable; 1 precision edit, no status/coverage overturned.**

@@ -20,7 +20,7 @@ NEUTRAL on backtests).
 | WAIT for the gap to fill; BLOCK a fresh entry while a significant gap is still open | §3.4 L604 / L613; §6.4 entry | FULL | `GapTheoryGate.java:56-57` returns `BLOCK` when `!gap.filled()`; armed by `ScalperConfig.java:121` `tags.contains("gap-theory")`→`requireGapFill`; consumed `ScalperConfluenceGate.java:173-177` | — |
 | After the fill, trade WITH the overall/prevailing trend (not the short move that made the gap) | §3.4 L605/L638; §6.4 | PARTIAL (live FULL on bias) | `GapTheoryGate` passes once filled, then the side is decided by VWAP (`ScalperConfluenceGate.java:149-152`) + the full ConnectTheDots confluence (L250-253). **Live: the 1h-Supertrend `bias60m` alias (`...nifty.yaml:43`) IS a HARD prevailing-trend filter** — `ScalperConfluenceGate.java:252` feeds it to `ConnectTheDotsScorer.java:111` (`biasAligned`) which is an AND-term of `valid` (L114-115), so a CE signal is invalidated when the 1h Supertrend is bearish. The backtest `gate.all` lacks it (chart-only). | Live path already enforces a higher-TF (1h Supertrend) prevailing-trend alignment; only the BACKTEST proxy ignores it. v2: corrected per README §5 false-coverage flag #1. |
 | Significant gap → INERT when absent (leave entry to normal confluence) | §3.4 (gap only on a fraction of bars) | FULL | `GapTheoryGate.java:53-54` returns `INERT` when `!gap.present()` | — |
-| High-probability variant: measure gap from prior candle **HIGH→open** (bull) / **LOW→open** (bear) | §3.4 L595; §6.4 setup | NONE | `GapState.java:14-15` doc-comment: high/low variant "is a stricter superset and is not used in v1"; detector uses prior **close**→open only (L52-53) | Trader must eyeball whether the stricter high/low gap is present for a higher-probability entry. Automatable: true (candle high/low are in the series). |
+| High-probability variant: measure gap from prior candle **HIGH→open** (bull) / **LOW→open** (bear) | §3.4 L595; §6.4 setup | NONE | `GapState.java:12-13` doc-comment: high/low variant "is a stricter superset and is not used in v1"; detector uses prior **close**→open only (L52-53) | Trader must eyeball whether the stricter high/low gap is present for a higher-probability entry. Automatable: true (candle high/low are in the series). |
 | Stop-loss = **SuperTrend level** for in-trend entries (CE 9-Jan SL 42431 = ST) | §3.4 L619; §6.4 stop_loss | PARTIAL | `GapTheoryGate.java:17-21` explicitly DEFERS the ST-level SL ("engine exposes SuperTrend only as a direction, not a level"); uses the matrix alternative instead | Manually compare the engine's pre-gap SL against the live SuperTrend level; tighten if ST is closer. Automatable: true (would need ST exposed as a price band, not just +1/-1). |
 | Stop-loss matrix alternative = **low of the candle BEFORE the gap candle** (longs) / its high (shorts) | §3.4 L619 ("Matrix alternative"); §6.4 stop_loss | FULL | `GapTheoryGate.java:60-65` `preGapCandle(...).low()`/`.high()`; `ScalperConfluenceGate.java:178` `structuralStop = gap.stopLevel()`; `ScalperConfig.StructuralStop.GAP_TREND` (`ScalperConfig.java:139-140`) | — |
 | **[S24] Gap is a 30–60 min play**; if unfilled on volume by ~30–40 min, abandon gap & trade the prevailing trend | §3.4 L622 | PARTIAL | `time_stop max_bars: 20` (`scalp-gap-theory-nifty.yaml:56`) = 20×3m = 60 min EXIT cap. But this is a post-entry time-stop, NOT the "abandon the unfilled gap at ~40 min and switch to trend" rule, and the "on volume" qualifier is absent. | Manually watch the ~30-40 min mark: if the gap has not filled on volume, drop the gap setup and take the trend trade. Automatable: partial (a fill-deadline counter could be added; "on volume" needs a volume gate on the fill bar). |
@@ -37,7 +37,7 @@ NEUTRAL on backtests).
 | **Gap-UP bias**: do NOT short Bank Nifty/Nifty on a gap up — look for support/long instead | §3.4 L605/L615/L630; §6.4 bearish[6] | NONE | Strategies are `direction: long`, CE-only (`...nifty.yaml:30/46`), so they never short a gap-up — but there is no explicit "on a gap-up flip to support/long" rule; it is incidental to being long-only. | On a gap-up, look for a support/long entry, never a short. Automatable: partial (long-only side already prevents the short; the active "seek support on gap-up" is not encoded). |
 | Targets: in-trend next S/R (R:R 1:2.5 / 1:1.6–1.7); scalp aim ≤1–2% (let R:R ~1%) | §3.4 L618; §6.4 target | NONE | No target/take-profit in exit_rules — only `signal_exit close < vwap` + `time_stop` (`...nifty.yaml:55-56`). No R:R or S/R target. | Set a manual target at the next S/R (≈1:2 R:R, ≤1-2%). Automatable: partial (a fixed-R:R or ATR target is encodable; a true next-S/R target needs S/R levels). |
 | Trail SL ~5 pts below price (longs) / above (shorts) once in profit; trail 5 pts below gap reference on gap trades | §3.4 L620; §6.4 scaling; §6.4 stop_loss | NONE | No trailing-stop in exit_rules (`...nifty.yaml:54-56`); only a fixed pre-gap structural SL + signal/time exit | Manually trail the SL ~5 pts below price once in profit. Automatable: true (a trailing-stop exit type). |
-| Strike/Delta selection: ATM ±3, **delta 0.6–0.7** buys, premium 250-400 BN / 100-250 Nifty | §3.4 L631; §6.4 filters | PARTIAL | `strikes: { selector: atm_window, width: 3 }` (`...nifty.yaml:29`) = ATM ±3; CE-only. Live `StrikePicker` applies the delta/premium band (`ScalperConfluenceGate.java:117-119`). Backtest selects by ATM window only (no delta/premium band in the YAML). | Confirm the chosen strike sits in the 0.6-0.7 delta band / premium range. Automatable: true (delta band already in the live StrikePicker; not surfaced into the backtest selector). |
+| Strike/Delta selection: ATM ±3, **delta 0.6–0.7** buys, premium 250-400 BN / 100-250 Nifty | §3.4 L631; §6.4 filters | PARTIAL | `strikes: { selector: atm_window, width: 3 }` (`...nifty.yaml:29`) = ATM ±3; CE-only. Live `StrikePicker.pick(...)` applies the delta/premium band via `cfg.strikeParams()` (`ScalperConfluenceGate.java:271-276`; band built in `ScalperConfig.java:117-118` `DELTA_LO 0.6`/`DELTA_HI 0.7` + per-index `PREMIUM`). Backtest selects by ATM window only (no delta/premium band in the YAML). | Confirm the chosen strike sits in the 0.6-0.7 delta band / premium range. Automatable: true (delta band already in the live StrikePicker; not surfaced into the backtest selector). |
 | Higher-TF / option-price gaps do NOT reliably fill — do not apply gap-fill there | §3.4 L588/L636/L637; §6.4 edge_cases | FULL (by construction) | Detector runs on the 3-min futures session only (`GapState.detect` scoped to IST session, on the signal future series); option-leg premiums are never gap-detected | — (the constraint is honoured by only detecting on the 3-min future). |
 | News overrides the data on gap/event days ("throw the data out") | §3.4 risk; doc §2.13 | MANUAL_COVERED | `ScalperManualChecks.java:26-30` `news_clear` (doc_ref 2.13) | Confirm no market-moving news against the trade before entry. Automatable: false (judgement / news feed). |
 | Avoid parabolic / forced entries; clean "one good trade"; regime suits (not choppy) | §3.4 risk; doc §3.1/§3.10 | MANUAL_COVERED | `ScalperManualChecks.java:36-60` `not_parabolic`, `clean_setup`, `regime_ok`, `level_respected` | Confirm the entry is a clean, non-parabolic setup at a respected level. Automatable: partial (VWAP-crossover-count proxy exists in the assist text, not gated). |
@@ -89,3 +89,54 @@ the high/low high-prob variant (NONE), RSI/volume/strike PARTIAL (live-rail vs b
 the OI/VIX/Dow confluence (PARTIAL/MANUAL_COVERED), and the no-target/no-trailing NONE rows — were each
 re-traced to the cited file:line/yaml key and stand as written. No invented figures found; every doc
 number (3 pts/60 ticks, ATM±3, delta 0.6–0.7, 30–60 min, ~50–60 pts) matches the cited doc lines verbatim.
+
+## v3 review notes
+
+Third-pass CITATION VALIDATION: every cited `file:line` / `yaml key` / `doc line` in the 26-row table
+was re-opened and confirmed against the actual source. The file converged cleanly after v2 — two minor
+citation line-drifts fixed, no status overturned, no still-missing doc rule found.
+
+**Re-opened and confirmed real + accurate (no change):**
+- All §3.4 doc-line cites — L596 (3 pt/60 tick), L597 (filled-on-creation), L604/L613 (WAIT bullish/bearish),
+  L605/L638 (with-trend), L595 (high/low variant), L619 (ST-level SL + matrix pre-gap-candle alt; CE 9-Jan
+  SL 42431=ST verbatim), L614/L639 (counter-trend toward-gap, risky/scalping-only), L598/L627 (after-9:45 +
+  ideal 9:15-10:00/avoid 11-1/post-3:30), L628 (RSI<75 CE / >25 PE / 40-60 no-trade), L629 (volume BN 50K/
+  Nifty 125K + "deck does not set a numeric gap-candle volume rule"), L590/L593 (primary chart = index
+  FUTURE current-month 3-min), L599 (VWAP/VWMA20/ST(10,2)/RSI14), L606 (pullback near VWMA/ST/VWAP), L630
+  (OI/VIX/DOW), L615 (gap-up = no short, support/long), L618 (targets 1:2.5 / 1:1.6-1.7 / ≤1-2%), L620 (trail
+  ~5 pts), L631 (ATM±3, delta 0.6-0.7, premium 250-400 BN / 100-250 Nifty), L588/L636/L637 (higher-TF +
+  option-price gaps don't fill), L622 ([S24] 30-60 min play / ~30-40 min give-up "on volume" + SL ~50-60 pts
+  or S/R) — all present and verbatim.
+- All §6.4 JSON cites — bearish[5] = L2133 (risky toward-gap), bearish[6] = L2134 (gap-up no-short),
+  uncertain L2180 (no numeric gap-candle volume rule), plus setup/indicators/filters/stop_loss/edge_cases —
+  all present.
+- All code cites re-opened: `GapState.java:34` (MIN_POINTS "3"), `:43-67` (detect), `:59-62` (filledBy
+  skip), `:52-53` (close→open); `GapTheoryGate.java:17-21` (deferred ST-level SL), `:23-25` (deferred
+  counter-trend), `:53-54` (INERT), `:56-57` (BLOCK !filled), `:60-65` (preGap low/high), `:47-48`
+  (evaluate signature); `ScalperConfig.java:121` (`tags.contains("gap-theory")`→`gapFill`), `:139-140`
+  (`StructuralStop.GAP_TREND`); `ScalperConfluenceGate.java:112-117` (time block), `:149-152` (VWAP side),
+  `:158-161` (RSI rail), `:161` (volume rail), `:173-178` (requireGapFill consume + structuralStop=stopLevel),
+  `:250-253` (ConnectTheDots score feeding bias60m at L252); `ConnectTheDotsScorer.java:111` (biasAligned),
+  `:114-115` (valid AND-term); `ScalperGates.java:23-25` (MIDDAY_BLOCK_FROM/TO + NO_FRESH_ENTRY_AFTER),
+  `:37-42` (timeWindow 11-1 + 15:30 blocks); `ScalperManualChecks.java:26-30` (news_clear 2.13), `:46-55`
+  (vix_normal 4.5 + global_cues_ok 4.7), `:36-60` (not_parabolic/regime_ok/clean_setup; level_respected is
+  at L31-35 just above the cited range — all four checks real). All YAML keys (`signal_underlying`
+  NIFTY-FUT-CONT L26, `primary: 3m` L33, indicators L37-43, `gate.all` L49-50, `time_stop max_bars:20` L56,
+  `oi_confluence_gate.enabled:false` L70, `window.from "09:45"` L65, `strikes width:3` L29, `direction: long`
+  L46, `option_types:[CE]` L30) confirmed in `scalp-gap-theory-nifty.yaml`.
+
+**Citations corrected in place (line/key drift, status unchanged):**
+1. *Strike/Delta selection* row — the live delta/premium-band cite was `ScalperConfluenceGate.java:117-119`,
+   which is actually the time-window `return Optional.empty()` block, NOT the StrikePicker. Corrected to
+   `ScalperConfluenceGate.java:271-276` (the `StrikePicker.pick(...)` call passing `cfg.strikeParams()`),
+   plus the band's source `ScalperConfig.java:117-118` (`DELTA_LO 0.6`/`DELTA_HI 0.7` + per-index `PREMIUM`).
+   Status PARTIAL unchanged (live-rail vs backtest-ATM-only split still holds).
+2. *High/low high-prob variant* row — the doc-comment cite was `GapState.java:14-15`, but the phrase "is a
+   stricter superset and is not used in v1" sits on L13 (L14-15 is the 3-point significance sentence).
+   Corrected to `GapState.java:12-13`. Status NONE unchanged.
+
+**Convergence:** stable. No genuinely-still-missing doc rule. The §3.4 L634 "runaway gaps may never fill —
+do not force a fill trade" caveat is honoured by construction (the gate BLOCKs while a gap is unfilled and
+the counter-trend gap-fill scalp is the deferred manual play of Row 28), so it needs no new row. No status
+re-grade was triggered by citation validation. Both v2 corrections (`bias60m` hard-bias, 11-1/15:30 live
+time blocks) re-verified against the live code and stand.

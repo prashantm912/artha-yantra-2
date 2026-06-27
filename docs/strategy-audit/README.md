@@ -31,8 +31,14 @@ loose-cite tightenings), and **45 genuinely-missed rules were added** (7 already
 most visibly 6 per-stock screener rules under Market Movers). No correction overturned a headline
 conclusion; **17 of 18 dimensions finish HIGH** confidence and 1 (Connect the Dots) MEDIUM. The adversarial
 pass flagged only **6 cosmetic** new issues (count typos, a section-label slip, off-by-one notes) — none
-substantive, none altering a status, figure, or table. The corrected totals above (566 rules / 420 gaps)
-already reflect this second pass.
+substantive, none altering a status, figure, or table. The second-pass totals were 566 rules / 420 gaps; a
+subsequent third (citation-validation) pass added 4 genuinely-missed rows (Two Candle multi-TF RSI, BTST
+next-morning re-confirm, Morning-Trade lot-modulation, Trend-Change strong-trend pullback — all gaps), so the
+corrected totals above now read **570 rules / 424 gaps**.
+
+## Third-pass review
+
+A third **citation-validation + convergence** pass opened every cited `file:line` / yaml key / doc-line, fixed 24 stale-but-non-substantive citations across 12 dimensions, added the 4 genuinely-missed rows folded into the totals above, and reconciled the index/summary counts — verdict: the rule set is **stable** and the audit **trustworthy** (no status overturned, no figure invented). Full record: **[AUDIT-REVIEW-PASS3.md](./AUDIT-REVIEW-PASS3.md)**.
 
 ---
 
@@ -42,22 +48,23 @@ already reflect this second pass.
 > in place; the v1 published totals were 499 rules / 382 gaps. See [§ Second-pass review](#second-pass-review)
 > and [AUDIT-REVIEW.md](./AUDIT-REVIEW.md). The re-audit re-counted the v1 section files at 521 rules, added
 > **45** missed rules (7 already-automated, 38 new gaps) → **566** rules, and fixed **16** inaccurate rows —
-> all without overturning a headline conclusion.
+> all without overturning a headline conclusion. A third citation-validation pass then added **4** more
+> genuinely-missed rows (all gaps) → the current **570** rules / **424** gaps.
 
 | Metric | Count |
 |--------|------:|
 | Dimensions audited (doc sections) | **18** |
-| Total rules audited | **566** |
-| Total verified gaps | **420** |
+| Total rules audited | **570** |
+| Total verified gaps | **424** |
 | — PARTIAL (soft/partial coverage) | 178 |
-| — NONE (no code at all) | 182 |
-| — MANUAL_COVERED (already in `ScalperManualChecks`) | 52 |
+| — NONE (no code at all) | 185 |
+| — MANUAL_COVERED (already in `ScalperManualChecks`) | 53 |
 | — UNCERTAIN (doc ambiguous) | 8 |
 | Gaps marked **automatable** (candidate future work) | **~318** |
-| Gaps **genuinely manual-only** (automatable=false) | **~102** |
+| Gaps **genuinely manual-only** (automatable=false) | **~106** |
 
-**Reading the two headline numbers.** Of the 420 gaps, **~318 are automatable-but-not-yet** (a coding
-task could close them — wire an existing feed, add a gate, grade sizing) and **~102 are genuinely
+**Reading the two headline numbers.** Of the 424 gaps, **~318 are automatable-but-not-yet** (a coding
+task could close them — wire an existing feed, add a gate, grade sizing) and **~106 are genuinely
 manual-only** — discretionary judgement, psychology, capital governance, or inputs with no data source
 (pre-market prep, FII/DII reads with no scorer, S/R eyeballing, "trade only money you can afford to
 lose"). The high automatable count is expected: most gaps are *soft dots that should be hard gates* or
@@ -85,25 +92,25 @@ detail (v1 rules · missed-found · inaccuracies-fixed · confirmed · verdict) 
 
 | Dimension | Doc § | Rules | Verified gaps | Section file |
 |-----------|-------|------:|--------------:|--------------|
-| Two Candle Theory | §3.1 (+5.1/6.1) | 39 | 28 | [two-candle.md](./two-candle.md) |
+| Two Candle Theory | §3.1 (+5.1/6.1) | 40 | 29 | [two-candle.md](./two-candle.md) |
 | Open=High / Open=Low | §3.2 | 32 | 18 | [open-high-low.md](./open-high-low.md) |
 | Market Movers | §3.3 (+6.3) | 25 | 23 | [market-movers.md](./market-movers.md) |
 | Gap Theory | §3.4 | 26 | 17 | [gap-theory.md](./gap-theory.md) |
 | Trending OI Crossover | §3.5 (+6.5) | 34 | 29 | [trending-oi.md](./trending-oi.md) |
 | Golden Crossover | §3.6 (+6.6) | 19 | 15 | [golden-crossover.md](./golden-crossover.md) |
 | Hero-Zero (Expiry-Day OI) | §3.7 | 32 | 22 | [hero-zero.md](./hero-zero.md) |
-| BTST / STBT | §3.8 (+6.8) | 26 | 22 | [btst-stbt.md](./btst-stbt.md) |
-| Morning Trade | §3.9 (+6.9) | 27 | 21 | [morning-trade.md](./morning-trade.md) |
+| BTST / STBT | §3.8 (+6.8) | 27 | 23 | [btst-stbt.md](./btst-stbt.md) |
+| Morning Trade | §3.9 (+6.9) | 28 | 22 | [morning-trade.md](./morning-trade.md) |
 | Connect the Dots (framework) | §3.10 (+6.10) | 41 | 22 | [connect-the-dots.md](./connect-the-dots.md) |
 | Straddle (Long & Short) | §3.11 (+6.11) | 24 | 21 | [straddle.md](./straddle.md) |
-| Trend Change | §3.12 | 30 | 25 | [trend-change.md](./trend-change.md) |
+| Trend Change | §3.12 | 31 | 26 | [trend-change.md](./trend-change.md) |
 | Global Risk Management | §2.1–§2.14 | 45 | 42 | [risk-framework.md](./risk-framework.md) |
 | Indicators / OI / VIX / IV | §4.1–§4.6 | 39 | 20 | [indicators-oi-vix-iv.md](./indicators-oi-vix-iv.md) |
 | Cues / A-D / Strike / Time / S&R / OIP / FII-DII | §4.7–§4.13 | 25 | 18 | [gates-strike-sr-fiidii.md](./gates-strike-sr-fiidii.md) |
 | Session-21..24 additions + open-questions + checklist coverage | §4.14–§4.17, §7 | 43 | 36 | [session-additions-and-manual-coverage.md](./session-additions-and-manual-coverage.md) |
 | Introduction & Terminology / Glossary | §1.1–§1.2 | 33 | 18 | [intro-terminology.md](./intro-terminology.md) |
 | Whole-document completeness sweep | §1, §5, §7 + orphans | 26 | 23 | [completeness-sweep.md](./completeness-sweep.md) |
-| **Total** | **§1–§7** | **566** | **420** | |
+| **Total** | **§1–§7** | **570** | **424** | |
 
 ---
 
@@ -519,7 +526,8 @@ Confirms the S22/S21/S24-RESOLVED items that the engine has NOT picked up:
 
 ## 4. Automatable gaps — candidate future work
 
-309 gaps are tagged `automatable=true`. The recurring, highest-leverage themes (one line each):
+~318 gaps are tagged `automatable=true` (the §1 headline figure). The recurring, highest-leverage themes
+(one line each):
 
 - **Wire the VIX feed.** VIX is hard-null in `MarketOiClient.macro` (level + direction), so every VIX
   dot/gate degrades to pass and never confirms or blocks. A VIX market-data endpoint (§12.2 follow-up)

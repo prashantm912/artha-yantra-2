@@ -123,3 +123,51 @@ is correct. The §4.14.3 #5 Q1/Q2 ≥50%-Δprice-AND-≥50%-ΔOI buyer gate (`Sc
 the 6-strike IV pair (`MarketOiClient.deriveIvPair:567-617`), the 40/40 stand-aside
 (`ConnectTheDotsScorer.java:186-195`), and the 60-minute bias AND-term (`ConnectTheDotsScorer.java:111`) were
 each re-traced and stand. No false-coverage and no invented figures were found in v1's rows.
+
+## v3 review notes
+
+Third-pass citation-validation sweep: opened EVERY cited `file:line`, `yaml key` and `doc §` in the
+table and re-confirmed the code/figure at the cite. **Result: all citations validated, no change.** The
+table has converged (v1 HIGH, v2 corrections held); this pass found nothing stale or wrong.
+
+**Validated (each cite opened and confirmed):**
+- *Indicator settings (engine + yaml):* ST 10,2 (`IndicatorRegistry.java:60-64`, factory default period 10;
+  yaml `scalp-connect-the-dots-nifty.yaml:32`), PSAR 0.02/0.2 (`IndicatorRegistry.java:86-88` lines 87/88 =
+  the 0.02 step / 0.2 max defaults; `Ta4jIndicators.psar:74`), VWMA 20 (`SessionIndicators.vwma:47`; yaml :28),
+  RSI 14 (yaml :30), VWAP (`SessionIndicators.sessionVwap:20`; gate `ScalperConfluenceGate.java:310` =
+  `bank.builtin("vwap", index)`, v2's off-by-one fix confirmed), MACD/ADX (`IndicatorRegistry.java:46-55`
+  MACD_HIST / `:44-45` ADX; `Ta4jIndicators.macdHistogram:43`/`adx:39`). All exact.
+- *Gates (`ScalperGates.java`):* rsiBand 80/20 caps at line 81 + the 60-80/20-40 band at 76-84; volume floors
+  NIFTY 125k / index 50k at 28-30; indicatorAlignment 102-118; oiQuadrant 121; callPutDeltaFilter 151;
+  futuresBasis 163-171. All exact.
+- *Scorer (`ConnectTheDotsScorer.java`):* biasAligned 111; vwma 76 / psar 77 dots; strike-cross 131-133;
+  oiSpurt 159-167; drasticOi 141-153; trendingCross 125-134; sentiment 84 / sentiment_slope 88; iv_rank 94;
+  iv_pair 97 + ivPair 173-180; 40/40 stand-aside 96/115/186-195. All exact.
+- *OI props (`ScalperOiProps.java`):* crossFilterPct default 50 @32, spurtOi/Price 50 @42-43, ivPairMinGap
+  0.10 @38, ivBothHighFloor 0.40 @40. All exact.
+- *Confluence gate (`ScalperConfluenceGate.java`):* RSI HARD block 157-163, volume HARD gate 161,
+  requireCallPutDeltaFilter pre-gate 196-199. All exact.
+- *MarketOiClient:* SERIES_WINDOW=20 @49; macro vixLevel/vixRising null @396-397 (comment+return) with the
+  "v1 gap → null" javadoc @350 + comment @394; frontFuturesQuadrant 401-404; futuresBasis 339 / frontContractBasis
+  407; deriveTrending 456-488; deriveSentiment 526; imbalancePct 508; deriveIvPair 567-617 (3-above+3-below,
+  ATM excluded @602-603). All exact.
+- *ConnectingDotsService matrix:* volumeFactor 241, futOiFactor 249, vixFactor 263, ivFactor 274. All exact.
+- *Manual checks:* `level_respected` docRef 4.11 (block @31-35, cite :33), `vix_normal` docRef 4.5 (block
+  @46-50, cite :46). Both confirmed.
+- *Doc §:* every quoted number/section verified verbatim against the consolidated doc — 3m primary @1290,
+  ST 10,2 @1302, RSI 14 / 80:20 @1304, daily-RSI <75/>25 @1308, PSAR 0.02,0.2 @1309, volume 50K/125K
+  @1311-1313, Golden-Cross alignment @1316-1317, OI build-up @1324-1327, OI-Spurt 50%/50% @1338-1339,
+  Q3/Q4 @1340-1341, trending Put-OI-crosses-above @1350, VIX grid @1362-1374, VIX regime bands 10-11…17+
+  @1506, VIX-vs-prev-close/erratic @1508, basis @1511, Q1/Q2 buyer-gate + price-per-OI @1514-1515, 60-min
+  bias @1527 (confirms the §4.14.6 cite on the bias row), VWMA 20 @1559, volume colour-coding @1561, IV
+  7-10-pt band @1566, 15-strike/5-7 read @1619, intraday-vs-positional + 5cr/10-12cr + PCR 1.2→1.5→2 @1620,
+  IV behaviour/expiry-crush @1626-1627, IV 6-strike @1380, IV-pair 10-pt @1389, IV 40/40 @1390, 10-12 IV
+  @1393. All present and accurately quoted.
+
+**Convergence (Part A): no genuinely-still-missing §4.1-4.6 rule.** Spot-checked the remaining doc lines not
+broken out as their own row — §4.5 "VIX is a Nifty-50 measure" @1360 (scoping context, not a tradeable gate),
+§4.4 "trade with conviction when Call OI rises drastically with Put OI covering" @1354 (maps to the existing
+`drastic_oi` dot, row 35), §4.6 IV-pair sub-cases (10/15, 20/20 erosion) @1387-1388 (covered by the iv_pair
+gap + 40/40 stand-aside logic). Every distinct rule is already represented; the table is complete and the
+status verdicts (incl. the VIX signal-gate NONE / OI-page PARTIAL split and the per-strike-IV-direction PARTIAL)
+all still hold against the re-opened code. No rows churned.

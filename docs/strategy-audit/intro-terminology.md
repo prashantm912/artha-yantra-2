@@ -108,3 +108,47 @@ Changes:
   row and the gaps list, deferred to the hero-zero dimension.
 
 - **Confirmed accurate as-is:** all 29 original v1 rows.
+
+## v3 review notes
+
+Third pass — citation-validation focus. Re-opened EVERY cited `file:line`, yaml key, and doc line in
+all 33 rows; re-derived §1.1–§1.2 for convergence. **All citations validated, no change** to any row,
+status, or evidence string. Detail of what was re-opened and confirmed:
+
+- **Doc lines (verbatim re-checked, all correct):** §1.1 line 46 (3-minute primary + 60-minute broad
+  view; "One Good Trade"; global cues DOW/Dollar/Asian/Crude — row 17/37/38/47); §1.2 line 79 Futures
+  Premium/Discount (row 18); line 74 ATM±3 (row 29); line 86 delta 0.6–0.7 + line 87 Gamma 3:00 PM
+  (rows 28/36); line 64 lot sizes UNCERTAIN (row 49); lines 111–113 VIX bands/correlation + IV 6-strike
+  10–12 (rows 39/40); line 114 IV Crash + line 116 Falling Knife + line 117 Basket Order Selling
+  (rows 41/42/43); lines 123–128 chart-indicator table VWAP/ST/VWMA/PSAR/RSI/Volume (rows 19–27);
+  line 139 Art of Averaging (row 48); line 143 Advance/Decline >32 (row 31); line 101 OI-spurt 50% +
+  200%/300% (rows 44/45); line 102 Trending OI 5–15 min (row 46); line 151 premium bands (row 30);
+  lines 157–160 Time Filters 9:45 / 11:00–13:00 / 3:30 PM / Hero-Zero 2 PM (rows 32–35).
+- **Code file:line re-opened, all accurate:** `ConnectTheDotsScorer.java` 32 (W_VWAP=2.5), 63–118
+  (score), 71/74 (vwap dot), 88 (sentiment_slope), 91 (breadth), 93 (basis), 97+173–195 (iv_pair /
+  stand-aside), 111/114–115 (biasAligned), 125–134 (trendingCross), 159–167 (oiSpurt); `ScalperGates.java`
+  22–25/28–30/34/37/40 (time + vol constants), 64 (volume), 76–84 (rsiBand 60–80/20–40), 128–133
+  (breadth count>32), 136–143 (vix non-blocking), 151–161/163–171 (callPutDeltaFilter / futuresBasis);
+  `ScalperConfig.java` 72–73 (#9 09:15–09:30), 76 (VWAP_ACTIONABLE_FROM=10:30), 78–81 (delta-refinement
+  defer), 82–83 (DELTA_LO/HI 0.6/0.7), 88 (THRESHOLD 0.6), 90–92 (backtest selector bypasses band),
+  93–98 (premium bands N100–250 / BN250–400 / SENSEX300–800); `ScalperOiProps.java` 32 (crossFilterPct
+  50), 38–40 (ivPairMinGap 0.10 / ivBothHighFloor 0.40), 42–43 (spurt 50/50);
+  `ScalperConfluenceGate.java` 149 (VWAP-decisive side), 249 (vwapHardGate #9-before-10:30 degrade);
+  `StrikePicker.java` 86 (forward=spot+basis), 93 (premium-band enforce), 99–105 (delta-band select);
+  `HeroZeroGate.java` 75 (RANGE_FROM=14:30); `IndicatorRegistry.java` 41 (VWAP), 79 (VWMA period-20
+  default at :80), 87–88 (PSAR 0.02/0.2); `MarketOiClient.java` 350–398 (macro = IV/rank/breadth/FII),
+  368–373 (breadth), 385–392 (deriveIvPair call), 394–397 (VIX null level+direction).
+- **yaml keys re-checked against `scalp-connect-the-dots-nifty.yaml`:** lines 20 (atm_window width 3),
+  23–25 (primary 3m / additional 1h), 28 (VWMA period 20), 30 (RSI period 14), 32 (ST 10/2.0), 34
+  (bias60m ST 1h 7/3.0), 49 (premium_budget). All present and accurate. (Note: this is the AUTO-DERIVED
+  2b-1 variant with `signal_underlying: NIFTY-FUT-CONT`; the §1-cited indicator/strike/sizing lines are
+  unaffected by that decoupling — the cited line numbers all still hold.)
+- **ScalperManualChecks keys confirmed:** `news_clear`(§2.13), `vix_normal`(§4.5), `global_cues_ok`(§4.7),
+  `not_parabolic`/`clean_setup`(§3.1), `regime_ok`(§3.10) — all present (`ScalperManualChecks.java:26–60`).
+- **Dow-only macro confirmed:** `ConnectingDotsService` carries a single Dow global-cue factor
+  (`dowFactor`, `DOWJONES@GLOBAL_INDEX`); USD/Asia/Crude are NOT in `MarketOiClient.macro` — row 38
+  PARTIAL holds.
+- **Convergence: STABLE.** Re-derived every §1.1/§1.2 sub-table; no real §1 tradeable rule remains
+  unrepresented. The few §1.2 glossary entries this file does not own as rows (2-Candle first-candle-SL,
+  Golden Crossover, BTST/STBT) are cross-referenced to their dedicated dimensions per the intro scope,
+  not §1-unique thresholds. No new MISSED rows; no status overturned.

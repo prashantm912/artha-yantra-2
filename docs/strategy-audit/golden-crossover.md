@@ -16,7 +16,7 @@ factors degrade to NEUTRAL on backtests — judged here by code presence, not ba
 | Volume mandatory on crossover candle: Bank Nifty 50K+, **Nifty 125K+** | 3.6 setup-4 / entry bull-4 / 6.6 setup_preconditions[4] | PARTIAL | `ScalperGates.volume()` floors NIFTY 50 = 125000, other indices = 50000 (`ScalperGates.java:27-30,64-68`); applied as a HARD rail in `ScalperConfluenceGate.java:161` keyed on `cfg.signalIndex()` | Floor is keyed to the **signal future's index** (`signalIndex`), which is `NIFTY 50` for ALL three variants (`signal_underlying: NIFTY-FUT-CONT`). So the SENSEX-options variants gate on the **NIFTY 125K** floor, not a SENSEX/BankNifty 50K floor — and the volume is the index-future bar's, not the doc's "crossover candle" on the traded chart. Manual: confirm the crossover candle's own volume clears the correct index floor. Automatable: true. |
 | RSI(3-min, 14): bullish **< 75** (not overbought) | 3.6 entry bull-3 / 6.6 entry bullish[3] / filters | PARTIAL | `RSI` indicator declared (`scalp-golden-crossover-nifty.yaml:33`); HARD gate `ScalperGates.rsiBand()` requires CE **> 60 and < 80** (`ScalperGates.java:76-84`); also scored as `rsi` dot (`ConnectTheDotsScorer.java:78`) | Engine uses the shared §4.2 band **60–80** (with a 40–60 no-trade dead-zone), NOT the doc §3.6 card's plain **RSI < 75**. A valid Golden-Cross bull at RSI 50–60 (doc-eligible) is blocked. The class javadoc acknowledges §4.2 governs over §3.10's "buy 50–75". Manual: a Golden-Cross with RSI 50–60 is doc-eligible but the engine rejects it. Automatable: true (a per-strategy RSI override pattern already exists — `requireOpenHighLow`). |
 | RSI(3-min): bearish **> 25** (not oversold) | 3.6 entry bear-3 / 6.6 entry bearish[3] | PARTIAL | `ScalperGates.rsiBand()` requires PE **> 20 and < 40** (`ScalperGates.java:81`) | Engine band 20–40 ≠ doc card "RSI > 25". Also the three YAMLs are `direction: long` / `option_types: [CE]` only — the **bearish (Buy PE / Sell CE) side is not seeded at all**. Manual: bearish Golden-Cross must be traded by hand; and the PE RSI gate differs. Doc itself flags this gate UNCERTAIN (card >25 vs a matrix row "<25"). Automatable: true. |
-| OI confirmation: **drastic change in change-of-OI on BOTH CE and PE sides** (no drastic OI ⇒ small move, skip) | 3.6 setup-5 / entry-5 / 6.6 setup_preconditions[4] | PARTIAL | `drastic_oi` dot: both legs' \|dOI\| ≥ `drasticFloor` AND imbalance favours side (`ConnectTheDotsScorer.java:86,141-153`); `drasticFloor` default 50000 (`ScalperOiProps.java:36,57`) | The drastic-OI rule is a **soft weighted dot (weight 1.0)**, not a hard gate — confluence can reach threshold without it. Doc treats it as a near-mandatory confirmer ("no drastic OI ⇒ skip"). The `oi-cross-filter` HARD pre-gate (`ScalperConfig.java:153`) is NOT tagged on Golden Crossover. The 50000 floor is an admitted placeholder (`ScalperOiProps.java:35` — "the doc gives NO number"). Manual: confirm a genuine drastic two-sided dOI move before taking the trade. Automatable: true (tag `oi-cross-filter`, calibrate floor). |
+| OI confirmation: **drastic change in change-of-OI on BOTH CE and PE sides** (no drastic OI ⇒ small move, skip) | 3.6 setup-5 / entry-5 / 6.6 setup_preconditions[5] | PARTIAL | `drastic_oi` dot: both legs' \|dOI\| ≥ `drasticFloor` AND imbalance favours side (`ConnectTheDotsScorer.java:86,141-153`); `drasticFloor` default 50000 (`ScalperOiProps.java:36,59`) | The drastic-OI rule is a **soft weighted dot (weight 1.0)**, not a hard gate — confluence can reach threshold without it. Doc treats it as a near-mandatory confirmer ("no drastic OI ⇒ skip"). The `oi-cross-filter` HARD pre-gate (`ScalperConfig.java:153`) is NOT tagged on Golden Crossover. The 50000 floor is an admitted placeholder (`ScalperOiProps.java:33` — "the doc gives NO number"). Manual: confirm a genuine drastic two-sided dOI move before taking the trade. Automatable: true (tag `oi-cross-filter`, calibrate floor). |
 | Trending OI across **5/7 strikes above and below ATM** (5–15 min window) | 3.6 setup-5 / filters / 6.6 indicators | PARTIAL | OI factors sourced from `ConnectingDotsService` / `MarketOiClient` active-strike + trending-cross dots (`ConnectTheDotsScorer.java:83-90`) | OI dots exist but the **specific 5/7-strike-around-ATM window** is not a configurable knob on this strategy (the active-strike service has its own window); no Golden-Cross-specific 5/7 setting is wired. Manual: read the Trending-OI dashboard over 5/7 strikes around ATM. Automatable: partial (window is service-level, not per-strategy). |
 | Strike/delta: **0.6–0.7 delta**, strikes within **ATM ±3** | 3.6 risk-3 / 6.6 risk_management[4] | FULL | `atm_window` width 3 (`scalp-golden-crossover-nifty.yaml:23`); `StrikePicker.Params` DELTA_LO/HI 0.6/0.7 (`ScalperConfig.java:82-83`); `StrikePicker.pick()` selects |delta| in band nearest midpoint (`StrikePicker.java:74-109`) | — |
 | Premium ranges: **Nifty 100–250, Bank Nifty 250–400** (SENSEX grill-locked 300–800) | 3.6 risk-3 / 6.6 risk_management[5] | FULL (live) | `PREMIUM` map (`ScalperConfig.java:93-98`), enforced in `StrikePicker.java:93` | Backtest selector ignores the band (picks nearest-strike-to-spot) per the §0B comment — live-only enforcement. Not a gap (doc-sanctioned). |
@@ -79,3 +79,61 @@ false-coverage, no false-gap, no invented figure. One real doc rule was **missed
   not on the doc (the doc gives no number — v1 says so).
 
 No v1 row was deleted; one row was added. All other rows stand as written.
+
+### v3 review notes
+
+Third-pass CITATION VALIDATION — every `file:line`, `yaml key`, and `doc §` in the table was
+re-opened and confirmed against the live source. Convergence is **stable**: no new doc rule is
+still-missing after v2 (the broad-trend ST(7,3) row was the last real gap and v2 caught it). All
+statuses hold; two citation fixes were applied (right-file, drifted line number / loose doc ordinal).
+
+- **[CHANGED — line drift]** Drastic-OI row: `ScalperOiProps.java:35` cited as "the doc gives NO
+  number" is stale — that exact text is on **line 33** (line 35 is "once the live dOI distribution is
+  observed…"). Fixed `:35` → `:33`. Also tightened the `drasticFloor` default cite from `:36,57` (line
+  57 is the compact-constructor header) to `:36,59` (line 59 is the actual `drasticFloor` default-fill).
+  Status PARTIAL unchanged — the dot is still a soft weight-1.0 dot, not a hard gate (re-confirmed at
+  `ConnectTheDotsScorer.java:86,141-153`).
+
+- **[CHANGED — doc ordinal]** Same drastic-OI row's doc pointer `6.6 setup_preconditions[4]` →
+  `[5]`: in the §6.6 JSON the drastic-OI precondition is the **5th** item (line 2315); `[4]` (line
+  2314) is the volume rule. (Rows 1 and 16 use 1-based ordinals consistently — cross=3rd item line
+  2313, volume=4th item line 2314 — so they are left as-is.)
+
+- **[VALIDATED — all code citations real and accurate]** Re-opened and confirmed every cited line:
+  `ConnectTheDotsScorer.java` dots `vwap/supertrend/vwma` (`:74-76`), `rsi` (`:78`), `vix` (`:92`),
+  OI dots (`:83-90`), `drastic_oi` + `drasticOi()` (`:86,141-153`), `biasAligned` hard AND-term
+  (`:111,114-115`); `ScalperGates.java` time window (`:22-44`), volume floors NIFTY 125k / index 50k
+  (`:27-30,64-68`), CE band 60-80 (`:76-84`), PE band 20-40 (`:81`); `ScalperConfluenceGate.java`
+  volume rail keyed on `cfg.signalIndex()` (`:161`), timeOk block (`:112-118`), `bias60m()` (`:318-321`),
+  ENTRY_CANDLE low/high (`:293-295`); `ScalperConfig.java` DELTA 0.6/0.7 (`:82-83`), PREMIUM map
+  (`:93-98`), `entry-candle-stop`→ENTRY_CANDLE (`:149-150`), `oi-cross-filter` tag (`:153`);
+  `StrikePicker.java` `pick()` delta-band-nearest-midpoint (`:74-109`), premium band enforce (`:93`);
+  `Ta4jIndicators.java` SUPERTREND direction-only +1/−1, no band level (`:49-62` → return at line 62);
+  `OptionsPremiumReplay.java:158` reads only `backtest.oi_confluence_gate` (confirms the backtest path
+  never invokes `ScalperConfluenceGate`); `ConnectingDotsService.java` `vixFactor` (`:263-270`),
+  `dowFactor` history→NEUTRAL (`:310-326`); all referenced `ScalperManualChecks` keys (`news_clear`
+  `:26-30`, `not_parabolic` `:36-40`, `regime_ok` `:41-45`, `vix_normal` `:46-50`, `global_cues_ok`
+  `:51-55`, `clean_setup` `:56-60`). Every one matched the row's claim.
+
+- **[VALIDATED — YAML keys]** `scalp-golden-crossover-nifty.yaml`: `entry-candle-stop` tag (line 15),
+  `signal_underlying: NIFTY-FUT-CONT` (line 20), `atm_window width: 3` (line 23), `RSI` indicator
+  (line 33), `bias60m: SUPERTREND@1h period:7 multiplier:3.0` (line 37), gate `vwma20 > vwap` /
+  `supertrend > 0` (lines 42-44), exits `signal_exit` + `time_stop max_bars:12` (lines 49-50),
+  session `from "09:45"` (line 59). All present and accurate; `direction: long` / `option_types: [CE]`
+  confirms the bearish side is genuinely unseeded.
+
+- **[VALIDATED — doc numbers verbatim]** §3.6 / §6.6 re-read: setup-3 same-candle cross + no-body
+  exclusion (line 746 / 2313); volume "Bank Nifty 50K+, Nifty 125K+" (line 747 / 2314); bull "RSI <
+  75" (line 753 / 2321), bear "RSI > 25" + the UNCERTAIN matrix-row conflict (line 761 / 2381);
+  drastic two-sided OI + "5/7 strikes above and below ATM (5-15 min)" (lines 748/755/778 / 2315);
+  "0.6-0.7 delta, ATM ±3, premium Nifty 100-250, Bank Nifty 250-400" (line 772 / 2345-2346); time
+  filter "after 9:45 / ideal 9:15-10:00 / avoid 11am-1pm" (lines 745/775 / 2350); targets "BN
+  ~100-150, Nifty ~50-70" (line 767 / 2336); S21(e) RSI-exhaustion "wait for VWAP to hold" (line 732);
+  §5.6 / §7 support-form SL = Supertrend level resolution (lines 1691/2975-2977). The ST(7,3)
+  15-min/1-hour broad-view fact is at the §4.2 indicator table **line 124** (the row's
+  "§3.6-S22 line 124" parenthetical is loose — line 124 sits in §4.2, not in the §3.6-S22 note at
+  line 734 — but the primary doc-§ "4.2" is correct and the line number is real; left as-is, not a
+  factual error).
+
+Convergence signal: **stable**. No still-missing rule, no status overturned, 1 row corrected (2
+citation fixes within it).

@@ -127,3 +127,53 @@ live-no-op VIX/Dow/dollar gaps (`MarketOiClient.java:396-397`; Macro has no dow/
 unarmed 2-candle / ≥50%-imbalance / structural-SL tags on these variants. The "no 15m ST variant"
 PARTIAL on the intraday-Supertrend row is correct (YAML wires ST 7,3 only @1h). No false-coverage or
 invented-figure errors were found in v1.
+
+## v3 review notes
+
+Third-pass **citation-validation** sweep: every row's cited `file:line` / yaml-key / doc-line was
+re-opened and confirmed against the live source. **Result: all citations validated, no change** — the
+section file is clean. The v2 fixes (doc-§ 406, off-by-one manual-check lines, the three added rows)
+hold up.
+
+**Citations re-opened and confirmed (the full set, MEDIUM-dim hardest-checked first):**
+- *Scorer/seam (the v2-flagged MEDIUM dim).* `ConnectTheDotsScorer.java` — VWAP weight `:32` +
+  decisive hard-gate `:71,114-115`; the dot list (`vwap/supertrend/vwma/psar/rsi/volume/futures_oi
+  :74-79`, `underlying_oi/trending_cross :80-83`, `breadth/vix/basis :91-93`, `iv_pair/standAside
+  :96-98`); the temporal helpers `trendingCross :125-134`, `oiSpurt :159-167`, `ivPair/ivBothHigh
+  :173-195`; `biasAligned` hard-gate `:111,115`; FII confirmed absent from the dot list. All exact.
+  `ScalperConfluenceGate.java` — timeWindow call `:115`, volume hard-rail `:161`, StrikePicker.pick
+  `:273`, short-straddle SPAN-defer comment `:130-131`. All exact.
+- *Gates / config / props.* `ScalperGates.java` time rails `:22-25,33-41`, volume floors `:27-30,64-68`,
+  rsiBand `:76-84`, oiQuadrant `:121-125`, breadth `:127-133`, vix `:136-143`, callPutDeltaFilter
+  `:151-161` — all exact. `ScalperConfig.java` DELTA_LO/HI `:82-83`, premium bands `:93-98` — exact.
+  `ScalperOiProps.java` cross 50 `:32`, iv-gap/both-high `:38-40`, spurt 50/50 `:42-43` — exact.
+  `ScalperManualChecks.java` all 7 checks `:26-60` with their docRefs (2.13/4.11/3.1/3.10/4.5/4.7/3.1) —
+  exact. `MarketOiClient.java` fiiLongPct fetch `:375-383`, vix null,null `:396-397`, advanceDecline
+  `:619-622` — exact. `ScalperGateContext.java` Macro record (no dow/dollar field) `:59-68` — exact.
+  `ConnectingDotsService.java` dowFactor `:316-333` — exact. `ExitEvaluator.java` exit-type switch
+  confirms only stop/take/trailing/time/signal (`:180-184`), no RSI ladder — confirms rows 40–42.
+- *YAML keys (all 3 variants).* `primary: 3m`, `additional:[1h]`, `bias60m` ST(7,3)@1h, `supertrend`
+  {10,2.0}@3m, `vwma20`{20}, `rsi14`{14}, `psar`, `strikes{atm_window,width:3}`, `signal_exit`/
+  `time_stop`, `max_daily_loss_pct:2.0`, `premium_budget budget_inr:15000`, `square_off:15:15`,
+  `tags` (nifty `[…,nifty]`; both sensex `[…,sensex]`) — all present. Confirmed all three carry
+  `signal_underlying: NIFTY-FUT-CONT` (so the 125k NIFTY volume floor applies to every variant, incl.
+  the SENSEX ones — row 25 correct) and that NONE carry a `two-candle-pattern` / `entry-candle-stop` /
+  `oi-cross-filter` tag (rows 26, 30, 43 correct → `StructuralStop.NONE` via `ScalperConfig.from`).
+- *Doc lines (quoted numbers verified verbatim).* §3.10 line 1066 (Setup 1 "after 9:45am"), 1118
+  (Filters: 11am–1pm sideways + "impending event after 3:30pm"), 1103 (Exit "not more than 1–2%"),
+  1104 (RSI ladder "book 90% at 75–80, last 10% at 85"), 1105 (VWAP-exit with/without volume), 1106
+  (SL 1st-candle low/high + gap-trail 5pts), 1107/1129 (support-trade pullback to ST/VWAP/VWMA), 1113
+  (night-risk/avoid-Friday), 1124 ("RSI(5m) below 75/80 and RSI(Daily) below 75 for longs"), 1132
+  (UNCERTAIN "Sell PE/Sell CE = directional synonyms"), 1054 S22 items (a) VWAP-distance sizing /
+  (b) ≥50% Call-vs-Put / (g) VWMA length 20; §4.2 line 1305-1307 (no-trade 40–60, CE>60, PE<40 — the
+  band the code follows), §4.3.2 lines 1338-1339 (50%/50% spurt), §4.6 lines 1386/1389/1390
+  (10/10, 30/20 ≥10pt, 40/40 stay-away), §4.5 (VIX table), §6.10 line 2621 ("RSI cross-checks 5-min
+  and Daily") — all match the row text. **v2 doc-§ fixes re-confirmed:** line 406 ("US Dollar Index
+  above 105 negative… under 90 ideal") sits under the §3.1 heading (346) not §3.10, and the
+  "one good trade" checklist item is filed §3.1 — both correct as v2 states.
+
+**Convergence (Part A): no genuinely-still-missing rule.** Re-read §3.10/§6.10 against the row set;
+every hard rule and Desirable maps to a row. The one borderline candidate — the §3.10 Entry-11 /
+§4.2 "ST & VWMA cross above VWAP together (Golden Cross)" *combined* desirable — is substantively
+captured by the separate VWAP + Supertrend + VWMA dots (all must align on the side), so it does not
+warrant a new row; it converges with existing coverage. Two passes have reached a stable fixpoint.

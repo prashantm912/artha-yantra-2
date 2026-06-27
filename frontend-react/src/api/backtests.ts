@@ -78,9 +78,10 @@ export function useJobs(
   sortBy?: string | null,
   sortDir?: 'asc' | 'desc' | null,
   strategyIds?: string | null,
+  versionIds?: string | null,
 ) {
   return useQuery({
-    queryKey: [JOBS_KEY, 'list', status, strategyId, offset, sortBy ?? null, sortDir ?? null, strategyIds ?? null],
+    queryKey: [JOBS_KEY, 'list', status, strategyId, offset, sortBy ?? null, sortDir ?? null, strategyIds ?? null, versionIds ?? null],
     queryFn: () => {
       const params = new URLSearchParams({ limit: String(JOBS_PAGE_SIZE), offset: String(offset) });
       if (status) params.set('status', status);
@@ -88,6 +89,7 @@ export function useJobs(
       if (sortBy) params.set('sortBy', sortBy);
       if (sortDir) params.set('sortDir', sortDir);
       if (strategyIds) params.set('strategyIds', strategyIds);
+      if (versionIds) params.set('versionIds', versionIds);
       return apiFetch<{ items: JobDto[] }>(`/backtests/jobs?${params.toString()}`);
     },
   });
@@ -101,10 +103,11 @@ export function useJobsLive(
   sortBy?: string | null,
   sortDir?: 'asc' | 'desc' | null,
   strategyIds?: string | null,
+  versionIds?: string | null,
 ) {
   const qc = useQueryClient();
   useEffect(() => {
-    const key = [JOBS_KEY, 'list', status, strategyId, offset, sortBy ?? null, sortDir ?? null, strategyIds ?? null];
+    const key = [JOBS_KEY, 'list', status, strategyId, offset, sortBy ?? null, sortDir ?? null, strategyIds ?? null, versionIds ?? null];
     const merge = (body: string) => {
       let f: JobProgressFrame;
       try {
@@ -135,7 +138,7 @@ export function useJobsLive(
       offTopic();
       offReconnect();
     };
-  }, [qc, status, strategyId, offset, sortBy, sortDir, strategyIds]);
+  }, [qc, status, strategyId, offset, sortBy, sortDir, strategyIds, versionIds]);
 }
 
 export function useSubmitRun() {

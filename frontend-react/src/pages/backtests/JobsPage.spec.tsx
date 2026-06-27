@@ -6,24 +6,23 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 const cancel = vi.fn();
 
 vi.mock('../../api/strategies.ts', () => ({
-  // s1's newest version is 1.0.1 → a job on 1.0.1 is "latest", 1.0.0 is "old".
-  useStrategies: () => ({ data: { items: [{ id: 's1', name: 'EMA Cross', currentVersion: '1.0.1', tags: [] }] } }),
+  // s1's newest version is 1.0.1 (id v-cur) → a job on 1.0.1 is "latest", 1.0.0 is "old".
+  useStrategies: () => ({ data: { items: [{ id: 's1', name: 'EMA Cross', currentVersion: '1.0.1', currentVersionId: 'v-cur', tags: [] }] } }),
 }));
+const JOBS = [
+  { jobId: 'aaaa1111-bb', kind: 'BACKTEST', status: 'completed', progress: 100, createdAt: '2026-06-23T10:00:00', strategyId: 's1', strategyVersion: '1.0.1' },
+  { jobId: 'cccc2222-dd', kind: 'OPTIMIZATION', status: 'running', progress: 40, createdAt: '2026-06-23T10:05:00', strategyId: 's1', strategyVersion: '1.0.0' },
+];
 vi.mock('../../api/backtests.ts', async (orig) => {
   const actual = await orig<typeof import('../../api/backtests.ts')>();
   return {
     ...actual, // keep JOB_STATUSES + fetchResultRef
-    useJobs: () => ({
-      data: {
-        items: [
-          { jobId: 'aaaa1111-bb', kind: 'BACKTEST', status: 'completed', progress: 100, createdAt: '2026-06-23T10:00:00', strategyId: 's1', strategyVersion: '1.0.1' },
-          { jobId: 'cccc2222-dd', kind: 'OPTIMIZATION', status: 'running', progress: 40, createdAt: '2026-06-23T10:05:00', strategyId: 's1', strategyVersion: '1.0.0' },
-        ],
-      },
-      isFetching: false,
-      isLoading: false,
-      refetch: () => {},
-    }),
+    // arg 7 = versionIds (server-side "latest only"): model the server filter to the current version.
+    useJobs: (...args: unknown[]) => {
+      const versionIds = args[6];
+      const items = versionIds ? JOBS.filter((j) => j.strategyVersion === '1.0.1') : JOBS;
+      return { data: { items }, isFetching: false, isLoading: false, refetch: () => {} };
+    },
     useJobsLive: () => {},
     useCancelJob: () => ({ mutate: cancel }),
   };
@@ -63,12 +62,12 @@ describe('JobsPage', () => {
     expect(cancel).toHaveBeenCalledWith('cccc2222-dd');
   });
 
-  it('"Latest version only" hides jobs that ran an older version', () => {
+  it('"Latest version only" re-queries with the current-version ids (server-side, all pages)', () => {
     renderPage();
     expect(screen.getAllByText('v1.0.0').length).toBeGreaterThan(0); // both versions visible by default
 
     fireEvent.click(screen.getByLabelText('Latest version only'));
-    expect(screen.queryAllByText('v1.0.0')).toHaveLength(0); // old-version job filtered out
+    expect(screen.queryAllByText('v1.0.0')).toHaveLength(0); // old-version job dropped by the server filter
     expect(screen.getAllByText('v1.0.1').length).toBeGreaterThan(0); // latest-version job kept
   });
 });

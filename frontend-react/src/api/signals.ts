@@ -65,6 +65,10 @@ export interface ScalperDetail {
   confluence_aggregate: number;
   dots: ConfluenceDot[];
   manual_checks: ManualCheck[];
+  /** W4 6c OIP-AI Open=High probability — open-high-low strategies only (absent otherwise). */
+  oh_tier?: string | null;
+  oh_prob_pct?: number | null;
+  badge?: boolean | null;
 }
 
 /** The frozen C-2.6 reasoning contract (composite = Σ contributions ÷ weightDenominator). */

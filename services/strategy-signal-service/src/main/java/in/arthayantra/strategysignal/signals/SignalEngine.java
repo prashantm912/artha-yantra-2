@@ -18,6 +18,7 @@ import in.arthayantra.strategyengine.series.EngineSeries;
 import in.arthayantra.strategyengine.series.SeriesKey;
 import in.arthayantra.strategysignal.registry.StrategyRepository;
 import in.arthayantra.strategysignal.scalper.ConnectTheDotsScorer;
+import in.arthayantra.strategysignal.scalper.OpenHighLow;
 import in.arthayantra.strategysignal.scalper.ScalperConfig;
 import in.arthayantra.strategysignal.scalper.ScalperConfluenceGate;
 import in.arthayantra.strategysignal.scalper.ScalperManualChecks;
@@ -662,7 +663,9 @@ public class SignalEngine {
                 decision.pick().candidate().strike(),
                 decision.pick().candidate().tradingsymbol(),
                 decision.pick().candidate().ltp(),
-                decision.confluence().aggregate());
+                decision.confluence().aggregate(),
+                decision.ohTier() == null ? null : decision.ohTier().name(),
+                decision.ohTier() == null ? null : OpenHighLow.probabilityPct(decision.ohTier()));
     events.publishEvent(
         new SignalEmitted(
             id, strategy.versionId(), exchange, tradingsymbol, side, entryPrice, stopLoss, target,
@@ -689,6 +692,13 @@ public class SignalEngine {
     root.put("iv", c.iv());
     root.put("delta", d.pick().delta());
     root.put("confluence_aggregate", d.confluence().aggregate());
+    // W4 6c (OIP-AI surfacing): the Open=High probability read (tier + % + HIGH badge), present only for
+    // an open-high-low strategy that graded a tier — the live signal side-channel the Cockpit/alerts render.
+    if (d.ohTier() != null) {
+      root.put("oh_tier", d.ohTier().name());
+      root.put("oh_prob_pct", OpenHighLow.probabilityPct(d.ohTier()));
+      root.put("badge", OpenHighLow.badge(d.ohTier()));
+    }
     ArrayNode dots = root.putArray("dots");
     for (ConnectTheDotsScorer.DotScore ds : d.confluence().dots()) {
       ObjectNode n = dots.addObject();

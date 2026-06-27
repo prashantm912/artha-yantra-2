@@ -73,7 +73,8 @@ public class ScalperConfluenceGate {
       List<Leg> legs,
       Confluence confluence,
       LocalDate expiry,
-      BigDecimal structuralStop) {
+      BigDecimal structuralStop,
+      OpenHighLow.Tier ohTier) {
 
     /** The directional/primary leg (CE for a straddle) — never empty: every decision has ≥1 leg. */
     public StrikePicker.Pick pick() {
@@ -146,7 +147,8 @@ public class ScalperConfluenceGate {
                       List.of(new Leg(OptionType.CE, s.call()), new Leg(OptionType.PE, s.put())),
                       neutralConfluence(),
                       chain.expiry(),
-                      null));
+                      null,
+                      null)); // #11 straddle is direction-neutral — no Open=High tier
     }
     // §0B VWAP-decisive: CE above VWAP, PE below — the side the rest of the confluence must confirm.
     OptionType side =
@@ -250,6 +252,10 @@ public class ScalperConfluenceGate {
     // footprint is fetched HERE (#2-only, not in the shared context fan-out). Fail-closed (a
     // MILD/LOW/STAND_ASIDE tier, null/empty stats or null OI blocks; null reject magnitudes do NOT
     // block); the front-future VWAP becomes the structural stop.
+    // W4 6c (OIP-AI surfacing): the Open=High probability tier the #2 gate graded — carried onto the
+    // Decision (LIVE-only side-channel) so the signal detail / scalp alert / Cockpit render the tier+%.
+    // Null for every non-open-high-low strategy (no tier was graded).
+    OpenHighLow.Tier ohTier = null;
     if (cfg.requireOpenHighLow()) {
       OpenHighLow.Marks futureMarks = OpenHighLow.marks(future, index);
       MarketOiClient.OpenHighStats stats =
@@ -262,6 +268,7 @@ public class ScalperConfluenceGate {
         return Optional.empty();
       }
       structuralStop = ohl.stopLevel();
+      ohTier = ohl.tier();
     }
     // #7 (section 7) Hero-Zero: when the strategy declares it, a HARD expiry-day end-of-day pre-gate -
     // expiry-day only (monthly-expiry blocks: prior-month OI is corrupt), after 14:30 / before the
@@ -312,8 +319,9 @@ public class ScalperConfluenceGate {
               cfg.strikeParams());
     }
     OptionType decided = side;
+    OpenHighLow.Tier decidedTier = ohTier;
     return pick.map(
-        p -> new Decision(decided, List.of(new Leg(decided, p)), conf, chain.expiry(), stop));
+        p -> new Decision(decided, List.of(new Leg(decided, p)), conf, chain.expiry(), stop, decidedTier));
   }
 
   /**

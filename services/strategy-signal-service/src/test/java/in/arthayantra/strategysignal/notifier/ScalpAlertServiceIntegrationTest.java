@@ -170,7 +170,8 @@ class ScalpAlertServiceIntegrationTest extends StrategySignalIntegrationTestBase
   private static SignalEmitted scalpEvent(long signalId, UUID versionId, BigDecimal strike) {
     ScalpDetail scalp =
         new ScalpDetail(
-            "NIFTY", "CE", strike, "NIFTY24500CE", new BigDecimal("120.00"), new BigDecimal("0.82"));
+            "NIFTY", "CE", strike, "NIFTY24500CE", new BigDecimal("120.00"), new BigDecimal("0.82"),
+            null, null); // not an open-high-low strategy -> no OIP-AI tier on this alert
     return new SignalEmitted(
         signalId, versionId, "NSE", "RELIANCE", "BUY",
         new BigDecimal("100.00"), new BigDecimal("95.00"), new BigDecimal("110.00"),

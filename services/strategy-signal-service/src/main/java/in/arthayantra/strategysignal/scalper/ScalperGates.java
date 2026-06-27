@@ -98,6 +98,24 @@ public final class ScalperGates {
         ok, rsi, "rsi " + rsi.toPlainString() + (ok ? " > " : " <= ") + floor.toPlainString());
   }
 
+  /**
+   * The S24-ratified RSI band (tag {@code rsi-s24-bands}, owner rulings U1/U2/U3): CE trades the
+   * 50–75 buy band, PE the 25–40 sell band, with 40–50 as the no-trade complement. This is the
+   * additive sibling of {@link #rsiBand} — the legacy 60–80 / 20–40 band stays byte-identical for
+   * every strategy that does NOT carry the tag, so no golden moves; only an armed strategy routes
+   * here (the same threshold-swap shape #2 open-high-low uses with {@link #rsiAbove}). A null RSI
+   * FAILS (the data is required). The HeroZero exhaustion caps (80/20) stay their own distinct path.
+   */
+  public static GateOutcome rsiS24Band(BigDecimal rsi, OptionType side) {
+    if (rsi == null) {
+      return GateOutcome.fail(null, "rsi unavailable");
+    }
+    double v = rsi.doubleValue();
+    boolean ok = side == OptionType.CE ? (v > 50.0 && v < 75.0) : (v > 25.0 && v < 40.0);
+    String want = side == OptionType.CE ? "CE wants 50-75" : "PE wants 25-40";
+    return new GateOutcome(ok, rsi, ok ? want + " ok" : want + " (40-50 no-trade)");
+  }
+
   /** Bull (CE): PSAR, VWMA, ST and VWAP all below price; bear (PE): all above. */
   public static GateOutcome indicatorAlignment(Chart c, OptionType side) {
     boolean ok;

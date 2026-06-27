@@ -372,6 +372,8 @@ short SL leg is `short-premium-span` (Open Points).
 
 ### 3.2 `dynamic-strike-recenter` [P] — re-anchor the OI window on a >1% move (tag-gated)
 
+> **DESCOPED (S24 ratification 2026-06-27):** builds the dropped ATM±7 strike-housekeeping re-centre; dropped rule = "strike housekeeping ATM±7" / "60-min + 15m=5×3m + ATM±7" per RATIFICATION-PACK P1 #25/#62/#74 (S24 keeps only the 5-15min interval, not the ATM±7 re-centre). See S24-PRUNE.md.
+
 **Goal.** Encode §3.5 S21(e): keep the Trending-OI strike window if the underlying has moved <1% from
 the session open; when it has moved ≥1%, re-centre the window to ATM±7 (wider) so the OI reads track the
 new ATM. Today the window is a fixed ATM±3.

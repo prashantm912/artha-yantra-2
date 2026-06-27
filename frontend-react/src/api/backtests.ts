@@ -20,6 +20,8 @@ export interface JobDto {
   createdAt: string;
   /** Originating strategy id (the UI maps it to a name); null on legacy rows. */
   strategyId?: string | null;
+  /** The version this job ran (resolved + pinned at submit); the UI flags it latest vs an older run. */
+  strategyVersion?: string | null;
   /** The completed run's total return (plain decimal string); null until a run exists. */
   totalReturn?: string | null;
   /** The tested window [from, to] (a date or ISO datetime); the UI shows the date part as Start/End. */

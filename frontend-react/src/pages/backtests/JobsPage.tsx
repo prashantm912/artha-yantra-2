@@ -66,6 +66,9 @@ export function JobsPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [strategyId, setStrategyId] = useState<string | null>(null);
   const [tags, setTags] = useState<string[]>([]);
+  // Client-side filter: hide jobs that ran an older version (keeps only jobs on each strategy's newest
+  // version). Filters the loaded page — server pagination still pages over the unfiltered set.
+  const [latestOnly, setLatestOnly] = useState(false);
   const [offset, setOffset] = useState(0);
   const [sort, setSort] = useState<{ id: string; dir: 'asc' | 'desc' } | null>({
     id: 'created',
@@ -90,7 +93,29 @@ export function JobsPage() {
   useJobsLive(status, strategyId, offset, apiSortBy, apiSortDir, tagStrategyIds);
   const cancel = useCancelJob();
 
-  const rows = useMemo(() => q.data?.items ?? [], [q.data]);
+  const nameById = useMemo(
+    () => new Map((strategies.data?.items ?? []).map((s) => [s.id, s.name])),
+    [strategies.data],
+  );
+  // strategyId → the strategy's NEWEST version string (RegistryService.currentVersion = latestVersion);
+  // a job is "latest" when its pinned version equals this.
+  const latestVersionById = useMemo(
+    () => new Map((strategies.data?.items ?? []).map((s) => [s.id, s.currentVersion])),
+    [strategies.data],
+  );
+  const isLatest = (job: JobDto) => {
+    const latest = job.strategyId ? latestVersionById.get(job.strategyId) : undefined;
+    return !!job.strategyVersion && !!latest && job.strategyVersion === latest;
+  };
+
+  const rows = useMemo(() => {
+    const items = q.data?.items ?? [];
+    if (!latestOnly) return items;
+    return items.filter((job) => {
+      const latest = job.strategyId ? latestVersionById.get(job.strategyId) : undefined;
+      return !!job.strategyVersion && !!latest && job.strategyVersion === latest;
+    });
+  }, [q.data, latestOnly, latestVersionById]);
   const allTags = useMemo(() => {
     const set = new Set<string>();
     for (const s of strategies.data?.items ?? []) for (const t of s.tags ?? []) set.add(t);
@@ -98,10 +123,6 @@ export function JobsPage() {
   }, [strategies.data]);
   const stratOptions = useMemo(
     () => (strategies.data?.items ?? []).map((s) => ({ value: s.id, label: s.name })),
-    [strategies.data],
-  );
-  const nameById = useMemo(
-    () => new Map((strategies.data?.items ?? []).map((s) => [s.id, s.name])),
     [strategies.data],
   );
 
@@ -138,6 +159,32 @@ export function JobsPage() {
         sortType: 'text',
         render: (job) => <span className="text-sm">{strategyName(job)}</span>,
         mobileLabel: 'Strategy',
+        mono: false,
+      },
+      {
+        id: 'version',
+        header: 'Version',
+        align: 'left',
+        help: 'The strategy version this job ran — "latest" if it matches the strategy\'s newest version, otherwise an older one.',
+        // Not server-sortable: the version lives in the request JSONB, not a sortable jobs column.
+        render: (job) =>
+          job.strategyVersion ? (
+            <span className="flex items-center gap-1.5">
+              <span className="tabular-nums text-xs">v{job.strategyVersion}</span>
+              {isLatest(job) ? (
+                <span className="rounded bg-bull/15 px-1.5 py-0.5 text-[10px] font-semibold text-bull ring-1 ring-bull/40">
+                  latest
+                </span>
+              ) : (
+                <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-ay-muted ring-1 ring-ay-border">
+                  old
+                </span>
+              )}
+            </span>
+          ) : (
+            <span className="text-ay-muted">—</span>
+          ),
+        mobileLabel: 'Version',
         mono: false,
       },
       {
@@ -270,8 +317,9 @@ export function JobsPage() {
         mono: false,
       },
     ],
-    // nameById drives the strategy column's label; navigate/cancel/viewResults are stable.
-    [nameById], // eslint-disable-line react-hooks/exhaustive-deps
+    // nameById drives the strategy column's label, latestVersionById the is-latest badge;
+    // navigate/cancel/viewResults are stable.
+    [nameById, latestVersionById], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const page = Math.floor(offset / JOBS_PAGE_SIZE) + 1;
@@ -329,13 +377,27 @@ export function JobsPage() {
             </DropdownMenuContent>
           </DropdownMenu>
         )}
-        {(status || strategyId || tags.length > 0) && (
+        <label
+          className="flex h-9 cursor-pointer items-center gap-1.5 rounded-md border border-ay-border px-3 text-sm hover:border-accent"
+          title="Hide jobs that ran an older version — keep only jobs on each strategy's newest version (filters the loaded page)."
+        >
+          <input
+            type="checkbox"
+            checked={latestOnly}
+            onChange={(e) => setLatestOnly(e.target.checked)}
+            className="size-4 accent-accent"
+            aria-label="Latest version only"
+          />
+          Latest version only
+        </label>
+        {(status || strategyId || tags.length > 0 || latestOnly) && (
           <button
             type="button"
             onClick={() => {
               setStatus(null);
               setStrategyId(null);
               setTags([]);
+              setLatestOnly(false);
             }}
             className="h-9 rounded-md border border-ay-border px-3 text-sm text-ay-muted hover:border-accent"
           >

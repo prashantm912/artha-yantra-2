@@ -13,10 +13,12 @@ presence**, not backtest behaviour.
 
 | Rule | Doc § | Status | Evidence (file:line / yaml key) | Gap / manual-check |
 |------|-------|--------|----------------------------------|--------------------|
+| Primary chart = 3-minute timeframe; direction read from the index FUTURE (not spot/option) | 3.1 instruments / 6.1 timeframe | FULL | `yaml timeframes.primary: 3m`; signal evaluates on the future via `universe.signal_underlying: NIFTY-FUT-CONT` → `ScalperConfig.signalIndex` `:176-184`; seam reads the future series `ScalperConfluenceGate.java:100-107,124` | — (v2-added; the 3m primary + future-charted direction are both encoded) |
 | Trade only after 9:45 AM | 3.1 #1 / 6.1 setup | FULL | `ScalperGates.java:22,33-44` `NO_TRADE_BEFORE=09:45`; seam calls `timeWindow` `ScalperConfluenceGate.java:112-118` | — |
 | Avoid sideways midday ~11:00–13:00 | 3.1 filters / 4.10 | FULL | `ScalperGates.java:23-24,37-39` `MIDDAY_BLOCK_FROM/TO` | — |
 | Two consecutive same-colour candles in direction | 3.1 #2 / 6.1 | FULL | `TwoCandleGate.java:46-51` (`sameColour` on bars `entryIndex-2/-1`) | — |
 | Each candle volume ≥ 50K (BN/other) / 125K (Nifty) | 3.1 #2 / 6.1 | FULL | `TwoCandleGate.java:52,67-69` → `ScalperGates.volume` `:64-68`; floors `:28-30` (NIFTY 125k / index 50k) | SENSEX/BankNifty use the 50K index floor; doc never states a SENSEX volume number (see §4.17.2 gate) |
+| 1st+3rd candle may SUBSTITUTE when the 2nd candle misses the volume gate (two qualifying candles still required) | 3.1 S21(a) / 5.1 | NONE | `TwoCandleGate.java:46-52` requires BOTH the 1st (`entryIndex-2`) AND 2nd (`entryIndex-1`) candle above the floor (`!floorMet(first) \|\| !floorMet(second)` → ABSENT); no 1st-or-3rd fallback path | v2-added MISS. The S21(a) "if the 2nd misses 50K/125K, the 1st+3rd may substitute" relaxation is not encoded — a 2nd-candle volume miss always blocks. Manual: substitute the 1st/3rd candle by hand when the 2nd is light. Automatable |
 | 2nd candle "strong" — wick ≥ 2× body = rejection, skip | 3.1 #3 / 6.1 / edge_cases | FULL | `TwoCandleGate.java:55-56,72-79` (`strongBody`: combined shadow < 2× body; doji rejected) | Doc says shadow "twice the body"; code uses combined (upper+lower) shadow — minor interpretation, acceptable |
 | Deploy on the 3rd candle | 3.1 #7 / 6.1 | FULL | `TwoCandleGate.detect` keys off `entryIndex` = the just-closed 3rd bar `:34-46`; seam runs after chart entry | — |
 | Index future ABOVE VWAP for CE / BELOW for PE | 3.1 #1 bull/bear / 6.1 | FULL | `ScalperConfluenceGate.java:149-152` picks side off close-vs-VWAP; VWAP hard gate `ConnectTheDotsScorer.java:114-115` | — |
@@ -37,6 +39,7 @@ presence**, not backtest behaviour.
 | Stop-loss: LONG = 1st-candle LOW, SHORT = 1st-candle HIGH | 3.1 exit / 6.1 | FULL | `TwoCandleGate.java:58` returns `first.low()` (CE) / `first.high()` (PE); seam wires as structural stop `ScalperConfluenceGate.java:166-169,290-292` | — |
 | SL alternate: use VWAP when move already extended before entry | 3.1 exit / 6.1 edge | NONE | not encoded — stop is always the 1st-candle extreme for two-candle; no "switch to VWAP if extended" branch | Manual: if price already ran far pre-entry, use VWAP as SL instead of the 1st-candle level. Automatable (VWAP available) |
 | SL alt (S21/S24): 1st-candle HIGH or 2nd-candle LOW when 1st candle very large | 3.1 S21(b)/S24(c) | NONE | always `first.low()`/`first.high()`; no large-1st-candle alternate or "size for the deeper SL" | Manual: on a very large 1st candle, consider the 2nd-candle low / size down for the wider risk. Automatable |
+| SL by trader type: positional keeps the 1st-candle low/high (runs all day); scalper trails the previous-candle high/low | 5.1 S24(b) | NONE | the structural stop is fixed at the 1st-candle extreme (`TwoCandleGate.java:58`, `StructuralStop.TWO_CANDLE_FIRST`); no previous-candle trailing and no positional-vs-scalper SL mode | v2-added MISS. Only the positional anchor (1st-candle extreme) is encoded; the scalper's previous-candle trail is not (no trailing exit at all — see the trailing row). Manual: choose the SL mode by trader type. Automatable |
 | Target: ride momentum to next S/R; aim 1–2%; manage at least to VWAP | 3.1 exit / 6.1 | PARTIAL | exit = `signal_exit close < vwap` + `time_stop max_bars:10` (`yaml exit_rules`); no profit target, no S/R target | The 1–2% target / next-S-R target / "ride the trend" is NOT automated — exit is VWAP-cross or a 10-bar timeout. Manual: manage the target. Weakly automatable (no S/R engine) |
 | Time exit: exit if VWAP breaks WITH volume; fake breakout = no follow-up | 3.1 exit / 6.1 | PARTIAL | `signal_exit close < vwap` exits on a VWAP cross (`yaml exit_rules`) but **without** the "with volume" / fake-breakout discrimination | Manual: confirm the VWAP break carried volume (else it's a fake breakout — don't exit / re-enter). Automatable (volume series) |
 | Trailing / scale-out: conservative → PSAR trail → Supertrend trail | 3.1 exit / 6.1 scaling | NONE | no trailing-stop logic in exit_rules; single hard `time_stop` + VWAP signal exit | Manual: trail on PSAR then Supertrend to ride the move. Automatable (both indicators present) |
@@ -62,3 +65,33 @@ presence**, not backtest behaviour.
 - **Sensex ~3× point-scaling of SL/target (§4.16):** the instrument decoupling is automated; the point-scaling of risk numbers is not.
 - **Bearish (PUT) two-candle:** code supports the PE side but no PE YAML is registered — bearish two-candle is manual.
 - **RSI band mismatch (§3.1 vs §4.2):** the live gate uses §4.2's CE 60–80 / PE 20–40, not §3.1's 50–75 — verify this is the intended band.
+- **1st+3rd candle volume substitution (§3.1 S21a):** the gate requires BOTH the 1st and 2nd candle above the floor; a light 2nd candle always blocks (no 1st/3rd fallback).
+- **Trader-type SL mode (§5.1 S24b):** only the positional 1st-candle anchor is encoded; the scalper's previous-candle trail is absent (no trailing exit exists).
+
+## v2 review notes
+
+Independent second-pass review of the v1 section against doc §3.1 / §5.1 / §6.1 and the automation
+(`TwoCandleGate`, `ScalperConfluenceGate`, `ScalperGates`, `ConnectTheDotsScorer`, `ScalperConfig`,
+`StrikePicker`, `ScalperManualChecks`, the three `scalp-two-candle-*.yaml`). The v1 table was strong:
+all 36 original rows traced to real code/yaml and were confirmed accurate — no false-coverage, no
+false-gap, no invented figures, no wrong file:line. Spot-checks that held: the §3.1-vs-§4.2 RSI-band
+divergence (`ScalperGates.java:76-84` CE 60–80 / PE 20–40, NOT §3.1's 50–75); the 0.65-midpoint delta
+(not 0.7-preferred) via `StrikePicker.deltaTarget()` = `(0.6+0.7)/2`; `indicatorAlignment` present but
+NOT called in `evaluate`; the `oi-cross-filter` 50% imbalance tag absent on two-candle YAMLs; the
+SENSEX signal/strike/execute decoupling (`signal_underlying: NIFTY-FUT-CONT`, `strike_reference:
+SENSEX-FUT-CONT`); the stop fixed at `first.low()/first.high()`. The README "Audit-quality flags"
+section raised no flag for the two-candle dimension.
+
+Three doc rules v1 MISSED, now added as rows:
+1. **3-min primary timeframe + direction read off the index FUTURE** (§3.1 instruments / §6.1 timeframe) —
+   FULL. Both are encoded (`yaml timeframes.primary: 3m`; `universe.signal_underlying: NIFTY-FUT-CONT`
+   → `ScalperConfig.signalIndex`); v1 had no explicit row for the namesake "3-minute Futures chart"
+   baseline, only the VWAP-side row that assumes it.
+2. **1st+3rd candle volume substitution** (§3.1 S21a / §5.1) — NONE. `TwoCandleGate.java:46-52`
+   hard-requires BOTH the 1st and 2nd candle above the volume floor; the S21(a) relaxation (a light
+   2nd candle may be replaced by the 1st+3rd) is not encoded.
+3. **Trader-type SL mode** (§5.1 S24b) — NONE. Only the positional 1st-candle anchor is encoded; the
+   scalper's previous-candle trail is absent (there is no trailing exit at all).
+
+No v1 row was downgraded or corrected for inaccuracy — all CONFIRMED. The three additions are net-new
+gaps (two NONE, one FULL); they do not overturn any existing verdict.

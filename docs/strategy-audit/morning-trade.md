@@ -36,6 +36,8 @@ degrade to NEUTRAL on backtests), but status below is judged by CODE PRESENCE, n
 | Strike & delta selection — AI-suggested strike, ATM±3, delta 0.6–0.7, premium band (Nifty 100–250) | 3.9 Setup 7 (L990); §6.9 setup | FULL | `strikes:{selector:atm_window,width:3}` (YAML); `StrikePicker` delta band 0.6–0.7 + premium band `ScalperConfig.java:82-98`; `StrikePicker.pick` `ScalperConfluenceGate.java:271-276` | Doc marks the premium/ATM/delta values UNCERTAIN (§6.9 uncertain[2]); the code uses the verified §0B band. SENSEX band 300–800 is grill-locked, not in the §3.9 doc. |
 | Small position size / profits-only (deploy only a portion of profits, never core capital) | 3.9 Risk 2 / S21 (L975,L1013); §6.9 risk | PARTIAL | `position_sizing:{premium_budget, budget_inr:15000}` + `max_positions:1` + `max_daily_loss_pct:2.0` (YAML). A fixed budget, not a "% of profits" rule | The "deploy only a portion of profits, never core capital" discipline is NOT enforced (YAML comment L9 admits "not enforced here"). Manual: size off profits only. Automatable: partial (no realized-profit-pool sizing method exists). |
 | Profit-trail-to-breakeven once price runs in your favour (S22 refinement) | 3.9 S22 update (b) (L977) | NONE | No trailing-stop / breakeven-move on the morning path; the stop is the static first-candle level | Manual: once in profit, trail the stop to your buy price. Automatable: true (a trailing/breakeven exit rule). |
+| RSI secondary exit confirmation — in the worked short, RSI dropping below 30 was a reason to exit | 3.9 Time exit (L1009) | NONE | No RSI-based exit on the morning/opening-tick path. The morning YAMLs declare `exit_rules:[signal_exit:"close < vwap", time_stop:max_bars:10]` only (no RSI exit); RSI(14) is used as an ENTRY band/dot (`ScalperGates.rsiBand`), never as an exit trigger | Manual: on a CE/long use RSI re-crossing back overbought→down (and for the worked PE, RSI<30) as a secondary exit confirmation alongside target/SL. Automatable: true (add an RSI-cross exit rule to `exit_rules`). |
+| Add to the position ONLY around the previous-day close, nowhere else (S22 refinement) | 3.9 S22 update (d) (L977) | NONE | No scale-in / averaging logic on the morning path at all: `max_positions_per_underlying:1` (YAML) + the no-averaging rule (`ScalperRisk.java:13`) preclude any add. The doc's "add only around prev-day close" location rule is therefore moot in the automation (single-entry only) | Manual: if averaging in, do so only around the previous-day close. Automatable: partial (would need a scale-in engine primitive, which does not exist — single-entry is enforced). |
 | Open=High doubles as exit-trigger + hedge (S22 refinement) | 3.9 S22 update (e) (L977) | NONE (separate strategy) | The `OpenHighLowGate` (#2) is a DISTINCT strategy, not wired into the opening-tick path; no opposite-side OH exit/hedge here | Manual: if price hits the opposite-side Open=High against you, exit (and optionally hedge). Automatable: partial. |
 | >50% change in OI direction needed for a convincing same-day view (S22) | 3.9 S22 update (g) (L977) | PARTIAL | The ≥50% call/put dOI imbalance exists as `ScalperGates.callPutDeltaFilter` (`ScalperGates.java:151-161`) but is gated behind the `oi-cross-filter` tag (#5), which the morning-trade YAMLs do NOT carry | Not active for morning trade (no `oi-cross-filter` tag). Manual: confirm a >50% OI-direction change supports the view. Automatable: true (add the tag, or make it intrinsic to the morning view). |
 | Experienced-traders-only / clean "one good trade" discipline | 3.9 Risk 1 (L1012); §6.9 risk | MANUAL_COVERED | `ScalperManualChecks` `clean_setup` L56-60 (§3.1) + `not_parabolic` L36-40 + `regime_ok` L41-45 | Manual: skip forced/marginal entries (checklist). Automatable: false. |
@@ -55,3 +57,40 @@ degrade to NEUTRAL on backtests), but status below is judged by CODE PRESENCE, n
 - **S/R-level profit target (§3.9 Target)** — exit is `close < vwap` + a 10-bar time stop, not the next Futures S/R level. Partly automatable.
 - **Tight "inside the first 3-min candle" exit (§3.9 Time exit)** — approximated by `max_bars:10`, coarser than the doc's 2-minute scalp. Automatable (tighten).
 - **Profits-only sizing + trail-to-breakeven + opposite-side Open=High exit/hedge (§3.9 S21/S22 refinements)** — none enforced. Partly automatable.
+- **RSI secondary exit confirmation (§3.9 Time exit L1009)** — RSI is an entry band/dot only; no RSI-cross exit rule in `exit_rules`. Automatable.
+- **"Add only around the previous-day close" (§3.9 S22 update d)** — no scale-in/averaging exists (`max_positions_per_underlying:1`, no-averaging enforced); the location rule is moot under single-entry. Partly automatable.
+
+### v2 review notes
+
+Independent second-pass review (fresh-derived §3.9 prose + §6.9 JSON, then diffed against the v1 table
+and verified each cited file:line). Changes:
+
+- **MISSED → added (2 rows).**
+  - *RSI secondary exit confirmation* (§3.9 Time exit L1009: "RSI dropping below 30 was a reason to
+    exit"; §6.9 `exit_conditions`). v1 enumerated the time-stop and target/SL exits but not the doc's
+    RSI exit confirmation. Status **NONE** — the morning YAMLs' `exit_rules` are `signal_exit:"close <
+    vwap"` + `time_stop:max_bars:10` only; RSI(14) drives the entry band/dot (`ScalperGates.rsiBand`),
+    never an exit.
+  - *"Add only around the previous-day close, nowhere else"* (§3.9 S22 update (d), L977). v1 omitted
+    this S22 add-location rule. Status **NONE** — there is no scale-in/averaging on the morning path
+    (`max_positions_per_underlying:1` + the no-averaging rule at `ScalperRisk.java:13`), so the
+    location rule is moot under single-entry.
+
+- **INACCURATE → none.** No false-coverage, false-gap, wrong-cite, or invented-figure rows found. Spot-
+  checked the load-bearing FULL/PARTIAL cites: the first-candle SL **is** enforced as a protective
+  touch-exit (`SignalEngine.java:400-410` exit-first, captured at entry `:587-589`) — v1's `:587-588,
+  405-408` cite is correct; the opening-tick window swap (`ScalperConfluenceGate.java:112-115`,
+  `OPENING_FROM/TO` `ScalperConfig.java:72-73`), the VWAP-before-10:30 soft-degrade
+  (`ScalperConfig.java:76`, `ScalperConfluenceGate.java:249`, `ConnectTheDotsScorer.java:113-115`), the
+  `>32` breadth dot (`ScalperGates.java:127-133`, fed by `/api/v1/market/breadth`
+  `MarketOiClient.java:368-373`), the RSI band CE 60–80 / PE 20–40 (`ScalperGates.java:76-84`), and the
+  null-VIX degrade (`MarketOiClient.java:396` — VIX level+dir are the `null,null` args to `new Macro`)
+  all verify exactly as v1 states.
+
+- **README audit-quality flags.** The README tail lists NO false-coverage/invented-claim flag for
+  morning-trade. The one cross-reference that touches this dimension — btst-stbt's note that the `>32`
+  breadth threshold "actually originates in Morning-Trade §6.9" — confirms (not contradicts) the
+  morning-trade breadth row's placement of `>32` on the code/§6.9. No change required here.
+
+- **CONFIRMED.** All pre-existing v1 rows (incl. the `n/a` automation-note row) stand as written; v1
+  quality is high.

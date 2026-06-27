@@ -21,6 +21,7 @@ factors degrade to NEUTRAL on backtests — judged here by code presence, not ba
 | Strike/delta: **0.6–0.7 delta**, strikes within **ATM ±3** | 3.6 risk-3 / 6.6 risk_management[4] | FULL | `atm_window` width 3 (`scalp-golden-crossover-nifty.yaml:23`); `StrikePicker.Params` DELTA_LO/HI 0.6/0.7 (`ScalperConfig.java:82-83`); `StrikePicker.pick()` selects |delta| in band nearest midpoint (`StrikePicker.java:74-109`) | — |
 | Premium ranges: **Nifty 100–250, Bank Nifty 250–400** (SENSEX grill-locked 300–800) | 3.6 risk-3 / 6.6 risk_management[5] | FULL (live) | `PREMIUM` map (`ScalperConfig.java:93-98`), enforced in `StrikePicker.java:93` | Backtest selector ignores the band (picks nearest-strike-to-spot) per the §0B comment — live-only enforcement. Not a gap (doc-sanctioned). |
 | Time filter: trade only after **9:45 am** (ideal 9:15–10:00); avoid sideways **11am–1pm**; no fresh entry after 3:30 | 3.6 setup-2 / filters / 6.6 filters[0] | FULL | `ScalperGates.timeWindow()` blocks <09:45, 11:00–13:00, ≥15:30 (`ScalperGates.java:22-44`); applied `ScalperConfluenceGate.java:112-118`; YAML session `from 09:45` (`scalp-golden-crossover-nifty.yaml:59`) | "Best/most-trending window 10–11 AM" (§3.6 S21) is NOT encoded as a preference. Manual: prefer 10–11 AM. Automatable: true (low value). |
+| Broad-trend confirmation: **Supertrend (7,3) on the 15-min / 1-hour chart** must agree with the 3-min side (the "broad view" trend filter) | 4.2 (ST 7,3 = 15-min/1-hour broad view; §3.6-S22 line 124) / glossary §1 DOTS (60-min broad + smaller-TF entries) | FULL (live) | `bias60m` alias = `SUPERTREND@1h period:7 multiplier:3.0` (`scalp-golden-crossover-nifty.yaml:37`); read as `bias60mDir` (`ScalperConfluenceGate.java:318-321`) and applied as a **HARD AND-term** in the confluence — `biasAligned` must hold for a valid bull/bear (`ConnectTheDotsScorer.java:111,114-115`) | Wired and enforced on the **live** `SignalEngine` path only; the **backtest** premium-replay path does NOT invoke `ScalperConfluenceGate` (it reads only `oi_confluence_gate`, `OptionsPremiumReplay.java:158`), so the 60-min bias does not gate on history (same live-only class as the README §5 gap-theory `bias60m` false-coverage flag). `bias60mDir == 0` (unknown / null) never blocks. Manual: on a backtest, confirm the 1h ST(7,3) bias agrees. |
 | Stop-loss: support-trade form SL = the **Supertrend level** (S21 Day 7); breakout form = crossover-candle extreme / VWAP reclaim | 3.6 exit / 5.6 / 6.6 exit_conditions.stop_loss | PARTIAL | `entry-candle-stop` tag ⇒ `StructuralStop.ENTRY_CANDLE` = crossover candle low(CE)/high(PE) (`scalp-golden-crossover-nifty.yaml:15`; `ScalperConfig.java:149-150`; `ScalperConfluenceGate.java:293-295`) | Only the **breakout-form** SL (crossover-candle extreme) is automated. The **Supertrend-level SL** (the support-trade form, the S21 resolution) is NOT — the engine's `SUPERTREND` indicator outputs only direction (+1/−1), not the ST price level (`Ta4jIndicators.java:49-62`), so the band level isn't available to size the stop. Manual: on the support-trade form, place SL at the Supertrend line. Automatable: true (expose the ST band level from the indicator). |
 | Targets: BN ~100–150 pts (vol-backed ~200), Nifty ~50–70 pts; S21 clean ~200–300 BN | 3.6 exit / 6.6 exit_conditions.target | NONE | Exit is `signal_exit` (VWMA < VWAP) + `time_stop max_bars: 12` (`scalp-golden-crossover-nifty.yaml:49-50`) | No point-target / take-profit encoded; exits on cross-undone or 12-bar timeout. Manual: manage to the ~point targets. Automatable: partial (an index-point target on a premium leg is indirect). |
 | RSI-exhaustion caveat: don't expect extension if RSI already overbought/oversold — wait for VWAP to hold | 3.6 S21(e) | NONE | Not encoded as a Golden-Cross rule | The 60–80/20–40 band partially caps exhaustion, but the "wait for VWAP to hold then trade the move" nuance is not. Manual: skip extension entries when RSI is already at the band edge. Automatable: false (judgment). |
@@ -40,3 +41,41 @@ factors degrade to NEUTRAL on backtests — judged here by code presence, not ba
 - **Volume floor keyed to the NIFTY signal-future for SENSEX variants** — SENSEX-options variants gate on NIFTY 125K, not a SENSEX/BankNifty 50K floor, and on the future bar's volume not the crossover candle's. (Automatable.)
 - **Point targets not encoded** — exits on VWMA-undone / 12-bar timeout, not the ~50–300 pt move expectations. (Partially automatable.)
 - **10–11 AM "best window" preference + 5/7-strike-around-ATM Trending-OI window** — not strategy-specific knobs. (Low-value / service-level.)
+
+### v2 review notes
+
+Independent second-pass review (fresh-derived §3.6 + §6.6, then diffed vs v1). Summary: v1 is
+**high-quality** — every FULL/PARTIAL/NONE row's cited `file:line` was re-traced and holds; no
+false-coverage, no false-gap, no invented figure. One real doc rule was **missed**.
+
+- **[MISSED → added FULL (live)]** *Broad-trend ST(7,3) 60-min/15-min confirmation.* The YAML declares
+  `bias60m: SUPERTREND@1h period:7 multiplier:3.0` (`scalp-golden-crossover-nifty.yaml:37`) and it is a
+  **hard AND-term** of the live confluence (`ScalperConfluenceGate.java:318-321` →
+  `ConnectTheDotsScorer.java:111,114-115` — `biasAligned` must hold). This traces to the doc's §4.2
+  indicator set ("ST 7,3 = 15-min / 1-hour broad view"; §3.6-S22 line 124) and the §1 DOTS glossary
+  ("60-min broad + smaller-TF entries"). v1 listed the 3-min ST(10,2) leg but never the higher-TF bias
+  filter, despite it being one of the few Golden-Crossover knobs that is a real hard gate. Added as a new
+  row, marked **FULL (live)** with the backtest-inert caveat (the premium-replay path invokes only
+  `oi_confluence_gate`, not `ScalperConfluenceGate` — same live-only class as the README §5 gap-theory
+  `bias60m` false-coverage flag).
+
+- **[CONFIRMED accurate]** Spot-checked the load-bearing v1 citations: `ScalperGates.rsiBand` PE band
+  `>20 && <40` (`ScalperGates.java:81`) and NIFTY 125k / index 50k volume floors (`:27-30,64-68`);
+  `drastic_oi` soft dot weight 1.0 + `drasticFloor` default 50000 placeholder (`ConnectTheDotsScorer.java:86,141-153`;
+  `ScalperOiProps.java:36`); `entry-candle-stop`→`StructuralStop.ENTRY_CANDLE` crossover-candle extreme
+  (`ScalperConfig.java:149-151`; `ScalperConfluenceGate.java:293-295`); `SUPERTREND` indicator is
+  **direction-only** (+1/−1, no band price level → the support-form ST-level SL genuinely cannot be sized,
+  `Ta4jIndicators.java:49-62`); StrikePicker delta/premium bands (`StrikePicker.java:74-109,93,99`;
+  `ScalperConfig.java:82-83,93-98`); all six `ScalperManualChecks` keys + line ranges
+  (`ScalperManualChecks.java:26-30/36-40/41-45/46-50/51-55/56-60`). Every one matched.
+
+- **[CONFIRMED — bearish RSI UNCERTAIN flag kept]** v1's UNCERTAIN row (card RSI >25 vs matrix "<25") is
+  faithful to the doc's own `uncertain[0]` (line 2381); the bearish PE side is genuinely unseeded
+  (all three YAMLs `direction: long` / `[CE]`). No change.
+
+- **[CONFIRMED — no invented claim]** The known v1 invented-claim flag does not apply to this section's
+  retained rows: no §3.6 threshold is attributed to the doc that isn't in the cited line. The 50000
+  `drasticFloor` is correctly placed on the **code** (an admitted placeholder, `ScalperOiProps.java:33-36`),
+  not on the doc (the doc gives no number — v1 says so).
+
+No v1 row was deleted; one row was added. All other rows stand as written.

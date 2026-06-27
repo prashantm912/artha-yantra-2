@@ -15,6 +15,7 @@ not the lens here — code presence is.)
 | Rule | Doc § | Status | Evidence (file:line / yaml key) | Gap / manual-check |
 |---|---|---|---|---|
 | Both legs = ATM, same strike, same expiry | 3.11 / 6.11 | FULL | `StraddleLegPicker.java:52-93` (nearest-forward strike with both CE+PE); yaml `universe.options.strikes.selector: atm_window`, `option_types: [CE, PE]` | — |
+| Strike: default ATM; OTM strikes allowed "for a safer bet" (one leg becomes ITM for the other side), but ATM preferred over deep OTM | 3.11 (setup #4) / 6.11 (setup_preconditions) | PARTIAL | The ATM default IS automated (`StraddleLegPicker.java:78-84` selects the strike with smallest \|strike−forward\|). The OTM-safer-bet alternative is NOT selectable — the picker only ever returns the single nearest-forward ATM strike; there is no width/offset knob to shift to OTM (yaml `atm_window, width: 3` only feeds candidates; the picker picks the nearest) | Manual: if you want the safer OTM variant (one leg ITM), pick the OTM legs yourself. Automatable: true (add an offset param to `StraddleLegPicker`). **[v2 added — v1 row only covered the ATM default, missed the OTM-alternative sub-rule]** |
 | Long straddle = BUY ATM Call + BUY ATM Put | 3.11 | FULL | `StraddleLegPicker` returns both legs as BUY; gate `ScalperConfluenceGate.java:143` emits `Leg(CE)`+`Leg(PE)`; yaml `entry_rules.direction: long` | — |
 | Short straddle = SELL ATM Call + ATM Put (range/decay play) | 3.11 / 6.11 | NONE | `StraddleLegPicker.java:24` only ever returns BUY legs; yaml header lines 18-21 "Short straddle … DEFERRED" | Short variant not built — SPAN-deferred (#47). To run a short straddle the trader must place/manage it entirely manually. Automatable: true (once #47 SPAN appliance gates short premium). |
 | Entry trigger: combined straddle premium breaks ABOVE its own VWAP **with volume** (long) | 3.11 / 4.15.2 / 6.11 | NONE | NOT in gate — `ScalperConfluenceGate.java:128-131` states the combined-premium-vs-VWAP series "the deterministic seam cannot recompute … NOT enforced". Engine emits draft on time+volume only | Manual: on the combined Call+Put premium chart, enter only when it closes above its own VWAP on volume. Automatable: true (combined-premium straddle chart already exists FE-side, task #6) — but not in the deterministic gate. |
@@ -30,10 +31,10 @@ not the lens here — code presence is.)
 | IV > 40 → stay away as a buyer; a 40/40 reading → play short straddle | 3.11 / 6.11 (filters, §4.6) | NONE | No IV-threshold gate in the straddle path | Manual: skip the long buy when IV > 40; treat a ~40/40 reading as the short-straddle condition. Automatable: true (IV feed exists). |
 | Breakeven: underlying must move > combined premium from the strike (don't pay ~1000 for a 100–200-pt move) | 3.11 / 6.11 (setup/risk) | NONE | Not computed/gated; sizing is a flat `premium_budget budget_inr: 15000` (yaml line 89) | Manual: compute the combined-premium breakeven and confirm the expected move exceeds it. Automatable: true (both leg premiums are known at entry). |
 | Trending-OI confirmation: change-in-OI moving together = range = short; divergence/break = long/directional | 3.11 / 6.11 (filters) | NONE | The neutral path uses `neutralConfluence()` (`ScalperConfluenceGate.java:144,328`) and skips the OI confluence; yaml `oi_confluence_gate.enabled: false` | Manual: read Trending-OI both-side together (short) vs divergence (long) before deploying. Automatable: partial (OI factors exist but degrade to NEUTRAL on derived history; live OI real). |
-| Volume floor on entry | 3.11 (entry "with volume") / §0B | FULL | `ScalperConfluenceGate.java:133` calls `ScalperGates.volume(...)` before picking legs; yaml gate `volume > 0` | — (a coarse floor, not the doc's "VWAP break with volume" — that specific conjunction is the entry-trigger gap above) |
+| Volume floor on entry | 3.11 (entry "with volume") / §0B | FULL | `ScalperConfluenceGate.java:132-135` (the straddle path) calls `ScalperGates.volume(cfg.signalIndex(), chart.volume())` before picking legs and BLOCKS on fail. The hard floor is keyed on the **signal future's index** = NIFTY 50 for all three variants (signal_underlying `NIFTY-FUT-CONT`) → **125,000** (`ScalperGates.java:28,30,64-68`); the yaml `volume > 0` expr is a soft pass-through, not the enforced floor | — (a coarse floor, not the doc's "VWAP break with volume" — that specific conjunction is the entry-trigger gap above) |
 | 5-minute straddle-chart timeframe | 3.11 / 6.11 | PARTIAL | Engine primary is `3m` (yaml `timeframes.primary: 3m`), backtest `interval: 1m` — neither is the doc's 5-min straddle chart; and the gate reads the index-future chart, not the combined-premium chart | Manual: read entries on the 5-min combined-premium chart. Automatable: true (resampling + combined series). |
 | Hard SL above VWAP mandatory for short (unlimited breakout risk; freak candles can hit SL 4×) | 3.11 / 6.11 (risk) | NONE | No short path; risk note unmodelled | Manual: if running a short straddle, a hard SL above VWAP is mandatory; beware freak-candle multi-hits. Automatable: true (once short path exists). |
-| Trade only from a slice of profits; Global Risk Framework (sizing, daily cap) | 3.11 / 6.11 (risk) | PARTIAL | `max_daily_loss_pct: 2.0`, `max_positions: 1` (yaml lines 90-92) encode a daily cap + position cap; "trade only from profits" is not modelled | Manual: deploy only from a profit slice. Automatable: false (a discretionary capital rule). |
+| Trade only from a slice of profits; Global Risk Framework (sizing, daily cap) | 3.11 / 6.11 (risk) | PARTIAL | Global rails are enforced ACCOUNT-side by `RiskService.java:27,60-69` (`daily_loss_limit`, off by default) + `RiskService.java:26` (`max_open_paper_positions`) and the §0B hard-stop floor `ScalperRisk.java:21-24`. The YAML `risk.max_daily_loss_pct: 2.0` + `max_positions: 1` (yaml lines 90-92) are **DEAD keys** — neither is read by `StrategyCompiler` or `strategy-engine` (no match in `libs/strategy-engine`). "Trade only from profits" is not modelled | Manual: deploy only from a profit slice; the daily cap must be set in the paper-account RiskService, not the YAML. Automatable: false (a discretionary capital rule). **[v2 fix: was false-coverage — cited the dead YAML keys as enforcing the cap]** |
 | News overrides the data / no event against the trade | (Global §2.13) | MANUAL_COVERED | `ScalperManualChecks.java:26-30` key `news_clear` | Checklist item — owner ticks before Take. |
 | India VIX not abnormally spiking | (Global §4.5) | MANUAL_COVERED | `ScalperManualChecks.java:46-50` key `vix_normal` | Checklist item. (Distinct from the straddle's own IV gates above, which are NOT covered.) |
 | Global cues not against the trade (DOW, Asia, crude, USD) | (Global §4.7) | MANUAL_COVERED | `ScalperManualChecks.java:51-55` key `global_cues_ok` | Checklist item. |
@@ -48,3 +49,31 @@ not the lens here — code presence is.)
 - **Trending-OI variant confirmation** (together = short / divergence = long) is skipped — the neutral path uses a NEUTRAL stand-in confluence and disables the OI gate.
 - **Timeframe / chart mismatch** — engine runs 3m on the index-future chart; the doc's tool is the 5-min combined-premium straddle chart. The event-long ~12:30 PM entry additionally collides with the engine's 11:00-13:00 midday block.
 - **VIX/global-cue/news checks ARE covered** by `ScalperManualChecks`, but those are the *global* gates; the straddle's *own* IV gates are not.
+
+### v2 review notes
+
+Independent second-pass review (fresh-derived from doc §3.11 / §6.11, then diffed vs v1). **v1 was high quality**
+— every gap verdict (short straddle unbuilt, combined-premium-VWAP entry/SL not enforced, no IV/OI gating,
+one-leg management live-managed) traced to the live code; the MANUAL_COVERED rows (`news_clear` 2.13,
+`vix_normal` 4.5, `global_cues_ok` 4.7) match `ScalperManualChecks.java:26-30,46-55` exactly; and the
+NEUTRAL-path claim (time + volume only, no CE/PE split, no OI confluence) is confirmed at
+`ScalperConfluenceGate.java:132-146` (early return before the `client.context` OI fetch at line 191).
+
+Changes made:
+1. **MISSED (added row):** *Strike — OTM "safer bet" alternative, ATM preferred over deep OTM* (§3.11 setup #4 /
+   §6.11). v1's strike row covered only the ATM default; the doc also offers an OTM variant. The picker
+   (`StraddleLegPicker.java:78-84`) only ever returns the nearest-forward ATM strike with no offset knob →
+   PARTIAL (ATM default automated, OTM alternative not selectable).
+2. **INACCURATE → corrected (false-coverage):** the *"Global Risk Framework (daily cap)"* row cited the YAML
+   `max_daily_loss_pct: 2.0` + `max_positions: 1` as encoding the caps. Those are **DEAD YAML keys** — neither is
+   read by `StrategyCompiler` or `strategy-engine` (no match in `libs/strategy-engine`; corroborated by the
+   README §4 "DEAD YAML key never read" flag). The actual global rails are ACCOUNT-side `RiskService`
+   (`daily_loss_limit` off-by-default `:27,60-69`; `max_open_paper_positions` `:26`) + the §0B hard-stop floor
+   (`ScalperRisk.java:21-24`). Status stays PARTIAL; evidence corrected to point at the real enforcer.
+3. **Evidence sharpened (volume floor, still FULL):** named the actual enforced floor — `ScalperGates.volume`
+   keys off `cfg.signalIndex()` = NIFTY 50 (signal_underlying `NIFTY-FUT-CONT`) → **125,000**
+   (`ScalperGates.java:28,30,64-68`), not the soft yaml `volume > 0` expr. No status change.
+
+No row was deleted. All other v1 rows confirmed accurate as written. README §5 raised no false-coverage flag
+against this dimension; its one straddle parking item (combined-premium VWAP entry + LOW IV + combined-VWAP SL,
+LIVE-deferred) is correctly reflected by v1 rows for the entry-trigger / SL / LOW-IV gaps.

@@ -176,6 +176,11 @@ public class ScalperConfluenceGate {
     if (cfg.has("divergence-vol-gate") && !ScalperGates.divergenceVolume(chart.volume()).pass()) {
       return Optional.empty();
     }
+    // W4 (tag overbought-defer, S24 §3.1): stand aside while the tape is exhaustion-overbought (CE) /
+    // oversold (PE). Default-OFF; a null RSI degrades to pass inside the gate.
+    if (cfg.has("overbought-defer") && !ScalperGates.overboughtDefer(chart.rsi14(), side).pass()) {
+      return Optional.empty();
+    }
     // §3.1 Two-Candle: when the strategy declares it, the multi-bar formation is a HARD entry gate
     // (the chart-only YAML grammar cannot express it). The 1st-candle extreme becomes the stop.
     BigDecimal structuralStop = structuralStop(cfg, future, index, side);
@@ -210,6 +215,11 @@ public class ScalperConfluenceGate {
     // (data unavailable / flat-OI caveat) DEGRADES to pass inside the gate, so it never blocks then.
     if (cfg.requireCallPutDeltaFilter()
         && !ScalperGates.callPutDeltaFilter(ctx.oi(), oiProps.crossFilterPct()).pass()) {
+      return Optional.empty();
+    }
+    // W4 (tag directional-change-gate, S24 Day-20): only enter on a confirmed OI directional change —
+    // the PE-CE tilt must have crossed within the window. Default-OFF; an unchanged/short series blocks.
+    if (cfg.has("directional-change-gate") && !ScalperGates.directionalChange(ctx.oi()).pass()) {
       return Optional.empty();
     }
     // #12 (section 3.12) Trend-Change: when the strategy declares it, a HARD reversal pre-gate - a price

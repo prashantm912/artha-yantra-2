@@ -30,6 +30,12 @@ public final class ScalperGates {
   private static final BigDecimal INDEX_VOL = new BigDecimal("50000");
   private static final Map<String, BigDecimal> VOL_FLOOR = Map.of("NIFTY 50", NIFTY_VOL);
 
+  // W4 (tag overbought-defer, S24 §3.1 "RSI>85 -> defer"): the RSI exhaustion DEFER caps — a CE buy
+  // stands aside while overbought (>=85), a PE buy while oversold (<=15). The cool-to-70-80 +
+  // pullback-re-entry half is live trade-management (cross-bar state), not a point-in-time gate.
+  private static final BigDecimal OVERBOUGHT_CAP = new BigDecimal("85");
+  private static final BigDecimal OVERSOLD_FLOOR = new BigDecimal("15");
+
   // W4 PARAM #5 (S24 §3.10 "indicators far from candles = avoid"): the overextension band — block when
   // the NEAREST indicator is farther than this fraction of the close. The source gives NO number; 1.5%
   // is a deliberately wide v1 default that rarely fires on an index future (forward-paper-tunable). Tag
@@ -241,6 +247,38 @@ public final class ScalperGates {
         ok,
         volume,
         (ok ? "volume >= " : "volume < ") + NIFTY_VOL.toPlainString() + " (divergence confirm)");
+  }
+
+  /**
+   * W4 (tag {@code overbought-defer}, S24 §3.1 "RSI&gt;85 -&gt; defer"): PASS (ok) unless the tape is at
+   * the exhaustion extreme for the side — a CE buy blocks at {@code rsi >= 85}, a PE buy at {@code rsi <=
+   * 15}. A null RSI DEGRADES to pass (a veto never blocks on missing data; the distinct hard RSI rail
+   * already requires a non-null RSI). The cool-to-70-80 + pullback-re-entry half is live trade-management.
+   */
+  public static GateOutcome overboughtDefer(BigDecimal rsi, OptionType side) {
+    if (rsi == null) {
+      return GateOutcome.pass(null, "rsi unavailable (degrade -> pass)");
+    }
+    boolean extreme =
+        side == OptionType.CE
+            ? rsi.compareTo(OVERBOUGHT_CAP) >= 0
+            : rsi.compareTo(OVERSOLD_FLOOR) <= 0;
+    String want = side == OptionType.CE ? "CE defers >= 85" : "PE defers <= 15";
+    return new GateOutcome(!extreme, rsi, extreme ? want + " (exhaustion defer)" : want + " ok");
+  }
+
+  /**
+   * W4 (tag {@code directional-change-gate}, S24 Day-20 "directional-change precondition"): require the OI
+   * to have flipped direction this window before entering — PASS only when the PE-CE tilt crossed within
+   * the window ({@code oi.crossedThisWindow()}). A short/absent series reads {@code false} and BLOCKS (the
+   * precondition is unmet) — the intended "only enter on a confirmed OI directional change".
+   */
+  public static GateOutcome directionalChange(Oi oi) {
+    boolean ok = oi != null && oi.crossedThisWindow();
+    return new GateOutcome(
+        ok,
+        oi == null ? null : oi.sentimentPct(),
+        ok ? "OI tilt crossed this window" : "no OI directional change this window");
   }
 
   private static boolean gt(BigDecimal a, BigDecimal b) {

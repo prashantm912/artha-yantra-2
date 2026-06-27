@@ -587,6 +587,18 @@ public class SignalEngine {
     if (decision != null && decision.structuralStop() != null) {
       stopLoss = decision.structuralStop();
     }
+    // W3 PR-4 (S24 ratification D36/D37/D30/D46, additive fallback/cap): an index_points stop_loss
+    // rule bounds the stop to a fixed point distance (BN ~100 / N ~50-60 / SENSEX ~200-250) — the
+    // FALLBACK when no other stop is set, and a CAP that clamps a too-wide structural stop to that
+    // distance (the tighter of the two wins). Default-OFF: no YAML carries an index_points rule
+    // today, so stopLoss is unchanged for every existing strategy.
+    boolean shortDir =
+        strategy.definition().direction() == StrategyDefinition.Direction.SHORT;
+    BigDecimal pointStop =
+        indexPointStopLevel(strategy.definition().exitRules(), shortDir, entryPrice);
+    if (pointStop != null) {
+      stopLoss = (stopLoss == null) ? pointStop : closerToEntry(entryPrice, stopLoss, pointStop);
+    }
     BigDecimal target = levelFromRules(strategy.definition(), entryPrice, "take_profit");
     String side =
         strategy.definition().direction() == StrategyDefinition.Direction.SHORT ? "SELL" : "BUY";
@@ -822,6 +834,32 @@ public class SignalEngine {
       return type.equals("stop_loss") ? entryPrice.subtract(distance) : entryPrice.add(distance);
     }
     return null;
+  }
+
+  /**
+   * W3 PR-4: the level of a {@code stop_loss} rule with {@code basis: index_points} — entry minus the
+   * point value for a long (stop below), plus it for a short (stop above) — or {@code null} when no
+   * such rule is present. Package-private for a focused unit test.
+   */
+  static BigDecimal indexPointStopLevel(
+      List<StrategyDefinition.ExitRuleSpec> rules, boolean shortDir, BigDecimal entryPrice) {
+    for (StrategyDefinition.ExitRuleSpec rule : rules) {
+      if (!"stop_loss".equals(rule.type()) || !"index_points".equals(rule.params().get("basis"))) {
+        continue;
+      }
+      Object value = rule.params().get("value");
+      if (value == null) {
+        continue;
+      }
+      BigDecimal pts = new BigDecimal(value.toString());
+      return shortDir ? entryPrice.add(pts) : entryPrice.subtract(pts);
+    }
+    return null;
+  }
+
+  /** PR-4 additive cap: the stop level closer to entry (the tighter of two) wins. */
+  static BigDecimal closerToEntry(BigDecimal entryPrice, BigDecimal a, BigDecimal b) {
+    return entryPrice.subtract(a).abs().compareTo(entryPrice.subtract(b).abs()) <= 0 ? a : b;
   }
 
   private static Duration intervalDuration(String interval) {

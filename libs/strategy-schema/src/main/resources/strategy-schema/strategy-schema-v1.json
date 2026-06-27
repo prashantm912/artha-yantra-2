@@ -390,7 +390,7 @@
               "additionalProperties": false,
               "required": ["basis"],
               "properties": {
-                "basis": { "enum": ["premium_pct", "atr_multiple"] },
+                "basis": { "enum": ["premium_pct", "atr_multiple", "index_points"] },
                 "value": { "type": "number", "exclusiveMinimum": 0 },
                 "activate_at": { "type": "number", "exclusiveMinimum": 0 },
                 "trail_by": { "type": "number", "exclusiveMinimum": 0 },

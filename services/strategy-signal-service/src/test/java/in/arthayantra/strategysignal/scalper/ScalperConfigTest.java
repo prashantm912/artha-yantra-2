@@ -38,4 +38,28 @@ class ScalperConfigTest {
     assertThat(cfg.strikeParams().deltaLo()).isEqualTo(0.7);
     assertThat(cfg.strikeParams().deltaHi()).isEqualTo(0.8);
   }
+
+  @Test
+  void premiumBandIsLegacyWithoutTheTag() {
+    ScalperConfig nifty = ScalperConfig.from(config("NIFTY 50"), List.of("scalper"));
+    assertThat(nifty.strikeParams().premiumLo()).isEqualByComparingTo("100");
+    assertThat(nifty.strikeParams().premiumHi()).isEqualByComparingTo("250");
+    ScalperConfig bank = ScalperConfig.from(config("NIFTY BANK"), List.of("scalper"));
+    assertThat(bank.strikeParams().premiumLo()).isEqualByComparingTo("250");
+    assertThat(bank.strikeParams().premiumHi()).isEqualByComparingTo("400");
+  }
+
+  @Test
+  void premiumS24BandTagShiftsNiftyAndBankNotSensex() {
+    ScalperConfig nifty = ScalperConfig.from(config("NIFTY 50"), List.of("scalper", "premium-s24-band"));
+    assertThat(nifty.strikeParams().premiumLo()).isEqualByComparingTo("150");
+    assertThat(nifty.strikeParams().premiumHi()).isEqualByComparingTo("350");
+    ScalperConfig bank = ScalperConfig.from(config("NIFTY BANK"), List.of("scalper", "premium-s24-band"));
+    assertThat(bank.strikeParams().premiumLo()).isEqualByComparingTo("250");
+    assertThat(bank.strikeParams().premiumHi()).isEqualByComparingTo("550");
+    // SENSEX is unchanged (no S24 ruling) — 300-800 with or without the tag.
+    ScalperConfig sensex = ScalperConfig.from(config("SENSEX"), List.of("scalper", "premium-s24-band"));
+    assertThat(sensex.strikeParams().premiumLo()).isEqualByComparingTo("300");
+    assertThat(sensex.strikeParams().premiumHi()).isEqualByComparingTo("800");
+  }
 }

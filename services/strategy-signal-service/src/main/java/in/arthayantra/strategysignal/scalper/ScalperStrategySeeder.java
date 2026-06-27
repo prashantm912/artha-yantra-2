@@ -83,6 +83,7 @@ public class ScalperStrategySeeder {
   @EventListener(ApplicationReadyEvent.class)
   public void seed() {
     int created = 0;
+    int resynced = 0;
     for (String id : STRATEGIES) {
       try {
         String yaml = load(id);
@@ -95,7 +96,22 @@ public class ScalperStrategySeeder {
         log.info("seeded scalper strategy draft: {}", id);
       } catch (ApiException e) {
         if (e.httpStatus() == 409) {
-          log.debug("scalper strategy {} already present — skipping", id);
+          // Already present — RE-SYNC the identity-row tags from the YAML so a later change to the
+          // ratified gate arming (W3/W4 S24 tags) propagates on boot without a version mint, a checksum
+          // change, or any data loss (metadata only; the engine reads strategy.tags()). Idempotent.
+          try {
+            String yaml = load(id);
+            List<String> tags = new ArrayList<>();
+            StrategyDocuments.parse(yaml).config().path("tags").forEach(t -> tags.add(t.asText()));
+            if (registry.resyncTags(id, tags)) {
+              resynced++;
+              log.info("re-synced scalper strategy tags (S24 arming): {}", id);
+            } else {
+              log.debug("scalper strategy {} already present + tags current — skipping", id);
+            }
+          } catch (IOException | RuntimeException re) {
+            log.warn("scalper strategy {} tag re-sync skipped: {}", id, re.getMessage());
+          }
         } else {
           log.warn("scalper strategy {} failed to seed ({}): {}", id, e.code(), e.getMessage());
         }
@@ -103,9 +119,11 @@ public class ScalperStrategySeeder {
         log.error("scalper strategy {} resource unreadable — not seeded: {}", id, e.getMessage());
       }
     }
-    if (created > 0) {
+    if (created > 0 || resynced > 0) {
       log.info(
-          "scalper seeder created {} new draft strategies (publish from the UI to go live)", created);
+          "scalper seeder: {} new draft strategies created, {} existing re-armed (publish from the UI"
+              + " to go live)",
+          created, resynced);
     }
   }
 

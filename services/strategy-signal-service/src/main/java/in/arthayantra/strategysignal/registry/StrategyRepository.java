@@ -234,6 +234,21 @@ public class StrategyRepository {
         enabled, channel, strategyId);
   }
 
+  /**
+   * Re-set the strategy IDENTITY-row tags (the §12.3 scalper-gate arming the engine reads via
+   * {@code strategy.tags()}). Like {@link #updateNotifications} this is orthogonal to the versioned
+   * config — it never touches strategy_versions, so no D18 checksum changes. The {@code text[]} array
+   * is bound via an explicit setter to avoid the JdbcTemplate vararg-array spreading ambiguity.
+   */
+  public void updateTags(UUID strategyId, List<String> tags) {
+    jdbc.update(
+        "UPDATE strategies SET tags = ?, updated_at = now() WHERE id = ?",
+        ps -> {
+          ps.setArray(1, ps.getConnection().createArrayOf("text", tags.toArray()));
+          ps.setObject(2, strategyId);
+        });
+  }
+
   /** Hard delete (drafts-only path; cascades versions + audit). */
   public void deleteStrategy(UUID strategyId) {
     jdbc.update("DELETE FROM strategies WHERE id = ?", strategyId);

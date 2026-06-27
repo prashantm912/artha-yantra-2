@@ -5,7 +5,7 @@ import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
-import { useStrategies } from '../../api/strategies.ts';
+import { useStrategies, useStrategyVersions } from '../../api/strategies.ts';
 import {
   DIRECTIONS,
   FOLD_AGGREGATIONS,
@@ -41,6 +41,8 @@ export function BacktestRunnerPage() {
 
   const [tab, setTab] = useState<'backtest' | 'sweep'>('backtest');
   const [strategyId, setStrategyId] = useState<string | null>(null);
+  // '' = latest (the backend pins latest published, else latest draft); a version string runs that version.
+  const [strategyVersion, setStrategyVersion] = useState('');
   const [interval, setInterval] = useState('1d');
   const [from, setFrom] = useState(dayISO(60));
   const [to, setTo] = useState(dayISO(0));
@@ -59,12 +61,23 @@ export function BacktestRunnerPage() {
     [strategies.data],
   );
 
+  // Version dropdown for the selected strategy: "Latest" (omit the version) + every minted version.
+  const versions = useStrategyVersions(strategyId ?? '');
+  const versionOptions = useMemo(
+    () => [
+      { value: '', label: 'Latest (default)' },
+      ...(versions.data?.items ?? []).map((v) => ({ value: v.version, label: `v${v.version} · ${v.status}` })),
+    ],
+    [versions.data],
+  );
+
   const iso = (d: string) => new Date(`${d}T00:00:00`).toISOString();
+  const versionField = strategyVersion ? { strategyVersion } : {};
 
   const runBacktest = () => {
     if (!strategyId) return;
     submitRun.mutate(
-      { strategyId, from: iso(from), to: iso(to), interval, initialCapital: capital, seed: Number(seed) },
+      { strategyId, ...versionField, from: iso(from), to: iso(to), interval, initialCapital: capital, seed: Number(seed) },
       { onSuccess: () => navigate('/backtests/jobs') },
     );
   };
@@ -74,6 +87,7 @@ export function BacktestRunnerPage() {
     submitSweep.mutate(
       {
         strategyId,
+        ...versionField,
         from: iso(from),
         to: iso(to),
         interval,
@@ -115,10 +129,22 @@ export function BacktestRunnerPage() {
           <Select
             value={strategyId}
             options={strategyOptions}
-            onChange={setStrategyId}
+            onChange={(v) => {
+              setStrategyId(v);
+              setStrategyVersion(''); // a stale version string would not exist on the new strategy
+            }}
             ariaLabel="Strategy"
             placeholder="Select strategy"
             title="The strategy to backtest (its latest published, else latest draft, version is used)."
+          />
+        </Field>
+        <Field label="Version">
+          <Select
+            value={strategyVersion}
+            options={versionOptions}
+            onChange={setStrategyVersion}
+            ariaLabel="Version"
+            title="Which version to run. Latest (default) pins the latest published, else latest draft; pick a specific version to backtest an older one."
           />
         </Field>
         <Field label="Interval">

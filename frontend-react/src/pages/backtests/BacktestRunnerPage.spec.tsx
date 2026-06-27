@@ -8,6 +8,7 @@ const sweep = vi.fn();
 
 vi.mock('../../api/strategies.ts', () => ({
   useStrategies: () => ({ data: { items: [{ id: 's1', name: 'EMA Cross' }] } }),
+  useStrategyVersions: () => ({ data: { items: [{ version: '1.0.1', status: 'draft' }, { version: '1.0.0', status: 'published' }] } }),
 }));
 vi.mock('../../api/backtests.ts', async (orig) => {
   const actual = await orig<typeof import('../../api/backtests.ts')>();
@@ -36,7 +37,20 @@ describe('BacktestRunnerPage', () => {
     fireEvent.change(screen.getByLabelText('Strategy'), { target: { value: 's1' } });
     expect(runBtn).toBeEnabled();
     fireEvent.click(runBtn);
+    // No version picked ⇒ "Latest (default)" ⇒ strategyVersion omitted from the payload.
+    expect(run).toHaveBeenCalledWith(
+      expect.not.objectContaining({ strategyVersion: expect.anything() }),
+      expect.anything(),
+    );
     expect(run).toHaveBeenCalledWith(expect.objectContaining({ strategyId: 's1' }), expect.anything());
+
+    // Pick an explicit older version ⇒ it rides in the payload.
+    fireEvent.change(screen.getByLabelText('Version'), { target: { value: '1.0.0' } });
+    fireEvent.click(runBtn);
+    expect(run).toHaveBeenLastCalledWith(
+      expect.objectContaining({ strategyId: 's1', strategyVersion: '1.0.0' }),
+      expect.anything(),
+    );
 
     fireEvent.click(screen.getByRole('tab', { name: 'sweep' }));
     expect(screen.getByLabelText('Method')).toBeInTheDocument();

@@ -253,7 +253,8 @@ public class ScalperConfluenceGate {
       HeroZeroGate.Verdict hz =
           HeroZeroGate.evaluate(
               future, index, side, ctx.oi(), chart.rsi14(), istTime,
-              calendar.isWeeklyIndexExpiryDay(tradeDate), calendar.isMonthlyIndexExpiryDay(tradeDate));
+              calendar.isWeeklyIndexExpiryDay(tradeDate), calendar.isMonthlyIndexExpiryDay(tradeDate),
+              cfg.has("herozero-side-oi"));
       if (!hz.pass()) {
         return Optional.empty();
       }

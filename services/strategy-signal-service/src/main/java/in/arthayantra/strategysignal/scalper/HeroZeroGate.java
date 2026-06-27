@@ -71,6 +71,10 @@ public final class HeroZeroGate {
   private static final Verdict BLOCK = new Verdict(false, null);
   /** section 7: the &gt;50% OI / price "real move" floor (both legs, same side). */
   private static final BigDecimal MIN_MOVE_PCT = new BigDecimal("50");
+  // W4 PARAM #3 (tag herozero-side-oi): the S24 Day-17 ASYMMETRIC per-side OI floor — the PUT side
+  // (PE) needs the heavier ~70% put-writing-collapse confirm vs the CALL side's 50%. Only the OI leg
+  // is raised, and only when the tag is armed; default-OFF keeps both sides at 50% (byte-identical).
+  private static final BigDecimal PE_OI_FLOOR = new BigDecimal("70");
   /** section 7: the range is only marked after ~14:30. */
   static final LocalTime RANGE_FROM = LocalTime.of(14, 30);
   /** section 7: no fresh buy in the last minutes (head-room before the 15:20 square-off / hard close). */
@@ -104,6 +108,26 @@ public final class HeroZeroGate {
       LocalTime istTime,
       boolean expiryDay,
       boolean monthlyExpiryDay) {
+    return evaluate(future, index, side, oi, rsi, istTime, expiryDay, monthlyExpiryDay, false);
+  }
+
+  /**
+   * W4 PARAM #3 (tag {@code herozero-side-oi}, S24 Day-17 per-side OI thresholds) overload: the Day-17
+   * refinement makes the OI "real move" floor ASYMMETRIC — the CALL side (bullish, CE) confirms at the
+   * §0B 50%, but the PUT side (bearish, PE) needs the heavier ~70% put-writing-collapse confirm. When
+   * {@code asymmetricSideOi} is true and the side is PE, the OI leg of {@link #realMove} requires
+   * {@link #PE_OI_FLOOR}; otherwise both sides keep the 50% floor (byte-identical to the 8-arg form).
+   */
+  public static Verdict evaluate(
+      EngineSeries future,
+      int index,
+      OptionType side,
+      Oi oi,
+      BigDecimal rsi,
+      LocalTime istTime,
+      boolean expiryDay,
+      boolean monthlyExpiryDay,
+      boolean asymmetricSideOi) {
     // (1) expiry day only; a monthly expiry's prior-month OI is corrupt -> cannot confirm a break.
     if (!expiryDay || monthlyExpiryDay) {
       return BLOCK;
@@ -126,8 +150,9 @@ public final class HeroZeroGate {
     if (oi.underlying() == OiQuadrant.LONG_UNWINDING && oi.futures() == OiQuadrant.LONG_UNWINDING) {
       return BLOCK;
     }
-    // (3) a REAL move - both OI AND price moved >50% on the SAME side.
-    if (!realMove(oi, ce)) {
+    // (3) a REAL move - both OI AND price moved >50% on the SAME side (PE OI leg raised to ~70% when
+    // the herozero-side-oi tag is armed, per S24 Day-17).
+    if (!realMove(oi, ce, asymmetricSideOi)) {
       return BLOCK;
     }
     // (4) short-covering on the side: a drastic fall in the side's OI (call writers covering for CE /
@@ -151,13 +176,15 @@ public final class HeroZeroGate {
    * imbalance or null spurt-price returns {@code false} - OI rising without a confirmed price follow
    * (or a missing derivation) is never a real move.
    */
-  private static boolean realMove(Oi oi, boolean ce) {
+  private static boolean realMove(Oi oi, boolean ce, boolean asymmetricSideOi) {
     BigDecimal imbalance = oi.callPutDeltaImbalancePct();
     BigDecimal pricePct = oi.spurtPricePct();
     if (imbalance == null || pricePct == null) {
       return false;
     }
-    boolean oiLeg = imbalance.compareTo(MIN_MOVE_PCT) >= 0;
+    // W4 #3: the PUT side needs the heavier ~70% confirm when armed; CE (and the unarmed default) use 50%.
+    BigDecimal oiFloor = (asymmetricSideOi && !ce) ? PE_OI_FLOOR : MIN_MOVE_PCT;
+    boolean oiLeg = imbalance.compareTo(oiFloor) >= 0;
     boolean priceLeg =
         pricePct.abs().compareTo(MIN_MOVE_PCT) >= 0 && (ce ? pricePct.signum() > 0 : pricePct.signum() < 0);
     return oiLeg && priceLeg;

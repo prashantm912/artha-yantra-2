@@ -17,10 +17,11 @@ vi.mock('../../api/backtests.ts', async (orig) => {
   const actual = await orig<typeof import('../../api/backtests.ts')>();
   return {
     ...actual, // keep JOB_STATUSES + fetchResultRef
-    // arg 7 = versionIds (server-side "latest only"): model the server filter to the current version.
+    // arg 7 = currentVersions (server-side "latest only", "strategyId:version" pairs): model the
+    // server filter keeping only jobs on the current version.
     useJobs: (...args: unknown[]) => {
-      const versionIds = args[6];
-      const items = versionIds ? JOBS.filter((j) => j.strategyVersion === '1.0.1') : JOBS;
+      const currentVersions = args[6];
+      const items = currentVersions ? JOBS.filter((j) => j.strategyVersion === '1.0.1') : JOBS;
       return { data: { items }, isFetching: false, isLoading: false, refetch: () => {} };
     },
     useJobsLive: () => {},

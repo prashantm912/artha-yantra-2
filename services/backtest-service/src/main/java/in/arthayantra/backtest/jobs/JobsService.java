@@ -148,13 +148,13 @@ public class JobsService {
       String status,
       String strategyId,
       String strategyIds,
-      String versionIds,
+      String currentVersions,
       int limit,
       int offset,
       String sortBy,
       String sortDir) {
     return repository.list(
-        parseStatus(status), strategyId, strategyIds, versionIds, limit, offset, sortBy, sortDir);
+        parseStatus(status), strategyId, strategyIds, currentVersions, limit, offset, sortBy, sortDir);
   }
 
   /** Cancels a job: queued → 204 cancelled now; running → 202 flag set for the checkpoint. */

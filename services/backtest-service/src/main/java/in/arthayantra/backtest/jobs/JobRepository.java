@@ -189,7 +189,7 @@ public class JobRepository {
       JobStatus status,
       String strategyId,
       String strategyIds,
-      String versionIds,
+      String currentVersions,
       int limit,
       int offset,
       String sortBy,
@@ -214,12 +214,16 @@ public class JobRepository {
       sql.append(" AND jobs.request->>'strategyId' = ANY(string_to_array(?, ','))");
       args.add(strategyIds);
     }
-    // CSV of strategy_version UUIDs (the "Latest version only" filter → each strategy's current
-    // version id). Server-side so the filter spans EVERY page, not just the loaded one. Cast the
-    // uuid column to text for the CSV match; a sentinel like '__none__' matches no uuid → empty page.
-    if (versionIds != null && !versionIds.isBlank()) {
-      sql.append(" AND jobs.strategy_version_id::text = ANY(string_to_array(?, ','))");
-      args.add(versionIds);
+    // "Latest version only": CSV of "strategyId:version" pairs (each strategy's CURRENT version).
+    // Matched against the request JSONB, NOT the strategy_version_id column — TRIAL + OPTIMIZATION
+    // rows leave that column NULL (only BACKTEST submits set it), so a column match dropped every
+    // trial. The (strategyId, version) pair is unique per the registry and is exactly what the row's
+    // is-latest badge compares, so filter and badge agree. '__none__' matches no pair → empty page.
+    if (currentVersions != null && !currentVersions.isBlank()) {
+      sql.append(
+          " AND (jobs.request->>'strategyId' || ':' || (jobs.request->>'strategyVersion'))"
+              + " = ANY(string_to_array(?, ','))");
+      args.add(currentVersions);
     }
     // NB: Map.of#getOrDefault throws on a null key — guard before the lookup (a no-sortBy request,
     // e.g. a tag-only filter call, otherwise NPEs).

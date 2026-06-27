@@ -188,12 +188,17 @@ public class SignalEngine {
       try {
         JsonNode config = versionRow.get().config();
         StrategyDefinition definition = StrategyCompiler.compile(config);
-        // Track-2: a strategy tagged `scalper` over an options_of_underlying universe carries the
+        // Track-2 (S24): the gate-arming tags are the SINGLE SOURCE OF TRUTH on the PUBLISHED config
+        // (what the editor shows), NOT the strategy identity row — so editing + publishing the YAML is
+        // what arms a scalper. The row tags (registry.update keeps them in lockstep) drive only the
+        // list/filters. A strategy tagged `scalper` over an options_of_underlying universe carries the
         // §0B knobs (the confluence seam reads them); every other strategy stays null = unaffected.
+        List<String> configTags = new ArrayList<>();
+        config.path("tags").forEach(t -> configTags.add(t.asText()));
         ScalperConfig scalper =
-            strategy.tags().contains("scalper")
+            configTags.contains("scalper")
                     && "options_of_underlying".equals(config.path("universe").path("mode").asText())
-                ? ScalperConfig.from(config, strategy.tags())
+                ? ScalperConfig.from(config, configTags)
                 : null;
         // §0B hard-stop rule: a scalper without a fixed SL or a time-stop could ride an unbounded
         // losing option — refuse to load it rather than emit signals it can never safely exit.

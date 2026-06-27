@@ -96,21 +96,19 @@ public class ScalperStrategySeeder {
         log.info("seeded scalper strategy draft: {}", id);
       } catch (ApiException e) {
         if (e.httpStatus() == 409) {
-          // Already present — RE-SYNC the identity-row tags from the YAML so a later change to the
-          // ratified gate arming (W3/W4 S24 tags) propagates on boot without a version mint, a checksum
-          // change, or any data loss (metadata only; the engine reads strategy.tags()). Idempotent.
+          // Already present — RE-SYNC the CONFIG from the repo YAML so a later change to the ratified
+          // gate arming (W3/W4 S24 tags) propagates on boot: it mints a fresh DRAFT carrying the armed
+          // YAML (which the editor + the engine read as the source of truth) and keeps the row tags in
+          // lockstep, with the D18 checksum dedupe making it idempotent (no churn on identical content).
           try {
-            String yaml = load(id);
-            List<String> tags = new ArrayList<>();
-            StrategyDocuments.parse(yaml).config().path("tags").forEach(t -> tags.add(t.asText()));
-            if (registry.resyncTags(id, tags)) {
+            if (registry.resyncConfig(id, load(id))) {
               resynced++;
-              log.info("re-synced scalper strategy tags (S24 arming): {}", id);
+              log.info("re-synced scalper strategy config (S24 arming): {}", id);
             } else {
-              log.debug("scalper strategy {} already present + tags current — skipping", id);
+              log.debug("scalper strategy {} already present + config current — skipping", id);
             }
           } catch (IOException | RuntimeException re) {
-            log.warn("scalper strategy {} tag re-sync skipped: {}", id, re.getMessage());
+            log.warn("scalper strategy {} config re-sync skipped: {}", id, re.getMessage());
           }
         } else {
           log.warn("scalper strategy {} failed to seed ({}): {}", id, e.code(), e.getMessage());

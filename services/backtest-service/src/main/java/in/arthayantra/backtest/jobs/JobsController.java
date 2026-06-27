@@ -45,6 +45,7 @@ public class JobsController {
       @RequestParam(required = false) String status,
       @RequestParam(required = false) String strategyId,
       @RequestParam(required = false) String strategyIds,
+      @RequestParam(required = false) String versionIds,
       @RequestParam(required = false) String sortBy,
       @RequestParam(required = false) String sortDir,
       @RequestParam(defaultValue = "50") int limit,
@@ -52,7 +53,8 @@ public class JobsController {
     int boundedLimit = Math.min(Math.max(limit, 1), 500);
     int boundedOffset = Math.max(offset, 0);
     List<Job> jobs =
-        service.list(status, strategyId, strategyIds, boundedLimit, boundedOffset, sortBy, sortDir);
+        service.list(
+            status, strategyId, strategyIds, versionIds, boundedLimit, boundedOffset, sortBy, sortDir);
     // One batch query for the page's completed-run returns, so the list shows a returns column
     // without an N+1 per-row fetch.
     Map<UUID, String> returns =

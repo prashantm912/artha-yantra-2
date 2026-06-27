@@ -189,6 +189,7 @@ public class JobRepository {
       JobStatus status,
       String strategyId,
       String strategyIds,
+      String versionIds,
       int limit,
       int offset,
       String sortBy,
@@ -212,6 +213,13 @@ public class JobRepository {
     if (strategyIds != null && !strategyIds.isBlank()) {
       sql.append(" AND jobs.request->>'strategyId' = ANY(string_to_array(?, ','))");
       args.add(strategyIds);
+    }
+    // CSV of strategy_version UUIDs (the "Latest version only" filter → each strategy's current
+    // version id). Server-side so the filter spans EVERY page, not just the loaded one. Cast the
+    // uuid column to text for the CSV match; a sentinel like '__none__' matches no uuid → empty page.
+    if (versionIds != null && !versionIds.isBlank()) {
+      sql.append(" AND jobs.strategy_version_id::text = ANY(string_to_array(?, ','))");
+      args.add(versionIds);
     }
     // NB: Map.of#getOrDefault throws on a null key — guard before the lookup (a no-sortBy request,
     // e.g. a tag-only filter call, otherwise NPEs).

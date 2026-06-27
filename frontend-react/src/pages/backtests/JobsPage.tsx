@@ -66,8 +66,8 @@ export function JobsPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [strategyId, setStrategyId] = useState<string | null>(null);
   const [tags, setTags] = useState<string[]>([]);
-  // Client-side filter: hide jobs that ran an older version (keeps only jobs on each strategy's newest
-  // version). Filters the loaded page — server pagination still pages over the unfiltered set.
+  // Server-side filter: keep only jobs whose pinned version is its strategy's NEWEST version. Sends the
+  // set of current-version ids so the filter spans EVERY page, not just the loaded one.
   const [latestOnly, setLatestOnly] = useState(false);
   const [offset, setOffset] = useState(0);
   const [sort, setSort] = useState<{ id: string; dir: 'asc' | 'desc' } | null>({
@@ -89,8 +89,18 @@ export function JobsPage() {
     return ids.length ? ids.join(',') : '__none__';
   }, [tags, strategies.data]);
 
-  const q = useJobs(status, strategyId, offset, apiSortBy, apiSortDir, tagStrategyIds);
-  useJobsLive(status, strategyId, offset, apiSortBy, apiSortDir, tagStrategyIds);
+  // "Latest version only" → every strategy's current-version UUID; the server keeps jobs whose
+  // strategy_version_id is in this set. '__none__' = on but no current versions → empty (not unfiltered).
+  const latestVersionIds = useMemo(() => {
+    if (!latestOnly) return null;
+    const ids = (strategies.data?.items ?? [])
+      .map((s) => s.currentVersionId)
+      .filter((v): v is string => !!v);
+    return ids.length ? ids.join(',') : '__none__';
+  }, [latestOnly, strategies.data]);
+
+  const q = useJobs(status, strategyId, offset, apiSortBy, apiSortDir, tagStrategyIds, latestVersionIds);
+  useJobsLive(status, strategyId, offset, apiSortBy, apiSortDir, tagStrategyIds, latestVersionIds);
   const cancel = useCancelJob();
 
   const nameById = useMemo(
@@ -108,14 +118,7 @@ export function JobsPage() {
     return !!job.strategyVersion && !!latest && job.strategyVersion === latest;
   };
 
-  const rows = useMemo(() => {
-    const items = q.data?.items ?? [];
-    if (!latestOnly) return items;
-    return items.filter((job) => {
-      const latest = job.strategyId ? latestVersionById.get(job.strategyId) : undefined;
-      return !!job.strategyVersion && !!latest && job.strategyVersion === latest;
-    });
-  }, [q.data, latestOnly, latestVersionById]);
+  const rows = useMemo(() => q.data?.items ?? [], [q.data]);
   const allTags = useMemo(() => {
     const set = new Set<string>();
     for (const s of strategies.data?.items ?? []) for (const t of s.tags ?? []) set.add(t);
@@ -127,7 +130,7 @@ export function JobsPage() {
   );
 
   // Reset to the first page whenever a filter OR the sort changes (a stale offset can land past the set).
-  useEffect(() => setOffset(0), [status, strategyId, tags, sort]);
+  useEffect(() => setOffset(0), [status, strategyId, tags, sort, latestOnly]);
 
   const viewResults = async (jobId: string) => {
     const ref = await fetchResultRef(jobId);
@@ -379,7 +382,7 @@ export function JobsPage() {
         )}
         <label
           className="flex h-9 cursor-pointer items-center gap-1.5 rounded-md border border-ay-border px-3 text-sm hover:border-accent"
-          title="Hide jobs that ran an older version — keep only jobs on each strategy's newest version (filters the loaded page)."
+          title="Hide jobs that ran an older version — keep only jobs on each strategy's newest version (across all pages)."
         >
           <input
             type="checkbox"

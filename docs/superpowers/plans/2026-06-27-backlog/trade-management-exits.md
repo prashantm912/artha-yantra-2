@@ -37,6 +37,17 @@ Stream total: **50 AUTOMATE_PKG gap rows** (`31 + 11 + 2 + 1×6`). Several rows 
 take-profit leg, a trailing-stop leg), so the *code surface* is much smaller than 50 — the count is
 gaps-closed, not files-touched.
 
+> **⚠ STALE GAP-SOURCE LINE NUMBERS (audit pass 1).** Every `docs/strategy-audit/*.md` line number in
+> the table above and in §3.x below is **stale** — the audit `.md` files were expanded with v2/v3 rows
+> (look for the inline `[v2 doc-§ fix]` / `v3-added MISS` / "INACCURATE —" annotations), shifting every
+> exit/target/SL row ~10-25 lines DOWN from where the plan captured them. The cited line numbers now
+> point at the OI/VIX block, not the exit/target/stop rows. The CONTENT→feature mapping is correct;
+> only the line numbers are wrong. **Executor: locate gap-source rows by their ROW TEXT (the
+> "Target:…" / "Trail…" / "Stop-loss…" / "VWAP…with volume…" wording), not by the line number.** The
+> corrected line numbers for the load-bearing rows are in the Audit-pass-1 block at the end; the rest
+> are findable by text. Also note `session-additions.md` is really
+> `session-additions-and-manual-coverage.md` (its spot-OI-bar S/R row is L57, not L51).
+
 **Key architectural finding (verified, drives the whole design).** The engine `ExitEvaluator` ALREADY
 implements `take_profit` (basis `premium_pct`/`atr_multiple`/`r_multiple`) and `trailing_stop`
 (`premium_pct` with `activate_at`/`trail_by`, or `atr_multiple`) — `ExitEvaluator.java:180-303`. The
@@ -109,8 +120,14 @@ ATR/structure target source, and the laddered sizing.
   precedent — CLAUDE.md "Extend engine records parity-safely").
 - `TickwiseGoldenRunner` (`golden/TickwiseGoldenRunner.java`) drives the engine exit path: it calls
   `ExitEvaluator.evaluate` (L150, L220), `evaluateIntrabarLevels` (L181), and stamps `entryLevels`
-  onto the entry event (L166, L206, L235, L266-273). The runner rolls 1m → 3m/5m/15m/1h primaries
-  (`intervalDuration`, L354-363).
+  onto the entry event (L166, L206, L235; the `entryLevels` helper itself is L281-287, not L266-273 —
+  audit cite fix). The runner rolls 1m → 3m/5m/15m/1h primaries (`intervalDuration`, L354-363).
+  **The golden FEATURES are pure-engine strategy YAMLs (NOT scalper configs)** — the new
+  `signal-exit-volume`/`trailing-points`/`trailing-indicator`/`stop-points` fixtures must each be a
+  minimal NON-scalper YAML declaring the new exit type on the NIFTY50 1m fixtures, so the harness can
+  evaluate them without the live OI/macro seam (which never runs on the replay). For `trailing-indicator`
+  the fixture's `alias` must be an indicator the YAML actually declares (e.g. a VWMA the runner can read
+  via `valueAt`), since `supertrend` is direction-only (see §3.3).
 - `GoldenDeterminismTest.FEATURES` = `{ema-crossover, optional-indicator-activation, btst-preclose,
   exit-intrabar, context-series}` (L33-36) — **no scalper, no new exit type**. `BacktestParityTest`
   mirrors these (FU2 §2.6). A new parity-sensitive exit primitive needs a NEW FEATURES entry + a
@@ -184,12 +201,19 @@ private static Optional<ExitDecision> signalExit(
   if (!result.passed()) return Optional.empty();
   Object minVol = rule.params().get("min_volume");           // NEW (optional)
   if (minVol != null) {
-    BigDecimal vol = bank.primarySeries().candle(index).volume()...; // bar volume
+    BigDecimal vol = bank.builtin("volume", index);          // bar volume as BigDecimal
     if (vol == null || vol.compareTo(decimal(minVol)) < 0) return Optional.empty();
   }
   return Optional.of(new ExitDecision("signal_exit", text));
 }
 ```
+
+> **[audit pass 1 — soundness fix]** `EngineCandle.volume()` is a **`long`**, not a `BigDecimal`
+> (`EngineCandle.java:17`), so the original `bank.primarySeries().candle(index).volume()` would NOT
+> compile against `.compareTo(...)`. The correct accessor is `bank.builtin("volume", index)`, which
+> returns `BigDecimal.valueOf(candle.volume())` (`IndicatorBank.java:124`). `signalExit` already
+> receives the `IndicatorBank bank` (`ExitEvaluator.java:330-331`), so no signature change is needed
+> for the volume floor.
 
 Schema: add `min_volume` (optional number) to the `signal_exit` params (`exitRule` L432-442). YAML
 (new variant): `{ type: signal_exit, params: { rule: "close < vwap", min_volume: 125000 } }`.
@@ -203,23 +227,64 @@ exit" (morning-trade L32). These need a non-premium-pct trailing basis. **Change
 
 ```java
 // ExitEvaluator.trailing (extend, L250-305): two new bases.
-case "points" -> {                       // fixed-offset trail: peak ± N points
+case "points" -> {                       // fixed-offset trail: peak ± N points (no bank needed)
   BigDecimal off = decimal(params.get("value"));
-  yield hit(isLong, close, peak, off) ? ... : Optional.empty();
+  if (off == null) yield Optional.empty();
+  boolean hit = isLong ? close.compareTo(peak.subtract(off)) <= 0
+                       : close.compareTo(peak.add(off)) >= 0;
+  yield hit ? Optional.of(new ExitDecision("trailing_stop", "trailed " + off + "pts off " + peak))
+            : Optional.empty();
 }
 case "indicator" -> {                    // trail to a named indicator level (e.g. psar, supertrend, vwap)
-  BigDecimal level = bank.builtinOrAlias(String.valueOf(params.get("alias")), index);
-  yield (isLong ? close.compareTo(level) <= 0 : close.compareTo(level) >= 0) ? ... : Optional.empty();
+  String alias = String.valueOf(params.get("alias"));
+  BigDecimal level = indicatorLevel(bank, alias, index);   // see resolution note below
+  if (level == null) yield Optional.empty();
+  boolean hit = isLong ? close.compareTo(level) <= 0 : close.compareTo(level) >= 0;
+  yield hit ? Optional.of(new ExitDecision("trailing_stop", "trailed to " + alias))
+            : Optional.empty();
 }
 ```
 
-(The `indicator` basis needs the `IndicatorBank`, so `trailing(...)` must take `bank`, not just
-`series` — a signature widen confined to `ExitEvaluator`.) The "RSI-cross exit" + "ride-to-VWAP" are
+> **[audit pass 1 — soundness fixes]**
+> 1. **No `bank.builtinOrAlias(...)` method exists.** `IndicatorBank` exposes `valueAt(String alias, int)`
+>    for declared aliases (`IndicatorBank.java:104-109`) and `builtin(String name, int)` for the three
+>    built-ins `close|volume|vwap` (`IndicatorBank.java:120-128`). The resolver must try `builtin` for
+>    `vwap`/`close`, else `valueAt` for a declared alias (`psar`, `supertrend`, …) — guarding the
+>    `IllegalArgumentException` `valueAt` throws on an unknown alias. Call this helper `indicatorLevel`.
+>    (`BarValues.isBuiltin(name)` `:20-23` is the ready-made discriminator for the `builtin`-vs-`valueAt`
+>    branch.)
+> 2. **The `indicator` basis needs the bank, but `trailing(...)` does NOT receive it — on EITHER path.**
+>    **[audit pass 2 — signature correction]** Pass-1 framed this as only an INTRABAR problem; it is also a
+>    PRIMARY-path problem. `trailing(...)` is declared `(EngineSeries series, Position position, int index,
+>    ExitRuleSpec rule, BigDecimal close)` (`ExitEvaluator.java:250-255`) — **no `bank` parameter** — and
+>    `evaluate` calls it `trailing(series, position, primaryIndex, rule, close)` (`:182`). So the proposed
+>    `indicator` snippet that references `bank` will NOT compile until `trailing(...)`'s OWN signature gains
+>    the bank (and the L182 call site passes it). `evaluate` HAS the bank in scope, so this is a one-line
+>    call-site change PLUS the method-signature widen — small, but it is a signature change, not a pure
+>    in-body addition. The INTRABAR reuse (`trailingOn` ← `evaluateIntrabarLevels`, `:133-161`) is the
+>    SEPARATE harder problem: that path has only raw `EngineSeries` and no bank anywhere in scope.
+>    **Decision required (Open Point #9):** (a) thread the bank through `trailing` + the intrabar path
+>    (`evaluateIntrabarLevels`/`trailingOn`) too, or (b) widen ONLY `trailing` (primary) for the bank and
+>    declare `indicator` trailing **bar-close-ONLY** (skip it in `trailingOn`), documenting that
+>    `exit_intrabar` does not apply to it. `points` has no such problem (peak/close only, no bank) and works
+>    on both paths.
+> 3. **`SUPERTREND` alias returns +1/-1, not the line price** (`ScalperConfluenceGate.chart` reads
+>    `bank.valueAt(SUPERTREND, index).signum()`, `:305-307`). So `indicator: supertrend` would trail to
+>    ±1, which is meaningless. A real Supertrend-line trail needs a NEW indicator that exposes the ST
+>    LINE value (ta4j computes it; the registry only binds the direction today). Same caveat for any
+>    direction-only indicator. **This blocks §3.3's "indicator-trail for backtest" claim** — see §3.3.
+
+The "RSI-cross exit" + "ride-to-VWAP" are
 better modelled as additional **`signal_exit` rules** (`rsi14 < 30`, `close < vwap`) — no new code,
 fold into (A)-style variants. The "hourly-new-high erosion" is a genuinely new detector; recommend
 **DEFER** to a manual check (no clean primitive; record in Open Points).
 **[P]** for `points`/`indicator` trailing → new tag `struct-trail` is NOT needed (it's expressed by the
 exit rule itself in a new variant YAML) + new golden FEATURE (`trailing-points`, `trailing-indicator`).
+**Schema:** `trailing_stop` basis enum (`exitRule` L393) must gain `points` + `indicator`, and the
+params block must accept `alias` (string) for the `indicator` basis — today the `trailing_stop` params
+(L390-403) allow only `basis|value|activate_at|trail_by|atr_period` under `additionalProperties:false`,
+so an `alias` key REJECTS until added (and the `anyOf` value/activate_at requirement must be widened so
+a `points` rule with `value` and an `indicator` rule with `alias` both validate).
 
 **Sequencing within (A-D):** (A) and (B) are pure YAML variants (ship first, zero engine risk). (C) and
 (D) are the only engine edits and each needs a golden variant.
@@ -257,17 +322,33 @@ behind a `sr-target` tag that is inert until the feed lands (Open Point).
 
 ### 3.3 `supertrend-level-stop` (2) — expose the ST band price as a stop anchor [P]
 
-Closes gap-theory L18, golden-crossover L25 (S21 support-form SL), completeness-sweep L17. The
-`SUPERTREND` indicator is direction-only (+1/-1) in the scoring path, but ta4j computes the ST LINE
-price. **Change:** add a new `StructuralStop.SUPERTREND_LEVEL` enum value (`ScalperConfig.java:55-64`)
-armed by a `supertrend-level-stop` tag (parse at L149-ish), and in `ScalperConfluenceGate.structuralStop`
-(L288+) read the ST line value at the entry bar from the bank and set it as `decision.structuralStop`.
+Closes gap-theory ST-level-stop row (correct line ~L24/L49; NOT L18), golden-crossover S21 support-form
+SL, completeness-sweep ST-level row. The `SUPERTREND` indicator is direction-only (+1/-1) in the scoring
+path (`ScalperConfluenceGate.chart` → `valueAt(SUPERTREND).signum()`, `:305-307`); ta4j CAN compute the
+ST LINE price but the registry does NOT bind it today. **So the FIRST step is a NEW indicator/alias that
+exposes the Supertrend LINE value** (a price), distinct from the existing direction-only `supertrend`
+alias. Without it there is no ST price to anchor to. **Then:** add a new `StructuralStop.SUPERTREND_LEVEL`
+enum value (`ScalperConfig.java:55-64`) armed by a `supertrend-level-stop` tag (a new branch in the
+`from(...)` chain, L136-151), and set the anchor in `ScalperConfluenceGate.evaluate`.
+
+> **[audit pass 1 — soundness fix]** The private `structuralStop(cfg, future, index, side)` method
+> (`ScalperConfluenceGate.java:288-302`) does **NOT** receive the `bank`/`BarValues` that holds the ST
+> line value — it only has the raw future `EngineSeries`. So the ST-line anchor must either (a) be set
+> inline in `evaluate(...)` (which has `bank` in scope, e.g. right after the side decision, reusing the
+> `chart(bank,index)` read), or (b) thread the bank/ST-line value into `structuralStop(...)`. Prefer
+> (a) to avoid widening the private helper's signature. Update the `structuralStop` javadoc accordingly.
+
 Because the structural stop is LIVE-only (the parity firewall), this is **[P] but parity-safe-by-firewall**
 — it never touches the golden replay; still requires the seam-test triple (pass/anchor/non-armed
-unaffected) like every existing structural stop. **Alternatively** (and cleaner for backtest fidelity):
-add a `trailing_stop basis: indicator, alias: supertrend` rule (§3.1-D) so the ST-trail also works in the
-premium replay — recommend BOTH (the structural anchor live + the indicator-trail for backtest).
-Tag: `supertrend-level-stop`. New golden FEATURE rides §3.1-D's `trailing-indicator`.
+unaffected) like every existing structural stop. **The "also works in the premium replay" alternative is
+NOT free:** `OptionsPremiumReplay.exitRules` (`:262-296`) only parses `premium_pct` levels +
+`activate_at`/`trail_by` trailing — it would SILENTLY IGNORE a `basis: indicator` trail, AND a
+`points`/`indicator` index-level has no meaning on the OPTION-premium leg anyway (different instrument).
+So an indicator-trail does NOT give backtest fidelity for free; treat the ST-level stop as **live-seam +
+golden-harness only** and DROP the "recommend BOTH for backtest" claim (record the premium-replay
+extension as an Open Point if backtest application of structural trails is ever wanted).
+Tag: `supertrend-level-stop`. No new GOLDEN FEATURE for the live anchor (firewall); if the engine
+`indicator` trailing basis (§3.1-D) is also shipped, it carries its own `trailing-indicator` FEATURE.
 
 ### 3.4 `volume-conditional-exit` (1) — adverse-move volume-conditional exit [S, equity-gated]
 
@@ -290,24 +371,51 @@ keep deferred** (record in Open Points); if armed, behind a `sl-leeway` tag, for
 
 ### 3.6 `structural-stop-arming` (1) — arm the 1st-candle stop on connect-the-dots [S→P]
 
-Closes connect-the-dots L31. The `StructuralStop` machinery EXISTS; connect-the-dots YAMLs just don't
-carry a stop tag (they set `StructuralStop.NONE`). **Change:** add the `entry-candle-stop` (or a new
-`two-candle-pattern`-style) tag to a NEW connect-the-dots *variant* YAML so the 1st-candle low (bull) /
-high (bear) becomes the persisted stop. This is purely a YAML tag add on a new variant — **[S]** (new
-variant, no existing golden; the structural stop is live-only so even the existing config is
-parity-inert). If instead armed on the SHIPPED connect-the-dots YAMLs it becomes **[P]** (changes live
-emission) → keep it a new variant, default-OFF.
+Closes connect-the-dots stop-loss row (correct line ~L43 "Stop-loss = 1st candle low/high; gap-trail
+5pts"; NOT L31). The `StructuralStop` machinery EXISTS **and the `entry-candle-stop` tag is ALREADY
+fully wired** — `ScalperConfig.from` already maps `tags.contains("entry-candle-stop")` →
+`StructuralStop.ENTRY_CANDLE` (`ScalperConfig.java:149-150`), and `ScalperConfluenceGate.structuralStop`
+already returns `future.candle(index).low()/.high()` for it (`:293-295`). connect-the-dots YAMLs simply
+don't carry the tag (they resolve to `StructuralStop.NONE`). **Change: ZERO Java — purely add the
+existing `entry-candle-stop` tag to a NEW connect-the-dots *variant* YAML** so the entry-candle extreme
+becomes the persisted stop. (`two-candle-pattern` is the OTHER existing tag, but it ALSO runs the
+TwoCandleGate as a HARD entry gate — pick `entry-candle-stop` if only the stop anchor is wanted, not the
+2-candle entry filter.) **[S]** — new variant, no existing golden; the structural stop is live-only so
+even arming it is parity-inert on the harness. If instead armed on the SHIPPED connect-the-dots YAMLs it
+becomes **[P]** (changes live emission) → keep it a new variant, default-OFF.
 
 ### 3.7 `profit-slice-sizing` (1) — size hero-zero off realised PnL [S]
 
-Closes hero-zero L27 ("deploy ~10% of profits / ₹1-2k"). Today hero-zero sizes off a flat
-`budget_inr`. **Change:** a new `position_sizing.method: profit_slice` (schema `risk.position_sizing` +
-`PositionSizer` in `libs/strategy-engine/.../eval/PositionSizer.java`) that reads the running realised
-PnL (`dayPnl` from the emission guard / RiskService) and caps the premium budget at `pct_of_profit` (e.g.
-10%), floored at a min and capped at a max (the ₹1-2k band). Sizing is ADVISORY (`suggested_qty`) — it
-does NOT change WHICH signal fires, so **[S]** (parity-neutral, same class as `probability-graded-sizing`
-in the sibling stream). Depends on a realised-PnL feed being threaded into the sizer (it exists for the
-A12 `suggestedQty` path, SignalEngine L605-609). Ship as a new hero-zero variant.
+Closes hero-zero "10%-of-profits / ₹1-2k" row (correct line ~L43; NOT L27). Today hero-zero sizes off a
+flat `budget_inr` (`premium_budget` method, `PositionSizer.java:36-44`; hero-zero YAML `budget_inr:2000`).
+**Change:** a new `position_sizing.method: profit_slice` (schema `risk.position_sizing` method enum
+L468 + a params shape; `PositionSizer.size` switch, `PositionSizer.java:28-61`) that caps the premium
+budget at `pct_of_profit` (e.g. 10%) of running realised PnL, floored at a min and capped at a max (the
+₹1-2k band). Sizing is ADVISORY (`suggested_qty`) — it does NOT change WHICH signal fires, so **[S]**
+(parity-neutral, same class as `probability-graded-sizing` in the sibling stream).
+
+> **[audit pass 1 — completeness fixes]** Two concrete steps the plan omitted:
+> 1. **`PositionSizer.Inputs` carries NO PnL field** — it is `record Inputs(BigDecimal equity, BigDecimal
+>    price, BigDecimal stopDistance, long lotSize)` (`PositionSizer.java:18-19`). `profit_slice` needs the
+>    running realised `dayPnl`, so a NEW field must be added to `Inputs` AND populated at the call site.
+> 2. **The LIVE sizing call site is `PaperEmissionGuard.suggestedQty(...)`** (the impl of the
+>    `EmissionGuard` SPI **interface** `EmissionGuard.java:31-36` — not the interface itself; reached from
+>    `SignalEngine.java:608-610`, live-only — guarded by `emissionGuard.isPresent()`). `dayPnl` lives in the
+>    paper layer (`PaperAccountService` / `RiskService`); thread it into the `EmissionGuard.suggestedQty`
+>    SIGNATURE (so every impl + the `SignalEngine` caller change), into `PaperEmissionGuard` (`:54-55`), and
+>    on into `PositionSizer.Inputs`. Because `suggestedQty` is stamped ONLY on the live path and is NOT part
+>    of the golden side-channel, feeding live `dayPnl` into the deterministic `libs/strategy-engine` sizer
+>    stays **parity-safe** (the golden harness never calls `EmissionGuard`).
+> 3. **[audit pass 2 — call-site fan-out correction]** Pass-1 said "the only call site" — WRONG.
+>    `PositionSizer.Inputs` has a SECOND production constructor at **`ReplayEngine.size`
+>    (`ReplayEngine.java:283-287`)** — the DETERMINISTIC backtest path — plus **6** test constructors in
+>    `ExitEvaluatorTest` (`:317,321,326,332,338,344,350`). Adding a 5th `Inputs` field is a
+>    constructor-ARITY break that MUST also update `ReplayEngine` (pass `null`/zero `dayPnl` — `profit_slice`
+>    is never selected in a backtest config, so every existing method stays inert and parity holds) AND the
+>    6 `ExitEvaluatorTest` literals AND any `PositionSizerTest` literal. Enumerate ALL of these — the
+>    `ReplayEngine` site is the parity-relevant one (it compiles on the golden/parity path).
+
+Ship as a new hero-zero variant.
 
 ### 3.8 `gap-fill-deadline-switch` (1) — abandon an unfilled gap at ~40 min [P]
 
@@ -347,7 +455,7 @@ new variant). Record as the stream's primary Open Point.
 | §3.2-i `stop_loss`/`take_profit` `points` basis | **[P]** | new variant | **`stop-points`** FEATURES entry |
 | §3.2-ii S/R-zone analytics endpoint | **[S]** | (read-only `/sr-levels`) | none (analytics, no signal) |
 | §3.2-ii seam consumes S/R targets | **[P]** | `sr-target` tag (inert until feed) | rides `stop-points` pattern when armed |
-| §3.3 `SUPERTREND_LEVEL` structural anchor | **[P]**¹ | `supertrend-level-stop` tag | none live (firewall); backtest rides `trailing-indicator` |
+| §3.3 `SUPERTREND_LEVEL` structural anchor | **[P]**¹ | `supertrend-level-stop` tag (needs a NEW ST-LINE indicator first — Open Point #10) | none live (firewall); NO backtest representation (premium-replay ignores it — Open Point #11) |
 | §3.4 per-stock volume exit | **[S]** | (equity-gated, deferred) | none (new path) |
 | §3.5 OI-confirmed SL leeway | **[P]**¹ | `sl-leeway` tag (owner-gated, default keep-deferred) | none live (firewall) |
 | §3.6 arm structural stop on connect-the-dots | **[S]** | `entry-candle-stop` on a NEW variant | none (structural stop live-only) |
@@ -417,10 +525,21 @@ positive deterministic coverage without mutating a frozen vector.
 
 ## 6. Dependencies & sequencing
 
-1. **Schema FIRST.** `min_volume`, `points` basis (level + trailing), then the compiler reads them —
-   nothing downstream compiles without the schema + `StrategyCompiler` change. (Schema is also the
-   springdoc/contract source; confirm `ContractCaptureTest` — `exit_rules` params are inside the request
-   body, so a new enum value / param is a contract change → re-capture per CLAUDE.md.)
+1. **Schema FIRST.** `min_volume`, `points` basis (level + trailing), `indicator` basis + `alias`, then
+   the compiler reads them — nothing downstream validates without the schema change. **[audit pass 1 —
+   correction]** `StrategyCompiler` itself needs **NO code change**: it builds `ExitRuleSpec(type,
+   paramsMap(params))` generically with NO param allowlist (`StrategyCompiler.java:58-62`), so a new
+   param/basis flows into `rule.params()` automatically once the schema admits it — only the schema +
+   the consuming `ExitEvaluator`/`levelFromRules` code change (and a `StrategyCompilerTest` to lock the
+   round-trip).
+   **[audit pass 1 — correction]** The strategy JSON-schema is **NOT** part of the springdoc `/v3/api-docs`
+   contract: `/schema/v1` returns the schema as an opaque `String` (`RegistryController.java:156-159`) and
+   `/validate` takes an untyped `JsonNode`/`Map` body (`:150-153`) — no DTO mirrors `exitRule`/`ExitRuleSpec`,
+   so per CLAUDE.md "generic `Map<String,Object>`/string returns are NOT enumerated", **adding an exit-rule
+   param/basis does NOT drift the springdoc spec and needs NO `ContractCaptureTest` re-capture.** (There IS
+   a separate frozen-schema *byte-identity* acceptance — the schema doc is served byte-for-byte — but that
+   is satisfied by editing the schema resource normally, not a springdoc concern.) Also confirm
+   `StrategyDocuments`/`StrategySchemaV1` reloads the edited schema (it is read from the classpath resource).
 2. **Engine exit types** (§3.1-C/D, §3.2-i) before any YAML can use them; each lands with its golden
    FEATURE in the SAME PR (generate-once, freeze).
 3. **YAML-only variants** (§3.1-A/B, §3.6, §3.7) can ship in parallel once the engine types exist (A/B
@@ -436,6 +555,10 @@ positive deterministic coverage without mutating a frozen vector.
    its own plan (it interacts with the no-averaging ACCEPT_BY_DESIGN rail).
 8. **Owner sign-off** gates §3.5 (`oi-confirmed-sl-leeway`, deliberately deferred today) and the doc point
    values (per-index SL/target points — see Open Points).
+9. **[audit pass 1] A NEW Supertrend-LINE indicator** (a price, distinct from the direction-only
+   `supertrend` alias) must be added to `IndicatorRegistry` BEFORE §3.3 (`SUPERTREND_LEVEL` stop) and
+   before any `indicator: supertrend` trail can resolve to a meaningful level — see Open Point #10. Put
+   it at the head of PR-3 (or drop §3.3's ST-level form from v1 if deferred).
 
 ---
 
@@ -452,9 +575,12 @@ Overall effort: **L** (the package is L per the disposition; but front-loaded wi
   `StrategyCompiler` + `ExitEvaluator` (`signalExit` floor, `levelDistance` points) + 4 new golden
   FEATURES (`signal-exit-volume`, `stop-points`) + `SignalEngine.levelFromRules` points + contract
   re-capture. `feat(strategy-engine): volume-qualified exit + points stop/target basis`.
-- **PR-3 (M) — engine: structural trailing bases + ST-level anchor.** `trailing_stop` `points`/`indicator`
-  bases (signature widen to pass the bank) + golden FEATURES (`trailing-points`, `trailing-indicator`) +
-  the `SUPERTREND_LEVEL` structural anchor + `supertrend-level-stop` tag + seam triple.
+- **PR-3 (M) — engine: structural trailing bases + ST-level anchor.** A NEW Supertrend-LINE indicator
+  (prerequisite, dep #9) + `trailing_stop` `points`/`indicator` bases (`points` works on both paths;
+  `indicator` is bar-close-only OR threads the bank through the intrabar path — Open Point #9) + golden
+  FEATURES (`trailing-points`, `trailing-indicator` — the `indicator` fixture uses a value-bearing alias,
+  not the direction-only `supertrend`) + the `SUPERTREND_LEVEL` structural anchor (set inline in
+  `evaluate`, not the private `structuralStop` helper) + `supertrend-level-stop` tag + seam triple.
   `feat(strategy-engine): structural trailing + supertrend-level stop`.
 - **PR-4 (S) — profit_slice sizing + connect-the-dots structural-stop variant.** `profit_slice`
   `PositionSizer` method + schema + new hero-zero variant; `entry-candle-stop` connect-the-dots variant.
@@ -479,7 +605,9 @@ on every PR.
    wins). **Recommended default: (a).**
 
 2. **Per-index SL/target point values.** The doc gives Nifty ~30/50-60, BankNifty ~75, Sensex
-   ~50-100/200-250 pt (risk-framework L50) — but these are INDEX points and the scalper trades the PREMIUM
+   ~50-100/200-250 pt (risk-framework **L73** — the v2-corrected row with the verbatim numbers; the
+   earlier "L50" cite is stale, and L73 explicitly removed an invented "~80 pt" Sensex figure) — but
+   these are INDEX points and the scalper trades the PREMIUM
    leg. **Options:** (a) map to a tuned premium-% band per index and let the optimizer find it
    (recommended — consistent with "tune on live, not backtest"); (b) hardcode a `points` basis on the
    index future and convert to premium at fill. **Recommended default: (a)**; expose the `points` basis
@@ -502,8 +630,9 @@ on every PR.
    `min_volume` per exit rule (already supported by the param — let the optimizer tune it). **Recommended
    default: (a) as the YAML default, (b) available for tuning.**
 
-6. **Hourly-new-high erosion exit (completeness-sweep L21) + RSI-laddered partial scale-out
-   (connect-the-dots L29).** These need a partial-exit / multi-bucket-scale-out primitive the engine
+6. **Hourly-new-high erosion exit (completeness-sweep, erosion row — verify by text) + RSI-laddered
+   partial scale-out (connect-the-dots **L41** "RSI profit-booking ladder", NOT L29 which is Trending-OI
+   cross).** These need a partial-exit / multi-bucket-scale-out primitive the engine
    lacks (it exits the WHOLE position). **Options:** (a) DEFER both to a "partial exits" follow-up (the
    RSI-book-90%/10% ladder is explicitly a partial scale-out); (b) approximate erosion with a wider
    `time_stop` + tighter trail. **Recommended default: (a) defer the partials**, approximate with trail in
@@ -521,3 +650,227 @@ on every PR.
    this is the existing `premium_pct` stop behaviour, already shipped on hero-zero/straddle, so it's
    consistent); (b) add a premium-only target basis. **Recommended default: (a)** — it matches the
    existing premium-pct stop semantics; document the dual meaning in the variant YAML header.
+
+9. **[audit pass 1; sharpened pass 2] `indicator` trailing basis — bank threading.** The `indicator`
+   basis (§3.1-D) needs the `IndicatorBank`, but `trailing(...)` does not receive it on EITHER path —
+   the PRIMARY `trailing(...)` (`:250-255`) takes only `EngineSeries`, and the intrabar
+   `evaluateIntrabarLevels`/`trailingOn` (`:133-161`) has no bank anywhere in scope. So EVEN the
+   bar-close-only option requires widening the primary `trailing(...)` signature + its `:182` call site
+   (cheap — `evaluate` has the bank). **Options:** (a) thread the bank through `trailing` AND the
+   intrabar path (wider change, `indicator` works intrabar); (b) widen `trailing` (primary) only and
+   make `indicator` trailing **bar-close-ONLY** (skip it under `exit_intrabar`), documenting the
+   limitation. **Recommended default: (b)** for v1 (the `points` basis works intrabar with no bank;
+   `indicator` is the rarer case). Decide before PR-3.
+
+10. **[audit pass 1] Supertrend-LINE indicator is unbuilt.** The `supertrend` alias is direction-only
+    (±1); §3.3 + the `indicator: supertrend` trail both need a NEW registry indicator exposing the ST
+    LINE PRICE. **Options:** (a) add an `SUPERTREND_LINE` (or parameterised `output: line`) indicator
+    in `IndicatorRegistry`/ta4j and bind it; (b) drop the ST-level stop and ST-trail from v1 and keep
+    only `points`/premium trailing. **Recommended default: (a)** if the ST-level stop is wanted (it is
+    the §3.3 core), else (b). This is the gating dependency for §3.3 and the `trailing-indicator`
+    golden if `supertrend` is the chosen alias.
+
+11. **[audit pass 1] Structural trails in the premium-replay backtest.** `OptionsPremiumReplay.exitRules`
+    (`:262-296`) parses only `premium_pct` levels + `activate_at`/`trail_by` trailing; the new
+    `points`/`indicator` bases (and any index-level structural stop) are silently ignored there AND are
+    meaningless on the option-premium leg anyway. So structural trails are **live-seam + golden-harness
+    only** — they have NO backtest representation. **Options:** (a) accept (treat structural trails as
+    forward-paper-validated, not backtested — consistent with "tune on live"); (b) extend
+    `PremiumExitEvaluator` to apply a points/indicator trail on the PREMIUM series itself (a different
+    semantic — a premium-points trail, not an index trail). **Recommended default: (a).**
+
+---
+
+## Audit pass 1 findings
+
+Auditor opened every cited source file. **Verdict: sound-with-open-points.** The architecture is
+correct — the engine already implements `take_profit`/`trailing_stop` and the premium-replay already
+consumes them, so the "YAML-variant first, narrow engine work" framing holds — and the PARITY design is
+right (engine changes get new golden FEATURES; live-seam changes are parity-safe-by-firewall and must be
+tag-gated default-OFF; the 5 frozen goldens stay byte-identical because they declare none of the new
+types). But there is one **systematic citation defect** plus several **soundness/completeness gaps in the
+proposed code** that would each fail a developer at first contact. All are corrected in place above.
+
+### A. Engine/seam/schema/golden citations — VERIFIED CORRECT
+- `ExitEvaluator`: `evaluate` L164-193, `evaluateIntrabarLevels` L86-121, `level` L195-222,
+  `levelDistance` L225-248 (bases `premium_pct`/`atr_multiple`/`r_multiple` at L236-245), `trailing`
+  L250-305 (premium_pct activate_at L266-277; atr_multiple L288-303), `signalExit` L330-338, `timeStop`
+  L307-328, `entryLevels` L50-56, `favorableExtreme` L340-351 — **all correct.**
+- Schema `exitRule` L362-446; `trailing_stop` L382-405 (basis enum L393); `time_stop` L406-425;
+  `signal_exit` L426-444; `levelParams` L447-456; optimize-path regex L715; `position_sizing` method
+  enum L468 — **all correct.**
+- `ScalperConfig`: `record` L36-52, `StructuralStop` enum L55-64, `from` L101-157, tag→anchor chain
+  L136-151 — **all correct.** (`entry-candle-stop`→`ENTRY_CANDLE` is ALREADY wired at L149-150.)
+- `ScalperConfluenceGate`: `Decision` L71-87 (`structuralStop` L76), per-tag stop set at L166/178/210/
+  228/244, private `structuralStop` L288-302, LIVE-only firewall (class javadoc L29-32) — **all correct.**
+- `SignalEngine`: `emitEntry` L573-604, `levelFromRules` L809-825 (premium_pct-ONLY, confirmed),
+  structuralStop override L587-589, `target` L590, scalper exit block L398-425 (structuralStopHit
+  L405-411, ExitEvaluator L414-421), `hasBoundingExit` assert L199, suggestedQty L605-613 — **all correct.**
+- `ScalperRisk.hasBoundingExit` L20-24; `GoldenSignalsJson.write` serializes only timestamp/exchange/
+  tradingsymbol/direction/composite/breakdown (stopLoss/takeProfit side-channel) L52-65; `GoldenDeterminismTest.FEATURES`
+  = exactly 5, no scalper, L33-36; `OptionsPremiumReplay.exitRules` L262-296; **8** `new ScalperConfig(...)`
+  literals in `ScalperConfluenceGateTest` — **all correct.** FU2 precedents (`indicator-alignment` tag,
+  parity firewall, 8-literal fan-out) all real.
+- Minor cite drift only: `TickwiseGoldenRunner.entryLevels` HELPER is L281-287 (plan said L266-273); the
+  STAMP sites L166/206/235 are correct. Fixed.
+
+### B. Citation defect — STALE GAP-SOURCE LINE NUMBERS (the one systemic problem)
+Every `docs/strategy-audit/*.md` line number is **stale**, pointing ~10-25 lines above the actual
+exit/target/SL row (the audit `.md` files were expanded with v2/v3 rows after the plan captured them).
+The content→feature mapping is correct; the numbers are not. A prominent warning was added under §1 and
+the load-bearing cites were corrected. Spot-checked corrections (find the rest by ROW TEXT):
+- two-candle.md: Target **L43** (not L28); VWAP-with-volume exit **L44** (not L29); PSAR/ST trail **L45**
+  (not L30). connect-the-dots.md: Target **L40** (not L28); VWAP-with-volume exit **L42** (not L30);
+  structural-stop row **L43** (not L31); RSI-book ladder **L41** (not L29).
+- gap-theory.md: ST-level SL **L24/L49** (not L18); targets **L38/L50** (not L20/L28); 5-pt trail
+  **L39/L50** (not L29); §3.8 "abandon unfilled gap ~40 min on volume" **L51** (not L19).
+- hero-zero.md: index-point SL **L25/L42** (not L26); 10%-of-profits/₹1-2k **L43** (not L19/L27).
+- risk-framework.md: scale-in/ladder **L11/L60** (not L20); RR/no-take_profit **L55** (not L17);
+  per-index point values **L73** (not L50). market-movers.md: per-stock target **L32** (not L30).
+- trend-change.md: L24/L25 are timing/morning-print rows, NOT the SL-leeway/ride-to-VWAP rows (find by text).
+- session-additions: file is `session-additions-and-manual-coverage.md`; spot-OI-bar S/R row **L57** (not L51).
+
+### C. Soundness gaps in the proposed CODE (each would not compile / not work) — CORRECTED
+1. **§3.1-C volume accessor** used `candle(index).volume()` (a **`long`**, `EngineCandle.java:17`) with
+   `.compareTo(...)` → won't compile. Fixed to `bank.builtin("volume", index)` (returns BigDecimal,
+   `IndicatorBank.java:124`); `signalExit` already has the bank, no signature change.
+2. **§3.1-D `bank.builtinOrAlias(...)` does not exist.** `IndicatorBank` has `valueAt(alias,i)` +
+   `builtin(name,i)` only. Replaced with an `indicatorLevel` resolver note.
+3. **§3.1-D `indicator` trail + the intrabar path.** `trailing(...)` is also reached via `trailingOn`
+   from `evaluateIntrabarLevels`, which has NO bank → the "signature widen confined to one method" claim
+   is wrong. Flagged + Open Point #9 (bar-close-only vs thread-the-bank).
+4. **§3.3 SUPERTREND_LEVEL.** (a) the private `structuralStop(...)` lacks the bank → set the anchor inline
+   in `evaluate`; (b) the `supertrend` alias is **direction-only (±1)**, not a price → a NEW ST-LINE
+   indicator is the gating prerequisite (Open Point #10); (c) the "also works in premium replay /
+   recommend BOTH" claim is false — `OptionsPremiumReplay.exitRules` ignores non-premium-pct trails and
+   the index level is meaningless on the premium leg (Open Point #11). §3.3 rewritten.
+
+### D. Completeness gaps — ADDED
+5. **§3.6** is **zero-Java** — the `entry-candle-stop` tag is already fully wired; only a new variant YAML
+   is needed. The plan implied machinery work. Corrected.
+6. **§3.7 profit_slice** omitted two concrete steps: `PositionSizer.Inputs` has NO PnL field (must add
+   one) and the only call site is `EmissionGuard.suggestedQty` (live-only) — thread `dayPnl` from the
+   paper layer through it; enumerate the constructor-arity fan-out. Parity-safe (live-only). Added.
+7. **§6.1 contract-capture is overcautious.** The strategy JSON-schema is NOT a springdoc DTO (`/schema/v1`
+   returns a `String`, `/validate` takes an untyped body) → adding an exit-rule param/basis does NOT drift
+   `/v3/api-docs` and needs no `ContractCaptureTest` re-capture. Corrected.
+8. **`StrategyCompiler` needs no code change** — it copies all exit params generically (L58-62). The plan
+   listed a compiler change; clarified it's schema + consumer + test only.
+9. **Schema for §3.1-D/§3.2-i** must add the `trailing_stop` `points`/`indicator` enum values AND an
+   `alias` param (today `additionalProperties:false` rejects `alias`), and widen the `anyOf`. Added to §3.1-D.
+
+### E. Parity assessment — PASS
+- The [P]/[S] classification is correct after the fixes. §3.1-C/D and §3.2-i touch `ExitEvaluator`/schema
+  (run on the golden harness) → correctly [P] with new FEATURES; the 5 frozen goldens declare none of the
+  new types so they stay byte-identical (re-run, assert, do NOT regenerate). §3.3/§3.5/§3.6/§3.8 are
+  live-seam-only → parity-safe by the firewall, correctly tag-gated default-OFF + seam-test triple.
+  §3.1-A/B/§3.7 are [S] (pre-existing engine types / advisory sizing, parity-neutral). `GoldenDeterminismTest`
+  + `BacktestParityTest` would still pass. **No [S] mis-marked as signal-moving; no [P] missing its tag/golden.**
+- One clarification added to §2.5: the new golden FEATURE fixtures must be **pure-engine (non-scalper)**
+  YAMLs, and the `trailing-indicator` fixture's `alias` must be a declared, value-bearing indicator
+  (not `supertrend`, which is direction-only).
+
+### F. Sequencing — SOUND
+Schema → engine types (with goldens) → YAML variants is the right order; S/R feed before its consumer;
+equity universe before per-stock volume exit; SPAN before any sell-leg (none in v1). The Supertrend-LINE
+indicator (Open Point #10) is a NEW prerequisite that must precede §3.3 — added to the dependency set.
+
+---
+
+## Audit pass 2 findings
+
+INDEPENDENT re-audit. I re-opened every load-bearing source file myself (not trusting pass-1's
+transcript) and re-derived the citations, re-checked the parity firewall end-to-end, confirmed the pass-1
+corrections, and hunted for what both the author and pass-1 missed. **Verdict: sound-with-open-points** —
+ready to execute once the two NEW gaps below and the four pre-existing Open Points are folded into the
+PR-3/PR-4 dev notes (no design rework; both new gaps are within already-flagged areas).
+
+### A. Re-verified citations (opened the files, line-by-line) — ALL CORRECT
+- `ExitEvaluator.java`: `entryLevels` L50-56, `evaluateIntrabarLevels` L86-121, `trailingOn` L133-161,
+  `evaluate` L164-193, `level` L195-222, `levelDistance` L225-248 (bases L235-246), `trailing` L250-305
+  (signature `(EngineSeries,Position,int,ExitRuleSpec,BigDecimal)` — **no bank**, L250-255; premium_pct
+  activate_at L266-277; atr_multiple L288-303), `timeStop` L307-328, `signalExit` L330-338 (already takes
+  `IndicatorBank bank`), `favorableExtreme` L340-351 — **all exact.**
+- `IndicatorBank.java`: `valueAt` L104-109 (throws on unknown alias via `bound()` L92-94), `builtin`
+  L120-128 (`volume` → `BigDecimal.valueOf(candle.volume())` L124) — **exact.** `BarValues.java`:
+  `valueAt`/`builtin` ports + `isBuiltin(name)` L20-23. `EngineCandle.volume()` is **`long`** (L17) —
+  confirms pass-1 fix C.1.
+- Schema `strategy-schema-v1.json`: `exitRule` L362-446, `trailing_stop` L382-405 (basis enum L393
+  `[premium_pct, atr_multiple]`, anyOf L399-402, `additionalProperties:false` L390), `time_stop` L406-425,
+  `signal_exit` L426-444 (params `additionalProperties:false` L434, `required:[rule]` L435), `levelParams`
+  L447-456 (basis enum L452), `position_sizing` method enum L468, optimize regex L715 (admits
+  `exit_rules[type=...].params.<lc>`) — **all exact.**
+- `ScalperConfig.java`: record L36-52, `StructuralStop` enum L55-64 (8 values), `from` L101-157, anchor
+  chain L136-151, **`entry-candle-stop`→`ENTRY_CANDLE` already wired L149-150**, OPENING_*/VWAP consts
+  L72-76 — **exact** (confirms §3.6 zero-Java).
+- `ScalperConfluenceGate.java`: LIVE-only javadoc L29-32, `Decision` L71-87 (`structuralStop` L76),
+  `evaluate` L100-280, per-tag stop set L166/178/210/228/244, private `structuralStop` L288-302 (**no
+  bank**), ENTRY_CANDLE returns `candle(index).low()/.high()` L293-295, `chart` reads
+  `valueAt(SUPERTREND).signum()` L305-307 (direction-only) — **exact** (confirms pass-1 C.4).
+- `SignalEngine.java`: `emitEntry` L573-604, structuralStop override L587-589, `target` L590, suggestedQty
+  L605-613 (call L608-610). `EmissionGuard` is an **interface** (SPI), `suggestedQty` sig L31-36.
+  `OptionsPremiumReplay.exitRules` L262-296 (trailing reads `activate_at`/`trail_by` only). `PositionSizer`
+  switch L28-61, `premium_budget` L36-44, `Inputs` L18-19 (no PnL). `GoldenDeterminismTest.FEATURES` =
+  exactly 5 L33-36. `TickwiseGoldenRunner.entryLevels` helper L281, `intervalDuration` L354. 8
+  `new ScalperConfig(...)` literals in the seam test — **all exact.**
+- Gap-source staleness re-verified by ROW TEXT: `two-candle.md` Target **L43**, VWAP-with-volume **L44**,
+  PSAR/ST-trail **L45**; `connect-the-dots.md` Target **L40**, RSI-book ladder **L41**, VWAP-with-volume
+  **L42**, structural-stop **L43** (the row itself says "add `entry-candle-stop`/`two-candle-pattern`
+  tag" — confirms §3.6). `session-additions-and-manual-coverage.md` is the real filename. Pass-1's
+  corrected numbers match; the original plan numbers are ~10-13 lines high. **Defect is real and pass-1's
+  "find by row text" remedy is correct.**
+
+### B. Pass-1 corrections — CONFIRMED RIGHT, no new error introduced
+All four soundness fixes (C.1 volume accessor, C.2 no-`builtinOrAlias`, C.3 intrabar bank, C.4 SUPERTREND
+direction-only + private-helper-lacks-bank + premium-replay-ignores) and all four completeness fixes (D.5
+zero-Java §3.6, D.6 profit_slice Inputs+call-site, D.7 no springdoc drift, D.8 no StrategyCompiler change)
+are each grounded in the actual code. The springdoc claim is correct (the schema is served as an opaque
+`String`/untyped body, not a DTO). The `StrategyCompiler` "copies params generically" claim is consistent
+with how `levelDistance`/`signalExit` read `params.get(...)` reflectively. **No pass-1 fix is wrong.**
+
+### C. NEW gaps pass-1 AND the author both missed (corrected in place)
+1. **§3.7 call-site fan-out understated (real, moderate).** Pass-1 D.6.2 wrote "the only call site is
+   `EmissionGuard.suggestedQty`". That is wrong twice: (a) the LIVE sizing call is in `PaperEmissionGuard`
+   (the impl), not the `EmissionGuard` interface; (b) there is a SECOND production `PositionSizer.Inputs`
+   constructor — **`ReplayEngine.size` (`ReplayEngine.java:283-287`), the deterministic backtest path** —
+   plus 6 `ExitEvaluatorTest` literals. Adding a 5th `Inputs` field is a constructor-ARITY break that MUST
+   update `ReplayEngine` too. Parity still holds (ReplayEngine passes null/zero `dayPnl`; `profit_slice`
+   is never a backtest config), but the fan-out enumeration in §3.7 was incomplete. **Corrected** in the
+   §3.7 pass-1 note (added item 3).
+2. **§3.1-D `trailing(...)` lacks the bank on the PRIMARY path too (real, compile-blocking).** Pass-1
+   Open Point #9 framed the missing bank as ONLY an intrabar problem. But the primary `trailing(...)`
+   signature itself (`ExitEvaluator.java:250-255`) takes no `bank` — so the proposed `indicator` case that
+   references `bank` will not compile until `trailing`'s own signature is widened and the `:182` call site
+   passes the bank. It's a small change (`evaluate` has the bank), but it IS a signature change, not a
+   pure in-body addition. **Corrected** the §3.1-D soundness note (item 2) and Open Point #9.
+
+### D. Parity re-assessment — PASS (independently re-derived)
+Every signal-affecting change is correctly handled: §3.1-C (`min_volume`), §3.1-D (`points`/`indicator`
+trailing) and §3.2-i (`points` level) are **[P]**, touch `ExitEvaluator`/schema (which DO run on the golden
+harness), and each carries a NEW generate-once FEATURES fixture — the 5 frozen goldens declare none of the
+new types/bases so a new `switch` case / optional param is inert (re-run, assert byte-identity, never
+regenerate). §3.3/§3.5/§3.6/§3.8 are live-seam-only (`ScalperConfluenceGate` never runs on the
+golden/parity harness — the firewall) → correctly **[P] tag-gated default-OFF + seam-test triple**, can't
+perturb the goldens. §3.1-A/B/§3.7 are **[S]** (pre-existing premium-pct engine types already golden-
+covered; advisory sizing stamped outside the frozen breakdown). **The profit_slice `Inputs` field (new
+gap C.1) is the only thing that newly touches the deterministic `ReplayEngine` — and it is parity-safe
+precisely because the new field defaults null/zero there and `profit_slice` is never a backtest method.**
+No [S] is secretly signal-moving; no [P] is missing its tag/golden. `GoldenDeterminismTest` +
+`BacktestParityTest` stay green.
+
+### E. Sequencing & automatability — SOUND
+The Open-Point deferrals are right-sized: §3.2-ii S/R engine (own plan), §3.9 scale-in ladder (breaks the
+single-active-entry invariant — own plan), §3.4 per-stock volume exit (equity-gated), the RSI-book /
+hourly-erosion partials (need a partial-exit primitive the engine lacks — `ExitEvaluator` exits the WHOLE
+position, confirmed). The ST-LINE indicator (Open Point #10) is correctly the gating prerequisite for §3.3
+and the `trailing-indicator` golden. No dependency is mis-ordered; no item is over-claimed as automatable
+(every "Automatable: true" in the gap-source rows I spot-checked maps to a real, in-scope primitive).
+
+### F. Final readiness verdict
+**sound-with-open-points — implementation-ready.** The architecture, the parity design, and the PR
+breakdown are correct and the citations (after pass-1's staleness warning + the two pass-2 corrections)
+resolve to real code. Before coding: (1) fold the §3.7 `ReplayEngine`/`PaperEmissionGuard` fan-out and the
+§3.1-D primary-path bank-widen into the PR-4/PR-3 dev notes; (2) resolve Open Points #9 (bank threading
+scope), #10 (ST-LINE indicator: build or drop §3.3 from v1), #11 (no backtest rep for structural trails),
+plus the owner-gated #2/#3/#5 (point bands, SL-leeway, exit volume floor). None require design changes —
+they are build-time decisions already enumerated.

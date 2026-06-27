@@ -206,12 +206,27 @@ config flag controls whether that fallback trades or skips — see Open Points #
 Add a window-returning catalog method so the band filter runs client-side over the listed strikes:
 
 ```java
-// OptionContractSelector.Catalog
+// OptionContractSelector.Catalog  (currently has expiriesOnOrAfter + nearestStrike, L46-51)
 /** The listed strikes for (underlying, expiry, optionType) within ±window steps of the ATM,
  *  ascending by |strike − spot|. window<=0 ⇒ just the single nearest (back-compat). */
 List<OptionContract> nearestStrikes(
     String underlying, LocalDate expiry, String optionType, BigDecimal spot, int window);
 ```
+
+> **[Audit pass 1] Adding to the `Catalog` interface breaks every implementer until they provide it.**
+> Implementers are `JdbcExpiredContractCatalog` (the real impl, below) AND the anonymous `Catalog`
+> fakes in tests — at minimum `OptionsPremiumGoldenTest.CATALOG` (`OptionsPremiumGoldenTest.java:52-67`)
+> and any fake in `OptionContractSelectorTest` / `OptionsPremiumReplayTest`. Each MUST get a
+> `nearestStrikes(...)` body or the test source won't compile. Give the GoldenTest fake a trivial
+> ladder (e.g. return the nearest strike ±window×500 around its existing nearest-500 ATM) so the
+> NO-BAND fixture — which never calls `nearestStrikes` — stays byte-identical.
+>
+> **[Audit pass 2] Exact count of `Catalog` fakes to patch: FIVE.** Verified `new Catalog() {…}` literals:
+> `OptionsPremiumGoldenTest.java:53`, `OptionContractSelectorTest.java:29`, and **THREE** in
+> `OptionsPremiumReplayTest.java` (L51, L118, L397). Each needs a `nearestStrikes(...)` body. Only the
+> GoldenTest + any replay fake whose fixture you flip to band-enabled need a non-trivial ladder; the rest
+> can `return List.of(nearestStrike(...).orElseThrow())` (or an empty list) since their tests never enable
+> the band. (`select(...)` itself is unchanged, so non-band test paths compile + pass untouched.)
 
 ```java
 // JdbcExpiredContractCatalog
@@ -265,8 +280,18 @@ public Optional<OptionContract> selectInBand(
 ```
 
 **File 3 — `OptionsPremiumReplay`.**
-- Read the band knobs from config (the `min_premium_inr` precedent), **backtest-only**, default = the
-  live `ScalperConfig.PREMIUM` band per underlying so a backtest matches live by default:
+- Read the band knobs from config (the `min_premium_inr` precedent), **backtest-only**, with the band
+  `lo`/`hi` supplied IN the backtest config (so a backtest matches live by setting them to the same
+  numbers as the live `ScalperConfig.PREMIUM` map). **[Audit pass 1] `ScalperConfig.PREMIUM` is `private
+  static final` and lives in `strategy-signal-service` (`ScalperConfig.java:94`) — it is NOT on
+  `backtest-service`'s classpath, so the replay CANNOT reference it as a default.** Two honest options:
+  (a) require `backtest.strike_premium_band.lo`/`.hi` explicitly when `enabled` (recommended — the value-
+  verify config sets them); (b) duplicate a tiny per-underlying default map in backtest-service keyed by
+  the option-root (the same N/BN/SENSEX numbers), accepting the documented duplication. The pseudocode
+  below uses `dec(b,"lo")`/`dec(b,"hi")` straight from config, so it already takes (a); the prose "default
+  = the live band" is only literally true if the config carries those numbers. Pick (a) and make `lo`/`hi`
+  REQUIRED-when-enabled (return `DISABLED` + a warn-log if either is null, so a half-filled band never
+  silently selects on a one-sided bound).
 
 ```java
 /** Backtest premium-band selection knobs (backtest-only; not in strategy-schema/v1). Mirror the live
@@ -305,6 +330,20 @@ where `premiumAtEntry(c, entryBar)` is a tiny helper that pulls the candidate's 
 instant (a one-bar read window `[entryBar, entryBar+1m)` is enough). **Crucially the legacy
 `else`/no-band branch is byte-identical to today**, so the existing `OptionsPremiumGoldenTest` (which
 runs no band) stays green unchanged.
+
+> **[Audit pass 2] `priceLeg`/`replayLegs` have NO `config` parameter — the band must be threaded, not
+> read in-place.** `premiumBand(config)` cannot be called inside `priceLeg(...)` because neither
+> `priceLeg` (`OptionsPremiumReplay.java:486-496`, params: seq/underlying/underlyingSymbol/leg/spec/
+> rules/budgetInr/minPremiumInr/maxLots/strikeRef) nor its caller `replayLegs(...)` (L342-353) carries
+> the `JsonNode config`. The `min_premium_inr`/`max_lots` precedent is exactly the fix: resolve
+> `premiumBand(config)` ONCE at the public entry method (the `replayLegs(...)` invocation site at L104-115,
+> right next to `minPremiumInr(config)`/`maxLots(config)` at L112-113) and thread the resulting
+> `PremiumBand` as a NEW parameter through `replayLegs(...)` (L342-353) → `priceLeg(...)` (the call sites
+> at L363-365 and L452). So `priceLeg` receives `band` as an argument (like `minPremiumInr`), it does not
+> compute it. The pseudocode above uses `band.*` correctly; the `premiumBand(JsonNode)` resolver in File-3
+> is invoked at the entry method, NOT inside `priceLeg`. (Net: +1 method param on `replayLegs` + `priceLeg`,
+> +1 resolve at L104-115 — a 3-line plumbing edit, the same fan-out the [Audit pass 1] record-fan-out notes
+> describe, applied to the two private methods.)
 
 **Step 4 — the S22-operative band swap (`completeness-sweep.md:15`, `session-additions:39`).**
 Because the default band derives from `ScalperConfig.PREMIUM`, swapping that map ALSO corrects the live
@@ -350,13 +389,22 @@ BigDecimal recenterWidth,     // default 7   (the wider ATM±width after a >1% m
 
 - **`ScalperConfig`** — add `boolean requireOiWindowRecenter` (record field + constructor) and parse
   `tags.contains("oi-window-recenter")` in `from(...)` (alongside L153 `oi-cross-filter`). Default OFF.
-- **`MarketOiClient.oi(...)`** — thread an effective window: compute `movedPct = |spot − sessionOpen| /
-  sessionOpen × 100`; if recenter is armed AND `movedPct ≥ recenterMovePct`, request the OI analytics
-  with `width = recenterWidth` (ATM±7) instead of the base width. The trending/spurt/active-strikes
-  endpoints must accept a `window`/`strikes` param for this to bite — **see the dependency in §6**: if
-  the market-data analytics endpoints do not yet take a strike-window param, that param must be wired
-  first (read-only [S] addition there), then `MarketOiClient` passes it. The session-open spot is
-  available from the chart/engine context (the day's first bar) or a `/quote` read.
+- **`MarketOiClient.oi(...)` (and its caller `context(...)`)** — thread an effective window: compute
+  `movedPct = |spot − sessionOpen| / sessionOpen × 100`; if recenter is armed AND `movedPct ≥
+  recenterMovePct`, request the OI analytics with `width = recenterWidth` (ATM±7) instead of the base
+  width. **[Audit pass 1] Wiring is one level deeper than "`oi(...)`":** `oi(String underlying, LocalDate
+  expiry, LocalDate tradeDate)` (`MarketOiClient.java:267`) is called by `context(...)` (L80-93, itself
+  called from `ScalperConfluenceGate.evaluate` L191-192) — and `oi()`'s current signature carries NO spot
+  / sessionOpen / width. So the executor must (i) widen `oi(...)`'s params (or pass the recenter inputs
+  down through `context(...)`), (ii) thread `width`/`recenterWidth` onto the `/options/spurt`,
+  `/options/active-strikes`, `/options/trending` `get(...)` URI builders (L276-318), AND (iii) supply
+  `spot` + `sessionOpen` from the seam (the engine bar close + the first-bar close). `active-strikes`
+  already passes a numeric param (`buckets=SERIES_WINDOW=20`, L302) — that is a TIME bucket count, NOT a
+  strike window, so it does not satisfy the recenter; the strike-window param is genuinely new on all three.
+  The trending/spurt/active-strikes endpoints must accept a `window`/`strikes` param for this to bite —
+  **see the dependency in §6**: if the market-data analytics endpoints do not yet take a strike-window
+  param, that param must be wired first (read-only [S] addition there), then `MarketOiClient` passes it.
+  The session-open spot is available from the chart/engine context (the day's first bar) or a `/quote` read.
 - The recenter decision must be **deterministic on the live bar** (no wall-clock beyond the bar instant)
   so the persisted confluence replays consistently; the session-open anchor is the first bar of the IST
   session, already known to the seam.
@@ -381,15 +429,30 @@ different signal").
   (sideLtp − otherLtp)/otherLtp × 100`) to the chain/premium analytics already computed by
   `OiPremiumService` / the chain endpoint — a thin read-only field, no new capture. `MarketOiClient.macro`
   maps it into `ScalperGateContext.Macro` (new nullable fields, conservative null on absence).
+  **[Audit pass 1] `Macro` is a record (`ScalperGateContext.java:59-68`) — adding a field forces updating
+  the one `new Macro(...)` constructor in `MarketOiClient.macro` (`MarketOiClient.java:396-397`, 9 args
+  today) AND every direct `new Macro(...)` in tests (e.g. the `macroIv(...)` helper + `BULL_MACRO` literal
+  in `ConnectTheDotsScorerTest`).** Prefer the single `premiumSkewPct` field (one operand, signed) over two
+  LTP fields — fewer call-site edits, and the skew is what the dot actually reads.
 - **`ConnectTheDotsScorer`** — add a default-OFF dot. Because adding a scored dot to the *default* path
-  changes the aggregate denominator for every bar (the exact failure FU2 §8.2 calls out for a Dow dot),
-  the skew dot must be **conditional**: only added to the `dots` list when the strategy arms it. The
-  clean way that keeps `score(...)`'s positional signature stable is to thread a small flags object (or
-  reuse the existing `ScalperOiProps`/a new boolean param) so an UNARMED strategy's dot list + aggregate
-  are byte-identical to today. Recommended: add `boolean premiumSkewDot` to the `score(...)` call via a
-  new overload (the base overload delegates with `false`), and inside:
+  changes the aggregate denominator for every bar (the exact failure the FU2 plan flags for a Dow dot —
+  FU2 §2.4 Open Point + §5.2 "the aggregate over 18 dots, denominator 19.6"; adding a 19th dot moves the
+  denominator and breaks the goldens — see FU2 L53/L649), the skew dot must be **conditional**: only added
+  to the `dots` list when the strategy arms it. The clean way that keeps `score(...)`'s positional
+  signature stable is to thread a small flags object (or reuse the existing `ScalperOiProps`/a new boolean
+  param) so an UNARMED strategy's dot list + aggregate are byte-identical to today. Recommended: add
+  `boolean premiumSkewDot` to the `score(...)` call via a new overload (the base 6-arg overload delegates
+  with `false` — this keeps all ~25 existing `ConnectTheDotsScorerTest` call sites + the
+  `ScalperConfluenceGate.score(...)` call at L250-252 compiling). **The `if (premiumSkewDot)` block MUST be
+  placed AFTER the `iv_pair` add (L97-98) and BEFORE the aggregate loop (L100-109)** so the unarmed dot
+  list is positionally identical; `corroboratingCue(dots, ce)` is a NEW private helper that scans the
+  already-built `dots` for a supporting `trending_cross`/`oi_spurt` on the side. Inside:
 
 ```java
+// [Audit pass 1] FIXED ORIENTATION: the producer MUST define premiumSkewPct = (CE_atm − PE_atm)/PE_atm
+// × 100 (positive ⇒ CE richer). The OiPremiumService ATM row already carries ce()/pe() (PremiumRow,
+// OiPremiumService.java:20,66) so this is (atm.ce()-atm.pe())/atm.pe(). The consumer sign test below
+// DEPENDS on that orientation: CE-side "richer" ⇔ skew>0, PE-side "richer" ⇔ skew<0.
 if (premiumSkewDot) {
   // A WARNING dot: supports (good) when the traded side is NOT the richer side, OR it is richer but a
   // positive cue (e.g. trending_cross / oi_spurt for the side) corroborates. "Higher-premium side with
@@ -408,7 +471,8 @@ if (premiumSkewDot) {
 
 **PARITY plan.** New tag `premium-skew`, default-OFF. Because the dot is added to the list ONLY when
 armed, the unarmed aggregate is bit-identical (no denominator change) — this is the load-bearing parity
-property (FU2 §8.2's warning is satisfied by conditional-add, not unconditional-add). A new golden
+property (the FU2 plan's "a Dow/extra dot would change the scorer denominator and break goldens" warning
+is satisfied by conditional-add, not unconditional-add). A new golden
 variant is needed only when armed AND a scalper golden harness exists (none today) — the proof is the
 scorer unit test (armed vs unarmed aggregate) + the `ScalperStrategyLoadTest` OFF tripwire. The dot
 also rides the `dots[]` side-channel → `scalper_detail` → FE chip row for free (same as every FU2 dot).
@@ -458,11 +522,14 @@ also rides the `dots[]` side-channel → `scalper_detail` → FE chip row for fr
   SL anchor below the combined VWAP for a 2-leg ATM straddle (generate-once).
 
 ### 5.2 Unit — live scalper ([P], both tag-gated)
-- **`ScalperOiPropsTest`** (if present, else add) — the two new recenter props default 1.0 / 7 and honour
-  partial YAML override (the existing prop-default test shape).
-- **`ScalperConfigTest` / `ScalperStrategyLoadTest`** — assert `requireOiWindowRecenter` and
-  `requirePremiumSkewDot` are **OFF for every seeded strategy** (the FU2 §5.3 tripwire) — proves no YAML
-  arms either tag.
+- **`ScalperOiPropsTest`** (exists — `services/strategy-signal-service/.../scalper/ScalperOiPropsTest.java`)
+  — the two new recenter props default 1.0 / 7 and honour partial YAML override (the existing
+  prop-default test shape). **[Audit pass 1]** Adding 2 record fields to `ScalperOiProps` also forces
+  updating `ScalperOiProps.defaults()` (`ScalperOiProps.java:77`, currently 11 nulls → 13) + the compact
+  constructor's default-fill block (L57-73) + EVERY direct `new ScalperOiProps(...)` literal in tests.
+- **`ScalperStrategyLoadTest`** (exists; there is **no** `ScalperConfigTest` — the tag-parse assertions
+  live in the load test) — assert `requireOiWindowRecenter` and `requirePremiumSkewDot` are **OFF for
+  every seeded strategy** (the FU2 §5.3 load-test tripwire) — proves no YAML arms either tag.
 - **`ConnectTheDotsScorerTest`** — `premiumSkewDotAbsentWhenUnarmedKeepsAggregateIdentical` (armed=false
   → dot list size + aggregate bit-identical to the pre-change baseline — the parity property);
   `premiumSkewDotLowersAggregateWhenChasingRicherSideNoCues`;
@@ -504,6 +571,15 @@ also rides the `dots[]` side-channel → `scalper_detail` → FE chip row for fr
 2. **Per-side ATM premium field (gates `per-side-premium-skew`).** The `premiumSkewPct` analytics field
    must exist before `MarketOiClient.macro` can map it and the scorer dot can read it. Thin read-only
    add to the existing premium/chain analytics ([S], market-data) → then the scorer dot ([P]).
+   **[Audit pass 2] `macro(...)` ALREADY reads `/options/chain` (`MarketOiClient.java:387-392`, the
+   `deriveIvPair` call) — and `OiPremiumService` already computes the ATM `PremiumRow.ce()/pe()`
+   (`OiPremiumService.java:20,63-69`). So the cheapest path is to surface `premiumSkewPct` (or
+   `ceAtmLtp`/`peAtmLtp`) ON THE SAME `/options/chain` response the macro already fetches and derive it in
+   `deriveIvPair`'s sibling, NOT a new endpoint/round-trip. If `/options/chain` does not already carry the
+   per-strike LTP the skew needs, the read-only add lands there (one field, one response key — generic
+   `Map<String,Object>`/extra-key returns do NOT drift the springdoc contract per CLAUDE.md, so no
+   ci-contracts break). This trims dependency #2 from "new analytics field + new read" to "new key on an
+   existing read".
 3. **`strike-premium-band-backtest` is self-contained** — it needs only the existing
    `CandlePremiumReader` + `expired_contracts`; no upstream feed. It can land first and independently.
 4. **Band-swap ordering.** The `ScalperConfig.PREMIUM` S22 swap is a live behaviour change; land the
@@ -602,3 +678,225 @@ do it first.
    seam + scorer unit tests + the OFF tripwire (recommended, matches FU2); (b) invest in a scalper golden
    harness (large, separate). Recommend (a) for this stream; if a harness is ever built, both [P] changes
    get an additive new FEATURES variant, never a mutation of the 5 frozen engine goldens.
+
+9. **[Audit pass 1] Backtest band default source.** `ScalperConfig.PREMIUM` is `private` + in
+   strategy-signal-service (not on backtest-service's classpath), so the replay cannot "default to the
+   live band map" by reference (§3.1 File-3). **Options:** (a) make `backtest.strike_premium_band.lo`/`.hi`
+   REQUIRED-when-enabled (recommended — the value-verify config sets them, no duplication); (b) duplicate
+   a small per-underlying default map in backtest-service. Pick (a). Confirm before PR-1.
+
+10. **[Audit pass 1] `min_premium_inr` floor vs the band lower bound.** `priceLeg` already SKIPS a leg
+    whose entry premium `< min_premium_inr` (`OptionsPremiumReplay.java:546-548`, default ₹1). The band
+    `lo` (e.g. 100/150) is a *stricter* floor. Confirm the band path's in-band filter runs on the SAME
+    `entryPremium` the floor uses, and that the band does NOT bypass the `min_premium_inr`/`max_lots`
+    degenerate-sizing guards (those still apply AFTER the in-band strike is chosen). Recommended: the band
+    is an additional ATM/ITM+premium filter on candidate selection; the existing floor/cap stay as the
+    post-selection sizing guards (no change to L546-560 logic).
+
+11. **[Audit pass 1] `oi(...)` signature widening for the recenter is a cross-method change, not a
+    one-liner.** Threading the recenter width requires editing `MarketOiClient.oi(...)` (L267) + its caller
+    `context(...)` (L80-93) + the seam call (`ScalperConfluenceGate.java:191-192`) to pass `spot` +
+    `sessionOpen`, PLUS adding the strike-window query param to 3 `get(...)` URI builders (L276-318). The
+    `buckets=20` on active-strikes is a TIME-bucket count, NOT a strike window — it does not satisfy the
+    recenter. Confirm with the owner whether the market-data side already exposes a strike-window param
+    (Open Point #4) before estimating PR-4 — the wiring is S–M only if the param already exists.
+
+---
+
+## Audit pass 1 findings
+
+Pass 1 (2026-06-27) opened every cited source file and the disposition/audit rows. **Verdict:
+sound-with-open-points** — the plan is implementation-ready after the inline corrections below. All
+file:line/method/yaml/test citations were verified accurate (one was loose, fixed); the parity
+classification is correct and the two [P] changes are properly tag-gated default-OFF; the [S] split is
+right. The corrections add the constructor/interface fan-out steps the executor would otherwise hit at
+compile time, tighten two wiring imprecisions, and add 3 open points.
+
+### Citations — all verified, 1 loose (fixed)
+- ✓ `OptionsPremiumReplay.priceLeg` L486-510, `strikeSpot` L500, `min_premium_inr` floor L546-548,
+  `max_lots` cap L558-560, `minPremiumInr(config)` L309-312 — **all exact.**
+- ✓ `OptionContractSelector.select` L73-90, `Catalog.nearestStrike` L49-51, javadoc "nearest-listed ATM
+  strike" L11-13; `JdbcExpiredContractCatalog.nearestStrike` `ORDER BY abs(strike-?) LIMIT 1` L46 — exact.
+- ✓ `CandlePremiumReader.premiumSeries` L38-47, `premiumAt` L54-58 — exact.
+- ✓ `OptionsPremiumGoldenTest` 3-leg fixture: TP +3767.76 / SL −2987.51 / signal-exit +401.33,
+  200000→201181.58, fake CATALOG rounds spot to nearest 500 (L62-65) — exact.
+- ✓ `StrikePicker.pick` L74-109, premium-band reject L93-95, `ScalperConfig.PREMIUM` L93-98 (NIFTY
+  100–250 / BANK 250–400 / SENSEX 300–800), the "backtest selector ignores the band" comment L89-92 — exact.
+- ✓ `MarketOiClient.oi` L267-336, `SERIES_WINDOW=20` L49, `macro` L351-398, `ceIvAvg6`/`peIvAvg6` L397.
+- ✓ `ConnectTheDotsScorer.score` L63-118 adds **18** dots L74-98 (counted), aggregate L100-109, validity
+  L114-115, `iv_pair` L97, `iv_rank` L94 — exact.
+- ✓ `ScalperOiProps.openHighWindow` default 3 L52; `ScalperConfig.from` `oi-cross-filter` L153, canonical
+  `new ScalperConfig(...)` L154-156; **8** `new ScalperConfig(...)` literals in `ScalperConfluenceGateTest`
+  (L44,49,56,62,68,74,81,87) — exact count.
+- ✓ `ScalperGateContext.Macro` L59-68 (carries `ceIvAvg6`/`peIvAvg6`, no per-side premium).
+- ✓ `GoldenDeterminismTest.FEATURES` + `BacktestParityTest.FEATURES` = {ema-crossover,
+  optional-indicator-activation, btst-preclose, exit-intrabar, context-series} — **no scalper / no
+  options strategy** (confirms the [S] parity firewall).
+- ✓ `OiPremiumService` exists and already computes per-strike `ce()`/`pe()` LTP + ATM strike
+  (`PremiumRow` L20, ATM L66) — the skew operand is a thin read-only add, as claimed.
+- ✓ All disposition rows exact: `disposition/two-candle.md:23`, `disposition/open-high-low.md:14,21`,
+  `disposition/hero-zero.md:18,22,32` (and the `:21` COVERED_FU2 scope note),
+  `disposition/intro-terminology.md:17`, `disposition/completeness-sweep.md:15`,
+  `disposition/session-additions-and-manual-coverage.md:39`, `disposition/straddle.md:24,34` (and `:21`
+  COVERED_FU1), `disposition/trending-oi.md:36`, `disposition/trend-change.md:37`.
+- ✓ The plan's careful split holds: `disposition/X.md:NN` = disposition row, bare `X.md:NN` = SOURCE
+  audit evidence. Verified `trend-change.md:43` (source) = the "no per-side-premium-skew warning (IV-pair
+  dot L97 is a different signal) … Automatable: yes" row, and `trending-oi.md:40` (source) = the
+  "Strike housekeeping … strikes fixed at atm_window width:3 (yaml:20); no <1%/>1% reset-to-ATM±7" row.
+  **Both correct** — not stale.
+- ✗→fixed **`ScalperConfigTest` does NOT exist** (§5.2): the tag-parse OFF-tripwire assertions live in
+  `ScalperStrategyLoadTest`. Corrected the cite; `ScalperOiPropsTest` DOES exist (the "(if present)"
+  hedge was removed).
+- ✗→fixed **"FU2 §8.2"** is not a real subsection (FU2 §8 is a flat "Open Points"). The
+  denominator-break warning IS real (FU2 L53/L649 + §2.4 Open Point + §5.2). Reworded to the substance,
+  not the bogus number. (FU2 §5.3 load-test and §5.6 optional-golden references ARE correct.)
+
+### Soundness corrections (would have failed at compile / mis-wired)
+- **`Catalog` interface fan-out** (§3.1 File-1): adding `nearestStrikes(...)` breaks every implementer —
+  `JdbcExpiredContractCatalog` AND the anonymous `Catalog` fakes in `OptionsPremiumGoldenTest` (L52-67),
+  `OptionContractSelectorTest`, `OptionsPremiumReplayTest` — each needs a body or the test source won't
+  compile. Added the explicit note + how to keep the no-band golden byte-identical.
+- **`ScalperOiProps` record fan-out** (§5.2): +2 fields ⇒ update `defaults()` (L77, 11→13 nulls) + the
+  compact constructor default-fill (L57-73) + all direct `new ScalperOiProps(...)` test literals. Added.
+- **`Macro` record fan-out** (§3.3): +1 field ⇒ update the one `new Macro(...)` in `MarketOiClient.macro`
+  (L396-397) + the `macroIv(...)`/`BULL_MACRO` test literals. Added; recommended the single signed
+  `premiumSkewPct` field over two LTP fields.
+- **`premiumSkewPct` orientation** (§3.3): the consumer sign test depends on a FIXED orientation
+  `(CE−PE)/PE` — pinned it in the pseudocode comment so producer + consumer agree (else the dot reads
+  the wrong side).
+- **scorer dot placement** (§3.3): the `if (premiumSkewDot)` block MUST sit after the `iv_pair` add and
+  before the aggregate loop (L97→L100) so the unarmed dot list is positionally identical; flagged
+  `corroboratingCue(...)` as a new helper.
+- **recenter wiring depth** (§3.2): `oi(...)` (L267) is one level below the seam — it has no spot/
+  sessionOpen/width today; the change must thread through `context(...)` (L80-93) + the seam call
+  (`ScalperConfluenceGate.java:191-192`) + 3 URI builders, and `buckets=20` is a TIME bucket, not a
+  strike window. Corrected the "`MarketOiClient.oi(...)`" one-liner to name the full call chain.
+- **band default classpath** (§3.1 File-3): `ScalperConfig.PREMIUM` is `private` + cross-module — the
+  replay cannot reference it; the band `lo`/`hi` must come from config. Corrected + added Open Point #9.
+
+### Parity — confirmed sound
+- The [S] backtest-selector change touches only `OptionsPremiumReplay`/`OptionContractSelector`/
+  `JdbcExpiredContractCatalog`, whose only golden is the dedicated `OptionsPremiumGoldenTest`; the engine
+  goldens carry no options strategy, so they are invisible to it. The legacy no-band `priceLeg` branch is
+  byte-identical → the existing 3-leg fixture re-runs green. **`GoldenDeterminismTest` /
+  `BacktestParityTest` stay byte-identical.**
+- Both [P] scalper changes are tag-gated default-OFF with conditional dot-add / conditional width-thread,
+  so an unarmed strategy's emitted signal + aggregate + `dots[]` are bit-identical. No shipped YAML arms
+  `oi-window-recenter` or `premium-skew`. The S22-band swap (PR-2) is correctly marked [P]-live-only
+  (changes the live StrikePicker, not the engine goldens) and isolated to its own owner-reviewed PR.
+
+### Completeness / sequencing — sound, with added open points
+- Dependency order is right: market-data strike-window param BEFORE `dynamic-strike-recenter`; per-side
+  ATM premium field BEFORE `per-side-premium-skew`; band-plumbing BEFORE the S22 band-swap; SPAN before
+  any short leg. `strike-premium-band-backtest` is correctly self-contained (only `CandlePremiumReader` +
+  `expired_contracts`).
+- Added Open Points #9 (band default source), #10 (`min_premium_inr` floor vs band `lo` interaction),
+  #11 (`oi(...)` cross-method widening cost).
+
+---
+
+## Audit pass 2 findings
+
+Pass 2 (2026-06-27, independent) re-opened the working tree, re-verified a SAMPLE of the citations from
+scratch (not trusting pass-1), re-checked the parity firewall end-to-end, confirmed pass-1's corrections
+are right and introduced no new error, and hunted for what both the author and pass-1 missed. **Verdict:
+sound-with-open-points** — implementation-ready after the ONE new inline soundness correction below
+(`priceLeg`/`replayLegs` band-threading). The parity story is solid; the package split is correct; the
+dependency order holds.
+
+### Citations independently re-verified (sample) — all exact
+- ✓ `OptionsPremiumReplay.priceLeg` L486-510, `strikeSpot` L500, `selector.select` L502-510,
+  `min_premium_inr` floor L546-548, `max_lots` cap L558-560, `minPremiumInr(config)` L309-312,
+  `maxLots(config)` L315-316, `dec(JsonNode,String)` helper L323 — **all confirmed open-and-read.**
+- ✓ `OptionContractSelector.select` L73-90, `Catalog.nearestStrike` L49-51, javadoc "nearest-listed ATM
+  strike" L12-13; `JdbcExpiredContractCatalog.nearestStrike` `ORDER BY abs(strike-?) LIMIT 1` L46, column
+  set `exchange,tradingsymbol,strike,lot_size` + `instrument_type` filter — the plan's `nearestStrikes`
+  SQL mirrors it exactly (bind order underlying/expiry/optionType/spot/limit is correct).
+- ✓ `CandlePremiumReader.premiumSeries` L38-47, `premiumAt` L54-58 (takes `OffsetDateTime`, matches
+  `entryBar.bucketStart()`).
+- ✓ `OptionsPremiumGoldenTest`: TP +3767.76 / SL −2987.51 / signal-exit +401.33, 200000→201181.58
+  (L124/132/141/145/151), fake `CATALOG` rounds spot to nearest 500 (L62-65), 3-leg fixture — exact.
+- ✓ `StrikePicker.pick` L74-109, premium-band reject L93-95; `ScalperConfig.PREMIUM` is `private static
+  final` L94, NIFTY 100–250 / NIFTY BANK 250–400 / SENSEX 300–800 L96-98, "backtest selector ignores the
+  band" comment L89-92 — exact. (Confirms pass-1's classpath/private correction + Open Point #9.)
+- ✓ `ScalperConfig.from` `oi-cross-filter` L153, canonical `new ScalperConfig(...)` L154-156 takes **16**
+  positional args; **8** `new ScalperConfig(...)` literals in `ScalperConfluenceGateTest` (L44/49/56/62/
+  68/74/81/87) and **NO other call sites** in the service (grep-confirmed) — pass-1's count exact.
+- ✓ `ConnectTheDotsScorer.score` is a **6-arg** method (L63-65); the **18** dots counted L74-98 (`iv_rank`
+  L94, `iv_pair` L97-98), aggregate L100-109; **25** `.score(` call sites in `ConnectTheDotsScorerTest`
+  + **1** in `ScalperConfluenceGate` (L251) — grep-confirmed. The new-overload + `score(...,false)`
+  delegation plan is sound (base 6-arg overload preserved → all 25+1 sites compile).
+- ✓ `ScalperGateContext.Macro` is a record L59-68 (9 fields); `new Macro(...)` in `macro()` L396-397 has
+  9 args. `ScalperOiProps.defaults()` L76-78 = `new ScalperOiProps(null ×11)`; compact-ctor default-fill
+  L57-73 fills **11** fields; `openHighWindow` default 3 L52 — pass-1's "11→13" fan-out exact.
+- ✓ `MarketOiClient.oi(...)` L267 carries NO spot/sessionOpen/width; called by `context(...)` L80-93
+  (which DOES have `chart`, but `oi()` does not); seam `client.context(...)` L191-192, `score(...)` L251.
+  The strike-windowed OI endpoints are exactly **3** — `/options/spurt` L276-285, `/options/active-strikes`
+  L295-306, `/options/trending` L308-318 (`/futures/banks` is not strike-windowed); `buckets=SERIES_WINDOW`
+  (=20, L49/L302) is a TIME-bucket count, not a strike window. **Pass-1's OP#11 wiring-depth correction is
+  exactly right.**
+- ✓ `OiPremiumService.PremiumRow(strike,straddle,ce,pe)` L20, ATM-row select L63-69 — the skew operand
+  `(atm.ce()-atm.pe())/atm.pe()` is buildable; pass-1's orientation pin is sound.
+- ✓ Disposition rows re-read in bulk and all exact: `two-candle:23`, `open-high-low:14/21`,
+  `hero-zero:18/22/32` (+ `:21` COVERED_FU2), `intro-terminology:17`, `completeness-sweep:15`,
+  `session-additions:39`, `straddle:24/34` (+ `:21` COVERED_FU1). Source-evidence `trend-change.md:43`
+  + `trending-oi.md:40` (the bare-path SOURCE files, distinct from `disposition/`) — exact. The 11-gap
+  count for `strike-premium-band-backtest` is right.
+- ✓ FU2 cross-refs: the denominator-break warning is real at FU2 L53 + L648-650 (plan cites L53/L649);
+  FU2 §5.3 = `ScalperStrategyLoadTest`, §5.6 = "Optional positive golden coverage" (no scalper golden
+  exists). `ScalperConfigTest.java` confirmed ABSENT, `ScalperStrategyLoadTest`/`ScalperOiPropsTest`
+  present — pass-1's loose-cite fixes verified.
+- ✓ Parity firewall re-verified from source: `BacktestParityTest.FEATURES` L35-37 and
+  `GoldenDeterminismTest.FEATURES` L33-35 BOTH = {ema-crossover, optional-indicator-activation,
+  btst-preclose, exit-intrabar, context-series} — no scalper/options strategy. The [S] band-selector
+  change cannot perturb either; the [P] changes are LIVE-only and tag-gated default-OFF → invisible too.
+
+### NEW soundness gap found (both author + pass-1 missed) — CORRECTED inline
+- **`priceLeg`/`replayLegs` carry no `config`; the band must be threaded, not read in-place.** §3.1
+  File-3's routing pseudocode is fine, but the prose implies `premiumBand(config)` is callable inside
+  `priceLeg` — it is not (neither `priceLeg` L486-496 nor `replayLegs` L342-353 takes `JsonNode config`;
+  the assemble method resolves `minPremiumInr(config)`/`maxLots(config)` at L112-113 and threads the
+  SCALARS down). The band follows the identical precedent: resolve `premiumBand(config)` at the
+  `replayLegs(...)` invocation (L104-115) and thread the `PremiumBand` as a new param through
+  `replayLegs` → `priceLeg`. Added an `[Audit pass 2]` note after the routing pseudocode. **Non-fatal**
+  (the executor would hit it immediately and copy the `minPremiumInr` plumbing), but the pseudocode was
+  literally un-compilable as written — now corrected.
+
+### Smaller refinements applied inline
+- **Catalog-fake count made exact: FIVE** `new Catalog(){…}` literals (3 of them in
+  `OptionsPremiumReplayTest` alone — L51/118/397 — plus GoldenTest L53 + SelectorTest L29). Pass-1's
+  "any fake in …Test" hedge was correct but under-counted; the executor now has the exact list and a
+  one-liner fallback body for the non-band fakes.
+- **`premium-skew` dependency trimmed:** `macro()` ALREADY fetches `/options/chain` (L387-392), so the
+  `premiumSkewPct` operand should be surfaced as a key on THAT existing read (and `OiPremiumService`
+  already computes ATM `ce()/pe()`), not a new endpoint/round-trip — and a `Map`/extra-key return does
+  not drift the springdoc contract (CLAUDE.md). Added to dependency #2.
+
+### Parity re-confirmed sound
+- [S] band selector: only `OptionsPremiumReplay`/`OptionContractSelector`/`JdbcExpiredContractCatalog`
+  touched; only golden is `OptionsPremiumGoldenTest`; legacy no-band branch byte-identical → re-run, do
+  NOT regenerate. Engine goldens carry no options strategy (independently re-verified from source).
+- [P] recenter + skew: tag-gated default-OFF; conditional dot-add keeps the aggregate denominator
+  unchanged when unarmed (the FU2 denominator-break constraint is satisfied by conditional-add — the
+  load-bearing property, re-checked against FU2 L53/L648-650). No shipped YAML arms either tag.
+- The S22-band swap (PR-2) is correctly [P]-live-only (StrikePicker, not engine goldens), isolated to an
+  owner-reviewed PR. **No new parity hole introduced by pass-1's corrections.**
+
+### Open points / watch-items (not blockers)
+- The `dynamic-strike-recenter` `sessionOpen` anchor is genuinely NOT present anywhere in the seam→`oi()`
+  chain today (only `chart`/the bar close is). Threading it is real work — correctly captured by Open
+  Points #4/#5/#11 and the "verify the market-data strike-window param FIRST" dependency. The plan does
+  not over-claim this as a one-liner (pass-1 already downgraded it). Fine.
+- Every automatable item is correctly scoped: the Hero-Zero per-strike reads are kept as backtest-only
+  read-only diagnostics (Open Point #3), the short-SL legs deferred to `short-premium-span`/#47, the
+  combined-premium straddle SL is a brand-new generate-once golden. No item is over-claimed as
+  signal-affecting-yet-parity-free; the two genuinely signal-affecting changes are both tag-gated.
+
+### Readiness verdict
+**sound-with-open-points.** All sampled citations are exact; pass-1's six soundness corrections are
+correct and introduced no regression; the parity classification (1× [S] backtest package + 2× [P]
+tag-gated live singles) holds end-to-end. The one new gap pass-2 found (band-threading through
+`priceLeg`/`replayLegs`) is corrected inline. PR-1 (the 7-gap, fully-independent backtest selector) is
+the right first move; PR-4/PR-5 stay correctly blocked on their market-data read-only dependencies.
+Ready to execute, with the §8 Open Points resolved with the owner before the affected PRs (especially
+#1 fallback-vs-skip, #2 SENSEX band, #4 market-data strike-window param).

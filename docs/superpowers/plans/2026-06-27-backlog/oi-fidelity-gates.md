@@ -305,6 +305,9 @@ gate: also block when `ceOiDelta>0 && peOiDelta>0 && imbalance < consolidationPc
 imbalance) — one extra clause, same flag.
 
 ### M5 — `oi-direction-change-arrow` hard veto (closes P5)
+
+> **DESCOPED (S24 ratification 2026-06-27):** builds the dropped OI direction-change-arrow tool-UI primitive; dropped rule = "direction-change arrows" per RATIFICATION-PACK P1 #26/#63 (the KEPT confluence uses the OI cross + quadrant + sentiment level, not the arrow). See S24-PRUNE.md.
+
 A direction-change arrow = a **slope-sign flip** of the OI sentiment between the latest two buckets.
 Compute a `sentimentFlip` (sign of `last−prior` differs from sign of `prior−beforePrior`) in
 `MarketOiClient.deriveSentiment` (L526-538). **NOTE (audit pass 1): `deriveSentiment` today reads only
@@ -370,6 +373,9 @@ the top-N OI on BOTH CE and PE (already-available chain OI). Flag `requireOiQuad
 levels into the `scalper_detail` side-channel for the operator (see §4 [S]) — distinct from the gate.
 
 ### M7 — `oi-interval-and-60m-trend` (closes P12, P13)
+
+> **DESCOPED (S24 ratification 2026-06-27) — the P13 `trending-oi-strike-window` sub-package ONLY (not P12):** P13 builds the dropped ATM±7 strike-housekeeping re-centre (reset the OI window to ATM±7 on a >1% move); dropped rule = "strike housekeeping ATM±7" / "60-min + 15m=5×3m + ATM±7" per RATIFICATION-PACK P1 #25/#62/#74. S24 keeps the 5-15min interval read (P12) — only the ATM±7 re-centre drops. See S24-PRUNE.md.
+
 **P12 — explicit interval + 60m read.** Pass an explicit interval to `/options/trending`
 (`MarketOiClient` L308-318) — add `.queryParam("interval", oiProps.trendingInterval())` (default `"5m"`,
 the doc's 5-15m window; `oiProps.trendingInterval()` is a NEW `ScalperOiProps` String field). Add a SECOND

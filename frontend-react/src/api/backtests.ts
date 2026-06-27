@@ -40,6 +40,8 @@ interface JobProgressFrame {
 
 export interface RunRequest {
   strategyId: string;
+  /** Optional explicit strategy version (e.g. "1.0.1"); omitted ⇒ the backend pins latest published, else latest draft. */
+  strategyVersion?: string;
   from: string;
   to: string;
   interval: string;

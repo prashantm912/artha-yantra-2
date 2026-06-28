@@ -305,6 +305,11 @@ public class ScalperConfluenceGate {
         && !ScalperGates.ivBuyerCap(ctx.macro(), side, ScalperGates.IV_BUYER_CAP).pass()) {
       return Optional.empty();
     }
+    // E3 fii-bias (tag fii-bias, §4.6): the FII L/S flow must not oppose the side (long% >= 50 for CE).
+    // Reads the existing Macro.fiiLongPct (no new feed); fail-open on a null/neutral read.
+    if (cfg.has("fii-bias") && !ScalperGates.fiiBias(ctx.macro(), side).pass()) {
+      return Optional.empty();
+    }
     // W4 (tag directional-change-gate, S24 Day-20): only enter on a confirmed OI directional change —
     // the PE-CE tilt must have crossed within the window. Default-OFF; an unchanged/short series blocks.
     if (cfg.has("directional-change-gate") && !ScalperGates.directionalChange(ctx.oi()).pass()) {

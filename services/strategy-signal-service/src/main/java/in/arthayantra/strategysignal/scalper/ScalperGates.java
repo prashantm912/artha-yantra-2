@@ -59,6 +59,10 @@ public final class ScalperGates {
   // peIvAvg6 are 0..1 fractions (0.40 = "40 IV"). A pure risk veto — NOT one of the 18 scorer dots.
   static final BigDecimal IV_BUYER_CAP = new BigDecimal("0.40");
 
+  // E3 (tag fii-bias, §4.6 "the FII Long/Short ratio gates direction"): the FII long % of (long+short)
+  // index-future positions; 50 is the net-flat pivot — above = net long (bullish), below = net short.
+  static final BigDecimal FII_NEUTRAL_PCT = new BigDecimal("50");
+
   /** ≥09:45 (ideal 09:15–10:00), block the 11:00–13:00 sideways window, no fresh entry after 15:30. */
   public static GateOutcome timeWindow(LocalTime ist) {
     if (ist.isBefore(NO_TRADE_BEFORE)) {
@@ -335,6 +339,24 @@ public final class ScalperGates {
         side == OptionType.CE ? close.compareTo(open) > 0 : close.compareTo(open) < 0;
     boolean ok = floorCleared && directional;
     return new GateOutcome(ok, volume, ok ? "volume pump confirms " + side : "no volume pump for " + side);
+  }
+
+  /**
+   * E3 (tag {@code fii-bias}, §4.6 "the FII Long/Short ratio gates direction"): the FII index-future flow
+   * must not oppose the side — CE needs the FII net long ({@code fiiLongPct >= 50}), PE net short
+   * ({@code <= 50}). At exactly 50 (net flat) BOTH pass — a neutral read never blocks. A null read
+   * DEGRADES to pass (the macro confirm is best-effort, like the other macro gates). Reads the existing
+   * {@code Macro.fiiLongPct} (no new feed); the simple long%-vs-50 form of the §4.6 ratio.
+   */
+  public static GateOutcome fiiBias(Macro m, OptionType side) {
+    BigDecimal longPct = m.fiiLongPct();
+    if (longPct == null) {
+      return GateOutcome.pass(null, "FII L/S unavailable (degrade -> pass)");
+    }
+    int cmp = longPct.compareTo(FII_NEUTRAL_PCT);
+    boolean ok = side == OptionType.CE ? cmp >= 0 : cmp <= 0;
+    return new GateOutcome(
+        ok, longPct, ok ? "FII flow favours " + side : "FII flow opposes " + side);
   }
 
   /** Futures basis: future > spot (premium) is bullish → CE; future < spot (discount) bearish → PE. */

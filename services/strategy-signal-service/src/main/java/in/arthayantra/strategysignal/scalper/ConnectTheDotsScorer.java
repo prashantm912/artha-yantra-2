@@ -76,6 +76,20 @@ public final class ConnectTheDotsScorer {
   public static Confluence score(
       ScalperGateContext ctx, OptionType side, int bias60mDir, BigDecimal threshold,
       ScalperOiProps props, boolean vwapHardGate, boolean ivPerStrikeGate) {
+    return score(ctx, side, bias60mDir, threshold, props, vwapHardGate, ivPerStrikeGate, false);
+  }
+
+  /**
+   * As the 7-arg form but with the E7 {@code premium-skew} dot opted in (§3.12 "don't chase the higher-
+   * premium side without cues"). When {@code premiumSkewDot} is true a SOFT warning dot ({@code
+   * premium_skew}) is appended that withholds support — lowering the aggregate — only when the traded
+   * side is the richer (higher-premium) side AND no {@code trending_cross}/{@code oi_spurt} cue
+   * corroborates. When false the dot list + aggregate are byte-identical to the 7-arg form
+   * (conditional-add ⇒ the unarmed denominator never moves).
+   */
+  public static Confluence score(
+      ScalperGateContext ctx, OptionType side, int bias60mDir, BigDecimal threshold,
+      ScalperOiProps props, boolean vwapHardGate, boolean ivPerStrikeGate, boolean premiumSkewDot) {
     Chart c = ctx.chart();
     Oi oi = ctx.oi();
     Macro m = ctx.macro();
@@ -125,6 +139,19 @@ public final class ConnectTheDotsScorer {
           && m.atmIv().compareTo(props.ivAbsBandLow()) >= 0
           && m.atmIv().compareTo(props.ivAbsBandHigh()) <= 0;
       add(dots, "iv_abs_band", W_IV, ivAbsOk, "ATM IV in 10-12 trend-play band");
+    }
+    if (premiumSkewDot) {
+      // E7 §3.12: a WARNING dot. supports (good) when the traded side is NOT the richer (higher-premium)
+      // side, OR it is richer but a positive cue (trending_cross / oi_spurt for the side) corroborates.
+      // "Higher-premium side with no cues" → does NOT support → lowers the aggregate (discourages the
+      // chase). Null skew → neutral (supports), so a missing feed never blocks. premiumSkewPct > 0 ⇒ CE
+      // is the richer side, < 0 ⇒ PE is (the producer's (CE−PE)/PE orientation).
+      boolean richerSide =
+          m.premiumSkewPct() != null
+              && (ce ? m.premiumSkewPct().signum() > 0 : m.premiumSkewPct().signum() < 0);
+      boolean cued = corroboratingCue(dots, ce);
+      add(dots, "premium_skew", W, m.premiumSkewPct() == null || !richerSide || cued,
+          "not chasing the richer side without cues");
     }
 
     double num = 0;
@@ -235,6 +262,19 @@ public final class ConnectTheDotsScorer {
 
   private static void add(List<DotScore> dots, String name, double weight, boolean supports, String reason) {
     dots.add(new DotScore(name, weight, supports, reason));
+  }
+
+  /**
+   * E7: a "positive cue" for the side already in the dot list — a supporting {@code trending_cross} or
+   * {@code oi_spurt}. These are added before the premium-skew dot, so scanning the built list is exact.
+   */
+  private static boolean corroboratingCue(List<DotScore> dots, boolean ce) {
+    for (DotScore d : dots) {
+      if (d.supports() && ("trending_cross".equals(d.dot()) || "oi_spurt".equals(d.dot()))) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /** CE wants the value positive (put-heavy / PE-OI rising), PE wants it negative. */

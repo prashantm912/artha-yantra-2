@@ -128,6 +128,31 @@ class MarketOiClientTest {
   }
 
   @Test
+  void derivePremiumSkewIsTheSignedAtmCeVsPePremiumGap() throws Exception {
+    wire(); // initialises the client (no HTTP call — derivePremiumSkew is a pure parse).
+    // E7: the ATM (nearest spot=100) carries CE ltp 120 vs PE ltp 80 → (120-80)/80×100 = +50% (CE
+    // is the richer side). Off-ATM rows are ignored.
+    var chain =
+        new ObjectMapper()
+            .readTree(
+                "{\"spot\":100,\"rows\":["
+                    + "{\"strike\":95,\"ce\":{\"ltp\":150},\"pe\":{\"ltp\":60}},"
+                    + "{\"strike\":100,\"ce\":{\"ltp\":120},\"pe\":{\"ltp\":80}},"
+                    + "{\"strike\":105,\"ce\":{\"ltp\":90},\"pe\":{\"ltp\":110}}]}");
+    assertThat(client.derivePremiumSkew(chain)).isEqualByComparingTo("50");
+  }
+
+  @Test
+  void derivePremiumSkewIsNullWhenAnAtmPremiumIsAbsent() throws Exception {
+    wire(); // initialises the client (no HTTP call).
+    // a missing PE ltp on the ATM row → null → the premium-skew dot degrades to neutral (never blocks).
+    var chain =
+        new ObjectMapper()
+            .readTree("{\"spot\":100,\"rows\":[{\"strike\":100,\"ce\":{\"ltp\":120},\"pe\":{}}]}");
+    assertThat(client.derivePremiumSkew(chain)).isNull();
+  }
+
+  @Test
   void mapsMacroHalfAndScalesIvRankToHundred() {
     wire();
     // rank is a 0..1 fraction upstream; must surface ×100 so the scorer's <50 gate is meaningful

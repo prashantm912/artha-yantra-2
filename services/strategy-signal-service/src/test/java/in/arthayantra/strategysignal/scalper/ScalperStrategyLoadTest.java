@@ -299,6 +299,13 @@ class ScalperStrategyLoadTest {
         config.path("universe").path("options").path("option_types").forEach(t -> optTypes.add(t.asText()));
         assertThat(optTypes).as(id + " trades both ATM legs").containsExactlyInAnyOrder("CE", "PE");
       }
+
+      // E8 prior-day-vwap-stop (§3.9 Morning Trade): before ~10:30 the morning structural stop is the
+      // prior-day VWAP; armed on the scalp-morning-trade (opening-tick) family.
+      boolean isMorningTrade = id.startsWith("scalp-morning-trade-");
+      assertThat(tags.contains("prior-day-vwap-stop"))
+          .as(id + " prior-day-vwap-stop armed iff morning-trade")
+          .isEqualTo(isMorningTrade);
     }
   }
 }

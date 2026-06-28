@@ -51,7 +51,7 @@ version: 1.0.0
 description: "Market Movers momentum-breakout scalp (Siva #3) — v1 ports the deterministic trend-continuation CORE on the NIFTY 50 3-min front future: trade WITH the trend only after price reclaims VWAP (the source's literal long trigger), after 09:45 (Market Movers matrix floor), RSI in band + shared confluence carry validity, ~1-2% target, SL = entry-candle low (the source's 1st-candle-low reference; stocks have no rigid SL); long-premium CE only. The true F&O-EQUITY universe + the 8/9-day breakout / OH-OL / OI-interpretation screener legs + RSI(Daily) + the SHORT side are DEFERRED (no equity-screener feed in strategy-signal-service); the index future is a faithful momentum surrogate."
 author: owner
 # `entry-candle-stop` anchors the structural stop on the breakout candle's low (§3.3: "1st candle low").
-tags: [scalper, options, intraday, nifty, entry-candle-stop, rsi-s24-bands, delta-s24-floor, premium-s24-band, s24-trade-window]
+tags: [scalper, options, intraday, nifty, entry-candle-stop, rsi-s24-bands, delta-s24-floor, premium-s24-band, pct-price-move, s24-trade-window]
 
 universe:
   mode: options_of_underlying

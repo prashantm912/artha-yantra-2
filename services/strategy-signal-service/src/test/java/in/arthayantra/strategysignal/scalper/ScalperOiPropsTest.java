@@ -35,6 +35,8 @@ class ScalperOiPropsTest {
           // E4: the absolute ATM-IV "trend-play" band on the 0..1 fraction scale = 0.10-0.12.
           assertThat(p.ivAbsBandLow()).isEqualByComparingTo("0.10");
           assertThat(p.ivAbsBandHigh()).isEqualByComparingTo("0.12");
+          // E6: the Market-Movers >1% session-move floor.
+          assertThat(p.pctPriceMoveFloor()).isEqualByComparingTo("1.0");
         });
   }
 

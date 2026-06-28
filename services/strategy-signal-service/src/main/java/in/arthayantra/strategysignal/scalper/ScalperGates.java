@@ -71,6 +71,8 @@ public final class ScalperGates {
   // index-future positions; 50 is the net-flat pivot — above = net long (bullish), below = net short.
   static final BigDecimal FII_NEUTRAL_PCT = new BigDecimal("50");
 
+  private static final BigDecimal HUNDRED = new BigDecimal("100");
+
   /** ≥09:45 (ideal 09:15–10:00), block the 11:00–13:00 sideways window, no fresh entry after 15:30. */
   public static GateOutcome timeWindow(LocalTime ist) {
     if (ist.isBefore(NO_TRADE_BEFORE)) {
@@ -187,6 +189,28 @@ public final class ScalperGates {
     boolean ok = pullbackCandle && cooled;
     return new GateOutcome(
         ok, rsi, ok ? "cooled pullback after a hot bar" : "still hot — wait for a cooled pullback candle");
+  }
+
+  /**
+   * E6 §3.3 Market-Movers intraday move gate (tag {@code pct-price-move}): the index must have moved at
+   * least {@code floorPct}% in the SIDE's direction since the SESSION OPEN — CE wants {@code >= +floor},
+   * PE {@code <= -floor} (a "mover" scalp needs a real move, not chop). Series-free: the seam supplies the
+   * deploy {@code close} + the {@code sessionOpen}. A null operand (or a zero open) PASSES — the gate
+   * never blocks on missing data (the seam already guards a null future).
+   */
+  public static GateOutcome pctPriceMove(
+      BigDecimal close, BigDecimal sessionOpen, BigDecimal floorPct, OptionType side) {
+    if (close == null || sessionOpen == null || sessionOpen.signum() == 0) {
+      return GateOutcome.pass(null, "session move unavailable (degrade -> pass)");
+    }
+    BigDecimal movePct =
+        close.subtract(sessionOpen).multiply(HUNDRED).divide(sessionOpen, 4, RoundingMode.HALF_UP);
+    boolean ok =
+        side == OptionType.CE
+            ? movePct.compareTo(floorPct) >= 0
+            : movePct.compareTo(floorPct.negate()) <= 0;
+    String want = side == OptionType.CE ? "move >= +" + floorPct + "%" : "move <= -" + floorPct + "%";
+    return new GateOutcome(ok, movePct, ok ? want + " ok" : want + " (move too small)");
   }
 
   /** Bull (CE): PSAR, VWMA, ST and VWAP all below price; bear (PE): all above. */

@@ -587,6 +587,30 @@ class ScalperConfluenceGateTest {
   }
 
   @Test
+  void pctPriceMoveTagRequiresAOnePercentSessionMove() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+
+    // the seam reads the SESSION-OPEN bar's open + the deploy close (bullBank close = 100). A session
+    // open of 98 → +2.04% move → armed pct-price-move FIRES; an open of 100 → 0% → BLOCKS.
+    EngineSeries moved = futureSeries(candleOpen(0, "98"), strongGreen(1));
+    assertThat(gate.evaluate(cfgTags("pct-price-move"), bullBank(), moved, 1, NOW, IST_TIME, EOD)).isPresent();
+    EngineSeries flat = futureSeries(candleOpen(0, "100"), strongGreen(1));
+    assertThat(gate.evaluate(cfgTags("pct-price-move"), bullBank(), flat, 1, NOW, IST_TIME, EOD)).isEmpty();
+    // the bare CFG (gate off) fires on the same flat session.
+    assertThat(gate.evaluate(CFG, bullBank(), flat, 1, NOW, IST_TIME, EOD)).isPresent();
+  }
+
+  // a candle with a caller-chosen OPEN (the session-open bar for the pct-price-move gate); other OHLCV
+  // immaterial to that gate (only the open is read).
+  private static EngineCandle candleOpen(int i, String open) {
+    return new EngineCandle(
+        NOW.atOffset(IST).plusMinutes(i), bd(open), bd("130"), bd("90"), bd("120"), 130_000);
+  }
+
+  @Test
   void fiiBiasTagBlocksWhenTheFlowOpposesAndPassesOnNeutral() {
     // E3: fii-bias blocks a CE when FII flow is net short (30 < 50); a neutral read (bullContext, 50)
     // passes; the bare CFG (gate off) fires on the same net-short context.

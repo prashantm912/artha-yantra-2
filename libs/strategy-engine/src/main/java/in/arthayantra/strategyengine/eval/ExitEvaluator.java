@@ -157,7 +157,8 @@ public final class ExitEvaluator {
           ? Optional.of(new ExitDecision("trailing_stop", value + "x entry-ATR 1m trail off " + peak))
           : Optional.empty();
     }
-    return trailing(priceSeries, pricePosition, priceIndex, rule, close);
+    // null bank: the indicator-trail basis is bar-close-only and is skipped on the intrabar path.
+    return trailing(null, priceSeries, pricePosition, priceIndex, rule, close);
   }
 
   /** Evaluates all exit rules at a bar; first match in precedence order wins. */
@@ -179,7 +180,7 @@ public final class ExitEvaluator {
             switch (type) {
               case "stop_loss" -> level(definition, series, position, rule, close, true);
               case "take_profit" -> level(definition, series, position, rule, close, false);
-              case "trailing_stop" -> trailing(series, position, primaryIndex, rule, close);
+              case "trailing_stop" -> trailing(bank, series, position, primaryIndex, rule, close);
               case "time_stop" -> timeStop(series, position, primaryIndex, rule);
               case "signal_exit" -> signalExit(bank, primaryIndex, rule);
               default -> Optional.empty();
@@ -249,6 +250,7 @@ public final class ExitEvaluator {
   }
 
   private static Optional<ExitDecision> trailing(
+      IndicatorBank bank,
       EngineSeries series,
       Position position,
       int index,
@@ -316,7 +318,37 @@ public final class ExitEvaluator {
           ? Optional.of(new ExitDecision("trailing_stop", "trailed " + offset + "pts off " + peak))
           : Optional.empty();
     }
+    if ("indicator".equals(basis)) {
+      // trail to a named level (psar / vwap / supertrend-line): exit when price crosses it. Needs
+      // the bank, so it is bar-close-ONLY — the intrabar path passes a null bank (level → skip).
+      BigDecimal level = indicatorLevel(bank, String.valueOf(params.get("alias")), index);
+      if (level == null) {
+        return Optional.empty();
+      }
+      boolean hit = isLong ? close.compareTo(level) <= 0 : close.compareTo(level) >= 0;
+      return hit
+          ? Optional.of(
+              new ExitDecision("trailing_stop", "trailed to " + params.get("alias") + " " + level))
+          : Optional.empty();
+    }
     return Optional.empty();
+  }
+
+  /**
+   * Resolves a trailing {@code indicator} alias to a price level: a built-in operand
+   * ({@code close/volume/vwap}) via {@link IndicatorBank#builtin}, else a declared indicator alias via
+   * {@link IndicatorBank#valueAt} (guarded by {@code has} so an undeclared alias yields null, never the
+   * "alias not in the bank" throw). Null when the bank is absent (the intrabar path) or the alias is
+   * unknown/warming.
+   */
+  private static BigDecimal indicatorLevel(IndicatorBank bank, String alias, int index) {
+    if (bank == null) {
+      return null;
+    }
+    if (BarValues.isBuiltin(alias)) {
+      return bank.builtin(alias, index);
+    }
+    return bank.has(alias) ? bank.valueAt(alias, index) : null;
   }
 
   private static Optional<ExitDecision> timeStop(

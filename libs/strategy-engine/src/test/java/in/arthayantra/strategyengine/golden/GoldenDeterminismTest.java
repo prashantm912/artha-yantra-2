@@ -32,7 +32,8 @@ class GoldenDeterminismTest {
 
   private static final String[] FEATURES = {
     "ema-crossover", "optional-indicator-activation", "btst-preclose", "exit-intrabar",
-    "context-series", "signal-exit-volume", "stop-points", "trailing-points"
+    "context-series", "signal-exit-volume", "stop-points", "trailing-points",
+    "trailing-indicator"
   };
   private static final String[] PRIMARY_DAYS = {
     "NSE_NIFTY50_1m_day1.csv", "NSE_NIFTY50_1m_day2.csv", "NSE_NIFTY50_1m_day3.csv",

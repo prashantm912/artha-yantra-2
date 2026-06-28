@@ -379,6 +379,25 @@ class ScalperGatesTest {
   }
 
   @Test
+  void vwapDistancePassesNearVwapAndSkipsWhenExtended() {
+    BigDecimal max = ScalperGates.VWAP_DISTANCE_MAX_FRAC; // 0.4%
+    BigDecimal minOff = ScalperGates.VWAP_DISTANCE_MIN_FRAC; // 0 -> the min (pin) clause is inert
+    // a pullback 0.3% above VWAP is within the band -> pass; an extended 1% chase -> skip.
+    assertThat(ScalperGates.vwapDistance(bd("100"), bd("99.7"), minOff, max).pass()).isTrue();
+    assertThat(ScalperGates.vwapDistance(bd("100"), bd("99"), minOff, max).pass()).isFalse();
+    // symmetric below VWAP (the PE side): 0.3% below passes, 1% below skips.
+    assertThat(ScalperGates.vwapDistance(bd("100"), bd("100.3"), minOff, max).pass()).isTrue();
+    assertThat(ScalperGates.vwapDistance(bd("100"), bd("101"), minOff, max).pass()).isFalse();
+    // null / non-positive operands degrade to pass (fail-open, never block on missing data).
+    assertThat(ScalperGates.vwapDistance(null, bd("99"), minOff, max).pass()).isTrue();
+    assertThat(ScalperGates.vwapDistance(bd("100"), null, minOff, max).pass()).isTrue();
+    assertThat(ScalperGates.vwapDistance(bd("0"), bd("99"), minOff, max).pass()).isTrue();
+    // when armed, the min clause skips a too-close (VWAP-pinned) entry; min 0 never fires.
+    assertThat(ScalperGates.vwapDistance(bd("100"), bd("99.95"), bd("0.001"), max).pass()).isFalse();
+    assertThat(ScalperGates.vwapDistance(bd("100"), bd("99.95"), minOff, max).pass()).isTrue();
+  }
+
+  @Test
   void divergenceVolumeNeedsTheHeavyweightBarRegardlessOfIndex() {
     assertThat(ScalperGates.divergenceVolume(bd("125000")).pass()).isTrue();
     assertThat(ScalperGates.divergenceVolume(bd("124999")).pass()).isFalse();

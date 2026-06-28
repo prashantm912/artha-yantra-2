@@ -79,6 +79,15 @@ public final class ScalperGates {
   // index future) — forward-paper-tunable, package-visible for a future DB promotion.
   static final BigDecimal PSAR_DISTANCE_MIN_PCT = new BigDecimal("0.05");
 
+  // E8 §2.2 r8 / §3.4 (tag vwap-distance): an entry must be a PULLBACK near VWAP, not an extended chase
+  // — the max |close-vwap|/close FRACTION an armed entry may sit at. The deck gives no number; 0.004
+  // (0.4% of price) is a cautious v1 placeholder, optimizer/forward-paper-tunable BEFORE arming. The
+  // min clause (the Hero-Zero "VWAP-pin low-range sit-out") is OFF by default (ZERO) — only a variant
+  // that wants the too-close skip sets it. Default-OFF tag, so both are dormant until armed. NOTE the
+  // FRACTION scale (0.004 = 0.4%), unlike the percent-scale OI knobs (50 = 50%).
+  static final BigDecimal VWAP_DISTANCE_MAX_FRAC = new BigDecimal("0.004");
+  static final BigDecimal VWAP_DISTANCE_MIN_FRAC = BigDecimal.ZERO;
+
   /** ≥09:45 (ideal 09:15–10:00), block the 11:00–13:00 sideways window, no fresh entry after 15:30. */
   public static GateOutcome timeWindow(LocalTime ist) {
     if (ist.isBefore(NO_TRADE_BEFORE)) {
@@ -279,6 +288,31 @@ public final class ScalperGates {
     boolean ok = distPct.compareTo(PSAR_DISTANCE_MIN_PCT) >= 0;
     return new GateOutcome(
         ok, distPct, "psar gap " + distPct.toPlainString() + (ok ? "% durable" : "% too tight"));
+  }
+
+  /**
+   * E8 §2.2 r8 / §3.4 VWAP-distance pullback band (tag {@code vwap-distance}): an entry must sit NEAR
+   * VWAP, not extended away from it — PASS when {@code |close-vwap|/close} is at/below {@code maxFrac}
+   * (a pullback). When {@code minFrac > 0} a SECOND clause ALSO requires the distance be at/above it
+   * (the Hero-Zero "VWAP-pin low-range sit-out": too CLOSE = premium-erosion chop). Side-agnostic (the
+   * distance is symmetric). A null close/vwap or a non-positive close DEGRADES to pass (fail-open, like
+   * the sibling {@link #indicatorDistance}/{@link #psarDurable} overextension vetoes) so missing data
+   * never gates an entry. The fractions are PRICE fractions (0.004 = 0.4% of close).
+   */
+  public static GateOutcome vwapDistance(
+      BigDecimal close, BigDecimal vwap, BigDecimal minFrac, BigDecimal maxFrac) {
+    if (close == null || vwap == null || close.signum() <= 0) {
+      return GateOutcome.pass(null, "vwap distance unavailable (degrade -> pass)");
+    }
+    BigDecimal frac = close.subtract(vwap).abs().divide(close.abs(), 6, RoundingMode.HALF_UP);
+    boolean tooFar = maxFrac != null && frac.compareTo(maxFrac) > 0;
+    boolean tooClose = minFrac != null && minFrac.signum() > 0 && frac.compareTo(minFrac) < 0;
+    boolean ok = !tooFar && !tooClose;
+    return new GateOutcome(
+        ok,
+        frac,
+        "|close-vwap|/close " + frac.toPlainString()
+            + (ok ? " within band" : tooFar ? " too far from VWAP" : " too close (VWAP pin)"));
   }
 
   /** Bull (CE): PSAR, VWMA, ST and VWAP all below price; bear (PE): all above. */

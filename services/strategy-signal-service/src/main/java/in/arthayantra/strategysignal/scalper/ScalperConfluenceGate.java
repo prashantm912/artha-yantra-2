@@ -169,6 +169,18 @@ public class ScalperConfluenceGate {
         chart.close() != null && chart.vwap() != null && chart.close().compareTo(chart.vwap()) >= 0
             ? OptionType.CE
             : OptionType.PE;
+    // E8 §2.2 r8 / §3.4 vwap-distance (tag vwap-distance): an entry too FAR from VWAP is an extended
+    // chase, not a pullback — a HARD skip (the Siva "wait for a pullback near VWAP, don't chase the
+    // move" discipline). Chart-only (|close-vwap|/close), side-agnostic; a null operand degrades to
+    // pass. Default-OFF — no shipped YAML carries the tag, so every config stays byte-identical. The
+    // 0.4% band is a placeholder default tuned BEFORE any strategy is armed onto it.
+    if (cfg.has("vwap-distance")
+        && !ScalperGates.vwapDistance(
+                chart.close(), chart.vwap(),
+                ScalperGates.VWAP_DISTANCE_MIN_FRAC, ScalperGates.VWAP_DISTANCE_MAX_FRAC)
+            .pass()) {
+      return Optional.empty();
+    }
     // W4 (tag gap-size-side-gate, S24 #9): a large gap-down suppresses the PE (put-buy) side
     // ("300-400 gap-down no-put"). Default-OFF; reads the same session gap GapState detects (pure).
     if (cfg.has("gap-size-side-gate")

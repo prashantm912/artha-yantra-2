@@ -255,6 +255,98 @@ class OptionsPremiumReplayTest {
     assertThat(capped.trades().get(0).qty()).isEqualTo(650);
   }
 
+  // ---- E7 band-aware backtest selection ----
+
+  @Test
+  void premiumBandParsesAndDegradesOnAHalfFilledBand() throws Exception {
+    var om = new com.fasterxml.jackson.databind.ObjectMapper();
+    var band =
+        OptionsPremiumReplay.premiumBand(
+            om.readTree(
+                "{\"backtest\":{\"strike_premium_band\":{\"enabled\":true,\"lo\":100,\"hi\":250,"
+                    + "\"window\":4,\"strike_step\":50,\"fallback_nearest\":false}}}"));
+    assertThat(band.enabled()).isTrue();
+    assertThat(band.lo()).isEqualByComparingTo("100");
+    assertThat(band.hi()).isEqualByComparingTo("250");
+    assertThat(band.window()).isEqualTo(4);
+    assertThat(band.fallbackNearest()).isFalse();
+    // absent → disabled (legacy nearest-strike path)
+    assertThat(OptionsPremiumReplay.premiumBand(om.readTree("{}")).enabled()).isFalse();
+    // half-filled (lo, no hi) → disabled (never select on a one-sided bound)
+    assertThat(
+            OptionsPremiumReplay.premiumBand(
+                    om.readTree(
+                        "{\"backtest\":{\"strike_premium_band\":{\"enabled\":true,\"lo\":100}}}"))
+                .enabled())
+        .isFalse();
+    // window defaults from universe.options.strikes.width
+    assertThat(
+            OptionsPremiumReplay.premiumBand(
+                    om.readTree(
+                        "{\"universe\":{\"options\":{\"strikes\":{\"width\":7}}},\"backtest\":{"
+                            + "\"strike_premium_band\":{\"enabled\":true,\"lo\":100,\"hi\":250}}}"))
+                .window())
+        .isEqualTo(7);
+  }
+
+  @Test
+  void bandEnabledTradesTheInBandStrikeNotTheNearestSpot() {
+    String inBand = "NIFTY16JUN2625100CE"; // the 25100 strike — in band, NOT the nearest-spot 25000
+    // a 2-strike ladder around spot 25010: 25000 (nearest, premium 300 OUT of band) + 25100 (premium 180 IN).
+    Catalog ladder =
+        new Catalog() {
+          @Override
+          public List<Expiry> expiriesOnOrAfter(String u, LocalDate d) {
+            return List.of(new Expiry(W, true));
+          }
+
+          @Override
+          public Optional<OptionContract> nearestStrike(String u, LocalDate e, String t, BigDecimal s) {
+            return Optional.of(new OptionContract("NFO", CE_SYMBOL, bd("25000"), e, t, 65));
+          }
+
+          @Override
+          public List<OptionContract> nearestStrikes(
+              String u, LocalDate e, String t, BigDecimal s, int window) {
+            return List.of(
+                new OptionContract("NFO", CE_SYMBOL, bd("25000"), e, t, 65),
+                new OptionContract("NFO", inBand, bd("25100"), e, t, 65));
+          }
+        };
+    List<EngineCandle> underlying = List.of(bar("09:15", "25010"), bar("09:16", "25020"));
+    CandleReader reader = mock(CandleReader.class);
+    when(reader.read(eq("NFO"), eq(CE_SYMBOL), eq("1m"), any(), any()))
+        .thenReturn(List.of(new EngineCandle(t("09:15"), bd("300"), bd("300"), bd("300"), bd("300"), 0L)));
+    when(reader.read(eq("NFO"), eq(inBand), eq("1m"), any(), any()))
+        .thenReturn(
+            List.of(
+                new EngineCandle(t("09:15"), bd("180"), bd("180"), bd("180"), bd("180"), 0L),
+                new EngineCandle(t("09:16"), bd("190"), bd("190"), bd("190"), bd("190"), 0L)));
+
+    OptionsPremiumReplay replay =
+        new OptionsPremiumReplay(new OptionContractSelector(ladder), new CandlePremiumReader(reader));
+    OptionsPremiumReplay.PremiumBand band =
+        new OptionsPremiumReplay.PremiumBand(true, bd("100"), bd("250"), 1, bd("200"), true);
+
+    var result =
+        replay.replayLegs(
+            List.of(),
+            underlying,
+            List.of(new PairedLeg(false, 0, 1)),
+            "NIFTY",
+            new UniverseSpec(ExpiryMode.NEAREST_WEEKLY, 0, Set.of("CE", "PE")),
+            new PremiumExitEvaluator.Rules(bd("20"), bd("35"), null, null, null),
+            15_000,
+            BigDecimal.ZERO,
+            0,
+            band,
+            new BigDecimal("200000"),
+            underlying);
+
+    assertThat(result.trades()).hasSize(1);
+    assertThat(result.trades().get(0).tradingsymbol()).isEqualTo(inBand); // band picked 25100, not 25000
+  }
+
   @Test
   void parsesTheOptionsConfigIntoSpecRulesAndBudget() throws Exception {
     com.fasterxml.jackson.databind.JsonNode config =

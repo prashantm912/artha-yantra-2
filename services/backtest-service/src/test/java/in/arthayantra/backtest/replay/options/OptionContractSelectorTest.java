@@ -9,8 +9,10 @@ import in.arthayantra.backtest.replay.options.OptionContractSelector.OptionContr
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -109,5 +111,90 @@ class OptionContractSelectorTest {
                 "NIFTY", new BigDecimal("24980"), LocalDate.of(2026, 7, 1),
                 ExpiryMode.NEAREST_WEEKLY, 0, true, Set.of("CE", "PE")))
         .isEmpty();
+  }
+
+  // ---- E7 band-aware selection (selectInBand) ----
+
+  private static BigDecimal bd(String s) {
+    return new BigDecimal(s);
+  }
+
+  /** ATM-25000 strike ladder, ascending by |strike − 25000| (the shape JdbcExpiredContractCatalog returns). */
+  private static final List<BigDecimal> LADDER =
+      List.of(bd("25000"), bd("24900"), bd("25100"), bd("24800"), bd("25200"));
+
+  private static final Catalog BAND_CATALOG =
+      new Catalog() {
+        @Override
+        public List<Expiry> expiriesOnOrAfter(String u, LocalDate d) {
+          return List.of(new Expiry(W1, true));
+        }
+
+        @Override
+        public Optional<OptionContract> nearestStrike(String u, LocalDate e, String t, BigDecimal s) {
+          return Optional.of(new OptionContract("NFO", u + LADDER.get(0) + t, LADDER.get(0), e, t, 65));
+        }
+
+        @Override
+        public List<OptionContract> nearestStrikes(
+            String u, LocalDate e, String t, BigDecimal s, int window) {
+          int limit = Math.min(LADDER.size(), 2 * window + 1);
+          return LADDER.subList(0, limit).stream()
+              .map(k -> new OptionContract("NFO", u + k + t, k, e, t, 65))
+              .toList();
+        }
+      };
+
+  /** A premium probe keyed by the candidate's strike (plain string); an absent strike ⇒ null (untradeable). */
+  private static Function<OptionContract, BigDecimal> probe(Map<String, String> byStrike) {
+    return c -> {
+      String v = byStrike.get(c.strike().toPlainString());
+      return v == null ? null : new BigDecimal(v);
+    };
+  }
+
+  private OptionContractSelector band() {
+    return new OptionContractSelector(BAND_CATALOG);
+  }
+
+  @Test
+  void selectInBandPicksTheInBandAtmItmStrikeNearestTheMidpoint() {
+    // band [100,250] mid 175, spot 25000, step 100 (so ≤25100 is ATM/ITM for a CE). 25000=300 (out),
+    // 24900=180 (in, err 5 ← nearest mid), 25100=120 (in, err 55), 24800=230 (in, err 55), 25200 deep-OTM.
+    Map<String, String> prem =
+        Map.of("25000", "300", "24900", "180", "25100", "120", "24800", "230", "25200", "175");
+    Optional<OptionContract> c =
+        band().selectInBand(
+            "NIFTY", bd("25000"), LocalDate.of(2026, 6, 5), ExpiryMode.NEAREST_WEEKLY, 0,
+            true, Set.of("CE", "PE"), 2, bd("100"), bd("250"), bd("100"), probe(prem));
+
+    assertThat(c).isPresent();
+    assertThat(c.get().strike()).isEqualByComparingTo("24900");
+  }
+
+  @Test
+  void selectInBandIsEmptyWhenNoStrikeIsInBand() {
+    // every ATM/ITM candidate's premium is out of [100,250] → empty (the caller decides fallback/skip).
+    Map<String, String> prem =
+        Map.of("25000", "300", "24900", "320", "25100", "80", "24800", "350");
+    Optional<OptionContract> c =
+        band().selectInBand(
+            "NIFTY", bd("25000"), LocalDate.of(2026, 6, 5), ExpiryMode.NEAREST_WEEKLY, 0,
+            true, Set.of("CE", "PE"), 2, bd("100"), bd("250"), bd("100"), probe(prem));
+
+    assertThat(c).isEmpty();
+  }
+
+  @Test
+  void selectInBandExcludesDeepOtm() {
+    // only the deep-OTM 25200 (> spot+step 25100) is in band by premium → excluded → empty, never traded.
+    Map<String, String> prem =
+        Map.of("25000", "300", "24900", "300", "25100", "300", "24800", "300", "25200", "175");
+    Optional<OptionContract> c =
+        band().selectInBand(
+            "NIFTY", bd("25000"), LocalDate.of(2026, 6, 5), ExpiryMode.NEAREST_WEEKLY, 0,
+            true, Set.of("CE", "PE"), 2, bd("100"), bd("250"), bd("100"), probe(prem));
+
+    assertThat(c).isEmpty();
   }
 }

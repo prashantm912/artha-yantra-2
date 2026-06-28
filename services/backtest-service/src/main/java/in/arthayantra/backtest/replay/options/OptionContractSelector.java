@@ -1,10 +1,12 @@
 package in.arthayantra.backtest.replay.options;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import org.springframework.stereotype.Component;
 
 /**
@@ -49,6 +51,18 @@ public class OptionContractSelector {
     /** The nearest-strike contract for {@code (underlying, expiry, optionType)} to {@code spot}. */
     Optional<OptionContract> nearestStrike(
         String underlying, LocalDate expiry, String optionType, BigDecimal spot);
+
+    /**
+     * The listed strikes within ±{@code window} of the ATM, ascending by {@code |strike − spot|} — the
+     * candidate set the band-aware {@link #selectInBand} filters. DEFAULT delegates to the single
+     * {@link #nearestStrike} (back-compat: every existing fake inherits this, only the JDBC catalog
+     * overrides it with the real {@code LIMIT 2·window+1} ladder), so adding the band path churns no
+     * existing implementer and the legacy premium golden stays byte-identical.
+     */
+    default List<OptionContract> nearestStrikes(
+        String underlying, LocalDate expiry, String optionType, BigDecimal spot, int window) {
+      return nearestStrike(underlying, expiry, optionType, spot).map(List::of).orElseGet(List::of);
+    }
   }
 
   private final Catalog catalog;
@@ -87,6 +101,63 @@ public class OptionContractSelector {
       return Optional.empty();
     }
     return catalog.nearestStrike(underlying, expiry, optionType, spot);
+  }
+
+  /**
+   * Band-aware ATM/ITM selection (mirrors the live {@code StrikePicker}): among the ±{@code window}
+   * listed strikes on the bias side, keep the ATM/ITM strikes whose entry premium lands in {@code
+   * [premiumLo, premiumHi]}, and pick the one whose premium is nearest the band midpoint. Empty when no
+   * strike qualifies (the caller decides fallback-to-nearest or skip). {@code premiumProbe} returns a
+   * candidate's entry premium (null ⇒ untradeable, excluded) — supplied by the replay so this stays
+   * DB-free and unit-testable. The expiry/side resolution mirrors {@link #select}.
+   */
+  public Optional<OptionContract> selectInBand(
+      String underlying,
+      BigDecimal spot,
+      LocalDate onOrAfter,
+      ExpiryMode mode,
+      int expiryOffset,
+      boolean longBias,
+      Set<String> optionTypes,
+      int window,
+      BigDecimal premiumLo,
+      BigDecimal premiumHi,
+      BigDecimal strikeStep,
+      Function<OptionContract, BigDecimal> premiumProbe) {
+    String optionType = longBias ? "CE" : "PE";
+    if (!optionTypes.isEmpty() && !optionTypes.contains(optionType)) {
+      return Optional.empty();
+    }
+    LocalDate expiry = pickExpiry(catalog.expiriesOnOrAfter(underlying, onOrAfter), mode, expiryOffset);
+    if (expiry == null) {
+      return Optional.empty();
+    }
+    BigDecimal mid = premiumLo.add(premiumHi).divide(BigDecimal.valueOf(2), 4, RoundingMode.HALF_UP);
+    BigDecimal step = strikeStep == null ? BigDecimal.ZERO : strikeStep;
+    OptionContract best = null;
+    BigDecimal bestErr = null;
+    for (OptionContract c : catalog.nearestStrikes(underlying, expiry, optionType, spot, window)) {
+      if (!atmOrItm(longBias, c.strike(), spot, step)) {
+        continue; // exclude deep-OTM legs (one step OTM tolerated)
+      }
+      BigDecimal prem = premiumProbe.apply(c);
+      if (prem == null || prem.compareTo(premiumLo) < 0 || prem.compareTo(premiumHi) > 0) {
+        continue; // untradeable / out of the premium band
+      }
+      BigDecimal err = prem.subtract(mid).abs();
+      if (bestErr == null || err.compareTo(bestErr) < 0) {
+        bestErr = err;
+        best = c;
+      }
+    }
+    return Optional.ofNullable(best);
+  }
+
+  /** CE ATM/ITM: strike ≤ spot + step; PE ATM/ITM: strike ≥ spot − step (one step OTM tolerated). */
+  private static boolean atmOrItm(boolean longBias, BigDecimal strike, BigDecimal spot, BigDecimal step) {
+    return longBias
+        ? strike.compareTo(spot.add(step)) <= 0
+        : strike.compareTo(spot.subtract(step)) >= 0;
   }
 
   /**

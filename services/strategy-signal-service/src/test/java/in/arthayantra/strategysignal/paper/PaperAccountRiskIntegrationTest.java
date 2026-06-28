@@ -92,6 +92,20 @@ class PaperAccountRiskIntegrationTest extends StrategySignalIntegrationTestBase 
   }
 
   @Test
+  void pctModeDailyLossTripsOnPercentOfEquity() {
+    // E10 #1: the seeded mode the V011 migration uses — 10% of the 1,000,000 equity = 100,000 cap.
+    insertClosed("BUY", 50, "-150000.0000"); // a day loss past the 10% cap
+    risk.update("daily_loss_limit", "{\"enabled\":true,\"mode\":\"pct\",\"value\":10}");
+    assertThat(risk.entryAllowed()).isFalse();
+    // a small loss within the cap does not pause entries.
+    risk.update("daily_loss_limit", "{\"enabled\":false}"); // re-arm
+    jdbc.update("DELETE FROM paper_positions");
+    insertClosed("BUY", 50, "-50000.0000");
+    risk.update("daily_loss_limit", "{\"enabled\":true,\"mode\":\"pct\",\"value\":10}");
+    assertThat(risk.entryAllowed()).isTrue();
+  }
+
+  @Test
   void killSwitchPausesAllEntries() {
     assertThat(risk.entryAllowed()).isTrue();
     risk.update("kill_switch", "{\"enabled\":true}");

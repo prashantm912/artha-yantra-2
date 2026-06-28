@@ -187,6 +187,14 @@ class ScalperGatesTest {
   }
 
   @Test
+  void flatOiStandAsideBlocksANullImbalanceButPassesAPresentOne() {
+    // the deliberate inverse of callPutDeltaFilter's fail-open: a present imbalance passes...
+    assertThat(ScalperGates.flatOiStandAside(imbalance(bd("10"))).pass()).isTrue();
+    // ...and a null/flat imbalance STANDS ASIDE (blocks).
+    assertThat(ScalperGates.flatOiStandAside(imbalance(null)).pass()).isFalse();
+  }
+
+  @Test
   void indicatorDistanceBlocksWhenPriceRanFarFromTheWholeCluster() {
     BigDecimal max = bd("0.015"); // 1.5%
     // the nearest indicator (vwap, 0.5% away) is within the band -> not overextended -> pass.

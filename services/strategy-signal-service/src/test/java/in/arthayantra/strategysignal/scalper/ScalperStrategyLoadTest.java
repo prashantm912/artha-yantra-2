@@ -165,27 +165,17 @@ class ScalperStrategyLoadTest {
           .as(id + " oi-slope-agree armed iff trending-oi")
           .isEqualTo(isTrendingOi);
 
-      // E2 M4 (flat-oi-stand-aside): armed on the connect-the-dots master-confluence family ONLY (it
-      // carries no oi-cross-filter, so the fail-open cross gate and the stand-aside stay mutually
-      // exclusive); every other variant stays unarmed.
-      boolean isConnectDots = id.startsWith("scalp-connect-the-dots-");
-      assertThat(tags.contains("flat-oi-stand-aside"))
-          .as(id + " flat-oi-stand-aside armed iff connect-the-dots")
-          .isEqualTo(isConnectDots);
-      // E2 M6 (max-oi-sr-gate): the OI-wall S/R gate is armed on the connect-the-dots family too.
-      assertThat(tags.contains("max-oi-sr-gate"))
-          .as(id + " max-oi-sr-gate armed iff connect-the-dots")
-          .isEqualTo(isConnectDots);
-
-      // FU2 + E3 directional-VIX: the 5 confluence soft-dots promoted to hard gates are armed on the
-      // connect-the-dots master-confluence family (its identity is requiring the full confluence).
-      for (String fu2Tag :
+      // Connect-the-Dots (#10) is the SOFT weighted-scorer strategy: these confluences are ALREADY soft
+      // dots in the 18-dot scorer, so the hard-gate versions ship default-OFF and are armed on NO
+      // strategy (the scorer + base rails decide, not an AND of hard pre-gates). The code stays merged +
+      // available for the owner to arm selectively later.
+      for (String softKeptOff :
           List.of(
-              "indicator-alignment-gate", "futures-oi-gate", "breadth-gate", "basis-gate",
-              "directional-vix-gate")) {
-        assertThat(tags.contains(fu2Tag))
-            .as(id + " " + fu2Tag + " armed iff connect-the-dots")
-            .isEqualTo(isConnectDots);
+              "flat-oi-stand-aside", "max-oi-sr-gate", "indicator-alignment-gate", "futures-oi-gate",
+              "breadth-gate", "basis-gate", "directional-vix-gate")) {
+        assertThat(tags.contains(softKeptOff))
+            .as(id + " " + softKeptOff + " unarmed (connect-the-dots kept soft)")
+            .isFalse();
       }
 
       // #11 (section 3.11): only the scalp-straddle family carries the straddle tag → the NEUTRAL two-leg

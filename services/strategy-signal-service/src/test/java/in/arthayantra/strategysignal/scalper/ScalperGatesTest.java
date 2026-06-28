@@ -235,6 +235,22 @@ class ScalperGatesTest {
   }
 
   @Test
+  void pctPriceMoveNeedsAOnePercentSessionMoveInTheSideDirection() {
+    BigDecimal floor = bd("1.0");
+    // CE: +2.04% (open 98 -> close 100) passes; +0.5% fails; a DOWN move on a CE side fails.
+    assertThat(ScalperGates.pctPriceMove(bd("100"), bd("98"), floor, CE).pass()).isTrue();
+    assertThat(ScalperGates.pctPriceMove(bd("100"), bd("99.5"), floor, CE).pass()).isFalse();
+    assertThat(ScalperGates.pctPriceMove(bd("97"), bd("100"), floor, CE).pass()).isFalse();
+    // PE: -2% (100 -> 98) passes; -0.5% fails.
+    assertThat(ScalperGates.pctPriceMove(bd("98"), bd("100"), floor, PE).pass()).isTrue();
+    assertThat(ScalperGates.pctPriceMove(bd("99.5"), bd("100"), floor, PE).pass()).isFalse();
+    // null close / null or zero session-open degrade to pass (never block on missing data).
+    assertThat(ScalperGates.pctPriceMove(null, bd("100"), floor, CE).pass()).isTrue();
+    assertThat(ScalperGates.pctPriceMove(bd("100"), null, floor, CE).pass()).isTrue();
+    assertThat(ScalperGates.pctPriceMove(bd("100"), bd("0"), floor, CE).pass()).isTrue();
+  }
+
+  @Test
   void constituentRequiresHeavyweightPushNotToOppose() {
     // CE wants the net constituent push positive; PE negative; 0 (flat) and null degrade to pass.
     assertThat(ScalperGates.constituent(macroConstituent(bd("0.5")), CE).pass()).isTrue();

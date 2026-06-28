@@ -198,6 +198,15 @@ public class ScalperConfluenceGate {
         return Optional.empty();
       }
     }
+    // E6 §3.3 pct-price-move (Market-Movers): the index must have moved >= the floor% in the side's
+    // direction since the SESSION OPEN — a "mover" scalp needs a real move, not chop. Reads the deploy
+    // close + the session-open bar off the future series; a null future degrades to pass. Armed via the tag.
+    if (cfg.has("pct-price-move") && future != null && index >= 0) {
+      BigDecimal sessionOpen = future.candle(future.sessionStart(index)).open();
+      if (!ScalperGates.pctPriceMove(chart.close(), sessionOpen, oiProps.pctPriceMoveFloor(), side).pass()) {
+        return Optional.empty();
+      }
+    }
     // E3 volume-pump (tag volume-pump, §4.15.3): the deploy candle must be a floor-clearing pump closing
     // in the side's direction (dark-green/dark-red attribution). Reads the bar OHLCV off the future
     // series already in scope (no Chart extension). Default-OFF; a null future degrades to pass.

@@ -186,6 +186,13 @@ class ScalperStrategyLoadTest {
           .as(id + " rsi-cooloff armed iff two-candle")
           .isEqualTo(isTwoCandle);
 
+      // E6 pct-price-move (§3.3 Market-Movers >1% intraday move): armed on the scalp-market-movers family
+      // (a "mover" scalp needs a real move).
+      boolean isMarketMovers = id.startsWith("scalp-market-movers-");
+      assertThat(tags.contains("pct-price-move"))
+          .as(id + " pct-price-move armed iff market-movers")
+          .isEqualTo(isMarketMovers);
+
       // E3 volume-pump (§4.15.3): armed on the scalp-gap-theory family (a breakout needs a real pump).
       boolean isGapTheory = id.startsWith("scalp-gap-theory-");
       assertThat(tags.contains("volume-pump"))

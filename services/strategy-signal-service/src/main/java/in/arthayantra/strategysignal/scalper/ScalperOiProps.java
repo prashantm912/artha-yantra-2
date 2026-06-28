@@ -28,7 +28,8 @@ public record ScalperOiProps(
     BigDecimal openHighWindow,
     BigDecimal openHighRsiFloor,
     BigDecimal ivAbsBandLow,
-    BigDecimal ivAbsBandHigh) {
+    BigDecimal ivAbsBandHigh,
+    BigDecimal pctPriceMoveFloor) {
 
   // T2.1: the #5 call-put delta-imbalance HARD pre-gate floor (>= 50% of the larger leg).
   private static final BigDecimal DEFAULT_CROSS_FILTER_PCT = new BigDecimal("50");
@@ -58,6 +59,9 @@ public record ScalperOiProps(
   // on the 0..1 fraction scale (see class javadoc) = 0.10-0.12. Only read by the iv_abs_band dot.
   private static final BigDecimal DEFAULT_IV_ABS_BAND_LOW = new BigDecimal("0.10");
   private static final BigDecimal DEFAULT_IV_ABS_BAND_HIGH = new BigDecimal("0.12");
+  // E6 §3.3 Market-Movers: the intraday session-open->now %-move floor a "mover" entry needs. The deck
+  // says >1% (for a stock); on the index it is a strict-but-tunable default.
+  private static final BigDecimal DEFAULT_PCT_PRICE_MOVE_FLOOR = new BigDecimal("1.0");
 
   /** Fills any unset field with its documented default (so a partial yaml override is honoured). */
   public ScalperOiProps {
@@ -78,11 +82,12 @@ public record ScalperOiProps(
     openHighRsiFloor = openHighRsiFloor == null ? DEFAULT_OPEN_HIGH_RSI_FLOOR : openHighRsiFloor;
     ivAbsBandLow = ivAbsBandLow == null ? DEFAULT_IV_ABS_BAND_LOW : ivAbsBandLow;
     ivAbsBandHigh = ivAbsBandHigh == null ? DEFAULT_IV_ABS_BAND_HIGH : ivAbsBandHigh;
+    pctPriceMoveFloor = pctPriceMoveFloor == null ? DEFAULT_PCT_PRICE_MOVE_FLOOR : pctPriceMoveFloor;
   }
 
   /** The all-defaults instance (used where config is absent — tests, the pure-scorer fallback). */
   public static ScalperOiProps defaults() {
     return new ScalperOiProps(
-        null, null, null, null, null, null, null, null, null, null, null, null, null);
+        null, null, null, null, null, null, null, null, null, null, null, null, null, null);
   }
 }

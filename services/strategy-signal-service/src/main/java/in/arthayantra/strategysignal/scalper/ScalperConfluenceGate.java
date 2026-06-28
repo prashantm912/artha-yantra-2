@@ -324,6 +324,24 @@ public class ScalperConfluenceGate {
       }
       structuralStop = gap.stopLevel();
     }
+    // E8 §3.9 Morning Trade: before the intraday VWAP settles (~10:30 IST) it is unreliable, so the
+    // morning structural stop is the PRIOR-day VWAP (the first support on a fall, doc L539/L541) — used
+    // only when it sits on the protective side of the entry; otherwise the default structural stop
+    // stands. The doc cites the STRIKE's prior-day VWAP; the strike isn't selected until later, so this
+    // uses the INDEX-future's prior-session VWAP (the same index-price domain every scalper structural
+    // stop lives in — the stop is touched by the index future). Live-only seam (parity-safe by
+    // firewall); a fresh boot with no prior session degrades to the default stop.
+    if (cfg.has("prior-day-vwap-stop")
+        && cfg.openingTick()
+        && future != null
+        && index >= 0
+        && istTime.isBefore(ScalperConfig.VWAP_ACTIONABLE_FROM)) {
+      BigDecimal vwapStop =
+          ScalperGates.priorDayVwapStop(priorSessionVwap(future, index), future.candle(index).close(), side);
+      if (vwapStop != null) {
+        structuralStop = vwapStop;
+      }
+    }
     // The live bar's IST date drives the S24 monthly-expiry OI suppression (distinct from eodDate,
     // the prior completed session used for breadth/FII).
     LocalDate tradeDate = barInstant.atZone(Ist.ZONE).toLocalDate();
@@ -559,6 +577,34 @@ public class ScalperConfluenceGate {
       return side == OptionType.CE ? first.low() : first.high();
     }
     return null;
+  }
+
+  /**
+   * E8 §3.9: VWAP over the PRIOR completed session's warmed bars — {@code Σ((H+L+C)·V) / (3·ΣV)}, a
+   * single division at the end (no intermediate rounding). null when no prior session is in the warmed
+   * window ({@code sessionStart == 0}, e.g. a fresh boot) or the prior session carried zero volume.
+   */
+  static BigDecimal priorSessionVwap(EngineSeries future, int index) {
+    if (future == null || index < 0) {
+      return null;
+    }
+    int todayStart = future.sessionStart(index);
+    if (todayStart <= 0) {
+      return null; // no prior session warmed
+    }
+    int priorStart = future.sessionStart(todayStart - 1);
+    BigDecimal sumPv = BigDecimal.ZERO;
+    BigDecimal sumV = BigDecimal.ZERO;
+    for (int i = priorStart; i < todayStart; i++) {
+      EngineCandle c = future.candle(i);
+      BigDecimal v = BigDecimal.valueOf(c.volume());
+      sumPv = sumPv.add(c.high().add(c.low()).add(c.close()).multiply(v));
+      sumV = sumV.add(v);
+    }
+    if (sumV.signum() == 0) {
+      return null;
+    }
+    return sumPv.divide(sumV.multiply(BigDecimal.valueOf(3)), 4, java.math.RoundingMode.HALF_UP);
   }
 
   /**

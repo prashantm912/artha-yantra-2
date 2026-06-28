@@ -330,6 +330,23 @@ public final class ScalperGates {
             + (ok ? " within band" : tooFar ? " too far from VWAP" : " too close (VWAP pin)"));
   }
 
+  /**
+   * §3.9 Morning Trade: the PRIOR-day VWAP as the morning structural stop — but only when it sits on
+   * the PROTECTIVE side of the entry (a support BELOW a CE long / a resistance ABOVE a PE short, doc
+   * L539/L541 "the first support on a fall"). Returns the stop level, or null when the VWAP is on the
+   * wrong side or unavailable (→ the default structural stop stands).
+   */
+  public static BigDecimal priorDayVwapStop(BigDecimal priorVwap, BigDecimal entryClose, OptionType side) {
+    if (priorVwap == null || entryClose == null) {
+      return null;
+    }
+    boolean protective =
+        side == OptionType.CE
+            ? priorVwap.compareTo(entryClose) < 0 // support below the long entry
+            : priorVwap.compareTo(entryClose) > 0; // resistance above the short entry
+    return protective ? priorVwap : null;
+  }
+
   /** Bull (CE): PSAR, VWMA, ST and VWAP all below price; bear (PE): all above. */
   public static GateOutcome indicatorAlignment(Chart c, OptionType side) {
     boolean ok;

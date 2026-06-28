@@ -172,6 +172,11 @@ class ScalperStrategyLoadTest {
       assertThat(tags.contains("oi-interval-and-60m-trend"))
           .as(id + " oi-interval-and-60m-trend armed iff trending-oi")
           .isEqualTo(isTrendingOi);
+      // E8 atr-stop (§2.2 2×ATR(14) index structural stop): armed on the scalp-trending-oi family (a
+      // directional trend strategy that otherwise carries no structural stop — a clean volatility-stop add).
+      assertThat(tags.contains("atr-stop"))
+          .as(id + " atr-stop armed iff trending-oi")
+          .isEqualTo(isTrendingOi);
 
       // E4 (iv-buyer-cap, "IV>40 -> don't buy"): armed on the golden-crossover momentum-buyer family.
       boolean isGoldenCrossover = id.startsWith("scalp-golden-crossover-");

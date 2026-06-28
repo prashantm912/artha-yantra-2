@@ -114,6 +114,9 @@ public record ScalperConfig(
   // #9: VWAP "not actionable before 10:30" — before this IST the opening-tick path drops VWAP from the
   // HARD validity gate (it stays a soft dot); at/after 10:30 the normal hard-VWAP behaviour resumes.
   static final LocalTime VWAP_ACTIONABLE_FROM = LocalTime.of(10, 30);
+  /** E8 §2.2 ATR stop: the structural stop = entry ∓ 2 × ATR(14) on the index future (owner: 2× ATR). */
+  static final java.math.BigDecimal ATR_STOP_MULT = new java.math.BigDecimal("2.0");
+  static final int ATR_STOP_PERIOD = 14;
 
   // E8 §3.5 time-of-day-preference window: the high-probability intraday band an opt-in strategy
   // initiates inside ("best 10:00-11:30, ease off after ~13:30-14:00"). Held as clock-bound constants

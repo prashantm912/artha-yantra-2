@@ -533,4 +533,15 @@ class ScalperGatesTest {
     return new Macro(
         bd("14"), bd("30"), bd("12.5"), Boolean.FALSE, 40, 10, bd("50"), null, null, constituentBias);
   }
+
+  @Test
+  void atrStopPlacesTheStopMultipleAtrsOnTheProtectiveSide() {
+    // CE: entry − 2×ATR (support below); PE: entry + 2×ATR (resistance above).
+    assertThat(ScalperGates.atrStop(bd("100"), bd("5"), bd("2.0"), CE)).isEqualByComparingTo("90");
+    assertThat(ScalperGates.atrStop(bd("100"), bd("5"), bd("2.0"), PE)).isEqualByComparingTo("110");
+    // null / non-positive ATR degrades to null → the default structural stop stands.
+    assertThat(ScalperGates.atrStop(bd("100"), null, bd("2.0"), CE)).isNull();
+    assertThat(ScalperGates.atrStop(bd("100"), bd("0"), bd("2.0"), CE)).isNull();
+    assertThat(ScalperGates.atrStop(null, bd("5"), bd("2.0"), CE)).isNull();
+  }
 }

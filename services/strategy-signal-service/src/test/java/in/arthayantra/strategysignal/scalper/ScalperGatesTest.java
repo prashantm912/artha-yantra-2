@@ -214,6 +214,18 @@ class ScalperGatesTest {
   }
 
   @Test
+  void fiiBiasRequiresTheFlowNotToOpposeTheSide() {
+    // CE wants FII net long (>=50); PE net short (<=50); 50 is neutral (both pass); null degrades to pass.
+    assertThat(ScalperGates.fiiBias(macroFii(bd("60")), CE).pass()).isTrue();
+    assertThat(ScalperGates.fiiBias(macroFii(bd("40")), CE).pass()).isFalse();
+    assertThat(ScalperGates.fiiBias(macroFii(bd("40")), PE).pass()).isTrue();
+    assertThat(ScalperGates.fiiBias(macroFii(bd("60")), PE).pass()).isFalse();
+    assertThat(ScalperGates.fiiBias(macroFii(bd("50")), CE).pass()).isTrue(); // neutral never blocks
+    assertThat(ScalperGates.fiiBias(macroFii(bd("50")), PE).pass()).isTrue();
+    assertThat(ScalperGates.fiiBias(macroFii(null), CE).pass()).isTrue(); // null -> pass
+  }
+
+  @Test
   void volumePumpRequiresAFloorClearingDirectionalCandle() {
     // CE: a floor-clearing GREEN candle (close>open) confirms; a RED one (close<open) blocks.
     assertThat(ScalperGates.volumePump(bd("110"), bd("100"), bd("130000"), "NIFTY 50", CE).pass()).isTrue();
@@ -365,5 +377,9 @@ class ScalperGatesTest {
 
   private static Macro macroIv(BigDecimal ceIvAvg6, BigDecimal peIvAvg6) {
     return new Macro(bd("14"), bd("30"), bd("12.5"), Boolean.FALSE, 40, 10, bd("50"), ceIvAvg6, peIvAvg6);
+  }
+
+  private static Macro macroFii(BigDecimal fiiLongPct) {
+    return new Macro(bd("14"), bd("30"), bd("12.5"), Boolean.FALSE, 40, 10, fiiLongPct, null, null);
   }
 }

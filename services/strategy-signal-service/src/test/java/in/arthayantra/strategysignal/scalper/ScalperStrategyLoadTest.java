@@ -169,6 +169,12 @@ class ScalperStrategyLoadTest {
           .as(id + " oi-divergence-magnitude armed iff trending-oi")
           .isEqualTo(isTrendingOi);
 
+      // E4 (iv-buyer-cap, "IV>40 -> don't buy"): armed on the golden-crossover momentum-buyer family.
+      boolean isGoldenCrossover = id.startsWith("scalp-golden-crossover-");
+      assertThat(tags.contains("iv-buyer-cap"))
+          .as(id + " iv-buyer-cap armed iff golden-crossover")
+          .isEqualTo(isGoldenCrossover);
+
       // Connect-the-Dots (#10) is the SOFT weighted-scorer strategy: these confluences are ALREADY soft
       // dots in the 18-dot scorer, so the hard-gate versions ship default-OFF and are armed on NO
       // strategy (the scorer + base rails decide, not an AND of hard pre-gates). The code stays merged +

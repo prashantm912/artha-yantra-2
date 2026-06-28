@@ -202,6 +202,18 @@ class ScalperGatesTest {
   }
 
   @Test
+  void ivBuyerCapBlocksBuyingIntoRichSideIvButDegradesOnNull() {
+    BigDecimal cap = ScalperGates.IV_BUYER_CAP; // 0.40 fraction = "IV 40"
+    // CE: buyable when the CE 6-strike IV <= cap, blocked above it.
+    assertThat(ScalperGates.ivBuyerCap(macroIv(bd("0.30"), bd("0.20")), CE, cap).pass()).isTrue();
+    assertThat(ScalperGates.ivBuyerCap(macroIv(bd("0.50"), bd("0.20")), CE, cap).pass()).isFalse();
+    // PE reads the PE-side IV.
+    assertThat(ScalperGates.ivBuyerCap(macroIv(bd("0.20"), bd("0.50")), PE, cap).pass()).isFalse();
+    // a null side IV degrades to pass (a risk veto never blocks on missing data).
+    assertThat(ScalperGates.ivBuyerCap(macroIv(null, bd("0.20")), CE, cap).pass()).isTrue();
+  }
+
+  @Test
   void flatOiStandAsideBlocksANullImbalanceButPassesAPresentOne() {
     // the deliberate inverse of callPutDeltaFilter's fail-open: a present imbalance passes...
     assertThat(ScalperGates.flatOiStandAside(imbalance(bd("10"))).pass()).isTrue();
@@ -336,5 +348,9 @@ class ScalperGatesTest {
 
   private static Macro macro(int adv, int dec, Boolean vixRising) {
     return new Macro(bd("14"), bd("30"), bd("12.5"), vixRising, adv, dec, bd("50"), null, null);
+  }
+
+  private static Macro macroIv(BigDecimal ceIvAvg6, BigDecimal peIvAvg6) {
+    return new Macro(bd("14"), bd("30"), bd("12.5"), Boolean.FALSE, 40, 10, bd("50"), ceIvAvg6, peIvAvg6);
   }
 }

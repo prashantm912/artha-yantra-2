@@ -54,6 +54,11 @@ public final class ScalperGates {
   static final BigDecimal OI_DIVERGENCE_MIN_PCT = new BigDecimal("20");
   static final BigDecimal PRICE_IMPULSE_MIN_PCT = new BigDecimal("50");
 
+  // E4 (tag iv-buyer-cap, IV-interpretation "IV>40 -> sellers' market, don't buy"): the side's 6-strike
+  // average IV above which a long-premium BUY is too rich (theta bleed > expected move). ceIvAvg6 /
+  // peIvAvg6 are 0..1 fractions (0.40 = "40 IV"). A pure risk veto — NOT one of the 18 scorer dots.
+  static final BigDecimal IV_BUYER_CAP = new BigDecimal("0.40");
+
   /** ≥09:45 (ideal 09:15–10:00), block the 11:00–13:00 sideways window, no fresh entry after 15:30. */
   public static GateOutcome timeWindow(LocalTime ist) {
     if (ist.isBefore(NO_TRADE_BEFORE)) {
@@ -294,6 +299,23 @@ public final class ScalperGates {
     }
     boolean ok = side == OptionType.CE ? spot.compareTo(wall) < 0 : spot.compareTo(wall) > 0;
     return new GateOutcome(ok, wall, ok ? "clear of OI wall " + wall : "into OI wall " + wall);
+  }
+
+  /**
+   * E4 (tag {@code iv-buyer-cap}, IV-interpretation "IV&gt;40 → sellers' market, don't buy"): a
+   * long-premium BUY is too rich when the traded side's 6-strike average IV exceeds {@code capFraction}
+   * — block it (theta bleed outweighs the expected move). Reads {@code ceIvAvg6}/{@code peIvAvg6}
+   * (already on Macro); a null side IV DEGRADES to pass (a risk veto never blocks on missing data). This
+   * is NOT one of the scored dots — it's a standalone IV risk rail, so it does not double-count.
+   */
+  public static GateOutcome ivBuyerCap(Macro m, OptionType side, BigDecimal capFraction) {
+    BigDecimal iv = side == OptionType.CE ? m.ceIvAvg6() : m.peIvAvg6();
+    if (iv == null) {
+      return GateOutcome.pass(null, "side IV unavailable (degrade -> pass)");
+    }
+    boolean ok = iv.compareTo(capFraction) <= 0;
+    return new GateOutcome(
+        ok, iv, ok ? "side IV <= cap (buyable)" : "side IV > cap (too rich, sellers' market)");
   }
 
   /** Futures basis: future > spot (premium) is bullish → CE; future < spot (discount) bearish → PE. */

@@ -197,4 +197,32 @@ class OptionContractSelectorTest {
 
     assertThat(c).isEmpty();
   }
+
+  @Test
+  void selectInBandWithNullStepAppliesNoSideCut() {
+    // strikeStep null ⇒ no ATM/ITM cut (the live StrikePicker shape): the near-OTM 25000 (> spot 24960)
+    // is NOT excluded, so its in-band premium makes it selectable (a non-null step would have cut it).
+    Map<String, String> prem = Map.of("25000", "180", "24900", "300", "25100", "300");
+    Optional<OptionContract> c =
+        band().selectInBand(
+            "NIFTY", bd("24960"), LocalDate.of(2026, 6, 5), ExpiryMode.NEAREST_WEEKLY, 0,
+            true, Set.of("CE", "PE"), 2, bd("100"), bd("250"), null, probe(prem));
+
+    assertThat(c).isPresent();
+    assertThat(c.get().strike()).isEqualByComparingTo("25000");
+  }
+
+  @Test
+  void selectInBandBreaksMidpointTiesByNearnessThenLowerStrike() {
+    // 24900 and 25100 tie on midpoint error (both premium 175 = mid) and on nearness (both 100 off spot)
+    // → the lower strike 24900 wins deterministically, regardless of catalog row order. step null = no cut.
+    Map<String, String> prem = Map.of("25000", "300", "24900", "175", "25100", "175");
+    Optional<OptionContract> c =
+        band().selectInBand(
+            "NIFTY", bd("25000"), LocalDate.of(2026, 6, 5), ExpiryMode.NEAREST_WEEKLY, 0,
+            true, Set.of("CE", "PE"), 2, bd("100"), bd("250"), null, probe(prem));
+
+    assertThat(c).isPresent();
+    assertThat(c.get().strike()).isEqualByComparingTo("24900");
+  }
 }

@@ -66,7 +66,7 @@ public class JdbcExpiredContractCatalog implements Catalog {
     return jdbc.query(
         "SELECT exchange, tradingsymbol, strike, lot_size FROM marketdata.expired_contracts "
             + "WHERE underlying_symbol = ? AND expiry = ? AND instrument_type = ? "
-            + "AND strike IS NOT NULL ORDER BY abs(strike - ?) LIMIT ?",
+            + "AND strike IS NOT NULL ORDER BY abs(strike - ?), strike LIMIT ?",
         (rs, n) ->
             new OptionContract(
                 rs.getString("exchange"),

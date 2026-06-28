@@ -29,7 +29,11 @@ public record ScalperOiProps(
     BigDecimal openHighRsiFloor,
     BigDecimal ivAbsBandLow,
     BigDecimal ivAbsBandHigh,
-    BigDecimal pctPriceMoveFloor) {
+    BigDecimal pctPriceMoveFloor,
+    BigDecimal rsi5mCeCap,
+    BigDecimal rsi5mPeFloor,
+    BigDecimal rsiDailyCeCap,
+    BigDecimal rsiDailyPeFloor) {
 
   // T2.1: the #5 call-put delta-imbalance HARD pre-gate floor (>= 50% of the larger leg).
   private static final BigDecimal DEFAULT_CROSS_FILTER_PCT = new BigDecimal("50");
@@ -62,6 +66,11 @@ public record ScalperOiProps(
   // E6 §3.3 Market-Movers: the intraday session-open->now %-move floor a "mover" entry needs. The deck
   // says >1% (for a stock); on the index it is a strict-but-tunable default.
   private static final BigDecimal DEFAULT_PCT_PRICE_MOVE_FLOOR = new BigDecimal("1.0");
+  // E5 §3.2/§4.2 higher-TF RSI caps (the §4.2 "5m < 75/80, daily < 75 for CE; mirror PE" values).
+  private static final BigDecimal DEFAULT_RSI_5M_CE_CAP = new BigDecimal("75");
+  private static final BigDecimal DEFAULT_RSI_5M_PE_FLOOR = new BigDecimal("25");
+  private static final BigDecimal DEFAULT_RSI_DAILY_CE_CAP = new BigDecimal("75");
+  private static final BigDecimal DEFAULT_RSI_DAILY_PE_FLOOR = new BigDecimal("25");
 
   /** Fills any unset field with its documented default (so a partial yaml override is honoured). */
   public ScalperOiProps {
@@ -83,11 +92,16 @@ public record ScalperOiProps(
     ivAbsBandLow = ivAbsBandLow == null ? DEFAULT_IV_ABS_BAND_LOW : ivAbsBandLow;
     ivAbsBandHigh = ivAbsBandHigh == null ? DEFAULT_IV_ABS_BAND_HIGH : ivAbsBandHigh;
     pctPriceMoveFloor = pctPriceMoveFloor == null ? DEFAULT_PCT_PRICE_MOVE_FLOOR : pctPriceMoveFloor;
+    rsi5mCeCap = rsi5mCeCap == null ? DEFAULT_RSI_5M_CE_CAP : rsi5mCeCap;
+    rsi5mPeFloor = rsi5mPeFloor == null ? DEFAULT_RSI_5M_PE_FLOOR : rsi5mPeFloor;
+    rsiDailyCeCap = rsiDailyCeCap == null ? DEFAULT_RSI_DAILY_CE_CAP : rsiDailyCeCap;
+    rsiDailyPeFloor = rsiDailyPeFloor == null ? DEFAULT_RSI_DAILY_PE_FLOOR : rsiDailyPeFloor;
   }
 
   /** The all-defaults instance (used where config is absent — tests, the pure-scorer fallback). */
   public static ScalperOiProps defaults() {
     return new ScalperOiProps(
-        null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+        null, null);
   }
 }

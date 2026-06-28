@@ -37,6 +37,11 @@ class ScalperOiPropsTest {
           assertThat(p.ivAbsBandHigh()).isEqualByComparingTo("0.12");
           // E6: the Market-Movers >1% session-move floor.
           assertThat(p.pctPriceMoveFloor()).isEqualByComparingTo("1.0");
+          // E5: the higher-TF RSI caps (§4.2 5m/daily 75/25).
+          assertThat(p.rsi5mCeCap()).isEqualByComparingTo("75");
+          assertThat(p.rsi5mPeFloor()).isEqualByComparingTo("25");
+          assertThat(p.rsiDailyCeCap()).isEqualByComparingTo("75");
+          assertThat(p.rsiDailyPeFloor()).isEqualByComparingTo("25");
         });
   }
 

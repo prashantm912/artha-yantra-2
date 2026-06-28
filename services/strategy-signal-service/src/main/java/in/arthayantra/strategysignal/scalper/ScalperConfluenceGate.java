@@ -39,6 +39,9 @@ public class ScalperConfluenceGate {
 
   static final String PSAR = "psar";
   static final String RSI = "rsi14";
+  // E5 §3.2/§4.2 higher-TF RSI aliases the 5m/daily caps read (declared on the opted-in YAMLs only).
+  static final String RSI_5M = "rsi5m";
+  static final String RSI_DAILY = "rsi_daily";
   static final String SUPERTREND = "supertrend";
   // optional 60-minute bias confirmation (e.g. SUPERTREND@60m); absent ⇒ unknown ⇒ never blocks.
   static final String BIAS_60M = "bias60m";
@@ -183,6 +186,21 @@ public class ScalperConfluenceGate {
                 ? ScalperGates.rsiS24Band(chart.rsi14(), side).pass()
                 : ScalperGates.rsiBand(chart.rsi14(), side).pass();
     if (!ScalperGates.volume(cfg.signalIndex(), chart.volume()).pass() || !rsiOk) {
+      return Optional.empty();
+    }
+    // E5 §3.2/§4.2 higher-TF RSI caps: on top of the 3m rail, the 5m must not be overbought (CE) and the
+    // daily must agree (CE < 75 / PE > 25). Armed via rsi-5m-cap / rsi-daily-cap; the opted-in YAML
+    // declares rsi5m@5m / rsiDaily@1d (warmed by §3.2a). Fail-closed on a null higher-TF read.
+    if (cfg.has("rsi-5m-cap")
+        && !ScalperGates.rsiHigherTfCap(
+                chart.rsi5m(), side, oiProps.rsi5mCeCap(), oiProps.rsi5mPeFloor())
+            .pass()) {
+      return Optional.empty();
+    }
+    if (cfg.has("rsi-daily-cap")
+        && !ScalperGates.rsiHigherTfCap(
+                chart.rsiDaily(), side, oiProps.rsiDailyCeCap(), oiProps.rsiDailyPeFloor())
+            .pass()) {
       return Optional.empty();
     }
     // E5 §3.6 rsi-cooloff: after a HOT prior bar (RSI overbought/oversold) the entry waits for a cooled
@@ -504,7 +522,11 @@ public class ScalperConfluenceGate {
         bank.valueAt(PSAR, index),
         supertrendDir,
         bank.valueAt(RSI, index),
-        bank.builtin("volume", index));
+        bank.builtin("volume", index),
+        // E5 §3.2a: read the higher-TF RSI aliases ONLY when the YAML declares them (else valueAt throws
+        // "alias not in the bank"); a strategy without the caps gets null and the gates are unarmed anyway.
+        bank.has(RSI_5M) ? bank.valueAt(RSI_5M, index) : null,
+        bank.has(RSI_DAILY) ? bank.valueAt(RSI_DAILY, index) : null);
   }
 
   private int bias60m(BarValues bank, int index) {

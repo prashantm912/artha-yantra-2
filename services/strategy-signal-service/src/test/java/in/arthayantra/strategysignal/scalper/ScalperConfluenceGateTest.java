@@ -611,6 +611,65 @@ class ScalperConfluenceGateTest {
   }
 
   @Test
+  void higherTfRsiCapsBlockAnOverboughtCeWhenArmed() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+
+    // rsi-5m-cap: a 5m RSI of 78 (>= the 75 cap) BLOCKS a CE; 70 fires; the bare CFG ignores the 5m read.
+    assertThat(gate.evaluate(cfgTags("rsi-5m-cap"), bullBankHigherTf(bd("78"), null), null, 0, NOW, IST_TIME, EOD))
+        .isEmpty();
+    assertThat(gate.evaluate(cfgTags("rsi-5m-cap"), bullBankHigherTf(bd("70"), null), null, 0, NOW, IST_TIME, EOD))
+        .isPresent();
+    assertThat(gate.evaluate(CFG, bullBankHigherTf(bd("78"), null), null, 0, NOW, IST_TIME, EOD)).isPresent();
+
+    // rsi-daily-cap: a daily RSI of 80 BLOCKS; 60 fires.
+    assertThat(gate.evaluate(cfgTags("rsi-daily-cap"), bullBankHigherTf(null, bd("80")), null, 0, NOW, IST_TIME, EOD))
+        .isEmpty();
+    assertThat(gate.evaluate(cfgTags("rsi-daily-cap"), bullBankHigherTf(null, bd("60")), null, 0, NOW, IST_TIME, EOD))
+        .isPresent();
+  }
+
+  // E5: bullBank that ALSO exposes the higher-TF rsi5m / rsiDaily aliases — has(...) reflects only the
+  // non-null ones, so the seam reads `bank.has(alias) ? valueAt : null` exactly as in production.
+  private static BarValues bullBankHigherTf(BigDecimal rsi5m, BigDecimal rsiDaily) {
+    Map<String, BigDecimal> builtins = Map.of("close", bd("100"), "vwap", bd("99"), "volume", bd("130000"));
+    Map<String, BigDecimal> aliases = new java.util.HashMap<>();
+    aliases.put("vwma20", bd("98"));
+    aliases.put("psar", bd("97"));
+    aliases.put("rsi14", bd("65"));
+    aliases.put("supertrend", bd("1"));
+    if (rsi5m != null) {
+      aliases.put("rsi5m", rsi5m);
+    }
+    if (rsiDaily != null) {
+      aliases.put("rsi_daily", rsiDaily);
+    }
+    return new BarValues() {
+      @Override
+      public BigDecimal valueAt(String alias, int i) {
+        return aliases.get(alias);
+      }
+
+      @Override
+      public BigDecimal previousValueAt(String alias, int i) {
+        return null;
+      }
+
+      @Override
+      public BigDecimal builtin(String name, int i) {
+        return builtins.get(name);
+      }
+
+      @Override
+      public boolean has(String alias) {
+        return aliases.containsKey(alias);
+      }
+    };
+  }
+
+  @Test
   void fiiBiasTagBlocksWhenTheFlowOpposesAndPassesOnNeutral() {
     // E3: fii-bias blocks a CE when FII flow is net short (30 < 50); a neutral read (bullContext, 50)
     // passes; the bare CFG (gate off) fires on the same net-short context.

@@ -116,6 +116,12 @@ public final class IndicatorBank implements BarValues {
     return index < 1 ? null : bound.indicator().valueAt(index - 1);
   }
 
+  /** True when the alias was declared on this bank (a higher-TF gate reads it only when present). */
+  @Override
+  public boolean has(String alias) {
+    return byAlias.containsKey(alias);
+  }
+
   /** Built-in operand values (close, volume, vwap) at a primary index. */
   @Override
   public BigDecimal builtin(String name, int primaryIndex) {

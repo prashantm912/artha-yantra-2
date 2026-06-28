@@ -249,6 +249,60 @@ class ExitEvaluatorTest {
   }
 
   @Test
+  void indexPointsStopAndTargetAreAbsoluteDistances() {
+    StrategyDefinition def =
+        definitionWith(
+            """
+              - { type: stop_loss,   params: { basis: index_points, value: 30 } }
+              - { type: take_profit, params: { basis: index_points, value: 60 } }
+            """);
+    // entry 100.00 (index 1): stop at 70 (-30 pts), target at 160 (+60 pts)
+    ExitEvaluator.Position position =
+        new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, new BigDecimal("100.00"), 1);
+
+    // -25 pts: within the 30-pt stop, no exit
+    assertThat(ExitEvaluator.evaluate(def, bank(def, series(10000, 10000, 7500)), position, 2))
+        .isEmpty();
+    // -35 pts: through the 30-pt stop
+    Optional<ExitEvaluator.ExitDecision> stop =
+        ExitEvaluator.evaluate(def, bank(def, series(10000, 10000, 6500)), position, 2);
+    assertThat(stop).get().extracting(ExitEvaluator.ExitDecision::type).isEqualTo("stop_loss");
+    // +65 pts: through the 60-pt target
+    Optional<ExitEvaluator.ExitDecision> target =
+        ExitEvaluator.evaluate(def, bank(def, series(10000, 10000, 16500)), position, 2);
+    assertThat(target).get().extracting(ExitEvaluator.ExitDecision::type).isEqualTo("take_profit");
+
+    // entryLevels reflect the absolute-point distances
+    ExitEvaluator.EntryLevels levels =
+        ExitEvaluator.entryLevels(def, bank(def, series(10000, 10000, 10000)), position);
+    assertThat(levels.stopLoss()).isEqualByComparingTo("70.00");
+    assertThat(levels.takeProfit()).isEqualByComparingTo("160.00");
+  }
+
+  @Test
+  void indexPointsTrailingExitsOnAFixedPointRetraceOffThePeak() {
+    StrategyDefinition def =
+        definitionWith(
+            """
+              - { type: trailing_stop, params: { basis: index_points, value: 20 } }
+            """);
+    ExitEvaluator.Position position =
+        new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, new BigDecimal("100.00"), 1);
+    // peak high reaches ~150.05 by index 3 (close 150 + 0.05 wrap); a drop to 135 is a 15.05-pt
+    // retrace off the peak — within the 20-pt trail, no exit
+    EngineSeries s = series(10000, 10000, 13000, 15000, 13500);
+    IndicatorBank b = bank(def, s);
+    assertThat(ExitEvaluator.evaluate(def, b, position, 4))
+        .as("15-pt retrace inside the 20-pt trail")
+        .isEmpty();
+    // a deeper drop to 125 is a 25-pt retrace off the ~150 peak — through the trail
+    EngineSeries deep = series(10000, 10000, 13000, 15000, 12500);
+    Optional<ExitEvaluator.ExitDecision> trail =
+        ExitEvaluator.evaluate(def, bank(def, deep), position, 4);
+    assertThat(trail).get().extracting(ExitEvaluator.ExitDecision::type).isEqualTo("trailing_stop");
+  }
+
+  @Test
   void shortPositionsMirrorLevels() {
     StrategyDefinition def =
         definitionWith(

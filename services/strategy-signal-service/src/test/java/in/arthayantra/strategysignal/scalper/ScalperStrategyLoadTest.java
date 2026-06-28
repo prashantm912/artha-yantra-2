@@ -177,6 +177,17 @@ class ScalperStrategyLoadTest {
           .as(id + " max-oi-sr-gate armed iff connect-the-dots")
           .isEqualTo(isConnectDots);
 
+      // FU2 + E3 directional-VIX: the 5 confluence soft-dots promoted to hard gates are armed on the
+      // connect-the-dots master-confluence family (its identity is requiring the full confluence).
+      for (String fu2Tag :
+          List.of(
+              "indicator-alignment-gate", "futures-oi-gate", "breadth-gate", "basis-gate",
+              "directional-vix-gate")) {
+        assertThat(tags.contains(fu2Tag))
+            .as(id + " " + fu2Tag + " armed iff connect-the-dots")
+            .isEqualTo(isConnectDots);
+      }
+
       // #11 (section 3.11): only the scalp-straddle family carries the straddle tag → the NEUTRAL two-leg
       // path. ScalperConfig.requireStraddle mirrors the tag; the others stay off, and the straddle
       // declares both option_types (it BUYS the ATM CE + PE) rather than a single directional side.

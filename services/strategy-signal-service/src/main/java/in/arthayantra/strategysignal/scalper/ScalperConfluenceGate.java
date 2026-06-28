@@ -255,6 +255,31 @@ public class ScalperConfluenceGate {
             .pass()) {
       return Optional.empty();
     }
+    // FU2 — soft-dots-to-hard-gates: each of these confluence reads is ALSO a scored soft dot; arming the
+    // tag makes it a STRICT requirement (the scorer/den is unchanged → parity-safe). Every operand is
+    // already in hand. The natural home is the #10 "Connect-the-Dots" strategy, whose identity IS
+    // requiring the whole confluence to align. Each is default-OFF.
+    // - indicator-alignment: VWAP+VWMA+PSAR+ST all on the side (fail-closed on a missing/opposed leg).
+    if (cfg.has("indicator-alignment-gate") && !ScalperGates.indicatorAlignment(chart, side).pass()) {
+      return Optional.empty();
+    }
+    // - futures-oi: the futures OI quadrant must support the side (CE wants LB/SC; fail-closed on NEUTRAL).
+    if (cfg.has("futures-oi-gate") && !ScalperGates.oiQuadrant(ctx.oi(), side).pass()) {
+      return Optional.empty();
+    }
+    // - breadth: advances/declines > 32 for the side (fail-closed on a 0/0 / unavailable read).
+    if (cfg.has("breadth-gate") && !ScalperGates.breadth(ctx.macro(), side).pass()) {
+      return Optional.empty();
+    }
+    // - basis: the futures basis must agree (premium→CE, discount→PE); fail-OPEN on a null basis.
+    if (cfg.has("basis-gate") && !ScalperGates.futuresBasis(ctx.oi(), side).pass()) {
+      return Optional.empty();
+    }
+    // E3 P1 — directional-VIX HARD gate: VIX direction must confirm the side (falling→CE, rising→PE);
+    // fail-OPEN on unknown direction, so it stays inert until the VIX feed is wired (vixRising is null today).
+    if (cfg.has("directional-vix-gate") && !ScalperGates.vix(ctx.macro(), side).pass()) {
+      return Optional.empty();
+    }
     // W4 (tag directional-change-gate, S24 Day-20): only enter on a confirmed OI directional change —
     // the PE-CE tilt must have crossed within the window. Default-OFF; an unchanged/short series blocks.
     if (cfg.has("directional-change-gate") && !ScalperGates.directionalChange(ctx.oi()).pass()) {

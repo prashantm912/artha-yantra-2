@@ -33,6 +33,7 @@ indicators:
   - { name: SUPERTREND, alias: supertrend, timeframe: 3m, params: { period: 10, multiplier: 2.0 },
       weight: 1.0, normalize: { type: direction } }
   - { name: SUPERTREND, alias: bias60m,   timeframe: 1h, params: { period: 7, multiplier: 3.0 } }
+  - { name: SUPERTREND_LINE, alias: supertrend_line, timeframe: 3m, params: { period: 10, multiplier: 2.0 } } # E9 §3: the ST LINE for the trail-with-Super-Trend exit
 
 entry_rules:
   direction: long                # long bias → CE (the seam derives CE/PE from price vs VWAP)
@@ -44,6 +45,7 @@ entry_rules:
 
 exit_rules:
   - { type: signal_exit, params: { rule: "close < vwap", min_volume: 125000 } }   # structural exit on the future
+  - { type: trailing_stop, params: { basis: indicator, alias: supertrend_line } }   # E9 §3: trail with the Super Trend line as the move matures
   - { type: time_stop,   params: { max_bars: 10 } }           # scalps go stale fast
 
 risk:

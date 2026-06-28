@@ -255,7 +255,7 @@ public class ScalperConfluenceGate {
     // (>=20% of total OI) with a corroborating price impulse (>=50%). Fail-closed; NEUTRAL on history.
     if (cfg.has("oi-divergence-magnitude")
         && !ScalperGates.oiDivergenceMagnitude(
-                ctx.oi(), ScalperGates.OI_DIVERGENCE_MIN_PCT, ScalperGates.PRICE_IMPULSE_MIN_PCT)
+                ctx.oi(), ScalperGates.OI_DIVERGENCE_MIN_PCT, ScalperGates.PRICE_IMPULSE_MIN_PCT, side)
             .pass()) {
       return Optional.empty();
     }

@@ -257,21 +257,26 @@ public final class ScalperGates {
 
   /**
    * E2 M3 (tag {@code oi-divergence-magnitude}, Trending-OI #5): the OI lines must DIVERGE by at least
-   * {@code minPct} (the PE−CE gap as a % of total OI) AND a corroborating price impulse of at least
-   * {@code priceMinPct} must confirm it. Stronger than the boolean trending-cross dot — it requires a
-   * real magnitude, not just a sign flip. Null divergence/price FAILS (fail-closed) → NEUTRAL on derived
-   * history, so it's a forward-paper gate.
+   * {@code minPct} IN THE SIDE'S DIRECTION (the SIGNED PE−CE gap as a % of total OI — CE wants it
+   * {@code >= +minPct} (PE-heavy, bullish), PE {@code <= -minPct} (CE-heavy, bearish)) AND a
+   * corroborating price impulse of at least {@code priceMinPct} in the same direction (CE up, PE down).
+   * Stronger than the boolean trending-cross dot — a real magnitude AND the right direction, not just a
+   * sign flip. Null divergence/price FAILS (fail-closed) → NEUTRAL on derived history (forward-paper gate).
    */
-  public static GateOutcome oiDivergenceMagnitude(Oi oi, BigDecimal minPct, BigDecimal priceMinPct) {
+  public static GateOutcome oiDivergenceMagnitude(
+      Oi oi, BigDecimal minPct, BigDecimal priceMinPct, OptionType side) {
     BigDecimal div = oi.oiDivergencePct();
     BigDecimal px = oi.spurtPricePct();
+    if (div == null || px == null) {
+      return new GateOutcome(false, div, "missing divergence/price impulse");
+    }
     boolean ok =
-        div != null
-            && div.compareTo(minPct) >= 0
-            && px != null
-            && px.abs().compareTo(priceMinPct) >= 0;
+        side == OptionType.CE
+            ? div.compareTo(minPct) >= 0 && px.compareTo(priceMinPct) >= 0
+            : div.compareTo(minPct.negate()) <= 0 && px.compareTo(priceMinPct.negate()) <= 0;
     return new GateOutcome(
-        ok, div, ok ? "OI divergence + price impulse confirm" : "weak divergence/impulse");
+        ok, div,
+        ok ? "OI divergence + price impulse confirm " + side : "weak/opposing divergence or impulse");
   }
 
   /**

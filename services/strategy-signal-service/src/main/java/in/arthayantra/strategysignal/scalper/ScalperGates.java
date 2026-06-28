@@ -197,6 +197,49 @@ public final class ScalperGates {
         "call-put dOI imbalance " + imbalance.toPlainString() + (ok ? " >= " : " < ") + floorPct.toPlainString());
   }
 
+  /**
+   * E2 M1 (tag {@code oi-cross-required}, Trending-OI #5 defining trigger): a HARD requirement for a
+   * COMPLETED fresh cross favouring the side — CE wants {@code peΔ>0 && ceΔ<0} (put writers building
+   * support while call writers unwind), PE the mirror, AND {@code crossedThisWindow} (a real sign
+   * transition, not a widening gap). Unlike the soft {@code trending_cross} dot, {@code gapWidening}
+   * alone does NOT satisfy it. Null deltas FAIL (fail-closed) — a missing derivation cannot pass a
+   * fresh-cross requirement, and a stalled (not-yet-flipped) cross reads {@code crossedThisWindow=false}
+   * so it is rejected for free (P16 incomplete-cross). NEUTRAL on derived history → forward-paper gate.
+   */
+  public static GateOutcome oiCrossRequired(Oi oi, OptionType side) {
+    boolean ce = side == OptionType.CE;
+    boolean realCross =
+        oi.crossedThisWindow()
+            && oi.ceOiDelta() != null
+            && oi.peOiDelta() != null
+            && (ce
+                ? oi.peOiDelta().signum() > 0 && oi.ceOiDelta().signum() < 0
+                : oi.ceOiDelta().signum() > 0 && oi.peOiDelta().signum() < 0);
+    return new GateOutcome(
+        realCross,
+        oi.callPutDeltaImbalancePct(),
+        realCross ? "fresh OI cross favours " + side : "no completed OI cross for " + side);
+  }
+
+  /**
+   * E2 M2 (tag {@code oi-slope-agree}, Trending-OI #5): the active-strike sentiment LEVEL and its SLOPE
+   * must BOTH favour the side (a hard conjunction of the two independent soft sentiment dots) — CE wants
+   * both {@code > 0}, PE both {@code < 0}. Null level/slope FAILS (fail-closed; the conjunction is
+   * required). NEUTRAL on derived history → forward-paper gate.
+   */
+  public static GateOutcome oiSlopeAgree(Oi oi, OptionType side) {
+    boolean ce = side == OptionType.CE;
+    BigDecimal slope = oi.sentimentSlope();
+    BigDecimal level = oi.sentimentPct();
+    boolean ok =
+        slope != null
+            && level != null
+            && (ce
+                ? slope.signum() > 0 && level.signum() > 0
+                : slope.signum() < 0 && level.signum() < 0);
+    return new GateOutcome(ok, slope, ok ? "sentiment level+slope agree" : "level/slope disagree");
+  }
+
   /** Futures basis: future > spot (premium) is bullish → CE; future < spot (discount) bearish → PE. */
   public static GateOutcome futuresBasis(Oi oi, OptionType side) {
     BigDecimal basis = oi.futuresBasis();

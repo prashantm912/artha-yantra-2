@@ -175,6 +175,29 @@ class ScalperConfluenceGateTest {
         new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), null, null));
   }
 
+  // a config carrying arbitrary behaviour tags (the canonical 19-arg form) — every requireXxx flag off,
+  // so only the has(tag) gates under test are armed.
+  private static ScalperConfig cfgTags(String... tags) {
+    return new ScalperConfig(
+        "NSE", "NIFTY 50", "NIFTY 50", "NIFTY 50", 2,
+        new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
+        false, ScalperConfig.StructuralStop.NONE, false, false, false, false, false, false, false,
+        false, false, List.of(tags));
+  }
+
+  // a bullish context whose OI carries a COMPLETED CE-favouring cross (peΔ>0 && ceΔ<0, crossed) plus an
+  // agreeing sentiment level+slope (both positive) — the operands the E2 oi-cross-required /
+  // oi-slope-agree hard gates require.
+  private static ScalperGateContext bullContextOiCross() {
+    return new ScalperGateContext(
+        "NIFTY 50", "NIFTY 50", IST_TIME,
+        new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("130000")),
+        new Oi(
+            OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("5"), bd("5"),
+            bd("-100"), bd("200"), bd("60"), true, false, bd("3"), null, null),
+        new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), null, null));
+  }
+
   private static ChainSnapshot chainWithInBandCe() {
     // spot 20000, basis 0, ~5d, iv 0.14 → 19850 CE lands delta ~0.68 (in 0.6–0.7); others out
     List<StrikePicker.Candidate> candidates =
@@ -215,6 +238,38 @@ class ScalperConfluenceGateTest {
     Optional<Decision> s24 = gate.evaluate(RSI_S24_CFG, bullBankRsi(bd("55")), null, 0, NOW, IST_TIME, EOD);
     assertThat(s24).isPresent();
     assertThat(s24.get().confluence().bullish()).isTrue();
+  }
+
+  @Test
+  void oiCrossRequiredTagFiresOnAFreshCrossAndBlocksWithout() {
+    // E2 M1: the oi-cross-required hard gate fires only on a COMPLETED cross favouring the side; the
+    // bare CFG (which arms no new gate) still fires on the same no-cross context (the cross stays soft).
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContextOiCross());
+    assertThat(gate.evaluate(cfgTags("oi-cross-required"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    assertThat(gate.evaluate(cfgTags("oi-cross-required"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isEmpty();
+    assertThat(gate.evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+  }
+
+  @Test
+  void oiSlopeAgreeTagFiresWhenLevelAndSlopeAgreeAndBlocksWithout() {
+    // E2 M2: oi-slope-agree fires only when sentiment level+slope both favour the side; bullContext has
+    // a null slope → the armed gate blocks while the bare CFG (no gate armed) still fires.
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContextOiCross());
+    assertThat(gate.evaluate(cfgTags("oi-slope-agree"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    assertThat(gate.evaluate(cfgTags("oi-slope-agree"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isEmpty();
+    assertThat(gate.evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
   }
 
   @Test

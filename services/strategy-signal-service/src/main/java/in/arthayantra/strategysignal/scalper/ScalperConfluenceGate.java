@@ -229,6 +229,17 @@ public class ScalperConfluenceGate {
         && !ScalperGates.callPutDeltaFilter(ctx.oi(), oiProps.crossFilterPct()).pass()) {
       return Optional.empty();
     }
+    // E2 M1 (tag oi-cross-required, Trending-OI #5 defining trigger): a COMPLETED fresh PE-over-CE /
+    // CE-over-PE cross favouring the side is a HARD precondition — stricter than the soft trending_cross
+    // dot (gapWidening alone does not satisfy it). Fail-closed; degrades to NEUTRAL on derived history.
+    if (cfg.has("oi-cross-required") && !ScalperGates.oiCrossRequired(ctx.oi(), side).pass()) {
+      return Optional.empty();
+    }
+    // E2 M2 (tag oi-slope-agree, Trending-OI #5): the active-strike sentiment LEVEL and SLOPE must both
+    // favour the side (a hard conjunction of the two soft sentiment dots). Fail-closed on null.
+    if (cfg.has("oi-slope-agree") && !ScalperGates.oiSlopeAgree(ctx.oi(), side).pass()) {
+      return Optional.empty();
+    }
     // W4 (tag directional-change-gate, S24 Day-20): only enter on a confirmed OI directional change —
     // the PE-CE tilt must have crossed within the window. Default-OFF; an unchanged/short series blocks.
     if (cfg.has("directional-change-gate") && !ScalperGates.directionalChange(ctx.oi()).pass()) {

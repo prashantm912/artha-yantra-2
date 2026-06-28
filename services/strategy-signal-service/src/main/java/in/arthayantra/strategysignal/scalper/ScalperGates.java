@@ -362,6 +362,53 @@ public final class ScalperGates {
     return protective ? priorVwap : null;
   }
 
+  /**
+   * §3.9 Morning-Trade OPENING FORMATION (tag {@code morning-opening-formation}, doc L540): do NOT enter
+   * on the gap alone — the SECOND session candle must BREAK the first candle's high (CE) / low (PE) AND
+   * CLOSE beyond it (the "rejection wick at the level" confirm that the break HELD, not a fake poke that
+   * closed back inside). A null candle operand degrades to pass (the seam guards "the 2nd bar formed").
+   */
+  public static GateOutcome openingFormation(
+      BigDecimal firstHigh, BigDecimal firstLow, BigDecimal secondHigh, BigDecimal secondLow,
+      BigDecimal secondClose, OptionType side) {
+    if (firstHigh == null || firstLow == null || secondHigh == null || secondLow == null || secondClose == null) {
+      return GateOutcome.pass(null, "no operand to judge — degrade to pass");
+    }
+    boolean formed =
+        side == OptionType.CE
+            ? secondHigh.compareTo(firstHigh) > 0 && secondClose.compareTo(firstHigh) >= 0
+            : secondLow.compareTo(firstLow) < 0 && secondClose.compareTo(firstLow) <= 0;
+    return formed
+        ? GateOutcome.pass(null, "ok")
+        : GateOutcome.fail(null, "opening formation not confirmed (2nd candle did not break+hold the 1st)");
+  }
+
+  /**
+   * §3.9 Morning-Trade EOD PRECONDITION (tag {@code morning-eod-precondition}, doc L534): the opening
+   * view needs a CONVINCING prior-session close in the side's direction — the prior session must have
+   * CLOSED in the side's quartile of its range (top quartile for a CE, bottom for a PE). {@code fraction}
+   * is the near-extreme band (the same 0.25 the Hero-Zero toward-extreme read uses). Null/zero-range
+   * operands degrade to pass (no prior session to judge → the rest of the confluence carries the entry).
+   */
+  public static GateOutcome eodConvincingClose(
+      BigDecimal priorHigh, BigDecimal priorLow, BigDecimal priorClose, OptionType side, BigDecimal fraction) {
+    if (priorHigh == null || priorLow == null || priorClose == null) {
+      return GateOutcome.pass(null, "no operand to judge — degrade to pass");
+    }
+    BigDecimal range = priorHigh.subtract(priorLow);
+    if (range.signum() <= 0) {
+      return GateOutcome.pass(null, "no operand to judge — degrade to pass");
+    }
+    BigDecimal band = range.multiply(fraction);
+    boolean convincing =
+        side == OptionType.CE
+            ? priorClose.compareTo(priorHigh.subtract(band)) >= 0 // closed in the TOP quartile (bullish)
+            : priorClose.compareTo(priorLow.add(band)) <= 0; // closed in the BOTTOM quartile (bearish)
+    return convincing
+        ? GateOutcome.pass(null, "ok")
+        : GateOutcome.fail(null, "prior-session close not convincing in the side direction");
+  }
+
   /** Bull (CE): PSAR, VWMA, ST and VWAP all below price; bear (PE): all above. */
   public static GateOutcome indicatorAlignment(Chart c, OptionType side) {
     boolean ok;

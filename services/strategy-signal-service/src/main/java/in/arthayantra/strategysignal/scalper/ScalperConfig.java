@@ -114,6 +114,9 @@ public record ScalperConfig(
   // #9: VWAP "not actionable before 10:30" — before this IST the opening-tick path drops VWAP from the
   // HARD validity gate (it stays a soft dot); at/after 10:30 the normal hard-VWAP behaviour resumes.
   static final LocalTime VWAP_ACTIONABLE_FROM = LocalTime.of(10, 30);
+  // #9 §3.9 morning-eod-precondition: "convincing close" = the prior-session close in the top/bottom
+  // QUARTILE of its range (the same near-extreme 0.25 the Hero-Zero toward-extreme read uses).
+  static final java.math.BigDecimal MORNING_NEAR_EXTREME_FRAC = new java.math.BigDecimal("0.25");
   /** E8 §2.2 ATR stop: the structural stop = entry ∓ 2 × ATR(14) on the index future (owner: 2× ATR). */
   static final java.math.BigDecimal ATR_STOP_MULT = new java.math.BigDecimal("2.0");
   static final int ATR_STOP_PERIOD = 14;

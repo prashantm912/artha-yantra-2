@@ -28,7 +28,7 @@ timeframes:
 
 indicators:
   - { name: VWMA,       alias: vwma20,    timeframe: 3m, params: { period: 20 } }
-  - { name: PSAR,       alias: psar,      timeframe: 3m }
+  - { name: PSAR,       alias: psar,      timeframe: 3m, params: { step: 0.02, max: 0.2 } }
   - { name: RSI,        alias: rsi14,     timeframe: 3m, params: { period: 14 }, weight: 1.0,
       normalize: { type: rsi_momentum } }
   - { name: SUPERTREND, alias: supertrend, timeframe: 3m, params: { period: 10, multiplier: 2.0 },

@@ -106,6 +106,46 @@ class PaperAccountRiskIntegrationTest extends StrategySignalIntegrationTestBase 
   }
 
   @Test
+  void dailyProfitTargetPausesEntryAndAuditsItsOwnKey() {
+    // E10: a banked WIN past the daily profit target stops fresh entries for the day.
+    insertClosed("BUY", 50, "50000.0000"); // +50,000 realized today
+    risk.update("daily_profit_target", "{\"enabled\":true,\"mode\":\"inr\",\"value\":20000}");
+    assertThat(risk.entryAllowed()).isFalse();
+    Integer trips =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM risk_audit WHERE action='TRIP' AND key='daily_profit_target'",
+            Integer.class);
+    assertThat(trips).isGreaterThanOrEqualTo(1);
+  }
+
+  @Test
+  void profitTargetPctModeSizesAgainstEquity() {
+    // mode=pct value=1.5 -> threshold = 1.5% of 1,000,000 equity = 15,000.
+    insertClosed("BUY", 50, "20000.0000"); // +20,000 > 15,000 cap
+    risk.update("daily_profit_target", "{\"enabled\":true,\"mode\":\"pct\",\"value\":1.5}");
+    assertThat(risk.entryAllowed()).isFalse();
+    // a smaller win within the 15,000 threshold does not pause entries.
+    risk.update("daily_profit_target", "{\"enabled\":false}"); // re-arm
+    jdbc.update("DELETE FROM paper_positions");
+    insertClosed("BUY", 50, "10000.0000");
+    risk.update("daily_profit_target", "{\"enabled\":true,\"mode\":\"pct\",\"value\":1.5}");
+    assertThat(risk.entryAllowed()).isTrue();
+  }
+
+  @Test
+  void maxDeploymentPctBlocksWhenOpenDeploymentExceedsCap() {
+    // an open EQUITY position deploys its full notional (500,000); cap = 20% of 1,000,000 = 200,000.
+    insertOpen("DEPLOYTEST", "BUY", 5000, "100.0000");
+    risk.update("max_deployment_pct", "{\"enabled\":true,\"value\":20.0}");
+    assertThat(risk.entryAllowed()).isFalse();
+    Integer trips =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM risk_audit WHERE action='TRIP' AND key='max_deployment_pct'",
+            Integer.class);
+    assertThat(trips).isGreaterThanOrEqualTo(1);
+  }
+
+  @Test
   void killSwitchPausesAllEntries() {
     assertThat(risk.entryAllowed()).isTrue();
     risk.update("kill_switch", "{\"enabled\":true}");
@@ -161,5 +201,18 @@ class PaperAccountRiskIntegrationTest extends StrategySignalIntegrationTestBase 
         side,
         qty,
         new BigDecimal(realized));
+  }
+
+  private void insertOpen(String tradingsymbol, String side, long qty, String avgEntry) {
+    jdbc.update(
+        """
+        INSERT INTO paper_positions
+          (exchange, tradingsymbol, side, qty, avg_entry_price, status, opened_at)
+        VALUES ('NSE', ?, ?, ?, ?, 'OPEN', now())
+        """,
+        tradingsymbol,
+        side,
+        qty,
+        new BigDecimal(avgEntry));
   }
 }

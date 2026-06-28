@@ -70,6 +70,11 @@ public class PaperAccountService {
     return account.get().startingCapital().add(positions.realizedTotal()).add(unrealizedTotal());
   }
 
+  /** The configured account size (day-stable; the fixed-allocation base for per-account caps). */
+  public BigDecimal startingCapital() {
+    return account.get().startingCapital();
+  }
+
   /** Σ mark-to-market unrealized over the open positions. */
   public BigDecimal unrealizedTotal() {
     BigDecimal total = BigDecimal.ZERO;

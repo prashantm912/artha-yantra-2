@@ -26,8 +26,8 @@ class ScalperAccountModelTest {
   private static final Clock CLOCK =
       Clock.fixed(Instant.parse("2026-06-25T06:00:00Z"), ZoneId.of("UTC"));
 
-  /** ₹10L equity × 0.20 fraction × 1% = ₹2,000 profit-lock target per account. */
-  private static final BigDecimal EQUITY = new BigDecimal("1000000");
+  /** ₹10L starting capital × 0.20 fraction × 1% = ₹2,000 profit-lock target per account. */
+  private static final BigDecimal STARTING_CAPITAL = new BigDecimal("1000000");
   private static final BigDecimal FRACTION = new BigDecimal("0.20");
   private static final BigDecimal OVER_TARGET = new BigDecimal("2500"); // ≥ ₹2,000 → banked
   private static final BigDecimal UNDER_TARGET = new BigDecimal("500"); // < ₹2,000 → not banked
@@ -39,7 +39,7 @@ class ScalperAccountModelTest {
     when(repo.subAccountCapitalFractions())
         .thenReturn(Map.of(1, FRACTION, 2, FRACTION, 3, FRACTION, 4, FRACTION, 5, FRACTION));
     PaperAccountService account = mock(PaperAccountService.class);
-    when(account.equity()).thenReturn(EQUITY);
+    when(account.startingCapital()).thenReturn(STARTING_CAPITAL);
     return new ScalperAccountModel(repo, account, CLOCK);
   }
 

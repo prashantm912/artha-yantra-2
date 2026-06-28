@@ -24,8 +24,8 @@ import org.springframework.stereotype.Component;
  *       carries an idx (legacy / non-scalper rows only — the NULL-idx fallback), it degrades to the
  *       day-granularity loss COUNT against 5 accounts, preserving the prior semantics exactly.
  *   <li><b>1%-profit-lock (per account):</b> a sub-account also freezes once its day's net realized
- *       P&amp;L reaches ~1% of its allocated capital (equity × {@code capital_fraction}) — "lock ~1%
- *       profit per account and rotate" (operative doc L86, r15-16). A banked account is excluded from
+ *       P&amp;L reaches ~1% of its allocated capital (starting capital × {@code capital_fraction}) —
+ *       "lock ~1% profit per account and rotate" (operative doc L86, r15-16). A banked account is excluded from
  *       routing and counts toward the all-frozen block, exactly like a loss-frozen one. Only applies
  *       on the per-account (idx-carrying) path; the legacy NULL-idx fallback is unaffected.
  *   <li><b>5-wins/day cap:</b> after 5 winning trades the day's gains are banked and fresh scalper
@@ -94,10 +94,17 @@ public class ScalperAccountModel {
 
   /**
    * The sub-accounts done for the IST day: frozen on a losing trade (≤ 0) OR profit-locked once their
-   * net realized P&amp;L reaches ~1% of their allocated capital (equity × {@code capital_fraction}).
+   * net realized P&amp;L reaches ~1% of their allocated capital (starting capital ×
+   * {@code capital_fraction}).
+   *
+   * <p>The target is sized off the day-stable STARTING capital, not live equity: the lock must
+   * latch for the day (operative doc L73 measures 1% against the account SIZE, and "frozen for the
+   * IST day" must be durable). A live-equity base would float the target up as total equity drifts
+   * — un-banking an account when another sub-account wins — which an adversarial review caught; a
+   * fixed allocation makes {@code realized ≥ target} monotonic, like the binary first-loss latch.
    */
   private java.util.Set<Integer> frozenAccounts(List<SubAccountTally> tallies) {
-    BigDecimal equity = account.equity();
+    BigDecimal startingCapital = account.startingCapital();
     java.util.Map<Integer, BigDecimal> fractions = positions.subAccountCapitalFractions();
     java.util.Set<Integer> frozen = new java.util.HashSet<>();
     for (SubAccountTally t : tallies) {
@@ -105,7 +112,8 @@ public class ScalperAccountModel {
         frozen.add(t.idx());
         continue;
       }
-      BigDecimal capital = equity.multiply(fractions.getOrDefault(t.idx(), DEFAULT_CAPITAL_FRACTION));
+      BigDecimal capital =
+          startingCapital.multiply(fractions.getOrDefault(t.idx(), DEFAULT_CAPITAL_FRACTION));
       BigDecimal target = capital.multiply(PROFIT_LOCK_FRACTION);
       if (t.realized().compareTo(target) >= 0) {
         frozen.add(t.idx());

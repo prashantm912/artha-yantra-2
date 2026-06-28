@@ -109,8 +109,9 @@ class ScalperRiskIntegrationTest extends StrategySignalIntegrationTestBase {
     insertClosedOnAccount("-1000.0000", 3);
     insertClosedOnAccount("-1000.0000", 4);
     assertThat(scalperAccounts.scalperEntryAllowed()).as("4 frozen — account 5 free").isTrue();
-    // ₹10L equity × 0.20 × 1% = ₹2,000 target; a ₹10,000 win on account 5 clears it → banked.
-    BigDecimal target = paperAccount.equity().multiply(new BigDecimal("0.20")).multiply(new BigDecimal("0.01"));
+    // ₹10L starting capital × 0.20 × 1% = ₹2,000 target; a ₹10,000 win on account 5 clears it → banked.
+    BigDecimal target =
+        paperAccount.startingCapital().multiply(new BigDecimal("0.20")).multiply(new BigDecimal("0.01"));
     assertThat(target).as("sanity: target well under the staged win").isLessThan(new BigDecimal("10000"));
     insertClosedOnAccount("10000.0000", 5);
     assertThat(scalperAccounts.scalperEntryAllowed()).as("account 5 profit-banked — all 5 frozen").isFalse();

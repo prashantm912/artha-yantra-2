@@ -25,7 +25,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class RiskController {
 
   private static final Set<String> KEYS =
-      Set.of(RiskService.KILL_SWITCH, RiskService.MAX_OPEN, RiskService.DAILY_LOSS);
+      Set.of(
+          RiskService.KILL_SWITCH,
+          RiskService.MAX_OPEN,
+          RiskService.DAILY_LOSS,
+          RiskService.DAILY_PROFIT_TARGET,
+          RiskService.MAX_DEPLOYMENT_PCT);
 
   /** A typed limit update: the key and its JSONB payload (incl. {@code enabled}). */
   public record UpdateBody(String key, JsonNode value) {}

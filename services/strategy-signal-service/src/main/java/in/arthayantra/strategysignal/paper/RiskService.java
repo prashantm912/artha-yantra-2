@@ -21,10 +21,12 @@ import org.springframework.stereotype.Service;
 @Service
 public class RiskService {
 
-  /** The three limit keys. */
+  /** The limit keys. */
   public static final String KILL_SWITCH = "kill_switch";
   public static final String MAX_OPEN = "max_open_paper_positions";
   public static final String DAILY_LOSS = "daily_loss_limit";
+  public static final String DAILY_PROFIT_TARGET = "daily_profit_target";
+  public static final String MAX_DEPLOYMENT_PCT = "max_deployment_pct";
 
   private static final Logger log = LoggerFactory.getLogger(RiskService.class);
   private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
@@ -34,7 +36,8 @@ public class RiskService {
   private final PaperAccountService account;
   private final Clock clock;
 
-  private volatile LocalDate dailyLossTrippedOn;
+  /** Per-day, per-cap trip dedup (key -> IST day it last tripped); re-armed on an {@code update}. */
+  private final java.util.Map<String, LocalDate> trippedOn = new java.util.concurrent.ConcurrentHashMap<>();
 
   /** Wires the risk inputs. */
   public RiskService(
@@ -59,17 +62,42 @@ public class RiskService {
     }
     Optional<Setting> dailyLoss = settings.get(DAILY_LOSS);
     if (enabled(dailyLoss)) {
-      BigDecimal limit = dailyLossLimitInr(dailyLoss.get().value());
+      BigDecimal limit = limitInr(dailyLoss.get().value());
       BigDecimal dayPnl = account.dayPnl();
       if (dayPnl.compareTo(limit.negate()) <= 0) {
-        recordTrip(dayPnl, limit);
+        recordTrip(DAILY_LOSS, dayPnl, limit);
+        return false;
+      }
+    }
+    Optional<Setting> profitTarget = settings.get(DAILY_PROFIT_TARGET);
+    if (enabled(profitTarget)) {
+      BigDecimal target = limitInr(profitTarget.get().value());
+      BigDecimal dayPnl = account.dayPnl();
+      if (dayPnl.compareTo(target) >= 0) {
+        recordTrip(DAILY_PROFIT_TARGET, dayPnl, target);
+        return false;
+      }
+    }
+    Optional<Setting> deployment = settings.get(MAX_DEPLOYMENT_PCT);
+    if (enabled(deployment)) {
+      // deployment is ALWAYS a % of equity (no mode field) — a live capital-state check, not a
+      // one-shot day event, so it is audited directly each time it blocks (no per-day trip dedup).
+      BigDecimal value = deployment.get().value().path("value").decimalValue();
+      BigDecimal cap = account.equity().multiply(value).divide(BigDecimal.valueOf(100));
+      BigDecimal used = account.capitalUsed();
+      if (used.compareTo(cap) >= 0) {
+        settings.audit(
+            MAX_DEPLOYMENT_PCT,
+            "TRIP",
+            "open deployment " + used.toPlainString() + " ≥ cap " + cap.toPlainString());
         return false;
       }
     }
     return true;
   }
 
-  private BigDecimal dailyLossLimitInr(JsonNode node) {
+  /** Resolves a {@code {value, mode}} limit row to INR: {@code pct} → equity × value/100, else raw INR. */
+  private BigDecimal limitInr(JsonNode node) {
     BigDecimal value = node.path("value").decimalValue();
     if ("pct".equalsIgnoreCase(node.path("mode").asText("inr"))) {
       return account.equity().multiply(value).divide(BigDecimal.valueOf(100));
@@ -77,15 +105,15 @@ public class RiskService {
     return value;
   }
 
-  private void recordTrip(BigDecimal dayPnl, BigDecimal limit) {
+  private void recordTrip(String key, BigDecimal dayPnl, BigDecimal limit) {
     LocalDate today = LocalDate.ofInstant(clock.instant(), IST);
-    if (!today.equals(dailyLossTrippedOn)) {
-      dailyLossTrippedOn = today;
+    if (!today.equals(trippedOn.get(key))) {
+      trippedOn.put(key, today);
       settings.audit(
-          DAILY_LOSS,
+          key,
           "TRIP",
           "day P&L " + dayPnl.toPlainString() + " breached limit " + limit.toPlainString());
-      log.warn("global daily-loss limit tripped — ENTRY emission paused for {}", today);
+      log.warn("global risk cap {} tripped — ENTRY emission paused for {}", key, today);
     }
   }
 
@@ -103,9 +131,7 @@ public class RiskService {
   public void update(String key, String valueJson) {
     settings.upsert(key, valueJson);
     settings.audit(key, "UPDATE", valueJson);
-    if (DAILY_LOSS.equals(key)) {
-      dailyLossTrippedOn = null; // re-arm the per-day trip dedup on a limit change
-    }
+    trippedOn.remove(key); // re-arm this cap's per-day trip dedup on a limit change
   }
 
   private boolean boolFlag(String key) {

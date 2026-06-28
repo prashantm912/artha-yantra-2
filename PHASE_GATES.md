@@ -31,6 +31,12 @@ analytics/expired-backfill=Upstox`, EOD=bhavcopy, orders=OpenAlgo, **not** a ful
 **data-foundation value-verify** (render every OI page in History mode vs oipulse — the backfill data is now
 ready; the comparison needs the owner's oipulse sign-in).
 
+**Scalper engine → 100% (2026-06-28):** the S24 incorporation is closed (debloated operative doc + W3 drift
+tags + W4 gates + 2b infra, all BUILT/inert). Finishing the engine to "nothing-deferred" is now tracked in
+the consolidated roadmap [`docs/superpowers/plans/2026-06-28-scalper-to-100-roadmap.md`](docs/superpowers/plans/2026-06-28-scalper-to-100-roadmap.md)
+(12 epics E1–E12 / ~95 packages, dependency waves, descopes, owner-decisions). The bloated `docs/strategy-audit/`
+chain is CLOSED. Arming any built/new tag on a real strategy is the owner's forward-paper (2c) step.
+
 **2026-06-26 — 2b scalper tunable-infra COMPLETE (#220–#230, all MERGED + DEPLOYED + live-verified):** the
 12 Siva scalpers became 36 instrument-agnostic, tunable, paper-ready variants on the real expired-premium
 archive. Arc: **#220** fold-fix (walk-forward folds route through `OptionsPremiumReplay` → `oos_fold_mean`

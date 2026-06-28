@@ -1,5 +1,14 @@
 # Options-Scalper Automation Audit — what the strategy doc says vs what the engine does
 
+> **CLOSED — historical record (2026-06-28).** This whole directory audited the OLD *bloated*
+> `Options_Scalper_Siva_Consolidated_Strategy.md`. It is superseded by the **debloated** S24 operative
+> doc (`strategy-documents/options-scalper-siva-operative/Options_Scalper_Siva_Operative_Strategy.md`)
+> and the S24 ratification chain it produced (COMPARISON → RATIFICATION-PACK → W1 operative doc →
+> W2 prune → W3 6 drifts (built) → W4 triage+impl). **Forward work now lives in the consolidated
+> roadmap:** [`../superpowers/plans/2026-06-28-scalper-to-100-roadmap.md`](../superpowers/plans/2026-06-28-scalper-to-100-roadmap.md).
+> Kept here for provenance + the `GAP-DISPOSITION` / `RATIFICATION-PACK` decision trail; the gap
+> *counts* below are against the bloated doc, not the debloated 100% scope.
+
 **Wave-5 #1.** This audit answers one question: *of everything in the consolidated Siva options-scalper
 strategy doc (`strategy-documents/options-scalper-siva/Options_Scalper_Siva_Consolidated_Strategy.md`),
 what is NOT automated, and therefore must be carried by a human checklist?*

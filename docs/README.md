@@ -16,10 +16,12 @@ authority is the OpenAlgo/React master plan; the design authority is `docs/desig
 
 ## Active — forward-work plans (`superpowers/plans/`)
 *(The master plan above is the authority; these are the open, non-merged plans.)*
-- `2026-06-26-scalper-tunable-infra.md` — the **2b build**: fold-fix, NIFTY/SENSEX-FUT-CONT continuous
-  signal series, the three-way signal/strike/option decoupling (ADR-0003), and 36 instrument-agnostic
-  scalper variants seeded + functionally backtested. All phases DONE (#220, #222–#230); move to
-  `plans/archive/` once 2c forward paper begins.
+- `2026-06-28-scalper-to-100-roadmap.md` — the **scalper forward authority**: the consolidated,
+  debloated-operative-anchored roadmap to finish the scalper engine (12 epics E1–E12 / ~95 packages,
+  dependency waves, descopes, owner-decisions, the "nothing-deferred" ledger). Per-package design lives
+  in `superpowers/plans/2026-06-27-backlog/` (12 stream files, KEEP-NEEDED) + FU1/FU2; the S24 audit
+  chain in `strategy-audit/` is CLOSED (historical). The S24 drift tags (W3) + W4 gates + 2b infra are
+  already BUILT — see the roadmap §1 baseline.
 - `2026-06-21-data-foundation-milestone.md` — value-verify every OI/data page in History mode on a
   REAL session vs oipulse (Phase-4 gate). The expired/OI backfill is now COMPLETE; this is the open
   value-verify gate (needs the owner's oipulse sign-in).
@@ -32,7 +34,9 @@ authority is the OpenAlgo/React master plan; the design authority is `docs/desig
 - `superpowers/plans/archive/` — completed/merged plans (oipulse-parity, stage-g, eod-bhavcopy,
   phase3-scalper-track2, phase3.5 OI-analytics backlog + tier1, open-high per-strike,
   **scalper-manual-verification-checklist** (backend + React UI #125 done), **frontend-revamp**
-  (#158–#177 — revamp + 64/65-page rollout + World Indices/Pre-Open + section nav, deployed)).
+  (#158–#177 — revamp + 64/65-page rollout + World Indices/Pre-Open + section nav, deployed),
+  **2026-06-26-scalper-tunable-infra** (2b, #220–#230 done+live), **2026-06-27-w3-engine-drift-impl**
+  (#251–256), **2026-06-27-oip-ai-probability-spec** (#255/#262)).
 
 ## Active — operations & references (top level)
 - `dev-setup.md`, `remote-access.md` — local/dev setup + remote access.
@@ -62,6 +66,10 @@ authority is the OpenAlgo/React master plan; the design authority is `docs/desig
 ## Historical — as-built record (`archive/`)
 - `archive/ARTHAYANTRA_2_FEATURE_PROPOSALS.md` — the 2026-06-12 owner feature selection; the
   source of the `[FP-N]` tags cited in the design docs (superseded by amendments A7–A12).
+- `strategy-audit/` — **CLOSED** (2026-06-28): the bloated-consolidated scalper automation audit
+  (570 rules / 424 gaps) + the S24 ratification chain (COMPARISON / RATIFICATION-PACK / GAP-DISPOSITION /
+  W4 triage+impl). Superseded by the debloated operative doc + the scalper-to-100 roadmap; kept for the
+  decision trail.
 
 ## Reference — research the build draws on
 - `oipulse-study/` — field study of oipulse.com (per-page design docs + API map + replication

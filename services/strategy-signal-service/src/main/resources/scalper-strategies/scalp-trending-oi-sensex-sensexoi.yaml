@@ -43,7 +43,7 @@ entry_rules:
     threshold: 0.2
 
 exit_rules:
-  - { type: signal_exit, params: { rule: "close < vwma20" } }   # trend break exit
+  - { type: signal_exit, params: { rule: "close < vwma20", min_volume: 125000 } }   # trend break exit
   - { type: time_stop,   params: { max_bars: 12 } }
 
 risk:

@@ -48,7 +48,7 @@ entry_rules:
     threshold: 0.2
 
 exit_rules:
-  - { type: signal_exit, params: { rule: "close < vwap" } }
+  - { type: signal_exit, params: { rule: "close < vwap", min_volume: 125000 } }
   - { type: time_stop,   params: { max_bars: 10 } }
 
 risk:

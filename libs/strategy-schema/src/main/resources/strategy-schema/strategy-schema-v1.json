@@ -390,15 +390,17 @@
               "additionalProperties": false,
               "required": ["basis"],
               "properties": {
-                "basis": { "enum": ["premium_pct", "atr_multiple", "index_points"] },
+                "basis": { "enum": ["premium_pct", "atr_multiple", "index_points", "indicator"] },
                 "value": { "type": "number", "exclusiveMinimum": 0 },
                 "activate_at": { "type": "number", "exclusiveMinimum": 0 },
                 "trail_by": { "type": "number", "exclusiveMinimum": 0 },
-                "atr_period": { "type": "integer", "minimum": 1, "maximum": 200 }
+                "atr_period": { "type": "integer", "minimum": 1, "maximum": 200 },
+                "alias": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
               },
               "anyOf": [
                 { "required": ["value"] },
-                { "required": ["activate_at", "trail_by"] }
+                { "required": ["activate_at", "trail_by"] },
+                { "required": ["alias"] }
               ]
             }
           }

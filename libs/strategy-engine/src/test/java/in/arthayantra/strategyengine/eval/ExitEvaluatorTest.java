@@ -303,6 +303,36 @@ class ExitEvaluatorTest {
   }
 
   @Test
+  void indicatorTrailingExitsWhenPriceCrossesBelowTheAliasLevel() {
+    StrategyDefinition def =
+        definitionWith(
+            """
+              - { type: trailing_stop, params: { basis: indicator, alias: vwap } }
+            """);
+    ExitEvaluator.Position position =
+        new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, new BigDecimal("100.00"), 1);
+    // closes run up then plunge well below the running VWAP
+    EngineSeries s = series(10000, 10000, 10500, 11000, 8000);
+    IndicatorBank b = bank(def, s);
+
+    assertThat(ExitEvaluator.evaluate(def, b, position, 3))
+        .as("price 110 still above VWAP — no trail exit")
+        .isEmpty();
+    Optional<ExitEvaluator.ExitDecision> trail = ExitEvaluator.evaluate(def, b, position, 4);
+    assertThat(trail).get().extracting(ExitEvaluator.ExitDecision::type).isEqualTo("trailing_stop");
+
+    // an undeclared / unknown alias yields no level (never throws) -> no exit
+    StrategyDefinition unknown =
+        definitionWith(
+            """
+              - { type: trailing_stop, params: { basis: indicator, alias: psar } }
+            """);
+    assertThat(ExitEvaluator.evaluate(unknown, bank(unknown, s), position, 4))
+        .as("undeclared alias -> null level -> no exit (guarded)")
+        .isEmpty();
+  }
+
+  @Test
   void shortPositionsMirrorLevels() {
     StrategyDefinition def =
         definitionWith(

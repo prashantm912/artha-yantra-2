@@ -221,6 +221,34 @@ class ExitEvaluatorTest {
   }
 
   @Test
+  void signalExitHonoursMinVolumeFloor() {
+    EngineSeries s = series(10000, 10000, 9950, 9890); // volume = 100 on every bar
+    ExitEvaluator.Position position =
+        new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, new BigDecimal("100.00"), 1);
+
+    // volume 100 clears a floor of 50 -> the break exits (same as a plain signal_exit)
+    StrategyDefinition passes =
+        definitionWith(
+            """
+              - { type: signal_exit, params: { rule: "close < 99", min_volume: 50 } }
+            """);
+    Optional<ExitEvaluator.ExitDecision> exit =
+        ExitEvaluator.evaluate(passes, bank(passes, s), position, 3);
+    assertThat(exit).isPresent();
+    assertThat(exit.get().type()).isEqualTo("signal_exit");
+
+    // volume 100 below a floor of 200 -> a no-volume "fake" break does NOT exit
+    StrategyDefinition suppressed =
+        definitionWith(
+            """
+              - { type: signal_exit, params: { rule: "close < 99", min_volume: 200 } }
+            """);
+    assertThat(ExitEvaluator.evaluate(suppressed, bank(suppressed, s), position, 3))
+        .as("a break below the volume floor is a fake and does not exit")
+        .isEmpty();
+  }
+
+  @Test
   void shortPositionsMirrorLevels() {
     StrategyDefinition def =
         definitionWith(

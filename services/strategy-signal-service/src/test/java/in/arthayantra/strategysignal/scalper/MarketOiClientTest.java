@@ -153,6 +153,21 @@ class MarketOiClientTest {
   }
 
   @Test
+  void deriveVixReadsTheLevelAndRisingDirection() throws Exception {
+    wire();
+    var om = new ObjectMapper();
+    // change > 0 → VIX rising (favours PE)
+    var up = client.deriveVix(om.readTree("{\"ltp\":\"15.2\",\"change\":\"0.40\"}"));
+    assertThat(up.level()).isEqualByComparingTo("15.2");
+    assertThat(up.rising()).isTrue();
+    // change < 0 → falling (favours CE)
+    assertThat(client.deriveVix(om.readTree("{\"ltp\":\"14.0\",\"change\":\"-0.10\"}")).rising()).isFalse();
+    // change 0 (or absent) → direction unknown (null → the vix gate stays non-blocking)
+    assertThat(client.deriveVix(om.readTree("{\"ltp\":\"14.0\",\"change\":\"0\"}")).rising()).isNull();
+    assertThat(client.deriveVix(om.readTree("{}")).level()).isNull();
+  }
+
+  @Test
   void mapsMacroHalfAndScalesIvRankToHundred() {
     wire();
     // rank is a 0..1 fraction upstream; must surface ×100 so the scorer's <50 gate is meaningful
@@ -174,6 +189,8 @@ class MarketOiClientTest {
         "/api/v1/market/options/active-strikes",
         "{\"activeStrikeIvSeries\":[{\"ceIv\":\"0.12\",\"peIv\":\"0.15\"},"
             + "{\"ceIv\":\"0.16\",\"peIv\":\"0.13\"}]}");
+    // E3: macro now also reads the INDIA VIX quote (level + change-vs-prev-close → direction).
+    stub("/api/v1/market/vix", "{\"ltp\":\"14.5\",\"change\":\"-0.30\"}");
 
     Macro m = client.macro(UNDERLYING, TRADE_DATE, EXPIRY);
 
@@ -187,8 +204,8 @@ class MarketOiClientTest {
     assertThat(m.advances()).isEqualTo(35);
     assertThat(m.declines()).isEqualTo(12);
     assertThat(m.fiiLongPct()).isEqualByComparingTo("70"); // 70 / (70+30) × 100
-    assertThat(m.vixLevel()).isNull(); // no VIX endpoint yet — documented v1 gap
-    assertThat(m.vixRising()).isNull();
+    assertThat(m.vixLevel()).isEqualByComparingTo("14.5"); // /vix ltp
+    assertThat(m.vixRising()).isFalse(); // change −0.30 < 0 → VIX falling (favours CE)
     server.verify();
   }
 
@@ -203,6 +220,7 @@ class MarketOiClientTest {
     stub("/api/v1/market/options/chain", "{\"spot\":\"20000\",\"rows\":[]}");
     stub("/api/v1/market/equity/index-contribution", "{}");
     stub("/api/v1/market/options/active-strikes", "{}"); // empty series → null slopes
+    stub("/api/v1/market/vix", "{}"); // absent quote → null level + unknown direction
 
     Macro m = client.macro(UNDERLYING, TRADE_DATE, EXPIRY);
 
@@ -339,6 +357,7 @@ class MarketOiClientTest {
     stub("/api/v1/market/options/chain", "{\"spot\":\"20000\",\"rows\":[]}");
     stub("/api/v1/market/equity/index-contribution", "{}");
     stub("/api/v1/market/options/active-strikes", "{}");
+    stub("/api/v1/market/vix", "{}");
 
     Macro m = client.macro(UNDERLYING, TRADE_DATE, EXPIRY);
 

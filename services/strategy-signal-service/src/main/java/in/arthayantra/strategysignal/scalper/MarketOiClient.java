@@ -464,10 +464,14 @@ public class MarketOiClient {
             IvSlope.EMPTY,
             "options/active-strikes");
 
-    // VIX has no market-data endpoint yet (§12.2 follow-up). null level + null direction; the vix
-    // gate treats an unknown direction as non-blocking, so the macro stays honest, not falsely bull.
+    // E3 directional VIX: the INDIA VIX quote (level + the change-vs-prev-close → rising/falling). VIX
+    // rising favours PE, falling favours CE (the §A4 vix dot + the directional-vix-gate read these). A
+    // 422/absent quote (off-hours / mock / history) degrades to null → the vix gate stays non-blocking.
+    Vix vix =
+        get(uri -> uri.path("/api/v1/market/vix").build(), this::deriveVix, Vix.EMPTY, "vix");
+
     return new Macro(
-        atmIv, ivRank, null, null, breadth[0], breadth[1], fiiLongPct,
+        atmIv, ivRank, vix.level(), vix.rising(), breadth[0], breadth[1], fiiLongPct,
         chain.ivPair().ceIvAvg6(), chain.ivPair().peIvAvg6(),
         constituentBias, ivSlope.ceSlope(), ivSlope.peSlope(), chain.premiumSkewPct());
   }
@@ -640,6 +644,19 @@ public class MarketOiClient {
   /** §A4 carrier: the 6-strike CE/PE IV averages (3 strikes above + 3 below the ATM). */
   record IvPair(BigDecimal ceIvAvg6, BigDecimal peIvAvg6) {
     static final IvPair EMPTY = new IvPair(null, null);
+  }
+
+  /** E3 directional VIX: the INDIA VIX level + whether it is rising (change vs the prior close > 0). */
+  record Vix(BigDecimal level, Boolean rising) {
+    static final Vix EMPTY = new Vix(null, null);
+  }
+
+  /** Maps the {@code /vix} quote to the level + a rising flag; a null/zero change leaves direction unknown. */
+  Vix deriveVix(JsonNode quote) {
+    BigDecimal level = decimal(quote.path("ltp"));
+    BigDecimal change = decimal(quote.path("change"));
+    Boolean rising = change == null || change.signum() == 0 ? null : change.signum() > 0;
+    return new Vix(level, rising);
   }
 
   /** The two values derived from a single {@code /options/chain} read: the 6-strike IV pair + the skew. */

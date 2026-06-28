@@ -1,9 +1,11 @@
 package in.arthayantra.strategysignal.paper;
 
+import in.arthayantra.strategysignal.paper.PaperPositionRepository.SubAccountTally;
 import in.arthayantra.strategysignal.paper.PaperPositionRepository.WinLoss;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -15,11 +17,13 @@ import org.springframework.stereotype.Component;
  *
  * <ul>
  *   <li><b>First-loss freeze (5 accounts):</b> capital is split across 5 logical sub-accounts; a
- *       losing trade freezes the sub-account that took it for the IST day. Once all 5 are frozen
- *       (5 losing trades), no fresh scalper entry is allowed. Modelled at day granularity — the loss
- *       COUNT against 5 accounts — rather than tracking which account took which trade.
+ *       losing trade freezes the sub-account that took it for the IST day. Once all 5 are frozen,
+ *       no fresh scalper entry is allowed. When trades carry a {@code subaccount_idx} (E10 ledger)
+ *       the freeze is PER-ACCOUNT — a loss freezes the specific account that took it. When NO trade
+ *       carries an idx (legacy / non-scalper rows only — the NULL-idx fallback), it degrades to the
+ *       day-granularity loss COUNT against 5 accounts, preserving the prior semantics exactly.
  *   <li><b>5-wins/day cap:</b> after 5 winning trades the day's gains are banked and fresh scalper
- *       entries stop (overtrading is the killer — §2.14).
+ *       entries stop (overtrading is the killer — §2.14). This aggregate cap spans all closed trades.
  * </ul>
  *
  * <p>EXITS are never gated by this — only fresh entries. State is the {@code paper_positions} ledger,
@@ -46,7 +50,8 @@ public class ScalperAccountModel {
     this.clock = clock;
   }
 
-  /** False once 5 losses have frozen all sub-accounts OR 5 wins have banked the day. */
+  /** False once all sub-accounts are frozen (per-account first-loss, or the legacy count) OR 5 wins
+   * have banked the day. */
   public boolean scalperEntryAllowed() {
     LocalDate today = LocalDate.ofInstant(clock.instant(), IST);
     WinLoss wl = positions.winLossOn(today);
@@ -54,8 +59,21 @@ public class ScalperAccountModel {
       log.info("scalper entries paused — {} wins banked today (cap {})", wl.wins(), MAX_WINS_PER_DAY);
       return false;
     }
-    if (wl.losses() >= ACCOUNTS) {
-      log.info("scalper entries paused — {} losses froze all {} sub-accounts", wl.losses(), ACCOUNTS);
+    List<SubAccountTally> tallies = positions.subAccountTalliesOn(today);
+    if (tallies.isEmpty()) {
+      // NULL-idx fallback: no trade carries a sub-account today (legacy / non-scalper only) → the
+      // prior day-granularity loss COUNT decides, so old rows + the aggregate caps behave identically.
+      if (wl.losses() >= ACCOUNTS) {
+        log.info("scalper entries paused — {} losses froze all {} sub-accounts", wl.losses(), ACCOUNTS);
+        return false;
+      }
+      return true;
+    }
+    // Per-account first-loss freeze: an account is frozen for the day once a trade charged to it
+    // closed at a loss (≤ 0). All 5 frozen ⇒ no fresh entry.
+    long frozen = tallies.stream().filter(t -> t.losses() > 0).count();
+    if (frozen >= ACCOUNTS) {
+      log.info("scalper entries paused — all {} sub-accounts frozen on a losing trade", ACCOUNTS);
       return false;
     }
     return true;

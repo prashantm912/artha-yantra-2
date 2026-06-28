@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
@@ -12,6 +13,7 @@ import in.arthayantra.backtest.replay.CandleReader;
 import in.arthayantra.backtest.replay.TradeRepository;
 import in.arthayantra.strategyengine.series.EngineCandle;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
@@ -147,6 +149,58 @@ class HeroZeroPremiumServiceTest {
 
     Map<String, Object> out = svc.diagnostics(run);
     assertThat(out.get("slTouched")).isEqualTo(1);
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void rejectsAStaleConfirmBaselineOnASparseSeries() {
+    UUID run = UUID.randomUUID();
+    // bars only at entry-30m and entry — NO bar near entry-15m, so the floor lookup would otherwise
+    // grab the 30m-old bar and compute a wrong-window %-change. The window+grace guard must reject it.
+    when(candles.read(eq("NFO"), eq("SPARSE"), eq("1m"), any(), any()))
+        .thenReturn(List.of(bar(ts(14, 10), "60"), bar(ts(14, 40), "100"), bar(ts(14, 50), "120")));
+    when(trades.findByRun(eq(run), anyInt(), anyInt(), any(), any(), any()))
+        .thenReturn(List.of(trade(1, "SPARSE", ts(14, 40), ts(14, 50), "100", "120", "50")));
+
+    Map<String, Object> out = svc.diagnostics(run);
+
+    assertThat(out.get("tradesPriced")).isEqualTo(1);
+    assertThat(out.get("premiumChangePctCount")).isEqualTo(0); // no valid baseline → excluded from the avg
+    assertThat(out.get("confirmed")).isEqualTo(0);
+    assertThat(out.get("avgPremiumChangePct")).isNull();
+    Map<String, Object> r = ((List<Map<String, Object>>) out.get("trades")).get(0);
+    assertThat(r.get("premiumChangePct")).isNull();
+    assertThat((Boolean) r.get("confirmed")).isFalse();
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void computesMirrorSkewFromThePairedContract() {
+    UUID run = UUID.randomUUID();
+    // PE leg @100; the mirror CE @80 at entry → the traded (PE) side is the richer leg, skew +25%.
+    when(candles.read(eq("NFO"), eq("PE22500"), eq("1m"), any(), any()))
+        .thenReturn(List.of(bar(ts(14, 25), "80"), bar(ts(14, 40), "100"), bar(ts(14, 50), "110")));
+    when(candles.read(eq("NFO"), eq("CE22500"), eq("1m"), any(), any()))
+        .thenReturn(List.of(bar(ts(14, 40), "80")));
+    // expired_contracts: the PE leg's meta, then its CE mirror's tradingsymbol.
+    when(jdbc.query(startsWith("SELECT underlying_symbol"), any(RowMapper.class), any(), any()))
+        .thenReturn(
+            List.of(
+                new HeroZeroPremiumService.ContractMeta(
+                    "NIFTY 50", LocalDate.of(2026, 6, 26), new BigDecimal("22500"), "PE")));
+    when(jdbc.query(startsWith("SELECT tradingsymbol"), any(RowMapper.class), any(), any(), any(), any(), any()))
+        .thenReturn(List.of("CE22500"));
+    when(trades.findByRun(eq(run), anyInt(), anyInt(), any(), any(), any()))
+        .thenReturn(List.of(trade(1, "PE22500", ts(14, 40), ts(14, 50), "100", "110", "50")));
+
+    Map<String, Object> out = svc.diagnostics(run);
+
+    assertThat(out.get("tradedSideRicherCount")).isEqualTo(1);
+    Map<String, Object> r = ((List<Map<String, Object>>) out.get("trades")).get(0);
+    assertThat((BigDecimal) r.get("mirrorPremium")).isEqualByComparingTo("80");
+    assertThat((BigDecimal) r.get("mirrorSkewPct")).isEqualByComparingTo("25.00");
+    assertThat((Boolean) r.get("tradedSideRicher")).isTrue();
+    assertThat(r.get("optionType")).isEqualTo("PE");
   }
 
   @Test

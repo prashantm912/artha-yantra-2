@@ -34,10 +34,11 @@ import org.springframework.stereotype.Service;
  *   <li><b>Excursion (hero / zero):</b> entry → peak (MFE) → exit, the peak/exit premium multiples,
  *       and whether the 50%-premium stop level was touched. {@code HERO} = peak ≥ 2× entry,
  *       {@code ZERO} = exit ≤ ½ entry, else {@code FLAT}.</li>
- *   <li><b>S24d per-strike confirmation:</b> the bought leg's premium %-change over the
- *       {@value #CONFIRM_WINDOW_MIN}-minute window leading into entry — the "strong move ran through
- *       THIS strike" residual the index-spurt gate does not cover. {@code confirmed} = ≥
- *       {@value #CONFIRM_THRESHOLD_PCT}%.</li>
+ *   <li><b>S24d-PROXY per-strike %-change:</b> the bought leg's own PREMIUM %-change over the
+ *       {@value #CONFIRM_WINDOW_MIN}-minute window leading into entry; {@code confirmed} = ≥ a flat
+ *       {@value #CONFIRM_THRESHOLD_PCT}%. This is a <i>premium proxy</i> — the disposition's S24d is
+ *       on the underlying strike's PRICE+OI with CE/PE-asymmetric thresholds (CE ≥50% / PE ~70-78%),
+ *       whose OI half is FU2's ΔOI gate, not here. Named/read as a value-verify lens, not that gate.</li>
  *   <li><b>S21b / Bearish-7 skew (raw data):</b> the mirror (same strike, opposite type) leg's entry
  *       premium + the signed per-side skew + a factual "the traded side is the richer leg" flag — the
  *       side-by-premium (S21b) and calls-at-a-discount (Bearish-7) reads SURFACED for the owner to
@@ -52,8 +53,9 @@ public class HeroZeroPremiumService {
 
   private static final int PAGE = 100_000; // one run's full trade set; runs are far smaller
   private static final int LOOKBACK_MIN = 30; // premium history pulled before entry (for the confirm read)
-  private static final int CONFIRM_WINDOW_MIN = 15; // the S24d %-change window leading into entry
-  private static final BigDecimal CONFIRM_THRESHOLD_PCT = new BigDecimal("50"); // S24d ≥50% per-strike move
+  private static final int CONFIRM_WINDOW_MIN = 15; // the %-change window leading into entry
+  private static final int CONFIRM_GRACE_MIN = 5; // a sparse baseline staler than window+grace is rejected
+  private static final BigDecimal CONFIRM_THRESHOLD_PCT = new BigDecimal("50"); // a flat 50% premium-move proxy
   private static final BigDecimal HERO_MULT = new BigDecimal("2.0"); // peak ≥ 2× entry ⇒ HERO
   private static final BigDecimal ZERO_MULT = new BigDecimal("0.5"); // exit ≤ ½ entry ⇒ ZERO
   private static final BigDecimal HUNDRED = new BigDecimal("100");
@@ -83,6 +85,7 @@ public class HeroZeroPremiumService {
     int confirmed = 0;
     int slTouched = 0;
     int richerSideCount = 0;
+    int changePctCount = 0; // priced trades that got a valid (in-window) confirm baseline
     BigDecimal peakMultSum = BigDecimal.ZERO;
     BigDecimal changePctSum = BigDecimal.ZERO;
 
@@ -161,10 +164,21 @@ public class HeroZeroPremiumService {
       pt.put("class", klass);
       pt.put("slTouched", sl);
 
-      // --- S24d per-strike premium %-change confirmation leading into entry ---
-      BigDecimal prePrem = premiumAt(series, entryTs.minusMinutes(CONFIRM_WINDOW_MIN));
+      // --- S24d-PROXY per-strike premium %-change leading into entry ---
+      // The chosen leg's own premium %-change over the ~CONFIRM_WINDOW before entry. NOTE this is a
+      // PREMIUM proxy for the disposition's S24d strong-move confirmation, which is actually on the
+      // underlying strike's PRICE+OI with CE/PE-asymmetric thresholds (CE ≥50% / PE ~70-78%) — the OI
+      // half lives in FU2's ΔOI gate, not here. On a sparse series the floor lookup could land on a bar
+      // far older than the window, so reject a baseline staler than window+grace (→ null, not confirmed).
+      var pre = series.floorEntry(entryTs.minusMinutes(CONFIRM_WINDOW_MIN));
+      BigDecimal prePrem =
+          pre == null
+                  || pre.getValue().signum() <= 0
+                  || pre.getKey().isBefore(entryTs.minusMinutes(CONFIRM_WINDOW_MIN + CONFIRM_GRACE_MIN))
+              ? null
+              : pre.getValue();
       BigDecimal changePct =
-          prePrem == null || prePrem.signum() <= 0
+          prePrem == null
               ? null
               : entryPrem.subtract(prePrem).divide(prePrem, 6, RoundingMode.HALF_UP).multiply(HUNDRED);
       boolean conf = changePct != null && changePct.compareTo(CONFIRM_THRESHOLD_PCT) >= 0;
@@ -173,6 +187,7 @@ public class HeroZeroPremiumService {
       }
       if (changePct != null) {
         changePctSum = changePctSum.add(changePct);
+        changePctCount++;
       }
       pt.put("premiumChangePct", changePct == null ? null : changePct.setScale(2, RoundingMode.HALF_UP));
       pt.put("confirmed", conf);
@@ -228,6 +243,7 @@ public class HeroZeroPremiumService {
     out.put("flats", priced - heroes - zeros);
     out.put("confirmed", confirmed);
     out.put("confirmedRate", priced == 0 ? null : rate(confirmed, priced));
+    out.put("premiumChangePctCount", changePctCount); // the avg's denominator (priced trades may lack a baseline)
     out.put("slTouched", slTouched);
     out.put("tradedSideRicherCount", richerSideCount);
     out.put(
@@ -235,28 +251,19 @@ public class HeroZeroPremiumService {
         priced == 0 ? null : peakMultSum.divide(new BigDecimal(priced), 4, RoundingMode.HALF_UP));
     out.put(
         "avgPremiumChangePct",
-        confirmedDenom(perTrade) == 0
+        changePctCount == 0
             ? null
-            : changePctSum.divide(new BigDecimal(confirmedDenom(perTrade)), 2, RoundingMode.HALF_UP));
+            : changePctSum.divide(new BigDecimal(changePctCount), 2, RoundingMode.HALF_UP));
     out.put(
         "caveat",
         "Read-only per-strike premium diagnostics on each trade's chosen leg (S21b/S24d/Bearish-7); "
-            + "the live side decision stays the VWAP+extreme proxy, NOT these reads. On derived history "
-            + "OI/Dow factors are muted — judge a hero-zero leg on real captured premium, not a weak "
-            + "historical backtest.");
+            + "the live side decision stays the VWAP+extreme proxy, NOT these reads. 'confirmed' is a "
+            + "flat-50% PREMIUM proxy for S24d (the disposition's price+OI confirmation lives elsewhere); "
+            + "'class' picks HERO (peak ≥ 2x) before ZERO, so a spike-then-collapse round-trip reads HERO "
+            + "(see peakMultiple vs exitMultiple). On derived history OI/Dow factors are muted — judge a "
+            + "hero-zero leg on real captured premium, not a weak historical backtest.");
     out.put("trades", perTrade);
     return out;
-  }
-
-  /** Count of trades that produced a (non-null) premiumChangePct, for the average's denominator. */
-  private static int confirmedDenom(List<Map<String, Object>> perTrade) {
-    int n = 0;
-    for (Map<String, Object> pt : perTrade) {
-      if (pt.get("premiumChangePct") != null) {
-        n++;
-      }
-    }
-    return n;
   }
 
   private NavigableMap<OffsetDateTime, BigDecimal> premiumSeries(

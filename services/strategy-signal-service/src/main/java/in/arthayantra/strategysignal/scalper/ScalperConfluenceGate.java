@@ -176,6 +176,17 @@ public class ScalperConfluenceGate {
     if (!ScalperGates.volume(cfg.signalIndex(), chart.volume()).pass() || !rsiOk) {
       return Optional.empty();
     }
+    // E3 volume-pump (tag volume-pump, §4.15.3): the deploy candle must be a floor-clearing pump closing
+    // in the side's direction (dark-green/dark-red attribution). Reads the bar OHLCV off the future
+    // series already in scope (no Chart extension). Default-OFF; a null future degrades to pass.
+    if (cfg.has("volume-pump") && future != null && index >= 0) {
+      EngineCandle bar = future.candle(index);
+      if (!ScalperGates.volumePump(
+              bar.close(), bar.open(), BigDecimal.valueOf(bar.volume()), cfg.signalIndex(), side)
+          .pass()) {
+        return Optional.empty();
+      }
+    }
     // W4 PARAM #5 (tag indicator-distance-veto): a chart-only overextension veto — block when price has
     // run far from the vwap/vwma/psar cluster (mean-reversion risk). Default-OFF; a null/absent cluster
     // degrades to pass inside the gate, so it never blocks on missing data.

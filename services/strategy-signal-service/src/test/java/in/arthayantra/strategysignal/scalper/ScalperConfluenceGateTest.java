@@ -122,6 +122,12 @@ class ScalperConfluenceGateTest {
         NOW.atOffset(IST).plusMinutes(i), bd("100"), bd("110"), bd("95"), bd("101"), 130_000);
   }
 
+  // a strong RED candle (close < open) above the floor — the bearish volume-pump bar.
+  private static EngineCandle strongRed(int i) {
+    return new EngineCandle(
+        NOW.atOffset(IST).plusMinutes(i), bd("110"), bd("111"), bd("99"), bd("100"), 130_000);
+  }
+
   private static BigDecimal bd(String s) {
     return new BigDecimal(s);
   }
@@ -486,6 +492,24 @@ class ScalperConfluenceGateTest {
 
     when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
     assertThat(gate.evaluate(cfgTags("iv-buyer-cap"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+  }
+
+  @Test
+  void volumePumpTagRequiresAFloorClearingDirectionalDeployCandle() {
+    // E3: volume-pump fires when the deploy bar is a floor-clearing pump in the side's direction; a red
+    // deploy bar on a CE side blocks. (A null future degrades to pass — covered by the gate guard.)
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+
+    EngineSeries up = futureSeries(strongGreen(0));
+    assertThat(gate.evaluate(cfgTags("volume-pump"), bullBank(), up, 0, NOW, IST_TIME, EOD)).isPresent();
+
+    EngineSeries down = futureSeries(strongRed(0));
+    assertThat(gate.evaluate(cfgTags("volume-pump"), bullBank(), down, 0, NOW, IST_TIME, EOD)).isEmpty();
+    // the bare CFG (gate off) fires on the same red deploy bar.
+    assertThat(gate.evaluate(CFG, bullBank(), down, 0, NOW, IST_TIME, EOD)).isPresent();
   }
 
   @Test

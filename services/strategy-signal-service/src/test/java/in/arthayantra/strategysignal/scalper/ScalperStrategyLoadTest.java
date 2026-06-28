@@ -181,6 +181,12 @@ class ScalperStrategyLoadTest {
           .as(id + " two-candle-substitution armed iff two-candle")
           .isEqualTo(isTwoCandle);
 
+      // E3 volume-pump (§4.15.3): armed on the scalp-gap-theory family (a breakout needs a real pump).
+      boolean isGapTheory = id.startsWith("scalp-gap-theory-");
+      assertThat(tags.contains("volume-pump"))
+          .as(id + " volume-pump armed iff gap-theory")
+          .isEqualTo(isGapTheory);
+
       // Connect-the-Dots (#10) is the SOFT weighted-scorer strategy: these confluences are ALREADY soft
       // dots in the 18-dot scorer, so the hard-gate versions ship default-OFF and are armed on NO
       // strategy (the scorer + base rails decide, not an AND of hard pre-gates). The code stays merged +

@@ -318,6 +318,25 @@ public final class ScalperGates {
         ok, iv, ok ? "side IV <= cap (buyable)" : "side IV > cap (too rich, sellers' market)");
   }
 
+  /**
+   * E3 (tag {@code volume-pump}, §4.15.3 dark-green / dark-red attribution): the deploy candle must be a
+   * REAL directional pump — it clears the §0B volume floor AND closes in the side's direction (CE wants
+   * {@code close > open}, PE {@code close < open}). The scorer's separate {@code volume} dot stays
+   * floor-only (unchanged) — this is an ADDITIONAL hard precondition, so the aggregate is byte-identical
+   * when unarmed. A null open/close DEGRADES to pass. (Below-floor is also caught by the hard volume rail.)
+   */
+  public static GateOutcome volumePump(
+      BigDecimal close, BigDecimal open, BigDecimal volume, String underlying, OptionType side) {
+    if (close == null || open == null) {
+      return GateOutcome.pass(close, "candle open/close unavailable (degrade -> pass)");
+    }
+    boolean floorCleared = volume(underlying, volume).pass();
+    boolean directional =
+        side == OptionType.CE ? close.compareTo(open) > 0 : close.compareTo(open) < 0;
+    boolean ok = floorCleared && directional;
+    return new GateOutcome(ok, volume, ok ? "volume pump confirms " + side : "no volume pump for " + side);
+  }
+
   /** Futures basis: future > spot (premium) is bullish → CE; future < spot (discount) bearish → PE. */
   public static GateOutcome futuresBasis(Oi oi, OptionType side) {
     BigDecimal basis = oi.futuresBasis();

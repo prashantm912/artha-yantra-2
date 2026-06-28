@@ -69,6 +69,19 @@ final class Ta4jIndicators {
     };
   }
 
+  /**
+   * Supertrend trailing-stop PRICE LEVEL (the band the {@link #supertrendDirection} sign is read off):
+   * sits BELOW the close in an uptrend, ABOVE in a downtrend. Behaviour-tested, not vector-pinned (the
+   * band ratchet is ta4j-internal, same as {@link #supertrendDirection}/{@link #psar}). Drives the S24
+   * ST-level stop / ST-distance no-trade rules (E6/E9) — the level the direction gate could not expose.
+   */
+  static EngineIndicator supertrendLine(EngineSeries series, int period, BigDecimal multiplier) {
+    SuperTrendIndicator supertrend =
+        new SuperTrendIndicator(series.barSeries(), period, multiplier.doubleValue());
+    int unstable = Math.max(period, supertrend.getCountOfUnstableBars());
+    return wrap(supertrend, unstable);
+  }
+
   /** Parabolic SAR stop-and-reverse PRICE LEVEL (ta4j-internal acceleration ratchet → behavior-tested,
    * not vector-pinned, like SUPERTREND). "close &gt; PSAR = long bias" is an S12 YAML gate, not here. */
   static EngineIndicator psar(EngineSeries series, BigDecimal step, BigDecimal max) {

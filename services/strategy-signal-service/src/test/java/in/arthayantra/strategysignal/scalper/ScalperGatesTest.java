@@ -288,6 +288,13 @@ class ScalperGatesTest {
   }
 
   @Test
+  void risingVolumeNeedsTheDeployBarToExceedThePrior() {
+    assertThat(ScalperGates.risingVolume(150_000L, 100_000L).pass()).isTrue();
+    assertThat(ScalperGates.risingVolume(100_000L, 100_000L).pass()).isFalse(); // equal is not rising
+    assertThat(ScalperGates.risingVolume(80_000L, 100_000L).pass()).isFalse();
+  }
+
+  @Test
   void constituentRequiresHeavyweightPushNotToOppose() {
     // CE wants the net constituent push positive; PE negative; 0 (flat) and null degrade to pass.
     assertThat(ScalperGates.constituent(macroConstituent(bd("0.5")), CE).pass()).isTrue();

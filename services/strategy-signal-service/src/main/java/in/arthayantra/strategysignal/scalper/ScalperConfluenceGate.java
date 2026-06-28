@@ -244,6 +244,16 @@ public class ScalperConfluenceGate {
         return Optional.empty();
       }
     }
+    // E6 §3.x rising-volume: a real move comes WITH expanding participation — the deploy bar's volume must
+    // exceed the prior bar's. Only consulted when a prior bar exists (index >= 1), so a session-edge bar is
+    // never blocked. Armed via the tag, default-OFF.
+    if (cfg.has("rising-volume")
+        && future != null
+        && index >= 1
+        && !ScalperGates.risingVolume(future.candle(index).volume(), future.candle(index - 1).volume())
+            .pass()) {
+      return Optional.empty();
+    }
     // E3 volume-pump (tag volume-pump, §4.15.3): the deploy candle must be a floor-clearing pump closing
     // in the side's direction (dark-green/dark-red attribution). Reads the bar OHLCV off the future
     // series already in scope (no Chart extension). Default-OFF; a null future degrades to pass.

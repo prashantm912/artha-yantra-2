@@ -197,6 +197,11 @@ class ScalperStrategyLoadTest {
       assertThat(tags.contains("pct-price-move"))
           .as(id + " pct-price-move armed iff market-movers")
           .isEqualTo(isMarketMovers);
+      // E6 rising-volume (§3.x): armed on the scalp-market-movers family (a mover's move comes WITH
+      // expanding participation — complements pct-price-move).
+      assertThat(tags.contains("rising-volume"))
+          .as(id + " rising-volume armed iff market-movers")
+          .isEqualTo(isMarketMovers);
 
       // E5 higher-TF RSI caps (§3.2 5m + §4.2 daily): armed on the scalp-open-high-low family (the #2
       // setup §3.2 explicitly specifies the 5m + daily caps for).

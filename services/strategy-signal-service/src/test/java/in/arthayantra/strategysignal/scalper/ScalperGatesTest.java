@@ -160,6 +160,33 @@ class ScalperGatesTest {
   }
 
   @Test
+  void oiCrossRequiredNeedsACompletedCrossFavouringTheSide() {
+    // CE: a real cross with peΔ>0 && ceΔ<0 → pass; PE wants the mirror.
+    assertThat(ScalperGates.oiCrossRequired(crossDeltas(true, bd("-100"), bd("200")), CE).pass()).isTrue();
+    assertThat(ScalperGates.oiCrossRequired(crossDeltas(true, bd("200"), bd("-100")), PE).pass()).isTrue();
+    // a stalled cross (crossedThisWindow=false) is rejected even with the favouring deltas (P16).
+    assertThat(ScalperGates.oiCrossRequired(crossDeltas(false, bd("-100"), bd("200")), CE).pass()).isFalse();
+    // deltas favouring the WRONG side fail.
+    assertThat(ScalperGates.oiCrossRequired(crossDeltas(true, bd("200"), bd("-100")), CE).pass()).isFalse();
+    // null deltas fail-closed (a missing derivation cannot pass a fresh-cross requirement).
+    assertThat(ScalperGates.oiCrossRequired(crossDeltas(true, null, null), CE).pass()).isFalse();
+  }
+
+  @Test
+  void oiSlopeAgreeRequiresLevelAndSlopeOnTheSameSide() {
+    // CE wants both the sentiment level and its slope positive; PE both negative.
+    assertThat(ScalperGates.oiSlopeAgree(sentiment(bd("10"), bd("3")), CE).pass()).isTrue();
+    assertThat(ScalperGates.oiSlopeAgree(sentiment(bd("-10"), bd("-3")), PE).pass()).isTrue();
+    // level and slope disagree → fail.
+    assertThat(ScalperGates.oiSlopeAgree(sentiment(bd("10"), bd("-3")), CE).pass()).isFalse();
+    // a positive pair does not confirm a PE side.
+    assertThat(ScalperGates.oiSlopeAgree(sentiment(bd("10"), bd("3")), PE).pass()).isFalse();
+    // null slope/level fail-closed (the conjunction is required).
+    assertThat(ScalperGates.oiSlopeAgree(sentiment(bd("10"), null), CE).pass()).isFalse();
+    assertThat(ScalperGates.oiSlopeAgree(sentiment(null, bd("3")), CE).pass()).isFalse();
+  }
+
+  @Test
   void indicatorDistanceBlocksWhenPriceRanFarFromTheWholeCluster() {
     BigDecimal max = bd("0.015"); // 1.5%
     // the nearest indicator (vwap, 0.5% away) is within the band -> not overextended -> pass.
@@ -245,6 +272,18 @@ class ScalperGatesTest {
 
   private static Oi oi(OiQuadrant futures) {
     return new Oi(futures, futures, bd("10"), bd("0"), bd("5"), null, null, null, false, false, null, null, null);
+  }
+
+  private static Oi crossDeltas(boolean crossedThisWindow, BigDecimal ceDelta, BigDecimal peDelta) {
+    return new Oi(
+        OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("0"), bd("5"), ceDelta, peDelta,
+        bd("60"), crossedThisWindow, false, null, null, null);
+  }
+
+  private static Oi sentiment(BigDecimal level, BigDecimal slope) {
+    return new Oi(
+        OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, level, bd("0"), bd("5"), null, null, null,
+        false, false, slope, null, null);
   }
 
   private static Oi basis(BigDecimal b) {

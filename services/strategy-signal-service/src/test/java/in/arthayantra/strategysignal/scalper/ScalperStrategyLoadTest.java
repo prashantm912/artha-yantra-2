@@ -155,6 +155,16 @@ class ScalperStrategyLoadTest {
           .as(id + " oi-cross-filter pre-gate")
           .isEqualTo(isTrendingOi);
 
+      // E2 M1/M2 (oi-cross-required + oi-slope-agree): the Trending-OI #5 defining hard gates are armed
+      // on the scalp-trending-oi family ONLY (the defining strategy per the operative doc); every other
+      // variant stays unarmed (the gate reads the tag via cfg.has(...), so assert against the tag list).
+      assertThat(tags.contains("oi-cross-required"))
+          .as(id + " oi-cross-required armed iff trending-oi")
+          .isEqualTo(isTrendingOi);
+      assertThat(tags.contains("oi-slope-agree"))
+          .as(id + " oi-slope-agree armed iff trending-oi")
+          .isEqualTo(isTrendingOi);
+
       // #11 (section 3.11): only the scalp-straddle family carries the straddle tag → the NEUTRAL two-leg
       // path. ScalperConfig.requireStraddle mirrors the tag; the others stay off, and the straddle
       // declares both option_types (it BUYS the ATM CE + PE) rather than a single directional side.

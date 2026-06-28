@@ -185,6 +185,19 @@ public class ScalperConfluenceGate {
     if (!ScalperGates.volume(cfg.signalIndex(), chart.volume()).pass() || !rsiOk) {
       return Optional.empty();
     }
+    // E5 §3.6 rsi-cooloff: after a HOT prior bar (RSI overbought/oversold) the entry waits for a cooled
+    // pullback candle (the cross-bar half of overbought-defer). Reads the existing 3m rsi14 (prior bar)
+    // + the deploy bar colour; a null future degrades to pass (no candle to judge). Armed via the tag.
+    if (cfg.has("rsi-cooloff") && future != null) {
+      EngineCandle deploy = future.candle(index);
+      boolean pullback =
+          side == OptionType.CE
+              ? deploy.close().compareTo(deploy.open()) < 0 // a CE waits for a RED pullback candle
+              : deploy.close().compareTo(deploy.open()) > 0; // a PE waits for a GREEN pullback candle
+      if (!ScalperGates.rsiCoolOff(bank.previousValueAt(RSI, index), chart.rsi14(), pullback, side).pass()) {
+        return Optional.empty();
+      }
+    }
     // E3 volume-pump (tag volume-pump, §4.15.3): the deploy candle must be a floor-clearing pump closing
     // in the side's direction (dark-green/dark-red attribution). Reads the bar OHLCV off the future
     // series already in scope (no Chart extension). Default-OFF; a null future degrades to pass.

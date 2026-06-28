@@ -101,6 +101,23 @@ class ScalperGatesTest {
   }
 
   @Test
+  void rsiCoolOffWaitsForACooledPullbackAfterAHotBar() {
+    // CE: prior bar hot (82) → require a cooled (<=75) RED pullback candle this bar.
+    assertThat(ScalperGates.rsiCoolOff(bd("82"), bd("72"), true, CE).pass()).isTrue(); // cooled + red
+    assertThat(ScalperGates.rsiCoolOff(bd("82"), bd("72"), false, CE).pass()).isFalse(); // green = no pullback
+    assertThat(ScalperGates.rsiCoolOff(bd("82"), bd("78"), true, CE).pass()).isFalse(); // 78 not cooled
+    // prior NOT hot (65) → inert PASS regardless of the candle (never blocks a normal entry).
+    assertThat(ScalperGates.rsiCoolOff(bd("65"), bd("72"), false, CE).pass()).isTrue();
+    // PE mirror: prior oversold (18) → require a warmed (>=25) GREEN pullback.
+    assertThat(ScalperGates.rsiCoolOff(bd("18"), bd("28"), true, PE).pass()).isTrue();
+    assertThat(ScalperGates.rsiCoolOff(bd("18"), bd("28"), false, PE).pass()).isFalse();
+    assertThat(ScalperGates.rsiCoolOff(bd("35"), bd("28"), false, PE).pass()).isTrue(); // prior not oversold
+    // null rsi on either bar → fail (data required when armed).
+    assertThat(ScalperGates.rsiCoolOff(null, bd("72"), true, CE).pass()).isFalse();
+    assertThat(ScalperGates.rsiCoolOff(bd("82"), null, true, CE).pass()).isFalse();
+  }
+
+  @Test
   void indicatorAlignmentNeedsAllOnTheCorrectSide() {
     Chart bull = new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("60000"));
     assertThat(ScalperGates.indicatorAlignment(bull, CE).pass()).isTrue();

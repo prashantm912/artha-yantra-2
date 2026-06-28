@@ -180,6 +180,11 @@ class ScalperStrategyLoadTest {
       assertThat(tags.contains("two-candle-substitution"))
           .as(id + " two-candle-substitution armed iff two-candle")
           .isEqualTo(isTwoCandle);
+      // E5 rsi-cooloff (§3.6 pullback re-entry after a hot bar): armed on the scalp-two-candle family
+      // (the cross-bar complement of its already-armed overbought-defer).
+      assertThat(tags.contains("rsi-cooloff"))
+          .as(id + " rsi-cooloff armed iff two-candle")
+          .isEqualTo(isTwoCandle);
 
       // E3 volume-pump (§4.15.3): armed on the scalp-gap-theory family (a breakout needs a real pump).
       boolean isGapTheory = id.startsWith("scalp-gap-theory-");

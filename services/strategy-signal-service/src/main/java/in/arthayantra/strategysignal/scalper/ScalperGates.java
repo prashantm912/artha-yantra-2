@@ -42,6 +42,14 @@ public final class ScalperGates {
   private static final BigDecimal OVERBOUGHT_CAP = new BigDecimal("85");
   private static final BigDecimal OVERSOLD_FLOOR = new BigDecimal("15");
 
+  // E5 §3.6 S21(f)/S24(a) cool-off pullback re-entry (tag rsi-cooloff): if the PRIOR bar's RSI was HOT
+  // (CE overbought >= 80 / PE oversold <= 20, the 100-complement) the entry must WAIT for a cooled
+  // pullback candle — a red bar back under 75 for a CE (a green bar back over 25 for a PE). The static
+  // overbought-defer (>=85 stand-aside) is the point-in-time half; this is the cross-bar pullback half.
+  private static final BigDecimal RSI_HOT_LEVEL = new BigDecimal("80");
+  private static final BigDecimal RSI_COOL_LEVEL = new BigDecimal("75");
+  private static final BigDecimal RSI_MAX = new BigDecimal("100");
+
   // W4 PARAM #5 (S24 §3.10 "indicators far from candles = avoid"): the overextension band — block when
   // the NEAREST indicator is farther than this fraction of the close. The source gives NO number; 1.5%
   // is a deliberately wide v1 default that rarely fires on an index future (forward-paper-tunable). Tag
@@ -148,6 +156,37 @@ public final class ScalperGates {
     boolean ok = side == OptionType.CE ? (v > 50.0 && v < 75.0) : (v > 25.0 && v < 40.0);
     String want = side == OptionType.CE ? "CE wants 50-75" : "PE wants 25-40";
     return new GateOutcome(ok, rsi, ok ? want + " ok" : want + " (40-50 no-trade)");
+  }
+
+  /**
+   * E5 §3.6 S21(f)/S24(a) cool-off pullback re-entry (tag {@code rsi-cooloff}). When the PRIOR bar's RSI
+   * was HOT (CE overbought {@code >= 80} / PE oversold {@code <= 20}) the entry must wait for a COOLED
+   * PULLBACK candle this bar — a red bar (the seam-supplied {@code pullbackCandle}) whose RSI has cooled
+   * back under {@code 75} for a CE (a green bar back over {@code 25} for a PE). When the prior bar was
+   * NOT hot the gate is INERT (PASS) — it never blocks a normal entry, only delays the ones chasing an
+   * exhaustion spike. A null RSI on either bar FAILS (the data is required when armed). The seam computes
+   * {@code pullbackCandle} (CE = red / PE = green) from the deploy bar, keeping this function series-free.
+   */
+  public static GateOutcome rsiCoolOff(
+      BigDecimal prevRsi, BigDecimal rsi, boolean pullbackCandle, OptionType side) {
+    if (prevRsi == null || rsi == null) {
+      return GateOutcome.fail(rsi, "cool-off rsi unavailable");
+    }
+    boolean ce = side == OptionType.CE;
+    boolean priorHot =
+        ce
+            ? prevRsi.compareTo(RSI_HOT_LEVEL) >= 0
+            : prevRsi.compareTo(RSI_MAX.subtract(RSI_HOT_LEVEL)) <= 0;
+    if (!priorHot) {
+      return GateOutcome.pass(rsi, "prior bar not hot — cool-off inert");
+    }
+    boolean cooled =
+        ce
+            ? rsi.compareTo(RSI_COOL_LEVEL) <= 0
+            : rsi.compareTo(RSI_MAX.subtract(RSI_COOL_LEVEL)) >= 0;
+    boolean ok = pullbackCandle && cooled;
+    return new GateOutcome(
+        ok, rsi, ok ? "cooled pullback after a hot bar" : "still hot — wait for a cooled pullback candle");
   }
 
   /** Bull (CE): PSAR, VWMA, ST and VWAP all below price; bear (PE): all above. */

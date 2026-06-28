@@ -273,6 +273,22 @@ class ScalperConfluenceGateTest {
   }
 
   @Test
+  void flatOiStandAsideTagBlocksFlatOiAndPassesWithPresentImbalance() {
+    // E2 M4: the flat-oi-stand-aside hard gate stands aside on a null/flat imbalance (the inverse of
+    // #5's fail-open); the bare CFG (gate off) still fires on the same flat-OI context.
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContextWithImbalance(bd("60")));
+    assertThat(gate.evaluate(cfgTags("flat-oi-stand-aside"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    assertThat(gate.evaluate(cfgTags("flat-oi-stand-aside"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isEmpty();
+    assertThat(gate.evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+  }
+
+  @Test
   void blocksWhenTheChainIsUnavailable() {
     MarketOiClient client = mock(MarketOiClient.class);
     when(client.chain("NIFTY 50")).thenReturn(Optional.empty());

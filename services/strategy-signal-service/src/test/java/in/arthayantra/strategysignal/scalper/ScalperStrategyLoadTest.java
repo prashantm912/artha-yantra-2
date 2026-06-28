@@ -165,6 +165,14 @@ class ScalperStrategyLoadTest {
           .as(id + " oi-slope-agree armed iff trending-oi")
           .isEqualTo(isTrendingOi);
 
+      // E2 M4 (flat-oi-stand-aside): armed on the connect-the-dots master-confluence family ONLY (it
+      // carries no oi-cross-filter, so the fail-open cross gate and the stand-aside stay mutually
+      // exclusive); every other variant stays unarmed.
+      boolean isConnectDots = id.startsWith("scalp-connect-the-dots-");
+      assertThat(tags.contains("flat-oi-stand-aside"))
+          .as(id + " flat-oi-stand-aside armed iff connect-the-dots")
+          .isEqualTo(isConnectDots);
+
       // #11 (section 3.11): only the scalp-straddle family carries the straddle tag → the NEUTRAL two-leg
       // path. ScalperConfig.requireStraddle mirrors the tag; the others stay off, and the straddle
       // declares both option_types (it BUYS the ATM CE + PE) rather than a single directional side.

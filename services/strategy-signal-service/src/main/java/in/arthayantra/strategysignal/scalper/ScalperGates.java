@@ -240,6 +240,20 @@ public final class ScalperGates {
     return new GateOutcome(ok, slope, ok ? "sentiment level+slope agree" : "level/slope disagree");
   }
 
+  /**
+   * E2 M4 (tag {@code flat-oi-stand-aside}, the doc's flat-OI trap): when the chain's OI is flat the
+   * producer returns a {@code null} call-put imbalance. This is the DELIBERATE INVERSE of the #5
+   * {@link #callPutDeltaFilter} fail-open — here a null/flat imbalance must STAND ASIDE (block), the
+   * operative intent that a directionless chain carries no edge; a present (non-flat) imbalance PASSES.
+   * Keep mutually exclusive with {@code oi-cross-filter} on the same strategy (one fail-opens, this
+   * stands aside).
+   */
+  public static GateOutcome flatOiStandAside(Oi oi) {
+    BigDecimal imb = oi.callPutDeltaImbalancePct();
+    boolean ok = imb != null;
+    return new GateOutcome(ok, imb, ok ? "OI not flat" : "flat OI — stand aside");
+  }
+
   /** Futures basis: future > spot (premium) is bullish → CE; future < spot (discount) bearish → PE. */
   public static GateOutcome futuresBasis(Oi oi, OptionType side) {
     BigDecimal basis = oi.futuresBasis();

@@ -240,6 +240,11 @@ public class ScalperConfluenceGate {
     if (cfg.has("oi-slope-agree") && !ScalperGates.oiSlopeAgree(ctx.oi(), side).pass()) {
       return Optional.empty();
     }
+    // E2 M4 (tag flat-oi-stand-aside, the doc's flat-OI trap): a null/flat call-put imbalance STANDS
+    // ASIDE (block) — the deliberate inverse of #5's fail-open (keep the two tags mutually exclusive).
+    if (cfg.has("flat-oi-stand-aside") && !ScalperGates.flatOiStandAside(ctx.oi()).pass()) {
+      return Optional.empty();
+    }
     // W4 (tag directional-change-gate, S24 Day-20): only enter on a confirmed OI directional change —
     // the PE-CE tilt must have crossed within the window. Default-OFF; an unchanged/short series blocks.
     if (cfg.has("directional-change-gate") && !ScalperGates.directionalChange(ctx.oi()).pass()) {

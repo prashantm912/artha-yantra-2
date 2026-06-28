@@ -242,4 +242,27 @@ public class PaperPositionRepository {
         (rs, n) -> new WinLoss(rs.getInt("wins"), rs.getInt("losses")),
         java.sql.Date.valueOf(istDate));
   }
+
+  /** Per-sub-account win/loss tally for an IST day (the E10 five-account ledger). */
+  public record SubAccountTally(int idx, int wins, int losses) {}
+
+  /**
+   * Per-sub-account win/loss counts of trades closed on an IST day — the 5-account ledger input
+   * (risk-governance.md §3.2). ONLY idx-carrying (scalper) closed trades are tallied; a NULL
+   * {@code subaccount_idx} (non-scalper / legacy) row is invisible to this model, so an empty result
+   * signals the day carries no ledger trades and {@link ScalperAccountModel} falls back to the
+   * day-granularity {@link #winLossOn} count. Win/loss uses the same convention as {@code winLossOn}:
+   * realized P&amp;L &gt; 0 is a win, ≤ 0 (flat or losing) a loss.
+   */
+  public java.util.List<SubAccountTally> subAccountTalliesOn(java.time.LocalDate istDate) {
+    return jdbc.query(
+        "SELECT subaccount_idx,"
+            + " COUNT(*) FILTER (WHERE realized_pnl > 0) AS wins,"
+            + " COUNT(*) FILTER (WHERE realized_pnl <= 0) AS losses"
+            + " FROM paper_positions WHERE status='CLOSED' AND subaccount_idx IS NOT NULL"
+            + " AND (closed_at AT TIME ZONE 'Asia/Kolkata')::date = ?"
+            + " GROUP BY subaccount_idx",
+        (rs, n) -> new SubAccountTally(rs.getInt("subaccount_idx"), rs.getInt("wins"), rs.getInt("losses")),
+        java.sql.Date.valueOf(istDate));
+  }
 }

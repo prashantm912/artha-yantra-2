@@ -64,6 +64,38 @@ class ScalperRiskIntegrationTest extends StrategySignalIntegrationTestBase {
     assertThat(scalperAccounts.scalperEntryAllowed()).isFalse();
   }
 
+  /** E10: a losing trade freezes only the SPECIFIC sub-account that took it; all 5 frozen ⇒ blocked. */
+  @Test
+  void perAccountFirstLossFreezesAllFiveDistinctAccounts() {
+    insertClosedOnAccount("-1000.0000", 1);
+    insertClosedOnAccount("-1000.0000", 2);
+    insertClosedOnAccount("-1000.0000", 3);
+    insertClosedOnAccount("-1000.0000", 4);
+    assertThat(scalperAccounts.scalperEntryAllowed()).as("4 accounts frozen — one free").isTrue();
+    insertClosedOnAccount("-1000.0000", 5);
+    assertThat(scalperAccounts.scalperEntryAllowed()).as("all 5 accounts frozen").isFalse();
+  }
+
+  /** E10: many losses on one account freeze ONLY that account, leaving the other four free. */
+  @Test
+  void perAccountManyLossesOnOneAccountLeaveOthersFree() {
+    insertClosedOnAccount("-1000.0000", 2);
+    insertClosedOnAccount("-1000.0000", 2);
+    insertClosedOnAccount("-1000.0000", 2);
+    assertThat(scalperAccounts.scalperEntryAllowed()).as("only account 2 frozen").isTrue();
+  }
+
+  /**
+   * E10 NULL-idx fallback: 5 NULL-idx losses would block via the legacy count, but once a single
+   * ledger trade carries an idx the per-account path is active and the NULL-idx losses are invisible.
+   */
+  @Test
+  void oneLedgerTradeMakesNullIdxLossesInvisible() {
+    insertClosedTrades(0, 5); // 5 NULL-idx losses — would block via the fallback on their own
+    insertClosedOnAccount("1000.0000", 1); // one ledger WIN flips to the per-account path
+    assertThat(scalperAccounts.scalperEntryAllowed()).isTrue();
+  }
+
   private void insertClosedTrades(int wins, int losses) {
     for (int i = 0; i < wins; i++) {
       insertClosed("1000.0000");
@@ -71,6 +103,17 @@ class ScalperRiskIntegrationTest extends StrategySignalIntegrationTestBase {
     for (int i = 0; i < losses; i++) {
       insertClosed("-1000.0000");
     }
+  }
+
+  private void insertClosedOnAccount(String realized, int idx) {
+    jdbc.update(
+        """
+        INSERT INTO paper_positions
+          (exchange, tradingsymbol, side, qty, avg_entry_price, realized_pnl, status, opened_at, closed_at, subaccount_idx)
+        VALUES ('NFO', 'SCALPTEST', 'BUY', 50, '100.0000', ?, 'CLOSED', now(), now(), ?)
+        """,
+        new BigDecimal(realized),
+        idx);
   }
 
   private void insertClosed(String realized) {

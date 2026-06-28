@@ -212,6 +212,62 @@ class ScalperConfluenceGateTest {
             new StrikeOi(bd("21000"), 100L, 800_000L)));
   }
 
+  // FU2 failing contexts — each flips exactly the one operand its hard gate reads, otherwise bullish.
+  private static ScalperGateContext ctxFuturesOpposesCe() {
+    return new ScalperGateContext(
+        "NIFTY 50", "NIFTY 50", IST_TIME,
+        new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("130000")),
+        new Oi(OiQuadrant.LONG_BUILDUP, OiQuadrant.SHORT_BUILDUP, bd("10"), bd("5"), bd("5"), null, null, null, false, false, null, null, null),
+        new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), null, null));
+  }
+
+  private static ScalperGateContext ctxBreadthLow() {
+    return new ScalperGateContext(
+        "NIFTY 50", "NIFTY 50", IST_TIME,
+        new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("130000")),
+        new Oi(OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("5"), bd("5"), null, null, null, false, false, null, null, null),
+        new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 20, 10, bd("50"), null, null));
+  }
+
+  private static ScalperGateContext ctxBasisDiscount() {
+    return new ScalperGateContext(
+        "NIFTY 50", "NIFTY 50", IST_TIME,
+        new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("130000")),
+        new Oi(OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("5"), bd("-5"), null, null, null, false, false, null, null, null),
+        new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), null, null));
+  }
+
+  private static ScalperGateContext ctxVixRising() {
+    return new ScalperGateContext(
+        "NIFTY 50", "NIFTY 50", IST_TIME,
+        new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("130000")),
+        new Oi(OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("5"), bd("5"), null, null, null, false, false, null, null, null),
+        new Macro(bd("14"), bd("30"), bd("12"), Boolean.TRUE, 40, 10, bd("50"), null, null));
+  }
+
+  // a bank with SuperTrend pointing DOWN — breaks CE indicator-alignment (price still > vwap → CE side).
+  private static BarValues bullBankStDown() {
+    Map<String, BigDecimal> builtins = Map.of("close", bd("100"), "vwap", bd("99"), "volume", bd("130000"));
+    Map<String, BigDecimal> aliases =
+        Map.of("vwma20", bd("98"), "psar", bd("97"), "rsi14", bd("65"), "supertrend", bd("-1"));
+    return new BarValues() {
+      @Override
+      public BigDecimal valueAt(String alias, int i) {
+        return aliases.get(alias);
+      }
+
+      @Override
+      public BigDecimal previousValueAt(String alias, int i) {
+        return null;
+      }
+
+      @Override
+      public BigDecimal builtin(String name, int i) {
+        return builtins.get(name);
+      }
+    };
+  }
+
   private static ChainSnapshot chainWithInBandCe() {
     // spot 20000, basis 0, ~5d, iv 0.14 → 19850 CE lands delta ~0.68 (in 0.6–0.7); others out
     List<StrikePicker.Candidate> candidates =
@@ -321,6 +377,62 @@ class ScalperConfluenceGateTest {
     // unarmed bare CFG against the into-the-wall chain → still fires.
     when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithCeWallAt(bd("20000"))));
     assertThat(gate.evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+  }
+
+  @Test
+  void indicatorAlignmentGateRequiresAllIndicatorsOnTheSide() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+    // armed + an aligned bank fires; armed + a SuperTrend-down bank (misaligned) blocks.
+    assertThat(gate.evaluate(cfgTags("indicator-alignment-gate"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+    assertThat(gate.evaluate(cfgTags("indicator-alignment-gate"), bullBankStDown(), null, 0, NOW, IST_TIME, EOD)).isEmpty();
+  }
+
+  @Test
+  void futuresOiGateRequiresASupportingQuadrant() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    assertThat(gate.evaluate(cfgTags("futures-oi-gate"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(ctxFuturesOpposesCe());
+    assertThat(gate.evaluate(cfgTags("futures-oi-gate"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isEmpty();
+  }
+
+  @Test
+  void breadthGateRequiresAdvancesOverThirtyTwo() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    assertThat(gate.evaluate(cfgTags("breadth-gate"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(ctxBreadthLow());
+    assertThat(gate.evaluate(cfgTags("breadth-gate"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isEmpty();
+  }
+
+  @Test
+  void basisGateRequiresAgreeingFuturesBasis() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    assertThat(gate.evaluate(cfgTags("basis-gate"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(ctxBasisDiscount());
+    assertThat(gate.evaluate(cfgTags("basis-gate"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isEmpty();
+  }
+
+  @Test
+  void directionalVixGateRequiresVixDirectionToConfirmAndIsInertWhenUnknown() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+    // falling VIX confirms a CE → fires; rising VIX opposes a CE → blocks.
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    assertThat(gate.evaluate(cfgTags("directional-vix-gate"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(ctxVixRising());
+    assertThat(gate.evaluate(cfgTags("directional-vix-gate"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isEmpty();
   }
 
   @Test

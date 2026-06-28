@@ -38,9 +38,10 @@ import org.springframework.stereotype.Service;
  *       {@value #CONFIRM_WINDOW_MIN}-minute window leading into entry — the "strong move ran through
  *       THIS strike" residual the index-spurt gate does not cover. {@code confirmed} = ≥
  *       {@value #CONFIRM_THRESHOLD_PCT}%.</li>
- *   <li><b>S21b / Bearish-7 skew:</b> the mirror (same strike, opposite type) leg's entry premium →
- *       the per-side premium skew, a "chasing the richer side" flag, and the PE-when-calls-at-a-discount
- *       caution. Mirror reads degrade to null when {@code expired_contracts} has no paired row.</li>
+ *   <li><b>S21b / Bearish-7 skew (raw data):</b> the mirror (same strike, opposite type) leg's entry
+ *       premium + the signed per-side skew + a factual "the traded side is the richer leg" flag — the
+ *       side-by-premium (S21b) and calls-at-a-discount (Bearish-7) reads SURFACED for the owner to
+ *       judge, NOT automated verdicts. Degrades to null when {@code expired_contracts} has no pair.</li>
  * </ul>
  *
  * <p><b>Caveat:</b> on derived history the OI/Dow factors are muted, so judge a hero-zero leg on real
@@ -81,8 +82,7 @@ public class HeroZeroPremiumService {
     int zeros = 0;
     int confirmed = 0;
     int slTouched = 0;
-    int chaseWarnings = 0;
-    int bearishCautions = 0;
+    int richerSideCount = 0;
     BigDecimal peakMultSum = BigDecimal.ZERO;
     BigDecimal changePctSum = BigDecimal.ZERO;
 
@@ -177,17 +177,23 @@ public class HeroZeroPremiumService {
       pt.put("premiumChangePct", changePct == null ? null : changePct.setScale(2, RoundingMode.HALF_UP));
       pt.put("confirmed", conf);
 
-      // --- S21b / Bearish-7 mirror-side skew (degrades to null without a paired contract row) ---
+      // --- S21b / Bearish-7 mirror-side premium (raw DATA for value-verify, NOT a derived verdict) ---
+      // The disposition wants the side-by-premium (S21b) + "calls at a discount" (Bearish-7) reads
+      // SURFACED on the chosen leg for the owner to judge — not automated. We report the mirror (same
+      // strike, opposite type) entry premium + the signed skew; the owner reads the S21b/Bearish-7
+      // caution off them. (No derived caution boolean: "calls at a discount to FAIR premium" is not the
+      // same as "CE cheaper than PE at this strike" — put-call parity makes the same-strike skew
+      // strike-position-dependent, so a boolean here would mislead.) Degrades to null without a pair.
       ContractMeta meta = meta(exchange, tradingsymbol);
+      BigDecimal mirrorPrem = null;
       BigDecimal skewPct = null;
-      Boolean richerSide = null;
-      Boolean callsAtDiscountCaution = null;
+      Boolean tradedSideRicher = null;
       if (meta != null) {
         pt.put("optionType", meta.type());
         pt.put("strike", meta.strike());
         String mirror = mirrorSymbol(meta, exchange);
         if (mirror != null) {
-          BigDecimal mirrorPrem =
+          mirrorPrem =
               premiumAt(
                   premiumSeries(exchange, mirror, entryTs.minusMinutes(1), entryTs.plusMinutes(1)),
                   entryTs);
@@ -198,22 +204,16 @@ public class HeroZeroPremiumService {
                     .divide(mirrorPrem, 6, RoundingMode.HALF_UP)
                     .multiply(HUNDRED)
                     .setScale(2, RoundingMode.HALF_UP);
-            richerSide = skewPct.signum() > 0; // the traded side is the richer (more expensive) side
-            // Bearish-7: on a PE trade, if the CE mirror trades cheaper than the PE (calls "at a
-            // discount" → market leaning UP) → caution against the short-biased PE.
-            callsAtDiscountCaution = "PE".equals(meta.type()) && skewPct.signum() > 0;
-            if (Boolean.TRUE.equals(richerSide)) {
-              chaseWarnings++;
-            }
-            if (Boolean.TRUE.equals(callsAtDiscountCaution)) {
-              bearishCautions++;
+            tradedSideRicher = skewPct.signum() > 0; // factual: the traded leg is the more expensive one
+            if (Boolean.TRUE.equals(tradedSideRicher)) {
+              richerSideCount++;
             }
           }
         }
       }
+      pt.put("mirrorPremium", mirrorPrem == null ? null : mirrorPrem.setScale(4, RoundingMode.HALF_UP));
       pt.put("mirrorSkewPct", skewPct);
-      pt.put("chasingRicherSide", richerSide);
-      pt.put("callsAtDiscountCaution", callsAtDiscountCaution);
+      pt.put("tradedSideRicher", tradedSideRicher);
 
       perTrade.add(pt);
     }
@@ -229,8 +229,7 @@ public class HeroZeroPremiumService {
     out.put("confirmed", confirmed);
     out.put("confirmedRate", priced == 0 ? null : rate(confirmed, priced));
     out.put("slTouched", slTouched);
-    out.put("chaseWarnings", chaseWarnings);
-    out.put("bearishCautions", bearishCautions);
+    out.put("tradedSideRicherCount", richerSideCount);
     out.put(
         "avgPeakMultiple",
         priced == 0 ? null : peakMultSum.divide(new BigDecimal(priced), 4, RoundingMode.HALF_UP));

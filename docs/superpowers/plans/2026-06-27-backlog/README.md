@@ -1,5 +1,14 @@
 # Scalper backlog — implementation-plan index & roadmap
 
+> **Sequencing authority moved (2026-06-28).** These 12 stream files are now the **per-package
+> design library** for finishing the scalper engine; the **build sequence + status + descopes** live in
+> the consolidated roadmap [`../2026-06-28-scalper-to-100-roadmap.md`](../2026-06-28-scalper-to-100-roadmap.md)
+> (epics E1–E12, anchored on the *debloated* operative doc). All 12 streams are KEEP-NEEDED (each still
+> designs ≥1 unbuilt package). **Already BUILT** since this README was written: the 7 W3 drift tags +
+> the 7 W4 gates + several indicator/exit primitives — see the roadmap §1 baseline, don't rebuild.
+> **DESCOPED** (do not build): the ~5 packages in [S24-PRUNE.md](S24-PRUNE.md). The 246-gap count below
+> is the bloated-audit number; the debloated remaining is ~95 packages minus those descopes.
+
 Status: PLAN INDEX. Owner: single-owner. Date: 2026-06-27.
 
 This directory holds the **12 implementation-ready stream plans** that close the **246-gap

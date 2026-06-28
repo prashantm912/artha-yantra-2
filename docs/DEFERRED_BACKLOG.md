@@ -42,6 +42,13 @@ the factors and validated the OI thesis: April attribution Ext.Bullish 5tr/80%wi
 learning:** derived history still forces Dow+IV NEUTRAL, so the OI edge reads MUTED on backtests — judge OI-led
 strategies on FORWARD paper with real captured OI, not a weak historical backtest.
 
+**2026-06-28 — scalper engine → 100% roadmap.** The S24 incorporation chain is closed (debloated operative doc;
+W3 drift tags #251–256 + W4 gates #258–262 BUILT/inert; 2b infra live). The remaining engine work to finish the
+**debloated** operative doc (the AUTOMATE_PKG remainder, ~95 packages in 12 epics E1–E12, minus ~5 S24 descopes)
+is consolidated in [`superpowers/plans/2026-06-28-scalper-to-100-roadmap.md`](superpowers/plans/2026-06-28-scalper-to-100-roadmap.md)
+— the scalper forward authority. Per-package design = the 12 `2026-06-27-backlog/` stream files (KEEP-NEEDED) +
+FU1/FU2; the bloated `strategy-audit/` chain is CLOSED. Arming = owner forward-paper (2c).
+
 **2026-06-26 update — backfill IDLE + 2b scalper tunable-infra COMPLETE (#219–#230, all MERGED + DEPLOYED):**
 the expired/OI backfill is now **COMPLETE/idle** (`ExpiredBackfillAutoResume` self-resume skips all 32,543 legs),
 which unblocked the two formerly-gated items: the **Data Ops Console is DEPLOYED + live** (B1–B6, #121; #219

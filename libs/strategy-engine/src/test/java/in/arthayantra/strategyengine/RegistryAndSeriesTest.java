@@ -22,7 +22,8 @@ class RegistryAndSeriesTest {
   void registryKnowsTheFullSchemaV1Vocabulary() {
     assertThat(IndicatorRegistry.knownNames())
         .containsExactly(
-            "EMA", "SMA", "RSI", "VWAP", "ADX", "MACD_HIST", "SUPERTREND", "VOLUME_RATIO",
+            "EMA", "SMA", "RSI", "VWAP", "ADX", "MACD_HIST", "SUPERTREND", "SUPERTREND_LINE",
+            "VOLUME_RATIO",
             "OI_CHANGE_PCT", "ATR", "VWMA", "PSAR", "ORB_HIGH", "ORB_LOW", "PREV_DAY_HIGH",
             "PREV_DAY_LOW", "PREV_DAY_CLOSE", "DAY_HIGH", "DAY_LOW", "GAP_PCT", "RS_VS_INDEX",
             "VIX_LEVEL", "BASIS_PCT", "ADVANCE_DECLINE_RATIO");

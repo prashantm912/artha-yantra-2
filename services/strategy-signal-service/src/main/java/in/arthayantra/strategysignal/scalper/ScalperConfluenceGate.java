@@ -79,7 +79,11 @@ public class ScalperConfluenceGate {
       Confluence confluence,
       LocalDate expiry,
       BigDecimal structuralStop,
-      OpenHighLow.Tier ohTier) {
+      OpenHighLow.Tier ohTier,
+      // E8 §3.2: the live call-put OI imbalance % at entry, surfaced for the probability-graded
+      // suggested-qty OI-gap factor (a thin gap trims size). Null for the neutral straddle path / when
+      // the chain imbalance is unavailable. Advisory only ([S]) — NOT part of the frozen breakdown.
+      BigDecimal oiImbalancePct) {
 
     /** The directional/primary leg (CE for a straddle) — never empty: every decision has ≥1 leg. */
     public StrikePicker.Pick pick() {
@@ -171,7 +175,8 @@ public class ScalperConfluenceGate {
                       neutralConfluence(),
                       chain.expiry(),
                       null,
-                      null)); // #11 straddle is direction-neutral — no Open=High tier
+                      null,
+                      null)); // #11 straddle is direction-neutral — no Open=High tier / no graded sizing
     }
     // §0B VWAP-decisive: CE above VWAP, PE below — the side the rest of the confluence must confirm.
     OptionType side =
@@ -514,7 +519,10 @@ public class ScalperConfluenceGate {
     OptionType decided = side;
     OpenHighLow.Tier decidedTier = ohTier;
     return pick.map(
-        p -> new Decision(decided, List.of(new Leg(decided, p)), conf, chain.expiry(), stop, decidedTier));
+        p ->
+            new Decision(
+                decided, List.of(new Leg(decided, p)), conf, chain.expiry(), stop, decidedTier,
+                ctx.oi().callPutDeltaImbalancePct()));
   }
 
   /**

@@ -659,7 +659,7 @@ public class SignalEngine {
           decision == null
               ? null
               : in.arthayantra.strategysignal.scalper.ScalperSizing.sizeMultiplier(
-                  decision.confluence().aggregate());
+                  decision.confluence().aggregate(), decision.oiImbalancePct());
       BigDecimal suggestedQty =
           emissionGuard.get().suggestedQty(
               strategy.definition().sizing(), exchange, tradingsymbol, entryPrice, stopDistance,

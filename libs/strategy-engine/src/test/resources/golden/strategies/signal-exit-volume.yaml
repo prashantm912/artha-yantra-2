@@ -1,0 +1,31 @@
+# Golden feature: E9 volume-qualified signal_exit — a "close < vwap" exit that
+# fires ONLY when the bar volume clears min_volume (a no-volume fake break does
+# not exit). min_volume:1 always clears here, so the new param path is exercised
+# deterministically on the frozen 1m fixtures; the suppression logic itself is
+# covered by ExitEvaluatorTest.signalExitHonoursMinVolumeFloor.
+schema: strategy-schema/v1
+id: golden-signal-exit-volume
+name: "Golden Signal Exit Volume"
+version: 1.0.0
+universe:
+  mode: explicit
+  instruments:
+    - { exchange: NSE, tradingsymbol: "NIFTY 50" }
+timeframes: { primary: 1m }
+indicators:
+  - { name: EMA, alias: ema_fast, timeframe: 1m, params: { period: 9 }, weight: 1.0 }
+  - { name: EMA, alias: ema_slow, timeframe: 1m, params: { period: 21 }, weight: 1.0 }
+  - { name: RSI, alias: rsi_1m, timeframe: 1m, params: { period: 14 }, weight: 1.0,
+      normalize: { type: rsi_momentum } }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - crossover: { fast: ema_fast, slow: ema_slow }
+  scoring: { threshold: 0.2 }
+exit_rules:
+  - { type: signal_exit, params: { rule: "close < vwap", min_volume: 1 } }
+risk:
+  position_sizing: { method: fixed_quantity, params: { quantity: 1 } }
+  max_positions: 1
+  session: { style: intraday }

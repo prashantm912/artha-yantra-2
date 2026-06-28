@@ -332,9 +332,19 @@ public final class ExitEvaluator {
     String text = String.valueOf(rule.params().get("rule"));
     GateNode node = StrategyCompiler.compileLeafText(text);
     ScoreBreakdown.GateResult result = GateEvaluator.evaluate(node, bank, index);
-    return result.passed()
-        ? Optional.of(new ExitDecision("signal_exit", text))
-        : Optional.empty();
+    if (!result.passed()) {
+      return Optional.empty();
+    }
+    // Optional volume floor (S24 §3.3/§4.15): a VWAP/level break must come WITH volume to be real —
+    // a no-volume "fake" break does NOT exit. Absent min_volume → unchanged (parity-safe-additive).
+    Object minVolume = rule.params().get("min_volume");
+    if (minVolume != null) {
+      BigDecimal volume = bank.builtin("volume", index);
+      if (volume == null || volume.compareTo(decimal(minVolume)) < 0) {
+        return Optional.empty();
+      }
+    }
+    return Optional.of(new ExitDecision("signal_exit", text));
   }
 
   private static BigDecimal favorableExtreme(EngineSeries series, Position position, int index) {

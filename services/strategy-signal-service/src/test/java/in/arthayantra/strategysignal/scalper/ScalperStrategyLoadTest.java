@@ -231,6 +231,10 @@ class ScalperStrategyLoadTest {
       // declares both option_types (it BUYS the ATM CE + PE) rather than a single directional side.
       boolean isStraddle = id.startsWith("scalp-straddle-");
       assertThat(cfg.requireStraddle()).as(id + " straddle neutral path").isEqualTo(isStraddle);
+      // E4 low-iv-straddle (§3.11/§4.6 LONG-straddle LOW-IV skip): armed on the scalp-straddle family.
+      assertThat(tags.contains("low-iv-straddle"))
+          .as(id + " low-iv-straddle armed iff straddle")
+          .isEqualTo(isStraddle);
       if (isStraddle) {
         List<String> optTypes = new ArrayList<>();
         config.path("universe").path("options").path("option_types").forEach(t -> optTypes.add(t.asText()));

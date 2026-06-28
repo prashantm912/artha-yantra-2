@@ -96,6 +96,13 @@ class ScalperConfluenceGateTest {
           new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
           false, ScalperConfig.StructuralStop.NONE, false, false, false, false, false, false, true,
           false, false);
+  // E4: the straddle path with the low-iv-straddle tag armed (requireStraddle true + the tag list).
+  private static final ScalperConfig STRADDLE_LOW_IV_CFG =
+      new ScalperConfig(
+          "NSE", "NIFTY 50", "NIFTY 50", "NIFTY 50", 2,
+          new StrikePicker.Params(0.6, 0.7, bd("100"), bd("400"), 0.065), bd("0.6"),
+          false, ScalperConfig.StructuralStop.NONE, false, false, false, false, false, false, true,
+          false, false, List.of("low-iv-straddle"));
   // W3 (rsi-s24-bands): a strategy carrying the S24 RSI-band tag — routes the hard RSI rail through
   // rsiS24Band (CE 50-75 / PE 25-40) instead of the legacy 60-80 / 20-40 band.
   private static final ScalperConfig RSI_S24_CFG =
@@ -1140,6 +1147,29 @@ class ScalperConfluenceGateTest {
     assertThat(d.pick().candidate().tradingsymbol()).isEqualTo("NIFTY20000CE");
     org.mockito.Mockito.verify(client, org.mockito.Mockito.never())
         .context(any(), any(), any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void lowIvStraddleStandsAsideOnRichIvWhenArmedAndFiresOnLowIv() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithAtmPair()));
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+
+    // armed + rich IV (both legs >= 0.40) → the long straddle stands aside.
+    when(client.macro(eq("NIFTY 50"), any(), any())).thenReturn(straddleMacro(bd("0.45"), bd("0.45")));
+    assertThat(gate.evaluate(STRADDLE_LOW_IV_CFG, bullBank(), null, 0, NOW, IST_TIME, EOD)).isEmpty();
+
+    // armed + low IV (both legs < 0.40) → fires the two-leg draft.
+    when(client.macro(eq("NIFTY 50"), any(), any())).thenReturn(straddleMacro(bd("0.10"), bd("0.10")));
+    assertThat(gate.evaluate(STRADDLE_LOW_IV_CFG, bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+
+    // unarmed straddle (no low-iv tag) → fires even on rich IV (the gate is never consulted).
+    assertThat(gate.evaluate(STRADDLE_CFG, bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+  }
+
+  private static ScalperGateContext.Macro straddleMacro(BigDecimal ceAvg6, BigDecimal peAvg6) {
+    return new ScalperGateContext.Macro(
+        bd("0.14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), ceAvg6, peAvg6);
   }
 
   @Test

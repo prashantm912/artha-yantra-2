@@ -137,6 +137,15 @@ public class ScalperConfluenceGate {
       if (!ScalperGates.volume(cfg.signalIndex(), chart.volume()).pass()) {
         return Optional.empty();
       }
+      // E4 §3.A.4 low-iv-straddle: a LONG straddle wants LOW IV (cheap both legs); skip when either
+      // side's 6-strike IV avg is rich. Armed via the tag only (else the neutral path pays no extra
+      // fetch). Pass cfg.underlying() so the index/expiry are a matched pair (the macro IV pair is the
+      // option-root's own; a null avg never blocks). LIVE-only — the neutral path has no golden.
+      if (cfg.has("low-iv-straddle")
+          && StraddleIvGate.tooRichForLong(
+              client.macro(cfg.underlying(), eodDate, chain.expiry()), oiProps)) {
+        return Optional.empty();
+      }
       return StraddleLegPicker.pick(
               chain.candidates(), chain.spot(), chain.basis(), barInstant, chain.expiry(),
               cfg.strikeParams().rate())

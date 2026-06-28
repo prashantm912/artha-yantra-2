@@ -327,9 +327,14 @@ public class ScalperConfluenceGate {
     // E8 §3.9 Morning Trade: before the intraday VWAP settles (~10:30 IST) it is unreliable, so the
     // morning structural stop is the PRIOR-day VWAP (the first support on a fall, doc L539/L541) — used
     // only when it sits on the protective side of the entry; otherwise the default structural stop
-    // stands. Live-only seam (parity-safe by firewall); a fresh boot with no prior session degrades.
+    // stands. The doc cites the STRIKE's prior-day VWAP; the strike isn't selected until later, so this
+    // uses the INDEX-future's prior-session VWAP (the same index-price domain every scalper structural
+    // stop lives in — the stop is touched by the index future). Live-only seam (parity-safe by
+    // firewall); a fresh boot with no prior session degrades to the default stop.
     if (cfg.has("prior-day-vwap-stop")
         && cfg.openingTick()
+        && future != null
+        && index >= 0
         && istTime.isBefore(ScalperConfig.VWAP_ACTIONABLE_FROM)) {
       BigDecimal vwapStop =
           ScalperGates.priorDayVwapStop(priorSessionVwap(future, index), future.candle(index).close(), side);

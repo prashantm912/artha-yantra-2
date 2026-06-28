@@ -240,6 +240,14 @@ public class ScalperConfluenceGate {
     if (cfg.has("oi-slope-agree") && !ScalperGates.oiSlopeAgree(ctx.oi(), side).pass()) {
       return Optional.empty();
     }
+    // E2 M3 (tag oi-divergence-magnitude, Trending-OI #5): the OI lines must diverge by a real magnitude
+    // (>=20% of total OI) with a corroborating price impulse (>=50%). Fail-closed; NEUTRAL on history.
+    if (cfg.has("oi-divergence-magnitude")
+        && !ScalperGates.oiDivergenceMagnitude(
+                ctx.oi(), ScalperGates.OI_DIVERGENCE_MIN_PCT, ScalperGates.PRICE_IMPULSE_MIN_PCT)
+            .pass()) {
+      return Optional.empty();
+    }
     // E2 M4 (tag flat-oi-stand-aside, the doc's flat-OI trap): a null/flat call-put imbalance STANDS
     // ASIDE (block) — the deliberate inverse of #5's fail-open (keep the two tags mutually exclusive).
     if (cfg.has("flat-oi-stand-aside") && !ScalperGates.flatOiStandAside(ctx.oi()).pass()) {

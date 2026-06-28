@@ -186,6 +186,17 @@ class ScalperConfluenceGateTest {
         false, false, List.of(tags));
   }
 
+  // a bullish context carrying a strong OI divergence (30% gap) + price impulse (60%) — the M3 operands.
+  private static ScalperGateContext bullContextDivergence() {
+    return new ScalperGateContext(
+        "NIFTY 50", "NIFTY 50", IST_TIME,
+        new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("130000")),
+        new Oi(
+            OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("5"), bd("5"),
+            null, null, bd("60"), false, false, null, null, bd("60"), bd("30")),
+        new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), null, null));
+  }
+
   // a bullish context whose OI carries a COMPLETED CE-favouring cross (peΔ>0 && ceΔ<0, crossed) plus an
   // agreeing sentiment level+slope (both positive) — the operands the E2 oi-cross-required /
   // oi-slope-agree hard gates require.
@@ -433,6 +444,22 @@ class ScalperConfluenceGateTest {
     assertThat(gate.evaluate(cfgTags("directional-vix-gate"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
     when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(ctxVixRising());
     assertThat(gate.evaluate(cfgTags("directional-vix-gate"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isEmpty();
+  }
+
+  @Test
+  void oiDivergenceMagnitudeTagFiresOnAStrongDivergenceAndBlocksWithout() {
+    // E2 M3: oi-divergence-magnitude fires only on a real divergence + price impulse; bullContext has
+    // null divergence → the armed gate blocks while the bare CFG (gate off) still fires.
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContextDivergence());
+    assertThat(gate.evaluate(cfgTags("oi-divergence-magnitude"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    assertThat(gate.evaluate(cfgTags("oi-divergence-magnitude"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isEmpty();
+    assertThat(gate.evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
   }
 
   @Test

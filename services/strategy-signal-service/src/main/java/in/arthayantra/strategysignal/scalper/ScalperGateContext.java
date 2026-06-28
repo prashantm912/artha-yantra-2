@@ -49,7 +49,32 @@ public record ScalperGateContext(
       boolean gapWidening,
       BigDecimal sentimentSlope,
       BigDecimal spurtOiPct,
-      BigDecimal spurtPricePct) {}
+      BigDecimal spurtPricePct,
+      // E2 M3: the PE−CE OI gap as a % of the latest bucket's total OI (the "lines diverge ~20-30%"
+      // magnitude); null when the series is short/flat. The producer computes it in deriveTrending.
+      BigDecimal oiDivergencePct) {
+
+    /** Pre-M3 13-arg form: {@code oiDivergencePct} defaults to null (keeps existing literals intact). */
+    public Oi(
+        OiQuadrant underlying,
+        OiQuadrant futures,
+        BigDecimal sentimentPct,
+        BigDecimal trendingPeMinusCePct,
+        BigDecimal futuresBasis,
+        BigDecimal ceOiDelta,
+        BigDecimal peOiDelta,
+        BigDecimal callPutDeltaImbalancePct,
+        boolean crossedThisWindow,
+        boolean gapWidening,
+        BigDecimal sentimentSlope,
+        BigDecimal spurtOiPct,
+        BigDecimal spurtPricePct) {
+      this(
+          underlying, futures, sentimentPct, trendingPeMinusCePct, futuresBasis, ceOiDelta, peOiDelta,
+          callPutDeltaImbalancePct, crossedThisWindow, gapWidening, sentimentSlope, spurtOiPct,
+          spurtPricePct, null);
+    }
+  }
 
   /**
    * Macro confluence: ATM IV + rank, India VIX (level + direction), breadth, FII positioning, plus the

@@ -336,7 +336,8 @@ public class MarketOiClient {
         trending.gapWidening(),
         sentiment.slope(),
         spurt.oiPct(),
-        spurt.pricePct());
+        spurt.pricePct(),
+        trending.divergencePct());
   }
 
   /** Front-contract absolute futures basis (F − S) — price-derived, so NOT suppressed on a monthly expiry. */
@@ -447,8 +448,9 @@ public class MarketOiClient {
       BigDecimal peOiDelta,
       BigDecimal imbalancePct,
       boolean crossed,
-      boolean gapWidening) {
-    static final Trending EMPTY = new Trending(null, null, null, null, false, false);
+      boolean gapWidening,
+      BigDecimal divergencePct) {
+    static final Trending EMPTY = new Trending(null, null, null, null, false, false, null);
   }
 
   /**
@@ -466,7 +468,7 @@ public class MarketOiClient {
     BigDecimal level = peMinusCePct(last);
     if (items.size() < 2) {
       // A single bucket gives a level but no temporal signal — all derivations null/false.
-      return new Trending(level, null, null, null, false, false);
+      return new Trending(level, null, null, null, false, false, null);
     }
     JsonNode first = items.get(0);
     JsonNode prior = items.get(items.size() - 2);
@@ -487,8 +489,13 @@ public class MarketOiClient {
     // PE-over-CE cross) or first above → last below (bearish). Zero on either edge is not a cross.
     boolean crossed = (gapFirst < 0 && gapLast > 0) || (gapFirst > 0 && gapLast < 0);
     boolean widening = Math.abs(gapLast) > Math.abs(gapPrior);
+    // E2 M3: the PE−CE gap as a % of the latest bucket's total OI — the "lines diverge ~20-30%"
+    // magnitude. Null when the bucket carries no OI (flat) so a missing read can't pass the gate.
+    long totalLast = peLast + ceLast;
+    BigDecimal divergencePct =
+        totalLast <= 0 ? null : BigDecimal.valueOf(Math.abs(gapLast) * 100.0 / totalLast);
 
-    return new Trending(level, ceDelta, peDelta, imbalance, crossed, widening);
+    return new Trending(level, ceDelta, peDelta, imbalance, crossed, widening, divergencePct);
   }
 
   /** A single trending bucket's PE−CE tilt as a % of total OI; null when the bucket carries no OI. */

@@ -187,6 +187,21 @@ class ScalperGatesTest {
   }
 
   @Test
+  void oiDivergenceMagnitudeNeedsBothTheGapAndAPriceImpulse() {
+    BigDecimal minDiv = ScalperGates.OI_DIVERGENCE_MIN_PCT; // 20
+    BigDecimal minPx = ScalperGates.PRICE_IMPULSE_MIN_PCT; // 50
+    // divergence >= 20 AND |price impulse| >= 50 → pass.
+    assertThat(ScalperGates.oiDivergenceMagnitude(divergence(bd("25"), bd("60")), minDiv, minPx).pass()).isTrue();
+    // a weak divergence (< 20) fails.
+    assertThat(ScalperGates.oiDivergenceMagnitude(divergence(bd("10"), bd("60")), minDiv, minPx).pass()).isFalse();
+    // a weak price impulse (< 50) fails.
+    assertThat(ScalperGates.oiDivergenceMagnitude(divergence(bd("25"), bd("30")), minDiv, minPx).pass()).isFalse();
+    // null divergence or null price impulse fail-closed.
+    assertThat(ScalperGates.oiDivergenceMagnitude(divergence(null, bd("60")), minDiv, minPx).pass()).isFalse();
+    assertThat(ScalperGates.oiDivergenceMagnitude(divergence(bd("25"), null), minDiv, minPx).pass()).isFalse();
+  }
+
+  @Test
   void flatOiStandAsideBlocksANullImbalanceButPassesAPresentOne() {
     // the deliberate inverse of callPutDeltaFilter's fail-open: a present imbalance passes...
     assertThat(ScalperGates.flatOiStandAside(imbalance(bd("10"))).pass()).isTrue();
@@ -299,6 +314,12 @@ class ScalperGatesTest {
     return new Oi(
         OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("0"), bd("5"), ceDelta, peDelta,
         bd("60"), crossedThisWindow, false, null, null, null);
+  }
+
+  private static Oi divergence(BigDecimal divergencePct, BigDecimal spurtPricePct) {
+    return new Oi(
+        OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("0"), bd("5"), null, null, null,
+        false, false, null, null, spurtPricePct, divergencePct);
   }
 
   private static Oi sentiment(BigDecimal level, BigDecimal slope) {

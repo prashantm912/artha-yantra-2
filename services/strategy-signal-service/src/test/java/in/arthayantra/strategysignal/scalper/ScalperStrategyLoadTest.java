@@ -164,6 +164,10 @@ class ScalperStrategyLoadTest {
       assertThat(tags.contains("oi-slope-agree"))
           .as(id + " oi-slope-agree armed iff trending-oi")
           .isEqualTo(isTrendingOi);
+      // E2 M3 (oi-divergence-magnitude): armed on the scalp-trending-oi family (its OI-cross edge).
+      assertThat(tags.contains("oi-divergence-magnitude"))
+          .as(id + " oi-divergence-magnitude armed iff trending-oi")
+          .isEqualTo(isTrendingOi);
 
       // Connect-the-Dots (#10) is the SOFT weighted-scorer strategy: these confluences are ALREADY soft
       // dots in the 18-dot scorer, so the hard-gate versions ship default-OFF and are armed on NO

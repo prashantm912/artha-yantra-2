@@ -168,6 +168,16 @@ class MarketOiClientTest {
   }
 
   @Test
+  void deriveDowUpReadsTheSignedDirection() throws Exception {
+    wire();
+    var om = new ObjectMapper();
+    assertThat(client.deriveDowUp(om.readTree("{\"direction\":1}"))).isTrue(); // up → CE
+    assertThat(client.deriveDowUp(om.readTree("{\"direction\":-1}"))).isFalse(); // down → PE
+    assertThat(client.deriveDowUp(om.readTree("{\"direction\":0}"))).isNull(); // flat → neutral
+    assertThat(client.deriveDowUp(om.readTree("{}"))).isNull(); // absent → unknown
+  }
+
+  @Test
   void mapsMacroHalfAndScalesIvRankToHundred() {
     wire();
     // rank is a 0..1 fraction upstream; must surface ×100 so the scorer's <50 gate is meaningful
@@ -189,8 +199,9 @@ class MarketOiClientTest {
         "/api/v1/market/options/active-strikes",
         "{\"activeStrikeIvSeries\":[{\"ceIv\":\"0.12\",\"peIv\":\"0.15\"},"
             + "{\"ceIv\":\"0.16\",\"peIv\":\"0.13\"}]}");
-    // E3: macro now also reads the INDIA VIX quote (level + change-vs-prev-close → direction).
+    // E3: macro now also reads the INDIA VIX quote + the Dow global cue (direction +1 up / −1 down).
     stub("/api/v1/market/vix", "{\"ltp\":\"14.5\",\"change\":\"-0.30\"}");
+    stub("/api/v1/market/global/dow", "{\"direction\":1}");
 
     Macro m = client.macro(UNDERLYING, TRADE_DATE, EXPIRY);
 
@@ -206,6 +217,7 @@ class MarketOiClientTest {
     assertThat(m.fiiLongPct()).isEqualByComparingTo("70"); // 70 / (70+30) × 100
     assertThat(m.vixLevel()).isEqualByComparingTo("14.5"); // /vix ltp
     assertThat(m.vixRising()).isFalse(); // change −0.30 < 0 → VIX falling (favours CE)
+    assertThat(m.dowUp()).isTrue(); // /global/dow direction +1 → Dow up (favours CE)
     server.verify();
   }
 
@@ -220,7 +232,8 @@ class MarketOiClientTest {
     stub("/api/v1/market/options/chain", "{\"spot\":\"20000\",\"rows\":[]}");
     stub("/api/v1/market/equity/index-contribution", "{}");
     stub("/api/v1/market/options/active-strikes", "{}"); // empty series → null slopes
-    stub("/api/v1/market/vix", "{}"); // absent quote → null level + unknown direction
+    stub("/api/v1/market/vix", "{}");
+    stub("/api/v1/market/global/dow", "{}"); // absent quote → null level + unknown direction
 
     Macro m = client.macro(UNDERLYING, TRADE_DATE, EXPIRY);
 
@@ -358,6 +371,7 @@ class MarketOiClientTest {
     stub("/api/v1/market/equity/index-contribution", "{}");
     stub("/api/v1/market/options/active-strikes", "{}");
     stub("/api/v1/market/vix", "{}");
+    stub("/api/v1/market/global/dow", "{}");
 
     Macro m = client.macro(UNDERLYING, TRADE_DATE, EXPIRY);
 

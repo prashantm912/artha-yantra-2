@@ -243,6 +243,11 @@ class ScalperStrategyLoadTest {
       assertThat(tags.contains("oi-confluence-exit"))
           .as(id + " oi-confluence-exit armed iff trend-change")
           .isEqualTo(isTrendChange);
+      // E3 dow-confluence (the Dow global-cue soft dot): armed on the scalp-trend-change family (the
+      // macro-aware reversal strategy, alongside fii-bias + constituent).
+      assertThat(tags.contains("dow-confluence"))
+          .as(id + " dow-confluence armed iff trend-change")
+          .isEqualTo(isTrendChange);
 
       // Connect-the-Dots (#10) is the SOFT weighted-scorer strategy: these confluences are ALREADY soft
       // dots in the 18-dot scorer, so the hard-gate versions ship default-OFF and are armed on NO

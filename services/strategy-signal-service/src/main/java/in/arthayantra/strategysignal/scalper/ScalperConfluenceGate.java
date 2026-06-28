@@ -520,7 +520,7 @@ public class ScalperConfluenceGate {
     Confluence conf =
         ConnectTheDotsScorer.score(
             ctx, side, bias60m(bank, index), cfg.confluenceThreshold(), oiProps, vwapHardGate,
-            cfg.has("iv-per-strike"), cfg.has("premium-skew"));
+            cfg.has("iv-per-strike"), cfg.has("premium-skew"), cfg.has("dow-confluence"));
     boolean valid = side == OptionType.CE ? conf.bullish() : conf.bearish();
     if (!valid) {
       return Optional.empty();

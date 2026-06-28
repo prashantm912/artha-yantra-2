@@ -50,6 +50,13 @@ class ConnectTheDotsScorerTest {
         null, null, null, skew);
   }
 
+  /** BULL_MACRO plus an E3 Dow cue ({@code true} = up, {@code false} = down, null = unknown). */
+  private static Macro macroWithDow(Boolean dowUp) {
+    return new Macro(
+        bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), bd("0.20"), bd("0.05"),
+        null, null, null, null, dowUp);
+  }
+
   /** The S24-inert OI (no trending_cross / oi_spurt cue) — for isolating the premium-skew warning. */
   private static final Oi NO_CUE_OI =
       new Oi(
@@ -179,6 +186,46 @@ class ConnectTheDotsScorerTest {
             ctx(BULL_CHART, BULL_OI, macroWithSkew(null)), CE, 1, T, P, true, false, true);
 
     assertThat(dot(r, "premium_skew")).isTrue();
+  }
+
+  @Test
+  void dowDotAbsentWhenUnarmedIsByteIdentical() {
+    // E3 parity: a Dow cue present in the macro is IGNORED when unarmed — the dot is not added
+    // (conditional-add), so the 18-dot list + aggregate match the all-aligned baseline.
+    Confluence r =
+        ConnectTheDotsScorer.score(
+            ctx(BULL_CHART, BULL_OI, macroWithDow(Boolean.FALSE)), CE, 1, T, P, true, false, false, false);
+
+    assertThat(r.dots()).hasSize(18);
+    assertThat(r.dots().stream().anyMatch(d -> d.dot().equals("dow"))).isFalse();
+    assertThat(r.aggregate()).isEqualByComparingTo("1.0");
+  }
+
+  @Test
+  void dowDotConfirmsCeWhenDowUpAndOpposesWhenDown() {
+    // armed: Dow UP supports a CE; Dow DOWN does not (opposes the long global cue).
+    assertThat(
+            dot(
+                ConnectTheDotsScorer.score(
+                    ctx(BULL_CHART, BULL_OI, macroWithDow(Boolean.TRUE)), CE, 1, T, P, true, false, false, true),
+                "dow"))
+        .isTrue();
+    assertThat(
+            dot(
+                ConnectTheDotsScorer.score(
+                    ctx(BULL_CHART, BULL_OI, macroWithDow(Boolean.FALSE)), CE, 1, T, P, true, false, false, true),
+                "dow"))
+        .isFalse();
+  }
+
+  @Test
+  void dowDotNeutralOnUnknownDirection() {
+    // armed but the Dow direction is null (history / off-hours / unconfigured) → supports (neutral).
+    Confluence r =
+        ConnectTheDotsScorer.score(
+            ctx(BULL_CHART, BULL_OI, macroWithDow(null)), CE, 1, T, P, true, false, false, true);
+
+    assertThat(dot(r, "dow")).isTrue();
   }
 
   @Test

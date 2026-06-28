@@ -470,10 +470,15 @@ public class MarketOiClient {
     Vix vix =
         get(uri -> uri.path("/api/v1/market/vix").build(), this::deriveVix, Vix.EMPTY, "vix");
 
+    // E3 Dow global cue: the Dow Jones LTP-direction (up → bullish/CE, down → bearish/PE). A 422 (global
+    // feed unconfigured / off-hours / history) degrades to null → the dow dot stays neutral.
+    Boolean dowUp =
+        get(uri -> uri.path("/api/v1/market/global/dow").build(), this::deriveDowUp, null, "global/dow");
+
     return new Macro(
         atmIv, ivRank, vix.level(), vix.rising(), breadth[0], breadth[1], fiiLongPct,
         chain.ivPair().ceIvAvg6(), chain.ivPair().peIvAvg6(),
-        constituentBias, ivSlope.ceSlope(), ivSlope.peSlope(), chain.premiumSkewPct());
+        constituentBias, ivSlope.ceSlope(), ivSlope.peSlope(), chain.premiumSkewPct(), dowUp);
   }
 
   /** Front (nearest-expiry) index-future quadrant from the term-structure-with-interpretation grid. */
@@ -657,6 +662,16 @@ public class MarketOiClient {
     BigDecimal change = decimal(quote.path("change"));
     Boolean rising = change == null || change.signum() == 0 ? null : change.signum() > 0;
     return new Vix(level, rising);
+  }
+
+  /** Maps the {@code /global/dow} quote's signed direction to up/down/unknown (0/flat ⇒ null = neutral). */
+  Boolean deriveDowUp(JsonNode quote) {
+    JsonNode dir = quote.path("direction");
+    if (!dir.isNumber()) {
+      return null;
+    }
+    int d = dir.asInt();
+    return d == 0 ? null : d > 0;
   }
 
   /** The two values derived from a single {@code /options/chain} read: the 6-strike IV pair + the skew. */

@@ -120,7 +120,10 @@ public record ScalperGateContext(
       // E7 §3.7/§6.7 (Hero-Zero): the per-side ATM premium skew = (CE ATM ltp − PE ATM ltp)/PE ltp × 100
       // (positive ⇒ CE is the richer/more-expensive side). null when the ATM premiums are absent; the dot
       // degrades to neutral on null.
-      BigDecimal premiumSkewPct) {
+      BigDecimal premiumSkewPct,
+      // E3 Dow global cue: the Dow Jones LTP-direction (true = up → bullish/CE, false = down → bearish/PE);
+      // null when the global feed is unconfigured/off-hours/history → the dow dot degrades to neutral.
+      Boolean dowUp) {
 
     /** Pre-constituent 9-arg form: trailing macro fields default to null (keeps existing literals intact). */
     public Macro(
@@ -134,10 +137,10 @@ public record ScalperGateContext(
         BigDecimal ceIvAvg6,
         BigDecimal peIvAvg6) {
       this(atmIv, ivRank, vixLevel, vixRising, advances, declines, fiiLongPct, ceIvAvg6, peIvAvg6, null,
-          null, null, null);
+          null, null, null, null);
     }
 
-    /** Pre-iv-slope 10-arg form: {@code ceIvSlope}/{@code peIvSlope}/{@code premiumSkewPct} default to null. */
+    /** Pre-iv-slope 10-arg form: {@code ceIvSlope}/{@code peIvSlope}/{@code premiumSkewPct}/{@code dowUp} default null. */
     public Macro(
         BigDecimal atmIv,
         BigDecimal ivRank,
@@ -150,10 +153,10 @@ public record ScalperGateContext(
         BigDecimal peIvAvg6,
         BigDecimal constituentBias) {
       this(atmIv, ivRank, vixLevel, vixRising, advances, declines, fiiLongPct, ceIvAvg6, peIvAvg6,
-          constituentBias, null, null, null);
+          constituentBias, null, null, null, null);
     }
 
-    /** Pre-premium-skew 12-arg form: {@code premiumSkewPct} defaults to null. */
+    /** Pre-premium-skew 12-arg form: {@code premiumSkewPct}/{@code dowUp} default to null. */
     public Macro(
         BigDecimal atmIv,
         BigDecimal ivRank,
@@ -168,7 +171,26 @@ public record ScalperGateContext(
         BigDecimal ceIvSlope,
         BigDecimal peIvSlope) {
       this(atmIv, ivRank, vixLevel, vixRising, advances, declines, fiiLongPct, ceIvAvg6, peIvAvg6,
-          constituentBias, ceIvSlope, peIvSlope, null);
+          constituentBias, ceIvSlope, peIvSlope, null, null);
+    }
+
+    /** Pre-Dow 13-arg form: {@code dowUp} defaults to null. */
+    public Macro(
+        BigDecimal atmIv,
+        BigDecimal ivRank,
+        BigDecimal vixLevel,
+        Boolean vixRising,
+        int advances,
+        int declines,
+        BigDecimal fiiLongPct,
+        BigDecimal ceIvAvg6,
+        BigDecimal peIvAvg6,
+        BigDecimal constituentBias,
+        BigDecimal ceIvSlope,
+        BigDecimal peIvSlope,
+        BigDecimal premiumSkewPct) {
+      this(atmIv, ivRank, vixLevel, vixRising, advances, declines, fiiLongPct, ceIvAvg6, peIvAvg6,
+          constituentBias, ceIvSlope, peIvSlope, premiumSkewPct, null);
     }
   }
 }

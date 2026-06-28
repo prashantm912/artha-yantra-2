@@ -425,13 +425,14 @@ public class MarketOiClient {
             null,
             "fii-dii/long-short");
 
-    // §A4: the 6-strike CE/PE IV pair (3 above + 3 below the ATM), read off the same chain endpoint.
-    // null when fewer than 6 usable strikes carry the needed IV → the later IV-pair dot stays inert.
-    IvPair ivPair =
+    // §A4 + E7: the 6-strike CE/PE IV pair (3 above + 3 below the ATM) AND the per-side ATM premium
+    // skew, derived in ONE pass over the same /options/chain read (no extra round-trip). null pair when
+    // < 6 usable strikes; null skew when the ATM premiums are absent → each dependent dot stays inert.
+    ChainDerived chain =
         get(
             uri -> uri.path("/api/v1/market/options/chain").queryParam("underlying", underlying).build(),
-            this::deriveIvPair,
-            IvPair.EMPTY,
+            this::deriveChain,
+            ChainDerived.EMPTY,
             "options/chain");
 
     // E3 §4.6 constituent contribution: the index heavyweights' net weighted % push (its SIGN is the
@@ -466,8 +467,9 @@ public class MarketOiClient {
     // VIX has no market-data endpoint yet (§12.2 follow-up). null level + null direction; the vix
     // gate treats an unknown direction as non-blocking, so the macro stays honest, not falsely bull.
     return new Macro(
-        atmIv, ivRank, null, null, breadth[0], breadth[1], fiiLongPct, ivPair.ceIvAvg6(), ivPair.peIvAvg6(),
-        constituentBias, ivSlope.ceSlope(), ivSlope.peSlope());
+        atmIv, ivRank, null, null, breadth[0], breadth[1], fiiLongPct,
+        chain.ivPair().ceIvAvg6(), chain.ivPair().peIvAvg6(),
+        constituentBias, ivSlope.ceSlope(), ivSlope.peSlope(), chain.premiumSkewPct());
   }
 
   /** Front (nearest-expiry) index-future quadrant from the term-structure-with-interpretation grid. */
@@ -638,6 +640,52 @@ public class MarketOiClient {
   /** §A4 carrier: the 6-strike CE/PE IV averages (3 strikes above + 3 below the ATM). */
   record IvPair(BigDecimal ceIvAvg6, BigDecimal peIvAvg6) {
     static final IvPair EMPTY = new IvPair(null, null);
+  }
+
+  /** The two values derived from a single {@code /options/chain} read: the 6-strike IV pair + the skew. */
+  record ChainDerived(IvPair ivPair, BigDecimal premiumSkewPct) {
+    static final ChainDerived EMPTY = new ChainDerived(IvPair.EMPTY, null);
+  }
+
+  /** Derive both the §A4 IV pair and the E7 premium skew from one chain payload (no extra round-trip). */
+  ChainDerived deriveChain(JsonNode chain) {
+    return new ChainDerived(deriveIvPair(chain), derivePremiumSkew(chain));
+  }
+
+  /**
+   * E7 §3.7/§6.7 per-side premium skew = (CE ATM ltp − PE ATM ltp) / PE ltp × 100, at the strike nearest
+   * the spot. Positive ⇒ the CE side is the richer (more-expensive) side, negative ⇒ PE is. null when
+   * the chain/spot/ATM premiums are absent (or the PE leg is zero) → the premium-skew dot degrades to
+   * neutral, never blocking on a missing feed.
+   */
+  BigDecimal derivePremiumSkew(JsonNode chain) {
+    BigDecimal spot = decimal(chain.path("spot"));
+    JsonNode rows = chain.path("rows");
+    if (spot == null || !rows.isArray() || rows.isEmpty()) {
+      return null;
+    }
+    JsonNode atmRow = null;
+    BigDecimal best = null;
+    for (JsonNode row : rows) {
+      BigDecimal strike = decimal(row.path("strike"));
+      if (strike == null) {
+        continue;
+      }
+      BigDecimal diff = strike.subtract(spot).abs();
+      if (best == null || diff.compareTo(best) < 0) {
+        best = diff;
+        atmRow = row;
+      }
+    }
+    if (atmRow == null) {
+      return null;
+    }
+    BigDecimal ceLtp = decimal(atmRow.path("ce").path("ltp"));
+    BigDecimal peLtp = decimal(atmRow.path("pe").path("ltp"));
+    if (ceLtp == null || peLtp == null || peLtp.signum() == 0) {
+      return null;
+    }
+    return ceLtp.subtract(peLtp).divide(peLtp, 4, RoundingMode.HALF_UP).multiply(HUNDRED);
   }
 
   /**

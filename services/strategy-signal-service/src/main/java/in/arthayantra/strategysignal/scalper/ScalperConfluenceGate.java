@@ -494,12 +494,14 @@ public class ScalperConfluenceGate {
     // opening-tick path drops VWAP from the HARD validity gate before 10:30 IST (it stays a soft dot in
     // the aggregate). Every other path keeps the decisive hard-VWAP behaviour (vwapHardGate=true).
     boolean vwapHardGate = !(cfg.openingTick() && istTime.isBefore(ScalperConfig.VWAP_ACTIONABLE_FROM));
-    // E4 iv-per-strike (armed via the tag): adds the per-strike IV-slope + 10-12 abs-band SOFT dots and
-    // the unilateral IV>40 buy-side stand-aside. Absent ⇒ false ⇒ the 18-dot aggregate is byte-identical.
+    // E4 iv-per-strike + E7 premium-skew (each armed via its tag): iv-per-strike adds the per-strike
+    // IV-slope + 10-12 abs-band SOFT dots and the unilateral IV>40 stand-aside; premium-skew adds the
+    // §3.7/§6.7 Hero-Zero "favor the lower-premium side" warning dot. Each absent ⇒ false ⇒ that dot is
+    // not added ⇒ the aggregate is byte-identical (conditional-add parity).
     Confluence conf =
         ConnectTheDotsScorer.score(
             ctx, side, bias60m(bank, index), cfg.confluenceThreshold(), oiProps, vwapHardGate,
-            cfg.has("iv-per-strike"));
+            cfg.has("iv-per-strike"), cfg.has("premium-skew"));
     boolean valid = side == OptionType.CE ? conf.bullish() : conf.bearish();
     if (!valid) {
       return Optional.empty();

@@ -116,7 +116,11 @@ public record ScalperGateContext(
       // active-strike window; null when the series is short or the leg's IV is absent. A RISING slope on
       // the buy side confirms (a buyer paying up = demand); null never confirms.
       BigDecimal ceIvSlope,
-      BigDecimal peIvSlope) {
+      BigDecimal peIvSlope,
+      // E7 §3.7/§6.7 (Hero-Zero): the per-side ATM premium skew = (CE ATM ltp − PE ATM ltp)/PE ltp × 100
+      // (positive ⇒ CE is the richer/more-expensive side). null when the ATM premiums are absent; the dot
+      // degrades to neutral on null.
+      BigDecimal premiumSkewPct) {
 
     /** Pre-constituent 9-arg form: trailing macro fields default to null (keeps existing literals intact). */
     public Macro(
@@ -130,10 +134,10 @@ public record ScalperGateContext(
         BigDecimal ceIvAvg6,
         BigDecimal peIvAvg6) {
       this(atmIv, ivRank, vixLevel, vixRising, advances, declines, fiiLongPct, ceIvAvg6, peIvAvg6, null,
-          null, null);
+          null, null, null);
     }
 
-    /** Pre-iv-slope 10-arg form: {@code ceIvSlope}/{@code peIvSlope} default to null. */
+    /** Pre-iv-slope 10-arg form: {@code ceIvSlope}/{@code peIvSlope}/{@code premiumSkewPct} default to null. */
     public Macro(
         BigDecimal atmIv,
         BigDecimal ivRank,
@@ -146,7 +150,25 @@ public record ScalperGateContext(
         BigDecimal peIvAvg6,
         BigDecimal constituentBias) {
       this(atmIv, ivRank, vixLevel, vixRising, advances, declines, fiiLongPct, ceIvAvg6, peIvAvg6,
-          constituentBias, null, null);
+          constituentBias, null, null, null);
+    }
+
+    /** Pre-premium-skew 12-arg form: {@code premiumSkewPct} defaults to null. */
+    public Macro(
+        BigDecimal atmIv,
+        BigDecimal ivRank,
+        BigDecimal vixLevel,
+        Boolean vixRising,
+        int advances,
+        int declines,
+        BigDecimal fiiLongPct,
+        BigDecimal ceIvAvg6,
+        BigDecimal peIvAvg6,
+        BigDecimal constituentBias,
+        BigDecimal ceIvSlope,
+        BigDecimal peIvSlope) {
+      this(atmIv, ivRank, vixLevel, vixRising, advances, declines, fiiLongPct, ceIvAvg6, peIvAvg6,
+          constituentBias, ceIvSlope, peIvSlope, null);
     }
   }
 }

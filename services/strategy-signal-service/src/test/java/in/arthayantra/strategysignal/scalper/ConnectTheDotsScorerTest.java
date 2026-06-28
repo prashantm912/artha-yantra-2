@@ -43,6 +43,19 @@ class ConnectTheDotsScorerTest {
   private static final Macro BULL_MACRO =
       new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), bd("0.20"), bd("0.05"));
 
+  /** BULL_MACRO plus an E7 premium skew ({@code >0} ⇒ CE the richer side); null ⇒ identical to BULL_MACRO. */
+  private static Macro macroWithSkew(BigDecimal skew) {
+    return new Macro(
+        bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), bd("0.20"), bd("0.05"),
+        null, null, null, skew);
+  }
+
+  /** The S24-inert OI (no trending_cross / oi_spurt cue) — for isolating the premium-skew warning. */
+  private static final Oi NO_CUE_OI =
+      new Oi(
+          OiQuadrant.NEUTRAL, OiQuadrant.NEUTRAL, null, null, bd("5"), null, null, null,
+          false, false, null, null, null);
+
   @Test
   void allDotsAlignedFiresBullishCe() {
     Confluence r = ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, BULL_MACRO), CE, 1, T, P, true);
@@ -117,6 +130,55 @@ class ConnectTheDotsScorerTest {
 
     assertThat(r.biasAligned()).isFalse();
     assertThat(r.bullish()).isFalse();
+  }
+
+  @Test
+  void premiumSkewDotAbsentWhenUnarmedIsByteIdentical() {
+    // E7 parity: a CE-richer skew present in the macro is IGNORED when the dot is unarmed — the dot is
+    // not added (conditional-add), so the 18-dot list + aggregate match the all-aligned baseline exactly.
+    Confluence r =
+        ConnectTheDotsScorer.score(
+            ctx(BULL_CHART, BULL_OI, macroWithSkew(bd("10"))), CE, 1, T, P, true, false, false);
+
+    assertThat(r.dots()).hasSize(18);
+    assertThat(r.dots().stream().anyMatch(d -> d.dot().equals("premium_skew"))).isFalse();
+    assertThat(r.aggregate()).isEqualByComparingTo("1.0");
+  }
+
+  @Test
+  void premiumSkewDotWithholdsSupportChasingRicherSideNoCues() {
+    // armed, trading CE, CE is the richer side (skew>0), and no trending_cross/oi_spurt cue → the dot
+    // does NOT support → it lowers the aggregate vs the same unarmed context (discourages the chase).
+    Confluence armed =
+        ConnectTheDotsScorer.score(
+            ctx(BULL_CHART, NO_CUE_OI, macroWithSkew(bd("10"))), CE, 1, T, P, true, false, true);
+    Confluence unarmed =
+        ConnectTheDotsScorer.score(
+            ctx(BULL_CHART, NO_CUE_OI, macroWithSkew(bd("10"))), CE, 1, T, P, true, false, false);
+
+    assertThat(dot(armed, "premium_skew")).isFalse();
+    assertThat(armed.aggregate()).isLessThan(unarmed.aggregate());
+  }
+
+  @Test
+  void premiumSkewDotSupportsWhenRicherButCorroborated() {
+    // armed, CE richer, but BULL_OI carries a supporting trending_cross + oi_spurt cue → the dot
+    // SUPPORTS (the cue overrides the "richer side" warning) — chasing is justified.
+    Confluence r =
+        ConnectTheDotsScorer.score(
+            ctx(BULL_CHART, BULL_OI, macroWithSkew(bd("10"))), CE, 1, T, P, true, false, true);
+
+    assertThat(dot(r, "premium_skew")).isTrue();
+  }
+
+  @Test
+  void premiumSkewDotNeutralOnNullSkew() {
+    // armed but the skew is null (missing feed) → the dot SUPPORTS (neutral) → it never blocks.
+    Confluence r =
+        ConnectTheDotsScorer.score(
+            ctx(BULL_CHART, BULL_OI, macroWithSkew(null)), CE, 1, T, P, true, false, true);
+
+    assertThat(dot(r, "premium_skew")).isTrue();
   }
 
   @Test

@@ -278,6 +278,12 @@ class ScalperStrategyLoadTest {
       assertThat(tags.contains("hero-zero-iv-flat"))
           .as(id + " hero-zero-iv-flat armed iff hero-zero")
           .isEqualTo(isHeroZero);
+      // E7 premium-skew (§3.7/§6.7 "favor the lower-premium side; sit on the discount side as the
+      // buyer", Day 10): the soft warning dot, armed on the scalp-hero-zero family (its true doc home —
+      // an expiry-day side-selection mechanic, NOT a §3.12 Trend-Change rule as the audit mis-cited).
+      assertThat(tags.contains("premium-skew"))
+          .as(id + " premium-skew armed iff hero-zero")
+          .isEqualTo(isHeroZero);
 
       // #11 (section 3.11): only the scalp-straddle family carries the straddle tag → the NEUTRAL two-leg
       // path. ScalperConfig.requireStraddle mirrors the tag; the others stay off, and the straddle

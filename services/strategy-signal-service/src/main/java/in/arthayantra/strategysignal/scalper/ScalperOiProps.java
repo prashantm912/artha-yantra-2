@@ -26,7 +26,9 @@ public record ScalperOiProps(
     BigDecimal openHighFallVolumeFloor,
     BigDecimal openHighMaxPrevCloseFallPct,
     BigDecimal openHighWindow,
-    BigDecimal openHighRsiFloor) {
+    BigDecimal openHighRsiFloor,
+    BigDecimal ivAbsBandLow,
+    BigDecimal ivAbsBandHigh) {
 
   // T2.1: the #5 call-put delta-imbalance HARD pre-gate floor (>= 50% of the larger leg).
   private static final BigDecimal DEFAULT_CROSS_FILTER_PCT = new BigDecimal("50");
@@ -52,6 +54,10 @@ public record ScalperOiProps(
   private static final BigDecimal DEFAULT_OPEN_HIGH_WINDOW = new BigDecimal("3");
   // #2: the relaxed RSI floor (source "RSI >50") that replaces the 60-80 band for the open-high path.
   private static final BigDecimal DEFAULT_OPEN_HIGH_RSI_FLOOR = new BigDecimal("50");
+  // E4 §4.6: the absolute ATM-IV "trend-play" band (low IV = most of the move still ahead). "10-12 IV"
+  // on the 0..1 fraction scale (see class javadoc) = 0.10-0.12. Only read by the iv_abs_band dot.
+  private static final BigDecimal DEFAULT_IV_ABS_BAND_LOW = new BigDecimal("0.10");
+  private static final BigDecimal DEFAULT_IV_ABS_BAND_HIGH = new BigDecimal("0.12");
 
   /** Fills any unset field with its documented default (so a partial yaml override is honoured). */
   public ScalperOiProps {
@@ -70,10 +76,13 @@ public record ScalperOiProps(
             : openHighMaxPrevCloseFallPct;
     openHighWindow = openHighWindow == null ? DEFAULT_OPEN_HIGH_WINDOW : openHighWindow;
     openHighRsiFloor = openHighRsiFloor == null ? DEFAULT_OPEN_HIGH_RSI_FLOOR : openHighRsiFloor;
+    ivAbsBandLow = ivAbsBandLow == null ? DEFAULT_IV_ABS_BAND_LOW : ivAbsBandLow;
+    ivAbsBandHigh = ivAbsBandHigh == null ? DEFAULT_IV_ABS_BAND_HIGH : ivAbsBandHigh;
   }
 
   /** The all-defaults instance (used where config is absent — tests, the pure-scorer fallback). */
   public static ScalperOiProps defaults() {
-    return new ScalperOiProps(null, null, null, null, null, null, null, null, null, null, null);
+    return new ScalperOiProps(
+        null, null, null, null, null, null, null, null, null, null, null, null, null);
   }
 }

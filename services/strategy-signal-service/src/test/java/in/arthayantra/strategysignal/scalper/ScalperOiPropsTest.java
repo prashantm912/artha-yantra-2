@@ -32,6 +32,9 @@ class ScalperOiPropsTest {
           assertThat(p.ivBothHighFloor()).isEqualByComparingTo("0.40");
           assertThat(p.spurtOiPct()).isEqualByComparingTo("50");
           assertThat(p.spurtPricePct()).isEqualByComparingTo("50");
+          // E4: the absolute ATM-IV "trend-play" band on the 0..1 fraction scale = 0.10-0.12.
+          assertThat(p.ivAbsBandLow()).isEqualByComparingTo("0.10");
+          assertThat(p.ivAbsBandHigh()).isEqualByComparingTo("0.12");
         });
   }
 

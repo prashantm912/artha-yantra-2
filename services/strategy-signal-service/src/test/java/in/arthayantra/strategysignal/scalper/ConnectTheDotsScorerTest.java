@@ -266,6 +266,69 @@ class ConnectTheDotsScorerTest {
         .extracting(DotScore::reason).isEqualTo("iv pair 40/40 stand-aside");
   }
 
+  // ----------------------------------------------------------------------- E4 iv-per-strike (armed)
+
+  @Test
+  void ivPerStrikeUnarmedAddsNoDotAndArmedAddsTwo() {
+    Macro full = macroFull(bd("0.11"), bd("0.20"), bd("0.05"), bd("0.04"), bd("-0.02"));
+    Confluence off = ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, full), CE, 1, T, P, true);
+    Confluence on = ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, full), CE, 1, T, P, true, true);
+
+    // unarmed: the dot list is byte-identical (no iv_slope / iv_abs_band) — the parity guard.
+    assertThat(off.dots()).noneMatch(d -> d.dot().equals("iv_slope") || d.dot().equals("iv_abs_band"));
+    // armed: exactly the two new SOFT IV dots are appended, both confirming on this bullish ctx.
+    assertThat(on.dots()).hasSize(off.dots().size() + 2);
+    assertThat(dot(on, "iv_slope")).isTrue(); // ceIvSlope 0.04 > 0 (CE-strike IV rising = demand)
+    assertThat(dot(on, "iv_abs_band")).isTrue(); // atmIv 0.11 in the 0.10-0.12 trend-play band
+  }
+
+  @Test
+  void ivSlopeArmedFollowsBuySideSignAndDegradesOnNull() {
+    // rising CE-strike IV confirms a CE
+    assertThat(dot(armedIv(bd("0.04"), bd("0")), "iv_slope")).isTrue();
+    // falling CE-strike IV opposes
+    assertThat(dot(armedIv(bd("-0.04"), bd("0")), "iv_slope")).isFalse();
+    // null CE slope never confirms
+    assertThat(dot(armedIv(null, bd("0")), "iv_slope")).isFalse();
+  }
+
+  @Test
+  void ivAbsBandArmedSupportsOnlyInsideTheTenToTwelveBand() {
+    assertThat(dot(armedAtmIv(bd("0.11")), "iv_abs_band")).isTrue(); // in band
+    assertThat(dot(armedAtmIv(bd("0.08")), "iv_abs_band")).isFalse(); // below
+    assertThat(dot(armedAtmIv(bd("0.15")), "iv_abs_band")).isFalse(); // above
+  }
+
+  @Test
+  void perSideBuyIvOverFortySuppressesOnlyWhenArmed() {
+    // CE buy-side IV 0.45 >= 0.40 while PE 0.10 (< 0.40, so NOT the symmetric both-high case).
+    Macro richCe = macroFull(bd("0.11"), bd("0.45"), bd("0.10"), bd("0.04"), bd("-0.02"));
+    Confluence off = ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, richCe), CE, 1, T, P, true);
+    Confluence on = ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, richCe), CE, 1, T, P, true, true);
+
+    assertThat(off.standAside()).isFalse(); // unarmed: a unilateral rich buy side is ignored
+    assertThat(on.standAside()).isTrue(); // armed: "IV>40, buyer stays away"
+    assertThat(on.bullish()).isFalse(); // suppressed regardless of the otherwise-strong aggregate
+  }
+
+  /** Armed CE score over BULL_OI with the given CE/PE strike-IV slopes (atmIv in-band, avg6 benign). */
+  private static Confluence armedIv(BigDecimal ceSlope, BigDecimal peSlope) {
+    Macro m = macroFull(bd("0.11"), bd("0.20"), bd("0.05"), ceSlope, peSlope);
+    return ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, m), CE, 1, T, P, true, true);
+  }
+
+  /** Armed CE score over BULL_OI with the given absolute ATM IV (slopes null, avg6 benign). */
+  private static Confluence armedAtmIv(BigDecimal atmIv) {
+    Macro m = macroFull(atmIv, bd("0.20"), bd("0.05"), null, null);
+    return ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, m), CE, 1, T, P, true, true);
+  }
+
+  private static Macro macroFull(
+      BigDecimal atmIv, BigDecimal ceAvg6, BigDecimal peAvg6, BigDecimal ceSlope, BigDecimal peSlope) {
+    return new Macro(
+        atmIv, bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), ceAvg6, peAvg6, null, ceSlope, peSlope);
+  }
+
   private static Oi oiWithSlope(BigDecimal slope) {
     return new Oi(
         OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("0"), bd("5"),

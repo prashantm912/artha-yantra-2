@@ -247,7 +247,10 @@ class ScalperStrategyLoadTest {
       for (String softKeptOff :
           List.of(
               "flat-oi-stand-aside", "max-oi-sr-gate", "indicator-alignment-gate", "futures-oi-gate",
-              "breadth-gate", "basis-gate", "directional-vix-gate")) {
+              "breadth-gate", "basis-gate", "directional-vix-gate",
+              // E8: the vwap-distance entry-skip gate ships built-but-OFF — its 0.4% band is an
+              // un-validated placeholder, so arming awaits an owner/optimizer-tuned threshold.
+              "vwap-distance")) {
         assertThat(tags.contains(softKeptOff))
             .as(id + " " + softKeptOff + " unarmed (connect-the-dots kept soft)")
             .isFalse();

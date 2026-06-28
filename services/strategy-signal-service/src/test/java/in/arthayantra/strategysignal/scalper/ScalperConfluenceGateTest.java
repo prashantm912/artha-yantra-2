@@ -168,6 +168,30 @@ class ScalperConfluenceGateTest {
     };
   }
 
+  // E8: bullBank but close (100) sits only 0.3% above VWAP (99.7) — inside the vwap-distance 0.4%
+  // pullback band, so an armed vwap-distance strategy still fires (vs the default bullBank's 1%).
+  private static BarValues bullBankNearVwap() {
+    Map<String, BigDecimal> builtins = Map.of("close", bd("100"), "vwap", bd("99.7"), "volume", bd("130000"));
+    Map<String, BigDecimal> aliases =
+        Map.of("vwma20", bd("98"), "psar", bd("97"), "rsi14", bd("65"), "supertrend", bd("1"));
+    return new BarValues() {
+      @Override
+      public BigDecimal valueAt(String alias, int i) {
+        return aliases.get(alias);
+      }
+
+      @Override
+      public BigDecimal previousValueAt(String alias, int i) {
+        return null;
+      }
+
+      @Override
+      public BigDecimal builtin(String name, int i) {
+        return builtins.get(name);
+      }
+    };
+  }
+
   // E5: bullBank whose PRIOR bar RSI is caller-chosen (drives the rsi-cooloff gate); the current bar
   // RSI clears the 0B legacy 60-80 rail.
   private static BarValues bullBankHotPrior(BigDecimal rsi, BigDecimal prevRsi) {
@@ -529,6 +553,21 @@ class ScalperConfluenceGateTest {
 
     when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
     assertThat(gate.evaluate(cfgTags("oi-divergence-magnitude"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isEmpty();
+    assertThat(gate.evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+  }
+
+  @Test
+  void vwapDistanceTagSkipsAnExtendedEntryAndFiresNearVwap() {
+    // E8: vwap-distance skips an extended chase (the default bullBank sits 1% from VWAP, beyond the
+    // 0.4% band) and fires within the band (bullBankNearVwap, 0.3%); the bare CFG never consults the
+    // gate (default-OFF) even at 1% from VWAP.
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+
+    assertThat(gate.evaluate(cfgTags("vwap-distance"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isEmpty();
+    assertThat(gate.evaluate(cfgTags("vwap-distance"), bullBankNearVwap(), null, 0, NOW, IST_TIME, EOD)).isPresent();
     assertThat(gate.evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
   }
 

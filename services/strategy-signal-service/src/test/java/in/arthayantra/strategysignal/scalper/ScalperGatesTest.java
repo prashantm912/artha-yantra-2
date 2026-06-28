@@ -244,6 +244,20 @@ class ScalperGatesTest {
   }
 
   @Test
+  void oi60mAgreeRequiresTheBroaderTrendToFavourTheSideAndFailsOpenOnUnknown() {
+    // dir > 0 = PE building faster (put-writing = bullish) → confirms a CE, opposes a PE.
+    assertThat(ScalperGates.oi60mAgree(1, CE).pass()).isTrue();
+    assertThat(ScalperGates.oi60mAgree(1, PE).pass()).isFalse();
+    // dir < 0 = CE building faster (bearish) → confirms a PE, opposes a CE.
+    assertThat(ScalperGates.oi60mAgree(-1, PE).pass()).isTrue();
+    assertThat(ScalperGates.oi60mAgree(-1, CE).pass()).isFalse();
+    // dir == 0 (unknown / flat 60m trend) fail-OPENs for either side (a broader-trend CONFIRMATION,
+    // not a hard fresh-cross requirement).
+    assertThat(ScalperGates.oi60mAgree(0, CE).pass()).isTrue();
+    assertThat(ScalperGates.oi60mAgree(0, PE).pass()).isTrue();
+  }
+
+  @Test
   void ivBuyerCapBlocksBuyingIntoRichSideIvButDegradesOnNull() {
     BigDecimal cap = ScalperGates.IV_BUYER_CAP; // 0.40 fraction = "IV 40"
     // CE: buyable when the CE 6-strike IV <= cap, blocked above it.

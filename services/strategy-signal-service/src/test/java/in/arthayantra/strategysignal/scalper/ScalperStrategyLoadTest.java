@@ -168,6 +168,10 @@ class ScalperStrategyLoadTest {
       assertThat(tags.contains("oi-divergence-magnitude"))
           .as(id + " oi-divergence-magnitude armed iff trending-oi")
           .isEqualTo(isTrendingOi);
+      // E2 M7 (oi-interval-and-60m-trend): the 60m broader-trend confirm, armed on the same #5 family.
+      assertThat(tags.contains("oi-interval-and-60m-trend"))
+          .as(id + " oi-interval-and-60m-trend armed iff trending-oi")
+          .isEqualTo(isTrendingOi);
 
       // E4 (iv-buyer-cap, "IV>40 -> don't buy"): armed on the golden-crossover momentum-buyer family.
       boolean isGoldenCrossover = id.startsWith("scalp-golden-crossover-");

@@ -432,6 +432,27 @@ class ScalperConfluenceGateTest {
   }
 
   @Test
+  void oi60mAgreeTagBlocksWhenThe60mTrendOpposesTheSide() {
+    // E2 M7: armed, the 60m OI build must AGREE with the side (a focused 2nd /trending?interval=60m
+    // read in the seam, fetched ONLY when the tag is present). The bare CFG arms no new gate.
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+
+    // armed + an AGREEING 60m trend (dir > 0 on a CE side = PE-build, bullish) → fires.
+    when(client.trend60mDir(eq("NIFTY 50"), any(), any())).thenReturn(1);
+    assertThat(gate.evaluate(cfgTags("oi-interval-and-60m-trend"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+
+    // armed + an OPPOSING 60m trend (dir < 0 on a CE side) → blocked.
+    when(client.trend60mDir(eq("NIFTY 50"), any(), any())).thenReturn(-1);
+    assertThat(gate.evaluate(cfgTags("oi-interval-and-60m-trend"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isEmpty();
+
+    // unarmed (bare CFG): the opposing 60m read is never consulted → still fires.
+    assertThat(gate.evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+  }
+
+  @Test
   void oiSlopeAgreeTagFiresWhenLevelAndSlopeAgreeAndBlocksWithout() {
     // E2 M2: oi-slope-agree fires only when sentiment level+slope both favour the side; bullContext has
     // a null slope → the armed gate blocks while the bare CFG (no gate armed) still fires.

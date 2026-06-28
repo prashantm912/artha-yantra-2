@@ -557,6 +557,23 @@ class ScalperConfluenceGateTest {
   }
 
   @Test
+  void timeOfDayPreferenceTagSkipsAfterTheCutoffAndFiresInsideTheWindow() {
+    // E8 §3.5: time-of-day-preference skips an entry past the 13:30 cutoff (14:00) and fires inside the
+    // window (10:30); the bare CFG never consults it (default-OFF) and still fires at 14:00 (the §0B
+    // window admits 14:00 — only the opt-in preference narrows it).
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+
+    assertThat(gate.evaluate(cfgTags("time-of-day-preference"), bullBank(), null, 0, NOW, LocalTime.of(14, 0), EOD))
+        .isEmpty();
+    assertThat(gate.evaluate(cfgTags("time-of-day-preference"), bullBank(), null, 0, NOW, LocalTime.of(10, 30), EOD))
+        .isPresent();
+    assertThat(gate.evaluate(CFG, bullBank(), null, 0, NOW, LocalTime.of(14, 0), EOD)).isPresent();
+  }
+
+  @Test
   void vwapDistanceTagSkipsAnExtendedEntryAndFiresNearVwap() {
     // E8: vwap-distance skips an extended chase (the default bullBank sits 1% from VWAP, beyond the
     // 0.4% band) and fires within the band (bullBankNearVwap, 0.3%); the bare CFG never consults the

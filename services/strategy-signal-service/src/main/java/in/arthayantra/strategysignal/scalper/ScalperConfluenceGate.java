@@ -125,6 +125,15 @@ public class ScalperConfluenceGate {
     if (!timeOk) {
       return Optional.empty();
     }
+    // E8 §3.5 time-of-day-preference (tag time-of-day-preference): on top of the §0B hard window, an
+    // opt-in strategy only INITIATES inside the high-probability 10:00-13:30 band ("best 10:00-11:30,
+    // ease off after ~13:30"), rendered as a hard skip. Default-OFF — no shipped YAML carries the tag,
+    // so every config stays byte-identical. Fails fast before the chain fetch.
+    if (cfg.has("time-of-day-preference")
+        && !ScalperGates.timeOfDayPreference(istTime, ScalperConfig.PREFER_FROM, ScalperConfig.PREFER_TO)
+            .pass()) {
+      return Optional.empty();
+    }
     Optional<ChainSnapshot> chainOpt = client.chain(cfg.underlying());
     if (chainOpt.isEmpty()) {
       return Optional.empty();

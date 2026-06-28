@@ -115,6 +115,12 @@ public record ScalperConfig(
   // HARD validity gate (it stays a soft dot); at/after 10:30 the normal hard-VWAP behaviour resumes.
   static final LocalTime VWAP_ACTIONABLE_FROM = LocalTime.of(10, 30);
 
+  // E8 §3.5 time-of-day-preference window: the high-probability intraday band an opt-in strategy
+  // initiates inside ("best 10:00-11:30, ease off after ~13:30-14:00"). Held as clock-bound constants
+  // (like OPENING_FROM/TO above), NOT ScalperOiProps OI knobs. Default-OFF tag, so dormant until armed.
+  static final LocalTime PREFER_FROM = LocalTime.of(10, 0);
+  static final LocalTime PREFER_TO = LocalTime.of(13, 30);
+
   // §0B delta band — uniform across indices (the slightly-ITM 0.6–0.7 Siva favours). The §4.14.7 /
   // §4.15.4 expiry-phase refinements (0.7–0.8 near a weekly expiry's end, ~0.5 on its first day;
   // buyer 0.9 / seller 0.4) are DEFERRED: §4.14.7 states the 0.6–0.7 baseline "remains the general

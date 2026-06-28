@@ -250,7 +250,10 @@ class ScalperStrategyLoadTest {
               "breadth-gate", "basis-gate", "directional-vix-gate",
               // E8: the vwap-distance entry-skip gate ships built-but-OFF — its 0.4% band is an
               // un-validated placeholder, so arming awaits an owner/optimizer-tuned threshold.
-              "vwap-distance")) {
+              "vwap-distance",
+              // E8: time-of-day-preference is a HARD skip rendering of the doc's soft "best 10:00-11:30"
+              // preference — ships built-but-OFF; arming (prefer -> only) is an owner choice.
+              "time-of-day-preference")) {
         assertThat(tags.contains(softKeptOff))
             .as(id + " " + softKeptOff + " unarmed (connect-the-dots kept soft)")
             .isFalse();

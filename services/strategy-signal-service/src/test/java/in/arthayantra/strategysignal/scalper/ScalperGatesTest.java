@@ -41,6 +41,17 @@ class ScalperGatesTest {
   }
 
   @Test
+  void timeOfDayPreferencePassesInsideTheWindowAndSkipsOutside() {
+    LocalTime from = LocalTime.of(10, 0);
+    LocalTime to = LocalTime.of(13, 30);
+    assertThat(ScalperGates.timeOfDayPreference(LocalTime.of(10, 0), from, to).pass()).isTrue(); // from inclusive
+    assertThat(ScalperGates.timeOfDayPreference(LocalTime.of(11, 30), from, to).pass()).isTrue();
+    assertThat(ScalperGates.timeOfDayPreference(LocalTime.of(9, 59), from, to).pass()).isFalse(); // before
+    assertThat(ScalperGates.timeOfDayPreference(LocalTime.of(13, 30), from, to).pass()).isFalse(); // to exclusive
+    assertThat(ScalperGates.timeOfDayPreference(LocalTime.of(14, 0), from, to).pass()).isFalse();
+  }
+
+  @Test
   void openingTickWindowOverloadBoundsOnFromInclusiveToExclusive() {
     // #9 Morning Trade: the opening-tick overload passes from `from` (inclusive) up to `to` (exclusive).
     assertThat(ScalperGates.timeWindow(LocalTime.of(9, 16), LocalTime.of(9, 16), LocalTime.of(9, 30)).pass())

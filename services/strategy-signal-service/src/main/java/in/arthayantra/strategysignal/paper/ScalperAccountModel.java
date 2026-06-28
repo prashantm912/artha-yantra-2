@@ -2,6 +2,7 @@ package in.arthayantra.strategysignal.paper;
 
 import in.arthayantra.strategysignal.paper.PaperPositionRepository.SubAccountTally;
 import in.arthayantra.strategysignal.paper.PaperPositionRepository.WinLoss;
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -22,6 +23,11 @@ import org.springframework.stereotype.Component;
  *       the freeze is PER-ACCOUNT — a loss freezes the specific account that took it. When NO trade
  *       carries an idx (legacy / non-scalper rows only — the NULL-idx fallback), it degrades to the
  *       day-granularity loss COUNT against 5 accounts, preserving the prior semantics exactly.
+ *   <li><b>1%-profit-lock (per account):</b> a sub-account also freezes once its day's net realized
+ *       P&amp;L reaches ~1% of its allocated capital (starting capital × {@code capital_fraction}) —
+ *       "lock ~1% profit per account and rotate" (operative doc L86, r15-16). A banked account is excluded from
+ *       routing and counts toward the all-frozen block, exactly like a loss-frozen one. Only applies
+ *       on the per-account (idx-carrying) path; the legacy NULL-idx fallback is unaffected.
  *   <li><b>5-wins/day cap:</b> after 5 winning trades the day's gains are banked and fresh scalper
  *       entries stop (overtrading is the killer — §2.14). This aggregate cap spans all closed trades.
  * </ul>
@@ -38,15 +44,23 @@ public class ScalperAccountModel {
   /** Daily winning-trade cap: bank the gains and stop after this many wins. */
   static final int MAX_WINS_PER_DAY = 5;
 
+  /** Per-account profit lock: bank a sub-account once its day P&amp;L hits this fraction of its capital. */
+  static final BigDecimal PROFIT_LOCK_FRACTION = new BigDecimal("0.01"); // ~1% (operative doc L86, r15-16)
+
+  /** Fallback capital fraction if {@code scalper_subaccount} is missing a row (equal 5-way split). */
+  private static final BigDecimal DEFAULT_CAPITAL_FRACTION = new BigDecimal("0.20");
+
   private static final Logger log = LoggerFactory.getLogger(ScalperAccountModel.class);
   private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
   private final PaperPositionRepository positions;
+  private final PaperAccountService account;
   private final Clock clock;
 
-  /** Wires the closed-trade ledger. */
-  public ScalperAccountModel(PaperPositionRepository positions, Clock clock) {
+  /** Wires the closed-trade ledger + the capital model (for the 1%-profit-lock target). */
+  public ScalperAccountModel(PaperPositionRepository positions, PaperAccountService account, Clock clock) {
     this.positions = positions;
+    this.account = account;
     this.clock = clock;
   }
 
@@ -69,31 +83,59 @@ public class ScalperAccountModel {
       }
       return true;
     }
-    // Per-account first-loss freeze: an account is frozen for the day once a trade charged to it
-    // closed at a loss (≤ 0). All 5 frozen ⇒ no fresh entry.
-    long frozen = tallies.stream().filter(t -> t.losses() > 0).count();
-    if (frozen >= ACCOUNTS) {
-      log.info("scalper entries paused — all {} sub-accounts frozen on a losing trade", ACCOUNTS);
+    // Per-account freeze: an account is frozen for the day once a trade charged to it closed at a
+    // loss (≤ 0), OR it has banked ~1% of its allocated capital. All 5 frozen ⇒ no fresh entry.
+    if (frozenAccounts(tallies).size() >= ACCOUNTS) {
+      log.info("scalper entries paused — all {} sub-accounts frozen (first-loss or 1% profit-lock)", ACCOUNTS);
       return false;
     }
     return true;
   }
 
   /**
+   * The sub-accounts done for the IST day: frozen on a losing trade (≤ 0) OR profit-locked once their
+   * net realized P&amp;L reaches ~1% of their allocated capital (starting capital ×
+   * {@code capital_fraction}).
+   *
+   * <p>The target is sized off the day-stable STARTING capital, not live equity: the lock must
+   * latch for the day (operative doc L73 measures 1% against the account SIZE, and "frozen for the
+   * IST day" must be durable). A live-equity base would float the target up as total equity drifts
+   * — un-banking an account when another sub-account wins — which an adversarial review caught; a
+   * fixed allocation makes {@code realized ≥ target} monotonic, like the binary first-loss latch.
+   */
+  private java.util.Set<Integer> frozenAccounts(List<SubAccountTally> tallies) {
+    BigDecimal startingCapital = account.startingCapital();
+    java.util.Map<Integer, BigDecimal> fractions = positions.subAccountCapitalFractions();
+    java.util.Set<Integer> frozen = new java.util.HashSet<>();
+    for (SubAccountTally t : tallies) {
+      if (t.losses() > 0) {
+        frozen.add(t.idx());
+        continue;
+      }
+      BigDecimal capital =
+          startingCapital.multiply(fractions.getOrDefault(t.idx(), DEFAULT_CAPITAL_FRACTION));
+      BigDecimal target = capital.multiply(PROFIT_LOCK_FRACTION);
+      if (t.realized().compareTo(target) >= 0) {
+        frozen.add(t.idx());
+      }
+    }
+    return frozen;
+  }
+
+  /**
    * The sub-account (1..5) to charge a fresh scalper entry to: the NON-frozen account with the fewest
    * trades today (round-robin load balancing). An account is frozen once a trade charged to it closed
-   * at a loss. Falls back to account 1 if every account is frozen — the entry gate
-   * ({@link #scalperEntryAllowed}) normally blocks first, but a manually-TAKEN signal can bypass it.
+   * at a loss OR it has banked ~1% of its capital. Falls back to account 1 if every account is frozen
+   * — the entry gate ({@link #scalperEntryAllowed}) normally blocks first, but a manually-TAKEN signal
+   * can bypass it.
    */
   public int nextFreeAccount() {
     LocalDate today = LocalDate.ofInstant(clock.instant(), IST);
+    List<SubAccountTally> tallies = positions.subAccountTalliesOn(today);
+    java.util.Set<Integer> frozen = frozenAccounts(tallies);
     java.util.Map<Integer, Integer> tradeCount = new java.util.HashMap<>();
-    java.util.Set<Integer> frozen = new java.util.HashSet<>();
-    for (SubAccountTally t : positions.subAccountTalliesOn(today)) {
+    for (SubAccountTally t : tallies) {
       tradeCount.put(t.idx(), t.wins() + t.losses());
-      if (t.losses() > 0) {
-        frozen.add(t.idx());
-      }
     }
     int best = 1;
     int bestCount = Integer.MAX_VALUE;

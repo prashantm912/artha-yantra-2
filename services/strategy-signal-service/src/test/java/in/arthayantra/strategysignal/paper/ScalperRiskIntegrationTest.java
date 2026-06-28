@@ -21,6 +21,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 class ScalperRiskIntegrationTest extends StrategySignalIntegrationTestBase {
 
   @Autowired private ScalperAccountModel scalperAccounts;
+  @Autowired private PaperAccountService paperAccount;
   @Autowired private JdbcTemplate jdbc;
 
   @BeforeEach
@@ -94,6 +95,26 @@ class ScalperRiskIntegrationTest extends StrategySignalIntegrationTestBase {
     insertClosedTrades(0, 5); // 5 NULL-idx losses — would block via the fallback on their own
     insertClosedOnAccount("1000.0000", 1); // one ledger WIN flips to the per-account path
     assertThat(scalperAccounts.scalperEntryAllowed()).isTrue();
+  }
+
+  /**
+   * E10 1%-profit-lock: a sub-account that banks ~1% of its allocated capital freezes for the day,
+   * exactly like a loss. Here 4 accounts are loss-frozen and the 5th banks a win above its target —
+   * all 5 frozen ⇒ blocked — with only 1 aggregate win and 4 losses (neither legacy cap fires).
+   */
+  @Test
+  void aProfitBankedAccountFreezesLikeALoss() {
+    insertClosedOnAccount("-1000.0000", 1);
+    insertClosedOnAccount("-1000.0000", 2);
+    insertClosedOnAccount("-1000.0000", 3);
+    insertClosedOnAccount("-1000.0000", 4);
+    assertThat(scalperAccounts.scalperEntryAllowed()).as("4 frozen — account 5 free").isTrue();
+    // ₹10L starting capital × 0.20 × 1% = ₹2,000 target; a ₹10,000 win on account 5 clears it → banked.
+    BigDecimal target =
+        paperAccount.startingCapital().multiply(new BigDecimal("0.20")).multiply(new BigDecimal("0.01"));
+    assertThat(target).as("sanity: target well under the staged win").isLessThan(new BigDecimal("10000"));
+    insertClosedOnAccount("10000.0000", 5);
+    assertThat(scalperAccounts.scalperEntryAllowed()).as("account 5 profit-banked — all 5 frozen").isFalse();
   }
 
   private void insertClosedTrades(int wins, int losses) {

@@ -7,10 +7,12 @@ import static org.mockito.Mockito.when;
 
 import in.arthayantra.strategysignal.paper.PaperPositionRepository.SubAccountTally;
 import in.arthayantra.strategysignal.paper.PaperPositionRepository.WinLoss;
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -24,15 +26,30 @@ class ScalperAccountModelTest {
   private static final Clock CLOCK =
       Clock.fixed(Instant.parse("2026-06-25T06:00:00Z"), ZoneId.of("UTC"));
 
+  /** ₹10L starting capital × 0.20 fraction × 1% = ₹2,000 profit-lock target per account. */
+  private static final BigDecimal STARTING_CAPITAL = new BigDecimal("1000000");
+  private static final BigDecimal FRACTION = new BigDecimal("0.20");
+  private static final BigDecimal OVER_TARGET = new BigDecimal("2500"); // ≥ ₹2,000 → banked
+  private static final BigDecimal UNDER_TARGET = new BigDecimal("500"); // < ₹2,000 → not banked
+
   private static ScalperAccountModel model(WinLoss wl, List<SubAccountTally> tallies) {
     PaperPositionRepository repo = mock(PaperPositionRepository.class);
     when(repo.winLossOn(any())).thenReturn(wl);
     when(repo.subAccountTalliesOn(any())).thenReturn(tallies);
-    return new ScalperAccountModel(repo, CLOCK);
+    when(repo.subAccountCapitalFractions())
+        .thenReturn(Map.of(1, FRACTION, 2, FRACTION, 3, FRACTION, 4, FRACTION, 5, FRACTION));
+    PaperAccountService account = mock(PaperAccountService.class);
+    when(account.startingCapital()).thenReturn(STARTING_CAPITAL);
+    return new ScalperAccountModel(repo, account, CLOCK);
   }
 
   private static SubAccountTally loss(int idx) {
     return new SubAccountTally(idx, 0, 1);
+  }
+
+  /** A profit-banked account: wins summing past the ~1% target, no loss. */
+  private static SubAccountTally banked(int idx, int wins) {
+    return new SubAccountTally(idx, wins, 0, OVER_TARGET);
   }
 
   @Test
@@ -83,6 +100,34 @@ class ScalperAccountModelTest {
     // win, not frozen) → allowed. winLossOn still reports the aggregate (1 win, 5 losses).
     assertThat(model(new WinLoss(1, 5), List.of(new SubAccountTally(1, 1, 0))).scalperEntryAllowed())
         .isTrue();
+  }
+
+  @Test
+  void profitBankedAccountFreezesLikeALoss() {
+    // 4 loss-frozen + 1 profit-banked (≥1% of its capital) = all 5 frozen ⇒ blocked, with only 2
+    // aggregate wins (under the 5-win cap) and 4 losses (under the legacy count) — only the
+    // profit-lock makes the 5th. Without it, account 5 (a win, no loss) would be free → allowed.
+    assertThat(
+            model(new WinLoss(2, 4), List.of(loss(1), loss(2), loss(3), loss(4), banked(5, 2)))
+                .scalperEntryAllowed())
+        .isFalse();
+  }
+
+  @Test
+  void aWinUnderTheOnePercentTargetDoesNotFreeze() {
+    // an account up on the day but below the ~1% target is NOT banked — four losses + it = 4 frozen.
+    assertThat(
+            model(
+                    new WinLoss(1, 4),
+                    List.of(loss(1), loss(2), loss(3), loss(4), new SubAccountTally(5, 1, 0, UNDER_TARGET)))
+                .scalperEntryAllowed())
+        .isTrue();
+  }
+
+  @Test
+  void nextFreeAccountSkipsAProfitBankedAccount() {
+    // account 1 banked its ~1% → routing skips it even though it carries no loss and the fewest trades.
+    assertThat(model(new WinLoss(2, 0), List.of(banked(1, 2))).nextFreeAccount()).isEqualTo(2);
   }
 
   @Test

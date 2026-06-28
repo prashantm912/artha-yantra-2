@@ -257,26 +257,56 @@ public class PaperPositionRepository {
         java.sql.Date.valueOf(istDate));
   }
 
-  /** Per-sub-account win/loss tally for an IST day (the E10 five-account ledger). */
-  public record SubAccountTally(int idx, int wins, int losses) {}
+  /**
+   * Per-sub-account win/loss tally for an IST day (the E10 five-account ledger). {@code realized} is
+   * the day's net realized P&amp;L summed over the account's closed trades — the input to the
+   * per-account 1%-profit-lock (r15-16).
+   */
+  public record SubAccountTally(int idx, int wins, int losses, BigDecimal realized) {
+    /** Back-compat: pre-1%-bank callers/tests with no realized sum (defaults zero ⇒ never profit-locked). */
+    public SubAccountTally(int idx, int wins, int losses) {
+      this(idx, wins, losses, BigDecimal.ZERO);
+    }
+  }
 
   /**
-   * Per-sub-account win/loss counts of trades closed on an IST day — the 5-account ledger input
-   * (risk-governance.md §3.2). ONLY idx-carrying (scalper) closed trades are tallied; a NULL
-   * {@code subaccount_idx} (non-scalper / legacy) row is invisible to this model, so an empty result
-   * signals the day carries no ledger trades and {@link ScalperAccountModel} falls back to the
-   * day-granularity {@link #winLossOn} count. Win/loss uses the same convention as {@code winLossOn}:
-   * realized P&amp;L &gt; 0 is a win, ≤ 0 (flat or losing) a loss.
+   * Per-sub-account win/loss counts + net realized P&amp;L of trades closed on an IST day — the
+   * 5-account ledger input (risk-governance.md §3.2). ONLY idx-carrying (scalper) closed trades are
+   * tallied; a NULL {@code subaccount_idx} (non-scalper / legacy) row is invisible to this model, so
+   * an empty result signals the day carries no ledger trades and {@link ScalperAccountModel} falls
+   * back to the day-granularity {@link #winLossOn} count. Win/loss uses the same convention as
+   * {@code winLossOn}: realized P&amp;L &gt; 0 is a win, ≤ 0 (flat or losing) a loss.
    */
   public java.util.List<SubAccountTally> subAccountTalliesOn(java.time.LocalDate istDate) {
     return jdbc.query(
         "SELECT subaccount_idx,"
             + " COUNT(*) FILTER (WHERE realized_pnl > 0) AS wins,"
-            + " COUNT(*) FILTER (WHERE realized_pnl <= 0) AS losses"
+            + " COUNT(*) FILTER (WHERE realized_pnl <= 0) AS losses,"
+            + " COALESCE(SUM(realized_pnl), 0) AS realized"
             + " FROM paper_positions WHERE status='CLOSED' AND subaccount_idx IS NOT NULL"
             + " AND (closed_at AT TIME ZONE 'Asia/Kolkata')::date = ?"
             + " GROUP BY subaccount_idx",
-        (rs, n) -> new SubAccountTally(rs.getInt("subaccount_idx"), rs.getInt("wins"), rs.getInt("losses")),
+        (rs, n) ->
+            new SubAccountTally(
+                rs.getInt("subaccount_idx"),
+                rs.getInt("wins"),
+                rs.getInt("losses"),
+                rs.getBigDecimal("realized")),
         java.sql.Date.valueOf(istDate));
+  }
+
+  /**
+   * The per-sub-account capital fraction (config; equal 0.20 split by default) — the base for the
+   * 1%-profit-lock target (account capital = equity × fraction). Read from {@code scalper_subaccount}.
+   */
+  public java.util.Map<Integer, BigDecimal> subAccountCapitalFractions() {
+    return jdbc
+        .query(
+            "SELECT idx, capital_fraction FROM scalper_subaccount",
+            (rs, n) -> java.util.Map.entry(rs.getInt("idx"), rs.getBigDecimal("capital_fraction")))
+        .stream()
+        .collect(
+            java.util.stream.Collectors.toMap(
+                java.util.Map.Entry::getKey, java.util.Map.Entry::getValue));
   }
 }

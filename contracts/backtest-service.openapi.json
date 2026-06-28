@@ -370,6 +370,44 @@
         }
       }
     },
+    "/api/v1/backtests/{backtestId}/hero-zero-premium" : {
+      "get" : {
+        "tags" : [ "hero-zero-premium-controller" ],
+        "operationId" : "heroZeroPremium",
+        "parameters" : [ {
+          "name" : "backtestId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/backtests/{backtestId}/folds" : {
       "get" : {
         "tags" : [ "folds-controller" ],
@@ -498,6 +536,34 @@
           }
         }, {
           "name" : "strategyId",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "strategyIds",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "currentVersions",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "sortBy",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "sortDir",
           "in" : "query",
           "required" : false,
           "schema" : {

@@ -365,8 +365,11 @@ public final class ScalperGates {
   /**
    * §3.9 Morning-Trade OPENING FORMATION (tag {@code morning-opening-formation}, doc L540): do NOT enter
    * on the gap alone — the SECOND session candle must BREAK the first candle's high (CE) / low (PE) AND
-   * CLOSE beyond it (the "rejection wick at the level" confirm that the break HELD, not a fake poke that
-   * closed back inside). A null candle operand degrades to pass (the seam guards "the 2nd bar formed").
+   * CLOSE beyond it (the break HELD, not a fake poke that closed back inside). This encodes the doc's
+   * unambiguous core — "the 2nd candle breaking the 1st is the actual opening-trade trigger"; the doc's
+   * additional "+ a rejection wick at the level" is a finer discretionary read (a wick testing the
+   * support/resistance) left to the operator, NOT a thresholded condition here (no wick-size number is
+   * specified). A null candle operand degrades to pass (the seam guards "the 2nd bar formed").
    */
   public static GateOutcome openingFormation(
       BigDecimal firstHigh, BigDecimal firstLow, BigDecimal secondHigh, BigDecimal secondLow,

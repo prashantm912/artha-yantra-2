@@ -652,9 +652,18 @@ public class SignalEngine {
     // A12 suggested qty (lot-rounded sizing vs paper equity), stamped OUTSIDE the score breakdown
     if (emissionGuard.isPresent()) {
       BigDecimal stopDistance = stopLoss == null ? null : entryPrice.subtract(stopLoss).abs();
+      // E8 §3.2: a probability-graded size multiplier off the confluence aggregate — scalper decisions
+      // only (null for non-scalper signals → ungraded). Applied + lot-rounded inside the paper adapter;
+      // defaults to 1.0 so the stamped qty is byte-identical until a weak-vs-strong spread is present.
+      BigDecimal sizeMultiplier =
+          decision == null
+              ? null
+              : in.arthayantra.strategysignal.scalper.ScalperSizing.sizeMultiplier(
+                  decision.confluence().aggregate());
       BigDecimal suggestedQty =
           emissionGuard.get().suggestedQty(
-              strategy.definition().sizing(), exchange, tradingsymbol, entryPrice, stopDistance);
+              strategy.definition().sizing(), exchange, tradingsymbol, entryPrice, stopDistance,
+              sizeMultiplier);
       if (suggestedQty != null) {
         signals.stampSuggestedQty(id, suggestedQty);
       }

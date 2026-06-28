@@ -82,6 +82,22 @@ class PaperAccountRiskIntegrationTest extends StrategySignalIntegrationTestBase 
   }
 
   @Test
+  void gradedMultiplierScalesTheSuggestedQtyLotRoundedDown() {
+    StrategyDefinition.SizingSpec spec =
+        new StrategyDefinition.SizingSpec("percent_equity", Map.of("percent", new BigDecimal("10")));
+    BigDecimal full = guard.suggestedQty(spec, "NSE", "RELIANCE", new BigDecimal("100"), null); // 1000
+    // E8 §3.2: a null multiplier (6-arg) == the ungraded sizing (byte-identical to today's 5-arg path)
+    assertThat(guard.suggestedQty(spec, "NSE", "RELIANCE", new BigDecimal("100"), null, null))
+        .isEqualByComparingTo(full);
+    // a 0.5 multiplier halves the qty, lot-rounded DOWN (RELIANCE lot 1 -> 1000 -> 500)
+    assertThat(guard.suggestedQty(spec, "NSE", "RELIANCE", new BigDecimal("100"), null, new BigDecimal("0.5")))
+        .isEqualByComparingTo("500");
+    // a 1.0 multiplier leaves it unchanged
+    assertThat(guard.suggestedQty(spec, "NSE", "RELIANCE", new BigDecimal("100"), null, BigDecimal.ONE))
+        .isEqualByComparingTo(full);
+  }
+
+  @Test
   void dailyLossTripPausesEntryAndWritesAnAuditRow() {
     insertClosed("BUY", 50, "-100000.0000"); // a big loss today
     risk.update("daily_loss_limit", "{\"enabled\":true,\"mode\":\"inr\",\"value\":50000}");

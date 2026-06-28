@@ -723,6 +723,45 @@ class ScalperConfluenceGateTest {
   }
 
   @Test
+  void psarDurabilityBlocksAWhipsawTightPsarWhenArmed() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+
+    // a tight PSAR (99.99 vs close 100 → 0.01% gap < 0.05) BLOCKS when armed; the wide-gap bullBank
+    // (psar 97 → 3%) fires; the bare CFG ignores the gap.
+    assertThat(gate.evaluate(cfgTags("psar-durability"), bullBankTightPsar(), null, 0, NOW, IST_TIME, EOD))
+        .isEmpty();
+    assertThat(gate.evaluate(cfgTags("psar-durability"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+    assertThat(gate.evaluate(CFG, bullBankTightPsar(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+  }
+
+  // bullBank whose PSAR sits a whisker under price (close 100 / psar 99.99) — a too-tight, whipsaw-prone
+  // gap for the psar-durability gate, while still on the CE side (close > psar) for every other dot.
+  private static BarValues bullBankTightPsar() {
+    Map<String, BigDecimal> builtins = Map.of("close", bd("100"), "vwap", bd("99"), "volume", bd("130000"));
+    Map<String, BigDecimal> aliases =
+        Map.of("vwma20", bd("98"), "psar", bd("99.99"), "rsi14", bd("65"), "supertrend", bd("1"));
+    return new BarValues() {
+      @Override
+      public BigDecimal valueAt(String alias, int i) {
+        return aliases.get(alias);
+      }
+
+      @Override
+      public BigDecimal previousValueAt(String alias, int i) {
+        return null;
+      }
+
+      @Override
+      public BigDecimal builtin(String name, int i) {
+        return builtins.get(name);
+      }
+    };
+  }
+
+  @Test
   void fiiBiasTagBlocksWhenTheFlowOpposesAndPassesOnNeutral() {
     // E3: fii-bias blocks a CE when FII flow is net short (30 < 50); a neutral read (bullContext, 50)
     // passes; the bare CFG (gate off) fires on the same net-short context.

@@ -73,6 +73,12 @@ public final class ScalperGates {
 
   private static final BigDecimal HUNDRED = new BigDecimal("100");
 
+  // E6 §4.14.6 PSAR-distance durability: the SuperTrend/PSAR sitting CLOSE to price = a short-lived
+  // (whipsaw-prone) trend; a WIDE gap = a durable one. The minimum |close-PSAR|/close gap a durable
+  // entry needs. The deck gives no number; 0.05% is a deliberately wide v1 default (rarely fires on an
+  // index future) — forward-paper-tunable, package-visible for a future DB promotion.
+  static final BigDecimal PSAR_DISTANCE_MIN_PCT = new BigDecimal("0.05");
+
   /** ≥09:45 (ideal 09:15–10:00), block the 11:00–13:00 sideways window, no fresh entry after 15:30. */
   public static GateOutcome timeWindow(LocalTime ist) {
     if (ist.isBefore(NO_TRADE_BEFORE)) {
@@ -241,6 +247,24 @@ public final class ScalperGates {
     boolean ok = dir15m == 0 || (side == OptionType.CE ? dir15m > 0 : dir15m < 0);
     String label = dir15m == 0 ? "15m trend unknown" : (dir15m > 0 ? "15m up" : "15m down");
     return new GateOutcome(ok, null, label + (ok ? " supports " : " opposes ") + side);
+  }
+
+  /**
+   * E6 §4.14.6 PSAR-distance durability (tag {@code psar-durability}): a PSAR sitting too CLOSE to price
+   * marks a short-lived trend (the stop is right under price → whipsaw); require the {@code |close-PSAR|}
+   * gap to be at least {@link #PSAR_DISTANCE_MIN_PCT} of the close. A null close/PSAR PASSES (fail-OPEN —
+   * a missing PSAR never blocks; durability is a refinement, not a hard data dependency). Side-agnostic:
+   * the distance is the trend's durability regardless of CE/PE.
+   */
+  public static GateOutcome psarDurable(BigDecimal close, BigDecimal psar) {
+    if (close == null || psar == null || close.signum() == 0) {
+      return GateOutcome.pass(null, "psar distance unavailable (degrade -> pass)");
+    }
+    BigDecimal distPct =
+        close.subtract(psar).abs().multiply(HUNDRED).divide(close.abs(), 4, RoundingMode.HALF_UP);
+    boolean ok = distPct.compareTo(PSAR_DISTANCE_MIN_PCT) >= 0;
+    return new GateOutcome(
+        ok, distPct, "psar gap " + distPct.toPlainString() + (ok ? "% durable" : "% too tight"));
   }
 
   /** Bull (CE): PSAR, VWMA, ST and VWAP all below price; bear (PE): all above. */

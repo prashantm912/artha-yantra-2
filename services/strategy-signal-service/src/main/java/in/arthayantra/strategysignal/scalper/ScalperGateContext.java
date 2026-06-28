@@ -117,8 +117,8 @@ public record ScalperGateContext(
       // the buy side confirms (a buyer paying up = demand); null never confirms.
       BigDecimal ceIvSlope,
       BigDecimal peIvSlope,
-      // E7 §3.12: the per-side ATM premium skew = (CE ATM ltp − PE ATM ltp)/PE ltp × 100 (positive ⇒ CE
-      // is the richer/more-expensive side). null when the ATM premiums are absent; the premium-skew dot
+      // E7 §3.7/§6.7 (Hero-Zero): the per-side ATM premium skew = (CE ATM ltp − PE ATM ltp)/PE ltp × 100
+      // (positive ⇒ CE is the richer/more-expensive side). null when the ATM premiums are absent; the dot
       // degrades to neutral on null.
       BigDecimal premiumSkewPct) {
 

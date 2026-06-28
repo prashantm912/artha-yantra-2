@@ -496,7 +496,7 @@ public class ScalperConfluenceGate {
     boolean vwapHardGate = !(cfg.openingTick() && istTime.isBefore(ScalperConfig.VWAP_ACTIONABLE_FROM));
     // E4 iv-per-strike + E7 premium-skew (each armed via its tag): iv-per-strike adds the per-strike
     // IV-slope + 10-12 abs-band SOFT dots and the unilateral IV>40 stand-aside; premium-skew adds the
-    // §3.12 "don't chase the richer side without cues" warning dot. Each absent ⇒ false ⇒ that dot is
+    // §3.7/§6.7 Hero-Zero "favor the lower-premium side" warning dot. Each absent ⇒ false ⇒ that dot is
     // not added ⇒ the aggregate is byte-identical (conditional-add parity).
     Confluence conf =
         ConnectTheDotsScorer.score(

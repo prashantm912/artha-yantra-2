@@ -80,12 +80,12 @@ public final class ConnectTheDotsScorer {
   }
 
   /**
-   * As the 7-arg form but with the E7 {@code premium-skew} dot opted in (§3.12 "don't chase the higher-
-   * premium side without cues"). When {@code premiumSkewDot} is true a SOFT warning dot ({@code
-   * premium_skew}) is appended that withholds support — lowering the aggregate — only when the traded
-   * side is the richer (higher-premium) side AND no {@code trending_cross}/{@code oi_spurt} cue
-   * corroborates. When false the dot list + aggregate are byte-identical to the 7-arg form
-   * (conditional-add ⇒ the unarmed denominator never moves).
+   * As the 7-arg form but with the E7 {@code premium-skew} dot opted in (§3.7/§6.7 Hero-Zero "favor the
+   * side whose premium is lower; sit on the discount side as the buyer", Day 10). When {@code
+   * premiumSkewDot} is true a SOFT warning dot ({@code premium_skew}) is appended that withholds support
+   * — lowering the aggregate — only when the traded side is the richer (higher-premium) side AND no
+   * {@code trending_cross}/{@code oi_spurt} cue corroborates. When false the dot list + aggregate are
+   * byte-identical to the 7-arg form (conditional-add ⇒ the unarmed denominator never moves).
    */
   public static Confluence score(
       ScalperGateContext ctx, OptionType side, int bias60mDir, BigDecimal threshold,
@@ -141,7 +141,7 @@ public final class ConnectTheDotsScorer {
       add(dots, "iv_abs_band", W_IV, ivAbsOk, "ATM IV in 10-12 trend-play band");
     }
     if (premiumSkewDot) {
-      // E7 §3.12: a WARNING dot. supports (good) when the traded side is NOT the richer (higher-premium)
+      // E7 §3.7/§6.7 (Hero-Zero): a WARNING dot. supports (good) when the traded side is NOT the richer
       // side, OR it is richer but a positive cue (trending_cross / oi_spurt for the side) corroborates.
       // "Higher-premium side with no cues" → does NOT support → lowers the aggregate (discourages the
       // chase). Null skew → neutral (supports), so a missing feed never blocks. premiumSkewPct > 0 ⇒ CE

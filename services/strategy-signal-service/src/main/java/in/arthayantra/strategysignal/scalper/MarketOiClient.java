@@ -653,7 +653,7 @@ public class MarketOiClient {
   }
 
   /**
-   * E7 §3.12 per-side premium skew = (CE ATM ltp − PE ATM ltp) / PE ltp × 100, at the strike nearest
+   * E7 §3.7/§6.7 per-side premium skew = (CE ATM ltp − PE ATM ltp) / PE ltp × 100, at the strike nearest
    * the spot. Positive ⇒ the CE side is the richer (more-expensive) side, negative ⇒ PE is. null when
    * the chain/spot/ATM premiums are absent (or the PE leg is zero) → the premium-skew dot degrades to
    * neutral, never blocking on a missing feed.

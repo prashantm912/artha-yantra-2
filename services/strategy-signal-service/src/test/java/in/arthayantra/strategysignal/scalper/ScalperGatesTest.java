@@ -214,6 +214,19 @@ class ScalperGatesTest {
   }
 
   @Test
+  void volumePumpRequiresAFloorClearingDirectionalCandle() {
+    // CE: a floor-clearing GREEN candle (close>open) confirms; a RED one (close<open) blocks.
+    assertThat(ScalperGates.volumePump(bd("110"), bd("100"), bd("130000"), "NIFTY 50", CE).pass()).isTrue();
+    assertThat(ScalperGates.volumePump(bd("100"), bd("110"), bd("130000"), "NIFTY 50", CE).pass()).isFalse();
+    // a below-floor candle blocks even when green (the floor rail also catches it separately).
+    assertThat(ScalperGates.volumePump(bd("110"), bd("100"), bd("100000"), "NIFTY 50", CE).pass()).isFalse();
+    // PE wants a floor-clearing RED candle.
+    assertThat(ScalperGates.volumePump(bd("100"), bd("110"), bd("130000"), "NIFTY 50", PE).pass()).isTrue();
+    // a null open/close degrades to pass.
+    assertThat(ScalperGates.volumePump(null, bd("100"), bd("130000"), "NIFTY 50", CE).pass()).isTrue();
+  }
+
+  @Test
   void flatOiStandAsideBlocksANullImbalanceButPassesAPresentOne() {
     // the deliberate inverse of callPutDeltaFilter's fail-open: a present imbalance passes...
     assertThat(ScalperGates.flatOiStandAside(imbalance(bd("10"))).pass()).isTrue();

@@ -425,7 +425,8 @@ public class ScalperConfluenceGate {
       return Optional.empty();
     }
     // E3 P1 — directional-VIX HARD gate: VIX direction must confirm the side (falling→CE, rising→PE);
-    // fail-OPEN on unknown direction, so it stays inert until the VIX feed is wired (vixRising is null today).
+    // fail-OPEN on unknown direction (an off-hours/history 422 leaves vixRising null → inert). Default-OFF
+    // (armed on no strategy — the soft vix dot already encodes the directional read).
     if (cfg.has("directional-vix-gate") && !ScalperGates.vix(ctx.macro(), side).pass()) {
       return Optional.empty();
     }

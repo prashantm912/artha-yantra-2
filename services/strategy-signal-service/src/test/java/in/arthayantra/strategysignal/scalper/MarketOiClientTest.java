@@ -123,12 +123,19 @@ class MarketOiClientTest {
     // the pair null without disturbing the IV/rank/breadth/FII assertions below.
     stub("/api/v1/market/options/chain", "{\"spot\":\"20000\",\"rows\":[]}");
     stub("/api/v1/market/equity/index-contribution", "{\"indexChangePct\":\"0.5\"}");
+    // E4: macro now also reads the active-strike IV series for the per-strike CE/PE IV slope.
+    stub(
+        "/api/v1/market/options/active-strikes",
+        "{\"activeStrikeIvSeries\":[{\"ceIv\":\"0.12\",\"peIv\":\"0.15\"},"
+            + "{\"ceIv\":\"0.16\",\"peIv\":\"0.13\"}]}");
 
-    Macro m = client.macro(UNDERLYING, TRADE_DATE);
+    Macro m = client.macro(UNDERLYING, TRADE_DATE, EXPIRY);
 
     assertThat(m.atmIv()).isEqualByComparingTo("0.14");
     assertThat(m.constituentBias()).isEqualByComparingTo("0.5"); // /equity/index-contribution indexChangePct
     assertThat(m.ivRank()).isEqualByComparingTo("30"); // 0.30 × 100
+    assertThat(m.ceIvSlope()).isEqualByComparingTo("0.04"); // 0.16 − 0.12 (CE-strike IV rising)
+    assertThat(m.peIvSlope()).isEqualByComparingTo("-0.02"); // 0.13 − 0.15 (PE-strike IV falling)
     assertThat(m.ceIvAvg6()).isNull(); // <6 strikes → no IV pair
     assertThat(m.peIvAvg6()).isNull();
     assertThat(m.advances()).isEqualTo(35);
@@ -149,11 +156,13 @@ class MarketOiClientTest {
     stub("/api/v1/market/fii-dii/long-short", "{\"items\":[]}");
     stub("/api/v1/market/options/chain", "{\"spot\":\"20000\",\"rows\":[]}");
     stub("/api/v1/market/equity/index-contribution", "{}");
+    stub("/api/v1/market/options/active-strikes", "{}"); // empty series → null slopes
 
-    Macro m = client.macro(UNDERLYING, TRADE_DATE);
+    Macro m = client.macro(UNDERLYING, TRADE_DATE, EXPIRY);
 
     assertThat(m.ivRank()).isNull(); // not 0 — "unknown", so the iv_rank dot stays unconfirmed
     assertThat(m.constituentBias()).isNull(); // empty contribution envelope
+    assertThat(m.ceIvSlope()).isNull(); // empty active-strike series → no slope
     assertThat(m.fiiLongPct()).isNull(); // empty envelope
   }
 
@@ -283,8 +292,9 @@ class MarketOiClientTest {
     stub("/api/v1/market/fii-dii/long-short", "{\"items\":[]}");
     stub("/api/v1/market/options/chain", "{\"spot\":\"20000\",\"rows\":[]}");
     stub("/api/v1/market/equity/index-contribution", "{}");
+    stub("/api/v1/market/options/active-strikes", "{}");
 
-    Macro m = client.macro(UNDERLYING, TRADE_DATE);
+    Macro m = client.macro(UNDERLYING, TRADE_DATE, EXPIRY);
 
     assertThat(m.advances()).isZero();
     assertThat(m.declines()).isZero();

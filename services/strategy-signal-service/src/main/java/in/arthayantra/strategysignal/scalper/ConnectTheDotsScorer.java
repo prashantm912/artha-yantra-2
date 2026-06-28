@@ -63,6 +63,19 @@ public final class ConnectTheDotsScorer {
   public static Confluence score(
       ScalperGateContext ctx, OptionType side, int bias60mDir, BigDecimal threshold,
       ScalperOiProps props, boolean vwapHardGate) {
+    return score(ctx, side, bias60mDir, threshold, props, vwapHardGate, false);
+  }
+
+  /**
+   * As {@link #score(ScalperGateContext, OptionType, int, BigDecimal, ScalperOiProps, boolean)} but with
+   * the E4 {@code iv-per-strike} IV-fidelity reads opted in. When {@code ivPerStrikeGate} is true the dot
+   * list gains two SOFT IV dots ({@code iv_slope} per-strike IV direction, {@code iv_abs_band} the 10-12
+   * trend-play band) and the {@code standAside} suppression extends to a unilateral buy-side IV>40 cap.
+   * When false the dot list and {@code standAside} are byte-identical to the 6-arg form (parity-safe).
+   */
+  public static Confluence score(
+      ScalperGateContext ctx, OptionType side, int bias60mDir, BigDecimal threshold,
+      ScalperOiProps props, boolean vwapHardGate, boolean ivPerStrikeGate) {
     Chart c = ctx.chart();
     Oi oi = ctx.oi();
     Macro m = ctx.macro();
@@ -93,9 +106,26 @@ public final class ConnectTheDotsScorer {
     add(dots, "basis", W, ScalperGates.futuresBasis(oi, side).pass(), "futures basis");
     add(dots, "iv_rank", W_IV, m.ivRank() != null && m.ivRank().compareTo(IV_RANK_LOW) < 0, "IV rank low (cheap premium)");
     // T2.8: the side's IV richer than the other by >= the gap; 40/40-both-high forces a stand-aside.
-    boolean standAside = ivBothHighStandAside(m, props);
+    // E4 iv-per-strike: a UNILATERAL buy-side IV>=40 ("buyer stays away", §4.6) also forces the
+    // stand-aside when armed — the existing symmetric ivBothHighStandAside misses the one-sided case.
+    boolean buySideTooRich = ivPerStrikeGate && buySideRich(m, ce, props);
+    boolean standAside = ivBothHighStandAside(m, props) || buySideTooRich;
     add(dots, "iv_pair", W_IV, !standAside && ivPair(m, ce, props),
         standAside ? "iv pair 40/40 stand-aside" : "iv pair gap favors side");
+    if (ivPerStrikeGate) {
+      // E4 §4.6: the bought strike's IV DIRECTION — CE confirms when its strike IV is RISING (a buyer
+      // paying up = demand), PE when the PE-leg IV rises. Null slope never confirms.
+      boolean ivSlopeOk = ce
+          ? m.ceIvSlope() != null && m.ceIvSlope().signum() > 0
+          : m.peIvSlope() != null && m.peIvSlope().signum() > 0;
+      add(dots, "iv_slope", W_IV, ivSlopeOk, "per-strike IV rising on the buy side");
+      // E4 §4.6: the absolute ATM IV sits in the 10-12 "trend-play" band (low IV = most of the move
+      // still ahead). Null atmIv never confirms.
+      boolean ivAbsOk = m.atmIv() != null
+          && m.atmIv().compareTo(props.ivAbsBandLow()) >= 0
+          && m.atmIv().compareTo(props.ivAbsBandHigh()) <= 0;
+      add(dots, "iv_abs_band", W_IV, ivAbsOk, "ATM IV in 10-12 trend-play band");
+    }
 
     double num = 0;
     double den = 0;
@@ -192,6 +222,15 @@ public final class ConnectTheDotsScorer {
             && m.peIvAvg6().compareTo(props.ivBothHighFloor()) >= 0;
     return bothHigh
         && m.ceIvAvg6().subtract(m.peIvAvg6()).abs().compareTo(props.ivPairMinGap()) < 0;
+  }
+
+  /**
+   * E4 §4.6 unilateral buyer cap: the BUY side's 6-strike IV is >= the both-high floor (40) — "IV>40,
+   * buyer stays away" — so a long-premium entry on that side stands aside. Null average → not too rich.
+   */
+  private static boolean buySideRich(Macro m, boolean ce, ScalperOiProps props) {
+    BigDecimal buyIv = ce ? m.ceIvAvg6() : m.peIvAvg6();
+    return buyIv != null && buyIv.compareTo(props.ivBothHighFloor()) >= 0;
   }
 
   private static void add(List<DotScore> dots, String name, double weight, boolean supports, String reason) {

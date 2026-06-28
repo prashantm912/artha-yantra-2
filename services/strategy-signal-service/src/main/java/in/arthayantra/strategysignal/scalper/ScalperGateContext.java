@@ -79,7 +79,8 @@ public record ScalperGateContext(
   /**
    * Macro confluence: ATM IV + rank, India VIX (level + direction), breadth, FII positioning, plus the
    * Phase-3.5 6-strike CE/PE IV averages (the mean IV over the 3 strikes above + 3 below the ATM) —
-   * {@code null} when fewer than 6 usable strikes carry the needed IV.
+   * {@code null} when fewer than 6 usable strikes carry the needed IV — plus the E4 per-strike CE/PE IV
+   * SLOPE (the peak-OI strike's IV direction over the active-strike window; rising = demand confirms).
    */
   public record Macro(
       BigDecimal atmIv,
@@ -93,9 +94,14 @@ public record ScalperGateContext(
       BigDecimal peIvAvg6,
       // E3: the index heavyweights' net weighted % push (the /equity/index-contribution indexChangePct);
       // its SIGN is the constituent direction. null when bhavcopy/weights are unavailable.
-      BigDecimal constituentBias) {
+      BigDecimal constituentBias,
+      // E4 iv-per-strike: the signed CE/PE IV slope (last − first) of the peak-OI strike's IV over the
+      // active-strike window; null when the series is short or the leg's IV is absent. A RISING slope on
+      // the buy side confirms (a buyer paying up = demand); null never confirms.
+      BigDecimal ceIvSlope,
+      BigDecimal peIvSlope) {
 
-    /** Pre-constituent 9-arg form: {@code constituentBias} defaults to null (keeps existing literals intact). */
+    /** Pre-constituent 9-arg form: trailing macro fields default to null (keeps existing literals intact). */
     public Macro(
         BigDecimal atmIv,
         BigDecimal ivRank,
@@ -106,7 +112,24 @@ public record ScalperGateContext(
         BigDecimal fiiLongPct,
         BigDecimal ceIvAvg6,
         BigDecimal peIvAvg6) {
-      this(atmIv, ivRank, vixLevel, vixRising, advances, declines, fiiLongPct, ceIvAvg6, peIvAvg6, null);
+      this(atmIv, ivRank, vixLevel, vixRising, advances, declines, fiiLongPct, ceIvAvg6, peIvAvg6, null,
+          null, null);
+    }
+
+    /** Pre-iv-slope 10-arg form: {@code ceIvSlope}/{@code peIvSlope} default to null. */
+    public Macro(
+        BigDecimal atmIv,
+        BigDecimal ivRank,
+        BigDecimal vixLevel,
+        Boolean vixRising,
+        int advances,
+        int declines,
+        BigDecimal fiiLongPct,
+        BigDecimal ceIvAvg6,
+        BigDecimal peIvAvg6,
+        BigDecimal constituentBias) {
+      this(atmIv, ivRank, vixLevel, vixRising, advances, declines, fiiLongPct, ceIvAvg6, peIvAvg6,
+          constituentBias, null, null);
     }
   }
 }

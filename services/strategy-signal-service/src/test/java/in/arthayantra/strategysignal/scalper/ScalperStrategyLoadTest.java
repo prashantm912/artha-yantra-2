@@ -210,6 +210,15 @@ class ScalperStrategyLoadTest {
             .isFalse();
       }
 
+      // E4 iv-per-strike: per-strike IV-slope + 10-12 abs-band SOFT dots + a unilateral IV>40 buy-side
+      // stand-aside. SOFT (scorer dots / a scorer-internal suppression, NOT an early-return hard gate),
+      // so it is consistent with keeping connect-the-dots soft and IS armed on that family (its IV dots
+      // already live in the 18-dot scorer). Armed iff the scalp-connect-the-dots family.
+      boolean isConnectTheDots = id.startsWith("scalp-connect-the-dots-");
+      assertThat(tags.contains("iv-per-strike"))
+          .as(id + " iv-per-strike armed iff connect-the-dots")
+          .isEqualTo(isConnectTheDots);
+
       // #11 (section 3.11): only the scalp-straddle family carries the straddle tag → the NEUTRAL two-leg
       // path. ScalperConfig.requireStraddle mirrors the tag; the others stay off, and the straddle
       // declares both option_types (it BUYS the ATM CE + PE) rather than a single directional side.

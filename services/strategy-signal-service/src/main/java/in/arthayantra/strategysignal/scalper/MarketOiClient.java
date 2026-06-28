@@ -89,7 +89,7 @@ public class MarketOiClient {
     // §0B volume-floor dot (the chart's volume is the signal future's). Equal for a single-index scalper.
     return new ScalperGateContext(
         underlying, signalIndex, istTime, chart,
-        oi(underlying, expiry, tradeDate), macro(underlying, eodDate));
+        oi(underlying, expiry, tradeDate), macro(underlying, eodDate, expiry));
   }
 
   /**
@@ -353,7 +353,7 @@ public class MarketOiClient {
   }
 
   /** The macro confluence half: ATM IV + rank, breadth, FII positioning (VIX is a v1 gap → null). */
-  public Macro macro(String underlying, LocalDate tradeDate) {
+  public Macro macro(String underlying, LocalDate tradeDate, LocalDate expiry) {
     JsonNode ivHistory =
         get(
             uri ->
@@ -409,11 +409,27 @@ public class MarketOiClient {
             null,
             "equity/index-contribution");
 
+    // E4 iv-per-strike §4.6: the per-strike IV DIRECTION — the signed CE/PE IV slope of the peak-OI
+    // strike over the active-strike window. Reuses the same /options/active-strikes read shape as oi()
+    // (name+expiry+buckets — the activeStrikeIvSeries is serialized only when `buckets` is present).
+    // null slopes on a short/absent series → the iv_slope dot stays inert.
+    IvSlope ivSlope =
+        get(
+            uri ->
+                uri.path("/api/v1/market/options/active-strikes")
+                    .queryParam("name", underlying)
+                    .queryParam("expiry", expiry)
+                    .queryParam("buckets", SERIES_WINDOW)
+                    .build(),
+            this::deriveActiveStrikeIvSlope,
+            IvSlope.EMPTY,
+            "options/active-strikes");
+
     // VIX has no market-data endpoint yet (§12.2 follow-up). null level + null direction; the vix
     // gate treats an unknown direction as non-blocking, so the macro stays honest, not falsely bull.
     return new Macro(
         atmIv, ivRank, null, null, breadth[0], breadth[1], fiiLongPct, ivPair.ceIvAvg6(), ivPair.peIvAvg6(),
-        constituentBias);
+        constituentBias, ivSlope.ceSlope(), ivSlope.peSlope());
   }
 
   /** Front (nearest-expiry) index-future quadrant from the term-structure-with-interpretation grid. */
@@ -641,6 +657,33 @@ public class MarketOiClient {
     BigDecimal n = BigDecimal.valueOf(count); // 6
     return new IvPair(
         ceSum.divide(n, 4, RoundingMode.HALF_UP), peSum.divide(n, 4, RoundingMode.HALF_UP));
+  }
+
+  /** E4 carrier: the signed CE/PE IV slope of the peak-OI strike over the active-strike window. */
+  record IvSlope(BigDecimal ceSlope, BigDecimal peSlope) {
+    static final IvSlope EMPTY = new IvSlope(null, null);
+  }
+
+  /**
+   * E4 §4.6: the per-strike IV DIRECTION — the signed slope ({@code last − first}) of the peak-OI
+   * strike's CE IV and PE IV over the {@code activeStrikeIvSeries} window (newest-last), the same
+   * {@code last − first} shape {@link #deriveSentiment} uses. null per leg when the series is shorter
+   * than 2 buckets or the leg's IV is absent on an endpoint bucket — so a short/empty series can never
+   * confirm a side. The interpretation is the deck's strike-demand rule (RISING IV in the bought strike
+   * confirms; the OPPOSITE sign from {@code ConnectingDotsService.ivFactor}'s index-fear read).
+   */
+  IvSlope deriveActiveStrikeIvSlope(JsonNode json) {
+    JsonNode series = json.path("activeStrikeIvSeries");
+    if (!series.isArray() || series.size() < 2) {
+      return IvSlope.EMPTY;
+    }
+    BigDecimal ceFirst = decimal(series.get(0).path("ceIv"));
+    BigDecimal ceLast = decimal(series.get(series.size() - 1).path("ceIv"));
+    BigDecimal peFirst = decimal(series.get(0).path("peIv"));
+    BigDecimal peLast = decimal(series.get(series.size() - 1).path("peIv"));
+    return new IvSlope(
+        ceFirst == null || ceLast == null ? null : ceLast.subtract(ceFirst),
+        peFirst == null || peLast == null ? null : peLast.subtract(peFirst));
   }
 
   /** Advances/declines counts from the breadth summary; {@code {0,0}} when absent. */

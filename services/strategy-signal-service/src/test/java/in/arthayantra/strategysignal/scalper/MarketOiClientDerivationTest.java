@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.strategysignal.scalper.MarketOiClient.IvPair;
+import in.arthayantra.strategysignal.scalper.MarketOiClient.IvSlope;
 import in.arthayantra.strategysignal.scalper.MarketOiClient.Sentiment;
 import in.arthayantra.strategysignal.scalper.MarketOiClient.Spurt;
 import in.arthayantra.strategysignal.scalper.MarketOiClient.Trending;
@@ -247,6 +248,44 @@ class MarketOiClientDerivationTest {
     Sentiment none = client.deriveSentiment(json("{\"sentimentPct\":\"12.5\"}"));
     assertThat(none.level()).isEqualByComparingTo("12.5");
     assertThat(none.slope()).isNull(); // absent series
+  }
+
+  // ------------------------------------------------------------------------ E4 per-strike IV slope
+
+  @Test
+  void ivSlopeIsSignedLastMinusFirstPerLeg() {
+    // CE 0.12 → 0.16 (rising, +0.04); PE 0.15 → 0.13 (falling, −0.02) over the window.
+    IvSlope s =
+        client.deriveActiveStrikeIvSlope(
+            json(
+                "{\"activeStrikeIvSeries\":["
+                    + "{\"ceIv\":\"0.12\",\"peIv\":\"0.15\"},"
+                    + "{\"ceIv\":\"0.14\",\"peIv\":\"0.14\"},"
+                    + "{\"ceIv\":\"0.16\",\"peIv\":\"0.13\"}]}"));
+
+    assertThat(s.ceSlope()).isEqualByComparingTo("0.04");
+    assertThat(s.peSlope()).isEqualByComparingTo("-0.02");
+  }
+
+  @Test
+  void ivSlopeNullPerLegWhenAnEndpointIvIsMissing() {
+    // the last bucket's CE iv is absent → CE slope null; PE present on both ends → PE slope real.
+    IvSlope s =
+        client.deriveActiveStrikeIvSlope(
+            json(
+                "{\"activeStrikeIvSeries\":["
+                    + "{\"ceIv\":\"0.12\",\"peIv\":\"0.15\"},"
+                    + "{\"ceIv\":null,\"peIv\":\"0.13\"}]}"));
+
+    assertThat(s.ceSlope()).isNull();
+    assertThat(s.peSlope()).isEqualByComparingTo("-0.02");
+  }
+
+  @Test
+  void ivSlopeEmptyWhenSeriesShortOrAbsent() {
+    assertThat(client.deriveActiveStrikeIvSlope(json("{\"activeStrikeIvSeries\":[{\"ceIv\":\"0.12\",\"peIv\":\"0.15\"}]}")))
+        .isEqualTo(IvSlope.EMPTY); // < 2 buckets
+    assertThat(client.deriveActiveStrikeIvSlope(json("{}"))).isEqualTo(IvSlope.EMPTY); // absent series
   }
 
   // --------------------------------------------------------------------------------- §A6 spurt mags

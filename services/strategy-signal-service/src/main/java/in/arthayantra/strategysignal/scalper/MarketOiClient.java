@@ -340,6 +340,44 @@ public class MarketOiClient {
         trending.divergencePct());
   }
 
+  /**
+   * E2 M7 (P12): the UP(+1)/DOWN(-1)/UNKNOWN(0) sign of the 60-minute OI build — a FOCUSED 2nd
+   * {@code /options/trending?interval=60m} read (the slower broader-trend confirmation above the 5m
+   * series). Called from {@link ScalperConfluenceGate} ONLY when the {@code oi-interval-and-60m-trend}
+   * gate is armed, so the primary trending read is untouched and unarmed scalpers pay no extra fetch.
+   * The sign is the 60m CE/PE OI delta-imbalance (peΔ − ceΔ over the window): {@code >0} = PE building
+   * faster (put-writing = bullish/CE), {@code <0} the mirror; {@code 0} when the series is short/flat,
+   * the read fails, or the day is a monthly index expiry (chain-OI corrupt, S24) → a fail-open gate.
+   */
+  public int trend60mDir(String underlying, LocalDate expiry, LocalDate tradeDate) {
+    if (calendar.isMonthlyIndexExpiryDay(tradeDate)) {
+      return 0;
+    }
+    return get(
+        uri ->
+            uri.path("/api/v1/market/options/trending")
+                .queryParam("name", underlying)
+                .queryParam("expiry", expiry)
+                .queryParam("interval", "60m")
+                .build(),
+        this::deriveTrend60mDir,
+        0,
+        "options/trending?interval=60m");
+  }
+
+  /** §M7: the sign of the 60m CE/PE OI delta-imbalance over the trending window (0 when short/flat). */
+  Integer deriveTrend60mDir(JsonNode trending) {
+    JsonNode items = trending.path("items");
+    if (!items.isArray() || items.size() < 2) {
+      return 0;
+    }
+    JsonNode first = items.get(0);
+    JsonNode last = items.get(items.size() - 1);
+    long ceBuild = last.path("ceOi").asLong() - first.path("ceOi").asLong();
+    long peBuild = last.path("peOi").asLong() - first.path("peOi").asLong();
+    return Long.signum(peBuild - ceBuild);
+  }
+
   /** Front-contract absolute futures basis (F − S) — price-derived, so NOT suppressed on a monthly expiry. */
   private BigDecimal futuresBasis(String underlying) {
     return get(

@@ -107,6 +107,27 @@ class MarketOiClientTest {
   }
 
   @Test
+  void trend60mDirReadsTheSignOfThe60mOiBuild() {
+    wire();
+    // E2 M7: over the 60m window CE OI builds faster than PE (ceBuild 300 vs peBuild 150) → CE-heavy
+    // build = bearish → dir < 0. One focused /options/trending?interval=60m read.
+    stub(
+        "/api/v1/market/options/trending",
+        "{\"items\":[{\"ceOi\":100,\"peOi\":100},{\"ceOi\":400,\"peOi\":250}]}");
+    assertThat(client.trend60mDir(UNDERLYING, EXPIRY, NON_MONTHLY)).isEqualTo(-1);
+    server.verify();
+  }
+
+  @Test
+  void trend60mDirIsZeroOnAMonthlyExpiryWithoutFiring() {
+    wire();
+    // S24: the chain-OI is corrupt on a monthly index expiry → no 60m fetch fires, returns 0
+    // (unknown → the M7 gate fail-opens). Nothing is stubbed, so any request would error the test.
+    assertThat(client.trend60mDir(UNDERLYING, EXPIRY, MONTHLY_EXPIRY)).isEqualTo(0);
+    server.verify();
+  }
+
+  @Test
   void mapsMacroHalfAndScalesIvRankToHundred() {
     wire();
     // rank is a 0..1 fraction upstream; must surface ×100 so the scorer's <50 gate is meaningful

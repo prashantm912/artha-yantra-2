@@ -475,6 +475,23 @@ public final class ScalperGates {
   }
 
   /**
+   * E2 M7 (tag {@code oi-interval-and-60m-trend}, Trending-OI #5 §3.5 "5-15m analytics interval + a
+   * 60-min broader-trend read"): the 60-minute OI build (the slower confirmation ABOVE the 5-minute
+   * cross/slope) must AGREE with the side. {@code dir60m} is the sign of the 60m CE/PE OI delta-imbalance
+   * — {@code > 0} (PE building faster = put-writing support = bullish) confirms a CE, {@code < 0} a PE.
+   * Fail-OPEN on {@code 0}: an unknown / flat 60m trend degrades to pass (this is a broader-trend
+   * CONFIRMATION, not a hard fresh-cross requirement like M1). NEUTRAL on derived history → live gate.
+   */
+  public static GateOutcome oi60mAgree(int dir60m, OptionType side) {
+    if (dir60m == 0) {
+      return GateOutcome.pass(null, "60m OI trend unknown/flat (degrade -> pass)");
+    }
+    boolean ok = (side == OptionType.CE) == (dir60m > 0);
+    return new GateOutcome(
+        ok, BigDecimal.valueOf(dir60m), "60m OI trend " + (ok ? "supports " : "opposes ") + side);
+  }
+
+  /**
    * E2 M4 (tag {@code flat-oi-stand-aside}, the doc's flat-OI trap): when the chain's OI is flat the
    * producer returns a {@code null} call-put imbalance. This is the DELIBERATE INVERSE of the #5
    * {@link #callPutDeltaFilter} fail-open — here a null/flat imbalance must STAND ASIDE (block), the

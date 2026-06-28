@@ -378,6 +378,14 @@ public class ScalperConfluenceGate {
             .pass()) {
       return Optional.empty();
     }
+    // E2 M7 (tag oi-interval-and-60m-trend, Trending-OI #5 §3.5 "5-15m interval + a 60m broader-trend
+    // read"): the 60-minute OI build must AGREE with the side — a slower confirmation above the 5m
+    // cross/slope. A FOCUSED 2nd /options/trending?interval=60m read, fetched ONLY when armed (cfg.has
+    // short-circuits first, so unarmed scalpers pay no extra OI fetch). Fail-OPEN on an unknown (0) trend.
+    if (cfg.has("oi-interval-and-60m-trend")
+        && !ScalperGates.oi60mAgree(client.trend60mDir(cfg.oiIndex(), oiExpiry, tradeDate), side).pass()) {
+      return Optional.empty();
+    }
     // FU2 — soft-dots-to-hard-gates: each of these confluence reads is ALSO a scored soft dot; arming the
     // tag makes it a STRICT requirement (the scorer/den is unchanged → parity-safe). Every operand is
     // already in hand. The natural home is the #10 "Connect-the-Dots" strategy, whose identity IS

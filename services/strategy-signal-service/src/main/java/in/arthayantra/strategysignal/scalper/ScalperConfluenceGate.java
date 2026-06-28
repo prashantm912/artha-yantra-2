@@ -363,11 +363,16 @@ public class ScalperConfluenceGate {
     // closed (any missing leg / null OI / null RSI blocks); the OPPOSITE session extreme becomes the
     // structural stop. tradeDate is the live bar's IST date (the same one driving the OI suppression).
     if (cfg.requireHeroZero()) {
+      // E4 §3.7 hero-zero-iv-flat: pass the 6-strike IV averages ONLY when armed (else null → the
+      // both-flat leg is skipped, byte-identical to the unarmed gate).
+      boolean ivFlatArmed = cfg.has("hero-zero-iv-flat");
       HeroZeroGate.Verdict hz =
           HeroZeroGate.evaluate(
               future, index, side, ctx.oi(), chart.rsi14(), istTime,
               calendar.isWeeklyIndexExpiryDay(tradeDate), calendar.isMonthlyIndexExpiryDay(tradeDate),
-              cfg.has("herozero-side-oi"));
+              cfg.has("herozero-side-oi"),
+              ivFlatArmed ? ctx.macro().ceIvAvg6() : null,
+              ivFlatArmed ? ctx.macro().peIvAvg6() : null);
       if (!hz.pass()) {
         return Optional.empty();
       }

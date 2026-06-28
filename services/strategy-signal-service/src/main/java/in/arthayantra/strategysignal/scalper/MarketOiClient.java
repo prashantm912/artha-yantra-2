@@ -503,11 +503,13 @@ public class MarketOiClient {
     // PE-over-CE cross) or first above → last below (bearish). Zero on either edge is not a cross.
     boolean crossed = (gapFirst < 0 && gapLast > 0) || (gapFirst > 0 && gapLast < 0);
     boolean widening = Math.abs(gapLast) > Math.abs(gapPrior);
-    // E2 M3: the PE−CE gap as a % of the latest bucket's total OI — the "lines diverge ~20-30%"
-    // magnitude. Null when the bucket carries no OI (flat) so a missing read can't pass the gate.
+    // E2 M3: the SIGNED PE−CE gap as a % of the latest bucket's total OI — the "lines diverge ~20-30%"
+    // magnitude AND direction (>0 = PE-heavy = bullish/CE; <0 = CE-heavy = bearish/PE). Null when the
+    // bucket carries no OI (flat) so a missing read can't pass the gate. The gate reads the sign so the
+    // divergence must favour the traded side (not just be large in either direction).
     long totalLast = peLast + ceLast;
     BigDecimal divergencePct =
-        totalLast <= 0 ? null : BigDecimal.valueOf(Math.abs(gapLast) * 100.0 / totalLast);
+        totalLast <= 0 ? null : BigDecimal.valueOf(gapLast * 100.0 / totalLast);
 
     return new Trending(level, ceDelta, peDelta, imbalance, crossed, widening, divergencePct);
   }

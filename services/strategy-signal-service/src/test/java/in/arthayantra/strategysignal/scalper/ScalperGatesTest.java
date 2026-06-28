@@ -187,18 +187,22 @@ class ScalperGatesTest {
   }
 
   @Test
-  void oiDivergenceMagnitudeNeedsBothTheGapAndAPriceImpulse() {
+  void oiDivergenceMagnitudeNeedsTheGapAndPriceImpulseInTheSideDirection() {
     BigDecimal minDiv = ScalperGates.OI_DIVERGENCE_MIN_PCT; // 20
     BigDecimal minPx = ScalperGates.PRICE_IMPULSE_MIN_PCT; // 50
-    // divergence >= 20 AND |price impulse| >= 50 → pass.
-    assertThat(ScalperGates.oiDivergenceMagnitude(divergence(bd("25"), bd("60")), minDiv, minPx).pass()).isTrue();
-    // a weak divergence (< 20) fails.
-    assertThat(ScalperGates.oiDivergenceMagnitude(divergence(bd("10"), bd("60")), minDiv, minPx).pass()).isFalse();
-    // a weak price impulse (< 50) fails.
-    assertThat(ScalperGates.oiDivergenceMagnitude(divergence(bd("25"), bd("30")), minDiv, minPx).pass()).isFalse();
+    // CE: a bullish divergence (+div >= 20 = PE-heavy) + an UP price impulse (+px >= 50) confirms.
+    assertThat(ScalperGates.oiDivergenceMagnitude(divergence(bd("25"), bd("60")), minDiv, minPx, CE).pass()).isTrue();
+    // PE: the mirror — a bearish divergence (-div <= -20 = CE-heavy) + a DOWN impulse (-px <= -50).
+    assertThat(ScalperGates.oiDivergenceMagnitude(divergence(bd("-25"), bd("-60")), minDiv, minPx, PE).pass()).isTrue();
+    // a divergence OPPOSING the side is rejected (a bearish -div on a CE side; a bullish +div on a PE side).
+    assertThat(ScalperGates.oiDivergenceMagnitude(divergence(bd("-25"), bd("-60")), minDiv, minPx, CE).pass()).isFalse();
+    assertThat(ScalperGates.oiDivergenceMagnitude(divergence(bd("25"), bd("60")), minDiv, minPx, PE).pass()).isFalse();
+    // a weak divergence (< 20) fails; a weak price impulse (< 50) fails.
+    assertThat(ScalperGates.oiDivergenceMagnitude(divergence(bd("10"), bd("60")), minDiv, minPx, CE).pass()).isFalse();
+    assertThat(ScalperGates.oiDivergenceMagnitude(divergence(bd("25"), bd("30")), minDiv, minPx, CE).pass()).isFalse();
     // null divergence or null price impulse fail-closed.
-    assertThat(ScalperGates.oiDivergenceMagnitude(divergence(null, bd("60")), minDiv, minPx).pass()).isFalse();
-    assertThat(ScalperGates.oiDivergenceMagnitude(divergence(bd("25"), null), minDiv, minPx).pass()).isFalse();
+    assertThat(ScalperGates.oiDivergenceMagnitude(divergence(null, bd("60")), minDiv, minPx, CE).pass()).isFalse();
+    assertThat(ScalperGates.oiDivergenceMagnitude(divergence(bd("25"), null), minDiv, minPx, CE).pass()).isFalse();
   }
 
   @Test

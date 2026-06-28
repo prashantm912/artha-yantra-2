@@ -187,10 +187,14 @@ class ScalperStrategyLoadTest {
           .as(id + " volume-pump armed iff gap-theory")
           .isEqualTo(isGapTheory);
 
-      // E3 fii-bias (§4.6): armed on the scalp-trend-change family (a reversal confirmed by FII flow).
+      // E3 fii-bias + constituent-gate (§4.6): armed on the scalp-trend-change family (a reversal
+      // confirmed by FII flow + the index heavyweights' net push, both cited in trend-change.md).
       boolean isTrendChange = id.startsWith("scalp-trend-change-");
       assertThat(tags.contains("fii-bias"))
           .as(id + " fii-bias armed iff trend-change")
+          .isEqualTo(isTrendChange);
+      assertThat(tags.contains("constituent-gate"))
+          .as(id + " constituent-gate armed iff trend-change")
           .isEqualTo(isTrendChange);
 
       // Connect-the-Dots (#10) is the SOFT weighted-scorer strategy: these confluences are ALREADY soft

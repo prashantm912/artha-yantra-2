@@ -90,5 +90,23 @@ public record ScalperGateContext(
       int declines,
       BigDecimal fiiLongPct,
       BigDecimal ceIvAvg6,
-      BigDecimal peIvAvg6) {}
+      BigDecimal peIvAvg6,
+      // E3: the index heavyweights' net weighted % push (the /equity/index-contribution indexChangePct);
+      // its SIGN is the constituent direction. null when bhavcopy/weights are unavailable.
+      BigDecimal constituentBias) {
+
+    /** Pre-constituent 9-arg form: {@code constituentBias} defaults to null (keeps existing literals intact). */
+    public Macro(
+        BigDecimal atmIv,
+        BigDecimal ivRank,
+        BigDecimal vixLevel,
+        Boolean vixRising,
+        int advances,
+        int declines,
+        BigDecimal fiiLongPct,
+        BigDecimal ceIvAvg6,
+        BigDecimal peIvAvg6) {
+      this(atmIv, ivRank, vixLevel, vixRising, advances, declines, fiiLongPct, ceIvAvg6, peIvAvg6, null);
+    }
+  }
 }

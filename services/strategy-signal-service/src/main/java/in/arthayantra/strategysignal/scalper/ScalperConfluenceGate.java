@@ -310,6 +310,11 @@ public class ScalperConfluenceGate {
     if (cfg.has("fii-bias") && !ScalperGates.fiiBias(ctx.macro(), side).pass()) {
       return Optional.empty();
     }
+    // E3 constituent-gate (tag constituent-gate, §4.6): the index heavyweights' net push must not oppose
+    // the side (Macro.constituentBias = /equity/index-contribution indexChangePct); fail-open on null/0.
+    if (cfg.has("constituent-gate") && !ScalperGates.constituent(ctx.macro(), side).pass()) {
+      return Optional.empty();
+    }
     // W4 (tag directional-change-gate, S24 Day-20): only enter on a confirmed OI directional change —
     // the PE-CE tilt must have crossed within the window. Default-OFF; an unchanged/short series blocks.
     if (cfg.has("directional-change-gate") && !ScalperGates.directionalChange(ctx.oi()).pass()) {

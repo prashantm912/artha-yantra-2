@@ -273,6 +273,17 @@ class ScalperConfluenceGateTest {
         new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("30"), null, null));
   }
 
+  // a bullish context whose index heavyweights push DOWN (constituentBias -0.5) — opposes a CE (the E3 operand).
+  private static ScalperGateContext ctxConstituentAgainst() {
+    return new ScalperGateContext(
+        "NIFTY 50", "NIFTY 50", IST_TIME,
+        new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("130000")),
+        new Oi(
+            OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("5"), bd("5"), null, null, null,
+            false, false, null, null, null),
+        new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), null, null, bd("-0.5")));
+  }
+
   // a bullish context whose CE 6-strike IV is too rich (0.50 > the 0.40 buyer cap) — the E4 operand.
   private static ScalperGateContext ctxRichCeIv() {
     return new ScalperGateContext(
@@ -537,6 +548,22 @@ class ScalperConfluenceGateTest {
 
     when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
     assertThat(gate.evaluate(cfgTags("fii-bias"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+  }
+
+  @Test
+  void constituentGateTagBlocksWhenHeavyweightsOpposeAndPassesOnNeutral() {
+    // E3: constituent-gate blocks a CE when the heavyweights' net push is negative; a neutral/null read
+    // (bullContext, constituentBias null) passes; the bare CFG fires on the same opposing context.
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(ctxConstituentAgainst());
+    assertThat(gate.evaluate(cfgTags("constituent-gate"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isEmpty();
+    assertThat(gate.evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    assertThat(gate.evaluate(cfgTags("constituent-gate"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
   }
 
   @Test

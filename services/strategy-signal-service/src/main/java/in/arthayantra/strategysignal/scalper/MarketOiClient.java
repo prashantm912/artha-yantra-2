@@ -396,10 +396,24 @@ public class MarketOiClient {
             IvPair.EMPTY,
             "options/chain");
 
+    // E3 §4.6 constituent contribution: the index heavyweights' net weighted % push (its SIGN is the
+    // constituent direction). Read off the existing /equity/index-contribution endpoint; null on a
+    // bhavcopy/weights gap → the constituent gate degrades to pass.
+    BigDecimal constituentBias =
+        get(
+            uri ->
+                uri.path("/api/v1/market/equity/index-contribution")
+                    .queryParam("name", underlying)
+                    .build(),
+            json -> decimal(json.path("indexChangePct")),
+            null,
+            "equity/index-contribution");
+
     // VIX has no market-data endpoint yet (§12.2 follow-up). null level + null direction; the vix
     // gate treats an unknown direction as non-blocking, so the macro stays honest, not falsely bull.
     return new Macro(
-        atmIv, ivRank, null, null, breadth[0], breadth[1], fiiLongPct, ivPair.ceIvAvg6(), ivPair.peIvAvg6());
+        atmIv, ivRank, null, null, breadth[0], breadth[1], fiiLongPct, ivPair.ceIvAvg6(), ivPair.peIvAvg6(),
+        constituentBias);
   }
 
   /** Front (nearest-expiry) index-future quadrant from the term-structure-with-interpretation grid. */

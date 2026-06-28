@@ -24,6 +24,7 @@ import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategyengine.series.SeriesKey;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -111,6 +112,7 @@ public class OptionsPremiumReplay {
         budgetInr(config),
         minPremiumInr(config),
         maxLots(config),
+        premiumBand(config),
         initialEquity,
         strikeReferenceOneMinute);
   }
@@ -316,6 +318,44 @@ public class OptionsPremiumReplay {
     return config.path("risk").path("position_sizing").path("params").path("max_lots").asInt(0);
   }
 
+  /**
+   * Backtest premium-band strike selection ({@code backtest.strike_premium_band}; backtest-only, not in
+   * {@code strategy-schema/v1}, read leniently like {@code min_premium_inr}). When ENABLED with both
+   * {@code lo} + {@code hi}, the replay picks the ATM/ITM strike whose entry premium lands in the band
+   * (nearest the midpoint) — matching the live {@code StrikePicker} — instead of the single
+   * nearest-strike-to-spot. ABSENT or half-filled (a one-sided bound is unsafe) ⇒ {@link
+   * PremiumBand#DISABLED} → the legacy nearest-strike path (the existing golden holds, byte-identical).
+   */
+  record PremiumBand(
+      boolean enabled,
+      BigDecimal lo,
+      BigDecimal hi,
+      int window,
+      BigDecimal strikeStep,
+      boolean fallbackNearest) {
+    static final PremiumBand DISABLED = new PremiumBand(false, null, null, 0, null, false);
+  }
+
+  static PremiumBand premiumBand(JsonNode config) {
+    JsonNode b = config.path("backtest").path("strike_premium_band");
+    if (b.isMissingNode() || !b.path("enabled").asBoolean(false)) {
+      return PremiumBand.DISABLED;
+    }
+    BigDecimal lo = dec(b, "lo");
+    BigDecimal hi = dec(b, "hi");
+    if (lo == null || hi == null) {
+      return PremiumBand.DISABLED; // never select on a one-sided bound
+    }
+    return new PremiumBand(
+        true, lo, hi, b.path("window").asInt(strikeWindow(config)), dec(b, "strike_step"),
+        b.path("fallback_nearest").asBoolean(true));
+  }
+
+  /** ATM±window from {@code universe.options.strikes.width} (default 3) — the width the YAML declares. */
+  static int strikeWindow(JsonNode config) {
+    return config.path("universe").path("options").path("strikes").path("width").asInt(3);
+  }
+
   private static boolean isPremiumPct(JsonNode params) {
     return "premium_pct".equals(params.path("basis").asText());
   }
@@ -351,6 +391,25 @@ public class OptionsPremiumReplay {
       int maxLots,
       BigDecimal initialEquity,
       List<EngineCandle> strikeReferenceOneMinute) {
+    return replayLegs(
+        signals, underlying, legs, underlyingSymbol, spec, rules, budgetInr, minPremiumInr, maxLots,
+        PremiumBand.DISABLED, initialEquity, strikeReferenceOneMinute);
+  }
+
+  /** As above but with the backtest premium-band selection; the no-band form delegates DISABLED. */
+  public ReplayResult replayLegs(
+      List<in.arthayantra.strategyengine.golden.GoldenSignalsJson.SignalEvent> signals,
+      List<EngineCandle> underlying,
+      List<PairedLeg> legs,
+      String underlyingSymbol,
+      UniverseSpec spec,
+      PremiumExitEvaluator.Rules rules,
+      long budgetInr,
+      BigDecimal minPremiumInr,
+      int maxLots,
+      PremiumBand band,
+      BigDecimal initialEquity,
+      List<EngineCandle> strikeReferenceOneMinute) {
     // 2b-E2b: anchor the ATM strike on the strike-reference series' price at the entry instant (e.g.
     // SENSEX-fut for a SENSEX-options strategy), not the signal bar's close. When the strike reference
     // IS the signal series, the lookup returns the entry bar's own close → byte-identical to before.
@@ -362,7 +421,7 @@ public class OptionsPremiumReplay {
       Optional<LegResult> r =
           priceLeg(
               seq + 1, underlying, underlyingSymbol, leg, spec, rules, budgetInr, minPremiumInr,
-              maxLots, strikeRef);
+              maxLots, band, strikeRef);
       if (r.isEmpty()) {
         continue;
       }
@@ -451,7 +510,7 @@ public class OptionsPremiumReplay {
     // The strike reference is the signal series itself → the strike is anchored on the entry bar's close.
     return priceLeg(
             seq, underlying, underlyingSymbol, leg, spec, rules, budgetInr, BigDecimal.ZERO, 0,
-            strikeReferenceByInstant(underlying))
+            PremiumBand.DISABLED, strikeReferenceByInstant(underlying))
         .map(LegResult::trade);
   }
 
@@ -476,6 +535,14 @@ public class OptionsPremiumReplay {
     return e != null ? e.getValue() : entryBar.close();
   }
 
+  /** A band candidate's premium at the entry instant (a one-bar read window) — null when uncovered. */
+  private BigDecimal premiumAtEntry(OptionContract contract, EngineCandle entryBar) {
+    OffsetDateTime to = entryBar.bucketStart().plusMinutes(1);
+    NavigableMap<OffsetDateTime, BigDecimal> series =
+        premiumReader.premiumSeries(contract, entryBar.bucketStart(), to);
+    return CandlePremiumReader.premiumAt(series, entryBar.bucketStart());
+  }
+
   /**
    * Prices one leg into a {@link LegResult} (the {@link Trade} + the per-bar marking inputs), or empty
    * when there's no tradeable contract for the bias/expiry or the budget can't afford a lot. Entry and
@@ -493,21 +560,34 @@ public class OptionsPremiumReplay {
       long budgetInr,
       BigDecimal minPremiumInr,
       int maxLots,
+      PremiumBand band,
       NavigableMap<java.time.Instant, BigDecimal> strikeRef) {
     EngineCandle entryBar = underlying.get(leg.entryIndex());
     // 2b-E2b: anchor the ATM strike on the strike-reference price (e.g. SENSEX-fut for SENSEX options),
     // not the signal bar's close. Reference == signal series → identical (the entry bar's own close).
     BigDecimal strikeSpot = strikeSpotAt(strikeRef, entryBar);
     boolean longBias = !leg.shortSide();
+    LocalDate onOrAfter = entryBar.bucketStart().toLocalDate();
+    // E7 band-aware selection (backtest-only, opt-in): pick the ATM/ITM strike whose entry premium lands
+    // in the band, nearest the midpoint (the live StrikePicker shape). DISABLED ⇒ the legacy
+    // nearest-strike-to-spot path, byte-identical to before — the existing premium golden holds.
     Optional<OptionContract> resolved =
-        selector.select(
-            underlyingSymbol,
-            strikeSpot,
-            entryBar.bucketStart().toLocalDate(),
-            spec.expiryMode(),
-            spec.expiryOffset(),
-            longBias,
-            spec.optionTypes());
+        band.enabled()
+            ? selector
+                .selectInBand(
+                    underlyingSymbol, strikeSpot, onOrAfter, spec.expiryMode(), spec.expiryOffset(),
+                    longBias, spec.optionTypes(), band.window(), band.lo(), band.hi(),
+                    band.strikeStep(), c -> premiumAtEntry(c, entryBar))
+                .or(
+                    () ->
+                        band.fallbackNearest()
+                            ? selector.select(
+                                underlyingSymbol, strikeSpot, onOrAfter, spec.expiryMode(),
+                                spec.expiryOffset(), longBias, spec.optionTypes())
+                            : Optional.empty())
+            : selector.select(
+                underlyingSymbol, strikeSpot, onOrAfter, spec.expiryMode(), spec.expiryOffset(),
+                longBias, spec.optionTypes());
     if (resolved.isEmpty()) {
       return Optional.empty(); // no tradeable contract for the bias/expiry — a legit skip
     }

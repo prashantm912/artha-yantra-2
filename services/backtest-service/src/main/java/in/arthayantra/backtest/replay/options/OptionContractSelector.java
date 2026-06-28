@@ -1,10 +1,12 @@
 package in.arthayantra.backtest.replay.options;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import org.springframework.stereotype.Component;
 
 /**
@@ -49,6 +51,18 @@ public class OptionContractSelector {
     /** The nearest-strike contract for {@code (underlying, expiry, optionType)} to {@code spot}. */
     Optional<OptionContract> nearestStrike(
         String underlying, LocalDate expiry, String optionType, BigDecimal spot);
+
+    /**
+     * The listed strikes within ±{@code window} of the ATM, ascending by {@code |strike − spot|} — the
+     * candidate set the band-aware {@link #selectInBand} filters. DEFAULT delegates to the single
+     * {@link #nearestStrike} (back-compat: every existing fake inherits this, only the JDBC catalog
+     * overrides it with the real {@code LIMIT 2·window+1} ladder), so adding the band path churns no
+     * existing implementer and the legacy premium golden stays byte-identical.
+     */
+    default List<OptionContract> nearestStrikes(
+        String underlying, LocalDate expiry, String optionType, BigDecimal spot, int window) {
+      return nearestStrike(underlying, expiry, optionType, spot).map(List::of).orElseGet(List::of);
+    }
   }
 
   private final Catalog catalog;
@@ -87,6 +101,79 @@ public class OptionContractSelector {
       return Optional.empty();
     }
     return catalog.nearestStrike(underlying, expiry, optionType, spot);
+  }
+
+  /**
+   * Band-aware ATM/ITM selection (the live {@code StrikePicker} premium-band shape): among the ±{@code
+   * window} listed strikes on the bias side, keep those whose entry premium lands in {@code [premiumLo,
+   * premiumHi]}, and pick the one whose premium is nearest the band midpoint. Empty when no strike
+   * qualifies (the caller decides fallback-to-nearest or skip). {@code premiumProbe} returns a
+   * candidate's entry premium (null ⇒ untradeable, excluded) — supplied by the replay so this stays
+   * DB-free and unit-testable. The expiry/side resolution mirrors {@link #select}.
+   *
+   * <p>{@code strikeStep} bounds OTM: a non-null step keeps only ATM/ITM strikes (CE ≤ spot + step / PE
+   * ≥ spot − step, one step OTM tolerated); a NULL step applies NO side cut (like the live StrikePicker,
+   * which relies on the premium + delta band alone) — so an absent {@code strike_step} does not silently
+   * exclude the natural near-OTM ATM strike. The midpoint-error pick is broken deterministically (nearer
+   * the spot, then the lower strike) so the choice never depends on the catalog's row order.
+   */
+  public Optional<OptionContract> selectInBand(
+      String underlying,
+      BigDecimal spot,
+      LocalDate onOrAfter,
+      ExpiryMode mode,
+      int expiryOffset,
+      boolean longBias,
+      Set<String> optionTypes,
+      int window,
+      BigDecimal premiumLo,
+      BigDecimal premiumHi,
+      BigDecimal strikeStep,
+      Function<OptionContract, BigDecimal> premiumProbe) {
+    String optionType = longBias ? "CE" : "PE";
+    if (!optionTypes.isEmpty() && !optionTypes.contains(optionType)) {
+      return Optional.empty();
+    }
+    LocalDate expiry = pickExpiry(catalog.expiriesOnOrAfter(underlying, onOrAfter), mode, expiryOffset);
+    if (expiry == null) {
+      return Optional.empty();
+    }
+    BigDecimal mid = premiumLo.add(premiumHi).divide(BigDecimal.valueOf(2), 4, RoundingMode.HALF_UP);
+    OptionContract best = null;
+    BigDecimal bestErr = null;
+    for (OptionContract c : catalog.nearestStrikes(underlying, expiry, optionType, spot, window)) {
+      // A non-null step bounds OTM; a null step applies no side cut (the live StrikePicker shape) so an
+      // absent strike_step never silently excludes the natural near-OTM ATM strike.
+      if (strikeStep != null && !atmOrItm(longBias, c.strike(), spot, strikeStep)) {
+        continue;
+      }
+      BigDecimal prem = premiumProbe.apply(c);
+      if (prem == null || prem.compareTo(premiumLo) < 0 || prem.compareTo(premiumHi) > 0) {
+        continue; // untradeable / out of the premium band
+      }
+      BigDecimal err = prem.subtract(mid).abs();
+      if (best == null
+          || err.compareTo(bestErr) < 0
+          || (err.compareTo(bestErr) == 0 && preferOnTie(c, best, spot))) {
+        bestErr = err;
+        best = c;
+      }
+    }
+    return Optional.ofNullable(best);
+  }
+
+  /** CE ATM/ITM: strike ≤ spot + step; PE ATM/ITM: strike ≥ spot − step (one step OTM tolerated). */
+  private static boolean atmOrItm(boolean longBias, BigDecimal strike, BigDecimal spot, BigDecimal step) {
+    return longBias
+        ? strike.compareTo(spot.add(step)) <= 0
+        : strike.compareTo(spot.subtract(step)) >= 0;
+  }
+
+  /** Deterministic midpoint-error tiebreak: prefer the strike nearer the spot, then the lower strike. */
+  private static boolean preferOnTie(OptionContract cand, OptionContract cur, BigDecimal spot) {
+    int byNearness =
+        cand.strike().subtract(spot).abs().compareTo(cur.strike().subtract(spot).abs());
+    return byNearness < 0 || (byNearness == 0 && cand.strike().compareTo(cur.strike()) < 0);
   }
 
   /**

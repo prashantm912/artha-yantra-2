@@ -58,4 +58,27 @@ public class JdbcExpiredContractCatalog implements Catalog {
             spot);
     return rows.stream().findFirst();
   }
+
+  @Override
+  public List<OptionContract> nearestStrikes(
+      String underlying, LocalDate expiry, String optionType, BigDecimal spot, int window) {
+    int limit = Math.max(1, 2 * window + 1); // the ATM ± window listed strikes
+    return jdbc.query(
+        "SELECT exchange, tradingsymbol, strike, lot_size FROM marketdata.expired_contracts "
+            + "WHERE underlying_symbol = ? AND expiry = ? AND instrument_type = ? "
+            + "AND strike IS NOT NULL ORDER BY abs(strike - ?), strike LIMIT ?",
+        (rs, n) ->
+            new OptionContract(
+                rs.getString("exchange"),
+                rs.getString("tradingsymbol"),
+                rs.getBigDecimal("strike"),
+                expiry,
+                optionType,
+                rs.getInt("lot_size")),
+        underlying,
+        java.sql.Date.valueOf(expiry),
+        optionType,
+        spot,
+        limit);
+  }
 }

@@ -84,4 +84,24 @@ class ScalperAccountModelTest {
     assertThat(model(new WinLoss(1, 5), List.of(new SubAccountTally(1, 1, 0))).scalperEntryAllowed())
         .isTrue();
   }
+
+  @Test
+  void nextFreeAccountLoadBalancesOverNonFrozenAccounts() {
+    // empty ledger → account 1 (lowest idx, all equal).
+    assertThat(model(new WinLoss(0, 0), List.of()).nextFreeAccount()).isEqualTo(1);
+    // account 1 carries a win (1 trade), the rest 0 → next is account 2 (fewest trades, lowest idx).
+    assertThat(model(new WinLoss(1, 0), List.of(new SubAccountTally(1, 1, 0))).nextFreeAccount())
+        .isEqualTo(2);
+    // accounts 1 and 2 frozen on a loss → the next free is account 3.
+    assertThat(model(new WinLoss(0, 2), List.of(loss(1), loss(2))).nextFreeAccount()).isEqualTo(3);
+  }
+
+  @Test
+  void nextFreeAccountFallsBackToOneWhenAllFrozen() {
+    // the entry gate normally blocks first, but a manually-taken signal can bypass it.
+    assertThat(
+            model(new WinLoss(0, 5), List.of(loss(1), loss(2), loss(3), loss(4), loss(5)))
+                .nextFreeAccount())
+        .isEqualTo(1);
+  }
 }

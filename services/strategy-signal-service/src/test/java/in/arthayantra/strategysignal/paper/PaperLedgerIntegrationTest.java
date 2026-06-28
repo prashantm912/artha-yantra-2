@@ -183,6 +183,20 @@ class PaperLedgerIntegrationTest extends StrategySignalIntegrationTestBase {
   }
 
   @Test
+  void aStampedOrderChargesThePositionToItsSubAccount() {
+    // E10: openOrder threads OrderRequest.subaccountIdx through to insertOpen's subaccount_idx column.
+    String sym = "TESTOPT-" + UUID.randomUUID();
+    paper.openOrder(
+        new PaperService.OrderRequest(null, "NFO", sym, "BUY", 50, new BigDecimal("100.00"), null, null, 2));
+    Integer idx =
+        jdbc.queryForObject(
+            "SELECT subaccount_idx FROM paper_positions WHERE tradingsymbol=? AND status='OPEN'",
+            Integer.class,
+            sym);
+    assertThat(idx).isEqualTo(2);
+  }
+
+  @Test
   void resetRequiresConfirmThenWipesTheLedger() throws Exception {
     String sym = "TESTOPT-" + UUID.randomUUID();
     paper.openOrder(new PaperService.OrderRequest(null, "NFO", sym, "SELL", 10, new BigDecimal("100.00"), null, null));

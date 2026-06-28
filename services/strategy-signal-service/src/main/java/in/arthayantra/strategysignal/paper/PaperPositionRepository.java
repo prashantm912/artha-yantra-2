@@ -81,7 +81,7 @@ public class PaperPositionRepository {
         .findFirst();
   }
 
-  /** Opens a new position (optional SL/TP bracket levels); returns the generated id. */
+  /** Opens a new position (optional SL/TP bracket levels), unstamped sub-account; returns the id. */
   public long insertOpen(
       String exchange,
       String tradingsymbol,
@@ -90,12 +90,25 @@ public class PaperPositionRepository {
       BigDecimal avgEntryPrice,
       BigDecimal stopLoss,
       BigDecimal takeProfit) {
+    return insertOpen(exchange, tradingsymbol, side, qty, avgEntryPrice, stopLoss, takeProfit, null);
+  }
+
+  /** Opens a new position charged to a 5-account sub-ledger (E10); {@code subaccountIdx} null = unstamped. */
+  public long insertOpen(
+      String exchange,
+      String tradingsymbol,
+      String side,
+      long qty,
+      BigDecimal avgEntryPrice,
+      BigDecimal stopLoss,
+      BigDecimal takeProfit,
+      Integer subaccountIdx) {
     Long id =
         jdbc.queryForObject(
             """
             INSERT INTO paper_positions
-              (exchange, tradingsymbol, side, qty, avg_entry_price, status, opened_at, stop_loss, take_profit)
-            VALUES (?,?,?,?,?, 'OPEN', now(), ?, ?) RETURNING id
+              (exchange, tradingsymbol, side, qty, avg_entry_price, status, opened_at, stop_loss, take_profit, subaccount_idx)
+            VALUES (?,?,?,?,?, 'OPEN', now(), ?, ?, ?) RETURNING id
             """,
             Long.class,
             exchange,
@@ -104,7 +117,8 @@ public class PaperPositionRepository {
             qty,
             avgEntryPrice,
             stopLoss,
-            takeProfit);
+            takeProfit,
+            subaccountIdx);
     return id == null ? 0 : id;
   }
 

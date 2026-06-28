@@ -21,6 +21,7 @@ import in.arthayantra.strategysignal.scalper.ConnectTheDotsScorer;
 import in.arthayantra.strategysignal.scalper.OpenHighLow;
 import in.arthayantra.strategysignal.scalper.ScalperConfig;
 import in.arthayantra.strategysignal.scalper.ScalperConfluenceGate;
+import in.arthayantra.strategysignal.scalper.ScalperGates;
 import in.arthayantra.strategysignal.scalper.ScalperManualChecks;
 import in.arthayantra.strategysignal.scalper.ScalperRisk;
 import in.arthayantra.strategysignal.scalper.StrikePicker;
@@ -420,6 +421,18 @@ public class SignalEngine {
           && activeEntry.get().stopLoss() != null
           && structuralStopHit(
               directionOf(strategy.definition()), primary.candle(index), activeEntry.get().stopLoss())) {
+        emit(strategy, exchange, tradingsymbol, interval, "EXIT", bar, activeEntry.get());
+        return;
+      }
+      // E9 D4 OI-confluence-flip exit (scalper, live-only, tag oi-confluence-exit): re-read the OI
+      // confluence at this bar; if it now STRONGLY confirms the OPPOSITE side to the one held, the read
+      // has flipped against the position — exit. Reuses the entry gate (never runs on the deterministic
+      // golden replay → parity-safe by firewall). Held side rides the entry's scalper side-channel.
+      if (strategy.scalper() != null
+          && strategy.scalper().has("oi-confluence-exit")
+          && scalperGate.isPresent()
+          && activeEntry.get().scalperDetail() != null
+          && confluenceFlipExit(strategy, bank, primary, index, bar, activeEntry.get())) {
         emit(strategy, exchange, tradingsymbol, interval, "EXIT", bar, activeEntry.get());
         return;
       }
@@ -839,6 +852,29 @@ public class SignalEngine {
     return definition.direction() == StrategyDefinition.Direction.SHORT
         ? ExitEvaluator.Direction.SHORT
         : ExitEvaluator.Direction.LONG;
+  }
+
+  /**
+   * E9 D4: re-reads the OI confluence at the current bar and reports whether it now STRONGLY confirms
+   * the opposite side to the one held — i.e. the read flipped against the open scalper position.
+   * Live-only (the confluence gate never runs on the deterministic replay). The held side rides the
+   * entry's {@code scalper_detail} side-channel; a neutral (straddle) entry has no side to flip.
+   */
+  private boolean confluenceFlipExit(
+      Loaded strategy, BarValues bank, EngineSeries future, int index, EngineCandle bar,
+      SignalRepository.SignalRow entry) {
+    String heldSide = entry.scalperDetail().path("side").asText("");
+    if (!"CE".equals(heldSide) && !"PE".equals(heldSide)) {
+      return false;
+    }
+    OffsetDateTime istBar = bar.bucketStart().withOffsetSameInstant(Ist.OFFSET);
+    Optional<ScalperConfluenceGate.Decision> now =
+        scalperGate.get().evaluate(
+            strategy.scalper(), bank, future, index, bar.bucketStart().toInstant(),
+            istBar.toLocalTime(), istBar.toLocalDate());
+    return now.isPresent()
+        && !now.get().neutral()
+        && ScalperGates.confluenceFlippedAgainst(heldSide, now.get().side().name());
   }
 
   /** A scalper structural stop fires when the bar touches the level: low ≤ stop (long), high ≥ stop (short). */

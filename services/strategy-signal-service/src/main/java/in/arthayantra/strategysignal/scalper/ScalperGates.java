@@ -326,6 +326,21 @@ public final class ScalperGates {
   }
 
   /**
+   * E9 D4 OI-confluence-flip exit (tag {@code oi-confluence-exit}, Day-7 "a confluence read against your
+   * position = exit"): TRUE when the held option side ({@code heldSide}) and the side the OI confluence
+   * NOW strongly confirms ({@code currentSide}) are BOTH directional (CE/PE) and OPPOSITE — the read has
+   * flipped against the open position. A neutral/missing current read (the caller passes a non-CE/PE
+   * string) never exits, so a merely-weak confluence does not trip it — only a confirmed opposite side.
+   */
+  public static boolean confluenceFlippedAgainst(String heldSide, String currentSide) {
+    return isDirectional(heldSide) && isDirectional(currentSide) && !heldSide.equals(currentSide);
+  }
+
+  private static boolean isDirectional(String side) {
+    return "CE".equals(side) || "PE".equals(side);
+  }
+
+  /**
    * #5 (T2.1): the trending-OI call-put delta-imbalance HARD pre-gate. PASS when the imbalance %
    * (|peDelta-ceDelta|/max(|peDelta|,|ceDelta|)*100) is at/above {@code floorPct}; FAIL when it is
    * present and below. A {@code null} imbalance (data unavailable or the flat-OI caveat the producer

@@ -233,6 +233,12 @@ class ScalperStrategyLoadTest {
       assertThat(tags.contains("psar-durability"))
           .as(id + " psar-durability armed iff trend-change")
           .isEqualTo(isTrendChange);
+      // E9 D4 oi-confluence-exit: armed on the scalp-trend-change family (a reversal strategy must exit
+      // when the OI confluence flips back against the captured direction — Day-7 "a read against your
+      // position = exit"). Live-only seam exit, parity-safe by firewall.
+      assertThat(tags.contains("oi-confluence-exit"))
+          .as(id + " oi-confluence-exit armed iff trend-change")
+          .isEqualTo(isTrendChange);
 
       // Connect-the-Dots (#10) is the SOFT weighted-scorer strategy: these confluences are ALREADY soft
       // dots in the 18-dot scorer, so the hard-gate versions ship default-OFF and are armed on NO

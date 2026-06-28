@@ -19,6 +19,16 @@ class ScalperGatesTest {
   }
 
   @Test
+  void confluenceFlippedAgainstOnlyOnAConfirmedOppositeSide() {
+    assertThat(ScalperGates.confluenceFlippedAgainst("CE", "PE")).isTrue(); // bullish held, now bearish
+    assertThat(ScalperGates.confluenceFlippedAgainst("PE", "CE")).isTrue(); // mirror
+    assertThat(ScalperGates.confluenceFlippedAgainst("CE", "CE")).isFalse(); // same side, no flip
+    assertThat(ScalperGates.confluenceFlippedAgainst("CE", "NEUTRAL")).isFalse(); // weak, not a flip
+    assertThat(ScalperGates.confluenceFlippedAgainst("NEUTRAL", "PE")).isFalse(); // no held side
+    assertThat(ScalperGates.confluenceFlippedAgainst("", "CE")).isFalse();
+  }
+
+  @Test
   void timeWindowBlocksOpenNoiseMiddayAndLateEntry() {
     assertThat(ScalperGates.timeWindow(LocalTime.of(9, 44)).pass()).isFalse();
     assertThat(ScalperGates.timeWindow(LocalTime.of(9, 45)).pass()).isTrue();

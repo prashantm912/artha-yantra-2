@@ -53,4 +53,28 @@ class SignalEnginePointStopTest {
     assertThat(SignalEngine.closerToEntry(entry, new BigDecimal("10"), new BigDecimal("45")))
         .isEqualByComparingTo("45");
   }
+
+  @Test
+  void higherTimeframesAreTheNonContextDeclarationsAbovePrimaryAnd1m() {
+    // §3.2a: only signal-future (instrument == null) indicators whose timeframe is neither the primary
+    // (3m) nor 1m must be separately warmed — context indicators + the primary/1m are already covered.
+    var primary3m = spec("VWMA", "vwma20", "3m", null);
+    var bias1h = spec("SUPERTREND", "bias60m", "1h", null);
+    var daily = spec("RSI", "rsiDaily", "1d", null);
+    var oneMinute = spec("RSI", "rsi1m", "1m", null);
+    var contextHourly = spec("SUPERTREND", "ctx", "1h", new StrategyDefinition.InstrumentRef("NSE", "NIFTY 50"));
+
+    assertThat(
+            SignalEngine.higherTimeframes(
+                "3m", List.of(primary3m, bias1h, daily, oneMinute, contextHourly)))
+        .containsExactlyInAnyOrder("1h", "1d"); // primary 3m, 1m, and the CONTEXT 1h are all excluded
+    // no higher-TF indicators → empty set (the common single-timeframe scalper).
+    assertThat(SignalEngine.higherTimeframes("3m", List.of(primary3m))).isEmpty();
+  }
+
+  private static StrategyDefinition.IndicatorSpec spec(
+      String name, String alias, String timeframe, StrategyDefinition.InstrumentRef instrument) {
+    return new StrategyDefinition.IndicatorSpec(
+        name, alias, timeframe, Map.of(), null, false, null, instrument);
+  }
 }

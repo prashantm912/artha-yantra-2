@@ -235,6 +235,14 @@ public class SignalEngine {
                     spec.instrument().exchange(), spec.instrument().tradingsymbol(), "1m"));
           }
         }
+        // §3.2a: warm each declared higher-TF series on the SIGNAL future itself (e.g. bias60m@1h,
+        // rsi@1d) on every universe instrument — else IndicatorBank.build throws "no series coverage"
+        // and the strategy silently emits nothing on the live path.
+        for (String tf : higherTimeframes(definition.primaryTimeframe(), definition.indicators())) {
+          for (StrategyDefinition.InstrumentRef instrument : universe) {
+            keys.add(new SeriesKey(instrument.exchange(), instrument.tradingsymbol(), tf));
+          }
+        }
         keys.forEach(seriesStore::ensureWarm);
         fresh.add(
             new Loaded(
@@ -483,6 +491,14 @@ public class SignalEngine {
     if (bucketBoundary) {
       // the bucket this bar OPENS means the previous one just completed in the caggs
       seriesStore.refreshFromRest(primaryKey);
+      // §3.2a: refresh each declared higher-TF series so a higher-TF gate (e.g. a 5m/daily RSI cap or
+      // a 15m ST) reads a fresh higher-TF bar intraday (mirrors the BTST daily refresh). 1m + the
+      // primary are already covered above.
+      for (String tf :
+          higherTimeframes(
+              strategy.definition().primaryTimeframe(), strategy.definition().indicators())) {
+        seriesStore.refreshFromRest(new SeriesKey(exchange, tradingsymbol, tf));
+      }
       evaluateAtBarClose(strategy, exchange, tradingsymbol, bar, primaryInterval);
       return;
     }
@@ -885,6 +901,26 @@ public class SignalEngine {
       case "1h" -> Duration.ofHours(1);
       default -> Duration.ofMinutes(1);
     };
+  }
+
+  /**
+   * §3.2a: the distinct HIGHER timeframes declared on the SIGNAL future itself — a non-context
+   * indicator ({@code instrument == null}) whose timeframe is neither the primary nor 1m (those are
+   * already warmed by the universe loop). These series must be warmed at reload + refreshed at each
+   * bucket boundary, else {@code IndicatorBank.build} throws "no series coverage" for e.g. a
+   * {@code bias60m@1h} or {@code rsi@1d} and the strategy is silently disabled on the live path.
+   */
+  static Set<String> higherTimeframes(
+      String primaryTimeframe, List<StrategyDefinition.IndicatorSpec> indicators) {
+    Set<String> tfs = new LinkedHashSet<>();
+    for (StrategyDefinition.IndicatorSpec spec : indicators) {
+      if (spec.instrument() == null
+          && !spec.timeframe().equals(primaryTimeframe)
+          && !spec.timeframe().equals("1m")) {
+        tfs.add(spec.timeframe());
+      }
+    }
+    return tfs;
   }
 
   /** Loaded view for the IT + status surfaces. */

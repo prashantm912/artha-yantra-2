@@ -2621,6 +2621,34 @@
         }
       }
     },
+    "/api/v1/market/global/dow" : {
+      "get" : {
+        "tags" : [ "market-surface-controller" ],
+        "operationId" : "dow",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DowQuote"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/futures/term-structure" : {
       "get" : {
         "tags" : [ "futures-controller" ],
@@ -2827,6 +2855,14 @@
           "required" : true,
           "schema" : {
             "type" : "string"
+          }
+        }, {
+          "name" : "date",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
           }
         } ],
         "responses" : {
@@ -5060,6 +5096,9 @@
           },
           "fallPctFromPrevClose" : {
             "type" : "number"
+          },
+          "oiChangePct" : {
+            "type" : "number"
           }
         }
       },
@@ -5866,6 +5905,24 @@
           "peOi" : {
             "type" : "integer",
             "format" : "int64"
+          }
+        }
+      },
+      "DowQuote" : {
+        "type" : "object",
+        "properties" : {
+          "ltp" : {
+            "type" : "number"
+          },
+          "prevClose" : {
+            "type" : "number"
+          },
+          "change" : {
+            "type" : "number"
+          },
+          "direction" : {
+            "type" : "integer",
+            "format" : "int32"
           }
         }
       },

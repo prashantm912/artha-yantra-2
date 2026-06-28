@@ -740,6 +740,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/global/dow": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["dow"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/futures/term-structure": {
         parameters: {
             query?: never;
@@ -1647,6 +1663,7 @@ export interface components {
             olMark?: boolean;
             fallPctFromOpen?: number;
             fallPctFromPrevClose?: number;
+            oiChangePct?: number;
         };
         StrikeSessionStats: {
             /** Format: date-time */
@@ -1938,6 +1955,13 @@ export interface components {
             ceOi?: number;
             /** Format: int64 */
             peOi?: number;
+        };
+        DowQuote: {
+            ltp?: number;
+            prevClose?: number;
+            change?: number;
+            /** Format: int32 */
+            direction?: number;
         };
         ContractLeg: {
             tradingsymbol?: string;
@@ -4185,6 +4209,35 @@ export interface operations {
             };
         };
     };
+    dow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["DowQuote"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     termStructure: {
         parameters: {
             query: {
@@ -4323,6 +4376,7 @@ export interface operations {
         parameters: {
             query: {
                 name: string;
+                date?: string;
             };
             header?: never;
             path?: never;

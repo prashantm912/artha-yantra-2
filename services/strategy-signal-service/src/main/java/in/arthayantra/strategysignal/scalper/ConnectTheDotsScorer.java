@@ -90,6 +90,19 @@ public final class ConnectTheDotsScorer {
   public static Confluence score(
       ScalperGateContext ctx, OptionType side, int bias60mDir, BigDecimal threshold,
       ScalperOiProps props, boolean vwapHardGate, boolean ivPerStrikeGate, boolean premiumSkewDot) {
+    return score(
+        ctx, side, bias60mDir, threshold, props, vwapHardGate, ivPerStrikeGate, premiumSkewDot, false);
+  }
+
+  /**
+   * As the 8-arg form but with the E3 {@code dow-confluence} dot opted in (the Dow global cue: CE
+   * confirmed when Dow is up, PE when down; an unknown direction is neutral). When false the dot list +
+   * aggregate are byte-identical to the 8-arg form (conditional-add ⇒ the unarmed denominator never moves).
+   */
+  public static Confluence score(
+      ScalperGateContext ctx, OptionType side, int bias60mDir, BigDecimal threshold,
+      ScalperOiProps props, boolean vwapHardGate, boolean ivPerStrikeGate, boolean premiumSkewDot,
+      boolean dowDot) {
     Chart c = ctx.chart();
     Oi oi = ctx.oi();
     Macro m = ctx.macro();
@@ -152,6 +165,13 @@ public final class ConnectTheDotsScorer {
       boolean cued = corroboratingCue(dots, ce);
       add(dots, "premium_skew", W, m.premiumSkewPct() == null || !richerSide || cued,
           "not chasing the richer side without cues");
+    }
+    if (dowDot) {
+      // E3 Dow global cue: CE confirmed when Dow is UP, PE when DOWN; an unknown direction (null, e.g. a
+      // history/off-hours/unconfigured feed) is NEUTRAL → supports, so a missing cue never blocks.
+      boolean dowOk = m.dowUp() == null || (ce == m.dowUp());
+      add(dots, "dow", W, dowOk,
+          "Dow global cue " + (m.dowUp() == null ? "unknown" : m.dowUp() ? "up" : "down"));
     }
 
     double num = 0;

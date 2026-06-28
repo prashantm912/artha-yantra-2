@@ -4,6 +4,7 @@ import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketcalendar.MarketCalendar;
+import in.arthayantra.marketdata.kite.GlobalQuoteSource;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.QuoteGateway;
 import java.math.BigDecimal;
@@ -26,11 +27,14 @@ public class MarketSurfaceController {
 
   /** INDIA VIX is an ordinary pinned NSE index instrument (FP-14) — no special casing. */
   private static final InstrumentKey VIX_KEY = new InstrumentKey("NSE", "INDIA VIX");
+  /** The Dow global cue — OpenAlgo {@code DOWJONES@GLOBAL_INDEX}, the same key the Connecting-Dots uses. */
+  private static final InstrumentKey DOW_KEY = new InstrumentKey("GLOBAL_INDEX", "DOWJONES");
   private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
 
   private final LastTickStore lastTickStore;
   private final MarketCalendar calendar;
   private final QuoteGateway quoteGateway;
+  private final org.springframework.beans.factory.ObjectProvider<GlobalQuoteSource> dowSource;
   private final Clock clock;
 
   /** Wires the read paths. */
@@ -38,11 +42,35 @@ public class MarketSurfaceController {
       LastTickStore lastTickStore,
       MarketCalendar calendar,
       QuoteGateway quoteGateway,
+      org.springframework.beans.factory.ObjectProvider<GlobalQuoteSource> dowSource,
       Clock clock) {
     this.lastTickStore = lastTickStore;
     this.calendar = calendar;
     this.quoteGateway = quoteGateway;
+    this.dowSource = dowSource;
     this.clock = clock;
+  }
+
+  /** The Dow global-cue quote: LTP + prev close + signed direction (+1 up / −1 down / 0 flat). */
+  public record DowQuote(BigDecimal ltp, BigDecimal prevClose, BigDecimal change, Integer direction) {}
+
+  /**
+   * GET /global/dow: the Dow Jones global cue (LTP-direction vs prev close). 422 DATA_GAP when the
+   * global-quote feed is unconfigured (absent unless {@code artha.openalgo.global-quotes-enabled}) or
+   * the quote is unavailable (off-hours / mock) — the scalper Dow read then degrades to neutral.
+   */
+  @GetMapping("/global/dow")
+  public DowQuote dow() {
+    GlobalQuoteSource source = dowSource.getIfAvailable();
+    QuoteGateway.Quote q = source == null ? null : source.latest(DOW_KEY).orElse(null);
+    if (q == null || q.lastPrice() == null) {
+      throw new ApiException(422, ErrorCodes.DATA_GAP, "no Dow global-cue quote");
+    }
+    QuoteGateway.Quote.Ohlc o = q.ohlc(); // globals are LTP-only → the OHLC close slot is the prev close
+    BigDecimal prevClose = o == null ? null : o.close();
+    BigDecimal change = prevClose == null ? null : q.lastPrice().subtract(prevClose);
+    Integer direction = change == null ? null : change.signum();
+    return new DowQuote(q.lastPrice(), prevClose, change, direction);
   }
 
   /** INDIA VIX quote: LTP + day OHLC + change vs the previous close (the §20.7.4 header VIX). */

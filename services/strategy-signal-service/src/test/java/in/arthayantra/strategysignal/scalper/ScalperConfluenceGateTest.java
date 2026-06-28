@@ -168,6 +168,30 @@ class ScalperConfluenceGateTest {
     };
   }
 
+  // E5: bullBank whose PRIOR bar RSI is caller-chosen (drives the rsi-cooloff gate); the current bar
+  // RSI clears the 0B legacy 60-80 rail.
+  private static BarValues bullBankHotPrior(BigDecimal rsi, BigDecimal prevRsi) {
+    Map<String, BigDecimal> builtins = Map.of("close", bd("100"), "vwap", bd("99"), "volume", bd("130000"));
+    Map<String, BigDecimal> aliases =
+        Map.of("vwma20", bd("98"), "psar", bd("97"), "rsi14", rsi, "supertrend", bd("1"));
+    return new BarValues() {
+      @Override
+      public BigDecimal valueAt(String alias, int i) {
+        return aliases.get(alias);
+      }
+
+      @Override
+      public BigDecimal previousValueAt(String alias, int i) {
+        return "rsi14".equals(alias) ? prevRsi : null;
+      }
+
+      @Override
+      public BigDecimal builtin(String name, int i) {
+        return builtins.get(name);
+      }
+    };
+  }
+
   private static ScalperGateContext bullContext() {
     return new ScalperGateContext(
         "NIFTY 50", "NIFTY 50", IST_TIME,
@@ -539,6 +563,27 @@ class ScalperConfluenceGateTest {
     assertThat(gate.evaluate(cfgTags("volume-pump"), bullBank(), down, 0, NOW, IST_TIME, EOD)).isEmpty();
     // the bare CFG (gate off) fires on the same red deploy bar.
     assertThat(gate.evaluate(CFG, bullBank(), down, 0, NOW, IST_TIME, EOD)).isPresent();
+  }
+
+  @Test
+  void rsiCoolOffTagWaitsForACooledRedPullbackAfterAHotBar() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+
+    // prior bar hot (82); current RSI 72 (cooled, inside the legacy 60-80 rail) → on a CE the entry
+    // waits for a RED pullback candle this bar.
+    BarValues hotPrior = bullBankHotPrior(bd("72"), bd("82"));
+
+    // a GREEN deploy candle (not a CE pullback) → armed rsi-cooloff BLOCKS.
+    assertThat(gate.evaluate(cfgTags("rsi-cooloff"), hotPrior, futureSeries(strongGreen(0)), 0, NOW, IST_TIME, EOD))
+        .isEmpty();
+    // a RED deploy candle (the cooled pullback) → fires.
+    assertThat(gate.evaluate(cfgTags("rsi-cooloff"), hotPrior, futureSeries(strongRed(0)), 0, NOW, IST_TIME, EOD))
+        .isPresent();
+    // the bare CFG (gate off) fires on the same hot-prior green deploy bar.
+    assertThat(gate.evaluate(CFG, hotPrior, futureSeries(strongGreen(0)), 0, NOW, IST_TIME, EOD)).isPresent();
   }
 
   @Test

@@ -219,6 +219,13 @@ class ScalperStrategyLoadTest {
           .as(id + " iv-per-strike armed iff connect-the-dots")
           .isEqualTo(isConnectTheDots);
 
+      // E4 hero-zero-iv-flat (§3.7 S22 (i) both-sides-flat IV skip): armed on the scalp-hero-zero
+      // family (the expiry-day buy-side gate the both-flat block refines).
+      boolean isHeroZero = id.startsWith("scalp-hero-zero-");
+      assertThat(tags.contains("hero-zero-iv-flat"))
+          .as(id + " hero-zero-iv-flat armed iff hero-zero")
+          .isEqualTo(isHeroZero);
+
       // #11 (section 3.11): only the scalp-straddle family carries the straddle tag → the NEUTRAL two-leg
       // path. ScalperConfig.requireStraddle mirrors the tag; the others stay off, and the straddle
       // declares both option_types (it BUYS the ATM CE + PE) rather than a single directional side.

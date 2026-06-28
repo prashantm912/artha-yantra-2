@@ -82,6 +82,8 @@ public final class HeroZeroGate {
   /** RSI exhaustion caps - a bullish buy avoids an already-overbought tape, bearish an oversold one. */
   private static final BigDecimal RSI_OVERBOUGHT = new BigDecimal("80");
   private static final BigDecimal RSI_OVERSOLD = new BigDecimal("20");
+  /** E4 §3.7 S22 (i): the max CE−PE 6-strike IV gap that reads as "flat on both sides" (~2 IV pts, 0..1 scale). */
+  private static final BigDecimal IV_FLAT_MAX_GAP = new BigDecimal("0.02");
   /** "closing toward" the extreme: within this fraction of the session range of the matching extreme. */
   private static final BigDecimal NEAR_EXTREME_FRACTION = new BigDecimal("0.25");
 
@@ -128,6 +130,29 @@ public final class HeroZeroGate {
       boolean expiryDay,
       boolean monthlyExpiryDay,
       boolean asymmetricSideOi) {
+    return evaluate(
+        future, index, side, oi, rsi, istTime, expiryDay, monthlyExpiryDay, asymmetricSideOi, null, null);
+  }
+
+  /**
+   * E4 §3.7 S22 (i) both-sides-flat IV overload (tag {@code hero-zero-iv-flat}): when both 6-strike IV
+   * averages are present and their gap is under {@link #IV_FLAT_MAX_GAP}, sellers control BOTH sides
+   * (only premium erosion, no directional edge) — block. The averages are passed ONLY when armed (else
+   * {@code null} → the leg is skipped), so the 9-arg form is byte-identical. Distinct from the scorer's
+   * {@code ivBothHighStandAside} (the both-HIGH case) — this is the both-FLAT (near-zero gap) skip.
+   */
+  public static Verdict evaluate(
+      EngineSeries future,
+      int index,
+      OptionType side,
+      Oi oi,
+      BigDecimal rsi,
+      LocalTime istTime,
+      boolean expiryDay,
+      boolean monthlyExpiryDay,
+      boolean asymmetricSideOi,
+      BigDecimal ceIvAvg6,
+      BigDecimal peIvAvg6) {
     // (1) expiry day only; a monthly expiry's prior-month OI is corrupt -> cannot confirm a break.
     if (!expiryDay || monthlyExpiryDay) {
       return BLOCK;
@@ -144,6 +169,14 @@ public final class HeroZeroGate {
     // (6) RSI not overbought (CE) / not oversold (PE); a null RSI blocks (the data is required).
     if (rsi == null
         || (ce ? rsi.compareTo(RSI_OVERBOUGHT) >= 0 : rsi.compareTo(RSI_OVERSOLD) <= 0)) {
+      return BLOCK;
+    }
+    // (7) E4 §3.7 S22 (i): IV flat on BOTH sides (near-zero CE−PE gap) = sellers control both, only
+    // erosion -> no trade. Armed via hero-zero-iv-flat (the averages arrive null when unarmed -> skip);
+    // a null average never blocks (IV is a refinement, not a hard data dependency like OI).
+    if (ceIvAvg6 != null
+        && peIvAvg6 != null
+        && ceIvAvg6.subtract(peIvAvg6).abs().compareTo(IV_FLAT_MAX_GAP) <= 0) {
       return BLOCK;
     }
     // (4) both-sides long-unwinding is the deck's explicit skip.

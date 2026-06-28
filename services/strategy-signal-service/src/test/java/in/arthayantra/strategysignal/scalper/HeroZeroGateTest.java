@@ -119,6 +119,37 @@ class HeroZeroGateTest {
   }
 
   @Test
+  void e4BothSidesFlatIvBlocksOnlyWhenTheAveragesArePassed() {
+    // baseline: a normally-firing bullish setup (no IV passed → 8-arg form, byte-identical).
+    assertThat(
+            HeroZeroGate.evaluate(
+                    towardHighFuture(), 2, CE, bullishOi(), RSI_OK_CE, FIRE_TIME, true, false)
+                .pass())
+        .isTrue();
+    // armed both-flat: CE 0.30 vs PE 0.31 (gap 0.01 ≤ 0.02) → sellers pin both sides → BLOCK.
+    assertThat(
+            HeroZeroGate.evaluate(
+                    towardHighFuture(), 2, CE, bullishOi(), RSI_OK_CE, FIRE_TIME, true, false, false,
+                    bd("0.30"), bd("0.31"))
+                .pass())
+        .isFalse();
+    // divergent IV (gap 0.10 > 0.02) → the both-flat leg does not block, the gate still fires.
+    assertThat(
+            HeroZeroGate.evaluate(
+                    towardHighFuture(), 2, CE, bullishOi(), RSI_OK_CE, FIRE_TIME, true, false, false,
+                    bd("0.30"), bd("0.20"))
+                .pass())
+        .isTrue();
+    // null averages (the unarmed pass-through) → the leg is skipped, the gate still fires.
+    assertThat(
+            HeroZeroGate.evaluate(
+                    towardHighFuture(), 2, CE, bullishOi(), RSI_OK_CE, FIRE_TIME, true, false, false,
+                    null, null)
+                .pass())
+        .isTrue();
+  }
+
+  @Test
   void w4SideOiTagRaisesThePutSideFloorToSeventyButLeavesTheCallSideAtFifty() {
     // W4 #3 (tag herozero-side-oi, S24 Day-17): the PUT side's OI confirm rises to ~70% when armed.
     // unarmed (8-arg): the PE imbalance-60 real-move fires.

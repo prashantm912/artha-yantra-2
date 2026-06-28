@@ -119,6 +119,21 @@ public final class ScalperGates {
     return GateOutcome.pass(null, "within opening-tick window");
   }
 
+  /**
+   * E8 §3.5 time-of-day PREFERENCE (tag {@code time-of-day-preference}): the high-probability intraday
+   * window — PASS inside [{@code from}, {@code to}), FAIL (skip the entry) outside it. The Siva "best
+   * 10:00-11:30, ease off after ~13:30" preference rendered as an opt-in HARD skip, layered ON TOP of
+   * the §0B hard {@link #timeWindow} rails. {@code to} is EXCLUSIVE — an entry exactly at the cutoff is
+   * already past the preferred window.
+   */
+  public static GateOutcome timeOfDayPreference(LocalTime ist, LocalTime from, LocalTime to) {
+    boolean ok = !ist.isBefore(from) && ist.isBefore(to);
+    return new GateOutcome(
+        ok,
+        null,
+        (ok ? "within" : "outside") + " preferred window " + from + "-" + to);
+  }
+
   /** Bar volume ≥ the underlying's floor (NIFTY 125k / other indices 50k). */
   public static GateOutcome volume(String underlying, BigDecimal volume) {
     BigDecimal floor = VOL_FLOOR.getOrDefault(underlying, INDEX_VOL);

@@ -243,6 +243,7 @@ public final class ExitEvaluator {
         BigDecimal initialRisk = initialRisk(definition, series, position);
         yield initialRisk == null ? null : initialRisk.multiply(value, EngineMath.MC);
       }
+      case "index_points" -> value; // absolute index points — the distance IS the value (Nifty ~30-60, Sensex ~100-250)
       default -> null;
     };
   }
@@ -299,6 +300,20 @@ public final class ExitEvaluator {
       return hit
           ? Optional.of(
               new ExitDecision("trailing_stop", value + "x entry-ATR trail off " + peak))
+          : Optional.empty();
+    }
+    if ("index_points".equals(basis)) {
+      // fixed-offset trail: exit when price retraces `value` index points off the favourable peak.
+      BigDecimal offset = decimal(params.get("value"));
+      if (offset == null) {
+        return Optional.empty();
+      }
+      boolean hit =
+          isLong
+              ? close.compareTo(peak.subtract(offset)) <= 0
+              : close.compareTo(peak.add(offset)) >= 0;
+      return hit
+          ? Optional.of(new ExitDecision("trailing_stop", "trailed " + offset + "pts off " + peak))
           : Optional.empty();
     }
     return Optional.empty();

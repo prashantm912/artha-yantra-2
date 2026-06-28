@@ -450,7 +450,7 @@
       "additionalProperties": false,
       "required": ["basis", "value"],
       "properties": {
-        "basis": { "enum": ["premium_pct", "atr_multiple", "r_multiple"] },
+        "basis": { "enum": ["premium_pct", "atr_multiple", "r_multiple", "index_points"] },
         "value": { "type": "number", "exclusiveMinimum": 0 },
         "atr_period": { "type": "integer", "minimum": 1, "maximum": 200 }
       }

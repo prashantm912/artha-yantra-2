@@ -256,6 +256,17 @@ class ScalperConfluenceGateTest {
         new Macro(bd("14"), bd("30"), bd("12"), Boolean.TRUE, 40, 10, bd("50"), null, null));
   }
 
+  // a bullish context whose CE 6-strike IV is too rich (0.50 > the 0.40 buyer cap) — the E4 operand.
+  private static ScalperGateContext ctxRichCeIv() {
+    return new ScalperGateContext(
+        "NIFTY 50", "NIFTY 50", IST_TIME,
+        new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("130000")),
+        new Oi(
+            OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("5"), bd("5"), null, null, null,
+            false, false, null, null, null),
+        new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), bd("0.50"), bd("0.20")));
+  }
+
   // a bank with SuperTrend pointing DOWN — breaks CE indicator-alignment (price still > vwap → CE side).
   private static BarValues bullBankStDown() {
     Map<String, BigDecimal> builtins = Map.of("close", bd("100"), "vwap", bd("99"), "volume", bd("130000"));
@@ -460,6 +471,21 @@ class ScalperConfluenceGateTest {
     when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
     assertThat(gate.evaluate(cfgTags("oi-divergence-magnitude"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isEmpty();
     assertThat(gate.evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+  }
+
+  @Test
+  void ivBuyerCapTagBlocksBuyingIntoRichIvAndDegradesWhenUnknown() {
+    // E4: iv-buyer-cap blocks a CE buy when the CE 6-strike IV is too rich (0.50 > 0.40); a null side IV
+    // degrades to pass (the gate is inert until IV data is present).
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(ctxRichCeIv());
+    assertThat(gate.evaluate(cfgTags("iv-buyer-cap"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isEmpty();
+
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    assertThat(gate.evaluate(cfgTags("iv-buyer-cap"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
   }
 
   @Test

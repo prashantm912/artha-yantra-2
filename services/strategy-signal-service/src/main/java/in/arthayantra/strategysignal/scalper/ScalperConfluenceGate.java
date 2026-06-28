@@ -288,6 +288,12 @@ public class ScalperConfluenceGate {
     if (cfg.has("directional-vix-gate") && !ScalperGates.vix(ctx.macro(), side).pass()) {
       return Optional.empty();
     }
+    // E4 (tag iv-buyer-cap, IV>40 -> sellers' market): block a long-premium BUY when the traded side's
+    // 6-strike IV is too rich (> 0.40 fraction). Fail-OPEN on a null side IV. A standalone risk veto.
+    if (cfg.has("iv-buyer-cap")
+        && !ScalperGates.ivBuyerCap(ctx.macro(), side, ScalperGates.IV_BUYER_CAP).pass()) {
+      return Optional.empty();
+    }
     // W4 (tag directional-change-gate, S24 Day-20): only enter on a confirmed OI directional change —
     // the PE-CE tilt must have crossed within the window. Default-OFF; an unchanged/short series blocks.
     if (cfg.has("directional-change-gate") && !ScalperGates.directionalChange(ctx.oi()).pass()) {

@@ -43,6 +43,8 @@ public class ScalperConfluenceGate {
   static final String RSI_5M = "rsi5m";
   static final String RSI_DAILY = "rsi_daily";
   static final String SUPERTREND = "supertrend";
+  // E6 §3.10/§4.14.6 15m SuperTrend confirmation alias (declared on the opted-in YAMLs only).
+  static final String SUPERTREND_15M = "supertrend15m";
   // optional 60-minute bias confirmation (e.g. SUPERTREND@60m); absent ⇒ unknown ⇒ never blocks.
   static final String BIAS_60M = "bias60m";
 
@@ -202,6 +204,16 @@ public class ScalperConfluenceGate {
                 chart.rsiDaily(), side, oiProps.rsiDailyCeCap(), oiProps.rsiDailyPeFloor())
             .pass()) {
       return Optional.empty();
+    }
+    // E6 §3.10/§4.14.6 supertrend-15m: the 15m SuperTrend trend must agree with the side (a momentum
+    // entry confirmed by the higher-TF trend). Read the 15m ST direction off the bank only when declared
+    // (warmed by §3.2a); an unknown/unwarmed direction (0) fail-OPENs. Armed via the tag, default-OFF.
+    if (cfg.has("supertrend-15m")) {
+      BigDecimal st15 = bank.has(SUPERTREND_15M) ? bank.valueAt(SUPERTREND_15M, index) : null;
+      int dir15m = st15 == null ? 0 : st15.signum();
+      if (!ScalperGates.supertrend15mAlign(dir15m, side).pass()) {
+        return Optional.empty();
+      }
     }
     // E5 §3.6 rsi-cooloff: after a HOT prior bar (RSI overbought/oversold) the entry waits for a cooled
     // pullback candle (the cross-bar half of overbought-defer). Reads the existing 3m rsi14 (prior bar)

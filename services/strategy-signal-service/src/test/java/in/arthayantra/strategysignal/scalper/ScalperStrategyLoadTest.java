@@ -174,6 +174,11 @@ class ScalperStrategyLoadTest {
       assertThat(tags.contains("iv-buyer-cap"))
           .as(id + " iv-buyer-cap armed iff golden-crossover")
           .isEqualTo(isGoldenCrossover);
+      // E6 supertrend-15m (§3.10/§4.14.6 15m trend confirm): armed on the golden-crossover momentum
+      // family (a crossover entry confirmed by the higher-TF trend).
+      assertThat(tags.contains("supertrend-15m"))
+          .as(id + " supertrend-15m armed iff golden-crossover")
+          .isEqualTo(isGoldenCrossover);
 
       // E6 #10 (two-candle-substitution): armed on the scalp-two-candle family (#1, its namesake gate).
       boolean isTwoCandle = id.startsWith("scalp-two-candle-");

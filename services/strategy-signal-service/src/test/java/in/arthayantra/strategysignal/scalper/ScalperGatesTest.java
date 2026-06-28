@@ -266,6 +266,17 @@ class ScalperGatesTest {
   }
 
   @Test
+  void supertrend15mAlignConfirmsTheSideAndFailOpensOnUnknown() {
+    assertThat(ScalperGates.supertrend15mAlign(1, CE).pass()).isTrue(); // 15m up confirms CE
+    assertThat(ScalperGates.supertrend15mAlign(-1, CE).pass()).isFalse(); // 15m down opposes CE
+    assertThat(ScalperGates.supertrend15mAlign(-1, PE).pass()).isTrue(); // 15m down confirms PE
+    assertThat(ScalperGates.supertrend15mAlign(1, PE).pass()).isFalse();
+    // dir 0 (unwarmed / mid-flip) fail-OPENs on either side — never blocks a confirmed 3m entry.
+    assertThat(ScalperGates.supertrend15mAlign(0, CE).pass()).isTrue();
+    assertThat(ScalperGates.supertrend15mAlign(0, PE).pass()).isTrue();
+  }
+
+  @Test
   void constituentRequiresHeavyweightPushNotToOppose() {
     // CE wants the net constituent push positive; PE negative; 0 (flat) and null degrade to pass.
     assertThat(ScalperGates.constituent(macroConstituent(bd("0.5")), CE).pass()).isTrue();

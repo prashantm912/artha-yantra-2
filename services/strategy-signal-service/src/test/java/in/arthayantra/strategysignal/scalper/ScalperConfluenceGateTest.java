@@ -670,6 +670,59 @@ class ScalperConfluenceGateTest {
   }
 
   @Test
+  void supertrend15mGateBlocksWhenThe15mTrendOpposesTheSide() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+
+    // 15m ST DOWN (-1) opposes a CE → armed supertrend-15m BLOCKS; UP (+1) confirms → fires.
+    assertThat(gate.evaluate(cfgTags("supertrend-15m"), bullBankSt15m(bd("-1")), null, 0, NOW, IST_TIME, EOD))
+        .isEmpty();
+    assertThat(gate.evaluate(cfgTags("supertrend-15m"), bullBankSt15m(bd("1")), null, 0, NOW, IST_TIME, EOD))
+        .isPresent();
+    // an unknown 15m trend (alias absent) fail-OPENs → fires.
+    assertThat(gate.evaluate(cfgTags("supertrend-15m"), bullBankSt15m(null), null, 0, NOW, IST_TIME, EOD))
+        .isPresent();
+    // the bare CFG (gate off) ignores the 15m read.
+    assertThat(gate.evaluate(CFG, bullBankSt15m(bd("-1")), null, 0, NOW, IST_TIME, EOD)).isPresent();
+  }
+
+  // E6: bullBank exposing the supertrend15m alias (has(...) true only when a direction is supplied).
+  private static BarValues bullBankSt15m(BigDecimal st15) {
+    Map<String, BigDecimal> builtins = Map.of("close", bd("100"), "vwap", bd("99"), "volume", bd("130000"));
+    Map<String, BigDecimal> aliases = new java.util.HashMap<>();
+    aliases.put("vwma20", bd("98"));
+    aliases.put("psar", bd("97"));
+    aliases.put("rsi14", bd("65"));
+    aliases.put("supertrend", bd("1"));
+    if (st15 != null) {
+      aliases.put("supertrend15m", st15);
+    }
+    return new BarValues() {
+      @Override
+      public BigDecimal valueAt(String alias, int i) {
+        return aliases.get(alias);
+      }
+
+      @Override
+      public BigDecimal previousValueAt(String alias, int i) {
+        return null;
+      }
+
+      @Override
+      public BigDecimal builtin(String name, int i) {
+        return builtins.get(name);
+      }
+
+      @Override
+      public boolean has(String alias) {
+        return aliases.containsKey(alias);
+      }
+    };
+  }
+
+  @Test
   void fiiBiasTagBlocksWhenTheFlowOpposesAndPassesOnNeutral() {
     // E3: fii-bias blocks a CE when FII flow is net short (30 < 50); a neutral read (bullContext, 50)
     // passes; the bare CFG (gate off) fires on the same net-short context.

@@ -11,6 +11,7 @@ import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.QuoteGateway;
 import in.arthayantra.marketdata.options.OptionsChainService;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDate;
@@ -46,6 +47,15 @@ public class StraddleChartService {
   /** The oipulse interval set in minutes (adds 1-min for scalping + 10-min vs the OI pages). */
   private static final Set<Integer> ALLOWED_MINUTES = Set.of(1, 3, 5, 10, 15, 30, 60);
 
+  private static final BigDecimal THREE = BigDecimal.valueOf(3);
+
+  /**
+   * Siva #11 long-straddle SL buffer (owner S24 ruling): the combined-premium stop sits {@value} points
+   * BELOW the combined-premium VWAP ("Long SL = below the (combined) VWAP", §3.11). The straddle is
+   * LIVE-managed — this surfaces the authoritative SL level so the operator squares off on the break.
+   */
+  private static final BigDecimal SL_BUFFER_POINTS = new BigDecimal("15");
+
   /** One interval's combined straddle candle: summed OHLC + each leg's close + summed volume. */
   public record StraddleCandle(
       OffsetDateTime time,
@@ -57,7 +67,12 @@ public class StraddleChartService {
       BigDecimal peClose,
       long volume) {}
 
-  /** The straddle/strangle chart payload: the header strip + the per-interval combined candles. */
+  /**
+   * The straddle/strangle chart payload: the header strip + the per-interval combined candles, plus the
+   * authoritative combined-premium session VWAP and the long-straddle SL level ({@code combinedVwap −
+   * slBufferPoints}) the LIVE exit is managed against (§3.11). {@code combinedVwap}/{@code slLevel} are
+   * null on an empty session.
+   */
   public record StraddleChart(
       String underlying,
       LocalDate expiry,
@@ -67,6 +82,9 @@ public class StraddleChartService {
       BigDecimal underlyingLtp,
       BigDecimal underlyingDayOpen,
       OffsetDateTime asOf,
+      BigDecimal combinedVwap,
+      BigDecimal slBufferPoints,
+      BigDecimal slLevel,
       List<StraddleCandle> items) {}
 
   private final InstrumentRepository instruments;
@@ -144,6 +162,8 @@ public class StraddleChartService {
 
     QuoteGateway.Quote underlyingQuote = underlyingQuote(chain, underlying);
     OffsetDateTime asOf = items.isEmpty() ? OffsetDateTime.now(clock) : items.get(items.size() - 1).time();
+    BigDecimal combinedVwap = combinedVwap(items);
+    BigDecimal slLevel = combinedVwap == null ? null : combinedVwap.subtract(SL_BUFFER_POINTS);
     return new StraddleChart(
         underlying,
         expiry,
@@ -153,7 +173,36 @@ public class StraddleChartService {
         underlyingQuote == null ? null : underlyingQuote.lastPrice(),
         underlyingQuote == null || underlyingQuote.ohlc() == null ? null : underlyingQuote.ohlc().open(),
         asOf,
+        combinedVwap,
+        SL_BUFFER_POINTS,
+        slLevel,
         items);
+  }
+
+  /**
+   * The session combined-premium VWAP — typical-price ((H+L+C)/3) volume-weighted over the combined
+   * candles; a zero-total-volume session falls back to the simple mean of the combined closes. null on
+   * an empty session. Anchored at the session open (the items already start at 09:15 IST).
+   */
+  static BigDecimal combinedVwap(List<StraddleCandle> items) {
+    if (items.isEmpty()) {
+      return null;
+    }
+    BigDecimal pv = BigDecimal.ZERO;
+    long vol = 0;
+    for (StraddleCandle c : items) {
+      BigDecimal typical = c.high().add(c.low()).add(c.close()).divide(THREE, 6, RoundingMode.HALF_UP);
+      pv = pv.add(typical.multiply(BigDecimal.valueOf(c.volume())));
+      vol += c.volume();
+    }
+    if (vol > 0) {
+      return pv.divide(BigDecimal.valueOf(vol), 4, RoundingMode.HALF_UP);
+    }
+    BigDecimal sum = BigDecimal.ZERO;
+    for (StraddleCandle c : items) {
+      sum = sum.add(c.close());
+    }
+    return sum.divide(BigDecimal.valueOf(items.size()), 4, RoundingMode.HALF_UP);
   }
 
   /** Reads the leg's 1m candles cache-first and folds them into session-aligned interval buckets. */

@@ -5194,6 +5194,15 @@
             "type" : "string",
             "format" : "date-time"
           },
+          "combinedVwap" : {
+            "type" : "number"
+          },
+          "slBufferPoints" : {
+            "type" : "number"
+          },
+          "slLevel" : {
+            "type" : "number"
+          },
           "items" : {
             "type" : "array",
             "items" : {

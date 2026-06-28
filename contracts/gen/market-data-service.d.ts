@@ -1700,6 +1700,9 @@ export interface components {
             underlyingDayOpen?: number;
             /** Format: date-time */
             asOf?: string;
+            combinedVwap?: number;
+            slBufferPoints?: number;
+            slLevel?: number;
             items?: components["schemas"]["StraddleCandle"][];
         };
         SpurtChain: {

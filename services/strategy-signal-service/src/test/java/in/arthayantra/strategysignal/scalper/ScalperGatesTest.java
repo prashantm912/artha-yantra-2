@@ -195,6 +195,19 @@ class ScalperGatesTest {
   }
 
   @Test
+  void oiWallClearBlocksAnEntryIntoTheDominantOiWall() {
+    // CE: clear when spot is below the max-CE-OI wall (resistance); blocked at/above it.
+    assertThat(ScalperGates.oiWallClear(bd("20100"), bd("19900"), bd("20000"), CE).pass()).isTrue();
+    assertThat(ScalperGates.oiWallClear(bd("20000"), bd("19900"), bd("20000"), CE).pass()).isFalse();
+    // PE: clear when spot is above the max-PE-OI wall (support); blocked at/below it.
+    assertThat(ScalperGates.oiWallClear(bd("20100"), bd("19900"), bd("20000"), PE).pass()).isTrue();
+    assertThat(ScalperGates.oiWallClear(bd("20100"), bd("20000"), bd("20000"), PE).pass()).isFalse();
+    // a null wall or null spot degrades to pass (fail-open — a missing ladder never blocks).
+    assertThat(ScalperGates.oiWallClear(null, null, bd("20000"), CE).pass()).isTrue();
+    assertThat(ScalperGates.oiWallClear(bd("20100"), bd("19900"), null, CE).pass()).isTrue();
+  }
+
+  @Test
   void indicatorDistanceBlocksWhenPriceRanFarFromTheWholeCluster() {
     BigDecimal max = bd("0.015"); // 1.5%
     // the nearest indicator (vwap, 0.5% away) is within the band -> not overextended -> pass.

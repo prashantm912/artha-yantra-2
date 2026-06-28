@@ -254,6 +254,23 @@ public final class ScalperGates {
     return new GateOutcome(ok, imb, ok ? "OI not flat" : "flat OI — stand aside");
   }
 
+  /**
+   * E2 M6 (tag {@code max-oi-sr-gate}): the entry must not trade INTO the dominant standing-OI wall on
+   * its side — the strike with the largest CE OI is overhead resistance for a CE (block when {@code
+   * spot >= ceWall}), the largest PE OI is support for a PE (block when {@code spot <= peWall}). The two
+   * wall strikes are the {@code argmax(oi)} over the chain's per-strike ladder (the LARGEST STANDING OI,
+   * NOT the biggest mover). A null wall or spot DEGRADES to pass — a missing ladder never blocks.
+   */
+  public static GateOutcome oiWallClear(
+      BigDecimal ceWall, BigDecimal peWall, BigDecimal spot, OptionType side) {
+    BigDecimal wall = side == OptionType.CE ? ceWall : peWall;
+    if (wall == null || spot == null) {
+      return GateOutcome.pass(spot, "no OI wall / spot (degrade -> pass)");
+    }
+    boolean ok = side == OptionType.CE ? spot.compareTo(wall) < 0 : spot.compareTo(wall) > 0;
+    return new GateOutcome(ok, wall, ok ? "clear of OI wall " + wall : "into OI wall " + wall);
+  }
+
   /** Futures basis: future > spot (premium) is bullish → CE; future < spot (discount) bearish → PE. */
   public static GateOutcome futuresBasis(Oi oi, OptionType side) {
     BigDecimal basis = oi.futuresBasis();

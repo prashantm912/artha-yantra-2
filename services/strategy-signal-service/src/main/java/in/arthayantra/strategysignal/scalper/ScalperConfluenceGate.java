@@ -245,6 +245,16 @@ public class ScalperConfluenceGate {
     if (cfg.has("flat-oi-stand-aside") && !ScalperGates.flatOiStandAside(ctx.oi()).pass()) {
       return Optional.empty();
     }
+    // E2 M6 (tag max-oi-sr-gate): the entry must not trade INTO the dominant standing-OI wall on its
+    // side (max-CE-OI strike = overhead resistance, max-PE-OI strike = support). Walls come from the
+    // chain's per-strike OI ladder already in hand (no new fetch); fail-open on a missing ladder/spot.
+    if (cfg.has("max-oi-sr-gate")
+        && !ScalperGates.oiWallClear(
+                maxOiStrike(chain.strikeOi(), true), maxOiStrike(chain.strikeOi(), false),
+                chain.spot(), side)
+            .pass()) {
+      return Optional.empty();
+    }
     // W4 (tag directional-change-gate, S24 Day-20): only enter on a confirmed OI directional change —
     // the PE-CE tilt must have crossed within the window. Default-OFF; an unchanged/short series blocks.
     if (cfg.has("directional-change-gate") && !ScalperGates.directionalChange(ctx.oi()).pass()) {
@@ -360,6 +370,24 @@ public class ScalperConfluenceGate {
       return side == OptionType.CE ? first.low() : first.high();
     }
     return null;
+  }
+
+  /**
+   * E2 M6: the strike carrying the LARGEST STANDING CE/PE open interest in the chain ladder — the OI
+   * S/R "wall". {@code null} when the ladder is empty/absent (so the gate degrades to pass). This is the
+   * argmax over raw {@code oi}, distinct from the biggest |oiChange| mover.
+   */
+  private static BigDecimal maxOiStrike(List<MarketOiClient.StrikeOi> ladder, boolean ce) {
+    BigDecimal best = null;
+    long bestOi = Long.MIN_VALUE;
+    for (MarketOiClient.StrikeOi row : ladder) {
+      Long oi = ce ? row.ceOi() : row.peOi();
+      if (oi != null && oi > bestOi) {
+        bestOi = oi;
+        best = row.strike();
+      }
+    }
+    return best;
   }
 
   private Chart chart(BarValues bank, int index) {

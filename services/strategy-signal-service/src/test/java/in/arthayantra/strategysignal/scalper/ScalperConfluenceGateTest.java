@@ -762,6 +762,27 @@ class ScalperConfluenceGateTest {
   }
 
   @Test
+  void risingVolumeGateNeedsTheDeployBarToExceedThePrior() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+
+    // prior bar 100k, deploy bar 150k → rising → armed fires; a falling deploy (100k after 200k) blocks.
+    EngineSeries rising = futureSeries(candleVol(0, 100_000), candleVol(1, 150_000));
+    assertThat(gate.evaluate(cfgTags("rising-volume"), bullBank(), rising, 1, NOW, IST_TIME, EOD)).isPresent();
+    EngineSeries falling = futureSeries(candleVol(0, 200_000), candleVol(1, 100_000));
+    assertThat(gate.evaluate(cfgTags("rising-volume"), bullBank(), falling, 1, NOW, IST_TIME, EOD)).isEmpty();
+    // the bare CFG (gate off) fires on the same falling-volume series.
+    assertThat(gate.evaluate(CFG, bullBank(), falling, 1, NOW, IST_TIME, EOD)).isPresent();
+  }
+
+  // a candle with a caller-chosen VOLUME (the rising-volume gate reads only the future bar's volume).
+  private static EngineCandle candleVol(int i, long vol) {
+    return new EngineCandle(NOW.atOffset(IST).plusMinutes(i), bd("100"), bd("111"), bd("99"), bd("110"), vol);
+  }
+
+  @Test
   void fiiBiasTagBlocksWhenTheFlowOpposesAndPassesOnNeutral() {
     // E3: fii-bias blocks a CE when FII flow is net short (30 < 50); a neutral read (bullContext, 50)
     // passes; the bare CFG (gate off) fires on the same net-short context.

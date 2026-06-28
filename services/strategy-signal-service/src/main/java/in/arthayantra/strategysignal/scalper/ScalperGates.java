@@ -118,6 +118,20 @@ public final class ScalperGates {
   }
 
   /**
+   * E6 §3.x rising-volume confirm (tag {@code rising-volume}): a real move comes WITH expanding
+   * participation — the deploy bar's volume must exceed the prior bar's. The seam supplies both volumes
+   * and only calls this when a prior bar exists, so a series-edge bar is never blocked.
+   */
+  public static GateOutcome risingVolume(long curVol, long prevVol) {
+    boolean ok = curVol > prevVol;
+    return new GateOutcome(
+        ok,
+        BigDecimal.valueOf(curVol),
+        ok ? "volume rising (" + curVol + " > " + prevVol + ")"
+            : "volume not rising (" + curVol + " <= " + prevVol + ")");
+  }
+
+  /**
    * RSI(3m,14): 40–60 is NO-TRADE; CE trades 60–80, PE trades 20–40 (exhaustion caps at 80/20).
    * These follow §4.2 "Indicator Set &amp; Exact Settings" (the doc's designated single source of
    * thresholds: no-trade 40–60, CE &gt;60, PE &lt;40). §3.10/§6.10 render the band as "buy 50–75 /

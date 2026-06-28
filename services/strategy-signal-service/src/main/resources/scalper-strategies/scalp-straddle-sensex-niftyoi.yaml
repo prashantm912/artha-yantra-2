@@ -84,7 +84,9 @@ entry_rules:
 exit_rules:
   - { type: stop_loss,   params: { basis: premium_pct, value: 50 } }   # [ASSUMED] v1 bounding stop proxy (combined-premium SL is LIVE)
   - { type: time_stop,   params: { max_bars: 30 } }                    # [ASSUMED] ~90 min cap; the real exit is the combined-premium roll-over
-  # NOTE: the faithful exit (combined-premium vs its own VWAP / one-leg management - section 3.11) is LIVE-managed
+  # NOTE: the faithful exit (combined-premium vs its own VWAP / one-leg management - section 3.11) is LIVE-managed.
+  # The authoritative long-straddle SL = combined-premium 5m VWAP - 15 points (owner S24 ruling); market-data
+  # surfaces combinedVwap + slBufferPoints + slLevel on /options/straddle-chart, the operator squares off on the break.
 
 risk:
   position_sizing: { method: premium_budget, params: { budget_inr: 15000 } }

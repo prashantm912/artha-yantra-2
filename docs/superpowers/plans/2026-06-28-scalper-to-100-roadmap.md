@@ -50,6 +50,34 @@ Verified against HEAD `ef2650b` (2026-06-28):
 These were ratified in [RATIFICATION-PACK](../../strategy-audit/RATIFICATION-PACK.md) and built per the
 (now archived) W3/oip-ai plans. **Everything below is what remains.**
 
+## 1b. Built + armed this session (2026-06-28, owner directive: arm-on-where-they-belong)
+
+The build started under the owner's D1-override (**gates ARMED on the strategies they belong to**, not
+left inert — strategies aren't live yet; the seeder mints a new draft version on tag-change at the next
+deploy). Default-OFF in code (`absent = off` stays clean); NOT live-deployed. Merged to `main`:
+
+- **W0 — `SUPERTREND_LINE` indicator** (#274): the P1 ST price-level primitive (ta4j Supertrend LINE,
+  the level the direction-only `SUPERTREND` dot could not expose). Registered, golden-safe; unblocks the
+  E6 ST-distance + E9 ST-level-stop rules. *(Consumers not yet wired — that is E6/E9.)*
+- **E2 M1 `oi-cross-required` + M2 `oi-slope-agree`** (#275): the Trending-OI #5 defining edge promoted
+  from soft dots to HARD pre-gates (completed fresh cross; sentiment level+slope conjunction; both
+  fail-closed). **Armed on `scalp-trending-oi-{nifty,sensex-niftyoi,sensex-sensexoi}`.**
+- **E2 M4 `flat-oi-stand-aside`** (#276): the flat-OI trap (null/flat imbalance → stand aside; inverse of
+  #5's fail-open). **Armed on `scalp-connect-the-dots-*`** (no `oi-cross-filter` there → mutually exclusive).
+- **E2 M6 `max-oi-sr-gate`** (#277): the OI-wall S/R gate (don't trade into the max-standing-OI strike;
+  fail-open). **Armed on `scalp-connect-the-dots-*`.**
+
+Parity held throughout: the 5 engine/backtest goldens carry no scalper → byte-identical, no regen
+(BacktestParityTest green each PR). **Build recipe proven** for the rest: a pure `ScalperGates` fn → a
+`cfg.has(tag)` early-return in `ScalperConfluenceGate` (NO `ScalperConfig` record change — the lighter
+W4 pattern, not the stream-files' `requireXxx` field) → `ScalperGatesTest` unit + `ScalperConfluenceGateTest`
+seam triple → arm the tag on the applicable YAMLs → a `ScalperStrategyLoadTest` *armed-iff-family* tripwire.
+**Caveat (expected):** armed strategies show ~ZERO trades on HISTORICAL backtests (derived history mutes OI →
+fail-closed gates) — a data artifact, NOT a regression; judge on FORWARD paper.
+
+**E2 remainder:** M3 `oi-divergence-magnitude` (needs an `oiDivergencePct` producer field), M7
+`oi-interval-and-60m-trend` (2nd `/options/trending` fetch); M5 is DESCOPED. See [oi-fidelity-gates.md](2026-06-27-backlog/oi-fidelity-gates.md).
+
 ## 2. The remaining work — 12 epics (the AUTOMATE_PKG remainder, debloated)
 
 ~95 work-packages across 12 streams. Each epic links its design file. Effort S/M/L; `[P]` =

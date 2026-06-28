@@ -79,4 +79,27 @@ class PriorDayVwapStopTest {
     assertThat(ScalperGates.priorDayVwapStop(null, bd("110"), CE)).isNull();
     assertThat(ScalperGates.priorDayVwapStop(bd("105"), null, CE)).isNull();
   }
+
+  /** n consecutive 10-wide bars (high = base+5, low = base−5) for the E8 ATR(14) read. */
+  private static EngineSeries volatileSeries(int n) {
+    OffsetDateTime t0 = OffsetDateTime.of(2026, 6, 20, 9, 15, 0, 0, IST);
+    EngineCandle[] bars = new EngineCandle[n];
+    for (int i = 0; i < n; i++) {
+      BigDecimal base = bd(String.valueOf(100 + i));
+      bars[i] =
+          new EngineCandle(
+              t0.plusMinutes(i), base, base.add(bd("5")), base.subtract(bd("5")), base, 100L);
+    }
+    return series(bars);
+  }
+
+  @Test
+  void atrAtEntryIsNullWithoutEnoughBars() {
+    assertThat(ScalperConfluenceGate.atrAtEntry(volatileSeries(10), 9)).isNull(); // index 9 < period 14
+  }
+
+  @Test
+  void atrAtEntryComputesAPositiveAtrOnAVolatileSeries() {
+    assertThat(ScalperConfluenceGate.atrAtEntry(volatileSeries(20), 19)).isPositive();
+  }
 }

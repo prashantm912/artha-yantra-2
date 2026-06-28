@@ -342,6 +342,21 @@ public class ScalperConfluenceGate {
         structuralStop = vwapStop;
       }
     }
+    // E8 §2.2 ATR stop (tag atr-stop): a volatility-scaled structural stop = entry ∓ 2×ATR(14) on the
+    // index future (the same index-price domain as every scalper structural stop). Reuses the engine's
+    // Wilder-ATR indicator on the warmed future series; null ATR (too few bars) leaves the default stop.
+    // Owner-directed MECHANISM, shipped default-OFF (armed on NO strategy): §2.2 ATR is a probability-
+    // graded SIZING lever, not a doc stop gate, and every directional family already specifies its own
+    // structural stop (or deliberately has none) — so no family is a faithful auto-home. The owner arms
+    // this per-strategy after deciding which family's default stop it should replace.
+    if (cfg.has("atr-stop") && future != null && index >= 0) {
+      BigDecimal atrStop =
+          ScalperGates.atrStop(
+              future.candle(index).close(), atrAtEntry(future, index), ScalperConfig.ATR_STOP_MULT, side);
+      if (atrStop != null) {
+        structuralStop = atrStop;
+      }
+    }
     // The live bar's IST date drives the S24 monthly-expiry OI suppression (distinct from eodDate,
     // the prior completed session used for breadth/FII).
     LocalDate tradeDate = barInstant.atZone(Ist.ZONE).toLocalDate();
@@ -606,6 +621,19 @@ public class ScalperConfluenceGate {
       return null;
     }
     return sumPv.divide(sumV.multiply(BigDecimal.valueOf(3)), 4, java.math.RoundingMode.HALF_UP);
+  }
+
+  /**
+   * E8: ATR(14) on the index future at the entry bar, via the engine's Wilder-ATR indicator (the same
+   * computation the engine exit path uses). null when the warmed series is too short for a full ATR.
+   */
+  static BigDecimal atrAtEntry(EngineSeries future, int index) {
+    if (future == null || index < ScalperConfig.ATR_STOP_PERIOD) {
+      return null;
+    }
+    return in.arthayantra.strategyengine.indicators.IndicatorRegistry.create(
+            "ATR", future, null, java.util.Map.of("period", ScalperConfig.ATR_STOP_PERIOD))
+        .valueAt(index);
   }
 
   /**

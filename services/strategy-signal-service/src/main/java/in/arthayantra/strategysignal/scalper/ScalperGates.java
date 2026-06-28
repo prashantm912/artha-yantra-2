@@ -331,6 +331,21 @@ public final class ScalperGates {
   }
 
   /**
+   * E8 §2.2 ATR stop: a volatility-scaled structural stop — {@code entry ∓ multiple × ATR} on the index
+   * future (CE: support below, PE: resistance above). Always on the protective side by construction
+   * ({@code multiple × atr} ≥ 0). null when the ATR is unavailable (too few bars) → the default
+   * structural stop stands.
+   */
+  public static BigDecimal atrStop(
+      BigDecimal entryClose, BigDecimal atr, BigDecimal multiple, OptionType side) {
+    if (entryClose == null || atr == null || atr.signum() <= 0) {
+      return null;
+    }
+    BigDecimal distance = atr.multiply(multiple);
+    return side == OptionType.CE ? entryClose.subtract(distance) : entryClose.add(distance);
+  }
+
+  /**
    * §3.9 Morning Trade: the PRIOR-day VWAP as the morning structural stop — but only when it sits on
    * the PROTECTIVE side of the entry (a support BELOW a CE long / a resistance ABOVE a PE short, doc
    * L539/L541 "the first support on a fall"). Returns the stop level, or null when the VWAP is on the

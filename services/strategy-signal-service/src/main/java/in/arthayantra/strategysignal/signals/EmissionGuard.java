@@ -34,4 +34,20 @@ public interface EmissionGuard {
       String tradingsymbol,
       BigDecimal price,
       BigDecimal stopDistance);
+
+  /**
+   * The {@link #suggestedQty} variant that also applies an E8 §3.2 probability-graded size
+   * {@code multiplier} (in {@code (0, 1]}) before lot-rounding. The default IGNORES the multiplier
+   * (back-compat for impls that do not grade); the paper adapter overrides it to scale + re-lot-round
+   * DOWN (never up, never below one lot for a fired entry). A null multiplier == the ungraded sizing.
+   */
+  default BigDecimal suggestedQty(
+      StrategyDefinition.SizingSpec sizing,
+      String exchange,
+      String tradingsymbol,
+      BigDecimal price,
+      BigDecimal stopDistance,
+      BigDecimal multiplier) {
+    return suggestedQty(sizing, exchange, tradingsymbol, price, stopDistance);
+  }
 }

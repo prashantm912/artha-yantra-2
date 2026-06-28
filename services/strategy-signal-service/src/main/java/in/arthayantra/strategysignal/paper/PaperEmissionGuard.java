@@ -49,10 +49,37 @@ public class PaperEmissionGuard implements EmissionGuard {
       String tradingsymbol,
       BigDecimal price,
       BigDecimal stopDistance) {
+    return suggestedQty(sizing, exchange, tradingsymbol, price, stopDistance, null);
+  }
+
+  @Override
+  public BigDecimal suggestedQty(
+      StrategyDefinition.SizingSpec sizing,
+      String exchange,
+      String tradingsymbol,
+      BigDecimal price,
+      BigDecimal stopDistance,
+      BigDecimal multiplier) {
     InstrumentMeta meta = instruments.meta(exchange, tradingsymbol);
-    long qty =
+    long lot = Math.max(1, meta.lotSize());
+    long base =
         PositionSizer.size(
             sizing, new PositionSizer.Inputs(account.equity(), price, stopDistance, meta.lotSize()));
-    return qty <= 0 ? null : BigDecimal.valueOf(qty);
+    if (base <= 0) {
+      return null;
+    }
+    if (multiplier == null) {
+      return BigDecimal.valueOf(base);
+    }
+    // E8 §3.2: scale the advisory qty by the graded multiplier, then floor to a WHOLE lot (never round
+    // UP, never below one lot for a fired entry). PaperEmissionGuard is the one rounding authority.
+    long lots =
+        Math.max(
+            1L,
+            BigDecimal.valueOf(base)
+                .multiply(multiplier)
+                .divideToIntegralValue(BigDecimal.valueOf(lot))
+                .longValueExact());
+    return BigDecimal.valueOf(lots * lot);
   }
 }

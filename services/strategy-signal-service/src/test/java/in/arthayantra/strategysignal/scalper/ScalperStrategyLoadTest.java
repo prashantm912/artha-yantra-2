@@ -155,6 +155,17 @@ class ScalperStrategyLoadTest {
           .as(id + " oi-cross-filter pre-gate")
           .isEqualTo(isTrendingOi);
 
+      // E11 §3.9 Morning-Trade #9 entry gates: morning-opening-formation (2nd-candle break+hold) +
+      // morning-eod-precondition (prior-session convincing close) are armed on the scalp-morning-trade
+      // family ONLY (the #9 opening-tick strategy per the operative doc); every other variant stays off.
+      boolean isMorning = id.startsWith("scalp-morning-trade-");
+      assertThat(tags.contains("morning-opening-formation"))
+          .as(id + " morning-opening-formation armed iff morning-trade")
+          .isEqualTo(isMorning);
+      assertThat(tags.contains("morning-eod-precondition"))
+          .as(id + " morning-eod-precondition armed iff morning-trade")
+          .isEqualTo(isMorning);
+
       // E2 M1/M2 (oi-cross-required + oi-slope-agree): the Trending-OI #5 defining hard gates are armed
       // on the scalp-trending-oi family ONLY (the defining strategy per the operative doc); every other
       // variant stays unarmed (the gate reads the tag via cfg.has(...), so assert against the tag list).

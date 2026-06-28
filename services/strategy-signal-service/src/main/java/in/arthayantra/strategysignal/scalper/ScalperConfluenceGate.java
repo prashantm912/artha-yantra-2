@@ -280,6 +280,35 @@ public class ScalperConfluenceGate {
             .pass()) {
       return Optional.empty();
     }
+    // E11 §3.9 Morning-Trade OPENING FORMATION (tag morning-opening-formation, doc L540): do NOT enter on
+    // the gap alone — the 2nd session candle must break+hold the 1st candle's high (CE)/low (PE). Morning
+    // family only (opening-tick). Blocks the opening bar itself (formation not yet formed). Live-only seam.
+    if (cfg.openingTick() && cfg.has("morning-opening-formation") && future != null && index >= 0) {
+      int s = future.sessionStart(index);
+      if (index < s + 1) {
+        return Optional.empty(); // only the opening bar so far — wait for the 2nd candle, never the gap alone
+      }
+      EngineCandle c1 = future.candle(s);
+      EngineCandle c2 = future.candle(s + 1);
+      if (!ScalperGates.openingFormation(
+              c1.high(), c1.low(), c2.high(), c2.low(), c2.close(), side)
+          .pass()) {
+        return Optional.empty();
+      }
+    }
+    // E11 §3.9 Morning-Trade EOD PRECONDITION (tag morning-eod-precondition, doc L534): the opening view
+    // needs a CONVINCING prior-session close in the side direction (close in the side's quartile of the
+    // prior session's range). Reads the warmed prior session off the future series (no new feed). Morning
+    // family only. A null/absent prior session degrades to pass. Live-only seam.
+    if (cfg.openingTick() && cfg.has("morning-eod-precondition")) {
+      PriorExtremes pe = priorSessionExtremes(future, index);
+      if (pe != null
+          && !ScalperGates.eodConvincingClose(
+                  pe.high(), pe.low(), pe.close(), side, ScalperConfig.MORNING_NEAR_EXTREME_FRAC)
+              .pass()) {
+        return Optional.empty();
+      }
+    }
     // E3 volume-pump (tag volume-pump, §4.15.3): the deploy candle must be a floor-clearing pump closing
     // in the side's direction (dark-green/dark-red attribution). Reads the bar OHLCV off the future
     // series already in scope (no Chart extension). Default-OFF; a null future degrades to pass.
@@ -621,6 +650,33 @@ public class ScalperConfluenceGate {
       return null;
     }
     return sumPv.divide(sumV.multiply(BigDecimal.valueOf(3)), 4, java.math.RoundingMode.HALF_UP);
+  }
+
+  /** The PRIOR completed session's high / low / close over the warmed bars (#9 EOD precondition). */
+  record PriorExtremes(BigDecimal high, BigDecimal low, BigDecimal close) {}
+
+  /**
+   * §3.9 #9: the prior completed session's HIGH / LOW / CLOSE from the warmed future series — same
+   * session-walk as {@link #priorSessionVwap}. null when no prior session is warmed (sessionStart == 0).
+   */
+  static PriorExtremes priorSessionExtremes(EngineSeries future, int index) {
+    if (future == null || index < 0) {
+      return null;
+    }
+    int todayStart = future.sessionStart(index);
+    if (todayStart <= 0) {
+      return null; // no prior session warmed
+    }
+    int priorStart = future.sessionStart(todayStart - 1);
+    BigDecimal high = null;
+    BigDecimal low = null;
+    for (int i = priorStart; i < todayStart; i++) {
+      EngineCandle c = future.candle(i);
+      high = high == null || c.high().compareTo(high) > 0 ? c.high() : high;
+      low = low == null || c.low().compareTo(low) < 0 ? c.low() : low;
+    }
+    BigDecimal close = future.candle(todayStart - 1).close(); // the prior session's last (closing) bar
+    return new PriorExtremes(high, low, close);
   }
 
   /**

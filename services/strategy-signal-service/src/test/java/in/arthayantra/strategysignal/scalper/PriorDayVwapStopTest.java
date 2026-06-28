@@ -94,6 +94,23 @@ class PriorDayVwapStopTest {
   }
 
   @Test
+  void priorSessionExtremesReadsThePriorSessionHighLowClose() {
+    // prior session (2026-06-19): bars 100 then 110 (flat OHLC) → H=110, L=100, close=110 (last bar).
+    var ex = ScalperConfluenceGate.priorSessionExtremes(twoSessionSeries(), 3);
+    assertThat(ex).isNotNull();
+    assertThat(ex.high()).isEqualByComparingTo("110");
+    assertThat(ex.low()).isEqualByComparingTo("100");
+    assertThat(ex.close()).isEqualByComparingTo("110");
+  }
+
+  @Test
+  void priorSessionExtremesIsNullWithoutAPriorSession() {
+    OffsetDateTime d20 = OffsetDateTime.of(2026, 6, 20, 9, 15, 0, 0, IST);
+    EngineSeries todayOnly = series(bar(d20, "112", 5), bar(d20.plusMinutes(1), "113", 5));
+    assertThat(ScalperConfluenceGate.priorSessionExtremes(todayOnly, 1)).isNull();
+  }
+
+  @Test
   void atrAtEntryIsNullWithoutEnoughBars() {
     assertThat(ScalperConfluenceGate.atrAtEntry(volatileSeries(10), 9)).isNull(); // index 9 < period 14
   }

@@ -544,4 +544,37 @@ class ScalperGatesTest {
     assertThat(ScalperGates.atrStop(bd("100"), bd("0"), bd("2.0"), CE)).isNull();
     assertThat(ScalperGates.atrStop(null, bd("5"), bd("2.0"), CE)).isNull();
   }
+
+  @Test
+  void openingFormationRequiresThe2ndCandleToBreakAndHoldThe1st() {
+    // first candle H=110 L=90. CE: 2nd must break ABOVE 110 AND close >= 110.
+    assertThat(ScalperGates.openingFormation(bd("110"), bd("90"), bd("112"), bd("100"), bd("111"), CE).pass())
+        .isTrue(); // broke 110 and held (close 111)
+    assertThat(ScalperGates.openingFormation(bd("110"), bd("90"), bd("112"), bd("100"), bd("108"), CE).pass())
+        .isFalse(); // poked to 112 but closed 108 back inside (a rejected fakeout)
+    assertThat(ScalperGates.openingFormation(bd("110"), bd("90"), bd("109"), bd("100"), bd("109"), CE).pass())
+        .isFalse(); // never broke the 110 high
+    // PE mirror: 2nd must break BELOW 90 AND close <= 90.
+    assertThat(ScalperGates.openingFormation(bd("110"), bd("90"), bd("100"), bd("88"), bd("89"), PE).pass())
+        .isTrue();
+    assertThat(ScalperGates.openingFormation(bd("110"), bd("90"), bd("100"), bd("88"), bd("92"), PE).pass())
+        .isFalse(); // poked below but closed back above 90
+    // a null candle operand degrades to pass (the seam guards "the 2nd bar formed").
+    assertThat(ScalperGates.openingFormation(null, bd("90"), bd("112"), bd("100"), bd("111"), CE).pass())
+        .isTrue();
+  }
+
+  @Test
+  void eodConvincingCloseRequiresThePriorCloseInTheSideQuartile() {
+    BigDecimal q = bd("0.25"); // top/bottom quartile of the prior range
+    // prior H=200 L=100 range=100, band=25. CE wants close >= 175 (top quartile).
+    assertThat(ScalperGates.eodConvincingClose(bd("200"), bd("100"), bd("180"), CE, q).pass()).isTrue();
+    assertThat(ScalperGates.eodConvincingClose(bd("200"), bd("100"), bd("174"), CE, q).pass()).isFalse();
+    // PE wants close <= 125 (bottom quartile).
+    assertThat(ScalperGates.eodConvincingClose(bd("200"), bd("100"), bd("120"), PE, q).pass()).isTrue();
+    assertThat(ScalperGates.eodConvincingClose(bd("200"), bd("100"), bd("126"), PE, q).pass()).isFalse();
+    // null operands / a zero-range prior session degrade to pass.
+    assertThat(ScalperGates.eodConvincingClose(null, bd("100"), bd("180"), CE, q).pass()).isTrue();
+    assertThat(ScalperGates.eodConvincingClose(bd("150"), bd("150"), bd("150"), CE, q).pass()).isTrue();
+  }
 }

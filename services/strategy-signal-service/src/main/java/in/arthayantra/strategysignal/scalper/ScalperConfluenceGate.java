@@ -398,7 +398,11 @@ public class ScalperConfluenceGate {
   private static BigDecimal structuralStop(
       ScalperConfig cfg, EngineSeries future, int index, OptionType side) {
     if (cfg.requireTwoCandle()) {
-      return TwoCandleGate.detect(future, index, side, cfg.signalIndex()).stopLevel();
+      // E6 #10 (tag two-candle-substitution): a light-volume 2nd candle is admitted when the deploy bar
+      // carries the floor on the side colour. Absent ⇒ the strict detector (byte-identical).
+      return TwoCandleGate.detect(
+              future, index, side, cfg.signalIndex(), cfg.has("two-candle-substitution"))
+          .stopLevel();
     }
     if (cfg.structuralStop() == StructuralStop.ENTRY_CANDLE && future != null && index >= 0) {
       return side == OptionType.CE ? future.candle(index).low() : future.candle(index).high();

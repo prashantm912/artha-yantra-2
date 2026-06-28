@@ -175,6 +175,12 @@ class ScalperStrategyLoadTest {
           .as(id + " iv-buyer-cap armed iff golden-crossover")
           .isEqualTo(isGoldenCrossover);
 
+      // E6 #10 (two-candle-substitution): armed on the scalp-two-candle family (#1, its namesake gate).
+      boolean isTwoCandle = id.startsWith("scalp-two-candle-");
+      assertThat(tags.contains("two-candle-substitution"))
+          .as(id + " two-candle-substitution armed iff two-candle")
+          .isEqualTo(isTwoCandle);
+
       // Connect-the-Dots (#10) is the SOFT weighted-scorer strategy: these confluences are ALREADY soft
       // dots in the 18-dot scorer, so the hard-gate versions ship default-OFF and are armed on NO
       // strategy (the scorer + base rails decide, not an AND of hard pre-gates). The code stays merged +

@@ -40,6 +40,22 @@ public final class TwoCandleGate {
    */
   public static Formation detect(
       EngineSeries future, int entryIndex, OptionType side, String underlying) {
+    return detect(future, entryIndex, side, underlying, false);
+  }
+
+  /**
+   * E6 #10 (tag {@code two-candle-substitution}) overload: when {@code allowVolumeSubstitution} is set,
+   * a 2nd candle that misses the volume floor is still accepted IF the deploy (3rd) bar itself clears
+   * the floor on the side's colour (the doc's "if the 2nd is light, the breakout candle carries it").
+   * The colour + 2nd-candle-strength + 1st-candle-floor checks are unchanged, so {@code false} (the
+   * default) is byte-identical to the strict detector.
+   */
+  public static Formation detect(
+      EngineSeries future,
+      int entryIndex,
+      OptionType side,
+      String underlying,
+      boolean allowVolumeSubstitution) {
     if (future == null || entryIndex < 2) {
       return ABSENT;
     }
@@ -49,8 +65,18 @@ public final class TwoCandleGate {
     if (!sameColour(first, ce) || !sameColour(second, ce)) {
       return ABSENT;
     }
-    if (!floorMet(underlying, first) || !floorMet(underlying, second)) {
+    if (!floorMet(underlying, first)) {
       return ABSENT;
+    }
+    if (!floorMet(underlying, second)) {
+      // strict path rejects a light 2nd candle; the substitution path admits it only when the deploy
+      // (3rd) bar clears the floor on the side colour.
+      EngineCandle deploy = future.candle(entryIndex);
+      boolean substituted =
+          allowVolumeSubstitution && sameColour(deploy, ce) && floorMet(underlying, deploy);
+      if (!substituted) {
+        return ABSENT;
+      }
     }
     if (!strongBody(second)) {
       return ABSENT;

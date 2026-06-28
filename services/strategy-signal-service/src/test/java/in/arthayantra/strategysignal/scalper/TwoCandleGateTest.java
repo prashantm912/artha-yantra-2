@@ -72,6 +72,21 @@ class TwoCandleGateTest {
   }
 
   @Test
+  void substitutionAdmitsALightSecondCandleWhenTheDeployBarCarriesTheFloor() {
+    // 2nd candle below the floor → the strict path rejects; the substitution path admits it because the
+    // deploy (3rd) bar is green AND clears the floor (E6 #10).
+    EngineSeries s = series(green(0, FLOOR), green(1, BELOW), green(2, FLOOR));
+    assertThat(TwoCandleGate.detect(s, 2, CE, "NIFTY 50", false).present()).isFalse();
+    assertThat(TwoCandleGate.detect(s, 2, CE, "NIFTY 50", true).present()).isTrue();
+    // ...but only when the deploy bar itself clears the floor (a light deploy bar still rejects).
+    EngineSeries lightDeploy = series(green(0, FLOOR), green(1, BELOW), green(2, BELOW));
+    assertThat(TwoCandleGate.detect(lightDeploy, 2, CE, "NIFTY 50", true).present()).isFalse();
+    // ...and only when the deploy bar is the side colour (a red deploy bar on a CE side rejects).
+    EngineSeries redDeploy = series(green(0, FLOOR), green(1, BELOW), red(2, FLOOR));
+    assertThat(TwoCandleGate.detect(redDeploy, 2, CE, "NIFTY 50", true).present()).isFalse();
+  }
+
+  @Test
   void rejectsWhenTheSecondCandleIsWeak() {
     // 2nd candle (index 1) has a wick ≥ 2× its body → rejection, not a momentum candle
     EngineSeries s = series(green(0, FLOOR), weakGreen(1, FLOOR), green(2, FLOOR));

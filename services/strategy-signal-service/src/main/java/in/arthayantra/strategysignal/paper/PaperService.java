@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -90,6 +91,7 @@ public class PaperService {
   private final InstrumentMetaClient instruments;
   private final SignalRepository signals;
   private final PaperAccountService accountService;
+  private final ApplicationEventPublisher events;
 
   /** Wires the ledger collaborators. */
   public PaperService(
@@ -99,7 +101,8 @@ public class PaperService {
       LastTickReader lastTick,
       InstrumentMetaClient instruments,
       SignalRepository signals,
-      PaperAccountService accountService) {
+      PaperAccountService accountService,
+      ApplicationEventPublisher events) {
     this.orders = orders;
     this.positions = positions;
     this.fills = fills;
@@ -107,6 +110,7 @@ public class PaperService {
     this.instruments = instruments;
     this.signals = signals;
     this.accountService = accountService;
+    this.events = events;
   }
 
   /** Simulates an entry; fills via {@code ltp_slippage/v1} against the next-tick LTP + cost model. */
@@ -220,6 +224,9 @@ public class PaperService {
         null, pos.exchange(), pos.tradingsymbol(), exitSide.name(), pos.qty(), exit.fillPrice(),
         fills.simulatorId(), exit.slippageApplied(), null, null);
     positions.close(pos.id(), realized, closeReason);
+    // Auto-journal hook: the journal module listens AFTER_COMMIT (so a journal failure can never
+    // roll back the close). Publishing inside the close tx is fine — delivery is deferred to commit.
+    events.publishEvent(new PaperPositionClosed(pos.id(), realized, closeReason));
     return realized;
   }
 

@@ -73,7 +73,7 @@ entry_rules:
 
 exit_rules:
   - { type: stop_loss,   params: { basis: premium_pct, value: 50 } }   # section 7: SL = 50% of premium
-  - { type: signal_exit, params: { rule: "close < vwap" } }            # the break failing back through VWAP invalidates
+  - { type: signal_exit, params: { rule: "close < vwap", min_volume: 125000 } }            # the break failing back through VWAP invalidates
   - { type: time_stop,   params: { max_bars: 16 } }                    # ~48 min cap into the 15:20 square-off
 
 risk:

@@ -12,7 +12,7 @@ version: 1.0.0
 description: "Golden-crossover scalp (Siva #6) on the NIFTY front future; ST+VWMA pierce VWAP + confluence; long-premium CE only."
 author: owner
 # `entry-candle-stop` anchors the structural stop on the crossover candle's low (§3.6 breakout form).
-tags: [scalper, options, intraday, nifty, entry-candle-stop, rsi-s24-bands, delta-s24-floor, premium-s24-band, iv-buyer-cap, s24-trade-window]
+tags: [scalper, options, intraday, nifty, entry-candle-stop, rsi-s24-bands, delta-s24-floor, premium-s24-band, iv-buyer-cap, supertrend-15m, s24-trade-window]
 
 universe:
   mode: options_of_underlying
@@ -25,7 +25,7 @@ universe:
 
 timeframes:
   primary: 3m
-  additional: [1h]
+  additional: [15m, 1h]            # 15m for the §3.10 ST-trend confirm; 1h for the bias
 
 indicators:
   - { name: VWMA,       alias: vwma20,    timeframe: 3m, params: { period: 20 } }
@@ -35,6 +35,7 @@ indicators:
   - { name: SUPERTREND, alias: supertrend, timeframe: 3m, params: { period: 10, multiplier: 2.0 },
       weight: 1.0, normalize: { type: direction } }
   - { name: SUPERTREND, alias: bias60m,   timeframe: 1h, params: { period: 7, multiplier: 3.0 } }
+  - { name: SUPERTREND, alias: supertrend15m, timeframe: 15m, params: { period: 7, multiplier: 3.0 } } # §3.10 15m trend confirm
 
 entry_rules:
   direction: long

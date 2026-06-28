@@ -231,6 +231,18 @@ public final class ScalperGates {
     return new GateOutcome(ok, rsi, ok ? want + " ok" : want + " (overbought/oversold cap)");
   }
 
+  /**
+   * E6 §3.10/§4.14.6 15-minute SuperTrend confirmation (tag {@code supertrend-15m}): the higher-TF trend
+   * must AGREE with the side — CE needs {@code dir15m > 0} (15m uptrend), PE {@code dir15m < 0}. An
+   * UNKNOWN direction ({@code dir15m == 0}: the 15m series unwarmed / mid-flip) PASSES — the
+   * {@code bias60m}/VIX fail-OPEN convention, so a missing higher-TF trend never blocks a confirmed 3m entry.
+   */
+  public static GateOutcome supertrend15mAlign(int dir15m, OptionType side) {
+    boolean ok = dir15m == 0 || (side == OptionType.CE ? dir15m > 0 : dir15m < 0);
+    String label = dir15m == 0 ? "15m trend unknown" : (dir15m > 0 ? "15m up" : "15m down");
+    return new GateOutcome(ok, null, label + (ok ? " supports " : " opposes ") + side);
+  }
+
   /** Bull (CE): PSAR, VWMA, ST and VWAP all below price; bear (PE): all above. */
   public static GateOutcome indicatorAlignment(Chart c, OptionType side) {
     boolean ok;

@@ -172,6 +172,10 @@ class ScalperStrategyLoadTest {
       assertThat(tags.contains("flat-oi-stand-aside"))
           .as(id + " flat-oi-stand-aside armed iff connect-the-dots")
           .isEqualTo(isConnectDots);
+      // E2 M6 (max-oi-sr-gate): the OI-wall S/R gate is armed on the connect-the-dots family too.
+      assertThat(tags.contains("max-oi-sr-gate"))
+          .as(id + " max-oi-sr-gate armed iff connect-the-dots")
+          .isEqualTo(isConnectDots);
 
       // #11 (section 3.11): only the scalp-straddle family carries the straddle tag → the NEUTRAL two-leg
       // path. ScalperConfig.requireStraddle mirrors the tag; the others stay off, and the straddle

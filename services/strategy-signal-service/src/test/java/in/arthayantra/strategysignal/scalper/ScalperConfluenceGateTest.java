@@ -14,6 +14,7 @@ import in.arthayantra.strategyengine.series.EngineSeries;
 import in.arthayantra.strategyengine.series.SeriesKey;
 import in.arthayantra.strategysignal.scalper.MarketOiClient.ChainSnapshot;
 import in.arthayantra.strategysignal.scalper.MarketOiClient.OpenHighStats;
+import in.arthayantra.strategysignal.scalper.MarketOiClient.StrikeOi;
 import in.arthayantra.strategysignal.scalper.MarketOiClient.StrikeStat;
 import in.arthayantra.strategysignal.scalper.ScalperConfluenceGate.Decision;
 import in.arthayantra.strategysignal.scalper.ScalperGateContext.Chart;
@@ -198,6 +199,19 @@ class ScalperConfluenceGateTest {
         new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), null, null));
   }
 
+  // a chain whose largest STANDING CE OI sits at ceWallStrike (the S/R wall the M6 gate reads); the PE
+  // wall is parked far above so it never gates a CE side. spot = 20000, in-band 19850 CE for the pick.
+  private static ChainSnapshot chainWithCeWallAt(BigDecimal ceWallStrike) {
+    return new ChainSnapshot(
+        EXPIRY, bd("20000"), bd("20000"),
+        List.of(
+            new StrikePicker.Candidate("NIFTY19850CE", bd("19850"), CE, bd("200"), bd("0.14")),
+            new StrikePicker.Candidate("NIFTY20000CE", bd("20000"), CE, bd("120"), bd("0.14"))),
+        List.of(
+            new StrikeOi(ceWallStrike, 500_000L, 100L),
+            new StrikeOi(bd("21000"), 100L, 800_000L)));
+  }
+
   private static ChainSnapshot chainWithInBandCe() {
     // spot 20000, basis 0, ~5d, iv 0.14 → 19850 CE lands delta ~0.68 (in 0.6–0.7); others out
     List<StrikePicker.Candidate> candidates =
@@ -285,6 +299,27 @@ class ScalperConfluenceGateTest {
 
     when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
     assertThat(gate.evaluate(cfgTags("flat-oi-stand-aside"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isEmpty();
+    assertThat(gate.evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+  }
+
+  @Test
+  void maxOiSrGateBlocksAnEntryIntoTheOiWall() {
+    // E2 M6: the max-oi-sr-gate blocks when spot is AT/beyond the dominant standing-OI wall on the side;
+    // the bare CFG (gate off) still fires into the same wall.
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+
+    // CE wall sits AT spot (20000) → trading into the wall → blocked when armed.
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithCeWallAt(bd("20000"))));
+    assertThat(gate.evaluate(cfgTags("max-oi-sr-gate"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isEmpty();
+
+    // CE wall above spot (20100) → clear of the wall → fires when armed.
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithCeWallAt(bd("20100"))));
+    assertThat(gate.evaluate(cfgTags("max-oi-sr-gate"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+
+    // unarmed bare CFG against the into-the-wall chain → still fires.
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithCeWallAt(bd("20000"))));
     assertThat(gate.evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
   }
 

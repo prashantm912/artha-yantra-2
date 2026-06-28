@@ -214,6 +214,17 @@ class ScalperGatesTest {
   }
 
   @Test
+  void constituentRequiresHeavyweightPushNotToOppose() {
+    // CE wants the net constituent push positive; PE negative; 0 (flat) and null degrade to pass.
+    assertThat(ScalperGates.constituent(macroConstituent(bd("0.5")), CE).pass()).isTrue();
+    assertThat(ScalperGates.constituent(macroConstituent(bd("-0.5")), CE).pass()).isFalse();
+    assertThat(ScalperGates.constituent(macroConstituent(bd("-0.5")), PE).pass()).isTrue();
+    assertThat(ScalperGates.constituent(macroConstituent(bd("0.5")), PE).pass()).isFalse();
+    assertThat(ScalperGates.constituent(macroConstituent(bd("0")), CE).pass()).isTrue(); // flat never blocks
+    assertThat(ScalperGates.constituent(macroConstituent(null), CE).pass()).isTrue(); // null -> pass
+  }
+
+  @Test
   void fiiBiasRequiresTheFlowNotToOpposeTheSide() {
     // CE wants FII net long (>=50); PE net short (<=50); 50 is neutral (both pass); null degrades to pass.
     assertThat(ScalperGates.fiiBias(macroFii(bd("60")), CE).pass()).isTrue();
@@ -381,5 +392,10 @@ class ScalperGatesTest {
 
   private static Macro macroFii(BigDecimal fiiLongPct) {
     return new Macro(bd("14"), bd("30"), bd("12.5"), Boolean.FALSE, 40, 10, fiiLongPct, null, null);
+  }
+
+  private static Macro macroConstituent(BigDecimal constituentBias) {
+    return new Macro(
+        bd("14"), bd("30"), bd("12.5"), Boolean.FALSE, 40, 10, bd("50"), null, null, constituentBias);
   }
 }

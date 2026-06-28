@@ -359,6 +359,22 @@ public final class ScalperGates {
         ok, longPct, ok ? "FII flow favours " + side : "FII flow opposes " + side);
   }
 
+  /**
+   * E3 (tag {@code constituent-gate}, §4.6 "the heavyweights must support the direction"): the index
+   * constituents' net weighted push ({@code Macro.constituentBias}, the {@code /equity/index-contribution}
+   * {@code indexChangePct}) must not oppose the side — CE needs it positive (heavyweights pushing up), PE
+   * negative. A null or exactly-zero (flat) push DEGRADES to pass (a neutral read never blocks).
+   */
+  public static GateOutcome constituent(Macro m, OptionType side) {
+    BigDecimal bias = m.constituentBias();
+    if (bias == null || bias.signum() == 0) {
+      return GateOutcome.pass(bias, "constituent push neutral/unavailable (degrade -> pass)");
+    }
+    boolean ok = side == OptionType.CE ? bias.signum() > 0 : bias.signum() < 0;
+    return new GateOutcome(
+        ok, bias, ok ? "heavyweights push favours " + side : "heavyweights push opposes " + side);
+  }
+
   /** Futures basis: future > spot (premium) is bullish → CE; future < spot (discount) bearish → PE. */
   public static GateOutcome futuresBasis(Oi oi, OptionType side) {
     BigDecimal basis = oi.futuresBasis();

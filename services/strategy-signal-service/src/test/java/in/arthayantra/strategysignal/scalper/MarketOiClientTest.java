@@ -122,10 +122,12 @@ class MarketOiClientTest {
     // §A4: macro now also reads the chain for the 6-strike IV pair — a chain with <6 strikes leaves
     // the pair null without disturbing the IV/rank/breadth/FII assertions below.
     stub("/api/v1/market/options/chain", "{\"spot\":\"20000\",\"rows\":[]}");
+    stub("/api/v1/market/equity/index-contribution", "{\"indexChangePct\":\"0.5\"}");
 
     Macro m = client.macro(UNDERLYING, TRADE_DATE);
 
     assertThat(m.atmIv()).isEqualByComparingTo("0.14");
+    assertThat(m.constituentBias()).isEqualByComparingTo("0.5"); // /equity/index-contribution indexChangePct
     assertThat(m.ivRank()).isEqualByComparingTo("30"); // 0.30 × 100
     assertThat(m.ceIvAvg6()).isNull(); // <6 strikes → no IV pair
     assertThat(m.peIvAvg6()).isNull();
@@ -146,10 +148,12 @@ class MarketOiClientTest {
     stub("/api/v1/market/breadth", "{\"summary\":{\"advances\":5,\"declines\":40}}");
     stub("/api/v1/market/fii-dii/long-short", "{\"items\":[]}");
     stub("/api/v1/market/options/chain", "{\"spot\":\"20000\",\"rows\":[]}");
+    stub("/api/v1/market/equity/index-contribution", "{}");
 
     Macro m = client.macro(UNDERLYING, TRADE_DATE);
 
     assertThat(m.ivRank()).isNull(); // not 0 — "unknown", so the iv_rank dot stays unconfirmed
+    assertThat(m.constituentBias()).isNull(); // empty contribution envelope
     assertThat(m.fiiLongPct()).isNull(); // empty envelope
   }
 
@@ -278,6 +282,7 @@ class MarketOiClientTest {
         .andRespond(withServerError());
     stub("/api/v1/market/fii-dii/long-short", "{\"items\":[]}");
     stub("/api/v1/market/options/chain", "{\"spot\":\"20000\",\"rows\":[]}");
+    stub("/api/v1/market/equity/index-contribution", "{}");
 
     Macro m = client.macro(UNDERLYING, TRADE_DATE);
 

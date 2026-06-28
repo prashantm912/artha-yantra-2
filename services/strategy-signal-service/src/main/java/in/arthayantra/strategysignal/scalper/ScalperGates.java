@@ -213,6 +213,24 @@ public final class ScalperGates {
     return new GateOutcome(ok, movePct, ok ? want + " ok" : want + " (move too small)");
   }
 
+  /**
+   * E5 §3.2/§4.2 higher-timeframe RSI overbought/oversold cap (tags {@code rsi-5m-cap} / {@code
+   * rsi-daily-cap}). CE must be BELOW {@code ceCap} (not overbought on the higher TF); PE must be ABOVE
+   * {@code peFloor} (not oversold). A null RSI FAILS (fail-closed) — the higher-TF series is warmed
+   * (§3.2a), so a null read means the cap data is genuinely unavailable and the strategy that OPTED IN
+   * waits rather than chasing blind.
+   */
+  public static GateOutcome rsiHigherTfCap(
+      BigDecimal rsi, OptionType side, BigDecimal ceCap, BigDecimal peFloor) {
+    if (rsi == null) {
+      return GateOutcome.fail(null, "higher-tf rsi unavailable");
+    }
+    boolean ok =
+        side == OptionType.CE ? rsi.compareTo(ceCap) < 0 : rsi.compareTo(peFloor) > 0;
+    String want = side == OptionType.CE ? "CE rsi < " + ceCap : "PE rsi > " + peFloor;
+    return new GateOutcome(ok, rsi, ok ? want + " ok" : want + " (overbought/oversold cap)");
+  }
+
   /** Bull (CE): PSAR, VWMA, ST and VWAP all below price; bear (PE): all above. */
   public static GateOutcome indicatorAlignment(Chart c, OptionType side) {
     boolean ok;

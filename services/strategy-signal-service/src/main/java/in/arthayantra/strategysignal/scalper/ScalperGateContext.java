@@ -25,7 +25,24 @@ public record ScalperGateContext(
       BigDecimal psar,
       int supertrendDir,
       BigDecimal rsi14,
-      BigDecimal volume) {}
+      BigDecimal volume,
+      // E5 §3.2/§4.2: the higher-TF RSI reads (5m + daily) for the overbought/oversold caps; null when
+      // the strategy declares no such indicator (read only behind bank.has(...)).
+      BigDecimal rsi5m,
+      BigDecimal rsiDaily) {
+
+    /** Pre-higher-TF 7-arg form: {@code rsi5m}/{@code rsiDaily} default to null (keeps literals intact). */
+    public Chart(
+        BigDecimal close,
+        BigDecimal vwap,
+        BigDecimal vwma20,
+        BigDecimal psar,
+        int supertrendDir,
+        BigDecimal rsi14,
+        BigDecimal volume) {
+      this(close, vwap, vwma20, psar, supertrendDir, rsi14, volume, null, null);
+    }
+  }
 
   /**
    * OI confluence from the market-data readers: 4-state quadrants, sentiment %, trending cross, basis,

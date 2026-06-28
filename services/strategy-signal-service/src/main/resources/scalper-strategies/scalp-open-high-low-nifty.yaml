@@ -46,7 +46,7 @@ name: "Scalper · Open=High / Open=Low · NIFTY CE"
 version: 1.0.0
 description: "Open=High/Open=Low momentum scalp (Siva #2) on the NIFTY 50 3-min front future. Gates on the SOURCE-FAITHFUL FNO-structure probability tier (Table-1: Futures-OH + >=3 ATM+-3 Call strikes Open=High + Put Open=Low -> HIGH; few strikes -> MILD; both-sides OH -> stand aside) refined by the Table-2 price/volume modifier (a CE-OH premium falling on >=50k volume, or a >50% fall vs prev close, downgrades to LOW). Only HIGH fires. Per-strike OH/OL + volume come from /options/strike-session-stats (5-min snapshot resolution; native 3-min needs 3-min capture). RSI>50 entry; section-3.2 <=50% premium/OI spurt reject; 1st-half (no fresh entry after ~12:00) window; VWAP stop; exit ~5pts inside the OH/OL, never beyond it. The OiPulse >=90% AI badge stays external/unavailable (optional, degraded around)."
 author: owner
-tags: [scalper, options, intraday, nifty, open-high-low, delta-s24-floor, premium-s24-band, directional-change-gate, open-high-oi-veto, s24-trade-window]
+tags: [scalper, options, intraday, nifty, open-high-low, delta-s24-floor, premium-s24-band, directional-change-gate, open-high-oi-veto, rsi-5m-cap, rsi-daily-cap, s24-trade-window]
 
 universe:
   mode: options_of_underlying
@@ -59,7 +59,7 @@ universe:
 
 timeframes:
   primary: 3m
-  additional: [1h]
+  additional: [5m, 1d, 1h]      # 5m + daily for the §3.2/§4.2 higher-TF RSI caps; 1h for the bias
 
 indicators:
   - { name: VWMA,       alias: vwma20,    timeframe: 3m, params: { period: 20 } }
@@ -69,6 +69,8 @@ indicators:
   - { name: SUPERTREND, alias: supertrend, timeframe: 3m, params: { period: 10, multiplier: 2.0 },
       weight: 1.0, normalize: { type: direction } }
   - { name: SUPERTREND, alias: bias60m,   timeframe: 1h, params: { period: 7, multiplier: 3.0 } }
+  - { name: RSI,        alias: rsi5m,     timeframe: 5m, params: { period: 14 } }   # §3.2 5m overbought cap
+  - { name: RSI,        alias: rsi_daily,  timeframe: 1d, params: { period: 14 } }   # §4.2 daily RSI cap
 
 entry_rules:
   direction: long

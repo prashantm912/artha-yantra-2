@@ -17,6 +17,16 @@ public interface BarValues {
   /** Built-in operand (close, volume, vwap) at a primary index. */
   BigDecimal builtin(String name, int primaryIndex);
 
+  /**
+   * True when an indicator {@code alias} is present in the bank. Default false so existing stubs keep
+   * compiling; the concrete {@link IndicatorBank} overrides it. A higher-TF gate reads an optional alias
+   * only when declared ({@code has(alias) ? valueAt(alias, i) : null}), so a strategy that omits the
+   * higher-TF indicator never trips {@code valueAt}'s "alias not in the bank" guard.
+   */
+  default boolean has(String alias) {
+    return false;
+  }
+
   /** True when {@code name} is a built-in operand of the closed grammar. */
   static boolean isBuiltin(String name) {
     return "close".equals(name) || "volume".equals(name) || "vwap".equals(name);

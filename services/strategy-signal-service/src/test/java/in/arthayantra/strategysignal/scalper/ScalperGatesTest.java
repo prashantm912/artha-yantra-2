@@ -251,6 +251,21 @@ class ScalperGatesTest {
   }
 
   @Test
+  void rsiHigherTfCapBlocksAnOverboughtCeAndAnOversoldPe() {
+    BigDecimal ceCap = bd("75");
+    BigDecimal peFloor = bd("25");
+    // CE: below the cap passes, at/above it blocks.
+    assertThat(ScalperGates.rsiHigherTfCap(bd("70"), CE, ceCap, peFloor).pass()).isTrue();
+    assertThat(ScalperGates.rsiHigherTfCap(bd("78"), CE, ceCap, peFloor).pass()).isFalse();
+    assertThat(ScalperGates.rsiHigherTfCap(bd("75"), CE, ceCap, peFloor).pass()).isFalse(); // boundary
+    // PE: above the floor passes, at/below it blocks (oversold).
+    assertThat(ScalperGates.rsiHigherTfCap(bd("30"), PE, ceCap, peFloor).pass()).isTrue();
+    assertThat(ScalperGates.rsiHigherTfCap(bd("22"), PE, ceCap, peFloor).pass()).isFalse();
+    // null fails closed (the higher-TF data is required when the strategy opts into the cap).
+    assertThat(ScalperGates.rsiHigherTfCap(null, CE, ceCap, peFloor).pass()).isFalse();
+  }
+
+  @Test
   void constituentRequiresHeavyweightPushNotToOppose() {
     // CE wants the net constituent push positive; PE negative; 0 (flat) and null degrade to pass.
     assertThat(ScalperGates.constituent(macroConstituent(bd("0.5")), CE).pass()).isTrue();

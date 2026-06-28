@@ -193,6 +193,16 @@ class ScalperStrategyLoadTest {
           .as(id + " pct-price-move armed iff market-movers")
           .isEqualTo(isMarketMovers);
 
+      // E5 higher-TF RSI caps (§3.2 5m + §4.2 daily): armed on the scalp-open-high-low family (the #2
+      // setup §3.2 explicitly specifies the 5m + daily caps for).
+      boolean isOpenHighLow = id.startsWith("scalp-open-high-low-");
+      assertThat(tags.contains("rsi-5m-cap"))
+          .as(id + " rsi-5m-cap armed iff open-high-low")
+          .isEqualTo(isOpenHighLow);
+      assertThat(tags.contains("rsi-daily-cap"))
+          .as(id + " rsi-daily-cap armed iff open-high-low")
+          .isEqualTo(isOpenHighLow);
+
       // E3 volume-pump (§4.15.3): armed on the scalp-gap-theory family (a breakout needs a real pump).
       boolean isGapTheory = id.startsWith("scalp-gap-theory-");
       assertThat(tags.contains("volume-pump"))

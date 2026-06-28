@@ -64,6 +64,15 @@ public final class IndicatorRegistry {
                 p.decimalValue("multiplier", BigDecimal.valueOf(3))));
     register(
         new Definition(
+            "SUPERTREND_LINE", "Supertrend trailing-stop price level (pairs with SUPERTREND direction)",
+            Set.of("period", "multiplier"), false),
+        (s, c, p) ->
+            Ta4jIndicators.supertrendLine(
+                s,
+                requirePositive(p, "period", 10),
+                p.decimalValue("multiplier", BigDecimal.valueOf(3))));
+    register(
+        new Definition(
             "VOLUME_RATIO", "Volume vs mean of prior lookback bars", Set.of("lookback"), false),
         (s, c, p) -> SessionIndicators.volumeRatio(s, requirePositive(p, "lookback", 20)));
     register(

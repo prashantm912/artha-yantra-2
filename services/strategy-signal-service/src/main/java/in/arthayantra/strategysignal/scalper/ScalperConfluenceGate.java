@@ -215,6 +215,13 @@ public class ScalperConfluenceGate {
         return Optional.empty();
       }
     }
+    // E6 §4.14.6 psar-durability: a PSAR too CLOSE to price = a short-lived (whipsaw) trend — require the
+    // |close-PSAR| gap to clear the durability floor. Reads the existing chart close/psar; fail-OPEN on a
+    // null PSAR. Armed via the tag, default-OFF.
+    if (cfg.has("psar-durability")
+        && !ScalperGates.psarDurable(chart.close(), chart.psar()).pass()) {
+      return Optional.empty();
+    }
     // E5 §3.6 rsi-cooloff: after a HOT prior bar (RSI overbought/oversold) the entry waits for a cooled
     // pullback candle (the cross-bar half of overbought-defer). Reads the existing 3m rsi14 (prior bar)
     // + the deploy bar colour; a null future degrades to pass (no candle to judge). Armed via the tag.

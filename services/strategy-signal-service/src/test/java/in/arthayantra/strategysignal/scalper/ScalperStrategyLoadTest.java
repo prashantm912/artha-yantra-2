@@ -223,6 +223,11 @@ class ScalperStrategyLoadTest {
       assertThat(tags.contains("constituent-gate"))
           .as(id + " constituent-gate armed iff trend-change")
           .isEqualTo(isTrendChange);
+      // E6 psar-durability (§4.14.6): armed on the scalp-trend-change family (a reversal into a new trend
+      // needs a durable, wide-PSAR move — not a whipsaw). Debatable home; flagged for owner redirect.
+      assertThat(tags.contains("psar-durability"))
+          .as(id + " psar-durability armed iff trend-change")
+          .isEqualTo(isTrendChange);
 
       // Connect-the-Dots (#10) is the SOFT weighted-scorer strategy: these confluences are ALREADY soft
       // dots in the 18-dot scorer, so the hard-gate versions ship default-OFF and are armed on NO

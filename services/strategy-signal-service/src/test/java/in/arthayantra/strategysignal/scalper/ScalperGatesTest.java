@@ -277,6 +277,17 @@ class ScalperGatesTest {
   }
 
   @Test
+  void psarDurableNeedsAWideEnoughGapAndFailOpensOnNull() {
+    // |close-psar|/close: 1% gap (>= 0.05 floor) is durable; 0.01% is too tight; the abs handles either side.
+    assertThat(ScalperGates.psarDurable(bd("100"), bd("99")).pass()).isTrue();
+    assertThat(ScalperGates.psarDurable(bd("100"), bd("99.99")).pass()).isFalse();
+    assertThat(ScalperGates.psarDurable(bd("100"), bd("101")).pass()).isTrue(); // 1% above is durable too
+    // a null close/psar fail-OPENs (durability is a refinement, not a hard data dependency).
+    assertThat(ScalperGates.psarDurable(null, bd("99")).pass()).isTrue();
+    assertThat(ScalperGates.psarDurable(bd("100"), null).pass()).isTrue();
+  }
+
+  @Test
   void constituentRequiresHeavyweightPushNotToOppose() {
     // CE wants the net constituent push positive; PE negative; 0 (flat) and null degrade to pass.
     assertThat(ScalperGates.constituent(macroConstituent(bd("0.5")), CE).pass()).isTrue();

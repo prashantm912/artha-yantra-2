@@ -96,6 +96,19 @@ class MarketOiClientDerivationTest {
   }
 
   @Test
+  void trendingComputesDivergencePctAsGapOverTotalOi() {
+    // last bucket ce=1000 pe=1500 → gap |500| over total 2500 → 20% divergence (E2 M3).
+    Trending t =
+        client.deriveTrending(
+            json("{\"items\":[{\"ceOi\":900,\"peOi\":1100},{\"ceOi\":1000,\"peOi\":1500}]}"));
+    assertThat(t.divergencePct()).isEqualByComparingTo("20");
+    // a flat/zero-OI latest bucket → null divergence (a missing read can't pass the magnitude gate).
+    Trending flat =
+        client.deriveTrending(json("{\"items\":[{\"ceOi\":0,\"peOi\":0},{\"ceOi\":0,\"peOi\":0}]}"));
+    assertThat(flat.divergencePct()).isNull();
+  }
+
+  @Test
   void trendingPermanentlyOneSidedDoesNotCross() {
     // gap stays positive across the window → no cross, deltas non-zero, imbalance present.
     Trending t =

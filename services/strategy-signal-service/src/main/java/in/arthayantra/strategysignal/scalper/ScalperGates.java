@@ -48,6 +48,12 @@ public final class ScalperGates {
   // default-OFF, so this constant only bites for an armed strategy. Package-visible for the seam.
   static final BigDecimal INDICATOR_DISTANCE_MAX_PCT = new BigDecimal("0.015");
 
+  // E2 M3 (tag oi-divergence-magnitude, Trending-OI #5 "lines immediately diverge ~20-30% / >=50%
+  // conviction"): the PE−CE OI gap must be at least this % of total OI, AND a corroborating price
+  // impulse this %. Doc-sourced numbers; DB-promotable later. Default-OFF until armed.
+  static final BigDecimal OI_DIVERGENCE_MIN_PCT = new BigDecimal("20");
+  static final BigDecimal PRICE_IMPULSE_MIN_PCT = new BigDecimal("50");
+
   /** ≥09:45 (ideal 09:15–10:00), block the 11:00–13:00 sideways window, no fresh entry after 15:30. */
   public static GateOutcome timeWindow(LocalTime ist) {
     if (ist.isBefore(NO_TRADE_BEFORE)) {
@@ -238,6 +244,25 @@ public final class ScalperGates {
                 ? slope.signum() > 0 && level.signum() > 0
                 : slope.signum() < 0 && level.signum() < 0);
     return new GateOutcome(ok, slope, ok ? "sentiment level+slope agree" : "level/slope disagree");
+  }
+
+  /**
+   * E2 M3 (tag {@code oi-divergence-magnitude}, Trending-OI #5): the OI lines must DIVERGE by at least
+   * {@code minPct} (the PE−CE gap as a % of total OI) AND a corroborating price impulse of at least
+   * {@code priceMinPct} must confirm it. Stronger than the boolean trending-cross dot — it requires a
+   * real magnitude, not just a sign flip. Null divergence/price FAILS (fail-closed) → NEUTRAL on derived
+   * history, so it's a forward-paper gate.
+   */
+  public static GateOutcome oiDivergenceMagnitude(Oi oi, BigDecimal minPct, BigDecimal priceMinPct) {
+    BigDecimal div = oi.oiDivergencePct();
+    BigDecimal px = oi.spurtPricePct();
+    boolean ok =
+        div != null
+            && div.compareTo(minPct) >= 0
+            && px != null
+            && px.abs().compareTo(priceMinPct) >= 0;
+    return new GateOutcome(
+        ok, div, ok ? "OI divergence + price impulse confirm" : "weak divergence/impulse");
   }
 
   /**

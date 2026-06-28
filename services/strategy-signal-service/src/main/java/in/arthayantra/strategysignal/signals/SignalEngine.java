@@ -599,9 +599,43 @@ public class SignalEngine {
         EntryEvaluator.evaluate(strategy.definition(), bank, index);
     if (evaluation.isPresent() && evaluation.get().entry()) {
       EngineCandle lastOneMinute = dayBars.get(dayBars.size() - 1);
+      // E11 §3.8/§3.13 BTST carry confluence (tag btst-confluence, the P4 gap): the overnight carry must
+      // clear the §12.3 confluence at the pre-close decision — the YAML's documented "shared confluence
+      // carry validity". Today the BTST scalper emits straight from the engine entry, bypassing the
+      // OI/macro gate the intraday scalper path runs (scalperEntry). The side resolves LIVE in the gate
+      // (close toward the day HIGH ⇒ CE/BTST, LOW ⇒ PE/STBT) + the OI/macro must confirm. Reads a
+      // CONSISTENT intraday triple — the scalper PRIMARY series (bank.primarySeries()) + its own last
+      // index — independent of the daily "buy today" entry mechanics. LIVE-only by firewall (the engine
+      // btst golden is a pure-engine 1d strategy with no scalper → byte-identical). Default-OFF tag.
+      ScalperConfluenceGate.Decision decision = null;
+      if (strategy.scalper() != null && strategy.scalper().has("btst-confluence")) {
+        if (scalperGate.isEmpty()) {
+          return; // fail-closed: a confluence-gated scalper without the seam must not fire
+        }
+        EngineSeries scalpPrimary = bank.primarySeries();
+        int scalpIdx = scalpPrimary.size() - 1;
+        if (scalpIdx < 0) {
+          return;
+        }
+        EngineCandle scalpBar = scalpPrimary.candle(scalpIdx);
+        OffsetDateTime istScalp = scalpBar.bucketStart().withOffsetSameInstant(Ist.OFFSET);
+        Optional<ScalperConfluenceGate.Decision> confluence =
+            scalperGate
+                .get()
+                .evaluate(
+                    strategy.scalper(), bank, scalpPrimary, scalpIdx,
+                    scalpBar.bucketStart().toInstant(), istScalp.toLocalTime(), istScalp.toLocalDate());
+        if (confluence.isEmpty()) {
+          log.info(
+              "BTST confluence blocked the carry: {} {}:{}",
+              strategy.slug(), instrument.exchange(), instrument.tradingsymbol());
+          return;
+        }
+        decision = confluence.get();
+      }
       emitEntry(
           strategy, instrument.exchange(), instrument.tradingsymbol(), "1d", lastOneMinute,
-          evaluation.get(), null);
+          evaluation.get(), decision);
     }
   }
 

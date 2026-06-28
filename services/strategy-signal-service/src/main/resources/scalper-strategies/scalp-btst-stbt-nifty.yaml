@@ -60,7 +60,7 @@ name: "Scalper · BTST / STBT · NIFTY"
 version: 1.0.0
 description: "BTST/STBT overnight carry (Siva #8) on the NIFTY 50 3-min front future, evaluated ONCE at the 15:20 pre-close clock (style: btst, fills AT_CLOSE to capture the overnight gap). direction: both — closing toward the day HIGH ⇒ CE/BTST (bullish carry), toward the day LOW ⇒ PE/STBT (bearish carry); §0B VWAP-decisive side + RSI band (BTST examples >60 / STBT <40) + shared confluence carry validity. v1 seeds the DEFINED-RISK long-premium buy leg (Buy CE / Buy PE); the SHORT-PREMIUM sell legs (BTST Sell PE / STBT Sell CE — correctly SELL side) are the documented sizing follow-up, gated on margin-service SPAN (#47, out of scope). SL = 50% of premium + next-morning exit; 1-night carry."
 author: owner
-tags: [scalper, options, btst, nifty]
+tags: [scalper, options, btst, nifty, btst-confluence]
 
 universe:
   mode: options_of_underlying

@@ -166,6 +166,14 @@ class ScalperStrategyLoadTest {
           .as(id + " morning-eod-precondition armed iff morning-trade")
           .isEqualTo(isMorning);
 
+      // E11 §3.8/§3.13 BTST carry confluence (the P4 gap): btst-confluence routes the overnight carry
+      // through the §12.3 seam at pre-close. Armed on the scalp-btst-stbt family ONLY (the #8 BTST/STBT
+      // strategy per the operative doc); every other variant stays off.
+      boolean isBtst = id.startsWith("scalp-btst-stbt-");
+      assertThat(tags.contains("btst-confluence"))
+          .as(id + " btst-confluence armed iff btst-stbt")
+          .isEqualTo(isBtst);
+
       // E2 M1/M2 (oi-cross-required + oi-slope-agree): the Trending-OI #5 defining hard gates are armed
       // on the scalp-trending-oi family ONLY (the defining strategy per the operative doc); every other
       // variant stays unarmed (the gate reads the tag via cfg.has(...), so assert against the tag list).

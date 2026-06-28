@@ -85,7 +85,10 @@ public class SignalsController {
     Integer qty = request == null ? null : request.qty();
     BigDecimal fillPrice =
         request == null || request.fillPrice() == null ? null : new BigDecimal(request.fillPrice());
-    events.publishEvent(new SignalTaken(id, qty, fillPrice));
+    // A signal carries a scalper_detail side-channel iff a scalper strategy emitted it (E10) — the
+    // flag rides the event so the paper listener charges the open to a 5-account sub-ledger.
+    boolean scalper = repository.find(id).map(r -> r.scalperDetail() != null).orElse(false);
+    events.publishEvent(new SignalTaken(id, qty, fillPrice, scalper));
     return detail(id);
   }
 

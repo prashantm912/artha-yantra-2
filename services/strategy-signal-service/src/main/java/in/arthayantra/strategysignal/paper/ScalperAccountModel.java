@@ -78,4 +78,35 @@ public class ScalperAccountModel {
     }
     return true;
   }
+
+  /**
+   * The sub-account (1..5) to charge a fresh scalper entry to: the NON-frozen account with the fewest
+   * trades today (round-robin load balancing). An account is frozen once a trade charged to it closed
+   * at a loss. Falls back to account 1 if every account is frozen — the entry gate
+   * ({@link #scalperEntryAllowed}) normally blocks first, but a manually-TAKEN signal can bypass it.
+   */
+  public int nextFreeAccount() {
+    LocalDate today = LocalDate.ofInstant(clock.instant(), IST);
+    java.util.Map<Integer, Integer> tradeCount = new java.util.HashMap<>();
+    java.util.Set<Integer> frozen = new java.util.HashSet<>();
+    for (SubAccountTally t : positions.subAccountTalliesOn(today)) {
+      tradeCount.put(t.idx(), t.wins() + t.losses());
+      if (t.losses() > 0) {
+        frozen.add(t.idx());
+      }
+    }
+    int best = 1;
+    int bestCount = Integer.MAX_VALUE;
+    for (int idx = 1; idx <= ACCOUNTS; idx++) {
+      if (frozen.contains(idx)) {
+        continue;
+      }
+      int count = tradeCount.getOrDefault(idx, 0);
+      if (count < bestCount) {
+        bestCount = count;
+        best = idx;
+      }
+    }
+    return best;
+  }
 }

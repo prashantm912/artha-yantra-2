@@ -45,7 +45,22 @@ public class PaperService {
       long qty,
       BigDecimal price,
       BigDecimal stopLoss,
-      BigDecimal takeProfit) {}
+      BigDecimal takeProfit,
+      Integer subaccountIdx) {
+
+    /** Pre-E10 8-arg form: no sub-account (manual / non-scalper order leaves the ledger key NULL). */
+    public OrderRequest(
+        Long signalId,
+        String exchange,
+        String tradingsymbol,
+        String side,
+        long qty,
+        BigDecimal price,
+        BigDecimal stopLoss,
+        BigDecimal takeProfit) {
+      this(signalId, exchange, tradingsymbol, side, qty, price, stopLoss, takeProfit, null);
+    }
+  }
 
   /** An open position with its live mark-to-market (and an optional buying-power warning on open). */
   public record PositionDto(
@@ -149,7 +164,7 @@ public class PaperService {
         fills.simulatorId(), fill.slippageApplied(), null, null);
     upsertPosition(
         exchange, tradingsymbol, side, request.qty(), fill.fillPrice(),
-        request.stopLoss(), request.takeProfit());
+        request.stopLoss(), request.takeProfit(), request.subaccountIdx());
     String warning =
         accountService.buyingPowerWarning(
             accountService.usageFor(
@@ -167,10 +182,12 @@ public class PaperService {
       long qty,
       BigDecimal fillPrice,
       BigDecimal stopLoss,
-      BigDecimal takeProfit) {
+      BigDecimal takeProfit,
+      Integer subaccountIdx) {
     Optional<PositionRow> existing = positions.findOpen(exchange, tradingsymbol, side);
     if (existing.isPresent()) {
-      // averaging onto an open position keeps its original bracket levels (set at first open)
+      // averaging onto an open position keeps its original bracket levels AND its original
+      // sub-account (set at first open) — a later add never re-charges the trade to a new account.
       PositionRow row = existing.get();
       long newQty = row.qty() + qty;
       BigDecimal newAvg =
@@ -180,7 +197,8 @@ public class PaperService {
               .divide(BigDecimal.valueOf(newQty), 4, RoundingMode.HALF_UP);
       positions.updateOpen(row.id(), newQty, newAvg);
     } else {
-      positions.insertOpen(exchange, tradingsymbol, side, qty, fillPrice, stopLoss, takeProfit);
+      positions.insertOpen(
+          exchange, tradingsymbol, side, qty, fillPrice, stopLoss, takeProfit, subaccountIdx);
     }
   }
 

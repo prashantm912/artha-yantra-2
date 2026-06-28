@@ -68,12 +68,13 @@ timeframes:
 
 indicators:
   - { name: VWMA,       alias: vwma20,    timeframe: 3m, params: { period: 20 } }
-  - { name: PSAR,       alias: psar,      timeframe: 3m }
+  - { name: PSAR,       alias: psar,      timeframe: 3m, params: { step: 0.02, max: 0.2 } }
   - { name: RSI,        alias: rsi14,     timeframe: 3m, params: { period: 14 }, weight: 1.0,
       normalize: { type: rsi_momentum } }
   - { name: SUPERTREND, alias: supertrend, timeframe: 3m, params: { period: 10, multiplier: 2.0 },
       weight: 1.0, normalize: { type: direction } }
   - { name: SUPERTREND, alias: bias60m,   timeframe: 1h, params: { period: 7, multiplier: 3.0 } }
+  - { name: VOLUME_RATIO, alias: vol_ratio20, timeframe: 3m, params: { lookback: 20 } } # E6 §3.2: Volume-20 MA relationship, declared-only (unscored — optimizer/side-channel)
   - { name: SUPERTREND_LINE, alias: supertrend_line, timeframe: 3m, params: { period: 10, multiplier: 2.0 } } # E9 §3: the ST LINE for the trail-with-Super-Trend exit
 
 entry_rules:

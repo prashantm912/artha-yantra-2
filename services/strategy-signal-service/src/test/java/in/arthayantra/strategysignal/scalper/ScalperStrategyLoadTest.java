@@ -275,11 +275,18 @@ class ScalperStrategyLoadTest {
       assertThat(tags.contains("oi-confluence-exit"))
           .as(id + " oi-confluence-exit armed iff trend-change or trending-oi")
           .isEqualTo(isTrendChange || isTrendingOiFam);
-      // E3 dow-confluence (the Dow global-cue soft dot): armed on the scalp-trend-change family (the
-      // macro-aware reversal strategy, alongside fii-bias + constituent).
-      assertThat(tags.contains("dow-confluence"))
-          .as(id + " dow-confluence armed iff trend-change")
+      // E3 directional-vix-gate (§A4 VIX-directional rule): armed on the scalp-trend-change family (the
+      // macro-aware reversal strategy, alongside fii-bias + constituent). VIX is live (/api/v1/market/vix),
+      // so the gate fires during market hours (degrades non-blocking off-hours/history). It REPLACES the
+      // inert dow-confluence — Dow is a manual checklist item (global_cues_ok, no live feed), so that gate
+      // could never fire.
+      assertThat(tags.contains("directional-vix-gate"))
+          .as(id + " directional-vix-gate armed iff trend-change")
           .isEqualTo(isTrendChange);
+      // dow-confluence un-armed everywhere (Dow = manual checklist `global_cues_ok`, no live feed).
+      assertThat(tags.contains("dow-confluence"))
+          .as(id + " dow-confluence unarmed (Dow is manual)")
+          .isFalse();
 
       // E2 M4/M6 — the two HARD OI gates with NO soft-dot duplicate in the scorer (the flat-OI stand-aside
       // trap §6.5 + the max-standing-OI S/R wall §4.7): armed on the scalp-connect-the-dots family, its
@@ -301,7 +308,7 @@ class ScalperStrategyLoadTest {
       for (String softKeptOff :
           List.of(
               "indicator-alignment-gate", "futures-oi-gate",
-              "breadth-gate", "basis-gate", "directional-vix-gate")) {
+              "breadth-gate", "basis-gate")) {
         assertThat(tags.contains(softKeptOff))
             .as(id + " " + softKeptOff + " unarmed (connect-the-dots kept soft)")
             .isFalse();

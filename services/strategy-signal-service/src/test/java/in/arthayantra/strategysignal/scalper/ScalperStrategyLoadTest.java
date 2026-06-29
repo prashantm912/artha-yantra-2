@@ -210,10 +210,13 @@ class ScalperStrategyLoadTest {
           .as(id + " two-candle-substitution armed iff two-candle")
           .isEqualTo(isTwoCandle);
       // E5 rsi-cooloff (§3.6 pullback re-entry after a hot bar): armed on the scalp-two-candle family
-      // (the cross-bar complement of its already-armed overbought-defer).
+      // (the cross-bar complement of its already-armed overbought-defer) AND the scalp-trend-change
+      // family — §3.12 post-vertical-RSI: after a vertical climb a reversal re-entry must wait for RSI
+      // to cool (a pullback candle), the same hot-prior-bar→cooled-pullback semantics.
+      boolean isTrendChangeFam = id.startsWith("scalp-trend-change-");
       assertThat(tags.contains("rsi-cooloff"))
-          .as(id + " rsi-cooloff armed iff two-candle")
-          .isEqualTo(isTwoCandle);
+          .as(id + " rsi-cooloff armed iff two-candle or trend-change")
+          .isEqualTo(isTwoCandle || isTrendChangeFam);
 
       // E6 pct-price-move (§3.3 Market-Movers >1% intraday move): armed on the scalp-market-movers family
       // (a "mover" scalp needs a real move).
@@ -257,12 +260,15 @@ class ScalperStrategyLoadTest {
       assertThat(tags.contains("psar-durability"))
           .as(id + " psar-durability armed iff trend-change")
           .isEqualTo(isTrendChange);
-      // E9 D4 oi-confluence-exit: armed on the scalp-trend-change family (a reversal strategy must exit
-      // when the OI confluence flips back against the captured direction — Day-7 "a read against your
-      // position = exit"). Live-only seam exit, parity-safe by firewall.
+      // E9 D4 / E2 §3.5 oi-confluence-exit: armed on the scalp-trend-change family (a reversal must exit
+      // when the OI confluence flips against the captured direction) AND the scalp-trending-oi family —
+      // §3.5/§6.5 the Trending-OI fake-cross trap: "a SECOND crossover against your position = exit
+      // immediately" is exactly the OI-confluence-flip-against-the-held-side this seam detects. Live-only
+      // seam exit, parity-safe by firewall.
+      boolean isTrendingOiFam = id.startsWith("scalp-trending-oi-");
       assertThat(tags.contains("oi-confluence-exit"))
-          .as(id + " oi-confluence-exit armed iff trend-change")
-          .isEqualTo(isTrendChange);
+          .as(id + " oi-confluence-exit armed iff trend-change or trending-oi")
+          .isEqualTo(isTrendChange || isTrendingOiFam);
       // E3 dow-confluence (the Dow global-cue soft dot): armed on the scalp-trend-change family (the
       // macro-aware reversal strategy, alongside fii-bias + constituent).
       assertThat(tags.contains("dow-confluence"))

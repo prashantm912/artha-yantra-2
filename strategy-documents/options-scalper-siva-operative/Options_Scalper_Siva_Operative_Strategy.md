@@ -139,6 +139,7 @@ These rules govern every trade regardless of strategy. They are the non-negotiab
 - [keep-rail] Keep winning-trade quantity equal to losing-trade quantity — never size up after a loss to win it back.
 - [keep-rail] Journal every trade (entry, exit, reason, outcome) and review the log.
 - [keep-rail] Once a trade is on, let it run to its stop-loss or its target — do not interfere or exit early on impulse.
+- [keep-rail] **Economic-event days = a PERMANENT MANUAL check, NEVER an automated lockout (E12 disposition, owner-ratified 2026-06-29).** The engine ALWAYS generates signals on event days (RBI/MPC, Fed/FOMC, Union Budget, CPI/inflation, major results) — there is intentionally **no scheduled-event feed and no auto-suppression** — and the owner decides per-signal whether to take the trade, surfaced as the `news_clear` item on the `ScalperManualChecks` card. Rationale: a faithful auto-lockout needs an economic-events calendar feed the platform does not have; rather than build/stall on that missing feed, this stays a one-glance operator check. **Do NOT attempt to auto-build an event-lockout gate.**
 
 ## 2.10 Session-24 demo benchmark (2025)
 

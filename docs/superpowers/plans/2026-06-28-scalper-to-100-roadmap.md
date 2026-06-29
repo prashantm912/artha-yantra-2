@@ -198,7 +198,8 @@ Per [S24-PRUNE](2026-06-27-backlog/S24-PRUNE.md) (markers in-place in the stream
 | targets/trailing variants, volume-qualified VWAP exit, structural/points/ST trails, gap-fill deadline, profit-slice | **E9** |
 | daily caps, 5-account ledgers, auto-journal | **E10** |
 | BTST routing+side+quadrant+window, Sensex scaling, PE-mirror seeding, per-strategy knobs, straddle combined-premium | **E11** |
-| event lockout, time/expiry/Friday gates, backtest rails, SPAN sell legs | **E12** |
+| economic-event lockout | **MANUAL — PERMANENT** (owner-ratified 2026-06-29): signals always fire on event days, the owner decides via the `news_clear` ScalperManualChecks item; NO scheduled-event feed, never auto-build (operative §2.9) |
+| avoid-Friday gate, time/expiry/window gates, backtest rails, SPAN sell legs | **E12** (avoid-Friday BUILT #333; SPAN sell legs SPAN-deferred) |
 | ATM±7 recenter, OI direction-arrows, 200/300% spurt, scale-in ladder, S/R-zone engine | **DESCOPED / SPLIT-PLAN** (§4) |
 | daily-loss number, overnight-SL, window anchors, FII feed, 15-strike width, 2 UNCERTAIN | **OWNER-DECISION** (§5) |
 | pre-market prep, capital governance, news, S/R eyeballing, psychology (~106 audit rows) | **MANUAL** (`ScalperManualChecks` + FU1) |

@@ -26,8 +26,10 @@ public final class ScalperManualChecks {
           new Check(
               "news_clear",
               "No market-moving news or event against this trade (news overrides the data).",
-              "2.13",
-              "Scan your news feed and the day's economic calendar before entering."),
+              "2.9",
+              "Signals fire on economic-event days TOO, by design (no auto-lockout) — YOU decide whether"
+                  + " to take. Scan the news feed + the day's calendar (RBI/MPC, Fed, Budget, CPI, major"
+                  + " results) first; news overrides the data."),
           new Check(
               "level_respected",
               "Price is reacting at the right support/resistance zone, not mid-range or into a wall.",

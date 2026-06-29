@@ -36,8 +36,16 @@ are untouched). Investigation: workflow `wf_8c8e0d72-75f` + 2 follow-ups. Built:
   wired: `onClosedBar` iterates `strategy.universe()`, no size>1 guard).
 - **backtest `JobsService`**: `futures_screener` added to the submission-pin condition (else replay gets an
   empty universe). Phase-44 lifted the publish guard → the mode publishes freely.
-- Pure `screenerPicks` parse unit-tested both sides (5/5). REMAINING = **4b** (the `mm-stockfut-bank` YAML +
-  register + functional backtest + multi-instrument smoke; full-N50 "nifty" variant = v2, Upstox-key-gated).
+- Pure `screenerPicks` parse unit-tested both sides (5/5).
+- **KNOWN 4b GAP (adversarial-review caught):** `BacktestRunner.signalInstrument` (backtest replay) reads
+  the strategy config's `universe.instruments` / `signal_underlying` / `underlying` to pick the single
+  signal series — a `futures_screener` config has NONE of those (its instruments live in the pinned request
+  array), so a functional backtest currently throws "needs an explicit single-instrument universe". NOT a
+  parity defect (every existing mode is byte-identical; this is a missing CONSUMPTION arm, not a regression)
+  and nothing references the mode yet. **4b must wire the runner to read the pinned `futures_screener`
+  universe** (top pick for the v1 functional backtest, or a per-constituent fold for full N-instrument).
+- REMAINING = **4b**: the `BacktestRunner` consumption arm + the `mm-stockfut-bank` YAML + register +
+  functional backtest + multi-instrument smoke (full-N50 "nifty" variant = v2, Upstox-key-gated).
 
 ## STAGE 3b — DONE (2026-06-29): `MarketMoversScreenService` + `GET /api/v1/market/futures/movers-screen`
 Built exactly per the recipe below: front-pick per radar underlying from the newest captured bucket +

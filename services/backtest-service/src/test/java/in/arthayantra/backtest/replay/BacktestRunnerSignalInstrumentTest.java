@@ -13,11 +13,14 @@ import org.junit.jupiter.api.Test;
  * options/futures-of-underlying case carries the underlying as a schema-v1 instrumentRef OBJECT
  * {@code {exchange, tradingsymbol}} — the pre-2026-06-25 code only parsed a legacy {@code "EXCH:SYMBOL"}
  * string, so a schema-valid options strategy threw "needs an explicit single-instrument universe". This
- * pins all three accepted shapes + the throw (caught live by the Part-2 value-verify).
+ * pins all accepted shapes + the throw (caught live by the Part-2 value-verify). E1 §3.3: a
+ * {@code futures_screener} config has NO instrument — its picks are pinned into the request universe
+ * array at submission, so the signal is the TOP pinned pick.
  */
 class BacktestRunnerSignalInstrumentTest {
 
   private final ObjectMapper mapper = new ObjectMapper();
+  private final JsonNode noRequest = mapper.createObjectNode();
 
   private JsonNode cfg(String json) {
     try {
@@ -33,7 +36,8 @@ class BacktestRunnerSignalInstrumentTest {
         BacktestRunner.signalInstrument(
             cfg(
                 "{\"universe\":{\"mode\":\"options_of_underlying\","
-                    + "\"underlying\":{\"exchange\":\"NSE\",\"tradingsymbol\":\"NIFTY 50\"}}}"));
+                    + "\"underlying\":{\"exchange\":\"NSE\",\"tradingsymbol\":\"NIFTY 50\"}}}"),
+            noRequest);
     assertThat(k.exchange()).isEqualTo("NSE");
     assertThat(k.tradingsymbol()).isEqualTo("NIFTY 50");
     assertThat(k.interval()).isEqualTo("1m");
@@ -48,7 +52,8 @@ class BacktestRunnerSignalInstrumentTest {
             cfg(
                 "{\"universe\":{\"mode\":\"options_of_underlying\","
                     + "\"underlying\":{\"exchange\":\"BFO\",\"tradingsymbol\":\"SENSEX\"},"
-                    + "\"signal_underlying\":{\"exchange\":\"NFO\",\"tradingsymbol\":\"NIFTY-FUT-CONT\"}}}"));
+                    + "\"signal_underlying\":{\"exchange\":\"NFO\",\"tradingsymbol\":\"NIFTY-FUT-CONT\"}}}"),
+            noRequest);
     assertThat(k.exchange()).isEqualTo("NFO");
     assertThat(k.tradingsymbol()).isEqualTo("NIFTY-FUT-CONT");
     assertThat(k.interval()).isEqualTo("1m");
@@ -61,7 +66,8 @@ class BacktestRunnerSignalInstrumentTest {
         BacktestRunner.signalInstrument(
             cfg(
                 "{\"universe\":{\"mode\":\"options_of_underlying\","
-                    + "\"underlying\":{\"exchange\":\"NSE\",\"tradingsymbol\":\"NIFTY 50\"}}}"));
+                    + "\"underlying\":{\"exchange\":\"NSE\",\"tradingsymbol\":\"NIFTY 50\"}}}"),
+            noRequest);
     assertThat(k.tradingsymbol()).isEqualTo("NIFTY 50");
   }
 
@@ -69,16 +75,44 @@ class BacktestRunnerSignalInstrumentTest {
   void resolvesExplicitInstrumentsArray() {
     SeriesKey k =
         BacktestRunner.signalInstrument(
-            cfg("{\"universe\":{\"instruments\":[{\"exchange\":\"NSE\",\"tradingsymbol\":\"RELIANCE\"}]}}"));
+            cfg("{\"universe\":{\"instruments\":[{\"exchange\":\"NSE\",\"tradingsymbol\":\"RELIANCE\"}]}}"),
+            noRequest);
     assertThat(k.tradingsymbol()).isEqualTo("RELIANCE");
   }
 
   @Test
   void resolvesLegacyColonStringUnderlying() {
     SeriesKey k =
-        BacktestRunner.signalInstrument(cfg("{\"universe\":{\"underlying\":\"NSE:NIFTY 50\"}}"));
+        BacktestRunner.signalInstrument(
+            cfg("{\"universe\":{\"underlying\":\"NSE:NIFTY 50\"}}"), noRequest);
     assertThat(k.exchange()).isEqualTo("NSE");
     assertThat(k.tradingsymbol()).isEqualTo("NIFTY 50");
+  }
+
+  @Test
+  void futuresScreenerSignalsOnTheTopPinnedPick() {
+    // E1 §3.3: the config has no instrument; the resolved picks are pinned into the REQUEST universe
+    // array at submission. The runner is single-signal-instrument → it signals on the TOP pick.
+    SeriesKey k =
+        BacktestRunner.signalInstrument(
+            cfg("{\"universe\":{\"mode\":\"futures_screener\",\"side\":\"long\",\"max_picks\":5}}"),
+            cfg(
+                "{\"universe\":[{\"exchange\":\"NFO\",\"tradingsymbol\":\"HDFCBANK26JULFUT\"},"
+                    + "{\"exchange\":\"NFO\",\"tradingsymbol\":\"SBIN26JULFUT\"}]}"));
+    assertThat(k.exchange()).isEqualTo("NFO");
+    assertThat(k.tradingsymbol()).isEqualTo("HDFCBANK26JULFUT");
+    assertThat(k.interval()).isEqualTo("1m");
+  }
+
+  @Test
+  void futuresScreenerThrowsWhenSubmissionPinnedNoMovers() {
+    assertThatThrownBy(
+            () ->
+                BacktestRunner.signalInstrument(
+                    cfg("{\"universe\":{\"mode\":\"futures_screener\"}}"),
+                    cfg("{\"universe\":[]}")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("pinned universe");
   }
 
   @Test
@@ -102,7 +136,9 @@ class BacktestRunnerSignalInstrumentTest {
 
   @Test
   void throwsWhenNoResolvableInstrument() {
-    assertThatThrownBy(() -> BacktestRunner.signalInstrument(cfg("{\"universe\":{\"mode\":\"index\"}}")))
+    assertThatThrownBy(
+            () ->
+                BacktestRunner.signalInstrument(cfg("{\"universe\":{\"mode\":\"index\"}}"), noRequest))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("single-instrument universe");
   }

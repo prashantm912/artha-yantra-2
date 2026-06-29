@@ -125,7 +125,7 @@ public class BacktestRunner {
       config = TrialOverrides.apply(config, overrides);
     }
     StrategyDefinition definition = StrategyCompiler.compile(config);
-    SeriesKey signal = signalInstrument(config);
+    SeriesKey signal = signalInstrument(config, request);
     OffsetDateTime from = OffsetDateTime.parse(dateTime(request.path("from").asText()));
     OffsetDateTime to = OffsetDateTime.parse(dateTime(request.path("to").asText()));
     BigDecimal initialEquity =
@@ -433,7 +433,21 @@ public class BacktestRunner {
   }
 
   // Package-visible for BacktestRunnerSignalInstrumentTest.
-  static SeriesKey signalInstrument(JsonNode config) {
+  static SeriesKey signalInstrument(JsonNode config, JsonNode request) {
+    // E1 §3.3: a futures_screener universe has NO instrument in the config — the daily picks are pinned
+    // into the request universe array at submission (JobsService). The runner is single-signal-instrument,
+    // so v1 signals on the TOP pick. GATED to futures_screener so every existing mode stays byte-identical:
+    // a global pinned-array-first would flip futures_of_underlying from the underlying spot to the contract.
+    if ("futures_screener".equals(config.path("universe").path("mode").asText())) {
+      JsonNode pinned = request.path("universe");
+      if (pinned.isArray() && !pinned.isEmpty()) {
+        JsonNode first = pinned.get(0);
+        return new SeriesKey(
+            first.path("exchange").asText(), first.path("tradingsymbol").asText(), "1m");
+      }
+      throw new IllegalArgumentException(
+          "futures_screener backtest needs a pinned universe (submission produced no movers)");
+    }
     JsonNode instruments = config.path("universe").path("instruments");
     if (instruments.isArray() && !instruments.isEmpty()) {
       JsonNode first = instruments.get(0);

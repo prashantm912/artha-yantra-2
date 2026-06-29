@@ -420,8 +420,7 @@ public class SignalEngine {
       if (strategy.scalper() != null
           && activeEntry.get().stopLoss() != null
           && structuralStopHit(
-              scalperPositionDirection(strategy, activeEntry.get()),
-              primary.candle(index), activeEntry.get().stopLoss())) {
+              directionOf(strategy.definition()), primary.candle(index), activeEntry.get().stopLoss())) {
         emit(strategy, exchange, tradingsymbol, interval, "EXIT", bar, activeEntry.get());
         return;
       }
@@ -443,7 +442,7 @@ public class SignalEngine {
           ExitEvaluator.evaluate(
               strategy.definition(), bank,
               new ExitEvaluator.Position(
-                  scalperPositionDirection(strategy, activeEntry.get()),
+                  directionOf(strategy.definition()),
                   activeEntry.get().entryPrice(),
                   Math.max(entryIndex, 0)),
               index);
@@ -533,7 +532,7 @@ public class SignalEngine {
         Optional<ExitEvaluator.ExitDecision> exit =
             ExitEvaluator.evaluateIntrabarLevels(
                 strategy.definition(), primary, entryPrimaryIndex, oneMinute,
-                scalperPositionDirection(strategy, activeEntry.get()), activeEntry.get().entryPrice(),
+                directionOf(strategy.definition()), activeEntry.get().entryPrice(),
                 entryOneMinuteIndex, oneMinute.size() - 1);
         if (exit.isPresent()) {
           emit(strategy, exchange, tradingsymbol, "1m", "EXIT", bar, activeEntry.get());
@@ -862,29 +861,6 @@ public class SignalEngine {
     return definition.direction() == StrategyDefinition.Direction.SHORT
         ? ExitEvaluator.Direction.SHORT
         : ExitEvaluator.Direction.LONG;
-  }
-
-  /**
-   * The exit/stop direction for an OPEN scalper position. A long-premium scalper BUYS a CE on a bullish
-   * (LONG-on-future) read and a PE on a bearish (SHORT-on-future) read — both legs are BUYs, but the
-   * protective structural stop + the trailing/level exits are anchored on the INDEX FUTURE, so they must
-   * use the HELD side (CE ⇒ LONG, PE ⇒ SHORT, from the persisted {@code scalper_detail}), NOT the
-   * strategy's static {@code direction}. A {@code direction:both} bidirectional scalper would otherwise
-   * treat an open PE as LONG (stop on the wrong side, trailing off the wrong extreme). Falls back to the
-   * definition direction for a non-scalper or a neutral/sideless (straddle) entry. Live-only path.
-   */
-  private static ExitEvaluator.Direction scalperPositionDirection(
-      Loaded strategy, SignalRepository.SignalRow activeEntry) {
-    if (strategy.scalper() != null && activeEntry.scalperDetail() != null) {
-      String heldSide = activeEntry.scalperDetail().path("side").asText("");
-      if ("PE".equals(heldSide)) {
-        return ExitEvaluator.Direction.SHORT;
-      }
-      if ("CE".equals(heldSide)) {
-        return ExitEvaluator.Direction.LONG;
-      }
-    }
-    return directionOf(strategy.definition());
   }
 
   /**

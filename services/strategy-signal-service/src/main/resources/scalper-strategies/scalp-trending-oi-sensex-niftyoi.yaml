@@ -7,7 +7,7 @@ schema: strategy-schema/v1
 id: scalp-trending-oi-sensex-niftyoi
 name: "Scalper · Trending-OI Crossover · SENSEX CE (NIFTY-OI)"
 version: 1.0.0
-description: "Trending-OI crossover scalp (Siva #5) on the NIFTY front future; long-premium CE/PE (BIDIRECTIONAL — CE on a bullish OI cross, PE on a bearish cross), OI-led via the confluence."
+description: "Trending-OI crossover scalp (Siva #5) on the NIFTY front future; long-premium CE, OI-led via the confluence."
 author: owner
 tags: [scalper, options, intraday, sensex, oi-cross-filter, oi-cross-required, oi-slope-agree, oi-divergence-magnitude, oi-interval-and-60m-trend, rsi-s24-bands, delta-s24-floor, premium-s24-band, s24-trade-window]
 
@@ -19,7 +19,7 @@ universe:
   options:
     expiry: nearest_weekly
     strikes: { selector: atm_window, width: 3 }
-    option_types: [CE, PE]
+    option_types: [CE]
 
 timeframes:
   primary: 3m
@@ -29,21 +29,22 @@ indicators:
   - { name: VWMA,       alias: vwma20,    timeframe: 3m, params: { period: 20 } }
   - { name: PSAR,       alias: psar,      timeframe: 3m, params: { step: 0.02, max: 0.2 } }
   - { name: RSI,        alias: rsi14,     timeframe: 3m, params: { period: 14 }, weight: 1.0,
-      normalize: { type: step, bands: [{ score: 1.0 }] } } # BIDIRECTIONAL: composite neutralised (long-side normalizers block PE); the side-aware confluence is the filter
+      normalize: { type: rsi_momentum } }
   - { name: SUPERTREND, alias: supertrend, timeframe: 3m, params: { period: 10, multiplier: 2.0 },
-      weight: 1.0, normalize: { type: step, bands: [{ score: 1.0 }] } }
+      weight: 1.0, normalize: { type: direction } }
   - { name: SUPERTREND, alias: bias60m,   timeframe: 1h, params: { period: 7, multiplier: 3.0 } }
   - { name: SUPERTREND_LINE, alias: supertrend_line, timeframe: 3m, params: { period: 10, multiplier: 2.0 } } # E9 §3: the ST LINE for the trail-with-Super-Trend exit
 
 entry_rules:
-  direction: both
+  direction: long
   gate:
     all:
-      - "volume > 0"             # side-agnostic pre-gate; the side-aware confluence resolves CE/PE (close-vs-VWAP) + the OI cross carries the direction
+      - "close > vwma20"         # trend confirmation; the OI cross lives in the confluence seam
   scoring:
     threshold: 0.2
 
 exit_rules:
+  - { type: signal_exit, params: { rule: "close < vwma20", min_volume: 125000 } }   # trend break exit
   - { type: trailing_stop, params: { basis: indicator, alias: supertrend_line } }   # E9 §3: trail with the Super Trend line as the move matures
   - { type: time_stop,   params: { max_bars: 12 } }
 

@@ -4538,6 +4538,7 @@ export interface operations {
                 mode?: string;
                 date?: string;
                 interval?: string;
+                source?: string;
             };
             header?: never;
             path?: never;

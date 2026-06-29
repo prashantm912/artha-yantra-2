@@ -41,7 +41,9 @@ class MarketMoversScreenServiceTest {
   void returnsNullWhenNoRadarBucket() {
     FuturesSnapshotReader reader = mock(FuturesSnapshotReader.class);
     when(reader.latestPairAll(any(), any(), any())).thenReturn(List.of());
-    MarketMoversScreenService svc = new MarketMoversScreenService(reader);
+    MarketMoversScreenService svc =
+        new MarketMoversScreenService(
+            reader, mock(UpstoxFnoDailyReader.class), java.time.Clock.systemUTC());
     assertThat(svc.screen(List.of("HDFCBANK"), OiInterval.M3, null)).isNull();
   }
 
@@ -67,7 +69,9 @@ class MarketMoversScreenServiceTest {
             bd("118"), bd("124"), bd("117"), bd("119"), 800L, 1L, 3_000_000L)); // filtered out
     when(reader.eod(eq("HDFCBANK"), any(), any())).thenReturn(hist);
 
-    MarketMoversScreenService svc = new MarketMoversScreenService(reader);
+    MarketMoversScreenService svc =
+        new MarketMoversScreenService(
+            reader, mock(UpstoxFnoDailyReader.class), java.time.Clock.systemUTC());
     MarketMoversScreenService.Screen s = svc.screen(List.of("HDFCBANK"), OiInterval.M3, null);
 
     assertThat(s).isNotNull();

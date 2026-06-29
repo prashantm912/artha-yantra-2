@@ -18,6 +18,9 @@ new state is appended as dated update blocks (latest first), the old blocks are 
 - Still open: W-U4 Upstox cutover; the data-foundation value-verify gate (owner oipulse sign-in); Telegram
   scalp-alert opt-in (owner sets the bot token). The Phase-3 "#3 Market Movers" row below is now superseded
   (the stock-future universe is built; only the residual per-stock packages + v2 remain).
+- **Full code-verified remaining-build inventory** (15 confirmed-pending + 12 owner-gated + the 4 false-flags
+  rejected + the descope list + recommended build order) → `superpowers/plans/2026-06-30-remaining-build-inventory.md`.
+  That doc is the authoritative "what's left" ledger; the per-row tables below remain as the phase-by-phase provenance.
 
 **Merge state at writing (2026-06-24):** Phase 0–3 + Phase 3.5 are on `main` (#39–#44). **Phase 4
 React is substantially built** — the cockpit pages (Signals/Paper/Dashboard/Strategies/Backtests/

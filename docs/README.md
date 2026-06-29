@@ -16,6 +16,10 @@ authority is the OpenAlgo/React master plan; the design authority is `docs/desig
 
 ## Active — forward-work plans (`superpowers/plans/`)
 *(The master plan above is the authority; these are the open, non-merged plans.)*
+- `2026-06-30-remaining-build-inventory.md` — the **single code-verified ledger of everything yet to build**
+  across the whole platform (scalper / frontend-oipulse / Phase-5 data), produced by a discover→adversarial-
+  refute workflow (15 confirmed-pending, 12 owner-gated, 4 false-flags rejected). Includes the descope list +
+  recommended build order. Read this FIRST when picking the next thing to build.
 - `2026-06-28-scalper-to-100-roadmap.md` — the **scalper forward authority**: the consolidated,
   debloated-operative-anchored roadmap to finish the scalper engine (12 epics E1–E12 / ~95 packages,
   dependency waves, descopes, owner-decisions, the "nothing-deferred" ledger). Per-package design lives

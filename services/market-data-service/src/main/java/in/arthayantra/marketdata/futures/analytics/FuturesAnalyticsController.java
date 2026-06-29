@@ -3,6 +3,7 @@ package in.arthayantra.marketdata.futures.analytics;
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.time.Ist;
+import in.arthayantra.marketdata.futures.screener.MarketMoversScreenService;
 import in.arthayantra.marketdata.options.OiInterval;
 import in.arthayantra.marketdata.options.OiQuery;
 import java.time.LocalDate;
@@ -29,6 +30,7 @@ public class FuturesAnalyticsController {
   private final FuturesBankGridService bankGridService;
   private final FuturesOiChartService oiChartService;
   private final FuturesBankAnalysisService bankAnalysisService;
+  private final MarketMoversScreenService moversScreenService;
   private final int buzzBuckets;
   private final List<String> bankStocks;
   private final List<String> bankAnalysisStocks;
@@ -41,6 +43,7 @@ public class FuturesAnalyticsController {
       FuturesBankGridService bankGridService,
       FuturesOiChartService oiChartService,
       FuturesBankAnalysisService bankAnalysisService,
+      MarketMoversScreenService moversScreenService,
       @Value("${artha.futures.buzz-buckets:12}") int buzzBuckets,
       @Value(
               "${artha.futures.bank-stocks:HDFCBANK,ICICIBANK,SBIN,AXISBANK,KOTAKBANK,INDUSINDBK,"
@@ -58,6 +61,7 @@ public class FuturesAnalyticsController {
     this.bankGridService = bankGridService;
     this.oiChartService = oiChartService;
     this.bankAnalysisService = bankAnalysisService;
+    this.moversScreenService = moversScreenService;
     this.buzzBuckets = buzzBuckets;
     this.bankStocks = bankStocks;
     this.bankAnalysisStocks = bankAnalysisStocks;
@@ -233,6 +237,35 @@ public class FuturesAnalyticsController {
       throw new ApiException(422, ErrorCodes.DATA_GAP, "no bank-stock futures snapshots");
     }
     return bankGridService.grid(pair);
+  }
+
+  /**
+   * /movers-screen: §3.3 Market-Movers stock-future screener — the high-probability LONG / SHORT
+   * stock-future picks over the bank-sector radar (8/9-day breakout + Open=Low/High + OI quadrant +
+   * daily-RSI, ranked by move × liquidity). Sector-wide (no {@code name}); the engine entry_rules do
+   * the WHEN on each picked future. 422 until ≥1 radar bucket has accrued (forward-only, like
+   * /banks-grid). Map envelope {@code {longCandidates, shortCandidates, asOf}} — no typed schema.
+   */
+  @GetMapping("/movers-screen")
+  public Map<String, Object> moversScreen(
+      @RequestParam(required = false) String mode,
+      @RequestParam(required = false) String date,
+      @RequestParam(required = false) String interval) {
+    boolean live = mode == null || mode.isBlank() || "live".equalsIgnoreCase(mode);
+    OiInterval iv =
+        interval == null || interval.isBlank() ? OiInterval.M3 : OiInterval.parse(interval);
+    LocalDate d = date == null || date.isBlank() ? null : parseDate(date);
+    if (!live && d == null) {
+      throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "history mode requires date");
+    }
+    MarketMoversScreenService.Screen s = moversScreenService.screen(bankStocks, iv, d);
+    if (s == null) {
+      throw new ApiException(422, ErrorCodes.DATA_GAP, "no bank-stock futures snapshots");
+    }
+    return Map.of(
+        "longCandidates", s.longCandidates(),
+        "shortCandidates", s.shortCandidates(),
+        "asOf", s.asOf());
   }
 
   /**

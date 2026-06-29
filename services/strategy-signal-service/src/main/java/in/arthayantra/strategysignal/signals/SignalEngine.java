@@ -580,6 +580,14 @@ public class SignalEngine {
     if (dayBars.isEmpty() || !EngineSeries.sessionDate(dayBars.get(0)).equals(today)) {
       return;
     }
+    // E12 §3.8 avoid-Friday carry (tag avoid-friday-carry): a BTST/STBT position opened on a Friday
+    // carries weekend-gap risk (2+ nights, beyond the strategy's "<=1 night" mandate) — skip the carry
+    // entirely on Fridays. Default-OFF; only the btst YAMLs carrying the tag opt in.
+    if (strategy.scalper() != null
+        && strategy.scalper().has("avoid-friday-carry")
+        && today.getDayOfWeek() == java.time.DayOfWeek.FRIDAY) {
+      return;
+    }
     SeriesKey dailyKey =
         new SeriesKey(instrument.exchange(), instrument.tradingsymbol(), "1d");
     seriesStore.refreshFromRest(dailyKey);

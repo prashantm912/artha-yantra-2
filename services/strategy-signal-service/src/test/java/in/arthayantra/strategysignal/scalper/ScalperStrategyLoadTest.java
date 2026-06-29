@@ -344,6 +344,14 @@ class ScalperStrategyLoadTest {
         assertThat(optTypes).as(id + " trades both ATM legs").containsExactlyInAnyOrder("CE", "PE");
       }
 
+      // E12 §3.8 avoid-friday-carry: armed on the scalp-btst-stbt family (the overnight-carry strategy)
+      // — a Friday carry holds weekend-gap risk (2+ nights) beyond its "<=1 night" mandate, so the
+      // pre-close clock skips it on Fridays. Live-only seam (preCloseEvaluate), parity-safe by firewall.
+      boolean isBtst = id.startsWith("scalp-btst-stbt-");
+      assertThat(tags.contains("avoid-friday-carry"))
+          .as(id + " avoid-friday-carry armed iff btst")
+          .isEqualTo(isBtst);
+
       // E8 prior-day-vwap-stop (§3.9 Morning Trade): before ~10:30 the morning structural stop is the
       // prior-day VWAP; armed on the scalp-morning-trade (opening-tick) family.
       boolean isMorningTrade = id.startsWith("scalp-morning-trade-");

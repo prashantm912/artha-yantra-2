@@ -52,7 +52,8 @@ public record ScalperConfig(
     boolean requireStraddle,
     boolean requireRsiS24Bands,
     boolean requireOpenHighOiVeto,
-    List<String> tags) {
+    List<String> tags,
+    ScalperParams params) {
 
   /** Where the entry-time structural stop-loss is anchored (none = size off structure/VWAP only). */
   public enum StructuralStop {
@@ -67,10 +68,11 @@ public record ScalperConfig(
   }
 
   /**
-   * Legacy 18-arg form (pre-W4): defaults {@code tags} to empty. The W4 extension gates are armed via
-   * {@link #has(String)} against the raw YAML tag list, which only the canonical 19-arg constructor
-   * (used by {@link #from}) carries — so a config built without tags arms NO W4 gate (default path,
-   * byte-identical). Keeps the direct-construction test fixtures unchanged.
+   * Legacy 18-arg form (pre-W4): defaults {@code tags} to empty AND {@code params} to the all-default
+   * {@link ScalperParams}. The W4 extension gates are armed via {@link #has(String)} against the raw
+   * YAML tag list, which only the canonical constructor (used by {@link #from}) carries — so a config
+   * built without tags arms NO W4 gate (default path, byte-identical). Keeps the direct-construction
+   * test fixtures unchanged.
    */
   public ScalperConfig(
       String underlyingExchange,
@@ -96,6 +98,38 @@ public record ScalperConfig(
         confluenceThreshold, requireTwoCandle, structuralStop, requireCallPutDeltaFilter, requireGapFill,
         requireTrendChange, requireOpenHighLow, openingTick, requireHeroZero, requireStraddle,
         requireRsiS24Bands, requireOpenHighOiVeto, List.of());
+  }
+
+  /**
+   * 19-arg form (tags, no per-strategy {@code params}): defaults {@code params} to the all-default
+   * {@link ScalperParams}. Lets the existing tag-carrying fixtures stay unchanged while {@link #from}
+   * supplies the YAML-tuned params via the canonical 20-arg constructor.
+   */
+  public ScalperConfig(
+      String underlyingExchange,
+      String underlying,
+      String signalIndex,
+      String oiIndex,
+      int rollDays,
+      StrikePicker.Params strikeParams,
+      BigDecimal confluenceThreshold,
+      boolean requireTwoCandle,
+      StructuralStop structuralStop,
+      boolean requireCallPutDeltaFilter,
+      boolean requireGapFill,
+      boolean requireTrendChange,
+      boolean requireOpenHighLow,
+      boolean openingTick,
+      boolean requireHeroZero,
+      boolean requireStraddle,
+      boolean requireRsiS24Bands,
+      boolean requireOpenHighOiVeto,
+      List<String> tags) {
+    this(
+        underlyingExchange, underlying, signalIndex, oiIndex, rollDays, strikeParams,
+        confluenceThreshold, requireTwoCandle, structuralStop, requireCallPutDeltaFilter, requireGapFill,
+        requireTrendChange, requireOpenHighLow, openingTick, requireHeroZero, requireStraddle,
+        requireRsiS24Bands, requireOpenHighOiVeto, tags, ScalperParams.defaults());
   }
 
   /** Whether the strategy carries a (W4) behaviour tag (the raw YAML tag list from {@link #from}). */
@@ -234,10 +268,14 @@ public record ScalperConfig(
     // W3 PR-6 (#2 open-high-low): the open-high-oi-veto tag adds the per-strike >50% change-in-OI
     // AVOID veto to the OpenHighLowGate (default-OFF; absent => no per-strike veto, byte-identical).
     boolean openHighOiVeto = tags.contains("open-high-oi-veto");
+    // §5 (100%-YAML): the optional `scalper.params` block tunes the armable confluence-gate thresholds
+    // per-strategy (vwap-distance, gap-suppress, indicator-distance, oi-divergence, iv-buyer-cap). Absent
+    // ⇒ ScalperParams.defaults() = the ScalperGates constants, so an untuned strategy is byte-identical.
+    ScalperParams scalperParams = ScalperParams.from(config.path("scalper").path("params"));
     return new ScalperConfig(
         exchange, underlying, signalIndex, oiIndex, rollDays, params, THRESHOLD, twoCandle, stop,
         callPutDeltaFilter, gapFill, trendChange, openHighLow, openingTick, heroZero, straddle,
-        rsiS24Bands, openHighOiVeto, List.copyOf(tags));
+        rsiS24Bands, openHighOiVeto, List.copyOf(tags), scalperParams);
   }
 
   /** A {@code (exchange, tradingsymbol)} index reference for live front-future resolution. */

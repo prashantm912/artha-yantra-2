@@ -93,4 +93,50 @@ class ScalperConfigTest {
                 .requireOpenHighOiVeto())
         .isTrue();
   }
+
+  @Test
+  void scalperParamsDefaultToTheGateConstantsWhenAbsent() {
+    // §5: no scalper.params block ⇒ every armable-gate threshold equals its ScalperGates default, so an
+    // untuned strategy is byte-identical (the values the gate used before this feature).
+    ScalperParams p = ScalperConfig.from(config("NIFTY 50"), List.of("scalper")).params();
+    assertThat(p.vwapDistanceMinFrac()).isEqualByComparingTo(ScalperGates.VWAP_DISTANCE_MIN_FRAC);
+    assertThat(p.vwapDistanceMaxFrac()).isEqualByComparingTo(ScalperGates.VWAP_DISTANCE_MAX_FRAC);
+    assertThat(p.gapSuppressPts()).isEqualByComparingTo(ScalperGates.GAP_SIDE_SUPPRESS_PTS);
+    assertThat(p.indicatorDistanceMaxPct()).isEqualByComparingTo(ScalperGates.INDICATOR_DISTANCE_MAX_PCT);
+    assertThat(p.oiDivergenceMinPct()).isEqualByComparingTo(ScalperGates.OI_DIVERGENCE_MIN_PCT);
+    assertThat(p.priceImpulseMinPct()).isEqualByComparingTo(ScalperGates.PRICE_IMPULSE_MIN_PCT);
+    assertThat(p.ivBuyerCap()).isEqualByComparingTo(ScalperGates.IV_BUYER_CAP);
+    // the legacy fixture constructors also default params (never null) so the gate read is safe.
+    assertThat(
+            new ScalperConfig(
+                    "NSE", "NIFTY 50", "NIFTY 50", "NIFTY 50", 2,
+                    new StrikePicker.Params(0.6, 0.7, new BigDecimal("100"), new BigDecimal("250"), 0.065),
+                    new BigDecimal("0.6"), false, ScalperConfig.StructuralStop.NONE, false, false, false,
+                    false, false, false, false, false, false)
+                .params()
+                .ivBuyerCap())
+        .isEqualByComparingTo(ScalperGates.IV_BUYER_CAP);
+  }
+
+  @Test
+  void scalperParamsBlockOverridesReachTheConfig() throws Exception {
+    JsonNode cfg =
+        M.readTree(
+            "{\"universe\":{\"underlying\":{\"exchange\":\"NSE\",\"tradingsymbol\":\"NIFTY 50\"}},"
+                + "\"scalper\":{\"params\":{"
+                + "\"vwap_distance_max_frac\":0.006,"
+                + "\"gap_suppress_pts\":400,"
+                + "\"indicator_distance_max_pct\":0.02,"
+                + "\"oi_divergence_min_pct\":30,"
+                + "\"iv_buyer_cap\":0.45}}}");
+    ScalperParams p = ScalperConfig.from(cfg, List.of("scalper")).params();
+    assertThat(p.vwapDistanceMaxFrac()).isEqualByComparingTo("0.006");
+    assertThat(p.gapSuppressPts()).isEqualByComparingTo("400");
+    assertThat(p.indicatorDistanceMaxPct()).isEqualByComparingTo("0.02");
+    assertThat(p.oiDivergenceMinPct()).isEqualByComparingTo("30");
+    assertThat(p.ivBuyerCap()).isEqualByComparingTo("0.45");
+    // an UNSET field inside a partial block still falls back to the gate default.
+    assertThat(p.priceImpulseMinPct()).isEqualByComparingTo(ScalperGates.PRICE_IMPULSE_MIN_PCT);
+    assertThat(p.vwapDistanceMinFrac()).isEqualByComparingTo(ScalperGates.VWAP_DISTANCE_MIN_FRAC);
+  }
 }

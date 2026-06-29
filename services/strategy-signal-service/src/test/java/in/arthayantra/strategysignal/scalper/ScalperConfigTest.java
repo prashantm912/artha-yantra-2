@@ -106,6 +106,12 @@ class ScalperConfigTest {
     assertThat(p.oiDivergenceMinPct()).isEqualByComparingTo(ScalperGates.OI_DIVERGENCE_MIN_PCT);
     assertThat(p.priceImpulseMinPct()).isEqualByComparingTo(ScalperGates.PRICE_IMPULSE_MIN_PCT);
     assertThat(p.ivBuyerCap()).isEqualByComparingTo(ScalperGates.IV_BUYER_CAP);
+    // §0B rails default to the Siva constants; the midday block defaults ON; the volume floor stays
+    // null (⇒ the per-index default map).
+    assertThat(p.noTradeBefore()).isEqualTo(ScalperGates.NO_TRADE_BEFORE);
+    assertThat(p.noFreshEntryAfter()).isEqualTo(ScalperGates.NO_FRESH_ENTRY_AFTER);
+    assertThat(p.middayBlock()).isTrue();
+    assertThat(p.volumeFloor()).isNull();
     // the legacy fixture constructors also default params (never null) so the gate read is safe.
     assertThat(
             new ScalperConfig(
@@ -128,15 +134,23 @@ class ScalperConfigTest {
                 + "\"gap_suppress_pts\":400,"
                 + "\"indicator_distance_max_pct\":0.02,"
                 + "\"oi_divergence_min_pct\":30,"
-                + "\"iv_buyer_cap\":0.45}}}");
+                + "\"iv_buyer_cap\":0.45,"
+                + "\"no_trade_before\":\"09:30\","
+                + "\"midday_block\":false,"
+                + "\"volume_floor\":80000}}}");
     ScalperParams p = ScalperConfig.from(cfg, List.of("scalper")).params();
     assertThat(p.vwapDistanceMaxFrac()).isEqualByComparingTo("0.006");
     assertThat(p.gapSuppressPts()).isEqualByComparingTo("400");
     assertThat(p.indicatorDistanceMaxPct()).isEqualByComparingTo("0.02");
     assertThat(p.oiDivergenceMinPct()).isEqualByComparingTo("30");
     assertThat(p.ivBuyerCap()).isEqualByComparingTo("0.45");
+    // §0B rail overrides reach the config: an earlier floor, the midday block OFF, a custom volume floor.
+    assertThat(p.noTradeBefore()).isEqualTo(java.time.LocalTime.of(9, 30));
+    assertThat(p.middayBlock()).isFalse();
+    assertThat(p.volumeFloor()).isEqualByComparingTo("80000");
     // an UNSET field inside a partial block still falls back to the gate default.
     assertThat(p.priceImpulseMinPct()).isEqualByComparingTo(ScalperGates.PRICE_IMPULSE_MIN_PCT);
     assertThat(p.vwapDistanceMinFrac()).isEqualByComparingTo(ScalperGates.VWAP_DISTANCE_MIN_FRAC);
+    assertThat(p.noFreshEntryAfter()).isEqualTo(ScalperGates.NO_FRESH_ENTRY_AFTER); // unset → default
   }
 }

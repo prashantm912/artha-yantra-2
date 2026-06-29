@@ -155,7 +155,14 @@ public class ScalperConfluenceGate {
               : cfg.has("s24-trade-window")
                   // W4 (S24 Shared-S2): the explicit 09:45-14:30 window — no 11:00-13:00 midday block, cap 14:30.
                   ? ScalperGates.timeWindow(istTime, ScalperGates.NO_TRADE_BEFORE, ScalperGates.S24_WINDOW_TO).pass()
-                  : ScalperGates.timeWindow(istTime).pass();
+                  // §5 part 2: the §0B rail honours per-strategy scalper.params (bounds + midday toggle);
+                  // unset ⇒ the Siva 09:45/15:30/midday-on defaults, byte-identical.
+                  : ScalperGates.timeWindow(
+                          istTime,
+                          cfg.params().noTradeBefore(),
+                          cfg.params().noFreshEntryAfter(),
+                          cfg.params().middayBlock())
+                      .pass();
       if (!timeOk) {
         return Optional.empty();
       }
@@ -183,7 +190,7 @@ public class ScalperConfluenceGate {
     // (deferred to live management); v1 emits the two-leg draft once an ATM pair exists. Short straddle
     // (SELL legs) is SPAN-deferred — StraddleLegPicker only ever returns BUY legs.
     if (cfg.requireStraddle()) {
-      if (!ScalperGates.volume(cfg.signalIndex(), chart.volume()).pass()) {
+      if (!ScalperGates.volume(cfg.signalIndex(), chart.volume(), cfg.params().volumeFloor()).pass()) {
         return Optional.empty();
       }
       // E4 §3.A.4 low-iv-straddle: a LONG straddle wants LOW IV (cheap both legs); skip when either
@@ -249,7 +256,7 @@ public class ScalperConfluenceGate {
             : cfg.requireRsiS24Bands()
                 ? ScalperGates.rsiS24Band(chart.rsi14(), side).pass()
                 : ScalperGates.rsiBand(chart.rsi14(), side).pass();
-    if (!ScalperGates.volume(cfg.signalIndex(), chart.volume()).pass() || !rsiOk) {
+    if (!ScalperGates.volume(cfg.signalIndex(), chart.volume(), cfg.params().volumeFloor()).pass() || !rsiOk) {
       return Optional.empty();
     }
     // E5 §3.2/§4.2 higher-TF RSI caps: on top of the 3m rail, the 5m must not be overbought (CE) and the

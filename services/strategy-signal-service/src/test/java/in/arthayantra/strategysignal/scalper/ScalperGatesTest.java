@@ -41,6 +41,30 @@ class ScalperGatesTest {
   }
 
   @Test
+  void timeWindowRailOverridesHonourBoundsAndTheMiddayToggle() {
+    // §5 part 2: an earlier floor (09:30), a later cap (15:25), and the midday block OFF — a 11:30 entry
+    // that the default rail blocks now passes.
+    assertThat(ScalperGates.timeWindow(LocalTime.of(9, 30), LocalTime.of(9, 30), LocalTime.of(15, 25), false).pass())
+        .isTrue();
+    assertThat(ScalperGates.timeWindow(LocalTime.of(11, 30), LocalTime.of(9, 30), LocalTime.of(15, 25), false).pass())
+        .isTrue(); // midday block disabled
+    assertThat(ScalperGates.timeWindow(LocalTime.of(11, 30), LocalTime.of(9, 30), LocalTime.of(15, 25), true).pass())
+        .isFalse(); // midday block on → still blocked
+    assertThat(ScalperGates.timeWindow(LocalTime.of(9, 29), LocalTime.of(9, 30), LocalTime.of(15, 25), false).pass())
+        .isFalse(); // before the custom floor
+    assertThat(ScalperGates.timeWindow(LocalTime.of(15, 25), LocalTime.of(9, 30), LocalTime.of(15, 25), false).pass())
+        .isFalse(); // at the custom cap
+  }
+
+  @Test
+  void volumeFloorOverrideReplacesThePerIndexDefault() {
+    // null override ⇒ the per-index map (NIFTY 125k); a custom 80k floor admits a 90k bar the default rejects.
+    assertThat(ScalperGates.volume("NIFTY 50", new BigDecimal("90000"), null).pass()).isFalse();
+    assertThat(ScalperGates.volume("NIFTY 50", new BigDecimal("90000"), new BigDecimal("80000")).pass()).isTrue();
+    assertThat(ScalperGates.volume("NIFTY 50", new BigDecimal("70000"), new BigDecimal("80000")).pass()).isFalse();
+  }
+
+  @Test
   void timeOfDayPreferencePassesInsideTheWindowAndSkipsOutside() {
     LocalTime from = LocalTime.of(10, 0);
     LocalTime to = LocalTime.of(13, 30);

@@ -35,7 +35,7 @@ class SessionGateTest {
   void blocksEntriesOutsideTheWindowAndForcesSquareOff() {
     MarketCalendar cal = MarketCalendar.nse();
     LocalDate day = nonExpiryDay(cal);
-    SessionGate g = new SessionGate(session("09:20", "15:00", "15:12", null, null, null));
+    SessionGate g = new SessionGate(session("09:20", "15:00", "15:12", null, null, null), false);
 
     assertThat(g.entryAllowed(LocalTime.of(9, 19), day)).isFalse(); // before window open
     assertThat(g.entryAllowed(LocalTime.of(9, 20), day)).isTrue(); // window open is inclusive
@@ -50,7 +50,7 @@ class SessionGateTest {
   @Test
   void noSessionFieldsMeansEverythingAllowed() {
     // the golden-fixture shape (only style/pre_close_at) → gate is a no-op, parity preserved.
-    SessionGate g = new SessionGate(session(null, null, null, null, null, null));
+    SessionGate g = new SessionGate(session(null, null, null, null, null, null), false);
     LocalDate anyDay = LocalDate.of(2026, 4, 6);
     assertThat(g.entryAllowed(LocalTime.of(9, 0), anyDay)).isTrue();
     assertThat(g.entryAllowed(LocalTime.of(15, 29), anyDay)).isTrue();
@@ -69,7 +69,7 @@ class SessionGateTest {
     }
     assertThat(expiry).as("a weekly index expiry in April 2026").isNotNull();
 
-    SessionGate g = new SessionGate(session("09:20", "15:00", "15:12", true, "09:20", "14:30"));
+    SessionGate g = new SessionGate(session("09:20", "15:00", "15:12", true, "09:20", "14:30"), false);
     // 14:45 is inside the normal 15:00 window but past the 14:30 expiry-day window.
     assertThat(g.entryAllowed(LocalTime.of(14, 45), expiry)).isFalse();
     assertThat(g.entryAllowed(LocalTime.of(14, 29), expiry)).isTrue();
@@ -86,8 +86,29 @@ class SessionGateTest {
         break;
       }
     }
-    SessionGate g = new SessionGate(session("09:20", "15:00", "15:12", false, null, null));
+    SessionGate g = new SessionGate(session("09:20", "15:00", "15:12", false, null, null), false);
     assertThat(g.entryAllowed(LocalTime.of(10, 0), expiry)).isFalse(); // no entries on expiry day
     assertThat(g.entryAllowed(LocalTime.of(10, 0), nonExpiryDay(cal))).isTrue();
+  }
+
+  @Test
+  void relaxSessionDisablesTheClockRailEntirely() {
+    // backtest relax-session: entries fire all session (window/square_off/expiry-day ignored) and the
+    // square_off force-close is off — positions exit purely on their own exit_rules. Functional smoke.
+    MarketCalendar cal = MarketCalendar.nse();
+    LocalDate day = nonExpiryDay(cal);
+    SessionGate relaxed = new SessionGate(session("09:20", "15:00", "15:12", false, null, null), true);
+    assertThat(relaxed.entryAllowed(LocalTime.of(9, 0), day)).isTrue(); // before the window
+    assertThat(relaxed.entryAllowed(LocalTime.of(15, 29), day)).isTrue(); // after the window + square_off
+    assertThat(relaxed.pastSquareOff(LocalTime.of(15, 29))).isFalse(); // no forced square-off
+    // expiry-day entry block is also lifted under relax.
+    LocalDate expiry = null;
+    for (LocalDate d = LocalDate.of(2026, 4, 1); d.isBefore(LocalDate.of(2026, 5, 1)); d = d.plusDays(1)) {
+      if (cal.isWeeklyIndexExpiryDay(d)) {
+        expiry = d;
+        break;
+      }
+    }
+    assertThat(relaxed.entryAllowed(LocalTime.of(10, 0), expiry)).isTrue();
   }
 }

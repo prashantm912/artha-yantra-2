@@ -89,9 +89,15 @@ public class OptionsPremiumReplay {
       List<EngineCandle> strikeReferenceOneMinute,
       Map<SeriesKey, List<EngineCandle>> contextCandles,
       BigDecimal initialEquity) {
+    // NEW: backtest.relax_session (opt-in, default false) disables the intraday clock rail so an
+    // armed scalper fires its signal-driven entries across the FULL session for functional evaluation
+    // (the live confluence gates are firewalled out of replay anyway). It does NOT relax the signal
+    // gate or indicator warmup — those would manufacture fake trades — so a sparse backtest stays a
+    // signal/data-fidelity artifact (judge on live). Off ⇒ premium goldens are byte-identical.
+    boolean relaxSession = config.path("backtest").path("relax_session").asBoolean(false);
     List<SignalEvent> signals =
         new TickwiseGoldenRunner(definition, underlyingExchange, underlyingTradingsymbol)
-            .run(underlyingOneMinute, contextCandles, null);
+            .run(underlyingOneMinute, contextCandles, null, relaxSession);
     List<PairedLeg> legs = pairLegs(signals, underlyingOneMinute);
     OiGate gate = parseOiGate(config);
     // 2b-E2: the option legs + the OI-confluence index resolve from {@code universe.underlying} (the

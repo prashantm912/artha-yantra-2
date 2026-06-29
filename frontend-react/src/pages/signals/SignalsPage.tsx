@@ -4,6 +4,7 @@ import { Inbox } from 'lucide-react';
 import { formatDecimal } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
+import { DateInput } from '../../components/atoms/DateInput.tsx';
 import {
   SIGNAL_STATUSES,
   useDismissSignal,
@@ -27,6 +28,18 @@ import { ReasoningBreakdown } from './ReasoningBreakdown.tsx';
 // Revamp rollout (Trading screens): the sr-only h1 becomes the visible signature PageHeader (text
 // preserved). The live feed table is wrapped in QueryState (error/empty/loading split) — the empty
 // copy is preserved byte-identical. The detail aside + all WS/Take/Dismiss behaviour is untouched.
+
+/** Today's calendar date (YYYY-MM-DD) in IST, robust to the browser's own timezone. */
+function todayIst(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+}
+
+/** The [00:00, next-00:00) IST bounds of a YYYY-MM-DD day, as ISO offset datetimes the API parses. */
+function dayBoundsIst(date: string): { from: string; to: string } {
+  const next = new Date(new Date(`${date}T00:00:00+05:30`).getTime() + 24 * 3600 * 1000);
+  const nextDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(next);
+  return { from: `${date}T00:00:00+05:30`, to: `${nextDay}T00:00:00+05:30` };
+}
 
 function statusTone(status: string): string {
   switch (status) {
@@ -52,8 +65,13 @@ function Badge({ label, tone }: { label: string; tone: string }) {
 export function SignalsPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const q = useSignals(status);
-  useSignalsLive(status);
+  // Live = today (the STOMP feed merges in); Historical = a picked past day (static snapshot).
+  const [mode, setMode] = useState<'live' | 'historical'>('live');
+  const [date, setDate] = useState<string>(todayIst);
+  const effectiveDate = mode === 'live' ? todayIst() : date;
+  const { from, to } = dayBoundsIst(effectiveDate);
+  const q = useSignals(status, from, to);
+  useSignalsLive(status, from, to, mode === 'live');
   const take = useTakeSignal();
   const dismiss = useDismissSignal();
 
@@ -78,6 +96,40 @@ export function SignalsPage() {
       <BeatBlock className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[1.4fr_minmax(20rem,1fr)]">
       <section className="min-w-0">
         <div className="mb-3 flex flex-wrap items-center gap-2">
+          <div className="inline-flex rounded-md border border-ay-border" role="group" aria-label="Live or historical signals">
+            <button
+              type="button"
+              onClick={() => setMode('live')}
+              aria-pressed={mode === 'live'}
+              title="Show only today's signals; the live feed streams new ones in."
+              className={cn(
+                'h-9 rounded-l-md px-3 text-sm',
+                mode === 'live' ? 'bg-accent/15 font-semibold text-accent' : 'text-ay-muted hover:text-ay-text',
+              )}
+            >
+              Live
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('historical')}
+              aria-pressed={mode === 'historical'}
+              title="Browse signals from a chosen past day (a static snapshot — the live feed is paused)."
+              className={cn(
+                'h-9 rounded-r-md border-l border-ay-border px-3 text-sm',
+                mode === 'historical' ? 'bg-accent/15 font-semibold text-accent' : 'text-ay-muted hover:text-ay-text',
+              )}
+            >
+              Historical
+            </button>
+          </div>
+          {mode === 'historical' && (
+            <DateInput
+              value={date}
+              onChange={(v) => setDate(v ?? todayIst())}
+              ariaLabel="Pick a past date to view that day's signals"
+              title="Show signals generated on this IST day."
+            />
+          )}
           <Select
             value={status}
             options={[...SIGNAL_STATUSES]}

@@ -80,6 +80,7 @@ export function PaperPage() {
   };
   const riskItems = risk.data?.items;
   const killOn = riskEnabled(riskItems, 'kill_switch');
+  const autoOn = riskEnabled(riskItems, 'auto_paper_trade');
 
   const points = useMemo(() => pnl.data?.points ?? [], [pnl.data]);
   const makeOption = useCallback(
@@ -144,6 +145,17 @@ export function PaperPage() {
               </button>
             </div>
             <div className="flex-1" />
+            <button
+              type="button"
+              onClick={() => updateRisk.mutate({ key: 'auto_paper_trade', value: { enabled: !autoOn } })}
+              title="Auto-paper-trade — when on, every emitted entry signal is taken automatically at its suggested quantity (no manual click)."
+              className={cn(
+                'h-9 rounded-md px-3 text-sm font-semibold ring-1',
+                autoOn ? 'bg-bull/15 text-bull ring-bull/50' : 'text-ay-muted ring-ay-border hover:border-accent',
+              )}
+            >
+              ◎ {autoOn ? 'AUTO-PAPER ON' : 'Auto-paper'}
+            </button>
             <button
               type="button"
               onClick={() => updateRisk.mutate({ key: 'kill_switch', value: { enabled: !killOn } })}

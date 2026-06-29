@@ -495,6 +495,19 @@ class ScalperConfluenceGateTest {
   }
 
   @Test
+  void trendlineBreakTagBlocksWithoutAConfirmedBreak() {
+    // §3.12: armed, the gate requires a trendline break in the side's direction; a null future (no
+    // session structure to read) fail-CLOSES → block. The bare CFG (gate off) fires on the same inputs.
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+
+    assertThat(gate.evaluate(cfgTags("trendline-break"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isEmpty();
+    assertThat(gate.evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+  }
+
+  @Test
   void flatOiStandAsideTagBlocksFlatOiAndPassesWithPresentImbalance() {
     // E2 M4: the flat-oi-stand-aside hard gate stands aside on a null/flat imbalance (the inverse of
     // #5's fail-open); the bare CFG (gate off) still fires on the same flat-OI context.

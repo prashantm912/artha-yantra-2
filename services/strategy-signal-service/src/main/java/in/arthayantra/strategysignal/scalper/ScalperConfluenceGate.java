@@ -373,6 +373,15 @@ public class ScalperConfluenceGate {
     if (cfg.has("overbought-defer") && !ScalperGates.overboughtDefer(chart.rsi14(), side).pass()) {
       return Optional.empty();
     }
+    // §3.12 trendline-break (tag trendline-break): require a confirmed break of the 2-pivot session
+    // trendline in the side's direction (CE breaks a falling resistance, PE a rising support) — the
+    // §3.12 chart-pattern reversal trigger, distinct from the single-pivot MarketStructure break. Built
+    // default-OFF (armed on no shipped strategy; the owner arms it per-strategy, like atr-stop, because a
+    // mechanical 2-pivot line is a refinement whose home is a discretionary owner choice). Fail-closed:
+    // too few pivots / no break / a null future → block.
+    if (cfg.has("trendline-break") && !Trendline.detect(future, index, side).broke()) {
+      return Optional.empty();
+    }
     // §3.1 Two-Candle: when the strategy declares it, the multi-bar formation is a HARD entry gate
     // (the chart-only YAML grammar cannot express it). The 1st-candle extreme becomes the stop.
     BigDecimal structuralStop = structuralStop(cfg, future, index, side);

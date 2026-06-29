@@ -398,6 +398,32 @@ class ScalperConfluenceGateTest {
   }
 
   @Test
+  void btstCarryOverloadPinsForcedSideAndSkipsTheIntradayTimeWindow() {
+    // E11 §3.8: the BTST carry overload (forcedSide + carryClock) pins the CE/PE side resolved from the
+    // day-close location and SKIPS the §0B intraday window — the 15:20 pre-close clock IS the carry window.
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+    LocalTime midday = LocalTime.of(12, 0); // inside the 11:00-13:00 default midday block
+
+    // carryClock=false at 12:00 → the §0B midday block fires → no carry.
+    assertThat(gate.evaluate(CFG, bullBank(), null, 0, NOW, midday, EOD, CE, false)).isEmpty();
+    // carryClock=true → the window is skipped; forced CE + the bullish confluence confirms → a carry fires.
+    Optional<Decision> ce = gate.evaluate(CFG, bullBank(), null, 0, NOW, midday, EOD, CE, true);
+    assertThat(ce).isPresent();
+    assertThat(ce.get().side()).isEqualTo(CE);
+    // forcedSide=PE pins the bearish side even though price>VWAP (CE by the default VWAP-decisive read):
+    // the PE path is then blocked downstream (RSI 65 sits outside the PE 20-40 rail), whereas the CE path
+    // above fired — proving the side is taken from forcedSide, not derived from price-vs-VWAP.
+    assertThat(
+            gate.evaluate(
+                CFG, bullBank(), null, 0, NOW, midday, EOD,
+                in.arthayantra.black76.Black76.OptionType.PE, true))
+        .isEmpty();
+  }
+
+  @Test
   void rsiS24BandsTagRoutesTheHardRailThroughTheNewBand() {
     // RSI 55: inside the S24 buy band (50-75) but in the LEGACY 40-60 no-trade gap. The hard RSI
     // rail must BLOCK a legacy strategy and PASS one carrying the rsi-s24-bands tag — chain +

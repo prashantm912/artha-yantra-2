@@ -115,19 +115,46 @@ public class ScalperConfluenceGate {
       Instant barInstant,
       LocalTime istTime,
       LocalDate eodDate) {
+    return evaluate(cfg, bank, future, index, barInstant, istTime, eodDate, null, false);
+  }
+
+  /**
+   * E11 §3.8 BTST/STBT carry overload. {@code forcedSide} pins the CE/PE side the caller already
+   * resolved — the overnight carry's side is the day-close LOCATION (toward the day HIGH ⇒ CE/BTST,
+   * toward the LOW ⇒ PE/STBT, §3.8's BTST-vs-STBT split), NOT the intraday VWAP-decisive read; pass
+   * {@code null} to keep the default VWAP derivation. {@code carryClock=true} skips the §0B intraday
+   * time window (the 15:20 pre-close clock IS the carry's window — the intraday cap would otherwise
+   * block every carry). Every other rail (volume / RSI / confluence / OI / macro / strike pick) runs
+   * UNCHANGED against the pinned side, so the carry is validated by the SAME confluence the intraday
+   * scalps use — fail-closed, NEUTRAL on derived history (so a carry reads ~0 backtest trades).
+   */
+  public Optional<Decision> evaluate(
+      ScalperConfig cfg,
+      BarValues bank,
+      EngineSeries future,
+      int index,
+      Instant barInstant,
+      LocalTime istTime,
+      LocalDate eodDate,
+      OptionType forcedSide,
+      boolean carryClock) {
     // §0B hard pre-flight (§12.1): the time window — the one the YAML session cannot express (the
     // 11:00–13:00 midday block). Blocked early, before the chain fetch, to skip the HTTP fan-out.
     // #9 (section 3.9) Morning Trade: the opening-tick path uses its own opening window instead (the
     // ~09:16-09:30 opening tick the general "after 09:45" rule must NOT block — owner-confirmed).
-    boolean timeOk =
-        cfg.openingTick()
-            ? ScalperGates.timeWindow(istTime, ScalperConfig.OPENING_FROM, ScalperConfig.OPENING_TO).pass()
-            : cfg.has("s24-trade-window")
-                // W4 (S24 Shared-S2): the explicit 09:45-14:30 window — no 11:00-13:00 midday block, cap 14:30.
-                ? ScalperGates.timeWindow(istTime, ScalperGates.NO_TRADE_BEFORE, ScalperGates.S24_WINDOW_TO).pass()
-                : ScalperGates.timeWindow(istTime).pass();
-    if (!timeOk) {
-      return Optional.empty();
+    // E11 §3.8: the carry clock (carryClock) SKIPS this window — the 15:20 pre-close evaluation IS the
+    // carry's window, and the intraday cap would block it.
+    if (!carryClock) {
+      boolean timeOk =
+          cfg.openingTick()
+              ? ScalperGates.timeWindow(istTime, ScalperConfig.OPENING_FROM, ScalperConfig.OPENING_TO).pass()
+              : cfg.has("s24-trade-window")
+                  // W4 (S24 Shared-S2): the explicit 09:45-14:30 window — no 11:00-13:00 midday block, cap 14:30.
+                  ? ScalperGates.timeWindow(istTime, ScalperGates.NO_TRADE_BEFORE, ScalperGates.S24_WINDOW_TO).pass()
+                  : ScalperGates.timeWindow(istTime).pass();
+      if (!timeOk) {
+        return Optional.empty();
+      }
     }
     // E8 §3.5 time-of-day-preference (tag time-of-day-preference): on top of the §0B hard window, an
     // opt-in strategy only INITIATES inside the high-probability 10:00-13:30 band ("best 10:00-11:30,
@@ -179,10 +206,14 @@ public class ScalperConfluenceGate {
                       null)); // #11 straddle is direction-neutral — no Open=High tier / no graded sizing
     }
     // §0B VWAP-decisive: CE above VWAP, PE below — the side the rest of the confluence must confirm.
+    // E11 §3.8: a BTST carry pins the side from the day-close LOCATION (forcedSide), overriding the
+    // intraday VWAP read.
     OptionType side =
-        chart.close() != null && chart.vwap() != null && chart.close().compareTo(chart.vwap()) >= 0
-            ? OptionType.CE
-            : OptionType.PE;
+        forcedSide != null
+            ? forcedSide
+            : chart.close() != null && chart.vwap() != null && chart.close().compareTo(chart.vwap()) >= 0
+                ? OptionType.CE
+                : OptionType.PE;
     // E8 §2.2 r8 / §3.4 vwap-distance (tag vwap-distance): an entry too FAR from VWAP is an extended
     // chase, not a pullback — a HARD skip (the Siva "wait for a pullback near VWAP, don't chase the
     // move" discipline). Chart-only (|close-vwap|/close), side-agnostic; a null operand degrades to

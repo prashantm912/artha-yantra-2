@@ -39,9 +39,38 @@ public class MarketMoversScreenService {
   static final int HISTORY_DAYS = 25;
 
   private final FuturesSnapshotReader reader;
+  private final UpstoxFnoDailyReader upstoxReader;
+  private final java.time.Clock clock;
 
-  public MarketMoversScreenService(FuturesSnapshotReader reader) {
+  public MarketMoversScreenService(
+      FuturesSnapshotReader reader, UpstoxFnoDailyReader upstoxReader, java.time.Clock clock) {
     this.reader = reader;
+    this.upstoxReader = upstoxReader;
+    this.clock = clock;
+  }
+
+  /**
+   * E1 v2: grade an arbitrary radar (e.g. the full NIFTY-50) from ON-DEMAND Upstox daily candles instead
+   * of the captured snapshots — same {@link MarketMoversScreener} core, so the WHICH-stock grading is
+   * identical; only the data SOURCE differs (no capture / migration / OOM). {@code null} when no radar
+   * stock yields ≥2 daily bars (the controller 422s). Best-effort per stock (an unresolvable stock is
+   * skipped, never throws).
+   */
+  public Screen screenUpstox(List<String> radar) {
+    LocalDate today = LocalDate.now(clock);
+    Map<String, List<DailyBar>> byStock = new LinkedHashMap<>();
+    for (String stock : radar) {
+      List<DailyBar> bars = upstoxReader.dailyBars(stock, today.minusDays(HISTORY_DAYS), today);
+      if (bars.size() >= 2) {
+        byStock.put(stock, bars);
+      }
+    }
+    if (byStock.isEmpty()) {
+      return null;
+    }
+    MarketMoversScreener.Screen s = MarketMoversScreener.screen(byStock);
+    OffsetDateTime asOf = OffsetDateTime.now(clock).withOffsetSameInstant(Ist.OFFSET);
+    return new Screen(s.longCandidates(), s.shortCandidates(), asOf);
   }
 
   /** The ranked long / short candidate lists + the snapshot bucket they were graded from. */

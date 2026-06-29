@@ -34,6 +34,7 @@ public class FuturesAnalyticsController {
   private final int buzzBuckets;
   private final List<String> bankStocks;
   private final List<String> bankAnalysisStocks;
+  private final List<String> niftyRadarStocks;
 
   public FuturesAnalyticsController(
       FuturesSnapshotReader reader,
@@ -53,7 +54,14 @@ public class FuturesAnalyticsController {
       @Value(
               "${artha.futures.bank-analysis-stocks:"
                   + "HDFCBANK,ICICIBANK,AXISBANK,SBIN,KOTAKBANK,INDUSINDBK}")
-          List<String> bankAnalysisStocks) {
+          List<String> bankAnalysisStocks,
+      @Value(
+              "${artha.futures.nifty-radar-stocks:RELIANCE,TCS,HDFCBANK,ICICIBANK,INFY,ITC,SBIN,"
+                  + "BHARTIARTL,LT,KOTAKBANK,AXISBANK,HINDUNILVR,BAJFINANCE,MARUTI,SUNPHARMA,"
+                  + "TATAMOTORS,TITAN,ONGC,NTPC,POWERGRID,TATASTEEL,ADANIENT,COALINDIA,JSWSTEEL,"
+                  + "ULTRACEMCO,GRASIM,HINDALCO,WIPRO,TECHM,BAJAJFINSV,NESTLEIND,M&M,INDUSINDBK,"
+                  + "CIPLA,DRREDDY,EICHERMOT,BPCL,HEROMOTOCO,DIVISLAB,BRITANNIA}")
+          List<String> niftyRadarStocks) {
     this.reader = reader;
     this.spurtService = spurtService;
     this.moversService = moversService;
@@ -65,6 +73,7 @@ public class FuturesAnalyticsController {
     this.buzzBuckets = buzzBuckets;
     this.bankStocks = bankStocks;
     this.bankAnalysisStocks = bankAnalysisStocks;
+    this.niftyRadarStocks = niftyRadarStocks;
   }
 
   @GetMapping("/oi-analysis")
@@ -241,26 +250,37 @@ public class FuturesAnalyticsController {
 
   /**
    * /movers-screen: §3.3 Market-Movers stock-future screener — the high-probability LONG / SHORT
-   * stock-future picks over the bank-sector radar (8/9-day breakout + Open=Low/High + OI quadrant +
-   * daily-RSI, ranked by move × liquidity). Sector-wide (no {@code name}); the engine entry_rules do
-   * the WHEN on each picked future. 422 until ≥1 radar bucket has accrued (forward-only, like
-   * /banks-grid). Map envelope {@code {longCandidates, shortCandidates, asOf}} — no typed schema.
+   * stock-future picks (8/9-day breakout + Open=Low/High + OI quadrant + daily-RSI, ranked by move ×
+   * liquidity). Sector-wide (no {@code name}); the engine entry_rules do the WHEN on each picked future.
+   * Map envelope {@code {longCandidates, shortCandidates, asOf}} — no typed schema. {@code source}
+   * selects the data path: default = the captured NIFTY-Bank snapshot radar (v1, 422 until ≥1 radar
+   * bucket, supports history {@code date}); {@code source=upstox} (E1 v2) = the full NIFTY-50 radar from
+   * ON-DEMAND Upstox daily candles (live only — no history/interval).
    */
   @GetMapping("/movers-screen")
   public Map<String, Object> moversScreen(
       @RequestParam(required = false) String mode,
       @RequestParam(required = false) String date,
-      @RequestParam(required = false) String interval) {
-    boolean live = mode == null || mode.isBlank() || "live".equalsIgnoreCase(mode);
-    OiInterval iv =
-        interval == null || interval.isBlank() ? OiInterval.M3 : OiInterval.parse(interval);
-    LocalDate d = date == null || date.isBlank() ? null : parseDate(date);
-    if (!live && d == null) {
-      throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "history mode requires date");
-    }
-    MarketMoversScreenService.Screen s = moversScreenService.screen(bankStocks, iv, d);
-    if (s == null) {
-      throw new ApiException(422, ErrorCodes.DATA_GAP, "no bank-stock futures snapshots");
+      @RequestParam(required = false) String interval,
+      @RequestParam(required = false) String source) {
+    MarketMoversScreenService.Screen s;
+    if ("upstox".equalsIgnoreCase(source)) {
+      s = moversScreenService.screenUpstox(niftyRadarStocks);
+      if (s == null) {
+        throw new ApiException(422, ErrorCodes.DATA_GAP, "no NIFTY-50 stock-future daily candles");
+      }
+    } else {
+      boolean live = mode == null || mode.isBlank() || "live".equalsIgnoreCase(mode);
+      OiInterval iv =
+          interval == null || interval.isBlank() ? OiInterval.M3 : OiInterval.parse(interval);
+      LocalDate d = date == null || date.isBlank() ? null : parseDate(date);
+      if (!live && d == null) {
+        throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "history mode requires date");
+      }
+      s = moversScreenService.screen(bankStocks, iv, d);
+      if (s == null) {
+        throw new ApiException(422, ErrorCodes.DATA_GAP, "no bank-stock futures snapshots");
+      }
     }
     return Map.of(
         "longCandidates", s.longCandidates(),

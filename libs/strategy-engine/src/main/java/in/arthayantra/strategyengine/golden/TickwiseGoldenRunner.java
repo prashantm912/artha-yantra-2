@@ -61,6 +61,23 @@ public final class TickwiseGoldenRunner {
       List<EngineCandle> primaryOneMinute,
       Map<SeriesKey, List<EngineCandle>> contextCandles,
       IntConsumer onBar) {
+    return run(primaryOneMinute, contextCandles, onBar, false);
+  }
+
+  /**
+   * As {@link #run(List, Map, IntConsumer)} but with the backtest-only {@code relaxSession} lever
+   * (false on the live + golden paths): when true the §session ENTRY window / {@code square_off} /
+   * expiry-day entry restriction is DISABLED so a backtest fires its signal-driven entries across the
+   * FULL series — a functional-smoke lever for a strategy whose intraday clock would otherwise thin the
+   * trade list. It deliberately does NOT touch the signal gate or indicator warmup (relaxing those
+   * would MANUFACTURE fake trades), so a sparse armed-scalper backtest remains a signal/data-fidelity
+   * artifact (judge on live). Default {@code false} keeps every golden fixture byte-identical.
+   */
+  public List<GoldenSignalsJson.SignalEvent> run(
+      List<EngineCandle> primaryOneMinute,
+      Map<SeriesKey, List<EngineCandle>> contextCandles,
+      IntConsumer onBar,
+      boolean relaxSession) {
     boolean btst = "btst".equals(definition.session().style());
     boolean coarsePrimary = !definition.primaryTimeframe().equals("1m") && !btst;
     EngineSeries live1m = new EngineSeries(new SeriesKey(exchange, tradingsymbol, "1m"));
@@ -116,7 +133,7 @@ public final class TickwiseGoldenRunner {
     // Session enforcement (mirrors the live SignalEngine): entries blocked outside the IST window /
     // at-or-after square_off / outside the tighter expiry-day window; an open position is force-closed
     // at square_off. Inert unless the strategy declares those fields → golden fixtures stay byte-identical.
-    SessionGate gate = new SessionGate(definition.session());
+    SessionGate gate = new SessionGate(definition.session(), relaxSession);
 
     int barIndex = 0;
     for (EngineCandle bar : primaryOneMinute) {
@@ -383,8 +400,11 @@ public final class TickwiseGoldenRunner {
     private final LocalTime expiryTo;
     private final Boolean expiryDayAllowed;
     private final MarketCalendar calendar; // null unless an expiry_day block was declared
+    // Backtest-only: when true the entry clock rail is OFF (entries fire all session) and the square_off
+    // force-close is disabled (positions exit purely on their own exit_rules). false on live + goldens.
+    private final boolean relax;
 
-    SessionGate(StrategyDefinition.Session s) {
+    SessionGate(StrategyDefinition.Session s, boolean relax) {
       this.windowFrom = parse(s.windowFrom());
       this.windowTo = parse(s.windowTo());
       this.squareOff = parse(s.squareOff());
@@ -394,6 +414,7 @@ public final class TickwiseGoldenRunner {
       boolean expiryDeclared =
           s.expiryDayAllowed() != null || expiryFrom != null || expiryTo != null;
       this.calendar = expiryDeclared ? MarketCalendar.nse() : null;
+      this.relax = relax;
     }
 
     private static LocalTime parse(String v) {
@@ -401,6 +422,9 @@ public final class TickwiseGoldenRunner {
     }
 
     boolean entryAllowed(LocalTime t, LocalDate day) {
+      if (relax) {
+        return true; // backtest relax-session: the intraday clock never blocks an entry
+      }
       boolean expiryDay = calendar != null && calendar.isWeeklyIndexExpiryDay(day);
       if (expiryDay && Boolean.FALSE.equals(expiryDayAllowed)) {
         return false; // strategy opts out of expiry-day entries entirely
@@ -417,7 +441,7 @@ public final class TickwiseGoldenRunner {
     }
 
     boolean pastSquareOff(LocalTime t) {
-      return squareOff != null && !t.isBefore(squareOff);
+      return !relax && squareOff != null && !t.isBefore(squareOff);
     }
   }
 }

@@ -630,6 +630,11 @@
             "costs": { "$ref": "#/$defs/costs" }
           }
         },
+        "relax_session": {
+          "type": "boolean",
+          "default": false,
+          "description": "Backtest-only (options path): when true the intraday session ENTRY clock rail (window / square_off / expiry-day entry restriction) is disabled so a strategy fires its signal-driven entries across the FULL series — a functional-smoke lever for a strategy whose intraday clock would otherwise thin the trade list. It does NOT relax the signal gate or indicator warmup (those would manufacture fake trades). Off by default; the engine goldens are byte-identical."
+        },
         "oi_confluence_gate": {
           "type": "object",
           "additionalProperties": false,

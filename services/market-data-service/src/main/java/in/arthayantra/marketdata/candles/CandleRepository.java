@@ -166,6 +166,40 @@ public class CandleRepository {
         Timestamp.from(from.toInstant()), Timestamp.from(to.toInstant()));
   }
 
+  /**
+   * Read-time 1m→{@code N}-minute rollup for an interval that has NO materialised continuous aggregate
+   * (today only 3m): {@code time_bucket}s the base 1m rows on the fly. We do NOT create/refresh a
+   * {@code candles_3m} cagg because re-aggregating the stitched CONT / expired-contract 1m series
+   * (~106k contracts) OOM-crashed the live DB twice — so the 3m PRIMARY the scalpers signal on is
+   * derived read-time, exactly like the historical-OI derivation. Bucketed in {@code Asia/Kolkata} so
+   * 09:15 IST is a bucket boundary (the same grid the 5m/15m caggs use), OHLCV+OI rolled the standard
+   * way (open=first, high=max, low=min, close=last, volume=sum, oi=last).
+   */
+  public List<Candle> rangeRolledFromOneMinute(
+      String exchange, String tradingsymbol, int minutes, OffsetDateTime from, OffsetDateTime to) {
+    return jdbc.query(
+        "SELECT public.time_bucket(INTERVAL '" + minutes + " minutes', bucket, 'Asia/Kolkata') AS b, "
+            + "public.first(open, bucket) AS open, max(high) AS high, min(low) AS low, "
+            + "public.last(close, bucket) AS close, sum(volume) AS volume, public.last(oi, bucket) AS oi "
+            + "FROM candles WHERE exchange = ? AND tradingsymbol = ? AND \"interval\" = '1m' "
+            + "AND bucket >= ? AND bucket < ? GROUP BY b ORDER BY b",
+        (rs, n) ->
+            new Candle(
+                exchange,
+                tradingsymbol,
+                minutes + "m",
+                rs.getObject("b", OffsetDateTime.class),
+                rs.getBigDecimal("open"),
+                rs.getBigDecimal("high"),
+                rs.getBigDecimal("low"),
+                rs.getBigDecimal("close"),
+                rs.getLong("volume"),
+                rs.getObject("oi", Long.class),
+                null),
+        exchange, tradingsymbol,
+        Timestamp.from(from.toInstant()), Timestamp.from(to.toInstant()));
+  }
+
   /** Distinct present 1m bucket starts in a range (gap detection, Phase 11). */
   public List<OffsetDateTime> presentBuckets(
       String exchange, String tradingsymbol, String interval, OffsetDateTime from, OffsetDateTime to) {

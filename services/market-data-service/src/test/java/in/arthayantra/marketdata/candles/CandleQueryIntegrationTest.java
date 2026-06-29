@@ -203,13 +203,50 @@ class CandleQueryIntegrationTest extends MarketDataIntegrationTestBase {
 
   @Test
   void unsupportedIntervalRejectedWith400() {
-    assertThatThrownBy(() -> queryService.read("NSE", "CQBAD", "3m", FROM, TO))
+    assertThatThrownBy(() -> queryService.read("NSE", "CQBAD", "2m", FROM, TO))
         .isInstanceOfSatisfying(
             ApiException.class,
             e -> {
               assertThat(e.httpStatus()).isEqualTo(400);
               assertThat(e.code()).isEqualTo(ErrorCodes.VALIDATION_INTERVAL_UNSUPPORTED);
             });
+  }
+
+  @Test
+  void threeMinuteIsRolledReadTimeFromOneMinute() {
+    // 3m has NO materialised cagg — it is time_bucket'd from the 1m base on read (the scalper PRIMARY).
+    // Seed 6 known 1m bars 09:15-09:20 → two 3m buckets [09:15,09:18) + [09:18,09:21).
+    long[] vol = {10, 20, 30, 40, 50, 60};
+    String[][] ohlc = {
+      {"100", "105", "99", "101"}, {"101", "110", "100", "108"}, {"108", "109", "104", "106"},
+      {"106", "107", "102", "103"}, {"103", "104", "98", "99"}, {"99", "100", "95", "97"}
+    };
+    for (int i = 0; i < 6; i++) {
+      repository.upsert(
+          new Candle(
+              "NSE", "CQ3M", "1m", FROM.plusMinutes(i),
+              new BigDecimal(ohlc[i][0]), new BigDecimal(ohlc[i][1]),
+              new BigDecimal(ohlc[i][2]), new BigDecimal(ohlc[i][3]),
+              vol[i], null, "MOCK"));
+    }
+    OffsetDateTime to3 = FROM.plusMinutes(6); // [09:15, 09:21)
+
+    CandleQueryService.CandleRead read = queryService.read("NSE", "CQ3M", "3m", FROM, to3);
+
+    assertThat(read.items()).hasSize(2);
+    Candle b0 = read.items().get(0); // 09:15-09:18 from bars 0,1,2
+    assertThat(b0.interval()).isEqualTo("3m");
+    assertThat(b0.open()).isEqualByComparingTo("100"); // first
+    assertThat(b0.high()).isEqualByComparingTo("110"); // max
+    assertThat(b0.low()).isEqualByComparingTo("99"); // min
+    assertThat(b0.close()).isEqualByComparingTo("106"); // last
+    assertThat(b0.volume()).isEqualTo(60L); // 10+20+30
+    Candle b1 = read.items().get(1); // 09:18-09:21 from bars 3,4,5
+    assertThat(b1.open()).isEqualByComparingTo("106");
+    assertThat(b1.high()).isEqualByComparingTo("107");
+    assertThat(b1.low()).isEqualByComparingTo("95");
+    assertThat(b1.close()).isEqualByComparingTo("97");
+    assertThat(b1.volume()).isEqualTo(150L); // 40+50+60
   }
 
   @Test

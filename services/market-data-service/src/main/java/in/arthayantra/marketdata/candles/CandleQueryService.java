@@ -28,7 +28,9 @@ import org.springframework.stereotype.Service;
 public class CandleQueryService {
 
   private static final Logger log = LoggerFactory.getLogger(CandleQueryService.class);
-  private static final List<String> INTERVALS = List.of("1m", "5m", "15m", "1h", "1d", "1w");
+  // 3m has NO materialised cagg (it is read-time rolled from 1m — see CandleRepository) so the scalper
+  // 3m PRIMARY can be served on the live path without an OOM-prone candles_3m refresh.
+  private static final List<String> INTERVALS = List.of("1m", "3m", "5m", "15m", "1h", "1d", "1w");
 
   /** Read result with staleness markers (B-3 ladder step 3). */
   public record CandleRead(List<Candle> items, boolean stale, OffsetDateTime asOf) {}
@@ -99,6 +101,8 @@ public class CandleQueryService {
     List<Candle> items =
         switch (interval) {
           case "1m", "1d" -> repository.range(exchange, tradingsymbol, interval, from, to);
+          // 3m is read-time rolled from the 1m base (no candles_3m cagg) — the scalper PRIMARY.
+          case "3m" -> repository.rangeRolledFromOneMinute(exchange, tradingsymbol, 3, from, to);
           case "1w" -> repository.rangeFromAggregate("candles_1w", exchange, tradingsymbol, from, to);
           default ->
               repository.rangeFromAggregate(
@@ -153,11 +157,11 @@ public class CandleQueryService {
   @SuppressWarnings("FutureReturnValueIgnored")
   public Map<String, String> refreshAsync(
       String exchange, String tradingsymbol, String interval, OffsetDateTime from, OffsetDateTime to) {
-    if (interval.equals("1w") || !INTERVALS.contains(interval)) {
+    if (interval.equals("1w") || interval.equals("3m") || !INTERVALS.contains(interval)) {
       throw new ApiException(
           400,
           in.arthayantra.common.web.error.ErrorCodes.VALIDATION_INTERVAL_UNSUPPORTED,
-          "1w is rolled locally, never fetched (B-21); refresh 1m or 1d instead");
+          "1w/3m are rolled locally, never fetched (B-21); refresh 1m or 1d instead");
     }
     if (tradingsymbol.endsWith("-FUT-CONT")) {
       // the stitch is local arithmetic — a CONT symbol must NEVER reach a Kite port (B-19)

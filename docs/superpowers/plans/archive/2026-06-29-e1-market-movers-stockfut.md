@@ -1,6 +1,12 @@
 # E1 — faithful stock-futures Market-Movers (#3) build plan
 
-**Status:** ACTIVE (2026-06-29). Owner: "build both" (E12 done #339; this is E1). Authority for the
+**Status:** ✅ COMPLETE / ARCHIVED (2026-06-30). E1 #3 stock-future Market-Movers universe shipped +
+ops-done + live-verified (#345-348) and the E1 v2 source-selector merged (#354). The forward home for the
+residual per-stock packages + v2 (full-N50 Upstox F&O key + SPAN short) is the KEEP-NEEDED backlog stream
+`2026-06-27-backlog/stock-universe-market-movers.md` + the scalper-to-100 roadmap §E1. This dated build-plan
+is retained as the as-built record.
+
+**Original status:** ACTIVE (2026-06-29). Owner: "build both" (E12 done #339; this is E1). Authority for the
 strategy = operative `strategy-documents/.../Options_Scalper_Siva_Operative_Strategy.md` §3.3 + the Day-10
 deck ("Market Movers Strategy.pdf"). Design = a 4-agent investigation workflow (run `wf_92835239-f33`).
 

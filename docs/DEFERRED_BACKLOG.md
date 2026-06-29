@@ -1,9 +1,23 @@
-# Deferred / Pending Backlog — Phases 0 → 6 (as of 2026-06-26)
+# Deferred / Pending Backlog — Phases 0 → 6 (as of 2026-06-30)
 
 Single source of truth for everything NOT yet done across the OpenAlgo/React master-plan phases 0–6.
 The forward-work authority is `superpowers/plans/2026-06-19-openalgo-react-integration-master-plan.md`
 (§16.1 phase map); current phase + the running checklist is `PHASE_GATES.md`. This file consolidates the
-deferrals so a fresh session has one place to look.
+deferrals so a fresh session has one place to look. The per-row tables below are a provenance ledger —
+new state is appended as dated update blocks (latest first), the old blocks are kept, never rewritten.
+
+**2026-06-30 reconciliation — scalper-to-100 build in progress + live signal path GO:**
+- **12 NIFTY options-scalper strategies PUBLISHED + live**; the live signal path was verified GO (engine loads
+  the 12, `signal_underlying` resolves to the live dated front contract `NIFTY26JULFUT`, 3m primary serves).
+- **Scalper-to-100 epics:** E2/E4/E10 DONE; E1 #3 stock-future Market-Movers universe CODE-COMPLETE + ops-done
+  + live-verified (#345-348) + E1 v2 source-selector (#354); E3/E5/E6/E7/E8/E9/E11/E12 partial or
+  pending-owner-numbers (see the scalper-to-100 roadmap §1 baseline for the live per-epic state).
+- **This session merged + deployed live:** #365 (3m-primary read-time rollup — the live-signal blocker fix),
+  #366 (Signals page Live/Historical filter + date picker), #367 (auto-paper-trade toggle).
+- **PE-mirror** bidirectional-scalper plan PARKED (owner: build later, #364).
+- Still open: W-U4 Upstox cutover; the data-foundation value-verify gate (owner oipulse sign-in); Telegram
+  scalp-alert opt-in (owner sets the bot token). The Phase-3 "#3 Market Movers" row below is now superseded
+  (the stock-future universe is built; only the residual per-stock packages + v2 remain).
 
 **Merge state at writing (2026-06-24):** Phase 0–3 + Phase 3.5 are on `main` (#39–#44). **Phase 4
 React is substantially built** — the cockpit pages (Signals/Paper/Dashboard/Strategies/Backtests/

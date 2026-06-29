@@ -31,7 +31,18 @@ authority is the OpenAlgo/React master plan; the design authority is `docs/desig
 - `2026-06-24-upstox-live-migration.md` — move the live stack (OI/quotes/WS ticker) to the login-free
   Upstox analytics token; W-U1/U2/U3 **MERGED** flag-gated default-Kite; **W-U4 cutover** (latency A/B +
   deploy + flip) is the only open wave.
+- `2026-06-29-e8-e12-numbers.md` — the E8-E12 owner-number completion plan + owner answers. **PARTIALLY
+  SHIPPED** (E8 arm #349, E9 fixed-% take-profit #351); E9-remaining / E11 / E12 still open epics. Active.
+- `2026-06-30-pe-mirror-bidirectional-scalpers.md` — PE-side mirror of the CE-only directional scalpers.
+  **PARKED** (owner: build later, #364) — the one open design choice (signed-composite vs STEP) is unresolved.
+- `2026-06-27-followup1-expand-manual-checks.md`, `2026-06-27-followup2-soft-dots-to-hard-gates.md`,
+  `2026-06-27-followups-plan-audit-summary.md` — the two scalper-audit follow-up plans (FU1 = +9 manual
+  checks; FU2 = promote 4 soft-dots to opt-in hard gates) + their readiness/open-point audit. **Unbuilt**;
+  the scalper-to-100 roadmap §5b cites both as live per-package design (FU2 is the W4 tag-gating pattern source).
 - `superpowers/plans/archive/` — completed/merged plans (oipulse-parity, stage-g, eod-bhavcopy,
+  **2026-06-29-e1-market-movers-stockfut** (E1 #3 stock-future Market-Movers universe — `futures_screener`
+  end-to-end, CODE-COMPLETE + ops-done + live-verified #345-348, E1 v2 selector #354; v2 residual lives in the
+  `backlog/stock-universe-market-movers.md` stream + roadmap §E1),
   phase3-scalper-track2, phase3.5 OI-analytics backlog + tier1, open-high per-strike,
   **scalper-manual-verification-checklist** (backend + React UI #125 done), **frontend-revamp**
   (#158–#177 — revamp + 64/65-page rollout + World Indices/Pre-Open + section nav, deployed),
@@ -61,7 +72,7 @@ authority is the OpenAlgo/React master plan; the design authority is `docs/desig
 
 ## Active — consolidated deferred backlog
 - `DEFERRED_BACKLOG.md` — single source of truth for all deferred/pending items Phases 0–6
-  (last reconciled 2026-06-24); updated each phase; the forward-work authority for the next session.
+  (last reconciled 2026-06-30); updated each phase; the forward-work authority for the next session.
 
 ## Historical — as-built record (`archive/`)
 - `archive/ARTHAYANTRA_2_FEATURE_PROPOSALS.md` — the 2026-06-12 owner feature selection; the

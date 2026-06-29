@@ -1,6 +1,10 @@
 # IV fidelity — per-strike IV direction, absolute band, both-sides-flat
 
-Status: PLAN (implementation-ready, audited pass 1 + pass 2). Owner: single-owner. Target service:
+Status: ✅ BUILT / DONE (E4 — shipped #282/#288/#289/#290: iv-per-strike + iv-absolute-band dots, iv-buyer-cap
+>40 veto, hero-zero both-sides-flat skip, low-iv-straddle LOW-IV skip). Kept as the as-built design ref (the
+scalper-to-100 roadmap §E4 links it). Original status below.
+
+Status (original): PLAN (implementation-ready, audited pass 1 + pass 2). Owner: single-owner. Target service:
 `services/strategy-signal-service` ONLY (scalper confluence seam + scorer + Hero-Zero gate + the
 `MarketOiClient` HTTP reader). **There is NO market-data code change** — the IV-direction series
 (`activeStrikeIvSeries`) and the ATM-IV level (`iv-history.currentIv`) ALREADY ship from market-data;

@@ -77,9 +77,10 @@ TOP pick.
 3. `mm-stockfut-bank.yaml` (futures_screener, side=long, max_picks=5, RSI+VWAP+SUPERTREND momentum gate,
    stop_loss+signal_exit, fixed_quantity, intraday) — clone the `accept/futures-screener.yaml` shape (already
    schema-valid). Seed it where the scalper YAMLs are seeded; register the variant.
-4. Functional backtest: submit, expect it to RUN (≈0 trades on muted history = expected — judge LIVE). The pin
-   captures TODAY's movers; if none captured yet (fresh radar), the universe pins empty → 0-trade run, still a
-   plumbing pass.
+4. Functional backtest: submit when the radar HAS captured movers — runs on the TOP pick (≈0 trades on muted
+   history = expected — judge LIVE). The pin captures TODAY's movers; an EMPTY pin (fresh/off-hours radar)
+   THROWS "needs a pinned universe" (consistent with the `index` mode throw — you cannot backtest an empty
+   universe), so run it against a stack whose screener returns ≥1 mover.
 5. Multi-instrument smoke = the engine LIVE path (resolveScreener → N InstrumentRefs → onClosedBar iterates);
    covered by `FuturesUniverseResolverTest.screenerPicks` + the existing no-size>1-guard. The single-instrument
    BACKTEST runner does NOT need N (top-pick is the functional proof).

@@ -702,7 +702,11 @@
             "indicator_distance_max_pct": { "type": "number", "exclusiveMinimum": 0, "maximum": 1, "description": "indicator-distance-veto: max nearest-indicator distance fraction (default 0.015)." },
             "oi_divergence_min_pct": { "type": "number", "minimum": 0, "maximum": 100, "description": "oi-divergence-magnitude: min signed PE-CE OI gap as percent of total (default 20)." },
             "price_impulse_min_pct": { "type": "number", "minimum": 0, "maximum": 100, "description": "oi-divergence-magnitude: corroborating price-impulse percent (default 50)." },
-            "iv_buyer_cap": { "type": "number", "exclusiveMinimum": 0, "maximum": 1, "description": "iv-buyer-cap: side IV fraction above which a long-premium buy is too rich (default 0.40)." }
+            "iv_buyer_cap": { "type": "number", "exclusiveMinimum": 0, "maximum": 1, "description": "iv-buyer-cap: side IV fraction above which a long-premium buy is too rich (default 0.40)." },
+            "no_trade_before": { "type": "string", "pattern": "^[0-2][0-9]:[0-5][0-9]$", "description": "§0B time rail: no entry before this IST HH:mm (default 09:45)." },
+            "no_fresh_entry_after": { "type": "string", "pattern": "^[0-2][0-9]:[0-5][0-9]$", "description": "§0B time rail: no fresh entry at/after this IST HH:mm (default 15:30)." },
+            "midday_block": { "type": "boolean", "default": true, "description": "§0B time rail toggle: when false, trade THROUGH the 11:00-13:00 sideways window (default true = blocked)." },
+            "volume_floor": { "type": "number", "exclusiveMinimum": 0, "description": "§0B volume rail: per-strategy bar-volume floor override (default = the per-index map — NIFTY 125000 / others 50000)." }
           }
         }
       }

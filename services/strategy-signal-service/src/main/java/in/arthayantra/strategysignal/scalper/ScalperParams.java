@@ -2,6 +2,7 @@ package in.arthayantra.strategysignal.scalper;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import java.math.BigDecimal;
+import java.time.LocalTime;
 
 /**
  * Per-strategy YAML overrides ({@code scalper.params}) for the ARMABLE confluence-gate thresholds that
@@ -17,6 +18,14 @@ import java.math.BigDecimal;
  * indicatorDistanceMaxPct} are PRICE FRACTIONS (0.004 = 0.4% of close); {@code ivBuyerCap} is a 0..1 IV
  * FRACTION (0.40 = "40 IV"); {@code oiDivergenceMinPct}/{@code priceImpulseMinPct} are PERCENTAGES (20 =
  * 20%); {@code gapSuppressPts} is index POINTS (300).
+ *
+ * <p>The §0B HARD RAILS are also exposed here (the "make every always-applied gate armable" goal): the
+ * time-window bounds + the 11:00-13:00 midday block (toggle) + the bar-volume floor. They stay
+ * ALWAYS-ON (an unset field keeps the Siva default — you cannot accidentally ship a strategy with no
+ * volume/time guard) but are VALUE-tunable per-strategy, and the midday block is the one rail with a
+ * clean on/off ({@code midday_block: false} lets a strategy trade through the sideways window). An
+ * absent {@code scalper.params} block keeps every rail byte-identical to the {@link ScalperGates}
+ * constants.
  */
 public record ScalperParams(
     BigDecimal vwapDistanceMinFrac,
@@ -25,7 +34,11 @@ public record ScalperParams(
     BigDecimal indicatorDistanceMaxPct,
     BigDecimal oiDivergenceMinPct,
     BigDecimal priceImpulseMinPct,
-    BigDecimal ivBuyerCap) {
+    BigDecimal ivBuyerCap,
+    LocalTime noTradeBefore,
+    LocalTime noFreshEntryAfter,
+    Boolean middayBlock,
+    BigDecimal volumeFloor) {
 
   /**
    * Fills any unset override with its {@link ScalperGates} default constant (the SINGLE source of the
@@ -41,11 +54,17 @@ public record ScalperParams(
     oiDivergenceMinPct = oiDivergenceMinPct == null ? ScalperGates.OI_DIVERGENCE_MIN_PCT : oiDivergenceMinPct;
     priceImpulseMinPct = priceImpulseMinPct == null ? ScalperGates.PRICE_IMPULSE_MIN_PCT : priceImpulseMinPct;
     ivBuyerCap = ivBuyerCap == null ? ScalperGates.IV_BUYER_CAP : ivBuyerCap;
+    // §0B rails: the time bounds default to the Siva constants; the midday block defaults ON (it can only
+    // be turned OFF, never silently absent); the volume floor stays NULL ⇒ the per-index default map.
+    noTradeBefore = noTradeBefore == null ? ScalperGates.NO_TRADE_BEFORE : noTradeBefore;
+    noFreshEntryAfter = noFreshEntryAfter == null ? ScalperGates.NO_FRESH_ENTRY_AFTER : noFreshEntryAfter;
+    middayBlock = middayBlock == null ? Boolean.TRUE : middayBlock;
   }
 
   /** The all-defaults instance (no {@code scalper.params} block — every shipped strategy today). */
   public static ScalperParams defaults() {
-    return new ScalperParams(null, null, null, null, null, null, null);
+    return new ScalperParams(
+        null, null, null, null, null, null, null, null, null, null, null);
   }
 
   /**
@@ -63,7 +82,11 @@ public record ScalperParams(
         num(params, "indicator_distance_max_pct"),
         num(params, "oi_divergence_min_pct"),
         num(params, "price_impulse_min_pct"),
-        num(params, "iv_buyer_cap"));
+        num(params, "iv_buyer_cap"),
+        time(params, "no_trade_before"),
+        time(params, "no_fresh_entry_after"),
+        bool(params, "midday_block"),
+        num(params, "volume_floor"));
   }
 
   /** A numeric (or numeric-string) override, or null when the field is absent/blank (⇒ the default). */
@@ -73,5 +96,17 @@ public record ScalperParams(
       return n.decimalValue();
     }
     return n.isTextual() && !n.asText().isBlank() ? new BigDecimal(n.asText().trim()) : null;
+  }
+
+  /** A {@code HH:mm} IST time override, or null when absent/blank (⇒ the default). */
+  private static LocalTime time(JsonNode node, String field) {
+    JsonNode n = node.path(field);
+    return n.isTextual() && !n.asText().isBlank() ? LocalTime.parse(n.asText().trim()) : null;
+  }
+
+  /** A boolean override, or null when absent (⇒ the default). */
+  private static Boolean bool(JsonNode node, String field) {
+    JsonNode n = node.path(field);
+    return n.isBoolean() ? n.asBoolean() : null;
   }
 }

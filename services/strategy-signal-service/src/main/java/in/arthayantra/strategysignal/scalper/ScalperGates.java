@@ -90,14 +90,26 @@ public final class ScalperGates {
 
   /** ≥09:45 (ideal 09:15–10:00), block the 11:00–13:00 sideways window, no fresh entry after 15:30. */
   public static GateOutcome timeWindow(LocalTime ist) {
-    if (ist.isBefore(NO_TRADE_BEFORE)) {
-      return GateOutcome.fail(null, "before 09:45 open-noise window");
+    return timeWindow(ist, NO_TRADE_BEFORE, NO_FRESH_ENTRY_AFTER, true);
+  }
+
+  /**
+   * §0B time window with per-strategy RAIL overrides (§5 part 2, the {@code scalper.params} block):
+   * block before {@code noTradeBefore}, the 11:00–13:00 sideways window when {@code middayBlock}, and
+   * at/after {@code noFreshAfter}. The no-arg overload passes the Siva defaults (09:45 / 15:30 / block
+   * on), so an untuned strategy is byte-identical. The midday bounds stay constants — only the toggle is
+   * exposed (a strategy can trade THROUGH midday, but the window itself is the Siva 11:00–13:00).
+   */
+  public static GateOutcome timeWindow(
+      LocalTime ist, LocalTime noTradeBefore, LocalTime noFreshAfter, boolean middayBlock) {
+    if (ist.isBefore(noTradeBefore)) {
+      return GateOutcome.fail(null, "before " + noTradeBefore + " open-noise window");
     }
-    if (!ist.isBefore(MIDDAY_BLOCK_FROM) && ist.isBefore(MIDDAY_BLOCK_TO)) {
+    if (middayBlock && !ist.isBefore(MIDDAY_BLOCK_FROM) && ist.isBefore(MIDDAY_BLOCK_TO)) {
       return GateOutcome.fail(null, "11:00-13:00 sideways block");
     }
-    if (!ist.isBefore(NO_FRESH_ENTRY_AFTER)) {
-      return GateOutcome.fail(null, "no fresh entry after 15:30");
+    if (!ist.isBefore(noFreshAfter)) {
+      return GateOutcome.fail(null, "no fresh entry after " + noFreshAfter);
     }
     return GateOutcome.pass(null, "within scalp window");
   }
@@ -136,7 +148,16 @@ public final class ScalperGates {
 
   /** Bar volume ≥ the underlying's floor (NIFTY 125k / other indices 50k). */
   public static GateOutcome volume(String underlying, BigDecimal volume) {
-    BigDecimal floor = VOL_FLOOR.getOrDefault(underlying, INDEX_VOL);
+    return volume(underlying, volume, null);
+  }
+
+  /**
+   * As above with a per-strategy {@code floorOverride} (§5 part 2): when non-null it replaces the
+   * per-index default floor; null ⇒ the {@link #VOL_FLOOR} map (NIFTY 125k / other indices 50k), so an
+   * untuned strategy is byte-identical.
+   */
+  public static GateOutcome volume(String underlying, BigDecimal volume, BigDecimal floorOverride) {
+    BigDecimal floor = floorOverride != null ? floorOverride : VOL_FLOOR.getOrDefault(underlying, INDEX_VOL);
     boolean ok = volume != null && volume.compareTo(floor) >= 0;
     return new GateOutcome(ok, volume, (ok ? "volume >= " : "volume < ") + floor.toPlainString());
   }

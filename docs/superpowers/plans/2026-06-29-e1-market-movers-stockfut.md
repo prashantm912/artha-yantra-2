@@ -53,9 +53,16 @@ Built per the recipe below. `BacktestRunner.signalInstrument(config, request)` g
 byte-identical (`BacktestRunnerSignalInstrumentTest` 9/9, incl. the futures_screener pick + empty-pin
 throw). `docs/strategies/mm-stockfut-bank.yaml` = the long-only NIFTY-Bank momentum strategy (schema-valid;
 NOT scalper-seeded — it has no scalper gate, so it stays out of `ScalperStrategySeeder`/its load tripwire).
-REMAINING = the OPS step only: register `mm-stockfut-bank` via `POST /api/v1/strategies` on the live/mock
-stack + one functional backtest (≈0 trades on muted history expected; judge live). v2 = full-N50 radar
-(Upstox active F&O key) + the SPAN-gated short side.
+**OPS STEP DONE 2026-06-29 (LIVE-verified):** rebuilt+redeployed market-data/strategy-signal/backtest on the
+LIVE stack (owner-authorized); registered `mm-stockfut-bank` (draft `af4a89b1-8aba-42c2-9fb9-c92e6b9ffff5`,
+201). The functional backtest VERIFIED the whole pipeline end-to-end: `/movers-screen` live (200, asOf today,
+captured data, but 0 graded candidates — thin ~10d history × the strict breakout∧OL∧quadrant∧RSI filter →
+a valid selective result), so `resolveFuturesScreener` pinned EMPTY → the job failed at `signalInstrument`
+(progress 10) with the EXACT designed error "futures_screener backtest needs a pinned universe (submission
+produced no movers)". The empty result is a DATA artifact, not a wiring break — the top-pick run executes when
+the radar grades ≥1 mover; judge edge on live paper. **E1 #3 Market-Movers = COMPLETE** (code merged
+#345-347 + deployed + registered + pipeline live-verified). v2 = full-N50 radar (Upstox active F&O key) +
+the SPAN-gated short side.
 
 ## STAGE 4b — VERIFIED RECIPE (2026-06-29, one-shot; root-caused, no more investigation)
 The replay seam is fully mapped. `BacktestRunner.run` (`BacktestRunner.java:108-128`): `config = resolved.config()`

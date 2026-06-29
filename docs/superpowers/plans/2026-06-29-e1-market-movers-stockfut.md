@@ -1,0 +1,111 @@
+# E1 — faithful stock-futures Market-Movers (#3) build plan
+
+**Status:** ACTIVE (2026-06-29). Owner: "build both" (E12 done #339; this is E1). Authority for the
+strategy = operative `strategy-documents/.../Options_Scalper_Siva_Operative_Strategy.md` §3.3 + the Day-10
+deck ("Market Movers Strategy.pdf"). Design = a 4-agent investigation workflow (run `wf_92835239-f33`).
+
+## DATA SOURCE = UPSTOX (owner-chosen 2026-06-29, supersedes the NSE-bhavcopy ingest below)
+Use the existing Upstox integration for the per-stock-future data instead of parsing the NSE F&O UDiFF
+bhavcopy CSV — cleaner (no external-CSV schema risk), and **read ON-DEMAND → no migration, no bulk
+storage, NO OOM**:
+- **Per-stock-future daily OHLC + OI** (8/9-day breakout, daily RSI, OI%/quadrant) → an **active**
+  Upstox `GET /v2/historical-candle/{key}/day/{to}/{from}` (OHLCV+OI bars). The platform already parses
+  this shape for EXPIRED contracts (`UpstoxExpiredInstrumentsClient` + `UpstoxExpiredCandles`,
+  `b.oi()`); the ACTIVE endpoint is the one small new client (clone, drop `expired-instruments/`).
+- **Live LTP / LTP% / OH-OL / volume** mover-rank → existing `GET /v2/market-quote/quotes`
+  (`source.quotes=upstox`, W-U2).
+- **Stock-future Upstox key resolution** → the V2 F&O instrument-key map (#58) for the radar stocks'
+  NFO front futures (`StockUpstoxKeyMap` carries the EQ keys; the F&O map carries the FUT keys).
+This COLLAPSES Stages 1-2 (no `nse_eod_fo_bhavcopy` table, no NSE CSV fetcher, no bulk equity-radar
+capture): **Stage 1 (revised) = a thin active Upstox historical-candle client (OHLCV+OI) + an
+`UpstoxFnoDailyReader` over the radar set, read on-demand/lightly-cached.** Stages 3-5 unchanged
+(screener reads the Upstox reader; the strategy + dynamic universe + parity + tests stay as below).
+The NSE-bhavcopy stages below are kept as the FALLBACK design only.
+
+## Verdict — buildable, NO missing feed, NO OOM
+Every primitive exists or 1:1-mirrors the equity-bhavcopy stack:
+- per-stock **daily OHLCV** (8/9-day breakout + daily RSI) → already ingested for the ~22k universe via
+  `candles` 1d `source=BHAVCOPY` (`BhavcopyBackfillService.projectNse`).
+- live **LTP/LTP%/OH-OL/volume mover-rank** → `FuturesMoversService.movers` + `OiBuzzService` batched quote.
+- **4-quadrant OI interpretation** → `OiInterpretation.classify` (`FuturesMoversService:85`).
+- **stock-future paper execution** → `InstrumentClass.FUTURE` + `futureMarginPct` (SPAN-aware).
+- the **ONLY net-new feed** = daily per-stock-FUTURE OI from the NSE F&O **UDiFF bhavcopy** (~few hundred
+  rows/day, a clone of the V014 equity stack). The prior OOM was the multi-year OPTIONS backfill (~350M
+  rows) — NOT this.
+
+## Architecture (locked decisions)
+- **Execution = a STANDARD futures-momentum engine strategy** (`futures_of_underlying`), NOT a scalper-gate
+  variant. The deck says "trade FUTURES, not stock options" — a plain momentum entry on the picked stock
+  future (RSI>60, above VWAP/SuperTrend/WMA, rising volume, entry-candle-low stop) = exactly the corpus
+  `futures-universe.yaml` shape. The scalper gate exists only to pick an OPTION via StrikePicker → would
+  force a spurious index-option leg → wrong. No StrikePicker, no option leg.
+- **NEW id family `mm-stockfut-nifty` / `mm-stockfut-bank` (long-only v1)** — do NOT re-platform the
+  existing `scalp-market-movers-*` triplet (a universe-mode change breaks checksum + golden; they stay the
+  documented honest index-option momentum surrogate).
+- **Screener lives in MARKET-DATA** (D7/D10 — strategy-signal has no marketdata DB grant). New
+  `GET /api/v1/market/futures/movers-screen` (Map envelope `{longCandidates, shortCandidates, asOf}`; new
+  `@GetMapping` path DRIFTS the springdoc spec → re-capture `ContractCaptureTest` in-PR).
+- **Dynamic per-day universe = the one net-new engine hook**: a `MarketMoversSelector` (strategy-signal)
+  reads the screener via `MarketOiClient.get`, and a new resolver arm in `SignalEngine.resolveUniverse`
+  feeds the picked-mover front futures into the EXISTING `futures_of_underlying` subscribe/tick path,
+  refreshed daily at `morningReload(08:40)`/reconcile. **Partition: screener = WHICH stock (market-data),
+  engine entry_rules = WHEN on its future (strategy-signal).**
+- **Parity:** the live screen is non-deterministic → persist the picked stock(s) in the V009 side-channel
+  at entry + replay (never re-screen on replay) — mirrors the index-option/Hero-Zero pattern.
+
+## Stages (one PR each)
+1. **F&O UDiFF bhavcopy ingest** (market-data) — clone the V014 equity stack: new migration
+   `nse_eod_fo_bhavcopy` (trade_date, instrument_type FUTSTK|FUTIDX, symbol, expiry_date, OHLC, settle,
+   contracts, val, open_int, chg_in_oi; PK (trade_date,symbol,expiry); hypertable, compress 7d, NO
+   retention) + `FoBhavcopyFetcher`/`LiveFoBhavcopyFetcher` (UDiFF CSV: FinInstrmTp STF/IDF,
+   Opn/Hgh/Lw/Cls/Sttlm/OpnIntrst/ChngInOpnIntrst; header-sniff; empty-on-404) + `FoBhavcopyRepository`
+   (clone NseEodBhavcopyRepository) + a `runFo()` leg in `BhavcopyBackfillService`. **RAW-TABLE-ONLY** —
+   never project FUT rows into `candles` (collides on (exch,sym,1d,bucket) with live FUT bars + the
+   continuous-future stitch). OI% = chg_in_oi / NULLIF(open_int − chg_in_oi, 0).
+2. **Curated equity-futures live snapshot subset** (market-data, OOM-bounded) — new property
+   `artha.futures.equity-radar-stocks` (~50 large-cap N50/NBANK constituents, **front-month only**) + a
+   SEPARATE slower-cadence pass in `FuturesOiSnapshotService` (the index 3-min cadence UNTOUCHED). Resolve
+   via `FuturesContractSource.monthlyFutures`. Pre-deploy guard: `SELECT count(*) FROM instruments WHERE
+   instrument_type='FUT' AND underlying_tradingsymbol IN (radar)`. Raise DB memory before any broader run.
+3. **MarketMoversScreener + endpoint** (market-data) — `MarketMoversScreener` reusing
+   `FuturesMoversService.movers` over the radar set, enriched into `ScreenerRow{symbol, ltp, pricePct,
+   oiPct, interpretation, breakoutDays, openHigh/Low, dailyRsiOk, advTurnover, newHigh/Low}`; pure helpers
+   `NDayExtremes` (8/9-day high/low, **front-contract-reduced per day** before the rolling extreme),
+   `LiquidityRanker`, per-stock daily-RSI over candles 1d, OH/OL via `OpenHighLow.marks`. longCandidates =
+   8/9-day-HIGH ∧ OL ∧ LB/SC ∧ dailyRsiOk, ranked by pricePct×liquidity. 422 until ≥1 radar bucket. New
+   `/movers-screen` on `FuturesAnalyticsController` (sibling /movers). Re-capture contracts.
+4. **Stock-futures strategy + dynamic universe** (strategy-signal + engine) — new
+   `mm-stockfut-{nifty,bank}.yaml` (`futures_of_underlying`, long-only, momentum: RSI/VWAP/SUPERTREND/VWMA/
+   VOLUME_RATIO; gate close>vwap ∧ close>supertrend ∧ rsi>60 ∧ rising-volume; exit signal_exit + entry-
+   candle-low stop + time_stop; sizing `fixed_quantity`/future-notional, NOT premium_budget) +
+   `MarketMoversSelector` (reads /movers-screen) + the `SignalEngine.resolveUniverse` resolver arm
+   (pre-subscribe the radar front futures in seriesStore — without a subscribed EngineSeries the picked
+   mover silently has no series) + V009 pick-persistence for parity.
+5. **Tests + golden/parity + register + functional backtest** — screener unit tests (NDayExtremes
+   roll-boundary, quadrant, ranking), selector failure-isolation (empty→block), resolver-arm subscription
+   test, persisted-pick parity replay; GoldenDeterminismTest + BacktestParityTest byte-identical (no
+   scalper-gate touched; mm-stockfut have no prior golden); register the 2 variants + a functional backtest
+   each (~0 historical trades on muted history = expected; judge on FORWARD live paper).
+
+## Key decisions (recommended, locked)
+- Long-only v1 (SHORT = futures short-sell, SPAN-gated → v2; the screener already computes shortCandidates).
+- Sizing = `fixed_quantity` / future-notional risk vs `futureMarginPct` (NOT premium_budget = option-only);
+  size off the PICKED stock future's price/lot (RestInstrumentMetaClient resolves FUTURE lotSize).
+- Backtest = LIVE-PAPER-ONLY for the verdict (functional backtest for plumbing); persist the pick for
+  parity but judge edge forward (consistent with the 12 owner-LIVE-validated scalpers).
+
+## Risks / traps
+- The equity-futures live capture is the ONE OOM risk → front-month + ~50-name radar + separate slower pass
+  + leave the index OI cadence untouched + raise DB memory first.
+- HARD prereq often missed: pre-SUBSCRIBE the picked stock's front-future candle series in the engine
+  seriesStore (today only the strategy's own signal future is subscribed) — else the picked mover has no
+  EngineSeries and silently blocks every bar.
+- Instrument-master: equity-future resolution needs the NFO FUT rows synced (`instrument_type='FUT' AND
+  underlying_tradingsymbol`) — unsynced → both capture + resolver silently no-op. Verify with a SELECT.
+- UDiFF schema not verified in-repo — confirm the URL + column order + mirror the header-sniff guard.
+- Candle-collision: keep F&O bhavcopy raw-table-only.
+
+## Descope (NOT built)
+per-stock OPTION IV/greeks · bulk per-stock intraday capture · the full ~190-stock live universe (radar ~50)
+· stock-BTST overnight carry · the SHORT side (v2) · re-platforming the existing triplet · a deterministic
+screener-replay backtest engine · equity-CASH execution (route to the future).

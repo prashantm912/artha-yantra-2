@@ -47,6 +47,43 @@ are untouched). Investigation: workflow `wf_8c8e0d72-75f` + 2 follow-ups. Built:
 - REMAINING = **4b**: the `BacktestRunner` consumption arm + the `mm-stockfut-bank` YAML + register +
   functional backtest + multi-instrument smoke (full-N50 "nifty" variant = v2, Upstox-key-gated).
 
+## STAGE 4b — CODE DONE (2026-06-29): BacktestRunner consumption arm + the strategy YAML
+Built per the recipe below. `BacktestRunner.signalInstrument(config, request)` gained a GATED
+`futures_screener` arm that signals on the TOP pinned pick (`request.universe[0]`) — existing modes
+byte-identical (`BacktestRunnerSignalInstrumentTest` 9/9, incl. the futures_screener pick + empty-pin
+throw). `docs/strategies/mm-stockfut-bank.yaml` = the long-only NIFTY-Bank momentum strategy (schema-valid;
+NOT scalper-seeded — it has no scalper gate, so it stays out of `ScalperStrategySeeder`/its load tripwire).
+REMAINING = the OPS step only: register `mm-stockfut-bank` via `POST /api/v1/strategies` on the live/mock
+stack + one functional backtest (≈0 trades on muted history expected; judge live). v2 = full-N50 radar
+(Upstox active F&O key) + the SPAN-gated short side.
+
+## STAGE 4b — VERIFIED RECIPE (2026-06-29, one-shot; root-caused, no more investigation)
+The replay seam is fully mapped. `BacktestRunner.run` (`BacktestRunner.java:108-128`): `config = resolved.config()`
+is the ORIGINAL strategy version config (universe.mode + fields); `request = job.request()` carries the
+SUBMISSION-PINNED `universe` ARRAY (`{exchange,tradingsymbol}` items, from `JobsService:115`) + `universeChecksum`.
+`signalInstrument(config)` (`:436`) reads the ORIGINAL config — `futures_of_underlying` resolves the
+`universe.underlying` OBJECT → signals on the **underlying SPOT** (NOT the pinned contract); `futures_screener`
+config has no `underlying`/`instruments` → throws "needs an explicit single-instrument universe".
+**The runner is SINGLE-signal-instrument** (`primary1m = read(signal,...)`, one fold) — so v1 = signal on the
+TOP pick.
+**FIX (gated, additive, parity-safe):**
+1. Change `signalInstrument(JsonNode config)` → `signalInstrument(JsonNode config, JsonNode request)`; update
+   the call at `:128` + `BacktestRunnerSignalInstrumentTest`.
+2. As the FIRST arm: `if ("futures_screener".equals(config.path("universe").path("mode").asText())) {` read
+   `request.path("universe")` (the pinned array); if non-empty array → `SeriesKey(first.exchange, first.tradingsymbol, "1m")`;
+   else throw "futures_screener backtest needs a pinned universe (submission produced no movers)". **MUST stay
+   gated to futures_screener** — a global pinned-array-first would flip `futures_of_underlying` spot→contract and
+   break existing-mode parity. Existing modes untouched → goldens/parity byte-identical.
+3. `mm-stockfut-bank.yaml` (futures_screener, side=long, max_picks=5, RSI+VWAP+SUPERTREND momentum gate,
+   stop_loss+signal_exit, fixed_quantity, intraday) — clone the `accept/futures-screener.yaml` shape (already
+   schema-valid). Seed it where the scalper YAMLs are seeded; register the variant.
+4. Functional backtest: submit, expect it to RUN (≈0 trades on muted history = expected — judge LIVE). The pin
+   captures TODAY's movers; if none captured yet (fresh radar), the universe pins empty → 0-trade run, still a
+   plumbing pass.
+5. Multi-instrument smoke = the engine LIVE path (resolveScreener → N InstrumentRefs → onClosedBar iterates);
+   covered by `FuturesUniverseResolverTest.screenerPicks` + the existing no-size>1-guard. The single-instrument
+   BACKTEST runner does NOT need N (top-pick is the functional proof).
+
 ## STAGE 3b — DONE (2026-06-29): `MarketMoversScreenService` + `GET /api/v1/market/futures/movers-screen`
 Built exactly per the recipe below: front-pick per radar underlying from the newest captured bucket +
 `reader.eod` history → reuse `MarketMoversScreener.classify`/`screen`. Map envelope `{longCandidates,

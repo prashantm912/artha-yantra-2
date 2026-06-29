@@ -22,6 +22,13 @@ capture): **Stage 1 (revised) = a thin active Upstox historical-candle client (O
 (screener reads the Upstox reader; the strategy + dynamic universe + parity + tests stay as below).
 The NSE-bhavcopy stages below are kept as the FALLBACK design only.
 
+## STAGE 3b — DONE (2026-06-29): `MarketMoversScreenService` + `GET /api/v1/market/futures/movers-screen`
+Built exactly per the recipe below: front-pick per radar underlying from the newest captured bucket +
+`reader.eod` history → reuse `MarketMoversScreener.classify`/`screen`. Map envelope `{longCandidates,
+shortCandidates, asOf}`, 422 until ≥1 radar bucket; contract spec + gen TS re-captured (new path drift).
+Tests: `MarketMoversScreenServiceTest` (2) + the controller IT (12) green. REMAINING = Stage 4 (the
+`mm-stockfut-{nifty,bank}` strategy + the parity-sensitive dynamic-universe engine arm) + Stage 5.
+
 ## STAGE 3b — VERIFIED ASSEMBLY RECIPE (2026-06-29, one-shot build, no more investigation)
 The capture is config-driven (`FuturesOiSnapshotService.snapshotNow` iterates `oi-snapshot-underlyings`
 incl. the ~17 bank stocks, resolving each via `monthlyFutures` — the "indices-only" `FuturesMoversService`

@@ -27,6 +27,8 @@ public class RiskService {
   public static final String DAILY_LOSS = "daily_loss_limit";
   public static final String DAILY_PROFIT_TARGET = "daily_profit_target";
   public static final String MAX_DEPLOYMENT_PCT = "max_deployment_pct";
+  /** When ON, an emitted ENTRY auto-opens a paper position at the suggested qty (no manual take). */
+  public static final String AUTO_PAPER_TRADE = "auto_paper_trade";
 
   private static final Logger log = LoggerFactory.getLogger(RiskService.class);
   private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
@@ -49,6 +51,11 @@ public class RiskService {
     this.positions = positions;
     this.account = account;
     this.clock = clock;
+  }
+
+  /** Whether emitted ENTRY signals should auto-open a paper position (the auto-paper-trade toggle). */
+  public boolean autoPaperTradeEnabled() {
+    return boolFlag(AUTO_PAPER_TRADE);
   }
 
   /** Whether a new ENTRY may be emitted right now (the {@code emitEntry} gate). */

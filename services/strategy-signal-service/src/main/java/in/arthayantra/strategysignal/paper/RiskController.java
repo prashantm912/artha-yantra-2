@@ -30,7 +30,8 @@ public class RiskController {
           RiskService.MAX_OPEN,
           RiskService.DAILY_LOSS,
           RiskService.DAILY_PROFIT_TARGET,
-          RiskService.MAX_DEPLOYMENT_PCT);
+          RiskService.MAX_DEPLOYMENT_PCT,
+          RiskService.AUTO_PAPER_TRADE);
 
   /** A typed limit update: the key and its JSONB payload (incl. {@code enabled}). */
   public record UpdateBody(String key, JsonNode value) {}

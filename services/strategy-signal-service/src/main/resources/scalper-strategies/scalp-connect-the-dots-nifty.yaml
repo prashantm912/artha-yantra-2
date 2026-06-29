@@ -9,7 +9,7 @@ name: "Scalper · Connect-the-Dots · NIFTY CE"
 version: 1.0.0
 description: "Master Connect-the-Dots confluence scalp (Siva #10) on the NIFTY front future; long-premium CE only."
 author: owner
-tags: [scalper, options, intraday, nifty, rsi-s24-bands, delta-s24-floor, premium-s24-band, indicator-distance-veto, s24-trade-window, iv-per-strike]
+tags: [scalper, options, intraday, nifty, rsi-s24-bands, delta-s24-floor, premium-s24-band, indicator-distance-veto, s24-trade-window, iv-per-strike, flat-oi-stand-aside, max-oi-sr-gate]
 
 universe:
   mode: options_of_underlying

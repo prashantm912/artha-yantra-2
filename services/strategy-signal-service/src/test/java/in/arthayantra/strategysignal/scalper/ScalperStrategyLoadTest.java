@@ -269,13 +269,26 @@ class ScalperStrategyLoadTest {
           .as(id + " dow-confluence armed iff trend-change")
           .isEqualTo(isTrendChange);
 
+      // E2 M4/M6 — the two HARD OI gates with NO soft-dot duplicate in the scorer (the flat-OI stand-aside
+      // trap §6.5 + the max-standing-OI S/R wall §4.7): armed on the scalp-connect-the-dots family, its
+      // faithful home (the confluence strategy that carries no oi-cross-filter, so flat-OI fail-open would
+      // otherwise leave it ungated). Owner-armed 2026-06-29 (closes the roadmap §1b #276/#277 intent).
+      boolean isCtdOiArmed = id.startsWith("scalp-connect-the-dots-");
+      assertThat(tags.contains("flat-oi-stand-aside"))
+          .as(id + " flat-oi-stand-aside armed iff connect-the-dots")
+          .isEqualTo(isCtdOiArmed);
+      assertThat(tags.contains("max-oi-sr-gate"))
+          .as(id + " max-oi-sr-gate armed iff connect-the-dots")
+          .isEqualTo(isCtdOiArmed);
+
       // Connect-the-Dots (#10) is the SOFT weighted-scorer strategy: these confluences are ALREADY soft
       // dots in the 18-dot scorer, so the hard-gate versions ship default-OFF and are armed on NO
       // strategy (the scorer + base rails decide, not an AND of hard pre-gates). The code stays merged +
-      // available for the owner to arm selectively later.
+      // available for the owner to arm selectively later. (flat-oi/max-oi-sr ABOVE are the exception —
+      // they have no soft duplicate, so they are armed rather than redundant.)
       for (String softKeptOff :
           List.of(
-              "flat-oi-stand-aside", "max-oi-sr-gate", "indicator-alignment-gate", "futures-oi-gate",
+              "indicator-alignment-gate", "futures-oi-gate",
               "breadth-gate", "basis-gate", "directional-vix-gate",
               // E8: the vwap-distance entry-skip gate ships built-but-OFF — its 0.4% band is an
               // un-validated placeholder, so arming awaits an owner/optimizer-tuned threshold.

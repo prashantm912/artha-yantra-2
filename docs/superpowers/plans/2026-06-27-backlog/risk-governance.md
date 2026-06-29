@@ -1,6 +1,11 @@
 # Risk governance — daily caps, 5-account ledgers, max-positions wiring, auto-journal
 
-Status: PLAN (implementation-ready). Owner: single-owner. Target service:
+Status: ✅ BUILT / DONE (E10 — shipped #77 (daily-loss/max-positions wiring), #300 (auto-journal),
+#314 (five-account first-loss-freeze ledger), #315 (ledger stamping); daily caps 10% loss / 1.5% profit /
+20% deploy live). Kept as the as-built design ref (the scalper-to-100 roadmap §E10 links it). Original status
+below.
+
+Status (original): PLAN (implementation-ready). Owner: single-owner. Target service:
 `services/strategy-signal-service` (the account-side paper/risk layer — NOT the per-strategy
 signal seam). Date: 2026-06-27.
 

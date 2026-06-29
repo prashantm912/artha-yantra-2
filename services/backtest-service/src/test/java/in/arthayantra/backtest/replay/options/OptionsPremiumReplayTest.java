@@ -393,6 +393,13 @@ class OptionsPremiumReplayTest {
         label, trend, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
   }
 
+  /** A row with the active-strike IV factor set (1 Bullish / 2 Bearish), the rest neutral. */
+  private static in.arthayantra.backtest.client.MarketDataClient.CdRow cdRowIv(
+      String label, int trend, int activeStrikeIv) {
+    return new in.arthayantra.backtest.client.MarketDataClient.CdRow(
+        label, trend, 0, 0, 0, activeStrikeIv, 0, 0, 0, 0, 0, 0, 0);
+  }
+
   @Test
   void oiConfluenceGateDropsCounterTrendLegsKeepsAligned() {
     in.arthayantra.backtest.client.MarketDataClient md =
@@ -410,11 +417,37 @@ class OptionsPremiumReplayTest {
 
     PairedLeg longLeg = new PairedLeg(false, 0, 1); // long CE entering into Bearish OI → DROP
     PairedLeg shortLeg = new PairedLeg(true, 0, 1); // short PE entering into Bearish OI → aligned, KEEP
-    OptionsPremiumReplay.OiGate gate = new OptionsPremiumReplay.OiGate(true, "5m", 5, "");
+    OptionsPremiumReplay.OiGate gate = new OptionsPremiumReplay.OiGate(true, "5m", 5, "", false);
 
     List<PairedLeg> kept =
         replay.filterCounterTrend(List.of(longLeg, shortLeg), underlying, "NIFTY 50", gate);
     assertThat(kept).containsExactly(shortLeg); // the counter-trend long is dropped
+  }
+
+  @Test
+  void ivConfluenceGateDropsLegsAgainstTheIvFactorIndependentOfOi() {
+    in.arthayantra.backtest.client.MarketDataClient md =
+        mock(in.arthayantra.backtest.client.MarketDataClient.class);
+    // 10:00-10:05: the active-strike IV factor is Bearish (2); the OI dimension is OFF, so only the IV
+    // filter runs — a long CE entered here is into a bearish IV read and must be dropped.
+    when(md.connectingDots(eq("NIFTY 50"), eq(LocalDate.of(2026, 6, 16)), eq("5m")))
+        .thenReturn(
+            new in.arthayantra.backtest.client.MarketDataClient.CdResponse(
+                true, List.of(cdRowIv("10:00-10:05", 0, 2))));
+
+    OptionsPremiumReplay replay =
+        new OptionsPremiumReplay(
+            mock(OptionContractSelector.class), mock(CandlePremiumReader.class), md);
+    List<EngineCandle> underlying = List.of(bar("10:02", "25000"), bar("10:30", "25010"));
+
+    PairedLeg longLeg = new PairedLeg(false, 0, 1); // long CE into a bearish IV read → DROP
+    PairedLeg shortLeg = new PairedLeg(true, 0, 1); // short PE into a bearish IV read → KEEP
+    // enabled=false (OI dimension off), iv=true — the IV filter is usable on its own.
+    OptionsPremiumReplay.OiGate ivOnly = new OptionsPremiumReplay.OiGate(false, "5m", 5, "", true);
+
+    List<PairedLeg> kept =
+        replay.filterCounterTrend(List.of(longLeg, shortLeg), underlying, "NIFTY 50", ivOnly);
+    assertThat(kept).containsExactly(shortLeg);
   }
 
   @Test
@@ -430,7 +463,10 @@ class OptionsPremiumReplayTest {
     PairedLeg longLeg = new PairedLeg(false, 0, 1);
     List<PairedLeg> kept =
         replay.filterCounterTrend(
-            List.of(longLeg), underlying, "NIFTY 50", new OptionsPremiumReplay.OiGate(true, "5m", 5, ""));
+            List.of(longLeg),
+            underlying,
+            "NIFTY 50",
+            new OptionsPremiumReplay.OiGate(true, "5m", 5, "", false));
     assertThat(kept).containsExactly(longLeg);
   }
 
@@ -439,6 +475,7 @@ class OptionsPremiumReplayTest {
     com.fasterxml.jackson.databind.node.ObjectNode off =
         com.fasterxml.jackson.databind.json.JsonMapper.builder().build().createObjectNode();
     assertThat(OptionsPremiumReplay.parseOiGate(off).enabled()).isFalse(); // default OFF → goldens safe
+    assertThat(OptionsPremiumReplay.parseOiGate(off).iv()).isFalse(); // IV dimension also OFF by default
   }
 
   @Test

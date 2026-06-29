@@ -165,6 +165,35 @@ public final class UpstoxExpiredInstrumentsClient {
                     .header("Accept", "application/json")
                     .retrieve()
                     .body(UpstoxExpiredCandles.class));
+    return toBars(response);
+  }
+
+  /**
+   * OHLCV+OI bars for an ACTIVE instrument over {@code [from, to]} inclusive — the {@code
+   * expired-instruments/}-less sibling of {@link #candles} ({@code GET
+   * /v2/historical-candle/{key}/{interval}/{to}/{from}}), identical wire shape + Plus token. Used by
+   * the E1 Market-Movers screener to read a live stock FUTURE's daily OHLC+OI on-demand (no capture, no
+   * storage). {@code instrumentKey} is the active contract's {@code instrument_key}.
+   */
+  public List<Bar> activeCandles(String instrumentKey, String interval, LocalDate from, LocalDate to) {
+    UpstoxExpiredCandles response =
+        withRetry(
+            () ->
+                restClient
+                    .get()
+                    .uri(
+                        b ->
+                            b.path("/v2/historical-candle/{key}/{interval}/{to}/{from}")
+                                .build(instrumentKey, interval, to.toString(), from.toString()))
+                    .header("Authorization", "Bearer " + properties.resolveToken())
+                    .header("Accept", "application/json")
+                    .retrieve()
+                    .body(UpstoxExpiredCandles.class));
+    return toBars(response);
+  }
+
+  /** Parse the Upstox candle-array response into {@link Bar}s (col 6 = OI, may be absent/null). */
+  private static List<Bar> toBars(UpstoxExpiredCandles response) {
     if (response == null || response.data() == null || response.data().candles() == null) {
       return List.of();
     }

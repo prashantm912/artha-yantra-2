@@ -142,4 +142,35 @@ class UpstoxExpiredInstrumentsClientTest {
     assertThat(first.oi()).isEqualTo(315185L);
     assertThat(first.bucket().toString()).isEqualTo("2026-06-16T15:29+05:30");
   }
+
+  @Test
+  void activeCandlesParseDailyOhlcvAndOiFromTheActiveEndpoint() {
+    // E1 Market-Movers: the active /v2/historical-candle sibling (no expired-instruments/) reads a live
+    // stock FUTURE's DAILY OHLC+OI on-demand — same positional [ts,o,h,l,c,v,oi] array, col 6 = OI.
+    wireMock.stubFor(
+        get(urlPathEqualTo("/v2/historical-candle/NSEFORELFUT/day/2026-06-16/2026-06-02"))
+            .willReturn(
+                aResponse()
+                    .withHeader("Content-Type", "application/json")
+                    .withBody(
+                        "{\"status\":\"success\",\"data\":{\"candles\":["
+                            + "[\"2026-06-16T00:00:00+05:30\",1500.0,1525.5,1498.0,1520.0,4500000,12500000],"
+                            + "[\"2026-06-13T00:00:00+05:30\",1490.0,1505.0,1485.0,1500.0,3800000,12000000]]}}")));
+
+    List<Bar> bars =
+        client()
+            .activeCandles(
+                "NSEFORELFUT", "day", LocalDate.of(2026, 6, 2), LocalDate.of(2026, 6, 16));
+
+    assertThat(bars).hasSize(2);
+    Bar first = bars.get(0);
+    assertThat(first.high()).isEqualByComparingTo("1525.5");
+    assertThat(first.close()).isEqualByComparingTo("1520.0");
+    assertThat(first.volume()).isEqualTo(4500000);
+    assertThat(first.oi()).isEqualTo(12500000L);
+    wireMock.verify(
+        getRequestedFor(
+                urlPathEqualTo("/v2/historical-candle/NSEFORELFUT/day/2026-06-16/2026-06-02"))
+            .withHeader("Authorization", equalTo("Bearer test-token")));
+  }
 }

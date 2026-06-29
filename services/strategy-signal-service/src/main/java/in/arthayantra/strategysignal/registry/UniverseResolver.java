@@ -53,6 +53,7 @@ public class UniverseResolver {
     return switch (mode) {
       case "index_constituents" -> resolveIndex(universe);
       case "futures_of_underlying" -> resolveFutures(universe);
+      case "futures_screener" -> resolveFuturesScreener(universe);
       default -> resolveExplicit(mode, universe);
     };
   }
@@ -87,6 +88,51 @@ public class UniverseResolver {
       items.add(new Constituent("NFO", legs.get(leg).path("tradingsymbol").asText()));
     }
     return new ResolvedUniverse("futures_of_underlying", null, items, checksum(items), null);
+  }
+
+  /**
+   * E1 §3.3: pins the Market-Movers stock-future universe at submission — the screener's top
+   * {@code max_picks} conviction-ranked movers for {@code side}, each mapped to its FRONT contract via
+   * term-structure. Pinned by copy (like {@code futures_of_underlying}/{@code index_constituents}), so
+   * backtest replay reads THIS snapshot, never re-screens. Empty when the screener/term-structure is
+   * unavailable at submission (off-hours / no movers) — the backtest then runs an empty universe.
+   */
+  private ResolvedUniverse resolveFuturesScreener(JsonNode universe) {
+    String side = universe.path("side").asText("long");
+    int maxPicks = universe.path("max_picks").asInt(5);
+    List<Constituent> items = new ArrayList<>();
+    try {
+      JsonNode screen = get("/api/v1/market/futures/movers-screen");
+      for (String underlying : screenerPicks(screen, side, maxPicks)) {
+        JsonNode legs =
+            get("/api/v1/market/futures/term-structure?underlying={u}", underlying).path("contracts");
+        if (!legs.isEmpty()) {
+          Constituent c = new Constituent("NFO", legs.get(0).path("tradingsymbol").asText());
+          if (!items.contains(c)) {
+            items.add(c);
+          }
+        }
+      }
+    } catch (ApiException unavailable) {
+      // screener/term-structure down at submission -> pin empty (no movers to trade this window)
+    }
+    return new ResolvedUniverse("futures_screener", null, items, checksum(items), null);
+  }
+
+  /** The screener's conviction-ranked picked UNDERLYINGS for {@code side}, capped at {@code maxPicks}. */
+  static List<String> screenerPicks(JsonNode moversScreen, String side, int maxPicks) {
+    String key = "short".equals(side) ? "shortCandidates" : "longCandidates";
+    List<String> out = new ArrayList<>();
+    for (JsonNode row : moversScreen.path(key)) {
+      if (out.size() >= maxPicks) {
+        break;
+      }
+      String symbol = row.path("symbol").asText("");
+      if (!symbol.isBlank() && !out.contains(symbol)) {
+        out.add(symbol);
+      }
+    }
+    return out;
   }
 
   private ResolvedUniverse resolveExplicit(String mode, JsonNode universe) {

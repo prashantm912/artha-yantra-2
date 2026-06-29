@@ -28,6 +28,24 @@ class UniverseResolverTest {
   }
 
   @Test
+  void screenerPicksTakesTopNUnderlyingsForTheChosenSide() throws Exception {
+    var screen =
+        mapper.readTree(
+            """
+            {"longCandidates":[{"symbol":"HDFCBANK"},{"symbol":"ICICIBANK"},{"symbol":"SBIN"}],
+             "shortCandidates":[{"symbol":"PNB"},{"symbol":"YESBANK"}]}
+            """);
+    // long side, capped at 2, in conviction (list) order
+    assertThat(UniverseResolver.screenerPicks(screen, "long", 2))
+        .containsExactly("HDFCBANK", "ICICIBANK");
+    // short side reads the other list
+    assertThat(UniverseResolver.screenerPicks(screen, "short", 5))
+        .containsExactly("PNB", "YESBANK");
+    // missing list / blank symbols -> empty, never throws
+    assertThat(UniverseResolver.screenerPicks(mapper.readTree("{}"), "long", 5)).isEmpty();
+  }
+
+  @Test
   void explicitUniverseResolvesFromTheConfigList() throws Exception {
     var config =
         mapper.readTree(

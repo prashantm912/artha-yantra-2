@@ -22,6 +22,23 @@ capture): **Stage 1 (revised) = a thin active Upstox historical-candle client (O
 (screener reads the Upstox reader; the strategy + dynamic universe + parity + tests stay as below).
 The NSE-bhavcopy stages below are kept as the FALLBACK design only.
 
+## STAGE 4a — DONE (2026-06-29): `futures_screener` universe plumbing (parity-safe)
+The dynamic universe rides the EXISTING submission-pin parity mechanism — NO V009 side-channel, NO
+migration, NO replay/golden change (`resolveUniverse` is LIVE-only; the engine lib + `TickwiseGoldenRunner`
+are untouched). Investigation: workflow `wf_8c8e0d72-75f` + 2 follow-ups. Built:
+- **schema**: 5th `universe.mode` oneOf branch `futures_screener` (`side` long/short, `max_picks` 1-20) +
+  the `accept/futures-screener.yaml` corpus fixture (CorpusTest 33/33).
+- **registry `UniverseResolver.resolveFuturesScreener`**: submission-pin — GET `/movers-screen` → top
+  `max_picks` conviction underlyings → `/term-structure` per pick → front contract → pinned `items`.
+- **engine `FuturesUniverseResolver.resolveScreener` + `SignalEngine.resolveUniverse` case**: live reload
+  re-screens (08:40 + hot-swap); each picked mover → front contract via the SHARED `resolve()` (roll
+  handling reused) → auto-subscribed by the existing universe→ensureWarm loop (multi-instrument is fully
+  wired: `onClosedBar` iterates `strategy.universe()`, no size>1 guard).
+- **backtest `JobsService`**: `futures_screener` added to the submission-pin condition (else replay gets an
+  empty universe). Phase-44 lifted the publish guard → the mode publishes freely.
+- Pure `screenerPicks` parse unit-tested both sides (5/5). REMAINING = **4b** (the `mm-stockfut-bank` YAML +
+  register + functional backtest + multi-instrument smoke; full-N50 "nifty" variant = v2, Upstox-key-gated).
+
 ## STAGE 3b — DONE (2026-06-29): `MarketMoversScreenService` + `GET /api/v1/market/futures/movers-screen`
 Built exactly per the recipe below: front-pick per radar underlying from the newest captured bucket +
 `reader.eod` history → reuse `MarketMoversScreener.classify`/`screen`. Map envelope `{longCandidates,

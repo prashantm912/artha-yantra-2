@@ -1,0 +1,28 @@
+# E1 §3.3 fixture: futures_screener dynamic stock-future universe (Market-Movers, long-only)
+schema: strategy-schema/v1
+id: mm-stockfut-screener
+name: "Market Movers Stock-Future Screener"
+version: 1.0.0
+universe:
+  mode: futures_screener
+  side: long
+  max_picks: 5
+timeframes: { primary: 5m }
+indicators:
+  - { name: RSI, alias: rsi, timeframe: 5m, params: { period: 14 }, weight: 1.0 }
+  - { name: VWAP, alias: vwap, timeframe: 5m, weight: 1.0 }
+  - { name: SUPERTREND, alias: st, timeframe: 5m, params: { period: 10, multiplier: 3.0 }, weight: 1.0 }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - "rsi > 55"
+      - "close > vwap"
+  scoring: { threshold: 0.5 }
+exit_rules:
+  - { type: stop_loss, params: { basis: atr_multiple, value: 2.0, atr_period: 14 } }
+  - { type: signal_exit, params: { rule: "rsi < 50" } }
+risk:
+  position_sizing: { method: fixed_quantity, params: { quantity: 1 } }
+  max_positions: 5
+  session: { style: intraday, square_off: "15:12" }

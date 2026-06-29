@@ -301,13 +301,7 @@ class ScalperStrategyLoadTest {
       for (String softKeptOff :
           List.of(
               "indicator-alignment-gate", "futures-oi-gate",
-              "breadth-gate", "basis-gate", "directional-vix-gate",
-              // E8: the vwap-distance entry-skip gate ships built-but-OFF — its 0.4% band is an
-              // un-validated placeholder, so arming awaits an owner/optimizer-tuned threshold.
-              "vwap-distance",
-              // E8: time-of-day-preference is a HARD skip rendering of the doc's soft "best 10:00-11:30"
-              // preference — ships built-but-OFF; arming (prefer -> only) is an owner choice.
-              "time-of-day-preference")) {
+              "breadth-gate", "basis-gate", "directional-vix-gate")) {
         assertThat(tags.contains(softKeptOff))
             .as(id + " " + softKeptOff + " unarmed (connect-the-dots kept soft)")
             .isFalse();
@@ -364,6 +358,19 @@ class ScalperStrategyLoadTest {
       assertThat(tags.contains("prior-day-vwap-stop"))
           .as(id + " prior-day-vwap-stop armed iff morning-trade")
           .isEqualTo(isMorningTrade);
+
+      // E8 time-of-day-preference (§3.5 Trending-OI "best 10:00-11:30 AM, ease off after ~13:30"): the
+      // doc names that high-probability window for Trending-OI specifically (PREFER 10:00-13:30 hard
+      // skip) — armed iff the scalp-trending-oi family (isTrendingOi defined above).
+      assertThat(tags.contains("time-of-day-preference"))
+          .as(id + " time-of-day-preference armed iff trending-oi")
+          .isEqualTo(isTrendingOi);
+      // E8 vwap-distance (§3.4 Gap-Theory "don't chase the gap — wait for a pullback near VWAP"): the
+      // extended-chase skip (|close-vwap|/close > 0.4%) is the gap-theory pullback discipline — armed
+      // iff the scalp-gap-theory family (isGapTheory defined above).
+      assertThat(tags.contains("vwap-distance"))
+          .as(id + " vwap-distance armed iff gap-theory")
+          .isEqualTo(isGapTheory);
     }
   }
 }

@@ -105,7 +105,7 @@ public class OptionsPremiumReplay {
     // signal_underlying} (e.g. NIFTY-FUT-CONT) while the legs trade SENSEX. When no signal_underlying
     // is set, {@code underlyingTradingsymbol} == the underlying, so this is byte-identical to before
     // and the premium goldens hold.
-    if (gate.enabled() && marketData != null) {
+    if ((gate.enabled() || gate.iv()) && marketData != null) {
       legs = filterCounterTrend(legs, underlyingOneMinute, oiGateIndex(config, gate), gate);
     }
     return replayLegs(
@@ -153,22 +153,26 @@ public class OptionsPremiumReplay {
     return legs;
   }
 
-  /** Opt-in OI-confluence entry gate (off by default → the existing premium goldens are untouched). */
-  record OiGate(boolean enabled, String interval, int intervalMin, String index) {}
+  /**
+   * Opt-in OI/IV-confluence entry gate (both dimensions off by default → the existing premium goldens
+   * are untouched). {@code enabled} = the OI-trend filter; {@code iv} = the IV-confluence filter (#4).
+   */
+  record OiGate(boolean enabled, String interval, int intervalMin, String index, boolean iv) {}
 
   /**
-   * Reads {@code backtest.oi_confluence_gate:{enabled,interval,index}} (a backtest-only knob, not the
+   * Reads {@code backtest.oi_confluence_gate:{enabled,iv,interval,index}} (a backtest-only knob, not the
    * strategy schema). {@code index} is an OPTIONAL override of the OI-confluence index (2b-E2): blank →
    * gate on the options-execution root, set → gate on a different index (e.g. a NIFTY-signal / SENSEX-
-   * option strategy gating on {@code NIFTY 50} OI).
+   * option strategy gating on {@code NIFTY 50} OI). {@code iv} (#4) arms the sibling IV-confluence filter.
    */
   static OiGate parseOiGate(JsonNode config) {
     JsonNode g = config.path("backtest").path("oi_confluence_gate");
     boolean enabled = g.path("enabled").asBoolean(false);
+    boolean iv = g.path("iv").asBoolean(false);
     String interval = g.path("interval").asText("5m");
     String index = g.path("index").asText("");
     String digits = interval.replaceAll("[^0-9]", "");
-    return new OiGate(enabled, interval, digits.isEmpty() ? 5 : Integer.parseInt(digits), index);
+    return new OiGate(enabled, interval, digits.isEmpty() ? 5 : Integer.parseInt(digits), index, iv);
   }
 
   /**
@@ -195,40 +199,60 @@ public class OptionsPremiumReplay {
   }
 
   /**
-   * Drops legs whose ENTRY fires against the historical OI confluence (long/CE into a Bearish or
-   * Ext.Bearish Connecting-Dots trend; short/PE into a Bullish or Ext.Bullish one) — the
-   * attribution-surface finding that counter-confluence entries lose, turned into a tradeable filter.
-   * The confluence is fetched once per session (deterministic: same stored data → same kept legs). A
-   * bucket with no OI data ({@code trend} missing) does NOT filter — the leg passes through.
+   * Drops legs whose ENTRY fires against the historical OI/IV confluence — the attribution-surface
+   * finding that counter-confluence entries lose, turned into a deterministic, opt-in backtest filter:
+   *
+   * <ul>
+   *   <li>{@code oi_confluence_gate.enabled} (the OI dimension): drops long/CE into a Bearish or
+   *       Ext.Bearish Connecting-Dots {@code trend}, short/PE into a Bullish or Ext.Bullish one.
+   *   <li>{@code oi_confluence_gate.iv} (the IV dimension, #4): drops long/CE entered when the
+   *       active-strike IV factor reads Bearish (richer puts), short/PE when it reads Bullish — the
+   *       backtest analogue of the live IV-confluence gate. NEUTRAL on derived history (CLAUDE.md), so
+   *       this is a FORWARD-paper discriminator (judge OI/IV-led strategies on live, not the backtest).
+   * </ul>
+   *
+   * <p>Both read the SAME per-session Connecting-Dots fetch (one call/session, deterministic: same
+   * stored data → same kept legs). A bucket with no OI data (the {@code row} missing) does NOT filter —
+   * the leg passes through. Each dimension is independent: a strategy may arm the IV filter alone.
    */
   List<PairedLeg> filterCounterTrend(
       List<PairedLeg> legs, List<EngineCandle> underlying, String indexName, OiGate gate) {
     java.time.ZoneId ist = java.time.ZoneId.of("Asia/Kolkata");
-    Map<java.time.LocalDate, Map<String, Integer>> bySession = new HashMap<>();
+    Map<java.time.LocalDate, Map<String, in.arthayantra.backtest.client.MarketDataClient.CdRow>> bySession =
+        new HashMap<>();
     List<PairedLeg> kept = new ArrayList<>();
     for (PairedLeg leg : legs) {
       java.time.OffsetDateTime entry = underlying.get(leg.entryIndex()).bucketStart();
       java.time.LocalDate session = entry.atZoneSameInstant(ist).toLocalDate();
-      Map<String, Integer> matrix =
+      Map<String, in.arthayantra.backtest.client.MarketDataClient.CdRow> matrix =
           bySession.computeIfAbsent(
               session,
               s -> {
-                Map<String, Integer> m = new HashMap<>();
+                Map<String, in.arthayantra.backtest.client.MarketDataClient.CdRow> m = new HashMap<>();
                 for (in.arthayantra.backtest.client.MarketDataClient.CdRow r :
                     marketData.connectingDots(indexName, s, gate.interval()).rowsOrEmpty()) {
-                  m.put(r.timeInterval(), r.trend());
+                  m.put(r.timeInterval(), r);
                 }
                 return m;
               });
-      Integer trend =
+      in.arthayantra.backtest.client.MarketDataClient.CdRow row =
           matrix.get(
               in.arthayantra.backtest.analytics.OiAttributionService.bucketLabel(
                   entry, gate.intervalMin()));
-      boolean counterTrend =
-          trend != null
-              && ((!leg.shortSide() && (trend == 3 || trend == 4)) // long CE into bearish OI
-                  || (leg.shortSide() && (trend == 1 || trend == 2))); // short PE into bullish OI
-      if (!counterTrend) {
+      boolean drop = false;
+      if (gate.enabled() && row != null) {
+        int trend = row.trend();
+        drop =
+            (!leg.shortSide() && (trend == 3 || trend == 4)) // long CE into bearish OI
+                || (leg.shortSide() && (trend == 1 || trend == 2)); // short PE into bullish OI
+      }
+      if (!drop && gate.iv() && row != null) {
+        int ivFactor = row.activeStrikeIv(); // 0 Neutral / 1 Bullish / 2 Bearish
+        drop =
+            (!leg.shortSide() && ivFactor == 2) // long CE into a bearish IV read
+                || (leg.shortSide() && ivFactor == 1); // short PE into a bullish IV read
+      }
+      if (!drop) {
         kept.add(leg);
       }
     }

@@ -37,6 +37,7 @@ class CandleDerivedChainReaderIntegrationTest extends MarketDataIntegrationTestB
   private static final String DISPLAY = "NIFTY 50"; // options_chain_snapshots.underlying
   private static final LocalDate EXPIRY = LocalDate.of(2099, 1, 15);
   private static final LocalDate EXPIRY2 = LocalDate.of(2099, 2, 19);
+  private static final LocalDate EXPIRY3 = LocalDate.of(2099, 1, 16); // isolated, for the full-chain IV test
 
   @Autowired private CandleDerivedChainReader reader;
   @Autowired private OptionsSnapshotReader snapshotReader;
@@ -147,6 +148,37 @@ class CandleDerivedChainReaderIntegrationTest extends MarketDataIntegrationTestB
         .findFirst().orElseThrow();
     assertThat(pe.iv()).as("ATM-band PE IV solved from candle premium").isNotNull();
     assertThat(pe.iv().doubleValue()).isBetween(0.0001, 5.0); // a sane vol, inside the solver bracket
+  }
+
+  @Test
+  void fullChainModeSolvesPerStrikeIvBeyondTheAtmBand() {
+    // 4 CE strikes on a fresh expiry; the forward (the shared DERIV99FUT close) is ~23950. A NARROW
+    // (band=1) reader keeps only the nearest 3 → the far 24300 strike stays null; the FULL-CHAIN reader
+    // (band <= 0) back-solves its IV from the candle premium too — per-strike historical IV.
+    contract("DERIV3A", "CE", 23900, EXPIRY3, true);
+    contract("DERIV3B", "CE", 24000, EXPIRY3, true);
+    contract("DERIV3C", "CE", 24100, EXPIRY3, true);
+    contract("DERIV3FAR", "CE", 24300, EXPIRY3, true);
+    candle("DERIV3A", ist("09:19"), "60", 1000, 10);
+    candle("DERIV3B", ist("09:19"), "35", 1000, 10);
+    candle("DERIV3C", ist("09:19"), "14", 1000, 10);
+    candle("DERIV3FAR", ist("09:19"), "8", 1000, 10);
+
+    var calendar = in.arthayantra.marketcalendar.MarketCalendar.nse();
+    var narrow = new CandleDerivedChainReader(jdbc, calendar, new java.math.BigDecimal("0.065"), 1);
+    var full = new CandleDerivedChainReader(jdbc, calendar, new java.math.BigDecimal("0.065"), 0);
+
+    assertThat(far(narrow.series(EU, EXPIRY3, OiInterval.M5, ist("09:00"), ist("15:30"))).iv())
+        .as("out-of-band strike stays null under the default ATM band")
+        .isNull();
+    OptionsSnapshotReader.StrikePoint solved =
+        far(full.series(EU, EXPIRY3, OiInterval.M5, ist("09:00"), ist("15:30")));
+    assertThat(solved.iv()).as("full-chain mode solves the far strike's IV").isNotNull();
+    assertThat(solved.iv().doubleValue()).isBetween(0.0001, 5.0);
+  }
+
+  private static OptionsSnapshotReader.StrikePoint far(List<OptionsSnapshotReader.StrikePoint> s) {
+    return s.stream().filter(p -> p.strike().intValue() == 24300).findFirst().orElseThrow();
   }
 
   @Test

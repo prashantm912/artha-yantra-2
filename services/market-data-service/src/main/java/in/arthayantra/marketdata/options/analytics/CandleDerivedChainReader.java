@@ -56,21 +56,27 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class CandleDerivedChainReader {
 
-  /** ATM-band width (strikes either side of the spot) for the read-time IV recompute. */
-  private static final int IV_BAND = 3;
-
   private final JdbcTemplate jdbc;
   private final MarketCalendar calendar;
   private final double riskFreeRate;
+  // Read-time IV-solve band: the number of strikes EITHER SIDE of the forward to back-solve from the
+  // candle premium. Default 3 (the ATM band — cheap, byte-identical to the prior behaviour). Set <= 0
+  // for the FULL CHAIN — every strike with a valid premium gets a per-strike IV (the historical OI
+  // pages then show IV across the whole ladder, not just near the money). Full-chain is a heavier
+  // read (one Newton-Raphson solve per strike per bucket), so it stays opt-in via config.
+  private final int ivBand;
 
   public CandleDerivedChainReader(
       JdbcTemplate jdbc,
       MarketCalendar calendar,
       @org.springframework.beans.factory.annotation.Value("${artha.options.risk-free-rate:0.065}")
-          BigDecimal riskFreeRate) {
+          BigDecimal riskFreeRate,
+      @org.springframework.beans.factory.annotation.Value("${artha.options.derived-iv-band:3}")
+          int ivBand) {
     this.jdbc = jdbc;
     this.calendar = calendar;
     this.riskFreeRate = riskFreeRate.doubleValue();
+    this.ivBand = ivBand;
   }
 
   /**
@@ -203,16 +209,17 @@ public class CandleDerivedChainReader {
         Comparator.comparing(OptionsSnapshotReader.StrikePoint::bucket)
             .thenComparing(OptionsSnapshotReader.StrikePoint::strike)
             .thenComparing(OptionsSnapshotReader.StrikePoint::optionType));
-    return enrichAtmIv(points, expiry);
+    return enrichIv(points, expiry);
   }
 
   /**
-   * Solves Black-76 IV for the ATM-band strikes per bucket from the candle premium — the future-close
-   * {@code spot} proxy IS the forward, so the only missing solver input is now available. Keeps the
-   * 11th (ATM-IV) Connecting-Dots factor faithful on derived history + populates the OI-page IV columns
-   * near the money. Out-of-band strikes (and any below-intrinsic/zero premium) stay null.
+   * Solves Black-76 IV per bucket from the candle premium — the future-close {@code spot} proxy IS the
+   * forward, so the only missing solver input is now available. By default only the ATM band ({@link
+   * #ivBand} strikes either side, the cheap near-the-money set) is solved; with {@code ivBand <= 0} the
+   * FULL chain is solved so every strike with a valid premium carries a per-strike IV. Any below-
+   * intrinsic / zero / non-converging premium (and, in band mode, any out-of-band strike) stays null.
    */
-  private List<OptionsSnapshotReader.StrikePoint> enrichAtmIv(
+  private List<OptionsSnapshotReader.StrikePoint> enrichIv(
       List<OptionsSnapshotReader.StrikePoint> points, LocalDate expiry) {
     Map<OffsetDateTime, List<OptionsSnapshotReader.StrikePoint>> byBucket = new LinkedHashMap<>();
     for (OptionsSnapshotReader.StrikePoint p : points) {
@@ -235,16 +242,19 @@ public class CandleDerivedChainReader {
             return;
           }
           double t = years.getAsDouble();
+          // ivBand <= 0 ⇒ FULL chain (band == null, no strike filter); else the nearest 2*ivBand+1.
           Set<BigDecimal> band =
-              new HashSet<>(
-                  pts.stream()
-                      .map(OptionsSnapshotReader.StrikePoint::strike)
-                      .distinct()
-                      .sorted(Comparator.comparing(s -> s.subtract(forward).abs()))
-                      .limit(IV_BAND * 2L + 1)
-                      .toList());
+              ivBand <= 0
+                  ? null
+                  : new HashSet<>(
+                      pts.stream()
+                          .map(OptionsSnapshotReader.StrikePoint::strike)
+                          .distinct()
+                          .sorted(Comparator.comparing(s -> s.subtract(forward).abs()))
+                          .limit(ivBand * 2L + 1)
+                          .toList());
           for (OptionsSnapshotReader.StrikePoint p : pts) {
-            if (!band.contains(p.strike()) || p.ltp() == null || p.ltp().signum() <= 0) {
+            if ((band != null && !band.contains(p.strike())) || p.ltp() == null || p.ltp().signum() <= 0) {
               continue;
             }
             Black76.OptionType type =

@@ -41,6 +41,24 @@ class ScalperSizingTest {
   }
 
   @Test
+  void vixFactorTrimsOnlyInElevatedVolBandsAndIsNullSafe() {
+    // E8 §2.8 (Siva VIX bands): a FULL-confluence base (1.0) is untrimmed below the 15 sellers' band,
+    // trimmed to 0.85 in 15-16 (sellers' market), and to 0.70 at 17+ (active shorts / sell-off).
+    assertThat(ScalperSizing.sizeMultiplier(bd("0.90"), null, null)).isEqualByComparingTo("1.0"); // null VIX
+    assertThat(ScalperSizing.sizeMultiplier(bd("0.90"), null, bd("11"))).isEqualByComparingTo("1.0"); // lower
+    assertThat(ScalperSizing.sizeMultiplier(bd("0.90"), null, bd("14"))).isEqualByComparingTo("1.0"); // medium
+    assertThat(ScalperSizing.sizeMultiplier(bd("0.90"), null, bd("15"))).isEqualByComparingTo("0.85"); // sellers (inclusive)
+    assertThat(ScalperSizing.sizeMultiplier(bd("0.90"), null, bd("16"))).isEqualByComparingTo("0.85");
+    assertThat(ScalperSizing.sizeMultiplier(bd("0.90"), null, bd("17"))).isEqualByComparingTo("0.70"); // shorts (inclusive)
+    assertThat(ScalperSizing.sizeMultiplier(bd("0.90"), null, bd("24.75"))).isEqualByComparingTo("0.70");
+    // stacked factors clamp to the floor: weak base (0.5) * sellers VIX (0.85) = 0.425 -> 0.50.
+    assertThat(ScalperSizing.sizeMultiplier(bd("0.60"), null, bd("16"))).isEqualByComparingTo("0.50");
+    // the 2-arg overload == the 3-arg with a null VIX (back-compat, byte-identical).
+    assertThat(ScalperSizing.sizeMultiplier(bd("0.675"), bd("30")))
+        .isEqualByComparingTo(ScalperSizing.sizeMultiplier(bd("0.675"), bd("30"), null));
+  }
+
+  @Test
   void multiplierTapersLinearlyAndMonotonicallyBetween() {
     // midpoint 0.675 -> floor + 0.5*(1 - floor) = 0.50 + 0.25 = 0.75
     assertThat(ScalperSizing.sizeMultiplier(bd("0.675"))).isEqualByComparingTo("0.75");

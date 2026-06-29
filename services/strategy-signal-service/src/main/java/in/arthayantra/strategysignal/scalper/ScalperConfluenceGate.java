@@ -83,7 +83,11 @@ public class ScalperConfluenceGate {
       // E8 §3.2: the live call-put OI imbalance % at entry, surfaced for the probability-graded
       // suggested-qty OI-gap factor (a thin gap trims size). Null for the neutral straddle path / when
       // the chain imbalance is unavailable. Advisory only ([S]) — NOT part of the frozen breakdown.
-      BigDecimal oiImbalancePct) {
+      BigDecimal oiImbalancePct,
+      // E8 §2.8: the live India VIX level at entry, surfaced for the volatility-based sizing factor (an
+      // elevated VIX — 15+ sellers / 17+ shorts — trims size). Null for the neutral straddle path / when
+      // the VIX feed is unavailable (off-hours / derived history). Advisory only ([S]).
+      BigDecimal vixLevel) {
 
     /** The directional/primary leg (CE for a straddle) — never empty: every decision has ≥1 leg. */
     public StrikePicker.Pick pick() {
@@ -201,6 +205,7 @@ public class ScalperConfluenceGate {
                       List.of(new Leg(OptionType.CE, s.call()), new Leg(OptionType.PE, s.put())),
                       neutralConfluence(),
                       chain.expiry(),
+                      null,
                       null,
                       null,
                       null)); // #11 straddle is direction-neutral — no Open=High tier / no graded sizing
@@ -626,7 +631,7 @@ public class ScalperConfluenceGate {
         p ->
             new Decision(
                 decided, List.of(new Leg(decided, p)), conf, chain.expiry(), stop, decidedTier,
-                ctx.oi().callPutDeltaImbalancePct()));
+                ctx.oi().callPutDeltaImbalancePct(), ctx.macro().vixLevel()));
   }
 
   /**

@@ -22,6 +22,28 @@ capture): **Stage 1 (revised) = a thin active Upstox historical-candle client (O
 (screener reads the Upstox reader; the strategy + dynamic universe + parity + tests stay as below).
 The NSE-bhavcopy stages below are kept as the FALLBACK design only.
 
+## STAGE 3b — VERIFIED ASSEMBLY RECIPE (2026-06-29, one-shot build, no more investigation)
+The capture is config-driven (`FuturesOiSnapshotService.snapshotNow` iterates `oi-snapshot-underlyings`
+incl. the ~17 bank stocks, resolving each via `monthlyFutures` — the "indices-only" `FuturesMoversService`
+javadoc is STALE). So the bank-stock futures ARE captured (when the master is synced). Build
+`futures/screener/MarketMoversScreenService` (a @Service) thus — it REUSES the stage-3a `MarketMoversScreener.classify`:
+1. `List<FutPoint> pair = reader.latestPairAll(RADAR_UNDERLYINGS, interval, date)` (`FuturesSnapshotReader:169`)
+   — every radar stock's contracts, latest 2 buckets.
+2. Fold to the FRONT future per underlying (nearest expiry; mirror `/banks-grid`'s front-pick). Each front
+   `FutPoint` carries `dayOpen/dayHigh/dayLow` + `ltp` + `oi` + `volume` → build TODAY's `MarketMoversScreener.DailyBar`.
+3. `List<EodRow> hist = reader.eod(stock, today.minusDays(~25), today.minusDays(1))` (`FuturesSnapshotReader:201`)
+   → map each `EodRow` → a historical `DailyBar`.
+4. `bars = hist DailyBars ++ [today DailyBar]` → `MarketMoversScreener.classify(stock, bars)` → `ScreenerRow`.
+   (REUSE — no second grading path; OI-quadrant, OH/OL, breakout, daily-RSI all fall out of `classify`.)
+5. Collect → `MarketMoversScreener.screen`-style long/short ranking → return.
+6. `GET /api/v1/market/futures/movers-screen?mode&date&interval` on `FuturesAnalyticsController` (sibling
+   `/movers`:184), Map envelope `{longCandidates, shortCandidates, asOf}`, 422 until ≥1 radar bucket. New
+   `@GetMapping` path → re-capture `ContractCaptureTest`.
+RADAR_UNDERLYINGS = the bank stocks already in `oi-snapshot-underlyings` (HDFCBANK, ICICIBANK, SBIN, …).
+Verify FutPoint/EodRow exact field names before mapping (read `FuturesSnapshotReader:24` FutPoint + the
+EodRow record). Pre-deploy: `SELECT count(*) FROM instruments WHERE instrument_type='FUT' AND
+underlying_tradingsymbol IN (radar)` > 0 (else the capture silently no-ops).
+
 ## STAGE 3b DECISION (2026-06-29, build-time finding)
 Resolving an ARBITRARY stock → its ACTIVE NFO front-future Upstox `instrument_key` is NOT in the codebase
 today: `FuturesContractSource.monthlyFutures` returns `FutContract(InstrumentKey(exchange,tradingsymbol),

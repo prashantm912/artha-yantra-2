@@ -177,7 +177,12 @@
           "properties": {
             "mode": { "const": "futures_screener" },
             "side": { "enum": ["long", "short"], "default": "long" },
-            "max_picks": { "type": "integer", "minimum": 1, "maximum": 20, "default": 5 }
+            "max_picks": { "type": "integer", "minimum": 1, "maximum": 20, "default": 5 },
+            "source": {
+              "enum": ["captured", "upstox"],
+              "default": "captured",
+              "description": "Screener radar: `captured` = the NIFTY-Bank snapshot subset (v1); `upstox` (E1 v2) = the full NIFTY-50 from on-demand Upstox daily candles."
+            }
           }
         }
       ]

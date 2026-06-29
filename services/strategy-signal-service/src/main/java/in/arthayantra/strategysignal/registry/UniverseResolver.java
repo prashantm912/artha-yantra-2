@@ -100,9 +100,13 @@ public class UniverseResolver {
   private ResolvedUniverse resolveFuturesScreener(JsonNode universe) {
     String side = universe.path("side").asText("long");
     int maxPicks = universe.path("max_picks").asInt(5);
+    String moversUri =
+        "upstox".equals(universe.path("source").asText("captured"))
+            ? "/api/v1/market/futures/movers-screen?source=upstox"
+            : "/api/v1/market/futures/movers-screen";
     List<Constituent> items = new ArrayList<>();
     try {
-      JsonNode screen = get("/api/v1/market/futures/movers-screen");
+      JsonNode screen = get(moversUri);
       for (String underlying : screenerPicks(screen, side, maxPicks)) {
         JsonNode legs =
             get("/api/v1/market/futures/term-structure?underlying={u}", underlying).path("contracts");

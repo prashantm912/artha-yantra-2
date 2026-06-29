@@ -298,7 +298,9 @@ public class SignalEngine {
           // E1 §3.3: the dynamic Market-Movers stock-future universe — re-screened each reload
           // (08:40 + hot-swap), each picked mover mapped to its front contract + auto-subscribed.
           futuresResolver.resolveScreener(
-              universe.path("side").asText("long"), universe.path("max_picks").asInt(5));
+              universe.path("side").asText("long"),
+              universe.path("max_picks").asInt(5),
+              universe.path("source").asText("captured"));
       default -> {
         // index_constituents cannot publish until Phase 44 (the registry guard) — defensive
         log.warn("universe mode '{}' is not live-resolvable yet", mode);

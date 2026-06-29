@@ -93,14 +93,24 @@ public class FuturesUniverseResolver {
    * screen, takes the conviction-ranked candidates for {@code side}, then maps each picked underlying
    * to its actual front contract via {@link #resolve} (so roll handling is shared). Empty on any
    * screener/term-structure failure (the strategy simply has no movers to trade that reload).
+   * {@code source} selects the screener radar: default = the captured NIFTY-Bank snapshot set;
+   * {@code upstox} (E1 v2) = the full NIFTY-50 from on-demand Upstox daily candles.
    */
-  public List<StrategyDefinition.InstrumentRef> resolveScreener(String side, int maxPicks) {
+  public List<StrategyDefinition.InstrumentRef> resolveScreener(String side, int maxPicks, String source) {
+    boolean upstox = "upstox".equals(source);
     List<String> underlyings;
     try {
       String body =
           restClient
               .get()
-              .uri(uriBuilder -> uriBuilder.path("/api/v1/market/futures/movers-screen").build())
+              .uri(
+                  uriBuilder -> {
+                    uriBuilder.path("/api/v1/market/futures/movers-screen");
+                    if (upstox) {
+                      uriBuilder.queryParam("source", "upstox");
+                    }
+                    return uriBuilder.build();
+                  })
               .retrieve()
               .body(String.class);
       underlyings = screenerPicks(objectMapper.readTree(body), side, maxPicks);

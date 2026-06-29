@@ -1,0 +1,41 @@
+# E1 v2 §3.3 Market-Movers — full NIFTY-50 stock-future momentum (long-only).
+#
+# Same as mm-stockfut-bank but `universe.source: upstox` → the screener radar is the FULL NIFTY-50 (via
+# on-demand Upstox daily candles, #353) instead of the captured NIFTY-Bank subset. The deck filters
+# Market-Movers to "Nifty 50 AND Nifty Bank"; this variant covers the wider N50 leg. Each day's tradable
+# set = the top stock futures the §3.3 screener picks; these entry_rules do the WHEN on each picked future.
+#
+# Requires `artha.upstox.analytics.enabled=true` on the deployed market-data (else the upstox radar is
+# empty → the universe pins empty). NOT a boot-seeded scalper (no scalper confluence gate) — register via
+# POST /api/v1/strategies. Backtest = FUNCTIONAL plumbing only (single-instrument runner signals on the TOP
+# pick) — judge the edge on FORWARD live paper.
+schema: strategy-schema/v1
+id: mm-stockfut-nifty
+name: "Market Movers — NIFTY-50 Stock Futures (long)"
+description: "E1 v2 §3.3 dynamic Market-Movers stock-future momentum on the full NIFTY-50 radar (long-only, Upstox-fed)."
+version: 1.0.0
+tags: [market-movers, stock-futures, momentum, e1, nifty50]
+universe:
+  mode: futures_screener
+  side: long
+  max_picks: 5
+  source: upstox
+timeframes: { primary: 5m }
+indicators:
+  - { name: RSI, alias: rsi, timeframe: 5m, params: { period: 14 }, weight: 1.0 }
+  - { name: VWAP, alias: vwap, timeframe: 5m, weight: 1.0 }
+  - { name: SUPERTREND, alias: st, timeframe: 5m, params: { period: 10, multiplier: 3.0 }, weight: 1.0 }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - "rsi > 55"
+      - "close > vwap"
+  scoring: { threshold: 0.5 }
+exit_rules:
+  - { type: stop_loss, params: { basis: atr_multiple, value: 2.0, atr_period: 14 } }
+  - { type: signal_exit, params: { rule: "rsi < 50" } }
+risk:
+  position_sizing: { method: fixed_quantity, params: { quantity: 1 } }
+  max_positions: 5
+  session: { style: intraday, square_off: "15:12" }

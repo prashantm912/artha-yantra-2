@@ -6,6 +6,7 @@ import in.arthayantra.strategyengine.config.StrategyDefinition;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -84,5 +85,53 @@ public class FuturesUniverseResolver {
       log.warn("futures universe resolution failed for {}: {}", underlying, e.getMessage());
       return List.of();
     }
+  }
+
+  /**
+   * E1 §3.3: resolves a {@code futures_screener} universe to the top {@code maxPicks} stock movers'
+   * FRONT futures. Re-screens at each live reload (the picks roll daily): GETs the Market-Movers
+   * screen, takes the conviction-ranked candidates for {@code side}, then maps each picked underlying
+   * to its actual front contract via {@link #resolve} (so roll handling is shared). Empty on any
+   * screener/term-structure failure (the strategy simply has no movers to trade that reload).
+   */
+  public List<StrategyDefinition.InstrumentRef> resolveScreener(String side, int maxPicks) {
+    List<String> underlyings;
+    try {
+      String body =
+          restClient
+              .get()
+              .uri(uriBuilder -> uriBuilder.path("/api/v1/market/futures/movers-screen").build())
+              .retrieve()
+              .body(String.class);
+      underlyings = screenerPicks(objectMapper.readTree(body), side, maxPicks);
+    } catch (RestClientException | java.io.IOException e) {
+      log.warn("movers-screen universe resolution failed: {}", e.getMessage());
+      return List.of();
+    }
+    List<StrategyDefinition.InstrumentRef> out = new ArrayList<>();
+    for (String underlying : underlyings) {
+      for (StrategyDefinition.InstrumentRef ref : resolve("NSE", underlying, "front_month", 2)) {
+        if (!out.contains(ref)) {
+          out.add(ref);
+        }
+      }
+    }
+    return out;
+  }
+
+  /** The screener's conviction-ranked picked UNDERLYINGS for {@code side}, capped at {@code maxPicks}. */
+  static List<String> screenerPicks(JsonNode moversScreen, String side, int maxPicks) {
+    String key = "short".equals(side) ? "shortCandidates" : "longCandidates";
+    List<String> out = new ArrayList<>();
+    for (JsonNode row : moversScreen.path(key)) {
+      if (out.size() >= maxPicks) {
+        break;
+      }
+      String symbol = row.path("symbol").asText("");
+      if (!symbol.isBlank() && !out.contains(symbol)) {
+        out.add(symbol);
+      }
+    }
+    return out;
   }
 }

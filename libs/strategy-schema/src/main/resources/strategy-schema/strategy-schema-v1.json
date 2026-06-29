@@ -168,6 +168,17 @@
               }
             }
           }
+        },
+        {
+          "description": "E1 §3.3: dynamic Market-Movers stock-future universe — each day's tradable set is the top stock futures the market-data screener picks (resolved to front contracts at submission AND each live reload). No `underlying` — the radar is the server-side screener set.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": {
+            "mode": { "const": "futures_screener" },
+            "side": { "enum": ["long", "short"], "default": "long" },
+            "max_picks": { "type": "integer", "minimum": 1, "maximum": 20, "default": 5 }
+          }
         }
       ]
     },

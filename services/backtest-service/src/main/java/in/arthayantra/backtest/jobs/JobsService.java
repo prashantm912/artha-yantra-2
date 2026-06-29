@@ -105,7 +105,9 @@ public class JobsService {
     // submission, and PIN them by copy into the request JSONB — every sweep trial reuses this
     // embedded copy, so a mid-sweep constituent rebalance can never split a leaderboard.
     String universeMode = v.config().path("universe").path("mode").asText("explicit");
-    if ("index_constituents".equals(universeMode) || "futures_of_underlying".equals(universeMode)) {
+    if ("index_constituents".equals(universeMode)
+        || "futures_of_underlying".equals(universeMode)
+        || "futures_screener".equals(universeMode)) {
       versions
           .resolveUniverse(v.strategyId(), v.version())
           .ifPresent(

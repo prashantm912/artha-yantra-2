@@ -22,6 +22,23 @@ capture): **Stage 1 (revised) = a thin active Upstox historical-candle client (O
 (screener reads the Upstox reader; the strategy + dynamic universe + parity + tests stay as below).
 The NSE-bhavcopy stages below are kept as the FALLBACK design only.
 
+## STAGE 3b DECISION (2026-06-29, build-time finding)
+Resolving an ARBITRARY stock → its ACTIVE NFO front-future Upstox `instrument_key` is NOT in the codebase
+today: `FuturesContractSource.monthlyFutures` returns `FutContract(InstrumentKey(exchange,tradingsymbol),
+expiry)` — no Upstox key; only the 2 indices carry hardcoded Upstox keys (`ExpiredBackfillService.UNDERLYING_KEYS`);
+`StockUpstoxKeyMap` gives the EQ key (`NSE_EQ|ISIN`), not the FUT key. A faithful Upstox-on-demand path
+needs a NEW Upstox F&O instrument-master lookup (segment=NSE_FO, underlying, FUT, front-expiry → key) — a
+real component (silent-no-op if the master is unsynced, per the risks).
+**DECISION (v1): reuse the EXISTING captured bank-stock futures infra instead.** The `oi-snapshot-underlyings`
+config (application.yml:189) ALREADY captures ~17 NIFTY-Bank-constituent stock futures (HDFCBANK, ICICIBANK,
+SBIN, …) with full key resolution, and `FuturesMoversService.movers` already ranks them by price%/OI%/quadrant.
+So Stage 3b v1 = a NIFTY-Bank radar screener over the captured snapshots (live price%/OI%/quadrant/OH-OL) +
+`candles` 1d (the 8/9-day breakout + daily-RSI), reusing `NDayExtremes`/`DailyRsi` + the captured movers — NO
+Upstox-key wall, NO new feed. **Widen to the full NIFTY-50 (RELIANCE/TCS/INFY/…) via the Upstox active F&O
+master lookup as a v2** (the `activeCandles` client #341 is ready for it; only the key resolution is the gap).
+Faithful: the deck explicitly filters Market-Movers to "Nifty 50 AND Nifty Bank"; a Nifty-Bank v1 is a true
+subset, not a degradation.
+
 ## Verdict — buildable, NO missing feed, NO OOM
 Every primitive exists or 1:1-mirrors the equity-bhavcopy stack:
 - per-stock **daily OHLCV** (8/9-day breakout + daily RSI) → already ingested for the ~22k universe via

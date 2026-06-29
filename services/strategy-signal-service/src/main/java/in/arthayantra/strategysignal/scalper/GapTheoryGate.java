@@ -4,6 +4,7 @@ import in.arthayantra.black76.Black76.OptionType;
 import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategyengine.series.EngineSeries;
 import java.math.BigDecimal;
+import java.time.Duration;
 
 /**
  * Siva #4 Gap-Theory pre-gate (master plan section 12, doc section 3.4). On the 3-min Bank Nifty future a
@@ -37,6 +38,13 @@ public final class GapTheoryGate {
   private static final Verdict INERT = new Verdict(true, null);
 
   /**
+   * §3.4 (Day 21) gap-fill deadline: a gap trade is a ~30-60 min play — "wait ~30-40 min; if the gap is
+   * not filled, ignore it and trade with the trend instead." 40 min = the upper bound of the doc's
+   * stated wait, measured from the session open (the gap forms near it).
+   */
+  static final int GAP_FILL_DEADLINE_MIN = 40;
+
+  /**
    * Evaluate the gap pre-gate at the just-closed bar.
    *
    * @param future the index-future 3-min series the scalper evaluates on
@@ -54,7 +62,19 @@ public final class GapTheoryGate {
       return INERT; // no significant gap on this bar -> the gate never fires
     }
     if (!gap.filled()) {
-      return BLOCK; // a significant gap is still open -> wait for the fill before entering
+      // §3.4 (Day 21) gap-fill DEADLINE: a gap is a ~30-40 min play. Once the wait has elapsed and the
+      // gap is STILL open, abandon the gap requirement and trade WITH the trend instead — the gate goes
+      // INERT (the normal confluence + structural stop then decide) rather than blocking the whole
+      // session on a runaway gap that may never fill.
+      int sessionStart = future.sessionStart(index);
+      long elapsedMin =
+          Duration.between(
+                  future.candle(sessionStart).bucketStart(), future.candle(index).bucketStart())
+              .toMinutes();
+      if (elapsedMin >= GAP_FILL_DEADLINE_MIN) {
+        return INERT; // deadline passed, gap unfilled -> ignore the gap, trade with the trend
+      }
+      return BLOCK; // a significant gap is still open and within the wait -> hold for the fill
     }
     // filled: with-trend entry allowed; anchor the SL on the candle before the gap candle.
     EngineCandle preGap = preGapCandle(future, index, gap.origin());

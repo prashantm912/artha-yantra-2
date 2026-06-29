@@ -77,6 +77,26 @@ class GapTheoryGateTest {
   }
 
   @Test
+  void abandonsAnUnfilledGapAfterTheDeadlineAndTradesWithTheTrend() {
+    // §3.4 (Day 21): a gap is a ~30-40 min play. A >3pt bullish gap at bar1 stays unfilled (price holds
+    // above the 42530 origin) for the rest of the session → before the 40-min deadline the gate still
+    // blocks, but at/after it the gate ABANDONS the gap and goes INERT (trade with the trend).
+    EngineCandle[] bars = new EngineCandle[15];
+    bars[0] = bar(0, "42525", "42531", "42520", "42530");
+    bars[1] = bar(1, "42534.30", "42540", "42533", "42538"); // >3pt gap up, low 42533 stays above 42530
+    for (int i = 2; i < 15; i++) {
+      bars[i] = bar(i, "42538", "42541", "42534", "42539"); // flat, never retraces to the 42530 origin
+    }
+    EngineSeries s = series(bars);
+    // bar 13 = 39 min on the 3m clock (< 40) → the open gap still blocks.
+    assertThat(GapTheoryGate.evaluate(s, 13, CE, BN).pass()).isFalse();
+    // bar 14 = 42 min (>= 40) → deadline passed, gap unfilled → abandon it, pass inert (no gap stop).
+    GapTheoryGate.Verdict v = GapTheoryGate.evaluate(s, 14, CE, BN);
+    assertThat(v.pass()).isTrue();
+    assertThat(v.stopLevel()).isNull();
+  }
+
+  @Test
   void isInertWhenNoSignificantGapExists() {
     // a flat session with no >3 pt jump -> the gate never fires (passes, no stop anchor).
     EngineSeries s =

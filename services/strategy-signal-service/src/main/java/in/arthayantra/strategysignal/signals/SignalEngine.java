@@ -733,6 +733,23 @@ public class SignalEngine {
           emissionGuard.get().suggestedQty(
               strategy.definition().sizing(), exchange, tradingsymbol, entryPrice, stopDistance,
               sizeMultiplier);
+      // E9/§3.7 hero-zero profit-funded sizing: the expiry-day hero-zero leg deploys ~10% of accumulated
+      // realised PROFIT ("play with house money, never capital") with a ₹2.5k floor when profits are thin
+      // (owner: mode a if enough profit, else mode b). Sized off the OPTION premium (not the index-priced
+      // default), so it OVERRIDES the ordinary advisory qty — hero-zero family only.
+      if (decision != null
+          && strategy.scalper() != null
+          && strategy.scalper().requireHeroZero()
+          && decision.pick().candidate().ltp() != null) {
+        BigDecimal hzQty =
+            emissionGuard.get().heroZeroSuggestedQty(
+                exchange,
+                decision.pick().candidate().tradingsymbol(),
+                decision.pick().candidate().ltp());
+        if (hzQty != null) {
+          suggestedQty = hzQty;
+        }
+      }
       if (suggestedQty != null) {
         signals.stampSuggestedQty(id, suggestedQty);
       }

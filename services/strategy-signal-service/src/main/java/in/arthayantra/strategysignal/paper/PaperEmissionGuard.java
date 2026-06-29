@@ -5,6 +5,7 @@ import in.arthayantra.strategyengine.eval.PositionSizer;
 import in.arthayantra.strategysignal.paper.InstrumentMetaClient.InstrumentMeta;
 import in.arthayantra.strategysignal.signals.EmissionGuard;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import org.springframework.stereotype.Component;
 
 /**
@@ -14,6 +15,12 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class PaperEmissionGuard implements EmissionGuard {
+
+  // §3.7 hero-zero profit-funded sizing: deploy ~10% of accumulated realised PROFIT (mode a, "play with
+  // house money, never capital"), floored to a ₹2,500 minimum deploy (mode b — the ₹2-3k midpoint) when
+  // profits are thin / negative (owner: "a if we have enough profit, else b").
+  static final BigDecimal HERO_ZERO_PROFIT_PCT = new BigDecimal("0.10");
+  static final BigDecimal HERO_ZERO_MIN_DEPLOY_INR = new BigDecimal("2500");
 
   private final RiskService risk;
   private final PaperAccountService account;
@@ -81,5 +88,30 @@ public class PaperEmissionGuard implements EmissionGuard {
                 .divideToIntegralValue(BigDecimal.valueOf(lot))
                 .longValueExact());
     return BigDecimal.valueOf(lots * lot);
+  }
+
+  @Override
+  public BigDecimal heroZeroSuggestedQty(String exchange, String tradingsymbol, BigDecimal premium) {
+    if (premium == null || premium.signum() <= 0) {
+      return null;
+    }
+    InstrumentMeta meta = instruments.meta(exchange, tradingsymbol);
+    long lot = Math.max(1, meta.lotSize());
+    BigDecimal budget = heroZeroDeployBudget(account.realisedProfit());
+    BigDecimal perLotCost = premium.multiply(BigDecimal.valueOf(lot));
+    long affordableLots = budget.divide(perLotCost, 0, RoundingMode.DOWN).longValueExact();
+    long lots = Math.max(1L, affordableLots); // a fired entry deploys at least one lot (advisory)
+    return BigDecimal.valueOf(lots * lot);
+  }
+
+  /**
+   * §3.7 the hero-zero deploy budget (INR): mode a = 10% of accumulated realised PROFIT when there is
+   * enough profit (10% &gt; the floor), mode b = the {@link #HERO_ZERO_MIN_DEPLOY_INR} floor when profits
+   * are thin / negative. Package-private + static for a focused unit test.
+   */
+  static BigDecimal heroZeroDeployBudget(BigDecimal realisedProfit) {
+    BigDecimal tenPct =
+        realisedProfit == null ? BigDecimal.ZERO : realisedProfit.multiply(HERO_ZERO_PROFIT_PCT);
+    return tenPct.compareTo(HERO_ZERO_MIN_DEPLOY_INR) > 0 ? tenPct : HERO_ZERO_MIN_DEPLOY_INR;
   }
 }

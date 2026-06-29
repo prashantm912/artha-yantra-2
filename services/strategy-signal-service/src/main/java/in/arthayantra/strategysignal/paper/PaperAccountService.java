@@ -70,6 +70,15 @@ public class PaperAccountService {
     return account.get().startingCapital().add(positions.realizedTotal()).add(unrealizedTotal());
   }
 
+  /**
+   * §3.7 hero-zero: accumulated REALISED profit (Σ closed-trade P&amp;L) — "your profits", the funding
+   * base for the hero-zero "deploy ~10% of profits, never capital" rule. Negative when the account is
+   * net-down (the caller floors the deploy to the ₹2-3k minimum then).
+   */
+  public BigDecimal realisedProfit() {
+    return positions.realizedTotal();
+  }
+
   /** The configured account size (day-stable; the fixed-allocation base for per-account caps). */
   public BigDecimal startingCapital() {
     return account.get().startingCapital();

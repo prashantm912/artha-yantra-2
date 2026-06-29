@@ -50,4 +50,19 @@ public interface EmissionGuard {
       BigDecimal multiplier) {
     return suggestedQty(sizing, exchange, tradingsymbol, price, stopDistance);
   }
+
+  /**
+   * §3.7 hero-zero profit-funded sizing — the lot-rounded qty for an expiry-day hero-zero leg sized to
+   * "deploy ~10% of accumulated realised PROFIT, never capital" (mode a), with a ₹2-3k minimum deploy
+   * when profits are thin (mode b — owner: "a if we have enough profit, else b"). Computed off the
+   * OPTION premium + lot (the deploy is in premium terms, unlike the index-priced {@link #suggestedQty}).
+   * Default null (non-paper / no equity) ⇒ the caller keeps the ordinary advisory qty.
+   *
+   * @param exchange the option's exchange
+   * @param tradingsymbol the option tradingsymbol (drives the lot size)
+   * @param premium the option premium (ltp) per unit
+   */
+  default BigDecimal heroZeroSuggestedQty(String exchange, String tradingsymbol, BigDecimal premium) {
+    return null;
+  }
 }

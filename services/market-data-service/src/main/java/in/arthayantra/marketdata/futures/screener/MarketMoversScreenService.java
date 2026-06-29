@@ -65,6 +65,12 @@ public class MarketMoversScreenService {
         byStock.put(stock, bars);
       }
     }
+    org.slf4j.LoggerFactory.getLogger(MarketMoversScreenService.class)
+        .info(
+            "screenUpstox: radar={} stocks, upstoxAvailable={}, graded={} stocks",
+            radar.size(),
+            upstoxReader.upstoxAvailable(),
+            byStock.size());
     if (byStock.isEmpty()) {
       return null;
     }

@@ -2,6 +2,7 @@ package in.arthayantra.strategysignal.signals;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import in.arthayantra.black76.Black76.OptionType;
 import in.arthayantra.common.web.time.Ist;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -586,6 +587,18 @@ public class SignalEngine {
     if (daily == null) {
       return;
     }
+    // E11 §3.8 route-through-gate: the carry is validated by the LIVE confluence seam, which reads the
+    // PRIMARY (e.g. 3m) future + its higher-TF series — but the intraday tick path is skipped for the
+    // btst style, so those series are stale at the pre-close clock. Refresh them now (mirrors
+    // evaluateCoarsePrimary) so the gate reads a fresh close-bar confluence.
+    SeriesKey primaryKey =
+        new SeriesKey(
+            instrument.exchange(), instrument.tradingsymbol(), strategy.definition().primaryTimeframe());
+    seriesStore.refreshFromRest(primaryKey);
+    for (String tf :
+        higherTimeframes(strategy.definition().primaryTimeframe(), strategy.definition().indicators())) {
+      seriesStore.refreshFromRest(new SeriesKey(instrument.exchange(), instrument.tradingsymbol(), tf));
+    }
     // the deterministic pre-close bar view, appended for evaluation (A9 — identical in replay)
     EngineCandle preCloseBar = TickwiseGoldenRunner.preCloseDailyBar(dayBars);
     try {
@@ -599,10 +612,57 @@ public class SignalEngine {
         EntryEvaluator.evaluate(strategy.definition(), bank, index);
     if (evaluation.isPresent() && evaluation.get().entry()) {
       EngineCandle lastOneMinute = dayBars.get(dayBars.size() - 1);
+      // E11 §3.8: a scalper BTST carry routes through the LIVE confluence gate (NOT a decision==null
+      // bypass) — the same OI/macro/chart confluence the intraday scalps use must confirm the carry,
+      // and the gate picks the option leg. The side is the day-close LOCATION (toward the day HIGH ⇒
+      // CE/BTST, toward the LOW ⇒ PE/STBT — §3.8's BTST-vs-STBT split). Blocked ⇒ no carry (fail-closed,
+      // NEUTRAL on derived history ⇒ ~0 backtest trades). Parity-safe: the golden runner injects no
+      // scalperGate, so the deterministic btst replay never reaches this branch.
+      if (strategy.scalper() != null && scalperGate.isPresent()) {
+        EngineSeries primary = bank.primarySeries();
+        if (primary == null || primary.size() == 0) {
+          return;
+        }
+        OptionType carrySide = btstCarrySide(dayBars);
+        OffsetDateTime istBar = lastOneMinute.bucketStart().withOffsetSameInstant(Ist.OFFSET);
+        Optional<ScalperConfluenceGate.Decision> decision =
+            scalperGate.get().evaluate(
+                strategy.scalper(), bank, primary, primary.size() - 1,
+                lastOneMinute.bucketStart().toInstant(), istBar.toLocalTime(), today, carrySide, true);
+        if (decision.isEmpty()) {
+          log.info(
+              "BTST carry blocked by confluence gate: {} {}", strategy.slug(), instrument.tradingsymbol());
+          return;
+        }
+        emitEntry(
+            strategy, instrument.exchange(), instrument.tradingsymbol(), "1d", lastOneMinute,
+            evaluation.get(), decision.get());
+        return;
+      }
       emitEntry(
           strategy, instrument.exchange(), instrument.tradingsymbol(), "1d", lastOneMinute,
           evaluation.get(), null);
     }
+  }
+
+  /**
+   * E11 §3.8 the BTST-vs-STBT side from the day's close LOCATION: a close in the UPPER half of the
+   * day range ⇒ CE (a bullish BTST carry — price finishing near the day high), the LOWER half ⇒ PE
+   * (a bearish STBT carry — finishing near the day low).
+   */
+  private static OptionType btstCarrySide(List<EngineCandle> dayBars) {
+    BigDecimal high = dayBars.get(0).high();
+    BigDecimal low = dayBars.get(0).low();
+    for (EngineCandle c : dayBars) {
+      if (c.high().compareTo(high) > 0) {
+        high = c.high();
+      }
+      if (c.low().compareTo(low) < 0) {
+        low = c.low();
+      }
+    }
+    BigDecimal close = dayBars.get(dayBars.size() - 1).close();
+    return close.subtract(low).compareTo(high.subtract(close)) >= 0 ? OptionType.CE : OptionType.PE;
   }
 
   private void emitEntry(

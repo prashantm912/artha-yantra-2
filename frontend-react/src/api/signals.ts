@@ -119,13 +119,23 @@ export const SIGNAL_STATUSES = ['ACTIVE', 'EXPIRED', 'TAKEN', 'DISMISSED'] as co
 
 const SIGNALS_KEY = 'signals';
 
-/** REST history page; the live channel and reconnect heal it. `status=null` = all. */
-export function useSignals(status: string | null) {
+/**
+ * REST history page; the live channel and reconnect heal it. `status=null` = all. `from`/`to` are
+ * ISO datetimes bounding `generated_at` (the Live=today vs Historical=picked-day filter) — null = no
+ * bound. They join the query key so each day is cached separately.
+ */
+export function useSignals(
+  status: string | null,
+  from: string | null = null,
+  to: string | null = null,
+) {
   return useQuery({
-    queryKey: [SIGNALS_KEY, status],
+    queryKey: [SIGNALS_KEY, status, from, to],
     queryFn: () => {
-      const params = new URLSearchParams({ limit: '50', offset: '0' });
+      const params = new URLSearchParams({ limit: '200', offset: '0' });
       if (status) params.set('status', status);
+      if (from) params.set('from', from);
+      if (to) params.set('to', to);
       return apiFetch<SignalPage>(`/signals?${params.toString()}`);
     },
   });
@@ -149,9 +159,19 @@ export function useSignalDetail(id: number | null) {
  * (newest first, deduped by id, ring-bounded). A frame whose status no longer matches the active
  * filter only updates a row already shown (status transition); a reconnect re-fetches the snapshot.
  */
-export function useSignalsLive(status: string | null) {
+export function useSignalsLive(
+  status: string | null,
+  from: string | null = null,
+  to: string | null = null,
+  live: boolean = true,
+) {
   const qc = useQueryClient();
   useEffect(() => {
+    // Only the LIVE (today) view merges the STOMP feed — a Historical day is a static past snapshot,
+    // so an incoming live signal must not pollute it.
+    if (!live) {
+      return;
+    }
     const merge = (body: string) => {
       let sig: SignalDto;
       try {
@@ -159,7 +179,7 @@ export function useSignalsLive(status: string | null) {
       } catch {
         return; // unparseable frame — the REST snapshot heals
       }
-      qc.setQueryData<SignalPage>([SIGNALS_KEY, status], (prev) => {
+      qc.setQueryData<SignalPage>([SIGNALS_KEY, status, from, to], (prev) => {
         const items = prev?.items ?? [];
         if (status && sig.status !== status) {
           const next = items.map((i) => (i.id === sig.id ? sig : i));
@@ -177,7 +197,7 @@ export function useSignalsLive(status: string | null) {
       offTopic();
       offReconnect();
     };
-  }, [qc, status]);
+  }, [qc, status, from, to, live]);
 }
 
 /** Replaces a row across every cached signals page (after a take/dismiss round-trip). */

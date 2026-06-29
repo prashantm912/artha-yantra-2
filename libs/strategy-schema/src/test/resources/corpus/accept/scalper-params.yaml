@@ -1,0 +1,56 @@
+# §5 (100%-YAML): the optional `scalper.params` block tunes the armable confluence-gate
+# thresholds per-strategy. Every field is optional; absent ⇒ the built-in ScalperGates default.
+schema: strategy-schema/v1
+id: scalper-params-example
+name: "Scalper Params Example"
+version: 1.0.0
+description: "Options scalper that tunes its armed gate thresholds in YAML (no Java change)"
+author: owner
+tags: [options, scalping, intraday, nifty]
+enabled: true
+
+universe:
+  mode: options_of_underlying
+  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  options:
+    expiry: nearest_weekly
+    strikes: { selector: atm_window, width: 2 }
+    option_types: [CE, PE]
+
+timeframes:
+  primary: 1m
+  additional: [5m]
+
+indicators:
+  - { name: EMA,  alias: ema_fast, timeframe: 1m, params: { period: 9 },  weight: 1.0 }
+  - { name: EMA,  alias: ema_slow, timeframe: 1m, params: { period: 21 }, weight: 1.0 }
+  - { name: VWAP, alias: vwap_1m,  timeframe: 1m, weight: 1.0 }
+
+entry_rules:
+  direction: both
+  gate:
+    all:
+      - crossover: { fast: ema_fast, slow: ema_slow }
+      - "close > vwap_1m"
+  scoring:
+    threshold: 0.65
+
+exit_rules:
+  - { type: stop_loss,   params: { basis: premium_pct, value: 20 } }
+  - { type: time_stop,   params: { max_bars: 15 } }
+
+risk:
+  position_sizing: { method: premium_budget, params: { budget_inr: 15000 } }
+  max_positions: 2
+  session:
+    style: intraday
+    window: { from: "09:20", to: "15:00" }
+
+scalper:
+  params:
+    vwap_distance_max_frac: 0.006   # widen the pullback band vs the 0.004 default
+    gap_suppress_pts: 400           # suppress PE only on a >=400pt gap-down (vs 300)
+    indicator_distance_max_pct: 0.02
+    oi_divergence_min_pct: 30
+    price_impulse_min_pct: 50
+    iv_buyer_cap: 0.45              # allow a slightly richer long-premium buy

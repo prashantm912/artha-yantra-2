@@ -227,14 +227,14 @@ public class ScalperConfluenceGate {
     if (cfg.has("vwap-distance")
         && !ScalperGates.vwapDistance(
                 chart.close(), chart.vwap(),
-                ScalperGates.VWAP_DISTANCE_MIN_FRAC, ScalperGates.VWAP_DISTANCE_MAX_FRAC)
+                cfg.params().vwapDistanceMinFrac(), cfg.params().vwapDistanceMaxFrac())
             .pass()) {
       return Optional.empty();
     }
     // W4 (tag gap-size-side-gate, S24 #9): a large gap-down suppresses the PE (put-buy) side
     // ("300-400 gap-down no-put"). Default-OFF; reads the same session gap GapState detects (pure).
     if (cfg.has("gap-size-side-gate")
-        && !ScalperGates.gapSizeSide(GapState.detect(future, index), side, ScalperGates.GAP_SIDE_SUPPRESS_PTS)
+        && !ScalperGates.gapSizeSide(GapState.detect(future, index), side, cfg.params().gapSuppressPts())
             .pass()) {
       return Optional.empty();
     }
@@ -360,7 +360,7 @@ public class ScalperConfluenceGate {
     // run far from the vwap/vwma/psar cluster (mean-reversion risk). Default-OFF; a null/absent cluster
     // degrades to pass inside the gate, so it never blocks on missing data.
     if (cfg.has("indicator-distance-veto")
-        && !ScalperGates.indicatorDistance(chart, ScalperGates.INDICATOR_DISTANCE_MAX_PCT).pass()) {
+        && !ScalperGates.indicatorDistance(chart, cfg.params().indicatorDistanceMaxPct()).pass()) {
       return Optional.empty();
     }
     // W4 PARAM #10 (tag divergence-vol-gate): the S24 Day-21 counter-trend confirm — a heavyweight ~125k
@@ -466,7 +466,7 @@ public class ScalperConfluenceGate {
     // (>=20% of total OI) with a corroborating price impulse (>=50%). Fail-closed; NEUTRAL on history.
     if (cfg.has("oi-divergence-magnitude")
         && !ScalperGates.oiDivergenceMagnitude(
-                ctx.oi(), ScalperGates.OI_DIVERGENCE_MIN_PCT, ScalperGates.PRICE_IMPULSE_MIN_PCT, side)
+                ctx.oi(), cfg.params().oiDivergenceMinPct(), cfg.params().priceImpulseMinPct(), side)
             .pass()) {
       return Optional.empty();
     }
@@ -522,7 +522,7 @@ public class ScalperConfluenceGate {
     // E4 (tag iv-buyer-cap, IV>40 -> sellers' market): block a long-premium BUY when the traded side's
     // 6-strike IV is too rich (> 0.40 fraction). Fail-OPEN on a null side IV. A standalone risk veto.
     if (cfg.has("iv-buyer-cap")
-        && !ScalperGates.ivBuyerCap(ctx.macro(), side, ScalperGates.IV_BUYER_CAP).pass()) {
+        && !ScalperGates.ivBuyerCap(ctx.macro(), side, cfg.params().ivBuyerCap()).pass()) {
       return Optional.empty();
     }
     // E3 fii-bias (tag fii-bias, §4.6): the FII L/S flow must not oppose the side (long% >= 50 for CE).

@@ -44,7 +44,8 @@
       "items": { "$ref": "#/$defs/exitRule" }
     },
     "risk": { "$ref": "#/$defs/risk" },
-    "backtest": { "$ref": "#/$defs/backtest" }
+    "backtest": { "$ref": "#/$defs/backtest" },
+    "scalper": { "$ref": "#/$defs/scalper" }
   },
 
   "$defs": {
@@ -675,6 +676,27 @@
                 "anchored": { "type": "boolean", "default": false }
               }
             }
+          }
+        }
+      }
+    },
+    "scalper": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional per-strategy scalper overrides (read by ScalperConfig.from). Absent ⇒ the built-in gate defaults, byte-identical. §5 (100%-YAML): future scalper config grows here.",
+      "properties": {
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Per-strategy overrides for the ARMABLE confluence-gate thresholds; each optional, absent ⇒ the ScalperGates default constant. Tuning an armed gate is YAML-only, no Java change. Scales: vwap_distance_*/indicator_distance_max_pct are PRICE FRACTIONS (0.004 = 0.4%); iv_buyer_cap is a 0..1 IV FRACTION (0.40 = '40 IV'); oi_divergence_min_pct/price_impulse_min_pct are PERCENTAGES (20 = 20%); gap_suppress_pts is index POINTS.",
+          "properties": {
+            "vwap_distance_min_frac": { "type": "number", "minimum": 0, "maximum": 1, "description": "vwap-distance gate: min |close-vwap|/close (0 = off, the VWAP-pin sit-out lower clause)." },
+            "vwap_distance_max_frac": { "type": "number", "exclusiveMinimum": 0, "maximum": 1, "description": "vwap-distance gate: max |close-vwap|/close pullback band (default 0.004)." },
+            "gap_suppress_pts": { "type": "number", "exclusiveMinimum": 0, "description": "gap-size-side-gate: index-point gap-down that suppresses the PE side (default 300)." },
+            "indicator_distance_max_pct": { "type": "number", "exclusiveMinimum": 0, "maximum": 1, "description": "indicator-distance-veto: max nearest-indicator distance fraction (default 0.015)." },
+            "oi_divergence_min_pct": { "type": "number", "minimum": 0, "maximum": 100, "description": "oi-divergence-magnitude: min signed PE-CE OI gap as percent of total (default 20)." },
+            "price_impulse_min_pct": { "type": "number", "minimum": 0, "maximum": 100, "description": "oi-divergence-magnitude: corroborating price-impulse percent (default 50)." },
+            "iv_buyer_cap": { "type": "number", "exclusiveMinimum": 0, "maximum": 1, "description": "iv-buyer-cap: side IV fraction above which a long-premium buy is too rich (default 0.40)." }
           }
         }
       }

@@ -40,6 +40,11 @@ public class UpstoxFnoDailyReader {
   private final ObjectProvider<UpstoxExpiredInstrumentsClient> upstox;
   private final Clock clock;
 
+  /** True when the (conditional) Upstox analytics clients are both present — else the v2 radar is off. */
+  public boolean upstoxAvailable() {
+    return fnoMaster.getIfAvailable() != null && upstox.getIfAvailable() != null;
+  }
+
   /** Wires the instrument master + the (optional) Upstox wire clients. */
   public UpstoxFnoDailyReader(
       InstrumentRepository instruments,
@@ -73,6 +78,8 @@ public class UpstoxFnoDailyReader {
     }
     String key = master.keyFor("NFO", underlying, "FUT", front.expiry(), null);
     if (key == null) {
+      log.info("dailyBars {}: no Upstox key for front {} (expiry {})",
+          underlying, front.tradingsymbol(), front.expiry());
       return List.of();
     }
     List<Bar> bars;

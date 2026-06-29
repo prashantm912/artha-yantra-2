@@ -41,7 +41,11 @@ public class UpstoxQuoteConfig {
   @Bean
   @ConditionalOnExpression(
       "'${artha.marketdata.source.quotes:kite}' == 'upstox' "
-          + "or '${artha.marketdata.source.ticker:kite}' == 'upstox'")
+          + "or '${artha.marketdata.source.ticker:kite}' == 'upstox' "
+          // E1 v2: the FUT-key master lookup also drives the on-demand Upstox Market-Movers radar
+          // (UpstoxFnoDailyReader), so it must exist whenever analytics is on, not only on the
+          // quote/ticker cutover. Host is the token-free assets CDN — no analytics secret needed.
+          + "or '${artha.upstox.analytics.enabled:false}' == 'true'")
   public UpstoxFnoMasterClient upstoxFnoMasterClient(
       RestClient.Builder restClientBuilder, ObjectMapper mapper, UpstoxAnalyticsProperties properties) {
     return new UpstoxFnoMasterClient(restClientBuilder, mapper, properties);

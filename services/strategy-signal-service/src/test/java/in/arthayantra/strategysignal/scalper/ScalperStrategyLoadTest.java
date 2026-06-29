@@ -193,6 +193,12 @@ class ScalperStrategyLoadTest {
           .as(id + " atr-stop default-OFF (no design-doc home; owner arms per-strategy)")
           .isFalse();
 
+      // §3.12 trendline-break: built default-OFF (a mechanical 2-pivot session-trendline break; like
+      // atr-stop, the home for a refinement trendline is a discretionary owner choice) — armed on NONE.
+      assertThat(tags.contains("trendline-break"))
+          .as(id + " trendline-break default-OFF (owner arms per-strategy)")
+          .isFalse();
+
       // E4 (iv-buyer-cap, "IV>40 -> don't buy"): armed on the golden-crossover momentum-buyer family.
       boolean isGoldenCrossover = id.startsWith("scalp-golden-crossover-");
       assertThat(tags.contains("iv-buyer-cap"))

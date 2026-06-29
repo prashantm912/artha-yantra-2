@@ -61,7 +61,7 @@ public final class MarketStructure {
   }
 
   /** A 3-bar fractal swing-high: the high is strictly above the immediate neighbours' highs. */
-  private static boolean isSwingHigh(EngineSeries future, int i) {
+  static boolean isSwingHigh(EngineSeries future, int i) {
     EngineCandle prev = future.candle(i - 1);
     EngineCandle here = future.candle(i);
     EngineCandle next = future.candle(i + 1);
@@ -69,7 +69,7 @@ public final class MarketStructure {
   }
 
   /** A 3-bar fractal swing-low: the low is strictly below the immediate neighbours' lows. */
-  private static boolean isSwingLow(EngineSeries future, int i) {
+  static boolean isSwingLow(EngineSeries future, int i) {
     EngineCandle prev = future.candle(i - 1);
     EngineCandle here = future.candle(i);
     EngineCandle next = future.candle(i + 1);

@@ -136,10 +136,33 @@ public final class UpstoxMarketStatusClient {
   }
 
   /**
-   * The full market quote for a BATCH of index {@code instrumentKeys} in ONE call, re-keyed back to the
-   * request {@code |} form (Upstox keys the response map with a {@code :} variant). Returns an empty map
-   * on an empty request OR any transport / HTTP failure (the snapshot then lists price-less rows) —
+   * A cross-module quote: just the {@code last_price} (the pre-open indicative LTP) + {@code net_change}
+   * vs the prev close, keyed by the request {@code |} instrument key. The exposed shape of {@link
+   * #quotes} — the internal wire {@link UpstoxMarketQuote.Tick} stays module-internal.
+   */
+  public record Quote(BigDecimal lastPrice, BigDecimal netChange) {}
+
+  /**
+   * The pre-open quote ({@code last_price} + {@code net_change}) for a BATCH of {@code instrumentKeys} in
+   * ONE call — the cross-module entrypoint other market-data modules (the Futures Pre-Open scan) use to
+   * batch {@code NSE_FO|<token>} stock-future keys. Maps the internal wire tick to the domain {@link
+   * Quote} so no wire type crosses the module boundary. Empty map on an empty request / any failure —
    * NEVER throws.
+   */
+  public Map<String, Quote> quotes(List<String> instrumentKeys) {
+    Map<String, Quote> out = new LinkedHashMap<>();
+    for (Map.Entry<String, UpstoxMarketQuote.Tick> e : indexQuotes(instrumentKeys).entrySet()) {
+      out.put(e.getKey(), new Quote(e.getValue().lastPrice(), e.getValue().netChange()));
+    }
+    return out;
+  }
+
+  /**
+   * The full market quote for a BATCH of {@code instrumentKeys} in ONE call, re-keyed back to the
+   * request {@code |} form (Upstox keys the response map with a {@code :} variant). Module-internal (the
+   * {@link UpstoxMarketQuote.Tick} wire type does not cross the module boundary — {@link #quotes} is the
+   * exposed counterpart). Returns an empty map on an empty request OR any transport / HTTP failure (the
+   * snapshot then lists price-less rows) — NEVER throws.
    */
   Map<String, UpstoxMarketQuote.Tick> indexQuotes(List<String> instrumentKeys) {
     if (instrumentKeys == null || instrumentKeys.isEmpty()) {

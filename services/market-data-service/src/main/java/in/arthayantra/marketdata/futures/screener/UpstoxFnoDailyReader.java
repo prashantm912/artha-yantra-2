@@ -58,6 +58,26 @@ public class UpstoxFnoDailyReader {
   }
 
   /**
+   * The Upstox {@code NSE_FO|<token>} {@code instrument_key} for the stock's FRONT future (nearest
+   * non-expired FUT), or {@code null} when the instrument master / Upstox FUT key is unresolvable (or
+   * Upstox analytics is off). The live-quote counterpart of {@link #dailyBars} — the Futures Pre-Open
+   * scan batches these keys into ONE {@code /v2/market-quote/quotes} call for the pre-open snapshot.
+   */
+  public String frontFutureKey(String underlying) {
+    UpstoxFnoMasterClient master = fnoMaster.getIfAvailable();
+    if (master == null) {
+      return null;
+    }
+    LocalDate today = LocalDate.now(clock);
+    Instrument front =
+        instruments.futures(underlying).stream()
+            .filter(i -> i.expiry() != null && !i.expiry().isBefore(today))
+            .min(Comparator.comparing(Instrument::expiry))
+            .orElse(null);
+    return front == null ? null : master.keyFor("NFO", underlying, "FUT", front.expiry(), null);
+  }
+
+  /**
    * The stock's recent daily bars (oldest→newest) from its front future, or empty when unresolvable.
    * {@code from}/{@code to} bound the daily window (≈25-30 sessions for the breakout + RSI lookback).
    */

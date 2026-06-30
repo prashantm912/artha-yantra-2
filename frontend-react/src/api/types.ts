@@ -870,6 +870,38 @@ export interface PreOpenSnapshot {
 }
 
 /**
+ * One row of the Futures Pre-Open scan (GET /api/v1/market/futures/pre-open). Price / change fields are
+ * decimal STRINGS (never parseFloat), null when the quote did not resolve (the row still lists by name).
+ * `prevDayBreak` is the High/Low Break badge: "H" = pre-open price above the previous day's high, "L" =
+ * below the previous day's low, null = inside the range. The client splits Advances / Declines by the
+ * sign of `change`.
+ */
+export interface FuturesPreOpenRow {
+  symbol: string;
+  preOpenPrice: string | null;
+  prevClose: string | null;
+  change: string | null;
+  changePct: string | null;
+  prevDayBreak: 'H' | 'L' | null;
+}
+
+/**
+ * GET /api/v1/market/futures/pre-open — the 09:00–09:08 pre-market scan: the NSE session phase + the
+ * radar stock-future rows + the index rows, with the market (stock) advance/decline/unchanged counts.
+ * Empty rows + phase "UNKNOWN" when Upstox analytics is not wired (the page renders its closed state).
+ */
+export interface FuturesPreOpen {
+  phase: string;
+  preOpen: boolean;
+  asOf: string;
+  advances: number;
+  declines: number;
+  unchanged: number;
+  stocks: FuturesPreOpenRow[];
+  indices: FuturesPreOpenRow[];
+}
+
+/**
  * One global index's live snapshot of GET /api/v1/market/world-indices (Upstox GLOBAL_INDEX /
  * GLOBAL_INDICATOR). Price/change fields are decimal STRINGS (the platform BigDecimal-as-string
  * convention) and are null when the live quote did not resolve (the row still lists from the master).

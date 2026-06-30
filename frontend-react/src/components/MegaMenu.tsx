@@ -65,6 +65,7 @@ const SECTIONS: MenuSection[] = [
       { label: 'OI Chart', to: '/futures/oi-chart' }, // Wave 3 — candle + OI dual-axis combo
       { label: 'OI Buzz', to: '/futures/oi-buzz' }, // Wave 3 — constituent %change treemap (Futures Heatmap)
       { label: 'Banks', to: '/futures/banks' }, // Wave 3 — time × 6-bank OI matrix
+      { label: 'Pre-Open Market', to: '/futures/pre-open-market' }, // §1b — F&O-stock A/D + prev-day H/L break
     ],
   },
   {

@@ -22,7 +22,7 @@ Authorities used: `2026-06-28-scalper-to-100-roadmap.md` (+ the 12 `2026-06-27-b
 
 ---
 
-## 1. CONFIRMED PENDING — genuinely unbuilt (code-proven) — 9 (was 15; 6 shipped — §1a COMPLETE + §1b 2/8)
+## 1. CONFIRMED PENDING — genuinely unbuilt (code-proven) — 8 (was 15; 7 shipped — §1a COMPLETE + §1b 3/8; Event Days SKIP, Calendar Spread DEFER per owner)
 
 > **Progress log** (mark each item DONE here the moment it merges):
 > - ✅ `FU1-manual-checks-9` — **DONE 2026-06-30 (PR #371, e49c764).** `ScalperManualChecks.CHECKS` 7→16
@@ -44,6 +44,18 @@ Authorities used: `2026-06-28-scalper-to-100-roadmap.md` (+ the 12 `2026-06-27-b
 > - ✅ `feat-multiple-window` (§1b) — **DONE 2026-06-30 (PR #376).** Composable 1/2/2×2 monitoring workspace:
 >   `core/multipleWindow` (layout + panes + localStorage persist + spec) + `MultipleWindowPage` (per-pane
 >   widget dropdown over a registry of existing pages, lazy + per-pane ErrorBoundary) + nav. No backend.
+> - ✅ `fut-pre-open-market` (§1b) — **DONE 2026-06-30 (PR #377).** Futures Pre-Open scanner: market-data
+>   `FuturesPreOpenScan` (pure A/D + H/L-break, 9 tests) + `FuturesPreOpenService` (NSE phase + index rows
+>   via `UpstoxMarketStatusClient.preOpen()`, radar stock-future rows via ONE batched `/market-quote/quotes`
+>   + captured-EOD prev-day H/L) + `GET /market/futures/pre-open` (Map-envelope, contract recaptured) +
+>   `FuturesPreOpenMarketPage` (2×2 grid + counters + break badge) + nav. Parity-safe read-only;
+>   Modulith-safe (wire `Tick` stays internal, exposed domain `Quote`). v1 radar = captured NIFTY-Bank
+>   (v2 = full N50 Upstox prev-H/L). **Live-data render verifies at next pre-open (09:00 IST).**
+>
+> **Owner §1b dispositions (2026-06-30):** `feat-event-days` = **SKIP** (it's a static proprietary
+> Union-Budget slideshow, NOT an event calendar — `docs/oipulse-study/features/event-days.md`; inventory
+> mischaracterized it); `strat-calendar-spread` = **DEFER** (owner); `equity-announcement` = **BUILD**
+> (owner overrode the master-plan §20.5 defer); `w4-advance-chart` + `w4-multiframe-chart` = **BUILD**.
 
 ### 1a. Scalper signal-side (✅ ALL 4 SHIPPED — COMPLETE) — small, in-service, parity-safe tag-gate pattern
 | id | item | doc | code-evidence of absence |
@@ -53,17 +65,17 @@ Authorities used: `2026-06-28-scalper-to-100-roadmap.md` (+ the 12 `2026-06-27-b
 | ~~`E5-rsi-recovery-postvertical`~~ | **✅ DONE #373** — `rsiRecovery` trough→recovery sequencer, armed on trend-change ×3 (RATIFICATION-PACK row 51 = KEEP) | `rsi-multi-timeframe.md` §3.7 | shipped 2026-06-30 |
 | ~~`E3-fii-participant-classifier`~~ | **✅ DONE #374** — `ParticipantBiasService` LB/SC/LU/SB classifier + `/fii-dii/bias` + `fii-dii-gate` (default-OFF) | `macro-vix-global-fii.md` §3.3 | shipped 2026-06-30 |
 
-### 1b. Frontend / oipulse replication (6 pending; 2 shipped) — the bulk of remaining UI work
+### 1b. Frontend / oipulse replication (3 BUILD-pending; 3 shipped; Event Days SKIP, Calendar Spread DEFER) — the bulk of remaining UI work
 | id | item | backend? | code-evidence of absence |
 |---|---|---|---|
 | ~~`feat-risk-calculator`~~ | **✅ DONE #375** — Risk Calculator (`/features/risk-calculator`; pure `core/riskCalculator` + page + nav) | **pure-frontend** | shipped 2026-06-30 |
 | ~~`feat-multiple-window`~~ | **✅ DONE #376** — Multiple Window (`/features/multiple-window`; `core/multipleWindow` 1/2/2×2 + localStorage + page + nav) | **pure-frontend** | shipped 2026-06-30 |
-| `feat-event-days` | **Event Days** (econ/expiry-event calendar page) | needs events feed | no `EventDays*`/route/controller; distinct from the E12 backend lockout |
-| `fut-pre-open-market` | **Futures Pre-Open Market** (09:00-09:08 F&O-stock A/D + prev-H/L break scan) | needs futures pre-open endpoint | distinct from the built *equity* `/equity/pre-open-market` (index banner only); `prevDayBreak`/`getpreopenmarketdata` grep ZERO |
-| `equity-announcement` | **Announcement** (NSE corporate-filings feed, date-range searchable) | needs NEW external source | `/equity/news` (Upstox 7-day headlines) is a different surface; master-plan §20.5 = defer/skip (single-owner) |
-| `strat-calendar-spread` | **Calendar Spread** chart (spread-premium candles + socket Add-Position legs) | needs leg-premium series + WS | no `CalendarSpread*` page/route; master-plan §18.7 = "studied, never built, future work" |
-| `w4-advance-chart` | **Advance Chart** (openalgo-chart / TradingView-class, drawing + builder tools, OI overlay, study templates) | needs chart substrate decision | only `/charts` cockpit (lightweight-charts, overlays deferred); master-plan PR-W4 |
-| `w4-multiframe-chart` | **Multiframe Chart** (multi-timeframe grid of Advance-Chart instances) | depends on Advance-Chart | no `multiframe`/grid route; depends on the unbuilt Advance-Chart |
+| ~~`fut-pre-open-market`~~ | **✅ DONE #377** — Futures Pre-Open scanner (`/futures/pre-open-market`; `FuturesPreOpenScan/Service` + `/market/futures/pre-open` + page; live-verify next pre-open) | futures pre-open endpoint (built) | shipped 2026-06-30 |
+| ~~`feat-event-days`~~ | **⛔ SKIP (owner)** — NOT an event calendar: a static proprietary Union-Budget slideshow (`docs/oipulse-study/features/event-days.md`, no API). Inventory mischaracterized it. | — | n/a (descoped) |
+| `equity-announcement` | **Announcement** (NSE corporate-filings feed, date-range searchable) — **BUILD (owner overrode §20.5)** | needs NEW external source | `/equity/news` (Upstox 7-day headlines) is a different surface |
+| ~~`strat-calendar-spread`~~ | **⏸ DEFER (owner)** — Calendar Spread chart (spread-premium candles + socket Add-Position legs) | needs leg-premium series + WS | no `CalendarSpread*` page/route; master-plan §18.7 future-work |
+| `w4-advance-chart` | **Advance Chart** (LWC builder, drawing + builder tools, OI overlay, study templates) — **BUILD** | LWC substrate (already in stack) | only `/charts` cockpit (lightweight-charts, overlays deferred); master-plan PR-W4 |
+| `w4-multiframe-chart` | **Multiframe Chart** (multi-timeframe grid of Advance-Chart instances) — **BUILD** | depends on Advance-Chart | no `multiframe`/grid route; depends on the unbuilt Advance-Chart |
 
 ### 1c. Data / infra — Phase-5 equity-screener chain (2) — sequential
 | id | item | doc | code-evidence of absence |

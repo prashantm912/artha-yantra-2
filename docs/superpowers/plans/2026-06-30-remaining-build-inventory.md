@@ -22,12 +22,16 @@ Authorities used: `2026-06-28-scalper-to-100-roadmap.md` (+ the 12 `2026-06-27-b
 
 ---
 
-## 1. CONFIRMED PENDING — genuinely unbuilt (code-proven) — 15
+## 1. CONFIRMED PENDING — genuinely unbuilt (code-proven) — 14 (was 15; 1 shipped)
 
-### 1a. Scalper signal-side (4) — small, in-service, parity-safe tag-gate pattern
+> **Progress log** (mark each item DONE here the moment it merges):
+> - ✅ `FU1-manual-checks-9` — **DONE 2026-06-30 (PR #371, e49c764).** `ScalperManualChecks.CHECKS` 7→16
+>   (the 9 S21–S24 manual-only gaps); parity-safe side-channel, no FE/schema/contract change; tests green.
+
+### 1a. Scalper signal-side (3 pending; FU1 shipped) — small, in-service, parity-safe tag-gate pattern
 | id | item | doc | code-evidence of absence |
 |---|---|---|---|
-| `FU1-manual-checks-9` | Add 9 manual-only checks to `ScalperManualChecks` (constituent-weight, FII L/S, pre-open A/D, Sensex participation, intraday-vs-positional OI, expiry IV-crush, straddle-VWAP, time-of-day-VWAP, VIX-regime bands) — CHECKS 7→16 | `followup1-expand-manual-checks.md` §3; roadmap §5b | `ScalperManualChecks.CHECKS` = exactly 7 records; the 9 target keys grep ZERO in `**/*.java`/`**/*.tsx`; `ScalperManualChecksTest` still `hasSize(7)`; only the plan doc + #42/#125 (original 7) in git log |
+| ~~`FU1-manual-checks-9`~~ | **✅ DONE #371** — 9 manual-only checks added (`ScalperManualChecks.CHECKS` 7→16) | `followup1-expand-manual-checks.md` §3 | shipped 2026-06-30 |
 | `E5-rsi-band-per-strategy` | Per-strategy CE/PE RSI band override (`rsi_band` YAML + `ScalperGates.rsiBandCustom(ceLo,ceHi,peLo,peHi)`) replacing the shared band | `rsi-multi-timeframe.md` §3.5 / §3.1 | `rsiBandCustom`/`rsi_band`/`ceLo..peHi` = ZERO in `strategy-signal/src/main`; `ScalperConfig.from(...)` parses no `rsi_band` node. NEAR-MISS (not this): `rsiS24Band` is a *fixed* W3 constant band (CE 50-75/PE 25-40), not per-strategy configurable |
 | `E5-rsi-recovery-postvertical` | Post-vertical RSI-recovery detector (oversold trough <~20 → recovery ≥~40 sequencer; `requireRsiRecovery`, `rsiRecoveryLevel=40`, `rsiOversoldTrough=20`, `rsiRecoveryLookback=10`) | `rsi-multi-timeframe.md` §3.7 / §3.1 | identifiers grep ZERO; only cross-bar RSI mechanism is `rsiCoolOff` (prior-bar-hot→cooled-pullback, no trough memory). §3.12 intent was *substituted* by arming `rsi-cooloff` on trend-change (`ScalperStrategyLoadTest:218-225`), the dedicated detector never built. (roadmap §173 lists it UNCERTAIN keep/drop — not a confirmed cut) |
 | `E3-fii-participant-classifier` | 4-participant (FII/Pro/DII/Client) LB/SC/LU/SB change-in-OI classifier + participant-OI dot (the rich half of fii-dii-bias) | `macro-vix-global-fii.md` `fii-dii-bias` §3.3 | only the simple `fiiBias()` long%>50 gate shipped (#285, commit body explicitly defers the classifier); no `ParticipantBias*` file; `Macro` record has no `fiiBiasSign`; no `/fii-dii/bias` endpoint |
@@ -114,6 +118,6 @@ From the S24 prune + owner decisions (reference, so nothing here gets re-propose
 ---
 
 ## Net
-The **scalper engine is ~95% built** — only the 4 §1a packages + the §2 owner-numbers remain on the strategy
-side. The remaining *bulk of net-new work* is **frontend oipulse (§1b, 8 pages)** and the **Phase-5 equity
+The **scalper engine is ~95% built** — only the 3 remaining §1a packages (FU1 shipped #371) + the §2
+owner-numbers remain on the strategy side. The remaining *bulk of net-new work* is **frontend oipulse (§1b, 8 pages)** and the **Phase-5 equity
 screener chain (§1c, 2, sequential)**. Everything else is owner-gated, not code-pending.

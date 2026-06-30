@@ -38,7 +38,34 @@ public record ScalperParams(
     LocalTime noTradeBefore,
     LocalTime noFreshEntryAfter,
     Boolean middayBlock,
-    BigDecimal volumeFloor) {
+    BigDecimal volumeFloor,
+    RsiBand rsiBand) {
+
+  /**
+   * E5 §3.5 per-strategy RSI band override (YAML {@code scalper.params.rsi_band}). When present it
+   * REPLACES the shared §4.2 60-80 / 20-40 band on the hard RSI rail (and takes precedence over the
+   * fixed {@code rsi-s24-bands} band); absent ⇒ {@code null} ⇒ the existing band chain is byte-identical.
+   */
+  public record RsiBand(BigDecimal ceLo, BigDecimal ceHi, BigDecimal peLo, BigDecimal peHi) {
+
+    /**
+     * Parses {@code rsi_band: { ce: { lo, hi }, pe: { lo, hi } }}. Returns {@code null} when the block
+     * is absent OR any of the four bounds is missing (degrade to the shared band, never a broken one).
+     */
+    public static RsiBand from(JsonNode node) {
+      if (node == null || node.isMissingNode() || !node.isObject()) {
+        return null;
+      }
+      BigDecimal ceLo = num(node.path("ce"), "lo");
+      BigDecimal ceHi = num(node.path("ce"), "hi");
+      BigDecimal peLo = num(node.path("pe"), "lo");
+      BigDecimal peHi = num(node.path("pe"), "hi");
+      if (ceLo == null || ceHi == null || peLo == null || peHi == null) {
+        return null;
+      }
+      return new RsiBand(ceLo, ceHi, peLo, peHi);
+    }
+  }
 
   /**
    * Fills any unset override with its {@link ScalperGates} default constant (the SINGLE source of the
@@ -64,7 +91,7 @@ public record ScalperParams(
   /** The all-defaults instance (no {@code scalper.params} block — every shipped strategy today). */
   public static ScalperParams defaults() {
     return new ScalperParams(
-        null, null, null, null, null, null, null, null, null, null, null);
+        null, null, null, null, null, null, null, null, null, null, null, null);
   }
 
   /**
@@ -86,7 +113,8 @@ public record ScalperParams(
         time(params, "no_trade_before"),
         time(params, "no_fresh_entry_after"),
         bool(params, "midday_block"),
-        num(params, "volume_floor"));
+        num(params, "volume_floor"),
+        RsiBand.from(params.path("rsi_band")));
   }
 
   /** A numeric (or numeric-string) override, or null when the field is absent/blank (⇒ the default). */

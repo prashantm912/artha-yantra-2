@@ -150,6 +150,12 @@ const SweepDetailPage = lazy(() =>
 const ChartsPage = lazy(() =>
   import('./pages/charts/ChartsPage.tsx').then((m) => ({ default: m.ChartsPage })),
 );
+const AdvanceChartPage = lazy(() =>
+  import('./pages/charts/AdvanceChartPage.tsx').then((m) => ({ default: m.AdvanceChartPage })),
+);
+const MultiframeChartPage = lazy(() =>
+  import('./pages/charts/MultiframeChartPage.tsx').then((m) => ({ default: m.MultiframeChartPage })),
+);
 // The unified Scalping Cockpit composes the ECharts-bearing panels (straddle + heatmap) → lazy chunk.
 const CockpitPage = lazy(() =>
   import('./pages/scalper/CockpitPage.tsx').then((m) => ({ default: m.CockpitPage })),
@@ -182,6 +188,8 @@ export function App() {
           <Route path="/watchlists" element={<WatchlistsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/charts" element={<Lazy><ChartsPage /></Lazy>} />
+          <Route path="/advance-chart" element={<Lazy><AdvanceChartPage /></Lazy>} />
+          <Route path="/multiframe-chart" element={<Lazy><MultiframeChartPage /></Lazy>} />
           {/* Options */}
           <Route path="/options/options-chain" element={<OptionsChainPage />} />
           <Route path="/options/oi-spurt" element={<OptionsSpurtPage />} />

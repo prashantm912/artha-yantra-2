@@ -105,6 +105,19 @@ Authorities used: `2026-06-28-scalper-to-100-roadmap.md` (+ the 12 `2026-06-27-b
 ## 2. OWNER-GATED / PARKED — mechanism built, waiting on a number / decision / deploy / manual step — 12
 Not build work. Each needs an owner input, not code.
 
+> **§2 OWNER DECISIONS (2026-06-30 walk-through) — 9 open items resolved:**
+> 1. **E8 ATR-stop = OFF** — keep all families on existing point/premium stops (no arming).
+> 2. **E11 PE-mirror = BUILD (STEP)** — separate bearish rule set, CE untouched; template-first → review → replicate. *(QUEUED — needs a mechanism choice: engine resolves CE/PE by price-vs-VWAP and `direction:short`=SELL, so a long-PE-only STEP needs a deliberate approach. Not blind-coded.)*
+> 3. **E11 straddle combined-prem exit = BUILD** — engine-managed 2-leg auto-exit (combined-prem vs VWAP), fits being away during hours. *(QUEUED.)*
+> 4. **E12 ideal-window + OH-freshness = SKIP** (low-value; existing time rails cover the session).
+> 5. **FU2 4 soft dots = leave ADVISORY** (arm as hard gates only after live data).
+> 6. **E3 Dow dot = leave UN-ARMED** (directional-VIX + manual checklist cover macro).
+> 7. **wu4 Upstox cutover = STAY KITE / defer** (no urgency; revisit with a live-market A/B).
+> 8. **SPAN / short-premium = KEEP LONG-ONLY** — verified all 36 scalper YAMLs are buy/long (`direction: long|both`, zero `short`); selling legs are SPAN-deferred future work. SPAN stays dormant.
+> 9. **orders live-broker = KEEP PAPER / read-only** — validate on live paper first; real-money only after proof + supervision. (Per constraints, I never auto-execute trades.)
+>
+> → 2 builds queued (#2 PE-mirror STEP, #3 straddle auto-exit); 7 resolved as keep-as-is.
+
 | id | what's built | what's owner-gated |
 |---|---|---|
 | `FU2-unarmed` | 4 soft-dots (indicator-align / futures-OI / breadth / basis) scored + hard-gate versions wired default-OFF | arming decision after forward paper |

@@ -70,7 +70,11 @@ public class ScalperStrategySeeder {
           "scalp-market-movers-sensex-sensexoi",
           "scalp-btst-stbt-nifty",
           "scalp-btst-stbt-sensex-niftyoi",
-          "scalp-btst-stbt-sensex-sensexoi");
+          "scalp-btst-stbt-sensex-sensexoi",
+          // E11 PE-mirror (owner 2026-06-30): the bearish counterpart of the directional CE families,
+          // option_types:[PE] + sub-VWAP gate. Seeded as a draft like the rest; trend-change is the
+          // TEMPLATE — once validated the same flip replicates to the other directional families.
+          "scalp-trend-change-nifty-pe");
 
   private final RegistryService registry;
 

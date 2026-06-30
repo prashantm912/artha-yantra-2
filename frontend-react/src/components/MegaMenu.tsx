@@ -113,6 +113,7 @@ const SECTIONS: MenuSection[] = [
       { label: 'Market Holidays', to: '/features/market-holidays' }, // Wave 3 — NSE holiday reference table
       { label: 'World Indices', to: '/features/world-indices' }, // global-index live quotes (Upstox GLOBAL_INDEX)
       { label: 'Risk Calculator', to: '/features/risk-calculator' }, // §1b — pure-client position-sizing utility
+      { label: 'Multiple Window', to: '/features/multiple-window' }, // §1b — composable multi-pane monitoring workspace
     ],
   },
   {

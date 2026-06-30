@@ -228,6 +228,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/admin/equity-daily-backfill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["backfill_2"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instruments/sync": {
         parameters: {
             query?: never;
@@ -1364,6 +1380,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/admin/equity-daily-backfill/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["status_5"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/admin/coverage-summary": {
         parameters: {
             query?: never;
@@ -1515,7 +1547,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["status_5"];
+        get: operations["status_6"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1645,6 +1677,11 @@ export interface components {
             to?: string;
             interval?: string;
             force?: boolean;
+        };
+        EquityDailyBackfillRequest: {
+            symbols?: string[];
+            /** Format: int32 */
+            days?: number;
         };
         SessionRequest: {
             requestToken?: string;
@@ -3132,6 +3169,41 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": components["schemas"]["ExpiredBackfillRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    backfill_2: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["EquityDailyBackfillRequest"];
             };
         };
         responses: {
@@ -5563,6 +5635,35 @@ export interface operations {
             };
         };
     };
+    status_5: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["Status"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     coverageSummary: {
         parameters: {
             query?: never;
@@ -5848,7 +5949,7 @@ export interface operations {
             };
         };
     };
-    status_5: {
+    status_6: {
         parameters: {
             query?: never;
             header?: never;

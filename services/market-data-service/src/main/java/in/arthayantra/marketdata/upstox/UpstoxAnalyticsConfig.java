@@ -63,6 +63,22 @@ public class UpstoxAnalyticsConfig {
   }
 
   /**
+   * Upstox <b>NSE_EQ instrument-master</b> client — feeds the Phase-5 200-day equity daily backfill
+   * ({@code EquityDailyBackfillService}). Resolves a cash-equity tradingsymbol → its {@code
+   * NSE_EQ|<ISIN>} key off the token-free assets-CDN master. Bound only when the analytics token is
+   * enabled (its sibling {@link UpstoxExpiredInstrumentsClient} that fetches the daily candles needs
+   * the token); absent ⇒ the backfill trigger 503s as unconfigured.
+   */
+  @Bean
+  @ConditionalOnProperty(name = "artha.upstox.analytics.enabled", havingValue = "true")
+  public UpstoxEquityMasterClient upstoxEquityMasterClient(
+      RestClient.Builder restClientBuilder,
+      ObjectMapper objectMapper,
+      UpstoxAnalyticsProperties properties) {
+    return new UpstoxEquityMasterClient(restClientBuilder, objectMapper, properties);
+  }
+
+  /**
    * Upstox <b>global-instrument</b> client — feeds the World Indices page ({@code GET
    * /api/v1/market/world-indices}). It downloads the public global instrument master from the assets
    * CDN ({@code assets.upstox.com}, no token) and live-quotes the {@code GLOBAL_INDEX} /

@@ -124,13 +124,24 @@ Not build work. Each needs an owner input, not code.
 > 9. **orders live-broker = KEEP PAPER / read-only** — validate on live paper first; real-money only after proof + supervision. (Per constraints, I never auto-execute trades.)
 >
 > → 2 builds queued (#2 PE-mirror STEP, #3 straddle auto-exit); 7 resolved as keep-as-is.
+>
+> **§2 follow-on builds (2026-06-30, second pass):**
+> - **E9-target-trail-band = ✅ DONE (#386).** The fixed premium-% TP (#351, `value:35`) on its 2 armed
+>   homes (gap-theory + market-movers, 12 variants) was a hardcoded placeholder pending live validation;
+>   the owner design calls for it to be optimizer-tunable, but it sat in no sweep. Added
+>   `exit_rules[type=take_profit].params.value` (range [20,55] step 5) to each optimize block — default 35
+>   unchanged (live byte-identical), optimize block is backtest-only (parity-safe). The ST-line trail keeps
+>   the canonical SuperTrend(10,2.0), pinned to the scored ST by design (no independent sweep → no divergence).
+> - **instruments-exchange-token-null = ✅ DONE (#387).** Threaded `exchange_token` wire→domain→DB
+>   (the ledger's suggested one-liner was inaccurate — the domain `InstrumentRecord` had no field). +1 record
+>   field + 3 ctor sites + `setLong(4, …)`; nullable BIGINT column so no migration.
 
 | id | what's built | what's owner-gated |
 |---|---|---|
 | `FU2-unarmed` | 4 soft-dots (indicator-align / futures-OI / breadth / basis) scored + hard-gate versions wired default-OFF | arming decision after forward paper |
 | `E3-dow-confluence-unarmed` | dot + seam toggle + `Macro.dowUp` + producer + tests | left un-armed (no automated Dow feed; manual checklist covers it; superseded by directional-vix on trend-change) |
 | `E8-atr-stop-arming-roster` | ATR(14)×2 structural stop, tested, tripwire-guarded | **which families arm it** (owner roster) |
-| `E9-target-trail-band-value` | premium-% take-profit + trail mechanism, armed (#351) | the VALUE (35% TP / ST-line band are placeholders) — live validation |
+| ~~`E9-target-trail-band-value`~~ | **✅ DONE #386** — TP `value` now optimizer-tunable on gap-theory + market-movers (default 35, parity-safe) | the live-validated NUMBER stays an optimizer/live output, not a code gap |
 | ~~`E11-straddle-combined-prem-exit`~~ | **✅ DONE #383+#384** — 2-leg paper-open + the live `StraddleExitMonitor` (combined-prem ≤ slLevel → close both legs) | engine-managed; was operator-manual |
 | ~~`E11-pe-mirror-seeding`~~ | **✅ DONE #381+#382** — 27 PE drafts (STEP, additive `option_types:[PE]`); 9 NIFTY published | owner chose STEP; replicated + NIFTY-published |
 | `E12-oh-freshness-1030` | — | owner-deprioritized (low value, E12 time-window bucket) |
@@ -139,7 +150,7 @@ Not build work. Each needs an owner input, not code.
 | `data-foundation-value-verify` | every OI/data page renders in History mode; tested | owner oipulse sign-in for the cell-for-cell §20.8 compare |
 | `span-real-spn-broker-parity` | loader + adapter + parity harness + fetcher, CI-green on synthetic fixture | a real `nsccl.<date>.s.spn` + owner sign-off (distinct from SPAN sell-legs, which are EXCLUDED) |
 | `orders-page-live-broker-verify` | `/orders` page + §18.1 read endpoints (orderbook/positions/tradebook/funds), default-OFF | live-broker arm + verify |
-| `instruments-exchange-token-null` | wire value captured in `InstrumentRecord` | populate (one-liner `ps.setObject(4, r.exchangeToken())`) when a consumer needs it |
+| ~~`instruments-exchange-token-null`~~ | **✅ DONE #387** — `exchange_token` threaded wire→domain→DB (was hardcoded NULL) | none (closed) |
 
 *(13 rows because `E12-ideal-window` is carried here as owner-deprioritized rather than in §1.)*
 
@@ -180,10 +191,39 @@ From the S24 prune + owner decisions (reference, so nothing here gets re-propose
 
 ---
 
+## 6. DECIDED — WILL NOT BE DONE (owner NO; do NOT re-flag as pending / false-flag)
+These are **closed by an explicit owner decision**, not unbuilt work. A future "what's left" pass must
+**not** resurface them as pending — list them here only as the record of *why* they are out. (Distinct from
+§2, which is "mechanism built, waiting on an owner NUMBER" — those stay open; these are settled NOs.)
+
+| item | decision | why |
+|---|---|---|
+| E8 ATR-stop arming | **WON'T arm** | all families keep their existing point/premium stops; no doc home for ATR (#322 confirmed un-armed) |
+| FU2 4 soft dots (indicator-align / futures-OI / breadth / basis) | **WON'T hard-gate** | stay ADVISORY; only arm after live data proves them — not a build |
+| E3 Dow-confluence dot | **WON'T arm** | no automated Dow feed; directional-VIX + the manual checklist cover macro |
+| wu4 Upstox live cutover | **WON'T cut over (stay Kite)** | no urgency; Kite is the always-on fallback; revisit only with a live A/B |
+| SPAN short / sell-leg premium | **WON'T build (long-only)** | all 36 scalpers are buy/long (verified); selling legs are permanently out of scalper-100 |
+| orders live-broker arm | **WON'T arm (keep paper)** | paper/read-only only; real-money is out of scope (I never auto-execute trades) |
+| E12 ideal-window + OH-freshness-1030 | **WON'T build** | low-value; existing time rails (09:45 floor / 15:12 square-off) cover the session |
+| E12 economic-event lockout / event-window anchors | **WON'T build** | permanent-MANUAL (#339) / owner-DECLINED |
+| Event Days page | **WON'T build** | a static proprietary Union-Budget slideshow, not an event calendar (no API) |
+| SENSEX point-scale constant | **WON'T build** | dead code — all 2b scalpers signal on NIFTY-FUT-CONT, stops already in NIFTY-signal points |
+| E1 equity-screener OOM path | **WON'T build** | replaced by Upstox on-demand + the captured bank-radar (#345-347) |
+
+**Still genuinely open (NOT closed):** §1c Phase-5 chain (200-day backfill → Minervini) is the only net-new
+code; `strat-calendar-spread` is **DEFERRED** (owner may revisit, not a NO); the §2 rows below the E9/instruments
+lines (`E9-target-trail` live number, `span-real-spn-broker-parity`, `data-foundation-value-verify`) are
+owner-NUMBER/sign-off gated, not build gaps.
+
+---
+
 ## Net
 Both **§1a (scalper signal side)** and **§1b (frontend / oipulse)** are now **COMPLETE**. §1a = 4
 packages (#371–374); §1b = 6 pages built (Risk Calculator #375, Multiple Window #376, Futures Pre-Open
 #377, Announcement #378, Advance Chart + Multiframe #379) with Event Days + Calendar Spread owner-skipped.
 The **only net-new code left is the §1c Phase-5 equity-screener chain** (2, sequential: 200-day daily
-backfill → Minervini Trend-Template). Everything else is **§2 owner-gated** (numbers/decisions, not code).
-Deploy-verify pending on #377 (pre-open render at next 09:00), #378 (NSE field mapping), #379 (chart render).
+backfill → Minervini Trend-Template). The §2 second pass then closed **E9-target-trail (#386)** +
+**instruments-exchange-token (#387)**; the remaining §2 rows are owner-NUMBER/sign-off gated, not code.
+Everything the owner has decided NOT to do is consolidated in **§6 (WILL NOT BE DONE)** so it is not
+re-flagged as pending. Deploy-verify pending on #377 (pre-open render at next 09:00), #378 (NSE field
+mapping), #379 (chart render).

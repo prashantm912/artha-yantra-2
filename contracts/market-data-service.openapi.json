@@ -791,6 +791,46 @@
         }
       }
     },
+    "/api/v1/market/admin/equity-daily-backfill" : {
+      "post" : {
+        "tags" : [ "equity-daily-backfill-controller" ],
+        "operationId" : "backfill_2",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/EquityDailyBackfillRequest"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : {
+                    "type" : "string"
+                  }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/instruments/sync" : {
       "post" : {
         "tags" : [ "instruments-controller" ],
@@ -4364,6 +4404,34 @@
         }
       }
     },
+    "/api/v1/market/admin/equity-daily-backfill/status" : {
+      "get" : {
+        "tags" : [ "equity-daily-backfill-controller" ],
+        "operationId" : "status_5",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Status"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/admin/coverage-summary" : {
       "get" : {
         "tags" : [ "coverage-controller" ],
@@ -4745,7 +4813,7 @@
     "/api/v1/auth/kite/status" : {
       "get" : {
         "tags" : [ "kite-auth-controller" ],
-        "operationId" : "status_5",
+        "operationId" : "status_6",
         "responses" : {
           "200" : {
             "description" : "OK",
@@ -5065,6 +5133,21 @@
           },
           "force" : {
             "type" : "boolean"
+          }
+        }
+      },
+      "EquityDailyBackfillRequest" : {
+        "type" : "object",
+        "properties" : {
+          "symbols" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "days" : {
+            "type" : "integer",
+            "format" : "int32"
           }
         }
       },

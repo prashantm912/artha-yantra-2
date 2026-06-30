@@ -187,6 +187,30 @@ public class PaperPositionRepository {
         PaperPositionRepository::map);
   }
 
+  /** One open leg of a #11 straddle: the position id + its parent signal + that signal's detail. */
+  public record StraddleLegRow(long positionId, long signalId, String scalperDetail) {}
+
+  /**
+   * Open positions whose parent signal is a #11 NEUTRAL straddle — the live combined-prem exit set. Both
+   * legs of a straddle share the parent signal, so grouping the rows by {@code signalId} re-forms each
+   * CE+PE pair; {@code scalper_detail} carries the underlying / expiry / ATM strike for the slLevel read.
+   */
+  public List<StraddleLegRow> openStraddleLegs() {
+    return jdbc.query(
+        """
+        SELECT DISTINCT p.id, o.signal_id, s.scalper_detail::text AS scalper_detail
+        FROM paper_positions p
+        JOIN paper_orders o
+          ON o.exchange = p.exchange AND o.tradingsymbol = p.tradingsymbol AND o.side = p.side
+          AND o.signal_id IS NOT NULL
+        JOIN signals s ON s.id = o.signal_id
+        WHERE p.status = 'OPEN' AND s.scalper_detail->>'side' = 'NEUTRAL'
+        """,
+        (rs, n) ->
+            new StraddleLegRow(
+                rs.getLong("id"), rs.getLong("signal_id"), rs.getString("scalper_detail")));
+  }
+
   /** The strategy that opened a position (via its first signal-linked order), for the T-1 audit. */
   public java.util.Optional<NotifyTarget> notifyTargetFor(
       String exchange, String tradingsymbol, String side) {

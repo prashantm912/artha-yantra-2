@@ -7,6 +7,7 @@ import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -78,6 +79,52 @@ public class MarketDataCandlesClient {
           "candle warm-up fetch failed for {}:{} {} — engine starts cold: {}",
           exchange, tradingsymbol, interval, e.getMessage());
       return List.of();
+    }
+  }
+
+  /** The #11 straddle SL read: the live combined-premium slLevel + the latest combined premium. */
+  public record StraddleSl(BigDecimal slLevel, BigDecimal combinedPremium) {}
+
+  /**
+   * The straddle-chart {@code slLevel} (the combined-prem session VWAP − the §3.11 buffer) + the latest
+   * combined premium for a straddle strike — the live combined-prem exit monitor reads it. Empty on any
+   * upstream failure / an empty session, so a missing read never triggers an exit.
+   */
+  public Optional<StraddleSl> straddleSl(String name, String expiry, BigDecimal strike) {
+    try {
+      String body =
+          restClient
+              .get()
+              .uri(
+                  uriBuilder -> {
+                    uriBuilder
+                        .path("/api/v1/market/options/straddle-chart")
+                        .queryParam("name", name)
+                        .queryParam("strike", strike);
+                    if (expiry != null && !expiry.isBlank()) {
+                      uriBuilder.queryParam("expiry", expiry);
+                    }
+                    return uriBuilder.build();
+                  })
+              .retrieve()
+              .body(String.class);
+      JsonNode root = objectMapper.readTree(body);
+      JsonNode items = root.path("items");
+      if (!root.hasNonNull("slLevel") || !items.isArray() || items.isEmpty()) {
+        return Optional.empty();
+      }
+      JsonNode last = items.get(items.size() - 1);
+      if (!last.hasNonNull("close")) {
+        return Optional.empty();
+      }
+      return Optional.of(
+          new StraddleSl(
+              new BigDecimal(root.path("slLevel").asText()),
+              new BigDecimal(last.path("close").asText())));
+    } catch (java.io.IOException | RuntimeException e) {
+      log.warn(
+          "straddle-chart slLevel fetch failed for {} {} {}: {}", name, expiry, strike, e.getMessage());
+      return Optional.empty();
     }
   }
 }

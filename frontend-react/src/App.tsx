@@ -44,6 +44,9 @@ import { ExportWizardPage } from './pages/dataops/ExportWizardPage.tsx';
 const OptionsStraddlePage = lazy(() =>
   import('./pages/options/OptionsStraddlePage.tsx').then((m) => ({ default: m.OptionsStraddlePage })),
 );
+const CalendarSpreadPage = lazy(() =>
+  import('./pages/options/CalendarSpreadPage.tsx').then((m) => ({ default: m.CalendarSpreadPage })),
+);
 const OptionsPremiumPage = lazy(() =>
   import('./pages/options/OptionsPremiumPage.tsx').then((m) => ({ default: m.OptionsPremiumPage })),
 );
@@ -199,6 +202,7 @@ export function App() {
           <Route path="/options/big-oi-movement" element={<BigOiMovementPage />} />
           <Route path="/options/options-premium" element={<Lazy><OptionsPremiumPage /></Lazy>} />
           <Route path="/options/straddle-chart" element={<Lazy><OptionsStraddlePage /></Lazy>} />
+          <Route path="/options/calendar-spread" element={<Lazy><CalendarSpreadPage /></Lazy>} />
           <Route path="/options/oi-statistics" element={<Lazy><OiStatisticsPage /></Lazy>} />
           <Route path="/options/interval-wise-oi" element={<Lazy><IntervalWiseOiPage /></Lazy>} />
           <Route path="/options/active-strikes" element={<Lazy><ActiveStrikesPage /></Lazy>} />

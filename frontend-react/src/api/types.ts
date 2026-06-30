@@ -132,6 +132,32 @@ export interface StraddleChart {
   items: StraddleCandle[];
 }
 
+/** One interval's calendar-spread candle (GET /calendar-spread): (near − far) OHLC + each leg's close. */
+export interface SpreadCandle {
+  time: string;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  nearClose: string;
+  farClose: string;
+  volume: number;
+}
+
+/** GET /api/v1/market/options/calendar-spread — the (near − far) premium-differential candles + header. */
+export interface CalendarSpreadChart {
+  underlying: string;
+  strike: string;
+  optionType: string;
+  nearExpiry: string;
+  farExpiry: string;
+  interval: string;
+  underlyingLtp: string | null;
+  underlyingDayOpen: string | null;
+  asOf: string;
+  items: SpreadCandle[];
+}
+
 /** GET /api/v1/market/options/oi-analysis/strike-series — one strike's CE+PE points per session bucket. */
 export interface StrikeSeries {
   underlying: string;

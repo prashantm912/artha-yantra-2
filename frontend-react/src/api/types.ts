@@ -870,6 +870,22 @@ export interface PreOpenSnapshot {
 }
 
 /**
+ * One corporate announcement / exchange filing (GET /api/v1/market/equity/announcements, NSE source).
+ * `date`/`time` are the IST announcement date (ISO) + clock (HH:mm:ss); `subject` is the category,
+ * `detail` the full text, `fileLink` the attachment PDF URL (any of company/subject/detail/fileLink may
+ * be null). Empty list when the NSE source is not live (mock) or the call fails.
+ */
+export interface Announcement {
+  date: string;
+  time: string;
+  symbol: string;
+  company: string | null;
+  subject: string | null;
+  detail: string | null;
+  fileLink: string | null;
+}
+
+/**
  * One row of the Futures Pre-Open scan (GET /api/v1/market/futures/pre-open). Price / change fields are
  * decimal STRINGS (never parseFloat), null when the quote did not resolve (the row still lists by name).
  * `prevDayBreak` is the High/Low Break badge: "H" = pre-open price above the previous day's high, "L" =

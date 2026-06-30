@@ -22,7 +22,7 @@ Authorities used: `2026-06-28-scalper-to-100-roadmap.md` (+ the 12 `2026-06-27-b
 
 ---
 
-## 1. CONFIRMED PENDING — genuinely unbuilt (code-proven) — 7 (was 15; 8 shipped — §1a COMPLETE + §1b 4/8; Event Days SKIP, Calendar Spread DEFER per owner; only Advance Chart + Multiframe + Phase-5 chain left)
+## 1. CONFIRMED PENDING — genuinely unbuilt (code-proven) — 5 (was 15; 10 shipped — §1a COMPLETE + §1b COMPLETE: 6 built/2 owner-skipped; only the §1c Phase-5 equity chain + the low-value E12-ideal-window remain)
 
 > **Progress log** (mark each item DONE here the moment it merges):
 > - ✅ `FU1-manual-checks-9` — **DONE 2026-06-30 (PR #371, e49c764).** `ScalperManualChecks.CHECKS` 7→16
@@ -52,6 +52,13 @@ Authorities used: `2026-06-28-scalper-to-100-roadmap.md` (+ the 12 `2026-06-27-b
 >   Modulith-safe (wire `Tick` stays internal, exposed domain `Quote`). v1 radar = captured NIFTY-Bank
 >   (v2 = full N50 Upstox prev-H/L). **Live-data render verifies at next pre-open (09:00 IST).**
 >
+> - ✅ `w4-advance-chart` + `w4-multiframe-chart` (§1b) — **DONE 2026-06-30 (PR #379).** LWC pro chart:
+>   `core/indicators` (session VWAP / VWMA20 / SuperTrend10,2 / RSI14+SMA / volumeMA — 11 specs) +
+>   `components/charts/AdvanceChart` (candles + volume + the 5 overlays, RSI in a 2nd LWC pane) +
+>   `AdvanceChartPage` (`/advance-chart`; symbol typeahead + interval + lazy-older) + `MultiframeChartPage`
+>   (`/multiframe-chart`; 2×2 multi-TF grid of AdvanceCharts) + nav. Pure-frontend (binds `/market/candles`).
+>   TV-binary extras (drawing tools / study-template save-load / OI-bar / trade-history / audio alerts)
+>   deferred per the study's replication note. **Visually verify the chart render after deploy.**
 > - ✅ `equity-announcement` (§1b) — **DONE 2026-06-30 (PR #378).** NSE corporate-filings feed: `nse`
 >   `NseAnnouncementFetcher` (iface + Live `@Profile(live)` via `NseHttpClient.getWithCookieSeed` + Mock)
 >   + `AnnouncementService`/`Controller` (`GET /market/equity/announcements?from&to&symbol`, Map-envelope,
@@ -72,7 +79,7 @@ Authorities used: `2026-06-28-scalper-to-100-roadmap.md` (+ the 12 `2026-06-27-b
 | ~~`E5-rsi-recovery-postvertical`~~ | **✅ DONE #373** — `rsiRecovery` trough→recovery sequencer, armed on trend-change ×3 (RATIFICATION-PACK row 51 = KEEP) | `rsi-multi-timeframe.md` §3.7 | shipped 2026-06-30 |
 | ~~`E3-fii-participant-classifier`~~ | **✅ DONE #374** — `ParticipantBiasService` LB/SC/LU/SB classifier + `/fii-dii/bias` + `fii-dii-gate` (default-OFF) | `macro-vix-global-fii.md` §3.3 | shipped 2026-06-30 |
 
-### 1b. Frontend / oipulse replication (3 BUILD-pending; 3 shipped; Event Days SKIP, Calendar Spread DEFER) — the bulk of remaining UI work
+### 1b. Frontend / oipulse replication (COMPLETE — 6 built; Event Days SKIP + Calendar Spread DEFER per owner) — no UI work remains
 | id | item | backend? | code-evidence of absence |
 |---|---|---|---|
 | ~~`feat-risk-calculator`~~ | **✅ DONE #375** — Risk Calculator (`/features/risk-calculator`; pure `core/riskCalculator` + page + nav) | **pure-frontend** | shipped 2026-06-30 |
@@ -81,8 +88,8 @@ Authorities used: `2026-06-28-scalper-to-100-roadmap.md` (+ the 12 `2026-06-27-b
 | ~~`feat-event-days`~~ | **⛔ SKIP (owner)** — NOT an event calendar: a static proprietary Union-Budget slideshow (`docs/oipulse-study/features/event-days.md`, no API). Inventory mischaracterized it. | — | n/a (descoped) |
 | ~~`equity-announcement`~~ | **✅ DONE #378** — Announcement (`/equity/announcement`; `NseAnnouncementFetcher` + `/market/equity/announcements` + page; live-verify NSE field mapping after deploy) | NSE source (via `NseHttpClient`) | shipped 2026-06-30 |
 | ~~`strat-calendar-spread`~~ | **⏸ DEFER (owner)** — Calendar Spread chart (spread-premium candles + socket Add-Position legs) | needs leg-premium series + WS | no `CalendarSpread*` page/route; master-plan §18.7 future-work |
-| `w4-advance-chart` | **Advance Chart** (LWC builder, drawing + builder tools, OI overlay, study templates) — **BUILD** | LWC substrate (already in stack) | only `/charts` cockpit (lightweight-charts, overlays deferred); master-plan PR-W4 |
-| `w4-multiframe-chart` | **Multiframe Chart** (multi-timeframe grid of Advance-Chart instances) — **BUILD** | depends on Advance-Chart | no `multiframe`/grid route; depends on the unbuilt Advance-Chart |
+| ~~`w4-advance-chart`~~ | **✅ DONE #379** — Advance Chart (`/advance-chart`; LWC + VWAP/VWMA/SuperTrend/RSI/volMA via tested `core/indicators`). TV-binary extras (drawing/study-templates/OI-bar/trade-history) deferred. | LWC (in stack) | shipped 2026-06-30 |
+| ~~`w4-multiframe-chart`~~ | **✅ DONE #379** — Multiframe Chart (`/multiframe-chart`; 2×2 multi-TF grid of AdvanceCharts) | depends on Advance-Chart | shipped 2026-06-30 |
 
 ### 1c. Data / infra — Phase-5 equity-screener chain (2) — sequential
 | id | item | doc | code-evidence of absence |
@@ -154,7 +161,9 @@ From the S24 prune + owner decisions (reference, so nothing here gets re-propose
 ---
 
 ## Net
-The **scalper signal side (§1a) is COMPLETE** — all 4 packages shipped (FU1 #371 + rsi-band #372 +
-rsi-recovery #373 + fii-classifier #374). Only the §2 owner-numbers remain on the strategy side; the
-remaining *net-new* code is **frontend oipulse (§1b, 8 pages)** + the **Phase-5 equity chain (§1c, 2)**. The remaining *bulk of net-new work* is **frontend oipulse (§1b, 8 pages)** and the **Phase-5 equity
-screener chain (§1c, 2, sequential)**. Everything else is owner-gated, not code-pending.
+Both **§1a (scalper signal side)** and **§1b (frontend / oipulse)** are now **COMPLETE**. §1a = 4
+packages (#371–374); §1b = 6 pages built (Risk Calculator #375, Multiple Window #376, Futures Pre-Open
+#377, Announcement #378, Advance Chart + Multiframe #379) with Event Days + Calendar Spread owner-skipped.
+The **only net-new code left is the §1c Phase-5 equity-screener chain** (2, sequential: 200-day daily
+backfill → Minervini Trend-Template). Everything else is **§2 owner-gated** (numbers/decisions, not code).
+Deploy-verify pending on #377 (pre-open render at next 09:00), #378 (NSE field mapping), #379 (chart render).

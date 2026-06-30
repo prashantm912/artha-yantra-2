@@ -25,6 +25,8 @@ const SECTIONS: MenuSection[] = [
       { label: 'Dashboard', to: '/dashboard' }, // cockpit — at-a-glance status/signals/paper/jobs (E-2)
       { label: 'Signals', to: '/signals' }, // cockpit — live feed + reasoning breakdown (C-2.26)
       { label: 'Charts', to: '/charts' }, // cockpit — candlestick + trade/signal overlays (A13)
+      { label: 'Advance Chart', to: '/advance-chart' }, // §1b — LWC pro chart + default study set (VWAP/VWMA/SuperTrend/RSI)
+      { label: 'Multiframe Chart', to: '/multiframe-chart' }, // §1b — 2×2 multi-timeframe grid of Advance Charts
       { label: 'Paper Trading', to: '/paper' }, // cockpit — positions + ledger + risk limits (F-43)
       { label: 'Orders', to: '/orders' }, // §18.1 — broker orderbook/positions/tradebook/funds (read-only)
       { label: 'Journal', to: '/journal' }, // cockpit — weekly-review entries (F-44A)

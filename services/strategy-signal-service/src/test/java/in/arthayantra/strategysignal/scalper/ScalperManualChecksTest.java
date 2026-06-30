@@ -13,8 +13,21 @@ class ScalperManualChecksTest {
   @Test
   void canonicalListIsWellFormed() {
     List<ScalperManualChecks.Check> checks = ScalperManualChecks.CHECKS;
-    assertThat(checks).hasSize(7);
+    assertThat(checks).hasSize(16);
     assertThat(checks).extracting(ScalperManualChecks.Check::key).doesNotHaveDuplicates();
+    // FU1: the 9 manual-only S21-S24 audit gaps added on top of the original 7 generic checks.
+    assertThat(checks)
+        .extracting(ScalperManualChecks.Check::key)
+        .contains(
+            "fii_ls_ratio",
+            "constituent_contribution",
+            "pre_open_bias",
+            "sensex_participation",
+            "oi_intraday_positional",
+            "iv_crush_awareness",
+            "straddle_vwap_entry",
+            "time_of_day_vwap",
+            "vix_regime_bands");
     assertThat(checks)
         .allSatisfy(
             c -> {
@@ -34,7 +47,7 @@ class ScalperManualChecksTest {
 
     JsonNode arr = root.get("manual_checks");
     assertThat(arr.isArray()).isTrue();
-    assertThat(arr).hasSize(7);
+    assertThat(arr).hasSize(16);
     JsonNode first = arr.get(0);
     assertThat(first.has("key")).isTrue();
     assertThat(first.has("label")).isTrue();

@@ -59,7 +59,60 @@ public final class ScalperManualChecks {
               "clean_setup",
               "This is a clean 'one good trade' setup, not a forced or marginal entry.",
               "3.1",
-              "If you have to talk yourself into it, skip it."));
+              "If you have to talk yourself into it, skip it."),
+          new Check(
+              "fii_ls_ratio",
+              "FII futures Long/Short ratio is not against the trade (heavy short = sell every"
+                  + " level; a move toward 50 percent is a short-covering trigger).",
+              "4.17.4",
+              "Read the NSE FII index-futures Long/Short ratio; FII outweighs Pro, DII, Client."),
+          new Check(
+              "constituent_contribution",
+              "Index direction is confirmed by its heaviest constituents and sector sync, not one"
+                  + " stray stock.",
+              "4.14.4",
+              "Check the top movers and sector breadth (e.g. Bank top-3 dominate BankNifty)."),
+          new Check(
+              "pre_open_bias",
+              "Pre-open positioning and advances/declines agree with the intended morning bias.",
+              "4.14.5",
+              "Read the 9:00-9:07 pre-open A/D and positioning before the first trade."),
+          new Check(
+              "sensex_participation",
+              "Sensex has real participation; if thin, prefer Nifty (or pick the chain with nearer"
+                  + " expiry / richer premium).",
+              "4.17.2",
+              "Compare Sensex vs Nifty option volume/OI; skip a thin Sensex day."),
+          new Check(
+              "oi_intraday_positional",
+              "Intraday and positional OI agree (over 50 percent call-vs-put gap on BOTH), with the"
+                  + " PCR progressing the right way.",
+              "4.17.3",
+              "Cross-check today-vs-(yesterday+today) OI and the PCR ladder (1.2 -> 1.5 -> 2)."),
+          new Check(
+              "iv_crush_awareness",
+              "Aware of IV crush risk: IV falls in the second half of expiry day and right after a"
+                  + " scheduled event.",
+              "4.17.5",
+              "On an expiry afternoon or post-event, expect call IVs to drop - size accordingly."),
+          new Check(
+              "straddle_vwap_entry",
+              "For a straddle, entry is a combined Call+Put premium close above its own VWAP with"
+                  + " volume; manage one leg, SL near straddle VWAP +10-15pt.",
+              "4.15.2",
+              "Time the entry off the combined-premium VWAP break, not the index chart."),
+          new Check(
+              "time_of_day_vwap",
+              "Reference window matches the clock: prev-day data and prev-day VWAP until 11 AM,"
+                  + " intraday and current VWAP after.",
+              "4.14.5",
+              "Before 11 AM weight prior-session levels; after 11 AM use the current-session VWAP."),
+          new Check(
+              "vix_regime_bands",
+              "India VIX absolute band and the VIX-vs-price grid suit the trade (10-11 lower-bullish"
+                  + " / 12-14 medium / 15-16 seller-favoured / 17+ higher).",
+              "4.14.1",
+              "Map India VIX to its band and compare to the prev-day close; ignore erratic intraday VIX."));
 
   private ScalperManualChecks() {}
 

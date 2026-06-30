@@ -22,7 +22,7 @@ Authorities used: `2026-06-28-scalper-to-100-roadmap.md` (+ the 12 `2026-06-27-b
 
 ---
 
-## 1. CONFIRMED PENDING — genuinely unbuilt (code-proven) — 11 (was 15; 4 shipped — §1a COMPLETE)
+## 1. CONFIRMED PENDING — genuinely unbuilt (code-proven) — 10 (was 15; 5 shipped — §1a COMPLETE + §1b started)
 
 > **Progress log** (mark each item DONE here the moment it merges):
 > - ✅ `FU1-manual-checks-9` — **DONE 2026-06-30 (PR #371, e49c764).** `ScalperManualChecks.CHECKS` 7→16
@@ -38,6 +38,9 @@ Authorities used: `2026-06-28-scalper-to-100-roadmap.md` (+ the 12 `2026-06-27-b
 >   (LB/SC/LU/SB 2-day FII OI-delta classifier + option-leg seller read) + `GET /fii-dii/bias`; strategy-signal
 >   `Macro.fiiBiasSign` + `ScalperGates.fii` + `fii-dii-gate` seam (default-OFF). Real EOD data ⇒ backtest-usable.
 >   Contract recaptured (additive path) + TS regen. **§1a COMPLETE — the scalper signal side is fully built.**
+> - ✅ `feat-risk-calculator` (§1b) — **DONE 2026-06-30 (PR #375).** Pure-client position-sizing utility:
+>   `core/riskCalculator` (computeRisk + spec) + `RiskCalculatorPage` (`/features/risk-calculator`) + nav;
+>   sizes off capital/risk%/entry/stop (lot-floored), derives R-target + 1%-lock + deployment. No backend.
 
 ### 1a. Scalper signal-side (✅ ALL 4 SHIPPED — COMPLETE) — small, in-service, parity-safe tag-gate pattern
 | id | item | doc | code-evidence of absence |
@@ -47,10 +50,10 @@ Authorities used: `2026-06-28-scalper-to-100-roadmap.md` (+ the 12 `2026-06-27-b
 | ~~`E5-rsi-recovery-postvertical`~~ | **✅ DONE #373** — `rsiRecovery` trough→recovery sequencer, armed on trend-change ×3 (RATIFICATION-PACK row 51 = KEEP) | `rsi-multi-timeframe.md` §3.7 | shipped 2026-06-30 |
 | ~~`E3-fii-participant-classifier`~~ | **✅ DONE #374** — `ParticipantBiasService` LB/SC/LU/SB classifier + `/fii-dii/bias` + `fii-dii-gate` (default-OFF) | `macro-vix-global-fii.md` §3.3 | shipped 2026-06-30 |
 
-### 1b. Frontend / oipulse replication (8) — the bulk of remaining UI work
+### 1b. Frontend / oipulse replication (7 pending; 1 shipped) — the bulk of remaining UI work
 | id | item | backend? | code-evidence of absence |
 |---|---|---|---|
-| `feat-risk-calculator` | **Risk Calculator** (position-sizing / stoploss / 1%-target utility) | **pure-frontend** | no `risk-calculator`/`RiskCalculator` in `frontend-react`; `/features/*` = only connecting-dots/vix/holidays/world-indices |
+| ~~`feat-risk-calculator`~~ | **✅ DONE #375** — Risk Calculator (`/features/risk-calculator`; pure `core/riskCalculator` + page + nav) | **pure-frontend** | shipped 2026-06-30 |
 | `feat-multiple-window` | **Multiple Window** (composable 2×2 multi-pane workspace + per-pane widget picker, persisted) | **pure-frontend** | no `MultipleWindow`/`multi-pane`/`widget-grid` files; `/options/multiple-oi-chart` is a *different* page (strikes overlaid, not a workspace) |
 | `feat-event-days` | **Event Days** (econ/expiry-event calendar page) | needs events feed | no `EventDays*`/route/controller; distinct from the E12 backend lockout |
 | `fut-pre-open-market` | **Futures Pre-Open Market** (09:00-09:08 F&O-stock A/D + prev-H/L break scan) | needs futures pre-open endpoint | distinct from the built *equity* `/equity/pre-open-market` (index banner only); `prevDayBreak`/`getpreopenmarketdata` grep ZERO |

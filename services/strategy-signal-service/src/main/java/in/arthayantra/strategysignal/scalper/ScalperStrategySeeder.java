@@ -71,10 +71,37 @@ public class ScalperStrategySeeder {
           "scalp-btst-stbt-nifty",
           "scalp-btst-stbt-sensex-niftyoi",
           "scalp-btst-stbt-sensex-sensexoi",
-          // E11 PE-mirror (owner 2026-06-30): the bearish counterpart of the directional CE families,
-          // option_types:[PE] + sub-VWAP gate. Seeded as a draft like the rest; trend-change is the
-          // TEMPLATE — once validated the same flip replicates to the other directional families.
-          "scalp-trend-change-nifty-pe");
+          // E11 PE-mirror (owner 2026-06-30): the bearish counterpart of all 9 directional CE families
+          // × {NIFTY, SENSEX·NIFTY-OI, SENSEX·SENSEX-OI} = 27 PE drafts, option_types:[PE] + sub-VWAP
+          // gates. Auto-derived from the CE YAMLs (the directional VWAP/VWMA/ST gates + signal-exit
+          // flipped to the PE side); the CE strategies are byte-identical. All seed as DRAFTS.
+          "scalp-trend-change-nifty-pe",
+          "scalp-trend-change-sensex-niftyoi-pe",
+          "scalp-trend-change-sensex-sensexoi-pe",
+          "scalp-connect-the-dots-nifty-pe",
+          "scalp-connect-the-dots-sensex-niftyoi-pe",
+          "scalp-connect-the-dots-sensex-sensexoi-pe",
+          "scalp-gap-theory-nifty-pe",
+          "scalp-gap-theory-sensex-niftyoi-pe",
+          "scalp-gap-theory-sensex-sensexoi-pe",
+          "scalp-golden-crossover-nifty-pe",
+          "scalp-golden-crossover-sensex-niftyoi-pe",
+          "scalp-golden-crossover-sensex-sensexoi-pe",
+          "scalp-market-movers-nifty-pe",
+          "scalp-market-movers-sensex-niftyoi-pe",
+          "scalp-market-movers-sensex-sensexoi-pe",
+          "scalp-two-candle-nifty-pe",
+          "scalp-two-candle-sensex-niftyoi-pe",
+          "scalp-two-candle-sensex-sensexoi-pe",
+          "scalp-trending-oi-nifty-pe",
+          "scalp-trending-oi-sensex-niftyoi-pe",
+          "scalp-trending-oi-sensex-sensexoi-pe",
+          "scalp-morning-trade-nifty-pe",
+          "scalp-morning-trade-sensex-niftyoi-pe",
+          "scalp-morning-trade-sensex-sensexoi-pe",
+          "scalp-open-high-low-nifty-pe",
+          "scalp-open-high-low-sensex-niftyoi-pe",
+          "scalp-open-high-low-sensex-sensexoi-pe");
 
   private final RegistryService registry;
 

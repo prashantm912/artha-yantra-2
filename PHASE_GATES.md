@@ -19,17 +19,23 @@ forward-work authority (Phases 0–6). The legacy **Stage A–G** system in the 
 PR #6 `a96c99b`; F/G via the market-data + oipulse-parity PRs through #41). Its exit-gate
 checklists stay as the as-built reference; new phase boundaries are tracked by the map below.
 
-**Current frontier (2026-06-26) = the W-U4 Upstox cutover (the ONLY remaining pending wave) + live-gated
-QA.** Phases 0–3.5 MERGED; Phase 4 substantially built (64/65 pages); the **2b scalper tunable-infra build
-is COMPLETE** (see the block below). The expired/OI backfill is now **COMPLETE/idle** (`ExpiredBackfillAutoResume`
-self-resume skips all 32,543 legs — nothing left to fetch), which unblocked the two formerly-gated items: the
-**Data Ops Console (#121) is DEPLOYED + live** (backend + `/data-ops` route both serve 200; #219 fixed the bare
-route), and the **scalper tuning sweep pipeline is validated**. What remains is live-session/owner-gated:
-**W-U4** (Upstox cutover — OI parity + tick-latency A/B need market hours, then the owner's deliberate flip;
-the END-STATE keeps BOTH brokers split by capability — `ticker=Kite`, `quotes/candles/optionchain/fiidii/
-analytics/expired-backfill=Upstox`, EOD=bhavcopy, orders=OpenAlgo, **not** a full swap), and the
-**data-foundation value-verify** (render every OI page in History mode vs oipulse — the backfill data is now
-ready; the comparison needs the owner's oipulse sign-in).
+**Current frontier (2026-06-30) = the Phase-5 Minervini screener is the lone remaining net-new build; everything
+else pending is owner-gated (numbers/sign-off/a live flip), not code.** Phases 0–3.5 MERGED; the **2b scalper
+tunable-infra build is COMPLETE** (see the block below). Two big build tracks **closed 2026-06-30**: the **scalper
+signal-side §1a** (`FU1-manual-checks` #371, `E5-rsi-band`/`E5-rsi-recovery` #372/#373, `E3-fii-participant`
+#374) and the **frontend/oipulse §1b** (Risk Calculator #375, Multiple Window #376, Futures Pre-Open #377,
+Announcement #378, Advance Chart + Multiframe #379, **Calendar Spread #390**). The E11 PE-mirror (#381/#382) +
+straddle combined-prem auto-exit (#383/#384), the **E9 take-profit optimizer-tunable band (#386)**, the
+**`instruments.exchange_token` populate (#387)**, and the **Phase-5 200-day equity daily backfill (#389,
+live-verified 222 candles/symbol)** all landed — so the Minervini screener's 150/200-day MA history is now
+seeded. The single live forward-paper analysis runbook (#392) is in place for the ~1-month tune. What remains is
+live-session/owner-gated: **W-U4** (Upstox cutover — OI parity + tick-latency A/B need market hours, then the
+owner's deliberate flip; the END-STATE keeps BOTH brokers split by capability — `ticker=Kite`, `quotes/candles/
+optionchain/fiidii/analytics/expired-backfill=Upstox`, EOD=bhavcopy, orders=OpenAlgo, **not** a full swap), the
+**data-foundation value-verify** (render every OI page in History mode vs oipulse — backfill data is ready; the
+comparison needs the owner's oipulse sign-in), and the scalper **arming numbers** (E8 roster / E9 band / soft-dot
+gates — all owner forward-paper outputs). The expired/OI backfill is **COMPLETE/idle** and the **Data Ops Console
+(#121) is DEPLOYED + live** (#219 route fix). Forward inventory: `docs/superpowers/plans/2026-06-30-remaining-build-inventory.md`.
 
 **Scalper engine → 100% (2026-06-28):** the S24 incorporation is closed (debloated operative doc + W3 drift
 tags + W4 gates + 2b infra, all BUILT/inert). Finishing the engine to "nothing-deferred" is now tracked in
@@ -120,11 +126,11 @@ history.
 | Phase | Branch | State |
 |---|---|---|
 | 0 — OpenAlgo spine | `feat/openalgo-spine` | **MERGED** (PR #39) |
-| 1 — Data inflow (routing + ExpiryTrack OI + daily) | merged #40/#41/#112–#116, #137–#149 | **MOSTLY** — §4 routing + EOD bhavcopy daily (#40/#41) + §5 expired OHLCV+OI backfill (#112–#116) **COMPLETE/idle** (self-resume skips all 32,543 legs) + **Upstox login-free live capture (OI/quotes/v3-WS, #137/#139/#141/#149) BUILT flag-gated default-Kite** — the broker END-STATE (#217) keeps BOTH brokers split by capability; cutover = W-U4 (deploy + live A/B + owner flip), the only remaining wave. **DEFERRED**: §15 200-day daily history (Upstox v3 historical-candle can serve it — wire `UpstoxDailyHistoryClient`, see backlog) |
+| 1 — Data inflow (routing + ExpiryTrack OI + daily) | merged #40/#41/#112–#116, #137–#149 | **MOSTLY** — §4 routing + EOD bhavcopy daily (#40/#41) + §5 expired OHLCV+OI backfill (#112–#116) **COMPLETE/idle** (self-resume skips all 32,543 legs) + **Upstox login-free live capture (OI/quotes/v3-WS, #137/#139/#141/#149) BUILT flag-gated default-Kite** — the broker END-STATE (#217) keeps BOTH brokers split by capability; cutover = W-U4 (deploy + live A/B + owner flip), the only remaining wave. **§15 200-day daily history DONE (#389)** — `UpstoxEquityMasterClient` (NSE_EQ key) + `EquityDailyBackfillService` (`POST /market/admin/equity-daily-backfill`) → `candles`@1d `source=BACKFILL`; live-verified 222 candles/symbol (RELIANCE/TCS/INFY) |
 | 2 — Quant libs (greeks + indicators) | merged #40, #156 | **DONE** — §7 scalp indicators (#40); §6 **higher-order greeks vanna/charm/vomma DONE (#156)** on `black76-math` + the chain (FD-cross-checked) |
 | 3 — Scalper engine (§12 + §8 SPAN) | merged #42/#43/#44, #126, #144/#148/#154/#155 | **MERGED — registry 12/12** — core #1/#5/#6/#10 + Tier-2 OI fidelity + #2(faithful)/#4/#9/#12 + #7 Hero-Zero (#130) + **#3/#8 (#148) + #11 long-straddle on a two-leg/neutral primitive (#155)**, all paper drafts. **SPAN appliance dormant (#126) + `.spn` golden harness (#144)**; **`OpenAlgoOrderGateway` dormant (#154)**; checklist UI (#125). Only **DEFERRED**: SHORT-premium SELL legs of #8/#11 (SPAN live + live orders), full stock-universe #3 (→Track-1), §2 OiPulse badge |
-| 4 — React migration (§10 + §11) | merged #82–#110, #121, #146–#177 | **IN PROGRESS** — cockpit + React cutover + oipulse W1/W2/W3 + Data Ops Console (#121) + new pages OI-heatmap/OI-expiry/Open&High (#146/#150/#153) + cockpit paper-trade panel & scalp alerts (#151/#152) merged; **2026-06-25 frontend pass MERGED+DEPLOYED** — look/UX **revamp** (tokens+fonts+shadcn+DataTable+signature header/QueryState/motion, #158–#163) rolled out to 64/65 pages (#166–#173) + **World Indices** (#174/#176) + **Pre-Open Market** (#175) Upstox pages + **"All Menu"→per-section nav bar** (#177); **2026-06-25:** the analytics surfaces shipped (live P&L strip + exit-reason breakdown + compare leaderboard + OI-attribution tab, #199–#201), the **whole OI-page suite is now HISTORY-capable** (candle-derived fallback `HistoricalOiReader`, #210/#211, + ATM-band IV recompute #213 + the #214 `Instant`-key fix that un-NEUTRAL'd the OI/IV/VIX factors and validated the OI-confluence thesis, live-verified), and the `/orders` read-path is verified (stub → broker-gated); **Data Ops Console (#121) DEPLOYED + live** (#219 route fix); backtest jobs/results show strategy name + returns + filter + pagination (#230). Remaining: data-foundation value-verify (owner oipulse sign-in), OiPulse ≥90% badge, FE history date-pickers where missing |
-| 5 — Minervini Track-1 screener (§13) | `feat/minervini-track1` | **NOT STARTED** — needs Phase-1 §15 200-day history |
+| 4 — React migration (§10 + §11) | merged #82–#110, #121, #146–#177 | **IN PROGRESS** — cockpit + React cutover + oipulse W1/W2/W3 + Data Ops Console (#121) + new pages OI-heatmap/OI-expiry/Open&High (#146/#150/#153) + cockpit paper-trade panel & scalp alerts (#151/#152) merged; **2026-06-25 frontend pass MERGED+DEPLOYED** — look/UX **revamp** (tokens+fonts+shadcn+DataTable+signature header/QueryState/motion, #158–#163) rolled out to 64/65 pages (#166–#173) + **World Indices** (#174/#176) + **Pre-Open Market** (#175) Upstox pages + **"All Menu"→per-section nav bar** (#177); **2026-06-25:** the analytics surfaces shipped (live P&L strip + exit-reason breakdown + compare leaderboard + OI-attribution tab, #199–#201), the **whole OI-page suite is now HISTORY-capable** (candle-derived fallback `HistoricalOiReader`, #210/#211, + ATM-band IV recompute #213 + the #214 `Instant`-key fix that un-NEUTRAL'd the OI/IV/VIX factors and validated the OI-confluence thesis, live-verified), and the `/orders` read-path is verified (stub → broker-gated); **Data Ops Console (#121) DEPLOYED + live** (#219 route fix); backtest jobs/results show strategy name + returns + filter + pagination (#230). **2026-06-30 — frontend/oipulse §1b COMPLETE:** Risk Calculator (#375), Multiple Window (#376), Futures Pre-Open (#377), Announcement (#378), Advance Chart + Multiframe (#379), **Calendar Spread (#390)** all built (Event Days SKIP — static Budget slideshow, no API). Remaining: data-foundation value-verify (owner oipulse sign-in), OiPulse ≥90% badge, deploy-verify of #377 (pre-open render)/#378 (NSE field mapping)/#379 (chart render) |
+| 5 — Minervini Track-1 screener (§13) | `feat/minervini-track1` | **NOT STARTED — UNBLOCKED** — the Phase-1 §15 200-day history is now seeded (#389); the daily 8-gate Trend Template + RS-rank screener is the lone remaining net-new build |
 | 6 — Backtest + forward wiring (§14) | merged #114–#119, #195–#211, **#220–#230** | **SUBSTANTIAL** — Part 2 premium-as-primary replay landed (options trade their own 1m premium, golden-pinned). **2026-06-25:** real-data value-verify DONE; sizing guards (#198), session/square-off/expiry enforcement (#206), the **OI-confluence entry gate** (#208/#209), a sweepable optimize block (#207), the **OI-attribution surface** (#201). **2026-06-26 (2b):** the **fold engine routes walk-forward folds through `OptionsPremiumReplay`** (#220 → `oos_fold_mean` populates); backtests read a historical **NIFTY-FUT-CONT / SENSEX-FUT-CONT** continuous front-future 1m signal series (#222/#223/#225); `signal_underlying` / `strike_reference` / option-execution-root are **three independent refs** (ADR-0003, #224/#225); the **tick-wise golden runner supports a 3m primary** (#228 — it had 5m/15m/1h only, so every 3m scalper backtest failed at submission; parity-safe additive `case "3m"`); **36 scalper variants ran 36/36 functional backtests, zero engine errors** (#229). **Backtest API:** `strategyId` is the registry UUID (not the slug), omit `strategyVersion` → latest draft, terminal job status = `completed`, results keyed by `resultRef`; the optimizer reads `optimize.parameters` from the YAML but `walkForward`/`objective`/`maxTrials` from the REQUEST. Remaining: **live forward-paper tuning (2c — backtest sweeps overfit, functional screening only)**, forward-test wiring; needs Phases 3 + 5 |
 
 ---
@@ -554,9 +560,9 @@ each with its target:
   fixture-pinned envelope tests + no-tick alerting. Full wiring requires
   replacing the SDK socket with a first-party WS client (revisit when Kite
   changes its wire format or at the Stage-C hardening pass).
-- **`instruments.exchange_token` population** — column exists, never written
-  (dump record drops it). Wire through `InstrumentRecord` + both dump parsers
-  when anything consumes it (nothing in Stages B–D does).
+- ~~**`instruments.exchange_token` population**~~ — **RESOLVED 2026-06-30 (#387):**
+  `exchange_token` now threaded wire→domain→DB (`InstrumentRecord` field + both dump
+  parsers + `setLong(4, …)`); nullable BIGINT column, no migration.
 - **Canary result Redis key** — result lands in `kite:contract:check` (JSON) +
   `GET /auth/kite/status`, not embedded in the plain-string
   `kite:session:status` the spec names (would break that key's existing

@@ -6,6 +6,22 @@ The forward-work authority is `superpowers/plans/2026-06-19-openalgo-react-integ
 deferrals so a fresh session has one place to look. The per-row tables below are a provenance ledger —
 new state is appended as dated update blocks (latest first), the old blocks are kept, never rewritten.
 
+**2026-06-30 (EOD) reconciliation — §1a + §1b build tracks CLOSED; only the Minervini screener is net-new code left:**
+- **Scalper signal-side §1a COMPLETE** (#371 manual-checks, #372/#373 RSI band+recovery, #374 FII-participant) and
+  **frontend/oipulse §1b COMPLETE** (#375 Risk Calculator, #376 Multiple Window, #377 Futures Pre-Open, #378
+  Announcement, #379 Advance Chart + Multiframe, **#390 Calendar Spread**; Event Days SKIP — static Budget slideshow).
+- **Owner-decision builds landed:** E11 PE-mirror (#381/#382, 9 NIFTY-PE published + 18 SENSEX-PE drafts) + straddle
+  combined-prem auto-exit (#383/#384); **E9 take-profit optimizer-tunable band (#386)**; **`instruments.exchange_token`
+  populate (#387)**.
+- **Phase-5 §15 200-day equity daily backfill DONE (#389)** — Upstox cash-equity daily → `candles`@1d, live-verified
+  222 candles/symbol → the **Minervini Trend-Template screener is now UNBLOCKED** and is the lone remaining net-new build.
+- **Live forward-paper analysis runbook (#392)** in place — after ~1 month of live-paper scalper trades, the E9 band +
+  per-scalper keep/cut/tune are tuned via a counterfactual replay over real captured premium (backtest optimizer
+  can't tune scalpers — parity firewall). Authority: `superpowers/plans/2026-06-30-live-signal-analysis-runbook.md`.
+- **Still open (owner-gated, NOT code):** W-U4 Upstox cutover (live A/B + flip); data-foundation value-verify (oipulse
+  sign-in); scalper arming numbers (E8 roster / E9 band / soft-dot gates — forward-paper outputs); Telegram scalp-alert
+  opt-in (bot token). Everything the owner has decided NOT to do is consolidated in the inventory §6 (WILL NOT BE DONE).
+
 **2026-06-30 reconciliation — scalper-to-100 build in progress + live signal path GO:**
 - **12 NIFTY options-scalper strategies PUBLISHED + live**; the live signal path was verified GO (engine loads
   the 12, `signal_underlying` resolves to the live dated front contract `NIFTY26JULFUT`, 3m primary serves).
@@ -102,7 +118,7 @@ cutover) is now the ONLY remaining pending wave** — prepped, gated on a live m
 |---|---|---|---|
 | §5 expired-instrument OHLCV+OI backfill (ExpiryTrack historical) | **DONE / COMPLETE** | — (#112–#116) | Upstox Plus funded; the `ExpiredBackfillService` ingester (bounded strikes + sliding-window limiter + resume) loads NIFTY/SENSEX expired CE/PE/FUT per-min OHLCV+OI into `candles` (`source='BACKFILL'`). First full pull **COMPLETE/idle** as of 2026-06-26 (`ExpiredBackfillAutoResume` self-resume now skips all 32,543 legs — nothing left to fetch). See [[upstox-expired-instruments]]. |
 | Native (live) intraday-OI snapshot history depth | PARTIAL | ongoing forward-capture | Live 3-min full-chain OI capture has run since 2026-06-15 (forward-accruing); deep past OI for stocks (non-expired) still bought-only. |
-| §15 200-day daily history | DEFERRED | before Phase 5 | Needed by the Minervini screener (N-day high / RS rank); not needed earlier. SOURCE OPTIONS: (a) **Upstox historical-candle v3** `GET /v3/historical-candle/{key}/days/1/{to}/{from}` on the analytics token — login-free, multi-year daily, the same client family as the expired backfill (recommended — reuse `UpstoxExpiredInstrumentsClient`/`UpstoxFnoMasterClient` pattern); (b) openchart; (c) the EOD-bhavcopy daily candles already captured (forward-only, shallow). |
+| §15 200-day daily history | **DONE (#389)** | — | Built option (a): `UpstoxEquityMasterClient` (NSE_EQ tradingsymbol→`NSE_EQ\|<ISIN>` key off `complete.json.gz`) + `EquityDailyBackfillService` (async, `POST /api/v1/market/admin/equity-daily-backfill`) → `candles`@1d `source=BACKFILL`, reusing the `UpstoxExpiredInstrumentsClient` client family + shared rate-limiter. **Live-verified: RELIANCE/TCS/INFY each return 222 daily candles** via `/candles?interval=1d` → the Minervini screener's 150/200-day MAs compute without DATA_GAP. |
 | Live OI cutover (login-free capture) | **BUILT — deploy + flip pending (#137/#149)** | deploy after backfill, then A/B + flip | Direct-Upstox analytics-token live OI capture (login-free) shipped flag-gated default-Kite (#137); the cutover canary + runbook + OI A/B-diff tool are done (#149). Remaining: deploy off-hours + reconcile Upstox-vs-Kite per-strike OI for a session + flip `source.optionchain=upstox`. |
 | §6.3 BSM-on-spot seam (stock options) | DEFERRED | future stock-options work | Index path uses Black-76-on-the-forward; no stock-options consumer yet. |
 
@@ -167,7 +183,7 @@ mega-dropdown split into a per-section menu bar** (#177). Authority for the reva
 
 | Phase | Status | Needs | Notes |
 |---|---|---|---|
-| 5 — Minervini Track-1 screener (§13) | NOT STARTED | Phase-1 §15 200-day history | Daily 8-gate Trend Template + RS rank; VCP/pivot/Cheat/Power-Play deferred (owner accepts manual chart-reading of entries). |
+| 5 — Minervini Track-1 screener (§13) | **NOT STARTED — UNBLOCKED** | — (200-day history seeded #389) | Daily 8-gate Trend Template + RS rank; VCP/pivot/Cheat/Power-Play deferred (owner accepts manual chart-reading of entries). The 200-day MA history is now on disk (#389) → this is the lone remaining net-new build. |
 | 6 — Backtest + forward wiring (§14) | **PARTIAL** | Phases 3 + 5 (+ the §5 OI data now loading) | **Part 2 premium-as-primary replay LANDED** (#114–#119): an options backtest now trades the option's own 1m premium series (`CANDLE_1M`), not the index close — golden-pinned. The v1 simplifications are now CLOSED (#123): per-bar mark-to-market, FillSimulator slippage+costs on the premium leg, and a 422 DATA_GAP coverage pre-flight. **2026-06-25/26:** session/square-off/expiry enforced in replay (#206), an opt-in **OI-confluence entry gate** drops legs entering against the historical Connecting-Dots trend (#208/#209), a sweepable optimize block (#207), and a post-hoc **OI-attribution** surface (#201) all landed — all parity-safe. Remaining: the value-verify on real backfilled premium (gated on the backfill), forward-test wiring. Scalp historical-backtest fidelity is directional, not P&L-exact (R4) — **and OI-led strategies read MUTED on backtests because derived history forces Dow+IV NEUTRAL; judge them on FORWARD paper with real captured OI, not a weak historical backtest** (#214 lesson). raptorbt cross-check oracle DEFERRED. |
 
 ## Data Ops Console — parked decisions (from #121, B1–B6)
@@ -184,7 +200,7 @@ mega-dropdown split into a per-section menu bar** (#177). Authority for the reva
 | Item | Status | Target | Reason |
 |---|---|---|---|
 | B-9 binary-frame guard production wiring | DEFERRED | when Kite changes its wire format / a first-party WS client | javakiteconnect exposes no raw-frame hook; today's coverage = the daily contract canary + fixture-pinned envelope tests. |
-| `instruments.exchange_token` population | DEFERRED | when a consumer needs it | Column exists, never written; nothing in Phases B–D consumes it. |
+| `instruments.exchange_token` population | **DONE (#387)** | — | `exchange_token` now threaded wire→domain→DB (`InstrumentRecord` field + Live/Mock dump parsers + `setLong(4, …)`); nullable BIGINT, no migration. |
 | `candles_1h` IST alignment (buckets to UTC = :30 IST) | DEFERRED | before a 1h chart/overlay consumer | Re-anchoring means dropping/recreating the cagg. |
 | Options fidelity live walk (SNAPSHOT / SYNTHETIC_B76) | DEFERRED | first live-mode options session | IT-green; needs a real options archive + a multi-month window the mock can't supply. |
 | Walk-forward folds + fold-fed MedianPruner live walk | DEFERRED | a real multi-month dataset | Can't be shown on the ~3-day rolling mock window. |

@@ -68,7 +68,7 @@ Authorities used: `2026-06-28-scalper-to-100-roadmap.md` (+ the 12 `2026-06-27-b
 >
 > **Owner §1b dispositions (2026-06-30):** `feat-event-days` = **SKIP** (it's a static proprietary
 > Union-Budget slideshow, NOT an event calendar — `docs/oipulse-study/features/event-days.md`; inventory
-> mischaracterized it); `strat-calendar-spread` = **DEFER** (owner); `equity-announcement` = **✅ BUILT
+> mischaracterized it); `strat-calendar-spread` = **✅ BUILT #390** (owner un-deferred); `equity-announcement` = **✅ BUILT
 > #378** (owner overrode the master-plan §20.5 defer); `w4-advance-chart` + `w4-multiframe-chart` = **BUILD**.
 
 ### 1a. Scalper signal-side (✅ ALL 4 SHIPPED — COMPLETE) — small, in-service, parity-safe tag-gate pattern
@@ -79,7 +79,7 @@ Authorities used: `2026-06-28-scalper-to-100-roadmap.md` (+ the 12 `2026-06-27-b
 | ~~`E5-rsi-recovery-postvertical`~~ | **✅ DONE #373** — `rsiRecovery` trough→recovery sequencer, armed on trend-change ×3 (RATIFICATION-PACK row 51 = KEEP) | `rsi-multi-timeframe.md` §3.7 | shipped 2026-06-30 |
 | ~~`E3-fii-participant-classifier`~~ | **✅ DONE #374** — `ParticipantBiasService` LB/SC/LU/SB classifier + `/fii-dii/bias` + `fii-dii-gate` (default-OFF) | `macro-vix-global-fii.md` §3.3 | shipped 2026-06-30 |
 
-### 1b. Frontend / oipulse replication (COMPLETE — 6 built; Event Days SKIP + Calendar Spread DEFER per owner) — no UI work remains
+### 1b. Frontend / oipulse replication (COMPLETE — 7 built incl. Calendar Spread #390; Event Days SKIP per owner) — no UI work remains
 | id | item | backend? | code-evidence of absence |
 |---|---|---|---|
 | ~~`feat-risk-calculator`~~ | **✅ DONE #375** — Risk Calculator (`/features/risk-calculator`; pure `core/riskCalculator` + page + nav) | **pure-frontend** | shipped 2026-06-30 |
@@ -91,7 +91,7 @@ Authorities used: `2026-06-28-scalper-to-100-roadmap.md` (+ the 12 `2026-06-27-b
 | ~~`w4-advance-chart`~~ | **✅ DONE #379** — Advance Chart (`/advance-chart`; LWC + VWAP/VWMA/SuperTrend/RSI/volMA via tested `core/indicators`). TV-binary extras (drawing/study-templates/OI-bar/trade-history) deferred. | LWC (in stack) | shipped 2026-06-30 |
 | ~~`w4-multiframe-chart`~~ | **✅ DONE #379** — Multiframe Chart (`/multiframe-chart`; 2×2 multi-TF grid of AdvanceCharts) | depends on Advance-Chart | shipped 2026-06-30 |
 
-### 1c. Data / infra — Phase-5 equity-screener chain (2) — sequential
+### 1c. Data / infra — Phase-5 equity-screener chain (200-day backfill DONE #389; **Minervini screener** is the lone remaining net-new build) — sequential
 | id | item | doc | code-evidence of absence |
 |---|---|---|---|
 | ~~`phase5-200day-equity-daily-backfill`~~ | **✅ DONE #389** — `UpstoxEquityMasterClient` (NSE_EQ key resolver) + `EquityDailyBackfillService` (async, `POST /market/admin/equity-daily-backfill`) → `candles`@1d `source=BACKFILL`. **Live-verified: RELIANCE/TCS/INFY each return 222 daily candles** via `/candles?interval=1d` (M1b met, MAs compute without DATA_GAP). | `DEFERRED_BACKLOG.md` L102; master-plan §15 | shipped 2026-06-30 (Upstox cash-equity daily, not the openchart sidecar) |
@@ -210,10 +210,10 @@ These are **closed by an explicit owner decision**, not unbuilt work. A future "
 | SENSEX point-scale constant | **WON'T build** | dead code — all 2b scalpers signal on NIFTY-FUT-CONT, stops already in NIFTY-signal points |
 | E1 equity-screener OOM path | **WON'T build** | replaced by Upstox on-demand + the captured bank-radar (#345-347) |
 
-**Still genuinely open (NOT closed):** §1c Phase-5 chain (200-day backfill → Minervini) is the only net-new
-code; `strat-calendar-spread` is **DEFERRED** (owner may revisit, not a NO); the §2 rows below the E9/instruments
-lines (`E9-target-trail` live number, `span-real-spn-broker-parity`, `data-foundation-value-verify`) are
-owner-NUMBER/sign-off gated, not build gaps.
+**Still genuinely open (NOT closed):** the §1c Phase-5 **Minervini screener** is the only net-new code (its
+200-day MA history is now seeded #389; `strat-calendar-spread` shipped #390); the §2 rows below the
+E9/instruments lines (`E9-target-trail` live number, `span-real-spn-broker-parity`, `data-foundation-value-verify`)
+are owner-NUMBER/sign-off gated, not build gaps.
 
 ---
 

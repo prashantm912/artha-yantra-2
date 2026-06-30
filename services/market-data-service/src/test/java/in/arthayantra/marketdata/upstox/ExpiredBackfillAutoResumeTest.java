@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.upstox;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -10,11 +11,14 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketdata.upstox.ExpiredBackfillService.Status;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 
 /**
@@ -100,7 +104,7 @@ class ExpiredBackfillAutoResumeTest {
   void selfHeal_firesWhenCoverageStillIncomplete() {
     clientPresent();
     when(service.status()).thenReturn(status("OK", Instant.now()));
-    when(repo.hasIncompleteCoverage()).thenReturn(true);
+    when(repo.hasIncompleteCoverage(any())).thenReturn(true);
     autoResume(true).selfHeal();
     verifyResumed(1);
   }
@@ -109,7 +113,7 @@ class ExpiredBackfillAutoResumeTest {
   void selfHeal_noopWhenCompleteAndFresh() {
     clientPresent();
     when(service.status()).thenReturn(status("OK", Instant.now()));
-    when(repo.hasIncompleteCoverage()).thenReturn(false);
+    when(repo.hasIncompleteCoverage(any())).thenReturn(false);
     autoResume(true).selfHeal();
     verifyResumed(0);
   }
@@ -119,9 +123,23 @@ class ExpiredBackfillAutoResumeTest {
     clientPresent();
     when(service.status())
         .thenReturn(status("OK", Instant.now().minus(25, ChronoUnit.HOURS)));
-    when(repo.hasIncompleteCoverage()).thenReturn(false);
+    when(repo.hasIncompleteCoverage(any())).thenReturn(false);
     autoResume(true).selfHeal();
     verifyResumed(1);
+  }
+
+  @Test
+  void selfHeal_probesCoverageWithTheTrailingYearWalkWindow() {
+    // The "work remaining" probe MUST be scoped to the same window trigger() walks (now − 1 year),
+    // so frozen out-of-window partials can't keep the self-heal re-walking the roster forever.
+    clientPresent();
+    when(service.status()).thenReturn(status("OK", Instant.now()));
+    when(repo.hasIncompleteCoverage(any())).thenReturn(false);
+    autoResume(true).selfHeal();
+
+    ArgumentCaptor<LocalDate> floor = ArgumentCaptor.forClass(LocalDate.class);
+    verify(repo).hasIncompleteCoverage(floor.capture());
+    assertThat(floor.getValue()).isEqualTo(LocalDate.now(Ist.ZONE).minusYears(1));
   }
 
   // ---- resilience -------------------------------------------------------------------------------

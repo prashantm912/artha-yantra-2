@@ -87,7 +87,11 @@ public class ExpiredBackfillAutoResume {
     if ("NEVER_RUN".equals(s.state()) || "FAILED".equals(s.state())) {
       return true;
     }
-    if (repo.hasIncompleteCoverage()) {
+    // "Work remaining" must mean work the resume can actually REACH: scope the probe to the same
+    // trailing-year window trigger() walks. An incomplete contract whose expiry rolled out of that
+    // window is unreachable (Upstox no longer serves it), so it must not keep the self-heal re-walking
+    // the roster every hour and starving the shared Upstox limiter.
+    if (repo.hasIncompleteCoverage(LocalDate.now(Ist.ZONE).minusYears(1))) {
       return true;
     }
     // state == OK with every contract complete: re-walk at most once per catch-up window (new expiries).

@@ -1,0 +1,85 @@
+# PE-MIRROR (E11 STEP, owner 2026-06-30) of scalp-golden-crossover-sensex-niftyoi — auto-derived bearish counterpart: option_types:[PE]
+# + the directional VWAP/VWMA/SuperTrend gates and the signal-exit flipped to the PE side. Strictly
+# additive (the CE strategy is byte-identical). Seeded as a DRAFT — the owner publishes from the UI.
+#
+# AUTO-DERIVED (2b-1) variant of the scalp-golden-crossover family — signal on NFO/NIFTY-FUT-CONT. Executes on SENSEX options (strike anchored on BFO/SENSEX-FUT-CONT).
+# Siva #6 — Golden Crossover. Siva's golden cross is NOT a generic EMA cross: it is the
+# Supertrend AND VWMA(20) lines piercing VWAP together on the same candle (§3.6/§4.2). The
+# chart gate encodes the golden-cross STATE (VWMA above VWAP + Supertrend bullish — the engine
+# crossover op can't take VWAP, a built-in, as an operand); the §12.3
+# confluence seam then confirms OI/macro (drastic two-sided OI) and buys the nearest-weekly
+# ATM-band NIFTY CE. Evaluates on the NIFTY front future (Model A).
+schema: strategy-schema/v1
+id: scalp-golden-crossover-sensex-niftyoi-pe
+name: "Scalper · Golden Crossover · SENSEX PE (NIFTY-OI)"
+version: 1.0.0
+description: "Golden-crossover scalp (Siva #6) on the NIFTY front future; ST+VWMA pierce VWAP + confluence; long-premium PE only."
+author: owner
+# `entry-candle-stop` anchors the structural stop on the crossover candle's low (§3.6 breakout form).
+tags: [scalper, options, intraday, sensex, entry-candle-stop, rsi-s24-bands, delta-s24-floor, premium-s24-band, iv-buyer-cap, supertrend-15m, s24-trade-window]
+
+universe:
+  mode: options_of_underlying
+  underlying: { exchange: BSE, tradingsymbol: "SENSEX" }
+  signal_underlying: { exchange: NFO, tradingsymbol: "NIFTY-FUT-CONT" }
+  strike_reference: { exchange: BFO, tradingsymbol: "SENSEX-FUT-CONT" }
+  options:
+    expiry: nearest_weekly
+    strikes: { selector: atm_window, width: 3 }
+    option_types: [PE]
+
+timeframes:
+  primary: 3m
+  additional: [15m, 1h]            # 15m for the §3.10 ST-trend confirm; 1h for the bias
+
+indicators:
+  - { name: VWMA,       alias: vwma20,    timeframe: 3m, params: { period: 20 } }
+  - { name: PSAR,       alias: psar,      timeframe: 3m, params: { step: 0.02, max: 0.2 } }
+  - { name: RSI,        alias: rsi14,     timeframe: 3m, params: { period: 14 }, weight: 1.0,
+      normalize: { type: rsi_momentum } }
+  - { name: SUPERTREND, alias: supertrend, timeframe: 3m, params: { period: 10, multiplier: 2.0 },
+      weight: 1.0, normalize: { type: direction } }
+  - { name: SUPERTREND, alias: bias60m,   timeframe: 1h, params: { period: 7, multiplier: 3.0 } }
+  - { name: SUPERTREND, alias: supertrend15m, timeframe: 15m, params: { period: 7, multiplier: 3.0 } } # §3.10 15m trend confirm
+  - { name: SUPERTREND_LINE, alias: supertrend_line, timeframe: 3m, params: { period: 10, multiplier: 2.0 } } # E9 §3.10: the ST LINE (price) for the trail-with-ST exit
+
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - "vwma20 < vwap"      # VWMA(20) above VWAP — the VWMA leg of Siva's golden cross
+      - "supertrend < 0"     # Supertrend bullish — the ST leg (both lines on VWAP's bull side)
+  scoring:
+    threshold: 0.2
+
+exit_rules:
+  - { type: signal_exit, params: { rule: "vwma20 > vwap", min_volume: 125000 } }   # VWMA falls back below VWAP (cross undone)
+  - { type: trailing_stop, params: { basis: indicator, alias: supertrend_line } }   # E9 §3.10: trail with the Super Trend line — exit when the future closes through it
+  - { type: time_stop,   params: { max_bars: 12 } }
+
+risk:
+  position_sizing: { method: premium_budget, params: { budget_inr: 15000 } }
+  max_positions: 1
+  max_positions_per_underlying: 1
+  max_daily_loss_pct: 2.0
+  session:
+    style: intraday
+    window: { from: "09:45", to: "15:00" }
+    square_off: "15:15"
+
+backtest:
+  defaults: { interval: 1m, lookback_days: 120, initial_capital: 200000, costs: { per_lot_inr: 20, slippage_ticks: 1 } }
+  oi_confluence_gate: { enabled: false, interval: "5m", index: "NIFTY 50" }
+  optimize:
+    parameters:
+      - { path: "indicators[alias=vwma20].params.period",         range: [10, 30], step: 1 }
+      - { path: "indicators[alias=rsi14].params.period",          range: [9, 21], step: 1 }
+      - { path: "indicators[alias=supertrend].params.period",     range: [7, 14], step: 1 }
+      - { path: "indicators[alias=supertrend].params.multiplier", range: [1.5, 3.5] }
+      - { path: "entry_rules.scoring.threshold",                  range: [0.1, 0.5] }
+      - { path: "exit_rules[type=time_stop].params.max_bars",   range: [8, 18], step: 1 }
+    method: tpe
+    max_trials: 40
+    objective: { metric: expectancy, direction: maximize, fold_aggregation: mean }
+    constraints: { min_trades: 10 }
+    walk_forward: { train_days: 30, test_days: 30, step_days: 20, anchored: false }

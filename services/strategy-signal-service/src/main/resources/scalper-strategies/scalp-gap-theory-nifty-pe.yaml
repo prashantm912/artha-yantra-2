@@ -1,0 +1,90 @@
+# PE-MIRROR (E11 STEP, owner 2026-06-30) of scalp-gap-theory-nifty — auto-derived bearish counterpart: option_types:[PE]
+# + the directional VWAP/VWMA/SuperTrend gates and the signal-exit flipped to the PE side. Strictly
+# additive (the CE strategy is byte-identical). Seeded as a DRAFT — the owner publishes from the UI.
+#
+# AUTO-DERIVED (2b-1) variant of the scalp-gap-theory family — signal on NFO/NIFTY-FUT-CONT. Re-homed off BankNifty (now monthly-expiry) per the 2b LOCKED decision.
+# Siva #4 - Gap Theory. The `gap-theory` tag arms the §12.3 GapTheoryGate: on the 3-min NIFTY
+# future a significant (>3 pt / 60 tick) gap fills ~90% of the time same-day, so a fresh entry is
+# BLOCKED while the gap is still open and PASSES only once it has filled, then trades WITH the
+# prevailing trend via the normal confluence (Session-24 time box: the gap is a 30-60 min play; if
+# unfilled on volume by ~40 min, trade the prevailing trend anyway). The structural stop is anchored
+# on the candle BEFORE the gap candle (the matrix SL alternative; the doc's preferred SuperTrend-level
+# SL is a deferred refinement because the engine exposes SuperTrend only as a direction, not a level).
+# Evaluates on the NIFTY front future (Model A); the confluence seam buys the nearest-weekly
+# ATM-band CE.
+#
+# DEFERRED (manual only, not automated in v1): the counter-trend "trade TOWARD the gap" gap-fill
+# scalp (entry on rejection toward the gap, target = the gap level, SL = day-high/day-low) is
+# explicitly labelled risky / scalping-only in §3.4 and is NOT wired here.
+schema: strategy-schema/v1
+id: scalp-gap-theory-nifty-pe
+name: "Scalper · Gap Theory · NIFTY PE"
+version: 1.0.0
+description: "Gap-fill scalp (Siva #4) on the NIFTY 3-min front future; wait for the >3 pt gap to fill, then trade WITH the prevailing trend; pre-gap candle SL; long-premium PE only. The counter-trend gap-fill variant (SL = day-high/low) is a DEFERRED manual-only play, not automated."
+author: owner
+tags: [scalper, options, intraday, nifty, gap-theory, volume-pump, rsi-s24-bands, delta-s24-floor, premium-s24-band, s24-trade-window, vwap-distance]
+
+universe:
+  mode: options_of_underlying
+  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  signal_underlying: { exchange: NFO, tradingsymbol: "NIFTY-FUT-CONT" }
+  options:
+    expiry: nearest_weekly
+    strikes: { selector: atm_window, width: 3 }
+    option_types: [PE]
+
+timeframes:
+  primary: 3m
+  additional: [1h]
+
+indicators:
+  - { name: VWMA,       alias: vwma20,    timeframe: 3m, params: { period: 20 } }
+  - { name: PSAR,       alias: psar,      timeframe: 3m, params: { step: 0.02, max: 0.2 } }
+  - { name: RSI,        alias: rsi14,     timeframe: 3m, params: { period: 14 }, weight: 1.0,
+      normalize: { type: rsi_momentum } }
+  - { name: SUPERTREND, alias: supertrend, timeframe: 3m, params: { period: 10, multiplier: 2.0 },
+      weight: 1.0, normalize: { type: direction } }
+  - { name: SUPERTREND, alias: bias60m,   timeframe: 1h, params: { period: 7, multiplier: 3.0 } }
+  - { name: SUPERTREND_LINE, alias: supertrend_line, timeframe: 3m, params: { period: 10, multiplier: 2.0 } } # E9 §3: the ST LINE for the trail-with-Super-Trend exit
+
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - "close < vwap"
+      - "close < vwma20"         # with-trend continuation after the gap fills: price leading VWAP+VWMA
+  scoring:
+    threshold: 0.2
+
+exit_rules:
+  - { type: take_profit, params: { basis: premium_pct, value: 35 } }   # E9 §3.1 fixed premium-% target (owner: both target+trail; the trailing_stop below rides if 35% not hit first; tunable)
+  - { type: signal_exit, params: { rule: "close > vwap", min_volume: 125000 } }
+  - { type: trailing_stop, params: { basis: indicator, alias: supertrend_line } }   # E9 §3: trail with the Super Trend line as the move matures
+  - { type: time_stop,   params: { max_bars: 20 } }   # §3.4 Session-24: a gap trade is a 30-60 min play
+
+risk:
+  position_sizing: { method: premium_budget, params: { budget_inr: 15000 } }
+  max_positions: 1
+  max_positions_per_underlying: 1
+  max_daily_loss_pct: 2.0
+  session:
+    style: intraday
+    window: { from: "09:45", to: "15:00" }
+    square_off: "15:15"
+
+backtest:
+  defaults: { interval: 1m, lookback_days: 120, initial_capital: 200000, costs: { per_lot_inr: 20, slippage_ticks: 1 } }
+  oi_confluence_gate: { enabled: false, interval: "5m" }
+  optimize:
+    parameters:
+      - { path: "indicators[alias=vwma20].params.period",         range: [10, 30], step: 1 }
+      - { path: "indicators[alias=rsi14].params.period",          range: [9, 21], step: 1 }
+      - { path: "indicators[alias=supertrend].params.period",     range: [7, 14], step: 1 }
+      - { path: "indicators[alias=supertrend].params.multiplier", range: [1.5, 3.5] }
+      - { path: "entry_rules.scoring.threshold",                  range: [0.1, 0.5] }
+      - { path: "exit_rules[type=time_stop].params.max_bars",   range: [12, 28], step: 1 }
+    method: tpe
+    max_trials: 40
+    objective: { metric: expectancy, direction: maximize, fold_aggregation: mean }
+    constraints: { min_trades: 10 }
+    walk_forward: { train_days: 30, test_days: 30, step_days: 20, anchored: false }

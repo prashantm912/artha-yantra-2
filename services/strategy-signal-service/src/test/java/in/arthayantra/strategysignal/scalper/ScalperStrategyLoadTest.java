@@ -66,8 +66,34 @@ class ScalperStrategyLoadTest {
           Map.entry("scalp-btst-stbt-nifty", "NIFTY 50"),
           Map.entry("scalp-btst-stbt-sensex-niftyoi", "SENSEX"),
           Map.entry("scalp-btst-stbt-sensex-sensexoi", "SENSEX"),
-          // E11 PE-mirror template (the bearish trend-change variant — NIFTY PUT side)
-          Map.entry("scalp-trend-change-nifty-pe", "NIFTY 50"));
+          // E11 PE-mirror: all 9 directional families × 3 variants (the bearish PUT side)
+          Map.entry("scalp-trend-change-nifty-pe", "NIFTY 50"),
+          Map.entry("scalp-trend-change-sensex-niftyoi-pe", "SENSEX"),
+          Map.entry("scalp-trend-change-sensex-sensexoi-pe", "SENSEX"),
+          Map.entry("scalp-connect-the-dots-nifty-pe", "NIFTY 50"),
+          Map.entry("scalp-connect-the-dots-sensex-niftyoi-pe", "SENSEX"),
+          Map.entry("scalp-connect-the-dots-sensex-sensexoi-pe", "SENSEX"),
+          Map.entry("scalp-gap-theory-nifty-pe", "NIFTY 50"),
+          Map.entry("scalp-gap-theory-sensex-niftyoi-pe", "SENSEX"),
+          Map.entry("scalp-gap-theory-sensex-sensexoi-pe", "SENSEX"),
+          Map.entry("scalp-golden-crossover-nifty-pe", "NIFTY 50"),
+          Map.entry("scalp-golden-crossover-sensex-niftyoi-pe", "SENSEX"),
+          Map.entry("scalp-golden-crossover-sensex-sensexoi-pe", "SENSEX"),
+          Map.entry("scalp-market-movers-nifty-pe", "NIFTY 50"),
+          Map.entry("scalp-market-movers-sensex-niftyoi-pe", "SENSEX"),
+          Map.entry("scalp-market-movers-sensex-sensexoi-pe", "SENSEX"),
+          Map.entry("scalp-two-candle-nifty-pe", "NIFTY 50"),
+          Map.entry("scalp-two-candle-sensex-niftyoi-pe", "SENSEX"),
+          Map.entry("scalp-two-candle-sensex-sensexoi-pe", "SENSEX"),
+          Map.entry("scalp-trending-oi-nifty-pe", "NIFTY 50"),
+          Map.entry("scalp-trending-oi-sensex-niftyoi-pe", "SENSEX"),
+          Map.entry("scalp-trending-oi-sensex-sensexoi-pe", "SENSEX"),
+          Map.entry("scalp-morning-trade-nifty-pe", "NIFTY 50"),
+          Map.entry("scalp-morning-trade-sensex-niftyoi-pe", "SENSEX"),
+          Map.entry("scalp-morning-trade-sensex-sensexoi-pe", "SENSEX"),
+          Map.entry("scalp-open-high-low-nifty-pe", "NIFTY 50"),
+          Map.entry("scalp-open-high-low-sensex-niftyoi-pe", "SENSEX"),
+          Map.entry("scalp-open-high-low-sensex-sensexoi-pe", "SENSEX"));
 
   // Each derived strategy must carry the tag that arms its §12.3 gate (the seeder reads the same tag).
   // Every variant of each gated base carries the same tag (the gate behaviour is instrument-agnostic).
@@ -80,6 +106,17 @@ class ScalperStrategyLoadTest {
           Map.entry("scalp-trend-change-sensex-niftyoi", "trend-change"),
           Map.entry("scalp-trend-change-sensex-sensexoi", "trend-change"),
           Map.entry("scalp-trend-change-nifty-pe", "trend-change"),
+          Map.entry("scalp-trend-change-sensex-niftyoi-pe", "trend-change"),
+          Map.entry("scalp-trend-change-sensex-sensexoi-pe", "trend-change"),
+          Map.entry("scalp-gap-theory-nifty-pe", "gap-theory"),
+          Map.entry("scalp-gap-theory-sensex-niftyoi-pe", "gap-theory"),
+          Map.entry("scalp-gap-theory-sensex-sensexoi-pe", "gap-theory"),
+          Map.entry("scalp-morning-trade-nifty-pe", "opening-tick"),
+          Map.entry("scalp-morning-trade-sensex-niftyoi-pe", "opening-tick"),
+          Map.entry("scalp-morning-trade-sensex-sensexoi-pe", "opening-tick"),
+          Map.entry("scalp-open-high-low-nifty-pe", "open-high-low"),
+          Map.entry("scalp-open-high-low-sensex-niftyoi-pe", "open-high-low"),
+          Map.entry("scalp-open-high-low-sensex-sensexoi-pe", "open-high-low"),
           Map.entry("scalp-open-high-low-nifty", "open-high-low"),
           Map.entry("scalp-open-high-low-sensex-niftyoi", "open-high-low"),
           Map.entry("scalp-open-high-low-sensex-sensexoi", "open-high-low"),
@@ -141,10 +178,12 @@ class ScalperStrategyLoadTest {
       // mapped from signal_underlying NFO/NIFTY-FUT-CONT); the OI-confluence index is the option-root
       // for a NIFTY variant, else the backtest.oi_confluence_gate.index ("NIFTY 50" or "SENSEX").
       assertThat(cfg.signalIndex()).as(id + " signals on the NIFTY future").isEqualTo("NIFTY 50");
+      // .contains (not .endsWith) so the E11 PE-mirror ids (…-sensex-niftyoi-pe / …-sensex-sensexoi-pe)
+      // resolve the same OI-confluence index as their CE base (the PE variant copies it verbatim).
       String expectedOi =
-          id.endsWith("-sensex-niftyoi")
+          id.contains("-sensex-niftyoi")
               ? "NIFTY 50"
-              : id.endsWith("-sensex-sensexoi") ? "SENSEX" : UNDERLYING.get(id);
+              : id.contains("-sensex-sensexoi") ? "SENSEX" : UNDERLYING.get(id);
       assertThat(cfg.oiIndex()).as(id + " oi-confluence index").isEqualTo(expectedOi);
 
       Set<String> declared = new HashSet<>();

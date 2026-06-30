@@ -1,0 +1,119 @@
+# PE-MIRROR (E11 STEP, owner 2026-06-30) of scalp-open-high-low-sensex-niftyoi — auto-derived bearish counterpart: option_types:[PE]
+# + the directional VWAP/VWMA/SuperTrend gates and the signal-exit flipped to the PE side. Strictly
+# additive (the CE strategy is byte-identical). Seeded as a DRAFT — the owner publishes from the UI.
+#
+# AUTO-DERIVED (2b-1) variant of the scalp-open-high-low family — signal on NFO/NIFTY-FUT-CONT. Executes on SENSEX options (strike anchored on BFO/SENSEX-FUT-CONT).
+# Siva #2 - Open=High / Open=Low (O=H / O=L). The `open-high-low` tag arms the section-12.3
+# OpenHighLowGate: a momentum scalp that reads big-players' intent - a strike opening at its high
+# (Open=High on Calls, bullish) or its low (Open=Low on Puts, bearish) is a magnet the institution will
+# drag the premium back toward, so the trade is WITH the open-extreme intent and targets that extreme.
+#
+# v1 SCOPE (the Step-0 feasibility outcome). The doc's full configuration needs (1) per-strike ATM+-3
+# OH/OL confluence (>=3 strikes matching, "very high" at 4-5) AND (2) an external "OI-Pulse AI badge
+# >=90% (red dot)". NEITHER is available to strategy-signal-service:
+#   - The badge is a Phase-4 OiPulse-parity model we do NOT have. It is treated as an OPTIONAL,
+#     currently-unavailable confirmation we degrade around - NEVER required.
+#   - Per-strike ATM+-3 OH/OL needs per-strike option-premium intraday OHLC (session-open vs running
+#     high per strike). This service holds NO marketdata grant and reads only via market-data REST;
+#     the /options/chain endpoint returns per-strike point-in-time LTP, NOT per-strike OHLC, and there
+#     is no per-strike-OHLC REST endpoint. So the strike-count confluence cannot be computed without a
+#     NEW market-data endpoint (out of scope). It is a DEFERRED REFINEMENT.
+# v1 therefore gates on the HONEST equivalent the doc itself defines - the deterministic FNO-structure
+# probability TIER (section 3.2 L489): the front-FUTURE Open=High/Open=Low mark x the underlying OI
+# quadrant. Future OH + a bullish quadrant (LB/SC) => the bullish HIGH-tier proxy for a CE; Future OL +
+# a bearish quadrant (SB/LU) => the bearish HIGH-tier proxy for a PE; a mark without quadrant
+# confirmation => MILD (block); a two-sided OH+OL session or no mark => STAND_ASIDE (block).
+#
+# The hard pre-gate requires ALL of: (a) tier >= HIGH for the side; (b) the OI build-up in the side's
+# direction (folded into the tier - CE needs LB/SC, PE needs SB/LU); (c) the section-3.2 reject rules -
+# the option premium must not have moved >50% from the previous close AND the identified-strike OI
+# change must not be >50% (the move must not already be exhausted), reusing the Tier-1 spurt
+# price/OI magnitudes (a null/unavailable magnitude does NOT block); (d) the 1st-half preference - the
+# general >=09:45 pre-flight applies, plus no FRESH entry after ~12:00 (2nd-half time-value erosion).
+# Any failing leg BLOCKS (an OH/OL scalp is high-conviction-only - never a false fire); a null OI
+# snapshot degrades to a block.
+#
+# Structural stop: the VWAP (section 3.2 S22 - "on a live OH momentum scalp the VWAP is the stop-loss"),
+# anchored on the front-future session VWAP supplied by the engine (replay-safe). Exit target
+# (live-management, NOT engine-carried): the OH/OL extreme is the magnet but NEVER trade beyond it -
+# exit ~5 points INSIDE (below the OH for a CE, above the OL for a PE).
+#
+# DEFERRED REFINEMENTS (need a future per-strike-OHLC market-data endpoint / a Phase-4 OiPulse model):
+# the per-strike ATM+-3 OH/OL strike-count confluence (>=3 strikes matching; "very high" at 4-5) and
+# the >=90% OI-Pulse AI badge gate.
+#
+# Evaluates on the NIFTY 50 front future (Model A); the confluence seam buys the nearest-weekly
+# ATM-band CE.
+schema: strategy-schema/v1
+id: scalp-open-high-low-sensex-niftyoi-pe
+name: "Scalper · Open=High / Open=Low · SENSEX PE (NIFTY-OI)"
+version: 1.0.0
+description: "Open=High/Open=Low momentum scalp (Siva #2) on the NIFTY 50 3-min front future. Gates on the SOURCE-FAITHFUL FNO-structure probability tier (Table-1: Futures-OH + >=3 ATM+-3 Call strikes Open=High + Put Open=Low -> HIGH; few strikes -> MILD; both-sides OH -> stand aside) refined by the Table-2 price/volume modifier (a PE-OH premium falling on >=50k volume, or a >50% fall vs prev close, downgrades to LOW). Only HIGH fires. Per-strike OH/OL + volume come from /options/strike-session-stats (5-min snapshot resolution; native 3-min needs 3-min capture). RSI>50 entry; section-3.2 <=50% premium/OI spurt reject; 1st-half (no fresh entry after ~12:00) window; VWAP stop; exit ~5pts inside the OH/OL, never beyond it. The OiPulse >=90% AI badge stays external/unavailable (optional, degraded around)."
+author: owner
+tags: [scalper, options, intraday, sensex, open-high-low, delta-s24-floor, premium-s24-band, directional-change-gate, open-high-oi-veto, rsi-5m-cap, rsi-daily-cap, s24-trade-window]
+
+universe:
+  mode: options_of_underlying
+  underlying: { exchange: BSE, tradingsymbol: "SENSEX" }
+  signal_underlying: { exchange: NFO, tradingsymbol: "NIFTY-FUT-CONT" }
+  strike_reference: { exchange: BFO, tradingsymbol: "SENSEX-FUT-CONT" }
+  options:
+    expiry: nearest_weekly
+    strikes: { selector: atm_window, width: 3 }
+    option_types: [PE]
+
+timeframes:
+  primary: 3m
+  additional: [5m, 1d, 1h]      # 5m + daily for the §3.2/§4.2 higher-TF RSI caps; 1h for the bias
+
+indicators:
+  - { name: VWMA,       alias: vwma20,    timeframe: 3m, params: { period: 20 } }
+  - { name: PSAR,       alias: psar,      timeframe: 3m, params: { step: 0.02, max: 0.2 } }
+  - { name: RSI,        alias: rsi14,     timeframe: 3m, params: { period: 14 }, weight: 1.0,
+      normalize: { type: rsi_momentum } }
+  - { name: SUPERTREND, alias: supertrend, timeframe: 3m, params: { period: 10, multiplier: 2.0 },
+      weight: 1.0, normalize: { type: direction } }
+  - { name: SUPERTREND, alias: bias60m,   timeframe: 1h, params: { period: 7, multiplier: 3.0 } }
+  - { name: SUPERTREND_LINE, alias: supertrend_line, timeframe: 3m, params: { period: 10, multiplier: 2.0 } } # E9 §3: the ST LINE for the trail-with-Super-Trend exit
+  - { name: RSI,        alias: rsi5m,     timeframe: 5m, params: { period: 14 } }   # §3.2 5m overbought cap
+  - { name: RSI,        alias: rsi_daily,  timeframe: 1d, params: { period: 14 } }   # §4.2 daily RSI cap
+
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - "close < vwap"           # §3.2 S22: a Call-side OH is high-probability only while price > VWAP
+  scoring:
+    threshold: 0.2
+
+exit_rules:
+  - { type: signal_exit, params: { rule: "close > vwap", min_volume: 125000 } }   # §3.2 S22: VWAP is the OH momentum-scalp SL
+  - { type: trailing_stop, params: { basis: indicator, alias: supertrend_line } }   # E9 §3: trail with the Super Trend line as the move matures
+  - { type: time_stop,   params: { max_bars: 20 } }           # §3.2: small momentum scalp
+
+risk:
+  position_sizing: { method: premium_budget, params: { budget_inr: 15000 } }
+  max_positions: 1
+  max_positions_per_underlying: 1
+  max_daily_loss_pct: 2.0
+  session:
+    style: intraday
+    window: { from: "09:45", to: "12:00" }   # §3.2: 1st-half preference (no fresh entry after ~12:00)
+    square_off: "15:15"
+
+backtest:
+  defaults: { interval: 1m, lookback_days: 120, initial_capital: 200000, costs: { per_lot_inr: 20, slippage_ticks: 1 } }
+  oi_confluence_gate: { enabled: true, interval: "5m", index: "NIFTY 50" }
+  optimize:
+    parameters:
+      - { path: "indicators[alias=vwma20].params.period",         range: [10, 30], step: 1 }
+      - { path: "indicators[alias=rsi14].params.period",          range: [9, 21], step: 1 }
+      - { path: "indicators[alias=supertrend].params.period",     range: [7, 14], step: 1 }
+      - { path: "indicators[alias=supertrend].params.multiplier", range: [1.5, 3.5] }
+      - { path: "entry_rules.scoring.threshold",                  range: [0.1, 0.5] }
+      - { path: "exit_rules[type=time_stop].params.max_bars",   range: [12, 28], step: 1 }
+    method: tpe
+    max_trials: 40
+    objective: { metric: expectancy, direction: maximize, fold_aggregation: mean }
+    constraints: { min_trades: 10 }
+    walk_forward: { train_days: 30, test_days: 30, step_days: 20, anchored: false }

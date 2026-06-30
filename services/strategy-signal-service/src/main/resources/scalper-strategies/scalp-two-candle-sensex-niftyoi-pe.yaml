@@ -1,0 +1,82 @@
+# PE-MIRROR (E11 STEP, owner 2026-06-30) of scalp-two-candle-sensex-niftyoi — auto-derived bearish counterpart: option_types:[PE]
+# + the directional VWAP/VWMA/SuperTrend gates and the signal-exit flipped to the PE side. Strictly
+# additive (the CE strategy is byte-identical). Seeded as a DRAFT — the owner publishes from the UI.
+#
+# AUTO-DERIVED (2b-1) variant of the scalp-two-candle family — signal on NFO/NIFTY-FUT-CONT. Executes on SENSEX options (strike anchored on BFO/SENSEX-FUT-CONT).
+# Siva #1 — Two-Candle Theory. The `two-candle-pattern` tag arms the §12.3 TwoCandleGate: entry
+# requires two consecutive same-colour candles (each above the volume floor) with a strong 2nd
+# candle, deploying on the 3rd — the multi-bar pattern the chart-only gate grammar cannot express.
+# The 1st candle's low is the structural stop (§3.1). Evaluates on the NIFTY front future (Model A);
+# the confluence seam buys the nearest-weekly ATM-band CE.
+schema: strategy-schema/v1
+id: scalp-two-candle-sensex-niftyoi-pe
+name: "Scalper · Two-Candle · SENSEX PE (NIFTY-OI)"
+version: 1.0.0
+description: "Two-candle scalp (Siva #1) on the NIFTY front future; 2-candle pattern + 1st-candle SL; long-premium PE only."
+author: owner
+tags: [scalper, options, intraday, sensex, two-candle-pattern, two-candle-substitution, rsi-s24-bands, delta-s24-floor, premium-s24-band, overbought-defer, rsi-cooloff, s24-trade-window]
+
+universe:
+  mode: options_of_underlying
+  underlying: { exchange: BSE, tradingsymbol: "SENSEX" }
+  signal_underlying: { exchange: NFO, tradingsymbol: "NIFTY-FUT-CONT" }
+  strike_reference: { exchange: BFO, tradingsymbol: "SENSEX-FUT-CONT" }
+  options:
+    expiry: nearest_weekly
+    strikes: { selector: atm_window, width: 3 }
+    option_types: [PE]
+
+timeframes:
+  primary: 3m
+  additional: [1h]
+
+indicators:
+  - { name: VWMA,       alias: vwma20,    timeframe: 3m, params: { period: 20 } }
+  - { name: PSAR,       alias: psar,      timeframe: 3m, params: { step: 0.02, max: 0.2 } }
+  - { name: RSI,        alias: rsi14,     timeframe: 3m, params: { period: 14 }, weight: 1.0,
+      normalize: { type: rsi_momentum } }
+  - { name: SUPERTREND, alias: supertrend, timeframe: 3m, params: { period: 10, multiplier: 2.0 },
+      weight: 1.0, normalize: { type: direction } }
+  - { name: SUPERTREND, alias: bias60m,   timeframe: 1h, params: { period: 7, multiplier: 3.0 } }
+  - { name: SUPERTREND_LINE, alias: supertrend_line, timeframe: 3m, params: { period: 10, multiplier: 2.0 } } # E9 §3: the ST LINE for the trail-with-Super-Trend exit
+
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - "close < vwap"
+      - "close < vwma20"         # momentum continuation: price leading both VWAP and VWMA
+  scoring:
+    threshold: 0.2
+
+exit_rules:
+  - { type: signal_exit, params: { rule: "close > vwap", min_volume: 125000 } }
+  - { type: trailing_stop, params: { basis: indicator, alias: supertrend_line } }   # E9 §3: trail with the Super Trend line as the move matures
+  - { type: time_stop,   params: { max_bars: 10 } }
+
+risk:
+  position_sizing: { method: premium_budget, params: { budget_inr: 15000 } }
+  max_positions: 1
+  max_positions_per_underlying: 1
+  max_daily_loss_pct: 2.0
+  session:
+    style: intraday
+    window: { from: "09:45", to: "15:00" }
+    square_off: "15:15"
+
+backtest:
+  defaults: { interval: 1m, lookback_days: 120, initial_capital: 200000, costs: { per_lot_inr: 20, slippage_ticks: 1 } }
+  oi_confluence_gate: { enabled: true, interval: "5m", index: "NIFTY 50" }
+  optimize:
+    parameters:
+      - { path: "indicators[alias=vwma20].params.period",         range: [10, 30], step: 1 }
+      - { path: "indicators[alias=rsi14].params.period",          range: [9, 21], step: 1 }
+      - { path: "indicators[alias=supertrend].params.period",     range: [7, 14], step: 1 }
+      - { path: "indicators[alias=supertrend].params.multiplier", range: [1.5, 3.5] }
+      - { path: "entry_rules.scoring.threshold",                  range: [0.1, 0.5] }
+      - { path: "exit_rules[type=time_stop].params.max_bars",   range: [6, 16], step: 1 }
+    method: tpe
+    max_trials: 40
+    objective: { metric: expectancy, direction: maximize, fold_aggregation: mean }
+    constraints: { min_trades: 10 }
+    walk_forward: { train_days: 30, test_days: 30, step_days: 20, anchored: false }

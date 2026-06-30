@@ -692,6 +692,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/options/calendar-spread": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["calendarSpread"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/options/big-oi": {
         parameters: {
             query?: never;
@@ -2009,6 +2025,33 @@ export interface components {
             ltpChangePct?: number;
             /** @enum {string} */
             interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+        };
+        CalendarSpreadChart: {
+            underlying?: string;
+            strike?: number;
+            optionType?: string;
+            /** Format: date */
+            nearExpiry?: string;
+            /** Format: date */
+            farExpiry?: string;
+            interval?: string;
+            underlyingLtp?: number;
+            underlyingDayOpen?: number;
+            /** Format: date-time */
+            asOf?: string;
+            items?: components["schemas"]["SpreadCandle"][];
+        };
+        SpreadCandle: {
+            /** Format: date-time */
+            time?: string;
+            open?: number;
+            high?: number;
+            low?: number;
+            close?: number;
+            nearClose?: number;
+            farClose?: number;
+            /** Format: int64 */
+            volume?: number;
         };
         BigOi: {
             items?: components["schemas"]["BigOiRow"][];
@@ -4216,6 +4259,44 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ChainTable"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    calendarSpread: {
+        parameters: {
+            query: {
+                mode?: string;
+                name: string;
+                date?: string;
+                strike: number;
+                optionType?: string;
+                nearExpiry?: string;
+                farExpiry?: string;
+                interval?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["CalendarSpreadChart"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

@@ -41,6 +41,7 @@ public class OptionsAnalyticsController {
   private final OiTrendingService trendingService;
   private final OpenHighStatsService openHighStats;
   private final StraddleChartService straddleChartService;
+  private final CalendarSpreadChartService calendarSpreadChartService;
   private final OptionsOiChartService optionsOiChartService;
   private final OiHeatmapService heatmapService;
   private final OiExpiryService expiryService;
@@ -64,6 +65,7 @@ public class OptionsAnalyticsController {
       OiTrendingService trendingService,
       OpenHighStatsService openHighStats,
       StraddleChartService straddleChartService,
+      CalendarSpreadChartService calendarSpreadChartService,
       OptionsOiChartService optionsOiChartService,
       OiHeatmapService heatmapService,
       OiExpiryService expiryService,
@@ -85,6 +87,7 @@ public class OptionsAnalyticsController {
     this.trendingService = trendingService;
     this.openHighStats = openHighStats;
     this.straddleChartService = straddleChartService;
+    this.calendarSpreadChartService = calendarSpreadChartService;
     this.optionsOiChartService = optionsOiChartService;
     this.heatmapService = heatmapService;
     this.expiryService = expiryService;
@@ -645,6 +648,30 @@ public class OptionsAnalyticsController {
     OiQuery q = OiQuery.of(mode, name, date, null, expiry);
     return straddleChartService.chart(
         q.name(), q.expiry(), strike, callStrike, putStrike, interval, q.date());
+  }
+
+  /**
+   * /calendar-spread: oipulse Calendar Spread Chart (study {@code strategies/calendar-spread}) — the
+   * premium DIFFERENTIAL (near − far) of one {@code strike}+{@code optionType} across two expiries,
+   * charted as a candle series (the FE overlays VWAP / 20-EMA / day H-L). {@code interval} is RAW
+   * MINUTES (1/3/5/10/15/30/60). {@code nearExpiry} null → nearest on/after today; {@code farExpiry}
+   * null → the next listed expiry after near. Live mode → today IST; history → {@code date}.
+   */
+  @GetMapping("/calendar-spread")
+  public CalendarSpreadChartService.CalendarSpreadChart calendarSpread(
+      @RequestParam(required = false) String mode,
+      @RequestParam String name,
+      @RequestParam(required = false) String date,
+      @RequestParam BigDecimal strike,
+      @RequestParam(required = false, defaultValue = "CE") String optionType,
+      @RequestParam(required = false) String nearExpiry,
+      @RequestParam(required = false) String farExpiry,
+      @RequestParam(required = false, defaultValue = "3") int interval) {
+    OiQuery q = OiQuery.of(mode, name, date, null, nearExpiry);
+    java.time.LocalDate far =
+        farExpiry == null || farExpiry.isBlank() ? null : java.time.LocalDate.parse(farExpiry);
+    return calendarSpreadChartService.chart(
+        q.name(), strike, optionType, q.expiry(), far, interval, q.date());
   }
 
   /**

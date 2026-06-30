@@ -2467,6 +2467,94 @@
         }
       }
     },
+    "/api/v1/market/options/calendar-spread" : {
+      "get" : {
+        "tags" : [ "options-analytics-controller" ],
+        "operationId" : "calendarSpread",
+        "parameters" : [ {
+          "name" : "mode",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "name",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "date",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "strike",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "number"
+          }
+        }, {
+          "name" : "optionType",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "default" : "CE"
+          }
+        }, {
+          "name" : "nearExpiry",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "farExpiry",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "interval",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 3
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CalendarSpreadChart"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/options/big-oi" : {
       "get" : {
         "tags" : [ "options-analytics-controller" ],
@@ -6035,6 +6123,78 @@
           "interpretation" : {
             "type" : "string",
             "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
+          }
+        }
+      },
+      "CalendarSpreadChart" : {
+        "type" : "object",
+        "properties" : {
+          "underlying" : {
+            "type" : "string"
+          },
+          "strike" : {
+            "type" : "number"
+          },
+          "optionType" : {
+            "type" : "string"
+          },
+          "nearExpiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "farExpiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "interval" : {
+            "type" : "string"
+          },
+          "underlyingLtp" : {
+            "type" : "number"
+          },
+          "underlyingDayOpen" : {
+            "type" : "number"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SpreadCandle"
+            }
+          }
+        }
+      },
+      "SpreadCandle" : {
+        "type" : "object",
+        "properties" : {
+          "time" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "open" : {
+            "type" : "number"
+          },
+          "high" : {
+            "type" : "number"
+          },
+          "low" : {
+            "type" : "number"
+          },
+          "close" : {
+            "type" : "number"
+          },
+          "nearClose" : {
+            "type" : "number"
+          },
+          "farClose" : {
+            "type" : "number"
+          },
+          "volume" : {
+            "type" : "integer",
+            "format" : "int64"
           }
         }
       },

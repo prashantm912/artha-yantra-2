@@ -45,6 +45,7 @@ const SECTIONS: MenuSection[] = [
       { label: 'Big OI Movement', to: '/options/big-oi-movement' }, // Wave 2
       { label: 'Options Premium', to: '/options/options-premium' }, // Wave 2
       { label: 'Straddle Chart', to: '/options/straddle-chart' }, // combined CE+PE premium candles (§20.7.6)
+      { label: 'Calendar Spread', to: '/options/calendar-spread' }, // (near − far) premium-differential candles
       { label: 'Options Chart', to: '/options/options-chart' }, // Wave 3 — per-leg premium candle + OI line
       { label: 'Multiple OI Chart', to: '/options/multiple-oi-chart' }, // Wave 3 — multi-leg OI overlay + price
       { label: 'OI Chart', to: '/options/oi-chart' }, // Wave 3 — Call/Put OI + OI-vs-premium (off strike-series)

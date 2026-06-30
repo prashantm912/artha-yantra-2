@@ -36,6 +36,7 @@ import type {
   PremiumChain,
   SpurtChain,
   StraddleChart,
+  CalendarSpreadChart,
   StrikeSeries,
   TrendSeries,
   VixQuote,
@@ -195,6 +196,54 @@ export function useStraddleChart(
       return oiGet<StraddleChart | null>('/market/options/straddle-chart', p.toString(), null);
     },
     enabled: satisfiable(ctx, true) && !!strike,
+  });
+}
+
+/**
+ * Calendar Spread (study {@code strategies/calendar-spread}): the (near − far) premium-differential
+ * candles for one strike + option type across two expiries. {@code intervalMinutes} is RAW MINUTES
+ * owned by the page (1/3/5/10/15/30/60). The two expiries are page-owned (not the shared control bar's
+ * single expiry). Needs a strike + both expiries; name/mode/date ride the shared control bar.
+ */
+export function useCalendarSpreadChart(
+  strike: string | null,
+  optionType: string,
+  nearExpiry: string | null,
+  farExpiry: string | null,
+  intervalMinutes: number,
+) {
+  const ctx = useOiCtx();
+  return useQuery({
+    queryKey: [
+      'oi',
+      'calendar-spread',
+      ctx.name,
+      ctx.mode,
+      ctx.date,
+      strike,
+      optionType,
+      nearExpiry,
+      farExpiry,
+      intervalMinutes,
+    ],
+    queryFn: () => {
+      const p = new URLSearchParams({
+        mode: ctx.mode,
+        name: ctx.name,
+        optionType,
+        interval: String(intervalMinutes),
+      });
+      if (ctx.date) p.set('date', ctx.date);
+      if (strike) p.set('strike', strike);
+      if (nearExpiry) p.set('nearExpiry', nearExpiry);
+      if (farExpiry) p.set('farExpiry', farExpiry);
+      return oiGet<CalendarSpreadChart | null>(
+        '/market/options/calendar-spread',
+        p.toString(),
+        null,
+      );
+    },
+    enabled: satisfiable(ctx, false) && !!strike && !!nearExpiry && !!farExpiry,
   });
 }
 

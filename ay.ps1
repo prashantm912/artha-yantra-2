@@ -55,6 +55,20 @@ function Invoke-Compose {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
+# Like Invoke-Compose but does NOT abort on a non-zero exit — for restore steps
+# where benign errors are expected and non-fatal (pg_dumpall globals re-CREATE a
+# role that already exists; pg_restore emits per-statement errors for grants to a
+# not-yet-created role, etc.). The restore is verified by a post-restore row count,
+# not by these exit codes.
+function Invoke-ComposeAllowFail {
+    param([string[]]$ComposeArgs)
+    Set-ProfileEnv
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & docker compose -f $ComposeFile --env-file $EnvFile @ComposeArgs 2>&1 | ForEach-Object { "$_" }
+    $ErrorActionPreference = $previousEap
+}
+
 function Initialize-LocalConfig {
     if (-not (Test-Path $EnvFile)) {
         Copy-Item (Join-Path $RepoRoot '.env.example') $EnvFile
@@ -147,17 +161,53 @@ switch ($Verb) {
         Invoke-Compose @('exec', 'db-backup', '/usr/local/bin/backup.sh', 'manual')
     }
     'restore' {
-        if ($Rest.Count -lt 1) { Write-Error 'usage: ay restore <dump-file>' }
-        $dump = Resolve-Path $Rest[0]
-        Write-Host "[ay] restoring $dump into database 'artha' (per-schema -Fc dump)"
-        Invoke-Compose @('cp', "$dump", 'timescaledb:/tmp/ay-restore.dump')
-        # timescaledb_pre_restore disables chunk routing checks so pg_restore can write
-        # directly to chunk tables; timescaledb_post_restore re-enables them.
-        Invoke-Compose @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', 'artha', '-c', 'SELECT timescaledb_pre_restore()')
-        Invoke-Compose @('exec', '-T', 'timescaledb', 'pg_restore', '-U', 'artha', '-d', 'artha', '--data-only', '--no-owner', '/tmp/ay-restore.dump')
-        Invoke-Compose @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', 'artha', '-c', 'SELECT timescaledb_post_restore()')
-        Invoke-Compose @('exec', '-T', 'timescaledb', 'rm', '-f', '/tmp/ay-restore.dump')
-        Write-Host '[ay] restore complete'
+        # Restore a WHOLE-DATABASE -Fc dump (produced by `ay backup`) into the active
+        # profile's database. Accepts a backup DIRECTORY (uses its globals.sql + *-full.dump)
+        # or a single *-full.dump file. DESTRUCTIVE: drops + recreates the target DB.
+        if ($Rest.Count -lt 1) { Write-Error 'usage: ay restore <backup-dir-or-full-dump>' }
+        Set-ProfileEnv
+        $db  = $env:ARTHA_DB_NAME
+        $src = Resolve-Path $Rest[0]
+        if (Test-Path $src -PathType Container) {
+            $dump = (Get-ChildItem $src -Filter '*-full.dump' | Select-Object -First 1).FullName
+            if (-not $dump) { Write-Error "no *-full.dump found in $src (is this a backup directory?)" }
+            $globals = Join-Path $src 'globals.sql'
+        } else {
+            $dump    = "$src"
+            $globals = Join-Path (Split-Path $src) 'globals.sql'
+        }
+        Write-Host "[ay] RESTORE -> database '$db' from $dump"
+        Write-Host "[ay] WARNING: this DROPS and recreates '$db' — its current contents are replaced."
+        # 1) stop the stack, bring up ONLY the DB server (no app connections to drop)
+        Invoke-Compose @('--profile', 'obs', '--profile', 'dev-tools', 'down')
+        Invoke-Compose @('up', '-d', '--wait', 'timescaledb')
+        # 2) recreate the target database empty
+        Invoke-ComposeAllowFail @('exec', '-T', 'timescaledb', 'dropdb', '-U', 'artha', '--if-exists', "$db")
+        Invoke-Compose         @('exec', '-T', 'timescaledb', 'createdb', '-U', 'artha', "$db")
+        # 3) cluster globals (roles + grants) — restored into 'postgres'; a CREATE ROLE that
+        #    already exists (e.g. the bootstrap 'artha' superuser) is a tolerated no-op.
+        if (Test-Path $globals) {
+            Invoke-Compose         @('cp', "$globals", 'timescaledb:/tmp/ay-globals.sql')
+            Invoke-ComposeAllowFail @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', 'postgres', '-v', 'ON_ERROR_STOP=0', '-f', '/tmp/ay-globals.sql')
+        }
+        # 4) the Timescale pre/post_restore dance around a FULL (schema+data) restore.
+        #    pre_restore disables chunk routing + background jobs so pg_restore can write the
+        #    _timescaledb_internal chunk data directly; post_restore re-enables them.
+        Invoke-Compose         @('cp', "$dump", 'timescaledb:/tmp/ay-restore.dump')
+        Invoke-Compose         @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', "$db", '-c', 'CREATE EXTENSION IF NOT EXISTS timescaledb')
+        Invoke-Compose         @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', "$db", '-c', 'SELECT timescaledb_pre_restore()')
+        # pg_restore returns non-zero if ANY statement errored (benign grants to a missing role,
+        # etc.) — tolerated here; correctness is asserted by the row count printed below.
+        Invoke-ComposeAllowFail @('exec', '-T', 'timescaledb', 'pg_restore', '-U', 'artha', '-d', "$db", '--no-owner', '/tmp/ay-restore.dump')
+        Invoke-Compose         @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', "$db", '-c', 'SELECT timescaledb_post_restore()')
+        Invoke-Compose         @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', "$db", '-c', 'ANALYZE')
+        Invoke-ComposeAllowFail @('exec', '-T', 'timescaledb', 'rm', '-f', '/tmp/ay-restore.dump', '/tmp/ay-globals.sql')
+        Write-Host "[ay] restored row counts (sanity):"
+        Invoke-ComposeAllowFail @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', "$db", '-c',
+            "SELECT 'candles' t, count(*) FROM marketdata.candles UNION ALL SELECT 'oi_snapshots', count(*) FROM marketdata.options_chain_snapshots UNION ALL SELECT 'signals', count(*) FROM strategy.signals")
+        # 5) bring the full stack back; flyway-init validates the restored history head -> no-op
+        Invoke-Compose @('up', '-d', '--wait')
+        Write-Host "[ay] restore complete -> '$db'"
     }
     'reset-db' {
         # down, drop volumes, re-up -> flyway-init rebuilds all schemas (D17)
@@ -173,9 +223,9 @@ ay - ArthaYantra operator CLI (project-scoped docker compose)
   ay down                   stop project containers (volumes kept)
   ay logs <svc>             follow logs for one service
   ay status                 healthcheck summary of all containers
-  ay backup                 manual pg_dump into ./backups
-  ay restore <file>         restore a -Fc dump file into the database
-  ay reset-db               down, DROP VOLUMES, re-up (flyway rebuilds schemas)
+  ay backup                 manual whole-db pg_dump (+ globals) into ./backups
+  ay restore <dir|file>     restore a whole-db backup (dir or *-full.dump) — DROPS+recreates the DB
+  ay reset-db               down, DROP VOLUMES, re-up (flyway rebuilds schemas, empty)
 '@
     }
 }

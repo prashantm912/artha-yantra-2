@@ -137,6 +137,24 @@ class ScalperGatesTest {
   }
 
   @Test
+  void rsiBandCustomHonoursSuppliedBounds() {
+    // E5 §3.5 per-strategy band override: bounds come from the YAML (here CE 50-75, PE 25-50).
+    assertThat(ScalperGates.rsiBandCustom(bd("50"), CE, bd("50"), bd("75"), bd("25"), bd("50")).pass())
+        .isFalse(); // floor exclusive
+    assertThat(ScalperGates.rsiBandCustom(bd("55"), CE, bd("50"), bd("75"), bd("25"), bd("50")).pass())
+        .isTrue(); // 55 admitted by the custom band but rejected by the shared 60-80
+    assertThat(ScalperGates.rsiBand(bd("55"), CE).pass()).isFalse(); // proves the override widens
+    assertThat(ScalperGates.rsiBandCustom(bd("78"), CE, bd("50"), bd("75"), bd("25"), bd("50")).pass())
+        .isFalse(); // above the custom CE cap
+    assertThat(ScalperGates.rsiBandCustom(bd("30"), PE, bd("50"), bd("75"), bd("25"), bd("50")).pass())
+        .isTrue();
+    assertThat(ScalperGates.rsiBandCustom(bd("24"), PE, bd("50"), bd("75"), bd("25"), bd("50")).pass())
+        .isFalse(); // below the custom PE floor
+    assertThat(ScalperGates.rsiBandCustom(null, CE, bd("50"), bd("75"), bd("25"), bd("50")).pass())
+        .isFalse(); // null rsi -> fail
+  }
+
+  @Test
   void rsiAboveIsTheRelaxedOpenHighFloor() {
     // #2 (open-high-low) gates on the source's "RSI >50" floor, not the 60-80 band.
     assertThat(ScalperGates.rsiAbove(bd("50"), bd("50")).pass()).isFalse(); // exactly 50 -> not >

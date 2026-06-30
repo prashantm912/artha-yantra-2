@@ -226,6 +226,34 @@ public final class ScalperGates {
   }
 
   /**
+   * E5 §3.5 per-strategy RSI band override (the YAML {@code scalper.params.rsi_band} block). Same shape
+   * as {@link #rsiBand} but the CE/PE bounds are supplied by the strategy (e.g. CE 50-75 to admit the
+   * 50-60 momentum zone the shared 60-80 band rejects, or a tighter CE cap for Morning Trade). It is the
+   * configurable sibling of the FIXED {@link #rsiS24Band} — opt-in by the block's presence, so a strategy
+   * that declares no {@code rsi_band} never routes here and the shared band fires byte-identically. A
+   * null RSI FAILS (the data is required, like every RSI rail).
+   */
+  public static GateOutcome rsiBandCustom(
+      BigDecimal rsi,
+      OptionType side,
+      BigDecimal ceLo,
+      BigDecimal ceHi,
+      BigDecimal peLo,
+      BigDecimal peHi) {
+    if (rsi == null) {
+      return GateOutcome.fail(null, "rsi unavailable");
+    }
+    double v = rsi.doubleValue();
+    boolean ok =
+        side == OptionType.CE
+            ? (v > ceLo.doubleValue() && v < ceHi.doubleValue())
+            : (v > peLo.doubleValue() && v < peHi.doubleValue());
+    String want =
+        side == OptionType.CE ? "CE wants " + ceLo + "-" + ceHi : "PE wants " + peLo + "-" + peHi;
+    return new GateOutcome(ok, rsi, ok ? want + " ok" : want + " (out of band)");
+  }
+
+  /**
    * E5 §3.6 S21(f)/S24(a) cool-off pullback re-entry (tag {@code rsi-cooloff}). When the PRIOR bar's RSI
    * was HOT (CE overbought {@code >= 80} / PE oversold {@code <= 20}) the entry must wait for a COOLED
    * PULLBACK candle this bar — a red bar (the seam-supplied {@code pullbackCandle}) whose RSI has cooled

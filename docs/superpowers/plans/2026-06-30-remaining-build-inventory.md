@@ -107,8 +107,15 @@ Not build work. Each needs an owner input, not code.
 
 > **§2 OWNER DECISIONS (2026-06-30 walk-through) — 9 open items resolved:**
 > 1. **E8 ATR-stop = OFF** — keep all families on existing point/premium stops (no arming).
-> 2. **E11 PE-mirror = BUILD (STEP)** — separate bearish rule set, CE untouched; template-first → review → replicate. *(QUEUED — needs a mechanism choice: engine resolves CE/PE by price-vs-VWAP and `direction:short`=SELL, so a long-PE-only STEP needs a deliberate approach. Not blind-coded.)*
-> 3. **E11 straddle combined-prem exit = BUILD** — engine-managed 2-leg auto-exit (combined-prem vs VWAP), fits being away during hours. *(QUEUED.)*
+> 2. **E11 PE-mirror = ✅ DONE (#381 template + #382 replicate).** STEP = additive PE YAMLs (`option_types:[PE]`
+>    + directional gates/exit flipped to the PE side); the CE-only restriction was just `option_types:[CE]`,
+>    the engine already resolves PE by price-vs-VWAP + scores the bearish side symmetrically. 27 PE drafts
+>    (9 directional families × 3); the **9 `-nifty-pe` PUBLISHED live-paper**, the 18 SENSEX PE stay drafts (owner).
+> 3. **E11 straddle combined-prem exit = ✅ DONE (#383 part 1 + #384 part 2).** Found the prerequisite gap
+>    (straddle paper-opened only the CE leg). #383 = 2-leg paper-open (both ATM legs, combined-prem sized).
+>    #384 = the live-only `@Scheduled` `StraddleExitMonitor` that closes both legs when the combined premium
+>    ≤ the straddle-chart `slLevel` (combinedVwap − buffer). Parity-safe (never in replay; acts only on a
+>    paper straddle). Inert until the owner publishes a straddle.
 > 4. **E12 ideal-window + OH-freshness = SKIP** (low-value; existing time rails cover the session).
 > 5. **FU2 4 soft dots = leave ADVISORY** (arm as hard gates only after live data).
 > 6. **E3 Dow dot = leave UN-ARMED** (directional-VIX + manual checklist cover macro).
@@ -124,8 +131,8 @@ Not build work. Each needs an owner input, not code.
 | `E3-dow-confluence-unarmed` | dot + seam toggle + `Macro.dowUp` + producer + tests | left un-armed (no automated Dow feed; manual checklist covers it; superseded by directional-vix on trend-change) |
 | `E8-atr-stop-arming-roster` | ATR(14)×2 structural stop, tested, tripwire-guarded | **which families arm it** (owner roster) |
 | `E9-target-trail-band-value` | premium-% take-profit + trail mechanism, armed (#351) | the VALUE (35% TP / ST-line band are placeholders) — live validation |
-| `E11-straddle-combined-prem-exit` | combined-VWAP SL **level** surfaced (#324) | operator-manual by design; no engine-managed 2-leg exit |
-| `E11-pe-mirror-seeding` | engine exit-direction support (`scalperPositionDirection`) | **PARKED #364** — one open design choice (signed-composite vs STEP) |
+| ~~`E11-straddle-combined-prem-exit`~~ | **✅ DONE #383+#384** — 2-leg paper-open + the live `StraddleExitMonitor` (combined-prem ≤ slLevel → close both legs) | engine-managed; was operator-manual |
+| ~~`E11-pe-mirror-seeding`~~ | **✅ DONE #381+#382** — 27 PE drafts (STEP, additive `option_types:[PE]`); 9 NIFTY published | owner chose STEP; replicated + NIFTY-published |
 | `E12-oh-freshness-1030` | — | owner-deprioritized (low value, E12 time-window bucket) |
 | `E12-ideal-window-gate` | — | owner-deprioritized (low value) |
 | `wu4-upstox-cutover` | W-U1/U2/U3 merged, flag-gated default-Kite | off-hours deploy + live tick-latency/OI A/B + flip |

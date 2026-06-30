@@ -9,8 +9,10 @@ import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -189,15 +191,34 @@ public final class UpstoxMarketStatusClient {
     if (response == null || response.data() == null || response.data().isEmpty()) {
       return Map.of();
     }
+    return reKey(instrumentKeys, response.data());
+  }
+
+  /**
+   * Re-keys the Upstox quote {@code data} map back to the REQUEST instrument keys. Upstox keys the
+   * response by {@code EXCH:TRADINGSYMBOL}, which equals {@code normalize(requestKey)} ONLY when the
+   * instrument key is itself the symbol (indices: {@code NSE_INDEX|Nifty 50}). For F&O the request key
+   * is {@code NSE_FO|<token>} while the response key is {@code NSE_FO:<symbol>}, so the {@code |→:}
+   * normalize never matches — map back via the tick's {@code instrument_token} (the request key it
+   * echoes), falling back to the normalized response key. Unmatched ticks are dropped.
+   */
+  static Map<String, UpstoxMarketQuote.Tick> reKey(
+      List<String> requestedKeys, Map<String, UpstoxMarketQuote.Tick> data) {
+    Set<String> requested = new LinkedHashSet<>(requestedKeys);
     Map<String, String> byNormalized = new LinkedHashMap<>();
-    for (String requested : instrumentKeys) {
-      byNormalized.put(normalize(requested), requested);
+    for (String key : requestedKeys) {
+      byNormalized.put(normalize(key), key);
     }
     Map<String, UpstoxMarketQuote.Tick> out = new LinkedHashMap<>();
-    for (Map.Entry<String, UpstoxMarketQuote.Tick> entry : response.data().entrySet()) {
-      String requested = byNormalized.get(normalize(entry.getKey()));
-      if (requested != null) {
-        out.put(requested, entry.getValue());
+    for (Map.Entry<String, UpstoxMarketQuote.Tick> entry : data.entrySet()) {
+      UpstoxMarketQuote.Tick tick = entry.getValue();
+      String token = tick == null ? null : tick.instrumentToken();
+      String key =
+          token != null && requested.contains(token)
+              ? token
+              : byNormalized.get(normalize(entry.getKey()));
+      if (key != null) {
+        out.put(key, tick);
       }
     }
     return out;

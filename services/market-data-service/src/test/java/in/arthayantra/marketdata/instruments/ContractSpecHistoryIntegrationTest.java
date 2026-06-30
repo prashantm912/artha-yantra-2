@@ -92,7 +92,8 @@ class ContractSpecHistoryIntegrationTest extends MarketDataIntegrationTestBase {
             r ->
                 r.tradingsymbol().equals(FUT_SYMBOL)
                     ? new InstrumentRecord(
-                        r.instrumentToken(), r.exchange(), r.tradingsymbol(), r.name(),
+                        r.instrumentToken(), r.exchangeToken(), r.exchange(), r.tradingsymbol(),
+                        r.name(),
                         r.instrumentType(), r.segment(), r.expiry(), r.strike(), newLot,
                         r.tickSize())
                     : r)

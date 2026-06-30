@@ -86,11 +86,12 @@ public class LiveInstrumentDumpGateway implements InstrumentDumpGateway {
     return all;
   }
 
-  /** Maps a full wire row to the domain record; {@code exchange_token}/{@code last_price} are
-   * mirrored on {@link KiteInstrument} for reference but the domain record does not carry them. */
+  /** Maps a full wire row to the domain record; {@code exchange_token} now rides onto the domain
+   * record (persisted), {@code last_price} stays mirrored on {@link KiteInstrument} only. */
   private static InstrumentRecord toRecord(KiteInstrument k) {
     return new InstrumentRecord(
         k.instrumentToken(),
+        k.exchangeToken(),
         k.exchange(),
         k.tradingsymbol(),
         k.name(),

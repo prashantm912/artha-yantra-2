@@ -71,7 +71,7 @@ public class InstrumentRepository {
             ps.setString(1, r.exchange());
             ps.setString(2, r.tradingsymbol());
             ps.setLong(3, r.instrumentToken());
-            ps.setObject(4, null);
+            ps.setLong(4, r.exchangeToken());
             ps.setString(5, r.name());
             ps.setString(6, r.segment());
             ps.setString(7, r.instrumentType());

@@ -48,6 +48,7 @@ public class MockInstrumentDumpGateway implements InstrumentDumpGateway {
     String[] fields = line.split(",", -1);
     return new InstrumentRecord(
         Long.parseLong(fields[0]),
+        0L, // mock fixture carries no exchange_token
         fields[1],
         fields[2],
         fields[3],

@@ -13,6 +13,7 @@ public interface InstrumentDumpGateway {
   /** One dump row. */
   record InstrumentRecord(
       long instrumentToken,
+      long exchangeToken,
       String exchange,
       String tradingsymbol,
       String name,

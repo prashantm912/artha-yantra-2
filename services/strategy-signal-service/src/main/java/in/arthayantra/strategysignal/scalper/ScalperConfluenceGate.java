@@ -564,6 +564,12 @@ public class ScalperConfluenceGate {
     if (cfg.has("fii-bias") && !ScalperGates.fiiBias(ctx.macro(), side).pass()) {
       return Optional.empty();
     }
+    // E3 §3.3 fii-dii-gate (tag fii-dii-gate): the RICHER FII participant bias — the futures change-in-OI
+    // classifier + the option-leg seller read (Macro.fiiBiasSign, /fii-dii/bias) must not oppose the side;
+    // fail-open on a null/neutral read. Real EOD data, so usable in backtest (unlike the OI gates).
+    if (cfg.has("fii-dii-gate") && !ScalperGates.fii(ctx.macro(), side).pass()) {
+      return Optional.empty();
+    }
     // E3 constituent-gate (tag constituent-gate, §4.6): the index heavyweights' net push must not oppose
     // the side (Macro.constituentBias = /equity/index-contribution indexChangePct); fail-open on null/0.
     if (cfg.has("constituent-gate") && !ScalperGates.constituent(ctx.macro(), side).pass()) {

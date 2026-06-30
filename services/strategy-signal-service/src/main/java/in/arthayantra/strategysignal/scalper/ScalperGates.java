@@ -743,6 +743,25 @@ public final class ScalperGates {
   }
 
   /**
+   * E3 §3.3 fii-dii-bias (tag {@code fii-dii-gate}): the COMBINED FII EOD participant bias — the futures
+   * change-in-OI classifier (LB/SC/LU/SB) + the option-leg seller read, collapsed into {@code
+   * Macro.fiiBiasSign} (+1 bull / -1 bear / 0 neutral) by the market-data {@code /fii-dii/bias} endpoint.
+   * The bias must not OPPOSE the side: CE needs bull (sign &gt; 0), PE bear (sign &lt; 0). A null or 0
+   * (no data / conflicting) read DEGRADES to pass (a best-effort macro confirm, like the other macro
+   * gates). The RICHER sibling of {@link #fiiBias} (which reads only the raw long%); a strategy arms ONE.
+   */
+  public static GateOutcome fii(Macro m, OptionType side) {
+    BigDecimal sign = m.fiiBiasSign();
+    if (sign == null || sign.signum() == 0) {
+      return GateOutcome.pass(sign, "FII bias unavailable/neutral (degrade -> pass)");
+    }
+    boolean bull = sign.signum() > 0;
+    boolean ok = side == OptionType.CE ? bull : !bull;
+    return new GateOutcome(
+        ok, sign, "FII bias " + (bull ? "bull" : "bear") + (ok ? " supports " : " opposes ") + side);
+  }
+
+  /**
    * E3 (tag {@code constituent-gate}, §4.6 "the heavyweights must support the direction"): the index
    * constituents' net weighted push ({@code Macro.constituentBias}, the {@code /equity/index-contribution}
    * {@code indexChangePct}) must not oppose the side — CE needs it positive (heavyweights pushing up), PE

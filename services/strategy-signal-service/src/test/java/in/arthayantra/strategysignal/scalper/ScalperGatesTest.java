@@ -411,6 +411,17 @@ class ScalperGatesTest {
   }
 
   @Test
+  void fiiDiiGateRequiresTheParticipantBiasNotToOppose() {
+    // E3 §3.3: the combined FII participant bias sign (+1 bull / -1 bear / 0 neutral) must not oppose.
+    assertThat(ScalperGates.fii(macroFiiBias(bd("1")), CE).pass()).isTrue(); // bull supports CE
+    assertThat(ScalperGates.fii(macroFiiBias(bd("1")), PE).pass()).isFalse(); // bull opposes PE
+    assertThat(ScalperGates.fii(macroFiiBias(bd("-1")), PE).pass()).isTrue(); // bear supports PE
+    assertThat(ScalperGates.fii(macroFiiBias(bd("-1")), CE).pass()).isFalse(); // bear opposes CE
+    assertThat(ScalperGates.fii(macroFiiBias(bd("0")), CE).pass()).isTrue(); // neutral never blocks
+    assertThat(ScalperGates.fii(macroFiiBias(null), CE).pass()).isTrue(); // null -> pass
+  }
+
+  @Test
   void volumePumpRequiresAFloorClearingDirectionalCandle() {
     // CE: a floor-clearing GREEN candle (close>open) confirms; a RED one (close<open) blocks.
     assertThat(ScalperGates.volumePump(bd("110"), bd("100"), bd("130000"), "NIFTY 50", CE).pass()).isTrue();
@@ -590,6 +601,12 @@ class ScalperGatesTest {
   private static Macro macroConstituent(BigDecimal constituentBias) {
     return new Macro(
         bd("14"), bd("30"), bd("12.5"), Boolean.FALSE, 40, 10, bd("50"), null, null, constituentBias);
+  }
+
+  private static Macro macroFiiBias(BigDecimal fiiBiasSign) {
+    return new Macro(
+        bd("14"), bd("30"), bd("12.5"), Boolean.FALSE, 40, 10, bd("50"), null, null, null, null, null,
+        null, null, fiiBiasSign);
   }
 
   @Test

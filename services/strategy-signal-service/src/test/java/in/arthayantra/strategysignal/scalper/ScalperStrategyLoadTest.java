@@ -251,6 +251,9 @@ class ScalperStrategyLoadTest {
       assertThat(tags.contains("rsi-daily-cap"))
           .as(id + " rsi-daily-cap armed iff open-high-low")
           .isEqualTo(isOpenHighLow);
+      // E3 fii-dii-gate (§3.3 participant change-in-OI classifier): SHIPPED DEFAULT-OFF — armed on no
+      // strategy (the richer FII bias is a forward-paper discriminator; arming is a separate owner step).
+      assertThat(tags.contains("fii-dii-gate")).as(id + " fii-dii-gate off (default)").isFalse();
 
       // E3 volume-pump (§4.15.3): armed on the scalp-gap-theory family (a breakout needs a real pump).
       boolean isGapTheory = id.startsWith("scalp-gap-theory-");

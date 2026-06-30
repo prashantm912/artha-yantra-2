@@ -22,7 +22,7 @@ Authorities used: `2026-06-28-scalper-to-100-roadmap.md` (+ the 12 `2026-06-27-b
 
 ---
 
-## 1. CONFIRMED PENDING — genuinely unbuilt (code-proven) — 12 (was 15; 3 shipped)
+## 1. CONFIRMED PENDING — genuinely unbuilt (code-proven) — 11 (was 15; 4 shipped — §1a COMPLETE)
 
 > **Progress log** (mark each item DONE here the moment it merges):
 > - ✅ `FU1-manual-checks-9` — **DONE 2026-06-30 (PR #371, e49c764).** `ScalperManualChecks.CHECKS` 7→16
@@ -34,14 +34,18 @@ Authorities used: `2026-06-28-scalper-to-100-roadmap.md` (+ the 12 `2026-06-27-b
 >   trough→recovery≥40 sequencer) + 3 `ScalperOiProps` knobs + seam window-scan; armed on trend-change ×3.
 >   **RATIFICATION-PACK row 51 = KEEP/AUTOMATE_PKG (NOT the inventory's "uncertain").** Also bumped
 >   strategy-schema tags `maxItems` 16→24 (trend-change hit 17 tags; backward-compatible relaxation).
+> - ✅ `E3-fii-participant-classifier` — **DONE 2026-06-30 (PR #374).** New market-data `ParticipantBiasService`
+>   (LB/SC/LU/SB 2-day FII OI-delta classifier + option-leg seller read) + `GET /fii-dii/bias`; strategy-signal
+>   `Macro.fiiBiasSign` + `ScalperGates.fii` + `fii-dii-gate` seam (default-OFF). Real EOD data ⇒ backtest-usable.
+>   Contract recaptured (additive path) + TS regen. **§1a COMPLETE — the scalper signal side is fully built.**
 
-### 1a. Scalper signal-side (1 pending; FU1 + rsi-band + rsi-recovery shipped) — small, in-service, parity-safe tag-gate pattern
+### 1a. Scalper signal-side (✅ ALL 4 SHIPPED — COMPLETE) — small, in-service, parity-safe tag-gate pattern
 | id | item | doc | code-evidence of absence |
 |---|---|---|---|
 | ~~`FU1-manual-checks-9`~~ | **✅ DONE #371** — 9 manual-only checks added (`ScalperManualChecks.CHECKS` 7→16) | `followup1-expand-manual-checks.md` §3 | shipped 2026-06-30 |
 | ~~`E5-rsi-band-per-strategy`~~ | **✅ DONE #372** — configurable `rsi_band` block + `rsiBandCustom` (on `ScalperParams`) | `rsi-multi-timeframe.md` §3.5 | shipped 2026-06-30 |
 | ~~`E5-rsi-recovery-postvertical`~~ | **✅ DONE #373** — `rsiRecovery` trough→recovery sequencer, armed on trend-change ×3 (RATIFICATION-PACK row 51 = KEEP) | `rsi-multi-timeframe.md` §3.7 | shipped 2026-06-30 |
-| `E3-fii-participant-classifier` | 4-participant (FII/Pro/DII/Client) LB/SC/LU/SB change-in-OI classifier + participant-OI dot (the rich half of fii-dii-bias) | `macro-vix-global-fii.md` `fii-dii-bias` §3.3 | only the simple `fiiBias()` long%>50 gate shipped (#285, commit body explicitly defers the classifier); no `ParticipantBias*` file; `Macro` record has no `fiiBiasSign`; no `/fii-dii/bias` endpoint |
+| ~~`E3-fii-participant-classifier`~~ | **✅ DONE #374** — `ParticipantBiasService` LB/SC/LU/SB classifier + `/fii-dii/bias` + `fii-dii-gate` (default-OFF) | `macro-vix-global-fii.md` §3.3 | shipped 2026-06-30 |
 
 ### 1b. Frontend / oipulse replication (8) — the bulk of remaining UI work
 | id | item | backend? | code-evidence of absence |
@@ -125,6 +129,7 @@ From the S24 prune + owner decisions (reference, so nothing here gets re-propose
 ---
 
 ## Net
-The **scalper engine is ~95% built** — §1a is down to its LAST item (`E3-fii-participant-classifier`;
-FU1 #371 + rsi-band #372 + rsi-recovery #373 shipped) + the §2 owner-numbers remain on the strategy side. The remaining *bulk of net-new work* is **frontend oipulse (§1b, 8 pages)** and the **Phase-5 equity
+The **scalper signal side (§1a) is COMPLETE** — all 4 packages shipped (FU1 #371 + rsi-band #372 +
+rsi-recovery #373 + fii-classifier #374). Only the §2 owner-numbers remain on the strategy side; the
+remaining *net-new* code is **frontend oipulse (§1b, 8 pages)** + the **Phase-5 equity chain (§1c, 2)**. The remaining *bulk of net-new work* is **frontend oipulse (§1b, 8 pages)** and the **Phase-5 equity
 screener chain (§1c, 2, sequential)**. Everything else is owner-gated, not code-pending.

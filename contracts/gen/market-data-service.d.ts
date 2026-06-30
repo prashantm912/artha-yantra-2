@@ -1044,6 +1044,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/fii-dii/bias": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["bias"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/equity/sector-stats": {
         parameters: {
             query?: never;
@@ -2085,6 +2101,20 @@ export interface components {
             oiPct?: number;
             /** @enum {string} */
             interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+        };
+        Bias: {
+            /** Format: date */
+            tradeDate?: string;
+            fiiClassification?: string;
+            bias?: string;
+            fiiLongPct?: number;
+            /** Format: int64 */
+            callNet?: number;
+            /** Format: int64 */
+            putNet?: number;
+            legBias?: string;
+            /** Format: int32 */
+            biasSign?: number;
         };
         SectorAgg: {
             sector?: string;
@@ -4864,6 +4894,37 @@ export interface operations {
                     "*/*": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    bias: {
+        parameters: {
+            query: {
+                date: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["Bias"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

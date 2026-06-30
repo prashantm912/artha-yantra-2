@@ -202,6 +202,8 @@ class MarketOiClientTest {
     // E3: macro now also reads the INDIA VIX quote + the Dow global cue (direction +1 up / −1 down).
     stub("/api/v1/market/vix", "{\"ltp\":\"14.5\",\"change\":\"-0.30\"}");
     stub("/api/v1/market/global/dow", "{\"direction\":1}");
+    // E3 §3.3: macro now also reads the combined FII participant bias sign (+1 bull / -1 bear / 0).
+    stub("/api/v1/market/fii-dii/bias", "{\"biasSign\":1,\"bias\":\"BULL\"}");
 
     Macro m = client.macro(UNDERLYING, TRADE_DATE, EXPIRY);
 
@@ -218,6 +220,7 @@ class MarketOiClientTest {
     assertThat(m.vixLevel()).isEqualByComparingTo("14.5"); // /vix ltp
     assertThat(m.vixRising()).isFalse(); // change −0.30 < 0 → VIX falling (favours CE)
     assertThat(m.dowUp()).isTrue(); // /global/dow direction +1 → Dow up (favours CE)
+    assertThat(m.fiiBiasSign()).isEqualByComparingTo("1"); // /fii-dii/bias biasSign +1 → FII bull
     server.verify();
   }
 
@@ -234,6 +237,7 @@ class MarketOiClientTest {
     stub("/api/v1/market/options/active-strikes", "{}"); // empty series → null slopes
     stub("/api/v1/market/vix", "{}");
     stub("/api/v1/market/global/dow", "{}"); // absent quote → null level + unknown direction
+    stub("/api/v1/market/fii-dii/bias", "{}"); // absent → null biasSign → fii-dii-gate degrades to pass
 
     Macro m = client.macro(UNDERLYING, TRADE_DATE, EXPIRY);
 
@@ -372,6 +376,7 @@ class MarketOiClientTest {
     stub("/api/v1/market/options/active-strikes", "{}");
     stub("/api/v1/market/vix", "{}");
     stub("/api/v1/market/global/dow", "{}");
+    stub("/api/v1/market/fii-dii/bias", "{}");
 
     Macro m = client.macro(UNDERLYING, TRADE_DATE, EXPIRY);
 

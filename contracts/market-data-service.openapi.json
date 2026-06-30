@@ -3597,6 +3597,42 @@
         }
       }
     },
+    "/api/v1/market/fii-dii/bias" : {
+      "get" : {
+        "tags" : [ "fii-dii-controller" ],
+        "operationId" : "bias",
+        "parameters" : [ {
+          "name" : "date",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Bias"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/equity/sector-stats" : {
       "get" : {
         "tags" : [ "equity-controller" ],
@@ -6279,6 +6315,39 @@
           "interpretation" : {
             "type" : "string",
             "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
+          }
+        }
+      },
+      "Bias" : {
+        "type" : "object",
+        "properties" : {
+          "tradeDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "fiiClassification" : {
+            "type" : "string"
+          },
+          "bias" : {
+            "type" : "string"
+          },
+          "fiiLongPct" : {
+            "type" : "number"
+          },
+          "callNet" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "putNet" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "legBias" : {
+            "type" : "string"
+          },
+          "biasSign" : {
+            "type" : "integer",
+            "format" : "int32"
           }
         }
       },

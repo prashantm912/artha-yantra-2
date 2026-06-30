@@ -123,7 +123,11 @@ public record ScalperGateContext(
       BigDecimal premiumSkewPct,
       // E3 Dow global cue: the Dow Jones LTP-direction (true = up → bullish/CE, false = down → bearish/PE);
       // null when the global feed is unconfigured/off-hours/history → the dow dot degrades to neutral.
-      Boolean dowUp) {
+      Boolean dowUp,
+      // E3 §3.3 fii-dii-bias: the COMBINED FII EOD participant bias sign (+1 bull / -1 bear / 0 neutral),
+      // from the futures change-in-OI classifier + the option-leg seller read (market-data /fii-dii/bias).
+      // null / 0 (no data or conflicting) degrades the fii-dii-gate to pass (fail-open).
+      BigDecimal fiiBiasSign) {
 
     /** Pre-constituent 9-arg form: trailing macro fields default to null (keeps existing literals intact). */
     public Macro(
@@ -191,6 +195,26 @@ public record ScalperGateContext(
         BigDecimal premiumSkewPct) {
       this(atmIv, ivRank, vixLevel, vixRising, advances, declines, fiiLongPct, ceIvAvg6, peIvAvg6,
           constituentBias, ceIvSlope, peIvSlope, premiumSkewPct, null);
+    }
+
+    /** Pre-fii-bias 14-arg form: {@code fiiBiasSign} defaults to null (keeps existing 14-arg callers intact). */
+    public Macro(
+        BigDecimal atmIv,
+        BigDecimal ivRank,
+        BigDecimal vixLevel,
+        Boolean vixRising,
+        int advances,
+        int declines,
+        BigDecimal fiiLongPct,
+        BigDecimal ceIvAvg6,
+        BigDecimal peIvAvg6,
+        BigDecimal constituentBias,
+        BigDecimal ceIvSlope,
+        BigDecimal peIvSlope,
+        BigDecimal premiumSkewPct,
+        Boolean dowUp) {
+      this(atmIv, ivRank, vixLevel, vixRising, advances, declines, fiiLongPct, ceIvAvg6, peIvAvg6,
+          constituentBias, ceIvSlope, peIvSlope, premiumSkewPct, dowUp, null);
     }
   }
 }

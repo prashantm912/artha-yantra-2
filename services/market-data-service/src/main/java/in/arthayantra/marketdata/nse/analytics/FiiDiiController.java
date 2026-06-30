@@ -23,9 +23,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class FiiDiiController {
 
   private final NseEodReader reader;
+  private final ParticipantBiasService biasService;
 
-  public FiiDiiController(NseEodReader reader) {
+  public FiiDiiController(NseEodReader reader, ParticipantBiasService biasService) {
     this.reader = reader;
+    this.biasService = biasService;
   }
 
   public record LongShortRow(LocalDate tradeDate, long fiiLong, long fiiShort, BigDecimal ratio) {}
@@ -75,6 +77,17 @@ public class FiiDiiController {
                 })
             .toList();
     return Map.of("items", items);
+  }
+
+  /**
+   * E3 fii-dii-bias (§3.3): the combined FII EOD participant bias for a date — the LB/SC/LU/SB futures
+   * classification + the option-leg seller read collapsed into a single {@code biasSign} the scalper
+   * {@code fii-dii-gate} consumes. {@code date} defaults to today (the caller passes the prior completed
+   * session's eodDate for a backtest/intraday read).
+   */
+  @GetMapping("/bias")
+  public ParticipantBiasService.Bias bias(@RequestParam String date) {
+    return biasService.bias(parseDate(date));
   }
 
   private static LocalDate parseDate(String raw) {

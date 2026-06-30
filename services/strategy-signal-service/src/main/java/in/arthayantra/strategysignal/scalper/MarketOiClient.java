@@ -475,10 +475,21 @@ public class MarketOiClient {
     Boolean dowUp =
         get(uri -> uri.path("/api/v1/market/global/dow").build(), this::deriveDowUp, null, "global/dow");
 
+    // E3 §3.3 fii-dii-bias: the COMBINED FII EOD participant bias sign (the futures change-in-OI
+    // classifier + the option-leg seller read), read off the new /fii-dii/bias endpoint for the prior
+    // completed session's tradeDate. null on a participant-OI gap → the fii-dii-gate degrades to pass.
+    BigDecimal fiiBiasSign =
+        get(
+            uri -> uri.path("/api/v1/market/fii-dii/bias").queryParam("date", tradeDate).build(),
+            json -> decimal(json.path("biasSign")),
+            null,
+            "fii-dii/bias");
+
     return new Macro(
         atmIv, ivRank, vix.level(), vix.rising(), breadth[0], breadth[1], fiiLongPct,
         chain.ivPair().ceIvAvg6(), chain.ivPair().peIvAvg6(),
-        constituentBias, ivSlope.ceSlope(), ivSlope.peSlope(), chain.premiumSkewPct(), dowUp);
+        constituentBias, ivSlope.ceSlope(), ivSlope.peSlope(), chain.premiumSkewPct(), dowUp,
+        fiiBiasSign);
   }
 
   /** Front (nearest-expiry) index-future quadrant from the term-structure-with-interpretation grid. */

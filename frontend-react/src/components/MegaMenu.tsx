@@ -112,6 +112,7 @@ const SECTIONS: MenuSection[] = [
       { label: 'Vix & Index', to: '/features/vix-index' }, // Wave 3 — VIX vs index dual-axis lines (zero-BE)
       { label: 'Market Holidays', to: '/features/market-holidays' }, // Wave 3 — NSE holiday reference table
       { label: 'World Indices', to: '/features/world-indices' }, // global-index live quotes (Upstox GLOBAL_INDEX)
+      { label: 'Risk Calculator', to: '/features/risk-calculator' }, // §1b — pure-client position-sizing utility
     ],
   },
   {

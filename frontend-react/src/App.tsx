@@ -17,6 +17,7 @@ import { FuturesEodPage } from './pages/futures/FuturesEodPage.tsx';
 import { FuturesOiAnalysisPage } from './pages/futures/FuturesOiAnalysisPage.tsx';
 import { BanksAnalysisPage } from './pages/futures/BanksAnalysisPage.tsx';
 import { MarketHolidaysPage } from './pages/features/MarketHolidaysPage.tsx';
+import { RiskCalculatorPage } from './pages/features/RiskCalculatorPage.tsx';
 import { ParticipantWiseOiPage } from './pages/fiidii/ParticipantWiseOiPage.tsx';
 import { SignalsPage } from './pages/signals/SignalsPage.tsx';
 import { DashboardPage } from './pages/dashboard/DashboardPage.tsx';
@@ -233,6 +234,7 @@ export function App() {
           <Route path="/features/connecting-dots" element={<ConnectingDotsPage />} />
           <Route path="/features/vix-index" element={<Lazy><VixIndexPage /></Lazy>} />
           <Route path="/features/market-holidays" element={<MarketHolidaysPage />} />
+          <Route path="/features/risk-calculator" element={<RiskCalculatorPage />} />
           <Route path="/features/world-indices" element={<Lazy><WorldIndicesPage /></Lazy>} />
           {/* Data Ops — operator console for the expired/OI backfill (wave PR-DO) */}
           <Route path="/data-ops" element={<Navigate to="/data-ops/status" replace />} />

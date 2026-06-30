@@ -31,9 +31,11 @@ retention.
 ## Backups & restore (whole-database)
 
 The `db-backup` sidecar (`deploy/backup/backup.sh`) takes a **whole-database**
-`pg_dump -Fc` plus a `pg_dumpall --globals-only` (roles/grants) at 00:30 IST,
-rotation **7 nightly + 4 weekly**, into the host bind-mount `./backups/<mode>/<stamp>/`
-(`<db>-full.dump` + `globals.sql`). `ay backup` runs it on demand.
+`pg_dump -Fc` plus a `pg_dumpall --globals-only` (roles/grants) at 00:30 IST into the
+host bind-mount `./backups/<mode>/<stamp>/` (`<db>-full.dump` + `globals.sql`). `ay backup`
+runs it on demand. **Retention: the 3 NEWEST backups across `manual/` + `nightly/` +
+`weekly/` COMBINED** — a 4th evicts the oldest (each whole-db dump is ~3 GB ⇒ ~9 GB cap).
+`weekly/` is no longer written (the Sunday-copy tier is obsolete under a 3-total cap).
 
 > **Why whole-database (a per-schema dump is a data-loss trap).** TimescaleDB stores
 > hypertable rows in `_timescaledb_internal` chunks — *outside* the table's own schema —

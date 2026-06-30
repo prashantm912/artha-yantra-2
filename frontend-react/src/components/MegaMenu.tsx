@@ -80,6 +80,7 @@ const SECTIONS: MenuSection[] = [
       { label: 'Index Contribution', to: '/equity/index-contribution' }, // Wave 3 — weighted contribution
       { label: 'Open=High/Low', to: '/equity/open-high-low' }, // polish — O=H/O=L live setups
       { label: 'News', to: '/equity/news' }, // polish — Upstox per-stock news/announcements
+      { label: 'Announcement', to: '/equity/announcement' }, // §1b — NSE corporate-filings feed (date range + symbol)
     ],
   },
   {

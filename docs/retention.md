@@ -28,5 +28,25 @@ ratios and snapshot scope (`ay status` + the `ay_hypertable_bytes` gauge are
 the inputs) — the answer is widening disk or narrowing scope, never silent
 retention.
 
-Backups: the Stage A db-backup sidecar takes per-schema `pg_dump -Fc` at
-00:30 IST with 14-day + 8-week rotation; restore drill quarterly.
+## Backups & restore (whole-database)
+
+The `db-backup` sidecar (`deploy/backup/backup.sh`) takes a **whole-database**
+`pg_dump -Fc` plus a `pg_dumpall --globals-only` (roles/grants) at 00:30 IST,
+rotation **7 nightly + 4 weekly**, into the host bind-mount `./backups/<mode>/<stamp>/`
+(`<db>-full.dump` + `globals.sql`). `ay backup` runs it on demand.
+
+> **Why whole-database (a per-schema dump is a data-loss trap).** TimescaleDB stores
+> hypertable rows in `_timescaledb_internal` chunks — *outside* the table's own schema —
+> so a `pg_dump -n marketdata` captures the empty hypertable parents and **silently omits
+> every `candles` / `options_chain_snapshots` row** (200M+ rows; the bulk that took weeks
+> to backfill/capture). The pre-2026-07-01 per-schema sidecar had exactly this hole: its
+> `marketdata.dump` was ~25 MB for a 31 GB database. A whole-db dump (~3 GB `-Fc`, ~12 min)
+> captures all four schemas + chunk data and is the only dump that round-trips a rebuild.
+
+**Restore (`ay restore <backup-dir-or-full-dump>`)** — DESTRUCTIVE, drops + recreates the
+active-profile DB: stops the stack → brings up only `timescaledb` → `dropdb`/`createdb` →
+loads `globals.sql` → `CREATE EXTENSION timescaledb` → `timescaledb_pre_restore()` →
+`pg_restore --no-owner` (full, NOT `--data-only`) → `timescaledb_post_restore()` → `ANALYZE`
+→ `ay up` (flyway-init validates the restored history head, a no-op). Use this — not
+`ay reset-db` — when you want a rebuild that **keeps** the data. `ay reset-db` is the empty
+(Flyway-only) rebuild. Restore drill quarterly.

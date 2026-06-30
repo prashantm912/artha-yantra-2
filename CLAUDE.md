@@ -69,6 +69,9 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
 - **Candle sources split by interval:** `CandleReader.read()` serves the `candles_<iv>`
   caggs (5m/15m/1h/1d/1w), **sparse on a fresh boot**; native daily lives in `candles`@1d
   (dense — `readDailyWithWarmup`). The two diverge for 1d (chart overlays hit this).
+- **3m has NO cagg — it is a read-time 1m→3m rollup** (`CandleRepository.rangeRolledFromOneMinute`,
+  #365); `candles_3m` exists but is empty/unwired (refreshing it OOMs). `/candles?interval=3m` works;
+  the live SignalEngine 3m-primary depends on this rollup, not the cagg.
 - **Historical OI is VIRTUAL (read-time derived), never a snapshot backfill:** there are no real
   `options_chain_snapshots` rows before ~2026-06-15 (live capture start). `CandleDerivedChainReader`
   pivots the per-contract `candles` + `expired_contracts` into the StrikePoint shape on the fly
@@ -147,6 +150,21 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
   3m"`). Fixed with an additive `case "3m" -> Duration.ofMinutes(3)` — 3m is a valid aggregate, the
   bucketing is generic (epoch floor mod interval-seconds) and 09:15 IST aligns to a 3m boundary, so
   5m/15m/1h goldens stay byte-identical.
+- **Live scalper signal series = the DATED front contract, NOT `NIFTY-FUT-CONT`:** the continuous
+  future (NFO `NIFTY-FUT-CONT`) is BACKTEST/replay-only and intentionally stale (max bar = backfill
+  end). LIVE, `FuturesUniverseResolver` maps `universe.signal_underlying` → the live dated front/next
+  contract (e.g. `NIFTY26JULFUT`, roll re-resolves daily ~08:40 IST). Don't alarm that CONT is stale —
+  that's by design ("the continuous-series counterpart is replay territory").
+- **Published versions + signals persistence:** `strategy_versions.status='published'` (LOWERCASE —
+  `'PUBLISHED'` queries return empty) + the strategy's `published_version_id` pointer; the live engine
+  loads `enabled && publishedVersionId != null`. `strategy.signals` holds only FIRING bars (gate pass
+  AND composite≥threshold); rejected evals return a breakdown but never a row. `score_breakdown` =
+  frozen ScoreBreakdownDto (`composite = Σ(w·s)/Σw`; an optional activates iff score≥optionalMinScore
+  AND required-only composite≥threshold−optionalGateMargin). Scalper enrichment rides the
+  `scalper_detail` V009 side-channel (option leg + confluence dots + `manual_checks`).
+- **In-container `now()`/`::date` is UTC, not IST:** a 02:xx-IST row is the *previous* calendar day in
+  the DB (e.g. 02:xx IST on 06-29 stores as `2026-06-28` UTC). Filter `signals.generated_at` / candle
+  `bucket` by explicit `+05:30` ISO bounds, never `::date = CURRENT_DATE` (off-by-one across IST midnight).
 - **Rebuild + redeploy ONE service (no `ay` build verb):** build the artifact (`(cd frontend-react &&
   npm run build)` or the service JAR), set `$env:ARTHA_DB_NAME`/`$env:ARTHA_REDIS_DB` to the LIVE
   values (`artha`/`0`, mock `artha_mock`/`1`), then `docker compose -f deploy/docker-compose.yml
@@ -211,6 +229,8 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
 - Trunk-based: short-lived `feat/|fix/|chore/|docs/` branches, **Conventional Commits**
   (scope = service/lib name), **squash-merge only**, never push to `main`. A stage =
   one branch, one commit per phase, single final PR.
+- **`git reset --hard origin/main` wipes uncommitted TRACKED edits** (untracked new files survive) —
+  commit/stash a DIFFERENT in-flight feature BEFORE resetting to land another (lost the #2 edits once).
 - The **Bash tool is bash, not PowerShell** — PS here-strings (`@'…'@`) are taken
   literally and corrupt commit subjects; pass multi-line commit messages via
   `git commit -F -` with a heredoc.

@@ -117,6 +117,7 @@ backtest:
       - { path: "indicators[alias=supertrend].params.multiplier", range: [1.5, 3.5] }
       - { path: "entry_rules.scoring.threshold",                  range: [0.1, 0.5] }
       - { path: "exit_rules[type=time_stop].params.max_bars",   range: [12, 28], step: 1 }
+      - { path: "exit_rules[type=take_profit].params.value",  range: [20, 55], step: 5 }   # E9 target band — optimizer-tunable (default 35)
     method: tpe
     max_trials: 40
     objective: { metric: expectancy, direction: maximize, fold_aggregation: mean }

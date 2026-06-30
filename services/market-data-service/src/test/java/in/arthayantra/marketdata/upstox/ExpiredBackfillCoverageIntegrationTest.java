@@ -10,11 +10,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
- * IT for {@link ExpiredBackfillRepository#hasIncompleteCoverage()} — the lock-safe "work remains"
- * probe the auto-resume self-heal reads. Registering one {@code complete = false} contract makes the
- * registry EXISTS-probe return true. (The shared singleton DB has no per-method cleanup, so the
- * positive case is asserted monotonically — an incomplete row is enough; the false branch is covered
- * by {@code ExpiredBackfillAutoResumeTest}.)
+ * IT for {@link ExpiredBackfillRepository#hasIncompleteCoverage(LocalDate)} — the lock-safe "work
+ * remains" probe the auto-resume self-heal reads. Registering one {@code complete = false} contract
+ * makes the registry EXISTS-probe return true when its expiry is at/after the floor, and (the
+ * regression guard) NOT true when the floor is past it — an out-of-window partial is unreachable and
+ * must not count. (The shared singleton DB has no per-method cleanup, so the window assertions are
+ * relative to THIS row's own expiry, never a global empty/non-empty claim.)
  */
 @SpringBootTest(
     properties = {
@@ -27,13 +28,14 @@ class ExpiredBackfillCoverageIntegrationTest extends MarketDataIntegrationTestBa
   @Autowired private ExpiredBackfillRepository repo;
 
   @Test
-  void incompleteContractMakesCoverageProbeTrue() {
+  void incompleteContractCountsOnlyInsideTheResumeWindow() {
+    LocalDate expiry = LocalDate.of(2025, 7, 1);
     repo.upsertContract(
         "BFO",
         "SENSEX-AUTORESUME-IT-PROBE",
         "PE",
         "SENSEX",
-        LocalDate.of(2025, 7, 1),
+        expiry,
         new BigDecimal("80000"),
         10,
         new BigDecimal("0.05"),
@@ -45,6 +47,12 @@ class ExpiredBackfillCoverageIntegrationTest extends MarketDataIntegrationTestBa
         0,
         false);
 
-    assertThat(repo.hasIncompleteCoverage()).isTrue();
+    // Floor at/before this row's expiry → it is reachable work → probe true.
+    assertThat(repo.hasIncompleteCoverage(expiry)).isTrue();
+    assertThat(repo.hasIncompleteCoverage(expiry.minusYears(1))).isTrue();
+    // Regression guard: floor PAST this row's expiry → it is out-of-window/unreachable. The probe
+    // must not count it. (Monotonic-safe: this floor is one day past THIS row, and no other test
+    // inserts an incomplete contract dated this far in the future.)
+    assertThat(repo.hasIncompleteCoverage(expiry.plusDays(1))).isFalse();
   }
 }

@@ -147,14 +147,23 @@ public class ExpiredBackfillRepository {
 
   /**
    * Cheap "is there work left" probe for the auto-resume self-heal ({@link ExpiredBackfillAutoResume}):
-   * does ANY registered expired contract still carry {@code complete = false}? Reads only the small
-   * registry (no candle scan, no per-chunk locks), so it is safe to call while a backfill is actively
-   * ingesting into the {@code candles} hypertable.
+   * does any registered expired contract with {@code expiry >= expiryFloor} still carry {@code complete
+   * = false}? Reads only the small registry (no candle scan, no per-chunk locks), so it is safe to call
+   * while a backfill is actively ingesting into the {@code candles} hypertable.
+   *
+   * <p><b>Window scope is load-bearing.</b> The {@code expiryFloor} MUST be the same lower bound the
+   * resume actually walks ({@code now − 1 year}). An incomplete contract whose expiry has rolled out of
+   * that window is UNREACHABLE — the run skips it ({@code expiry.isBefore(from)}), so Upstox can never
+   * complete it (it no longer serves that old contract's candles). Counting those frozen out-of-window
+   * partials kept this probe perpetually true, so the hourly self-heal re-walked the whole trailing-year
+   * roster every hour forever, burning the shared Upstox quota on contracts it could never finish.
    */
-  public boolean hasIncompleteCoverage() {
+  public boolean hasIncompleteCoverage(LocalDate expiryFloor) {
     Boolean any =
         jdbc.queryForObject(
-            "SELECT EXISTS(SELECT 1 FROM expired_contracts WHERE NOT complete)", Boolean.class);
+            "SELECT EXISTS(SELECT 1 FROM expired_contracts WHERE NOT complete AND expiry >= ?)",
+            Boolean.class,
+            java.sql.Date.valueOf(expiryFloor));
     return Boolean.TRUE.equals(any);
   }
 

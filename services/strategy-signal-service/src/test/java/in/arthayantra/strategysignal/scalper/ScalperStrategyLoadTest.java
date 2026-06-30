@@ -65,7 +65,9 @@ class ScalperStrategyLoadTest {
           Map.entry("scalp-market-movers-sensex-sensexoi", "SENSEX"),
           Map.entry("scalp-btst-stbt-nifty", "NIFTY 50"),
           Map.entry("scalp-btst-stbt-sensex-niftyoi", "SENSEX"),
-          Map.entry("scalp-btst-stbt-sensex-sensexoi", "SENSEX"));
+          Map.entry("scalp-btst-stbt-sensex-sensexoi", "SENSEX"),
+          // E11 PE-mirror template (the bearish trend-change variant — NIFTY PUT side)
+          Map.entry("scalp-trend-change-nifty-pe", "NIFTY 50"));
 
   // Each derived strategy must carry the tag that arms its §12.3 gate (the seeder reads the same tag).
   // Every variant of each gated base carries the same tag (the gate behaviour is instrument-agnostic).
@@ -77,6 +79,7 @@ class ScalperStrategyLoadTest {
           Map.entry("scalp-trend-change-nifty", "trend-change"),
           Map.entry("scalp-trend-change-sensex-niftyoi", "trend-change"),
           Map.entry("scalp-trend-change-sensex-sensexoi", "trend-change"),
+          Map.entry("scalp-trend-change-nifty-pe", "trend-change"),
           Map.entry("scalp-open-high-low-nifty", "open-high-low"),
           Map.entry("scalp-open-high-low-sensex-niftyoi", "open-high-low"),
           Map.entry("scalp-open-high-low-sensex-sensexoi", "open-high-low"),

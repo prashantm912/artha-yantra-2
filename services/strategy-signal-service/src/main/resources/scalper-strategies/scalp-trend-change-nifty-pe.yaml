@@ -1,0 +1,85 @@
+# PE-MIRROR (E11 STEP, owner 2026-06-30) of scalp-trend-change-nifty — the bearish counterpart that BUYS
+# a PUT on a DOWN-reversal, leaving the CE strategy byte-identical. The TrendChangeGate is already
+# internally bidirectional (its hard pre-gate fires on a swing-LOW taken out to the downside + a >=50%
+# Trending-OI shift in the PE direction — "the mirror"); the ConnectTheDots scorer scores the resolved
+# side symmetrically; the engine resolves side = PE when close < VWAP. The ONLY thing that kept the base
+# CE-only was `option_types: [CE]` + the bullish `close > vwap` gate. This variant flips BOTH to the PE
+# side (option_types: [PE], gate `close < vwap`, exit `close > vwap`) — a STRICTLY ADDITIVE config mirror:
+# no engine/scorer change, the CE goldens stay byte-identical, parity holds.
+#
+# Seeded as a DRAFT (opt-in) like every scalper — it never auto-emits; the owner publishes it from the UI
+# after eyeballing the PE signals. This is the trend-change TEMPLATE for the PE-mirror set; once validated
+# the same flip replicates to the other directional families (+ the SENSEX variants).
+#
+# direction: long stays — a long-PUT is still a long-premium BUY (direction → BUY action; the PE side
+# comes from option_types + the sub-VWAP resolution, NOT from direction:short, which would SELL).
+schema: strategy-schema/v1
+id: scalp-trend-change-nifty-pe
+name: "Scalper · Trend Change · NIFTY PE"
+version: 1.0.0
+description: "PE-mirror of the trend-change / reversal-capture scalp (Siva #12) on the NIFTY 3-min front future: a price swing-LOW structure break + a >=50% Trending-OI shift to the PE side + the §3.1 2-candle confirm, capped to the 09:45-14:30 window; broken-swing-pivot SL; long-premium PE only (BUYS the nearest-weekly ATM-band PUT on a DOWN-reversal). The bearish counterpart of scalp-trend-change-nifty; CE strategy unchanged."
+author: owner
+tags: [scalper, options, intraday, nifty, trend-change, fii-bias, constituent-gate, rsi-s24-bands, delta-s24-floor, premium-s24-band, divergence-vol-gate, psar-durability, s24-trade-window, oi-confluence-exit, directional-vix-gate, rsi-cooloff, rsi-recovery]
+
+universe:
+  mode: options_of_underlying
+  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  signal_underlying: { exchange: NFO, tradingsymbol: "NIFTY-FUT-CONT" }
+  options:
+    expiry: nearest_weekly
+    strikes: { selector: atm_window, width: 3 }
+    option_types: [PE]
+
+timeframes:
+  primary: 3m
+  additional: [1h]
+
+indicators:
+  - { name: VWMA,       alias: vwma20,    timeframe: 3m, params: { period: 20 } }
+  - { name: PSAR,       alias: psar,      timeframe: 3m, params: { step: 0.02, max: 0.2 } }
+  - { name: RSI,        alias: rsi14,     timeframe: 3m, params: { period: 14 }, weight: 1.0,
+      normalize: { type: rsi_momentum } }
+  - { name: SUPERTREND, alias: supertrend, timeframe: 3m, params: { period: 10, multiplier: 2.0 },
+      weight: 1.0, normalize: { type: direction } }
+  - { name: SUPERTREND, alias: bias60m,   timeframe: 1h, params: { period: 7, multiplier: 3.0 } }
+  - { name: SUPERTREND_LINE, alias: supertrend_line, timeframe: 3m, params: { period: 10, multiplier: 2.0 } } # E9 §3: the ST LINE for the trail-with-Super-Trend exit
+
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - "close < vwap"           # PE mirror: the DOWN-reversal must hold the BEARISH side of VWAP post-break
+  scoring:
+    threshold: 0.2
+
+exit_rules:
+  - { type: signal_exit, params: { rule: "close > vwap", min_volume: 125000 } }   # §3.12 mirror: a VWAP RECLAIM invalidates the PE reversal
+  - { type: trailing_stop, params: { basis: indicator, alias: supertrend_line } }   # E9 §3: trail with the Super Trend line as the move matures
+  - { type: time_stop,   params: { max_bars: 30 } }
+
+risk:
+  position_sizing: { method: premium_budget, params: { budget_inr: 15000 } }
+  max_positions: 1
+  max_positions_per_underlying: 1
+  max_daily_loss_pct: 2.0
+  session:
+    style: intraday
+    window: { from: "09:45", to: "14:30" }   # §3.12: trend-change window 09:45-14:30
+    square_off: "15:15"
+
+backtest:
+  defaults: { interval: 1m, lookback_days: 120, initial_capital: 200000, costs: { per_lot_inr: 20, slippage_ticks: 1 } }
+  oi_confluence_gate: { enabled: false, interval: "5m" }
+  optimize:
+    parameters:
+      - { path: "indicators[alias=vwma20].params.period",         range: [10, 30], step: 1 }
+      - { path: "indicators[alias=rsi14].params.period",          range: [9, 21], step: 1 }
+      - { path: "indicators[alias=supertrend].params.period",     range: [7, 14], step: 1 }
+      - { path: "indicators[alias=supertrend].params.multiplier", range: [1.5, 3.5] }
+      - { path: "entry_rules.scoring.threshold",                  range: [0.1, 0.5] }
+      - { path: "exit_rules[type=time_stop].params.max_bars",   range: [20, 42], step: 1 }
+    method: tpe
+    max_trials: 40
+    objective: { metric: expectancy, direction: maximize, fold_aggregation: mean }
+    constraints: { min_trades: 10 }
+    walk_forward: { train_days: 30, test_days: 30, step_days: 20, anchored: false }

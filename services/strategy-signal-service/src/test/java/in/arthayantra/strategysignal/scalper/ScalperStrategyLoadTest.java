@@ -223,6 +223,12 @@ class ScalperStrategyLoadTest {
       assertThat(tags.contains("rsi-cooloff"))
           .as(id + " rsi-cooloff armed iff two-candle or trend-change")
           .isEqualTo(isTwoCandle || isTrendChangeFam);
+      // E5 rsi-recovery (§3.7 post-vertical RSI-recovery, RATIFICATION-PACK row 51 AUTOMATE_PKG): armed on
+      // the scalp-trend-change family — after a vertical fall a reversal long waits for RSI to recover
+      // toward 40 (inert when there is no recent oversold trough).
+      assertThat(tags.contains("rsi-recovery"))
+          .as(id + " rsi-recovery armed iff trend-change")
+          .isEqualTo(isTrendChangeFam);
 
       // E6 pct-price-move (§3.3 Market-Movers >1% intraday move): armed on the scalp-market-movers family
       // (a "mover" scalp needs a real move).

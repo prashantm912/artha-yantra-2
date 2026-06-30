@@ -15,6 +15,7 @@ import { FuturesOiSpurtPage } from './pages/futures/FuturesOiSpurtPage.tsx';
 import { FuturesMoversPage } from './pages/futures/FuturesMoversPage.tsx';
 import { FuturesEodPage } from './pages/futures/FuturesEodPage.tsx';
 import { FuturesOiAnalysisPage } from './pages/futures/FuturesOiAnalysisPage.tsx';
+import { FuturesPreOpenMarketPage } from './pages/futures/FuturesPreOpenMarketPage.tsx';
 import { BanksAnalysisPage } from './pages/futures/BanksAnalysisPage.tsx';
 import { MarketHolidaysPage } from './pages/features/MarketHolidaysPage.tsx';
 import { RiskCalculatorPage } from './pages/features/RiskCalculatorPage.tsx';
@@ -202,6 +203,7 @@ export function App() {
           <Route path="/futures/market-movers" element={<FuturesMoversPage />} />
           <Route path="/futures/eod-oi-analyzer" element={<FuturesEodPage />} />
           <Route path="/futures/oi-analysis" element={<FuturesOiAnalysisPage />} />
+          <Route path="/futures/pre-open-market" element={<FuturesPreOpenMarketPage />} />
           <Route path="/futures/oi-chart" element={<Lazy><FuturesOiChartPage /></Lazy>} />
           <Route path="/futures/oi-buzz" element={<Lazy><OiBuzzPage /></Lazy>} />
           <Route path="/futures/banks" element={<BanksAnalysisPage />} />

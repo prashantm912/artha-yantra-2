@@ -140,9 +140,12 @@ public class PaperService {
           signals
               .find(request.signalId())
               .orElseThrow(() -> new NotFoundException(ErrorCodes.NOT_FOUND_SIGNAL, "no such signal"));
-      exchange = signal.exchange();
-      tradingsymbol = signal.tradingsymbol();
-      side = signal.side();
+      // Prefer the request's EXPLICIT instrument when given (the #11 straddle opens its PE leg with an
+      // explicit symbol/side/price while still linking the fill to the parent signal); fall back to the
+      // signal's primary leg otherwise — backward-identical for every directional take (passes nulls).
+      exchange = exchange != null ? exchange : signal.exchange();
+      tradingsymbol = tradingsymbol != null ? tradingsymbol : signal.tradingsymbol();
+      side = side != null ? side : signal.side();
       signalEntry = signal.entryPrice();
     }
     if (exchange == null || tradingsymbol == null || side == null) {

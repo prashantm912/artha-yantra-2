@@ -2,22 +2,32 @@ package in.arthayantra.strategysignal.paper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import in.arthayantra.strategysignal.signals.SignalRepository;
 import in.arthayantra.strategysignal.signals.SignalTaken;
 import java.math.BigDecimal;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 /** The E10 stamping seam: a scalper take charges the paper open to a round-robin sub-account. */
 class PaperSignalListenerTest {
 
+  /** A signal store with no straddle detail → the single-leg open path (the legacy behaviour). */
+  private static SignalRepository noStraddle() {
+    SignalRepository signals = mock(SignalRepository.class);
+    when(signals.find(anyLong())).thenReturn(Optional.empty());
+    return signals;
+  }
+
   private static ArgumentCaptor<PaperService.OrderRequest> openedWith(
       PaperService paper, ScalperAccountModel accounts, SignalTaken event) {
-    new PaperSignalListener(paper, accounts).onSignalTaken(event);
+    new PaperSignalListener(paper, accounts, noStraddle()).onSignalTaken(event);
     ArgumentCaptor<PaperService.OrderRequest> req =
         ArgumentCaptor.forClass(PaperService.OrderRequest.class);
     verify(paper).openOrder(req.capture());
@@ -48,7 +58,7 @@ class PaperSignalListenerTest {
   void noQtyOpensNothing() {
     PaperService paper = mock(PaperService.class);
     ScalperAccountModel accounts = mock(ScalperAccountModel.class);
-    new PaperSignalListener(paper, accounts).onSignalTaken(new SignalTaken(7L, null, null, true));
+    new PaperSignalListener(paper, accounts, noStraddle()).onSignalTaken(new SignalTaken(7L, null, null, true));
     verify(paper, never()).openOrder(any());
   }
 }

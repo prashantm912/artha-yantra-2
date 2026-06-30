@@ -22,7 +22,7 @@ Authorities used: `2026-06-28-scalper-to-100-roadmap.md` (+ the 12 `2026-06-27-b
 
 ---
 
-## 1. CONFIRMED PENDING — genuinely unbuilt (code-proven) — 5 (was 15; 10 shipped — §1a COMPLETE + §1b COMPLETE: 6 built/2 owner-skipped; only the §1c Phase-5 equity chain + the low-value E12-ideal-window remain)
+## 1. CONFIRMED PENDING — genuinely unbuilt (code-proven) — 2 (was 15; 13 shipped — §1a + §1b COMPLETE; §1c 200-day backfill DONE #389 + calendar-spread DONE #390; only the **Phase-5 Minervini screener** + the low-value E12-ideal-window remain)
 
 > **Progress log** (mark each item DONE here the moment it merges):
 > - ✅ `FU1-manual-checks-9` — **DONE 2026-06-30 (PR #371, e49c764).** `ScalperManualChecks.CHECKS` 7→16
@@ -87,14 +87,14 @@ Authorities used: `2026-06-28-scalper-to-100-roadmap.md` (+ the 12 `2026-06-27-b
 | ~~`fut-pre-open-market`~~ | **✅ DONE #377** — Futures Pre-Open scanner (`/futures/pre-open-market`; `FuturesPreOpenScan/Service` + `/market/futures/pre-open` + page; live-verify next pre-open) | futures pre-open endpoint (built) | shipped 2026-06-30 |
 | ~~`feat-event-days`~~ | **⛔ SKIP (owner)** — NOT an event calendar: a static proprietary Union-Budget slideshow (`docs/oipulse-study/features/event-days.md`, no API). Inventory mischaracterized it. | — | n/a (descoped) |
 | ~~`equity-announcement`~~ | **✅ DONE #378** — Announcement (`/equity/announcement`; `NseAnnouncementFetcher` + `/market/equity/announcements` + page; live-verify NSE field mapping after deploy) | NSE source (via `NseHttpClient`) | shipped 2026-06-30 |
-| ~~`strat-calendar-spread`~~ | **⏸ DEFER (owner)** — Calendar Spread chart (spread-premium candles + socket Add-Position legs) | needs leg-premium series + WS | no `CalendarSpread*` page/route; master-plan §18.7 future-work |
+| ~~`strat-calendar-spread`~~ | **✅ DONE #390** — Calendar Spread chart (`/options/calendar-spread`; `CalendarSpreadChartService` near−far spread candles + `/market/options/calendar-spread` + page + nav; live-verified — resolves both legs + header quote, items populate in market hours) | leg-premium series (built, read-time) | shipped 2026-06-30 (owner un-deferred) |
 | ~~`w4-advance-chart`~~ | **✅ DONE #379** — Advance Chart (`/advance-chart`; LWC + VWAP/VWMA/SuperTrend/RSI/volMA via tested `core/indicators`). TV-binary extras (drawing/study-templates/OI-bar/trade-history) deferred. | LWC (in stack) | shipped 2026-06-30 |
 | ~~`w4-multiframe-chart`~~ | **✅ DONE #379** — Multiframe Chart (`/multiframe-chart`; 2×2 multi-TF grid of AdvanceCharts) | depends on Advance-Chart | shipped 2026-06-30 |
 
 ### 1c. Data / infra — Phase-5 equity-screener chain (2) — sequential
 | id | item | doc | code-evidence of absence |
 |---|---|---|---|
-| `phase5-200day-equity-daily-backfill` | §15 200-day daily-OHLCV equity-universe backfill (Upstox v3 `historical-candle/days/1` → `candles@1d`) — Phase-5 prerequisite | `DEFERRED_BACKLOG.md` L102; master-plan §15 | no `UpstoxDailyHistoryClient`/`openchart`/200d backfill; existing 1d populators cap at 30-90d forward-shallow |
+| ~~`phase5-200day-equity-daily-backfill`~~ | **✅ DONE #389** — `UpstoxEquityMasterClient` (NSE_EQ key resolver) + `EquityDailyBackfillService` (async, `POST /market/admin/equity-daily-backfill`) → `candles`@1d `source=BACKFILL`. **Live-verified: RELIANCE/TCS/INFY each return 222 daily candles** via `/candles?interval=1d` (M1b met, MAs compute without DATA_GAP). | `DEFERRED_BACKLOG.md` L102; master-plan §15 | shipped 2026-06-30 (Upstox cash-equity daily, not the openchart sidecar) |
 | `phase5-minervini-trend-template` | Phase-5 Minervini Track-1 screener — daily 8-gate Trend Template + RS-rank (§13) | `DEFERRED_BACKLOG.md` L167 | `ScreenerService` presets = `{momentum,long_term,oi_buildup,rs_rank}`; no `TrendTemplate`/`Minervini`; gated on the 200-day backfill above |
 
 *(Low-value aside: `E12-ideal-window-gate` (09:15-10:00 fresh-entry hard-skip) is technically unbuilt but the
@@ -221,8 +221,9 @@ owner-NUMBER/sign-off gated, not build gaps.
 Both **§1a (scalper signal side)** and **§1b (frontend / oipulse)** are now **COMPLETE**. §1a = 4
 packages (#371–374); §1b = 6 pages built (Risk Calculator #375, Multiple Window #376, Futures Pre-Open
 #377, Announcement #378, Advance Chart + Multiframe #379) with Event Days + Calendar Spread owner-skipped.
-The **only net-new code left is the §1c Phase-5 equity-screener chain** (2, sequential: 200-day daily
-backfill → Minervini Trend-Template). The §2 second pass then closed **E9-target-trail (#386)** +
+The §1c **200-day equity daily backfill is DONE (#389, live-verified — 222 daily candles/symbol)** and
+**calendar-spread is DONE (#390)**, so the **only net-new code left is the Phase-5 Minervini Trend-Template
+screener** (it now has its 150/200-day MA history). The §2 second pass then closed **E9-target-trail (#386)** +
 **instruments-exchange-token (#387)**; the remaining §2 rows are owner-NUMBER/sign-off gated, not code.
 Everything the owner has decided NOT to do is consolidated in **§6 (WILL NOT BE DONE)** so it is not
 re-flagged as pending. Deploy-verify pending on #377 (pre-open render at next 09:00), #378 (NSE field

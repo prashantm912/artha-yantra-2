@@ -21,6 +21,35 @@ public final class StraddleLegs {
   /** The ATM CE + PE pair of a long straddle. */
   public record Pair(Leg ce, Leg pe) {}
 
+  /** The straddle's market reference — the underlying + expiry + ATM strike (for the straddle-chart). */
+  public record Ref(String name, String expiry, BigDecimal strike) {}
+
+  /**
+   * The straddle market reference (underlying / expiry / ATM strike) from a signal's {@code
+   * scalper_detail} tree, or empty when it is not a NEUTRAL straddle or any field is missing — used by
+   * the live combined-prem exit monitor to fetch the {@code slLevel}.
+   */
+  public static Optional<Ref> ref(JsonNode root) {
+    if (root == null || !"NEUTRAL".equals(root.path("side").asText())) {
+      return Optional.empty();
+    }
+    String name = text(root, "underlying");
+    String expiry = text(root, "expiry");
+    BigDecimal strike = decimal(root, "strike");
+    if (name == null || expiry == null || strike == null) {
+      return Optional.empty();
+    }
+    return Optional.of(new Ref(name, expiry, strike));
+  }
+
+  /**
+   * The combined-premium stop: exit when the live combined premium is at/below the {@code slLevel}
+   * (the combined-premium session VWAP − the §3.11 buffer). False when either operand is absent.
+   */
+  public static boolean shouldExit(BigDecimal combinedPremium, BigDecimal slLevel) {
+    return combinedPremium != null && slLevel != null && combinedPremium.compareTo(slLevel) <= 0;
+  }
+
   /**
    * Extracts the CE+PE pair from a signal's {@code scalper_detail} tree, or empty when it is not a
    * NEUTRAL straddle carrying exactly two legs (one CE, one PE). Never throws — an absent/malformed

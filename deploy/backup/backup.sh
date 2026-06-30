@@ -2,9 +2,10 @@
 # db-backup sidecar (A.11 / plan §9.10, §12.7): WHOLE-DATABASE pg_dump -Fc (+ a
 # cluster-globals dump) into the bind-mounted ./backups on the Windows
 # filesystem (survives the WSL2 VM by design). Nightly at 00:30 IST via crond;
-# `ay backup` runs it with mode=manual. Rotation: 7 nightly + 4 weekly. On
-# failure the script POSTs the ops ntfy topic directly — shell-side, no shared
-# code; a no-op when ARTHA_NTFY_TOPIC is unset.
+# `ay backup` runs it with mode=manual. Retention: keep only the 3 NEWEST backups
+# across manual/ nightly/ weekly/ COMBINED (each whole-db dump is ~3 GB) — a 4th
+# evicts the oldest. On failure the script POSTs the ops ntfy topic directly —
+# shell-side, no shared code; a no-op when ARTHA_NTFY_TOPIC is unset.
 #
 # WHY WHOLE-DATABASE (not per-schema): a `pg_dump -n <schema>` does NOT capture
 # TimescaleDB hypertable DATA — chunks live in the _timescaledb_internal schema,
@@ -58,28 +59,31 @@ if ! pg_dump -Fc -d "$DB" -f "$dest/${DB}-full.dump"; then
   exit 1
 fi
 
-# weekly retention copy: Sunday nightly dumps also land in weekly/
-if [ "$MODE" = "nightly" ] && [ "$(date +%u)" = "7" ]; then
-  wdest="$BACKUP_ROOT/weekly/$STAMP"
-  mkdir -p "$wdest" && cp "$dest"/globals.sql "$dest"/*.dump "$wdest"/
-fi
-
-# rotation: keep newest N timestamped dirs (manual/ dumps are never pruned). Full
-# dumps are GB-scale, so retention is shallower than the old per-schema dumps.
-rotate() {
-  dir="$1"
-  keep="$2"
-  [ -d "$dir" ] || return 0
-  total="$(ls -1 "$dir" 2>/dev/null | wc -l)"
+# Global retention: keep only the GLOBAL_KEEP newest backups across manual/ nightly/
+# weekly/ COMBINED (each whole-db dump is ~3 GB, so a handful of slots is plenty). The
+# stamp dir name is YYYYMMDD-HHMMSS, so a lexical sort is chronological; the just-written
+# $dest is the newest and always survives. weekly/ is no longer written to (the old
+# Sunday-copy tier is obsolete under a 3-total cap) but is still scanned so any pre-existing
+# weekly copies age out too. manual/ dumps are NO LONGER exempt — they count toward the cap.
+GLOBAL_KEEP=3
+prune_global() {
+  keep="$1"
+  pairs="$(
+    for d in "$BACKUP_ROOT"/manual/*/ "$BACKUP_ROOT"/nightly/*/ "$BACKUP_ROOT"/weekly/*/; do
+      [ -d "$d" ] || continue                 # literal glob (no match) -> skip
+      printf '%s\t%s\n' "$(basename "$d")" "${d%/}"
+    done | sort                               # ascending by stamp -> oldest first
+  )"
+  [ -z "$pairs" ] && return 0
+  total="$(printf '%s\n' "$pairs" | wc -l)"
   excess=$((total - keep))
   [ "$excess" -le 0 ] && return 0
-  ls -1 "$dir" | sort | head -n "$excess" | while read -r old; do
-    rm -rf "${dir:?}/${old:?}"
-    echo "[backup] rotated out $dir/$old"
+  printf '%s\n' "$pairs" | head -n "$excess" | cut -f2- | while IFS= read -r old; do
+    rm -rf "$old"
+    echo "[backup] rotated out $old"
   done
 }
-rotate "$BACKUP_ROOT/nightly" 7
-rotate "$BACKUP_ROOT/weekly" 4
+prune_global "$GLOBAL_KEEP"
 
 sz="$(ls -l "$dest/${DB}-full.dump" 2>/dev/null | awk '{print $5}')"
 echo "[backup] OK mode=$MODE db=$DB -> $dest (whole-db dump ${sz:-?} bytes + globals)"

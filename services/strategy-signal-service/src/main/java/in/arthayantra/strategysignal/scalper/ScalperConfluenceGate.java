@@ -311,6 +311,26 @@ public class ScalperConfluenceGate {
         return Optional.empty();
       }
     }
+    // E5 §3.7 post-vertical RSI-recovery (RATIFICATION-PACK row 51): after a vertical FALL crashed the RSI
+    // oversold, a reversal long waits until it has recovered back toward 40. Scans the prior `lookback`
+    // bars' 3m RSI for the oversold trough, then defers to the recovery gate (inert when no recent
+    // trough). Armed via the rsi-recovery tag (default-OFF), the trend-change family. The window read uses
+    // the always-declared rsi14 alias; PE is inert (the mirror is a short-variant concern, plan §2.5).
+    if (cfg.has("rsi-recovery")) {
+      int lookback = oiProps.rsiRecoveryLookback().intValue();
+      BigDecimal trough = null;
+      for (int k = 1; k <= lookback && index - k >= 0; k++) {
+        BigDecimal r = bank.valueAt(RSI, index - k);
+        if (r != null && (trough == null || r.compareTo(trough) < 0)) {
+          trough = r;
+        }
+      }
+      if (!ScalperGates.rsiRecovery(
+              trough, chart.rsi14(), side, oiProps.rsiOversoldTrough(), oiProps.rsiRecoveryLevel())
+          .pass()) {
+        return Optional.empty();
+      }
+    }
     // E6 §3.3 pct-price-move (Market-Movers): the index must have moved >= the floor% in the side's
     // direction since the SESSION OPEN — a "mover" scalp needs a real move, not chop. Reads the deploy
     // close + the session-open bar off the future series; a null future degrades to pass. Armed via the tag.

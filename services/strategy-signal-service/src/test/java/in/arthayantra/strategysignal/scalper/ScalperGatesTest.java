@@ -155,6 +155,22 @@ class ScalperGatesTest {
   }
 
   @Test
+  void rsiRecoveryRequiresReboundToFortyAfterAnOversoldTrough() {
+    // CE: a recent oversold trough (18 <= 20) AND current recovered (42 >= 40) -> pass.
+    assertThat(ScalperGates.rsiRecovery(bd("18"), bd("42"), CE, bd("20"), bd("40")).pass()).isTrue();
+    // trough present but still recovering (35 < 40) -> fail (wait for the rebound).
+    assertThat(ScalperGates.rsiRecovery(bd("18"), bd("35"), CE, bd("20"), bd("40")).pass()).isFalse();
+    // no recent oversold trough (min 30 > 20) -> inert pass (nothing to sequence).
+    assertThat(ScalperGates.rsiRecovery(bd("30"), bd("35"), CE, bd("20"), bd("40")).pass()).isTrue();
+    // empty window (null trough) -> inert pass.
+    assertThat(ScalperGates.rsiRecovery(null, bd("35"), CE, bd("20"), bd("40")).pass()).isTrue();
+    // trough present, current rsi null -> fail (data required once a trough exists).
+    assertThat(ScalperGates.rsiRecovery(bd("18"), null, CE, bd("20"), bd("40")).pass()).isFalse();
+    // PE side -> inert (the post-vertical-rise mirror is unreachable until a short variant).
+    assertThat(ScalperGates.rsiRecovery(bd("18"), bd("10"), PE, bd("20"), bd("40")).pass()).isTrue();
+  }
+
+  @Test
   void rsiAboveIsTheRelaxedOpenHighFloor() {
     // #2 (open-high-low) gates on the source's "RSI >50" floor, not the 60-80 band.
     assertThat(ScalperGates.rsiAbove(bd("50"), bd("50")).pass()).isFalse(); // exactly 50 -> not >

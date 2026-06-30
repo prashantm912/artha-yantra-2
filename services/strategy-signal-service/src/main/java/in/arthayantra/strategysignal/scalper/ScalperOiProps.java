@@ -33,7 +33,10 @@ public record ScalperOiProps(
     BigDecimal rsi5mCeCap,
     BigDecimal rsi5mPeFloor,
     BigDecimal rsiDailyCeCap,
-    BigDecimal rsiDailyPeFloor) {
+    BigDecimal rsiDailyPeFloor,
+    BigDecimal rsiOversoldTrough,
+    BigDecimal rsiRecoveryLevel,
+    BigDecimal rsiRecoveryLookback) {
 
   // T2.1: the #5 call-put delta-imbalance HARD pre-gate floor (>= 50% of the larger leg).
   private static final BigDecimal DEFAULT_CROSS_FILTER_PCT = new BigDecimal("50");
@@ -71,6 +74,13 @@ public record ScalperOiProps(
   private static final BigDecimal DEFAULT_RSI_5M_PE_FLOOR = new BigDecimal("25");
   private static final BigDecimal DEFAULT_RSI_DAILY_CE_CAP = new BigDecimal("75");
   private static final BigDecimal DEFAULT_RSI_DAILY_PE_FLOOR = new BigDecimal("25");
+  // E5 §3.7 post-vertical RSI-recovery (RATIFICATION-PACK row 51 AUTOMATE_PKG): after a vertical fall the
+  // RSI crashes OVERSOLD (a trough at/under this level within the lookback), and a reversal long is only
+  // taken once it has RECOVERED back to >= the recovery level. The trough/recovery levels + the lookback
+  // bar-count are the §3.7 defaults (20 trough / 40 recovery / 10 bars), owner-tunable here.
+  private static final BigDecimal DEFAULT_RSI_OVERSOLD_TROUGH = new BigDecimal("20");
+  private static final BigDecimal DEFAULT_RSI_RECOVERY_LEVEL = new BigDecimal("40");
+  private static final BigDecimal DEFAULT_RSI_RECOVERY_LOOKBACK = new BigDecimal("10");
 
   /** Fills any unset field with its documented default (so a partial yaml override is honoured). */
   public ScalperOiProps {
@@ -96,12 +106,15 @@ public record ScalperOiProps(
     rsi5mPeFloor = rsi5mPeFloor == null ? DEFAULT_RSI_5M_PE_FLOOR : rsi5mPeFloor;
     rsiDailyCeCap = rsiDailyCeCap == null ? DEFAULT_RSI_DAILY_CE_CAP : rsiDailyCeCap;
     rsiDailyPeFloor = rsiDailyPeFloor == null ? DEFAULT_RSI_DAILY_PE_FLOOR : rsiDailyPeFloor;
+    rsiOversoldTrough = rsiOversoldTrough == null ? DEFAULT_RSI_OVERSOLD_TROUGH : rsiOversoldTrough;
+    rsiRecoveryLevel = rsiRecoveryLevel == null ? DEFAULT_RSI_RECOVERY_LEVEL : rsiRecoveryLevel;
+    rsiRecoveryLookback = rsiRecoveryLookback == null ? DEFAULT_RSI_RECOVERY_LOOKBACK : rsiRecoveryLookback;
   }
 
   /** The all-defaults instance (used where config is absent — tests, the pure-scorer fallback). */
   public static ScalperOiProps defaults() {
     return new ScalperOiProps(
         null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
-        null, null);
+        null, null, null, null, null);
   }
 }

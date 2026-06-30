@@ -254,6 +254,41 @@ public final class ScalperGates {
   }
 
   /**
+   * E5 §3.7 post-vertical RSI-recovery sequencing (tag {@code rsi-recovery}; RATIFICATION-PACK row 51
+   * AUTOMATE_PKG). The CE-reversal "bounce after a vertical fall" read: after the RSI crashed OVERSOLD (a
+   * {@code troughRsi} at/under {@code oversoldTrough} somewhere in the recent lookback) a reversal LONG
+   * is only taken once the current bar's RSI has RECOVERED back to {@code >= recoveryLevel} (~40). When
+   * there was NO recent oversold trough the gate is INERT (PASS) — it never blocks a normal entry, only
+   * sequences the post-fall reversals. The seam scans the window and supplies {@code troughRsi} (the min
+   * RSI over the lookback, or null when the window is empty), keeping this function series-free.
+   *
+   * <p>PE (the post-vertical-RISE mirror) is INERT here: it is a distinct overbought-peak read that is
+   * unreachable until a {@code direction: short} variant is seeded (plan §2.5), so a PE entry is never
+   * constrained by this gate.
+   */
+  public static GateOutcome rsiRecovery(
+      BigDecimal troughRsi,
+      BigDecimal currentRsi,
+      OptionType side,
+      BigDecimal oversoldTrough,
+      BigDecimal recoveryLevel) {
+    if (side != OptionType.CE) {
+      return new GateOutcome(true, currentRsi, "rsi-recovery PE mirror inert");
+    }
+    if (troughRsi == null || troughRsi.compareTo(oversoldTrough) > 0) {
+      return new GateOutcome(true, currentRsi, "no recent oversold trough (inert)");
+    }
+    if (currentRsi == null) {
+      return GateOutcome.fail(null, "rsi unavailable");
+    }
+    boolean ok = currentRsi.compareTo(recoveryLevel) >= 0;
+    return new GateOutcome(
+        ok,
+        currentRsi,
+        ok ? "rsi recovered to >= " + recoveryLevel : "rsi still recovering (< " + recoveryLevel + ")");
+  }
+
+  /**
    * E5 §3.6 S21(f)/S24(a) cool-off pullback re-entry (tag {@code rsi-cooloff}). When the PRIOR bar's RSI
    * was HOT (CE overbought {@code >= 80} / PE oversold {@code <= 20}) the entry must wait for a COOLED
    * PULLBACK candle this bar — a red bar (the seam-supplied {@code pullbackCandle}) whose RSI has cooled

@@ -132,11 +132,18 @@ export function useOiAnalysis() {
   });
 }
 
-export function useOptionsSpurt() {
+/**
+ * OI Spurt feed. {@code window='cumulative'} (the OI Spurt page — matches oipulse: ΔOI vs the session
+ * OPEN) vs the default per-interval ΔOI (Big OI page keeps this). Absent → server default (interval).
+ */
+export function useOptionsSpurt(window?: 'cumulative' | 'interval') {
   const ctx = useOiCtx();
   return useQuery({
-    queryKey: ['oi', 'spurt', ctx.name, ctx.expiry, ctx.interval, ctx.mode, ctx.date],
-    queryFn: () => oiGet<SpurtChain | null>('/market/options/spurt', oiParams(ctx, true), null),
+    queryKey: ['oi', 'spurt', ctx.name, ctx.expiry, ctx.interval, ctx.mode, ctx.date, window ?? null],
+    queryFn: () => {
+      const params = window ? `${oiParams(ctx, true)}&window=${window}` : oiParams(ctx, true);
+      return oiGet<SpurtChain | null>('/market/options/spurt', params, null);
+    },
     enabled: satisfiable(ctx, true),
   });
 }

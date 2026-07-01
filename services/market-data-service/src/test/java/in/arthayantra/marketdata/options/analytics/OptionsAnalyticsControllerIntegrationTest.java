@@ -217,6 +217,49 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
   }
 
   @Test
+  void spurtCumulativeWindowDiffsAgainstTheSessionOpen() throws Exception {
+    // F6: three buckets — open (oi 1000 / ltp 100), mid (1500 / 130), newest (1400 / 120). The default
+    // INTERVAL window diffs newest vs the PRIOR bucket (mid): OI 1400<1500 + LTP 120<130 => LONG_UNWINDING.
+    // The CUMULATIVE window diffs newest vs the session OPEN: OI 1400>1000 + LTP 120>100 => LONG_BUILDUP.
+    String u = "SPURTCUM";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    OffsetDateTime b0 =
+        OffsetDateTime.of(2026, 6, 20, 9, 15, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b0, u, exp, "22500", "CE", "100", 1000L, 0L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(
+        jdbc, b0.plusMinutes(5), u, exp, "22500", "CE", "130", 1500L, 0L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(
+        jdbc, b0.plusMinutes(10), u, exp, "22500", "CE", "120", 1400L, 0L);
+
+    // default (interval) window: newest vs the prior bucket → LONG_UNWINDING (ΔOI -100).
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/spurt")
+                .param("name", u)
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m")
+                .param("mode", "history")
+                .param("date", "2026-06-20"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items[0].interpretation").value("LONG_UNWINDING"))
+        .andExpect(jsonPath("$.items[0].oiChange").value(-100));
+
+    // cumulative window: newest vs the session OPEN → the quadrant flips to LONG_BUILDUP (ΔOI +400).
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/spurt")
+                .param("name", u)
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m")
+                .param("mode", "history")
+                .param("date", "2026-06-20")
+                .param("window", "cumulative"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items[0].interpretation").value("LONG_BUILDUP"))
+        .andExpect(jsonPath("$.items[0].oiChange").value(400));
+  }
+
+  @Test
   void intervalWiseOiRanksTopGainersAndLosers() throws Exception {
     String u = "IWCTRL";
     LocalDate exp = LocalDate.of(2026, 6, 25);

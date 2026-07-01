@@ -202,8 +202,9 @@ class OptionsChainIntegrationTest extends MarketDataIntegrationTestBase {
   }
 
   @Test
-  void chainTableOverlaysIntervalDeltasOnLiveGreeks() throws Exception {
-    // The live ATM strike of the synced NIFTY 50 chain (resolves to expiry 2026-06-16).
+  void chainTableHistoryModeServesTheSessionSnapshotChain() throws Exception {
+    // F1: History mode must serve the SELECTED session's captured snapshot chain (spot/OI/LTP = that
+    // day), NOT today's live black76 chain. Pick the live ATM strike only to reuse a real chain expiry.
     OptionsChainService.Chain chain = chainService.chain("NIFTY 50", null);
     BigDecimal atm =
         chain.rows().stream()
@@ -224,9 +225,8 @@ class OptionsChainIntegrationTest extends MarketDataIntegrationTestBase {
     insertSnap(b0, exp, k, "PE", "90", 1200L);
     insertSnap(b1, exp, k, "PE", "85", 1100L);
 
-    // Wildcard projection over rows omits null leaves (most rows have no snapshot pair → null
-    // deltas), collecting only the present interpretations — robust where a filter predicate that
-    // traverses null siblings is not. The seeded ATM strike is the only one carrying deltas.
+    // The captured session (2026-06-14) is date-isolated, so the historical chain has just this ATM
+    // strike; its header + legs come from the newest bucket (b1), the deltas from the b0→b1 pair.
     mockMvc
         .perform(
             get("/api/v1/market/options/chain-table")
@@ -236,10 +236,18 @@ class OptionsChainIntegrationTest extends MarketDataIntegrationTestBase {
                 .param("date", "2026-06-14"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.interval").value("5m"))
-        .andExpect(jsonPath("$.spot").isString())
-        // live black76 greeks ride along in the enriched leg shape (ATM CE IV computed)
-        .andExpect(jsonPath("$.rows[*].ce.leg.iv").value(org.hamcrest.Matchers.hasItem(
-            org.hamcrest.Matchers.notNullValue())))
+        // F1: spot is the SESSION's captured 23000.00, NOT today's live chain spot (~24000) — proves
+        // history date-scoping; asOf is the session's newest bucket.
+        .andExpect(jsonPath("$.spot").value(org.hamcrest.Matchers.startsWith("23000")))
+        .andExpect(jsonPath("$.asOf").value(org.hamcrest.Matchers.startsWith("2026-06-14")))
+        // legs come from the snapshot (b1): CE oi 1200, PE oi 1100 — not live OI.
+        .andExpect(jsonPath("$.rows[*].ce.leg.oi").value(org.hamcrest.Matchers.hasItem(1200)))
+        .andExpect(jsonPath("$.rows[*].pe.leg.oi").value(org.hamcrest.Matchers.hasItem(1100)))
+        // greeks are null on history (the snapshot projection carries IV only, not per-leg greeks).
+        .andExpect(
+            jsonPath("$.rows[*].ce.leg.delta")
+                .value(org.hamcrest.Matchers.everyItem(org.hamcrest.Matchers.nullValue())))
+        // the interval-delta overlay still classifies off the b0→b1 pair.
         .andExpect(
             jsonPath("$.rows[*].ce.deltas.interpretation")
                 .value(org.hamcrest.Matchers.hasItem("LONG_BUILDUP")))

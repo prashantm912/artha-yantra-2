@@ -33,7 +33,8 @@ const QUADRANTS: Quadrant[] = [
 ];
 
 export function OptionsSpurtPage() {
-  const spurtQ = useOptionsSpurt();
+  // Day-cumulative ΔOI (vs the session open), matching oipulse's OI Spurt (which has no interval knob).
+  const spurtQ = useOptionsSpurt('cumulative');
   const [search, setSearch] = useState('');
 
   const chain = spurtQ.data ?? null;
@@ -56,10 +57,10 @@ export function OptionsSpurtPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Options OI Spurt" help="Sorts every call and put strike into four OI-action buckets — Long Build Up, Short Build Up, Short Unwinding, Long Unwinding — so you can see at a glance where money is entering or exiting." subtitle="4-quadrant OI-action scanner — every CE/PE strike bucketed by its interval interpretation" />
+      <PageHeader title="Options OI Spurt" help="Sorts every call and put strike into four OI-action buckets — Long Build Up, Short Build Up, Short Unwinding, Long Unwinding — so you can see at a glance where money is entering or exiting. Classification is by the day-cumulative OI change (since the session open), matching oipulse." subtitle="4-quadrant OI-action scanner — every CE/PE strike bucketed by its day-cumulative OI interpretation" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <FilterBar showName showExpiry />
+        <FilterBar showName showExpiry showInterval={false} />
         <input
           type="search"
           value={search}

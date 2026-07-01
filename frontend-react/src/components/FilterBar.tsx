@@ -104,9 +104,17 @@ export function FilterBar({
   const expiries = useExpiries(name);
   const defaultDate = useDefaultDate();
 
-  // Cascade: default expiry to the nearest once the list loads and none is selected.
+  // Cascade: default expiry to the nearest once the list loads and none is selected — OR when the
+  // persisted expiry is STALE (no longer in the list, e.g. a weekly that expired since it was stored;
+  // localStorage keeps it, but querying an expired contract returns that dead session's data). Guarding
+  // on membership makes the page self-heal after an expiry rollover instead of showing yesterday's chain.
   useEffect(() => {
-    if (showExpiry && !expiry && expiries.data && expiries.data.length > 0) {
+    if (
+      showExpiry &&
+      expiries.data &&
+      expiries.data.length > 0 &&
+      (!expiry || !expiries.data.includes(expiry))
+    ) {
       setExpiry(expiries.data[0]);
     }
   }, [showExpiry, expiry, expiries.data, setExpiry]);

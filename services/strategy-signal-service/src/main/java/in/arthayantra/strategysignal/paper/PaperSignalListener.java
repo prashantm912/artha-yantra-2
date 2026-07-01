@@ -63,11 +63,19 @@ public class PaperSignalListener {
     }
   }
 
-  /** The legacy single-leg open — the signal's primary leg at its suggested qty. */
+  /**
+   * The legacy single-leg open — the signal's primary leg at its suggested qty. The signal's
+   * persisted stop_loss/take_profit ride along as bracket levels (they are priced on the same
+   * instrument the position opens — the signal's primary leg), so {@code PaperBracketEvaluator}
+   * backstops the position instead of skipping a null-bracket row (audit P0-2).
+   */
   private void openSingle(SignalTaken event, Integer subaccountIdx) {
+    Optional<SignalRepository.SignalRow> row = signals.find(event.signalId());
     paper.openOrder(
         new PaperService.OrderRequest(
-            event.signalId(), null, null, null, event.qty(), event.fillPrice(), null, null,
+            event.signalId(), null, null, null, event.qty(), event.fillPrice(),
+            row.map(SignalRepository.SignalRow::stopLoss).orElse(null),
+            row.map(SignalRepository.SignalRow::target).orElse(null),
             subaccountIdx));
   }
 

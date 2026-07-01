@@ -188,6 +188,33 @@ public class PaperPositionRepository {
         PaperPositionRepository::map);
   }
 
+  /** OPEN positions linked (via a signal-carrying order) to one signal — straddles yield both legs. */
+  public List<PositionRow> openForSignal(long signalId) {
+    return jdbc.query(
+        """
+        SELECT DISTINCT p.id, p.exchange, p.tradingsymbol, p.side, p.qty, p.avg_entry_price,
+               p.realized_pnl, p.status, p.opened_at, p.closed_at, p.close_reason,
+               p.stop_loss, p.take_profit
+        FROM paper_positions p
+        JOIN paper_orders o
+          ON o.exchange = p.exchange AND o.tradingsymbol = p.tradingsymbol AND o.side = p.side
+        WHERE p.status = 'OPEN' AND o.signal_id = ?
+        """,
+        PaperPositionRepository::map,
+        signalId);
+  }
+
+  /** The signal ids whose orders opened this position key (usually one; averaged adds share it). */
+  public List<Long> signalIdsFor(String exchange, String tradingsymbol, String side) {
+    return jdbc.queryForList(
+        "SELECT DISTINCT signal_id FROM paper_orders"
+            + " WHERE exchange=? AND tradingsymbol=? AND side=? AND signal_id IS NOT NULL",
+        Long.class,
+        exchange,
+        tradingsymbol,
+        side);
+  }
+
   /** One open leg of a #11 straddle: the position id + its parent signal + that signal's detail. */
   public record StraddleLegRow(long positionId, long signalId, String scalperDetail) {}
 

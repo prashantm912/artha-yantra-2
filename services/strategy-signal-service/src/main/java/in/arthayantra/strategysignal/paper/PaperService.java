@@ -308,6 +308,26 @@ public class PaperService {
     orders.deleteAll();
   }
 
+  /**
+   * Closes every OPEN position linked to a signal — the engine-EXIT hook (a TAKEN entry's exit must
+   * resolve its paper position). Settles at the instrument's live LTP (the null-price fallback in
+   * {@code doSettle}), with the engine's exit cause as {@code close_reason}. No-op when nothing is
+   * open for the signal.
+   */
+  @Transactional
+  public int closeForSignal(long signalId, String closeReason) {
+    int closed = 0;
+    for (PositionRow pos : positions.openForSignal(signalId)) {
+      try {
+        settle(pos, null, closeReason);
+        closed++;
+      } catch (Exception e) {
+        log.warn("signal-exit close failed for position {}: {}", pos.id(), e.getMessage());
+      }
+    }
+    return closed;
+  }
+
   /** 15:45 IST mark-to-close: settle every OPEN intraday position so it does not carry overnight. */
   @Transactional
   public int markToCloseIntraday() {

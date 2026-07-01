@@ -175,7 +175,8 @@ public class PaperPositionRepository {
     return jdbc.query(
         """
         SELECT DISTINCT p.id, p.exchange, p.tradingsymbol, p.side, p.qty, p.avg_entry_price,
-               p.realized_pnl, p.status, p.opened_at, p.closed_at, p.close_reason
+               p.realized_pnl, p.status, p.opened_at, p.closed_at, p.close_reason,
+               p.stop_loss, p.take_profit
         FROM paper_positions p
         JOIN paper_orders o
           ON o.exchange = p.exchange AND o.tradingsymbol = p.tradingsymbol AND o.side = p.side

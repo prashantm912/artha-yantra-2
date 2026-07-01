@@ -322,7 +322,7 @@ public class ScalperConfluenceGate {
       if (diag.fails(
           "volume-floor",
           ScalperGates.volume(cfg.signalIndex(), chart.volume(), cfg.params().volumeFloor()),
-          cfg.params().volumeFloor())) {
+          ScalperGates.volumeFloorFor(cfg.signalIndex(), cfg.params().volumeFloor()))) {
         return diag.block();
       }
       // E4 §3.A.4 low-iv-straddle: a LONG straddle wants LOW IV (cheap both legs); skip when either
@@ -404,7 +404,7 @@ public class ScalperConfluenceGate {
     if (diag.fails(
         "volume-floor",
         ScalperGates.volume(cfg.signalIndex(), chart.volume(), cfg.params().volumeFloor()),
-        cfg.params().volumeFloor())) {
+        ScalperGates.volumeFloorFor(cfg.signalIndex(), cfg.params().volumeFloor()))) {
       return diag.block();
     }
     ScalperParams.RsiBand band = cfg.params().rsiBand();

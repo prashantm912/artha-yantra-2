@@ -168,6 +168,29 @@ class ScalperConfluenceGateTest {
     };
   }
 
+  // bullBank with a caller-chosen bar volume (drives the §0B volume-floor rail + its recorded threshold).
+  private static BarValues bullBankVol(BigDecimal vol) {
+    Map<String, BigDecimal> builtins = Map.of("close", bd("100"), "vwap", bd("99"), "volume", vol);
+    Map<String, BigDecimal> aliases =
+        Map.of("vwma20", bd("98"), "psar", bd("97"), "rsi14", bd("65"), "supertrend", bd("1"));
+    return new BarValues() {
+      @Override
+      public BigDecimal valueAt(String alias, int i) {
+        return aliases.get(alias);
+      }
+
+      @Override
+      public BigDecimal previousValueAt(String alias, int i) {
+        return null;
+      }
+
+      @Override
+      public BigDecimal builtin(String name, int i) {
+        return builtins.get(name);
+      }
+    };
+  }
+
   // E8: bullBank but close (100) sits only 0.3% above VWAP (99.7) — inside the vwap-distance 0.4%
   // pullback band, so an armed vwap-distance strategy still fires (vs the default bullBank's 1%).
   private static BarValues bullBankNearVwap() {
@@ -498,6 +521,22 @@ class ScalperConfluenceGateTest {
     assertThat(r.blocked()).isTrue();
     assertThat(r.rejection().blockingRail()).isEqualTo("rsi-band");
     assertThat(r.rejection().operand()).isEqualByComparingTo(bd("55"));
+  }
+
+  @Test
+  void diagnosticVolumeBlockRecordsTheResolvedNiftyFloorNotTheNullOverride() {
+    // Regression: the volume-floor threshold/margin must record the RESOLVED 125000 floor (from
+    // ScalperGates.VOL_FLOOR), NOT the null cfg.params().volumeFloor() every untuned strategy carries.
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    ScalperConfluenceGate.Result r =
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL)
+            .evaluateWithDiagnostic(CFG, bullBankVol(bd("90000")), null, 0, NOW, IST_TIME, EOD);
+    assertThat(r.blocked()).isTrue();
+    assertThat(r.rejection().blockingRail()).isEqualTo("volume-floor");
+    assertThat(r.rejection().operand()).isEqualByComparingTo(bd("90000"));
+    assertThat(r.rejection().threshold()).isEqualByComparingTo(bd("125000"));
+    assertThat(r.rejection().margin()).isEqualByComparingTo(bd("-35000"));
   }
 
   @Test

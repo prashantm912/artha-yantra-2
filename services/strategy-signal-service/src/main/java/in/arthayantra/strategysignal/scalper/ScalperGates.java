@@ -157,9 +157,19 @@ public final class ScalperGates {
    * untuned strategy is byte-identical.
    */
   public static GateOutcome volume(String underlying, BigDecimal volume, BigDecimal floorOverride) {
-    BigDecimal floor = floorOverride != null ? floorOverride : VOL_FLOOR.getOrDefault(underlying, INDEX_VOL);
+    BigDecimal floor = volumeFloorFor(underlying, floorOverride);
     boolean ok = volume != null && volume.compareTo(floor) >= 0;
     return new GateOutcome(ok, volume, (ok ? "volume >= " : "volume < ") + floor.toPlainString());
+  }
+
+  /**
+   * The RESOLVED §0B volume floor for an underlying: the per-strategy {@code override} when set, else the
+   * per-index default ({@link #VOL_FLOOR}: NIFTY 125k / other indices 50k). Exposed so the rejection
+   * diagnostic can record the ACTUAL threshold the {@link #volume} rail tested — {@code cfg.params()
+   * .volumeFloor()} is null for every untuned strategy, so the real floor lives only here.
+   */
+  public static BigDecimal volumeFloorFor(String underlying, BigDecimal override) {
+    return override != null ? override : VOL_FLOOR.getOrDefault(underlying, INDEX_VOL);
   }
 
   /**

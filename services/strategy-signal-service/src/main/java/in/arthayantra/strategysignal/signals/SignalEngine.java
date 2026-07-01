@@ -435,7 +435,8 @@ public class SignalEngine {
           && structuralStopHit(
               scalperPositionDirection(strategy, activeEntry.get()),
               primary.candle(index), activeEntry.get().stopLoss())) {
-        emit(strategy, exchange, tradingsymbol, interval, "EXIT", bar, activeEntry.get());
+        emit(strategy, exchange, tradingsymbol, interval, "EXIT", bar, activeEntry.get(),
+            "STRUCTURAL_STOP");
         return;
       }
       // E9 D4 OI-confluence-flip exit (scalper, live-only, tag oi-confluence-exit): re-read the OI
@@ -447,7 +448,8 @@ public class SignalEngine {
           && scalperGate.isPresent()
           && activeEntry.get().scalperDetail() != null
           && confluenceFlipExit(strategy, bank, primary, index, bar, activeEntry.get())) {
-        emit(strategy, exchange, tradingsymbol, interval, "EXIT", bar, activeEntry.get());
+        emit(strategy, exchange, tradingsymbol, interval, "EXIT", bar, activeEntry.get(),
+            "CONFLUENCE_FLIP");
         return;
       }
       int entryIndex =
@@ -461,7 +463,8 @@ public class SignalEngine {
                   Math.max(entryIndex, 0)),
               index);
       if (exit.isPresent()) {
-        emit(strategy, exchange, tradingsymbol, interval, "EXIT", bar, activeEntry.get());
+        emit(strategy, exchange, tradingsymbol, interval, "EXIT", bar, activeEntry.get(),
+            exit.get().type().toUpperCase(java.util.Locale.ROOT));
         return;
       }
     } else {
@@ -549,7 +552,8 @@ public class SignalEngine {
                 scalperPositionDirection(strategy, activeEntry.get()), activeEntry.get().entryPrice(),
                 entryOneMinuteIndex, oneMinute.size() - 1);
         if (exit.isPresent()) {
-          emit(strategy, exchange, tradingsymbol, "1m", "EXIT", bar, activeEntry.get());
+          emit(strategy, exchange, tradingsymbol, "1m", "EXIT", bar, activeEntry.get(),
+              exit.get().type().toUpperCase(java.util.Locale.ROOT));
         }
       }
     }
@@ -998,7 +1002,7 @@ public class SignalEngine {
 
   private void emit(
       Loaded strategy, String exchange, String tradingsymbol, String interval, String type,
-      EngineCandle bar, SignalRepository.SignalRow anchor) {
+      EngineCandle bar, SignalRepository.SignalRow anchor, String exitReason) {
     String side = "SELL".equals(anchor.side()) ? "BUY" : "SELL"; // the closing side
     OffsetDateTime generatedAt = bar.bucketStart().withOffsetSameInstant(Ist.OFFSET);
     long id =
@@ -1013,8 +1017,11 @@ public class SignalEngine {
         id, strategy.versionId(), strategy.name(), strategy.slug(), strategy.version(),
         strategy.checksum(), exchange, tradingsymbol, interval, type, side, bar.close(),
         null, null, anchor.compositeScore(), anchor.scoreBreakdown(), generatedAt);
-    log.info("EXIT signal #{} {} {}:{} at {}", id, strategy.slug(), exchange, tradingsymbol,
-        bar.close());
+    // Close the anchor's paper position (a TAKEN entry has one open). The paper module listens
+    // synchronously; a paper failure is logged there, never propagated into the eval loop.
+    events.publishEvent(new SignalExited(anchor.id(), id, exitReason));
+    log.info("EXIT signal #{} {} {}:{} at {} ({})", id, strategy.slug(), exchange, tradingsymbol,
+        bar.close(), exitReason);
   }
 
   /** The 15:45 sweep: stale ACTIVE signals expire (C-2.14). */

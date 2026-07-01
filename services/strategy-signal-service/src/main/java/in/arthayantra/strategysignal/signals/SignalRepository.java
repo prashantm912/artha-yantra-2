@@ -124,13 +124,18 @@ public class SignalRepository {
     return jdbc.query("SELECT * FROM signals WHERE id = ?", this::row, id).stream().findFirst();
   }
 
-  /** The newest ACTIVE ENTRY for a (version, instrument) — the exit evaluator's anchor. */
+  /**
+   * The newest live ENTRY for a (version, instrument) — the exit evaluator's anchor. TAKEN entries
+   * stay anchored: a take opens a paper position, so the engine's exit passes (structural stop /
+   * confluence flip / ExitEvaluator / intrabar levels) and re-entry suppression must keep running
+   * until the position resolves — anchoring only ACTIVE exit-orphaned every taken position.
+   */
   public Optional<SignalRow> activeEntry(UUID versionId, String exchange, String tradingsymbol) {
     return jdbc.query(
             """
             SELECT * FROM signals
             WHERE strategy_version_id = ? AND exchange = ? AND tradingsymbol = ?
-              AND signal_type = 'ENTRY' AND status = 'ACTIVE'
+              AND signal_type = 'ENTRY' AND status IN ('ACTIVE', 'TAKEN')
             ORDER BY generated_at DESC, id DESC LIMIT 1
             """,
             this::row,
@@ -142,6 +147,13 @@ public class SignalRepository {
   /** Lifecycle transition; returns false when the row is missing. */
   public boolean transition(long id, String status) {
     return jdbc.update("UPDATE signals SET status = ? WHERE id = ?", status, id) > 0;
+  }
+
+  /** Guarded lifecycle transition — updates only when the row is still in {@code from}. */
+  public boolean transitionIf(long id, String from, String to) {
+    return jdbc.update(
+            "UPDATE signals SET status = ? WHERE id = ? AND status = ?", to, id, from)
+        > 0;
   }
 
   /** The 15:45 sweep: every stale ACTIVE row expires. */

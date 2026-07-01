@@ -61,4 +61,66 @@ class PaperSignalListenerTest {
     new PaperSignalListener(paper, accounts, noStraddle()).onSignalTaken(new SignalTaken(7L, null, null, true));
     verify(paper, never()).openOrder(any());
   }
+
+  /** A directional scalper take opens the PICKED OPTION at its captured premium (audit P0-3). */
+  @Test
+  void aScalperTakeOpensTheTradeableOptionAtItsCapturedPremiumWithNoFutureBasisBrackets()
+      throws Exception {
+    PaperService paper = mock(PaperService.class);
+    ScalperAccountModel accounts = mock(ScalperAccountModel.class);
+    when(accounts.nextFreeAccount()).thenReturn(1);
+    SignalRepository signals = mock(SignalRepository.class);
+    var detail =
+        new com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree("{\"side\":\"LONG_PE\",\"option_ltp\":\"82.50\"}");
+    when(signals.find(7L))
+        .thenReturn(
+            Optional.of(
+                new SignalRepository.SignalRow(
+                    7L, java.util.UUID.randomUUID(), "NFO", "NIFTY26JULFUT", "3m", "ENTRY", "BUY",
+                    new BigDecimal("25000"), new BigDecimal("24800"), new BigDecimal("25400"),
+                    new BigDecimal("0.8"), null, "TAKEN", null, null, new BigDecimal("75"),
+                    "NFO", "NIFTY26JUL24900PE", detail)));
+
+    // The auto-take's fillPrice is the FUTURE entry price — the option leg must ignore it.
+    new PaperSignalListener(paper, accounts, signals)
+        .onSignalTaken(new SignalTaken(7L, 75, new BigDecimal("25000"), true));
+
+    ArgumentCaptor<PaperService.OrderRequest> req =
+        ArgumentCaptor.forClass(PaperService.OrderRequest.class);
+    verify(paper).openOrder(req.capture());
+    assertThat(req.getValue().exchange()).isEqualTo("NFO");
+    assertThat(req.getValue().tradingsymbol()).isEqualTo("NIFTY26JUL24900PE");
+    assertThat(req.getValue().side()).isEqualTo("BUY");
+    assertThat(req.getValue().price()).isEqualByComparingTo("82.50");
+    // index-future SL/TP must NOT ride the option leg (wrong basis = instant bracket close)
+    assertThat(req.getValue().stopLoss()).isNull();
+    assertThat(req.getValue().takeProfit()).isNull();
+  }
+
+  /** A non-scalper take keeps the primary leg and carries the signal's same-basis brackets. */
+  @Test
+  void aNonScalperTakeCarriesTheSignalBracketsOnThePrimaryLeg() {
+    PaperService paper = mock(PaperService.class);
+    ScalperAccountModel accounts = mock(ScalperAccountModel.class);
+    SignalRepository signals = mock(SignalRepository.class);
+    when(signals.find(7L))
+        .thenReturn(
+            Optional.of(
+                new SignalRepository.SignalRow(
+                    7L, java.util.UUID.randomUUID(), "NSE", "RELIANCE", "1m", "ENTRY", "BUY",
+                    new BigDecimal("2500"), new BigDecimal("2450"), new BigDecimal("2600"),
+                    new BigDecimal("0.8"), null, "TAKEN", null, null, new BigDecimal("10"),
+                    null, null, null)));
+
+    new PaperSignalListener(paper, accounts, signals)
+        .onSignalTaken(new SignalTaken(7L, 10, new BigDecimal("2500"), false));
+
+    ArgumentCaptor<PaperService.OrderRequest> req =
+        ArgumentCaptor.forClass(PaperService.OrderRequest.class);
+    verify(paper).openOrder(req.capture());
+    assertThat(req.getValue().tradingsymbol()).isNull(); // primary-leg fallback in openOrder
+    assertThat(req.getValue().stopLoss()).isEqualByComparingTo("2450");
+    assertThat(req.getValue().takeProfit()).isEqualByComparingTo("2600");
+  }
 }

@@ -64,19 +64,50 @@ public class PaperSignalListener {
   }
 
   /**
-   * The legacy single-leg open — the signal's primary leg at its suggested qty. The signal's
-   * persisted stop_loss/take_profit ride along as bracket levels (they are priced on the same
-   * instrument the position opens — the signal's primary leg), so {@code PaperBracketEvaluator}
-   * backstops the position instead of skipping a null-bracket row (audit P0-2).
+   * The single-leg open. A directional scalper take opens the PICKED OPTION (the {@code tradeable_*}
+   * side-channel) BUY at its captured {@code option_ltp} — the instrument the strategy actually
+   * trades, matching {@code LiveOrderService} (paper booked the index future before: PE scalps were
+   * sign-inverted and hero-zero qtys landed on ~₹1cr future notional — audit P0-3). The persisted
+   * SL/TP are index-future levels, so they are NOT passed as brackets on the option leg (wrong
+   * basis — the instant-close kind of wrong); the engine's exit passes close it via SignalExited.
+   * A non-scalper/manual take is unchanged: the signal's primary leg, with its same-basis SL/TP as
+   * bracket levels so {@code PaperBracketEvaluator} backstops the position (audit P0-2).
    */
   private void openSingle(SignalTaken event, Integer subaccountIdx) {
     Optional<SignalRepository.SignalRow> row = signals.find(event.signalId());
+    if (row.isPresent()
+        && row.get().tradeableTradingsymbol() != null
+        && row.get().scalperDetail() != null) {
+      SignalRepository.SignalRow r = row.get();
+      // Prefer the captured option premium: the auto-take's fillPrice is the FUTURE entry price
+      // (AutoPaperListener mirrors a manual take), which is the wrong scale for the option leg.
+      java.math.BigDecimal optionLtp = decimal(r.scalperDetail(), "option_ltp");
+      paper.openOrder(
+          new PaperService.OrderRequest(
+              event.signalId(), r.tradeableExchange(), r.tradeableTradingsymbol(), "BUY",
+              event.qty(), optionLtp != null ? optionLtp : event.fillPrice(), null, null,
+              subaccountIdx));
+      return;
+    }
     paper.openOrder(
         new PaperService.OrderRequest(
             event.signalId(), null, null, null, event.qty(), event.fillPrice(),
             row.map(SignalRepository.SignalRow::stopLoss).orElse(null),
             row.map(SignalRepository.SignalRow::target).orElse(null),
             subaccountIdx));
+  }
+
+  /** A decimal field off the scalper_detail JSON; null when absent/non-numeric. */
+  private static java.math.BigDecimal decimal(com.fasterxml.jackson.databind.JsonNode root, String field) {
+    com.fasterxml.jackson.databind.JsonNode n = root.path(field);
+    if (n.isMissingNode() || n.isNull()) {
+      return null;
+    }
+    try {
+      return new java.math.BigDecimal(n.asText());
+    } catch (NumberFormatException e) {
+      return null;
+    }
   }
 
   /** Opens BOTH straddle legs (CE + PE) at the combined-premium lot count, linked to the signal. */

@@ -36,12 +36,16 @@ public class NotifierClient {
     this.telegramChatId = telegramChatId;
   }
 
-  /** True when the channel has the config it needs to send. */
+  /**
+   * True when the channel has the config it needs to send. NTFY requires BOTH url and topic:
+   * the compose defaults are fail-closed blank (audit P0-6 — the old wiremock URL default ran
+   * in live too, so every push hit the catch-all stub and was audited SENT).
+   */
   public boolean configured(String channel) {
     if ("TELEGRAM".equals(channel)) {
       return !telegramBotToken.isBlank() && !telegramChatId.isBlank();
     }
-    return !ntfyTopic.isBlank();
+    return !ntfyUrl.isBlank() && !ntfyTopic.isBlank();
   }
 
   /** Send a push; throws on a transport/non-2xx error (the caller retries). NEVER carries credentials. */

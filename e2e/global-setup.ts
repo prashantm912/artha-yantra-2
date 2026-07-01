@@ -24,7 +24,14 @@ export default async function globalSetup(): Promise<void> {
   if (!existsSync(envFile) || process.env['E2E_FORCE_ENV'] === '1') {
     writeFileSync(
       envFile,
-      ['SPRING_PROFILES_ACTIVE=mock', `ARTHA_OWNER_PASSWORD_HASH=${E2E_HASH}`, ''].join('\n'),
+      [
+        'SPRING_PROFILES_ACTIVE=mock',
+        `ARTHA_OWNER_PASSWORD_HASH=${E2E_HASH}`,
+        // audit P0-6: compose notifier defaults are fail-closed blank; mock targets the stub
+        'ARTHA_NOTIFIER_NTFY_URL=http://wiremock:8080',
+        'ARTHA_NOTIFIER_NTFY_TOPIC=ay-signals-mock',
+        '',
+      ].join('\n'),
     );
     process.env['E2E_OWNER_PASSWORD'] = 'e2e-owner-password';
   }

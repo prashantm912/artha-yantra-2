@@ -19,6 +19,10 @@ import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 const severityColor = (sev: OiSeverity, t: ChartTheme): string =>
   sev === 'success' ? t.bull : sev === 'danger' ? t.bear : sev === 'info' ? t.accent : t.warn;
 
+// Compact ΔOI axis labels (Indian grouping: K/L/Cr). The daily lookback is crore-scale, so the raw
+// number clips to ",000,000" inside the narrow 3-col grid — abbreviate it instead (same as OI Stats).
+const compactOi = new Intl.NumberFormat('en-IN', { notation: 'compact' });
+
 const CHARTS: { title: string; pick: (d: IntervalWiseOi) => StrikeMove[] }[] = [
   { title: 'OI Gainer · 15 min', pick: (d) => d.gainers15 },
   { title: 'OI Gainer · 60 min', pick: (d) => d.gainers60 },
@@ -65,7 +69,7 @@ export function IntervalWiseOiPage() {
           name: 'ΔOI',
           scale: true,
           splitLine: { lineStyle: { color: t.grid } },
-          axisLabel: { color: t.muted },
+          axisLabel: { color: t.muted, formatter: (v: number) => compactOi.format(v) },
         },
         series: [
           {

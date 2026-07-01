@@ -31,6 +31,19 @@ class OiHeatmapServiceTest {
   }
 
   @Test
+  void bucketLabelsAreFormattedInIstNotUtc() {
+    // JDBC time_bucket returns UTC (+00); 03:45+00 is 09:15 IST — the x-axis label must read IST.
+    OffsetDateTime u0 = OffsetDateTime.of(2026, 6, 20, 3, 45, 0, 0, ZoneOffset.UTC);
+    OffsetDateTime u1 = u0.plusMinutes(5);
+    List<OptionsSnapshotReader.StrikePoint> series =
+        List.of(pt(u0, "22500", "CE", 1000L), pt(u1, "22500", "CE", 1200L));
+
+    OiHeatmapService.Heatmap h = new OiHeatmapService().fold(series, new BigDecimal("22500"), 5);
+
+    assertThat(h.buckets()).containsExactly("09:15", "09:20");
+  }
+
+  @Test
   void cellIsDeltaFromPriorBucketAndFirstColumnIsDropped() {
     OffsetDateTime b1 = B0.plusMinutes(5);
     // one strike, CE: oi 1000 -> 1200 (+200); PE: oi 800 -> 700 (-100)

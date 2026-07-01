@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.options.analytics;
 
+import in.arthayantra.common.web.time.Ist;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -144,8 +145,13 @@ public class OiHeatmapService {
     return strike.stripTrailingZeros().toPlainString();
   }
 
-  /** "HH:mm" of the bucket in its own (IST) offset. */
+  /**
+   * "HH:mm" of the bucket in IST. The stored bucket is UTC (+00) off JDBC {@code time_bucket}, so the
+   * wall-clock fields must be read in the IST zone — otherwise the heatmap x-axis renders UTC times
+   * (e.g. 03:45 instead of 09:15). Converting a bucket that already carries +05:30 is a no-op.
+   */
   private static String hhmm(OffsetDateTime b) {
-    return String.format("%02d:%02d", b.getHour(), b.getMinute());
+    OffsetDateTime ist = b.atZoneSameInstant(Ist.ZONE).toOffsetDateTime();
+    return String.format("%02d:%02d", ist.getHour(), ist.getMinute());
   }
 }

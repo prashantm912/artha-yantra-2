@@ -147,7 +147,7 @@ Not build work. Each needs an owner input, not code.
 | `E12-oh-freshness-1030` | — | owner-deprioritized (low value, E12 time-window bucket) |
 | `E12-ideal-window-gate` | — | owner-deprioritized (low value) |
 | `wu4-upstox-cutover` | W-U1/U2/U3 merged, flag-gated default-Kite | off-hours deploy + live tick-latency/OI A/B + flip |
-| `data-foundation-value-verify` | every OI/data page renders in History mode; tested | owner oipulse sign-in for the cell-for-cell §20.8 compare |
+| ~~`data-foundation-value-verify`~~ | **✓ PASS 2026-07-01 (live-vs-live §20.8)** — owner's oipulse was signed-in + market open, so ran a live-vs-live compare. **OI Analysis: our captured OI == oipulse to the EXACT share** (2,882,220 / 3,464,080, SENSEX 77000, 2 buckets); Straddle premium + underlying + VWAP match; Connecting-Dots + OI-page STRUCTURE match. Our History-mode side re-confirmed on the full 2026-06-30 captured session (12 endpoints, real rows). Data foundation **value-verified**. Runbook: `docs/manual-tests/phase-4-wave1-value-verify-runbook.md` (Part A results). | residual (not build-gating): **F1** — `chain-table` ignores History-mode date (Options Chain page shows live data in History) → candidate BE fix; + low nits (heatmap UTC labels, strike-series ΔOI-method F5). Owner to ratify the close. |
 | `span-real-spn-broker-parity` | loader + adapter + parity harness + fetcher, CI-green on synthetic fixture | a real `nsccl.<date>.s.spn` + owner sign-off (distinct from SPAN sell-legs, which are EXCLUDED) |
 | `orders-page-live-broker-verify` | `/orders` page + §18.1 read endpoints (orderbook/positions/tradebook/funds), default-OFF | live-broker arm + verify |
 | ~~`instruments-exchange-token-null`~~ | **✅ DONE #387** — `exchange_token` threaded wire→domain→DB (was hardcoded NULL) | none (closed) |
@@ -212,8 +212,10 @@ These are **closed by an explicit owner decision**, not unbuilt work. A future "
 
 **Still genuinely open (NOT closed):** the §1c Phase-5 **Minervini screener** is the only net-new code (its
 200-day MA history is now seeded #389; `strat-calendar-spread` shipped #390); the §2 rows below the
-E9/instruments lines (`E9-target-trail` live number, `span-real-spn-broker-parity`, `data-foundation-value-verify`)
-are owner-NUMBER/sign-off gated, not build gaps.
+E9/instruments lines (`E9-target-trail` live number, `span-real-spn-broker-parity`) are owner-NUMBER/sign-off
+gated, not build gaps. **`data-foundation-value-verify` PASSED 2026-07-01** (live-vs-live §20.8; captured OI ==
+oipulse to the exact share) — the only residual is optional finding **F1** (`chain-table` doesn't honour
+History-mode date; live mode is correct), a small BE fix, not a value-verify blocker.
 
 ---
 

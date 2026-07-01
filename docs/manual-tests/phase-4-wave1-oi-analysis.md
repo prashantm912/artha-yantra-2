@@ -50,3 +50,19 @@ render; all four interpretation states + colours match.
   running extreme, because we capture point-in-time snapshots, not true intraday OHLC bars. So the exact
   break level can differ from oipulse's (which uses true 1-min highs/lows). Faithful in shape + signal;
   the level value is approximate until/unless per-bucket OHLC is captured.
+
+## Value-verify pass — 2026-07-01 (live-vs-live, SENSEX 77000 5-min) — DECISIVE
+Compared our `strike-series` against oipulse's live OI Analysis for the same strike, two consecutive
+buckets, both legs. **Our captured OI equals oipulse to the exact share:**
+
+| bucket | Call OI (oipulse → ours) | Put OI (oipulse → ours) |
+|---|---|---|
+| 13:00 | 28,82,220 → **2,882,220 ✓** | 34,64,080 → **3,464,080 ✓** |
+| 12:55 | 28,17,480 → **2,817,480 ✓** | 34,30,220 → **3,430,220 ✓** |
+
+Call LTP 271.65 vs 271.50 (sub-tick live skew); Call/Put OI-Interpretation (Short/Long Build Up) agree.
+**This is the core data-foundation value-verify proof — our OI capture reproduces the reference product's
+OI exactly.** One low finding (**F5**): our per-interval `oiChange` on the resampled leg carries the
+captured 3-min Δ rather than recomputing `bucket_end − prev_bucket_end` (55,800 vs the endpoint-diff
+33,860 = oipulse); absolute OI is exact and the interpretation direction still agrees. See
+`phase-4-wave1-value-verify-runbook.md` (Part A results).

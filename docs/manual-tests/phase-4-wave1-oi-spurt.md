@@ -45,3 +45,10 @@ green(+)/red(−) toned; Indian lakh number grouping; **sort by |ΔOI| desc**; *
 - **Search debounce**: oipulse debounces 300ms (socket re-subscribe); ours filters the client array
   immediately (no socket) — functionally equivalent.
 - **Expiry column**: study doc listed it; the live page does not show it (it's a filter).
+
+## Value-verify pass — 2026-07-01 (live-vs-live)
+OI Spurt renders the same per-strike OI + LTP + 4-state interpretation that the **OI Analysis** pass
+matched to oipulse **exactly** (see that page's doc + `phase-4-wave1-value-verify-runbook.md`), just in
+the 2×2 quadrant layout — so it inherits the exact-OI data-fidelity proof. It was **not** driven
+cell-for-cell this pass (structure + 4-state bucketing already confirmed 2026-06-21). The zero-change
+strike bucketing convention divergence above is unchanged.

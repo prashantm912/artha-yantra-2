@@ -99,3 +99,15 @@ absolute candle values aren't realistic — the STRUCTURE/overlays are what this
   `straddle_price` is unspecified — close is the faithful representative).
 - **Combined volume** = CE volume + PE volume per interval (drives VWAP). Mock volumes are synthetic.
 - **Greeks/IV not shown here** (this page is premium-only, matching oipulse).
+
+## Value-verify pass — 2026-07-01 (live-vs-live, SENSEX 77000 3-min) — real premium match
+Compared our `straddle-chart` against oipulse's live Straddle Chart for the same strike/interval — the
+combined-premium candle pipeline (distinct from the OI snapshots: it reads leg 1m `candles`) is faithful:
+- **Underlying** 77049.5 vs oipulse 77050.09 ✓ (sub-tick skew).
+- **Combined premium** — latest candle open 555.90 → close 557.45 vs oipulse's current marker **553** ✓;
+  opened ~707–775 both sides.
+- **VWAP** 602 vs oipulse blue VWAP line ~600 ✓.
+- 5-series structure (candles · VWAP · 20 EMA · Call · Put) + overlays already confirmed 2026-06-21.
+
+Verdict: the premium-candle data foundation reproduces oipulse's straddle premium. Full results:
+`phase-4-wave1-value-verify-runbook.md` (Part A).

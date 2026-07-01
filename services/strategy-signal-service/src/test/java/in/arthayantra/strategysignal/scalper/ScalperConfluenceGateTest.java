@@ -168,6 +168,29 @@ class ScalperConfluenceGateTest {
     };
   }
 
+  // bullBank with a caller-chosen bar volume (drives the §0B volume-floor rail + its recorded threshold).
+  private static BarValues bullBankVol(BigDecimal vol) {
+    Map<String, BigDecimal> builtins = Map.of("close", bd("100"), "vwap", bd("99"), "volume", vol);
+    Map<String, BigDecimal> aliases =
+        Map.of("vwma20", bd("98"), "psar", bd("97"), "rsi14", bd("65"), "supertrend", bd("1"));
+    return new BarValues() {
+      @Override
+      public BigDecimal valueAt(String alias, int i) {
+        return aliases.get(alias);
+      }
+
+      @Override
+      public BigDecimal previousValueAt(String alias, int i) {
+        return null;
+      }
+
+      @Override
+      public BigDecimal builtin(String name, int i) {
+        return builtins.get(name);
+      }
+    };
+  }
+
   // E8: bullBank but close (100) sits only 0.3% above VWAP (99.7) — inside the vwap-distance 0.4%
   // pullback band, so an armed vwap-distance strategy still fires (vs the default bullBank's 1%).
   private static BarValues bullBankNearVwap() {
@@ -455,6 +478,84 @@ class ScalperConfluenceGateTest {
     when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
     assertThat(gate.evaluate(cfgTags("oi-cross-required"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isEmpty();
     assertThat(gate.evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+  }
+
+  @Test
+  void diagnosticOnAPassingEntryCarriesTheDecisionAndNoRejection() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    ScalperConfluenceGate.Result r =
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL)
+            .evaluateWithDiagnostic(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD);
+    assertThat(r.blocked()).isFalse();
+    assertThat(r.decision()).isPresent();
+    assertThat(r.rejection()).isNull();
+  }
+
+  @Test
+  void diagnosticOnAMiddayBlockNamesTheTimeWindowRailBeforeTheChainFetch() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+    LocalTime midday = LocalTime.of(12, 0); // inside the 11:00-13:00 default midday block
+    ScalperConfluenceGate.Result r =
+        gate.evaluateWithDiagnostic(CFG, bullBank(), null, 0, NOW, midday, EOD);
+    assertThat(r.blocked()).isTrue();
+    assertThat(r.rejection()).isNotNull();
+    assertThat(r.rejection().blockingRail()).isEqualTo("time-window");
+    assertThat(r.rejection().checks())
+        .extracting(ScalperConfluenceGate.RailCheck::rail)
+        .contains("time-window");
+    // blocked before the chain fetch → no OI/macro context, no confluence score
+    assertThat(r.rejection().context()).isNull();
+    assertThat(r.rejection().confluence()).isNull();
+  }
+
+  @Test
+  void diagnosticOnAnRsiBlockNamesTheRsiRailAndCarriesTheOperand() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    ScalperConfluenceGate.Result r =
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL)
+            .evaluateWithDiagnostic(CFG, bullBankRsi(bd("55")), null, 0, NOW, IST_TIME, EOD);
+    assertThat(r.blocked()).isTrue();
+    assertThat(r.rejection().blockingRail()).isEqualTo("rsi-band");
+    assertThat(r.rejection().operand()).isEqualByComparingTo(bd("55"));
+  }
+
+  @Test
+  void diagnosticVolumeBlockRecordsTheResolvedNiftyFloorNotTheNullOverride() {
+    // Regression: the volume-floor threshold/margin must record the RESOLVED 125000 floor (from
+    // ScalperGates.VOL_FLOOR), NOT the null cfg.params().volumeFloor() every untuned strategy carries.
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    ScalperConfluenceGate.Result r =
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL)
+            .evaluateWithDiagnostic(CFG, bullBankVol(bd("90000")), null, 0, NOW, IST_TIME, EOD);
+    assertThat(r.blocked()).isTrue();
+    assertThat(r.rejection().blockingRail()).isEqualTo("volume-floor");
+    assertThat(r.rejection().operand()).isEqualByComparingTo(bd("90000"));
+    assertThat(r.rejection().threshold()).isEqualByComparingTo(bd("125000"));
+    assertThat(r.rejection().margin()).isEqualByComparingTo(bd("-35000"));
+  }
+
+  @Test
+  void diagnosticAllEvalRecordsDownstreamRailsEvenAfterAnEarlierFailure() {
+    // All-eval: an RSI-band failure no longer short-circuits — the OI context + confluence composite are
+    // STILL evaluated and recorded, so the DB row holds the complete condition matrix (blockingRail stays
+    // the FIRST failure). The old short-circuit would have stopped at rsi-band and never scored the composite.
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    ScalperConfluenceGate.Result r =
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL)
+            .evaluateWithDiagnostic(CFG, bullBankRsi(bd("55")), null, 0, NOW, IST_TIME, EOD);
+    assertThat(r.blocked()).isTrue();
+    assertThat(r.rejection().blockingRail()).isEqualTo("rsi-band"); // the FIRST failure is the summary rail
+    java.util.List<String> rails =
+        r.rejection().checks().stream().map(ScalperConfluenceGate.RailCheck::rail).toList();
+    assertThat(rails).contains("rsi-band", "confluence-composite"); // downstream conditions STILL recorded
+    assertThat(r.rejection().confluence()).isNotNull(); // the composite was scored despite the rsi block
   }
 
   @Test

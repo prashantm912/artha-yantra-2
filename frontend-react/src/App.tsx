@@ -22,6 +22,7 @@ import { RiskCalculatorPage } from './pages/features/RiskCalculatorPage.tsx';
 import { MultipleWindowPage } from './pages/features/MultipleWindowPage.tsx';
 import { ParticipantWiseOiPage } from './pages/fiidii/ParticipantWiseOiPage.tsx';
 import { SignalsPage } from './pages/signals/SignalsPage.tsx';
+import { RejectionsPage } from './pages/signals/RejectionsPage.tsx';
 import { DashboardPage } from './pages/dashboard/DashboardPage.tsx';
 import { ScalperCockpitPage } from './pages/scalper/ScalperCockpitPage.tsx';
 import { StrategiesListPage } from './pages/strategies/StrategiesListPage.tsx';
@@ -185,6 +186,7 @@ export function App() {
           <Route path="/scalper" element={<ScalperCockpitPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/signals" element={<SignalsPage />} />
+          <Route path="/signal-rejections" element={<RejectionsPage />} />
           <Route path="/paper" element={<Lazy><PaperPage /></Lazy>} />
           <Route path="/orders" element={<OrdersPage />} />
           <Route path="/journal" element={<JournalPage />} />

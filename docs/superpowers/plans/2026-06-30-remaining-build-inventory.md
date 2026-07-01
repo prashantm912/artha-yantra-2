@@ -105,6 +105,17 @@ Authorities used: `2026-06-28-scalper-to-100-roadmap.md` (+ the 12 `2026-06-27-b
 ## 2. OWNER-GATED / PARKED — mechanism built, waiting on a number / decision / deploy / manual step — 12
 Not build work. Each needs an owner input, not code.
 
+> **✅ GATE OBSERVABILITY — DONE 2026-07-01 (PR #404, SHA 198bc1f), live-deployed + verified.** Depth analysis
+> of "0 signals": the live §12.3 confluence gate blocks ~every scalper entry (NOT a bug — a strict ~30-rail
+> AND-chain + composite≥threshold; Dow-NEUTRAL + quiet market + ~2 live days compound it). Built: gate
+> `evaluateWithDiagnostic` Result form (parity-safe, `evaluate()`→Optional preserved, 60/60 tests) → persists
+> every blocked chart-entry to `strategy.signal_rejections` (V015; first-failing rail + operand/threshold/
+> **margin**, all rails checked, dot-by-dot confluence, raw OI/macro/chart context; LIVE-only, no backtest rows)
+> → `GET /api/v1/signal-rejections` (+`/rail-counts`) + **/signal-rejections** FE page (rail filter + rollup +
+> expandable breakdown). Rows populate next market open. **This is the tool to decide the §2 owner-numbers** —
+> see WHY the gate blocks + how close the composite sits before loosening a data-collection variant vs waiting
+> for trending days. Gateway route allowlist + contract recapture + TS regen included.
+
 > **§2 OWNER DECISIONS (2026-06-30 walk-through) — 9 open items resolved:**
 > 1. **E8 ATR-stop = OFF** — keep all families on existing point/premium stops (no arming).
 > 2. **E11 PE-mirror = ✅ DONE (#381 template + #382 replicate).** STEP = additive PE YAMLs (`option_types:[PE]`

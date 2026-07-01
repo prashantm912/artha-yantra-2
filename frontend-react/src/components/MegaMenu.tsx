@@ -24,6 +24,7 @@ const SECTIONS: MenuSection[] = [
       { label: 'Scalper Cockpit', to: '/scalper' }, // Phase 4b — live signals + paper order ticket + P&L
       { label: 'Dashboard', to: '/dashboard' }, // cockpit — at-a-glance status/signals/paper/jobs (E-2)
       { label: 'Signals', to: '/signals' }, // cockpit — live feed + reasoning breakdown (C-2.26)
+      { label: 'Signal Rejections', to: '/signal-rejections' }, // why the confluence gate blocked each scalper entry (rail + margin + dots)
       { label: 'Charts', to: '/charts' }, // cockpit — candlestick + trade/signal overlays (A13)
       { label: 'Advance Chart', to: '/advance-chart' }, // §1b — LWC pro chart + default study set (VWAP/VWMA/SuperTrend/RSI)
       { label: 'Multiframe Chart', to: '/multiframe-chart' }, // §1b — 2×2 multi-timeframe grid of Advance Charts

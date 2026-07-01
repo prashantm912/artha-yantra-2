@@ -46,9 +46,13 @@ green(+)/red(−) toned; Indian lakh number grouping; **sort by |ΔOI| desc**; *
   immediately (no socket) — functionally equivalent.
 - **Expiry column**: study doc listed it; the live page does not show it (it's a filter).
 
-## Value-verify pass — 2026-07-01 (live-vs-live)
-OI Spurt renders the same per-strike OI + LTP + 4-state interpretation that the **OI Analysis** pass
-matched to oipulse **exactly** (see that page's doc + `phase-4-wave1-value-verify-runbook.md`), just in
-the 2×2 quadrant layout — so it inherits the exact-OI data-fidelity proof. It was **not** driven
-cell-for-cell this pass (structure + 4-state bucketing already confirmed 2026-06-21). The zero-change
-strike bucketing convention divergence above is unchanged.
+## Value-verify pass — 2026-07-01 (live-vs-live, SENSEX) — DRIVEN
+Driven live vs oipulse's OI Spurt. **Structure ✓** (2×2 quadrants, 10 cols, |ΔOI|-desc sort, 7/page,
+green/red tones). **Absolute `New OI` matches** (77000 CE 2,876,560 — cross-checked against the live
+chain-table at 13:24). **Divergence F6 (medium):** the ΔOI **window** differs — oipulse OI Spurt classifies
+by **day-cumulative** ΔOI (its `Old OI` = day-open OI; **no interval selector**), while our `/spurt`
+classifies by **per-interval** ΔOI (Old OI = prior bucket, driven by the page's interval). So a strike's
+quadrant can flip: SENSEX 77000 CE was **LONG_BUILDUP** on oipulse (OI +13.3L since open) but
+**LONG_UNWINDING** for us (OI −0.75L in the last 5m). Candidate fix: add a day-cumulative/"Full Day" mode to
+`/spurt` and default the page to it. The zero-change strike bucketing convention divergence above is
+unchanged. Full results + F6: `phase-4-wave1-value-verify-runbook.md` (Part A).

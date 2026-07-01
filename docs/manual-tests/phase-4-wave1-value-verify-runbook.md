@@ -139,11 +139,12 @@ This is the core of "value-verify": our OI capture reproduces the reference prod
 | **OI Analysis** (`/options/oi-analysis`) | ✓ **Exact per-strike OI match** (table above); LTP within sub-tick; 4-state interpretation agrees. |
 | **Connecting Dots** (`/features/connecting-dots`) | ✓ **Structure** matches (13-col order, ↑/↓/↔ colour semantics, 5-state Trend badges, 25/page, legend). ⚠ **Per-cell factor directions were NOT cross-verified** — the factors are computed independently on both sides (oipulse's exact per-factor cutoffs + composite weights are server-side; ours are the documented *approximate* fit, §20.7.8), plus a few-minute skew between the oipulse capture and our pull. With the authoritative code map (`1=Bullish/2=Bearish/0=Neutral`, `core/connectingDots.ts`) several factors — including the OI ones — read *opposite* in the sampled 13:03–13:06 row; that is the already-documented approximation/convention class, **not a verified match and not a new defect**. Data fidelity for this page's inputs is proven upstream by OI Analysis (exact OI) + the futures-OI series, not by matching this derived sentiment cell-for-cell. **Dow** neutral (F4). |
 | **Straddle Chart** (`/options/straddle-chart`) | ✓ SENSEX 77000 3m: underlying 77049.5 vs 77050.09; combined-premium latest 555.9→557.45 vs oipulse marker 553; VWAP 602 vs oipulse ~600. Distinct premium-candle pipeline validated. |
-| **Options Chain** (`/options/options-chain`) | ~ Renders the same per-strike OI already exact-matched; greeks are ours (black76) = documented divergence. **NOT** driven cell-for-cell this pass. Also see finding **F1** (History-mode gap). |
-| **OI Spurt** (`/options/oi-spurt`) | ~ Same per-strike OI + LTP + 4-state interpretation as OI Analysis, in a 4-quadrant layout — inherits the exact-OI match. **NOT** driven cell-for-cell this pass. |
+| **Options Chain** (`/options/options-chain`) | ✓ Driven live (SENSEX): header **Total PCR 1.515 vs 1.5193 ✓**, **INDIA VIX 13.3875 vs 13.38 ✓**, spot 77011 vs 77016 ✓; ATM 77000 **PUT OI 3,528,160 EXACT**, CALL OI within 0.5% skew, LTP within a few pts. 18-col layout + colours + ATM tint match. Divergence: **IV** — ours is a single per-strike black76 IV (CE==PE), oipulse shows distinct per-leg server IV — the documented greeks class. Also finding **F1** (History-mode gap; live mode is correct). |
+| **OI Spurt** (`/options/oi-spurt`) | ✓ Driven live (SENSEX): 4-quadrant layout + 10 cols + |ΔOI|-sort + colours match; **absolute New OI matches** (77000 CE 2,876,560, cross-checked vs chain-table @13:24). **Divergence F6**: the ΔOI **window** differs — oipulse classifies by day-cumulative ΔOI, ours by per-interval — so the quadrant can flip (77000 CE: oipulse LONG_BUILDUP vs ours LONG_UNWINDING). |
 
-*(3/5 driven side-by-side; 2/5 render already-exact-matched OI. No silent claim of a full cell-for-cell on
-Options Chain / OI Spurt — recommend a quick same-day re-drive if a formal per-page sign-off is wanted.)*
+*(All **5/5** Part-A pages now driven live-vs-live. Data-fidelity anchor = OI Analysis + Options-Chain +
+Straddle exact absolute values; the two documented computed-view divergences are IV [greeks class] and
+OI-Spurt ΔOI window [F6].)*
 
 ### Findings
 - **F1 — actionable (medium): `/market/options/chain-table` ignores History mode.** With
@@ -161,6 +162,14 @@ Options Chain / OI Spurt — recommend a quick same-day re-drive if a formal per
   `oiChange` (55,800) differed from the endpoint-to-endpoint interval Δ (33,860 = current − prior-bucket OI,
   which is what oipulse shows) — we carry/aggregate the captured 3-min `oi_change` rather than recomputing
   `bucket_end − prev_bucket_end`. Absolute OI is exact; the interpretation **direction** still agrees.
+- **F6 — medium: OI Spurt ΔOI window differs from oipulse.** oipulse's OI Spurt classifies each strike
+  by **day-cumulative** ΔOI (its `Old OI` = day-open OI, `OI Chng` = New − open; it has **no** interval
+  selector). Our `/spurt` classifies by **per-interval** ΔOI (Old OI = prior bucket, driven by the page's
+  interval selector). Absolute `New OI` matches exactly, but the **quadrant/interpretation can flip** — e.g.
+  SENSEX 77000 CE was LONG_BUILDUP on oipulse (OI +13.3L since open) but LONG_UNWINDING for us (OI −0.75L in
+  the last 5m). Since OI Spurt is a signal scanner, this changes which strikes surface. Candidate: add a
+  day-cumulative / "Full Day" mode to `/spurt` and default the OI Spurt page to it (matching oipulse), keeping
+  the per-interval mode as an option.
 - **F2 — investigated, NOT a bug:** the "future-dated" 2026-07-01 snapshot rows were just *today's* live
   capture — git-bash `TZ=Asia/Kolkata date` mis-reported IST as UTC (real now was 13:05 IST, market open),
   so 07:27–07:33 UTC rows = 12:57–13:03 IST = normal. Use the container clock, not git-bash TZ, for IST.

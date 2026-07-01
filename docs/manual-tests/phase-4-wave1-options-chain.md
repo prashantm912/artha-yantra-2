@@ -75,11 +75,13 @@ ATM cream-tint row; per-strike PCR; signed-toned OI%/LTP%/LTP Chg; Go + Column S
 - **Greeks** computed in `black76-math` server-side (§17.9), NOT oipulse's server values — permanent,
   intended divergence (parity).
 
-## Value-verify pass — 2026-07-01 (live-vs-live)
-This page renders the same per-strike OI that the **OI Analysis** pass matched to oipulse **exactly**
-(2,882,220 / 3,464,080 to the share — see that page's doc); greeks stay the black76 divergence above. It
-was **not** driven cell-for-cell this pass (the exact-OI proof lives on OI Analysis). One **actionable
-finding surfaced here:**
+## Value-verify pass — 2026-07-01 (live-vs-live, SENSEX) — DRIVEN
+Driven live vs oipulse's Options Chain. Header matches: **Total PCR 1.515 vs 1.5193 ✓**, **INDIA VIX
+13.3875 vs 13.38 ✓**, spot 77011 vs 77016 ✓. ATM 77000: **PUT OI 3,528,160 EXACT**, CALL OI within 0.5%
+(live skew), CE/PE LTP within a few points. 18-col layout + side-coloured OI bars + ATM tint + OI-Int badges
+match. **IV divergence** (expected greeks class): ours assigns a single per-strike black76 IV to both legs
+(CE==PE = 16.22%), oipulse shows distinct per-leg server IV (13.7 / 15.25). One **actionable finding
+surfaced here:**
 
 - **F1 — `/market/options/chain-table` ignores History mode.** Called with `mode=history&date=2026-06-30`
   it returned the **live** chain (`asOf`=today, `spot`=live 24011, not 06-30's 23907) — the History

@@ -1,0 +1,175 @@
+package in.arthayantra.strategysignal.signals;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.math.BigDecimal;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Repository;
+
+/**
+ * JDBC access to the {@code signal_rejections} table — the live-only diagnostics of WHY a scalper
+ * chart-entry was blocked by the §12.3 confluence gate. Read-only from the UI; INSERT-only from the
+ * live engine (the golden replay never reaches the gate, so no rows are written on backtest).
+ */
+@Repository
+public class SignalRejectionRepository {
+
+  /** One rejection row. */
+  public record RejectionRow(
+      long id,
+      UUID strategyVersionId,
+      String strategySlug,
+      String exchange,
+      String tradingsymbol,
+      String interval,
+      String side,
+      String blockingRail,
+      BigDecimal blockingOperand,
+      BigDecimal blockingThreshold,
+      BigDecimal blockingMargin,
+      String blockingReason,
+      BigDecimal compositeScore,
+      BigDecimal compositeThreshold,
+      JsonNode diagnostic,
+      OffsetDateTime barTime,
+      OffsetDateTime generatedAt) {}
+
+  private final JdbcTemplate jdbc;
+  private final ObjectMapper objectMapper;
+
+  /** Wires the strategy datasource. */
+  public SignalRejectionRepository(JdbcTemplate jdbc, ObjectMapper objectMapper) {
+    this.jdbc = jdbc;
+    this.objectMapper = objectMapper;
+  }
+
+  /** Persists one rejection; returns its id. */
+  public long insert(
+      UUID strategyVersionId,
+      String strategySlug,
+      String exchange,
+      String tradingsymbol,
+      String interval,
+      String side,
+      String blockingRail,
+      BigDecimal blockingOperand,
+      BigDecimal blockingThreshold,
+      BigDecimal blockingMargin,
+      String blockingReason,
+      BigDecimal compositeScore,
+      BigDecimal compositeThreshold,
+      String diagnosticJson,
+      OffsetDateTime barTime) {
+    Long id =
+        jdbc.queryForObject(
+            """
+            INSERT INTO signal_rejections
+              (strategy_version_id, strategy_slug, exchange, tradingsymbol, "interval", side,
+               blocking_rail, blocking_operand, blocking_threshold, blocking_margin, blocking_reason,
+               composite_score, composite_threshold, diagnostic, bar_time)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?) RETURNING id
+            """,
+            Long.class,
+            strategyVersionId, strategySlug, exchange, tradingsymbol, interval, side,
+            blockingRail, blockingOperand, blockingThreshold, blockingMargin, blockingReason,
+            compositeScore, compositeThreshold, diagnosticJson, barTime);
+    return id == null ? -1 : id;
+  }
+
+  /** Paged history with optional filters (newest first). */
+  public List<RejectionRow> list(
+      UUID strategyVersionId, String blockingRail, String exchange, String tradingsymbol,
+      OffsetDateTime from, OffsetDateTime to, int limit, int offset) {
+    StringBuilder sql = new StringBuilder("SELECT * FROM signal_rejections WHERE 1=1");
+    List<Object> args = new ArrayList<>();
+    if (strategyVersionId != null) {
+      sql.append(" AND strategy_version_id = ?");
+      args.add(strategyVersionId);
+    }
+    if (blockingRail != null) {
+      sql.append(" AND blocking_rail = ?");
+      args.add(blockingRail);
+    }
+    if (exchange != null && tradingsymbol != null) {
+      sql.append(" AND exchange = ? AND tradingsymbol = ?");
+      args.add(exchange);
+      args.add(tradingsymbol);
+    }
+    if (from != null) {
+      sql.append(" AND generated_at >= ?");
+      args.add(from);
+    }
+    if (to != null) {
+      sql.append(" AND generated_at < ?");
+      args.add(to);
+    }
+    sql.append(" ORDER BY generated_at DESC, id DESC LIMIT ? OFFSET ?");
+    args.add(limit);
+    args.add(offset);
+    return jdbc.query(sql.toString(), this::row, args.toArray());
+  }
+
+  /** Per-rail block counts over an optional window (the "which rail blocks most" rollup). */
+  public List<RailCount> railCounts(UUID strategyVersionId, OffsetDateTime from, OffsetDateTime to) {
+    StringBuilder sql =
+        new StringBuilder(
+            "SELECT blocking_rail, count(*) AS n FROM signal_rejections WHERE 1=1");
+    List<Object> args = new ArrayList<>();
+    if (strategyVersionId != null) {
+      sql.append(" AND strategy_version_id = ?");
+      args.add(strategyVersionId);
+    }
+    if (from != null) {
+      sql.append(" AND generated_at >= ?");
+      args.add(from);
+    }
+    if (to != null) {
+      sql.append(" AND generated_at < ?");
+      args.add(to);
+    }
+    sql.append(" GROUP BY blocking_rail ORDER BY n DESC");
+    return jdbc.query(
+        sql.toString(),
+        (rs, i) -> new RailCount(rs.getString("blocking_rail"), rs.getLong("n")),
+        args.toArray());
+  }
+
+  /** One (rail, count) aggregate row. */
+  public record RailCount(String rail, long count) {}
+
+  private RejectionRow row(ResultSet rs, int rowNum) throws SQLException {
+    return new RejectionRow(
+        rs.getLong("id"),
+        rs.getObject("strategy_version_id", UUID.class),
+        rs.getString("strategy_slug"),
+        rs.getString("exchange"),
+        rs.getString("tradingsymbol"),
+        rs.getString("interval"),
+        rs.getString("side"),
+        rs.getString("blocking_rail"),
+        rs.getBigDecimal("blocking_operand"),
+        rs.getBigDecimal("blocking_threshold"),
+        rs.getBigDecimal("blocking_margin"),
+        rs.getString("blocking_reason"),
+        rs.getBigDecimal("composite_score"),
+        rs.getBigDecimal("composite_threshold"),
+        readTree(rs.getString("diagnostic")),
+        rs.getObject("bar_time", OffsetDateTime.class),
+        rs.getObject("generated_at", OffsetDateTime.class));
+  }
+
+  private JsonNode readTree(String json) {
+    try {
+      return objectMapper.readTree(json);
+    } catch (JsonProcessingException e) {
+      throw new IllegalStateException("stored rejection diagnostic is not valid JSON", e);
+    }
+  }
+}

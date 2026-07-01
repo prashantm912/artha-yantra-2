@@ -458,6 +458,49 @@ class ScalperConfluenceGateTest {
   }
 
   @Test
+  void diagnosticOnAPassingEntryCarriesTheDecisionAndNoRejection() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    ScalperConfluenceGate.Result r =
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL)
+            .evaluateWithDiagnostic(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD);
+    assertThat(r.blocked()).isFalse();
+    assertThat(r.decision()).isPresent();
+    assertThat(r.rejection()).isNull();
+  }
+
+  @Test
+  void diagnosticOnAMiddayBlockNamesTheTimeWindowRailBeforeTheChainFetch() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL);
+    LocalTime midday = LocalTime.of(12, 0); // inside the 11:00-13:00 default midday block
+    ScalperConfluenceGate.Result r =
+        gate.evaluateWithDiagnostic(CFG, bullBank(), null, 0, NOW, midday, EOD);
+    assertThat(r.blocked()).isTrue();
+    assertThat(r.rejection()).isNotNull();
+    assertThat(r.rejection().blockingRail()).isEqualTo("time-window");
+    assertThat(r.rejection().checks())
+        .extracting(ScalperConfluenceGate.RailCheck::rail)
+        .contains("time-window");
+    // blocked before the chain fetch → no OI/macro context, no confluence score
+    assertThat(r.rejection().context()).isNull();
+    assertThat(r.rejection().confluence()).isNull();
+  }
+
+  @Test
+  void diagnosticOnAnRsiBlockNamesTheRsiRailAndCarriesTheOperand() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    ScalperConfluenceGate.Result r =
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL)
+            .evaluateWithDiagnostic(CFG, bullBankRsi(bd("55")), null, 0, NOW, IST_TIME, EOD);
+    assertThat(r.blocked()).isTrue();
+    assertThat(r.rejection().blockingRail()).isEqualTo("rsi-band");
+    assertThat(r.rejection().operand()).isEqualByComparingTo(bd("55"));
+  }
+
+  @Test
   void oi60mAgreeTagBlocksWhenThe60mTrendOpposesTheSide() {
     // E2 M7: armed, the 60m OI build must AGREE with the side (a focused 2nd /trending?interval=60m
     // read in the seam, fetched ONLY when the tag is present). The bare CFG arms no new gate.

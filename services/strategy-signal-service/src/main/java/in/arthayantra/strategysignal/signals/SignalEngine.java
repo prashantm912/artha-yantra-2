@@ -22,6 +22,7 @@ import in.arthayantra.strategysignal.scalper.ConnectTheDotsScorer;
 import in.arthayantra.strategysignal.scalper.OpenHighLow;
 import in.arthayantra.strategysignal.scalper.ScalperConfig;
 import in.arthayantra.strategysignal.scalper.ScalperConfluenceGate;
+import in.arthayantra.strategysignal.scalper.ScalperGateContext;
 import in.arthayantra.strategysignal.scalper.ScalperGates;
 import in.arthayantra.strategysignal.scalper.ScalperManualChecks;
 import in.arthayantra.strategysignal.scalper.ScalperRisk;
@@ -105,6 +106,8 @@ public class SignalEngine {
   // §12.3 Track-2 confluence seam: OI/macro gate + option pick for scalper strategies. Absent ⇒
   // scalper strategies cannot emit (fail-closed — a scalper without its confluence must not fire).
   private final java.util.Optional<ScalperConfluenceGate> scalperGate;
+  // Live-only diagnostics: every scalper chart-entry the confluence gate blocked (why + margin).
+  private final SignalRejectionRepository rejections;
 
   // candles.1m.* are NEVER conflated (A.7.2 bus contract — every closed bar matters). A FIFO
   // queue preserves each distinct bar in arrival order; the single-threaded evalExecutor drains it
@@ -143,9 +146,11 @@ public class SignalEngine {
       MeterRegistry meterRegistry,
       java.util.Optional<EmissionGuard> emissionGuard,
       java.util.Optional<ScalperConfluenceGate> scalperGate,
+      SignalRejectionRepository rejections,
       @Value("${artha.signals.ttl-minutes:60}") int signalTtlMinutes) {
     this.registry = registry;
     this.signals = signals;
+    this.rejections = rejections;
     this.publisher = publisher;
     this.events = events;
     this.seriesStore = seriesStore;
@@ -492,15 +497,15 @@ public class SignalEngine {
       return;
     }
     OffsetDateTime istBar = bar.bucketStart().withOffsetSameInstant(Ist.OFFSET);
-    Optional<ScalperConfluenceGate.Decision> decision =
-        scalperGate.get().evaluate(
+    ScalperConfluenceGate.Result result =
+        scalperGate.get().evaluateWithDiagnostic(
             strategy.scalper(), bank, future, index, bar.bucketStart().toInstant(),
             istBar.toLocalTime(), istBar.toLocalDate());
-    if (decision.isEmpty()) {
-      log.info("scalper confluence blocked entry: {} {}:{}", strategy.slug(), exchange, tradingsymbol);
+    if (result.blocked()) {
+      recordRejection(strategy, exchange, tradingsymbol, interval, istBar, result.rejection());
       return;
     }
-    emitEntry(strategy, exchange, tradingsymbol, interval, bar, evaluation, decision.get());
+    emitEntry(strategy, exchange, tradingsymbol, interval, bar, evaluation, result.decision().get());
   }
 
   private void evaluateCoarsePrimary(
@@ -641,18 +646,19 @@ public class SignalEngine {
         }
         OptionType carrySide = btstCarrySide(dayBars);
         OffsetDateTime istBar = lastOneMinute.bucketStart().withOffsetSameInstant(Ist.OFFSET);
-        Optional<ScalperConfluenceGate.Decision> decision =
-            scalperGate.get().evaluate(
+        ScalperConfluenceGate.Result result =
+            scalperGate.get().evaluateWithDiagnostic(
                 strategy.scalper(), bank, primary, primary.size() - 1,
                 lastOneMinute.bucketStart().toInstant(), istBar.toLocalTime(), today, carrySide, true);
-        if (decision.isEmpty()) {
-          log.info(
-              "BTST carry blocked by confluence gate: {} {}", strategy.slug(), instrument.tradingsymbol());
+        if (result.blocked()) {
+          recordRejection(
+              strategy, instrument.exchange(), instrument.tradingsymbol(), "1d", istBar,
+              result.rejection());
           return;
         }
         emitEntry(
             strategy, instrument.exchange(), instrument.tradingsymbol(), "1d", lastOneMinute,
-            evaluation.get(), decision.get());
+            evaluation.get(), result.decision().get());
         return;
       }
       emitEntry(
@@ -860,6 +866,133 @@ public class SignalEngine {
       }
     }
     ScalperManualChecks.appendTo(root);
+    return root.toString();
+  }
+
+  /**
+   * Persists the live-only rejection diagnostic (WHY the confluence gate blocked this scalper
+   * chart-entry) and logs the structured reason. LIVE path only — the deterministic replay never
+   * reaches the gate, so this is never invoked on backtest (no rows there → parity-safe). Diagnostics
+   * must never break the live signal path, so a persistence failure is swallowed with a warning.
+   */
+  private void recordRejection(
+      Loaded strategy, String exchange, String tradingsymbol, String interval, OffsetDateTime barTime,
+      ScalperConfluenceGate.RejectionDiagnostic d) {
+    if (d == null) {
+      log.info("scalper confluence blocked entry: {} {}:{} (no diagnostic)", strategy.slug(), exchange, tradingsymbol);
+      return;
+    }
+    try {
+      rejections.insert(
+          strategy.versionId(), strategy.slug(), exchange, tradingsymbol, interval,
+          d.side() == null ? null : d.side().name(), d.blockingRail(), d.operand(), d.threshold(),
+          d.margin(), d.reason(), d.compositeScore(), d.compositeThreshold(),
+          rejectionDiagnosticJson(d), barTime);
+    } catch (RuntimeException e) {
+      log.warn(
+          "failed to persist scalper rejection {} {}:{}: {}",
+          strategy.slug(), exchange, tradingsymbol, e.toString());
+    }
+    log.info(
+        "scalper confluence blocked entry: {} {}:{} rail={} operand={} threshold={} margin={} composite={}/{} ({})",
+        strategy.slug(), exchange, tradingsymbol, d.blockingRail(), d.operand(), d.threshold(),
+        d.margin(), d.compositeScore(), d.compositeThreshold(), d.reason());
+  }
+
+  /**
+   * The full rejection diagnostic JSON: the blocking rail + margin, every rail evaluated up to the
+   * block, the dot-by-dot Connect-the-Dots confluence (when the composite was reached), and the raw
+   * OI/macro/chart context — the complete "why blocked" payload the Rejections page renders.
+   */
+  private String rejectionDiagnosticJson(ScalperConfluenceGate.RejectionDiagnostic d) {
+    ObjectNode root = objectMapper.createObjectNode();
+    root.put("blockingRail", d.blockingRail());
+    root.put("side", d.side() == null ? null : d.side().name());
+    root.put("operand", d.operand());
+    root.put("threshold", d.threshold());
+    root.put("margin", d.margin());
+    root.put("reason", d.reason());
+    root.put("compositeScore", d.compositeScore());
+    root.put("compositeThreshold", d.compositeThreshold());
+    ArrayNode checks = root.putArray("checks");
+    for (ScalperConfluenceGate.RailCheck c : d.checks()) {
+      ObjectNode n = checks.addObject();
+      n.put("rail", c.rail());
+      n.put("pass", c.pass());
+      n.put("operand", c.operand());
+      n.put("threshold", c.threshold());
+      n.put("margin", c.margin());
+      n.put("reason", c.reason());
+    }
+    if (d.confluence() != null) {
+      ConnectTheDotsScorer.Confluence conf = d.confluence();
+      ObjectNode c = root.putObject("confluence");
+      c.put("aggregate", conf.aggregate());
+      c.put("threshold", d.compositeThreshold());
+      c.put("bullish", conf.bullish());
+      c.put("bearish", conf.bearish());
+      c.put("vwapAligned", conf.vwapAligned());
+      c.put("biasAligned", conf.biasAligned());
+      c.put("standAside", conf.standAside());
+      ArrayNode dots = c.putArray("dots");
+      for (ConnectTheDotsScorer.DotScore ds : conf.dots()) {
+        ObjectNode n = dots.addObject();
+        n.put("dot", ds.dot());
+        n.put("weight", ds.weight());
+        n.put("supports", ds.supports());
+        n.put("reason", ds.reason());
+      }
+    }
+    if (d.context() != null) {
+      ScalperGateContext ctx = d.context();
+      ObjectNode c = root.putObject("context");
+      c.put("underlying", ctx.underlying());
+      c.put("signalIndex", ctx.signalIndex());
+      ScalperGateContext.Chart ch = ctx.chart();
+      ObjectNode chart = c.putObject("chart");
+      chart.put("close", ch.close());
+      chart.put("vwap", ch.vwap());
+      chart.put("vwma20", ch.vwma20());
+      chart.put("psar", ch.psar());
+      chart.put("supertrendDir", ch.supertrendDir());
+      chart.put("rsi14", ch.rsi14());
+      chart.put("volume", ch.volume());
+      chart.put("rsi5m", ch.rsi5m());
+      chart.put("rsiDaily", ch.rsiDaily());
+      ScalperGateContext.Oi oi = ctx.oi();
+      ObjectNode on = c.putObject("oi");
+      on.put("underlyingQuadrant", String.valueOf(oi.underlying()));
+      on.put("futuresQuadrant", String.valueOf(oi.futures()));
+      on.put("sentimentPct", oi.sentimentPct());
+      on.put("trendingPeMinusCePct", oi.trendingPeMinusCePct());
+      on.put("futuresBasis", oi.futuresBasis());
+      on.put("ceOiDelta", oi.ceOiDelta());
+      on.put("peOiDelta", oi.peOiDelta());
+      on.put("callPutDeltaImbalancePct", oi.callPutDeltaImbalancePct());
+      on.put("crossedThisWindow", oi.crossedThisWindow());
+      on.put("gapWidening", oi.gapWidening());
+      on.put("sentimentSlope", oi.sentimentSlope());
+      on.put("spurtOiPct", oi.spurtOiPct());
+      on.put("spurtPricePct", oi.spurtPricePct());
+      on.put("oiDivergencePct", oi.oiDivergencePct());
+      ScalperGateContext.Macro m = ctx.macro();
+      ObjectNode mn = c.putObject("macro");
+      mn.put("atmIv", m.atmIv());
+      mn.put("ivRank", m.ivRank());
+      mn.put("vixLevel", m.vixLevel());
+      mn.put("vixRising", m.vixRising());
+      mn.put("advances", m.advances());
+      mn.put("declines", m.declines());
+      mn.put("fiiLongPct", m.fiiLongPct());
+      mn.put("ceIvAvg6", m.ceIvAvg6());
+      mn.put("peIvAvg6", m.peIvAvg6());
+      mn.put("constituentBias", m.constituentBias());
+      mn.put("ceIvSlope", m.ceIvSlope());
+      mn.put("peIvSlope", m.peIvSlope());
+      mn.put("premiumSkewPct", m.premiumSkewPct());
+      mn.put("dowUp", m.dowUp());
+      mn.put("fiiBiasSign", m.fiiBiasSign());
+    }
     return root.toString();
   }
 

@@ -83,10 +83,10 @@ match. **IV divergence** (expected greeks class): ours assigns a single per-stri
 (CE==PE = 16.22%), oipulse shows distinct per-leg server IV (13.7 / 15.25). One **actionable finding
 surfaced here:**
 
-- **F1 — `/market/options/chain-table` ignores History mode.** Called with `mode=history&date=2026-06-30`
-  it returned the **live** chain (`asOf`=today, `spot`=live 24011, not 06-30's 23907) — the History
-  date/mode is dropped. Contrast: `oi-analysis/strike-series` **does** date-scope in History (verified
-  2026-06-21). So the Options Chain page's History toggle currently shows live data, not the selected past
-  session. **Live mode is correct.** Candidate fix: chain-table should read the historical chain from
-  `options_chain_snapshots` when `mode=history` (mirroring oi-analysis). Tracked in
+- **F1 — ✅ FIXED (#399): `/market/options/chain-table` now honours History mode.** It used to drop the
+  History date and return the **live** chain (`asOf`=today, `spot`=live 24011, not 06-30's 23907). Now, when
+  `mode=history` + a date, the chain is pivoted from the session's captured `options_chain_snapshots` (via
+  `HistoricalOiReader`) — greeks null on history (the snapshot projection carries IV only, so the Delta
+  column is blank in History). Live mode is byte-unchanged. Live-verified: History 2026-06-30 NIFTY →
+  spot **23913.55**, asOf **2026-06-30T15:15**, pcr 0.8837, greeks null. See
   `phase-4-wave1-value-verify-runbook.md` (Part A findings, F1).

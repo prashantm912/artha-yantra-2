@@ -27,9 +27,10 @@ public class MarketDataClient {
 
   private final RestClient http;
 
-  /** Builds the client against the market-data base URL. */
-  public MarketDataClient(@Value("${artha.marketdata.base-url}") String baseUrl) {
-    this.http = RestClient.builder().baseUrl(baseUrl).build();
+  /** Builds the client against the market-data base URL (auto-configured builder ⇒ bounded HTTP). */
+  public MarketDataClient(
+      RestClient.Builder builder, @Value("${artha.marketdata.base-url}") String baseUrl) {
+    this.http = builder.baseUrl(baseUrl).build();
   }
 
   /**

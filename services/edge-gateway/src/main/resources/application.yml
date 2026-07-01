@@ -26,6 +26,13 @@ spring:
     gateway:
       server:
         webflux:
+          # Bounded upstream HTTP (audit P0-4): without a response timeout a hung (not dead)
+          # upstream held gateway connections open forever with no 503. 300s: POST
+          # /api/v1/backtests/run runs its auto-warm + pre-flight inline and can legitimately
+          # take minutes on a fresh window — generous but finite.
+          httpclient:
+            connect-timeout: 3000   # ms
+            response-timeout: 300s
           default-filters:
             # A.2.6: generous 50 req/s global valve on ROUTED traffic —
             # catches runaway frontend loops, not humans

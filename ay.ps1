@@ -36,6 +36,10 @@ function Set-ProfileEnv {
     }
     if ($activeProfile -eq 'mock') {
         $env:ARTHA_DB_NAME = 'artha_mock'; $env:ARTHA_REDIS_DB = '1'
+        # Mock notifier targets the WireMock stub (audit P0-6: the compose default is now
+        # fail-closed blank, so live can never silently post to the stub).
+        $env:ARTHA_NOTIFIER_NTFY_URL = 'http://wiremock:8080'
+        $env:ARTHA_NOTIFIER_NTFY_TOPIC = 'ay-signals-mock'
     } else {
         $env:ARTHA_DB_NAME = 'artha';      $env:ARTHA_REDIS_DB = '0'
     }

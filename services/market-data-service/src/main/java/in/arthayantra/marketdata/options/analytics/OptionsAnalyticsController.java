@@ -389,7 +389,8 @@ public class OptionsAnalyticsController {
    * time chain cannot carry, derived from the latest snapshot pair using the spurt convention. The
    * displayed OI/LTP stay LIVE (flash on change); the "Chng" columns are the snapshot interval delta.
    * Deltas are null (not a 422) when snapshots have not accrued, so the live chain still renders.
-   * NOTE: greeks are always LIVE — history mode only date-scopes the deltas (Wave-1 limitation).
+   * HISTORY mode ({@code mode=history} + a {@code date}) instead serves the SELECTED session's chain,
+   * pivoted from the captured snapshots (F1) — see {@link #historicalChainTable}; live mode is unchanged.
    */
   @GetMapping("/chain-table")
   public ChainTable chainTable(
@@ -401,9 +402,15 @@ public class OptionsAnalyticsController {
     OiQuery q = OiQuery.of(mode, name, date, interval, expiry);
     // expiry defaults to the nearest on/after today — parity with the core /chain endpoint.
     LocalDate exp = chainService.resolveExpiry(q.name(), q.expiry());
-    OptionsChainService.Chain chain = chainService.chain(q.name(), exp);
     Map<String, LegDeltas> deltas =
         chainDeltas(reader.latestPair(q.name(), exp, q.interval(), q.date()));
+    // F1: History mode reads the session's captured snapshot chain, NOT today's live black76 chain,
+    // so the Options Chain page in History mode shows the requested past session (spot/OI/LTP/IV = that
+    // day). Live mode (date == null) keeps the live greeks chain unchanged.
+    if (!q.live() && q.date() != null) {
+      return historicalChainTable(q, exp, deltas);
+    }
+    OptionsChainService.Chain chain = chainService.chain(q.name(), exp);
     List<ChainTableRow> rows = new ArrayList<>(chain.rows().size());
     for (OptionsChainService.StrikeRow r : chain.rows()) {
       rows.add(
@@ -552,22 +559,57 @@ public class OptionsAnalyticsController {
     }
   }
 
-  /** /spurt: oipulse Options OI Spurt — per-strike interval buildup + the underlying 4-state rollup. */
+  /**
+   * /spurt: oipulse Options OI Spurt — per-strike buildup + the underlying 4-state rollup. {@code
+   * window} selects the ΔOI reference: {@code cumulative} (F6 — the oipulse default: newest bucket vs
+   * the SESSION-OPEN bucket, so "Old OI" is the day-open OI) or {@code interval} (the default here for
+   * backward-compat: newest vs the prior bucket). The OI Spurt page passes {@code window=cumulative}.
+   */
   @GetMapping("/spurt")
   public OiSpurtService.SpurtChain spurt(
       @RequestParam(required = false) String mode,
       @RequestParam String name,
       @RequestParam(required = false) String date,
       @RequestParam(required = false) String interval,
-      @RequestParam(required = false) String expiry) {
+      @RequestParam(required = false) String expiry,
+      @RequestParam(required = false) String window) {
     OiQuery q = OiQuery.of(mode, name, date, interval, expiry);
     LocalDate exp = requireExpiry(q);
     List<OptionsSnapshotReader.StrikePoint> pair =
-        reader.latestPair(q.name(), exp, q.interval(), q.date());
+        "cumulative".equalsIgnoreCase(window)
+            ? cumulativePair(q, exp)
+            : reader.latestPair(q.name(), exp, q.interval(), q.date());
     if (pair.isEmpty()) {
       throw new ApiException(422, ErrorCodes.DATA_GAP, "no snapshot for " + q.name() + " " + exp);
     }
     return spurtService.spurts(pair);
+  }
+
+  /**
+   * F6: the (session-open, newest) two-bucket window for the DAY-CUMULATIVE OI Spurt. Old OI is the
+   * FIRST captured bucket of the session, so {@link OiSpurtService#spurts} yields ΔOI-since-open (what
+   * oipulse's OI Spurt shows — it has no interval selector). Empty when the session has no snapshot; a
+   * single bucket (open == newest, e.g. just after open) yields no prior, so spurts returns no rows.
+   */
+  private List<OptionsSnapshotReader.StrikePoint> cumulativePair(OiQuery q, LocalDate exp) {
+    List<OptionsSnapshotReader.StrikePoint> latest =
+        reader.latest(q.name(), exp, q.interval(), q.date());
+    if (latest.isEmpty()) {
+      return List.of();
+    }
+    OffsetDateTime newest = latest.get(0).bucket();
+    LocalDate day = newest.atZoneSameInstant(Ist.ZONE).toLocalDate();
+    OffsetDateTime from = day.atStartOfDay().atOffset(Ist.OFFSET);
+    List<OptionsSnapshotReader.StrikePoint> session =
+        reader.series(q.name(), exp, q.interval(), from, newest.plus(q.interval().bucket()));
+    OffsetDateTime open =
+        session.stream()
+            .map(OptionsSnapshotReader.StrikePoint::bucket)
+            .min(Comparator.naturalOrder())
+            .orElse(newest);
+    return session.stream()
+        .filter(p -> p.bucket().equals(open) || p.bucket().equals(newest))
+        .toList();
   }
 
   /** /big-oi: oipulse Big OI — the latest bucket's legs ranked by |interval OI-change|. */
@@ -967,6 +1009,79 @@ public class OptionsAnalyticsController {
     if (leg == null) {
       return null;
     }
+    return new ChainTableLeg(leg, deltas.get(deltaKey(strike, optionType)));
+  }
+
+  /**
+   * F1: the chain-table for a PAST session — pivoted from the captured {@code options_chain_snapshots}
+   * (via the history-aware {@link HistoricalOiReader}) rather than the live black76 chain, so History
+   * mode shows the SELECTED session's per-strike OI/LTP/IV instead of today's live chain. Header
+   * spot/pcr/asOf come from the session's newest captured bucket; the per-leg greeks are null (the
+   * snapshot projection carries IV but not delta/gamma/…) — which is fine on history (greeks were
+   * always the black76-vs-oipulse divergence anyway). Deltas ride the same interval overlay as live.
+   * 422 when the session has no snapshot (parity with the other history-mode OI endpoints).
+   */
+  private ChainTable historicalChainTable(OiQuery q, LocalDate exp, Map<String, LegDeltas> deltas) {
+    List<OptionsSnapshotReader.StrikePoint> latest =
+        reader.latest(q.name(), exp, q.interval(), q.date());
+    if (latest.isEmpty()) {
+      throw new ApiException(422, ErrorCodes.DATA_GAP, "no snapshot chain for " + q.name() + " " + exp);
+    }
+    Map<BigDecimal, OptionsSnapshotReader.StrikePoint> ce = new java.util.TreeMap<>();
+    Map<BigDecimal, OptionsSnapshotReader.StrikePoint> pe = new java.util.TreeMap<>();
+    OffsetDateTime asOf = null;
+    BigDecimal spot = null;
+    long ceOi = 0L;
+    long peOi = 0L;
+    for (OptionsSnapshotReader.StrikePoint p : latest) {
+      if (asOf == null || p.bucket().isAfter(asOf)) {
+        asOf = p.bucket();
+      }
+      if (spot == null && p.spot() != null) {
+        spot = p.spot();
+      }
+      boolean call = "CE".equalsIgnoreCase(p.optionType());
+      (call ? ce : pe).put(p.strike(), p);
+      if (p.oi() != null) {
+        if (call) {
+          ceOi += p.oi();
+        } else {
+          peOi += p.oi();
+        }
+      }
+    }
+    java.util.TreeSet<BigDecimal> strikes = new java.util.TreeSet<>();
+    strikes.addAll(ce.keySet());
+    strikes.addAll(pe.keySet());
+    List<ChainTableRow> rows = new ArrayList<>(strikes.size());
+    for (BigDecimal strike : strikes) {
+      rows.add(
+          new ChainTableRow(
+              strike,
+              snapLeg(strike, "CE", ce.get(strike), deltas),
+              snapLeg(strike, "PE", pe.get(strike), deltas)));
+    }
+    BigDecimal pcr =
+        ceOi == 0L
+            ? null
+            : BigDecimal.valueOf(peOi).divide(BigDecimal.valueOf(ceOi), 4, RoundingMode.HALF_UP);
+    return new ChainTable(
+        q.name(), exp, spot, null, null, null, pcr, false, asOf, q.interval().token(), rows);
+  }
+
+  /** Builds a chain leg from a captured snapshot point (greeks null — the projection carries IV only). */
+  private static ChainTableLeg snapLeg(
+      BigDecimal strike,
+      String optionType,
+      OptionsSnapshotReader.StrikePoint p,
+      Map<String, LegDeltas> deltas) {
+    if (p == null) {
+      return null;
+    }
+    OptionsChainService.Leg leg =
+        new OptionsChainService.Leg(
+            null, p.ltp(), null, null, p.volume(), p.oi(), null, p.iv(),
+            null, null, null, null, null, null, null, null, null, null);
     return new ChainTableLeg(leg, deltas.get(deltaKey(strike, optionType)));
   }
 

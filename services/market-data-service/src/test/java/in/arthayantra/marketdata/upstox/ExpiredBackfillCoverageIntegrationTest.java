@@ -29,7 +29,13 @@ class ExpiredBackfillCoverageIntegrationTest extends MarketDataIntegrationTestBa
 
   @Test
   void incompleteContractCountsOnlyInsideTheResumeWindow() {
-    LocalDate expiry = LocalDate.of(2025, 7, 1);
+    // hasIncompleteCoverage is a GLOBAL EXISTS(NOT complete AND expiry >= floor) — no per-underlying
+    // filter — so the "floor past my row → false" guard only holds while THIS probe is the LATEST
+    // incomplete contract in the shared singleton DB. The one other incomplete fixture in the suite
+    // (CandleDerivedChainReaderIntegrationTest's DERIV99XCE @ 2099-01-15) leaks in under a different CI
+    // test order, so the probe sits at a far-future sentinel PAST it. The query is date-agnostic — the
+    // now-1y resume window is the CALLER's floor, so the sentinel year changes nothing under test.
+    LocalDate expiry = LocalDate.of(2099, 12, 31);
     repo.upsertContract(
         "BFO",
         "SENSEX-AUTORESUME-IT-PROBE",
@@ -50,9 +56,8 @@ class ExpiredBackfillCoverageIntegrationTest extends MarketDataIntegrationTestBa
     // Floor at/before this row's expiry → it is reachable work → probe true.
     assertThat(repo.hasIncompleteCoverage(expiry)).isTrue();
     assertThat(repo.hasIncompleteCoverage(expiry.minusYears(1))).isTrue();
-    // Regression guard: floor PAST this row's expiry → it is out-of-window/unreachable. The probe
-    // must not count it. (Monotonic-safe: this floor is one day past THIS row, and no other test
-    // inserts an incomplete contract dated this far in the future.)
+    // Regression guard: floor PAST this row's expiry (and past every other incomplete fixture in the
+    // suite) → it is out-of-window/unreachable, so the probe must not count it.
     assertThat(repo.hasIncompleteCoverage(expiry.plusDays(1))).isFalse();
   }
 }

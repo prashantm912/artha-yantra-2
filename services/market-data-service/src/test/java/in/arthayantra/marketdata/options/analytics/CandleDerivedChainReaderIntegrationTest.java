@@ -224,7 +224,9 @@ class CandleDerivedChainReaderIntegrationTest extends MarketDataIntegrationTestB
   @Test
   void frontExpiryPicksNearestCompleteOnOrAfterSession() {
     assertThat(reader.frontExpiry(EU, LocalDate.of(2099, 1, 1))).isEqualTo(EXPIRY);
-    assertThat(reader.frontExpiry(EU, EXPIRY.plusDays(1))).isEqualTo(EXPIRY2);
+    // Floor PAST both EXPIRY (01-15) and the full-chain test's EXPIRY3 (01-16, same NIFTY underlying —
+    // it leaks into frontExpiry's underlying-only query under a different CI test order) → picks EXPIRY2.
+    assertThat(reader.frontExpiry(EU, EXPIRY.plusDays(2))).isEqualTo(EXPIRY2);
     assertThat(reader.frontExpiry("NOPE", LocalDate.of(2099, 1, 1))).isNull();
   }
 

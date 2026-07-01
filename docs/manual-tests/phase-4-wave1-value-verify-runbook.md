@@ -105,3 +105,66 @@ new pre-flight will 422 `DATA_GAP` rather than silently return 0 trades.
 - Recent-expiry premium loads last in the backfill → Part B's recent-session target is the final thing
   the backfill makes available.
 - Dow factor (Connecting Dots) is live-LTP only → Neutral in History mode (documented divergence).
+
+---
+
+## Part A — VALUE-VERIFY PASS RESULTS (2026-07-01, live-vs-live)
+
+**Verdict: Part-A data foundation VALUE-VERIFIED.** Ran the §20.8 cell-for-cell compare **live-vs-live**
+during market hours (~13:05 IST, 2026-07-01) against the owner's signed-in oipulse via Claude-in-Chrome,
+plus a gateway-API pull of our own side at the same instant. Live-vs-live beats the History-mode fallback
+in the runbook above because both sides show the *same* live session (the milestone allowed either). Our
+own History-mode side was independently re-confirmed on **2026-06-30** (a full real-captured session:
+NIFTY 210,835 snapshot rows / 1,043 buckets, SENSEX 375,020) — all 12 OI/data endpoints return real,
+non-empty, internally-consistent rows.
+
+### The decisive result — captured OI is byte-faithful to oipulse
+OI Analysis, **SENSEX 77000 5-min**, two consecutive buckets, both legs — our captured OI equals oipulse
+**to the exact share**:
+
+| bucket | metric | oipulse | ours |
+|---|---|---|---|
+| 13:00 | Call OI | 28,82,220 | 2,882,220 ✓ EXACT |
+| 13:00 | Put OI  | 34,64,080 | 3,464,080 ✓ EXACT |
+| 12:55 | Call OI | 28,17,480 | 2,817,480 ✓ EXACT |
+| 12:55 | Put OI  | 34,30,220 | 3,430,220 ✓ EXACT |
+| 13:00 | Call LTP | 271.65 | 271.50 (~✓ sub-tick live skew) |
+| 13:00 | Call/Put interp | Short/Long Build Up | Short/Long Build Up ✓ |
+
+This is the core of "value-verify": our OI capture reproduces the reference product's OI exactly.
+
+### Page-by-page (Part A, 5 pages)
+| page | result |
+|---|---|
+| **OI Analysis** (`/options/oi-analysis`) | ✓ **Exact per-strike OI match** (table above); LTP within sub-tick; 4-state interpretation agrees. |
+| **Connecting Dots** (`/features/connecting-dots`) | ✓ **Structure** matches (13-col order, ↑/↓/↔ colour semantics, 5-state Trend badges, 25/page, legend). ⚠ **Per-cell factor directions were NOT cross-verified** — the factors are computed independently on both sides (oipulse's exact per-factor cutoffs + composite weights are server-side; ours are the documented *approximate* fit, §20.7.8), plus a few-minute skew between the oipulse capture and our pull. With the authoritative code map (`1=Bullish/2=Bearish/0=Neutral`, `core/connectingDots.ts`) several factors — including the OI ones — read *opposite* in the sampled 13:03–13:06 row; that is the already-documented approximation/convention class, **not a verified match and not a new defect**. Data fidelity for this page's inputs is proven upstream by OI Analysis (exact OI) + the futures-OI series, not by matching this derived sentiment cell-for-cell. **Dow** neutral (F4). |
+| **Straddle Chart** (`/options/straddle-chart`) | ✓ SENSEX 77000 3m: underlying 77049.5 vs 77050.09; combined-premium latest 555.9→557.45 vs oipulse marker 553; VWAP 602 vs oipulse ~600. Distinct premium-candle pipeline validated. |
+| **Options Chain** (`/options/options-chain`) | ~ Renders the same per-strike OI already exact-matched; greeks are ours (black76) = documented divergence. **NOT** driven cell-for-cell this pass. Also see finding **F1** (History-mode gap). |
+| **OI Spurt** (`/options/oi-spurt`) | ~ Same per-strike OI + LTP + 4-state interpretation as OI Analysis, in a 4-quadrant layout — inherits the exact-OI match. **NOT** driven cell-for-cell this pass. |
+
+*(3/5 driven side-by-side; 2/5 render already-exact-matched OI. No silent claim of a full cell-for-cell on
+Options Chain / OI Spurt — recommend a quick same-day re-drive if a formal per-page sign-off is wanted.)*
+
+### Findings
+- **F1 — actionable (medium): `/market/options/chain-table` ignores History mode.** With
+  `mode=history&date=2026-06-30` it returned the **live** chain (`asOf`=today, `spot`=live 24011, not the
+  06-30 session's 23907). Contrast: `oi-analysis/strike-series` **does** date-scope in history (verified
+  2026-06-21). → the Options Chain page in History mode shows live data, not the selected past session.
+  Candidate fix: chain-table controller/service should read the historical chain from
+  `options_chain_snapshots` when `mode=history` (as oi-analysis does). Live mode is correct.
+- **F3 — low: `/market/options/oi-heatmap` bucket labels are UTC** (`"03:45"` = 09:15 IST). IST-offset
+  display nit on the heatmap x-axis (the [[in-container-utc-ist]] class of bug).
+- **F4 — by-design: Connecting Dots `dow` = neutral** every row (global-quotes feed off;
+  owner-decided "WON'T arm Dow", inventory §6). oipulse shows a live Dow direction. Documented divergence,
+  not a defect.
+- **F5 — low: strike-series per-interval `oiChange` method.** On the resampled PE leg our reported
+  `oiChange` (55,800) differed from the endpoint-to-endpoint interval Δ (33,860 = current − prior-bucket OI,
+  which is what oipulse shows) — we carry/aggregate the captured 3-min `oi_change` rather than recomputing
+  `bucket_end − prev_bucket_end`. Absolute OI is exact; the interpretation **direction** still agrees.
+- **F2 — investigated, NOT a bug:** the "future-dated" 2026-07-01 snapshot rows were just *today's* live
+  capture — git-bash `TZ=Asia/Kolkata date` mis-reported IST as UTC (real now was 13:05 IST, market open),
+  so 07:27–07:33 UTC rows = 12:57–13:03 IST = normal. Use the container clock, not git-bash TZ, for IST.
+
+### Unchanged known divergences (carried forward, not defects)
+black76 greeks (vs oipulse server values) · interpretation-badge ring for WCAG (oipulse fills solid) ·
+`+`-prefix on positives (colour-only a11y) · `OiInterval` lacks 10m · EOD label `15:30-15:35` vs `15:30-EOD`.

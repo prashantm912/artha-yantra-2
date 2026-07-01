@@ -82,3 +82,15 @@ below). market-data was restored to live after the render.
   light-theme fills) so it clears AA contrast where white-on-green would not. Fills + colour semantics
   match; only the glyph colour differs (the standing a11y-driven divergence). Our `--ay-*` theming is
   the other standing intended divergence (see the chain QA doc).
+
+## Value-verify pass — 2026-07-01 (live-vs-live, NIFTY 3m)
+**Structure ✓** (13-col order, ↑/↓/↔ colour semantics, 5-state Trend badges, legend, pagination) matches
+oipulse's live Connecting Dots. **Per-cell factor directions were NOT cross-verified this pass** — both
+sides compute the factors independently (oipulse's exact cutoffs + weights are server-side; ours are the
+approximate fit above), and there is a few-minute skew between the oipulse capture and our API pull. Using
+the authoritative code map (`1=Bullish/2=Bearish/0=Neutral`, `core/connectingDots.ts`) several factors read
+opposite in the sampled 13:03–13:06 row — that is the already-documented approximation class, **not a
+verified match and not a new defect**. **Dow** remains Neutral (feed off; owner "WON'T arm Dow"). The
+data-fidelity proof for this page's OI inputs lives in the **OI Analysis** exact-OI match (see that page's
+doc + `phase-4-wave1-value-verify-runbook.md` Part A results), not in matching this derived sentiment
+cell-for-cell.

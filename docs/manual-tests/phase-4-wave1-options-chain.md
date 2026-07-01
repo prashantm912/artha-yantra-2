@@ -74,3 +74,17 @@ ATM cream-tint row; per-strike PCR; signed-toned OI%/LTP%/LTP Chg; Go + Column S
 - **Strike click → chart sub-view** deferred (Wave-4 openalgo-chart). ATM row tinted, not yet clickable.
 - **Greeks** computed in `black76-math` server-side (§17.9), NOT oipulse's server values — permanent,
   intended divergence (parity).
+
+## Value-verify pass — 2026-07-01 (live-vs-live)
+This page renders the same per-strike OI that the **OI Analysis** pass matched to oipulse **exactly**
+(2,882,220 / 3,464,080 to the share — see that page's doc); greeks stay the black76 divergence above. It
+was **not** driven cell-for-cell this pass (the exact-OI proof lives on OI Analysis). One **actionable
+finding surfaced here:**
+
+- **F1 — `/market/options/chain-table` ignores History mode.** Called with `mode=history&date=2026-06-30`
+  it returned the **live** chain (`asOf`=today, `spot`=live 24011, not 06-30's 23907) — the History
+  date/mode is dropped. Contrast: `oi-analysis/strike-series` **does** date-scope in History (verified
+  2026-06-21). So the Options Chain page's History toggle currently shows live data, not the selected past
+  session. **Live mode is correct.** Candidate fix: chain-table should read the historical chain from
+  `options_chain_snapshots` when `mode=history` (mirroring oi-analysis). Tracked in
+  `phase-4-wave1-value-verify-runbook.md` (Part A findings, F1).

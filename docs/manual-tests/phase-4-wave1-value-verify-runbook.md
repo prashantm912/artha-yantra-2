@@ -147,12 +147,11 @@ Straddle exact absolute values; the two documented computed-view divergences are
 OI-Spurt ΔOI window [F6].)*
 
 ### Findings
-- **F1 — actionable (medium): `/market/options/chain-table` ignores History mode.** With
-  `mode=history&date=2026-06-30` it returned the **live** chain (`asOf`=today, `spot`=live 24011, not the
-  06-30 session's 23907). Contrast: `oi-analysis/strike-series` **does** date-scope in history (verified
-  2026-06-21). → the Options Chain page in History mode shows live data, not the selected past session.
-  Candidate fix: chain-table controller/service should read the historical chain from
-  `options_chain_snapshots` when `mode=history` (as oi-analysis does). Live mode is correct.
+- **F1 — ✅ FIXED (#399): `/market/options/chain-table` now honours History mode.** It used to return the
+  **live** chain (`asOf`=today, `spot`=live 24011) even with `mode=history&date=2026-06-30`. Now history
+  mode pivots the chain from the session's captured `options_chain_snapshots` (via `HistoricalOiReader`);
+  greeks are null on history (the snapshot projection carries IV only). Live-verified: History 2026-06-30
+  NIFTY → spot **23913.55**, asOf **2026-06-30T15:15**, pcr 0.8837, greeks null. Live mode byte-unchanged.
 - **F3 — low: `/market/options/oi-heatmap` bucket labels are UTC** (`"03:45"` = 09:15 IST). IST-offset
   display nit on the heatmap x-axis (the [[in-container-utc-ist]] class of bug).
 - **F4 — by-design: Connecting Dots `dow` = neutral** every row (global-quotes feed off;
@@ -162,14 +161,12 @@ OI-Spurt ΔOI window [F6].)*
   `oiChange` (55,800) differed from the endpoint-to-endpoint interval Δ (33,860 = current − prior-bucket OI,
   which is what oipulse shows) — we carry/aggregate the captured 3-min `oi_change` rather than recomputing
   `bucket_end − prev_bucket_end`. Absolute OI is exact; the interpretation **direction** still agrees.
-- **F6 — medium: OI Spurt ΔOI window differs from oipulse.** oipulse's OI Spurt classifies each strike
-  by **day-cumulative** ΔOI (its `Old OI` = day-open OI, `OI Chng` = New − open; it has **no** interval
-  selector). Our `/spurt` classifies by **per-interval** ΔOI (Old OI = prior bucket, driven by the page's
-  interval selector). Absolute `New OI` matches exactly, but the **quadrant/interpretation can flip** — e.g.
-  SENSEX 77000 CE was LONG_BUILDUP on oipulse (OI +13.3L since open) but LONG_UNWINDING for us (OI −0.75L in
-  the last 5m). Since OI Spurt is a signal scanner, this changes which strikes surface. Candidate: add a
-  day-cumulative / "Full Day" mode to `/spurt` and default the OI Spurt page to it (matching oipulse), keeping
-  the per-interval mode as an option.
+- **F6 — ✅ FIXED (#399): OI Spurt now classifies by day-cumulative ΔOI (matches oipulse).** oipulse's OI
+  Spurt classifies by **day-cumulative** ΔOI (`Old OI` = day-open OI; no interval selector); ours used
+  **per-interval** ΔOI, so the quadrant could flip (SENSEX 77000 CE: oipulse LONG_BUILDUP since open vs our
+  LONG_UNWINDING in the last 5m). Added a `window=cumulative|interval` param to `/spurt`; the OI Spurt page
+  now sends `window=cumulative` (and hides the interval selector), Big OI keeps the per-interval default.
+  Live-verified: SENSEX 77000 CE cumulative `oiChange` 229,700 (since open) vs interval 0 (flat last bucket).
 - **F2 — investigated, NOT a bug:** the "future-dated" 2026-07-01 snapshot rows were just *today's* live
   capture — git-bash `TZ=Asia/Kolkata date` mis-reported IST as UTC (real now was 13:05 IST, market open),
   so 07:27–07:33 UTC rows = 12:57–13:03 IST = normal. Use the container clock, not git-bash TZ, for IST.

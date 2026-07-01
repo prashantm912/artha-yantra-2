@@ -49,10 +49,10 @@ green(+)/red(−) toned; Indian lakh number grouping; **sort by |ΔOI| desc**; *
 ## Value-verify pass — 2026-07-01 (live-vs-live, SENSEX) — DRIVEN
 Driven live vs oipulse's OI Spurt. **Structure ✓** (2×2 quadrants, 10 cols, |ΔOI|-desc sort, 7/page,
 green/red tones). **Absolute `New OI` matches** (77000 CE 2,876,560 — cross-checked against the live
-chain-table at 13:24). **Divergence F6 (medium):** the ΔOI **window** differs — oipulse OI Spurt classifies
-by **day-cumulative** ΔOI (its `Old OI` = day-open OI; **no interval selector**), while our `/spurt`
-classifies by **per-interval** ΔOI (Old OI = prior bucket, driven by the page's interval). So a strike's
-quadrant can flip: SENSEX 77000 CE was **LONG_BUILDUP** on oipulse (OI +13.3L since open) but
-**LONG_UNWINDING** for us (OI −0.75L in the last 5m). Candidate fix: add a day-cumulative/"Full Day" mode to
-`/spurt` and default the page to it. The zero-change strike bucketing convention divergence above is
-unchanged. Full results + F6: `phase-4-wave1-value-verify-runbook.md` (Part A).
+chain-table at 13:24). **F6 — ✅ FIXED (#399):** oipulse OI Spurt classifies by **day-cumulative** ΔOI
+(`Old OI` = day-open OI; **no interval selector**); ours used **per-interval** ΔOI, so a strike's quadrant
+could flip (SENSEX 77000 CE: oipulse LONG_BUILDUP since open vs our LONG_UNWINDING in the last 5m). Added a
+`window=cumulative|interval` param to `/spurt`; this page now sends `window=cumulative` and **hides the
+interval selector** (`showInterval={false}`), Big OI keeps the per-interval default. Live-verified: SENSEX
+77000 CE cumulative `oiChange` 229,700 (since open) vs interval 0 (flat last bucket). The zero-change strike
+bucketing convention divergence above is unchanged. Full results: `phase-4-wave1-value-verify-runbook.md`.

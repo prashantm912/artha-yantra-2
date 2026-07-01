@@ -154,40 +154,52 @@ public class ScalperConfluenceGate {
     private ScalperGateContext context;
     private Confluence confluence;
     private BigDecimal confluenceThreshold;
-    private RailCheck last;
+    private RailCheck firstFailure;
 
-    /** Records a {@link GateOutcome} rail; returns true when it FAILED (the caller then blocks). */
+    /** True once any recorded rail has failed — the entry is blocked (checked once, at the end). */
+    boolean anyFailed() {
+      return firstFailure != null;
+    }
+
+    private RailCheck record(RailCheck rc) {
+      checks.add(rc);
+      if (!rc.pass() && firstFailure == null) {
+        firstFailure = rc; // the FIRST failing rail becomes the summary blockingRail
+      }
+      return rc;
+    }
+
+    /** Records a {@link GateOutcome} rail; returns true when it FAILED. */
     boolean fails(String rail, GateOutcome o, BigDecimal threshold) {
       BigDecimal operand = o.operand();
       BigDecimal margin =
           operand != null && threshold != null ? operand.subtract(threshold) : null;
-      last = new RailCheck(rail, o.pass(), operand, threshold, margin, o.reason());
-      checks.add(last);
-      return !o.pass();
+      return !record(new RailCheck(rail, o.pass(), operand, threshold, margin, o.reason())).pass();
     }
 
     /** Records a boolean/verdict rail (no scalar operand); returns true when it FAILED. */
     boolean failsBool(String rail, boolean pass, String reason) {
-      last = new RailCheck(rail, pass, null, null, null, reason);
-      checks.add(last);
-      return !pass;
+      return !record(new RailCheck(rail, pass, null, null, null, reason)).pass();
     }
 
     /** Records the confluence-composite rail (operand=aggregate vs threshold); true when INVALID. */
     boolean failsScore(String rail, boolean valid, BigDecimal aggregate, BigDecimal threshold, String reason) {
       BigDecimal margin =
           aggregate != null && threshold != null ? aggregate.subtract(threshold) : null;
-      last = new RailCheck(rail, valid, aggregate, threshold, margin, reason);
-      checks.add(last);
-      return !valid;
+      return !record(new RailCheck(rail, valid, aggregate, threshold, margin, reason)).pass();
     }
 
-    /** Builds the diagnostic for the most recently recorded (failing) rail. */
+    /**
+     * Builds the diagnostic. The summary scalars (blockingRail/operand/threshold/margin/reason) come from
+     * the FIRST failing rail (the one the old short-circuit would have reported); {@code checks} carries
+     * EVERY evaluated rail — pass and fail — so the DB holds the complete condition matrix.
+     */
     Result block() {
+      RailCheck b = firstFailure;
       return new Result(
           Optional.empty(),
           new RejectionDiagnostic(
-              last.rail(), side, last.operand(), last.threshold(), last.margin(), last.reason(),
+              b.rail(), side, b.operand(), b.threshold(), b.margin(), b.reason(),
               confluence == null ? null : confluence.aggregate(), confluenceThreshold,
               List.copyOf(checks), confluence, context));
     }
@@ -319,12 +331,11 @@ public class ScalperConfluenceGate {
     // (deferred to live management); v1 emits the two-leg draft once an ATM pair exists. Short straddle
     // (SELL legs) is SPAN-deferred — StraddleLegPicker only ever returns BUY legs.
     if (cfg.requireStraddle()) {
-      if (diag.fails(
+      // All-eval: record every straddle condition (no short-circuit) so the DB holds the full matrix.
+      diag.fails(
           "volume-floor",
           ScalperGates.volume(cfg.signalIndex(), chart.volume(), cfg.params().volumeFloor()),
-          ScalperGates.volumeFloorFor(cfg.signalIndex(), cfg.params().volumeFloor()))) {
-        return diag.block();
-      }
+          ScalperGates.volumeFloorFor(cfg.signalIndex(), cfg.params().volumeFloor()));
       // E4 §3.A.4 low-iv-straddle: a LONG straddle wants LOW IV (cheap both legs); skip when either
       // side's 6-strike IV avg is rich. Armed via the tag only (else the neutral path pays no extra
       // fetch). Pass cfg.underlying() so the index/expiry are a matched pair (the macro IV pair is the
@@ -333,33 +344,33 @@ public class ScalperConfluenceGate {
         boolean tooRich =
             StraddleIvGate.tooRichForLong(
                 client.macro(cfg.underlying(), eodDate, chain.expiry()), oiProps);
-        if (diag.failsBool(
+        diag.failsBool(
             "low-iv-straddle",
             !tooRich,
-            tooRich ? "straddle IV too rich for a long" : "IV ok for long straddle")) {
-          return diag.block();
-        }
+            tooRich ? "straddle IV too rich for a long" : "IV ok for long straddle");
       }
-      return StraddleLegPicker.pick(
+      var pair =
+          StraddleLegPicker.pick(
               chain.candidates(), chain.spot(), chain.basis(), barInstant, chain.expiry(),
-              cfg.strikeParams().rate())
-          .map(
-              s ->
-                  Result.of(
-                      new Decision(
-                          null,
-                          List.of(new Leg(OptionType.CE, s.call()), new Leg(OptionType.PE, s.put())),
-                          neutralConfluence(),
-                          chain.expiry(),
-                          null,
-                          null,
-                          null,
-                          null))) // #11 straddle is direction-neutral — no Open=High tier / no graded sizing
-          .orElseGet(
-              () -> {
-                diag.failsBool("strike-pick", false, "no ATM straddle pair in band");
-                return diag.block();
-              });
+              cfg.strikeParams().rate());
+      if (pair.isEmpty()) {
+        diag.failsBool("strike-pick", false, "no ATM straddle pair in band");
+      }
+      if (diag.anyFailed()) {
+        return diag.block();
+      }
+      var s = pair.get();
+      // #11 straddle is direction-neutral — no Open=High tier / no graded sizing
+      return Result.of(
+          new Decision(
+              null,
+              List.of(new Leg(OptionType.CE, s.call()), new Leg(OptionType.PE, s.put())),
+              neutralConfluence(),
+              chain.expiry(),
+              null,
+              null,
+              null,
+              null));
     }
     // §0B VWAP-decisive: CE above VWAP, PE below — the side the rest of the confluence must confirm.
     // E11 §3.8: a BTST carry pins the side from the day-close LOCATION (forcedSide), overriding the
@@ -376,23 +387,21 @@ public class ScalperConfluenceGate {
     // move" discipline). Chart-only (|close-vwap|/close), side-agnostic; a null operand degrades to
     // pass. Default-OFF — no shipped YAML carries the tag, so every config stays byte-identical. The
     // 0.4% band is a placeholder default tuned BEFORE any strategy is armed onto it.
-    if (cfg.has("vwap-distance")
-        && diag.fails(
-            "vwap-distance",
-            ScalperGates.vwapDistance(
-                chart.close(), chart.vwap(),
-                cfg.params().vwapDistanceMinFrac(), cfg.params().vwapDistanceMaxFrac()),
-            cfg.params().vwapDistanceMaxFrac())) {
-      return diag.block();
+    if (cfg.has("vwap-distance")) {
+      diag.fails(
+          "vwap-distance",
+          ScalperGates.vwapDistance(
+              chart.close(), chart.vwap(),
+              cfg.params().vwapDistanceMinFrac(), cfg.params().vwapDistanceMaxFrac()),
+          cfg.params().vwapDistanceMaxFrac());
     }
     // W4 (tag gap-size-side-gate, S24 #9): a large gap-down suppresses the PE (put-buy) side
     // ("300-400 gap-down no-put"). Default-OFF; reads the same session gap GapState detects (pure).
-    if (cfg.has("gap-size-side-gate")
-        && diag.fails(
-            "gap-size-side-gate",
-            ScalperGates.gapSizeSide(GapState.detect(future, index), side, cfg.params().gapSuppressPts()),
-            cfg.params().gapSuppressPts())) {
-      return diag.block();
+    if (cfg.has("gap-size-side-gate")) {
+      diag.fails(
+          "gap-size-side-gate",
+          ScalperGates.gapSizeSide(GapState.detect(future, index), side, cfg.params().gapSuppressPts()),
+          cfg.params().gapSuppressPts());
     }
     // §0B hard "no trade" rails: volume floor + the RSI gate (both are blocks, not the soft dots the
     // scorer also weighs — a strong-everything-else signal must still respect them). #2 (open-high-low)
@@ -401,12 +410,10 @@ public class ScalperConfluenceGate {
     // strategy carrying the W3 rsi-s24-bands tag uses the ratified 50-75 / 40-50 / 40-25 band
     // (rsiS24Band); all are per-strategy overrides — the shared rsiBand (60-80 / 20-40) is unchanged for
     // every other strategy, so the goldens never move.
-    if (diag.fails(
+    diag.fails(
         "volume-floor",
         ScalperGates.volume(cfg.signalIndex(), chart.volume(), cfg.params().volumeFloor()),
-        ScalperGates.volumeFloorFor(cfg.signalIndex(), cfg.params().volumeFloor()))) {
-      return diag.block();
-    }
+        ScalperGates.volumeFloorFor(cfg.signalIndex(), cfg.params().volumeFloor()));
     ScalperParams.RsiBand band = cfg.params().rsiBand();
     GateOutcome rsiOutcome =
         cfg.requireOpenHighLow()
@@ -417,27 +424,23 @@ public class ScalperConfluenceGate {
                 : cfg.requireRsiS24Bands()
                     ? ScalperGates.rsiS24Band(chart.rsi14(), side)
                     : ScalperGates.rsiBand(chart.rsi14(), side);
-    if (diag.fails("rsi-band", rsiOutcome, null)) {
-      return diag.block();
-    }
+    diag.fails("rsi-band", rsiOutcome, null);
     // E5 §3.2/§4.2 higher-TF RSI caps: on top of the 3m rail, the 5m must not be overbought (CE) and the
     // daily must agree (CE < 75 / PE > 25). Armed via rsi-5m-cap / rsi-daily-cap; the opted-in YAML
     // declares rsi5m@5m / rsiDaily@1d (warmed by §3.2a). Fail-closed on a null higher-TF read.
-    if (cfg.has("rsi-5m-cap")
-        && diag.fails(
-            "rsi-5m-cap",
-            ScalperGates.rsiHigherTfCap(
-                chart.rsi5m(), side, oiProps.rsi5mCeCap(), oiProps.rsi5mPeFloor()),
-            null)) {
-      return diag.block();
+    if (cfg.has("rsi-5m-cap")) {
+      diag.fails(
+          "rsi-5m-cap",
+          ScalperGates.rsiHigherTfCap(
+              chart.rsi5m(), side, oiProps.rsi5mCeCap(), oiProps.rsi5mPeFloor()),
+          null);
     }
-    if (cfg.has("rsi-daily-cap")
-        && diag.fails(
-            "rsi-daily-cap",
-            ScalperGates.rsiHigherTfCap(
-                chart.rsiDaily(), side, oiProps.rsiDailyCeCap(), oiProps.rsiDailyPeFloor()),
-            null)) {
-      return diag.block();
+    if (cfg.has("rsi-daily-cap")) {
+      diag.fails(
+          "rsi-daily-cap",
+          ScalperGates.rsiHigherTfCap(
+              chart.rsiDaily(), side, oiProps.rsiDailyCeCap(), oiProps.rsiDailyPeFloor()),
+          null);
     }
     // E6 §3.10/§4.14.6 supertrend-15m: the 15m SuperTrend trend must agree with the side (a momentum
     // entry confirmed by the higher-TF trend). Read the 15m ST direction off the bank only when declared
@@ -445,19 +448,16 @@ public class ScalperConfluenceGate {
     if (cfg.has("supertrend-15m")) {
       BigDecimal st15 = bank.has(SUPERTREND_15M) ? bank.valueAt(SUPERTREND_15M, index) : null;
       int dir15m = st15 == null ? 0 : st15.signum();
-      if (diag.fails("supertrend-15m", ScalperGates.supertrend15mAlign(dir15m, side), null)) {
-        return diag.block();
-      }
+      diag.fails("supertrend-15m", ScalperGates.supertrend15mAlign(dir15m, side), null);
     }
     // E6 §4.14.6 psar-durability: a PSAR too CLOSE to price = a short-lived (whipsaw) trend — require the
     // |close-PSAR| gap to clear the durability floor. Reads the existing chart close/psar; fail-OPEN on a
     // null PSAR. Armed via the tag, default-OFF.
-    if (cfg.has("psar-durability")
-        && diag.fails(
-            "psar-durability",
-            ScalperGates.psarDurable(chart.close(), chart.psar()),
-            ScalperGates.PSAR_DISTANCE_MIN_PCT)) {
-      return diag.block();
+    if (cfg.has("psar-durability")) {
+      diag.fails(
+          "psar-durability",
+          ScalperGates.psarDurable(chart.close(), chart.psar()),
+          ScalperGates.PSAR_DISTANCE_MIN_PCT);
     }
     // E5 §3.6 rsi-cooloff: after a HOT prior bar (RSI overbought/oversold) the entry waits for a cooled
     // pullback candle (the cross-bar half of overbought-defer). Reads the existing 3m rsi14 (prior bar)
@@ -468,12 +468,10 @@ public class ScalperConfluenceGate {
           side == OptionType.CE
               ? deploy.close().compareTo(deploy.open()) < 0 // a CE waits for a RED pullback candle
               : deploy.close().compareTo(deploy.open()) > 0; // a PE waits for a GREEN pullback candle
-      if (diag.fails(
+      diag.fails(
           "rsi-cooloff",
           ScalperGates.rsiCoolOff(bank.previousValueAt(RSI, index), chart.rsi14(), pullback, side),
-          null)) {
-        return diag.block();
-      }
+          null);
     }
     // E5 §3.7 post-vertical RSI-recovery (RATIFICATION-PACK row 51): after a vertical FALL crashed the RSI
     // oversold, a reversal long waits until it has recovered back toward 40. Scans the prior `lookback`
@@ -489,37 +487,30 @@ public class ScalperConfluenceGate {
           trough = r;
         }
       }
-      if (diag.fails(
+      diag.fails(
           "rsi-recovery",
           ScalperGates.rsiRecovery(
               trough, chart.rsi14(), side, oiProps.rsiOversoldTrough(), oiProps.rsiRecoveryLevel()),
-          oiProps.rsiRecoveryLevel())) {
-        return diag.block();
-      }
+          oiProps.rsiRecoveryLevel());
     }
     // E6 §3.3 pct-price-move (Market-Movers): the index must have moved >= the floor% in the side's
     // direction since the SESSION OPEN — a "mover" scalp needs a real move, not chop. Reads the deploy
     // close + the session-open bar off the future series; a null future degrades to pass. Armed via the tag.
     if (cfg.has("pct-price-move") && future != null && index >= 0) {
       BigDecimal sessionOpen = future.candle(future.sessionStart(index)).open();
-      if (diag.fails(
+      diag.fails(
           "pct-price-move",
           ScalperGates.pctPriceMove(chart.close(), sessionOpen, oiProps.pctPriceMoveFloor(), side),
-          oiProps.pctPriceMoveFloor())) {
-        return diag.block();
-      }
+          oiProps.pctPriceMoveFloor());
     }
     // E6 §3.x rising-volume: a real move comes WITH expanding participation — the deploy bar's volume must
     // exceed the prior bar's. Only consulted when a prior bar exists (index >= 1), so a session-edge bar is
     // never blocked. Armed via the tag, default-OFF.
-    if (cfg.has("rising-volume")
-        && future != null
-        && index >= 1
-        && diag.fails(
-            "rising-volume",
-            ScalperGates.risingVolume(future.candle(index).volume(), future.candle(index - 1).volume()),
-            null)) {
-      return diag.block();
+    if (cfg.has("rising-volume") && future != null && index >= 1) {
+      diag.fails(
+          "rising-volume",
+          ScalperGates.risingVolume(future.candle(index).volume(), future.candle(index - 1).volume()),
+          null);
     }
     // E11 §3.9 Morning-Trade OPENING FORMATION (tag morning-opening-formation, doc L540): do NOT enter on
     // the gap alone — the 2nd session candle must break+hold the 1st candle's high (CE)/low (PE). Morning
@@ -534,12 +525,10 @@ public class ScalperConfluenceGate {
       }
       EngineCandle c1 = future.candle(s);
       EngineCandle c2 = future.candle(s + 1);
-      if (diag.fails(
+      diag.fails(
           "morning-opening-formation",
           ScalperGates.openingFormation(c1.high(), c1.low(), c2.high(), c2.low(), c2.close(), side),
-          null)) {
-        return diag.block();
-      }
+          null);
     }
     // E11 §3.9 Morning-Trade EOD PRECONDITION (tag morning-eod-precondition, doc L534): the opening view
     // needs a CONVINCING prior-session close in the side direction (close in the side's quartile of the
@@ -547,13 +536,12 @@ public class ScalperConfluenceGate {
     // family only. A null/absent prior session degrades to pass. Live-only seam.
     if (cfg.openingTick() && cfg.has("morning-eod-precondition")) {
       PriorExtremes pe = priorSessionExtremes(future, index);
-      if (pe != null
-          && diag.fails(
-              "morning-eod-precondition",
-              ScalperGates.eodConvincingClose(
-                  pe.high(), pe.low(), pe.close(), side, ScalperConfig.MORNING_NEAR_EXTREME_FRAC),
-              null)) {
-        return diag.block();
+      if (pe != null) {
+        diag.fails(
+            "morning-eod-precondition",
+            ScalperGates.eodConvincingClose(
+                pe.high(), pe.low(), pe.close(), side, ScalperConfig.MORNING_NEAR_EXTREME_FRAC),
+            null);
       }
     }
     // E3 volume-pump (tag volume-pump, §4.15.3): the deploy candle must be a floor-clearing pump closing
@@ -561,35 +549,30 @@ public class ScalperConfluenceGate {
     // series already in scope (no Chart extension). Default-OFF; a null future degrades to pass.
     if (cfg.has("volume-pump") && future != null && index >= 0) {
       EngineCandle bar = future.candle(index);
-      if (diag.fails(
+      diag.fails(
           "volume-pump",
           ScalperGates.volumePump(
               bar.close(), bar.open(), BigDecimal.valueOf(bar.volume()), cfg.signalIndex(), side),
-          null)) {
-        return diag.block();
-      }
+          null);
     }
     // W4 PARAM #5 (tag indicator-distance-veto): a chart-only overextension veto — block when price has
     // run far from the vwap/vwma/psar cluster (mean-reversion risk). Default-OFF; a null/absent cluster
     // degrades to pass inside the gate, so it never blocks on missing data.
-    if (cfg.has("indicator-distance-veto")
-        && diag.fails(
-            "indicator-distance-veto",
-            ScalperGates.indicatorDistance(chart, cfg.params().indicatorDistanceMaxPct()),
-            cfg.params().indicatorDistanceMaxPct())) {
-      return diag.block();
+    if (cfg.has("indicator-distance-veto")) {
+      diag.fails(
+          "indicator-distance-veto",
+          ScalperGates.indicatorDistance(chart, cfg.params().indicatorDistanceMaxPct()),
+          cfg.params().indicatorDistanceMaxPct());
     }
     // W4 PARAM #10 (tag divergence-vol-gate): the S24 Day-21 counter-trend confirm — a heavyweight ~125k
     // bar regardless of the index floor. Default-OFF; pairs with trend-change but is independent.
-    if (cfg.has("divergence-vol-gate")
-        && diag.fails("divergence-vol-gate", ScalperGates.divergenceVolume(chart.volume()), null)) {
-      return diag.block();
+    if (cfg.has("divergence-vol-gate")) {
+      diag.fails("divergence-vol-gate", ScalperGates.divergenceVolume(chart.volume()), null);
     }
     // W4 (tag overbought-defer, S24 §3.1): stand aside while the tape is exhaustion-overbought (CE) /
     // oversold (PE). Default-OFF; a null RSI degrades to pass inside the gate.
-    if (cfg.has("overbought-defer")
-        && diag.fails("overbought-defer", ScalperGates.overboughtDefer(chart.rsi14(), side), null)) {
-      return diag.block();
+    if (cfg.has("overbought-defer")) {
+      diag.fails("overbought-defer", ScalperGates.overboughtDefer(chart.rsi14(), side), null);
     }
     // §3.12 trendline-break (tag trendline-break): require a confirmed break of the 2-pivot session
     // trendline in the side's direction (CE breaks a falling resistance, PE a rising support) — the
@@ -599,30 +582,29 @@ public class ScalperConfluenceGate {
     // too few pivots / no break / a null future → block.
     if (cfg.has("trendline-break")) {
       boolean broke = Trendline.detect(future, index, side).broke();
-      if (diag.failsBool(
+      diag.failsBool(
           "trendline-break", broke,
-          broke ? "trendline broke in side direction" : "no confirmed 2-pivot trendline break")) {
-        return diag.block();
-      }
+          broke ? "trendline broke in side direction" : "no confirmed 2-pivot trendline break");
     }
     // §3.1 Two-Candle: when the strategy declares it, the multi-bar formation is a HARD entry gate
     // (the chart-only YAML grammar cannot express it). The 1st-candle extreme becomes the stop.
     BigDecimal structuralStop = structuralStop(cfg, future, index, side);
-    if (cfg.requireTwoCandle() && structuralStop == null) {
-      diag.failsBool("two-candle", false, "two-candle formation not present");
-      return diag.block();
+    if (cfg.requireTwoCandle()) {
+      diag.failsBool(
+          "two-candle", structuralStop != null,
+          structuralStop != null ? "two-candle formation present" : "two-candle formation not present");
     }
     // #4 (section 3.4) Gap-Theory: when the strategy declares it, a still-open significant gap BLOCKS
     // the entry until it fills; once filled the with-trend entry passes and the pre-gap extreme
     // becomes the stop. No significant gap => the gate is INERT and leaves the entry to the confluence.
     if (cfg.requireGapFill()) {
       GapTheoryGate.Verdict gap = GapTheoryGate.evaluate(future, index, side, cfg.signalIndex());
-      if (diag.failsBool(
+      diag.failsBool(
           "gap-fill", gap.pass(),
-          gap.pass() ? "gap filled / no significant gap" : "significant gap still open")) {
-        return diag.block();
+          gap.pass() ? "gap filled / no significant gap" : "significant gap still open");
+      if (gap.pass()) {
+        structuralStop = gap.stopLevel();
       }
-      structuralStop = gap.stopLevel();
     }
     // E8 §3.9 Morning Trade: before the intraday VWAP settles (~10:30 IST) it is unreliable, so the
     // morning structural stop is the PRIOR-day VWAP (the first support on a fall, doc L539/L541) — used
@@ -671,132 +653,122 @@ public class ScalperConfluenceGate {
     ScalperGateContext ctx =
         client.context(cfg.oiIndex(), cfg.signalIndex(), istTime, eodDate, oiExpiry, tradeDate, chart);
     diag.context = ctx;
+    if (ctx == null) {
+      // The OI/macro context (and thus every OI/composite condition) can't be evaluated — a hard
+      // precondition, like the chain fetch. In production context() is never null; this guards a
+      // fetch failure from NPE-ing the all-eval sweep. Rails already recorded above stand.
+      diag.failsBool("context-unavailable", false, "OI/macro context unavailable");
+      return diag.block();
+    }
     // #5 (T2.1): the oi-cross-filter strategies HARD-require a >=50% call-put dOI imbalance before
     // the confluence is even consulted. Fail-closed like the volume/RSI rails; a null imbalance
     // (data unavailable / flat-OI caveat) DEGRADES to pass inside the gate, so it never blocks then.
-    if (cfg.requireCallPutDeltaFilter()
-        && diag.fails(
-            "call-put-delta-filter",
-            ScalperGates.callPutDeltaFilter(ctx.oi(), oiProps.crossFilterPct()),
-            oiProps.crossFilterPct())) {
-      return diag.block();
+    if (cfg.requireCallPutDeltaFilter()) {
+      diag.fails(
+          "call-put-delta-filter",
+          ScalperGates.callPutDeltaFilter(ctx.oi(), oiProps.crossFilterPct()),
+          oiProps.crossFilterPct());
     }
     // E2 M1 (tag oi-cross-required, Trending-OI #5 defining trigger): a COMPLETED fresh PE-over-CE /
     // CE-over-PE cross favouring the side is a HARD precondition — stricter than the soft trending_cross
     // dot (gapWidening alone does not satisfy it). Fail-closed; degrades to NEUTRAL on derived history.
-    if (cfg.has("oi-cross-required")
-        && diag.fails("oi-cross-required", ScalperGates.oiCrossRequired(ctx.oi(), side), null)) {
-      return diag.block();
+    if (cfg.has("oi-cross-required")) {
+      diag.fails("oi-cross-required", ScalperGates.oiCrossRequired(ctx.oi(), side), null);
     }
     // E2 M2 (tag oi-slope-agree, Trending-OI #5): the active-strike sentiment LEVEL and SLOPE must both
     // favour the side (a hard conjunction of the two soft sentiment dots). Fail-closed on null.
-    if (cfg.has("oi-slope-agree")
-        && diag.fails("oi-slope-agree", ScalperGates.oiSlopeAgree(ctx.oi(), side), null)) {
-      return diag.block();
+    if (cfg.has("oi-slope-agree")) {
+      diag.fails("oi-slope-agree", ScalperGates.oiSlopeAgree(ctx.oi(), side), null);
     }
     // E2 M3 (tag oi-divergence-magnitude, Trending-OI #5): the OI lines must diverge by a real magnitude
     // (>=20% of total OI) with a corroborating price impulse (>=50%). Fail-closed; NEUTRAL on history.
-    if (cfg.has("oi-divergence-magnitude")
-        && diag.fails(
-            "oi-divergence-magnitude",
-            ScalperGates.oiDivergenceMagnitude(
-                ctx.oi(), cfg.params().oiDivergenceMinPct(), cfg.params().priceImpulseMinPct(), side),
-            cfg.params().oiDivergenceMinPct())) {
-      return diag.block();
+    if (cfg.has("oi-divergence-magnitude")) {
+      diag.fails(
+          "oi-divergence-magnitude",
+          ScalperGates.oiDivergenceMagnitude(
+              ctx.oi(), cfg.params().oiDivergenceMinPct(), cfg.params().priceImpulseMinPct(), side),
+          cfg.params().oiDivergenceMinPct());
     }
     // E2 M4 (tag flat-oi-stand-aside, the doc's flat-OI trap): a null/flat call-put imbalance STANDS
     // ASIDE (block) — the deliberate inverse of #5's fail-open (keep the two tags mutually exclusive).
-    if (cfg.has("flat-oi-stand-aside")
-        && diag.fails("flat-oi-stand-aside", ScalperGates.flatOiStandAside(ctx.oi()), null)) {
-      return diag.block();
+    if (cfg.has("flat-oi-stand-aside")) {
+      diag.fails("flat-oi-stand-aside", ScalperGates.flatOiStandAside(ctx.oi()), null);
     }
     // E2 M6 (tag max-oi-sr-gate): the entry must not trade INTO the dominant standing-OI wall on its
     // side (max-CE-OI strike = overhead resistance, max-PE-OI strike = support). Walls come from the
     // chain's per-strike OI ladder already in hand (no new fetch); fail-open on a missing ladder/spot.
-    if (cfg.has("max-oi-sr-gate")
-        && diag.fails(
-            "max-oi-sr-gate",
-            ScalperGates.oiWallClear(
-                maxOiStrike(chain.strikeOi(), true), maxOiStrike(chain.strikeOi(), false),
-                chain.spot(), side),
-            null)) {
-      return diag.block();
+    if (cfg.has("max-oi-sr-gate")) {
+      diag.fails(
+          "max-oi-sr-gate",
+          ScalperGates.oiWallClear(
+              maxOiStrike(chain.strikeOi(), true), maxOiStrike(chain.strikeOi(), false),
+              chain.spot(), side),
+          null);
     }
     // E2 M7 (tag oi-interval-and-60m-trend, Trending-OI #5 §3.5 "5-15m interval + a 60m broader-trend
     // read"): the 60-minute OI build must AGREE with the side — a slower confirmation above the 5m
     // cross/slope. A FOCUSED 2nd /options/trending?interval=60m read, fetched ONLY when armed (cfg.has
     // short-circuits first, so unarmed scalpers pay no extra OI fetch). Fail-OPEN on an unknown (0) trend.
-    if (cfg.has("oi-interval-and-60m-trend")
-        && diag.fails(
-            "oi-interval-and-60m-trend",
-            ScalperGates.oi60mAgree(client.trend60mDir(cfg.oiIndex(), oiExpiry, tradeDate), side),
-            null)) {
-      return diag.block();
+    if (cfg.has("oi-interval-and-60m-trend")) {
+      diag.fails(
+          "oi-interval-and-60m-trend",
+          ScalperGates.oi60mAgree(client.trend60mDir(cfg.oiIndex(), oiExpiry, tradeDate), side),
+          null);
     }
     // FU2 — soft-dots-to-hard-gates: each of these confluence reads is ALSO a scored soft dot; arming the
     // tag makes it a STRICT requirement (the scorer/den is unchanged → parity-safe). Every operand is
     // already in hand. The natural home is the #10 "Connect-the-Dots" strategy, whose identity IS
     // requiring the whole confluence to align. Each is default-OFF.
     // - indicator-alignment: VWAP+VWMA+PSAR+ST all on the side (fail-closed on a missing/opposed leg).
-    if (cfg.has("indicator-alignment-gate")
-        && diag.fails("indicator-alignment-gate", ScalperGates.indicatorAlignment(chart, side), null)) {
-      return diag.block();
+    if (cfg.has("indicator-alignment-gate")) {
+      diag.fails("indicator-alignment-gate", ScalperGates.indicatorAlignment(chart, side), null);
     }
     // - futures-oi: the futures OI quadrant must support the side (CE wants LB/SC; fail-closed on NEUTRAL).
-    if (cfg.has("futures-oi-gate")
-        && diag.fails("futures-oi-gate", ScalperGates.oiQuadrant(ctx.oi(), side), null)) {
-      return diag.block();
+    if (cfg.has("futures-oi-gate")) {
+      diag.fails("futures-oi-gate", ScalperGates.oiQuadrant(ctx.oi(), side), null);
     }
     // - breadth: advances/declines > 32 for the side (fail-closed on a 0/0 / unavailable read).
-    if (cfg.has("breadth-gate")
-        && diag.fails("breadth-gate", ScalperGates.breadth(ctx.macro(), side), BigDecimal.valueOf(32))) {
-      return diag.block();
+    if (cfg.has("breadth-gate")) {
+      diag.fails("breadth-gate", ScalperGates.breadth(ctx.macro(), side), BigDecimal.valueOf(32));
     }
     // - basis: the futures basis must agree (premium→CE, discount→PE); fail-OPEN on a null basis.
-    if (cfg.has("basis-gate")
-        && diag.fails("basis-gate", ScalperGates.futuresBasis(ctx.oi(), side), null)) {
-      return diag.block();
+    if (cfg.has("basis-gate")) {
+      diag.fails("basis-gate", ScalperGates.futuresBasis(ctx.oi(), side), null);
     }
     // E3 P1 — directional-VIX HARD gate: VIX direction must confirm the side (falling→CE, rising→PE);
     // fail-OPEN on unknown direction (an off-hours/history 422 leaves vixRising null → inert). Default-OFF
     // (armed on no strategy — the soft vix dot already encodes the directional read).
-    if (cfg.has("directional-vix-gate")
-        && diag.fails("directional-vix-gate", ScalperGates.vix(ctx.macro(), side), null)) {
-      return diag.block();
+    if (cfg.has("directional-vix-gate")) {
+      diag.fails("directional-vix-gate", ScalperGates.vix(ctx.macro(), side), null);
     }
     // E4 (tag iv-buyer-cap, IV>40 -> sellers' market): block a long-premium BUY when the traded side's
     // 6-strike IV is too rich (> 0.40 fraction). Fail-OPEN on a null side IV. A standalone risk veto.
-    if (cfg.has("iv-buyer-cap")
-        && diag.fails(
-            "iv-buyer-cap",
-            ScalperGates.ivBuyerCap(ctx.macro(), side, cfg.params().ivBuyerCap()),
-            cfg.params().ivBuyerCap())) {
-      return diag.block();
+    if (cfg.has("iv-buyer-cap")) {
+      diag.fails(
+          "iv-buyer-cap",
+          ScalperGates.ivBuyerCap(ctx.macro(), side, cfg.params().ivBuyerCap()),
+          cfg.params().ivBuyerCap());
     }
     // E3 fii-bias (tag fii-bias, §4.6): the FII L/S flow must not oppose the side (long% >= 50 for CE).
     // Reads the existing Macro.fiiLongPct (no new feed); fail-open on a null/neutral read.
-    if (cfg.has("fii-bias")
-        && diag.fails("fii-bias", ScalperGates.fiiBias(ctx.macro(), side), ScalperGates.FII_NEUTRAL_PCT)) {
-      return diag.block();
+    if (cfg.has("fii-bias")) {
+      diag.fails("fii-bias", ScalperGates.fiiBias(ctx.macro(), side), ScalperGates.FII_NEUTRAL_PCT);
     }
     // E3 §3.3 fii-dii-gate (tag fii-dii-gate): the RICHER FII participant bias — the futures change-in-OI
     // classifier + the option-leg seller read (Macro.fiiBiasSign, /fii-dii/bias) must not oppose the side;
     // fail-open on a null/neutral read. Real EOD data, so usable in backtest (unlike the OI gates).
-    if (cfg.has("fii-dii-gate")
-        && diag.fails("fii-dii-gate", ScalperGates.fii(ctx.macro(), side), null)) {
-      return diag.block();
+    if (cfg.has("fii-dii-gate")) {
+      diag.fails("fii-dii-gate", ScalperGates.fii(ctx.macro(), side), null);
     }
     // E3 constituent-gate (tag constituent-gate, §4.6): the index heavyweights' net push must not oppose
     // the side (Macro.constituentBias = /equity/index-contribution indexChangePct); fail-open on null/0.
-    if (cfg.has("constituent-gate")
-        && diag.fails("constituent-gate", ScalperGates.constituent(ctx.macro(), side), null)) {
-      return diag.block();
+    if (cfg.has("constituent-gate")) {
+      diag.fails("constituent-gate", ScalperGates.constituent(ctx.macro(), side), null);
     }
     // W4 (tag directional-change-gate, S24 Day-20): only enter on a confirmed OI directional change —
     // the PE-CE tilt must have crossed within the window. Default-OFF; an unchanged/short series blocks.
-    if (cfg.has("directional-change-gate")
-        && diag.fails("directional-change-gate", ScalperGates.directionalChange(ctx.oi()), null)) {
-      return diag.block();
+    if (cfg.has("directional-change-gate")) {
+      diag.fails("directional-change-gate", ScalperGates.directionalChange(ctx.oi()), null);
     }
     // #12 (section 3.12) Trend-Change: when the strategy declares it, a HARD reversal pre-gate - a price
     // structure break in the side's direction + the >=50% Trending-OI momentum shift + the §3.1
@@ -805,12 +777,12 @@ public class ScalperConfluenceGate {
     if (cfg.requireTrendChange()) {
       TrendChangeGate.Verdict tc =
           TrendChangeGate.evaluate(future, index, side, cfg.signalIndex(), ctx.oi(), istTime);
-      if (diag.failsBool(
+      diag.failsBool(
           "trend-change", tc.pass(),
-          tc.pass() ? "reversal structure + OI shift + 2-candle confirm" : "trend-change preconditions unmet")) {
-        return diag.block();
+          tc.pass() ? "reversal structure + OI shift + 2-candle confirm" : "trend-change preconditions unmet");
+      if (tc.pass()) {
+        structuralStop = tc.stopLevel();
       }
-      structuralStop = tc.stopLevel();
     }
     // #2 (section 3.2) Open=High/Open=Low: when the strategy declares it, a HARD FNO-structure pre-gate -
     // the front-future OH/OL mark + the source-faithful Table-1/Table-2 HIGH tier (per-strike footprint,
@@ -830,13 +802,13 @@ public class ScalperConfluenceGate {
           OpenHighLowGate.evaluate(
               futureMarks, stats, side, oiProps, ctx.oi(), ctx.chart().vwap(), istTime,
               cfg.requireOpenHighOiVeto());
-      if (diag.failsBool(
+      diag.failsBool(
           "open-high-low", ohl.pass(),
-          ohl.pass() ? "OH/OL + HIGH tier ok" : "open-high-low tier MILD/LOW/STAND_ASIDE or missing")) {
-        return diag.block();
+          ohl.pass() ? "OH/OL + HIGH tier ok" : "open-high-low tier MILD/LOW/STAND_ASIDE or missing");
+      if (ohl.pass()) {
+        structuralStop = ohl.stopLevel();
+        ohTier = ohl.tier();
       }
-      structuralStop = ohl.stopLevel();
-      ohTier = ohl.tier();
     }
     // #7 (section 7) Hero-Zero: when the strategy declares it, a HARD expiry-day end-of-day pre-gate -
     // expiry-day only (monthly-expiry blocks: prior-month OI is corrupt), after 14:30 / before the
@@ -855,12 +827,12 @@ public class ScalperConfluenceGate {
               cfg.has("herozero-side-oi"),
               ivFlatArmed ? ctx.macro().ceIvAvg6() : null,
               ivFlatArmed ? ctx.macro().peIvAvg6() : null);
-      if (diag.failsBool(
+      diag.failsBool(
           "hero-zero", hz.pass(),
-          hz.pass() ? "expiry-day real-move + short-covering ok" : "hero-zero expiry-day preconditions unmet")) {
-        return diag.block();
+          hz.pass() ? "expiry-day real-move + short-covering ok" : "hero-zero expiry-day preconditions unmet");
+      if (hz.pass()) {
+        structuralStop = hz.stopLevel();
       }
-      structuralStop = hz.stopLevel();
     }
     // #9 (section 3.9) Morning Trade: VWAP is "not actionable before 10:30" in the opening tick, so the
     // opening-tick path drops VWAP from the HARD validity gate before 10:30 IST (it stays a soft dot in
@@ -877,11 +849,9 @@ public class ScalperConfluenceGate {
     diag.confluence = conf;
     diag.confluenceThreshold = cfg.confluenceThreshold();
     boolean valid = side == OptionType.CE ? conf.bullish() : conf.bearish();
-    if (diag.failsScore(
+    diag.failsScore(
         "confluence-composite", valid, conf.aggregate(), cfg.confluenceThreshold(),
-        compositeReason(conf, cfg.confluenceThreshold(), side))) {
-      return diag.block();
-    }
+        compositeReason(conf, cfg.confluenceThreshold(), side));
     BigDecimal stop = structuralStop;
     // #7 (section 7) Hero-Zero buys the option ONE STRIKE INSIDE the short-covering strike (a CALL one
     // strike below the max-CE-OI strike for a bullish break, a PUT one above the max-PE-OI strike for a
@@ -902,19 +872,20 @@ public class ScalperConfluenceGate {
               chain.candidates(), chain.spot(), chain.basis(), side, barInstant, chain.expiry(),
               cfg.strikeParams());
     }
+    if (pick.isEmpty()) {
+      diag.failsBool("strike-pick", false, "no strike met the delta/premium band");
+    }
+    // All-eval: EVERY applicable rail (and the composite + strike pick) is now recorded above. The entry
+    // fires only when NONE failed; a single failure blocks, but the DB row still carries the full matrix.
+    if (diag.anyFailed()) {
+      return diag.block();
+    }
     OptionType decided = side;
     OpenHighLow.Tier decidedTier = ohTier;
-    return pick.map(
-            p ->
-                Result.of(
-                    new Decision(
-                        decided, List.of(new Leg(decided, p)), conf, chain.expiry(), stop, decidedTier,
-                        ctx.oi().callPutDeltaImbalancePct(), ctx.macro().vixLevel())))
-        .orElseGet(
-            () -> {
-              diag.failsBool("strike-pick", false, "no strike met the delta/premium band");
-              return diag.block();
-            });
+    return Result.of(
+        new Decision(
+            decided, List.of(new Leg(decided, pick.get())), conf, chain.expiry(), stop, decidedTier,
+            ctx.oi().callPutDeltaImbalancePct(), ctx.macro().vixLevel()));
   }
 
   /**

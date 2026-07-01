@@ -540,6 +540,25 @@ class ScalperConfluenceGateTest {
   }
 
   @Test
+  void diagnosticAllEvalRecordsDownstreamRailsEvenAfterAnEarlierFailure() {
+    // All-eval: an RSI-band failure no longer short-circuits — the OI context + confluence composite are
+    // STILL evaluated and recorded, so the DB row holds the complete condition matrix (blockingRail stays
+    // the FIRST failure). The old short-circuit would have stopped at rsi-band and never scored the composite.
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    ScalperConfluenceGate.Result r =
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults(), CAL)
+            .evaluateWithDiagnostic(CFG, bullBankRsi(bd("55")), null, 0, NOW, IST_TIME, EOD);
+    assertThat(r.blocked()).isTrue();
+    assertThat(r.rejection().blockingRail()).isEqualTo("rsi-band"); // the FIRST failure is the summary rail
+    java.util.List<String> rails =
+        r.rejection().checks().stream().map(ScalperConfluenceGate.RailCheck::rail).toList();
+    assertThat(rails).contains("rsi-band", "confluence-composite"); // downstream conditions STILL recorded
+    assertThat(r.rejection().confluence()).isNotNull(); // the composite was scored despite the rsi block
+  }
+
+  @Test
   void oi60mAgreeTagBlocksWhenThe60mTrendOpposesTheSide() {
     // E2 M7: armed, the 60m OI build must AGREE with the side (a focused 2nd /trending?interval=60m
     // read in the seam, fetched ONLY when the tag is present). The bare CFG arms no new gate.

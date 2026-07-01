@@ -59,18 +59,23 @@ if ! pg_dump -Fc -d "$DB" -f "$dest/${DB}-full.dump"; then
   exit 1
 fi
 
-# Global retention: keep only the GLOBAL_KEEP newest backups across manual/ nightly/
-# weekly/ COMBINED (each whole-db dump is ~3 GB, so a handful of slots is plenty). The
+# Per-DATABASE retention (audit P0-5): keep only the KEEP_PER_DB newest dumps OF THIS
+# DATABASE across manual/ nightly/ weekly/ combined (each whole-db dump is ~3 GB, so a
+# handful of slots is plenty). Only stamp dirs containing "${DB}-full.dump" count and are
+# pruned — a dump of ANOTHER database (or a pre-#395 per-schema dir, which has no
+# *-full.dump) can neither occupy this DB's slots nor be rotated out by its backups; the
+# old GLOBAL cap let three mock-mode nightlies silently evict the only live dump. The
 # stamp dir name is YYYYMMDD-HHMMSS, so a lexical sort is chronological; the just-written
-# $dest is the newest and always survives. weekly/ is no longer written to (the old
-# Sunday-copy tier is obsolete under a 3-total cap) but is still scanned so any pre-existing
-# weekly copies age out too. manual/ dumps are NO LONGER exempt — they count toward the cap.
-GLOBAL_KEEP=3
-prune_global() {
+# $dest is the newest and always survives. weekly/ is no longer written to but is still
+# scanned so pre-existing weekly copies of this DB age out too. manual/ dumps are NOT
+# exempt — they count toward the cap.
+KEEP_PER_DB=3
+prune_db() {
   keep="$1"
   pairs="$(
     for d in "$BACKUP_ROOT"/manual/*/ "$BACKUP_ROOT"/nightly/*/ "$BACKUP_ROOT"/weekly/*/; do
       [ -d "$d" ] || continue                 # literal glob (no match) -> skip
+      [ -f "${d%/}/${DB}-full.dump" ] || continue   # only THIS database's dumps
       printf '%s\t%s\n' "$(basename "$d")" "${d%/}"
     done | sort                               # ascending by stamp -> oldest first
   )"
@@ -83,7 +88,21 @@ prune_global() {
     echo "[backup] rotated out $old"
   done
 }
-prune_global "$GLOBAL_KEEP"
+prune_db "$KEEP_PER_DB"
+
+# Dead-man signal (audit P0-5): a SUCCESS ping too, so "no message by morning" means the
+# nightly did not run (stack down at 00:30, crond dead) — a silent miss was previously
+# indistinguishable from a quiet success. No-op when ARTHA_NTFY_TOPIC is unset.
+notify_success() {
+  [ -z "${ARTHA_NTFY_TOPIC:-}" ] && return 0
+  url="${ARTHA_NTFY_URL:-https://ntfy.sh}/${ARTHA_NTFY_TOPIC}"
+  if command -v curl >/dev/null 2>&1; then
+    curl -s -m 10 -H "Title: ArthaYantra backup OK" -d "$1" "$url" >/dev/null 2>&1 || true
+  else
+    wget -q -T 10 --header "Title: ArthaYantra backup OK" --post-data "$1" -O /dev/null "$url" 2>/dev/null || true
+  fi
+}
 
 sz="$(ls -l "$dest/${DB}-full.dump" 2>/dev/null | awk '{print $5}')"
+notify_success "backup $STAMP OK (mode=$MODE, db=$DB, ${sz:-?} bytes)"
 echo "[backup] OK mode=$MODE db=$DB -> $dest (whole-db dump ${sz:-?} bytes + globals)"

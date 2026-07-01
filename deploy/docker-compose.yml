@@ -138,11 +138,13 @@ services:
     logging: *default-logging
 
   # ---- always-on nightly backup sidecar (A.11 / D16) ----------------------
-  # 00:30 IST pg_dump -Fc per schema into the bind-mounted ./backups on the
-  # WINDOWS filesystem - outside the WSL2 VM and Docker volumes by design
-  # (write-once nightly traffic; survival outside the VM is the point).
-  # Rotation: 14 nightly + 8 weekly. Dump failure POSTs the ops ntfy topic
-  # directly (no-op when ARTHA_NTFY_TOPIC is unset).
+  # 00:30 IST WHOLE-DATABASE pg_dump -Fc + cluster globals (post-#395) into
+  # the bind-mounted ./backups on the WINDOWS filesystem - outside the WSL2 VM
+  # and Docker volumes by design (write-once nightly traffic; survival outside
+  # the VM is the point). Retention: 3 newest dumps PER DATABASE across
+  # manual/nightly/weekly (backup.sh prune). Failure AND success both POST the
+  # ops ntfy topic (success = the dead-man signal: no morning message means the
+  # nightly did not run; no-op when ARTHA_NTFY_TOPIC is unset).
   db-backup:
     image: postgres:17-alpine
     container_name: ay-db-backup
@@ -150,7 +152,10 @@ services:
       TZ: Asia/Kolkata
       PGHOST: timescaledb
       PGUSER: artha
-      PGDATABASE: ${ARTHA_DB_NAME:-artha}
+      # Pinned to the LIVE database regardless of the active profile (audit
+      # P0-5): mock is reproducible by design; a profile switch must never
+      # leave live unbacked-up while mock nightlies rotate live dumps out.
+      PGDATABASE: artha
       ARTHA_NTFY_TOPIC: ${ARTHA_NTFY_TOPIC:-}
       ARTHA_NTFY_URL: ${ARTHA_NTFY_URL:-https://ntfy.sh}
     secrets: [postgres_password]

@@ -7,6 +7,14 @@ server:
 spring:
   application:
     name: strategy-signal-service
+  # Bounded HTTP for every auto-configured RestClient.Builder client (market-data candles/OI
+  # fan-out, notifier, margin, instrument meta). All of them run on the single signal-eval
+  # thread, so an unbounded read once parked live evaluation (entries AND stop/exit passes)
+  # forever (audit P0-4). 30s read: a cache-miss candle warm can legitimately page upstream.
+  http:
+    client:
+      connect-timeout: 2s
+      read-timeout: 30s
   profiles:
     default: mock
   threads:

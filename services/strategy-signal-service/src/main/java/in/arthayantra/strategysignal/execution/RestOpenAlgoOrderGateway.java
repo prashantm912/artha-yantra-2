@@ -57,7 +57,9 @@ public class RestOpenAlgoOrderGateway implements OrderGateway {
     this.apiKey = apiKey;
     this.strategy = strategy;
     this.objectMapper = objectMapper;
-    this.reads = new RestOpenAlgoOrderReadGateway(RestClient.builder(), baseUrl, apiKey, objectMapper);
+    // clone(): reuse the AUTO-CONFIGURED builder (bounded HTTP, audit P0-4) without sharing
+    // mutable builder state with the write client built above.
+    this.reads = new RestOpenAlgoOrderReadGateway(builder.clone(), baseUrl, apiKey, objectMapper);
   }
 
   @Override

@@ -8,6 +8,14 @@ server:
 spring:
   application:
     name: market-data-service
+  # Bounded HTTP backstop for auto-configured RestClient.Builder clients — chiefly the four
+  # kite/live gateways (quote/historical/session/instrument-dump), whose unbounded reads could
+  # park the fixedDelay OI-snapshot loop forever on a half-open socket (audit P0-4). Clients
+  # that set their own SimpleClientHttpRequestFactory (Upstox/NSE/BSE) keep their tighter values.
+  http:
+    client:
+      connect-timeout: 3s
+      read-timeout: 60s
   profiles:
     default: mock
   threads:

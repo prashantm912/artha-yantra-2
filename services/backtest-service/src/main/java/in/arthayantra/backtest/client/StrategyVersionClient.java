@@ -33,9 +33,10 @@ public class StrategyVersionClient {
   /** The pinned version: strategy id, version UUID, semver, immutable checksum and the full config. */
   public record ResolvedVersion(UUID strategyId, UUID versionId, String version, String checksum, JsonNode config) {}
 
-  /** Builds the client against the strategy-signal base URL. */
-  public StrategyVersionClient(@Value("${artha.strategy.base-url}") String baseUrl) {
-    this.http = RestClient.builder().baseUrl(baseUrl).build();
+  /** Builds the client against the strategy-signal base URL (auto-configured builder ⇒ bounded HTTP). */
+  public StrategyVersionClient(
+      RestClient.Builder builder, @Value("${artha.strategy.base-url}") String baseUrl) {
+    this.http = builder.baseUrl(baseUrl).build();
   }
 
   /** Resolves (and validates the existence of) the pinned version. */

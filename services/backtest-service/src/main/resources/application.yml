@@ -8,6 +8,13 @@ server:
 spring:
   application:
     name: backtest-service
+  # Bounded HTTP for the auto-configured RestClient.Builder clients (market-data warm /
+  # connecting-dots, strategy-signal version resolve) — audit P0-4. 180s read: the cache-first
+  # auto-warm GET can page Kite history for minutes on a fresh window; generous but finite.
+  http:
+    client:
+      connect-timeout: 2s
+      read-timeout: 180s
   profiles:
     default: mock
   threads:

@@ -79,7 +79,8 @@ export function TrendingOiPage() {
 
       <p className="mb-3 text-xs text-ay-muted">
         Diff. in OI = ΔPut OI − ΔCall OI (puts−calls); positive = Bullish. Δ columns are cumulative vs
-        the session-open baseline.
+        the session-open baseline and computed across the FULL chain — oipulse's table uses a
+        ~15-strike ATM basket, so magnitudes differ while the direction agrees.
       </p>
 
       <QueryState

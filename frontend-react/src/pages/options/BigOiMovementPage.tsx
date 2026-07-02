@@ -76,7 +76,7 @@ export function BigOiMovementPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Big OI Movement" help="Lists the strikes with the largest OI changes, calls and puts side by side, tagged with moneyness and a price-vs-OI read so you can spot where big positions are being placed." subtitle="Biggest OI-change strikes, split CE | PE, tagged by moneyness + OI interpretation" />
+      <PageHeader title="Big OI Movement" help="Lists the strikes with the largest OI changes, calls and puts side by side, tagged with moneyness and a price-vs-OI read so you can spot where big positions are being placed." subtitle="Top-10 snapshot of the LATEST interval's OI changes (not a session event log), split CE | PE, tagged by moneyness + OI interpretation" />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval />

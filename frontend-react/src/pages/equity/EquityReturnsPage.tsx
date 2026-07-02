@@ -5,6 +5,7 @@ import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { EodBadge } from '../../components/atoms/EodBadge.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
@@ -70,8 +71,8 @@ export function EquityReturnsPage() {
         help="A screener ranking stocks by their price return across several timeframes (today through 1 year) so you can spot momentum leaders and laggards at a glance."
         subtitle={
           <>
-            Multi-timeframe % returns over the EQ universe · 6M / 1Y fill in as history accrues
-            {q.data?.asOf ? ` · as on ${q.data.asOf}` : ''}
+            Multi-timeframe % returns over the EQ universe · 6M / 1Y fill in as history accrues{' '}
+            {q.data?.asOf ? <EodBadge asOf={q.data.asOf} /> : null}
           </>
         }
       />

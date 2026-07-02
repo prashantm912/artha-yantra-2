@@ -30,10 +30,10 @@ function renderPage() {
 }
 
 describe('SectorHeatmapPage', () => {
-  it('renders the index selector and the as-on date', () => {
+  it('renders the index selector and the EOD provenance badge', () => {
     renderPage();
     expect(screen.getByRole('option', { name: 'NIFTY 50' })).toBeInTheDocument();
-    expect(screen.getByText(/as on 2026-06-22/)).toBeInTheDocument();
+    expect(screen.getByText(/EOD · as of 2026-06-22/)).toBeInTheDocument();
     expect(screen.getByText(/grouped by sector/)).toBeInTheDocument();
   });
 });

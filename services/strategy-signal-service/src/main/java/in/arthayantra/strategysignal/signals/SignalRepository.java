@@ -156,6 +156,28 @@ public class SignalRepository {
         > 0;
   }
 
+  /**
+   * The canonical config JSON of a version — the paper layer reads the YAML's {@code exit_rules}
+   * premium_pct percentages at take time to derive option-premium bracket levels (P1-8). Same-schema
+   * read; empty when the version is gone.
+   */
+  public Optional<com.fasterxml.jackson.databind.JsonNode> versionConfig(UUID versionId) {
+    return jdbc
+        .query(
+            "SELECT config FROM strategy_versions WHERE id = ?",
+            (rs, n) -> {
+              try {
+                return objectMapper.readTree(rs.getString("config"));
+              } catch (Exception e) {
+                return null;
+              }
+            },
+            versionId)
+        .stream()
+        .filter(java.util.Objects::nonNull)
+        .findFirst();
+  }
+
   /** The 15:45 sweep: every stale ACTIVE row expires. */
   public int expireAllActive() {
     return jdbc.update("UPDATE signals SET status = 'EXPIRED' WHERE status = 'ACTIVE'");

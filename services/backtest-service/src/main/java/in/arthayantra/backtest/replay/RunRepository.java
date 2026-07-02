@@ -68,6 +68,10 @@ public class RunRepository {
     boolean bench = benchmark != null && benchmark.present();
     String benchmarkCurve =
         bench && !benchmark.benchmarkCurve().isEmpty() ? curveJson(benchmark.benchmarkCurve()) : null;
+    // Replace-on-rerun (audit P1-10): a crash-recovery re-execution replaces the job's prior run
+    // instead of persisting a duplicate (trades cascade via ON DELETE); uq_runs_job (V007) is the
+    // backstop. The replay is deterministic, so the replacement is equivalent.
+    jdbc.update("DELETE FROM backtest_runs WHERE job_id = ?", jobId);
     return jdbc.queryForObject(
         """
         INSERT INTO backtest_runs (

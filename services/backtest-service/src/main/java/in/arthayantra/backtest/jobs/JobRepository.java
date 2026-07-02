@@ -142,18 +142,23 @@ public class JobRepository {
   }
 
   /**
-   * Re-queues every {@code running} row (D12 crash recovery). Single-instance assumption: on
-   * restart, all {@code running} rows are orphaned by the previous incarnation. Returns the count.
+   * Re-queues this service's orphaned {@code running} rows (D12 crash recovery). Single-instance
+   * assumption for BACKTEST/TRIAL only — OPTIMIZATION rows are owned by the optimizer's sweep
+   * thread (a separate container a backtest restart does NOT orphan): without the kind filter a
+   * restart hijacked a live sweep row, replayed it as a plain backtest and marked the sweep
+   * completed under the optimizer (audit P1-10). Returns the count.
    */
   public int requeueStaleRunning() {
     return jdbc.update(
-        "UPDATE jobs SET status='queued', worker_id=NULL, started_at=NULL WHERE status='running'");
+        "UPDATE jobs SET status='queued', worker_id=NULL, started_at=NULL"
+            + " WHERE status='running' AND kind IN ('BACKTEST','TRIAL')");
   }
 
-  /** Ids of all queued jobs — re-dispatched on startup so every queued job has a stream entry. */
+  /** Ids of queued BACKTEST/TRIAL jobs — re-dispatched on startup (never OPTIMIZATION rows). */
   public List<UUID> findQueuedIds() {
     return jdbc.query(
-        "SELECT id FROM jobs WHERE status='queued' ORDER BY created_at",
+        "SELECT id FROM jobs WHERE status='queued' AND kind IN ('BACKTEST','TRIAL')"
+            + " ORDER BY created_at",
         (rs, n) -> UUID.fromString(rs.getString("id")));
   }
 
@@ -241,12 +246,17 @@ public class JobRepository {
 
   /**
    * Prunes terminal-state {@code jobs} rows older than {@code days} (plan §6.5 stale-job hygiene).
-   * Phase 30 adds the {@code NOT EXISTS backtest_runs} guard so the research record is never pruned.
+   * NOT-EXISTS guards keep the research record (runs / trial ledger / parent sweeps) unprunable —
+   * the javadoc long claimed the runs guard but the SQL lacked it, so the first run-bearing job to
+   * age past the window made the whole monthly DELETE abort on its FK, forever (audit P1-10).
    */
   public int pruneStaleTerminal(int days) {
     return jdbc.update(
         "DELETE FROM jobs WHERE status IN ('completed','failed','cancelled') "
-            + "AND finished_at < now() - make_interval(days => ?)",
+            + "AND finished_at < now() - make_interval(days => ?) "
+            + "AND NOT EXISTS (SELECT 1 FROM backtest_runs r WHERE r.job_id = jobs.id) "
+            + "AND NOT EXISTS (SELECT 1 FROM optimization_trials t WHERE t.sweep_job_id = jobs.id) "
+            + "AND NOT EXISTS (SELECT 1 FROM jobs c WHERE c.parent_job_id = jobs.id)",
         days);
   }
 

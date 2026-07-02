@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useMemo, useRef } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { cn } from '../lib/cn.ts';
 import { useCenterRowInScroll } from '../lib/scrollToCenter.ts';
 import type { Density } from '../lib/density.ts';
@@ -14,6 +14,9 @@ import type { ChainTableLeg, ChainTableRow } from '../api/types.ts';
 import { DataBar } from './atoms/DataBar.tsx';
 import { OiBadge4 } from './atoms/OiBadge4.tsx';
 import { PulseValue } from './atoms/PulseValue.tsx';
+
+// Mobile card list: strikes shown either side of the ATM by default.
+const MOBILE_WINDOW = 10;
 import { ValueDeltaCell } from './atoms/ValueDeltaCell.tsx';
 
 // The faithful oipulse Options Chain grid (§20.7): dense CALL | STRIKE | PUT mirror with a trailing
@@ -233,6 +236,15 @@ export function OptionsChainTable({
   const atmRef = useRef<HTMLTableRowElement>(null);
   useCenterRowInScroll(scrollRef, atmRef, atmStrike);
 
+  // Mobile ATM window (§11 item 18): default ±MOBILE_WINDOW strikes around the ATM.
+  const [showAllMobile, setShowAllMobile] = useState(false);
+  const mobileRows = useMemo(() => {
+    if (showAllMobile || atmStrike == null) return rows;
+    const i = rows.findIndex((r) => r.strike === atmStrike);
+    if (i < 0) return rows;
+    return rows.slice(Math.max(0, i - MOBILE_WINDOW), i + MOBILE_WINDOW + 1);
+  }, [rows, atmStrike, showAllMobile]);
+
   return (
     <>
       {/* Desktop / landscape: the dense mirrored grid */}
@@ -323,9 +335,20 @@ export function OptionsChainTable({
         </table>
       </div>
 
-      {/* Phone (portrait, ~480px): card per strike, CALL/PUT split */}
+      {/* Phone (portrait, ~480px): card per strike, CALL/PUT split. Defaults to an ATM-centred
+          window — the full list started ~55 cards of deep-ITM scrolling before the ATM (audit
+          2026-07-02 §4 / §11 item 18); "All strikes" restores the full ladder. */}
       <div className="space-y-2 md:hidden">
-        {rows.map((row) => {
+        {atmStrike != null && rows.length > MOBILE_WINDOW * 2 + 1 && (
+          <button
+            type="button"
+            onClick={() => setShowAllMobile((v) => !v)}
+            className="w-full rounded border border-ay-border bg-surface-2 px-2 py-1.5 text-xs text-ay-text"
+          >
+            {showAllMobile ? `Show ATM ±${MOBILE_WINDOW} strikes` : `Show all ${rows.length} strikes`}
+          </button>
+        )}
+        {mobileRows.map((row) => {
           const ce = ctxFor(row, 'CE');
           const pe = ctxFor(row, 'PE');
           const isAtm = atmStrike != null && row.strike === atmStrike;

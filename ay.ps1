@@ -11,7 +11,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('up', 'down', 'logs', 'status', 'backup', 'restore', 'reset-db', 'help')]
+    [ValidateSet('up', 'down', 'logs', 'status', 'backup', 'restore', 'reset-db', 'tag-images', 'help')]
     [string]$Verb = 'help',
 
     [Parameter(ValueFromRemainingArguments = $true)]

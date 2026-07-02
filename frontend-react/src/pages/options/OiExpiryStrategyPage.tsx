@@ -6,22 +6,25 @@ import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
-import { Select } from '../../components/atoms/Select.tsx';
+import { LegMultiSelect } from '../../components/atoms/LegMultiSelect.tsx';
 import { OiBadge4 } from '../../components/atoms/OiBadge4.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { formatDecimal } from '../../lib/decimal.ts';
 import { FIELD_HELP } from '../../core/fieldHelp.ts';
+import { defaultBasket } from '../../core/oiExpiryBasket.ts';
 import type { OiExpiryEodDay } from '../../api/types.ts';
 
-// OI Expiry Strategy — oipulse "Options EOD OI Analysis" (§options/oi-expiry-strategy). Per-strike,
-// last-N-session EOD OHLC + OI + Volume tables (one CE table + one PE table for the chosen strike),
-// with day-over-day % change in close / OI, the 4-state OI interpretation, and the all-day-high/low
-// flag (★) — the data input to the expiry-day trading plan. One /oi-expiry read folds the day-rollup
-// over the captured snapshots (zero new capture); the server windows to the ATM strikes and returns
-// one `{items}` entry per strike. NOTE: capture is forward-only (history accrues from boot), so the
-// window is shallow until sessions accrue.
+// OI Expiry Strategy — oipulse "Options EOD OI Analysis" (§options/oi-expiry-strategy). A BASKET of
+// strikes (default 5 spread across the ATM window — theirs: 5 wide-spaced near-ATM strikes), each
+// rendering a CE + PE pair of last-N-session EOD OHLC + OI + Volume tables (audit §10.2-9), with
+// day-over-day % change in close / OI, the 4-state OI interpretation, and the all-day-high/low flag
+// (★) — the data input to the expiry-day trading plan. One /oi-expiry read folds the day-rollup over
+// the captured snapshots (zero new capture); the server windows to the ATM strikes and returns one
+// `{items}` entry per strike, so the basket is a pure client selection (core/oiExpiryBasket owns the
+// 5-strike default). NOTE: capture is forward-only (history accrues from boot), so the window is
+// shallow until sessions accrue.
 
 const num = (n: number | null) => (n == null ? '—' : n.toLocaleString('en-IN'));
 const dec = (s: string | null) => (s ? formatDecimal(s, 2) : '—');
@@ -85,17 +88,19 @@ export function OiExpiryStrategyPage() {
   const q = useOiExpiry();
   const strikes = useMemo(() => (q.data ?? []).map((s) => s.strike), [q.data]);
 
-  // Default to the middle strike of the returned ATM window (the server centres on the ATM).
-  const [strike, setStrike] = useState<string | null>(null);
+  // The 5-strike default basket (re-defaulted when the window changes underneath the selection).
+  const [basket, setBasket] = useState<string[]>([]);
   useEffect(() => {
-    if (strikes.length && (!strike || !strikes.includes(strike))) {
-      setStrike(strikes[Math.floor(strikes.length / 2)]);
+    if (strikes.length && !basket.some((s) => strikes.includes(s))) {
+      setBasket(defaultBasket(strikes));
     }
-  }, [strikes, strike]);
+  }, [strikes, basket]);
+  const toggleStrike = (s: string) =>
+    setBasket((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]));
 
   const selected = useMemo(
-    () => (q.data ?? []).find((s) => s.strike === strike) ?? null,
-    [q.data, strike],
+    () => (q.data ?? []).filter((s) => basket.includes(s.strike)),
+    [q.data, basket],
   );
 
   return (
@@ -108,14 +113,19 @@ export function OiExpiryStrategyPage() {
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval />
         {strikes.length > 0 && (
-          <Select ariaLabel="Strike" title="Strike whose Call and Put EOD tables to show" value={strike} options={strikes} onChange={setStrike} />
+          <LegMultiSelect options={strikes} selected={basket} onToggle={toggleStrike} />
+        )}
+        {basket.length > 0 && (
+          <span className="text-xs text-ay-muted">
+            Strikes: {[...basket].sort((a, b) => Number(a) - Number(b)).join(', ')}
+          </span>
         )}
         <GoButton onClick={() => q.refetch()} loading={q.isFetching} />
       </div>
 
       <QueryState
         query={q}
-        isEmpty={() => !selected}
+        isEmpty={() => selected.length === 0}
         empty={{
           icon: CalendarRange,
           title:
@@ -129,14 +139,16 @@ export function OiExpiryStrategyPage() {
           </div>
         }
       >
-        {() =>
-          selected && (
-            <BeatBlock className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-2">
-              <LegTable leg={`${selected.strike} CE`} rows={selected.ce} />
-              <LegTable leg={`${selected.strike} PE`} rows={selected.pe} />
-            </BeatBlock>
-          )
-        }
+        {() => (
+          <BeatBlock className="flex flex-col gap-6">
+            {selected.map((s) => (
+              <div key={s.strike} className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-2">
+                <LegTable leg={`${s.strike} CE`} rows={s.ce} />
+                <LegTable leg={`${s.strike} PE`} rows={s.pe} />
+              </div>
+            ))}
+          </BeatBlock>
+        )}
       </QueryState>
     </LoadBeat>
   );

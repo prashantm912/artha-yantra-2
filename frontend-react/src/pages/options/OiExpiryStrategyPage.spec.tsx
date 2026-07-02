@@ -61,6 +61,7 @@ const useOiExpiry = vi.fn();
 vi.mock('../../api/oiAnalytics.ts', () => ({ useOiExpiry: () => useOiExpiry() }));
 
 import { OiExpiryStrategyPage } from './OiExpiryStrategyPage.tsx';
+import { defaultBasket } from '../../core/oiExpiryBasket.ts';
 
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -72,15 +73,22 @@ function renderPage() {
 }
 
 describe('OiExpiryStrategyPage', () => {
-  it('renders the CE + PE leg tables for the selected strike', () => {
+  it('renders the CE + PE leg tables for every basket strike', () => {
     useOiExpiry.mockReturnValue({ data: items, isFetching: false, isLoading: false, refetch: () => {} });
     renderPage();
     expect(screen.getByRole('heading', { name: '22500.00 CE' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '22500.00 PE' })).toBeInTheDocument();
     // the day-over-day interpretation badge rides the newest CE row.
     expect(screen.getAllByLabelText('Long Build Up').length).toBeGreaterThan(0);
-    // the strike selector is present.
-    expect(screen.getByLabelText('Strike')).toBeInTheDocument();
+    // the strike-basket multi-select is present (single available strike → "1 selected").
+    expect(screen.getByRole('button', { name: /1 selected/ })).toBeInTheDocument();
+  });
+
+  it('defaultBasket spreads 5 strikes across the ATM window', () => {
+    const strikes = Array.from({ length: 21 }, (_, i) => String(22000 + 100 * i));
+    expect(defaultBasket(strikes)).toEqual(['22000', '22500', '23000', '23500', '24000']);
+    // small windows keep everything
+    expect(defaultBasket(['A', 'B', 'C'])).toEqual(['A', 'B', 'C']);
   });
 
   it('renders the empty state when no EOD history accrued', () => {

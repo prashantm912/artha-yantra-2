@@ -40,6 +40,7 @@ public class FeedWatchdog {
   private volatile Instant lastRestart = Instant.EPOCH;
 
   /** Wires the shared-state Redis, the feed lifecycle and the ops alert channel. */
+  @org.springframework.beans.factory.annotation.Autowired
   public FeedWatchdog(StringRedisTemplate redis, FeedPipeline pipeline, NtfyClient ntfy) {
     this(redis, pipeline, ntfy, Clock.systemUTC());
   }

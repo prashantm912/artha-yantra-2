@@ -3569,6 +3569,7 @@ export interface operations {
                 date?: string;
                 interval?: string;
                 expiry?: string;
+                buckets?: number;
             };
             header?: never;
             path?: never;

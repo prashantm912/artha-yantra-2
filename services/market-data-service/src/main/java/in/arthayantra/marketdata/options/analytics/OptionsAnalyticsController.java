@@ -749,19 +749,28 @@ public class OptionsAnalyticsController {
     return out;
   }
 
-  /** /trending: oipulse OI Trending — per-bucket total/CE/PE OI + UP/DOWN/FLAT across the session. */
+  /**
+   * /trending: oipulse OI Trending — per-bucket total/CE/PE OI + UP/DOWN/FLAT. Default (no
+   * {@code buckets}) serves the FULL session from the 09:15 IST open: the trending page folds its
+   * cumulative Δ columns against the first returned bucket, so a rolling window would silently
+   * rebase the session-open baseline mid-day. An explicit {@code buckets=N} serves the last N
+   * buckets instead — the scalper confluence gate ({@code MarketOiClient}) depends on that rolling
+   * window for its delta/imbalance/cross derivations; keep its behaviour unchanged.
+   */
   @GetMapping("/trending")
   public OiTrendingService.TrendSeries trending(
       @RequestParam(required = false) String mode,
       @RequestParam String name,
       @RequestParam(required = false) String date,
       @RequestParam(required = false) String interval,
-      @RequestParam(required = false) String expiry) {
+      @RequestParam(required = false) String expiry,
+      @RequestParam(required = false) Integer buckets) {
     OiQuery q = OiQuery.of(mode, name, date, interval, expiry);
     LocalDate exp = requireExpiry(q);
-    // Anchor on the newest captured bucket (clock-independent), then serve the FULL session from the
-    // 09:15 IST open: the client folds its cumulative Δ columns against the first returned bucket, so
-    // a rolling window would silently rebase the session-open baseline mid-day.
+    if (buckets != null && buckets < 1) {
+      throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "buckets must be >= 1");
+    }
+    // Anchor on the newest captured bucket (clock-independent).
     List<OptionsSnapshotReader.StrikePoint> latest =
         reader.latest(q.name(), exp, q.interval(), q.date());
     if (latest.isEmpty()) {
@@ -769,11 +778,13 @@ public class OptionsAnalyticsController {
     }
     OffsetDateTime newest = latest.get(0).bucket();
     OffsetDateTime from =
-        newest
-            .atZoneSameInstant(Ist.ZONE)
-            .toLocalDate()
-            .atTime(MarketCalendar.SESSION_OPEN)
-            .atOffset(Ist.OFFSET);
+        buckets != null
+            ? newest.minus(q.interval().bucket().multipliedBy(buckets - 1L))
+            : newest
+                .atZoneSameInstant(Ist.ZONE)
+                .toLocalDate()
+                .atTime(MarketCalendar.SESSION_OPEN)
+                .atOffset(Ist.OFFSET);
     List<OptionsSnapshotReader.StrikePoint> series =
         reader.series(q.name(), exp, q.interval(), from, newest.plus(q.interval().bucket()));
     return trendingService.trending(series);

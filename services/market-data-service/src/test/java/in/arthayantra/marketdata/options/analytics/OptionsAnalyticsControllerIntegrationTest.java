@@ -179,6 +179,18 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
         .andExpect(jsonPath("$.items.length()").value(25))
         // first row = the real 09:15 open bucket (oi 1000), not a mid-session rebase (oi 1005)
         .andExpect(jsonPath("$.items[0].totalOi").value(1000));
+
+    // The explicit rolling window the scalper confluence gate depends on (MarketOiClient).
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/trending")
+                .param("name", u)
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m")
+                .param("buckets", "20"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items.length()").value(20))
+        .andExpect(jsonPath("$.items[0].totalOi").value(1005));
   }
 
   @Test

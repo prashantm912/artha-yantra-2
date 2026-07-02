@@ -1225,6 +1225,14 @@
           "schema" : {
             "type" : "string"
           }
+        }, {
+          "name" : "buckets",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
         } ],
         "responses" : {
           "200" : {

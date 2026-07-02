@@ -6315,6 +6315,12 @@
               "$ref" : "#/components/schemas/ActiveStrikeIvPoint"
             }
           },
+          "activeStrikeSideIvSeries" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ActiveStrikeIvPoint"
+            }
+          },
           "asOf" : {
             "type" : "string",
             "format" : "date-time"

@@ -58,7 +58,9 @@ export function foldActiveStrikeIvSeries(
 ): ActiveStrikeIvViz {
   const points = iv ?? [];
   const num = (s: string | null | undefined): number | null => (s == null ? null : Number(s));
-  const pct = (s: string | null | undefined): number | null => (s == null ? null : Number(s) * 100);
+  // ×100 with a 4dp round so binary-float dust (0.1064 → 10.639999…) never reaches the tooltip
+  const pct = (s: string | null | undefined): number | null =>
+    s == null ? null : Number((Number(s) * 100).toFixed(4));
   return {
     times: points.map((p) => hhmm(p.bucket)),
     callIv: points.map((p) => pct(p.ceIv)),

@@ -111,9 +111,11 @@ export function CandleChart({ bars, marks, height, ariaLabel, className, intrada
     const candles = candleRef.current;
     const volume = volRef.current;
     if (!candles || !volume) return;
-    // lightweight-charts renders the axis in UTC; shift intraday bars by the IST offset so a 09:15
-    // session bar reads "09:15", not "03:45" (daily/weekly keep their date label, no shift).
-    const istShift = intraday ? 19800 : 0;
+    // lightweight-charts renders the axis in UTC; shift bars by the IST offset so a 09:15 session
+    // bar reads "09:15", not "03:45". Daily/weekly need the SAME shift (P1-11): their buckets are
+    // IST-midnight instants (= 18:30Z of the PREVIOUS day), so unshifted the UTC axis labelled
+    // every 1d/1w bar with the prior calendar date — Monday's session read as Sunday.
+    const istShift = 19800;
     const tOf = (b: MarketCandle) => (sec(b.bucket) + istShift) as UTCTimestamp;
     candles.setData(
       bars.map((b) => ({ time: tOf(b), open: Number(b.open), high: Number(b.high), low: Number(b.low), close: Number(b.close) })),

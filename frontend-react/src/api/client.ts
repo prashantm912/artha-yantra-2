@@ -73,19 +73,36 @@ export async function apiFetch<T>(path: string, opts: RequestOptions = {}): Prom
     } catch {
       /* non-JSON error body */
     }
+    // Audit P1-11: an expired gateway session must read as "signed out", not as an endless
+    // error-toast stream over frozen data — flip the auth store so RequireAuth redirects to
+    // /login (the store import is deferred to avoid a module cycle).
+    if (res.status === 401) {
+      void import('../stores/session.store').then(({ useSession }) => {
+        if (useSession.getState().auth === 'authenticated') {
+          useSession.setState({ auth: 'anonymous' });
+        }
+      });
+    }
     throw new ApiError(
       res.status,
       envelope.code,
       envelope.message ?? res.statusText ?? `HTTP ${res.status}`,
       envelope.details,
-      opts.silenceToast ?? false,
+      (opts.silenceToast ?? false) || res.status === 401, // 401 redirects; a toast per poll is spam
     );
   }
 
   if (res.status === 204) return undefined as T;
   const contentType = res.headers.get('content-type') ?? '';
   if (contentType.includes('application/json')) return (await res.json()) as T;
-  return (await res.text()) as unknown as T;
+  // Audit P1-11: a 200 that is not JSON is the gateway catch-all serving SPA index.html for a
+  // path missing from the route allowlist (the recurring #404-class incident) — returning the
+  // HTML as T rendered a permanent, silent empty state. Fail loud instead.
+  throw new ApiError(
+    res.status,
+    'BAD_CONTENT_TYPE',
+    `expected JSON from ${path} but got ${contentType || 'no content-type'} — is the path in the gateway route allowlist?`,
+  );
 }
 
 /** Unwraps the `{items:[...]}` list envelope (signals/paper/journal/oi-analysis/fii-dii/…). */

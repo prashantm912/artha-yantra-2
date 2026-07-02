@@ -5,6 +5,7 @@ import { FilterBar } from '../../components/FilterBar.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { ConnectingDotsTable } from '../../components/ConnectingDotsTable.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { PanelError } from '../../components/atoms/PanelError.tsx';
 
 // Connecting Dots (§20.7.8): the per-interval multi-factor sentiment matrix. INDICES only (oipulse has
 // 4; our backend covers NIFTY 50 + NIFTY BANK today — FINNIFTY/MIDCPNIFTY pending instrument cover).
@@ -43,7 +44,8 @@ export function ConnectingDotsPage() {
         <GoButton onClick={() => cdQ.refetch()} loading={cdQ.isFetching} />
       </div>
 
-      {cdQ.data == null && !cdQ.isLoading && (
+      {cdQ.isError && <PanelError onRetry={() => void cdQ.refetch()} />}
+      {!cdQ.isError && cdQ.data == null && !cdQ.isLoading && (
         <p className="mb-3 text-sm text-ay-muted">
           No matrix — pick an index + interval with an active (or captured) session.
         </p>

@@ -21,6 +21,7 @@ import { PageHeader } from '../../components/PageHeader.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { SignalsFeedPanel } from '../signals/SignalsFeedPanel.tsx';
 import { PaperBookPanel } from './PaperBookPanel.tsx';
+import { PanelError } from '../../components/atoms/PanelError.tsx';
 
 // Scalping Cockpit (master plan §20 — Cockpit composite): ONE live operator screen that composes the
 // highest-signal scalping views (option chain · OI-confluence/Connecting-Dots matrix + sentiment ·
@@ -144,7 +145,9 @@ export function CockpitPage() {
       <BeatBlock className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         {/* (a) Option chain (compact) */}
         <Panel title="Option chain" to="/options/options-chain" linkLabel="Full chain">
-          {chain == null && !chainQ.isLoading ? (
+          {chainQ.isError ? (
+            <PanelError onRetry={() => void chainQ.refetch()} />
+          ) : chain == null && !chainQ.isLoading ? (
             <p className="p-1 text-sm text-ay-muted">
               No chain — pick an underlying + expiry with a live option chain.
             </p>
@@ -162,7 +165,8 @@ export function CockpitPage() {
 
         {/* (b) Connecting-Dots / OI-confluence matrix + sentiment */}
         <Panel title="OI confluence matrix" to="/features/connecting-dots" linkLabel="Connecting Dots">
-          {cdQ.data == null && !cdQ.isLoading && (
+          {cdQ.isError && <PanelError onRetry={() => void cdQ.refetch()} />}
+          {!cdQ.isError && cdQ.data == null && !cdQ.isLoading && (
             <p className="mb-2 p-1 text-sm text-ay-muted">
               No matrix — pick an index + interval with an active (or captured) session.
             </p>
@@ -184,6 +188,8 @@ export function CockpitPage() {
               putStrike={straddle.putStrike}
               underlying={straddle.underlying}
             />
+          ) : straddleQ.isError ? (
+            <PanelError onRetry={() => void straddleQ.refetch()} />
           ) : (
             <p className="p-1 text-sm text-ay-muted">
               {straddleQ.isLoading
@@ -209,7 +215,9 @@ export function CockpitPage() {
         {/* (e) Compact OI heatmap — spans the full width on the two-column layout. */}
         <div className="xl:col-span-2">
           <Panel title="OI change heatmap" to="/options/oi-heatmap" linkLabel="Full heatmap">
-            {!hasGrid && !heatQ.isLoading ? (
+            {heatQ.isError ? (
+              <PanelError onRetry={() => void heatQ.refetch()} />
+            ) : !hasGrid && !heatQ.isLoading ? (
               <p className="p-1 text-sm text-ay-muted">
                 No OI-change grid — pick an index + expiry with captured chain snapshots.
               </p>

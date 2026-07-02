@@ -199,6 +199,25 @@ export interface SpurtChain {
   asOf: string | null;
 }
 
+/** One Big-OI session-log event (GET /api/v1/market/options/big-oi-log): a bucket's big ΔOI move. */
+export interface BigOiLogEvent {
+  time: string;
+  spot: string | null;
+  strike: string;
+  optionType: 'CE' | 'PE';
+  ltp: string | null;
+  ltpChange: string | null;
+  oi: number | null;
+  oiChange: number;
+  interpretation: OiInterpretation;
+}
+
+/** GET /api/v1/market/options/big-oi-log — chronological session event log, newest bucket first. */
+export interface BigOiLog {
+  items: BigOiLogEvent[];
+  asOf: string | null;
+}
+
 /** One strike's interval OI move (oipulse Interval-wise OI bars) — `strike` = e.g. "57400 PE". */
 export interface StrikeMove {
   strike: string;

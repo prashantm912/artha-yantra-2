@@ -9,6 +9,11 @@ the periodic strategy-tuning pass. Related but distinct:
 tunes EXIT bands from **executed paper trades**; THIS folder tunes ENTRY gates from **rejections**
 (what the gate blocked and why). The two meet at the multi-session tuning pass.
 
+**One-command agent:** the repo skill **`/session-analysis`** (`.claude/skills/session-analysis/`)
+runs this method as an agent — `post [date]` (EOD forensics → findings file → PR), `live`
+(read-only in-session data-health + counterfactual watch), `rollup` (multi-session consolidation).
+The skill defers to THIS doc as the method authority, so extending §3 upgrades the agent for free.
+
 **This method is deliberately OPEN-ENDED.** The dimensions below are the v1 checklist, not a cage —
 each session may surface new data points; add them as new numbered dimensions here (with their SQL)
 and as new sections in the findings template, so later sessions measure them too.

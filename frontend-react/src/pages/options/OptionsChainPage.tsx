@@ -4,6 +4,7 @@ import { nearestStrike } from '../../lib/strikes.ts';
 import { loadDensity, saveDensity, type Density } from '../../lib/density.ts';
 import { useChainTable, useVix } from '../../api/oiAnalytics.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
+import { StockOiWarmBar } from '../../components/StockOiWarmBar.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Select } from '../../components/atoms/Select.tsx';
 import { ColumnSettings } from '../../components/ColumnSettings.tsx';
@@ -118,6 +119,9 @@ export function OptionsChainPage() {
         />
         <DensityToggle value={density} onChange={changeDensity} />
       </div>
+
+      {/* Stock underlyings: the interval-Δ columns need warmed OI (audit §9.3) — offer the load. */}
+      <StockOiWarmBar />
 
       {/* Live header strip (§20.7.4). Max-pain/Sentiment intentionally NOT here — they belong to the
           separate OI Statistics / Active Strikes pages. aria-live announces value changes. */}

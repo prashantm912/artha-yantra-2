@@ -87,6 +87,35 @@ public class OptionsSnapshotRepository {
         (ps, row) -> bind(ps, row));
   }
 
+  /**
+   * Batch-inserts UPSTOX-1M-provenance rows (the on-demand stock-chain warm, audit §9.3 Wave 5) —
+   * identical columns/binding, {@code source='UPSTOX_1M'} so candle-derived stock rows are never
+   * confused with live quote capture. Idempotent on the PK, so a re-warm only adds NEW buckets
+   * (incremental top-up).
+   */
+  public int insertUpstoxDerived(List<SnapshotRow> rows) {
+    int[][] counts =
+        jdbc.batchUpdate(
+            """
+            INSERT INTO options_chain_snapshots
+              (ts, underlying, expiry, strike, option_type, tradingsymbol, ltp, bid, ask, volume, oi,
+               oi_change, spot_price, iv, delta, gamma, theta, vega, rho, iv_reason, price_source,
+               forward_price, risk_free_rate, source)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'UPSTOX_1M')
+            ON CONFLICT (ts, underlying, expiry, strike, option_type) DO NOTHING
+            """,
+            rows,
+            500,
+            (ps, row) -> bind(ps, row));
+    int inserted = 0;
+    for (int[] batch : counts) {
+      for (int c : batch) {
+        inserted += Math.max(0, c); // DO NOTHING reports 0 for a conflicting row
+      }
+    }
+    return inserted;
+  }
+
   /** Binds the 23 raw/solver columns of one snapshot row (shared by live + backfill inserts). */
   private static void bind(java.sql.PreparedStatement ps, SnapshotRow row) throws java.sql.SQLException {
     ps.setTimestamp(1, Timestamp.from(row.ts().toInstant()));

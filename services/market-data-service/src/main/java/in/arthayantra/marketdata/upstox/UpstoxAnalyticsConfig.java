@@ -62,6 +62,7 @@ public class UpstoxAnalyticsConfig {
     return new UpstoxExpiredInstrumentsClient(restClientBuilder, properties);
   }
 
+
   /**
    * Upstox <b>NSE_EQ instrument-master</b> client — feeds the Phase-5 200-day equity daily backfill
    * ({@code EquityDailyBackfillService}). Resolves a cash-equity tradingsymbol → its {@code

@@ -68,6 +68,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/options/stock-chain/warm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["status"];
+        put?: never;
+        post: operations["warm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/options/snapshot": {
         parameters: {
             query?: never;
@@ -347,7 +363,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["status"];
+        get: operations["status_1"];
         put?: never;
         post?: never;
         delete?: never;
@@ -779,7 +795,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["status_1"];
+        get: operations["status_2"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1291,7 +1307,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["status_2"];
+        get: operations["status_3"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1387,7 +1403,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["status_3"];
+        get: operations["status_4"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1435,7 +1451,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["status_4"];
+        get: operations["status_5"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1451,7 +1467,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["status_5"];
+        get: operations["status_6"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1611,7 +1627,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["status_6"];
+        get: operations["status_7"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1679,6 +1695,20 @@ export interface components {
             mode?: string;
             priority?: string;
             subscriber?: string;
+        };
+        WarmStatus: {
+            underlying?: string;
+            /** Format: date */
+            expiry?: string;
+            /** Format: date */
+            day?: string;
+            state?: string;
+            /** Format: int32 */
+            totalLegs?: number;
+            /** Format: int32 */
+            fetchedLegs?: number;
+            /** Format: int64 */
+            rowsInStore?: number;
         };
         SnapshotRequest: {
             underlying?: string;
@@ -2420,6 +2450,7 @@ export interface components {
             declines?: components["schemas"]["ContribRow"][];
             /** Format: date */
             asOf?: string;
+            live?: boolean;
         };
         Delivery: {
             symbol?: string;
@@ -2973,6 +3004,72 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    status: {
+        parameters: {
+            query: {
+                name: string;
+                expiry?: string;
+                date?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["WarmStatus"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    warm: {
+        parameters: {
+            query: {
+                name: string;
+                expiry?: string;
+                date?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["WarmStatus"];
+                };
             };
             /** @description Error envelope (COMMON 8.3) */
             default: {
@@ -3573,7 +3670,7 @@ export interface operations {
             };
         };
     };
-    status: {
+    status_1: {
         parameters: {
             query?: never;
             header?: never;
@@ -4538,7 +4635,7 @@ export interface operations {
             };
         };
     };
-    status_1: {
+    status_2: {
         parameters: {
             query?: never;
             header?: never;
@@ -5497,6 +5594,7 @@ export interface operations {
         parameters: {
             query: {
                 name: string;
+                mode?: string;
             };
             header?: never;
             path?: never;
@@ -5591,7 +5689,7 @@ export interface operations {
             };
         };
     };
-    status_2: {
+    status_3: {
         parameters: {
             query?: never;
             header?: never;
@@ -5783,7 +5881,7 @@ export interface operations {
             };
         };
     };
-    status_3: {
+    status_4: {
         parameters: {
             query?: never;
             header?: never;
@@ -5875,7 +5973,7 @@ export interface operations {
             };
         };
     };
-    status_4: {
+    status_5: {
         parameters: {
             query?: never;
             header?: never;
@@ -5904,7 +6002,7 @@ export interface operations {
             };
         };
     };
-    status_5: {
+    status_6: {
         parameters: {
             query?: never;
             header?: never;
@@ -6218,7 +6316,7 @@ export interface operations {
             };
         };
     };
-    status_6: {
+    status_7: {
         parameters: {
             query?: never;
             header?: never;

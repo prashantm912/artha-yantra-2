@@ -503,12 +503,19 @@ Mark each item DONE with its PR# here as it merges.
 - **DONE #469.** ~~Futures EOD continuous current-month view~~ (deferred from item 4): per-session
   front-contract stitch (rolls automatically after expiry; each date names its contract), view
   select Continuous | Per contract.
-- **OPEN — owner sizing call: stock-chain interval OI capture** (§9.3, §9.4). Measured 2026-07-02:
-  210 stock chains, ~13.8k front-expiry option contracts (avg 66/chain) → ~28 Kite quote calls per
-  pass. At a 5-min cadence: ~1.0M rows/day (≈ doubles today's 1.13M/day 6-index volume, ~+55MB/day
-  → ~+1.6GB/month on a 31GB DB) and ~9% of the 1-rps quote budget on top of the index capture's
-  ~58%. At 15-min: ~345k rows/day (+30%). Needs the owner's universe (all 210 vs top-N liquid) +
-  cadence + disk-budget decision before build.
+- **DONE #472.** ~~Stock-chain interval OI~~ — resolved as an ON-DEMAND WARM, not a standing
+  capture (owner decision after the sizing compare: a scheduled 210-chain pass ≈ 1.0M rows/day ≈
+  2× today's whole capture + Kite-budget load, for a research surface). Live-probed first: Upstox
+  serves 1-minute bars WITH OI for UNEXPIRED option contracts (v3 intraday = today, v2 historical =
+  past days). POST `/options/stock-chain/warm?name=` pulls one (stock, expiry, day)'s per-leg 1m
+  bars + the cash equity as the spot series into `options_chain_snapshots`
+  (`source='UPSTOX_1M'`, bar-END timestamps → T2 end-of-window consistent, PK-idempotent top-up,
+  single-flight against the shared Upstox limiter); every existing OI reader then serves the stock
+  unchanged. FE: StockOiWarmBar (chain + trending pages) with progress + auto-refill. LIVE-VERIFIED
+  2026-07-02: RELIANCE 28-Jul warm = 88 legs → 26,720 readings; trending served 125 3m buckets
+  (09:15→15:30, OI 7.57Cr→9.16Cr, spot 1307.10), spurt classified LONG_UNWINDING, big-oi-log 496
+  events. Caveats (recorded): stock IV/greek columns stay null (derived-history fidelity note);
+  ~1–2 min cold warm; Upstox-token dependency.
 - **OPEN — chip:** **FE-e2e spec repair** (task_499edb0f) → then flip the #422 CI shard to
   blocking. Left to its own session: the repair needs the MOCK stack up for hours, and swapping the
   live stack out the evening before the T2 next-session barometer verification is the wrong trade.

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { foldFuturesEod, orderContractsFrontFirst } from './futuresEodFold.ts';
+import {
+  foldFuturesEod,
+  orderContractsFrontFirst,
+  stitchContinuousFrontMonth,
+} from './futuresEodFold.ts';
 import type { FutEodRow } from './types.ts';
 
 function row(p: Partial<FutEodRow>): FutEodRow {
@@ -32,6 +36,27 @@ describe('foldFuturesEod', () => {
     expect(out[0].ltpChange).toBeNull();
     expect(out[0].oiChange).toBeNull();
     expect(out[0].interpretation).toBeNull();
+  });
+});
+
+describe('stitchContinuousFrontMonth', () => {
+  it('takes each session from its front contract and rolls at expiry (§10.2-4 Wave 5)', () => {
+    const { rows, contractByDate } = stitchContinuousFrontMonth([
+      // JUN is the front while it still produces rows; JUL exists alongside.
+      row({ tradeDate: '2026-06-24', tradingsymbol: 'NIFTY26JUNFUT', close: '100', oiClose: 900 }),
+      row({ tradeDate: '2026-06-24', tradingsymbol: 'NIFTY26JULFUT', close: '101', oiClose: 100 }),
+      row({ tradeDate: '2026-06-25', tradingsymbol: 'NIFTY26JUNFUT', close: '102', oiClose: 800 }),
+      row({ tradeDate: '2026-06-25', tradingsymbol: 'NIFTY26JULFUT', close: '103', oiClose: 200 }),
+      // JUN expired — only JUL produces rows → the stitch rolls.
+      row({ tradeDate: '2026-06-26', tradingsymbol: 'NIFTY26JULFUT', close: '104', oiClose: 300 }),
+    ]);
+    expect(rows.map((r) => r.tradeDate)).toEqual(['2026-06-26', '2026-06-25', '2026-06-24']);
+    expect(contractByDate.get('2026-06-25')).toBe('NIFTY26JUNFUT');
+    expect(contractByDate.get('2026-06-26')).toBe('NIFTY26JULFUT');
+    // pre-roll deltas stay within JUN (102 − 100); the roll session's deltas span the two contracts.
+    expect(rows[1].ltpChange).toBe('2');
+    expect(rows[0].ltpChange).toBe('2'); // 104 (JUL) − 102 (JUN)
+    expect(rows[0].oiChange).toBe(-500); // 300 (JUL) − 800 (JUN)
   });
 });
 

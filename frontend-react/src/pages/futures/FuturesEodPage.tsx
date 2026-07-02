@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useFuturesEod } from '../../api/oiAnalytics.ts';
 import { useUnderlyings } from '../../api/instruments.ts';
-import { foldFuturesEod, orderContractsFrontFirst, type FuturesEodRow } from '../../api/futuresEodFold.ts';
+import {
+  foldFuturesEod,
+  orderContractsFrontFirst,
+  stitchContinuousFrontMonth,
+  type FuturesEodRow,
+} from '../../api/futuresEodFold.ts';
 import { useSymbolContext } from '../../stores/symbolContext.store.ts';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
@@ -17,11 +22,12 @@ import { formatDecimal } from '../../lib/decimal.ts';
 import { FIELD_HELP } from '../../core/fieldHelp.ts';
 
 // Futures EOD OI Analyzer (oipulse §futures/eod-oi-analyzer): day-by-day OHLC + OI + day-over-day
-// deltas + interpretation for one futures contract. The BE /eod feed returns every captured contract
-// for the underlying; the page picks one (a contract selector when more than one is present) and folds
-// its daily series. NOTE: our capture is forward-only (history accrues from boot) — oipulse shows ~400
-// days back to 2019; ours is shallow until history accrues (documented). Chart/cumulative/range toggles
-// deferred.
+// deltas + interpretation. Two views (audit §10.2-4, Wave 5): CONTINUOUS — the barometer's
+// current-month read, one row per session from that session's front contract (rolls automatically
+// when a contract expires; the roll session's deltas span two contracts) — and Per-contract, the
+// dated-contract series behind a selector. NOTE: our capture is forward-only (history accrues from
+// boot) — oipulse shows ~400 days back to 2019; ours is shallow until history accrues (documented).
+// Chart/cumulative/range toggles deferred.
 
 const isoDaysAgo = (days: number): string => {
   const d = new Date();
@@ -45,18 +51,40 @@ export function FuturesEodPage() {
   // heuristic landed on a far month once several contracts had equal history).
   const contracts = useMemo(() => orderContractsFrontFirst(q.data ?? []), [q.data]);
 
+  const [view, setView] = useState<'continuous' | 'contract'>('continuous');
   const [contract, setContract] = useState<string | null>(null);
   useEffect(() => {
     if (contracts.length && (!contract || !contracts.includes(contract))) setContract(contracts[0]);
   }, [contracts, contract]);
 
+  const continuous = useMemo(() => stitchContinuousFrontMonth(q.data ?? []), [q.data]);
   const rows = useMemo(
-    () => foldFuturesEod((q.data ?? []).filter((r) => r.tradingsymbol === contract)),
-    [q.data, contract],
+    () =>
+      view === 'continuous'
+        ? continuous.rows
+        : foldFuturesEod((q.data ?? []).filter((r) => r.tradingsymbol === contract)),
+    [view, continuous, q.data, contract],
   );
 
   const columns: DataColumn<FuturesEodRow>[] = [
-    { id: 'date', header: 'Date', align: 'left', sortValue: (r) => r.tradeDate, sortType: 'text', render: (r) => r.tradeDate, mobileLabel: 'Date', help: 'The trading session this row summarises.' },
+    {
+      id: 'date',
+      header: 'Date',
+      align: 'left',
+      sortValue: (r) => r.tradeDate,
+      sortType: 'text',
+      render: (r) =>
+        view === 'continuous' ? (
+          <span className="whitespace-nowrap">
+            {r.tradeDate}{' '}
+            <span className="text-xs text-ay-muted">{continuous.contractByDate.get(r.tradeDate)}</span>
+          </span>
+        ) : (
+          r.tradeDate
+        ),
+      mobileLabel: 'Date',
+      help: 'The trading session this row summarises (the continuous view also names that session’s front contract).',
+    },
     { id: 'oi', header: 'Total OI', sortValue: (r) => r.totalOi, render: (r) => num(r.totalOi), mobileLabel: 'Total OI', help: FIELD_HELP.oi },
     { id: 'open', header: 'Day Open', render: (r) => dec(r.dayOpen), help: FIELD_HELP.open },
     { id: 'high', header: 'Day High', render: (r) => dec(r.dayHigh), help: FIELD_HELP.high },
@@ -83,7 +111,17 @@ export function FuturesEodPage() {
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Select ariaLabel="Underlying" value={name} options={nameOptions} onChange={setName} title="Pick the index or stock whose futures history to view" />
-        {contracts.length > 1 && (
+        <Select
+          ariaLabel="View"
+          value={view}
+          options={[
+            { value: 'continuous', label: 'Continuous (current month)' },
+            { value: 'contract', label: 'Per contract' },
+          ]}
+          onChange={(v) => setView(v as 'continuous' | 'contract')}
+          title="Continuous stitches each session's front contract (rolls at expiry — the roll day's deltas span two contracts); Per contract shows one dated expiry."
+        />
+        {view === 'contract' && contracts.length > 1 && (
           <Select ariaLabel="Contract" value={contract} options={contracts} onChange={setContract} title="Pick which futures expiry contract to analyse" />
         )}
         <GoButton onClick={() => q.refetch()} loading={q.isFetching} />

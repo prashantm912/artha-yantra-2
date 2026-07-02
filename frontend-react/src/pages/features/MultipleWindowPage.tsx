@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { CompactPaneContext } from '../../components/paneContext.ts';
 import { cn } from '../../lib/cn.ts';
 import {
   WIDGETS,
@@ -87,10 +88,12 @@ function Pane({
   onChange: (id: WidgetId) => void;
 }) {
   const Widget = widget ? WIDGET_COMPONENTS[widget] : undefined;
+  // The pane chrome carries the title; the embedded page's hero header collapses (CompactPaneContext).
+  const label = WIDGETS.find((w) => w.id === widget)?.label ?? 'Pane';
   return (
     <section className="flex min-h-0 flex-col rounded-md border border-ay-border bg-surface-0">
       <header className="flex items-center justify-between gap-2 border-b border-ay-border px-2 py-1.5">
-        <span className="text-xs font-semibold text-ay-muted">Pane</span>
+        <span className="truncate text-xs font-semibold text-ay-muted">{label}</span>
         <select
           value={widget}
           onChange={(e) => onChange(e.target.value as WidgetId)}
@@ -110,7 +113,9 @@ function Pane({
         {Widget ? (
           <PaneBoundary resetKey={widget}>
             <Suspense fallback={<p className="text-sm text-ay-muted">Loading…</p>}>
-              <Widget />
+              <CompactPaneContext.Provider value={true}>
+                <Widget />
+              </CompactPaneContext.Provider>
             </Suspense>
           </PaneBoundary>
         ) : (

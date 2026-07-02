@@ -48,12 +48,17 @@ export function OptionsPremiumPage() {
     (t: ChartTheme): EChartsOption => {
       const strikes = rows.map((r) => r.strike);
       const spotN = n(spot);
+      // Untraded legs (null/zero LTP) get NO bar — a zero LTP minus intrinsic used to plot a huge
+      // fake negative on deep strikes. A leg that DID trade below intrinsic keeps its genuine
+      // negative extrinsic (the deep-ITM discount the barometer plots — audit §9.4).
       const call = rows.map((r) => {
         const raw = n(r.ce);
+        if (raw === 0) return null;
         return showLtp ? raw : raw - Math.max(0, spotN - n(r.strike)); // extrinsic = LTP − intrinsic
       });
       const put = rows.map((r) => {
         const raw = n(r.pe);
+        if (raw === 0) return null;
         return showLtp ? raw : raw - Math.max(0, n(r.strike) - spotN);
       });
       return {
@@ -147,7 +152,7 @@ export function OptionsPremiumPage() {
           </BeatItem>
         )}
         <span className="text-xs">
-          · bars = {showLtp ? 'raw LTP' : 'extrinsic value (LTP − intrinsic)'} · Call green / Put red
+          · bars = {showLtp ? 'raw LTP' : 'extrinsic value (LTP − intrinsic; deep-ITM discounts plot negative)'} · Call green / Put red · untraded legs omitted
         </span>
       </BeatStrip>
 

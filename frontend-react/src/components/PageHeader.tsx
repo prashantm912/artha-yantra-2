@@ -1,6 +1,7 @@
-import type { ReactNode } from 'react';
+import { useContext, type ReactNode } from 'react';
 import { AlertTriangle, Circle } from 'lucide-react';
 import { cn } from '../lib/cn.ts';
+import { CompactPaneContext } from './paneContext.ts';
 import { InfoTip } from './atoms/InfoTip.tsx';
 
 // The ONE signature header lockup (revamp §1.7.2 / §4.0), reused by every hero page: a display-face
@@ -21,6 +22,17 @@ interface PageHeaderProps {
 }
 
 export function PageHeader({ title, subtitle, help, right }: PageHeaderProps) {
+  // Inside a Multiple-Window pane the hero lockup collapses to a hidden heading (audit §9.6);
+  // the `right` slot (as-of / freshness) survives as a slim strip.
+  const compact = useContext(CompactPaneContext);
+  if (compact) {
+    return (
+      <header className={cn(right && 'mb-2 flex items-center justify-end gap-2')}>
+        <h2 className="sr-only">{title}</h2>
+        {right}
+      </header>
+    );
+  }
   return (
     <header className="mb-4 flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
       <div className="border-l-2 border-accent pl-3">

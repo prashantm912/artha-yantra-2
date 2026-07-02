@@ -30,4 +30,7 @@ EXPOSE 8081
 HEALTHCHECK --interval=10s --retries=10 --start-period=30s \
   CMD wget -qO- http://127.0.0.1:8081/actuator/health | grep -q '"status":"UP"' || exit 1
 
-ENTRYPOINT ["java", "-Xmx448m", "-XX:+UseSerialGC", "-jar", "/app/market-data-service.jar"]
+# Default G1 (audit P2): SerialGC paired stop-the-world single-threaded collections with
+# the tick-normalizer / signal-eval hot paths — full GCs froze the whole JVM during bar
+# bursts. G1 at this heap size costs a few MB of metadata for far better pause behavior.
+ENTRYPOINT ["java", "-Xmx448m", "-jar", "/app/market-data-service.jar"]

@@ -34,6 +34,8 @@ const TYPE_OPTIONS: SelectOption[] = [
 
 export function CalendarSpreadPage() {
   const name = useSymbolContext((s) => s.name);
+  const expiry = useSymbolContext((s) => s.expiry);
+  const setExpiry = useSymbolContext((s) => s.setExpiry);
   const chainQ = useChainTable();
   const rows = useMemo(() => chainQ.data?.rows ?? [], [chainQ.data]);
   const strikes = useMemo(() => rows.map((r) => r.strike), [rows]);
@@ -62,6 +64,16 @@ export function CalendarSpreadPage() {
       setFarExpiry(expiries[1] ?? expiries[0]);
     }
   }, [expiries, nearExpiry, farExpiry]);
+
+  // This page hides the FilterBar expiry (it owns near/far) but useChainTable still keys off the
+  // SHARED ctx.expiry for the strike list — with the FilterBar heal opted out, a fresh session
+  // (null expiry) or a rolled-over persisted one dead-ended the page (audit register
+  // calendar-spread-expiry-dead-end). Mirror the heal locally.
+  useEffect(() => {
+    if (expiries.length > 0 && (!expiry || !expiries.includes(expiry))) {
+      setExpiry(expiries[0]);
+    }
+  }, [expiries, expiry, setExpiry]);
 
   const expiryOptions: SelectOption[] = expiries.map((e) => ({ value: e, label: e }));
   const spreadQ = useCalendarSpreadChart(strike, optionType, nearExpiry, farExpiry, intervalMin);

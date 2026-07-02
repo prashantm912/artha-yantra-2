@@ -139,12 +139,43 @@ export function JobsPage() {
     if (ref) navigate(`/backtests/${ref}`);
   };
 
+  // Compare picker (audit 2026-07-02 §10.2-3 / §11 item 15): tick 2-6 completed runs, press Compare —
+  // resolves each job's resultRef and lands on /backtests/compare?ids=… (previously URL-only).
+  const [compareIds, setCompareIds] = useState<string[]>([]);
+  const toggleCompare = (jobId: string) =>
+    setCompareIds((prev) =>
+      prev.includes(jobId) ? prev.filter((x) => x !== jobId) : prev.length >= 6 ? prev : [...prev, jobId],
+    );
+  const goCompare = async () => {
+    const refs = (await Promise.all(compareIds.map(fetchResultRef))).filter(
+      (r): r is string => !!r,
+    );
+    if (refs.length >= 2) navigate(`/backtests/compare?ids=${refs.join(',')}`);
+  };
+
   const strategyName = (job: JobDto) =>
     (job.strategyId ? nameById.get(job.strategyId) : null) ??
     (job.strategyId ? job.strategyId.slice(0, 8) : '—');
 
   const columns = useMemo<DataColumn<JobDto>[]>(
     () => [
+      {
+        id: 'compare',
+        header: 'Cmp',
+        align: 'center',
+        help: 'Tick 2–6 completed backtests to compare, then press the Compare button above.',
+        render: (job) =>
+          job.kind === 'BACKTEST' && job.status === 'completed' ? (
+            <input
+              type="checkbox"
+              aria-label={`Compare run ${job.jobId.slice(0, 8)}`}
+              checked={compareIds.includes(job.jobId)}
+              onChange={() => toggleCompare(job.jobId)}
+              className="size-4 accent-accent"
+            />
+          ) : null,
+        mono: false,
+      },
       {
         id: 'job',
         header: 'Job',
@@ -322,9 +353,9 @@ export function JobsPage() {
         mono: false,
       },
     ],
-    // nameById drives the strategy column's label, latestVersionById the is-latest badge;
-    // navigate/cancel/viewResults are stable.
-    [nameById, latestVersionById], // eslint-disable-line react-hooks/exhaustive-deps
+    // nameById drives the strategy column's label, latestVersionById the is-latest badge,
+    // compareIds the picker checkboxes; navigate/cancel/viewResults are stable.
+    [nameById, latestVersionById, compareIds], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const page = Math.floor(offset / JOBS_PAGE_SIZE) + 1;
@@ -417,6 +448,17 @@ export function JobsPage() {
         >
           {q.isFetching ? '…' : '↻ Reload'}
         </button>
+        {compareIds.length > 0 && (
+          <button
+            type="button"
+            onClick={() => void goCompare()}
+            disabled={compareIds.length < 2}
+            title="Open the metric matrix + overlaid equity curves for the ticked runs (2–6)."
+            className="h-9 rounded-md border border-accent bg-accent/10 px-3 text-sm font-medium text-accent hover:bg-accent/20 disabled:opacity-50"
+          >
+            Compare ({compareIds.length})
+          </button>
+        )}
       </div>
 
       <BeatBlock>

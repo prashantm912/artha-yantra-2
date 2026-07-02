@@ -516,9 +516,19 @@ Mark each item DONE with its PR# here as it merges.
   (09:15→15:30, OI 7.57Cr→9.16Cr, spot 1307.10), spurt classified LONG_UNWINDING, big-oi-log 496
   events. Caveats (recorded): stock IV/greek columns stay null (derived-history fidelity note);
   ~1–2 min cold warm; Upstox-token dependency.
-- **OPEN — chip:** **FE-e2e spec repair** (task_499edb0f) → then flip the #422 CI shard to
-  blocking. Left to its own session: the repair needs the MOCK stack up for hours, and swapping the
-  live stack out the evening before the T2 next-session barometer verification is the wrong trade.
+- **DONE #474.** ~~FE-e2e spec repair + flip the #422 shard blocking~~ (executed same evening on a
+  temporary mock-stack swap, live restored after). The suite had rotted to 36 failed / 8 passed;
+  every failure reproduced 1:1 locally. Root causes: the mock-only MOCK badge failed AA contrast
+  (3.81:1) on every page — live never renders it, so no live check could catch it (now
+  `--ay-text` + warn ring); #455 gave both cockpit scroll panels the same "Cockpit panel"
+  aria-label (landmark-unique); the #16 help InfoTips substring-matched every bare `getByLabel`
+  (all now `{ exact: true }`); Motion keeps OPACITY fades under reduced motion so axe read
+  mid-fade blended colours (new `settleAnimations` helper waits for finite WAAPI animations before
+  every axe run); the ticket's "Place paper BUY" matched the signal-feed `/(BUY|SELL)$/` locator;
+  stale asserts ("OI bias" moved to Spurt, theme picker hidden below md since #456, ">5
+  underlyings" → ">1" for the credential-free CI mock). 44/44 green locally AND the
+  `continue-on-error` came off in the same PR — the fe-e2e step passed as a BLOCKING gate on the
+  CI mock (#474). The e2e check now covers the React suite for real.
 
 **Rationale:** Waves 1–2 remove wrong-data and can't-tell-if-broken risk before trading off these
 screens; Wave 3 stops same-label-different-meaning misreads vs oipulse; Wave 4 is ergonomics; Wave 5

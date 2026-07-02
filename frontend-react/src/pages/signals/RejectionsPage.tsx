@@ -138,7 +138,7 @@ export function RejectionsPage() {
       >
         {() => (
           <BeatBlock>
-            <div className="max-h-[70vh] overflow-auto rounded-md border" style={{ contain: 'paint' }}>
+            <div className="max-h-[70vh] overflow-auto rounded-md border" style={{ contain: 'paint' }} tabIndex={0} role="region" aria-label="Signal rejections table">
               <table className="w-full text-sm">
                 <thead className="sticky top-0 bg-surface-1 text-left text-xs text-ay-muted">
                   <tr>

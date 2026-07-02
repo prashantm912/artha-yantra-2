@@ -50,17 +50,26 @@ export interface ActiveStrikeIvViz {
 /**
  * Fold the active-strike IV series (single peak strike's CE/PE IV + price per bucket) into the dual-axis
  * chart's parallel arrays. Decimal strings cross to number ONLY here (the ECharts coordinate boundary);
- * nulls (an absent IV leg) ride through so the line gaps rather than plots a zero.
+ * nulls (an absent IV leg) ride through so the line gaps rather than plots a zero. IVs are solver-scale
+ * decimals (0.106) on the wire and plot in PERCENT (10.6) — the barometer's axis convention (§10.2-1).
  */
 export function foldActiveStrikeIvSeries(
   iv: ActiveStrikeIvPoint[] | null | undefined,
 ): ActiveStrikeIvViz {
   const points = iv ?? [];
   const num = (s: string | null | undefined): number | null => (s == null ? null : Number(s));
+  // ×100 with a 4dp round so binary-float dust (0.1064 → 10.639999…) never reaches the tooltip
+  const pct = (s: string | null | undefined): number | null =>
+    s == null ? null : Number((Number(s) * 100).toFixed(4));
   return {
     times: points.map((p) => hhmm(p.bucket)),
-    callIv: points.map((p) => num(p.ceIv)),
-    putIv: points.map((p) => num(p.peIv)),
+    callIv: points.map((p) => pct(p.ceIv)),
+    putIv: points.map((p) => pct(p.peIv)),
     price: points.map((p) => num(p.price)),
   };
+}
+
+/** Decimal-vol string → display percent with one decimal ("0.1064" → "10.6"); null-safe. */
+export function ivPct(s: string | null | undefined): string | null {
+  return s == null ? null : (Number(s) * 100).toFixed(1);
 }

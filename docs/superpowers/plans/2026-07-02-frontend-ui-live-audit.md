@@ -400,9 +400,11 @@ Mark each item DONE with its PR# here as it merges.
    rebase the cumulative Δ columns to the real 09:15 open. Fixes `/options/trending-oi` +
    `/options/trending-oi-pa` (§9.2-4, §10.2-10). The scalper gate pins its old rolling window via an
    explicit `buckets=20` (live gate inputs byte-identical). Verify row-for-row vs oipulse next session.
-2. **Snapshot capture phase-alignment (T2).** Align the 3-min OI capture to bucket boundaries; label the
-   EOD row; stop rendering the post-close artifact bucket (§9.1). Benefits accrue forward-only → early.
-   Verification: aligned buckets must match oipulse exactly (pipeline already proven exact).
+2. **DONE #441.** ~~Snapshot capture phase-alignment (T2).~~ Capture crons now fire on the IST minute
+   grid (options 0 */2, futures 0 *) with entry-minute stamps; the gate shifts back one cadence (pre-open
+   fire skipped, the 15:30:00 EOD fire kept); readers bucket by ts−1s (end-of-window labelling — a
+   boundary capture labels the window it terminates, killing the post-close artifact bucket); trending
+   pages tag the closing row "(EOD)" (§9.1). Deploy + next-session barometer verify pending.
 3. **Per-side IV solve for Active-Strikes-IV (§10.2-1).** PCP-implied forward forces Call IV = Put IV →
    skew ≡ 0 by construction. Solve/display per-leg IVs unconstrained; display in %, fix chip precision.
    **Parity caution:** display path only — the scalper gate's ATM-band IV input must stay byte-identical

@@ -55,6 +55,8 @@ export interface ActiveStrikes {
   sentimentSeries?: SentimentPoint[] | null;
   activeStrikeOiSeries?: ActiveStrikeOiPoint[] | null;
   activeStrikeIvSeries?: ActiveStrikeIvPoint[] | null;
+  /** Per-side SPOT-solved IVs (display path) — shows the call-vs-put IV split the PCP-forward solve hides. */
+  activeStrikeSideIvSeries?: ActiveStrikeIvPoint[] | null;
   asOf: string;
 }
 

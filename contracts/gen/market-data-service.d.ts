@@ -2088,6 +2088,7 @@ export interface components {
             sentimentSeries?: components["schemas"]["SentimentPoint"][];
             activeStrikeOiSeries?: components["schemas"]["ActiveStrikeOiPoint"][];
             activeStrikeIvSeries?: components["schemas"]["ActiveStrikeIvPoint"][];
+            activeStrikeSideIvSeries?: components["schemas"]["ActiveStrikeIvPoint"][];
             /** Format: date-time */
             asOf?: string;
         };

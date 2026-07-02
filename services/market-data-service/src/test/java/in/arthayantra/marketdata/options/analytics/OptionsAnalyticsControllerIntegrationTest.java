@@ -346,7 +346,8 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
         // buckets absent -> response shape UNCHANGED: NONE of the three series keys present
         .andExpect(jsonPath("$.sentimentSeries").doesNotExist())
         .andExpect(jsonPath("$.activeStrikeOiSeries").doesNotExist())
-        .andExpect(jsonPath("$.activeStrikeIvSeries").doesNotExist());
+        .andExpect(jsonPath("$.activeStrikeIvSeries").doesNotExist())
+        .andExpect(jsonPath("$.activeStrikeSideIvSeries").doesNotExist());
   }
 
   @Test
@@ -409,7 +410,12 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
         .andExpect(jsonPath("$.activeStrikeIvSeries[0].ceIv").value("13.840000"))
         .andExpect(jsonPath("$.activeStrikeIvSeries[0].peIv").value("19.200000"))
         .andExpect(jsonPath("$.activeStrikeIvSeries[0].price").value("22480.0000"))
-        .andExpect(jsonPath("$.activeStrikeIvSeries[1].ceIv").value("12.500000")); // newest-last
+        .andExpect(jsonPath("$.activeStrikeIvSeries[1].ceIv").value("12.500000")) // newest-last
+        // §10.2-1: the per-side SPOT-solved series rides the same buckets param (display path only —
+        // the stored-iv series above stays byte-identical for the gate's iv_slope input).
+        .andExpect(jsonPath("$.activeStrikeSideIvSeries.length()").value(2))
+        .andExpect(jsonPath("$.activeStrikeSideIvSeries[0].ceIv").isNotEmpty())
+        .andExpect(jsonPath("$.activeStrikeSideIvSeries[0].price").value("22480.0000"));
   }
 
   @Test

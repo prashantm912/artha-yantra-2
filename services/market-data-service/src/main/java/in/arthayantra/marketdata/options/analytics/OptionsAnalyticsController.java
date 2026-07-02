@@ -54,6 +54,7 @@ public class OptionsAnalyticsController {
   private final int heatmapWindow;
   private final int expiryLookbackDays;
   private final int defaultSessionIntervalMinutes;
+  private final BigDecimal riskFreeRate;
 
   public OptionsAnalyticsController(
       HistoricalOiReader reader,
@@ -77,7 +78,8 @@ public class OptionsAnalyticsController {
       @Value("${artha.options.premium-buckets:60}") int premiumBuckets,
       @Value("${artha.options.heatmap-window:10}") int heatmapWindow,
       @Value("${artha.options.expiry-lookback-days:15}") int expiryLookbackDays,
-      @Value("${artha.options.snapshot-interval-ms:300000}") long snapshotIntervalMs) {
+      @Value("${artha.options.snapshot-interval-ms:300000}") long snapshotIntervalMs,
+      @Value("${artha.options.risk-free-rate:0.065}") BigDecimal riskFreeRate) {
     this.reader = reader;
     this.chainService = chainService;
     this.activeStrikes = activeStrikes;
@@ -102,6 +104,7 @@ public class OptionsAnalyticsController {
     // Default session-stats bucket = the snapshot capture cadence (ms -> minutes), min 1, default 5.
     long minutes = snapshotIntervalMs / 60000L;
     this.defaultSessionIntervalMinutes = minutes <= 0 ? 5 : (int) minutes;
+    this.riskFreeRate = riskFreeRate;
   }
 
   public record OiStats(BigDecimal pcr, BigDecimal maxPain, long ceOi, long peOi, OffsetDateTime asOf) {}
@@ -115,6 +118,9 @@ public class OptionsAnalyticsController {
               activeStrikeOiSeries,
       @JsonInclude(JsonInclude.Include.NON_NULL) List<ActiveStrikeService.ActiveStrikeIvPoint>
               activeStrikeIvSeries,
+      // per-side SPOT-solved IVs (display path — see ActiveStrikeService.activeStrikeSideIvSeries)
+      @JsonInclude(JsonInclude.Include.NON_NULL) List<ActiveStrikeService.ActiveStrikeIvPoint>
+              activeStrikeSideIvSeries,
       OffsetDateTime asOf) {}
 
   public record StrikeView(BigDecimal strike, long ceOi, long peOi) {}
@@ -349,7 +355,7 @@ public class OptionsAnalyticsController {
     OffsetDateTime asOf = latest.get(latest.size() - 1).bucket();
     if (buckets == null) {
       // NON_NULL on all series omits the keys, keeping the absent-buckets response byte-identical.
-      return new ActiveStrikesResponse(sentiment, items, null, null, null, asOf);
+      return new ActiveStrikesResponse(sentiment, items, null, null, null, null, asOf);
     }
     // Anchor on the newest captured bucket (clock-independent); span the last `buckets` buckets.
     OffsetDateTime newest = latest.get(0).bucket();
@@ -364,8 +370,17 @@ public class OptionsAnalyticsController {
         activeStrikes.activeStrikeOiSeries(series);
     List<ActiveStrikeService.ActiveStrikeIvPoint> activeStrikeIvSeries =
         activeStrikes.activeStrikeIvSeries(series);
+    // Display-path per-side spot-solved IVs (§10.2-1); the gate's iv_slope keeps the series above.
+    List<ActiveStrikeService.ActiveStrikeIvPoint> activeStrikeSideIvSeries =
+        activeStrikes.activeStrikeSideIvSeries(series, exp, riskFreeRate);
     return new ActiveStrikesResponse(
-        sentiment, items, sentimentSeries, activeStrikeOiSeries, activeStrikeIvSeries, asOf);
+        sentiment,
+        items,
+        sentimentSeries,
+        activeStrikeOiSeries,
+        activeStrikeIvSeries,
+        activeStrikeSideIvSeries,
+        asOf);
   }
 
   /** /oi-analysis: the data-table archetype source (per-strike rows for the latest bucket). */

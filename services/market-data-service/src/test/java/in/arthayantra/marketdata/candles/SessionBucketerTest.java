@@ -23,7 +23,24 @@ class SessionBucketerTest {
 
   @Test
   void preOpenPrintsFoldIntoTheOpenBucket() {
+    // fallback only — the builder drops pre-open ticks via isPreOpen before bucketing
     assertThat(bucketer.bucketFor(ist("2026-06-10T09:08:30"))).isEqualTo(ist("2026-06-10T09:15:00"));
+  }
+
+  @Test
+  void isPreOpenFlagsOnlyTradingDayPreOpenPrints() {
+    // the 09:00–09:15 order-collection window streams indicative values, not trades
+    assertThat(bucketer.isPreOpen(ist("2026-06-10T09:08:30"))).isTrue();
+    assertThat(bucketer.isPreOpen(ist("2026-06-10T00:05:00"))).isTrue();
+    // session open and later are real prints
+    assertThat(bucketer.isPreOpen(ist("2026-06-10T09:15:00"))).isFalse();
+    assertThat(bucketer.isPreOpen(ist("2026-06-10T15:45:00"))).isFalse();
+    // non-trading day (Saturday) and uncovered years: never pre-open
+    assertThat(bucketer.isPreOpen(ist("2026-06-13T09:08:30"))).isFalse();
+    assertThat(bucketer.isPreOpen(ist("2030-03-03T09:08:30"))).isFalse();
+    // clamp-off (mock 24/7 feed): never pre-open
+    assertThat(new SessionBucketer(MarketCalendar.nse(), false).isPreOpen(ist("2026-06-10T09:08:30")))
+        .isFalse();
   }
 
   @Test

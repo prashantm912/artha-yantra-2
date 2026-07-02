@@ -10,9 +10,13 @@ import java.time.temporal.ChronoUnit;
 
 /**
  * IST minute-bucket flooring with session clamping (Phase 10 minimal-config note): on a trading
- * day, pre-open prints fold into the 09:15 open bucket and at/after-close prints fold into the
- * 15:29 last session bucket — day-boundary aware. Outside calendar knowledge (non-trading days,
- * uncovered years — the mock feed ticks 24/7) plain minute flooring applies.
+ * day, at/after-close prints fold into the 15:29 last session bucket — day-boundary aware.
+ * Pre-open prints are flagged via {@link #isPreOpen} and DROPPED by the builder: the 09:00–09:15
+ * order-collection window streams indicative equilibrium values (not trades) that swing hundreds
+ * of points, and folding them into the 09:15 bucket corrupted the open bar's high/low (audit
+ * 2026-07-02 §5 — Jul-02 NIFTY 50 09:15 low 23670 vs open 24005). {@link #bucketFor} keeps the
+ * 09:15 fold as a fallback for callers that skip the pre-open check. Outside calendar knowledge
+ * (non-trading days, uncovered years — the mock feed ticks 24/7) plain minute flooring applies.
  */
 public final class SessionBucketer {
 
@@ -32,6 +36,25 @@ public final class SessionBucketer {
   public SessionBucketer(MarketCalendar calendar, boolean clampToSession) {
     this.calendar = calendar;
     this.clampToSession = clampToSession;
+  }
+
+  /**
+   * True when the tick lands in a trading day's pre-open window (before 09:15 IST) and session
+   * clamping is on — such prints are indicative order-collection values, not trades, and must not
+   * enter OHLC aggregation. Always false with clamping off (mock 24/7 feed).
+   */
+  public boolean isPreOpen(OffsetDateTime tickTime) {
+    if (!clampToSession) {
+      return false;
+    }
+    OffsetDateTime ist = tickTime.withOffsetSameInstant(Ist.OFFSET);
+    boolean tradingDay;
+    try {
+      tradingDay = calendar.isTradingDay(ist.toLocalDate());
+    } catch (IllegalArgumentException uncoveredYear) {
+      return false;
+    }
+    return tradingDay && ist.toLocalTime().isBefore(MarketCalendar.SESSION_OPEN);
   }
 
   /** The 1m bucket start (IST) for a tick timestamp. */

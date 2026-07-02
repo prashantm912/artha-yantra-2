@@ -78,6 +78,7 @@ jobs:
           CI: "true"
           E2E_OWNER_PASSWORD: e2e-owner-password
         run: |
+          npx playwright install chromium   # FE playwright pins a different browser build than e2e/
           docker exec ay-redis redis-cli -n 1 EVAL "local k=redis.call('keys','login:*'); if #k>0 then redis.call('del',unpack(k)) end; return #k" 0 || true
           npx playwright test
 

@@ -36,6 +36,14 @@ authority is the OpenAlgo/React master plan; the design authority is `docs/desig
   frontend-revamp (#158–#177), scalper-tunable-infra (2b #220–#230), w3-engine-drift-impl (#251–#256),
   oip-ai-probability-spec (#255/#262).
 
+## Active — per-session signal analysis (`signal-analysis/`)
+- `signal-analysis/README.md` — the standing method + cadence for mining `strategy.signal_rejections`
+  after every market session (open-ended dimension list, SQL toolkit, live in-session data-health +
+  counterfactual procedure, data-model improvement backlog).
+- `signal-analysis/YYYY-MM-DD-session-findings.md` — one immutable findings file per session (named by
+  DATA date); periodic multi-session rollups consolidate them into tuning passes. First:
+  `2026-07-02-session-findings.md` (volume-floor unpassable; composite capped ~0.765 by 5 dead dots).
+
 ## Active — operations & references (top level)
 - `dev-setup.md`, `remote-access.md` — local/dev setup + remote access.
 - `retention.md`, `runbook-notes.md` — data-retention policy + ops runbook notes.

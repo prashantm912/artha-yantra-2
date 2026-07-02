@@ -2,11 +2,10 @@ package in.arthayantra.marketdata.nse.preopen;
 
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketcalendar.MarketCalendar;
-import in.arthayantra.marketdata.futures.preopen.FuturesPreOpenScan;
-import in.arthayantra.marketdata.futures.preopen.FuturesPreOpenScan.PreOpenRow;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.QuoteGateway;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.sql.Date;
 import java.time.Clock;
 import java.time.LocalDate;
@@ -29,11 +28,27 @@ import org.springframework.stereotype.Service;
  * <p>Universe = the F&O stocks (distinct NFO FUT underlying names that have an EQ bhavcopy row —
  * indices fall out naturally). ONE batched {@link QuoteGateway} call (~200 equity keys, well under
  * the Kite quote batch cap); prev close/high/low come from the latest EQ bhavcopy BEFORE the
- * capture day; the row maths reuse {@link FuturesPreOpenScan#row} (the tested fold). Symbols
- * without a resolvable quote are skipped (nothing to preserve). Re-capture upserts (idempotent).
+ * capture day. The row maths (change%, H/L break) mirror the futures pre-open fold but live HERE —
+ * importing {@code futures.preopen} from an nse slice closes a Modulith cycle. Symbols without a
+ * resolvable quote are skipped (nothing to preserve). Re-capture upserts (idempotent).
  */
 @Service
 public class PreOpenEquityScanService {
+
+  /** One preserved scan row: the pre-open price vs prev close + the prev-day H/L break badge. */
+  public record ScanRow(
+      String symbol,
+      BigDecimal preOpenPrice,
+      BigDecimal prevClose,
+      BigDecimal change,
+      BigDecimal changePct,
+      String prevDayBreak) {}
+
+  /** The typed GET envelope: a day's rows + the captured-session list (history picker). */
+  public record PreOpenScanView(LocalDate date, List<ScanRow> items, List<LocalDate> dates) {}
+
+  /** The typed capture result. */
+  public record CaptureResult(LocalDate date, int captured) {}
 
   private static final Logger log = LoggerFactory.getLogger(PreOpenEquityScanService.class);
 
@@ -87,10 +102,6 @@ public class PreOpenEquityScanService {
       PrevDay p = prev.get(symbol);
       BigDecimal prevClose = p == null ? null : p.close();
       BigDecimal change = prevClose == null ? null : q.lastPrice().subtract(prevClose);
-      // Reuse the tested futures pre-open fold for change% + the H/L break badge.
-      PreOpenRow row =
-          FuturesPreOpenScan.row(
-              symbol, q.lastPrice(), change, p == null ? null : p.high(), p == null ? null : p.low());
       jdbc.update(
           "INSERT INTO preopen_equity_snapshots "
               + "(trade_date, symbol, preopen_price, prev_close, change, change_pct, prev_day_break) "
@@ -101,23 +112,45 @@ public class PreOpenEquityScanService {
               + "captured_at = now()",
           Date.valueOf(day),
           symbol,
-          row.preOpenPrice(),
-          row.prevClose(),
-          row.change(),
-          row.changePct(),
-          row.prevDayBreak());
+          q.lastPrice(),
+          prevClose,
+          change,
+          changePct(change, prevClose),
+          classifyBreak(q.lastPrice(), p == null ? null : p.high(), p == null ? null : p.low()));
       persisted++;
     }
     return persisted;
   }
 
+  /** {@code change / prevClose × 100} (2 dp), or {@code null} when either is absent / prevClose=0. */
+  static BigDecimal changePct(BigDecimal change, BigDecimal prevClose) {
+    if (change == null || prevClose == null || prevClose.signum() == 0) {
+      return null;
+    }
+    return change.multiply(BigDecimal.valueOf(100)).divide(prevClose, 2, RoundingMode.HALF_UP);
+  }
+
+  /** "H" above the prev-day high, "L" below the prev-day low, else null (the break badge). */
+  static String classifyBreak(BigDecimal price, BigDecimal prevHigh, BigDecimal prevLow) {
+    if (price == null) {
+      return null;
+    }
+    if (prevHigh != null && price.compareTo(prevHigh) > 0) {
+      return "H";
+    }
+    if (prevLow != null && price.compareTo(prevLow) < 0) {
+      return "L";
+    }
+    return null;
+  }
+
   /** The preserved scan for {@code day} (advances first by change%, then declines). */
-  public List<PreOpenRow> scan(LocalDate day) {
+  public List<ScanRow> scan(LocalDate day) {
     return jdbc.query(
         "SELECT symbol, preopen_price, prev_close, change, change_pct, prev_day_break "
             + "FROM preopen_equity_snapshots WHERE trade_date = ? ORDER BY change_pct DESC NULLS LAST",
         (rs, n) ->
-            new PreOpenRow(
+            new ScanRow(
                 rs.getString("symbol"),
                 rs.getBigDecimal("preopen_price"),
                 rs.getBigDecimal("prev_close"),
@@ -125,6 +158,11 @@ public class PreOpenEquityScanService {
                 rs.getBigDecimal("change_pct"),
                 rs.getString("prev_day_break")),
         Date.valueOf(day));
+  }
+
+  /** The typed GET envelope for {@code day}. */
+  public PreOpenScanView view(LocalDate day) {
+    return new PreOpenScanView(day, scan(day), capturedDates());
   }
 
   /** Captured session dates, newest first (the page's history picker). */

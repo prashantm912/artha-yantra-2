@@ -1,11 +1,13 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Inbox } from 'lucide-react';
 import { formatDecimal } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
 import { DateInput } from '../../components/atoms/DateInput.tsx';
+import { Pager } from '../../components/atoms/Pager.tsx';
 import {
+  SIGNAL_RING_LIMIT,
   SIGNAL_STATUSES,
   useDismissSignal,
   useSignalDetail,
@@ -68,9 +70,12 @@ export function SignalsPage() {
   // Live = today (the STOMP feed merges in); Historical = a picked past day (static snapshot).
   const [mode, setMode] = useState<'live' | 'historical'>('live');
   const [date, setDate] = useState<string>(todayIst);
+  // Server-offset page past the 200-row window (audit §6); any filter/day change restarts at page 0.
+  const [offset, setOffset] = useState(0);
   const effectiveDate = mode === 'live' ? todayIst() : date;
   const { from, to } = dayBoundsIst(effectiveDate);
-  const q = useSignals(status, from, to);
+  useEffect(() => setOffset(0), [status, from, to]);
+  const q = useSignals(status, from, to, offset);
   useSignalsLive(status, from, to, mode === 'live');
   const take = useTakeSignal();
   const dismiss = useDismissSignal();
@@ -224,6 +229,7 @@ export function SignalsPage() {
             </div>
           )}
         </QueryState>
+        <Pager offset={offset} limit={SIGNAL_RING_LIMIT} count={rows.length} onOffset={setOffset} />
       </section>
 
       <aside className="overflow-auto rounded-lg border border-ay-border bg-surface-1 p-4">

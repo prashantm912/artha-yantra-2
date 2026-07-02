@@ -3,6 +3,7 @@ import { Ban } from 'lucide-react';
 import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
 import { DateInput } from '../../components/atoms/DateInput.tsx';
+import { Pager } from '../../components/atoms/Pager.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
@@ -58,15 +59,18 @@ function Margin({ value }: { value: Num }) {
   return <span className={cls}>{n >= 0 ? '+' : ''}{fmtNum(value)}</span>;
 }
 
+const PAGE_SIZE = 200;
+
 export function RejectionsPage() {
   const [date, setDate] = useState<string>(todayIst());
   const [rail, setRail] = useState<string>('');
+  const [offset, setOffset] = useState(0);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
   const isToday = date === todayIst();
   const bounds = useMemo(() => dayBoundsIst(date), [date]);
 
-  const q = useSignalRejections(null, rail || null, bounds.from, bounds.to);
+  const q = useSignalRejections(null, rail || null, bounds.from, bounds.to, PAGE_SIZE, offset);
   const counts = useRejectionRailCounts(null, bounds.from, bounds.to);
   const rows = q.data?.items ?? [];
   const railOptions = counts.data?.items ?? [];
@@ -91,13 +95,19 @@ export function RejectionsPage() {
         <DateInput
           value={date}
           ariaLabel="Rejection day"
-          onChange={(v) => setDate(v ?? todayIst())}
+          onChange={(v) => {
+            setDate(v ?? todayIst());
+            setOffset(0);
+          }}
         />
         {isToday && <span className="text-xs text-ay-muted">live (today)</span>}
         <Select
           value={rail}
           ariaLabel="Filter by blocking rail"
-          onChange={setRail}
+          onChange={(v) => {
+            setRail(v);
+            setOffset(0);
+          }}
           options={[
             { value: '', label: 'All rails' },
             ...railOptions.map((c) => ({ value: c.rail, label: `${c.rail} (${c.count})` })),
@@ -200,8 +210,9 @@ export function RejectionsPage() {
             </div>
             <p className="mt-2 text-xs text-ay-muted">
               Click any row to expand the full breakdown. {rows.length} blocked {rows.length === 1 ? 'entry' : 'entries'}
-              {rail ? ` for rail “${rail}”` : ''}.
+              {rail ? ` for rail “${rail}”` : ''}{offset > 0 ? ` (from row ${offset + 1})` : ''}.
             </p>
+            <Pager offset={offset} limit={PAGE_SIZE} count={rows.length} onOffset={setOffset} />
           </BeatBlock>
         )}
       </QueryState>

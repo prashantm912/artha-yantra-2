@@ -51,6 +51,8 @@ public class TrialResultPublisher {
     }
     entry.put("oosFoldObjectives", json(oosFoldObjectives));
     redis.opsForStream().add(Streams.OPT_RESULTS, entry);
+    // approximate cap — see JobStreamDispatcher.STREAM_MAXLEN (audit P2)
+    redis.opsForStream().trim(Streams.OPT_RESULTS, JobStreamDispatcher.STREAM_MAXLEN, true);
   }
 
   private String json(Object node) {

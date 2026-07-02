@@ -38,9 +38,19 @@ class TrialDispatcher:
             if "BUSYGROUP" not in str(exc):
                 raise
 
+    #: Approximate stream cap (audit P2): acked entries are never trimmed by Redis itself, and a
+    #: 48 MB shared instance under volatile-lru evicts the owner's SESSION keys before touching
+    #: TTL-less stream bytes. 10k dwarfs any real backlog; jobs are re-derivable from Postgres.
+    STREAM_MAXLEN = 10_000
+
     def dispatch(self, trial_job_id: str) -> None:
         """XADDs a queued TRIAL job id onto the trials stream (its jobs row already exists)."""
-        self._redis.xadd(TRIALS_STREAM, {"jobId": str(trial_job_id)})
+        self._redis.xadd(
+            TRIALS_STREAM,
+            {"jobId": str(trial_job_id)},
+            maxlen=self.STREAM_MAXLEN,
+            approximate=True,
+        )
 
     def read_results(
         self, max_count: int, block_ms: int = 2000, sweep_id: str | None = None

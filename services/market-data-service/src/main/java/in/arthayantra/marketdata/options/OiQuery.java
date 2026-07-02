@@ -25,6 +25,11 @@ public record OiQuery(
     if (!live && d == null) {
       throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "history mode requires date");
     }
+    if (live) {
+      // T4 (audit 2026-07-02 §9.3): live never serves a historical day — a stale date param left
+      // over from a History session must not time-travel a "Live"-labelled response.
+      d = null;
+    }
     return new OiQuery(live, name.trim(), d, iv, e);
   }
 

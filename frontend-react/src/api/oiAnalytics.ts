@@ -57,12 +57,17 @@ interface OiCtx {
 
 /** Reads the shared selection as individual primitives (stable for query keys). */
 function useOiCtx(): OiCtx {
+  const mode = useSymbolContext((s) => s.mode);
+  const date = useSymbolContext((s) => s.date);
   return {
     name: useSymbolContext((s) => s.name),
     expiry: useSymbolContext((s) => s.expiry),
     interval: useSymbolContext((s) => s.interval),
-    mode: useSymbolContext((s) => s.mode),
-    date: useSymbolContext((s) => s.date),
+    mode,
+    // Live NEVER carries a date (audit 2026-07-02 §9.3, T4): the store keeps the picked date for a
+    // return to History, but letting it leak into a Live request served YESTERDAY's rows under a
+    // "Live" label. Normalizing here fixes every hook's params AND query key together.
+    date: mode === 'history' ? date : null,
   };
 }
 

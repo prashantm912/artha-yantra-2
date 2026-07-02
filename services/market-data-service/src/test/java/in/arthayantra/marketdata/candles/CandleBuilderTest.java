@@ -53,6 +53,23 @@ class CandleBuilderTest {
   }
 
   @Test
+  void preOpenTicksAreDroppedAndNeverPolluteTheOpenBar() {
+    // AUDIT REGRESSION (2026-07-02 §5): pre-open indicative prints used to fold into the 09:15
+    // bucket — Jul-02 NIFTY 50's first bar carried low 23670.35 against a 24005.85 open. They
+    // must be dropped entirely: OHLC and the volume baseline start from the first real print.
+    Run run = run();
+    run.builder.onNormalizedTick(tick("2026-06-10T09:08:30", "23670.35", 0, null, 1));
+    run.builder.onNormalizedTick(tick("2026-06-10T09:15:02", "24005.85", 100, null, 2));
+    run.builder.onNormalizedTick(tick("2026-06-10T09:15:40", "24000.10", 250, null, 3));
+    run.builder.onNormalizedTick(tick("2026-06-10T09:16:01", "24010.00", 300, null, 4));
+    assertThat(run.bars).hasSize(1);
+    Candle open = run.bars.get(0);
+    assertThat(open.open()).isEqualByComparingTo("24005.85");
+    assertThat(open.low()).isEqualByComparingTo("24000.10");
+    assertThat(open.volume()).as("baseline = first real print's cumulative").isEqualTo(150);
+  }
+
+  @Test
   void postCloseTicksNeverReopenTheFlushedSessionCloseBar() {
     // AUDIT REGRESSION (B-6/B-7): every after-close print clamps into the 15:29 bucket;
     // once the flush sweep closes that bar it must stay closed FOREVER — the mock feed

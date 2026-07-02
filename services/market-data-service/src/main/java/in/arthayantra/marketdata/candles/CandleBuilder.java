@@ -57,6 +57,11 @@ public class CandleBuilder implements NormalizedTickListener {
 
   @Override
   public void onNormalizedTick(NormalizedTick tick) {
+    if (bucketer.isPreOpen(tick.timestamp())) {
+      // pre-open order-collection prints are indicative equilibrium values, not trades —
+      // folding them into the 09:15 bucket corrupted the open bar's range (audit 2026-07-02 §5)
+      return;
+    }
     String key = tick.exchange() + ":" + tick.tradingsymbol();
     Accumulator acc = accumulators.computeIfAbsent(key, k -> new Accumulator());
     synchronized (acc) {

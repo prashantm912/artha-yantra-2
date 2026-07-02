@@ -51,14 +51,11 @@ public class ScalperConfluenceGate {
 
   private final MarketOiClient client;
   private final ScalperOiProps oiProps;
-  private final MarketCalendar calendar;
 
-  /** Wires the market-data OI/chain client, the Tier-1 OI-analytics thresholds + the NSE calendar. */
-  public ScalperConfluenceGate(
-      MarketOiClient client, ScalperOiProps oiProps, MarketCalendar calendar) {
+  /** Wires the market-data OI/chain client + the Tier-1 OI-analytics thresholds. */
+  public ScalperConfluenceGate(MarketOiClient client, ScalperOiProps oiProps) {
     this.client = client;
     this.oiProps = oiProps;
-    this.calendar = calendar;
   }
 
   /** One tradeable option leg the seam picked (the V009 side-channel carrier, §3.11 two-leg). */
@@ -865,7 +862,7 @@ public class ScalperConfluenceGate {
     boolean valid = side == OptionType.CE ? conf.bullish() : conf.bearish();
     diag.failsScore(
         "confluence-composite", valid, conf.aggregate(), cfg.confluenceThreshold(),
-        compositeReason(conf, cfg.confluenceThreshold(), side));
+        compositeReason(conf, cfg.confluenceThreshold()));
     BigDecimal stop = structuralStop;
     // #7 (section 7) Hero-Zero buys the option ONE STRIKE INSIDE the short-covering strike (a CALL one
     // strike below the max-CE-OI strike for a bullish break, a PUT one above the max-PE-OI strike for a
@@ -906,7 +903,7 @@ public class ScalperConfluenceGate {
    * A human reason for a blocked confluence composite: which of the decisive legs failed (VWAP side,
    * 60m bias, the 40/40 stand-aside) or, when all held, the aggregate falling short of the threshold.
    */
-  private static String compositeReason(Confluence conf, BigDecimal threshold, OptionType side) {
+  private static String compositeReason(Confluence conf, BigDecimal threshold) {
     if (conf.standAside()) {
       return "stand-aside (both-IV-high 40/40 suppression)";
     }

@@ -338,12 +338,20 @@ export function useVix() {
 }
 
 /** The faithful Options Chain feed (§20.7): live greeks/IV/OI/LTP/PCR + per-leg interval deltas. */
-export function useChainTable() {
+/**
+ * The faithful chain feed. {@code window='cumulative'} switches the delta columns to the
+ * day-cumulative ("Full day") reference — ΔOI/ΔLTP vs the SESSION-OPEN bucket, the barometer's
+ * default period (§9.2-3); absent → the per-interval delta (unchanged default).
+ */
+export function useChainTable(window?: 'interval' | 'cumulative') {
   const ctx = useOiCtx();
+  const win = window === 'cumulative' ? 'cumulative' : null;
   return useQuery({
-    queryKey: ['oi', 'chain-table', ctx.name, ctx.expiry, ctx.interval, ctx.mode, ctx.date],
-    queryFn: () =>
-      oiGet<ChainTable | null>('/market/options/chain-table', oiParams(ctx, true), null),
+    queryKey: ['oi', 'chain-table', ctx.name, ctx.expiry, ctx.interval, ctx.mode, ctx.date, win],
+    queryFn: () => {
+      const params = win ? `${oiParams(ctx, true)}&window=${win}` : oiParams(ctx, true);
+      return oiGet<ChainTable | null>('/market/options/chain-table', params, null);
+    },
     enabled: satisfiable(ctx, true),
   });
 }

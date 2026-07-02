@@ -404,6 +404,8 @@ public class OptionsAnalyticsController {
    * time chain cannot carry, derived from the latest snapshot pair using the spurt convention. The
    * displayed OI/LTP stay LIVE (flash on change); the "Chng" columns are the snapshot interval delta.
    * Deltas are null (not a 422) when snapshots have not accrued, so the live chain still renders.
+   * {@code window=cumulative} switches the delta reference to the SESSION-OPEN bucket ("Full day" —
+   * the barometer's default period; audit 2026-07-02 §9.2-3), same convention as /spurt.
    * HISTORY mode ({@code mode=history} + a {@code date}) instead serves the SELECTED session's chain,
    * pivoted from the captured snapshots (F1) — see {@link #historicalChainTable}; live mode is unchanged.
    */
@@ -413,12 +415,16 @@ public class OptionsAnalyticsController {
       @RequestParam String name,
       @RequestParam(required = false) String date,
       @RequestParam(required = false) String interval,
-      @RequestParam(required = false) String expiry) {
+      @RequestParam(required = false) String expiry,
+      @RequestParam(required = false) String window) {
     OiQuery q = OiQuery.of(mode, name, date, interval, expiry);
     // expiry defaults to the nearest on/after today — parity with the core /chain endpoint.
     LocalDate exp = chainService.resolveExpiry(q.name(), q.expiry());
     Map<String, LegDeltas> deltas =
-        chainDeltas(reader.latestPair(q.name(), exp, q.interval(), q.date()));
+        chainDeltas(
+            "cumulative".equalsIgnoreCase(window)
+                ? cumulativePair(q, exp)
+                : reader.latestPair(q.name(), exp, q.interval(), q.date()));
     // F1: History mode reads the session's captured snapshot chain, NOT today's live black76 chain,
     // so the Options Chain page in History mode shows the requested past session (spot/OI/LTP/IV = that
     // day). Live mode (date == null) keeps the live greeks chain unchanged.

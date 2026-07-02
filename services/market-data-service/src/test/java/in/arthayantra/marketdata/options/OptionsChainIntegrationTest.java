@@ -256,6 +256,47 @@ class OptionsChainIntegrationTest extends MarketDataIntegrationTestBase {
                 .value(org.hamcrest.Matchers.hasItem("LONG_UNWINDING")));
   }
 
+  @Test
+  void chainTableFullDayWindowRebasesDeltasToTheSessionOpen() throws Exception {
+    // §9.2-3 "Full day": window=cumulative pairs the newest bucket against the SESSION-OPEN bucket
+    // (the barometer's default period) instead of the prior bucket. Three buckets on an isolated
+    // day: open oi 1000 -> 1500 -> newest 1200. Interval delta = -300; full-day delta = +200.
+    OptionsChainService.Chain chain = chainService.chain("NIFTY 50", null);
+    BigDecimal atm =
+        chain.rows().stream()
+            .min(java.util.Comparator.comparing(r -> r.strike().subtract(chain.spot()).abs()))
+            .orElseThrow()
+            .strike();
+    LocalDate exp = chain.expiry();
+    String k = atm.toPlainString();
+    insertSnap(OffsetDateTime.parse("2026-06-13T09:36:00+05:30"), exp, k, "CE", "100", 1000L);
+    insertSnap(OffsetDateTime.parse("2026-06-13T11:06:00+05:30"), exp, k, "CE", "115", 1500L);
+    insertSnap(OffsetDateTime.parse("2026-06-13T13:06:00+05:30"), exp, k, "CE", "110", 1200L);
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/chain-table")
+                .param("name", "NIFTY 50")
+                .param("interval", "5m")
+                .param("mode", "history")
+                .param("date", "2026-06-13")
+                .param("window", "cumulative"))
+        .andExpect(status().isOk())
+        .andExpect(
+            jsonPath("$.rows[*].ce.deltas.oiChange").value(org.hamcrest.Matchers.hasItem(200)));
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/chain-table")
+                .param("name", "NIFTY 50")
+                .param("interval", "5m")
+                .param("mode", "history")
+                .param("date", "2026-06-13"))
+        .andExpect(status().isOk())
+        .andExpect(
+            jsonPath("$.rows[*].ce.deltas.oiChange").value(org.hamcrest.Matchers.hasItem(-300)));
+  }
+
   /** Seeds one option_chain_snapshots row (the chain-table delta overlay needs a captured pair). */
   private void insertSnap(
       OffsetDateTime ts, LocalDate exp, String strike, String type, String ltp, Long oi) {

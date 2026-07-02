@@ -106,11 +106,12 @@ export function useSignalRejections(
   from: string | null = null,
   to: string | null = null,
   limit = 200,
+  offset = 0,
 ) {
   return useQuery({
-    queryKey: [KEY, strategyVersionId, rail, from, to, limit],
+    queryKey: [KEY, strategyVersionId, rail, from, to, limit, offset],
     queryFn: () => {
-      const params = new URLSearchParams({ limit: String(limit), offset: '0' });
+      const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
       if (strategyVersionId) params.set('strategyVersionId', strategyVersionId);
       if (rail) params.set('rail', rail);
       if (from) params.set('from', from);

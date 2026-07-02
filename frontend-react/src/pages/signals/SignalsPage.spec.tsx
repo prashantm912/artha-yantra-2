@@ -52,6 +52,7 @@ const take = vi.fn();
 const dismiss = vi.fn();
 
 vi.mock('../../api/signals.ts', () => ({
+  SIGNAL_RING_LIMIT: 200,
   SIGNAL_STATUSES: ['ACTIVE', 'EXPIRED', 'TAKEN', 'DISMISSED'],
   useSignals: () => ({ data: { items: [signal] }, isFetching: false, isLoading: false, refetch: () => {} }),
   useSignalsLive: () => {},

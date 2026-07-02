@@ -122,17 +122,19 @@ const SIGNALS_KEY = 'signals';
 /**
  * REST history page; the live channel and reconnect heal it. `status=null` = all. `from`/`to` are
  * ISO datetimes bounding `generated_at` (the Live=today vs Historical=picked-day filter) — null = no
- * bound. They join the query key so each day is cached separately.
+ * bound. They join the query key so each day is cached separately. `offset` pages past the 200-row
+ * window (audit §6 — the cap was silent); the live merge only touches page 0.
  */
 export function useSignals(
   status: string | null,
   from: string | null = null,
   to: string | null = null,
+  offset: number = 0,
 ) {
   return useQuery({
-    queryKey: [SIGNALS_KEY, status, from, to],
+    queryKey: [SIGNALS_KEY, status, from, to, offset],
     queryFn: () => {
-      const params = new URLSearchParams({ limit: '200', offset: '0' });
+      const params = new URLSearchParams({ limit: '200', offset: String(offset) });
       if (status) params.set('status', status);
       if (from) params.set('from', from);
       if (to) params.set('to', to);
@@ -179,7 +181,7 @@ export function useSignalsLive(
       } catch {
         return; // unparseable frame — the REST snapshot heals
       }
-      qc.setQueryData<SignalPage>([SIGNALS_KEY, status, from, to], (prev) => {
+      qc.setQueryData<SignalPage>([SIGNALS_KEY, status, from, to, 0], (prev) => {
         const items = prev?.items ?? [];
         if (status && sig.status !== status) {
           const next = items.map((i) => (i.id === sig.id ? sig : i));

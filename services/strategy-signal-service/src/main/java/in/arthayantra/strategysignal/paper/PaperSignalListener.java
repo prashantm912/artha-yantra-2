@@ -69,7 +69,11 @@ public class PaperSignalListener {
    * trades, matching {@code LiveOrderService} (paper booked the index future before: PE scalps were
    * sign-inverted and hero-zero qtys landed on ~₹1cr future notional — audit P0-3). The persisted
    * SL/TP are index-future levels, so they are NOT passed as brackets on the option leg (wrong
-   * basis — the instant-close kind of wrong); the engine's exit passes close it via SignalExited.
+   * basis — the instant-close kind of wrong); instead the YAML's {@code premium_pct} exit rules are
+   * resolved against the option's own entry premium into bracket levels (P1-8 — §2.4's "premium
+   * exits work on BOTH paths" made true live: {@code PaperBracketEvaluator} enforces them against
+   * the option LTP, mirroring the backtest's {@code PremiumExitEvaluator}). The engine's structural
+   * stop / time stop still close it via SignalExited — whichever fires first wins.
    * A non-scalper/manual take is unchanged: the signal's primary leg, with its same-basis SL/TP as
    * bracket levels so {@code PaperBracketEvaluator} backstops the position (audit P0-2).
    */
@@ -82,11 +86,15 @@ public class PaperSignalListener {
       // Prefer the captured option premium: the auto-take's fillPrice is the FUTURE entry price
       // (AutoPaperListener mirrors a manual take), which is the wrong scale for the option leg.
       java.math.BigDecimal optionLtp = decimal(r.scalperDetail(), "option_ltp");
+      PremiumBrackets brackets =
+          optionLtp == null
+              ? PremiumBrackets.NONE
+              : premiumBrackets(r.strategyVersionId(), optionLtp);
       paper.openOrder(
           new PaperService.OrderRequest(
               event.signalId(), r.tradeableExchange(), r.tradeableTradingsymbol(), "BUY",
-              event.qty(), optionLtp != null ? optionLtp : event.fillPrice(), null, null,
-              subaccountIdx));
+              event.qty(), optionLtp != null ? optionLtp : event.fillPrice(),
+              brackets.stopLoss(), brackets.takeProfit(), subaccountIdx));
       return;
     }
     paper.openOrder(
@@ -95,6 +103,51 @@ public class PaperSignalListener {
             row.map(SignalRepository.SignalRow::stopLoss).orElse(null),
             row.map(SignalRepository.SignalRow::target).orElse(null),
             subaccountIdx));
+  }
+
+  /** Option-premium bracket levels derived from the YAML's premium_pct exit rules. */
+  record PremiumBrackets(java.math.BigDecimal stopLoss, java.math.BigDecimal takeProfit) {
+    static final PremiumBrackets NONE = new PremiumBrackets(null, null);
+  }
+
+  /**
+   * Resolves the version's {@code exit_rules} premium_pct percentages against the option entry
+   * premium: a long option's {@code stop_loss 50} → SL = ltp×0.50; {@code take_profit 35} →
+   * TP = ltp×1.35 (2dp HALF_UP). Non-premium_pct bases and absent rules yield no level — the
+   * engine's structural/time exits still bound the position.
+   */
+  private PremiumBrackets premiumBrackets(java.util.UUID versionId, java.math.BigDecimal ltp) {
+    try {
+      var config = signals.versionConfig(versionId).orElse(null);
+      if (config == null) {
+        return PremiumBrackets.NONE;
+      }
+      java.math.BigDecimal sl = null;
+      java.math.BigDecimal tp = null;
+      for (com.fasterxml.jackson.databind.JsonNode rule : config.path("exit_rules")) {
+        if (!"premium_pct".equals(rule.path("params").path("basis").asText())) {
+          continue;
+        }
+        java.math.BigDecimal pct = decimal(rule.path("params"), "value");
+        if (pct == null) {
+          continue;
+        }
+        java.math.BigDecimal fraction =
+            pct.divide(new java.math.BigDecimal("100"), 6, java.math.RoundingMode.HALF_UP);
+        String type = rule.path("type").asText();
+        if ("stop_loss".equals(type)) {
+          sl = ltp.multiply(java.math.BigDecimal.ONE.subtract(fraction))
+              .setScale(2, java.math.RoundingMode.HALF_UP);
+        } else if ("take_profit".equals(type)) {
+          tp = ltp.multiply(java.math.BigDecimal.ONE.add(fraction))
+              .setScale(2, java.math.RoundingMode.HALF_UP);
+        }
+      }
+      return new PremiumBrackets(sl, tp);
+    } catch (Exception e) {
+      log.warn("premium bracket derivation failed for version {}: {}", versionId, e.getMessage());
+      return PremiumBrackets.NONE;
+    }
   }
 
   /** A decimal field off the scalper_detail JSON; null when absent/non-numeric. */

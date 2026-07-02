@@ -79,7 +79,11 @@ export function AppShell() {
         <span className="font-semibold text-accent">ArthaYantra</span>
         <MegaMenu />
         <div className="ml-auto flex flex-wrap items-center gap-3">
-          <IstClock />
+          {/* Phone: clock + theme picker hide below md (theme lives in Settings too) — the wrapped
+              topbar stacked ~3 rows and ate ~300px of a 915px viewport (audit 2026-07-02 §4). */}
+          <span className="hidden md:inline-flex">
+            <IstClock />
+          </span>
           {mockMode && (
             <span className="rounded bg-warn/20 px-1.5 py-0.5 text-xs font-medium text-warn">
               MOCK
@@ -90,7 +94,7 @@ export function AppShell() {
             aria-label="Theme"
             value={theme}
             onChange={(e) => setTheme(e.target.value as ThemeId)}
-            className="h-8 rounded border border-ay-border bg-surface-2 px-1.5 text-xs text-ay-text"
+            className="hidden h-8 rounded border border-ay-border bg-surface-2 px-1.5 text-xs text-ay-text md:block"
           >
             {THEMES.map((t) => (
               <option key={t.id} value={t.id}>

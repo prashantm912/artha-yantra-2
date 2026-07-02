@@ -84,8 +84,10 @@ export function AppShell() {
           <span className="hidden md:inline-flex">
             <IstClock />
           </span>
+          {/* --ay-text on the faint warn tint keeps WCAG AA in every theme — text-warn on
+              bg-warn/20 measured 3.81:1 and failed axe on EVERY mock-stack page (e2e repair). */}
           {mockMode && (
-            <span className="rounded bg-warn/20 px-1.5 py-0.5 text-xs font-medium text-warn">
+            <span className="rounded bg-warn/10 px-1.5 py-0.5 text-xs font-semibold text-ay-text ring-1 ring-warn">
               MOCK
             </span>
           )}

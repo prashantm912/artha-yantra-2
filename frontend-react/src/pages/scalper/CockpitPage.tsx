@@ -171,7 +171,7 @@ export function CockpitPage() {
               No chain — pick an underlying + expiry with a live option chain.
             </p>
           ) : (
-            <div className="max-h-[26rem] overflow-auto" tabIndex={0} role="region" aria-label="Cockpit panel">
+            <div className="max-h-[26rem] overflow-auto" tabIndex={0} role="region" aria-label="Options chain panel">
               <OptionsChainTable
                 rows={chainRows}
                 spot={chain?.spot ?? null}
@@ -190,7 +190,7 @@ export function CockpitPage() {
               No matrix — pick an index + interval with an active (or captured) session.
             </p>
           )}
-          <div className="max-h-[26rem] overflow-auto" tabIndex={0} role="region" aria-label="Cockpit panel">
+          <div className="max-h-[26rem] overflow-auto" tabIndex={0} role="region" aria-label="OI confluence panel">
             <ConnectingDotsTable rows={cdRows} />
           </div>
         </Panel>

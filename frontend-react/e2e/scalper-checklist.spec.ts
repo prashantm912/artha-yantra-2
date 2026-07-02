@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
+import { settleAnimations } from './helpers';
 
 // Scalper manual-verify checklist (Phase 4b, owner-locked soft-gate). On the mock stack global-setup
 // publishes E2E_STRATEGY_YAML, so an ACTIVE signal feed exists on /scalper. The checklist only mounts
@@ -16,8 +17,13 @@ const PLACE = /^Place paper (BUY|SELL)$/; // the cockpit ticket's place button
  * Click each ACTIVE signal in the feed until one renders the ManualVerifyChecklist. Returns true when
  * a scalper signal was found + selected (the checklist is visible), false when the feed has none.
  */
+/** Feed rows only — the ticket's "Place paper BUY/SELL" also ends in BUY/SELL, so exclude it. */
+function signalFeedButtons(page: Page) {
+  return page.getByRole('button', { name: /(BUY|SELL)$/ }).filter({ hasNotText: 'Place paper' });
+}
+
 async function selectSignalWithChecklist(page: Page): Promise<boolean> {
-  const feedButtons = page.getByRole('button', { name: /(BUY|SELL)$/ });
+  const feedButtons = signalFeedButtons(page);
   const count = await feedButtons.count();
   for (let i = 0; i < count; i++) {
     await feedButtons.nth(i).click();
@@ -41,9 +47,12 @@ test('the scalper cockpit gates Place behind the manual-verify checklist (or ren
   await expect(page.getByRole('heading', { name: 'Paper order ticket' })).toBeVisible();
 
   // Wait for the live feed to settle: either signal rows appear or the empty-state copy renders.
-  const feedButtons = page.getByRole('button', { name: /(BUY|SELL)$/ });
+  // .first() on the whole or-chain — both sides can be present at once (strict-mode safe).
   await expect(
-    feedButtons.first().or(page.getByText('No live signals — publish a strategy.')),
+    signalFeedButtons(page)
+      .first()
+      .or(page.getByText('No live signals — publish a strategy.'))
+      .first(),
   ).toBeVisible({ timeout: 20_000 });
 
   const found = await selectSignalWithChecklist(page);
@@ -66,6 +75,8 @@ test('the scalper cockpit gates Place behind the manual-verify checklist (or ren
     await expect(page.getByRole('heading', { name: 'Live signals' })).toBeVisible();
   }
 
+  await settleAnimations(page);
+
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations).toEqual([]);
 });
@@ -77,6 +88,6 @@ test.describe('mobile (~480px)', () => {
     await page.goto('/scalper');
     await expect(page.getByTestId('app-shell')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Paper order ticket' })).toBeVisible();
-    await expect(page.getByLabel('Instrument')).toBeVisible();
+    await expect(page.getByLabel('Instrument', { exact: true })).toBeVisible();
   });
 });

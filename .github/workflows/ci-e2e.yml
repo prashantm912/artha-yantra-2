@@ -72,13 +72,11 @@ jobs:
       # booted. Vite dev server proxies /api + /ws to the running gateway; reset the login limiter
       # (mock Redis db1) first so the one login in FE global-setup can't hit the smoke suite's
       # cooldown.
-      # NON-BLOCKING for now: the suite ran in no CI and its assertions are coupled to a
-      # data-rich local stack (e.g. ">5 underlyings" — the credential-free CI mock serves 2).
-      # It runs + uploads its report for visibility; flip continue-on-error off once the specs
-      # are repaired for the CI mock-data environment (tracked follow-up).
+      # BLOCKING since the spec repair (audit follow-up, 2026-07-02): assertions are now
+      # mock-data-tolerant (>1 underlyings, settle-animations before axe, exact-label locators)
+      # and the mock-only MOCK badge is AA-contrast — 44/44 green on a local mock stack.
       - name: Frontend e2e + axe a11y (reuses the booted mock stack)
         id: fe-e2e
-        continue-on-error: true
         working-directory: frontend-react
         env:
           CI: "true"
@@ -89,7 +87,8 @@ jobs:
           npx playwright test
 
       - name: Upload frontend e2e report
-        if: steps.fe-e2e.outcome == 'failure'
+        # failure() so this still runs now that fe-e2e hard-fails the job (no continue-on-error)
+        if: failure() && steps.fe-e2e.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: frontend-playwright-report

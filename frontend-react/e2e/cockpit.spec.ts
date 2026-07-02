@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
+import { settleAnimations } from './helpers';
 
 // Pre-authenticated via the shared storageState (global-setup). Verifies the unified Scalping Cockpit
 // (/cockpit) — one operator screen composing the option chain · OI-confluence matrix · straddle ·
@@ -25,11 +26,12 @@ test('Scalping Cockpit renders the shared control bar + every panel, no axe viol
   await expect(page.getByRole('heading', { name: 'Scalping cockpit' })).toBeAttached();
 
   // The SINGLE shared FilterBar drives all panels (name/expiry/interval/mode).
-  await expect(page.getByLabel('Underlying')).toBeVisible();
-  await expect(page.getByLabel('Expiry')).toBeVisible();
-  await expect(page.getByLabel('Interval')).toBeVisible();
+  await expect(page.getByLabel('Underlying', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Expiry', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Interval', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Toggle live/history mode' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Go' })).toBeVisible();
+  // .first(): a composed panel may carry its own Go beside the shared FilterBar's.
+  await expect(page.getByRole('button', { name: 'Go' }).first()).toBeVisible();
 
   // Every composed panel heading is present.
   for (const name of PANELS) {
@@ -40,9 +42,11 @@ test('Scalping Cockpit renders the shared control bar + every panel, no axe viol
   await expect(page.getByText('Sentiment', { exact: false })).toBeVisible();
 
   // The paper-trading console: the risk-limit guard + the book's empty state (mock has no positions).
-  await expect(page.getByLabel('Risk limits')).toBeVisible();
+  await expect(page.getByLabel('Risk limits', { exact: true })).toBeVisible();
   await expect(page.getByText('Kill switch:', { exact: false })).toBeVisible();
   await expect(page.getByText(/No open positions —/)).toBeVisible();
+
+  await settleAnimations(page);
 
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations).toEqual([]);
@@ -56,12 +60,14 @@ test.describe('mobile (~480px)', () => {
     await page.goto('/cockpit');
     await expect(page.getByTestId('app-shell')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Scalping cockpit' })).toBeAttached();
-    await expect(page.getByLabel('Underlying')).toBeVisible();
+    await expect(page.getByLabel('Underlying', { exact: true })).toBeVisible();
 
     // Panels stay reachable (single scrollable column).
     for (const name of PANELS) {
       await expect(page.getByRole('heading', { name })).toBeVisible();
     }
+
+    await settleAnimations(page);
 
     const results = await new AxeBuilder({ page }).analyze();
     expect(results.violations).toEqual([]);

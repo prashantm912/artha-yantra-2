@@ -386,3 +386,82 @@ with matched params where their plan allowed (their historical depth = 2 days). 
 OI buckets (aligned), FII/DII capital market, participant-wise counts, delivery data, OI buzz, futures
 OI totals, LSR, holidays. Divergence classes are fully enumerated in §9.2/§10.2 — nothing else
 surfaced.
+
+---
+
+## 11. Fix sequence — the ordered plan for ALL findings
+
+Ordered by trust-impact → dependency → effort. One PR per numbered item unless marked *batch*.
+Mark each item DONE with its PR# here as it merges.
+
+### Wave 1 — data correctness (backend, market-data)
+
+1. **Trending-OI window cap + false session-open baseline (T1).** Serve the full session; rebase the
+   cumulative Δ columns to the real 09:15 open. Fixes `/options/trending-oi` + `/options/trending-oi-pa`
+   (§9.2-4, §10.2-10). Verify row-for-row vs oipulse next session.
+2. **Snapshot capture phase-alignment (T2).** Align the 3-min OI capture to bucket boundaries; label the
+   EOD row; stop rendering the post-close artifact bucket (§9.1). Benefits accrue forward-only → early.
+   Verification: aligned buckets must match oipulse exactly (pipeline already proven exact).
+3. **Per-side IV solve for Active-Strikes-IV (§10.2-1).** PCP-implied forward forces Call IV = Put IV →
+   skew ≡ 0 by construction. Solve/display per-leg IVs unconstrained; display in %, fix chip precision.
+   **Parity caution:** display path only — the scalper gate's ATM-band IV input must stay byte-identical
+   (golden suite + live-gate check in the PR).
+4. **Futures EOD analyzer: front-month default** (currently AUGFUT) + optional continuous current-month
+   view (§10.2-4).
+
+### Wave 2 — trust UX (frontend)
+
+5. **Watermark sweep (T3)** — remove/replace `Oi Pulse` in the 7+ chart files (§9.5). Trivial; first FE PR.
+6. **Pending-renders-as-empty** — skeletons while queries are pending / FilterBar unsatisfied on
+   options-chain, straddle and every expiry-gated page; fold in the calendar-spread expiry-heal opt-out
+   (§3-P0). The top pass-1 item.
+7. **History→Live stale-render leak (T4)** + History date-input validation (the "72026" hole) (§9.3).
+8. **Cockpit as-of + 30–60s market-hours auto-refresh** on the four market panels (§6).
+9. *Batch:* **BUY-red on Backtest Trades** → bull-green/neutral; **Settings "Data sync: NEVER_RUN" lie**;
+   **duplicate topbar/page clocks** → one source.
+
+### Wave 3 — semantics vs the barometer (same label, different meaning)
+
+10. **Participant-wise OI semantics** — % denominator (adopt segment-share, the standard reading) +
+    Interpretation basis (position-level vs day-delta; pick one, label it) (§9.2-1/2).
+11. **"Full day" period option on the options chain** (+ Select-Period on oi-stats) so OI-Chng can answer
+    the day-cumulative question (§9.2-3).
+12. **Freshness labelling** — loud "EOD · as of <date>" banners where live tiles sit beside EOD aggregates
+    (sector-stats, sector-heatmap, equity-returns, index-contribution); big-OI "top-N snapshot" subtitle
+    (§10.2-11, §9.2-5).
+13. **Trending-OI basket clarity** — label the Δ columns chain-wide vs oipulse's 15-strike basket (or add
+    the basket selector — Wave-5 owner call).
+
+### Wave 4 — workflow + polish (batchable)
+
+14. *Batch:* **journal delete confirm** + Disc./Emo. scale hints; **watchlist remove confirm** (§10.2-2).
+15. **Compare Backtests run-picker** (checkbox flow from the jobs list) (§10.2-3).
+16. *Batch:* **jobs/results show strategy names not hashes**; rename "Scalper cockpit"; strategy-list tag
+    chips → +N collapse; NOTIFY save feedback.
+17. *Batch (a11y):* keyboard access on scrollable tables (`scrollable-region-focusable`), the few
+    color-contrast nodes, consistent focus rings (§4).
+18. *Batch (mobile):* chain jump-to-ATM + ATM strike-window; collapse the 3-row nav (§4).
+19. *Batch (charts polish):* heatmap colorbar collision; straddle min/max pins; RSI pane divider + stray
+    cross-pane labels; dead volume pane on index charts; multiframe 1m default for index symbols;
+    futures-OI "1.8Cr" axis resolution; equity-curve tick dedup + short-window CAGR suppression; 09:15
+    gap-artifact bar; world-indices closed-market state; breadth ETF filter; absurd-PCR floor;
+    signals/rejections 200-row paging (§5, §10.2-5).
+
+### Wave 5 — owner decisions BEFORE build (scope/capacity)
+
+Each needs an explicit yes/no + sizing first:
+
+- **Stock-chain interval OI capture** — unlocks stock OI analytics + full-universe market-movers/oi-spurt;
+  large storage/quota cost (~200 chains) (§9.3, §9.4).
+- **Equity pre-open full scanner** (preserved snapshot + history) vs keep the bank-radar descope (§9.4).
+- **Index-contribution live points** (deferred item; the barometer's live mode is the useful one) (§9.4).
+- **Open-high-strategy live O=H flags + Hit/triggered-time** (§10.2-8); **OI-expiry 5-strike basket**
+  (§10.2-9); **option-premium negative extrinsic** (§9.4); **trending-OI graph-view / positional /
+  strike-basket selector** (§7); **risk-calculator option-picker autofill** (§10.2-12); **big-OI session
+  event-log view** (§9.2-5); **multiple-window compact pane headers** (§9.6).
+- Existing chip: **FE-e2e spec repair** (task_499edb0f) → then flip the #422 CI shard to blocking.
+
+**Rationale:** Waves 1–2 remove wrong-data and can't-tell-if-broken risk before trading off these
+screens; Wave 3 stops same-label-different-meaning misreads vs oipulse; Wave 4 is ergonomics; Wave 5
+spends real capacity and is owner-gated. Waves 1 and 2 are independent — backend/frontend PRs can
+interleave.

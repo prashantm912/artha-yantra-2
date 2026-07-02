@@ -18,9 +18,12 @@ const RESET_LOGIN_LIMITER_LUA =
  */
 export function resetLoginLimiter(): void {
   try {
+    // The mock stack lives on Redis LOGICAL DB 1 (P1-7 pins ARTHA_REDIS_DB=1) — without -n the
+    // reset EVALs against db0 and the limiter keys survive, tripping the cooldown mid-suite.
+    const db = process.env['ARTHA_REDIS_DB'] ?? '1';
     execFileSync(
       'docker',
-      ['exec', 'ay-redis', 'redis-cli', 'EVAL', RESET_LOGIN_LIMITER_LUA, '0'],
+      ['exec', 'ay-redis', 'redis-cli', '-n', db, 'EVAL', RESET_LOGIN_LIMITER_LUA, '0'],
       { stdio: 'ignore' },
     );
   } catch {

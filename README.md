@@ -42,7 +42,7 @@ on one Windows 11 machine under Docker Desktop, behind a single loopback-bound g
 git clone <repo> && cd artha-yantra-2
 pip install pre-commit && pre-commit install
 cp .env.example .env          # mock mode needs no secret values
-.\ay.ps1 up                   # Linux/WSL2: ./ay.sh up
+.\ay.ps1 up                   # Linux/WSL2: pwsh ./ay.ps1 up (ay.sh removed — lacked profile isolation)
 # → http://127.0.0.1:8080 — login, dashboard on deterministic mock ticks (D13)
 ```
 

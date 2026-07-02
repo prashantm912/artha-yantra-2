@@ -130,11 +130,19 @@ public class EquityIndexContributionService {
     return out;
   }
 
-  /** The index's latest 1d close on/before {@code asOf} from the candle archive, or {@code null}. */
+  /**
+   * The index's latest 1d close on/before {@code asOf} from the candle archive, or {@code null}.
+   *
+   * <p>Daily buckets are IST-day-aligned instants (00:00+05:30 = 18:30Z of the PREVIOUS day), and
+   * the container session is UTC, so a bare {@code bucket::date} lands one day early and today's
+   * accruing bar would slip under an {@code asOf} of yesterday (audit P2 — the lone bare-::date
+   * violator; CLAUDE.md bans it). Convert to IST before the date cast, matching every other
+   * date-compare in the codebase.
+   */
   private BigDecimal indexClose(String index, LocalDate asOf) {
     return jdbc.query(
         "SELECT close FROM candles WHERE interval = '1d' AND tradingsymbol = ? "
-            + "AND bucket::date <= ? ORDER BY bucket DESC LIMIT 1",
+            + "AND (bucket AT TIME ZONE 'Asia/Kolkata')::date <= ? ORDER BY bucket DESC LIMIT 1",
         rs -> rs.next() ? rs.getBigDecimal("close") : null,
         index,
         java.sql.Date.valueOf(asOf));

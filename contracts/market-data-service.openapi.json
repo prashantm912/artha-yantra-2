@@ -1233,6 +1233,20 @@
             "type" : "integer",
             "format" : "int32"
           }
+        }, {
+          "name" : "strikes",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "baseline",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
         } ],
         "responses" : {
           "200" : {

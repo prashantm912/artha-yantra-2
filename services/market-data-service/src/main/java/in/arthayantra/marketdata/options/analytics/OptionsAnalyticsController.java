@@ -17,9 +17,11 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -812,6 +814,12 @@ public class OptionsAnalyticsController {
    * rebase the session-open baseline mid-day. An explicit {@code buckets=N} serves the last N
    * buckets instead — the scalper confluence gate ({@code MarketOiClient}) depends on that rolling
    * window for its delta/imbalance/cross derivations; keep its behaviour unchanged.
+   *
+   * <p>Wave-5 parity extras (audit §7; the gate passes neither): {@code strikes} (comma-separated)
+   * restricts the fold to that basket (oipulse's ~15-strike "Change Strike Prices"); {@code
+   * baseline=peod} prepends the PREVIOUS trading session's last captured bucket, so the FE's
+   * cumulative Δ columns rebase to the prev-day EOD (oipulse's positional read). When the previous
+   * session has no snapshot the series is served unchanged (Δ stays session-open based).
    */
   @GetMapping("/trending")
   public OiTrendingService.TrendSeries trending(
@@ -820,11 +828,16 @@ public class OptionsAnalyticsController {
       @RequestParam(required = false) String date,
       @RequestParam(required = false) String interval,
       @RequestParam(required = false) String expiry,
-      @RequestParam(required = false) Integer buckets) {
+      @RequestParam(required = false) Integer buckets,
+      @RequestParam(required = false) String strikes,
+      @RequestParam(required = false) String baseline) {
     OiQuery q = OiQuery.of(mode, name, date, interval, expiry);
     LocalDate exp = requireExpiry(q);
     if (buckets != null && buckets < 1) {
       throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "buckets must be >= 1");
+    }
+    if (baseline != null && !baseline.isBlank() && !"peod".equalsIgnoreCase(baseline)) {
+      throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "baseline must be 'peod'");
     }
     // Anchor on the newest captured bucket (clock-independent).
     List<OptionsSnapshotReader.StrikePoint> latest =
@@ -833,17 +846,42 @@ public class OptionsAnalyticsController {
       throw new ApiException(422, ErrorCodes.DATA_GAP, "no snapshot for " + q.name() + " " + exp);
     }
     OffsetDateTime newest = latest.get(0).bucket();
+    LocalDate sessionDay = newest.atZoneSameInstant(Ist.ZONE).toLocalDate();
     OffsetDateTime from =
         buckets != null
             ? newest.minus(q.interval().bucket().multipliedBy(buckets - 1L))
-            : newest
-                .atZoneSameInstant(Ist.ZONE)
-                .toLocalDate()
-                .atTime(MarketCalendar.SESSION_OPEN)
-                .atOffset(Ist.OFFSET);
+            : sessionDay.atTime(MarketCalendar.SESSION_OPEN).atOffset(Ist.OFFSET);
     List<OptionsSnapshotReader.StrikePoint> series =
-        reader.series(q.name(), exp, q.interval(), from, newest.plus(q.interval().bucket()));
-    return trendingService.trending(series);
+        new ArrayList<>(
+            reader.series(q.name(), exp, q.interval(), from, newest.plus(q.interval().bucket())));
+    if ("peod".equalsIgnoreCase(baseline)) {
+      try {
+        LocalDate prev = calendar.previousTradingDay(sessionDay);
+        series.addAll(0, reader.latest(q.name(), exp, q.interval(), prev));
+      } catch (IllegalArgumentException uncoveredYear) {
+        // outside calendar coverage — serve the session series unchanged
+      }
+    }
+    return trendingService.trending(filterToBasket(series, strikes));
+  }
+
+  /** Restricts the series to the comma-separated strike basket; null/blank = the whole chain. */
+  private static List<OptionsSnapshotReader.StrikePoint> filterToBasket(
+      List<OptionsSnapshotReader.StrikePoint> series, String strikes) {
+    if (strikes == null || strikes.isBlank()) {
+      return series;
+    }
+    Set<String> basket = new HashSet<>();
+    for (String s : strikes.split(",")) {
+      try {
+        basket.add(new BigDecimal(s.trim()).stripTrailingZeros().toPlainString());
+      } catch (NumberFormatException e) {
+        throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "bad strike: " + s.trim());
+      }
+    }
+    return series.stream()
+        .filter(p -> basket.contains(p.strike().stripTrailingZeros().toPlainString()))
+        .toList();
   }
 
   /**

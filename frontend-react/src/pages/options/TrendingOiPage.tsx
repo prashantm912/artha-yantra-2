@@ -1,5 +1,6 @@
-import { useMemo } from 'react';
-import { useTrendingOi } from '../../api/oiAnalytics.ts';
+import { useCallback, useMemo, useState } from 'react';
+import type { EChartsOption } from 'echarts';
+import { useChainTable, useTrendingOi } from '../../api/oiAnalytics.ts';
 import { useSymbolContext } from '../../stores/symbolContext.store.ts';
 import { foldTrending, isClosingBucket, type TrendingRow } from '../../api/trendingOiFold.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
@@ -7,7 +8,9 @@ import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
+import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
+import { LegMultiSelect } from '../../components/atoms/LegMultiSelect.tsx';
 import { SignedCount } from '../../components/atoms/SignedCount.tsx';
 import { SentimentBadge } from '../../components/atoms/SentimentBadge.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
@@ -18,7 +21,9 @@ import { FIELD_HELP } from '../../core/fieldHelp.ts';
 // OI Trending (oipulse §options/trending-oi): aggregated Call vs Put OI over the session with a
 // derived directional sentiment. Time-ordered (newest on top), 100/page. All Δ/PCR/sentiment columns
 // are FE-folded (foldTrending) from the per-bucket OI series; the column set + Diff-in-OI sign
-// (puts−calls, positive = Bullish) follow the study doc.
+// (puts−calls, positive = Bullish) follow the study doc. Wave-5 extras (audit §7): a strike-basket
+// selector (server-side fold restriction), a positional (prev-day-EOD baseline) toggle, and the
+// Graph view — ΔCall/ΔPut lines + the underlying price, the study's two-line read.
 
 const TRENDING_INTERVALS = ['3m', '5m', '10m', '15m', '30m', '60m'] as const; // oipulse: no 1m
 
@@ -41,10 +46,62 @@ function Direction({ dir }: { dir: number }) {
 }
 
 export function TrendingOiPage() {
-  const q = useTrendingOi();
+  const [graph, setGraph] = useState(false);
+  const [positional, setPositional] = useState(false);
+  const [basket, setBasket] = useState<string[]>([]);
+  const q = useTrendingOi(basket, positional ? 'peod' : null);
+  const chainQ = useChainTable();
+  const strikeOptions = useMemo(() => (chainQ.data?.rows ?? []).map((r) => r.strike), [chainQ.data]);
+  const toggleStrike = (s: string) =>
+    setBasket((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]));
   const interval = useSymbolContext((s) => s.interval);
-  // The fold is oldest-first; oipulse reads newest-on-top.
-  const rows = useMemo(() => foldTrending(q.data?.items ?? []).reverse(), [q.data]);
+  // The fold is oldest-first; oipulse reads newest-on-top (the graph keeps chronological order).
+  const chrono = useMemo(() => foldTrending(q.data?.items ?? []), [q.data]);
+  const rows = useMemo(() => [...chrono].reverse(), [chrono]);
+
+  // Graph view (study: "graph view renders two line panels (ΔCall-OI and ΔPut-OI over time)").
+  const makeGraphOption = useCallback(
+    (t: ChartTheme): EChartsOption => ({
+      aria: { enabled: true },
+      textStyle: { color: t.text },
+      legend: { top: 0, textStyle: { color: t.muted }, data: ['Δ Call OI', 'Δ Put OI', 'Price'] },
+      grid: { left: 64, right: 64, top: 32, bottom: 40 },
+      tooltip: {
+        trigger: 'axis',
+        backgroundColor: t.surface1,
+        borderColor: t.border,
+        textStyle: { color: t.text },
+      },
+      xAxis: {
+        type: 'category',
+        data: chrono.map((r) => r.bucket.slice(11, 16)),
+        axisLine: { lineStyle: { color: t.border } },
+        axisLabel: { color: t.muted },
+      },
+      yAxis: [
+        {
+          type: 'value',
+          name: 'Δ OI',
+          scale: true,
+          splitLine: { lineStyle: { color: t.grid } },
+          axisLabel: { color: t.muted },
+        },
+        {
+          type: 'value',
+          name: 'Price',
+          scale: true,
+          splitLine: { show: false },
+          axisLabel: { color: t.muted },
+        },
+      ],
+      series: [
+        { name: 'Δ Call OI', type: 'line', showSymbol: false, data: chrono.map((r) => r.chngCallOi), lineStyle: { color: t.bear, width: 1.75 }, itemStyle: { color: t.bear } },
+        { name: 'Δ Put OI', type: 'line', showSymbol: false, data: chrono.map((r) => r.chngPutOi), lineStyle: { color: t.bull, width: 1.75 }, itemStyle: { color: t.bull } },
+        { name: 'Price', type: 'line', showSymbol: false, yAxisIndex: 1, data: chrono.map((r) => (r.spot == null ? null : Number(r.spot))), lineStyle: { color: t.accent, width: 1.25, type: 'dashed' }, itemStyle: { color: t.accent } },
+      ],
+    }),
+    [chrono],
+  );
 
   const columns: DataColumn<TrendingRow>[] = [
     { id: 'date', header: 'Date', align: 'left', help: 'Calendar date of this interval bucket.', render: (r) => r.bucket.slice(0, 10) },
@@ -74,13 +131,35 @@ export function TrendingOiPage() {
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval allowedIntervals={TRENDING_INTERVALS} />
+        <LegMultiSelect options={strikeOptions} selected={basket} onToggle={toggleStrike} />
+        {basket.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setBasket([])}
+            title="Clear the strike basket and fold across the whole chain again."
+            className="h-9 rounded-md border border-ay-border px-2 text-sm text-ay-muted hover:border-accent"
+          >
+            Clear ({basket.length})
+          </button>
+        )}
+        <label className="flex h-9 items-center gap-1.5 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text" title="Rebase the Δ columns to the previous session's EOD (positional read) instead of today's open.">
+          <input type="checkbox" checked={positional} onChange={(e) => setPositional(e.target.checked)} className="accent-accent" />
+          Positional
+        </label>
+        <label className="flex h-9 items-center gap-1.5 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text" title="Chart the ΔCall-OI and ΔPut-OI lines with the underlying price instead of the table.">
+          <input type="checkbox" checked={graph} onChange={(e) => setGraph(e.target.checked)} className="accent-accent" />
+          Graph view
+        </label>
         <GoButton onClick={() => q.refetch()} loading={q.isFetching} />
       </div>
 
       <p className="mb-3 text-xs text-ay-muted">
-        Diff. in OI = ΔPut OI − ΔCall OI (puts−calls); positive = Bullish. Δ columns are cumulative vs
-        the session-open baseline and computed across the FULL chain — oipulse's table uses a
-        ~15-strike ATM basket, so magnitudes differ while the direction agrees.
+        Diff. in OI = ΔPut OI − ΔCall OI (puts−calls); positive = Bullish. Δ columns are cumulative vs{' '}
+        {positional ? "the PREVIOUS session's EOD (positional)" : 'the session-open baseline'} and
+        computed across {basket.length > 0 ? `the ${basket.length}-strike basket` : 'the FULL chain'}
+        {basket.length === 0 &&
+          " — oipulse's table uses a ~15-strike ATM basket, so magnitudes differ while the direction agrees"}
+        .
       </p>
 
       <QueryState
@@ -90,18 +169,28 @@ export function TrendingOiPage() {
         errorTitle="Couldn't load trending OI"
         skeleton={<Skeleton variant="table-rows" rows={8} cols={12} />}
       >
-        {() => (
-          <BeatBlock>
-            <DataTable
-              columns={columns}
-              rows={rows}
-              rowKey={(r) => r.bucket}
-              pageSize={100}
-              ariaLabel="OI trending per interval"
-              emptyMessage="No trending data — pick an underlying + expiry with captured snapshots."
-            />
-          </BeatBlock>
-        )}
+        {() =>
+          graph ? (
+            <BeatBlock className="card shadow-e1">
+              <EChart
+                makeOption={makeGraphOption}
+                className="h-64 sm:h-80 lg:h-[440px]"
+                ariaLabel="Cumulative change in call and put OI over the session with the underlying price"
+              />
+            </BeatBlock>
+          ) : (
+            <BeatBlock>
+              <DataTable
+                columns={columns}
+                rows={rows}
+                rowKey={(r) => r.bucket}
+                pageSize={100}
+                ariaLabel="OI trending per interval"
+                emptyMessage="No trending data — pick an underlying + expiry with captured snapshots."
+              />
+            </BeatBlock>
+          )
+        }
       </QueryState>
     </LoadBeat>
   );

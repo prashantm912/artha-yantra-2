@@ -138,7 +138,14 @@ async function gatewayHealthy(): Promise<boolean> {
     // the GATEWAY's auth filter even when strategy-signal-service is down (the request never
     // reaches the upstream), so it proves nothing — check the container healthchecks directly (the
     // source of truth). Otherwise the first publish hits a 503 the instant the gateway is up.
-    for (const container of ['ay-strategy-signal-service', 'ay-market-data-service']) {
+    // audit P2: gate on backtest + optimizer too — backtest-results and sweep-explorer specs
+    // drive them, so a cold-start 503 the instant the gateway is up otherwise reads as flake.
+    for (const container of [
+      'ay-strategy-signal-service',
+      'ay-market-data-service',
+      'ay-backtest-service',
+      'ay-optimizer-service',
+    ]) {
       const status = execSync(`docker inspect -f "{{.State.Health.Status}}" ${container}`, {
         encoding: 'utf8',
       }).trim();

@@ -15,6 +15,10 @@ on:
       - "pom.xml"
       - ".mvn/**"
       - "config/checkstyle/**"
+      # deploy/flyway: the ITs migrate the REAL lineages into Testcontainers, so a
+      # migration-only PR must run them (audit P2) — else a column rename/type change
+      # merges green and breaks every service IT on the NEXT unrelated PR.
+      - "deploy/flyway/**"
       - ".github/workflows/ci-java.yml"
   pull_request:
     paths:
@@ -24,6 +28,10 @@ on:
       - "pom.xml"
       - ".mvn/**"
       - "config/checkstyle/**"
+      # deploy/flyway: the ITs migrate the REAL lineages into Testcontainers, so a
+      # migration-only PR must run them (audit P2) — else a column rename/type change
+      # merges green and breaks every service IT on the NEXT unrelated PR.
+      - "deploy/flyway/**"
       - ".github/workflows/ci-java.yml"
 
 concurrency:

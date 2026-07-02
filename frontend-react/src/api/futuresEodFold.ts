@@ -67,6 +67,28 @@ function rangePctOf(range: string, close: string): string | null {
 }
 
 /**
+ * The CONTINUOUS current-month stitch (audit §10.2-4, Wave 5): one row per session, taken from that
+ * session's FRONT contract. A session's front = the lowest-expiry contract that produced rows that
+ * day — an expired contract stops producing snapshots, so the stitch rolls automatically on the
+ * session after expiry. Day-over-day deltas run ACROSS rolls (the roll session's OI/LTP change spans
+ * two contracts — flagged via `rolledFrom` so the page can mark it).
+ */
+export function stitchContinuousFrontMonth(
+  rows: FutEodRow[],
+): { rows: FuturesEodRow[]; contractByDate: Map<string, string> } {
+  const byDate = new Map<string, FutEodRow>();
+  for (const r of rows) {
+    const cur = byDate.get(r.tradeDate);
+    if (!cur || futExpiryRank(r.tradingsymbol) < futExpiryRank(cur.tradingsymbol)) {
+      byDate.set(r.tradeDate, r);
+    }
+  }
+  const stitched = [...byDate.values()];
+  const contractByDate = new Map(stitched.map((r) => [r.tradeDate, r.tradingsymbol]));
+  return { rows: foldFuturesEod(stitched), contractByDate };
+}
+
+/**
  * Folds one contract's daily rows into the EOD table (newest-first). {@code rows} may be in any order;
  * the day-over-day deltas are computed against the chronologically prior day.
  */

@@ -238,7 +238,7 @@ export function ScalperCockpitPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Scalper cockpit" subtitle="Live signals · pre-filled paper order ticket · open positions & P&L — paper only, never a live broker order" help="Trade scalps from one screen: click a live signal on the left to pre-fill the paper ticket, place it, and watch your open positions and P&L update live on the right — all simulated, never a real broker order." />
+      <PageHeader title="Paper ticket" subtitle="Live signals · pre-filled paper order ticket · open positions & P&L — paper only, never a live broker order" help="Trade scalps from one screen: click a live signal on the left to pre-fill the paper ticket, place it, and watch your open positions and P&L update live on the right — all simulated, never a real broker order." />
       <BeatBlock className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1fr_1.2fr]">
         {/* Live signals */}
         <section className="min-w-0">

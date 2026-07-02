@@ -153,9 +153,10 @@ export function JobsPage() {
     if (refs.length >= 2) navigate(`/backtests/compare?ids=${refs.join(',')}`);
   };
 
+  // A job whose strategy was deleted resolves to no name — label it honestly, not a bare hash (§3).
   const strategyName = (job: JobDto) =>
     (job.strategyId ? nameById.get(job.strategyId) : null) ??
-    (job.strategyId ? job.strategyId.slice(0, 8) : '—');
+    (job.strategyId ? `deleted · ${job.strategyId.slice(0, 8)}` : '—');
 
   const columns = useMemo<DataColumn<JobDto>[]>(
     () => [

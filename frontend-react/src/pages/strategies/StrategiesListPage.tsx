@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { toast } from 'sonner';
 import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
@@ -178,11 +179,19 @@ export function StrategiesListPage() {
                   </td>
                   <td className="px-2 py-2">
                     <span className="flex flex-wrap gap-1">
-                      {s.tags.map((t) => (
+                      {s.tags.slice(0, 3).map((t) => (
                         <span key={t} className="rounded bg-surface-2 px-1.5 py-0.5 text-xs text-ay-muted">
                           {t}
                         </span>
                       ))}
+                      {s.tags.length > 3 && (
+                        <span
+                          title={s.tags.slice(3).join(', ')}
+                          className="cursor-default rounded bg-surface-2 px-1.5 py-0.5 text-xs text-ay-muted"
+                        >
+                          +{s.tags.length - 3}
+                        </span>
+                      )}
                     </span>
                   </td>
                   <td className="px-2 py-2">
@@ -191,11 +200,21 @@ export function StrategiesListPage() {
                         type="checkbox"
                         checked={s.notificationsEnabled ?? false}
                         onChange={(e) =>
-                          setNotifications.mutate({
-                            id: s.id,
-                            enabled: e.target.checked,
-                            channel: s.notificationChannel ?? 'NTFY',
-                          })
+                          setNotifications.mutate(
+                            {
+                              id: s.id,
+                              enabled: e.target.checked,
+                              channel: s.notificationChannel ?? 'NTFY',
+                            },
+                            {
+                              onSuccess: (res) =>
+                                toast.success(
+                                  res.notificationsEnabled
+                                    ? `Notifications ON for ${s.name} (${res.notificationChannel ?? 'NTFY'})`
+                                    : `Notifications OFF for ${s.name}`,
+                                ),
+                            },
+                          )
                         }
                         aria-label={`Notifications for ${s.name}`}
                       />

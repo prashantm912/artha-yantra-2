@@ -880,6 +880,8 @@ export interface IndexContribution {
   advances: ContribRow[];
   declines: ContribRow[];
   asOf: string | null;
+  /** True when the intraday quote-based fold served (mode=live); false = the EOD bhavcopy read. */
+  live: boolean;
 }
 
 /**

@@ -18,6 +18,7 @@ const data: IndexContribution = {
     { rank: 1, symbol: 'HINDALCO', contribution: '-0.0451', changePct: '-2.96', close: '983.90', points: '-10.66' },
   ],
   asOf: '2026-06-22',
+  live: true,
 };
 
 vi.mock('../../api/oiAnalytics.ts', () => ({
@@ -44,5 +45,11 @@ describe('IndexContributionPage', () => {
     expect(screen.getAllByText('RELIANCE').length).toBeGreaterThan(0);
     expect(screen.getAllByText('HINDALCO').length).toBeGreaterThan(0);
     expect(screen.getByRole('option', { name: 'NIFTY 50' })).toBeInTheDocument();
+    // the live fold shows the Live dot (not the EOD badge) + the live index level in the header;
+    // "Live" appears twice: the toggle label and the LiveDot text.
+    expect(screen.getAllByText('Live').length).toBeGreaterThan(1);
+    expect(screen.queryByText(/EOD · as of/)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/24117\.65/).length).toBeGreaterThan(0);
+    expect(screen.getByLabelText('Live')).toBeChecked();
   });
 });

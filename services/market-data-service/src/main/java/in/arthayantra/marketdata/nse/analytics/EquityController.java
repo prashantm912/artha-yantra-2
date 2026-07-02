@@ -51,10 +51,16 @@ public class EquityController {
     return sector.sectorStats();
   }
 
-  /** Per-constituent index contribution (weight × % change), split advances / declines. */
+  /**
+   * Per-constituent index contribution (weight × % change), split advances / declines.
+   * {@code mode=live} (audit §9.4, Wave 5) folds intraday quotes — points off the LIVE index
+   * level, EOD fallback when quotes are unavailable; default stays the EOD bhavcopy read.
+   */
   @GetMapping("/index-contribution")
   public EquityIndexContributionService.IndexContribution indexContribution(
-      @RequestParam String name) {
-    return contribution.contribution(name);
+      @RequestParam String name, @RequestParam(required = false) String mode) {
+    return "live".equalsIgnoreCase(mode)
+        ? contribution.liveContribution(name)
+        : contribution.contribution(name);
   }
 }

@@ -29,7 +29,9 @@ class FrontDispatcher:
             "metrics": json.dumps({"cagr": period / 10.0, "maxDrawdown": period / 20.0}),
         })
 
-    def read_results(self, max_count: int, block_ms: int = 2000) -> list[dict]:
+    def read_results(
+        self, max_count: int, block_ms: int = 2000, sweep_id: str | None = None
+    ) -> list[dict]:
         out = self._queue[:max_count]
         self._queue = self._queue[max_count:]
         return out

@@ -147,6 +147,7 @@ class SweepService:
                 on_progress=lambda done, total, best: self._progress(
                     sweep_id, jobs, done, total, best
                 ),
+                cancelled=lambda: sweep_id in self._cancelled,
                 **kwargs,
             )
         except Exception:  # noqa: BLE001 - mark the sweep failed, never crash the thread
@@ -158,8 +159,9 @@ class SweepService:
     def _progress(
         self, sweep_id: str, jobs: Any, done: int, total: int, best: float | None
     ) -> None:
-        if sweep_id in self._cancelled:
-            raise ApiError(409, "CONFLICT_JOB_TERMINAL", "sweep cancelled")
+        # Cancellation is handled by run_sweep's per-iteration ``cancelled`` poll (P1-10b) — the
+        # old raise-from-progress path made the blanket _run handler overwrite 'cancelled' with
+        # 'failed'; the repos.set_status terminal guard now also blocks that class of overwrite.
         pct = int(done * 100 / total) if total else 100
         jobs.set_status(sweep_id, "running", min(pct, 99))
         self._dispatcher.publish_progress(

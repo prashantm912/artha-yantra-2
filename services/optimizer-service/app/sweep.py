@@ -101,8 +101,14 @@ def run_sweep(
     on_progress: Callable[[int, int, float | None], None] | None = None,
     parallelism: int = 4,
     early_stopping: int | None = None,
+    cancelled: Callable[[], bool] | None = None,
 ) -> optuna.Study:
-    """Runs the sweep to completion and returns the in-memory study."""
+    """Runs the sweep to completion and returns the in-memory study.
+
+    ``cancelled`` is polled each loop iteration (audit P1-10b): before, a cancel was observed
+    only when a RESULT arrived — a sweep whose worker was down span forever, uncancellable.
+    On observed cancel the loop stops dispatching and returns WITHOUT writing a terminal
+    status (``cancel()`` already wrote 'cancelled'; the repo guard keeps it)."""
     sampler = optuna_runner.make_sampler(method, parameters, seed)
     multi = method == "nsga2"
     direction = objective.get("direction", "maximize")
@@ -124,6 +130,8 @@ def run_sweep(
     stopped_early = False
 
     while completed < planned and not stopped_early:
+        if cancelled and cancelled():
+            return study
         while (
             len(pending) < parallelism
             and completed + len(pending) < planned
@@ -140,7 +148,7 @@ def run_sweep(
             pending[str(trial_job_id)] = (trial, row_id)
             dispatcher.dispatch(trial_job_id)
 
-        results = dispatcher.read_results(max_count=max(len(pending), 1))
+        results = dispatcher.read_results(max_count=max(len(pending), 1), sweep_id=sweep_id)
         for result in results:
             key = result.get("trialId")
             if key not in pending:

@@ -120,7 +120,11 @@ export function CandleChart({ bars, marks, height, ariaLabel, className, intrada
     candles.setData(
       bars.map((b) => ({ time: tOf(b), open: Number(b.open), high: Number(b.high), low: Number(b.low), close: Number(b.close) })),
     );
-    volume.setData(bars.map((b) => ({ time: tOf(b), value: b.volume })));
+    // Index symbols report volume = 0 on every bar — hide the dead pane instead of rendering
+    // an empty histogram lane (audit 2026-07-02 §5).
+    const hasVolume = bars.some((b) => b.volume > 0);
+    volume.applyOptions({ visible: hasVolume });
+    volume.setData(hasVolume ? bars.map((b) => ({ time: tOf(b), value: b.volume })) : []);
 
     // map each mark to the nearest bar's time; markers must be unique-sorted ascending
     const nearestTime = (iso: string): UTCTimestamp | null => {

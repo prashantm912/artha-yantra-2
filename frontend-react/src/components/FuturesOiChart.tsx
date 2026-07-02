@@ -16,6 +16,8 @@ interface FuturesOiChartProps {
 
 const f2 = (n: number) => n.toFixed(2);
 const compactInt = (n: number) => new Intl.NumberFormat('en-IN', { notation: 'compact' }).format(n);
+const compactInt3 = (n: number) =>
+  new Intl.NumberFormat('en-IN', { notation: 'compact', maximumSignificantDigits: 4 }).format(n);
 
 export function FuturesOiChart({ items, tradingsymbol }: FuturesOiChartProps) {
   const series = useMemo(() => toFutOiChartSeries(items), [items]);
@@ -96,7 +98,8 @@ export function FuturesOiChart({ items, tradingsymbol }: FuturesOiChartProps) {
             scale: true,
             position: 'left',
             splitLine: { lineStyle: { color: t.grid } },
-            axisLabel: { color: t.muted, formatter: (v: number) => compactInt(v) },
+            // 3 significant digits: the default compact format printed "1.8Cr" on every tick (§10.2-5)
+            axisLabel: { color: t.muted, formatter: (v: number) => compactInt3(v) },
             nameTextStyle: { color: t.muted },
           },
           {

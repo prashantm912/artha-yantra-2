@@ -59,9 +59,23 @@ const BENCH_METRICS: MetricDef[] = [
 
 const FOLD_METRICS = ['sharpe', 'totalReturn', 'maxDrawdown', 'winRate'];
 
+/** Test-window length in days (from the equity curve extents); null when unknowable. */
+function windowDays(r: BacktestResults): number | null {
+  const c = r.equityCurve;
+  if (!c || c.length < 2) return null;
+  const ms = Date.parse(c[c.length - 1].ts) - Date.parse(c[0].ts);
+  return Number.isFinite(ms) ? ms / 86_400_000 : null;
+}
+
 function metric(r: BacktestResults, m: MetricDef): string {
   const v = r.metrics[m.key];
   if (v == null || Array.isArray(v)) return '—';
+  // Annualizing a weeks-long window prints decision noise ("CAGR −90.67%" off 6 weeks —
+  // audit 2026-07-02 §5); suppress CAGR-class metrics under 90 days.
+  if ((m.key === 'cagr' || m.key === 'excessCagr')) {
+    const days = windowDays(r);
+    if (days != null && days < 90) return 'n/a (<90d)';
+  }
   return `${formatDecimal(String(v), m.dp ?? 2)}${m.suffix ?? ''}`;
 }
 
@@ -117,7 +131,15 @@ export function BacktestResultsPage() {
         type: 'category',
         data: (r?.equityCurve ?? []).map((p) => p.ts.slice(0, 10)),
         axisLine: { lineStyle: { color: t.border } },
-        axisLabel: { color: t.muted },
+        // one label per DAY: the curve carries many points per session, so per-tick labels
+        // repeated the same date across the axis (audit 2026-07-02 §5)
+        axisLabel: {
+          color: t.muted,
+          interval: (i: number, value: string) => {
+            const dates = (r?.equityCurve ?? []).map((p) => p.ts.slice(0, 10));
+            return i === 0 || dates[i - 1] !== value;
+          },
+        },
       },
       yAxis: [
         { type: 'value', scale: true, axisLabel: { color: t.muted }, splitLine: { lineStyle: { color: t.grid } } },

@@ -34,7 +34,7 @@ function LegHeatmap({ data, cells, legLabel, ariaLabel }: LegHeatmapProps) {
       return {
         aria: { enabled: true },
         textStyle: { color: t.text },
-        grid: { left: 64, right: 16, top: 16, bottom: 56 },
+        grid: { left: 64, right: 16, top: 16, bottom: 84 },
         tooltip: {
           position: 'top',
           backgroundColor: t.surface1,
@@ -67,8 +67,12 @@ function LegHeatmap({ data, cells, legLabel, ariaLabel }: LegHeatmapProps) {
           orient: 'horizontal',
           left: 'center',
           bottom: 0,
+          itemHeight: 90,
           inRange: { color: [t.bear, t.surface1, t.bull] }, // unwind (red) → flat → build (green)
           textStyle: { color: t.muted },
+          // compact end labels — the full "-13,77,480" strings collided with the rotated
+          // x-axis ticks (audit 2026-07-02 §5); the deeper grid bottom gives the slider its own lane
+          formatter: (v: unknown) => compactInt(Number(v)),
         },
         series: [
           {

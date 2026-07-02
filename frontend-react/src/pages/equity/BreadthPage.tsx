@@ -25,6 +25,10 @@ function BreadthStat({ label, value }: { label: string; value: string }) {
   );
 }
 
+// ETFs/BeES settle ~100% delivered by construction, so they monopolized the Delivery-% Leaders
+// board and made it decorative (audit 2026-07-02 §9.6) — filter them from the leaderboard.
+const ETF_NAME = /BEES|ETF|IETF|ILIQ|LIQUID|GOLDSHARE|ADD$/i;
+
 // Equity → Breadth (oipulse): advance/decline + average delivery% + the delivery-% leaders for one
 // trade date, read from the NSE EQ-series EOD bhavcopy (BreadthController). EOD only — the date defaults
 // to the last completed weekday session; the owner picks any past date to value-verify. 422 (no bhavcopy
@@ -178,7 +182,7 @@ export function BreadthPage() {
                 <h2 className="mb-1 text-h3 text-ay-text">Delivery-% Leaders</h2>
                 <DataTable
                   columns={columns}
-                  rows={data?.topDelivery ?? []}
+                  rows={(data?.topDelivery ?? []).filter((r) => !ETF_NAME.test(r.symbol))}
                   rowKey={(r) => r.symbol}
                   pageSize={25}
                   ariaLabel="Delivery percentage leaders"

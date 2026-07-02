@@ -80,12 +80,20 @@ function satisfiable(ctx: OiCtx, needExpiry: boolean): boolean {
   return !(ctx.mode === 'history' && !ctx.date); // history requires a date (backend 400s)
 }
 
-/** GET that maps 422 DATA_GAP → the empty shape (no throw → no toast). */
+/**
+ * GET that maps 422 DATA_GAP → the empty shape (caught, so no throw → no toast). ONLY that pair
+ * is absorbed (audit P1-11): the old blanket silenceToast swallowed 5xx/network failures too, so
+ * a crashed market-data rendered as calm "no data" on the live cockpit — a real outage was
+ * indistinguishable from a quiet session. Everything else now rethrows UN-silenced, feeding the
+ * global toast and each page's QueryState error card.
+ */
 async function oiGet<T>(path: string, params: string, emptyOn422: T): Promise<T> {
   try {
-    return await apiFetch<T>(`${path}?${params}`, { silenceToast: true });
+    return await apiFetch<T>(`${path}?${params}`);
   } catch (err) {
-    if (err instanceof ApiError && err.status === 422) return emptyOn422;
+    if (err instanceof ApiError && err.status === 422 && err.code === 'DATA_GAP') {
+      return emptyOn422;
+    }
     throw err;
   }
 }

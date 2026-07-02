@@ -78,8 +78,10 @@ export const useSession = create<SessionState>((set) => ({
 
   async refreshSystemStatus() {
     try {
-      const status = await apiFetch<{ kite?: { session?: string } }>('/system/status');
-      set({ mockMode: status?.kite?.session === 'MOCK' });
+      // kite.raw is the un-rolled feed state (P1-11): kite.session maps MOCK → VALID for the
+      // health view, so checking session here meant the MOCK tag could never render.
+      const status = await apiFetch<{ kite?: { raw?: string } }>('/system/status');
+      set({ mockMode: status?.kite?.raw === 'MOCK' });
     } catch {
       /* status is best-effort */
     }

@@ -73,6 +73,7 @@ class SystemStatusIntegrationTest {
         .expectBody()
         .jsonPath("$.overall").isEqualTo("UP")
         .jsonPath("$.kite.session").isEqualTo("VALID") // B-13 enum, mapped from MOCK
+        .jsonPath("$.kite.raw").isEqualTo("MOCK") // P1-11: the un-rolled value the MOCK tag reads
         .jsonPath("$.kite.ticker").isNotEmpty()
         .jsonPath("$.market.phase").isNotEmpty()
         .jsonPath("$.services.length()").isEqualTo(2)

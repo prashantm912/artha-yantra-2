@@ -83,6 +83,11 @@ public class SystemStatusController {
     }
     Map<String, Object> kite = new LinkedHashMap<>();
     kite.put("session", session);
+    // Audit P1-11: the raw feed-state string ("MOCK"/"CONNECTED"/...). The B-13 rollup above
+    // deliberately maps MOCK → VALID for the health view, which made the frontend's MOCK-mode
+    // tag (session.store checks for "MOCK") permanently unreachable — the operator's UI showed
+    // synthetic data with no marker. Map return ⇒ an added key does not drift the contract.
+    kite.put("raw", kiteRaw);
     kite.put("ticker", ticker);
     kite.put("lastTickAgeMs", tickAge);
     kite.put("rateBudget", null); // producer pending — limiter metrics live in market-data

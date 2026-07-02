@@ -183,7 +183,7 @@ export function BacktestComparePage() {
     return (
       <div>
         <PageHeader title="Compare backtests" subtitle="Side-by-side metric matrix and normalized equity curves" help="Stacks several backtest runs side by side — best metric per row is highlighted, equity curves are rebased to 100 so different capital sizes compare fairly." />
-        <p className="text-ay-muted">Add runs to compare (e.g. /backtests/compare?ids=run1,run2).</p>
+        <p className="text-ay-muted">Nothing selected yet — on the Jobs page, tick 2–6 completed backtests in the Cmp column and press Compare.</p>
       </div>
     );
   }

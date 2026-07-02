@@ -9,8 +9,10 @@ import in.arthayantra.marketdata.kite.QuoteGateway;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -60,12 +62,17 @@ public class FuturesOiSnapshotService {
     this.rows = meterRegistry.counter("ay_futures_oi_snapshot_rows_total");
   }
 
-  /** Configurable cadence (default 3 min), market hours only. */
-  @Scheduled(
-      fixedDelayString = "${artha.futures.oi-snapshot-interval-ms:180000}",
-      initialDelay = 70_000)
+  /** The cron cadence; the gate shifts back by this much (see OptionsSnapshotService.CAPTURE_CADENCE). */
+  private static final Duration CAPTURE_CADENCE = Duration.ofMinutes(1);
+
+  /**
+   * Boundary-aligned capture (audit 2026-07-02 §9.1, T2): cron on the IST minute grid, replacing
+   * the boot-phase fixedDelay. One batched quotes() call per pass (~2 s), so every minute is
+   * affordable; the shifted gate skips the 09:15:00 fire and keeps the 15:30:00 EOD fire.
+   */
+  @Scheduled(cron = "${artha.futures.oi-snapshot-cron:0 * * * * *}", zone = "Asia/Kolkata")
   public void scheduledSnapshot() {
-    if (!isOpenSafe()) {
+    if (!isOpenSafe(clock.instant().minus(CAPTURE_CADENCE))) {
       return;
     }
     snapshotNow();
@@ -73,7 +80,8 @@ public class FuturesOiSnapshotService {
 
   /** One pass across every configured underlying's front/next/far contracts. */
   public void snapshotNow() {
-    OffsetDateTime ts = OffsetDateTime.now(clock);
+    // Entry-stamped on the minute grid (T2) — the readers' end-of-window bucketing depends on it.
+    OffsetDateTime ts = OffsetDateTime.now(clock).truncatedTo(ChronoUnit.MINUTES);
     LocalDate today = ts.atZoneSameInstant(Ist.ZONE).toLocalDate();
 
     // Resolve every underlying's ladder first, then batch ALL contracts into ONE quotes()
@@ -130,9 +138,9 @@ public class FuturesOiSnapshotService {
     }
   }
 
-  private boolean isOpenSafe() {
+  private boolean isOpenSafe(java.time.Instant instant) {
     try {
-      return calendar.isOpen(clock.instant());
+      return calendar.isOpen(instant);
     } catch (IllegalArgumentException uncoveredYear) {
       return false;
     }

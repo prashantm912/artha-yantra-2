@@ -194,6 +194,38 @@ class OptionsSnapshotReaderIntegrationTest extends MarketDataIntegrationTestBase
   }
 
   /** Helper: minimal insert into options_chain_snapshots (only the columns the reader touches). */
+  @Test
+  void boundaryCaptureLabelsIntoTheWindowItTerminates() {
+    // T2 (audit 2026-07-02 §9.1): a capture stamped exactly ON a bucket boundary carries the state
+    // observed AT that boundary, so it labels into the window it TERMINATES; legacy mid-bucket
+    // captures keep their bucket. The 15:30:00 EOD capture must label into the final session
+    // window (no post-close artifact bucket).
+    String u = "BOUNDARYLBL";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    OffsetDateTime open =
+        OffsetDateTime.of(2026, 6, 22, 9, 15, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime close = open.withHour(15).withMinute(30);
+    insertRow(jdbc, open.plusMinutes(1).plusSeconds(40), u, exp, "22500", "CE", "100", 100L, 0L); // legacy 09:16:40
+    insertRow(jdbc, open.plusMinutes(3), u, exp, "22500", "CE", "101", 200L, 0L); // boundary 09:18:00
+    insertRow(jdbc, open.plusMinutes(6), u, exp, "22500", "CE", "102", 300L, 0L); // boundary 09:21:00
+    insertRow(jdbc, close, u, exp, "22500", "CE", "103", 400L, 0L); // the EOD capture
+
+    List<OptionsSnapshotReader.StrikePoint> series =
+        reader.series(u, exp, OiInterval.parse("3m"), open, close);
+    // [09:15,09:18) holds BOTH the legacy row and the 09:18:00 boundary row (last() = the boundary
+    // state); [09:18,09:21) holds the 09:21:00 row; [15:27,15:30) holds the EOD capture.
+    assertThat(series)
+        .extracting(OptionsSnapshotReader.StrikePoint::oi)
+        .containsExactly(200L, 300L, 400L);
+    assertThat(series.get(0).bucket().toInstant()).isEqualTo(open.toInstant());
+    assertThat(series.get(2).bucket().toInstant()).isEqualTo(close.minusMinutes(3).toInstant());
+
+    // latest() anchors on the EOD row's bucket — still labelled INSIDE the session.
+    List<OptionsSnapshotReader.StrikePoint> latest = reader.latest(u, exp, OiInterval.parse("3m"));
+    assertThat(latest).extracting(OptionsSnapshotReader.StrikePoint::oi).containsExactly(400L);
+    assertThat(latest.get(0).bucket().toInstant()).isEqualTo(close.minusMinutes(3).toInstant());
+  }
+
   static void insertRow(
       JdbcTemplate jdbc,
       OffsetDateTime ts,

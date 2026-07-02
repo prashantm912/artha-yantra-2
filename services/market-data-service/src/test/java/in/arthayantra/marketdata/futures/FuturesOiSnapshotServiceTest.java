@@ -188,4 +188,63 @@ class FuturesOiSnapshotServiceTest {
     assertThat(captured.get(0).dayLow()).isEqualByComparingTo("23850");
     assertThat(captured.get(0).prevClose()).isEqualByComparingTo("23880");
   }
+
+  // ── T2 (audit 2026-07-02 §9.1): boundary-aligned stamps + the shifted market-hours gate ──────
+
+  private FuturesOiSnapshotService serviceAt(String isoIst, List<FuturesOiSnapshotRepository.Row> captured) {
+    Clock clock = Clock.fixed(OffsetDateTime.parse(isoIst).toInstant(), ZoneOffset.UTC);
+    FuturesOiSnapshotRepository repo =
+        new FuturesOiSnapshotRepository(null) {
+          @Override
+          public void insertAll(List<Row> rows) {
+            captured.addAll(rows);
+          }
+        };
+    FuturesContractSource contracts =
+        (underlying, onOrAfter) ->
+            List.of(new FutContract(NIFTY_FUT, LocalDate.parse("2026-06-25")));
+    QuoteGateway quotes =
+        keys ->
+            Map.of(
+                NIFTY_FUT,
+                new QuoteGateway.Quote(
+                    NIFTY_FUT, new BigDecimal("23950"), null, null, 1000L, 5000L,
+                    OffsetDateTime.now(clock)));
+    return new FuturesOiSnapshotService(
+        contracts, quotes, repo, MarketCalendar.nse(), clock, List.of("NIFTY 50"),
+        new SimpleMeterRegistry());
+  }
+
+  @Test
+  void stampsRowsOnTheMinuteGrid() {
+    List<FuturesOiSnapshotRepository.Row> captured = new ArrayList<>();
+    serviceAt("2026-06-16T11:00:37+05:30", captured).snapshotNow();
+
+    assertThat(captured).hasSize(1);
+    assertThat(captured.get(0).ts().toInstant())
+        .isEqualTo(OffsetDateTime.parse("2026-06-16T11:00:00+05:30").toInstant());
+  }
+
+  @Test
+  void gateSkipsTheOpenFireRunsTheEodFireAndStopsAfterClose() {
+    // 09:15:00 fire: the represented window (09:14, 09:15] starts pre-open -> skipped.
+    List<FuturesOiSnapshotRepository.Row> preOpen = new ArrayList<>();
+    serviceAt("2026-06-16T09:15:00+05:30", preOpen).scheduledSnapshot();
+    assertThat(preOpen).isEmpty();
+
+    // 09:16:00 fire: (09:15, 09:16] fully in-session -> first capture of the day.
+    List<FuturesOiSnapshotRepository.Row> first = new ArrayList<>();
+    serviceAt("2026-06-16T09:16:00+05:30", first).scheduledSnapshot();
+    assertThat(first).isNotEmpty();
+
+    // 15:30:00 fire: (15:29, 15:30] is the closing window -> the EOD capture runs.
+    List<FuturesOiSnapshotRepository.Row> eod = new ArrayList<>();
+    serviceAt("2026-06-16T15:30:00+05:30", eod).scheduledSnapshot();
+    assertThat(eod).isNotEmpty();
+
+    // 15:31:00 fire: the represented window starts at close -> stopped.
+    List<FuturesOiSnapshotRepository.Row> closed = new ArrayList<>();
+    serviceAt("2026-06-16T15:31:00+05:30", closed).scheduledSnapshot();
+    assertThat(closed).isEmpty();
+  }
 }

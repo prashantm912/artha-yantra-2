@@ -22,9 +22,19 @@ const snapshot: PreOpenSnapshot = {
   ],
 };
 
+const scan = {
+  date: '2026-06-24',
+  dates: ['2026-06-24'],
+  items: [
+    { symbol: 'RELIANCE', preOpenPrice: '1510.00', prevClose: '1480.00', change: '30.00', changePct: '2.03', prevDayBreak: 'H' as const },
+    { symbol: 'HINDALCO', preOpenPrice: '960.00', prevClose: '983.90', change: '-23.90', changePct: '-2.43', prevDayBreak: null },
+  ],
+};
+
 vi.mock('../../api/preOpen.ts', () => ({
   useMarketStatus: () => ({ data: statuses, isPending: false, isError: false, isSuccess: true, refetch: () => {} }),
   usePreOpen: () => ({ data: snapshot, isPending: false, isError: false, isSuccess: true, refetch: () => {} }),
+  usePreOpenScan: () => ({ data: scan, isPending: false, isError: false, isSuccess: true, refetch: () => {} }),
 }));
 
 import { PreOpenMarketPage } from './PreOpenMarketPage.tsx';
@@ -52,9 +62,21 @@ describe('PreOpenMarketPage', () => {
     expect(screen.getByText('Pre-Open')).toBeInTheDocument();
   });
 
+  it('renders the preserved stock scanner split into advances and declines with the break badge', () => {
+    renderPage();
+    // the advancing stock sits in the Advances table with its High Break badge; the decliner opposite.
+    const adv = screen.getByRole('table', { name: 'Pre-open market advances' });
+    expect(within(adv).getByText('RELIANCE')).toBeInTheDocument();
+    expect(within(adv).getByText('High Break')).toBeInTheDocument();
+    const dec = screen.getByRole('table', { name: 'Pre-open market declines' });
+    expect(within(dec).getByText('HINDALCO')).toBeInTheDocument();
+    // the counts strip reads the split.
+    expect(screen.getByText(/Advances:/)).toBeInTheDocument();
+  });
+
   it('renders the index snapshot with a sign-aware change per row and a muted dash for the price-less row', () => {
     renderPage();
-    const table = screen.getByRole('table');
+    const table = screen.getAllByRole('table')[0];
     for (const h of ['Index', 'LTP', 'Prev Close', 'Net Chg', '% Chg']) {
       expect(within(table).getByRole('columnheader', { name: new RegExp(h) })).toBeInTheDocument();
     }

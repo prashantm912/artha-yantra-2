@@ -71,11 +71,11 @@ export function JournalPage() {
           <input value={tagsInput} onChange={(e) => setTagsInput(e.target.value)} aria-label="Tags" title="Comma-separated labels to group and later filter this entry." className={`${inputCls} w-full sm:w-40`} />
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-xs text-ay-muted">Disc.</span>
+          <span className="text-xs text-ay-muted">Disc. (1–5)</span>
           <input type="number" min={1} max={5} value={discipline} onChange={(e) => setDiscipline(e.target.value)} aria-label="Discipline rating" title="Rate how well you followed your plan, 1 (poor) to 5 (excellent)." className={`${inputCls} w-16`} />
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-xs text-ay-muted">Emo.</span>
+          <span className="text-xs text-ay-muted">Emo. (1–5)</span>
           <input type="number" min={1} max={5} value={emotion} onChange={(e) => setEmotion(e.target.value)} aria-label="Emotion rating" title="Rate your emotional state during the trade, 1 (rattled) to 5 (calm)." className={`${inputCls} w-16`} />
         </label>
         <button
@@ -126,7 +126,7 @@ export function JournalPage() {
                     <td className="px-2 py-2 text-right tabular-nums">{e.emotionRating ?? '—'}</td>
                     <td className="px-2 py-2 tabular-nums">{e.createdAt?.slice(0, 10)}</td>
                     <td className="px-2 py-2 text-right">
-                      <button type="button" onClick={() => remove.mutate(e.id)} className="px-1.5 text-xs text-bear hover:underline">
+                      <button type="button" onClick={() => { if (window.confirm('Delete this journal entry? This cannot be undone.')) remove.mutate(e.id); }} className="px-1.5 text-xs text-bear hover:underline">
                         Delete
                       </button>
                     </td>

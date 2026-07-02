@@ -32,8 +32,11 @@ describe('WatchlistsPage', () => {
   it('shows the selected list items, removes one, and switches to the screener tab', () => {
     renderPage();
     expect(screen.getByText('NSE:RELIANCE')).toBeInTheDocument();
+    // Remove now confirms first (§10.2-2).
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     fireEvent.click(screen.getByText('Remove'));
     expect(remove).toHaveBeenCalledWith({ id: 'w1', item: { exchange: 'NSE', tradingsymbol: 'RELIANCE' } });
+    confirmSpy.mockRestore();
 
     fireEvent.click(screen.getByRole('tab', { name: 'Screener' }));
     expect(screen.getByText(/Pick a preset and run the screener/)).toBeInTheDocument();

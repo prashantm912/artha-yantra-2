@@ -996,7 +996,17 @@ public class OptionsAnalyticsController {
         lastDay.minusDays(expiryLookbackDays).atStartOfDay().atOffset(Ist.OFFSET);
     OffsetDateTime to = lastDay.plusDays(1).atStartOfDay().atOffset(Ist.OFFSET);
     List<OptionsSnapshotReader.OptionEodRow> eod = reader.eodSeries(q.name(), exp, from, to);
-    List<OpenHighStrategyService.StrikeOpenHigh> all = openHighStrategyService.fold(eod);
+    // Live read (audit §10.2-8): the pattern grades on the session BEFORE the viewed day; the
+    // viewed day's per-bucket premiums add New D.High/Low, the live LTP, and the Hit + time.
+    List<OptionsSnapshotReader.StrikePoint> daySeries =
+        reader.series(
+            q.name(),
+            exp,
+            q.interval(),
+            lastDay.atStartOfDay().atOffset(Ist.OFFSET),
+            latest.get(0).bucket().plus(q.interval().bucket()));
+    List<OpenHighStrategyService.StrikeOpenHigh> all =
+        openHighStrategyService.foldLive(eod, daySeries, lastDay);
     BigDecimal spot = latestSpot(latest);
     List<OpenHighStrategyService.StrikeOpenHigh> windowed =
         nearestOpenHighStrikes(all, spot, heatmapWindow);

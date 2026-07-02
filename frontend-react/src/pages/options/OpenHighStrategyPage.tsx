@@ -14,16 +14,17 @@ import { FIELD_HELP } from '../../core/fieldHelp.ts';
 import type { OpenHighStrategyLeg, OpenHighStrategyStrike } from '../../api/types.ts';
 
 // Open & High Strategy — oipulse §strategies/open-high-strategy (Siva #2). Mirrored CE | Strike | PE
-// scan: for each ATM-window strike the latest captured session's Open=High (Call) / Open=Low (Put)
-// premium-reversion mark, a "Hit" badge when it triggered, the historical TRIGGER PROBABILITY (hit-
-// rate over the prior captured sessions), and the % fall of close below its high (the LTP-distance
-// reversion gauge). One /open-high-strategy read folds the EOD day-rollup of captured snapshots (zero
-// new capture). Capture is forward-only, so the probability window is shallow until sessions accrue.
+// scan: for each ATM-window strike, the PRIOR session's Open=High (Call) / Open=Low (Put) premium-
+// reversion pattern, the live day's New D.High/D.Low + LTP, a "Hit ✓ HH:mm" badge when the live day
+// broke the graded day's extreme (audit §10.2-8), the historical TRIGGER PROBABILITY (hit-rate over
+// prior captured sessions), and the live % fall below the day high (the reversion gauge). One
+// /open-high-strategy read (EOD rollup + the viewed day's buckets). Capture is forward-only, so the
+// probability window is shallow until sessions accrue.
 
 const dec = (s: string | null) => (s ? formatDecimal(s, 2) : '—');
 
-/** Pattern badge: "O=H" (Call) / "O=L" (Put) when the leg's latest session formed it, else "—". The
- * text is the cue; the ring tone is supportive only (a11y — readable without colour). */
+/** Pattern badge: "O=H" (Call) / "O=L" (Put) when the graded session formed it; a live break adds
+ * "Hit ✓ HH:mm" (amber, oipulse-style). Text is the cue; ring tone supportive only (a11y). */
 function PatternBadge({ leg }: { leg: OpenHighStrategyLeg | null }) {
   if (!leg) return <span className="text-ay-muted">—</span>;
   const isCall = leg.optionType === 'CE';
@@ -34,11 +35,13 @@ function PatternBadge({ leg }: { leg: OpenHighStrategyLeg | null }) {
     <span
       className={cn(
         'inline-block whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-semibold ring-1',
-        'text-bull ring-bull/40',
+        leg.triggered ? 'text-warn ring-warn/40' : 'text-bull ring-bull/40',
       )}
       aria-label={isCall ? 'Open equals High' : 'Open equals Low'}
     >
-      {leg.triggered ? `${label} Hit` : label}
+      {leg.triggered
+        ? `${label} Hit ✓${leg.triggeredTime ? ` ${leg.triggeredTime}` : ''}`
+        : label}
     </span>
   );
 }
@@ -54,11 +57,24 @@ function ProbabilityCell({ leg }: { leg: OpenHighStrategyLeg | null }) {
 }
 
 /** Symmetric CE | Strike | PE columns: a Call (CE) half, the centre Strike, then a mirrored Put (PE) half. */
+/** The viewed day's running High / Low for a leg ("126.00 / 95.00"). */
+function NewHiLo({ leg }: { leg: OpenHighStrategyLeg | null }) {
+  if (!leg || (leg.newDayHigh == null && leg.newDayLow == null)) {
+    return <span className="text-ay-muted">—</span>;
+  }
+  return (
+    <span className="whitespace-nowrap tabular-nums">
+      {dec(leg.newDayHigh)} / {dec(leg.newDayLow)}
+    </span>
+  );
+}
+
 const columns: DataColumn<OpenHighStrategyStrike>[] = [
   { id: 'ceProb', header: 'Call Prob', render: (r) => <ProbabilityCell leg={r.ce} />, mobileLabel: 'Call Prob', help: 'Historical odds the Call formed the Open=High pattern, over prior captured sessions.' },
-  { id: 'cePattern', header: 'Call O=H', align: 'center', render: (r) => <PatternBadge leg={r.ce} />, mobileLabel: 'Call O=H', help: 'Shows O=H when the Call opened at its session high; "Hit" marks the reversion trade triggering.' },
-  { id: 'ceFall', header: 'Call Fall%', render: (r) => <ValueDeltaCell value={r.ce?.fallPctFromHigh ?? null} suffix="%" />, mobileLabel: 'Call Fall%', help: 'How far the Call has fallen below its session high, in percent — the reversion gauge.' },
-  { id: 'ceClose', header: 'Call LTP', render: (r) => dec(r.ce?.latestClose ?? null), mobileLabel: 'Call LTP', help: FIELD_HELP.ltp },
+  { id: 'cePattern', header: 'Call O=H', align: 'center', render: (r) => <PatternBadge leg={r.ce} />, mobileLabel: 'Call O=H', help: "Shows O=H when the Call opened at the GRADED session's high; the amber Hit ✓ + time marks the live day breaking that high." },
+  { id: 'ceNewHl', header: 'Call New D.H/L', render: (r) => <NewHiLo leg={r.ce} />, mobileLabel: 'Call D.H/L', help: "The Call premium's running high / low on the viewed day." },
+  { id: 'ceFall', header: 'Call Fall%', render: (r) => <ValueDeltaCell value={r.ce?.fallPctFromHigh ?? null} suffix="%" />, mobileLabel: 'Call Fall%', help: 'How far the Call LTP sits below its day high, in percent — the reversion gauge.' },
+  { id: 'ceClose', header: 'Call LTP', render: (r) => dec(r.ce?.liveLtp ?? r.ce?.latestClose ?? null), mobileLabel: 'Call LTP', help: FIELD_HELP.ltp },
   {
     id: 'strike',
     header: 'Strike',
@@ -69,9 +85,10 @@ const columns: DataColumn<OpenHighStrategyStrike>[] = [
     mobileLabel: 'Strike',
     help: FIELD_HELP.strike,
   },
-  { id: 'peClose', header: 'Put LTP', render: (r) => dec(r.pe?.latestClose ?? null), mobileLabel: 'Put LTP', help: FIELD_HELP.ltp },
-  { id: 'peFall', header: 'Put Fall%', render: (r) => <ValueDeltaCell value={r.pe?.fallPctFromHigh ?? null} suffix="%" />, mobileLabel: 'Put Fall%', help: 'How far the Put has fallen below its session high, in percent — the reversion gauge.' },
-  { id: 'pePattern', header: 'Put O=L', align: 'center', render: (r) => <PatternBadge leg={r.pe} />, mobileLabel: 'Put O=L', help: 'Shows O=L when the Put opened at its session low; "Hit" marks the reversion trade triggering.' },
+  { id: 'peClose', header: 'Put LTP', render: (r) => dec(r.pe?.liveLtp ?? r.pe?.latestClose ?? null), mobileLabel: 'Put LTP', help: FIELD_HELP.ltp },
+  { id: 'peFall', header: 'Put Fall%', render: (r) => <ValueDeltaCell value={r.pe?.fallPctFromHigh ?? null} suffix="%" />, mobileLabel: 'Put Fall%', help: 'How far the Put LTP sits below its day high, in percent — the reversion gauge.' },
+  { id: 'peNewHl', header: 'Put New D.H/L', render: (r) => <NewHiLo leg={r.pe} />, mobileLabel: 'Put D.H/L', help: "The Put premium's running high / low on the viewed day." },
+  { id: 'pePattern', header: 'Put O=L', align: 'center', render: (r) => <PatternBadge leg={r.pe} />, mobileLabel: 'Put O=L', help: "Shows O=L when the Put opened at the GRADED session's low; the amber Hit ✓ + time marks the live day breaking that low." },
   { id: 'peProb', header: 'Put Prob', render: (r) => <ProbabilityCell leg={r.pe} />, mobileLabel: 'Put Prob', help: 'Historical odds the Put formed the Open=Low pattern, over prior captured sessions.' },
 ];
 

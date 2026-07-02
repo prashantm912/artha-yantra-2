@@ -1,8 +1,10 @@
 package in.arthayantra.marketdata.options.analytics;
 
+import in.arthayantra.common.web.time.Ist;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -37,7 +39,13 @@ public class OpenHighStrategyService {
     this.tolerance = tolerance;
   }
 
-  /** One (strike, leg) Open=High/Low scan row: latest-session mark + historical trigger probability. */
+  /**
+   * One (strike, leg) Open=High/Low scan row: the graded session's mark + historical trigger
+   * probability. The four live fields (audit §10.2-8 — {@code newDayHigh}/{@code newDayLow}/
+   * {@code liveLtp}/{@code triggeredTime}) are filled only by {@link #foldLive}: today's running
+   * premium extremes, the live LTP, and the IST "HH:mm" of the first bucket that broke the graded
+   * day's high (CE) / low (PE) — {@code triggered} then means that break happened.
+   */
   public record OpenHighLeg(
       String optionType,
       LocalDate latestDate,
@@ -52,7 +60,11 @@ public class OpenHighStrategyService {
       BigDecimal fallPctFromHigh,
       int sessions,
       int hits,
-      BigDecimal probability) {}
+      BigDecimal probability,
+      BigDecimal newDayHigh,
+      BigDecimal newDayLow,
+      BigDecimal liveLtp,
+      String triggeredTime) {}
 
   /** One strike's CE + PE Open=High/Low scan (each leg nullable when that side has no captured day). */
   public record StrikeOpenHigh(BigDecimal strike, OpenHighLeg ce, OpenHighLeg pe) {}
@@ -133,7 +145,113 @@ public class OpenHighStrategyService {
         fallPctFromHigh(latest),
         sessions,
         priorHits,
-        probability);
+        probability,
+        null,
+        null,
+        null,
+        null);
+  }
+
+  /**
+   * The oipulse live read (audit §10.2-8): grade the pattern on the last session STRICTLY BEFORE
+   * {@code liveDay} (probability over the sessions before that), then enrich each leg from the live
+   * day's per-bucket premium series — New D.High/D.Low, the live LTP, and the Hit: the first bucket
+   * whose LTP broke the graded day's high (CE) / low (PE), with its IST "HH:mm" as the triggered
+   * time. A leg with no session before {@code liveDay} carries only the live fields (no pattern).
+   */
+  public List<StrikeOpenHigh> foldLive(
+      List<OptionsSnapshotReader.OptionEodRow> rows,
+      List<OptionsSnapshotReader.StrikePoint> daySeries,
+      LocalDate liveDay) {
+    // Pattern rows = sessions before the live day; graded exactly like fold().
+    List<StrikeOpenHigh> pattern =
+        fold(rows.stream().filter(r -> r.tradeDate().isBefore(liveDay)).toList());
+    Map<String, StrikeOpenHigh> byStrike = new LinkedHashMap<>();
+    for (StrikeOpenHigh s : pattern) {
+      byStrike.put(key(s.strike()), s);
+    }
+    // The live day's buckets per (strike, leg), bucket-ordered (the reader.series contract).
+    Map<String, List<OptionsSnapshotReader.StrikePoint>> liveByLeg = new LinkedHashMap<>();
+    for (OptionsSnapshotReader.StrikePoint p : daySeries) {
+      liveByLeg.computeIfAbsent(key(p.strike()) + "|" + p.optionType(), k -> new ArrayList<>()).add(p);
+      byStrike.putIfAbsent(
+          key(p.strike()), new StrikeOpenHigh(p.strike(), null, null)); // live-only strike
+    }
+    List<StrikeOpenHigh> out = new ArrayList<>(byStrike.size());
+    for (StrikeOpenHigh s : byStrike.values()) {
+      out.add(
+          new StrikeOpenHigh(
+              s.strike(),
+              enrich("CE", s.ce(), liveByLeg.get(key(s.strike()) + "|CE")),
+              enrich("PE", s.pe(), liveByLeg.get(key(s.strike()) + "|PE"))));
+    }
+    out.sort((a, b) -> a.strike().compareTo(b.strike()));
+    return out;
+  }
+
+  /** Merges a leg's pattern grading with the live day's buckets (either side may be absent). */
+  private OpenHighLeg enrich(
+      String optionType, OpenHighLeg leg, List<OptionsSnapshotReader.StrikePoint> live) {
+    if (live == null || live.isEmpty()) {
+      return leg; // no live reading — the pattern row stands as-is
+    }
+    BigDecimal newHigh = null;
+    BigDecimal newLow = null;
+    BigDecimal last = null;
+    for (OptionsSnapshotReader.StrikePoint p : live) {
+      if (p.ltp() == null) {
+        continue;
+      }
+      newHigh = newHigh == null ? p.ltp() : newHigh.max(p.ltp());
+      newLow = newLow == null ? p.ltp() : newLow.min(p.ltp());
+      last = p.ltp();
+    }
+    boolean isCall = "CE".equals(optionType);
+    BigDecimal breakLevel = leg == null ? null : (isCall ? leg.latestHigh() : leg.latestLow());
+    String triggeredTime = null;
+    if (breakLevel != null) {
+      for (OptionsSnapshotReader.StrikePoint p : live) {
+        if (p.ltp() == null) {
+          continue;
+        }
+        boolean broke = isCall ? p.ltp().compareTo(breakLevel) > 0 : p.ltp().compareTo(breakLevel) < 0;
+        if (broke) {
+          OffsetDateTime ist = p.bucket().atZoneSameInstant(Ist.ZONE).toOffsetDateTime();
+          triggeredTime = String.format("%02d:%02d", ist.getHour(), ist.getMinute());
+          break;
+        }
+      }
+    }
+    BigDecimal fallPct =
+        (last == null || newHigh == null || newHigh.signum() == 0)
+            ? (leg == null ? null : leg.fallPctFromHigh())
+            : last.subtract(newHigh)
+                .multiply(BigDecimal.valueOf(100))
+                .divide(newHigh, 2, RoundingMode.HALF_UP);
+    return new OpenHighLeg(
+        optionType,
+        leg == null ? null : leg.latestDate(),
+        leg == null ? null : leg.latestOpen(),
+        leg == null ? null : leg.latestHigh(),
+        leg == null ? null : leg.latestLow(),
+        leg == null ? null : leg.latestClose(),
+        leg == null ? null : leg.latestOi(),
+        leg != null && leg.ohMark(),
+        leg != null && leg.olMark(),
+        triggeredTime != null,
+        fallPct,
+        leg == null ? 0 : leg.sessions(),
+        leg == null ? 0 : leg.hits(),
+        leg == null ? null : leg.probability(),
+        newHigh,
+        newLow,
+        last,
+        triggeredTime);
+  }
+
+  /** Scale-insensitive strike key. */
+  private static String key(BigDecimal strike) {
+    return strike.stripTrailingZeros().toPlainString();
   }
 
   /** Whether the day formed the leg's tradeable pattern (OH for a Call, OL for a Put). */

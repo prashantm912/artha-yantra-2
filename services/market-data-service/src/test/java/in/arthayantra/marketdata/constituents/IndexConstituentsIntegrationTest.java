@@ -80,7 +80,12 @@ class IndexConstituentsIntegrationTest extends MarketDataIntegrationTestBase {
     MutableClockConfig.NOW.set(Instant.parse("2026-06-11T03:30:00Z"));
     accrualStep.afterStaging();
 
+    // Shared singleton IT DB (no per-method cleanup, the #405 rule): another IT's context boot can
+    // accrue a TODAY-dated snapshot for the same index, so exact-list equality over ALL dates is
+    // order-dependent. Pin exactness INSIDE this test's seeded window instead — still proves the
+    // same-date re-run was an append-only no-op (exactly two rows, not three).
     assertThat(repository.snapshotDates("NIFTY 100"))
+        .filteredOn(d -> !d.isAfter(LocalDate.parse("2026-06-11")))
         .containsExactly(LocalDate.parse("2026-06-10"), LocalDate.parse("2026-06-11"));
     List<IndexConstituentsFetcher.Constituent> day1 =
         repository.membership("NIFTY 100", LocalDate.parse("2026-06-10"));
@@ -106,13 +111,23 @@ class IndexConstituentsIntegrationTest extends MarketDataIntegrationTestBase {
   @Test
   @Order(3)
   void endpointServesLatestByDefaultAndExactDateWithAsOf() throws Exception {
-    mockMvc
-        .perform(
-            MockMvcRequestBuilders.get("/api/v1/instruments/indices/NIFTY 100/constituents"))
-        .andExpect(MockMvcResultMatchers.status().isOk())
-        .andExpect(MockMvcResultMatchers.jsonPath("$.asOf").value("2026-06-11"))
-        .andExpect(MockMvcResultMatchers.jsonPath("$.items.length()").value(50))
-        .andExpect(MockMvcResultMatchers.jsonPath("$.checksum").isString());
+    // "Latest" is collision-prone on the shared DB (a leaked TODAY snapshot outranks 2026-06-11),
+    // so assert latest >= our newest seeded date rather than pinning the exact day; the mock
+    // fixture is the only membership source either way, so the 50-row shape holds.
+    String body =
+        mockMvc
+            .perform(
+                MockMvcRequestBuilders.get("/api/v1/instruments/indices/NIFTY 100/constituents"))
+            .andExpect(MockMvcResultMatchers.status().isOk())
+            .andExpect(MockMvcResultMatchers.jsonPath("$.items.length()").value(50))
+            .andExpect(MockMvcResultMatchers.jsonPath("$.checksum").isString())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+    String latestAsOf =
+        com.jayway.jsonpath.JsonPath.read(body, "$.asOf");
+    assertThat(LocalDate.parse(latestAsOf))
+        .isAfterOrEqualTo(LocalDate.parse("2026-06-11"));
 
     mockMvc
         .perform(

@@ -62,7 +62,7 @@ class OptionsOiChartIntegrationTest extends MarketDataIntegrationTestBase {
   void chartMergesOiAndIvOntoBothLegsOnTheSharedGrid() {
     BigDecimal strike = midStrike();
     // Seed CE + PE snapshots at the first 5m bucket (09:15) with distinct oi + iv at the SAME strike scale.
-    OffsetDateTime b0 = OffsetDateTime.parse(SESSION + "T09:15:00+05:30");
+    OffsetDateTime b0 = OffsetDateTime.parse(SESSION + "T09:16:40+05:30");
     OptionsSnapshotReaderIntegrationTest.insertRow(
         jdbc, b0, UNDERLYING, EXPIRY, strike.toPlainString(), "CE", "100.00", 137250L, 0L, 1000L, "13.03");
     OptionsSnapshotReaderIntegrationTest.insertRow(
@@ -102,7 +102,7 @@ class OptionsOiChartIntegrationTest extends MarketDataIntegrationTestBase {
     BigDecimal strike = midStrike();
     OptionsSnapshotReaderIntegrationTest.insertRow(
         jdbc,
-        OffsetDateTime.parse(SESSION + "T09:15:00+05:30"),
+        OffsetDateTime.parse(SESSION + "T09:16:40+05:30"),
         UNDERLYING,
         EXPIRY,
         strike.toPlainString(),

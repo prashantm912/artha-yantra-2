@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useTrendingOi } from '../../api/oiAnalytics.ts';
-import { foldTrending, type TrendingRow } from '../../api/trendingOiFold.ts';
+import { useSymbolContext } from '../../stores/symbolContext.store.ts';
+import { foldTrending, isClosingBucket, type TrendingRow } from '../../api/trendingOiFold.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
@@ -43,11 +44,12 @@ function Direction({ dir }: { dir: number }) {
 
 export function TrendingOiPaPage() {
   const q = useTrendingOi();
+  const interval = useSymbolContext((s) => s.interval);
   const rows = useMemo(() => foldTrending(q.data?.items ?? []).reverse(), [q.data]); // newest on top
 
   const columns: DataColumn<TrendingRow>[] = [
     { id: 'date', header: 'Date', align: 'left', help: 'Calendar date of this interval bucket.', render: (r) => r.bucket.slice(0, 10) },
-    { id: 'time', header: 'Time', align: 'left', help: 'Clock time at the end of this interval bucket.', render: (r) => r.bucket.slice(11, 16), mobileLabel: 'Time' },
+    { id: 'time', header: 'Time', align: 'left', help: 'Clock time at the end of this interval bucket; (EOD) marks the window closing at 15:30.', render: (r) => (isClosingBucket(r.bucket, interval) ? `${r.bucket.slice(11, 16)} (EOD)` : r.bucket.slice(11, 16)), mobileLabel: 'Time' },
     { id: 'ltp', header: 'LTP', help: FIELD_HELP.spot, render: (r) => (r.spot ? formatDecimal(r.spot, 2) : '—'), mobileLabel: 'LTP' },
     { id: 'break', header: 'Day H/L Break', align: 'center', help: "Flags when the underlying broke the day's high (D.H.B, bullish) or low (D.L.B, bearish) in this interval.", render: (r) => <BreakCell row={r} /> },
     { id: 'chngCall', header: 'Chng. In Call OI', help: 'Change in total call Open Interest versus the session-open baseline (added + / closed −).', render: (r) => <SignedCount value={r.chngCallOi} />, mobileLabel: 'Δ Call OI' },

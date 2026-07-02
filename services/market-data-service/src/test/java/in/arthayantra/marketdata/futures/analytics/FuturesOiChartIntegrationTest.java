@@ -70,7 +70,7 @@ class FuturesOiChartIntegrationTest extends MarketDataIntegrationTestBase {
 
   @Test
   void chartMergesOiOntoCandlesOnTheSharedSessionGrid() {
-    insertOi(OffsetDateTime.parse(SESSION + "T09:15:00+05:30"), 1_000_000L, 5000L); // first 5m bucket
+    insertOi(OffsetDateTime.parse(SESSION + "T09:16:40+05:30"), 1_000_000L, 5000L); // first 5m bucket
     insertOi(OffsetDateTime.parse(SESSION + "T15:45:00+05:30"), 999L, 0L); // post-close: NO candle there
 
     FuturesOiChartService.FutOiChart chart =
@@ -112,7 +112,7 @@ class FuturesOiChartIntegrationTest extends MarketDataIntegrationTestBase {
 
   @Test
   void restEnvelopeServesDecimalStringsAndMergedOi() throws Exception {
-    insertOi(OffsetDateTime.parse(SESSION + "T09:15:00+05:30"), 1_000_000L, 5000L);
+    insertOi(OffsetDateTime.parse(SESSION + "T09:16:40+05:30"), 1_000_000L, 5000L);
 
     mockMvc
         .perform(

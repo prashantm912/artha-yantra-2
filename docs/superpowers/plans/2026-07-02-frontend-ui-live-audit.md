@@ -396,9 +396,10 @@ Mark each item DONE with its PR# here as it merges.
 
 ### Wave 1 — data correctness (backend, market-data)
 
-1. **Trending-OI window cap + false session-open baseline (T1).** Serve the full session; rebase the
-   cumulative Δ columns to the real 09:15 open. Fixes `/options/trending-oi` + `/options/trending-oi-pa`
-   (§9.2-4, §10.2-10). Verify row-for-row vs oipulse next session.
+1. **DONE #440.** ~~Trending-OI window cap + false session-open baseline (T1).~~ Serve the full session;
+   rebase the cumulative Δ columns to the real 09:15 open. Fixes `/options/trending-oi` +
+   `/options/trending-oi-pa` (§9.2-4, §10.2-10). The scalper gate pins its old rolling window via an
+   explicit `buckets=20` (live gate inputs byte-identical). Verify row-for-row vs oipulse next session.
 2. **Snapshot capture phase-alignment (T2).** Align the 3-min OI capture to bucket boundaries; label the
    EOD row; stop rendering the post-close artifact bucket (§9.1). Benefits accrue forward-only → early.
    Verification: aligned buckets must match oipulse exactly (pipeline already proven exact).

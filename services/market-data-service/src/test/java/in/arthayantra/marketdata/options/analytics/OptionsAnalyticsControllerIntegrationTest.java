@@ -139,8 +139,9 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
   void trendingReturnsBucketSeries() throws Exception {
     String u = "TRENDCTRL";
     LocalDate exp = LocalDate.of(2026, 6, 25);
+    // mid-bucket (legacy-style) captures -> buckets 09:15 and 09:20 under end-of-window labelling
     OffsetDateTime b0 =
-        OffsetDateTime.of(2026, 6, 20, 9, 15, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+        OffsetDateTime.of(2026, 6, 20, 9, 16, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
     OffsetDateTime b1 = b0.plusMinutes(5);
     OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b0, u, exp, "22500", "CE", "100", 1000L, 0L);
     OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b1, u, exp, "22500", "CE", "110", 1500L, 0L);
@@ -164,6 +165,8 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
     LocalDate exp = LocalDate.of(2026, 6, 25);
     OffsetDateTime open =
         OffsetDateTime.of(2026, 6, 22, 9, 15, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    // 25 boundary-aligned captures at 09:15..11:15 — state@09:15 (the pre-open carry) labels into
+    // the pre-session window under end-of-window labelling (T2) and stays out of the session table.
     for (int i = 0; i < 25; i++) {
       OptionsSnapshotReaderIntegrationTest.insertRow(
           jdbc, open.plusMinutes(5L * i), u, exp, "22500", "CE", "100", 1000L + i, 0L);
@@ -176,9 +179,9 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
                 .param("expiry", "2026-06-25")
                 .param("interval", "5m"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.items.length()").value(25))
-        // first row = the real 09:15 open bucket (oi 1000), not a mid-session rebase (oi 1005)
-        .andExpect(jsonPath("$.items[0].totalOi").value(1000));
+        .andExpect(jsonPath("$.items.length()").value(24))
+        // first row = the real 09:15 open bucket (state@09:20 -> oi 1001), not a mid-session rebase
+        .andExpect(jsonPath("$.items[0].totalOi").value(1001));
 
     // The explicit rolling window the scalper confluence gate depends on (MarketOiClient).
     mockMvc

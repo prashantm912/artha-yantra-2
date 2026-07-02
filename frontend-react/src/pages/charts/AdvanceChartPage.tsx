@@ -73,7 +73,7 @@ export function AdvanceChartPage() {
       <PageHeader
         title="Advance Chart"
         subtitle="Pro charting — candles with VWAP, VWMA, SuperTrend, volume MA and an RSI pane"
-        help="A lightweight-charts study chart for any instrument and interval, with the default OiPulse indicator set: VWAP, VWMA(20) and SuperTrend(10,2) over price plus an RSI(14) + SMA(14) sub-pane. Scroll back to lazy-load older bars."
+        help="A lightweight-charts study chart for any instrument and interval, with the default study set: VWAP, VWMA(20) and SuperTrend(10,2) over price plus an RSI(14) + SMA(14) sub-pane. Scroll back to lazy-load older bars."
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">

@@ -127,7 +127,7 @@ export function OptionsLegChart({ items, tradingsymbol, legLabel }: OptionsLegCh
             type: 'text',
             right: 64,
             bottom: 56,
-            style: { text: `Oi Pulse / ${tradingsymbol}`, fill: t.muted, fontSize: 11, opacity: 0.6 },
+            style: { text: tradingsymbol, fill: t.muted, fontSize: 11, opacity: 0.6 },
           },
         ],
         series: [

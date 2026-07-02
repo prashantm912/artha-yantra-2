@@ -197,6 +197,77 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
   }
 
   @Test
+  void trendingBasketRestrictsTheFoldAndPeodBaselinePrependsThePreviousSession() throws Exception {
+    // Wave-5 parity extras (audit §7): strikes= restricts the fold to a basket; baseline=peod
+    // prepends the previous trading session's last bucket so cumulative Δ rebases to prev-day EOD.
+    String u = "TRENDPEOD";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    OffsetDateTime prevEod =
+        OffsetDateTime.of(2026, 6, 19, 15, 28, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime b0 =
+        OffsetDateTime.of(2026, 6, 22, 9, 16, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime b1 = b0.plusMinutes(5);
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, prevEod, u, exp, "22500", "CE", "90", 800L, 0L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b0, u, exp, "22500", "CE", "100", 1000L, 0L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b0, u, exp, "22600", "CE", "40", 50L, 0L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b1, u, exp, "22500", "CE", "110", 1500L, 0L);
+    OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, b1, u, exp, "22600", "CE", "42", 60L, 0L);
+
+    // chain-wide (no basket): totals include the 22600 leg
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/trending")
+                .param("name", u)
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m")
+                .param("date", "2026-06-22")
+                .param("mode", "history"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items.length()").value(2))
+        .andExpect(jsonPath("$.items[0].totalOi").value(1050));
+
+    // basket = 22500 only (normalization: trailing zeros ignored)
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/trending")
+                .param("name", u)
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m")
+                .param("date", "2026-06-22")
+                .param("mode", "history")
+                .param("strikes", "22500.00"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items.length()").value(2))
+        .andExpect(jsonPath("$.items[0].totalOi").value(1000))
+        .andExpect(jsonPath("$.items[1].totalOi").value(1500));
+
+    // positional: the previous session's last bucket becomes the first (baseline) row
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/trending")
+                .param("name", u)
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m")
+                .param("date", "2026-06-22")
+                .param("mode", "history")
+                .param("strikes", "22500")
+                .param("baseline", "peod"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items.length()").value(3))
+        .andExpect(jsonPath("$.items[0].totalOi").value(800));
+
+    // unknown baseline value -> 400
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/trending")
+                .param("name", u)
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m")
+                .param("baseline", "yesterday"))
+        .andExpect(status().isBadRequest());
+  }
+
+  @Test
   void strikeSeriesReturnsOnlyTheChosenStrikeBuckets() throws Exception {
     String u = "STRIKESERIES";
     LocalDate exp = LocalDate.of(2026, 6, 25);

@@ -3571,6 +3571,8 @@ export interface operations {
                 interval?: string;
                 expiry?: string;
                 buckets?: number;
+                strikes?: string;
+                baseline?: string;
             };
             header?: never;
             path?: never;

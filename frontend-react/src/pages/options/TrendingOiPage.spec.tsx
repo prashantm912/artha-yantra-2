@@ -13,8 +13,14 @@ const data: TrendSeries = {
 
 vi.mock('../../api/oiAnalytics.ts', () => ({
   useTrendingOi: () => ({ data, isFetching: false, isLoading: false, refetch: vi.fn() }),
+  useChainTable: () => ({ data: null, isFetching: false, isLoading: false }),
+}));
+// jsdom has no canvas — swap the EChart atom for its accessible shell.
+vi.mock('../../components/atoms/EChart.tsx', () => ({
+  EChart: ({ ariaLabel }: { ariaLabel: string }) => <div role="img" aria-label={ariaLabel} />,
 }));
 
+import userEvent from '@testing-library/user-event';
 import { TrendingOiPage } from './TrendingOiPage.tsx';
 
 function renderPage() {
@@ -35,5 +41,14 @@ describe('TrendingOiPage', () => {
     }
     // The newest bucket (ΔPut 300 > ΔCall 100 → Diff +200) reads Bullish.
     expect(within(table).getAllByText('Bullish').length).toBeGreaterThan(0);
+  });
+
+  it('Graph view swaps the table for the ΔOI chart', async () => {
+    renderPage();
+    await userEvent.click(screen.getByLabelText('Graph view'));
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('img', { name: /Cumulative change in call and put OI/ }),
+    ).toBeInTheDocument();
   });
 });

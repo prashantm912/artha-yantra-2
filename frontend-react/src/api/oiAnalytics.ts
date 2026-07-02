@@ -358,12 +358,23 @@ export function useChainTable(window?: 'interval' | 'cumulative') {
 
 // ── Wave-2 depth hooks (§20.3). Symbol-context driven (name/expiry/interval/mode/date from the bar).
 
-/** OI Trending (§20.3): per-bucket total/CE/PE OI + spot + UP/DOWN/FLAT over the last N buckets. */
-export function useTrendingOi() {
+/**
+ * OI Trending (§20.3): per-bucket total/CE/PE OI + spot + UP/DOWN/FLAT over the session. Wave-5
+ * extras (audit §7): `strikes` restricts the server fold to that basket (oipulse's "Change Strike
+ * Prices"); `baseline='peod'` prepends the previous session's last bucket so the cumulative Δ
+ * columns rebase to the prev-day EOD (positional read). Defaults keep the classic chain-wide call.
+ */
+export function useTrendingOi(strikes: string[] = [], baseline: 'peod' | null = null) {
   const ctx = useOiCtx();
+  const basket = strikes.length > 0 ? [...strikes].sort().join(',') : null;
   return useQuery({
-    queryKey: ['oi', 'trending', ctx.name, ctx.expiry, ctx.interval, ctx.mode, ctx.date],
-    queryFn: () => oiGet<TrendSeries | null>('/market/options/trending', oiParams(ctx, true), null),
+    queryKey: ['oi', 'trending', ctx.name, ctx.expiry, ctx.interval, ctx.mode, ctx.date, basket, baseline],
+    queryFn: () => {
+      let params = oiParams(ctx, true);
+      if (basket) params += `&strikes=${encodeURIComponent(basket)}`;
+      if (baseline) params += `&baseline=${baseline}`;
+      return oiGet<TrendSeries | null>('/market/options/trending', params, null);
+    },
     enabled: satisfiable(ctx, true),
   });
 }

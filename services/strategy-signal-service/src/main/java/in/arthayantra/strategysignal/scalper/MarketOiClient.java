@@ -332,6 +332,10 @@ public class MarketOiClient {
                 uri.path("/api/v1/market/options/trending")
                     .queryParam("name", underlying)
                     .queryParam("expiry", expiry)
+                    // pin the rolling window: without `buckets` the endpoint now serves the FULL
+                    // session (trending-page baseline fix) and the first-vs-last derivations below
+                    // would silently become session-cumulative
+                    .queryParam("buckets", SERIES_WINDOW)
                     .build(),
             this::deriveTrending,
             Trending.EMPTY,
@@ -375,6 +379,8 @@ public class MarketOiClient {
                 .queryParam("name", underlying)
                 .queryParam("expiry", expiry)
                 .queryParam("interval", "60m")
+                // pin the rolling window (see the primary trending read above)
+                .queryParam("buckets", SERIES_WINDOW)
                 .build(),
         this::deriveTrend60mDir,
         0,

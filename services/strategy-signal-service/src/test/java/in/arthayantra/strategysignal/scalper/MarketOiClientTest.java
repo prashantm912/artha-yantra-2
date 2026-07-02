@@ -58,9 +58,11 @@ class MarketOiClientTest {
             + "{\"expiry\":\"2026-07-30\",\"interpretation\":\"LONG_UNWINDING\",\"basis\":\"30\"},"
             + "{\"expiry\":\"2026-06-25\",\"interpretation\":\"LONG_BUILDUP\",\"basis\":\"10\"}]}");
     stub("/api/v1/market/options/active-strikes", "{\"sentimentPct\":\"12.5\",\"items\":[]}");
-    // trending: latest point PE 200 / CE 100 of 300 total → (200-100)*100/300 = 33.3333
+    // trending: latest point PE 200 / CE 100 of 300 total → (200-100)*100/300 = 33.3333.
+    // The rolling window MUST be pinned (buckets=20) — the bare endpoint now serves the full
+    // session, which would silently make the first-vs-last derivations session-cumulative.
     stub(
-        "/api/v1/market/options/trending",
+        "/api/v1/market/options/trending?name=NIFTY%2050&expiry=2026-06-25&buckets=20",
         "{\"items\":[{\"ceOi\":50,\"peOi\":50},{\"ceOi\":100,\"peOi\":200}]}");
     stub(
         "/api/v1/market/futures/term-structure",
@@ -110,9 +112,9 @@ class MarketOiClientTest {
   void trend60mDirReadsTheSignOfThe60mOiBuild() {
     wire();
     // E2 M7: over the 60m window CE OI builds faster than PE (ceBuild 300 vs peBuild 150) → CE-heavy
-    // build = bearish → dir < 0. One focused /options/trending?interval=60m read.
+    // build = bearish → dir < 0. One focused /options/trending?interval=60m read, window pinned.
     stub(
-        "/api/v1/market/options/trending",
+        "interval=60m&buckets=20",
         "{\"items\":[{\"ceOi\":100,\"peOi\":100},{\"ceOi\":400,\"peOi\":250}]}");
     assertThat(client.trend60mDir(UNDERLYING, EXPIRY, NON_MONTHLY)).isEqualTo(-1);
     server.verify();

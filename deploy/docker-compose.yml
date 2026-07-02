@@ -38,6 +38,7 @@ secrets:
 
 volumes:
   timescale-data:
+  redis-data:           # AOF persistence — sessions + ticker SubscriptionRegistry survive recreates (P2)
   openalgo-data:        # OpenAlgo SQLite (sessions/api-keys/sandbox) + DuckDB persistence (§2)
 
 services:
@@ -69,9 +70,12 @@ services:
   redis:
     image: redis:7.4-alpine
     container_name: ay-redis
-    # CD-16: eviction is instance-wide, so volatile-lru + TTLs only on cache
-    # keys keeps sessions/Streams safe; pubsub buffer limit disconnects
-    # pathological subscribers instead of ballooning memory (A.7.2)
+    # CD-16: eviction is instance-wide (volatile-lru; note Spring-Session keys ARE TTL'd and thus
+    # evictable under pressure — producers now XTRIM the job streams so TTL-less stream bytes can't
+    # build that pressure, audit P2); pubsub buffer limit disconnects pathological subscribers
+    # instead of ballooning memory (A.7.2). AOF + a named volume (audit P2) so sessions and the
+    # ticker SubscriptionRegistry survive an `ay down`/container recreate — losing the registry
+    # silently killed live chart streaming for non-pinned symbols (the 2026-06-15 incident class).
     command:
       - redis-server
       - --maxmemory
@@ -80,6 +84,10 @@ services:
       - volatile-lru
       - --client-output-buffer-limit
       - pubsub 16mb 8mb 60
+      - --appendonly
+      - "yes"
+    volumes:
+      - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s

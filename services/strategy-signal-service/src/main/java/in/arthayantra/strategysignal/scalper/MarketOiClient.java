@@ -52,6 +52,20 @@ public class MarketOiClient {
   private final ObjectMapper objectMapper;
   private final MarketCalendar calendar;
 
+  /**
+   * Short-TTL response memo (audit P1-12): every scalper passing the chart gate on the SAME bar
+   * re-ran the full ~15-call OI/macro fan-out sequentially on the single eval thread — 12 CE
+   * variants ≈ 180 round-trips per bar. Successful bodies are cached by resolved URI for one
+   * bar-ish window, so the first strategy pays and the rest read memory; the mappers are pure and
+   * the OI snapshots only change on market-data's own capture cadence.
+   */
+  private record CachedBody(String body, long expiresAtMs) {}
+
+  private static final long MEMO_TTL_MS = 45_000;
+  private final java.util.concurrent.ConcurrentHashMap<String, CachedBody> memo =
+      new java.util.concurrent.ConcurrentHashMap<>();
+  private final org.springframework.web.util.DefaultUriBuilderFactory uriFactory;
+
   /** Wires the configured market-data base URL (same bean pattern as the candle client). */
   public MarketOiClient(
       RestClient.Builder builder,
@@ -61,6 +75,7 @@ public class MarketOiClient {
     this.restClient = builder.baseUrl(baseUrl).build();
     this.objectMapper = objectMapper;
     this.calendar = calendar;
+    this.uriFactory = new org.springframework.web.util.DefaultUriBuilderFactory(baseUrl);
   }
 
   /**
@@ -850,7 +865,23 @@ public class MarketOiClient {
       T fallback,
       String label) {
     try {
-      String body = restClient.get().uri(uri).retrieve().body(String.class);
+      // Resolve the URI up front so the memo can key on it (P1-12); an absolute URI overrides the
+      // client's baseUrl with the identical value.
+      java.net.URI resolved = uri.apply(uriFactory.builder());
+      long now = System.currentTimeMillis();
+      CachedBody hit = memo.get(resolved.toString());
+      String body;
+      if (hit != null && now < hit.expiresAtMs()) {
+        body = hit.body();
+      } else {
+        body = restClient.get().uri(resolved).retrieve().body(String.class);
+        if (body != null && !body.isBlank()) {
+          if (memo.size() > 256) {
+            memo.clear(); // tiny working set; a day of expiries/underlyings never nears this
+          }
+          memo.put(resolved.toString(), new CachedBody(body, now + MEMO_TTL_MS));
+        }
+      }
       if (body == null || body.isBlank()) {
         return fallback;
       }

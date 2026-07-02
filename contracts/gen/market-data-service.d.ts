@@ -4248,6 +4248,7 @@ export interface operations {
                 date?: string;
                 interval?: string;
                 expiry?: string;
+                window?: string;
             };
             header?: never;
             path?: never;

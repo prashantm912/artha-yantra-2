@@ -5,6 +5,7 @@ import { loadDensity, saveDensity, type Density } from '../../lib/density.ts';
 import { useChainTable, useVix } from '../../api/oiAnalytics.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
+import { Select } from '../../components/atoms/Select.tsx';
 import { ColumnSettings } from '../../components/ColumnSettings.tsx';
 import { DensityToggle } from '../../components/DensityToggle.tsx';
 import { OptionsChainTable } from '../../components/OptionsChainTable.tsx';
@@ -55,7 +56,10 @@ function ChainMetric({ label, value, sub }: { label: string; value: string; sub?
 }
 
 export function OptionsChainPage() {
-  const chainQ = useChainTable();
+  // "Full day" period (§9.2-3): the barometer's default OI-Chng answers "what changed TODAY";
+  // ours defaulted (and still defaults) to the per-interval delta — now both are selectable.
+  const [period, setPeriod] = useState<'interval' | 'cumulative'>('interval');
+  const chainQ = useChainTable(period);
   const vixQ = useVix();
   const [optional, setOptional] = useState<Record<string, boolean>>({});
   const [density, setDensity] = useState<Density>(() => loadDensity());
@@ -96,6 +100,16 @@ export function OptionsChainPage() {
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry />
+        <Select
+          ariaLabel="OI change period"
+          title='What the Chng columns measure: the last interval, or "Full day" (cumulative vs the session open)'
+          value={period}
+          options={[
+            { value: 'interval', label: 'Interval Δ' },
+            { value: 'cumulative', label: 'Full day Δ' },
+          ]}
+          onChange={(v) => setPeriod(v === 'cumulative' ? 'cumulative' : 'interval')}
+        />
         <GoButton onClick={() => chainQ.refetch()} loading={chainQ.isFetching} />
         <ColumnSettings
           columns={OPTIONAL_COLUMN_META}

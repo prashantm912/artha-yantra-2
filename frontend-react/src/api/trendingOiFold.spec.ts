@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { foldTrending } from './trendingOiFold.ts';
+import { foldTrending, isClosingBucket } from './trendingOiFold.ts';
 import type { TrendPoint } from './types.ts';
 
 function pt(p: Partial<TrendPoint>): TrendPoint {
@@ -68,5 +68,20 @@ describe('foldTrending', () => {
     ]);
     expect(rows[1].diffInOi).toBe(-300);
     expect(rows[1].sentiment.label).toBe('Bearish');
+  });
+});
+
+describe('isClosingBucket', () => {
+  it('marks the window ending at the 15:30 close, per interval', () => {
+    expect(isClosingBucket('2026-07-01T15:27:00+05:30', '3m')).toBe(true);
+    expect(isClosingBucket('2026-07-01T15:25:00+05:30', '5m')).toBe(true);
+    expect(isClosingBucket('2026-07-01T14:30:00+05:30', '60m')).toBe(true);
+    expect(isClosingBucket('2026-07-01T15:24:00+05:30', '3m')).toBe(false);
+    expect(isClosingBucket('2026-07-01T09:15:00+05:30', '3m')).toBe(false);
+  });
+
+  it('is false for malformed input', () => {
+    expect(isClosingBucket('b0', '3m')).toBe(false);
+    expect(isClosingBucket('2026-07-01T15:27:00+05:30', '')).toBe(false);
   });
 });

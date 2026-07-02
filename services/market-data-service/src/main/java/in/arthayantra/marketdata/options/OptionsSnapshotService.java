@@ -24,8 +24,9 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 /**
- * The 5-min snapshotter (Phase 15 / B-12): computes the chain and persists EVERY row — raw quote
- * fields unconditionally, IV/Greeks as the solver allows (null + reason rows are first-class).
+ * The chain snapshotter (Phase 15 / B-12), boundary-aligned since T2 (audit 2026-07-02): computes
+ * the chain and persists EVERY row — raw quote fields unconditionally, IV/Greeks as the solver
+ * allows (null + reason rows are first-class).
  * Publishes the fresh chain to the {@code options.chain.{underlying}.{expiry}} Redis key (TTL
  * 60 s) and the {@code options.chain} channel. Calendar-gated; manual trigger via the 202
  * endpoint.
@@ -79,12 +80,23 @@ public class OptionsSnapshotService {
   }
 
   /**
-   * Configurable cadence (default 5 min), market hours only (B-12; the Phase 16 schedule registry
-   * references this). Snapshots the full chain of EVERY expiry within the horizon per underlying.
+   * The capture cadence the cron below fires on. The gate shifts the market-hours check back by
+   * this much: a fire at boundary B records the state accumulated over {@code (B - cadence, B]},
+   * so it runs iff THAT window was in-session — the 09:15:00 fire is skipped (pre-open window) and
+   * the 15:30:00 fire still runs (the EOD capture). MUST match the cron cadence.
    */
-  @Scheduled(fixedDelayString = "${artha.options.snapshot-interval-ms:300000}", initialDelay = 60_000)
+  private static final Duration CAPTURE_CADENCE = Duration.ofMinutes(2);
+
+  /**
+   * Boundary-aligned capture (audit 2026-07-02 §9.1, T2): cron on the IST minute grid, replacing
+   * the boot-phase fixedDelay whose stamps drifted mid-bucket (the pass overruns the delay, so the
+   * phase crept ~8 s per pass). 2-min cadence keeps today's ~50% Kite /quote duty (a full 6-index
+   * pass is ~70 batched calls ≈ 70 s at the 1/s limit). Snapshots the full chain of EVERY expiry
+   * within the horizon per underlying (B-12; the Phase 16 schedule registry references this).
+   */
+  @Scheduled(cron = "${artha.options.snapshot-cron:0 */2 * * * *}", zone = "Asia/Kolkata")
   public void scheduledSnapshot() {
-    if (!isOpenSafe()) {
+    if (!isOpenSafe(clock.instant().minus(CAPTURE_CADENCE))) {
       return;
     }
     for (String underlying : snapshotUnderlyings) {
@@ -102,7 +114,7 @@ public class OptionsSnapshotService {
   /** 30 s live chain broadcast, market hours (B-12) — publish only, no persistence. */
   @Scheduled(fixedDelay = 30_000, initialDelay = 45_000)
   public void scheduledBroadcast() {
-    if (!isOpenSafe()) {
+    if (!isOpenSafe(clock.instant())) {
       return;
     }
     for (String underlying : snapshotUnderlyings) {
@@ -133,9 +145,11 @@ public class OptionsSnapshotService {
   /** One synchronous snapshot pass; returns the persisted chain. */
   public OptionsChainService.Chain snapshotNow(String underlying, LocalDate expiry) {
     long started = System.nanoTime();
+    // Stamp at ENTRY, floored to the minute grid (T2): the cron fires on boundaries, so the row's
+    // ts IS the boundary it represents; the readers' end-of-window bucketing depends on it. Chains
+    // later in a pass that crosses a minute stamp their own entry minute (still on-grid).
+    OffsetDateTime ts = OffsetDateTime.now(clock).truncatedTo(ChronoUnit.MINUTES);
     OptionsChainService.Chain chain = chainService.chain(underlying, expiry);
-    // one ts for the whole pass — the PK groups the snapshot
-    OffsetDateTime ts = OffsetDateTime.now(clock).truncatedTo(ChronoUnit.SECONDS);
     List<OptionsSnapshotRepository.SnapshotRow> rows = new ArrayList<>();
     for (OptionsChainService.StrikeRow strikeRow : chain.rows()) {
       addRow(rows, ts, chain, strikeRow.strike(), "CE", strikeRow.ce());
@@ -188,9 +202,9 @@ public class OptionsSnapshotService {
     }
   }
 
-  private boolean isOpenSafe() {
+  private boolean isOpenSafe(java.time.Instant instant) {
     try {
-      return calendar.isOpen(clock.instant());
+      return calendar.isOpen(instant);
     } catch (IllegalArgumentException uncoveredYear) {
       return false;
     }

@@ -11,7 +11,14 @@ import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-/** Query-time downsample of futures_oi_snapshots, per contract. */
+/**
+ * Query-time downsample of futures_oi_snapshots, per contract.
+ *
+ * <p>End-of-window bucketing (audit 2026-07-02 §9.1, T2): buckets shift {@code ts} back one second,
+ * so a boundary-aligned capture labels into the window it TERMINATES — same convention as
+ * {@code OptionsSnapshotReader} (see its class doc for the full rationale). Legacy mid-bucket
+ * captures keep their buckets; the raw-ts window predicates shift the same second.
+ */
 @Repository
 public class FuturesSnapshotReader {
 
@@ -66,7 +73,7 @@ public class FuturesSnapshotReader {
     String sql =
         "SELECT public.time_bucket(INTERVAL '"
             + interval.pgInterval()
-            + "', ts, 'Asia/Kolkata') AS b, "
+            + "', ts - INTERVAL '1 second', 'Asia/Kolkata') AS b, "
             + "  underlying, tradingsymbol, public.last(ltp, ts) AS ltp, public.last(oi, ts) AS oi, "
             + "  public.last(oi_change, ts) AS oi_change, "
             + "  public.last(day_open, ts) AS day_open, public.last(day_high, ts) AS day_high, "
@@ -78,8 +85,8 @@ public class FuturesSnapshotReader {
             + ") AND ts >= ? AND ts < ? "
             + "GROUP BY b, underlying, tradingsymbol ORDER BY b, underlying, tradingsymbol";
     List<Object> args = new ArrayList<>(underlyings);
-    args.add(Timestamp.from(from.toInstant()));
-    args.add(Timestamp.from(to.toInstant()));
+    args.add(Timestamp.from(from.plusSeconds(1).toInstant()));
+    args.add(Timestamp.from(to.plusSeconds(1).toInstant()));
     return jdbc.query(
         sql,
         (rs, n) ->
@@ -118,7 +125,7 @@ public class FuturesSnapshotReader {
         new StringBuilder(
             "SELECT public.time_bucket(INTERVAL '"
                 + interval.pgInterval()
-                + "', max(ts), 'Asia/Kolkata') AS b "
+                + "', max(ts) - INTERVAL '1 second', 'Asia/Kolkata') AS b "
                 + "FROM futures_oi_snapshots WHERE underlying = ?");
     List<Object> args = new ArrayList<>();
     args.add(underlying);
@@ -144,7 +151,7 @@ public class FuturesSnapshotReader {
         new StringBuilder(
             "SELECT DISTINCT public.time_bucket(INTERVAL '"
                 + interval.pgInterval()
-                + "', ts, 'Asia/Kolkata') AS b "
+                + "', ts - INTERVAL '1 second', 'Asia/Kolkata') AS b "
                 + "FROM futures_oi_snapshots WHERE underlying = ?");
     List<Object> args = new ArrayList<>();
     args.add(underlying);
@@ -176,7 +183,7 @@ public class FuturesSnapshotReader {
         new StringBuilder(
             "SELECT DISTINCT public.time_bucket(INTERVAL '"
                 + interval.pgInterval()
-                + "', ts, 'Asia/Kolkata') AS b "
+                + "', ts - INTERVAL '1 second', 'Asia/Kolkata') AS b "
                 + "FROM futures_oi_snapshots WHERE underlying IN ("
                 + placeholders
                 + ")");

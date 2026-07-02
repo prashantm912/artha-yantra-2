@@ -15,7 +15,18 @@ import java.util.Map;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-/** Query-time downsample of option_chain_snapshots (NO cagg — decision 2026-06-15). */
+/**
+ * Query-time downsample of option_chain_snapshots (NO cagg — decision 2026-06-15).
+ *
+ * <p><b>End-of-window bucketing (audit 2026-07-02 §9.1, T2):</b> every bucket expression shifts
+ * {@code ts} back one second, so a capture stamped exactly ON a bucket boundary labels into the
+ * window it TERMINATES — bucket {@code [B, B+iv)} carries the chain state observed AT {@code B+iv}.
+ * That matches both the candle-derived history convention ({@code last(oi)} of the window) and the
+ * oipulse barometer's boundary-sample rows, and it kills the post-close artifact bucket (the
+ * 15:30:00 EOD capture labels into the final session window). Legacy mid-bucket captures are
+ * unaffected ({@code ts − 1s} stays in the same bucket). The raw-ts window predicates shift the
+ * same second (callers keep passing bucket-domain {@code [from, to)}).
+ */
 @Repository
 public class OptionsSnapshotReader {
 
@@ -78,7 +89,7 @@ public class OptionsSnapshotReader {
     String sql =
         "SELECT public.time_bucket(INTERVAL '"
             + interval.pgInterval()
-            + "', ts, 'Asia/Kolkata') AS b, "
+            + "', ts - INTERVAL '1 second', 'Asia/Kolkata') AS b, "
             + "  strike, option_type, "
             + "  public.last(ltp, ts) AS ltp, public.last(oi, ts) AS oi, "
             + "  public.last(oi_change, ts) AS oi_change, public.last(iv, ts) AS iv, "
@@ -103,8 +114,8 @@ public class OptionsSnapshotReader {
         underlying,
         java.sql.Date.valueOf(expiry),
         strike,
-        Timestamp.from(from.toInstant()),
-        Timestamp.from(to.toInstant()));
+        Timestamp.from(from.plusSeconds(1).toInstant()),
+        Timestamp.from(to.plusSeconds(1).toInstant()));
   }
 
   /**
@@ -167,7 +178,7 @@ public class OptionsSnapshotReader {
     String sql =
         "SELECT public.time_bucket(INTERVAL '"
             + interval.pgInterval()
-            + "', ts, 'Asia/Kolkata') AS b, "
+            + "', ts - INTERVAL '1 second', 'Asia/Kolkata') AS b, "
             + "  strike, option_type, "
             + "  public.last(ltp, ts) AS ltp, public.last(oi, ts) AS oi, "
             + "  public.last(oi_change, ts) AS oi_change, public.last(iv, ts) AS iv, "
@@ -191,8 +202,8 @@ public class OptionsSnapshotReader {
                 rs.getObject("volume", Long.class)),
         underlying,
         java.sql.Date.valueOf(expiry),
-        Timestamp.from(from.toInstant()),
-        Timestamp.from(to.toInstant()));
+        Timestamp.from(from.plusSeconds(1).toInstant()),
+        Timestamp.from(to.plusSeconds(1).toInstant()));
   }
 
   /**
@@ -359,7 +370,7 @@ public class OptionsSnapshotReader {
         new StringBuilder(
             "SELECT public.time_bucket(INTERVAL '"
                 + interval.pgInterval()
-                + "', max(ts), 'Asia/Kolkata') AS b "
+                + "', max(ts) - INTERVAL '1 second', 'Asia/Kolkata') AS b "
                 + "FROM options_chain_snapshots WHERE underlying = ? AND expiry = ?");
     List<Object> args = new ArrayList<>();
     args.add(underlying);
@@ -392,7 +403,7 @@ public class OptionsSnapshotReader {
         new StringBuilder(
             "SELECT DISTINCT public.time_bucket(INTERVAL '"
                 + interval.pgInterval()
-                + "', ts, 'Asia/Kolkata') AS b "
+                + "', ts - INTERVAL '1 second', 'Asia/Kolkata') AS b "
                 + "FROM options_chain_snapshots WHERE underlying = ? AND expiry = ?");
     List<Object> args = new ArrayList<>();
     args.add(underlying);

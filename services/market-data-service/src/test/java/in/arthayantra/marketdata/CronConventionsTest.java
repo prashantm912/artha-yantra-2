@@ -21,6 +21,7 @@ class CronConventionsTest {
           in.arthayantra.marketdata.instruments.InstrumentSyncScheduler.class,
           in.arthayantra.marketdata.feed.TickerSchedule.class,
           in.arthayantra.marketdata.options.OptionsSnapshotService.class,
+          in.arthayantra.marketdata.futures.FuturesOiSnapshotService.class,
           in.arthayantra.marketdata.kite.session.SessionHealthProbe.class,
           in.arthayantra.marketdata.candles.CandlesConfig.CandleHousekeeping.class);
 

@@ -57,6 +57,18 @@ export interface TrendingRow {
   straddleChng: string | null;
 }
 
+/**
+ * True when this bucket's window ends at the 15:30 IST close — the EOD row (T2: the boundary-aligned
+ * 15:30:00 capture labels into the final session window, so its bucket starts at 15:30 − interval).
+ * `interval` is the FilterBar token ("3m"…"60m"); `bucket` is the row's IST ISO timestamp.
+ */
+export function isClosingBucket(bucket: string, interval: string): boolean {
+  const minutes = Number.parseInt(interval, 10);
+  if (!Number.isFinite(minutes) || bucket.length < 16) return false;
+  const end = Number(bucket.slice(11, 13)) * 60 + Number(bucket.slice(14, 16)) + minutes;
+  return end === 15 * 60 + 30;
+}
+
 function sentiment(diff: number, dhBreak: boolean, dlBreak: boolean, chngCallOi: number, chngPutOi: number): SentimentLevel {
   if (diff === 0) return { label: 'Neutral', tone: 'neutral' };
   if (diff > 0) {

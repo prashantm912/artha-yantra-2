@@ -182,6 +182,13 @@ public class InstrumentRepository {
         exchange, exchange, instrumentType, instrumentType, q, q, q, limit, offset);
   }
 
+  /** Newest {@code last_seen_at} across the master — proof of the most recent sync; null when empty. */
+  public java.time.Instant maxLastSeenAt() {
+    java.sql.Timestamp ts =
+        jdbc.queryForObject("SELECT max(last_seen_at) FROM instruments", java.sql.Timestamp.class);
+    return ts == null ? null : ts.toInstant();
+  }
+
   /** Total for the paged listing. */
   public long count(String exchange, String instrumentType, String q) {
     Long total =

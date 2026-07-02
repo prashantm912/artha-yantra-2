@@ -61,7 +61,9 @@ export function LiveDot({ stale = false, detail, className }: LiveDotProps) {
         <Circle aria-hidden="true" className="ay-breathe size-2.5 fill-current" />
       )}
       <span className="font-medium">{stale ? 'Stale' : 'Live'}</span>
-      {detail && <span className="nums text-ay-muted">{detail}</span>}
+      {/* "as of" marks this as the DATA timestamp — without it the detail read as a second
+          wall-clock ticking seconds apart from the topbar IST clock (audit 2026-07-02 §6). */}
+      {detail && <span className="nums text-ay-muted">as of {detail}</span>}
     </span>
   );
 }

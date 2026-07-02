@@ -338,7 +338,9 @@ export function BacktestResultsPage() {
                   >
                     <td className="px-2 py-2 tabular-nums">{tr.seq}</td>
                     <td className="px-2 py-2">
-                      <span className={cn('text-xs font-semibold', tr.side === 'LONG' ? 'text-bull' : 'text-bear')}>{tr.side}</span>
+                      {/* real trades carry side=BUY (option legs) — the old ==='LONG' check never
+                          matched, so every BUY rendered bear-red (audit 2026-07-02 §3) */}
+                      <span className={cn('text-xs font-semibold', tr.side === 'LONG' || tr.side === 'BUY' ? 'text-bull' : 'text-bear')}>{tr.side}</span>
                     </td>
                     <td className="px-2 py-2 tabular-nums text-ay-muted">{tr.entryTs.slice(5, 16).replace('T', ' ')}</td>
                     <td className="px-2 py-2 text-right tabular-nums">{price(tr.entryPrice)}</td>

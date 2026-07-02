@@ -211,7 +211,7 @@ export interface BacktestResults {
 
 export interface TradeRow {
   seq: number;
-  side: 'LONG' | 'SHORT';
+  side: 'LONG' | 'SHORT' | 'BUY' | 'SELL';
   qty: number;
   entryTs: string;
   entryPrice: string;

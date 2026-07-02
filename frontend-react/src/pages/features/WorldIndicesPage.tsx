@@ -19,6 +19,13 @@ import type { WorldIndex } from '../../api/types.ts';
 // as decimal STRINGS and are formatted exact (never parseFloat). Rows whose live quote did not resolve
 // list with a muted dash. Default-sorted by %change descending (today's strongest first).
 
+/** Over an hour since the venue's last print → the market is closed/drifting, not live (§9.6). */
+function isStaleQuote(iso: string | undefined): boolean {
+  if (!iso) return false;
+  const t = Date.parse(iso);
+  return Number.isFinite(t) && Date.now() - t > 60 * 60 * 1000;
+}
+
 /** The HH:mm:ss IST clock from the snapshot's ISO +05:30 asOf, for the live-dot detail. */
 function asOfClock(iso: string | undefined): string | undefined {
   if (!iso) return undefined;
@@ -114,7 +121,16 @@ export function WorldIndicesPage() {
         help: 'The timestamp of the latest quote for this index (global feeds carry a publication delay).',
         sortValue: (r) => r.asOf,
         sortType: 'text',
-        render: (r) => <span className="nums text-ay-muted">{asOfClock(r.asOf) ?? '—'}</span>,
+        render: (r) => (
+          <span className="nums text-ay-muted">
+            {asOfClock(r.asOf) ?? '—'}
+            {isStaleQuote(r.asOf) && (
+              <span className="ml-1 rounded bg-surface-2 px-1 py-0.5 text-[10px] text-ay-muted ring-1 ring-ay-border" title="This market's last quote is over an hour old — the venue is likely closed.">
+                closed
+              </span>
+            )}
+          </span>
+        ),
         mobileLabel: 'As Of',
       },
     ],

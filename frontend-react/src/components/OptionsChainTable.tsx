@@ -147,11 +147,15 @@ function emptyMax(): SideMax {
   return { oi: -1, absChange: -1, oiStrike: null, changeStrike: null, volStrike: null };
 }
 
-/** PCR for a single strike: ΣPE OI / ΣCE OI (2dp display); "—" when there is no CE OI. */
+/**
+ * PCR for a single strike: ΣPE OI / ΣCE OI (2dp display). Dashed when the CE side has less than a
+ * dust floor of OI — a 5-lot denominator printed absurd ratios like 16385.00 (audit 2026-07-02 §8).
+ */
+const PCR_OI_FLOOR = 500;
 function rowPcr(row: ChainTableRow): string {
   const ce = row.ce?.leg.oi ?? 0;
   const pe = row.pe?.leg.oi ?? 0;
-  return ce > 0 ? (pe / ce).toFixed(2) : '—';
+  return ce >= PCR_OI_FLOOR ? (pe / ce).toFixed(2) : '—';
 }
 
 export function OptionsChainTable({

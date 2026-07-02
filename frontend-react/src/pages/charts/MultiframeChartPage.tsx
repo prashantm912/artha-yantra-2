@@ -12,6 +12,10 @@ import { CHART_INTERVALS, useCandles } from '../../api/charts.ts';
 // component (the tested core/indicators study set) per cell.
 
 const DEFAULT_INTERVALS = ['15m', '5m', '3m', '1m'];
+// Index symbols have no 1m candles — the default 4th pane sat permanently on "No candles"
+// (audit 2026-07-02 §5); indices swap it for 30m.
+const INDEX_DEFAULT_INTERVALS = ['15m', '5m', '3m', '30m'];
+const INDEX_SYMBOLS = /NIFTY|SENSEX|BANKEX|VIX/i;
 
 /** One grid cell — its own candle read + interval selector over the shared symbol. */
 function Frame({
@@ -53,10 +57,23 @@ export function MultiframeChartPage() {
   const [params] = useSearchParams();
   const [symbol, setSymbol] = useState(params.get('symbol') ?? 'NSE:NIFTY 50');
   const [draft, setDraft] = useState(symbol);
-  const [intervals, setIntervals] = useState<string[]>(DEFAULT_INTERVALS);
+  const [intervals, setIntervals] = useState<string[]>(
+    INDEX_SYMBOLS.test(symbol) ? INDEX_DEFAULT_INTERVALS : DEFAULT_INTERVALS,
+  );
 
   const setIntervalAt = (i: number, v: string) =>
     setIntervals((prev) => prev.map((x, k) => (k === i ? v : x)));
+
+  // Loading an index while the 1m default pane is up (or vice versa) re-defaults that pane only.
+  const loadSymbol = (next: string) => {
+    setSymbol(next);
+    setIntervals((prev) =>
+      prev.map((iv, i) => {
+        const wanted = INDEX_SYMBOLS.test(next) ? INDEX_DEFAULT_INTERVALS[i] : DEFAULT_INTERVALS[i];
+        return iv === DEFAULT_INTERVALS[i] || iv === INDEX_DEFAULT_INTERVALS[i] ? wanted : iv;
+      }),
+    );
+  };
 
   return (
     <div className="flex h-[calc(100vh-7rem)] flex-col">
@@ -69,7 +86,7 @@ export function MultiframeChartPage() {
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (draft.trim()) setSymbol(draft.trim());
+          if (draft.trim()) loadSymbol(draft.trim());
         }}
         className="mb-2 flex items-center gap-2"
       >

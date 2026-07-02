@@ -41,10 +41,13 @@ test('Scalping Cockpit renders the shared control bar + every panel, no axe viol
   // The header sentiment strip is present (— until a live matrix accrues).
   await expect(page.getByText('Sentiment', { exact: false })).toBeVisible();
 
-  // The paper-trading console: the risk-limit guard + the book's empty state (mock has no positions).
+  // The paper-trading console: the risk-limit guard + the book renders. Data-tolerant: the shared
+  // CI stack may carry open paper positions left by the backend e2e suite that runs first, so
+  // assert the "Open positions" section exists (present in BOTH the empty and populated states) —
+  // demanding the empty-state copy flaked the first run where a prior spec left a position open.
   await expect(page.getByLabel('Risk limits', { exact: true })).toBeVisible();
   await expect(page.getByText('Kill switch:', { exact: false })).toBeVisible();
-  await expect(page.getByText(/No open positions —/)).toBeVisible();
+  await expect(page.getByRole('heading', { name: /^Open positions/ })).toBeVisible();
 
   await settleAnimations(page);
 

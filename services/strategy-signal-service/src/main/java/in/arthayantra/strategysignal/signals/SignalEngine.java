@@ -108,6 +108,8 @@ public class SignalEngine {
   private final java.util.Optional<ScalperConfluenceGate> scalperGate;
   // Live-only diagnostics: every scalper chart-entry the confluence gate blocked (why + margin).
   private final SignalRejectionRepository rejections;
+  // Shadow book: opens an eligible rejection as a virtual 1-lot position (signal-analysis §7.1/7.2).
+  private final ShadowBookService shadowBook;
 
   // candles.1m.* are NEVER conflated (A.7.2 bus contract — every closed bar matters). A FIFO
   // queue preserves each distinct bar in arrival order; the single-threaded evalExecutor drains it
@@ -149,10 +151,12 @@ public class SignalEngine {
       java.util.Optional<EmissionGuard> emissionGuard,
       java.util.Optional<ScalperConfluenceGate> scalperGate,
       SignalRejectionRepository rejections,
+      ShadowBookService shadowBook,
       @Value("${artha.signals.ttl-minutes:60}") int signalTtlMinutes) {
     this.registry = registry;
     this.signals = signals;
     this.rejections = rejections;
+    this.shadowBook = shadowBook;
     this.publisher = publisher;
     this.events = events;
     this.seriesStore = seriesStore;
@@ -899,11 +903,16 @@ public class SignalEngine {
       return;
     }
     try {
-      rejections.insert(
-          strategy.versionId(), strategy.slug(), exchange, tradingsymbol, interval,
-          d.side() == null ? null : d.side().name(), d.blockingRail(), d.operand(), d.threshold(),
-          d.margin(), d.reason(), d.compositeScore(), d.compositeThreshold(),
-          rejectionDiagnosticJson(d), barTime);
+      long rejectionId =
+          rejections.insert(
+              strategy.versionId(), strategy.slug(), exchange, tradingsymbol, interval,
+              d.side() == null ? null : d.side().name(), d.blockingRail(), d.operand(), d.threshold(),
+              d.margin(), d.reason(), d.compositeScore(), d.compositeThreshold(),
+              rejectionDiagnosticJson(d), barTime);
+      // Shadow book (default-OFF): an eligible rejection opens as a virtual 1-lot position so the
+      // exit sweep labels it with a real PnL. maybeOpen never throws (diagnostics never break live).
+      shadowBook.maybeOpen(
+          rejectionId, strategy.versionId(), strategy.slug(), exchange, tradingsymbol, barTime, d);
     } catch (RuntimeException e) {
       log.warn(
           "failed to persist scalper rejection {} {}:{}: {}",
@@ -930,6 +939,18 @@ public class SignalEngine {
     root.put("reason", d.reason());
     root.put("compositeScore", d.compositeScore());
     root.put("compositeThreshold", d.compositeThreshold());
+    // The would-be trade the block vetoed (signal-analysis §7.1) — present when the gate resolved
+    // a leg before blocking; the shadow book + counterfactual analysis key off this.
+    if (d.pick() != null) {
+      ObjectNode leg = root.putObject("wouldBeLeg");
+      leg.put("tradingsymbol", d.pick().candidate().tradingsymbol());
+      leg.put("strike", d.pick().candidate().strike());
+      leg.put("optionType", d.side() == null ? null : d.side().name());
+      leg.put("expiry", d.expiry() == null ? null : d.expiry().toString());
+      leg.put("entryLtp", d.pick().candidate().ltp());
+      leg.put("delta", d.pick().delta());
+      leg.put("structuralStop", d.structuralStop());
+    }
     ArrayNode checks = root.putArray("checks");
     for (ScalperConfluenceGate.RailCheck c : d.checks()) {
       ObjectNode n = checks.addObject();

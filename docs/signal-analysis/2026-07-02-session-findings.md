@@ -130,8 +130,12 @@ anything.
 Not computed for this session (method v1 written after close; snapshots available so it CAN be done
 retroactively). The 12 would-have-fired rows (§2.1) are the candidates: golden-crossover CE entries
 12:39–14:21 at spot ~24,244–24,262, connect-the-dots CE 13:18/13:24. NIFTY drifted mildly up
-into the 14:00s then faded — proper premium-path replay (README §4.2) deferred; **do it live for the
-NEXT session** and backfill this one if useful for the rollup.
+into the 14:00s then faded — proper premium-path replay (README §4.2) deferred.
+
+> **Addendum 2026-07-03:** the SHADOW BOOK shipped the next morning (README §2 —
+> `strategy.shadow_positions`, real-time bracket/structural/square-off exits on every
+> composite-passing rejection). From the 2026-07-03 session onward this section reads real shadow
+> PnL instead of manual counterfactuals.
 
 ## 6 New data points / anomalies for future passes
 

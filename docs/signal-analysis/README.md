@@ -48,6 +48,15 @@ or `AT TIME ZONE 'Asia/Kolkata'`.
 - `strategy.signals` (+ `scalper_detail` side-channel) — what DID fire (so far: nothing; when it does,
   cross-check entry context vs the rejection population).
 - `strategy.paper_positions` / paper trades — executed-outcome side (the runbook's domain).
+- `strategy.shadow_positions` (V016) — **the shadow book**: every composite-passing rejection opened
+  as a virtual 1-lot long-premium position (leg from the gate's own StrikePicker, entry at the
+  candidate LTP) and closed by `ShadowExitMonitor` (premium brackets from the YAML premium_pct rules
+  / structural stop on the signal future / 15:12 square-off / STALE for prior-day leftovers). One
+  row per rejection (FK `rejection_id`), PnL in points + %. Dedup = one OPEN per strategy+side;
+  flag `ARTHA_SCALPER_SHADOW_BOOK_ENABLED`. **Exit-fidelity caveat: indicator-driven exits
+  (trend-flip / signal-exit) are NOT replicated — brackets/structural/square-off only; state this
+  in every findings file.** Rejections blocked before the leg resolved (time-window, chain, straddle
+  path) never shadow. The rejection JSON also carries `wouldBeLeg` for non-shadowed analysis.
 - `marketdata.candles` — signal-future 1m (roll to 3m to mirror the engine) for operand ground truth
   (e.g., what bar volumes are physically possible).
 - `marketdata.options_chain_snapshots` — real captured per-strike OI/LTP (3-min) for counterfactual
@@ -131,7 +140,8 @@ Session character: <VIX level, index range/trend, expiry day?, notable events>.
 ## 2 Rail findings          (§3.3/3.5/3.8 — per flagged rail: evidence, verdict, proposed tune)
 ## 3 Composite + dots       (§3.4/3.6 — distribution, dead dots, cap math)
 ## 4 Data health            (§3.7 — nulls/zeros table, new-vs-known)
-## 5 Counterfactuals        (§4.2 — per would-have-fired row: leg, entry, outcome, points)
+## 5 Shadow-book outcomes   (per-rail PnL attribution + per-position table; §4.2 manual
+##                           counterfactuals only for rejection classes the shadow book skips)
 ## 6 New data points / anomalies   (anything not covered by current dimensions → promote to §3)
 ## 7 Tuning candidates      (knob → current → proposed → evidence → status[PROPOSED/OWNER-OK/SHIPPED PR#])
 ```
@@ -197,17 +207,42 @@ SELECT captured_at AT TIME ZONE 'Asia/Kolkata', last_price
 FROM marketdata.options_chain_snapshots
 WHERE underlying=:u AND expiry=:e AND strike=:k AND option_type=:side
   AND captured_at >= :bar_time ORDER BY captured_at;
+
+-- SHADOW BOOK: per-rail PnL attribution — "does rail X block winners or losers?"
+SELECT s.blocking_rail, count(*) n,
+       count(*) FILTER (WHERE s.pnl_points > 0) wins,
+       round(avg(s.pnl_points),2) avg_pts, round(sum(s.pnl_points),2) total_pts,
+       round(avg(s.pnl_pct),1) avg_pct
+FROM strategy.shadow_positions s
+WHERE s.status='CLOSED' AND s.pnl_points IS NOT NULL
+GROUP BY 1 ORDER BY total_pts DESC;
+
+-- SHADOW BOOK: per-strategy + close-reason breakdown for a session
+SELECT strategy_slug, side, close_reason, count(*), round(avg(pnl_pct),1) avg_pct
+FROM strategy.shadow_positions
+WHERE (opened_at AT TIME ZONE 'Asia/Kolkata')::date = :d
+GROUP BY 1,2,3 ORDER BY 1;
+
+-- SHADOW BOOK ⨯ REJECTION dots: PnL by whether a given dot supported at entry
+SELECT d->>'dot' dot, (d->>'supports')::boolean supported,
+       count(*), round(avg(s.pnl_points),2) avg_pts
+FROM strategy.shadow_positions s
+JOIN strategy.signal_rejections r ON r.id = s.rejection_id,
+     jsonb_array_elements(r.diagnostic->'confluence'->'dots') d
+WHERE s.status='CLOSED' AND s.pnl_points IS NOT NULL
+GROUP BY 1,2 ORDER BY 1,2;
 ```
 
 ## 7. Data-model improvement backlog (owner-gated builds; keeps this method getting sharper)
 
 Proposed 2026-07-03 from the first pass — each is small and parity-safe (rejections are LIVE-only):
 
-1. **Persist the would-be option leg on every rejection** (strike, expiry, entry LTP at bar) — makes
-   §4.2 counterfactuals EXACT instead of approximate. Biggest analysis unlock.
-2. **Nightly forward-outcome stamper** — a job that, for every rejection with composite ≥ floor,
-   records the option/index move at +15/+30/+60 min and to square-off → "what happened after" columns.
-   Turns every session into auto-labelled training data; multi-session tuning becomes a query.
+1. ~~Persist the would-be option leg on every rejection~~ — **SHIPPED as the shadow book**: the
+   diagnostic JSON carries `wouldBeLeg` and eligible rejections open real-time-managed
+   `shadow_positions` (see §2). Supersedes this item AND item 2 with better data (live exits, not
+   sampled offsets).
+2. ~~Nightly forward-outcome stamper~~ — **superseded by the shadow book** (real exit labels beat
+   fixed-offset sampling). Revisit only if a non-shadowed rejection class needs outcomes too.
 3. **All-eval mode (diagnostic completeness)** — evaluate ALL rails per bar instead of short-circuiting
    at the first CLOSED failure (the straddle path already does this), so `checks[]` is the full matrix
    and "only X failed" needs no caveat. Costs a few extra reads per bar.

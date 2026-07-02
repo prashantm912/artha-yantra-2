@@ -101,7 +101,8 @@ export function BacktestResultsPage() {
   const headerSubtitle = useMemo(() => {
     if (!r) return 'Metrics, equity and drawdown curves, trades, folds and Monte Carlo';
     const name = r.strategyId
-      ? ((strategies.data?.items ?? []).find((s) => s.id === r.strategyId)?.name ?? r.strategyId.slice(0, 8))
+      ? ((strategies.data?.items ?? []).find((s) => s.id === r.strategyId)?.name ??
+         `deleted strategy · ${r.strategyId.slice(0, 8)}`)
       : 'Strategy';
     const ranAt = r.ranAt ? ` · ran ${r.ranAt.slice(0, 19).replace('T', ' ')}` : '';
     return `${name}${ranAt}`;

@@ -724,6 +724,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/options/big-oi-log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["bigOiLog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/options/active-strikes": {
         parameters: {
             query?: never;
@@ -2066,6 +2082,25 @@ export interface components {
             /** Format: int64 */
             oiChange?: number;
             ltp?: number;
+        };
+        BigOiLog: {
+            items?: components["schemas"]["LogEvent"][];
+            /** Format: date-time */
+            asOf?: string;
+        };
+        LogEvent: {
+            time?: string;
+            spot?: number;
+            strike?: number;
+            optionType?: string;
+            ltp?: number;
+            ltpChange?: number;
+            /** Format: int64 */
+            oi?: number;
+            /** Format: int64 */
+            oiChange?: number;
+            /** @enum {string} */
+            interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
         };
         ActiveStrikeIvPoint: {
             /** Format: date-time */
@@ -4336,6 +4371,41 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["BigOi"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    bigOiLog: {
+        parameters: {
+            query: {
+                mode?: string;
+                name: string;
+                date?: string;
+                interval?: string;
+                expiry?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["BigOiLog"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

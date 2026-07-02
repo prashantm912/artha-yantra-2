@@ -4,6 +4,7 @@ import { useSymbolContext } from '../stores/symbolContext.store.ts';
 import type {
   ActiveStrikes,
   BanksAnalysis,
+  BigOiLog,
   Breadth,
   ChainTable,
   ConnectingDots,
@@ -158,6 +159,20 @@ export function useOptionsSpurt(window?: 'cumulative' | 'interval') {
       return oiGet<SpurtChain | null>('/market/options/spurt', params, null);
     },
     enabled: satisfiable(ctx, true),
+  });
+}
+
+/**
+ * Big-OI chronological session event log (audit §9.2-5 parity): each interval's biggest ΔOI moves,
+ * newest bucket first. `enabled` gates the fetch to the log view so the leaderboard view stays
+ * one-read.
+ */
+export function useBigOiLog(enabled: boolean) {
+  const ctx = useOiCtx();
+  return useQuery({
+    queryKey: ['oi', 'big-oi-log', ctx.name, ctx.expiry, ctx.interval, ctx.mode, ctx.date],
+    queryFn: () => oiGet<BigOiLog | null>('/market/options/big-oi-log', oiParams(ctx, true), null),
+    enabled: enabled && satisfiable(ctx, true),
   });
 }
 

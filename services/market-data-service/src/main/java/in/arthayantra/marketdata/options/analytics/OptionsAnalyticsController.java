@@ -37,6 +37,7 @@ public class OptionsAnalyticsController {
   private final ActiveStrikeService activeStrikes;
   private final OiSpurtService spurtService;
   private final OiBigOiService bigOiService;
+  private final BigOiLogService bigOiLogService;
   private final OiPremiumService premiumService;
   private final OiTrendingService trendingService;
   private final OpenHighStatsService openHighStats;
@@ -49,6 +50,7 @@ public class OptionsAnalyticsController {
   private final ObjectProvider<UpstoxOptionAnalyticsSource> upstoxOptionAnalytics;
   private final MarketCalendar calendar;
   private final int bigOiTopN;
+  private final int bigOiLogTop;
   private final int trendBuckets;
   private final int premiumBuckets;
   private final int heatmapWindow;
@@ -62,6 +64,7 @@ public class OptionsAnalyticsController {
       ActiveStrikeService activeStrikes,
       OiSpurtService spurtService,
       OiBigOiService bigOiService,
+      BigOiLogService bigOiLogService,
       OiPremiumService premiumService,
       OiTrendingService trendingService,
       OpenHighStatsService openHighStats,
@@ -74,6 +77,7 @@ public class OptionsAnalyticsController {
       ObjectProvider<UpstoxOptionAnalyticsSource> upstoxOptionAnalytics,
       MarketCalendar calendar,
       @Value("${artha.options.big-oi-top-n:10}") int bigOiTopN,
+      @Value("${artha.options.big-oi-log-top:4}") int bigOiLogTop,
       @Value("${artha.options.trend-buckets:20}") int trendBuckets,
       @Value("${artha.options.premium-buckets:60}") int premiumBuckets,
       @Value("${artha.options.heatmap-window:10}") int heatmapWindow,
@@ -85,6 +89,7 @@ public class OptionsAnalyticsController {
     this.activeStrikes = activeStrikes;
     this.spurtService = spurtService;
     this.bigOiService = bigOiService;
+    this.bigOiLogService = bigOiLogService;
     this.premiumService = premiumService;
     this.trendingService = trendingService;
     this.openHighStats = openHighStats;
@@ -97,6 +102,7 @@ public class OptionsAnalyticsController {
     this.upstoxOptionAnalytics = upstoxOptionAnalytics;
     this.calendar = calendar;
     this.bigOiTopN = bigOiTopN;
+    this.bigOiLogTop = bigOiLogTop;
     this.trendBuckets = trendBuckets;
     this.premiumBuckets = premiumBuckets;
     this.heatmapWindow = heatmapWindow;
@@ -649,6 +655,35 @@ public class OptionsAnalyticsController {
       throw new ApiException(422, ErrorCodes.DATA_GAP, "no snapshot for " + q.name() + " " + exp);
     }
     return bigOiService.bigOi(latest, bigOiTopN);
+  }
+
+  /**
+   * /big-oi-log: the chronological Big-OI session event log (audit §9.2-5 parity — the barometer's
+   * Big OI Movement is a session-long timestamped log, not a latest-bucket leaderboard). Folds the
+   * SAME one-read session series as /oi-heatmap into per-bucket ΔOI events, top {@code bigOiLogTop}
+   * per bucket, newest first. Empty log (not a 422) when no snapshot accrued.
+   */
+  @GetMapping("/big-oi-log")
+  public BigOiLogService.BigOiLog bigOiLog(
+      @RequestParam(required = false) String mode,
+      @RequestParam String name,
+      @RequestParam(required = false) String date,
+      @RequestParam(required = false) String interval,
+      @RequestParam(required = false) String expiry) {
+    OiQuery q = OiQuery.of(mode, name, date, interval, expiry);
+    LocalDate exp = requireExpiry(q);
+    List<OptionsSnapshotReader.StrikePoint> latest =
+        reader.latest(q.name(), exp, q.interval(), q.date());
+    if (latest.isEmpty()) {
+      return bigOiLogService.fold(List.of(), bigOiLogTop);
+    }
+    OffsetDateTime newest = latest.get(0).bucket();
+    LocalDate day = newest.atZoneSameInstant(Ist.ZONE).toLocalDate();
+    OffsetDateTime from = day.atStartOfDay().atOffset(Ist.OFFSET);
+    OffsetDateTime to = newest.plus(q.interval().bucket());
+    List<OptionsSnapshotReader.StrikePoint> series =
+        reader.series(q.name(), exp, q.interval(), from, to);
+    return bigOiLogService.fold(series, bigOiLogTop);
   }
 
   /** /premium: oipulse Premium — per-strike straddle premium + the ATM straddle (latest bucket). */

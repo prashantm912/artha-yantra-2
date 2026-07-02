@@ -136,7 +136,7 @@ export function WatchlistsPage() {
                             <td className="px-2 py-2 text-right">
                               <button
                                 type="button"
-                                onClick={() => removeItem.mutate({ id: selected.id, item: it })}
+                                onClick={() => { if (window.confirm(`Remove ${it.exchange}:${it.tradingsymbol} from this watchlist?`)) removeItem.mutate({ id: selected.id, item: it }); }}
                                 className="px-1.5 text-xs text-bear hover:underline"
                               >
                                 Remove

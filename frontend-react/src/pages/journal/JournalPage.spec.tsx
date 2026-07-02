@@ -38,7 +38,13 @@ describe('JournalPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /New entry/ }));
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ note: 'New note' }), expect.anything());
 
+    // Delete now confirms first (§10.2-2): cancelled -> no mutate; accepted -> mutate.
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValueOnce(false);
+    fireEvent.click(screen.getByText('Delete'));
+    expect(remove).not.toHaveBeenCalled();
+    confirmSpy.mockReturnValueOnce(true);
     fireEvent.click(screen.getByText('Delete'));
     expect(remove).toHaveBeenCalledWith(1);
+    confirmSpy.mockRestore();
   });
 });

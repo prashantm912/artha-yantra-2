@@ -145,13 +145,14 @@ switch ($Verb) {
         Initialize-LocalConfig
         $composeArgs = @()
         foreach ($p in $Rest) {
-            if ($p -eq 'obs' -or $p -eq 'dev-tools' -or $p -eq 'openalgo') { $composeArgs += @('--profile', $p) }
-            else { Write-Error "[ay] unknown profile '$p' (expected: obs, dev-tools, openalgo)" }
+            if ($p -eq 'dev-tools' -or $p -eq 'openalgo') { $composeArgs += @('--profile', $p) }
+            elseif ($p -eq 'obs') { Write-Error "[ay] the 'obs' profile has NO services yet (audit P2) - Prometheus/Grafana/Loki never shipped; running it silently started the plain stack" }
+            else { Write-Error "[ay] unknown profile '$p' (expected: dev-tools, openalgo)" }
         }
         Invoke-Compose ($composeArgs + @('up', '-d', '--wait'))
     }
     'down' {
-        Invoke-Compose @('--profile', 'obs', '--profile', 'dev-tools', 'down')
+        Invoke-Compose @('--profile', 'dev-tools', '--profile', 'openalgo', 'down')
     }
     'logs' {
         if ($Rest.Count -lt 1) { Write-Error 'usage: ay logs <service>' }
@@ -183,7 +184,7 @@ switch ($Verb) {
         Write-Host "[ay] RESTORE -> database '$db' from $dump"
         Write-Host "[ay] WARNING: this DROPS and recreates '$db' — its current contents are replaced."
         # 1) stop the stack, bring up ONLY the DB server (no app connections to drop)
-        Invoke-Compose @('--profile', 'obs', '--profile', 'dev-tools', 'down')
+        Invoke-Compose @('--profile', 'dev-tools', '--profile', 'openalgo', 'down')
         Invoke-Compose @('up', '-d', '--wait', 'timescaledb')
         # 2) recreate the target database empty
         Invoke-ComposeAllowFail @('exec', '-T', 'timescaledb', 'dropdb', '-U', 'artha', '--if-exists', "$db")
@@ -215,21 +216,38 @@ switch ($Verb) {
     }
     'reset-db' {
         # down, drop volumes, re-up -> flyway-init rebuilds all schemas (D17)
-        Invoke-Compose @('--profile', 'obs', '--profile', 'dev-tools', 'down', '-v')
+        Invoke-Compose @('--profile', 'dev-tools', '--profile', 'openalgo', 'down', '-v')
         Initialize-LocalConfig
         Invoke-Compose @('up', '-d', '--wait')
+    }
+    'tag-images' {
+        # Rollback target (audit P2): app images are the single mutable :dev tag, so a bad deploy
+        # had no fast way back. Snapshot the CURRENT :dev images to :<git-sha> right after a good
+        # build; roll back with `docker tag arthayantra/<svc>:<sha> arthayantra/<svc>:dev` + `ay up`.
+        $sha = (git rev-parse --short HEAD).Trim()
+        $svcs = @('edge-gateway', 'market-data-service', 'strategy-signal-service',
+                  'backtest-service', 'optimizer-service', 'margin-service', 'frontend-react')
+        foreach ($svc in $svcs) {
+            $dev = "arthayantra/$svc`:dev"
+            if (docker image inspect $dev 2>$null) {
+                docker tag $dev "arthayantra/$svc`:$sha"
+                Write-Host "[ay] tagged arthayantra/$svc`:$sha"
+            }
+        }
+        Write-Host "[ay] rollback: docker tag arthayantra/<svc>:$sha arthayantra/<svc>:dev; ay up"
     }
     default {
         Write-Host @'
 ay - ArthaYantra operator CLI (project-scoped docker compose)
 
-  ay up [obs] [dev-tools] [openalgo]   start the stack (creates .env + db password if missing)
+  ay up [dev-tools] [openalgo]   start the stack (creates .env + db password if missing)
   ay down                   stop project containers (volumes kept)
   ay logs <svc>             follow logs for one service
   ay status                 healthcheck summary of all containers
   ay backup                 manual whole-db pg_dump (+ globals) into ./backups
   ay restore <dir|file>     restore a whole-db backup (dir or *-full.dump) — DROPS+recreates the DB
   ay reset-db               down, DROP VOLUMES, re-up (flyway rebuilds schemas, empty)
+  ay tag-images             snapshot the current :dev images to :<git-sha> (a rollback target)
 '@
     }
 }

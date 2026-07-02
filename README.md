@@ -53,7 +53,7 @@ The stack boots **with no Kite credentials** under `SPRING_PROFILES_ACTIVE=mock`
 
 | Verb | Effect |
 |---|---|
-| `ay up [obs] [dev-tools]` | `docker compose --env-file .env [--profile …] up -d` |
+| `ay up [dev-tools] [openalgo]` | `docker compose --env-file .env [--profile …] up -d` |
 | `ay down` | `compose down` (project-scoped only — never raw `docker kill`) |
 | `ay logs <svc>` | `compose logs -f <svc>` |
 | `ay status` | healthcheck summary of all containers |
@@ -66,7 +66,6 @@ The stack boots **with no Kite credentials** under `SPRING_PROFILES_ACTIVE=mock`
 | Profile | Command | Contents | RAM delta |
 |---|---|---|---|
 | *(default — core)* | `ay up` | stateful containers + `flyway-init` (one-shot) + `db-backup` sidecar + app services as they land | ~3.9 GB full build-out |
-| `obs` | `ay up obs` | Prometheus 3.x, Grafana 11, Loki 3 + Promtail (Stage G) | +~550 MB |
 | `dev-tools` | `ay up dev-tools` | Adminer `127.0.0.1:8085`, RedisInsight `127.0.0.1:5540`, publishes redis 6379 + internal service ports on loopback | +~250 MB |
 
 Mock vs live is **orthogonal to profiles**: `SPRING_PROFILES_ACTIVE=mock|live`

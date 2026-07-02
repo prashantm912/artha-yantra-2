@@ -1,6 +1,5 @@
 # ArthaYantra 2.0 — single compose file, three activation tiers (A.1 / D14, D16)
 #   default        : core stateful containers (+ app services as they land)
-#   --profile obs  : Prometheus/Grafana/Loki (Stage G)
 #   --profile dev-tools : Adminer, RedisInsight, loopback publishes for T2
 # Mock vs live is orthogonal: SPRING_PROFILES_ACTIVE in .env (D13).
 # Every container: pinned tag, mem_limit, healthcheck, json-file log caps.

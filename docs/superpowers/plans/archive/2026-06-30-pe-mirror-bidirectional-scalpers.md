@@ -1,3 +1,6 @@
+> **ARCHIVED 2026-07-02 — EXECUTED as STEP (#381/#382).** 27 PE drafts seeded (9 `-nifty-pe` published,
+> 18 SENSEX-PE drafts pending owner). The open design choice resolved: STEP additive YAMLs, not signed-composite.
+
 # PE-mirror — bidirectional scalpers (PARKED, owner will build later)
 
 Status: **PARKED 2026-06-30** (owner: "leave for now, build later; make a planning doc so we

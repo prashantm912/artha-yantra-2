@@ -1,3 +1,6 @@
+> **ARCHIVED 2026-07-02 — FIX QUEUE FULLY CLOSED same day.** Waves 1–5 + charts part B + FE-e2e repair,
+> PRs #440–#475 (§11 has per-item PR#s). Next-session verify items moved to [`2026-07-02-remaining-items.md`](../2026-07-02-remaining-items.md).
+
 # ArthaYantra Frontend UI/UX Live Audit — 2026-07-02
 
 **Scope:** production-grade UI/UX + trust audit of `frontend-react` against the RUNNING live stack during

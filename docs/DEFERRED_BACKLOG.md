@@ -6,6 +6,25 @@ The forward-work authority is `superpowers/plans/2026-06-19-openalgo-react-integ
 deferrals so a fresh session has one place to look. The per-row tables below are a provenance ledger —
 new state is appended as dated update blocks (latest first), the old blocks are kept, never rewritten.
 
+**2026-07-02 (EOD) reconciliation — both same-day audit fix queues FULLY CLOSED; forward ledger moved:**
+- **Full codebase audit (41 agents) fixed same day:** P0 #407–#412 (paper pipeline 3-way, premium brackets,
+  HTTP timeouts, backups, notifier fail-closed), P1 #413–#419 (option-leg brackets, BSE Thursday calendar +
+  horizon canary, backtest/optimizer job spine, compose fail-closed + `ay.sh` deleted, UI trust, FeedWatchdog),
+  P2 #420–#434 (route-allowlist tripwire, Map-return ratchet, V027 drops `candles_3m` cagg, Redis AOF,
+  FailPolicy rail registry, explicit G1). All redeployed live 2026-07-02 ~11:00 IST.
+- **Frontend UI live audit vs oipulse (2 passes) fixed same day:** Waves 1–5 + charts part B + FE-e2e repair,
+  PRs #440–#475 — capture bucket alignment (T2), trending-OI window cap (T1), watermark sweep, participant
+  semantics, a11y root-cause (tailwind-merge type-ramp), 09:15 pre-open gap-bar data fix (#459), **stock-chain
+  OI as on-demand Upstox warm** (#472, owner picked over standing capture), FE-e2e suite 44/44 + the CI shard
+  flipped BLOCKING (#474).
+- **Docs archive sweep:** the scalper-to-100 roadmap + `2026-06-27-backlog/` streams, the build inventory,
+  both audits, data-foundation-milestone (value-verify PASSED), data-ops-console, upstox-live-migration
+  (W-U4 declined), e8-e12-numbers, pe-mirror and the FU1/FU2 plans all moved to `superpowers/plans/archive/`
+  with status banners. **The single open-items ledger is now
+  `superpowers/plans/2026-07-02-remaining-items.md`** — 1 net-new build (Minervini screener), owner-gated
+  rows, next-session verifies, the CD-2 calendar refresh (before ~2026-11-16), and the WON'T-DO record.
+  This file stays as the per-phase provenance history.
+
 **2026-06-30 (EOD) reconciliation — §1a + §1b build tracks CLOSED; only the Minervini screener is net-new code left:**
 - **Scalper signal-side §1a COMPLETE** (#371 manual-checks, #372/#373 RSI band+recovery, #374 FII-participant) and
   **frontend/oipulse §1b COMPLETE** (#375 Risk Calculator, #376 Multiple Window, #377 Futures Pre-Open, #378
@@ -78,7 +97,7 @@ strategies on FORWARD paper with real captured OI, not a weak historical backtes
 **2026-06-28 — scalper engine → 100% roadmap.** The S24 incorporation chain is closed (debloated operative doc;
 W3 drift tags #251–256 + W4 gates #258–262 BUILT/inert; 2b infra live). The remaining engine work to finish the
 **debloated** operative doc (the AUTOMATE_PKG remainder, ~95 packages in 12 epics E1–E12, minus ~5 S24 descopes)
-is consolidated in [`superpowers/plans/2026-06-28-scalper-to-100-roadmap.md`](superpowers/plans/2026-06-28-scalper-to-100-roadmap.md)
+is consolidated in [`superpowers/plans/archive/2026-06-28-scalper-to-100-roadmap.md`](superpowers/plans/archive/2026-06-28-scalper-to-100-roadmap.md)
 — the scalper forward authority. Per-package design = the 12 `2026-06-27-backlog/` stream files (KEEP-NEEDED) +
 FU1/FU2; the bloated `strategy-audit/` chain is CLOSED. Arming = owner forward-paper (2c).
 

@@ -1,3 +1,5 @@
+> **ARCHIVED 2026-07-02 — DONE #371.** `ScalperManualChecks.CHECKS` 7→16 (the 9 S21–S24 manual-only gaps).
+
 # Follow-up 1 — expand ScalperManualChecks with the missing manual-only rules + wire to the signal card
 
 > Status: PLAN (implementation-ready). Author date: 2026-06-27.

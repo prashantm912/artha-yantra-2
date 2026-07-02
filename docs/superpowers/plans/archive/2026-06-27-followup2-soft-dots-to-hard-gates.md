@@ -1,3 +1,6 @@
+> **ARCHIVED 2026-07-02 — BUILT default-OFF (#258–#262 W4 gates).** Owner decision 2026-06-30: the 4
+> soft-dots stay ADVISORY; hard-gate arming only after live forward-paper data (inventory §6).
+
 # Follow-up 2 — promote top soft-dots to hard gates (parity-safe, tag-gated)
 
 Status: PLAN (implementation-ready). Owner: single-owner. Target service:

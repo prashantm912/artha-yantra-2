@@ -71,12 +71,9 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
 - **Candle sources split by interval:** `CandleReader.read()` serves the `candles_<iv>`
   caggs (5m/15m/1h/1d/1w), **sparse on a fresh boot**; native daily lives in `candles`@1d
   (dense — `readDailyWithWarmup`). The two diverge for 1d (chart overlays hit this).
-- **3m reads are a read-time 1m→3m rollup, NOT the cagg** (`CandleRepository.rangeRolledFromOneMinute`,
-  #365): the read path deliberately bypasses `candles_3m` and the live SignalEngine 3m-primary
-  depends on this rollup. The `candles_3m` cagg (V019) DOES exist and carries an active incremental
-  refresh policy (1-day window) — a wide/historical refresh over the stitched CONT + expired-contract
-  1m series is what OOMs, not the bounded nightly one; nothing reads the materialized view. (Whether
-  to drop the unused cagg+policy is a tracked P2 decision.)
+- **3m reads are a read-time 1m→3m rollup** (`CandleRepository.rangeRolledFromOneMinute`, #365): the
+  live SignalEngine 3m-primary depends on this rollup. The unused `candles_3m` cagg + its refresh
+  policy were DROPPED (V027, #427) — 3m has no materialized view; only the 1m base feeds it.
 - **Historical OI is VIRTUAL (read-time derived), never a snapshot backfill:** there are no real
   `options_chain_snapshots` rows before ~2026-06-15 (live capture start). `CandleDerivedChainReader`
   pivots the per-contract `candles` + `expired_contracts` into the StrikePoint shape on the fly

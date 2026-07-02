@@ -15,43 +15,26 @@ authority is the OpenAlgo/React master plan; the design authority is `docs/desig
   authority** (Phases 0–6); its §17 Errata + §18 Gap Addendum override §1–§16 on conflict.
 
 ## Active — forward-work plans (`superpowers/plans/`)
-*(The master plan above is the authority; these are the open, non-merged plans.)*
-- `2026-06-30-remaining-build-inventory.md` — the **single code-verified ledger of everything yet to build**
-  across the whole platform (scalper / frontend-oipulse / Phase-5 data), produced by a discover→adversarial-
-  refute workflow (15 confirmed-pending, 12 owner-gated, 4 false-flags rejected). Includes the descope list +
-  recommended build order. Read this FIRST when picking the next thing to build.
-- `2026-06-28-scalper-to-100-roadmap.md` — the **scalper forward authority**: the consolidated,
-  debloated-operative-anchored roadmap to finish the scalper engine (12 epics E1–E12 / ~95 packages,
-  dependency waves, descopes, owner-decisions, the "nothing-deferred" ledger). Per-package design lives
-  in `superpowers/plans/2026-06-27-backlog/` (12 stream files, KEEP-NEEDED) + FU1/FU2; the S24 audit
-  chain in `strategy-audit/` is CLOSED (historical). The S24 drift tags (W3) + W4 gates + 2b infra are
-  already BUILT — see the roadmap §1 baseline.
-- `2026-06-21-data-foundation-milestone.md` — value-verify every OI/data page in History mode on a
-  REAL session vs oipulse (Phase-4 gate). The expired/OI backfill is now COMPLETE; this is the open
-  value-verify gate (needs the owner's oipulse sign-in).
-- `2026-06-24-data-ops-console-wave.md` — Data Ops Console (B1–B6) operator UI over the backfill;
-  **MERGED #121, now DEPLOYED + live** (backend + `/data-ops` route serve 200; #219 redirect fix).
-  Kept active until value-verified, then archive.
-- `2026-06-24-upstox-live-migration.md` — move the live stack (OI/quotes/WS ticker) to the login-free
-  Upstox analytics token; W-U1/U2/U3 **MERGED** flag-gated default-Kite; **W-U4 cutover** (latency A/B +
-  deploy + flip) is the only open wave.
-- `2026-06-29-e8-e12-numbers.md` — the E8-E12 owner-number completion plan + owner answers. **PARTIALLY
-  SHIPPED** (E8 arm #349, E9 fixed-% take-profit #351); E9-remaining / E11 / E12 still open epics. Active.
-- `2026-06-30-pe-mirror-bidirectional-scalpers.md` — PE-side mirror of the CE-only directional scalpers.
-  **PARKED** (owner: build later, #364) — the one open design choice (signed-composite vs STEP) is unresolved.
-- `2026-06-27-followup1-expand-manual-checks.md`, `2026-06-27-followup2-soft-dots-to-hard-gates.md`,
-  `2026-06-27-followups-plan-audit-summary.md` — the two scalper-audit follow-up plans (FU1 = +9 manual
-  checks; FU2 = promote 4 soft-dots to opt-in hard gates) + their readiness/open-point audit. **Unbuilt**;
-  the scalper-to-100 roadmap §5b cites both as live per-package design (FU2 is the W4 tag-gating pattern source).
-- `superpowers/plans/archive/` — completed/merged plans (oipulse-parity, stage-g, eod-bhavcopy,
-  **2026-06-29-e1-market-movers-stockfut** (E1 #3 stock-future Market-Movers universe — `futures_screener`
-  end-to-end, CODE-COMPLETE + ops-done + live-verified #345-348, E1 v2 selector #354; v2 residual lives in the
-  `backlog/stock-universe-market-movers.md` stream + roadmap §E1),
-  phase3-scalper-track2, phase3.5 OI-analytics backlog + tier1, open-high per-strike,
-  **scalper-manual-verification-checklist** (backend + React UI #125 done), **frontend-revamp**
-  (#158–#177 — revamp + 64/65-page rollout + World Indices/Pre-Open + section nav, deployed),
-  **2026-06-26-scalper-tunable-infra** (2b, #220–#230 done+live), **2026-06-27-w3-engine-drift-impl**
-  (#251–256), **2026-06-27-oip-ai-probability-spec** (#255/#262)).
+*(The master plan above is the authority; these are the only open plans after the 2026-07-02 archive sweep.)*
+- `2026-07-02-remaining-items.md` — the **single forward ledger of everything still open** across the
+  whole platform: 1 net-new build (Phase-5 Minervini screener), the owner-gated items, next-session
+  verifies, scheduled maintenance (CD-2 calendar refresh), the deferred-by-design list and the
+  consolidated WON'T-DO record. **Read this FIRST when picking the next thing to do.** Supersedes the
+  archived `2026-06-30-remaining-build-inventory.md`.
+- `2026-06-30-live-signal-analysis-runbook.md` — the standing procedure for analysing ~1 month of
+  live-paper scalper trades into the E9 band + per-scalper keep/cut/tune (counterfactual replay on real
+  captured premium). Runs when the owner has gathered the data.
+- `superpowers/plans/archive/` — everything completed / decided / superseded, each with an ARCHIVED
+  status banner. 2026-07-02 sweep added: the **scalper-to-100 roadmap + `2026-06-27-backlog/` design
+  streams** (build complete, #274–#404 arc), **remaining-build-inventory** (superseded), the two
+  **2026-07-02 audits + findings register** (fix queues fully closed — UI #440–#475, codebase
+  #407–#434), **data-foundation-milestone** (value-verify PASSED), **data-ops-console** (deployed),
+  **upstox-live-migration** (W-U4 declined — stay Kite), **e8-e12-numbers** (epics closed),
+  **pe-mirror** (executed STEP #381/#382), **FU1/FU2 follow-ups + audit summary** (built/declined).
+  Earlier archive contents: oipulse-parity, stage-g, eod-bhavcopy, e1-market-movers-stockfut,
+  phase3-scalper-track2, phase3.5 backlogs, open-high per-strike, scalper-manual-verification-checklist,
+  frontend-revamp (#158–#177), scalper-tunable-infra (2b #220–#230), w3-engine-drift-impl (#251–#256),
+  oip-ai-probability-spec (#255/#262).
 
 ## Active — operations & references (top level)
 - `dev-setup.md`, `remote-access.md` — local/dev setup + remote access.
@@ -75,8 +58,9 @@ authority is the OpenAlgo/React master plan; the design authority is `docs/desig
 - `manual-tests/archive/manual-testing-stage-{a..f}.md` — the legacy Stage A–G walks (historical).
 
 ## Active — consolidated deferred backlog
-- `DEFERRED_BACKLOG.md` — single source of truth for all deferred/pending items Phases 0–6
-  (last reconciled 2026-06-30); updated each phase; the forward-work authority for the next session.
+- `DEFERRED_BACKLOG.md` — the per-phase provenance ledger for deferred/pending items Phases 0–6
+  (last reconciled 2026-07-02). The *current* open list lives in
+  `superpowers/plans/2026-07-02-remaining-items.md`; this file keeps the dated history.
 
 ## Historical — as-built record (`archive/`)
 - `archive/ARTHAYANTRA_2_FEATURE_PROPOSALS.md` — the 2026-06-12 owner feature selection; the

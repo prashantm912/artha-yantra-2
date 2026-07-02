@@ -1,3 +1,5 @@
+> **ARCHIVED 2026-07-02 — both follow-ups closed.** FU1 built (#371); FU2 built inert (#258–#262), arming declined.
+
 # Follow-ups 1 & 2 — cross-plan readiness summary
 
 > Status: AUDIT SUMMARY. Date: 2026-06-27. Single-owner. Target service for both:

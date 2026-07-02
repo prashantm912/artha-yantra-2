@@ -1,3 +1,6 @@
+> **ARCHIVED 2026-07-02 — SUPERSEDED by [`2026-07-02-remaining-items.md`](../2026-07-02-remaining-items.md)** (the single remaining-items ledger now).
+> §4 false-flags / §5 descoped / §6 WON'T-DO are carried forward there — do not re-flag from here.
+
 # Remaining-build inventory — code-verified, adversarially refuted (2026-06-30)
 
 **Status:** ACTIVE — the single forward inventory of *everything yet to build* across the whole platform

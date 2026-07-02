@@ -1,3 +1,7 @@
+> **ARCHIVED 2026-07-02 — EXECUTED + PASSED.** The value-verify ran live-vs-live on 2026-07-01 (§20.8 method):
+> captured OI == oipulse to the exact share; all 5 Part-A pages verified; residual F1/F6 fixed (#399).
+> Low-value residual nits (F3/F5/per-leg-IV class) tracked in [`2026-07-02-remaining-items.md`](../2026-07-02-remaining-items.md).
+
 # Data-Foundation Milestone — value-verify the Wave-1 data pages on real sessions
 
 Status: DESIGN LOCKED (grilled with owner 2026-06-21). Sequenced **after PR-W1, before Wave 2/3**

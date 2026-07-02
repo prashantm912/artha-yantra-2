@@ -117,6 +117,8 @@ public class SignalEngine {
       new java.util.concurrent.ConcurrentLinkedQueue<>();
   private final AtomicBoolean drainScheduled = new AtomicBoolean();
   private final AtomicBoolean reloadRequested = new AtomicBoolean(true);
+  // Warm ta4j banks per (version|instrument) — cleared on reload/hot-swap (P1-12, D17 live).
+  private final Map<String, IndicatorBank> bankCache = new ConcurrentHashMap<>();
   private final Map<String, LocalDate> preCloseDone = new ConcurrentHashMap<>();
   private final ExecutorService evalExecutor =
       Executors.newSingleThreadExecutor(
@@ -182,6 +184,7 @@ public class SignalEngine {
   /** (Re)loads published+enabled strategies and rebuilds subscriptions. */
   public synchronized void reload() {
     reloadRequested.set(false);
+    bankCache.clear(); // definitions/universes may have changed — banks rebuild on next bar (P1-12)
     List<Loaded> fresh = new ArrayList<>();
     for (StrategyRepository.StrategyRow strategy : registry.listAll()) {
       if (!strategy.enabled() || strategy.publishedVersionId() == null) {
@@ -415,11 +418,20 @@ public class SignalEngine {
 
   private void evaluateAtBarClose(
       Loaded strategy, String exchange, String tradingsymbol, EngineCandle bar, String interval) {
+    // Long-lived bank per (version, instrument) — the D17 lesson applied live (audit P1-12):
+    // rebuilding per bar gave every evaluation a COLD ta4j cache, recomputing recursive
+    // indicators (EMA/RSI/SUPERTREND) from bar 0 in BigDecimal math — O(n²) over the session on
+    // the single eval thread. The underlying EngineSeries instances are mutated in place (never
+    // replaced) by LiveSeriesStore, and indicators are pure functions of (series, index), so a
+    // warm bank stays correct as bars append; reload()/hot-swap clears the cache.
     IndicatorBank bank =
-        IndicatorBank.build(
-            strategy.definition(),
-            new StrategyDefinition.InstrumentRef(exchange, tradingsymbol),
-            seriesStore);
+        bankCache.computeIfAbsent(
+            strategy.versionId() + "|" + exchange + ":" + tradingsymbol,
+            key ->
+                IndicatorBank.build(
+                    strategy.definition(),
+                    new StrategyDefinition.InstrumentRef(exchange, tradingsymbol),
+                    seriesStore));
     EngineSeries primary = bank.primarySeries();
     int index = primary.size() - 1;
 

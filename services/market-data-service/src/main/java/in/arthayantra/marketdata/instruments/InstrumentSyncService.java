@@ -143,9 +143,21 @@ public class InstrumentSyncService {
     }
   }
 
-  /** Last sync audit. */
+  /**
+   * Last sync audit. The in-memory audit resets to NEVER_RUN on every restart, which asserted a
+   * falsehood on a long-synced system (audit 2026-07-02 §3 — Settings read "Data sync: NEVER_RUN"
+   * live). When the DB proves a prior sync (instruments carry {@code last_seen_at}), report OK with
+   * that timestamp instead; per-run details (rows/duration) are gone with the restart.
+   */
   public SyncStatus status() {
-    return status.get();
+    SyncStatus s = status.get();
+    if ("NEVER_RUN".equals(s.state())) {
+      Instant lastSeen = repository.maxLastSeenAt();
+      if (lastSeen != null) {
+        return new SyncStatus(null, "OK", lastSeen, Map.of(), 0, null);
+      }
+    }
+    return s;
   }
 
   private void evict(String cache) {

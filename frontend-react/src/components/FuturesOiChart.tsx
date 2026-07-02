@@ -127,7 +127,7 @@ export function FuturesOiChart({ items, tradingsymbol }: FuturesOiChartProps) {
             right: 64,
             bottom: 56,
             style: {
-              text: `Oi Pulse / ${tradingsymbol}`,
+              text: tradingsymbol,
               fill: t.muted,
               fontSize: 11,
               opacity: 0.6,

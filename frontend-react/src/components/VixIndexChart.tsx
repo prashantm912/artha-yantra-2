@@ -6,7 +6,7 @@ import { EChart, type ChartTheme } from './atoms/EChart.tsx';
 // Vix & Index chart composite (§features/vix-index — oipulse "India Vix Vs. Nifty / Banknifty"). A dual-axis
 // LINE chart: INDIA VIX on the LEFT axis (blue/accent, tight range) + the index price on the RIGHT axis
 // (orange/warn). Each axis auto-scales independently (`scale:true`) — the spec forbids co-scaling (VIX
-// ~13.9–14.8 vs Nifty ~23,820–24,030). Bottom-centered legend, save-PNG + line/bar toolbox, "Oi Pulse"
+// ~13.9–14.8 vs Nifty ~23,820–24,030). Bottom-centered legend, save-PNG + line/bar toolbox, brand
 // watermark. All series maths live in core/vixIndexSeries; this only shapes the option from the live tokens.
 // ONE component, rendered twice (Nifty then Banknifty) — `priceLabel` differs.
 
@@ -86,7 +86,7 @@ export function VixIndexChart({ series, priceLabel }: VixIndexChartProps) {
           type: 'text',
           right: 72,
           bottom: 36,
-          style: { text: 'Oi Pulse', fill: t.muted, fontSize: 11, opacity: 0.6 },
+          style: { text: 'ArthaYantra', fill: t.muted, fontSize: 11, opacity: 0.6 },
         },
       ],
       series: [

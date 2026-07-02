@@ -69,7 +69,7 @@ export function FiiLongShortPage() {
         { type: 'slider', start: 0, end: 100, height: 20, bottom: 28, borderColor: t.border, textStyle: { color: t.muted } },
       ],
       graphic: [
-        { type: 'text', right: 24, bottom: 56, style: { text: 'OiPulse', fill: t.muted, fontSize: 11, opacity: 0.5 } },
+        { type: 'text', right: 24, bottom: 56, style: { text: 'ArthaYantra', fill: t.muted, fontSize: 11, opacity: 0.5 } },
       ],
       series: [
         {

@@ -85,7 +85,7 @@ export function OptionsPremiumPage() {
             type: 'text',
             right: 24,
             bottom: 36,
-            style: { text: 'OiPulse', fill: t.muted, fontSize: 11, opacity: 0.5 },
+            style: { text: 'ArthaYantra', fill: t.muted, fontSize: 11, opacity: 0.5 },
           },
         ],
         series: [

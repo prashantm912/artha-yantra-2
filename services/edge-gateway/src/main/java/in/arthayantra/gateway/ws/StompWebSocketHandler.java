@@ -69,20 +69,57 @@ public class StompWebSocketHandler implements WebSocketHandler {
   }
 
   /** One message captured off Redis, waiting for the next flush. */
-  private record Pending(String destination, String subscriptionId, String body, long receivedNanos) {}
+  record Pending(String destination, String subscriptionId, String body, long receivedNanos) {}
 
-  private static final class SessionState {
+  /**
+   * Per-session passthrough cap (audit P2): non-conflated topics (signals / jobs.* / candles.1m /
+   * options.chain — the 30s full-chain snapshot) were queued UNBOUNDED, so a wedged browser (lid
+   * closed, socket half-open) accumulated frames without limit inside the 384 MB gateway — the
+   * SINGLE front door — until it GC-thrashed or OOM'd, taking auth + all routing down. Bound it
+   * drop-OLDEST (the IngressQueue philosophy): a dropped frame self-heals via the client's
+   * reconnect gap-heal, whereas closing the session would kill the owner's whole live feed.
+   */
+  static final int MAX_PASSTHROUGH = 2_000;
+
+  static final class SessionState {
     final Map<String, Disposable> subscriptions = new ConcurrentHashMap<>();
     final Map<String, String> destinationBySub = new ConcurrentHashMap<>();
     final Map<String, Pending> conflated = new ConcurrentHashMap<>();
     final ConcurrentLinkedQueue<Pending> passthrough = new ConcurrentLinkedQueue<>();
     final AtomicLong messageIds = new AtomicLong();
+    final AtomicLong passthroughSize = new AtomicLong();
+    final AtomicLong droppedFrames = new AtomicLong();
+
+    /** Enqueue with a drop-oldest bound; returns how many frames were shed (0 in the common case). */
+    long offerBounded(Pending pending) {
+      passthrough.add(pending);
+      long size = passthroughSize.incrementAndGet(); // one count per offer
+      long shed = 0;
+      while (size > MAX_PASSTHROUGH) {
+        if (passthrough.poll() == null) {
+          break; // lost the race with the drainer — nothing left to shed
+        }
+        size = passthroughSize.decrementAndGet();
+        shed++;
+        droppedFrames.incrementAndGet();
+      }
+      return shed;
+    }
+
+    Pending pollPassthrough() {
+      Pending p = passthrough.poll();
+      if (p != null) {
+        passthroughSize.decrementAndGet();
+      }
+      return p;
+    }
 
     void dispose() {
       subscriptions.values().forEach(Disposable::dispose);
       subscriptions.clear();
       conflated.clear();
       passthrough.clear();
+      passthroughSize.set(0);
     }
   }
 
@@ -170,7 +207,13 @@ public class StompWebSocketHandler implements WebSocketHandler {
                   if (conflatable) {
                     state.conflated.put(destination, pending); // latest value wins (A.7.2)
                   } else {
-                    state.passthrough.add(pending);
+                    long shed = state.offerBounded(pending);
+                    if (shed > 0) {
+                      log.warn(
+                          "WS passthrough cap hit ({}); shed {} oldest frame(s) — slow/stalled"
+                              + " consumer on {}",
+                          MAX_PASSTHROUGH, shed, channel);
+                    }
                   }
                 },
                 error -> log.warn("redis subscription error on {}", channel, error));
@@ -203,7 +246,7 @@ public class StompWebSocketHandler implements WebSocketHandler {
       conflatedIterator.remove();
     }
     Pending queued;
-    while ((queued = state.passthrough.poll()) != null) {
+    while ((queued = state.pollPassthrough()) != null) {
       batch.add(queued);
     }
     if (batch.isEmpty()) {

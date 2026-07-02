@@ -101,10 +101,14 @@ public class ScalperConfluenceGate {
     }
   }
 
-  /** One evaluated rail: what it tested, whether it passed, and by what margin. */
+  /**
+   * One evaluated rail: what it tested, whether it passed, by what margin, and its declared
+   * missing-data {@link FailPolicy} (resolved from {@link RailPolicies} at record time — an
+   * unregistered rail name throws, so a new rail cannot ship without declaring its polarity).
+   */
   public record RailCheck(
       String rail, boolean pass, BigDecimal operand, BigDecimal threshold, BigDecimal margin,
-      String reason) {}
+      String reason, FailPolicy policy) {}
 
   /**
    * The live-only "why this entry was blocked" record persisted to {@code strategy.signal_rejections}.
@@ -174,19 +178,26 @@ public class ScalperConfluenceGate {
       BigDecimal operand = o.operand();
       BigDecimal margin =
           operand != null && threshold != null ? operand.subtract(threshold) : null;
-      return !record(new RailCheck(rail, o.pass(), operand, threshold, margin, o.reason())).pass();
+      return !record(
+              new RailCheck(
+                  rail, o.pass(), operand, threshold, margin, o.reason(), RailPolicies.of(rail)))
+          .pass();
     }
 
     /** Records a boolean/verdict rail (no scalar operand); returns true when it FAILED. */
     boolean failsBool(String rail, boolean pass, String reason) {
-      return !record(new RailCheck(rail, pass, null, null, null, reason)).pass();
+      return !record(new RailCheck(rail, pass, null, null, null, reason, RailPolicies.of(rail)))
+          .pass();
     }
 
     /** Records the confluence-composite rail (operand=aggregate vs threshold); true when INVALID. */
     boolean failsScore(String rail, boolean valid, BigDecimal aggregate, BigDecimal threshold, String reason) {
       BigDecimal margin =
           aggregate != null && threshold != null ? aggregate.subtract(threshold) : null;
-      return !record(new RailCheck(rail, valid, aggregate, threshold, margin, reason)).pass();
+      return !record(
+              new RailCheck(
+                  rail, valid, aggregate, threshold, margin, reason, RailPolicies.of(rail)))
+          .pass();
     }
 
     /**

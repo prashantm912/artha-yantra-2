@@ -939,6 +939,7 @@ public class SignalEngine {
       n.put("threshold", c.threshold());
       n.put("margin", c.margin());
       n.put("reason", c.reason());
+      n.put("failPolicy", c.policy().name()); // P2: the rail's declared missing-data polarity
     }
     if (d.confluence() != null) {
       ConnectTheDotsScorer.Confluence conf = d.confluence();

@@ -578,7 +578,9 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
   }
 
   @Test
-  void openHighStrategyGradesLatestSessionAndProbability() throws Exception {
+  void openHighStrategyGradesThePriorSessionAndReportsTheLiveBreak() throws Exception {
+    // foldLive semantics (audit §10.2-8, #465): the O=H/O=L pattern grades on the session BEFORE
+    // the viewed day; the viewed day's buckets fill New D.High/Low, the live LTP and the Hit.
     String u = "OHSTRAT";
     LocalDate exp = LocalDate.of(2026, 6, 25);
     // Three IST sessions, two captures each → daily premium OHLC (first/max/min/last per day).
@@ -588,16 +590,18 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
         OffsetDateTime.of(2026, 6, 17, 9, 20, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
     OffsetDateTime d3a =
         OffsetDateTime.of(2026, 6, 18, 9, 20, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
-    // CE d1: open(first capture)=120 == high → Open=High hit (a prior session).
+    // CE d1: open(first capture)=120 == high → Open=High hit (the one session before the pattern
+    // day → probability 1/1 = 100%).
     OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, d1a, u, exp, "22500", "CE", "120", 900L, 0L, 4000L);
     OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, d1a.plusHours(3), u, exp, "22500", "CE", "100", 1000L, 0L, 5000L);
-    // CE d2: open=100, high=118 → not Open=High (a prior miss). Probability = 1/2 = 50%.
+    // CE d2 (the PATTERN day for a 06-18 view): open=100, high=118 → not Open=High.
     OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, d2a, u, exp, "22500", "CE", "100", 1100L, 0L, 6000L);
     OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, d2a.plusHours(3), u, exp, "22500", "CE", "118", 1150L, 0L, 6500L);
-    // CE d3 (latest): open=125 == high → triggered. close=110 → fall% = (125-110)/125 = 12.00.
+    // CE d3 (the VIEWED day): first bucket 125 > the pattern day's high 118 → Hit at the first
+    // bucket; ends 110 → fall% = (110-125)/125 = -12.00.
     OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, d3a, u, exp, "22500", "CE", "125", 1200L, 0L, 7000L);
     OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, d3a.plusHours(3), u, exp, "22500", "CE", "110", 1250L, 0L, 7500L);
-    // a PE leg so the strike carries both halves (PE latest open==low → triggered OL).
+    // a PE leg only on the viewed day: no pattern session → live fields only, no Hit.
     OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, d3a, u, exp, "22500", "PE", "90", 1500L, 0L, 3000L);
     OptionsSnapshotReaderIntegrationTest.insertRow(jdbc, d3a.plusHours(3), u, exp, "22500", "PE", "130", 1450L, 0L, 3500L);
 
@@ -613,15 +617,22 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
         .andExpect(jsonPath("$.items.length()").value(1))
         .andExpect(jsonPath("$.items[0].strike").value("22500.00"))
         .andExpect(jsonPath("$.items[0].ce.optionType").value("CE"))
-        .andExpect(jsonPath("$.items[0].ce.sessions").value(3))
-        .andExpect(jsonPath("$.items[0].ce.ohMark").value(true))
+        // pattern = d2 (the session before the viewed day); d1 is its only prior → 100%.
+        .andExpect(jsonPath("$.items[0].ce.latestDate").value("2026-06-17"))
+        .andExpect(jsonPath("$.items[0].ce.sessions").value(2))
+        .andExpect(jsonPath("$.items[0].ce.ohMark").value(false))
+        .andExpect(jsonPath("$.items[0].ce.probability").value("100.00"))
+        // the viewed day broke the pattern day's high (125 > 118) at its first bucket.
         .andExpect(jsonPath("$.items[0].ce.triggered").value(true))
-        // probability over the two prior sessions (d1 hit, d2 miss) = 50% (decimal-string wire).
-        .andExpect(jsonPath("$.items[0].ce.probability").value("50.00"))
-        .andExpect(jsonPath("$.items[0].ce.fallPctFromHigh").value("12.00"))
-        // the PE leg grades Open=Low: open(90) == low(90) on the latest session.
-        .andExpect(jsonPath("$.items[0].pe.olMark").value(true))
-        .andExpect(jsonPath("$.items[0].pe.triggered").value(true));
+        .andExpect(jsonPath("$.items[0].ce.triggeredTime").value("09:15"))
+        .andExpect(jsonPath("$.items[0].ce.newDayHigh").value(org.hamcrest.Matchers.startsWith("125")))
+        .andExpect(jsonPath("$.items[0].ce.newDayLow").value(org.hamcrest.Matchers.startsWith("110")))
+        .andExpect(jsonPath("$.items[0].ce.liveLtp").value(org.hamcrest.Matchers.startsWith("110")))
+        .andExpect(jsonPath("$.items[0].ce.fallPctFromHigh").value("-12.00"))
+        // the PE leg has no pattern session — live fields only, never a Hit.
+        .andExpect(jsonPath("$.items[0].pe.olMark").value(false))
+        .andExpect(jsonPath("$.items[0].pe.triggered").value(false))
+        .andExpect(jsonPath("$.items[0].pe.liveLtp").value(org.hamcrest.Matchers.startsWith("130")));
   }
 
   @Test

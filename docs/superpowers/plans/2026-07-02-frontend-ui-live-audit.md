@@ -405,50 +405,67 @@ Mark each item DONE with its PR# here as it merges.
    fire skipped, the 15:30:00 EOD fire kept); readers bucket by ts−1s (end-of-window labelling — a
    boundary capture labels the window it terminates, killing the post-close artifact bucket); trending
    pages tag the closing row "(EOD)" (§9.1). Deploy + next-session barometer verify pending.
-3. **Per-side IV solve for Active-Strikes-IV (§10.2-1).** PCP-implied forward forces Call IV = Put IV →
-   skew ≡ 0 by construction. Solve/display per-leg IVs unconstrained; display in %, fix chip precision.
-   **Parity caution:** display path only — the scalper gate's ATM-band IV input must stay byte-identical
-   (golden suite + live-gate check in the PR).
-4. **Futures EOD analyzer: front-month default** (currently AUGFUT) + optional continuous current-month
-   view (§10.2-4).
+3. **DONE #442.** ~~Per-side IV solve for Active-Strikes-IV (§10.2-1).~~ New `activeStrikeSideIvSeries`
+   re-solves each leg unconstrained against the bucket SPOT (display path only — the stored iv and the
+   gate's `activeStrikeIvSeries`/iv_slope input are byte-identical); page plots the side series in %,
+   chips fixed to 1dp %.
+4. **DONE #443.** ~~Futures EOD analyzer: front-month default.~~ Contracts order front-month-first
+   (alive on the latest session, then nearest expiry from the symbol token). The continuous current-month
+   view stays deferred (capture history still shallow) → Wave-5 list.
 
 ### Wave 2 — trust UX (frontend)
 
-5. **Watermark sweep (T3)** — remove/replace `Oi Pulse` in the 7+ chart files (§9.5). Trivial; first FE PR.
-6. **Pending-renders-as-empty** — skeletons while queries are pending / FilterBar unsatisfied on
-   options-chain, straddle and every expiry-gated page; fold in the calendar-spread expiry-heal opt-out
-   (§3-P0). The top pass-1 item.
-7. **History→Live stale-render leak (T4)** + History date-input validation (the "72026" hole) (§9.3).
-8. **Cockpit as-of + 30–60s market-hours auto-refresh** on the four market panels (§6).
-9. *Batch:* **BUY-red on Backtest Trades** → bull-green/neutral; **Settings "Data sync: NEVER_RUN" lie**;
-   **duplicate topbar/page clocks** → one source.
+5. **DONE #444.** ~~Watermark sweep (T3).~~ Five render sites → instrument-descriptor or "ArthaYantra";
+   Advance-Chart help text reworded; the "OiPulse Red" THEME label deliberately stays (a skin, not a
+   watermark).
+6. **DONE #445.** ~~Pending-renders-as-empty.~~ Chain table rides QueryState (pending → skeleton,
+   settled-empty → EmptyCard, error → retry card; page spec locks it); straddle empty copy is
+   selection-aware; calendar-spread mirrors the FilterBar expiry heal locally (register
+   calendar-spread-expiry-dead-end closed).
+7. **DONE #446.** ~~History→Live stale-render leak (T4) + date validation.~~ useOiCtx normalizes date
+   to null outside history (params + query keys); OiQuery.of drops a leaked date server-side; DateInput
+   drafts locally and only propagates sane ISO dates in [min, today].
+8. **DONE #447.** ~~Cockpit as-of + auto-refresh.~~ 45s market-hours refetch (paused when hidden) +
+   the chain asOf/stale LiveDot in the header.
+9. **DONE #448.** ~~Trust batch.~~ Real trades carry side=BUY (live-DB verified) — the ==='LONG' check
+   never matched, every trade rendered red; sync status() falls back to max(last_seen_at) when the
+   in-memory audit reset; LiveDot detail reads "as of HH:mm:ss" (data-time, not a second wall clock).
 
 ### Wave 3 — semantics vs the barometer (same label, different meaning)
 
-10. **Participant-wise OI semantics** — % denominator (adopt segment-share, the standard reading) +
-    Interpretation basis (position-level vs day-delta; pick one, label it) (§9.2-1/2).
-11. **"Full day" period option on the options chain** (+ Select-Period on oi-stats) so OI-Chng can answer
-    the day-cumulative question (§9.2-3).
-12. **Freshness labelling** — loud "EOD · as of <date>" banners where live tiles sit beside EOD aggregates
-    (sector-stats, sector-heatmap, equity-returns, index-contribution); big-OI "top-N snapshot" subtitle
-    (§10.2-11, §9.2-5).
-13. **Trending-OI basket clarity** — label the Δ columns chain-wide vs oipulse's 15-strike basket (or add
-    the basket selector — Wave-5 owner call).
+10. **DONE #449.** ~~Participant-wise OI semantics.~~ % = the participant's share of THAT SEGMENT
+    market-wide; Interpretation = the day-delta read (sign of Chng-in-Total, put segments inverted);
+    both labelled in the column help.
+11. **DONE #450.** ~~"Full day" period on the chain.~~ /chain-table takes window=cumulative (the /spurt
+    convention — deltas vs the SESSION-OPEN bucket); the page gets an Interval Δ / Full day Δ select
+    (default unchanged).
+12. **DONE #451.** ~~Freshness labelling.~~ Warn-toned EodBadge on the four mixed screens; big-OI
+    subtitle states "top-10 snapshot of the LATEST interval (not a session event log)".
+13. **DONE #451.** ~~Trending-OI basket clarity.~~ Footnotes on both trending pages: chain-wide vs
+    oipulse's ~15-strike ATM basket — magnitudes differ, direction agrees. Basket selector stays a
+    Wave-5 owner call.
 
 ### Wave 4 — workflow + polish (batchable)
 
-14. *Batch:* **journal delete confirm** + Disc./Emo. scale hints; **watchlist remove confirm** (§10.2-2).
-15. **Compare Backtests run-picker** (checkbox flow from the jobs list) (§10.2-3).
-16. *Batch:* **jobs/results show strategy names not hashes**; rename "Scalper cockpit"; strategy-list tag
-    chips → +N collapse; NOTIFY save feedback.
-17. *Batch (a11y):* keyboard access on scrollable tables (`scrollable-region-focusable`), the few
-    color-contrast nodes, consistent focus rings (§4).
-18. *Batch (mobile):* chain jump-to-ATM + ATM strike-window; collapse the 3-row nav (§4).
-19. *Batch (charts polish):* heatmap colorbar collision; straddle min/max pins; RSI pane divider + stray
-    cross-pane labels; dead volume pane on index charts; multiframe 1m default for index symbols;
-    futures-OI "1.8Cr" axis resolution; equity-curve tick dedup + short-window CAGR suppression; 09:15
-    gap-artifact bar; world-indices closed-market state; breadth ETF filter; absurd-PCR floor;
-    signals/rejections 200-row paging (§5, §10.2-5).
+14. **DONE #452.** ~~Confirms batch.~~ window.confirm on journal Delete + watchlist Remove; Disc./Emo.
+    show the 1–5 scale inline.
+15. **DONE #453.** ~~Compare Backtests run-picker.~~ Cmp checkbox on completed backtests (2–6) +
+    Compare (N) button resolving resultRefs; compare-page empty copy points at the picker.
+16. **DONE #454.** ~~Names batch.~~ Deleted strategies read "deleted · 1a2b3c4d" (the registry no longer
+    carries the name); "/scalper" renamed "Paper ticket" (+ menu); tag chips collapse to 3 + "+N";
+    NOTIFY toasts the saved state + channel.
+17. **DONE #455.** ~~a11y batch.~~ ROOT CAUSE of every contrast node: stock tailwind-merge cannot
+    classify the custom type-ramp utilities, treated text-body-sm as a COLOUR conflict and silently
+    dropped text-surface-0 from the Button atom (live-probed 2.71:1 on the Go button) — cn() now runs
+    extendTailwindMerge with the ramp registered as font-size (cn spec locks it). Rejections + cockpit
+    scroll panels get tabIndex/role/aria-label.
+18. **DONE #456.** ~~Mobile batch.~~ Phone chain cards default to an ATM ±10 window with a
+    "Show all N strikes" toggle; the phone topbar hides the clock + theme picker below md (MOCK tag,
+    WS pill, Logout stay).
+19. **Part A DONE #457** (heatmap colorbar, dead volume pane, PCR floor, futures-OI axis resolution,
+    equity tick dedup, <90d CAGR suppression, multiframe index defaults, breadth ETF filter,
+    world-indices closed badge). **Part B OPEN:** straddle min/max pins; RSI pane divider + stray
+    cross-pane labels; 09:15 gap-artifact bar; signals/rejections 200-row paging (§5, §10.2-5).
 
 ### Wave 5 — owner decisions BEFORE build (scope/capacity)
 

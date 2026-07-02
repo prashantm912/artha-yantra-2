@@ -78,15 +78,29 @@ export function AdvanceChart({ bars, ariaLabel, className, intraday = false, onR
     if (!el) return;
     const chart = createChart(el, { autoSize: true });
     const candles = chart.addSeries(CandlestickSeries, {});
-    const volume = chart.addSeries(HistogramSeries, { priceScaleId: 'vol', priceFormat: { type: 'volume' } });
+    // lastValueVisible off: index symbols report volume 0 — the histogram's "0" last-value label
+    // was one of the stray cross-pane labels (audit §5).
+    const volume = chart.addSeries(HistogramSeries, {
+      priceScaleId: 'vol',
+      priceFormat: { type: 'volume' },
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
     chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
     const volMa = chart.addSeries(LineSeries, { priceScaleId: 'vol', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
     const vwapLine = chart.addSeries(LineSeries, { color: C_VWAP, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, title: 'VWAP' });
     const vwmaLine = chart.addSeries(LineSeries, { color: C_VWMA, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, title: 'VWMA 20' });
     const stUp = chart.addSeries(LineSeries, { lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
     const stDown = chart.addSeries(LineSeries, { lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
-    // RSI in a second pane (index 1).
-    const rsiLine = chart.addSeries(LineSeries, { color: C_RSI, lineWidth: 2, priceLineVisible: false, title: 'RSI 14' }, 1);
+    // RSI in a second pane (index 1), pinned to the full 0–100 oscillator range so the 70/30
+    // guides and value labels always sit INSIDE the pane (they used to bleed across the boundary).
+    const rsiLine = chart.addSeries(LineSeries, {
+      color: C_RSI,
+      lineWidth: 2,
+      priceLineVisible: false,
+      title: 'RSI 14',
+      autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
+    }, 1);
     const rsiSma = chart.addSeries(LineSeries, { lineWidth: 1, priceLineVisible: false, lastValueVisible: false, title: 'SMA 14' }, 1);
     rsiLine.createPriceLine({ price: 70, color: '#9ca3af', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: '70' });
     rsiLine.createPriceLine({ price: 30, color: '#9ca3af', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: '30' });
@@ -112,7 +126,12 @@ export function AdvanceChart({ bars, ariaLabel, className, intraday = false, onR
     const applyTheme = () => {
       const t = vars(el);
       chart.applyOptions({
-        layout: { background: { color: 'transparent' }, textColor: t.muted },
+        layout: {
+          background: { color: 'transparent' },
+          textColor: t.muted,
+          // visible divider between the price and RSI panes (audit §5: the boundary read as one pane)
+          panes: { separatorColor: t.border, separatorHoverColor: t.grid, enableResize: true },
+        },
         grid: { vertLines: { color: t.grid }, horzLines: { color: t.grid } },
         rightPriceScale: { borderColor: t.border },
         timeScale: { borderColor: t.border },
@@ -148,7 +167,11 @@ export function AdvanceChart({ bars, ariaLabel, className, intraday = false, onR
     candles.setData(
       bars.map((b) => ({ time: tOf(b), open: Number(b.open), high: Number(b.high), low: Number(b.low), close: Number(b.close) })),
     );
-    volRef.current?.setData(bars.map((b) => ({ time: tOf(b), value: b.volume })));
+    // Index symbols report volume = 0 on every bar — hide the dead histogram lane (audit §5,
+    // same rule as CandleChart).
+    const hasVolume = bars.some((b) => b.volume > 0);
+    volRef.current?.applyOptions({ visible: hasVolume });
+    volRef.current?.setData(hasVolume ? bars.map((b) => ({ time: tOf(b), value: b.volume })) : []);
 
     const ind: IndicatorBar[] = bars.map((b) => ({
       time: tOf(b),

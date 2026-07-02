@@ -67,6 +67,10 @@ jobs:
 
       - name: Dump container logs on failure
         if: failure()
+        env:
+          # audit P1-7: compose interpolation is fail-closed (:?); the mock harness values
+          ARTHA_DB_NAME: artha_mock
+          ARTHA_REDIS_DB: "1"
         run: |
           docker compose -f deploy/docker-compose.yml --env-file .env ps || true
           for c in $(docker ps -a --format '{{.Names}}' | grep '^ay-'); do

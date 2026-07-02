@@ -38,8 +38,23 @@ export default async function globalSetup(): Promise<void> {
 
   ensureSecrets();
 
+  // Audit P1-7: the harness is a MOCK harness — pin the profile-derived env the compose file now
+  // fail-closes on (the old :-artha/:-0 defaults let a locally-run suite write e2e strategies and
+  // mock candles into the LIVE artha DB / redis db0). execSync inherits process.env.
+  process.env['ARTHA_DB_NAME'] = 'artha_mock';
+  process.env['ARTHA_REDIS_DB'] = '1';
+
   if (await gatewayHealthy()) {
-    console.log('[e2e] gateway already healthy — reusing the running stack');
+    // Reuse ONLY a mock stack: the specs publish a fire-every-bar strategy and mutate the
+    // registry/jobs — against a live stack (auto-paper ON) that pollutes real trading data.
+    const profile = runningProfile();
+    if (profile !== 'mock') {
+      throw new Error(
+        `[e2e] a healthy stack is running with SPRING_PROFILES_ACTIVE=${profile} — refusing to ` +
+          'run the mutating e2e suite against a non-mock stack. Stop it or switch profiles via ay.',
+      );
+    }
+    console.log('[e2e] gateway already healthy — reusing the running MOCK stack');
     return;
   }
 
@@ -56,6 +71,20 @@ export default async function globalSetup(): Promise<void> {
   }
   execSync(`${COMPOSE.join(' ')} ps`, { cwd: REPO, stdio: 'inherit' });
   throw new Error('gateway did not become healthy within 6 minutes');
+}
+
+/** The running stack's Spring profile (via the market-data container env); 'unknown' when unreadable. */
+function runningProfile(): string {
+  try {
+    const env = execSync(
+      'docker inspect -f "{{range .Config.Env}}{{println .}}{{end}}" ay-market-data-service',
+      { encoding: 'utf8' },
+    );
+    const line = env.split('\n').find((l) => l.startsWith('SPRING_PROFILES_ACTIVE='));
+    return line ? line.substring('SPRING_PROFILES_ACTIVE='.length).trim() : 'unknown';
+  } catch {
+    return 'unknown';
+  }
 }
 
 /**

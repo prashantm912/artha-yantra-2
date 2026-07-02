@@ -4,7 +4,7 @@
 #   --profile dev-tools : Adminer, RedisInsight, loopback publishes for T2
 # Mock vs live is orthogonal: SPRING_PROFILES_ACTIVE in .env (D13).
 # Every container: pinned tag, mem_limit, healthcheck, json-file log caps.
-# Operate via ay.ps1 / ay.sh only — project-scoped compose, never docker kill.
+# Operate via ay.ps1 only (WSL2: pwsh ./ay.ps1) — project-scoped compose, never docker kill.
 
 name: arthayantra
 
@@ -93,6 +93,9 @@ services:
   # (live → artha, mock → artha_mock), so mock's synthetic candles/snapshots
   # can never pollute live data. Idempotently creates BOTH so either profile
   # boots cleanly; flyway-init then migrates only the active ${ARTHA_DB_NAME}.
+  # FAIL-CLOSED (audit P1-7): every ${ARTHA_DB_NAME}/${ARTHA_REDIS_DB} interpolation uses :?
+  # (error-if-unset) — the old :-artha/:-0 defaults meant a raw compose invocation silently
+  # pointed a MOCK-profile stack at the LIVE database (the documented pollution foot-gun).
   db-create:
     image: postgres:17-alpine
     container_name: ay-db-create
@@ -124,7 +127,7 @@ services:
     container_name: ay-flyway-init
     secrets: [postgres_password]
     environment:
-      ARTHA_DB_NAME: ${ARTHA_DB_NAME:-artha}
+      ARTHA_DB_NAME: ${ARTHA_DB_NAME:?unset - run via the ay CLI (derives mock->artha_mock, live->artha); raw compose must export it}
     volumes:
       - ./flyway:/flyway/sql:ro
     entrypoint: ["/bin/sh", "/flyway/sql/flyway-run.sh"]
@@ -191,7 +194,7 @@ services:
       ARTHA_OWNER_PASSWORD_HASH: ${ARTHA_OWNER_PASSWORD_HASH:-}
       GATEWAY_WS_FLUSH_HZ: ${GATEWAY_WS_FLUSH_HZ:-20}
       # Profile isolation: separate Redis logical DB per profile (live 0 / mock 1)
-      SPRING_DATA_REDIS_DATABASE: ${ARTHA_REDIS_DB:-0}
+      SPRING_DATA_REDIS_DATABASE: ${ARTHA_REDIS_DB:?unset - run via the ay CLI (derives mock->1, live->0); raw compose must export it}
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
@@ -222,8 +225,8 @@ services:
       # Stage B: marketdata schema access — password via secret file, never env
       ARTHA_DB_PASSWORD_FILE: /run/secrets/postgres_password
       # Profile isolation: per-profile database + Redis logical DB (live → artha/0, mock → artha_mock/1)
-      SPRING_DATASOURCE_URL: jdbc:postgresql://timescaledb:5432/${ARTHA_DB_NAME:-artha}?currentSchema=marketdata
-      SPRING_DATA_REDIS_DATABASE: ${ARTHA_REDIS_DB:-0}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://timescaledb:5432/${ARTHA_DB_NAME:?unset - run via the ay CLI (derives mock->artha_mock, live->artha); raw compose must export it}?currentSchema=marketdata
+      SPRING_DATA_REDIS_DATABASE: ${ARTHA_REDIS_DB:?unset - run via the ay CLI (derives mock->1, live->0); raw compose must export it}
       # OpenAlgo appliance URL (plan §3/§4); read only when a source.* capability = openalgo
       ARTHA_OPENALGO_BASE_URL: ${ARTHA_OPENALGO_BASE_URL:-http://openalgo:5000}
       # Data-foundation milestone flags (plan §2/§3). Wired here so the application.yml env names
@@ -349,8 +352,8 @@ services:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-mock}
       ARTHA_DB_PASSWORD_FILE: /run/secrets/postgres_password
       # Profile isolation: per-profile database + Redis logical DB (live → artha/0, mock → artha_mock/1)
-      SPRING_DATASOURCE_URL: jdbc:postgresql://timescaledb:5432/${ARTHA_DB_NAME:-artha}?currentSchema=strategy
-      SPRING_DATA_REDIS_DATABASE: ${ARTHA_REDIS_DB:-0}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://timescaledb:5432/${ARTHA_DB_NAME:?unset - run via the ay CLI (derives mock->artha_mock, live->artha); raw compose must export it}?currentSchema=strategy
+      SPRING_DATA_REDIS_DATABASE: ${ARTHA_REDIS_DB:?unset - run via the ay CLI (derives mock->1, live->0); raw compose must export it}
       # Phase 41 notifier (Q6): the signal-push ntfy endpoint + its OWN topic (distinct from the
       # ops topic). Under mock this points at the WireMock stub; live mode overrides both.
       # Fail-CLOSED defaults (audit P0-6): the old wiremock fallback ran in LIVE too — every
@@ -397,8 +400,8 @@ services:
       ARTHA_DB_PASSWORD_FILE: /run/secrets/postgres_password
       ARTHA_MARKETDATA_BASE_URL: http://market-data-service:8081
       # Profile isolation: per-profile database + Redis logical DB (live → artha/0, mock → artha_mock/1)
-      SPRING_DATASOURCE_URL: jdbc:postgresql://timescaledb:5432/${ARTHA_DB_NAME:-artha}?currentSchema=backtest
-      SPRING_DATA_REDIS_DATABASE: ${ARTHA_REDIS_DB:-0}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://timescaledb:5432/${ARTHA_DB_NAME:?unset - run via the ay CLI (derives mock->artha_mock, live->artha); raw compose must export it}?currentSchema=backtest
+      SPRING_DATA_REDIS_DATABASE: ${ARTHA_REDIS_DB:?unset - run via the ay CLI (derives mock->1, live->0); raw compose must export it}
     secrets: [postgres_password]
     depends_on:
       flyway-init:
@@ -432,8 +435,8 @@ services:
       ARTHA_DB_PASSWORD_FILE: /run/secrets/postgres_password
       DB_HOST: timescaledb
       # Profile isolation: per-profile database + Redis logical DB (live → artha/0, mock → artha_mock/1)
-      DB_NAME: ${ARTHA_DB_NAME:-artha}
-      REDIS_URL: redis://redis:6379/${ARTHA_REDIS_DB:-0}
+      DB_NAME: ${ARTHA_DB_NAME:?unset - run via the ay CLI (derives mock->artha_mock, live->artha); raw compose must export it}
+      REDIS_URL: redis://redis:6379/${ARTHA_REDIS_DB:?unset - run via the ay CLI (derives mock->1, live->0); raw compose must export it}
       STRATEGY_SIGNAL_BASE: http://strategy-signal-service:8082
       BACKTEST_BASE: http://backtest-service:8083
     secrets: [postgres_password]

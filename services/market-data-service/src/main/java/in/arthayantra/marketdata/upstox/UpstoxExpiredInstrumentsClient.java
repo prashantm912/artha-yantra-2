@@ -192,6 +192,29 @@ public final class UpstoxExpiredInstrumentsClient {
     return toBars(response);
   }
 
+  /**
+   * TODAY's bars for an ACTIVE instrument — {@code GET /v3/historical-candle/intraday/{key}/{unit}/
+   * {interval}} (the v2 historical endpoint serves completed days only). Same candle-array wire
+   * shape (col 6 = OI — live-probed 2026-07-02 on an unexpired stock option: 375 1-minute bars with
+   * real OI). {@code unit} e.g. {@code minutes}, {@code interval} e.g. {@code 1}.
+   */
+  public List<Bar> intradayCandles(String instrumentKey, String unit, int interval) {
+    UpstoxExpiredCandles response =
+        withRetry(
+            () ->
+                restClient
+                    .get()
+                    .uri(
+                        b ->
+                            b.path("/v3/historical-candle/intraday/{key}/{unit}/{interval}")
+                                .build(instrumentKey, unit, String.valueOf(interval)))
+                    .header("Authorization", "Bearer " + properties.resolveToken())
+                    .header("Accept", "application/json")
+                    .retrieve()
+                    .body(UpstoxExpiredCandles.class));
+    return toBars(response);
+  }
+
   /** Parse the Upstox candle-array response into {@link Bar}s (col 6 = OI, may be absent/null). */
   private static List<Bar> toBars(UpstoxExpiredCandles response) {
     if (response == null || response.data() == null || response.data().candles() == null) {

@@ -4,6 +4,7 @@ import { useChainTable, useTrendingOi } from '../../api/oiAnalytics.ts';
 import { useSymbolContext } from '../../stores/symbolContext.store.ts';
 import { foldTrending, isClosingBucket, type TrendingRow } from '../../api/trendingOiFold.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
+import { StockOiWarmBar } from '../../components/StockOiWarmBar.tsx';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
@@ -128,6 +129,8 @@ export function TrendingOiPage() {
   return (
     <LoadBeat>
       <PageHeader title="OI Trending" help="Tracks total call versus put OI through the session, interval by interval, and reads a directional bias from which side is being built faster — newest reading on top." subtitle="Call vs Put OI over the session with a derived directional sentiment" />
+
+      <StockOiWarmBar />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval allowedIntervals={TRENDING_INTERVALS} />

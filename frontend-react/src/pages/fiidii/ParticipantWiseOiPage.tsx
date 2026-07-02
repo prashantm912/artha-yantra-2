@@ -11,7 +11,6 @@ import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { useDefaultDate } from '../../api/marketCalendar.ts';
-import { FIELD_HELP } from '../../core/fieldHelp.ts';
 
 // Participant-wise OI (oipulse §fii-dii/participant-wise-oi): SEBI participant long/short contracts per
 // F&O segment, grouped FII/Pro/DII/Client × 6 segments, with day-over-day change + a Bullish/Bearish
@@ -28,8 +27,8 @@ const num = (n: number) => n.toLocaleString('en-IN');
 
 const COLUMNS: DataColumn<ParticipantSegmentRow>[] = [
   { id: 'segment', header: 'Type', align: 'left', render: (r) => r.segment, mobileLabel: 'Type', help: 'The F&O segment this long/short row covers (e.g. index futures, stock options).' },
-  { id: 'long', header: 'Long', render: (r) => `${num(r.long)}${r.longPct ? ` (${r.longPct}%)` : ''}`, mobileLabel: 'Long', help: 'Number of long (buy) contracts this participant holds in the segment, with its share of total in brackets.' },
-  { id: 'short', header: 'Short', render: (r) => `${num(r.short)}${r.shortPct ? ` (${r.shortPct}%)` : ''}`, mobileLabel: 'Short', help: 'Number of short (sell) contracts this participant holds in the segment, with its share of total in brackets.' },
+  { id: 'long', header: 'Long', render: (r) => `${num(r.long)}${r.longPct ? ` (${r.longPct}%)` : ''}`, mobileLabel: 'Long', help: "Long (buy) contracts this participant holds in the segment; the bracket is this participant's share of ALL participants' longs in the segment." },
+  { id: 'short', header: 'Short', render: (r) => `${num(r.short)}${r.shortPct ? ` (${r.shortPct}%)` : ''}`, mobileLabel: 'Short', help: "Short (sell) contracts this participant holds in the segment; the bracket is this participant's share of ALL participants' shorts in the segment." },
   { id: 'totalDiff', header: 'Total Diff.', render: (r) => <SignedCount value={r.totalDiff} />, mobileLabel: 'Total Diff', help: 'Long contracts minus short contracts — positive means net long (bullish lean) in the segment.' },
   { id: 'chngLong', header: 'Chng. In Long', render: (r) => <SignedCount value={r.chngLong} />, help: 'Change in long contracts versus the prior captured session — new longs added (+) or cut (−).' },
   { id: 'chngShort', header: 'Chng. In Short', render: (r) => <SignedCount value={r.chngShort} />, help: 'Change in short contracts versus the prior captured session — new shorts added (+) or cut (−).' },
@@ -40,7 +39,7 @@ const COLUMNS: DataColumn<ParticipantSegmentRow>[] = [
     align: 'center',
     render: (r) => (r.interpretation ? <SentimentBadge label={r.interpretation.label} tone={r.interpretation.tone} /> : <span className="text-ay-muted">—</span>),
     mobileLabel: 'Interpretation',
-    help: FIELD_HELP.oiInterpretation,
+    help: 'Day-delta read: the sign of Chng-in-Total decides (net position ADDED = bullish), with put segments inverted — puts being added lean bearish.',
   },
 ];
 

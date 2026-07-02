@@ -48,15 +48,33 @@ class JobsRepo:
         return str(row_id)
 
     def set_status(self, job_id: str, status: str, progress: int | None = None) -> None:
+        """Status write with a terminal guard (audit P1-10b): a row already in
+        completed/failed/cancelled is never overwritten — the sweep thread's final
+        'completed' (or the blanket failure handler) used to clobber a just-written
+        'cancelled', misrepresenting the research record."""
+        guard = " AND status NOT IN ('completed','failed','cancelled')"
         with self._conn.cursor() as cur:
             if progress is None:
-                cur.execute("UPDATE jobs SET status=%s WHERE id=%s", (status, job_id))
+                cur.execute("UPDATE jobs SET status=%s WHERE id=%s" + guard, (status, job_id))
             else:
                 cur.execute(
-                    "UPDATE jobs SET status=%s, progress=%s WHERE id=%s",
+                    "UPDATE jobs SET status=%s, progress=%s WHERE id=%s" + guard,
                     (status, progress, job_id),
                 )
         self._conn.commit()
+
+    def fail_orphaned_sweeps(self) -> int:
+        """Boot recovery (audit P1-10b): sweeps run as in-memory daemon threads, so a restart
+        strands their OPTIMIZATION rows at queued/running forever (no thread can resume an
+        in-memory Optuna study). Marks them failed so the UI/API reflect reality."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "UPDATE jobs SET status='failed'"
+                " WHERE kind='OPTIMIZATION' AND status IN ('queued','running')"
+            )
+            count = cur.rowcount
+        self._conn.commit()
+        return count
 
     def get(self, job_id: str) -> dict[str, Any] | None:
         with self._conn.cursor() as cur:

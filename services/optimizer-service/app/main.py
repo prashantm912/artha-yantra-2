@@ -41,6 +41,19 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     def open_conn() -> psycopg.Connection:
         return psycopg.connect(settings.conninfo)
 
+    # Boot recovery (P1-10b): sweeps are in-memory daemon threads — a restart strands their
+    # rows at running forever unless marked failed here (Postgres may be down at boot: warn only).
+    try:
+        repo = JobsRepo(open_conn())
+        try:
+            orphaned = repo.fail_orphaned_sweeps()
+            if orphaned:
+                log.warning("marked %d orphaned OPTIMIZATION row(s) failed at boot", orphaned)
+        finally:
+            repo.close()
+    except Exception as exc:  # noqa: BLE001 - postgres may be down at boot in some envs
+        log.warning("orphaned-sweep recovery skipped: %s", exc)
+
     app.state.sweeps = SweepService(
         strategy_client=StrategyClient(settings.strategy_signal_base),
         backtest_client=BacktestClient(settings.backtest_base),

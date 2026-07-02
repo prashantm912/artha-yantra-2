@@ -28,7 +28,10 @@ class FakeJobs:
         return job_id
 
     def set_status(self, job_id: str, status: str, progress: int | None = None) -> None:
+        # Mirrors the real repo's terminal guard (P1-10b): terminal rows are never overwritten.
         row = self.rows.setdefault(job_id, {})
+        if row.get("status") in ("completed", "failed", "cancelled"):
+            return
         row["status"] = status
         if progress is not None:
             row["progress"] = progress
@@ -99,7 +102,9 @@ class FakeDispatcher:
             "metrics": json.dumps({"sharpe": sharpe}),
         })
 
-    def read_results(self, max_count: int, block_ms: int = 2000) -> list[dict[str, Any]]:
+    def read_results(
+        self, max_count: int, block_ms: int = 2000, sweep_id: str | None = None
+    ) -> list[dict[str, Any]]:
         out = self._queue[:max_count]
         self._queue = self._queue[max_count:]
         return out

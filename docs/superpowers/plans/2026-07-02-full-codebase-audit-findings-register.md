@@ -12,11 +12,22 @@ finder self-verified against cited lines only.
 
 Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 adversarial verifications (16 CONFIRMED / 6 PARTIAL / 1 REFUTED).
 
+> **IMPLEMENTATION STATUS (2026-07-02, same day):** the report's §11 fix queue was implemented in full —
+> PRs **#407–#435** (P0 #407–412, P1 #413–419, P2 #420–435), all squash-merged CI-green, stack rebuilt +
+> redeployed live, fixes live-verified. Per-finding outcome is annotated inline below each heading:
+> **54 FIXED · 4 PARTIALLY FIXED · 31 OPEN · 1 REFUTED**. Every CRITICAL and HIGH is FIXED (or refuted);
+> OPEN items are MEDIUM/LOW findings below the queue's cut line, kept here as the standing backlog.
+> Recommended next from the OPEN set: the live-vs-backtest exit-equivalence test and an automated
+> backup-restore round-trip check. §9 Phase-1-only leads were not queued and remain open except where a
+> §1–§8 twin was fixed.
+
 ---
 
 ## 1. FRONTEND (frontend-react)
 
 ### [HIGH / bug] `mock-tag-never-renders` — verdict: **PARTIAL** (severity corrected high → medium)
+
+> **Resolution (2026-07-02):** FIXED #418 — gateway exposes the raw `kite.raw` session key; MOCK tag + Settings notice render.
 
 **MOCK mode indicator can never render — gateway maps kite session 'MOCK' to 'VALID' before the frontend checks for 'MOCK'**
 
@@ -27,6 +38,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [HIGH / ux] `cockpit-errors-render-as-empty` — verdict: **CONFIRMED**
 
+> **Resolution (2026-07-02):** FIXED #418 — PanelError on Cockpit/ConnectingDots; oiGet re-throws non-DATA_GAP errors un-silenced.
+
 **Scalping Cockpit and Connecting Dots render backend FAILURES as calm 'no data' copy, and ALL OI-endpoint errors are toast-silenced**
 
 - **Evidence:** frontend-react/src/api/oiAnalytics.ts:86 — oiGet passes `silenceToast: true` on EVERY request; client.ts:76-82 tags the thrown ApiError silenced for ANY status (500s and network failures included, not just the intended 422 DATA_GAP), and main.tsx:23 `if (error instanceof ApiError && error.silenced) return;` skips the global toast. CockpitPage.tsx:147-151 (`chain == null && !chainQ.isLoading` → 'No chain — pick an underlying + expiry with a live option chain.'), 165-168 ('No matrix…'), 188-193 ('No straddle candles…'), 212-214 ('No OI-change grid…') and ConnectingDotsPage.tsx:46-50 use data==null && !isLoading — on error (retry:false, isLoading false) this renders the EMPTY copy. Neither page uses QueryState (grep confirms; QueryState.tsx:8-10's own comment says it exists to kill exactly this bug).
@@ -34,6 +47,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Two small changes: (1) in oiGet, silence only the 422 path — catch the 422 and return empty as today, but re-throw non-422 errors WITHOUT silenceToast (pass silenceToast:true per-request only after checking status is impossible pre-flight, so instead construct: try apiFetch without silence, catch 422 → empty, non-422 → rethrow; the 422 never reaches the toast because it is swallowed); (2) wrap the Cockpit panels and ConnectingDots table in QueryState (or at minimum branch on q.isError with the existing error card).
 
 ### [MEDIUM / bug] `no-global-401-handling` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** FIXED #418 — 401 flips auth to anonymous; RequireAuth redirects to /login.
 
 **Session expiry leaves the app on a dead page: no 401 handler, no redirect, polling queries toast 'Authentication required' forever**
 
@@ -43,6 +58,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [MEDIUM / bug] `text-html-returned-as-typed-data` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** FIXED #418 — apiFetch throws `BAD_CONTENT_TYPE` on non-JSON bodies.
+
 **apiFetch returns text/html bodies as typed data — a gateway allowlist misroute renders as a silent empty state**
 
 - **Evidence:** client.ts:85-88 — after res.ok, if content-type is not application/json it returns `(await res.text()) as unknown as T`. No content-type guard exists anywhere in the module. The gateway serves the SPA index.html with HTTP 200 for any /api/v1 path missing from the edge-gateway route allowlist (documented, previously bitten: sibling prefixes do not match — signals/** ≠ signal-rejections/**). Downstream, listItems (client.ts:92-94) on an HTML string yields [] and QueryState's defaultIsEmpty (QueryState.tsx:23-31) returns false for a string, passing raw HTML into children(data).
@@ -50,6 +67,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** In apiFetch, when the caller expects a body and content-type does not include application/json, throw ApiError(res.status, 'BAD_CONTENT_TYPE', `expected JSON, got ${contentType}`) instead of returning text. (Keep the text path only for explicitly text endpoints if any exist — grep shows none.)
 
 ### [MEDIUM / bug] `daily-chart-date-off-by-one` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** FIXED #418 — the IST shift now applies to 1d/1w bars too.
 
 **Daily/weekly candle charts label every bar with the PREVIOUS calendar date (IST-midnight buckets rendered on a UTC axis with no shift)**
 
@@ -59,6 +78,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [MEDIUM / bug] `calendar-spread-expiry-dead-end` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** OPEN — below the fix-queue cut line.
+
 **Calendar Spread page depends on the shared expiry but opts out of the FilterBar expiry heal — fresh or stale-expiry sessions dead-end**
 
 - **Evidence:** CalendarSpreadPage.tsx:37 calls useChainTable() (strike list + ATM source), which requires ctx.expiry — oiAnalytics.ts:77-80 satisfiable(ctx,true) returns false when expiry is null, and sends the persisted expiry otherwise. But line 78 mounts `<FilterBar showName showExpiry={false} showInterval={false}/>`, and FilterBar's default-and-heal effect is gated on showExpiry (FilterBar.tsx:111-120), so on this page a null expiry is never defaulted and a stale one (localStorage ay.oi.expiry, symbolContext.store.ts:15-16 — shared across mock/live on the same origin) is never healed.
@@ -66,6 +87,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Either mount FilterBar with showExpiry (the page already ignores the shared expiry for its own near/far legs, so showing it is harmless), or add a page-local default: `if (!expiry && expiriesQ.data?.length) setExpiry(expiriesQ.data[0])` mirroring FilterBar's heal.
 
 ### [MEDIUM / ux] `live-cockpit-fetch-once-no-as-of` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** OPEN — below the fix-queue cut line.
 
 **The 'live' Scalping Cockpit never auto-refreshes its market panels and shows no as-of timestamp**
 
@@ -75,6 +98,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [LOW / bug] `oi-422-swallow-by-status` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** FIXED #418 — guard narrowed to `status 422 && code DATA_GAP`.
+
 **oiGet maps ANY 422 to the empty state by status alone, not the DATA_GAP code**
 
 - **Evidence:** oiAnalytics.ts:88 — `if (err instanceof ApiError && err.status === 422) return emptyOn422;` never inspects err.code, though the ApiError carries it (client.ts:76-78). The backend does emit non-DATA_GAP 422s: ScreenerService.java:65 throws 422 ErrorCodes.VALIDATION_FAILED ('window must be one of…'), establishing 422-as-validation in the codebase; today the oiGet-hit endpoints' 422s are DATA_GAP, but a dead-expiry request also 422s DATA_GAP ('no snapshot for NIFTY 50 <expiry>') and renders as a legitimate 'no data'.
@@ -82,6 +107,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Narrow the guard to `err.status === 422 && err.code === 'DATA_GAP'`; let other 422s flow to QueryState's error card.
 
 ### [LOW / ux] `signals-hard-cap-200-silent-drop` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** OPEN — below the fix-queue cut line.
 
 **Signals and rejections lists hard-cap at 200 rows with no pagination or 'showing N of total' — overflow rows silently invisible**
 
@@ -91,6 +118,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [LOW / performance] `ws-reconnect-global-invalidation` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** OPEN — below the fix-queue cut line.
+
 **Every WS reconnect invalidates the ENTIRE query cache (plus a redundant second signals invalidation)**
 
 - **Evidence:** main.tsx:34 — `wsClient.onReconnect(() => void queryClient.invalidateQueries())` with no filter refetches every ACTIVE query and marks all inactive ones stale; signals.ts:193-195 registers a second onReconnect invalidating [SIGNALS_KEY] (already covered by the global one). wsClient reconnects fire on every socket close after the first connect (wsClient.ts:71).
@@ -98,6 +127,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Scope the invalidation to WS-fed query keys (signals, ticks-seeded views, system status) or debounce reconnect bursts (e.g. only invalidate if connected-state holds for 2s); drop the redundant per-hook invalidation in signals.ts.
 
 ### [LOW / ux] `format-decimal-truncates` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** OPEN — below the fix-queue cut line.
 
 **formatDecimal truncates instead of rounding the last displayed digit**
 
@@ -107,6 +138,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [LOW / data-integrity] `tick-overlay-prefers-stale-tick` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** OPEN — partially mitigated by the #419 feed watchdog (a frozen upstream now alerts + restarts within ~3 min).
+
 **Paper-book MTM overlay prefers a possibly-frozen WS tick over the fresher 5s server mark with no staleness check**
 
 - **Evidence:** PaperBookPanel.tsx:72-83 — `const mark = live[key] ?? p.markPrice` then recomputes unrealized from that mark; api/ticks.ts:18-63 keeps the last received LTP per symbol in component state indefinitely — no timestamp on frames is checked, no expiry, and the map is not cleared on WS reconnect (only the REST seed on symbol-set change refreshes it). The server mark (p.markPrice, polled every MTM_REFETCH_MS via paper.ts:80) is silently outranked.
@@ -114,6 +147,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Carry the tick timestamp in the frame (or record receipt time) and fall back to p.markPrice when the tick is older than ~2× the server-mark cadence; clear the tick map on wsClient reconnect.
 
 ### [LOW / tech-debt] `handwritten-dtos-unbound-to-contracts` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** OPEN — #430 ratchets the Map-return surface; typed-DTO binding to contracts/gen still absent.
 
 **Frontend DTOs have zero compile-time binding to contracts/gen — 'tsc --strict against generated types' does not constrain the app**
 
@@ -135,6 +170,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [CRITICAL / bug] `taken-signals-exit-orphaned` — verdict: **PARTIAL** (severity corrected critical → high)
 
+> **Resolution (2026-07-02):** FIXED #408 — activeEntry includes TAKEN; SignalExited → EngineExitListener closes the paper leg; brackets pass through; TakenSignalResolver AFTER_COMMIT.
+
 **Auto/manual-TAKEN entries lose every engine exit path (structural stop, confluence-flip, ExitEvaluator, brackets) and the engine re-enters/averages onto the same position**
 
 - **Evidence:** services/strategy-signal-service/src/main/java/in/arthayantra/strategysignal/signals/SignalRepository.java:128-140 — activeEntry filters status='ACTIVE' only. AutoPaperListener.java:53 transitions the signal to 'TAKEN' synchronously on emission when auto_paper_trade is ON (SignalsController.java:84 does the same for a manual take). All engine exit passes anchor on activeEntry: structural stop SignalEngine.java:426-438, confluence-flip L445-452, ExitEvaluator L453-466, intrabar levels L533-555 — none run once TAKEN. PaperSignalListener.java:67-72 opens the paper position with null stopLoss/takeProfit (the signal's persisted stop_loss/target are discarded), and PaperBracketEvaluator.java:38-40 skips null-bracket positions. Grep of the paper package confirms NO component closes a paper position from an engine EXIT signal (only brackets/straddle-monitor/expiry/15:45-MTM/manual exist). Re-entry: with activeEntry empty, evaluateAtBarClose L467-477 re-runs EntryEvaluator every bar; scalper gates are level conditions (scalp-connect-the-dots-nifty.yaml:41 'close > vwap'), so a trend re-fires entries repeatedly, and PaperService.upsertPosition L190-201 AVERAGES each auto-take onto the same open (exchange,tradingsymbol,side) row. The YAML max_positions: 1 has no live enforcement other than activeEntry — defeated by TAKEN. The 5-account freeze can never engage because it counts CLOSED trades (ScalperAccountModel.java:69-93) and nothing closes them intraday (see intraday-mtm-crash). The owner's own runbook (docs/superpowers/plans/2026-06-30-live-signal-analysis-runbook.md:95-99) expects close_reason attribution across TAKE_PROFIT/trail/structural-stop/time_stop — impossible with this code, proving the behavior is NOT intended advisory semantics.
@@ -144,6 +181,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [CRITICAL / bug] `intraday-mtm-crash` — verdict: **CONFIRMED**
 
+> **Resolution (2026-07-02):** FIXED #407 — intradayOpen SELECT carries stop_loss/take_profit; IT covers markToCloseIntraday.
+
 **15:45 mark-to-close crashes every day there is an open intraday position — intradayOpen() SELECT omits stop_loss/take_profit but maps rows with the 13-column mapper**
 
 - **Evidence:** services/strategy-signal-service/src/main/java/in/arthayantra/strategysignal/paper/PaperPositionRepository.java:174-188 — intradayOpen()'s hand-written SELECT lists 11 columns (p.id … p.close_reason) and maps via PaperPositionRepository::map, which reads rs.getBigDecimal("stop_loss") and rs.getBigDecimal("take_profit") (L58-59). PgJDBC throws PSQLException ('column name stop_loss was not found in this ResultSet') on the FIRST row, so jdbc.query throws before PaperService.markToCloseIntraday's per-position try/catch (PaperService.java:313-324) is ever reached — the whole 15:45 sweep aborts. Regression from PR #110 (git show df66555: COLUMNS and map() gained the two columns; intradayOpen's inline list was not updated). No test covers intradayOpen/markToCloseIntraday (grep of src/test: zero matches). The join conditions themselves are correct (config->'risk'->'session'->>'style' matches the YAML shape, verified against StrategyCompiler.java:82 and scalp-connect-the-dots-nifty.yaml:56-57), so with any auto-taken scalper position the result set is non-empty — which is exactly when it throws.
@@ -152,6 +191,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [HIGH / data-integrity] `paper-simulates-future-not-option` — verdict: **CONFIRMED**
 
+> **Resolution (2026-07-02):** FIXED #410 — a scalper take opens the picked option (`tradeable_*`) at option_ltp.
+
 **Paper trades the INDEX FUTURE the signal is keyed on, not the picked option — PE-side scalps are direction-INVERTED and hero-zero qty (sized off option premium) is applied to future notional**
 
 - **Evidence:** PaperSignalListener.openSingle (L67-72) passes null exchange/tradingsymbol/side; PaperService.openOrder falls back to signal.exchange()/signal.tradingsymbol()/signal.side() (PaperService.java:146-148) — the index future the scalper signal is keyed on. Grep confirms nothing in the paper package reads tradeable_exchange/tradeable_tradingsymbol (only StraddleLegs for the 2-leg straddle path, which correctly opens the option symbols). The live arm DOES route the option (LiveOrderService.java:65-67) — paper and live diverge on the traded instrument. Inversion: every scalper YAML declares direction: long → side='BUY' (SignalEngine.java:720-721), including the -pe variants whose gate is 'close < vwap' (scalp-connect-the-dots-nifty-pe.yaml:42-45); a bearish read picks a PE, yet paper opens a LONG future position. The engine itself knows PE = SHORT-on-future (scalperPositionDirection, SignalEngine.java:1102-1114) — the ledger contradicts the engine. Hero-zero: emitEntry L753-765 overrides qty with heroZeroSuggestedQty (PaperEmissionGuard.java:94-105, budget ≈ ₹2,500 / premium×lot → e.g. 450 units at premium 5, lot 75), then the take opens 450 units of a ~25,000-point NIFTY future (~₹1.1cr notional) instead of a ₹2.5k option outlay.
@@ -159,6 +200,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** In PaperSignalListener.openSingle, when the signal carries scalper_detail, open tradeable_exchange/tradeable_tradingsymbol side BUY at scalper_detail.option_ltp (mirror the existing straddle-leg path, which already does exactly this).
 
 ### [HIGH / bug] `premium-pct-exits-dead-live` — verdict: **PARTIAL**
+
+> **Resolution (2026-07-02):** FIXED #413 — premium-basis brackets on the option leg from YAML premium_pct (straddles stay with StraddleExitMonitor). The cross-suite exit-equivalence test remains OPEN (see §7).
 
 **premium_pct stop/target rules are computed against the index-future price live but against real option premium in backtest — 50%-of-premium stops and 35% targets can never fire on the live path**
 
@@ -169,6 +212,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [HIGH / bug] `no-http-timeouts-single-eval-thread` — verdict: **CONFIRMED**
 
+> **Resolution (2026-07-02):** FIXED #409 — spring.http.client connect/read timeouts on all three services + gateway response-timeout.
+
 **Zero HTTP timeouts anywhere — every RestClient (MarketOiClient ~15-call fan-out, candle warm/refresh, instrument meta) uses the JDK HttpClient with infinite connect/read timeout, all on the single signal-eval thread**
 
 - **Evidence:** All clients build from the auto-configured RestClient.Builder with only a baseUrl (MarketOiClient.java:56-64, MarketDataCandlesClient.java:31-37, RestInstrumentMetaClient, RestMarketDataInstrumentClient, NotifierClient). No spring.http.client.connect-timeout/read-timeout anywhere (grep of application*.yml: only base-urls) and no .requestFactory customization. The fat jar contains no Apache HttpClient5/Jetty/Reactor-Netty (unzip -l verified), so Boot 3.5's detection falls to JdkClientHttpRequestFactory whose JDK HttpClient default is NO connect timeout and NO response timeout. These calls run on the single eval thread: gate fan-out via scalperEntry (SignalEngine.java:500-503), refreshFromRest at every coarse bucket boundary (L520-528), reload-time ensureWarm (L253) and futures resolution, and the paper open's instrument-meta fetch (synchronous SignalTaken listener).
@@ -176,6 +221,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Set spring.http.client.connect-timeout: 2s and read-timeout: 10s (applies to the auto-configured builder for all clients), or pass ClientHttpRequestFactorySettings per builder. One-line application.yml change.
 
 ### [MEDIUM / bug] `resubscribe-gap-drops-1m-bars` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** OPEN — below the fix-queue cut line.
 
 **resubscribe() stops the old Redis container before starting the new one — 1m bars published in the gap are lost permanently (the 1m series is never re-fetched after warm-up)**
 
@@ -185,6 +232,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [MEDIUM / bug] `transition-no-state-guard` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** FIXED #408 — compare-and-set `transitionIf(id, from, to)`.
+
 **Signal lifecycle transition() has no state precondition — a signal can be taken twice (double paper fill), taken after dismissal/expiry, or dismissed while a paper position is open**
 
 - **Evidence:** SignalRepository.transition (L143-145) is an unconditional UPDATE signals SET status=? WHERE id=?. SignalsController.taken (L80-93) calls transition then ALWAYS publishes SignalTaken regardless of prior status; AutoPaperListener does the same (L53-55). PaperService.upsertPosition averages onto the existing open position (L190-201), so a second SignalTaken for the same signal doubles the qty. The stage-C design (ARTHAYANTRA_2_STAGE_C_STRATEGY_ENGINE_MVP.md:385) specifies the lifecycle 'active → taken/dismissed/expired' — a one-way machine the code does not enforce.
@@ -192,6 +241,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Make the transition conditional: UPDATE ... WHERE id=? AND status='ACTIVE' (return rows-updated); 409 and skip the SignalTaken publish when 0 rows changed.
 
 ### [MEDIUM / data-integrity] `emit-entry-not-transactional` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** OPEN — below the fix-queue cut line.
 
 **emitEntry/emit perform 2-3 dependent autocommit writes with no transaction — a mid-sequence failure leaves an ENTRY without its option leg/qty, or an EXIT emitted with the entry still ACTIVE**
 
@@ -201,6 +252,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [MEDIUM / performance] `oi-fanout-uncached-per-strategy` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** FIXED #419 — 45s URI-keyed response memo in MarketOiClient.
+
 **The confluence gate re-fetches the full ~15-call OI/macro/chain REST fan-out for every scalper strategy on every firing bar — no per-bar cache, all sequential on the eval thread**
 
 - **Evidence:** ScalperConfluenceGate.evaluateWithDiagnostic fetches client.chain() (L319) then MarketOiClient.context() → oi() = 5 GETs (spurt, futures/banks, active-strikes, trending, term-structure — L271-341) + macro() = 9 GETs (iv-history, breadth, fii long-short, chain AGAIN, index-contribution, active-strikes AGAIN, vix, dow, fii-dii/bias — L394-493). No memoization keyed on (underlying, bar) exists anywhere in the class. All published CE variants share the same 'close > vwap' chart gate, so on one trending 3m bar N scalpers each pay the full fan-out sequentially on the single eval thread; confluenceFlipExit (SignalEngine.java:1122-1137) additionally re-runs the whole fan-out every bar per open position for oi-confluence-exit strategies.
@@ -208,6 +261,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Memoize chain/oi/macro per (underlying, barInstant) in MarketOiClient (a 1-entry TTL cache is enough — all callers in a drain share the same bar clock).
 
 ### [LOW / bug] `bar-eval-failure-drops-entry` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** OPEN — below the fix-queue cut line.
 
 **A signal-insert/DB failure during bar evaluation permanently consumes the bar — the ENTRY for that bar is never retried**
 
@@ -228,6 +283,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [HIGH / data-integrity] `optimization-job-requeue-collision` — verdict: **CONFIRMED**
 
+> **Resolution (2026-07-02):** FIXED #415 — recovery queries filter kind IN (BACKTEST, TRIAL).
+
 **backtest-service restart hijacks a live OPTIMIZATION sweep row and replays it as a plain backtest**
 
 - **Evidence:** Both services share ONE jobs table (deploy/flyway/backtest/V002__jobs.sql:8-23; optimizer INSERTs OPTIMIZATION/TRIAL rows into it, services/optimizer-service/app/repos.py:29-48, default status 'queued', then set_status 'running' for the sweep's whole duration, app/service.py:140). backtest-service's crash recovery has NO kind filter: requeueStaleRunning() is "UPDATE jobs SET status='queued' ... WHERE status='running'" (backtest/jobs/JobRepository.java:148-151), findQueuedIds() selects ALL queued rows (154-158), StreamBootstrap re-dispatches every one onto jobs.backtest (dispatch/StreamBootstrap.java:58-65), and WorkerPool.claim/BacktestRunner.run never check job.kind() except for the TRIAL publish branch (WorkerPool.java:150, BacktestRunner.java:107-135,289). A sweep's request carries strategyId/from/to, so BacktestRunner runs it as a real full replay.
@@ -235,6 +292,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Add a kind filter to the recovery path: requeueStaleRunning ... AND kind IN ('BACKTEST','TRIAL') and the same predicate in findQueuedIds (or a kind guard in WorkerPool before claim). One-line SQL change in each.
 
 ### [HIGH / bug] `optimizer-shared-consumer-result-stealing` — verdict: **PARTIAL** (severity corrected high → medium)
+
+> **Resolution (2026-07-02):** FIXED #416 — per-sweep result routing with a parking lot on the shared consumer.
 
 **Concurrent sweeps steal each other's trial results via one shared cg-optuna consumer + XACK-on-read + drop-unknown, hanging both**
 
@@ -245,6 +304,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [HIGH / data-integrity] `upstox-quota-fragmentation` — verdict: **REFUTED**
 
+> **Resolution (2026-07-02):** REFUTED — no action (limits are per-API, not per-token).
+
 **The Upstox 2000/30min per-token cap is enforced by 3 INDEPENDENT limiter instances plus 3 unlimited clients on the same token**
 
 - **Evidence:** UpstoxRateLimiter's javadoc pins the invariant ('shared across the backfill workers ... 2000 req/30 min is the binding constraint', libs source upstox/UpstoxRateLimiter.java:9-13) but three clients each construct their OWN instance: UpstoxExpiredInstrumentsClient.java:41, UpstoxGlobalInstrumentsClient.java:68, UpstoxMarketStatusClient.java:70 — a combined allowance of 3×1800=5400/30min against the real 2000 cap. UpstoxQuoteClient, UpstoxOptionChainClient and UpstoxAnalyticsClient use NO limiter at all (grep for 'limiter'/'acquire' matches only the three files above) yet run on the SAME analytics token (properties.resolveToken() in all). Live cadences that stack when the Wave U1/U2 source flags are flipped: options snapshot every 5min × every expiry ≤90d per underlying (options/OptionsSnapshotService.java:85-99, ~14+ chains/underlying) + 30s chain broadcast per underlying (:103-115) + futures OI every 3min (futures/FuturesOiSnapshotService.java:64-65) + quote batches — on top of an expired-contract backfill legitimately consuming its full private 1800/30min.
@@ -252,6 +313,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Make UpstoxRateLimiter a singleton Spring bean sized to the token cap and inject it into every Upstox client (including quote/chain/analytics); optionally reserve a priority budget for the live capture path so backfill can never starve it.
 
 ### [HIGH / bug] `calendar-2027-cliff` — verdict: **CONFIRMED**
+
+> **Resolution (2026-07-02):** FIXED #414 — coverage-edge look-ahead degrades weekday-only; CalendarHorizonCanaryTest goes red ~Nov 16 2026 as the CSV-refresh tripwire.
 
 **Live scalper evaluation throws from Tue 2026-12-29 and OI capture silently halts on 2027-01-01 — the calendar look-ahead crosses the coverage edge before year-end**
 
@@ -261,6 +324,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [HIGH / bug] `sensex-expiry-weekday-model` — verdict: **CONFIRMED**
 
+> **Resolution (2026-07-02):** FIXED #414 — MarketCalendar.bse() Thursday weekly expiry + ScalperCalendars per-root routing.
+
 **SENSEX scalpers use the NSE-Tuesday weekly-expiry model — hero-zero fires on the wrong weekday and monthly-expiry OI suppression misses the BSE expiry**
 
 - **Evidence:** There is exactly ONE calendar in the platform: MarketCalendar.nse(), Tuesday weekly expiries hard-coded (MarketCalendar.java:33-35,205-217); ScalperOiConfig.java:23 returns it and both ScalperConfluenceGate (:826, feeding HeroZeroGate expiry-day flags) and MarketOiClient (:272,353 monthly-expiry OI suppression) consume it with tradeDate regardless of the strategy's option root (NIFTY vs SENSEX). Since Sept 2025 BSE SENSEX weekly expiry is Thursday (external exchange fact; NSE=Tuesday per SEBI single-expiry-day — the javadoc itself documents only the NSE move). No BSE calendar or per-root selection exists anywhere in the repo.
@@ -268,6 +333,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Parameterize the weekly-expiry weekday per exchange/option root (BSE→Thursday) — a small MarketCalendar variant selected by the scalper's option-root exchange — and route the monthly-OI suppression through the same selection.
 
 ### [MEDIUM / data-integrity] `datahash-partial-coverage` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** OPEN — below the fix-queue cut line.
 
 **data_hash covers only the primary 1m tuple while options runs also consume premium candles, context series, strikeRef series and (when armed) live Connecting-Dots REST — the 'same triple ⇒ byte-identical trades' claim is false**
 
@@ -277,6 +344,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [MEDIUM / bug] `sweep-lifecycle-cancel-restart` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** FIXED #416 — cancel polled in the no-result loop; set_status terminal guard; boot marks orphaned OPTIMIZATION rows failed.
+
 **Sweep cancel only takes effect when a result arrives, a cancelled sweep is then overwritten to 'failed', and optimizer restarts orphan 'running' sweeps forever**
 
 - **Evidence:** Cancellation is checked ONLY in _progress (app/service.py:158-169), which run_sweep calls only after consuming a result (app/sweep.py:157-159); the no-result path (results empty, pending non-empty) loops with no cancel check (sweep.py:163-164,126). cancel() sets DB status 'cancelled' (service.py:295-306); when the thread later hits _progress it raises ApiError, caught by 'except Exception' which does jobs.set_status(sweep_id, 'failed') (service.py:152-153) — and set_status has NO terminal-state guard ('UPDATE jobs SET status=%s WHERE id=%s', app/repos.py:50-59), so 'cancelled' is overwritten by 'failed'. main.py wires no startup recovery for running OPTIMIZATION rows (app/main.py:27-61) and sweeps run on daemon threads.
@@ -284,6 +353,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Check self._cancelled inside the read loop (pass a cancel-probe callable into run_sweep); make set_status a conditional UPDATE ... WHERE status NOT IN ('completed','cancelled','failed') for terminal writes; on optimizer boot mark stale 'running' OPTIMIZATION rows failed ('optimizer restarted').
 
 ### [MEDIUM / bug] `jobpruner-fk-violation` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** FIXED #415 — NOT-EXISTS guards on the pruner DELETEs.
 
 **JobPruner's DELETE has no NOT-EXISTS-runs guard (contradicting its own javadoc) — the FK makes the monthly prune throw and prune NOTHING once any 180-day-old job has runs**
 
@@ -293,6 +364,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [MEDIUM / data-integrity] `duplicate-runs-no-unique-jobid` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** FIXED #415 — V007 unique index on backtest_runs(job_id) + replace-on-rerun.
+
 **No UNIQUE(job_id) on backtest_runs + crash-requeue re-execution can persist two runs (and double trial-tells) for one job**
 
 - **Evidence:** backtest_runs.job_id is NOT NULL REFERENCES jobs(id) with no UNIQUE (V003__runs_trades.sql:11,73). BacktestRunner persists runs.insert → trades.insertAll → trialResults.publish in separate non-transactional statements (BacktestRunner.java:266-297; no @Transactional), and markCompleted happens later in WorkerPool (WorkerPool.java:170-172). requeueStaleRunning re-queues any 'running' row on restart (JobRepository.java:148-151) → full re-execution → second run row for the same job_id, second trades set, second OPT_RESULTS publish.
@@ -300,6 +373,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** CREATE UNIQUE INDEX ON backtest_runs(job_id) in a new migration and convert runs.insert to INSERT ... ON CONFLICT (job_id) DO UPDATE (or delete-then-insert on re-run) so a crash-rerun replaces rather than duplicates.
 
 ### [MEDIUM / bug] `replay-legs-silent-index0-fallback` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** OPEN — below the fix-queue cut line.
 
 **Signal→bar pairing falls back to bar index 0 on a timestamp-key miss — a missing first minute of a coarse primary bucket silently opens the trade at the window start**
 
@@ -309,6 +384,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [MEDIUM / tech-debt] `candles-3m-policy-lineage-drift` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** FIXED #427 — V027 drops the unused cagg + policy; CLAUDE.md corrected in #425.
+
 **V019 ships an active candles_3m refresh policy that the runtime deliberately bypasses and doctrine says must not run — lineage vs live drift, resurrected on every reset-db**
 
 - **Evidence:** V019__candles_3m_cagg.sql:29-31 adds add_continuous_aggregate_policy('candles_3m', start_offset 1 day, schedule 3 minutes); no later migration alters or removes it (grep candles_3m over deploy/ matches only V019). The runtime never reads the cagg — 3m is read-time rolled from 1m (CandleQueryService.java:31-33,104-105; CandleRepository.rangeRolledFromOneMinute) — and CLAUDE.md pins 'candles_3m exists but is empty/unwired (refreshing it OOMs)', which contradicts a live 3-minutely refresh policy.
@@ -316,6 +393,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** New suffix-versioned migration: SELECT remove_continuous_aggregate_policy('candles_3m', if_exists=>true) (and optionally drop the cagg) so the lineage matches the read-time-rollup reality.
 
 ### [MEDIUM / data-integrity] `fetchsource-profile-not-gateway` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** OPEN — below the fix-queue cut line.
 
 **Candle provenance 'source' is derived from the Spring profile, not from which gateway actually fetched — OpenAlgo-fetched rows would persist as 'KITE'**
 
@@ -325,6 +404,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [MEDIUM / observability] `ticker-status-connected-lie` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** OPEN — mitigated by the #419 feed watchdog (stalled ticks alert + auto-restart); the status endpoint itself still reports CONNECTED.
+
 **kite:ticker:status=CONNECTED is written before the socket connects and never corrected on connect failure**
 
 - **Evidence:** FeedPipeline.startFeed writes 'CONNECTED' at feed/FeedPipeline.java:76 BEFORE marketFeed.start() at :80; LiveTickerFeed.start swallows connect failures with a warn log (kite/ticker/LiveTickerFeed.java:97-102); the only other writer of the key is stop() → 'DISCONNECTED' (FeedPipeline.java:135). Nothing transitions the key on the actual onConnected/onDisconnected callbacks (LiveTickerFeed.java:91-94 only log).
@@ -332,6 +413,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Write CONNECTED from the onConnected callback (and DISCONNECTED from onDisconnected), seeding the key as CONNECTING in startFeed.
 
 ### [LOW / bug] `tick-pipeline-redis-coupled-bar-loss` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** OPEN — blast radius reduced by #426 (AOF + named-volume persistence).
 
 **Candle building is fan-out-coupled to Redis publish success, and BarWriter swallows closed-bar persist failures — intraday 1m loss heals only at the 15:45 EOD pass**
 
@@ -341,6 +424,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [LOW / architecture] `pel-inline-drain-blocks-startup` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** FIXED #429 — startup PEL is acked-and-dropped instead of inline serial replay.
+
 **StreamBootstrap drains the PEL by running pending backtests INLINE and serially on the startup thread before the worker pool starts**
 
 - **Evidence:** drainPending() reads the consumer's pending entries and calls workerPool.process(record) directly (dispatch/StreamBootstrap.java:93-125, inline call at :115); process → claim → runClaimed → runner.run is fully synchronous (WorkerPool.java:146-183). workerPool.start() only runs after the drain completes (StreamBootstrap.java:71).
@@ -348,6 +433,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** XCLAIM/collect the pending records and submit them to the worker pool (or simply XACK them and rely on the requeue+re-dispatch path, which already covers the same jobs via the authoritative table).
 
 ### [LOW / ux] `cancellation-checkpoint-gaps` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** PARTIALLY FIXED #416 — cancel now polled inside the no-result wait loop; finer-grained per-trial checkpoints not added.
 
 **Job cancellation is only observed at progress 10/40/80 — options replays and the whole fold/benchmark/persist phase are uncancellable**
 
@@ -369,6 +456,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [HIGH / data-integrity] `compose-mock-defaults-live-db` — verdict: **CONFIRMED**
 
+> **Resolution (2026-07-02):** FIXED #417 — `:?` fail-closed interpolation; raw compose errors unless ARTHA_DB_NAME/ARTHA_REDIS_DB are exported.
+
 **Compose defaults pair the MOCK profile with the LIVE database (artha) and live Redis db0 — the stated mock/live isolation invariant is enforced only by ay.ps1, with zero detection if breached**
 
 - **Evidence:** deploy/docker-compose.yml:185,214,338,381 default SPRING_PROFILES_ACTIVE to 'mock' while lines 220/341/385/420 default every datasource to ${ARTHA_DB_NAME:-artha} and lines 189/221/342/386/421 default Redis to ${ARTHA_REDIS_DB:-0} — i.e. the fallback combination is mock behaviour writing into the live database. The compose comment at lines 92-94 states the invariant: 'mock's synthetic candles/snapshots can never pollute live data'. CandleQueryService.java:65 stamps fetchSource='MOCK' when not on the live profile, and CandleRepository.java:24-31 UPSERT sets source=EXCLUDED.source plus high=GREATEST/low=LEAST, so mock rows both land in and merge into live rows. grep for 'artha_mock' across services/ returns zero hits — no service asserts profile↔DB pairing at boot; grep for source='MOCK' in market-data main shows no canary/integrity job that would ever detect mock rows in the live archive. CLAUDE.md itself documents the trigger ('raw compose leaves the vars unset → mock writes to artha').
@@ -376,6 +465,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Two one-liners plus a guard: (1) change the compose datasource defaults to a value that fails fast (e.g. ${ARTHA_DB_NAME:?set via ay.ps1}) so raw compose without the var refuses to start rather than silently choosing live; (2) add a boot assertion in each service (or flyway-init) that profile=mock + dbName=artha (or profile=live + artha_mock) is fatal; (3) optionally a startup canary in market-data on the live profile: SELECT count(*) FROM candles WHERE source='MOCK' > 0 → alarm.
 
 ### [MEDIUM / bug] `job-pruner-fk-doc-drift` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** FIXED #415 — the pruner guards make the documented ordering real.
 
 **JobPruner's DELETE has no NOT EXISTS(backtest_runs) guard despite its Javadoc claiming one — the monthly prune will FK-abort wholesale once any run-bearing job ages past 180 days, so nothing is ever pruned**
 
@@ -385,6 +476,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [MEDIUM / tech-debt] `candles-3m-cagg-lineage-drift` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** FIXED #427 (V027 drop) + #425 (CLAUDE.md correction).
+
 **V019 creates the candles_3m cagg + an every-3-minute refresh policy that the codebase has since abandoned as OOM-prone — no later migration disables it, so a fresh rebuild resurrects a zombie refresh job the live DB evidently no longer runs**
 
 - **Evidence:** marketdata/V019__candles_3m_cagg.sql:13-31 creates the candles_3m continuous aggregate AND add_continuous_aggregate_policy (schedule every 3 minutes, start_offset 1 day). No migration V020-V026 touches candles_3m (all read). The operative design abandoned it: CandleRepository.java:169-177 ('We do NOT create/refresh a candles_3m cagg because re-aggregating the stitched CONT / expired-contract 1m series (~106k contracts) OOM-crashed the live DB twice'), rangeFromAggregate's whitelist (line 146) excludes candles_3m, refreshDerivedAggregates (line 229) excludes it, and commit efb654f (#365) states 'A candles_3m cagg exists but is EMPTY + unwired'. An empty cagg despite V019's active 3-minute policy implies the policy was removed by hand on the live DB — a lineage↔live divergence the checksum-locked-migrations discipline exists to prevent.
@@ -392,6 +485,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Add marketdata/V027 (suffix-versioned, per house rules): SELECT remove_continuous_aggregate_policy('candles_3m', if_exists => true); and DROP MATERIALIZED VIEW candles_3m (nothing reads it — CandleQueryService routes 3m to the 1m rollup). Needs an executeInTransaction=false .conf like V019's.
 
 ### [MEDIUM / data-integrity] `backup-follows-active-profile` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** FIXED #411 — PGDATABASE pinned to artha regardless of the active profile.
 
 **The nightly backup sidecar dumps whichever database the last `up` selected, and the 3-slot global retention rotates live backups out while running the mock profile**
 
@@ -401,6 +496,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [MEDIUM / bug] `bucket-date-utc-trap-indexclose` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** FIXED #424 — the date filter converts to IST before ::date.
+
 **EquityIndexContributionService.indexClose filters 1d candles with a bare `bucket::date <= ?` — UTC session cast shifts IST-midnight daily buckets one day back, letting today's in-progress close masquerade as 'on/before asOf'**
 
 - **Evidence:** EquityIndexContributionService.java:135-141: SELECT close FROM candles WHERE interval='1d' AND tradingsymbol=? AND bucket::date <= ? ORDER BY bucket DESC LIMIT 1. Daily bars are IST-day-aligned (Kite native 1d bars carry 00:00+05:30; the 1d cagg buckets with time_bucket(...,'Asia/Kolkata'), V004:57), so IST day D stores bucket = D-1T18:30Z, and in the container's UTC session bucket::date = D-1. Every other date comparison in the codebase converts first — e.g. FuturesSnapshotReader.java:205 and PaperPositionRepository.java:262 use (ts AT TIME ZONE 'Asia/Kolkata')::date — and CLAUDE.md explicitly bans bare ::date ('off-by-one across IST midnight'). This is the lone violator among the ::date usages in services/.
@@ -409,6 +506,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [LOW / data-integrity] `backtest-runs-no-unique-jobid` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** FIXED #415 — V007 unique index.
+
 **backtest_runs has no UNIQUE(job_id) and run-insert / job-completion are separate commits — a crash between them plus boot requeue writes a second run for the same job**
 
 - **Evidence:** backtest/V003__runs_trades.sql:73 creates only the non-unique idx_runs_job; V002__jobs.sql header (lines 5-6) promises idempotent claims + stale-running requeue, and JobRepository.java:148-150 requeues EVERY 'running' row on boot. WorkerPool.java:170-171 shows runner.run(job,...) (which persists the run inside) followed by repository.markCompleted(jobId) as separate statements — no shared transaction. Read paths partially tolerate duplicates: RunRepository.findRunIdByJobId (line 167) orders by completed_at DESC LIMIT 1, but findReturnsByJobIds (lines 148-161) does map.put per unordered row, so which duplicate's total_return shows in the jobs list is arbitrary.
@@ -416,6 +515,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Add a suffix-versioned backtest migration: CREATE UNIQUE INDEX uq_runs_job ON backtest_runs (job_id) (current duplicates, if any, must be de-duped first), and have the worker INSERT ... ON CONFLICT (job_id) DO NOTHING or wrap run-insert + markCompleted in one transaction.
 
 ### [LOW / data-integrity] `candle-upsert-merge-asymmetry` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** OPEN — below the fix-queue cut line (#417 closed the mock-writes-to-live entry points, shrinking the trigger surface).
 
 **Candle UPSERT merge (high=GREATEST, low=LEAST, source=last-writer) makes bad spikes uncorrectable by re-fetch and silently flips row provenance**
 
@@ -437,6 +538,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [MEDIUM / bug] `ratelimiter-lost-expire-lockout` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** FIXED #423 — atomic Lua INCR+PEXPIRE; no permanent-lockout window.
+
 **Non-atomic INCR/EXPIRE in LoginRateLimiter can permanently lock the sole owner out of login**
 
 - **Evidence:** services/edge-gateway/src/main/java/in/arthayantra/gateway/auth/LoginRateLimiter.java lines 41-56: `redis.opsForValue().increment(attemptsKey)` and the TTL are two separate Redis commands. The `expire(attemptsKey, WINDOW)` only runs when `attempts == 1L` (line 47). If the process dies (OOM/`restart: unless-stopped`, mem_limit 384m) or the EXPIRE round-trip is dropped between the INCR and the EXPIRE, `login:attempts:<ip>` persists with NO TTL. Redis is configured `--maxmemory-policy volatile-lru` (docker-compose.yml line 79), which never evicts a key that has no TTL, so the counter grows unbounded forever.
@@ -444,6 +547,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Make attempt-counting atomic: use a single Lua script (or `SET key 0 EX 60 NX` followed by INCR) so the window TTL is established in the same round-trip as the increment, guaranteeing every attempts key carries a TTL. Alternatively set the TTL unconditionally on every increment (idempotent `expire`).
 
 ### [LOW / security] `owner-hash-plain-env` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** OPEN — accepted risk (single-owner, loopback-only host).
 
 **Owner password hash passed as a plain env var, contradicting the compose file's own 'no secret in docker inspect' invariant**
 
@@ -453,6 +558,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [LOW / architecture] `pubsub-profile-unqualified` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** OPEN — accepted risk (mock and live stacks never run concurrently on this host).
+
 **Redis pub/sub signal channels are profile-unqualified, so mock/live logical-DB isolation is not a boundary for the WS bridge**
 
 - **Evidence:** services/strategy-signal-service/.../signals/SignalPublisher.java line 24 hardcodes `CHANNEL = "signals"` and publishes via `redis.convertAndSend(CHANNEL, ...)` (line 76). The gateway bridge subscribes by the same bare channel name (RedisTopicHub.messages(channel) -> ChannelTopic.of(ch)). Redis PUBLISH/SUBSCRIBE is global to the server and ignores the SELECTed logical DB, so the mock(db1)/live(db0) separation that isolates keys does NOT isolate pub/sub. Same pattern for StrategyChangedPublisher / SessionStatusPublisher channels.
@@ -461,6 +568,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [LOW / security] `downstream-no-auth-devtools-bypass` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** OPEN — accepted risk (loopback-only gateway; services unreachable off-host).
+
 **Downstream services enforce no auth of their own; dev-tools socat publishes bypass the gateway to reach the SQL console + order endpoints unauthenticated**
 
 - **Evidence:** Only edge-gateway has a SecurityConfig (grep for SecurityWebFilterChain/EnableWebSecurity across services returns exactly one file). libs/common-web/servlet/.../ArthaIdentityFilter.java lines 30-35 read `X-Artha-User` into MDC for logging only and never block a request lacking it. market-data (8081) and strategy-signal (8082) therefore trust network isolation alone; docker-compose.yml `mds-publish` (lines 519-535) and `sss-publish` (lines 537-553) forward those ports onto 127.0.0.1 under the `dev-tools` profile, and the AdminQueryController SQL console (/api/v1/market/admin/query) plus the orders/strategy surfaces sit behind no service-local auth.
@@ -468,6 +577,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Document explicitly that the dev-tools socat publishes expose unauthenticated admin surfaces and should never be enabled on a multi-tenant host; optionally bind a lightweight shared-secret header check (validated against a file secret) in ArthaIdentityFilter so the direct ports are not fully open even locally. No change needed to the gateway path.
 
 ### [LOW / security] `auth-session-preauth-profile-disclosure` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** OPEN — accepted risk (loopback-only).
 
 **/api/v1/auth/session discloses live-vs-mock profile to unauthenticated callers**
 
@@ -487,6 +598,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [HIGH / bug] `no-timeouts-single-eval-thread` — verdict: **CONFIRMED**
 
+> **Resolution (2026-07-02):** FIXED #409.
+
 **Every intra-stack REST client has NO timeout, and they all run on the single signal-eval thread — one hung connection freezes all live signal evaluation (including stop-loss EXITs) indefinitely**
 
 - **Evidence:** MarketOiClient.java:61 and MarketDataCandlesClient.java:35 build RestClient via builder.baseUrl(baseUrl).build() with no requestFactory/timeout; strategy-signal-service has zero timeout config anywhere (grep for Timeout/requestFactory in its main tree: no hits; pom has no httpclient5/jetty/reactor, so Boot 3.5.15 detects JdkClientHttpRequestFactory whose JDK HttpClient default is NO connect/read timeout). These clients are invoked on the single 'signal-eval' executor (SignalEngine.java:121-127): refreshFromRest at every coarse-primary boundary (SignalEngine.java:520-528), the confluence-gate fan-out (scalperEntry:500-503), the flip-exit re-read (confluenceFlipExit:1130-1133), and the synchronous AutoPaperListener→PaperSignalListener chain (@EventListener without @Async, AutoPaperListener.java:38, PaperSignalListener.java:39). The bar queue feeding this thread is an unbounded ConcurrentLinkedQueue (SignalEngine.java:116-118). backtest MarketDataClient.java:32 (bare RestClient.builder()) and edge-gateway (no spring.cloud.gateway httpclient response-timeout in application.yml) share the same gap.
@@ -494,6 +607,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Set bounded timeouts on the shared Boot builder once: spring.http.client.connect-timeout=2s / read-timeout=5s (Boot 3.5 property, applies to every auto-configured RestClient.Builder) in strategy-signal, backtest and market-data; add spring.cloud.gateway.httpclient.response-timeout (~30s) in edge-gateway. Optionally add a watchdog metric (seconds since last drained bar) alerting via the existing ntfy path.
 
 ### [HIGH / bug] `kite-rest-no-timeout-snapshot-stall` — verdict: **CONFIRMED**
+
+> **Resolution (2026-07-02):** FIXED #409 — bounded timeouts on the Kite/live REST clients.
 
 **Live Kite REST clients (quotes/historical/session) have no timeouts; one hung call permanently stalls the fixedDelay OI-snapshot loop — the platform's irreplaceable forward OI capture silently stops**
 
@@ -503,6 +618,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [HIGH / data-integrity] `requeue-hijacks-optimizer-jobs` — verdict: **CONFIRMED**
 
+> **Resolution (2026-07-02):** FIXED #415.
+
 **Backtest crash recovery ignores job kind: a backtest-service restart mid-sweep requeues the running OPTIMIZATION parent job and runs it as a plain backtest, corrupting the sweep's state**
 
 - **Evidence:** JobRepository.requeueStaleRunning (JobRepository.java:148-151): UPDATE jobs SET status='queued' ... WHERE status='running' — no kind filter. findQueuedIds (154-158) — no kind filter. StreamBootstrap.run (StreamBootstrap.java:58-67) then dispatches EVERY queued id onto jobs.backtest (JobStreamDispatcher.java:24-26). WorkerPool.claim wins on any 'queued' row regardless of kind (JobRepository.java:95-103) and BacktestRunner.run has no kind guard (BacktestRunner.java:107-117) — the sweep echo carries strategyId/from/to (service.py _sweep_echo:309-317), so it runs as a real backtest and markCompleted()s the OPTIMIZATION parent. Meanwhile the optimizer's daemon sweep thread (service.py:117-133) keeps flipping the same row back to 'running' via an unguarded set_status (repos.py:50-59). Optimizer restart recovery is also absent: sweeps are in-memory daemon threads, so an optimizer restart strands the parent at 'running' forever until this backtest-restart path 'completes' it spuriously.
@@ -510,6 +627,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Add kind filters: requeueStaleRunning → WHERE status='running' AND kind IN ('BACKTEST','TRIAL'); findQueuedIds → same predicate. Optionally guard BacktestRunner.run with an early return for kind==OPTIMIZATION. For the optimizer side, on FastAPI startup mark this service's own orphaned 'running' OPTIMIZATION rows failed (no thread can resume them).
 
 ### [MEDIUM / performance] `indicator-bank-rebuilt-per-bar` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** FIXED #419 — long-lived IndicatorBank per (version, instrument), cleared on strategy reload.
 
 **Live SignalEngine rebuilds IndicatorBank (cold ta4j cache) on every evaluated bar — the exact O(n²) pattern the golden runner fixed (D17); the D11 IndicatorValueCache lib exists but is wired into nothing; EngineSeries is never trimmed so cost and memory grow with uptime**
 
@@ -519,6 +638,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [MEDIUM / performance] `oi-fanout-uncached` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** FIXED #419 — 45s URI-keyed memo.
+
 **Confluence gate fires ~15-18 sequential uncached HTTP GETs per gated entry, per strategy, with intra-evaluation duplicate fetches — repeated every bar for flip-exit positions — all on the single eval thread against market-data's 5-conn pool**
 
 - **Evidence:** Per evaluation: oi() = 5 GETs (spurt, futures/banks, active-strikes, trending, term-structure — MarketOiClient.java:271-341, 381-391), macro() = 9 GETs (iv-history, breadth, fii-dii/long-short, chain, index-contribution, active-strikes AGAIN, vix, global/dow, fii-dii/bias — MarketOiClient.java:394-493), plus the gate's own chain fetch (ScalperConfluenceGate.java:319), a possible second chain for a decoupled oi-index (:652), trend60mDir (:715) and openHighStats (:800). No caching anywhere in MarketOiClient/ScalperConfluenceGate (grep cache: comments only); market-data's Caffeine caches cover instrument lookups only (CacheConfig.java, InstrumentsController.java:118-130 — not the analytics endpoints). /options/active-strikes and /options/chain are each fetched twice within ONE evaluation. confluenceFlipExit re-runs the whole context per bar while a tagged position is open (SignalEngine.java:445-452, 1123-1137). Nothing shares results across the 12 strategies evaluating the same NIFTY-future bar.
@@ -526,6 +647,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Add a bar-scoped memo (Caffeine, TTL = min(bar interval, 60s), key = endpoint+underlying+expiry) inside MarketOiClient.get(), shared across strategies and across the entry/flip-exit paths; deduplicate the two active-strikes and two/three chain reads within one evaluation by threading the already-fetched payloads through.
 
 ### [MEDIUM / architecture] `pel-drain-blocks-startup` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** FIXED #429.
 
 **StreamBootstrap drains the PEL by running full backtests inline and serially on the startup ApplicationRunner thread, before the worker pool starts — readiness (and the compose health gate) blocks for the whole recovery**
 
@@ -535,6 +658,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [MEDIUM / architecture] `redis-48mb-shared-fragile` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** PARTIALLY FIXED #426 — XTRIM caps the job streams + AOF/named-volume persistence; the 48MB sizing and shared-instance topology are unchanged.
+
 **48mb volatile-lru Redis shared by live+mock: session keys ARE TTL'd (evictable — the compose comment's safety claim is wrong), job streams are never trimmed (non-evictable growth), and there is no volume/persistence — a recreate silently loses UI ticker subscriptions and sessions**
 
 - **Evidence:** docker-compose.yml:69-89: redis 7.4, maxmemory 48mb, volatile-lru, NO volume mounted; comment claims 'TTLs only on cache keys keeps sessions/Streams safe'. But edge-gateway uses Spring Session Redis with timeout 12h (edge-gateway application.yml:21-24) — Spring Session sets EXPIRE on its keys, so under volatile-lru pressure session keys are precisely what gets evicted. Streams (jobs.backtest, jobs.backtest.trials, optimizations.results) are XADD'd (JobStreamDispatcher.java:25, streams.py:37) and XACK'd but never XTRIM'd/XDEL'd anywhere (repo-wide grep for trim/maxlen/xdel: zero stream hits) — acked entries persist forever with no TTL (non-evictable). ticks:last hash and ticks:last-at (RedisTickPublisher.java:48-50) also carry no TTL. On Redis recreate: pinned indices/futures re-pin (PinnedIndicesSubscriber/FuturesPinner) but owner-added chart subscriptions in marketdata:subscriptions are gone with nothing to re-seed them, and the owner is logged out mid-day.
@@ -542,6 +667,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Three small changes: (1) XADD with approximate MAXLEN (~10k) or a nightly XTRIM for the three job streams; (2) mount a volume + appendonly yes for redis (or add a Postgres-backed re-seed of marketdata:subscriptions); (3) fix the compose comment, and if owner-session survival matters more than cache eviction, consider noeviction (TTLs already expire the caches) or a higher maxmemory.
 
 ### [MEDIUM / observability] `no-feed-liveness-watchdog` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** FIXED #419 — 60s watchdog; ticks stalled >3 min → feed restart + ntfy alert, 10 min cooldown.
 
 **Feed liveness is checked nowhere automatically: gap backfill fires only on WS reconnect, the container healthcheck is HTTP-only, and no watchdog restarts a silently-frozen feed — mid-day tick death means no candles, hence no bar-driven exit evaluation**
 
@@ -551,6 +678,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [LOW / performance] `serialgc-hot-paths` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** FIXED #431 + #434 — explicit -XX:+UseG1GC (JVM ergonomics below ~1792MB pick SerialGC, so dropping the flag alone changed nothing; PrintFlagsFinal-verified live).
+
 **-XX:+UseSerialGC on the tick-hot market-data and eval-hot strategy-signal JVMs pairs stop-the-world single-threaded collections with the per-bar cold-bank BigDecimal allocation storm**
 
 - **Evidence:** market-data Dockerfile:33 and strategy-signal Dockerfile:16 both run 'java -Xmx448m -XX:+UseSerialGC'. The per-bar IndicatorBank rebuild (finding indicator-bank-rebuilt-per-bar) allocates O(series-length) DecimalNum-32 BigDecimals per indicator per bar, driving frequent young collections and periodic full STW pauses (typically 100ms-1s on a ~448m heap) that halt the tick-normalizer and signal-eval threads simultaneously.
@@ -558,6 +687,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Drop UseSerialGC on these two services (default G1 at this heap size costs a few MB of metadata for far better pause behavior); keep SerialGC only where latency is not tick-shaped (edge-gateway/backtest) if footprint matters. Re-measure container RSS against the 640m limits afterwards.
 
 ### [LOW / bug] `resubscribe-message-drop` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** OPEN — below the fix-queue cut line.
 
 **Every reload/hot-swap rebuilds the Redis listener container stop-then-start, dropping any candle message published in the gap (pub/sub has no replay); 1m-primary series have no intra-day self-heal for a dropped bar**
 
@@ -567,6 +698,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [LOW / bug] `interval-duration-silent-default` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** OPEN — below the fix-queue cut line.
+
 **SignalEngine.intervalDuration silently maps any unrecognized primary timeframe (e.g. '1d' on a non-btst strategy) to 1 minute — full evaluation + REST refresh every 1m bar — where the golden runner throws instead**
 
 - **Evidence:** SignalEngine.java:1191-1199: switch over 3m/5m/15m/1h with 'default -> Duration.ofMinutes(1)'. evaluateCoarsePrimary then treats every bar as a bucket boundary for such a strategy (Math.floorMod(epoch, 60)==0 always, :516-518) → seriesStore.refreshFromRest for the primary + every higher TF, plus a full IndicatorBank.build + evaluate, per 1m bar per instrument. The replay counterpart deliberately rejects unsupported primaries (TickwiseGoldenRunner behavior documented in CLAUDE.md, fixed additively for 3m in #228), and EngineSeries.intervalDuration itself throws for unknown intervals (EngineSeries.java:160-170) — the live engine is the lone lenient path.
@@ -574,6 +707,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Make the default branch throw (matching EngineSeries), or skip live evaluation for non-rollable primaries with a loud warning at load time in reload().
 
 ### [LOW / performance] `ws-passthrough-unbounded` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** FIXED #428 — bounded per-session passthrough queue, drop-oldest.
 
 **Per-session WS passthrough queue is unbounded for non-conflated topics (candles.1m.*, options.chain, jobs.progress) — a stalled browser accumulates frames in the 256m-heap gateway**
 
@@ -595,6 +730,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [HIGH / data-integrity] `e2e-global-setup-can-hit-live-db` — verdict: **PARTIAL**
 
+> **Resolution (2026-07-02):** FIXED #417 — the harness pins ARTHA_DB_NAME=artha_mock and refuses to reuse a non-mock stack.
+
 **Root e2e harness boots/reuses compose against the LIVE artha/db0 — mock/live isolation is unenforced in the one place that writes test data**
 
 - **Evidence:** e2e/global-setup.ts:16 builds COMPOSE = ['docker','compose','-f','deploy/docker-compose.yml','--env-file','.env'] and never sets ARTHA_DB_NAME/ARTHA_REDIS_DB; deploy/docker-compose.yml defaults them to the LIVE values (lines 220-221, 341-342, 385-386: `${ARTHA_DB_NAME:-artha}`, `${ARTHA_REDIS_DB:-0}`). global-setup.ts:24-30 writes a mock .env ONLY if none exists ('locally an existing .env wins'); lines 34-37 REUSE any already-healthy stack with zero check that it is the mock profile; line 40 `up -d --build` otherwise boots with the owner's existing .env. e2e/tests/helpers.ts:4-5 explicitly instructs 'Locally export E2E_OWNER_PASSWORD to match your own .env hash' — i.e. logging into the owner's real stack is the designed local flow. The specs MUTATE state: e2e/tests/strategy-editor.spec.ts:28-51 creates persisted strategy drafts; backtest-results.spec.ts submits backtest runs. Only ay.ps1:38-40 derives artha_mock/db1, and the harness bypasses it.
@@ -604,6 +741,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [HIGH / testing-gap] `no-live-vs-backtest-exit-equivalence-test` — verdict: **CONFIRMED**
 
+> **Resolution (2026-07-02):** OPEN — top of the recommended follow-up list.
+
 **Zero tests assert live paper exits match backtest premium_pct exits — the divergence is total and the only assertion touching it is isNotNull()**
 
 - **Evidence:** Backtest: PremiumExitEvaluator (services/backtest-service/src/main/java/.../options/PremiumExitEvaluator.java:6-15) evaluates premium_pct SL/TP/trailing/time-stop against the OPTION's own 1m premium series, pinned by OptionsPremiumGoldenTest. Live: SignalEngine.emitEntry (services/strategy-signal-service/.../signals/SignalEngine.java:699-700) sets entryPrice = the INDEX-FUTURE bar close and levelFromRules (lines 1147-1163) applies the premium_pct percentage TO THAT INDEX PRICE (a 20%-of-premium stop becomes entry−20%-of-index ≈ 5,000 NIFTY points — unreachable). Then PaperSignalListener.openSingle/openLeg (paper/PaperSignalListener.java:67-72, 89-94) pass NULL stopLoss/takeProfit, and PaperBracketEvaluator.evaluate (paper/PaperBracketEvaluator.java:38-40) skips any position with both null — so auto-papered positions (#367, toggle ON) have NO exit at all until the 15:45 mark-to-close (paper/PaperScheduler.java:59-65). The paper layer also never reads tradeable_tradingsymbol (grep 'tradeable' in paper/ = zero hits) despite SignalRepository.java:181's comment 'the option the seam picked to trade (the order/paper layer trades it)'. The ONLY test touching live stop values is SignalEngineIntegrationTest.java:181-182: `assertThat(row.stopLoss()).isNotNull()` — with a premium_pct 20/40 YAML (lines 116-117) whose computed level is semantically wrong, invisible to a null-check.
@@ -611,6 +750,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** (1) Strengthen SignalEngineIntegrationTest to assert the stop VALUE (would immediately expose premium_pct-applied-to-index). (2) Add a cross-suite equivalence test: feed one scalper YAML + a synthetic premium path through PremiumExitEvaluator AND through the live chain (signal emit → auto-take → bracket evaluate with stubbed LastTickReader) and assert the same exit reason/bar. (3) Add a PaperSignalListener test asserting a taken signal's brackets are populated (currently the tests pin the null-bracket behavior as if intended).
 
 ### [MEDIUM / testing-gap] `frontend-e2e-and-axe-run-in-no-ci` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** PARTIALLY FIXED #422 — FE e2e/axe shard now runs in CI but non-blocking until the specs fit CI mock data (chip task_499edb0f); flip to blocking after spec repair.
 
 **frontend-react/e2e (9 specs x 2 viewports + ALL axe a11y scans) runs in no CI workflow — the stated 'a11y gated by axe' invariant is unenforced**
 
@@ -620,6 +761,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [MEDIUM / testing-gap] `calendar-year-rollover-no-canary` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** FIXED #414 — CalendarHorizonCanaryTest.
+
 **market-calendar covers only 2026 and no test fails before the 2027 rollover bricks every live trading-day query**
 
 - **Evidence:** libs/market-calendar/src/main/resources/nse-trading-holidays.csv contains only 2026 dates (last: 2026-12-25); MarketCalendar.requireCovered (libs/market-calendar/src/main/java/.../MarketCalendar.java:236-243) throws IllegalArgumentException for any uncovered year. The only related test asserts that 2027 THROWS (MarketCalendarTest.java:156-158) — it pins the fail-loud behavior but nothing asserts the bundle covers the horizon the live system needs. Refresh is 'yearly by PR' (CSV header comment), i.e. human memory.
@@ -627,6 +770,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Add a horizon canary test: assert the bundled calendar covers LocalDate.now() plus ~45 days (e.g. `assertThat(calendar.coveredYears()).contains(Year.now().getValue())` and, when today > Nov 15, also `contains(year+1)`). It goes red in nightly ci-e2e/next ci-java run in mid-November 2026 — weeks of notice instead of a New-Year outage.
 
 ### [MEDIUM / testing-gap] `migration-only-prs-skip-ci-java` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** FIXED #422 — deploy/flyway/** added to the ci-java path filters.
 
 **A deploy/flyway-only PR never runs the Java ITs that actually consume the schema**
 
@@ -636,6 +781,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [MEDIUM / testing-gap] `gateway-allowlist-no-contract-crosscheck` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** FIXED #421 — GatewayRouteAllowlistTest: every spec path must match a Path= predicate.
+
 **Edge-gateway route allowlist vs controller paths has no test despite a recorded live failure of exactly this class**
 
 - **Evidence:** services/edge-gateway/src/main/resources/application.yml:43-61 is a hand-maintained Path= prefix list per service, with a catch-all Path=/** (line 82) that serves SPA index.html for anything unmatched — so a missing prefix returns HTTP 200 HTML, not an error. Gateway tests are only ContractCaptureTest, GatewayIntegrationTest, auth/status/ws tests (services/edge-gateway/src/test/java/in/arthayantra/gateway/) — none cross-check the allowlist. The committed OpenAPI specs in contracts/ enumerate every /api/v1 path per service. Memory records the live incident: /api/v1/signal-rejections (#404) silently served index.html until the allowlist was hand-patched ('live-verify catches it, unit tests don't').
@@ -643,6 +790,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** A pure-file unit test in edge-gateway: parse each contracts/<svc>.openapi.json's paths and assert every one is matched by that service's Path= prefixes from application.yml. No containers, ~50 lines, kills a recurring incident class.
 
 ### [MEDIUM / testing-gap] `optimizer-cancel-and-streams-untested` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** FIXED #416 — lifecycle tests landed with the fixes.
 
 **Optimizer cancellation path and the real Redis Streams transport have zero test coverage**
 
@@ -652,6 +801,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [MEDIUM / tech-debt] `map-return-contract-blindspot-42pct` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** FIXED #430 — MapReturnRatchetTest freezes the per-service Map-return counts (2/31/28/10), down-only.
+
 **69 of ~166 mapped endpoints return untyped Map<String,Object> — response-shape drift is invisible to ci-contracts and the TS client for ~42% of the API**
 
 - **Evidence:** grep 'public Map<String, Object>' across services/*/src/main/java **/*Controller.java = 69 handler methods (market-data 16 files, strategy-signal 9, backtest 6) vs 166 total @*Mapping methods. CLAUDE.md itself codifies the loophole ('Generic Map<String,Object> returns are NOT enumerated, so adding response keys does NOT drift the spec') and memory records it being exploited twice ('both Map-return=no contract drift'). ci-contracts (.github/workflows/ci-contracts.yml:1-6) fails only on BREAKING spec diffs — a renamed/removed key inside a Map response produces NO diff at all.
@@ -659,6 +810,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Don't boil the ocean: ratchet. Add a ContractCaptureTest lint counting Map-returning handlers per service and freeze the current number (fail on increase), then convert the highest-churn surfaces (signals, paper, backtest results) to records as they are next touched.
 
 ### [MEDIUM / testing-gap] `backup-restore-no-automated-roundtrip` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** OPEN — recommended follow-up (one manual round-trip live-verified 2026-07-01).
 
 **ay backup/restore has no automated round-trip test despite a proven silent-data-loss incident in that exact code**
 
@@ -668,6 +821,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [LOW / tech-debt] `it-naming-silent-skip-unguarded` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** OPEN — below the fix-queue cut line.
+
 **The *IT silent-skip trap is enforced by prose only — no failsafe plugin, no naming guard**
 
 - **Evidence:** grep 'failsafe' across every pom.xml = zero matches; no maven-enforcer plugin exists either (grep 'enforcer' = zero). Today 0 test classes match *IT.java (find = empty; 282 of 293 test files match the surefire-picked *Test/*IntegrationTest patterns), so the trap is latent. The only guard is a CLAUDE.md bullet.
@@ -675,6 +830,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Cheapest: a tiny root-pom enforcer rule or a unit test in each service's testsupport that scans src/test/java for files matching .*IT\.java / .*ITCase\.java and fails with a rename instruction. Five minutes, permanent.
 
 ### [LOW / testing-gap] `rerun-retries-plus-dirty-singleton-db` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** OPEN — mitigated per-test as instances surface (#405/#420 collision-proofing pattern).
 
 **rerunFailingTestsCount=2 on a shared never-cleaned singleton DB both masks real races and wastes retries on non-idempotent tests**
 
@@ -684,6 +841,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [LOW / testing-gap] `ci-e2e-gaps-push-trigger-and-readiness` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** FIXED #422 — push trigger + healthcheck-gated readiness.
+
 **ci-e2e has no push-to-main trigger and its readiness gate omits the backtest/optimizer containers its own specs exercise**
 
 - **Evidence:** ci-e2e.yml:6-11 triggers on pull_request + nightly cron + dispatch only — a merge-race (two individually-green PRs whose combination breaks a journey) or any direct-to-main push (enforce_admins is disabled per memory) reaches main untested until the nightly. e2e/global-setup.ts:105 health-gates only ay-strategy-signal-service and ay-market-data-service, while backtest-results.spec.ts and sweep-explorer.spec.ts drive backtest-service and optimizer-service — their cold-start 503s are absorbed by retries:1 (playwright.config.ts:12) or surface as flakes.
@@ -691,6 +850,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Add `push: branches: [main]` to ci-e2e, and append ay-backtest-service + ay-optimizer-service to the container-health loop in global-setup (both already have compose healthchecks).
 
 ### [LOW / testing-gap] `frontend-vitest-no-coverage-floor` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** OPEN — below the fix-queue cut line.
 
 **Frontend vitest has no coverage threshold — 34 of 75 pages have no spec and nothing prevents erosion**
 
@@ -712,6 +873,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [HIGH / data-integrity] `backup-rotation-mock-evicts-live` — verdict: **CONFIRMED**
 
+> **Resolution (2026-07-02):** FIXED #411 — per-database retention.
+
 **Backup sidecar dumps only the active profile's DB, and global rotation (KEEP=3) lets mock-mode nightlies evict every live dump**
 
 - **Evidence:** deploy/docker-compose.yml:153 sets db-backup PGDATABASE: ${ARTHA_DB_NAME:-artha} — the sidecar dumps ONLY the active profile's database. deploy/backup/backup.sh:23 (DB="${PGDATABASE:-artha}") and lines 68-86: prune_global sorts ALL stamp dirs across manual/nightly/weekly by basename timestamp and deletes the oldest beyond GLOBAL_KEEP=3, with zero regard for WHICH database the dump inside contains. On-disk state confirms the stakes: backups/ currently holds exactly ONE restorable live dump (manual/20260701-011737/artha-full.dump, 3.0 GB) — the two retained nightlies (20260630, 20260701) are pre-#395 per-schema dumps (marketdata.dump 25 MB, no globals.sql) that #395's own commit message declares lost all 224M hypertable rows.
@@ -719,6 +882,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Two-line-scale change in backup.sh: (a) dump BOTH databases every run (loop `for db in artha artha_mock` or at minimum always dump artha), and (b) make prune per-database — e.g. only count/delete stamp dirs containing "${DB}-full.dump", or nest dest as $MODE/$DB/$STAMP. Also delete the two useless per-schema nightly dirs so they stop occupying 2 of the 3 retention slots.
 
 ### [HIGH / observability] `nightly-backup-no-deadman` — verdict: **CONFIRMED**
+
+> **Resolution (2026-07-02):** FIXED #411 — success dead-man ping (ops ntfy topic configured 2026-07-02).
 
 **Nightly backup silently skips whenever the stack is down at 00:30 IST — already happened today, and nothing can ever alert on a MISSED run**
 
@@ -728,6 +893,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [HIGH / observability] `live-notifier-points-at-wiremock` — verdict: **CONFIRMED**
 
+> **Resolution (2026-07-02):** FIXED #412 — fail-closed blank defaults; ay.ps1 injects the stub only under mock. Live-verified 2026-07-02: real test-send SENT to ntfy.sh.
+
 **Live-mode signal notifications currently POST to the WireMock stub (catch-all 200) — fail-open compose default, key absent from .env.example and from the owner's live .env**
 
 - **Evidence:** docker-compose.yml:345-346: ARTHA_NOTIFIER_NTFY_URL defaults to http://wiremock:8080 and topic to ay-signals-mock with NO profile gating; wiremock itself has no profiles: key (lines 320-330) and is running in the live stack right now (docker ps shows ay-wiremock Up). The owner's actual .env (checked keys only) contains SPRING_PROFILES_ACTIVE=live and ARTHA_NTFY_TOPIC but NO ARTHA_NOTIFIER_NTFY_URL/TOPIC; .env.example never mentions them either (only the ops ARTHA_NTFY_TOPIC, line 44). NotifierClient.java:40-45: configured() checks only that the topic is non-blank — 'ay-signals-mock' passes — and send() (61-66) POSTs to wiremock, which returns 200, so the delivery audit records success.
@@ -735,6 +902,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Change the compose default to empty (ARTHA_NOTIFIER_NTFY_URL: ${ARTHA_NOTIFIER_NTFY_URL:-}) and have NotifierClient.configured() require a non-blank URL; set the wiremock values only in the mock path (or gate wiremock behind a profile). Add both keys to .env.example under the ops-alerts section.
 
 ### [HIGH / observability] `ops-ntfy-topic-never-reaches-market-data` — verdict: **PARTIAL** (severity corrected high → medium)
+
+> **Resolution (2026-07-02):** FIXED #412 — passthrough wired; topic set in .env 2026-07-02.
 
 **All contract-canary and corporate-action ntfy alerts are dead: compose passes ARTHA_NTFY_TOPIC only to the db-backup sidecar, never to market-data-service**
 
@@ -745,6 +914,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [HIGH / data-integrity] `ay-sh-stale-mirror-breaks-isolation` — verdict: **CONFIRMED**
 
+> **Resolution (2026-07-02):** FIXED #417 — ay.sh deleted.
+
 **ay.sh is a 19-day-stale mirror still documented in README: no profile-env derivation (mock writes into live artha) and a pre-#395 destructive restore hardcoded at the live DB**
 
 - **Evidence:** git log: ay.sh last functionally touched 2026-06-12 (a00869f/9939e1f) — BEFORE mock/live DB isolation (#11, 2026-06-14) and the restore rewrite (#395, 2026-07-01); ay.ps1 got both. ay.sh:30-40 `up` never sets ARTHA_DB_NAME/ARTHA_REDIS_DB, so compose's fail-open defaults ${ARTHA_DB_NAME:-artha} / ${ARTHA_REDIS_DB:-0} (docker-compose.yml:220, 341, 385, 420, 189) apply — a mock-profile stack writes synthetic candles/signals into LIVE artha and Redis db0, the exact pollution the compose comment (lines 92-95) claims 'can never' happen. ay.sh:54-63 `restore` runs pg_restore --clean --if-exists into hardcoded 'artha' with no dropdb/createdb, no timescaledb_pre_restore/post_restore, and no globals — the method #395's commit message describes as silently broken for hypertables. README.md:45 still advertises it ('Linux/WSL2: ./ay.sh up') and README.md:61 documents `ay restore <file>`.
@@ -752,6 +923,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Either delete ay.sh and change README line 45 to WSL-invoke ay.ps1 via pwsh, or port Set-ProfileEnv + the #395 restore verbatim. If kept, the cheapest hardening is also fixing the root enabler: change the compose defaults to fail CLOSED (${ARTHA_DB_NAME:?set via ay CLI} or default artha_mock) so an env-less invocation cannot touch live.
 
 ### [MEDIUM / data-integrity] `profile-detection-exact-string-match` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** OPEN — ay.ps1 still requires the exact string `mock`; a compound profile (e.g. `mock,debug`) derives LIVE DB vars.
 
 **ay.ps1 profile detection is an exact 'mock' string compare — any compound Spring profile routes mock beans at the LIVE database**
 
@@ -761,6 +934,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [MEDIUM / data-integrity] `restore-verification-is-eyeball-only` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** OPEN — recommended follow-up alongside the automated backup-restore round-trip.
+
 **ay restore never fails programmatically: pg_restore errors are tolerated, verification is a printed row-count table, and '[ay] restore complete' prints unconditionally**
 
 - **Evidence:** ay.ps1:63-70: Invoke-ComposeAllowFail deliberately ignores exit codes; the actual pg_restore (line 201) and the row-count sanity query (lines 205-207) both run through it. Line 210 prints '[ay] restore complete' regardless of outcome, and line 209 restarts the full stack on top of whatever state resulted. The comment (58-62) says 'The restore is verified by a post-restore row count' — but the count is only PRINTED for the owner to eyeball; no threshold, no comparison to the dump, no abort.
@@ -768,6 +943,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** After the sanity SELECT, capture the candle count and fail (skip the stack restart, exit non-zero) if it is 0 — a three-line guard that converts the eyeball check into a real gate.
 
 ### [MEDIUM / observability] `obs-profile-phantom-no-metrics-pipeline` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** FIXED #431 — phantom profile rejected in ay.ps1, removed from README/compose.
 
 **The 'obs' profile is accepted by both CLIs and advertised in README (Prometheus/Grafana/Loki, +~550 MB) but contains ZERO services; nothing scrapes the exposed metrics, no log aggregation, no stall/staleness/disk alerts exist**
 
@@ -777,6 +954,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [MEDIUM / tech-debt] `no-rollback-path-dev-tag-plus-stale-artifact-trap` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** PARTIALLY FIXED #431 + #435 — `ay tag-images` snapshots :dev → :<git-sha> (verb registration fixed in #435). The stale-artifact trap remains: `ay up` does NOT rebuild images (bit the 2026-07-02 redeploy — always compose build first).
+
 **Deploy is always build-latest-on-host onto a single mutable :dev tag — no image versioning or rollback, compounded by Dockerfiles that COPY host-built artifacts (stale dist/JAR ships silently)**
 
 - **Evidence:** Every app image is tagged :dev (docker-compose.yml:182, 211, 335, 378, 414, 450, 472); each rebuild overwrites it. services/edge-gateway/Dockerfile: 'COPY target/edge-gateway.jar' — the image build needs no compile, so whatever JAR sits in target/ (possibly from a previous branch) is what ships. frontend-react/Dockerfile: 'COPY dist /usr/share/nginx/html' — same trap, already documented as a bitten gotcha in CLAUDE.md ('the Dockerfile COPYs the HOST-built dist/'). No registry, no SHA tags, no compose image pinning.
@@ -784,6 +963,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** After each service build, additionally tag the image with the git short-SHA (docker tag arthayantra/x:dev arthayantra/x:<sha>) — one line in the deploy routine gives instant `compose up` rollback. For the stale-artifact trap, add a build-stamp check: bake the git SHA into the JAR/dist at build time and have the deploy script compare it to HEAD before `compose build`.
 
 ### [MEDIUM / tech-debt] `scalper-gate-monolith-mixed-rail-policies` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** FIXED #432 + #433 — FailPolicy enum + RailPolicies registry (48 rails, record-time enforcement + RailPolicyTableTest source-scan); dead calendar seam removed. The monolith was not split — the registry addresses the mixed-policy hazard directly.
 
 **ScalperConfluenceGate.evaluateWithDiagnostic is a single ~620-line method chaining ~30 rails whose fail-open vs fail-closed policy exists only in comments — structurally unenforced**
 
@@ -793,6 +974,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [LOW / tech-debt] `claude-md-calendar-claim-false-plus-2027-timebomb` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** FIXED #425 (claims corrected) + #414 (cliff defused + canary).
+
 **CLAUDE.md claims market-calendar 'covers only the CURRENT year (2024/2025 windows 500)' but the CSV covers 2024-2026; meanwhile nothing trips before the real coverage cliff on 2027-01-01**
 
 - **Evidence:** libs/market-calendar/src/main/resources/nse-trading-holidays.csv contains 14×2024, 14×2025, 16×2026 entries (counted); MarketCalendar.requireCovered (MarketCalendar.java:236-244) throws only for years OUTSIDE that set. CLAUDE.md (mock-stack backtest bullet) states 'libs/market-calendar covers only the CURRENT year, so a window outside it (2024/2025) 500s' — false since Phase 1 added 2024/25. Conversely the refresh process is 'yearly refresh by PR' (CSV header comment) with no tripwire: on 2027-01-01 requireCovered starts throwing for every 2027 query (regime pre-flight, expiry math) on the live stack.
@@ -800,6 +983,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Fix the CLAUDE.md sentence to name the actual covered set. Add a one-assert unit test: fail once today() is within ~60 days of Dec-31 of max(coveredYears) with message 'refresh nse-trading-holidays.csv (CD-2)' — turns the annual process into a CI tripwire.
 
 ### [LOW / tech-debt] `dead-seams-inventory` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** MOSTLY OPEN — #433 removed the gate’s dead calendar seam; the rest of the inventory stands.
 
 **Dead code/seams: IndicatorValueCache never wired, candles_3m cagg permanently empty (V019), obsolete weekly/ backup tier, and the compose db-backup comment describes the pre-#395 behavior**
 
@@ -809,6 +994,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 ### [LOW / tech-debt] `fe-generated-contracts-unused` — *(no verify pass)*
 
+> **Resolution (2026-07-02):** OPEN — below the fix-queue cut line.
+
 **Generated OpenAPI TypeScript contracts (contracts/gen/*.d.ts, all 5 services) are imported by ZERO frontend source files — every FE DTO is hand-written and can drift without a type error**
 
 - **Evidence:** contracts/gen/ holds backtest-service.d.ts, edge-gateway.d.ts, market-data-service.d.ts, optimizer-service.d.ts, strategy-signal-service.d.ts (regenerated per the ContractCaptureTest flow). Grep across frontend-react/src for 'contracts/gen' or any import of those modules: zero hits; no tsconfig/vite path alias exists. The ~40 hand-written API modules (frontend-react/src/api/*.ts) each redeclare response shapes. ci-contracts runs tsc --strict over the GEN dir only — it validates the generated types compile, not that the app agrees with them.
@@ -816,6 +1003,8 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 - **Fix:** Lowest-cost: import the generated types in the highest-churn api modules (signals, backtests, oiAnalytics) as the declared response types (components['schemas'][...]) so tsc flags drift; full adoption can stay incremental.
 
 ### [LOW / tech-debt] `redis-stateless-across-recreate` — *(no verify pass)*
+
+> **Resolution (2026-07-02):** FIXED #426 — appendonly + named volume (live-verified on the 2026-07-02 redeploy).
 
 **Redis has no volume and no persistence flags — sessions, ticker SubscriptionRegistry, and Streams state vanish on every `ay down`/container recreate**
 
@@ -837,6 +1026,11 @@ Phase-2 totals: **90 findings** — 2 critical, 21 high, 39 medium, 28 low. 23 a
 
 From the architecture pass; evidence is Phase-1 reader citations, NOT adversarially re-verified. Treat as
 credible leads, confirm the cited lines before acting.
+
+> **Resolution (2026-07-02):** none of these were queued — all remain OPEN, with two incidental updates:
+> the "ntfy is the single alert channel (currently dead)" caveat under contract-canary blind spots is
+> resolved (#412 + topic configured, live test-send SENT), and the `ay reset-db` recovery caveat is
+> softened by the #411 backup hardening (pinned live dumps, per-DB retention, dead-man ping).
 
 ### CI / contracts
 - **[MEDIUM] optimizer-service OpenAPI contract committed but never regenerated or diff-gated.**

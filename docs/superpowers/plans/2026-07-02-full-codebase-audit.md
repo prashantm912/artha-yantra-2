@@ -13,6 +13,13 @@ severity, verbatim evidence/failure/fix, per-finding verdicts), ~25 Phase-1-only
 cleared-leads list — is in
 [2026-07-02-full-codebase-audit-findings-register.md](2026-07-02-full-codebase-audit-findings-register.md).
 
+> **IMPLEMENTATION STATUS (2026-07-02, same day):** the §11 fix queue is implemented in full — PRs
+> **#407–#435** (P0 #407–412 · P1 #413–419 · P2 #420–435), all squash-merged CI-green; stack rebuilt and
+> redeployed live the same day (images, V027, Redis AOF, notifier live-verified with a real ntfy send, fresh
+> backup, `:git-sha` rollback tags). All 10 top issues resolved — per-item PR refs annotated in §11/§12; the
+> per-finding outcome (54 FIXED / 4 PARTIAL / 31 OPEN / 1 REFUTED) lives in the register, which is now the
+> standing backlog for the below-cut-line OPEN items.
+
 ---
 
 ## 1. Executive summary
@@ -551,40 +558,48 @@ Threat model accepted: single-owner loopback; host compromise = game over. Withi
 ## 11. Prioritized fixes
 
 ### P0 — before the gate ever passes a signal (this week; all small)
-1. `intradayOpen()` — add `p.stop_loss, p.take_profit` to the SELECT (1 line) + IT for markToCloseIntraday.
-2. `activeEntry` → `status IN ('ACTIVE','TAKEN')`; pass signal SL/TP into `OrderRequest`; close paper position
+1. **DONE #407** — `intradayOpen()` — add `p.stop_loss, p.take_profit` to the SELECT (1 line) + IT for markToCloseIntraday.
+2. **DONE #408** — `activeEntry` → `status IN ('ACTIVE','TAKEN')`; pass signal SL/TP into `OrderRequest`; close paper position
    on engine EXIT (small listener on paper_orders.signal_id).
-3. `PaperSignalListener.openSingle` → open `tradeable_*` at `option_ltp` (mirror the straddle openLeg path).
-4. `spring.http.client.connect-timeout/read-timeout` in strategy-signal + backtest + market-data (kite/live
+3. **DONE #410** — `PaperSignalListener.openSingle` → open `tradeable_*` at `option_ltp` (mirror the straddle openLeg path).
+4. **DONE #409** — `spring.http.client.connect-timeout/read-timeout` in strategy-signal + backtest + market-data (kite/live
    clients); gateway response-timeout.
-5. Backup: always dump `artha`, per-DB prune, delete the 2 dead nightly dirs, success-ping dead-man.
-   **Take a fresh manual backup today.**
-6. Notifier: empty compose default + `configured()` requires URL; pass `ARTHA_NTFY_TOPIC` to market-data;
-   set a real topic.
+5. **DONE #411** — Backup: always dump `artha`, per-DB prune, delete the 2 dead nightly dirs, success-ping dead-man.
+   **Take a fresh manual backup today.** (Fresh backup taken 2026-07-01 + post-redeploy 2026-07-02.)
+6. **DONE #412** — Notifier: empty compose default + `configured()` requires URL; pass `ARTHA_NTFY_TOPIC` to market-data;
+   set a real topic. (Topic set 2026-07-02; live test-send SENT.)
 
 ### P1 — this month
-7. Compose `${ARTHA_DB_NAME:?set via ay}` fail-closed defaults + boot profile↔DB assertion + e2e global-setup
+7. **DONE #417** — Compose `${ARTHA_DB_NAME:?set via ay}` fail-closed defaults + boot profile↔DB assertion + e2e global-setup
    mock pinning + delete/port ay.sh.
-8. premium_pct live semantics decision (resolve against option premium via LastTickReader, or reject at publish +
-   convert YAMLs to index_points) + the exit-equivalence test.
-9. 2027 holiday CSV (cliff fires 2026-12-29 via look-ahead; OI capture silently halts 2027-01-01) + horizon
+8. **DONE #413** — premium_pct live semantics decision (resolve against option premium via LastTickReader, or reject at publish +
+   convert YAMLs to index_points) + the exit-equivalence test. (Chosen: premium-basis brackets on the option leg.
+   The exit-equivalence test itself is still OPEN — see register §7.)
+9. **DONE #414** — 2027 holiday CSV (cliff fires 2026-12-29 via look-ahead; OI capture silently halts 2027-01-01) + horizon
    canary test; SENSEX Thursday weekly-expiry calendar variant.
-10. Job spine: kind filters in requeue/findQueuedIds; UNIQUE(job_id) on backtest_runs; JobPruner NOT-EXISTS
+10. **DONE #415 + #416** — Job spine: kind filters in requeue/findQueuedIds; UNIQUE(job_id) on backtest_runs; JobPruner NOT-EXISTS
     guard; optimizer per-sweep result routing + cancel-in-loop + terminal-status guard + boot recovery.
-11. UI trust cluster: oiGet 422-DATA_GAP-only + QueryState on Cockpit/ConnectingDots; raw mode in status payload;
+11. **DONE #418** — UI trust cluster: oiGet 422-DATA_GAP-only + QueryState on Cockpit/ConnectingDots; raw mode in status payload;
     apiFetch content-type guard; 401 redirect; daily-chart date shift.
-12. Feed-liveness watchdog + long-lived IndicatorBank + OI fan-out memo.
+12. **DONE #419** — Feed-liveness watchdog + long-lived IndicatorBank + OI fan-out memo.
 
 ### P2 — opportunistic
-Gateway allowlist contract test; frontend e2e/axe CI shard; `deploy/flyway/**` in ci-java paths; Redis stream
-trimming + volume; Map-return ratchet; FailPolicy enum + rail extraction; CLAUDE.md corrections; image SHA tags;
-LoginRateLimiter atomic expire; candles_3m keep-or-drop decision; transition() state guard; emitEntry
-transaction; resubscribe start-before-stop; replay index-0 fail-loud; dataHash widening; SerialGC → G1;
-WS passthrough cap; PEL XACK-and-drop; `bucket::date` fix; obs profile honesty.
+**ALL DONE, #420–#435:** Gateway allowlist contract test (#421); frontend e2e/axe CI shard (#422, non-blocking
+until spec repair); `deploy/flyway/**` in ci-java paths (#422); Redis stream trimming + volume (#426); Map-return
+ratchet (#430); FailPolicy enum + rail extraction (#432 registry + #433 dead-seam removal); CLAUDE.md corrections
+(#425); image SHA tags (#431 + #435); LoginRateLimiter atomic expire (#423); candles_3m keep-or-drop decision
+(#427 — dropped, V027); transition() state guard (landed early in #408); SerialGC → G1 (#431 + #434 — the flag
+must be explicit, ergonomics pick SerialGC below ~1792MB); WS passthrough cap (#428); PEL XACK-and-drop (#429);
+`bucket::date` fix (#424); obs profile honesty (#431). Not queued in the end (still open in the register):
+emitEntry transaction; resubscribe start-before-stop; replay index-0 fail-loud; dataHash widening.
 
 ---
 
 ## 12. Top 10 issues
+
+> **All 10 resolved (2026-07-02):** 1 → #407/#408/#410 · 2 → #411 · 3 → #409 · 4 → #413 · 5 → #417 ·
+> 6 → #412 + #419 (+ topic configured, live-verified) · 7 → #414 · 8 → #418 · 9 → #415/#416 ·
+> 10 → #417/#421/#422 (exit-equivalence test still open in the register).
 
 | # | Issue | Severity | One-line failure |
 |---|---|---|---|

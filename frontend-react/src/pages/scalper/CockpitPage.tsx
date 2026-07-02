@@ -17,7 +17,8 @@ import { ConnectingDotsTable } from '../../components/ConnectingDotsTable.tsx';
 import { StraddleChart } from '../../components/StraddleChart.tsx';
 import { CallOiHeatmap, PutOiHeatmap } from '../../components/OiHeatmapChart.tsx';
 import { trendMeta } from '../../core/connectingDots.ts';
-import { PageHeader } from '../../components/PageHeader.tsx';
+import { PageHeader, LiveDot } from '../../components/PageHeader.tsx';
+import { isMarketHoursIst } from '../../lib/marketHours.ts';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { SignalsFeedPanel } from '../signals/SignalsFeedPanel.tsx';
 import { PaperBookPanel } from './PaperBookPanel.tsx';
@@ -109,9 +110,27 @@ export function CockpitPage() {
   const fetching =
     chainQ.isFetching || cdQ.isFetching || straddleQ.isFetching || heatQ.isFetching;
 
+  // Audit 2026-07-02 §6 / §11 item 8: the market panels used to freeze at the last Go with no
+  // staleness cue while the paper book polled live. Auto-refresh every 45s during IST market hours
+  // (paused when the tab is hidden); the header LiveDot renders the chain asOf + stale flag.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (document.visibilityState !== 'visible' || !isMarketHoursIst()) return;
+      refetchAll();
+    }, 45_000);
+    return () => window.clearInterval(id);
+    // refetchAll is re-created per render but only closes over stable query handles.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <LoadBeat>
-      <PageHeader title="Scalping cockpit" subtitle="One live operator screen — option chain · OI confluence · straddle · signals · paper book · heatmap" help="One live screen that fans out a single underlying/expiry/interval selection across every scalping view — option chain, OI-confluence matrix, straddle premium, signals, paper book and OI heatmap; pick a symbol and press Go to refresh them all." />
+      <PageHeader
+        title="Scalping cockpit"
+        subtitle="One live operator screen — option chain · OI confluence · straddle · signals · paper book · heatmap"
+        help="One live screen that fans out a single underlying/expiry/interval selection across every scalping view — option chain, OI-confluence matrix, straddle premium, signals, paper book and OI heatmap; pick a symbol and press Go to refresh them all. Market panels auto-refresh every 45s during market hours."
+        right={<LiveDot stale={!!chain?.stale} detail={chain?.asOf ? chain.asOf.slice(11, 19) : undefined} />}
+      />
 
       {/* The single shared control bar — drives every panel below via the SymbolContext store. */}
       <div className="mb-3 flex flex-wrap items-center gap-2">

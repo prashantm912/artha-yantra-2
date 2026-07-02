@@ -255,3 +255,9 @@ Proposed 2026-07-03 from the first pass — each is small and parity-safe (rejec
    Analysis keeps mis-reading dead-data dots as bearish evidence until this is uniform.
 7. **FE funnel view** on /signal-rejections — per-strategy Sankey/waterfall (bars → rail₁ → … →
    composite → fired) per day; the §3 pass at a glance.
+8. **`DataHealthCanary` (code, FeedWatchdog pattern)** — a live scheduled check that inspects the
+   NEWEST rejection's context fields against a known-dead baseline and ntfy-pings when a field goes
+   newly dead (or newly alive). Replaces the scheduled 09:42 agent-run data-health check with a
+   machine watcher once a few sessions prove the check stable — agents investigate on ping, code
+   does the watching. (Interim: scheduled tasks `live-data-health-check` 09:42 + the 15:47
+   post-market forensics run.)

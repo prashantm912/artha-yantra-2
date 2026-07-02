@@ -37,6 +37,8 @@ export function StraddleChart({ items, callStrike, putStrike, underlying }: Stra
   const makeOption = useCallback(
     (t: ChartTheme): EChartsOption => {
       const lineBase = { type: 'line', showSymbol: false, smooth: false } as const;
+      // Day high/low as balloon pins (oipulse-style): the value rides INSIDE the pin body, offset
+      // from the candle by the pin geometry — the old floating text overlapped candles (audit §5).
       const markData =
         series.dayHigh && series.dayLow
           ? [
@@ -44,20 +46,20 @@ export function StraddleChart({ items, callStrike, putStrike, underlying }: Stra
                 name: 'Day High',
                 coord: [series.times[series.dayHigh.index], series.dayHigh.value],
                 value: f2(series.dayHigh.value),
-                symbol: 'triangle',
-                symbolSize: 10,
+                symbol: 'pin',
+                symbolSize: 42,
                 itemStyle: { color: t.bull },
-                label: { color: t.text, fontSize: 10 },
+                label: { color: '#fff', fontSize: 9, offset: [0, -3] },
               },
               {
                 name: 'Day Low',
                 coord: [series.times[series.dayLow.index], series.dayLow.value],
                 value: f2(series.dayLow.value),
-                symbol: 'triangle',
+                symbol: 'pin',
                 symbolRotate: 180,
-                symbolSize: 10,
+                symbolSize: 42,
                 itemStyle: { color: t.bear },
-                label: { color: t.text, fontSize: 10 },
+                label: { color: '#fff', fontSize: 9, offset: [0, 3] },
               },
             ]
           : [];
@@ -143,7 +145,7 @@ export function StraddleChart({ items, callStrike, putStrike, underlying }: Stra
               borderColor: t.bull,
               borderColor0: t.bear,
             },
-            markPoint: { symbolSize: 10, data: markData },
+            markPoint: { data: markData },
           },
           { ...lineBase, name: 'VWAP', data: series.vwap, lineStyle: { color: t.accent, width: 1.75 }, itemStyle: { color: t.accent } },
           { ...lineBase, name: '20 EMA', data: series.ema20, lineStyle: { color: t.warn, width: 1.5 }, itemStyle: { color: t.warn } },

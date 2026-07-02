@@ -4,6 +4,8 @@
 name: ci-e2e
 
 on:
+  push:
+    branches: [main] # audit P2: catch a merge-race break on main, not ~24h later at the nightly
   pull_request:
     branches: [main]
   schedule:
@@ -64,6 +66,35 @@ jobs:
         env:
           CI: "true"
         run: npx playwright test
+
+      # audit P2: the frontend-react e2e + axe a11y suite (OI pages, cockpit, data-ops, scalper
+      # checklist, S24 mobile viewport) ran in NO CI — reuse the mock stack the smoke suite just
+      # booted. Vite dev server proxies /api + /ws to the running gateway; reset the login limiter
+      # (mock Redis db1) first so the one login in FE global-setup can't hit the smoke suite's
+      # cooldown.
+      # NON-BLOCKING for now: the suite ran in no CI and its assertions are coupled to a
+      # data-rich local stack (e.g. ">5 underlyings" — the credential-free CI mock serves 2).
+      # It runs + uploads its report for visibility; flip continue-on-error off once the specs
+      # are repaired for the CI mock-data environment (tracked follow-up).
+      - name: Frontend e2e + axe a11y (reuses the booted mock stack)
+        id: fe-e2e
+        continue-on-error: true
+        working-directory: frontend-react
+        env:
+          CI: "true"
+          E2E_OWNER_PASSWORD: e2e-owner-password
+        run: |
+          npx playwright install chromium   # FE playwright pins a different browser build than e2e/
+          docker exec ay-redis redis-cli -n 1 EVAL "local k=redis.call('keys','login:*'); if #k>0 then redis.call('del',unpack(k)) end; return #k" 0 || true
+          npx playwright test
+
+      - name: Upload frontend e2e report
+        if: steps.fe-e2e.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-playwright-report
+          path: frontend-react/test-results/
+          retention-days: 7
 
       - name: Dump container logs on failure
         if: failure()

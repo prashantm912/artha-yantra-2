@@ -1,7 +1,10 @@
 package in.arthayantra.marketdata.options.analytics;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 
+import in.arthayantra.black76.Black76;
+import in.arthayantra.marketdata.options.ExpiryClock;
 import java.math.BigDecimal;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -210,5 +213,75 @@ class ActiveStrikeServiceTest {
   @Test
   void activeStrikeIvSeriesEmptyWhenNoPoints() {
     assertThat(new ActiveStrikeService(5).activeStrikeIvSeries(List.of())).isEmpty();
+  }
+
+  private static OptionsSnapshotReader.StrikePoint ptLtp(
+      java.time.OffsetDateTime b, String strike, String type, long oi, String ltp, String spot) {
+    return new OptionsSnapshotReader.StrikePoint(
+        b,
+        new BigDecimal(strike),
+        type,
+        ltp == null ? null : new BigDecimal(ltp),
+        oi,
+        0L,
+        null,
+        spot == null ? null : new BigDecimal(spot),
+        null);
+  }
+
+  @Test
+  void activeStrikeSideIvSeriesSolvesEachLegUnconstrainedAgainstSpot() {
+    // §10.2-1: the stored iv is PCP-forward-solved (CE IV == PE IV by construction). The side series
+    // must recover DISTINCT per-side IVs when the two legs are priced at different vols off the spot.
+    java.time.OffsetDateTime b0 =
+        java.time.OffsetDateTime.of(
+            2026, 6, 20, 9, 15, 0, 0, java.time.ZoneOffset.ofHoursMinutes(5, 30));
+    java.time.LocalDate expiry = java.time.LocalDate.of(2026, 6, 25);
+    double t = ExpiryClock.yearsToExpiry(b0.toInstant(), expiry).orElseThrow();
+    double f = 24000;
+    double r = 0.065;
+    String ceLtp =
+        BigDecimal.valueOf(Black76.price(Black76.OptionType.CE, f, 24000, t, r, 0.10))
+            .toPlainString();
+    String peLtp =
+        BigDecimal.valueOf(Black76.price(Black76.OptionType.PE, f, 24000, t, r, 0.12))
+            .toPlainString();
+    List<OptionsSnapshotReader.StrikePoint> series =
+        List.of(
+            ptLtp(b0, "24000", "CE", 1000, ceLtp, "24000"),
+            ptLtp(b0, "24000", "PE", 1000, peLtp, "24000"));
+
+    List<ActiveStrikeService.ActiveStrikeIvPoint> out =
+        new ActiveStrikeService(5)
+            .activeStrikeSideIvSeries(series, expiry, new BigDecimal("0.065"));
+
+    assertThat(out).hasSize(1);
+    assertThat(out.get(0).ceIv().doubleValue()).isCloseTo(0.10, within(1e-4));
+    assertThat(out.get(0).peIv().doubleValue()).isCloseTo(0.12, within(1e-4)); // skew visible
+    assertThat(out.get(0).price()).isEqualByComparingTo("24000");
+  }
+
+  @Test
+  void activeStrikeSideIvSeriesNullsSidesWithoutQuoteOrSpot() {
+    java.time.OffsetDateTime b0 =
+        java.time.OffsetDateTime.of(
+            2026, 6, 20, 9, 15, 0, 0, java.time.ZoneOffset.ofHoursMinutes(5, 30));
+    java.time.LocalDate expiry = java.time.LocalDate.of(2026, 6, 25);
+    // CE has no LTP -> null ceIv; PE ltp present but spot missing on b1 -> both null there.
+    List<OptionsSnapshotReader.StrikePoint> series =
+        List.of(
+            ptLtp(b0, "24000", "CE", 1000, null, "24000"),
+            ptLtp(b0, "24000", "PE", 1000, "150", "24000"),
+            ptLtp(b0.plusMinutes(5), "24000", "PE", 1000, "150", null));
+
+    List<ActiveStrikeService.ActiveStrikeIvPoint> out =
+        new ActiveStrikeService(5)
+            .activeStrikeSideIvSeries(series, expiry, new BigDecimal("0.065"));
+
+    assertThat(out).hasSize(2);
+    assertThat(out.get(0).ceIv()).isNull();
+    assertThat(out.get(0).peIv()).isNotNull();
+    assertThat(out.get(1).ceIv()).isNull();
+    assertThat(out.get(1).peIv()).isNull();
   }
 }

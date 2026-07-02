@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useActiveStrikes } from '../../api/oiAnalytics.ts';
-import { foldActiveStrikeIvSeries } from '../../api/activeStrikesFold.ts';
+import { foldActiveStrikeIvSeries, ivPct } from '../../api/activeStrikesFold.ts';
 import { Activity } from 'lucide-react';
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
@@ -10,7 +10,7 @@ import { Metric } from '../../components/atoms/Metric.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { ActiveStrikeIvChart } from '../../components/ActiveStrikeCharts.tsx';
 import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
-import { formatDecimal, subtractDecimal } from '../../lib/decimal.ts';
+import { subtractDecimal } from '../../lib/decimal.ts';
 import type { OiInterval } from '../../stores/symbolContext.store.ts';
 
 // Active Strikes IV (oipulse §options/active-strikes-iv) — the active strike's Call IV / Put IV vs price
@@ -29,19 +29,18 @@ export function ActiveStrikesIvPage() {
   const q = useActiveStrikes(BUCKETS);
   const data = q.data ?? null;
 
-  const series = useMemo(
-    () => foldActiveStrikeIvSeries(data?.activeStrikeIvSeries),
-    [data],
-  );
+  // Per-side SPOT-solved IVs (§10.2-1): the stored IV is PCP-forward-solved, which forces
+  // Call IV == Put IV (skew ≡ 0 by construction) — the side series makes the split visible.
+  // Fallback to the stored series for a backend that predates the field.
+  const points = data?.activeStrikeSideIvSeries ?? data?.activeStrikeIvSeries;
+  const series = useMemo(() => foldActiveStrikeIvSeries(points), [points]);
   const hasSeries = series.times.length > 0;
 
-  // Latest captured CE/PE IV (newest-last) + the CE−PE skew, off the raw decimal strings.
-  const latest = useMemo(() => {
-    const pts = data?.activeStrikeIvSeries ?? [];
-    return pts.length ? pts[pts.length - 1] : null;
-  }, [data]);
-  const skew =
+  // Latest captured CE/PE IV (newest-last) + the P−C skew, in display percent.
+  const latest = points?.length ? points[points.length - 1] : null;
+  const skewDecimal =
     latest?.ceIv && latest?.peIv ? subtractDecimal(latest.peIv, latest.ceIv) : null;
+  const skew = ivPct(skewDecimal);
 
   return (
     <LoadBeat>
@@ -57,13 +56,13 @@ export function ActiveStrikesIvPage() {
 
       <BeatStrip className="card shadow-e1 mb-4 flex flex-wrap items-center gap-2" aria-live="polite">
         <BeatItem>
-          <Metric label="Call IV" value={latest?.ceIv ? formatDecimal(latest.ceIv, 2) : '—'} />
+          <Metric label="Call IV" value={latest?.ceIv ? `${ivPct(latest.ceIv)}%` : '—'} />
         </BeatItem>
         <BeatItem>
-          <Metric label="Put IV" value={latest?.peIv ? formatDecimal(latest.peIv, 2) : '—'} />
+          <Metric label="Put IV" value={latest?.peIv ? `${ivPct(latest.peIv)}%` : '—'} />
         </BeatItem>
         <BeatItem>
-          <Metric label="IV skew (P−C)" value={skew ? formatDecimal(skew, 2) : '—'} />
+          <Metric label="IV skew (P−C)" value={skew ? `${skew}%` : '—'} />
         </BeatItem>
         <BeatItem>
           <Metric label="Last updated" value={data?.asOf ? data.asOf.slice(11, 19) : '—'} />

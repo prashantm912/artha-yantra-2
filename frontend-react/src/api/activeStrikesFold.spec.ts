@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { foldActiveStrikeIvSeries, foldActiveStrikeSeries } from './activeStrikesFold.ts';
+import { foldActiveStrikeIvSeries, foldActiveStrikeSeries, ivPct } from './activeStrikesFold.ts';
 import type { ActiveStrikeIvPoint, ActiveStrikeOiPoint, SentimentPoint } from './types.ts';
 
 const B0 = '2026-06-20T09:15:00+05:30';
@@ -46,25 +46,30 @@ describe('foldActiveStrikeSeries', () => {
 });
 
 describe('foldActiveStrikeIvSeries', () => {
-  it('maps the IV series to HH:mm + numeric callIv/putIv/price (decimal strings → number)', () => {
+  it('maps the IV series to HH:mm + IVs in display PERCENT (solver decimals ×100) + numeric price', () => {
     const iv: ActiveStrikeIvPoint[] = [
-      { bucket: B0, ceIv: '13.840000', peIv: '19.200000', price: '57700.0000' },
-      { bucket: B1, ceIv: '15.250000', peIv: '21.400000', price: '57750.0000' },
+      { bucket: B0, ceIv: '0.106400', peIv: '0.118200', price: '57700.0000' },
+      { bucket: B1, ceIv: '0.152500', peIv: '0.214000', price: '57750.0000' },
     ];
     const r = foldActiveStrikeIvSeries(iv);
     expect(r.times).toEqual(['09:15', '09:18']);
-    expect(r.callIv).toEqual([13.84, 15.25]);
-    expect(r.putIv).toEqual([19.2, 21.4]);
+    expect(r.callIv).toEqual([10.64, 15.25]);
+    expect(r.putIv).toEqual([11.82, 21.4]);
     expect(r.price).toEqual([57700, 57750]);
   });
 
   it('a null IV leg rides through as null (line gaps, not a zero)', () => {
-    const r = foldActiveStrikeIvSeries([{ bucket: B0, ceIv: null, peIv: '19.20', price: '57700' }]);
+    const r = foldActiveStrikeIvSeries([{ bucket: B0, ceIv: null, peIv: '0.192', price: '57700' }]);
     expect(r.callIv).toEqual([null]);
     expect(r.putIv).toEqual([19.2]);
   });
 
   it('null/undefined input → empty arrays', () => {
     expect(foldActiveStrikeIvSeries(null)).toEqual({ times: [], callIv: [], putIv: [], price: [] });
+  });
+
+  it('ivPct renders a decimal-vol string as one-decimal percent', () => {
+    expect(ivPct('0.1064')).toBe('10.6');
+    expect(ivPct(null)).toBeNull();
   });
 });

@@ -7,6 +7,7 @@ import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { Select } from '../../components/atoms/Select.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { EodBadge } from '../../components/atoms/EodBadge.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
@@ -76,7 +77,7 @@ export function IndexContributionPage() {
             <span className="font-semibold">
               <ValueDeltaCell value={data.indexChangePct} suffix="%" />
             </span>
-            {data.asOf ? <span className="text-ay-muted"> · as on {data.asOf}</span> : null}
+            {data.asOf ? <> <EodBadge asOf={data.asOf} /></> : null}
           </span>
         )}
       </div>

@@ -6,6 +6,7 @@ import { Select } from '../../components/atoms/Select.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { EodBadge } from '../../components/atoms/EodBadge.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
@@ -120,7 +121,7 @@ export function SectorHeatmapPage() {
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <Select value={index} options={indices} onChange={setIndex} ariaLabel="Index" placeholder="Index…" title="Pick the index whose constituents the heatmap groups by sector" />
         <GoButton onClick={() => void q.refetch()} loading={q.isFetching} />
-        {q.data?.asOf && <span className="text-xs text-ay-muted">as on {q.data.asOf}</span>}
+        {q.data?.asOf && <EodBadge asOf={q.data.asOf} />}
       </div>
 
       <QueryState

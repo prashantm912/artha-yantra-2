@@ -87,6 +87,8 @@ export function TrendingOiPaPage() {
       <p className="mb-3 text-xs text-ay-muted">
         Price-action columns: Total Call/Put Ltp = summed premium across the chain; Δ columns are vs the
         session-open baseline. CE+PE Ltp Chng (the straddle change) confirms an OI shift when both move together.
+        All columns are chain-wide — oipulse's table uses a ~15-strike ATM basket, so magnitudes differ
+        while the direction agrees.
       </p>
 
       <QueryState

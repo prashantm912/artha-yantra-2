@@ -38,4 +38,13 @@ class OiQueryTest {
     assertThat(q.expiry()).isEqualTo(LocalDate.of(2026, 6, 25));
     assertThat(q.interval()).isEqualTo(OiInterval.M15);
   }
+
+  @Test
+  void liveModeDropsALeakedDateParam() {
+    // T4 (audit 2026-07-02 §9.3): a History date left in the client store must not time-travel a
+    // "Live"-labelled response — live queries never carry a date.
+    OiQuery q = OiQuery.of("live", "NIFTY 50", "2026-06-20", "3m", "2026-06-25");
+    assertThat(q.live()).isTrue();
+    assertThat(q.date()).isNull();
+  }
 }

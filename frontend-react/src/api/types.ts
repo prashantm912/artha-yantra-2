@@ -271,7 +271,8 @@ export interface OiExpiryStrike {
  */
 export interface OpenHighStrategyLeg {
   optionType: string;
-  latestDate: string;
+  /** The GRADED (pattern) session — the day BEFORE the viewed one on the live read. */
+  latestDate: string | null;
   latestOpen: string | null;
   latestHigh: string | null;
   latestLow: string | null;
@@ -279,11 +280,17 @@ export interface OpenHighStrategyLeg {
   latestOi: number | null;
   ohMark: boolean;
   olMark: boolean;
+  /** Live read: the viewed day BROKE the graded day's high (CE) / low (PE). */
   triggered: boolean;
   fallPctFromHigh: string | null;
   sessions: number;
   hits: number;
   probability: string | null;
+  /** Live enrichment (audit §10.2-8): the viewed day's premium extremes + LTP + break time. */
+  newDayHigh: string | null;
+  newDayLow: string | null;
+  liveLtp: string | null;
+  triggeredTime: string | null;
 }
 
 /** One strike's CE + PE Open=High/Low scan (each leg null when that side has no captured session). */

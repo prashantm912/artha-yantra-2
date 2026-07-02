@@ -29,19 +29,30 @@ describe('foldParticipantOi', () => {
     expect(futIdx.chngLong).toBe(1074); // 41074 − 40000
     expect(futIdx.chngShort).toBe(2315); // 282315 − 280000
     expect(futIdx.chngTotal).toBe(1074 - 2315); // −1241
-    expect(futIdx.interpretation?.label).toBe('Bearish');
-    expect(futIdx.longPct).toBe('4.1'); // 41074 / 1,000,000 * 100
+    expect(futIdx.interpretation?.label).toBe('Bearish'); // day-delta read: Chng-in-Total < 0
   });
 
-  it('is Neutral when net-long but the long leg is falling (not just chngTotal sign)', () => {
+  it('percentages are the participant SHARE OF THE SEGMENT market-wide (§9.2-1)', () => {
+    // FII holds 32,476 of a 3,25,011 segment long book → ~10.0%; the old own-book denominator
+    // (totalLongContracts) would have read a misleading fraction of the participant's whole book.
     const groups = foldParticipantOi([
-      row({ tradeDate: '2026-06-12', futureStockLong: 100, futureStockShort: 50 }),
-      row({ tradeDate: '2026-06-15', futureStockLong: 90, futureStockShort: 40 }), // net long (50) but ΔLong −10
+      row({ clientType: 'FII', futureIndexLong: 32476, futureIndexShort: 292535 }),
+      row({ clientType: 'Client', futureIndexLong: 292535, futureIndexShort: 32476 }),
     ]);
-    const futStk = groups[0].segments.find((s) => s.segment === 'Future Stock')!;
-    expect(futStk.totalDiff).toBe(50); // net long
-    expect(futStk.chngLong).toBe(-10); // long falling
-    expect(futStk.interpretation?.label).toBe('Neutral'); // not Bullish despite chngTotal 0
+    const fii = groups.find((g) => g.participant === 'FII')!;
+    const futIdx = fii.segments.find((s) => s.segment === 'Future Index')!;
+    expect(futIdx.longPct).toBe('10.0'); // 32476 / (32476 + 292535)
+    expect(futIdx.shortPct).toBe('90.0');
+  });
+
+  it('put segments read INVERTED on the day-delta (puts added = bearish)', () => {
+    const groups = foldParticipantOi([
+      row({ tradeDate: '2026-06-12', optionIndexPutLong: 1000, optionIndexPutShort: 500 }),
+      row({ tradeDate: '2026-06-15', optionIndexPutLong: 2000, optionIndexPutShort: 500 }), // ΔTotal +1000
+    ]);
+    const puts = groups[0].segments.find((s) => s.segment === 'Option Index Put')!;
+    expect(puts.chngTotal).toBe(1000);
+    expect(puts.interpretation?.label).toBe('Bearish'); // long puts building
   });
 
   it('leaves change columns null when only one date is present', () => {

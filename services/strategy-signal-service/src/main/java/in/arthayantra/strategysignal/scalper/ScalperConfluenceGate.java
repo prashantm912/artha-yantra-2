@@ -124,7 +124,15 @@ public class ScalperConfluenceGate {
       BigDecimal compositeThreshold,
       List<RailCheck> checks,
       Confluence confluence,
-      ScalperGateContext context) {}
+      ScalperGateContext context,
+      // The would-be trade the block vetoed (signal-analysis §7.1) — the option root, its expiry,
+      // the leg the StrikePicker WOULD have picked (all-eval runs the pick even on a block) and the
+      // gate's structural stop. Null when the block happened before that stage (time-window /
+      // chain-unavailable / straddle path) — those rows are not shadow-tradeable.
+      String underlying,
+      LocalDate expiry,
+      StrikePicker.Pick pick,
+      BigDecimal structuralStop) {}
 
   /**
    * The gate verdict: a {@link Decision} to fire OR a {@link RejectionDiagnostic} explaining the block.
@@ -156,6 +164,10 @@ public class ScalperConfluenceGate {
     private Confluence confluence;
     private BigDecimal confluenceThreshold;
     private RailCheck firstFailure;
+    private String underlying;
+    private LocalDate expiry;
+    private StrikePicker.Pick pick;
+    private BigDecimal structuralStop;
 
     /** True once any recorded rail has failed — the entry is blocked (checked once, at the end). */
     boolean anyFailed() {
@@ -209,7 +221,7 @@ public class ScalperConfluenceGate {
           new RejectionDiagnostic(
               b.rail(), side, b.operand(), b.threshold(), b.margin(), b.reason(),
               confluence == null ? null : confluence.aggregate(), confluenceThreshold,
-              List.copyOf(checks), confluence, context));
+              List.copyOf(checks), confluence, context, underlying, expiry, pick, structuralStop));
     }
   }
 
@@ -330,6 +342,10 @@ public class ScalperConfluenceGate {
       return diag.block();
     }
     ChainSnapshot chain = chainOpt.get();
+    // Shadow-book capture (signal-analysis §7.1): the option root + its live expiry ride the
+    // diagnostic so a blocked-but-composite-passing entry can be opened as a virtual position.
+    diag.underlying = cfg.underlying();
+    diag.expiry = chain.expiry();
     Chart chart = chart(bank, index);
     // #11 (section 3.11) Straddle: a direction-NEUTRAL volatility position trading BOTH legs of the
     // SAME ATM strike (delta≈0.5 each). It must NOT take the CE/PE directional split below — there is no
@@ -886,6 +902,10 @@ public class ScalperConfluenceGate {
     if (pick.isEmpty()) {
       diag.failsBool("strike-pick", false, "no strike met the delta/premium band");
     }
+    // Shadow-book capture: the leg the pick resolved + the structural stop — recorded on the
+    // diagnostic even when a rail blocks, so the shadow book can trade the vetoed entry virtually.
+    diag.pick = pick.orElse(null);
+    diag.structuralStop = stop;
     // All-eval: EVERY applicable rail (and the composite + strike pick) is now recorded above. The entry
     // fires only when NONE failed; a single failure blocks, but the DB row still carries the full matrix.
     if (diag.anyFailed()) {

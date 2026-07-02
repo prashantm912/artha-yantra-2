@@ -373,6 +373,11 @@ services:
       # clean; the live/mock .env flips it true to seed the 36 scalper drafts on boot (idempotent,
       # 409-skips existing). Drafts NEVER auto-emit — the owner publishes each from the UI.
       ARTHA_SCALPER_SEED_STRATEGIES: ${ARTHA_SCALPER_SEED_STRATEGIES:-false}
+      # Shadow book (signal-analysis §7.1/§7.2): open composite-passing REJECTED entries as virtual
+      # 1-lot positions so the exit sweep labels them with a real PnL (entry-gate tuning evidence).
+      # Code default is false; ON for the stack — separate shadow_positions table, never touches
+      # paper/risk/notifications. Flip to false to disable without a rebuild.
+      ARTHA_SCALPER_SHADOW_BOOK_ENABLED: ${ARTHA_SCALPER_SHADOW_BOOK_ENABLED:-true}
     secrets: [postgres_password]
     depends_on:
       flyway-init:

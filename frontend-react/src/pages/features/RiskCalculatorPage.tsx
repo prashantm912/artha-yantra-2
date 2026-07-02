@@ -1,14 +1,19 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { FilterBar } from '../../components/FilterBar.tsx';
+import { Select } from '../../components/atoms/Select.tsx';
 import { LoadBeat, BeatBlock } from '../../components/LoadBeat.tsx';
 import { cn } from '../../lib/cn.ts';
+import { nearestStrike } from '../../lib/strikes.ts';
+import { useChainTable } from '../../api/oiAnalytics.ts';
 import { computeRisk, type RiskInput } from '../../core/riskCalculator.ts';
 
 // Risk Calculator (§features/risk-calculator — oipulse "Risk Calculator"). A pure, client-side
 // position-sizing utility: enter the account, the per-trade risk %, the entry + protective stop and a
 // reward:risk multiple, and it sizes the position so the loss at the stop equals the risk budget, then
-// derives the reward-target, the 1%-of-capital profit-lock price and the deployment. No backend —
-// everything is computed in core/riskCalculator. Long vs short is inferred from entry-vs-stop.
+// derives the reward-target, the 1%-of-capital profit-lock price and the deployment. The maths stay
+// local (core/riskCalculator); the optional option picker (audit §10.2-12 parity) reads the live
+// chain-table to autofill the entry with a leg's LTP. Long vs short is inferred from entry-vs-stop.
 
 const numberCls = 'h-9 w-full rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text';
 
@@ -92,6 +97,20 @@ export function RiskCalculatorPage() {
   const [lotSize, setLotSize] = useState('1');
   const [rewardRisk, setRewardRisk] = useState('2');
 
+  // Option picker (oipulse parity): pick side + strike off the live chain, "Use LTP" fills the entry.
+  const chainQ = useChainTable();
+  const rows = useMemo(() => chainQ.data?.rows ?? [], [chainQ.data]);
+  const strikes = useMemo(() => rows.map((r) => r.strike), [rows]);
+  const atm = useMemo(() => nearestStrike(strikes, chainQ.data?.spot ?? null), [strikes, chainQ.data]);
+  const [side, setSide] = useState<'CE' | 'PE'>('CE');
+  const [strike, setStrike] = useState<string | null>(null);
+  useEffect(() => {
+    if (atm && (strike == null || !strikes.includes(strike))) setStrike(atm);
+  }, [atm, strike, strikes]);
+  const pickedRow = rows.find((r) => r.strike === strike) ?? null;
+  const pickedLeg = (side === 'CE' ? pickedRow?.ce : pickedRow?.pe)?.leg ?? null;
+  const pickedLtp = pickedLeg?.ltp ?? null;
+
   const input: RiskInput = {
     capital: Number(capital) || 0,
     riskPct: Number(riskPct) || 0,
@@ -112,8 +131,39 @@ export function RiskCalculatorPage() {
       <PageHeader
         title="Risk Calculator"
         subtitle="Position sizing from your account, per-trade risk and the entry/stop — plus the reward-target and 1% lock"
-        help="Sizes a position so the loss at your stop equals the chosen percent of capital. Enter the account, the risk per trade, the entry and protective stop, and a reward:risk multiple; long vs short is read from whether the stop sits below or above the entry. Everything is computed locally — nothing is sent or saved."
+        help="Sizes a position so the loss at your stop equals the chosen percent of capital. Enter the account, the risk per trade, the entry and protective stop, and a reward:risk multiple; long vs short is read from whether the stop sits below or above the entry. The option picker fills the entry from a live option LTP (lot size stays manual); the sizing maths are computed locally — nothing is sent or saved."
       />
+
+      {/* Option picker — autofills the entry with the picked leg's live LTP (lot size stays manual). */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <FilterBar showName showExpiry showInterval={false} />
+        <Select
+          ariaLabel="Option side"
+          title="Call or put leg to price from the live chain"
+          value={side}
+          options={['CE', 'PE']}
+          onChange={(v) => setSide(v as 'CE' | 'PE')}
+        />
+        <Select
+          ariaLabel="Option strike"
+          title="The strike whose live LTP fills the entry (defaults to at-the-money)"
+          value={strike}
+          options={strikes}
+          onChange={setStrike}
+          placeholder="Strike"
+          disabled={strikes.length === 0}
+        />
+        <button
+          type="button"
+          disabled={pickedLtp == null}
+          onClick={() => pickedLtp != null && setEntry(pickedLtp)}
+          title="Fill the entry price with this option's live last-traded price."
+          className="h-9 rounded-md border border-ay-border px-3 text-sm text-ay-text hover:border-accent disabled:opacity-50"
+        >
+          Use LTP{pickedLtp != null ? ` (${num.format(Number(pickedLtp))})` : ''}
+        </button>
+        {pickedLeg && <span className="text-xs text-ay-muted">{pickedLeg.tradingsymbol}</span>}
+      </div>
 
       <BeatBlock>
         <div className="grid gap-4 lg:grid-cols-2">

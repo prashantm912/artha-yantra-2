@@ -53,14 +53,16 @@ public final class MarketCalendar {
   private final NavigableSet<LocalDate> holidays;
   private final NavigableSet<Integer> coveredYears;
   private final List<Holiday> holidayList;
+  private final DayOfWeek weeklyExpiryDay;
 
   private MarketCalendar(Collection<LocalDate> holidayDates) {
-    this(holidayDates, List.of());
+    this(holidayDates, List.of(), DayOfWeek.TUESDAY);
   }
 
   /** Names are carried only when built from the bundled resource ({@link #nse()}); the bare-date path
    * (tests / {@link #of}) leaves the named list empty. */
-  private MarketCalendar(Collection<LocalDate> holidayDates, List<Holiday> named) {
+  private MarketCalendar(
+      Collection<LocalDate> holidayDates, List<Holiday> named, DayOfWeek weeklyExpiryDay) {
     this.holidays = new TreeSet<>(holidayDates);
     this.coveredYears =
         holidayDates.stream().map(LocalDate::getYear).collect(Collectors.toCollection(TreeSet::new));
@@ -68,10 +70,26 @@ public final class MarketCalendar {
       throw new IllegalStateException("holiday calendar resource is empty");
     }
     this.holidayList = List.copyOf(named);
+    this.weeklyExpiryDay = weeklyExpiryDay;
   }
 
-  /** The NSE calendar from the bundled holiday resource. */
+  /** The NSE calendar from the bundled holiday resource (weekly index expiry: Tuesday). */
   public static MarketCalendar nse() {
+    return fromResource(DayOfWeek.TUESDAY);
+  }
+
+  /**
+   * The BSE calendar: SENSEX weekly index expiry is <b>Thursday</b> — BSE's pick under the same
+   * Sept-2025 SEBI single-expiry-day regime that moved NSE to Tuesday. The holiday list is the
+   * bundled NSE resource: BSE's equity-segment holidays track the same national set, so a BSE-only
+   * divergence would mis-prepone that one expiry (accepted approximation; revisit if BSE ever
+   * publishes a diverging list).
+   */
+  public static MarketCalendar bse() {
+    return fromResource(DayOfWeek.THURSDAY);
+  }
+
+  private static MarketCalendar fromResource(DayOfWeek weeklyExpiryDay) {
     try (InputStream in = MarketCalendar.class.getResourceAsStream(HOLIDAY_RESOURCE)) {
       if (in == null) {
         throw new IllegalStateException("missing resource " + HOLIDAY_RESOURCE);
@@ -84,7 +102,8 @@ public final class MarketCalendar {
                 .filter(line -> !line.isEmpty() && !line.startsWith("#"))
                 .map(MarketCalendar::parseHoliday)
                 .collect(Collectors.toList());
-        return new MarketCalendar(named.stream().map(Holiday::date).collect(Collectors.toList()), named);
+        return new MarketCalendar(
+            named.stream().map(Holiday::date).collect(Collectors.toList()), named, weeklyExpiryDay);
       }
     } catch (IOException e) {
       throw new UncheckedIOException("failed reading " + HOLIDAY_RESOURCE, e);
@@ -198,22 +217,37 @@ public final class MarketCalendar {
   }
 
   /**
-   * The next weekly index expiry on or after {@code date}: the coming Tuesday, preponed to the
-   * previous trading day when that Tuesday is a holiday (never returning a date before
-   * {@code date} — a preponed expiry already in the past rolls to the following week).
+   * The next weekly index expiry on or after {@code date}: the coming expiry weekday (NSE Tuesday /
+   * BSE Thursday), preponed to the previous trading day when it is a holiday (never returning a
+   * date before {@code date} — a preponed expiry already in the past rolls to the following week).
+   *
+   * <p>Look-ahead past the coverage edge degrades to weekday-only math (no holiday prepone) instead
+   * of throwing: without this, every expiry query from the last expiry weekday of the max covered
+   * year through year-end threw mid-look-ahead while "today" was still covered — a live scalper
+   * outage in the final December week (audit P1-9). A query whose {@code date} itself is uncovered
+   * still fails loudly via {@link #isTradingDay}'s coverage check in the callers.
    */
   public LocalDate nextWeeklyIndexExpiry(LocalDate date) {
-    LocalDate tuesday = date.with(TemporalAdjusters.nextOrSame(DayOfWeek.TUESDAY));
+    LocalDate anchor = date.with(TemporalAdjusters.nextOrSame(weeklyExpiryDay));
     while (true) {
-      LocalDate expiry = tuesday;
-      while (!isTradingDay(expiry)) {
+      LocalDate expiry = anchor;
+      while (!isTradingDayLenient(expiry)) {
         expiry = expiry.minusDays(1);
       }
       if (!expiry.isBefore(date)) {
         return expiry;
       }
-      tuesday = tuesday.plusWeeks(1);
+      anchor = anchor.plusWeeks(1);
     }
+  }
+
+  /** Strict trading-day inside coverage; weekday-only past it (expiry look-ahead use only). */
+  private boolean isTradingDayLenient(LocalDate date) {
+    if (coveredYears.contains(date.getYear())) {
+      return isTradingDay(date);
+    }
+    DayOfWeek day = date.getDayOfWeek();
+    return day != DayOfWeek.SATURDAY && day != DayOfWeek.SUNDAY;
   }
 
   /** True when {@code date} is a weekly index expiry day (Tuesday or its holiday prepone). */

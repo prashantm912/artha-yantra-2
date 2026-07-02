@@ -269,7 +269,8 @@ public class MarketOiClient {
    * unavailable, so every OI dot/gate is non-confirming. The price-derived futures basis is kept.
    */
   public Oi oi(String underlying, LocalDate expiry, LocalDate tradeDate) {
-    if (calendar.isMonthlyIndexExpiryDay(tradeDate)) {
+    // Per-root expiry model (P1-9): SENSEX suppression keys on the BSE Thursday monthly, not NSE's.
+    if (ScalperCalendars.forUnderlying(underlying).isMonthlyIndexExpiryDay(tradeDate)) {
       log.debug("scalper OI suppressed for monthly-expiry day {} ({}) - chain-OI is corrupted (S24)", tradeDate, underlying);
       BigDecimal futuresBasis = futuresBasis(underlying);
       return new Oi(
@@ -350,7 +351,7 @@ public class MarketOiClient {
    * the read fails, or the day is a monthly index expiry (chain-OI corrupt, S24) → a fail-open gate.
    */
   public int trend60mDir(String underlying, LocalDate expiry, LocalDate tradeDate) {
-    if (calendar.isMonthlyIndexExpiryDay(tradeDate)) {
+    if (ScalperCalendars.forUnderlying(underlying).isMonthlyIndexExpiryDay(tradeDate)) {
       return 0;
     }
     return get(

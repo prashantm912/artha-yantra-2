@@ -820,10 +820,13 @@ public class ScalperConfluenceGate {
       // E4 §3.7 hero-zero-iv-flat: pass the 6-strike IV averages ONLY when armed (else null → the
       // both-flat leg is skipped, byte-identical to the unarmed gate).
       boolean ivFlatArmed = cfg.has("hero-zero-iv-flat");
+      // Per-root expiry flags (P1-9): a SENSEX hero-zero arms on the BSE Thursday, not NSE Tuesday.
+      MarketCalendar rootCalendar = ScalperCalendars.forUnderlying(cfg.underlying());
       HeroZeroGate.Verdict hz =
           HeroZeroGate.evaluate(
               future, index, side, ctx.oi(), chart.rsi14(), istTime,
-              calendar.isWeeklyIndexExpiryDay(tradeDate), calendar.isMonthlyIndexExpiryDay(tradeDate),
+              rootCalendar.isWeeklyIndexExpiryDay(tradeDate),
+              rootCalendar.isMonthlyIndexExpiryDay(tradeDate),
               cfg.has("herozero-side-oi"),
               ivFlatArmed ? ctx.macro().ceIvAvg6() : null,
               ivFlatArmed ? ctx.macro().peIvAvg6() : null);

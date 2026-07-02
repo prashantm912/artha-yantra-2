@@ -129,6 +129,31 @@ class MarketCalendarTest {
   }
 
   @Test
+  void bseWeeklyIndexExpiryIsThursday() {
+    MarketCalendar bse = MarketCalendar.bse();
+    // Wednesday 2026-06-10 -> next Thursday 2026-06-11
+    assertThat(bse.nextWeeklyIndexExpiry(LocalDate.parse("2026-06-10")))
+        .isEqualTo(LocalDate.parse("2026-06-11"));
+    assertThat(bse.isWeeklyIndexExpiryDay(LocalDate.parse("2026-06-11"))).isTrue();
+    // NSE's Tuesday is NOT a BSE expiry
+    assertThat(bse.isWeeklyIndexExpiryDay(LocalDate.parse("2026-06-16"))).isFalse();
+    // BSE monthly = last Thursday of June 2026 (06-25; next weekly 07-02 is July)
+    assertThat(bse.isMonthlyIndexExpiryDay(LocalDate.parse("2026-06-25"))).isTrue();
+    assertThat(bse.isMonthlyIndexExpiryDay(LocalDate.parse("2026-06-18"))).isFalse();
+  }
+
+  @Test
+  void expiryLookAheadPastCoverageEdgeDegradesInsteadOfThrowing() {
+    // Regression (audit P1-9): 2026-12-29 is the last Tuesday of the max covered year; the monthly
+    // check's look-ahead walks into 2027 and used to throw for the whole final December week —
+    // while "today" was still covered. It must answer, not throw.
+    assertThat(calendar.isMonthlyIndexExpiryDay(LocalDate.parse("2026-12-29"))).isTrue();
+    assertThat(calendar.isWeeklyIndexExpiryDay(LocalDate.parse("2026-12-30"))).isFalse();
+    assertThat(calendar.nextWeeklyIndexExpiry(LocalDate.parse("2026-12-30")))
+        .isEqualTo(LocalDate.parse("2027-01-05")); // weekday-only past coverage (no prepone data)
+  }
+
+  @Test
   void monthlyIndexExpiryIsTheLastWeeklyExpiryOfTheMonth() {
     // June 2026 weekly expiries: Tue 2/9/16/23/30 (all trading days). The LAST, 2026-06-30, is the
     // monthly — the next weekly expiry after it (2026-07-07) is in July.

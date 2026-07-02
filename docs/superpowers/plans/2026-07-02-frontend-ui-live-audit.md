@@ -464,22 +464,54 @@ Mark each item DONE with its PR# here as it merges.
     WS pill, Logout stay).
 19. **Part A DONE #457** (heatmap colorbar, dead volume pane, PCR floor, futures-OI axis resolution,
     equity tick dedup, <90d CAGR suppression, multiframe index defaults, breadth ETF filter,
-    world-indices closed badge). **Part B OPEN:** straddle min/max pins; RSI pane divider + stray
-    cross-pane labels; 09:15 gap-artifact bar; signals/rejections 200-row paging (§5, §10.2-5).
+    world-indices closed badge). **Part B DONE #459 #460 #461:** the "09:15 gap-artifact bar" was a
+    DATA bug — SessionBucketer folded pre-open indicative index prints into the 09:15 bucket
+    (Jul-02 live bar low 23670 vs open 24005); CandleBuilder now DROPS pre-open ticks (#459).
+    Straddle day-H/L become balloon pins; AdvanceChart gets a pane separator, RSI pinned 0–100,
+    stray volume-"0" label hidden, dead index volume lane hidden (#460). Signals + rejections page
+    past the silent 200-row cap via a shared Newer/Older Pager (BE already paginated; the live
+    STOMP merge pins to page 0) (#461).
 
-### Wave 5 — owner decisions BEFORE build (scope/capacity)
+### Wave 5 — owner-gated items (executed 2026-07-02 on the owner's go-ahead)
 
-Each needs an explicit yes/no + sizing first:
-
-- **Stock-chain interval OI capture** — unlocks stock OI analytics + full-universe market-movers/oi-spurt;
-  large storage/quota cost (~200 chains) (§9.3, §9.4).
-- **Equity pre-open full scanner** (preserved snapshot + history) vs keep the bank-radar descope (§9.4).
-- **Index-contribution live points** (deferred item; the barometer's live mode is the useful one) (§9.4).
-- **Open-high-strategy live O=H flags + Hit/triggered-time** (§10.2-8); **OI-expiry 5-strike basket**
-  (§10.2-9); **option-premium negative extrinsic** (§9.4); **trending-OI graph-view / positional /
-  strike-basket selector** (§7); **risk-calculator option-picker autofill** (§10.2-12); **big-OI session
-  event-log view** (§9.2-5); **multiple-window compact pane headers** (§9.6).
-- Existing chip: **FE-e2e spec repair** (task_499edb0f) → then flip the #422 CI shard to blocking.
+- **DONE #470.** ~~Equity pre-open full scanner.~~ V028 `preopen_equity_snapshots` + a 09:09:30-IST
+  weekday capture (ONE batched quote call over the ~210-stock F&O universe; prev close/H/L off the
+  bhavcopy; H/L-break badge) + GET `/equity/pre-open-scan?date=` (typed; `dates` = history picker)
+  + POST `.../capture` + the page's Advances/Declines scanner tables. First real capture:
+  next session 09:09:30.
+- **DONE #468.** ~~Index-contribution live points.~~ `mode=live` folds intraday quotes (ONE batched
+  call; points off the LIVE index level; EOD fallback off-hours, `live` flag says which served);
+  page defaults Live with a LiveDot-vs-EodBadge header.
+- **DONE #465 + #466.** ~~Open-high-strategy live O=H flags + Hit/triggered-time.~~ foldLive grades
+  the pattern on the PRIOR session and enriches from the viewed day's buckets — New D.High/Low,
+  live LTP, amber "Hit ✓ HH:mm" on the first bucket that broke the graded day's extreme. (#466 =
+  the IT update to the new semantics after a premature admin-merge briefly turned the market-data
+  shard red — process note recorded there.)
+- **DONE #467.** ~~OI-expiry 5-strike basket.~~ Client-side basket (default 5 strikes spread across
+  the served ATM window) rendering a CE+PE table pair per strike + a Change-strikes multi-select.
+- **DONE #462.** ~~Option-premium negative extrinsic~~ (untraded legs get NO bar; genuine deep-ITM
+  discounts plot negative); ~~risk-calculator option-picker autofill~~ (CE|PE + strike off the live
+  chain, "Use LTP" fills the entry); ~~multiple-window compact pane headers~~ (CompactPaneContext
+  collapses the embedded hero header; the pane chrome names the widget).
+- **DONE #464.** ~~Trending-OI graph-view / positional / strike-basket selector.~~ /trending gains
+  `strikes=` (server-side basket fold) + `baseline=peod` (prev-session-EOD rebase — positional);
+  the page gets the basket multi-select, Positional checkbox and the ΔCall/ΔPut+price Graph view.
+  The scalper gate passes neither param — its pinned buckets=20 read is untouched.
+- **DONE #463.** ~~Big-OI session event-log view.~~ GET `/options/big-oi-log` (heatmap-style
+  one-read session fold; top-4 |ΔOI| moves per bucket, newest first) + the page's
+  "Latest top-10 | Session log" toggle.
+- **DONE #469.** ~~Futures EOD continuous current-month view~~ (deferred from item 4): per-session
+  front-contract stitch (rolls automatically after expiry; each date names its contract), view
+  select Continuous | Per contract.
+- **OPEN — owner sizing call: stock-chain interval OI capture** (§9.3, §9.4). Measured 2026-07-02:
+  210 stock chains, ~13.8k front-expiry option contracts (avg 66/chain) → ~28 Kite quote calls per
+  pass. At a 5-min cadence: ~1.0M rows/day (≈ doubles today's 1.13M/day 6-index volume, ~+55MB/day
+  → ~+1.6GB/month on a 31GB DB) and ~9% of the 1-rps quote budget on top of the index capture's
+  ~58%. At 15-min: ~345k rows/day (+30%). Needs the owner's universe (all 210 vs top-N liquid) +
+  cadence + disk-budget decision before build.
+- **OPEN — chip:** **FE-e2e spec repair** (task_499edb0f) → then flip the #422 CI shard to
+  blocking. Left to its own session: the repair needs the MOCK stack up for hours, and swapping the
+  live stack out the evening before the T2 next-session barometer verification is the wrong trade.
 
 **Rationale:** Waves 1–2 remove wrong-data and can't-tell-if-broken risk before trading off these
 screens; Wave 3 stops same-label-different-meaning misreads vs oipulse; Wave 4 is ergonomics; Wave 5

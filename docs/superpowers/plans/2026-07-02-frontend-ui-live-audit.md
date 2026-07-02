@@ -306,3 +306,83 @@ filter; world-indices closed-market state; date-input validation on History mode
 (exact), OI levels at aligned buckets (exact), straddle/VWAP live agreement, sentiment direction
 agreement, expiry/strike/underlying control behaviour, RELIANCE/stock chain mechanics, breadth sums,
 heatmap bucket math, VIX consistency.
+
+---
+
+## 10. Pass 2b — full remaining-page sweep (2026-07-02, 13:15–13:45 IST)
+
+Completes 100% page coverage: every remaining options/futures/FII/equity/features page compared
+interactively against its oipulse counterpart (8–10s waits, control interactions on both sides), and
+every AY-only workflow page exercised.
+
+### 10.1 New barometer-EXACT confirmations (data accuracy verdicts)
+
+- **Delivery Data (AXISBANK, 15 days): every row identical** — %Delivery 53.82/45.73/70.13…, delivery
+  and traded quantities, OHLC, day ranges, all digit-for-digit.
+- **Futures OI: exact same source** — our Futures OI Analysis 13:27–13:30 Total OI 1,77,16,530 equals
+  their EOD-analyzer current-month value exactly; JULFUT OI in our oi-spurt (1,77,16,205) matched to
+  live drift.
+- **OI Buzz treemap: exact** — Advance 40 / Decline 10 identical; tile values match (TECHM 4.08=4.08,
+  TCS 3.94=3.94; rest within live drift).
+- **FII Long-Short Ratio: headline identical to the word** — "FII are long for 9.99%" on both; ours is
+  internally consistent with the exact participant-wise counts (32,476/(32,476+2,92,535)).
+- **Market Holidays: all trading-holiday dates match**; ours deliberately lists engine trading closures
+  only (weekday) vs their all-observances list (incl. Sunday festivals + muhurat asterisk) — semantic,
+  fine.
+- **Announcement page live-verified** (filings minutes old, PDF links, field mapping correct — closes
+  the #378 deploy-verify note). Futures Pre-Open + Equity O=H/O=L live-sane.
+
+### 10.2 New findings (pass-2b)
+
+1. **Active-Strikes-IV skew is dead by construction** — the barometer plots distinct Call IV (~9–11.5)
+   vs Put IV (~11.5–12), a real ~2-point put skew; ours plots call≈put overlapping because our Black-76
+   IV uses the PCP-implied forward, which forces put-call parity → IV skew ≈ 0 always. The page's whole
+   signal (skew) cannot appear. Fix: solve per-side IV off the actual forward/spot (or display side IVs
+   from unconstrained solves), and display in % not decimals. **Promote next to T1/T2.**
+2. **Journal Delete confirmed one-click, no confirmation** (round-trip tested: created + deleted an
+   entry) — add a confirm.
+3. **Compare Backtests page has no picker** — literally "Add runs to compare (e.g.
+   /backtests/compare?ids=run1,run2)"; needs run selection from the jobs list.
+4. **Futures EOD OI Analyzer defaults to the wrong contract** (AUGFUT, not the front month) and offers
+   only per-dated-contract views (10 rows since contract birth) vs the barometer's continuous
+   current-month view with 400-session history + chart/cumulative/range toggles.
+5. **Futures OI Analysis** (AY table): full 84-row session — confirms the 20-bucket cap is
+   trending-oi-specific, NOT pipeline-wide. Nits: Day-High/Low columns repeat one static value per row,
+   Level-Break column renders empty all session, and the OI y-axis on Futures OI Chart prints "1.8Cr"
+   on every tick (zero resolution).
+6. **Watermark scope re-confirmed live** on Options Chart (both panels: `Oi Pulse / NIFTY…CE|PE`),
+   Futures OI Chart, and the LSR page — matches the §9.5 file list.
+7. **Options Chart**: full parity incl. side-by-side/Go/strike interactions (strike switch verified);
+   only gap = IV + Volume sub-panes, which the page already declares as deferred in a footer note.
+8. **Open-High Strategy vs theirs**: they populate O=H/O=L chips live, show "Hit ✓" probability states,
+   Triggered Time, New D.High/D.Low, and an Open=High/Open=Low toggle; our equivalent columns sit empty
+   ("—") all session. (Our extra: premium Fall% columns.)
+9. **OI Expiry Strategy**: theirs renders a 5-strike basket (a CE+PE table pair per strike, Change-
+   Strike-Prices button); ours is single-strike with a dropdown.
+10. **Trending-OI-PA** shares trending-oi's engine — the §9.2-4 window-cap/baseline bug and
+    basket-vs-chain scale divergence apply to it too.
+11. **Sector Stats / Sector Heatmap / Equity Returns freshness mix** — live index tiles and live
+    "Current Day" columns sit beside "as on <yesterday>" EOD aggregates on the same screens (NIFTY IT
+    tile +4.47% live vs IT sector card −1.23% EOD reads contradictory); the barometer's sector-stats is
+    fully live with per-index constituent up/down tables. Label the EOD panels loudly or compute live.
+12. **Risk Calculator**: ours is pure-client (manual entry price); theirs auto-fills from a live
+    option picker (name/expiry/strike/type). Minor gap, ours self-contained.
+13. **Calendar Spread purpose divergence is by design** — theirs is a position-builder tool (Add
+    Position, signals); ours is the read-only near−far premium chart (#36 descope, #390 viz). Strangle:
+    our checkbox = their separate page; functional parity.
+14. **Multiple-OI-Chart interactions verified** (searchable multi-select, add-strike renders 3rd
+    series); their mode radio resets Historical→Live on Go (their quirk, not ours).
+15. **AY-only workflow pages exercised**: strategy editor (YAML + validation + version-bump + save
+    ✓), strategy builder (chain-gated leg composer, sane empty state), data-ops coverage/query/export/
+    collection (all functional; coverage 40,740 contracts 100%, SQL console presets + CSV), news
+    (works, thin 7-day Upstox feed — AY-extra), equity pre-open / index-contribution (as §9.4).
+
+### 10.3 Final coverage statement
+
+Every route in App.tsx has now been exercised across the three passes (66 routes; the two
+parameterized detail routes — backtest results, sweep detail — via a live results page and the
+#416-tested sweep flow respectively). All 30 oipulse-counterpart pages compared live or historical
+with matched params where their plan allowed (their historical depth = 2 days). Barometer-exact set:
+OI buckets (aligned), FII/DII capital market, participant-wise counts, delivery data, OI buzz, futures
+OI totals, LSR, holidays. Divergence classes are fully enumerated in §9.2/§10.2 — nothing else
+surfaced.

@@ -3,12 +3,16 @@ package in.arthayantra.marketdata.nse.analytics;
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.error.NotFoundException;
+import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketdata.constituents.StaticIndexWeights;
+import in.arthayantra.marketdata.kite.InstrumentKey;
+import in.arthayantra.marketdata.kite.QuoteGateway;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -17,10 +21,11 @@ import org.springframework.stereotype.Service;
 /**
  * oipulse "Index Contribution": how much each constituent pushes the index, split into advances and
  * declines. Contribution is computed weight × % change (free-float weights from {@link
- * StaticIndexWeights}, % change from the latest EQ bhavcopy). oipulse renders this in index POINTS,
- * which need the live index level (not captured) — so v1 reports the contribution in PERCENT (the
- * stock's share of the index's % move; the per-index points scale is a single constant multiple, so
- * the ranking and sign are identical). The summed contributions equal the index's weighted % change.
+ * StaticIndexWeights}). Two reads: the EOD fold (% change from the latest EQ bhavcopy — the v1
+ * previous-day view) and the LIVE fold (audit §9.4, Wave 5): one batched {@link QuoteGateway} call
+ * for the index + constituents, % change = (ltp − prev-close)/prev-close off the venue quote, and
+ * the points scale off the LIVE index level — the intraday read the barometer serves. The live fold
+ * falls back to EOD when quotes are unavailable (off-hours, feed down).
  */
 @Service
 public class EquityIndexContributionService {
@@ -29,10 +34,13 @@ public class EquityIndexContributionService {
 
   private final JdbcTemplate jdbc;
   private final StaticIndexWeights weights;
+  private final QuoteGateway quoteGateway;
 
-  public EquityIndexContributionService(JdbcTemplate jdbc, StaticIndexWeights weights) {
+  public EquityIndexContributionService(
+      JdbcTemplate jdbc, StaticIndexWeights weights, QuoteGateway quoteGateway) {
     this.jdbc = jdbc;
     this.weights = weights;
+    this.quoteGateway = quoteGateway;
   }
 
   /** One constituent's contribution: weight × % change. {@code points} = contribution × index level /
@@ -45,7 +53,8 @@ public class EquityIndexContributionService {
       BigDecimal close,
       BigDecimal points) {}
 
-  /** Advances + declines, each ranked by |contribution|, with their summed contributions + points. */
+  /** Advances + declines, each ranked by |contribution|, with their summed contributions + points.
+   * {@code live} marks an intraday quote-based fold (vs the EOD bhavcopy read). */
   public record IndexContribution(
       String index,
       BigDecimal indexChangePct,
@@ -56,18 +65,71 @@ public class EquityIndexContributionService {
       BigDecimal declinePoints,
       List<ContribRow> advances,
       List<ContribRow> declines,
-      LocalDate asOf) {}
+      LocalDate asOf,
+      boolean live) {}
 
   public IndexContribution contribution(String index) {
+    Map<String, BigDecimal> w = requireWeights(index);
+    LocalDate asOf = asOf();
+    // indexClose null when the index 1d candle isn't archived
+    return fold(index, w, latestChange(), asOf, indexClose(index, asOf), false);
+  }
+
+  /**
+   * The intraday read (audit §9.4): ONE batched quote call for the index + constituents; % change
+   * = (ltp − prev-close)/prev-close off each venue quote, points off the LIVE index level. Falls
+   * back to the EOD fold when no constituent quote is available (off-hours, feed down).
+   */
+  public IndexContribution liveContribution(String index) {
+    Map<String, BigDecimal> w = requireWeights(index);
+    List<InstrumentKey> keys = new ArrayList<>(w.size() + 1);
+    for (String symbol : w.keySet()) {
+      keys.add(new InstrumentKey("NSE", symbol));
+    }
+    InstrumentKey indexKey = new InstrumentKey("NSE", index);
+    keys.add(indexKey);
+    Map<InstrumentKey, QuoteGateway.Quote> quotes = quoteGateway.quotes(keys);
+
+    Map<String, Latest> latest = new HashMap<>();
+    for (String symbol : w.keySet()) {
+      QuoteGateway.Quote q = quotes.get(new InstrumentKey("NSE", symbol));
+      if (q == null || q.lastPrice() == null || q.ohlc() == null || q.ohlc().close() == null
+          || q.ohlc().close().signum() <= 0) {
+        continue;
+      }
+      BigDecimal pct =
+          q.lastPrice()
+              .subtract(q.ohlc().close())
+              .multiply(HUNDRED)
+              .divide(q.ohlc().close(), 2, RoundingMode.HALF_UP);
+      latest.put(symbol, new Latest(pct, q.lastPrice()));
+    }
+    if (latest.isEmpty()) {
+      return contribution(index); // no live quotes — serve the EOD read
+    }
+    QuoteGateway.Quote iq = quotes.get(indexKey);
+    LocalDate today = LocalDate.now(Ist.ZONE);
+    BigDecimal indexLevel =
+        iq != null && iq.lastPrice() != null ? iq.lastPrice() : indexClose(index, today);
+    return fold(index, w, latest, today, indexLevel, true);
+  }
+
+  private Map<String, BigDecimal> requireWeights(String index) {
     Map<String, BigDecimal> w = weights.weights(index);
     if (w.isEmpty()) {
       throw new NotFoundException(
           ErrorCodes.NOT_FOUND_RESOURCE, "no seeded weights for index '" + index + "'");
     }
-    Map<String, Latest> latest = latestChange();
-    LocalDate asOf = asOf();
-    BigDecimal indexLevel = indexClose(index, asOf); // null when the index 1d candle isn't archived
+    return w;
+  }
 
+  private IndexContribution fold(
+      String index,
+      Map<String, BigDecimal> w,
+      Map<String, Latest> latest,
+      LocalDate asOf,
+      BigDecimal indexLevel,
+      boolean live) {
     List<ContribRow> advances = new ArrayList<>();
     List<ContribRow> declines = new ArrayList<>();
     BigDecimal advTotal = BigDecimal.ZERO;
@@ -118,7 +180,8 @@ public class EquityIndexContributionService {
         indexLevel == null ? null : decPts.setScale(2, RoundingMode.HALF_UP),
         rankedAdv,
         rankedDec,
-        asOf);
+        asOf,
+        live);
   }
 
   private static List<ContribRow> rank(List<ContribRow> rows) {

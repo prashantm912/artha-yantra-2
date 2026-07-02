@@ -6,7 +6,7 @@ import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { Select } from '../../components/atoms/Select.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
-import { PageHeader } from '../../components/PageHeader.tsx';
+import { LiveDot, PageHeader } from '../../components/PageHeader.tsx';
 import { EodBadge } from '../../components/atoms/EodBadge.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
@@ -16,9 +16,9 @@ import { FIELD_HELP } from '../../core/fieldHelp.ts';
 
 // Equity → Index Contribution (oipulse): how much each constituent pushes the index, split into
 // Advances and Declines. Contribution = free-float weight × % change (weights seeded from the
-// niftyindices factsheet; % change from the latest EQ bhavcopy). oipulse renders index POINTS, which
-// need the live index level (not captured) — so this reports contribution in PERCENT (same ranking +
-// sign; the per-index points scale is one constant multiple). Summed contributions = index % change.
+// niftyindices factsheet). Live mode (audit §9.4, Wave 5 — the barometer's useful read) folds
+// intraday quotes with points off the LIVE index level; the server falls back to the EOD bhavcopy
+// read off-hours (the response `live` flag says which fold served → LiveDot vs EodBadge).
 
 const ltpCell = (r: ContribRow) => (
   <span className="tabular-nums">
@@ -53,12 +53,13 @@ export function IndexContributionPage() {
   const indicesQ = useOiBuzzIndices();
   const indices = useMemo(() => indicesQ.data ?? [], [indicesQ.data]);
   const [index, setIndex] = useState<string | null>(null);
+  const [live, setLive] = useState(true);
 
   useEffect(() => {
     if (!index && indices.length) setIndex(indices[0]);
   }, [index, indices]);
 
-  const q = useIndexContribution(index);
+  const q = useIndexContribution(index, live);
   const data = q.data ?? null;
 
   return (
@@ -70,6 +71,10 @@ export function IndexContributionPage() {
 
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <Select value={index} options={indices} onChange={setIndex} ariaLabel="Index" placeholder="Index…" title="Pick the index to break down by constituent contribution" />
+        <label className="flex h-9 items-center gap-1.5 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text" title="Fold live quotes (intraday points off the live index level) instead of the previous-day EOD read. Falls back to EOD when quotes are unavailable.">
+          <input type="checkbox" checked={live} onChange={(e) => setLive(e.target.checked)} className="accent-accent" />
+          Live
+        </label>
         <GoButton onClick={() => void q.refetch()} loading={q.isFetching} />
         {data && (
           <span className="text-sm">
@@ -77,13 +82,19 @@ export function IndexContributionPage() {
             <span className="font-semibold">
               <ValueDeltaCell value={data.indexChangePct} suffix="%" />
             </span>
-            {data.asOf ? <> <EodBadge asOf={data.asOf} /></> : null}
+            {data.indexLevel ? <> at {formatDecimal(data.indexLevel, 2)}</> : null}{' '}
+            {data.live ? (
+              <LiveDot />
+            ) : data.asOf ? (
+              <EodBadge asOf={data.asOf} />
+            ) : null}
           </span>
         )}
       </div>
 
       <p className="mb-3 text-xs text-ay-muted">
-        Contribution = free-float weight × % change · index points need the live index level (deferred)
+        Contribution = free-float weight × % change · Points = contribution × index level / 100
+        {data?.live ? ' (live index level)' : " (previous session's level)"}
       </p>
 
       <QueryState

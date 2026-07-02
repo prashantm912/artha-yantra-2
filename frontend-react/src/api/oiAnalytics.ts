@@ -659,16 +659,20 @@ export function useOpenHighLow(index: string | null) {
   });
 }
 
-/** Index Contribution (oipulse): per-constituent weighted contribution, split advances/declines. */
-export function useIndexContribution(index: string | null) {
+/**
+ * Index Contribution (oipulse): per-constituent weighted contribution, split advances/declines.
+ * `live` (audit §9.4, Wave 5) asks for the intraday quote fold — points off the LIVE index level;
+ * the server falls back to the EOD read when quotes are unavailable and the response's `live` flag
+ * says which fold actually served.
+ */
+export function useIndexContribution(index: string | null, live = false) {
   return useQuery({
-    queryKey: ['equity', 'index-contribution', index],
-    queryFn: () =>
-      oiGet<IndexContribution | null>(
-        '/market/equity/index-contribution',
-        new URLSearchParams({ name: index ?? '' }).toString(),
-        null,
-      ),
+    queryKey: ['equity', 'index-contribution', index, live],
+    queryFn: () => {
+      const p = new URLSearchParams({ name: index ?? '' });
+      if (live) p.set('mode', 'live');
+      return oiGet<IndexContribution | null>('/market/equity/index-contribution', p.toString(), null);
+    },
     enabled: !!index,
   });
 }

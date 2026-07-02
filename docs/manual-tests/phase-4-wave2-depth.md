@@ -72,5 +72,5 @@ capture).
 Like Wave 1, these data pages are **built + structure-QA'd against the study docs + mock fixtures but
 NOT value-verified** on a real session. Value-verification (Claude-in-Chrome side-by-side vs live
 oipulse, §20.8) is **blocked on the data-foundation milestone** (Upstox-backed OpenAlgo + the
-OI-backfill importer) — see `phase4-react-oipulse-plan` memory + `2026-06-21-data-foundation-milestone.md`.
+OI-backfill importer) — see `phase4-react-oipulse-plan` memory + `superpowers/plans/archive/2026-06-21-data-foundation-milestone.md`.
 Run the per-page live side-by-side once a real historical session is backfilled.

@@ -1,6 +1,6 @@
 # Manual test — Data Ops Console (B1–B6)
 
-Operator console over the expired/OI backfill. Spec: [`docs/superpowers/plans/2026-06-24-data-ops-console-wave.md`](../superpowers/plans/2026-06-24-data-ops-console-wave.md).
+Operator console over the expired/OI backfill. Spec: [`docs/superpowers/plans/archive/2026-06-24-data-ops-console-wave.md`](../superpowers/plans/archive/2026-06-24-data-ops-console-wave.md).
 Route group `/data-ops/*`; mega-menu section **Data Ops**.
 
 ## How to run (dev, against the mock stack)

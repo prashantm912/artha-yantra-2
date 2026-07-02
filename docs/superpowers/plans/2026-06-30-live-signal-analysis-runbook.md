@@ -138,12 +138,12 @@ warranted, apply it as a parity-safe YAML edit (the `take_profit.value` is alrea
 optimizer-sweepable, #386) + republish — never a guess.
 
 ## 7. Pointers
-- E9 band design + why placeholder: `docs/superpowers/plans/2026-06-27-backlog/trade-management-exits.md`,
-  `2026-06-29-e8-e12-numbers.md` (answer #1 = both target+trail, DB/optimizer-tunable).
+- E9 band design + why placeholder: `docs/superpowers/plans/archive/2026-06-27-backlog/trade-management-exits.md`,
+  `archive/2026-06-29-e8-e12-numbers.md` (answer #1 = both target+trail, DB/optimizer-tunable).
 - Why backtest can't tune scalpers: [[scalper-tuning-findings]] (overfit proof-run),
   [[scalper-100-remaining-map]] (parity firewall, `relax_session`).
 - Exit mechanics: `ExitEvaluator` precedence `stop_loss → trailing_stop → take_profit →
   time_stop → signal_exit`; the ST-line trail is `trailing_stop{basis: indicator, alias:
   supertrend_line}` on every directional family; the 35% TP only on gap-theory + market-movers.
 - Auto-paper-trade toggle = #367; signals persistence = `strategy.signals` (only FIRING bars).
-- Inventory: `2026-06-30-remaining-build-inventory.md` §2 (E9 band = owner-number, low priority).
+- Ledger: `2026-07-02-remaining-items.md` §2 (E9 band = owner forward-paper output; inventory archived).

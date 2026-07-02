@@ -1,3 +1,6 @@
+> **ARCHIVED 2026-07-02 — SHIPPED.** B1–B6 merged (#121), DEPLOYED + live (#219 route fix), value-verified.
+> Parked v2 decisions (audit table, bulk export, STOMP status) stay in `docs/DEFERRED_BACKLOG.md`.
+
 # Data Ops Console — wave feature spec (B1–B6)
 
 - **Status:** **MERGED 2026-06-24 (PR #121, squash 5e4d5c9)** — all of B1–B6 built + CI-green. NOT yet

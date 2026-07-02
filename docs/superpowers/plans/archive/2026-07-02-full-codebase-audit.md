@@ -1,3 +1,6 @@
+> **ARCHIVED 2026-07-02 — FIX QUEUE FULLY CLOSED same day.** P0 #407–#412, P1 #413–#419, P2 #420–#434,
+> all merged + redeployed live ~11:00 IST. FE-e2e shard flipped blocking (#474). Kept as the findings record.
+
 # ArthaYantra Full Codebase Audit — 2026-07-02
 
 **Method:** two-phase multi-agent audit. Phase 1: 10 parallel architecture readers. Phase 2: 8 deep-dimension

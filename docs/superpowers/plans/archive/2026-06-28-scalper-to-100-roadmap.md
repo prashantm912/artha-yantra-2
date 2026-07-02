@@ -1,3 +1,7 @@
+> **ARCHIVED 2026-07-02 — BUILD COMPLETE.** Every AUTOMATE_PKG package is built (default-OFF tag-gate,
+> PRs #274–#404 arc), owner-descoped, or owner-declined (inventory §5/§6). What remains is owner-NUMBERS
+> only (E9 band, keep/cut/tune) via the live forward-paper analysis runbook — see [`2026-07-02-remaining-items.md`](../2026-07-02-remaining-items.md).
+
 # Scalper → 100% — consolidated implementation roadmap
 
 **Status:** ACTIVE — the single forward authority for finishing the options-scalper engine.

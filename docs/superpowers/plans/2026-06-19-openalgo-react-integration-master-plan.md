@@ -3536,7 +3536,7 @@ can note "no manual surface — verified by tests" instead.
 > (#94–#103), the **React cutover** (#104 — Angular `frontend-ui` parked, `frontend-react` served
 > through the gateway), the scalper cockpit (#105–#110), and oipulse Waves **W1/W2/W3** (depth +
 > breadth + chart pages, through #82–#93/#109). Beyond §20: the **Data Ops Console** (operator UI over
-> the expired/OI backfill) merged as #121 (`docs/superpowers/plans/2026-06-24-data-ops-console-wave.md`).
+> the expired/OI backfill) merged as #121 (`docs/superpowers/plans/archive/2026-06-24-data-ops-console-wave.md`).
 > The remaining open Phase-4 work is the **data-foundation value-verify** (§20.8 — render every page
 > in History mode on a real session vs oipulse, gated on the expired/OI backfill now loading), the
 > `/orders` page, and the manual-verification-checklist UI. Pending detail lives in
@@ -3629,7 +3629,7 @@ Owner chose a SEQUENCE of smaller PRs (65 routes is unreviewable in one).
   (combo candle+line). **2 backend tasks:** greeks-in-chain (black76 server-side) + Connecting-Dots read
   endpoint (expose the per-factor matrix). Both drift springdoc → recapture + `contracts/gen` regen.
 - **Data-foundation milestone (owner-decided 2026-06-21, between PR-W1 and PR-W2)** — DESIGN LOCKED, full
-  spec in `docs/superpowers/plans/2026-06-21-data-foundation-milestone.md` + `docs/adr/0001-...`. Resolved
+  spec in `docs/superpowers/plans/archive/2026-06-21-data-foundation-milestone.md` + `docs/adr/0001-...`. Resolved
   to **(A) verify-now on the EXISTING OpenAlgo scaffold** (no new SDK/appliance): flip
   `source.optionchain=openalgo` (canary-gated) + a snapshot-backfill importer (OpenAlgo `/history` 1m
   OHLC+OI → `options_chain_snapshots`/`futures_oi_snapshots`, source=`BACKFILL`, idempotent admin

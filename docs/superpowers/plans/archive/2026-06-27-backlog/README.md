@@ -1,3 +1,5 @@
+> **ARCHIVED 2026-07-02 with the scalper-to-100 roadmap** — per-package design provenance; build complete.
+
 # Scalper backlog — implementation-plan index & roadmap
 
 > **Sequencing authority moved (2026-06-28).** These 12 stream files are now the **per-package

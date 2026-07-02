@@ -1,3 +1,5 @@
+> **ARCHIVED 2026-07-02 — companion register; fix queue fully closed (see the main audit doc banner).**
+
 # Full Codebase Audit 2026-07-02 — Complete Findings Register
 
 Companion to [2026-07-02-full-codebase-audit.md](2026-07-02-full-codebase-audit.md). That report ranks and

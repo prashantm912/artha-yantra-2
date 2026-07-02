@@ -2,7 +2,7 @@
 
 The open Phase-4 gate (data-foundation milestone): render the data pages on a REAL session and compare
 value-for-value vs oipulse, and confirm the Part-2 premium backtest runs on real backfilled premium.
-Authority: `docs/superpowers/plans/2026-06-21-data-foundation-milestone.md` + master-plan §20.8 +
+Authority: `docs/superpowers/plans/archive/2026-06-21-data-foundation-milestone.md` + master-plan §20.8 +
 [[oipulse-live-qa-method]]. Two INDEPENDENT parts on two different data sources — do them separately.
 
 > **Two data sources, do not conflate.**

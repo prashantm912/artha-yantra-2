@@ -19,27 +19,29 @@ forward-work authority (Phases 0–6). The legacy **Stage A–G** system in the 
 PR #6 `a96c99b`; F/G via the market-data + oipulse-parity PRs through #41). Its exit-gate
 checklists stay as the as-built reference; new phase boundaries are tracked by the map below.
 
-**Current frontier (2026-06-30) = the Phase-5 Minervini screener is the lone remaining net-new build; everything
-else pending is owner-gated (numbers/sign-off/a live flip), not code.** Phases 0–3.5 MERGED; the **2b scalper
-tunable-infra build is COMPLETE** (see the block below). Two big build tracks **closed 2026-06-30**: the **scalper
-signal-side §1a** (`FU1-manual-checks` #371, `E5-rsi-band`/`E5-rsi-recovery` #372/#373, `E3-fii-participant`
-#374) and the **frontend/oipulse §1b** (Risk Calculator #375, Multiple Window #376, Futures Pre-Open #377,
-Announcement #378, Advance Chart + Multiframe #379, **Calendar Spread #390**). The E11 PE-mirror (#381/#382) +
-straddle combined-prem auto-exit (#383/#384), the **E9 take-profit optimizer-tunable band (#386)**, the
-**`instruments.exchange_token` populate (#387)**, and the **Phase-5 200-day equity daily backfill (#389,
-live-verified 222 candles/symbol)** all landed — so the Minervini screener's 150/200-day MA history is now
-seeded. The single live forward-paper analysis runbook (#392) is in place for the ~1-month tune. What remains is
-live-session/owner-gated: **W-U4** (Upstox cutover — OI parity + tick-latency A/B need market hours, then the
-owner's deliberate flip; the END-STATE keeps BOTH brokers split by capability — `ticker=Kite`, `quotes/candles/
-optionchain/fiidii/analytics/expired-backfill=Upstox`, EOD=bhavcopy, orders=OpenAlgo, **not** a full swap), the
-**data-foundation value-verify** (render every OI page in History mode vs oipulse — backfill data is ready; the
-comparison needs the owner's oipulse sign-in), and the scalper **arming numbers** (E8 roster / E9 band / soft-dot
-gates — all owner forward-paper outputs). The expired/OI backfill is **COMPLETE/idle** and the **Data Ops Console
-(#121) is DEPLOYED + live** (#219 route fix). Forward inventory: `docs/superpowers/plans/2026-06-30-remaining-build-inventory.md`.
+**Current frontier (2026-07-02) = the Phase-5 Minervini screener is the lone remaining net-new build; everything
+else pending is owner-gated / verify-only / scheduled maintenance, not code.** Forward inventory:
+**`docs/superpowers/plans/2026-07-02-remaining-items.md`** (supersedes the archived 2026-06-30 build inventory).
+**2026-07-02 was a double-audit day, both fix queues FULLY CLOSED same day:** the **full codebase audit**
+(41 agents; P0 #407–#412 paper-pipeline/brackets/timeouts/backups/notifier, P1 #413–#419 calendar+job-spine+
+fail-closed-compose+UI-trust+FeedWatchdog, P2 #420–#434 ratchets/tripwires/V027-drops-candles_3m/FailPolicy-
+registry/G1 — redeployed live ~11:00 IST) and the **frontend UI live audit vs oipulse** (2 passes; Waves 1–5 +
+charts part B + FE-e2e repair = PRs #440–#475 — capture bucket alignment T2, trending-OI cap T1, 09:15 pre-open
+gap-bar data fix #459, stock-chain OI as **on-demand Upstox warm** #472, FE-e2e 44/44 + CI shard BLOCKING #474).
+Earlier 2026-06-30 closes stand: scalper signal-side §1a (#371–#374), frontend/oipulse §1b (#375–#379, #390),
+E11 PE-mirror (#381/#382) + straddle auto-exit (#383/#384), E9 tunable band (#386), 200-day equity backfill
+(#389 — the Minervini MA history is seeded). Gate observability shipped #404 (`signal_rejections` + page).
+What remains beyond the screener: the **~1-month live forward-paper gather → E9/keep-cut-tune analysis**
+(runbook `2026-06-30-live-signal-analysis-runbook.md`), SPAN real-`.spn` parity sign-off, per-strategy
+notification toggles + Telegram token, next-session live verifies (T2 buckets / 09:09:30 pre-open scan /
+09:16+09:18 crons), and the **CD-2 2027 calendar-CSV refresh before ~2026-11-16**. W-U4 Upstox cutover is a
+settled owner NO (stay Kite, split-by-capability). The expired/OI backfill is **COMPLETE/idle**; the Data Ops
+Console is DEPLOYED + live.
 
 **Scalper engine → 100% (2026-06-28):** the S24 incorporation is closed (debloated operative doc + W3 drift
 tags + W4 gates + 2b infra, all BUILT/inert). Finishing the engine to "nothing-deferred" is now tracked in
-the consolidated roadmap [`docs/superpowers/plans/2026-06-28-scalper-to-100-roadmap.md`](docs/superpowers/plans/2026-06-28-scalper-to-100-roadmap.md)
+the consolidated roadmap [`docs/superpowers/plans/archive/2026-06-28-scalper-to-100-roadmap.md`](docs/superpowers/plans/archive/2026-06-28-scalper-to-100-roadmap.md)
+(ARCHIVED 2026-07-02 — build complete)
 (12 epics E1–E12 / ~95 packages, dependency waves, descopes, owner-decisions). The bloated `docs/strategy-audit/`
 chain is CLOSED. Arming any built/new tag on a real strategy is the owner's forward-paper (2c) step.
 

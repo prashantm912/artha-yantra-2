@@ -1,3 +1,7 @@
+> **ARCHIVED 2026-07-02 — BUILT; CUTOVER DECLINED.** W-U1/U2/U3 merged flag-gated default-Kite
+> (#137/#139/#141/#145/#149). W-U4 flip = owner decision 2026-06-30: **stay Kite**, revisit only with a
+> live A/B (inventory §6 WON'T-DO). End-state keeps BOTH brokers split by capability.
+
 # Upstox live-stack migration — wave spec
 
 - **Status:** **W-U1 + W-U2 + W-U3 MERGED 2026-06-24** (PRs #137 / #139 / #141 — all flag-gated,

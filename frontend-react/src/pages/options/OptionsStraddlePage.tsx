@@ -151,11 +151,21 @@ export function OptionsStraddlePage() {
       <QueryState
         query={straddleQ}
         isEmpty={() => data == null}
-        empty={{
-          icon: CandlestickChart,
-          title: 'Pick an underlying first.',
-          hint: 'Choose an underlying, expiry and strike to load the straddle chart.',
-        }}
+        // §3-P0: only claim "pick an underlying" when something is genuinely unpicked — a settled
+        // empty on a fully-picked selection is a data gap, not a missing selection.
+        empty={
+          baseStrike == null
+            ? {
+                icon: CandlestickChart,
+                title: 'Pick an underlying first.',
+                hint: 'Choose an underlying, expiry and strike to load the straddle chart.',
+              }
+            : {
+                icon: CandlestickChart,
+                title: 'No straddle data for this selection yet.',
+                hint: 'Snapshots accrue during market hours — hit Go again shortly or pick another expiry.',
+              }
+        }
         errorTitle="Couldn't load straddle chart"
         skeleton={<Skeleton variant="chart-block" className="h-64 sm:h-80 lg:h-[440px]" />}
       >

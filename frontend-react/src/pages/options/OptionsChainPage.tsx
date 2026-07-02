@@ -10,6 +10,8 @@ import { DensityToggle } from '../../components/DensityToggle.tsx';
 import { OptionsChainTable } from '../../components/OptionsChainTable.tsx';
 import { OPTIONAL_COLUMN_META } from '../../components/optionsChainColumns.ts';
 import { PageHeader, LiveDot } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 
 // Options Chain — the faithful oipulse chain (§20.7): 18 visible cols off /chain-table (live black76
@@ -130,21 +132,28 @@ export function OptionsChainPage() {
         </BeatItem>
       </BeatStrip>
 
-      {chain == null && !chainQ.isLoading && (
-        <p className="mb-3 text-body-sm text-ay-muted">
-          No chain — pick an underlying + expiry with a live option chain.
-        </p>
-      )}
-
-      <BeatBlock>
-        <OptionsChainTable
-          rows={rows}
-          spot={chain?.spot ?? null}
-          atmStrike={atm}
-          optionalKeys={optionalKeys}
-          density={density}
-        />
-      </BeatBlock>
+      {/* Audit 2026-07-02 §3-P0: the table used to render its FINAL "No chain for this selection"
+          copy while the chain query was still pending (or gated on the expiry cascade) — the operator
+          couldn't tell quiet market from still-loading. QueryState now owns the 4-way split. */}
+      <QueryState
+        query={chainQ}
+        isEmpty={() => rows.length === 0}
+        empty={{ title: 'No chain for this selection — pick an underlying + expiry with a live option chain.' }}
+        errorTitle="Couldn't load the options chain"
+        skeleton={<Skeleton variant="table-rows" rows={14} cols={9} />}
+      >
+        {() => (
+          <BeatBlock>
+            <OptionsChainTable
+              rows={rows}
+              spot={chain?.spot ?? null}
+              atmStrike={atm}
+              optionalKeys={optionalKeys}
+              density={density}
+            />
+          </BeatBlock>
+        )}
+      </QueryState>
     </LoadBeat>
   );
 }

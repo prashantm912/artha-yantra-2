@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
+import { settleAnimations } from './helpers';
 
 // Pre-authenticated via the shared storageState (global-setup). Verifies the Open & High Strategy page
 // (oipulse §strategies/open-high-strategy — per-strike CE/PE Open=High/Low scan + trigger probability)
@@ -13,9 +14,11 @@ test('Open & High Strategy renders the control bar, no axe violations', async ({
   await expect(page.getByRole('heading', { name: 'Open and High Strategy' })).toBeAttached();
 
   // shared FilterBar controls (name/expiry/interval/mode).
-  await expect(page.getByLabel('Underlying')).toBeVisible();
-  await expect(page.getByLabel('Interval')).toBeVisible();
+  await expect(page.getByLabel('Underlying', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Interval', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Toggle live/history mode' })).toBeVisible();
+
+  await settleAnimations(page);
 
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations).toEqual([]);
@@ -26,8 +29,10 @@ test.describe('mobile (~480px)', () => {
   test('Open & High Strategy renders the control bar on a narrow viewport, axe-clean', async ({ page }) => {
     await page.goto('/options/open-high-strategy');
     await expect(page.getByTestId('app-shell')).toBeVisible();
-    await expect(page.getByLabel('Underlying')).toBeVisible();
+    await expect(page.getByLabel('Underlying', { exact: true })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Open and High Strategy' })).toBeAttached();
+
+    await settleAnimations(page);
 
     const results = await new AxeBuilder({ page }).analyze();
     expect(results.violations).toEqual([]);

@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
+import { settleAnimations } from './helpers';
 
 // Cockpit-parity nav journeys (React-DOM ports of the parked Angular e2e, read-only paths only — no
 // publish/order mutations, so they are safe against any reused stack). Pre-authenticated via the
@@ -12,12 +13,14 @@ test('the scalper cockpit renders its three zones + the option quick-pick, no ax
   await expect(page.getByRole('heading', { name: 'Live signals' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Paper order ticket' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Positions & P&L' })).toBeVisible();
-  await expect(page.getByLabel('Instrument')).toBeVisible();
-  await expect(page.getByLabel('Side')).toBeVisible();
+  await expect(page.getByLabel('Instrument', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Side', { exact: true })).toBeVisible();
 
   // the option quick-pick toggles the strike-ladder picker
   await page.getByRole('button', { name: /Option quick-pick/ }).click();
-  await expect(page.getByLabel('Underlying')).toBeVisible();
+  await expect(page.getByLabel('Underlying', { exact: true })).toBeVisible();
+
+  await settleAnimations(page);
 
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations).toEqual([]);
@@ -27,15 +30,15 @@ test('every cockpit route renders its anchor control behind auth', async ({ page
   // grouped so the suite stays one session (one login); each is a read-only render assertion
   const routes: { path: string; locator: () => ReturnType<typeof page.getByRole> | ReturnType<typeof page.getByLabel> }[] = [
     { path: '/dashboard', locator: () => page.getByRole('heading', { name: 'Active Signals' }) },
-    { path: '/signals', locator: () => page.getByLabel('Status filter') },
+    { path: '/signals', locator: () => page.getByLabel('Status filter', { exact: true }) },
     { path: '/paper', locator: () => page.getByRole('heading', { name: 'Open positions' }) },
-    { path: '/journal', locator: () => page.getByLabel('Filter by tag') },
+    { path: '/journal', locator: () => page.getByLabel('Filter by tag', { exact: true }) },
     { path: '/watchlists', locator: () => page.getByRole('tab', { name: 'Screener' }) },
     { path: '/settings', locator: () => page.getByRole('heading', { name: 'Kite Connect' }) },
     { path: '/strategies', locator: () => page.getByRole('link', { name: '+ Create' }) },
     { path: '/backtests/run', locator: () => page.getByRole('tab', { name: 'backtest' }) },
     { path: '/backtests/jobs', locator: () => page.getByRole('button', { name: /Reload/ }) },
-    { path: '/charts', locator: () => page.getByLabel('Instrument') },
+    { path: '/charts', locator: () => page.getByLabel('Instrument', { exact: true }) },
   ];
 
   for (const { path, locator } of routes) {
@@ -47,7 +50,7 @@ test('every cockpit route renders its anchor control behind auth', async ({ page
 
 test('the charts page draws the lightweight-charts candlestick for a symbol with data', async ({ page }) => {
   await page.goto('/charts'); // defaults to NSE:NIFTY 50 @ 1d (has EOD daily candles on the live stack)
-  await expect(page.getByLabel('Instrument')).toBeVisible();
+  await expect(page.getByLabel('Instrument', { exact: true })).toBeVisible();
   // the CandleChart renders role=img only once candles load → proves LWC mounted + drew
   await expect(page.getByRole('img', { name: /candlestick chart/ })).toBeVisible({ timeout: 20_000 });
   const errors: string[] = [];
@@ -62,6 +65,6 @@ test.describe('mobile (~480px)', () => {
     await page.goto('/scalper');
     await expect(page.getByTestId('app-shell')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Paper order ticket' })).toBeVisible();
-    await expect(page.getByLabel('Instrument')).toBeVisible();
+    await expect(page.getByLabel('Instrument', { exact: true })).toBeVisible();
   });
 });

@@ -20,6 +20,10 @@ export default defineConfig({
     baseURL: 'http://127.0.0.1:4300',
     storageState: STATE,
     trace: 'on-first-retry',
+    // The app is reduced-motion-gated (MotionConfig + the index.css media rule). Without this, axe
+    // snapshots mid-entrance-fade and reads blended colours (e.g. the light-theme muted text at
+    // ~89% opacity → 4.42:1 phantom contrast failures on data-ops/heatmap/chain).
+    reducedMotion: 'reduce',
   },
   webServer: {
     command: 'npm run dev',

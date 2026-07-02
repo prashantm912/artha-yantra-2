@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
+import { settleAnimations } from './helpers';
 
 // Data Ops operator console (wave PR-DO) — render + a11y smoke over the five /data-ops routes. All
 // pages must render on the MOCK stack without live data (graceful degrade / on-demand POSTs not
@@ -18,6 +19,8 @@ test('/data-ops/status renders the backfill cards + quota gauge, no axe violatio
   // Quota is "not configured" on mock (analytics token off) — proves the graceful-degrade path.
   await expect(page.getByText(/not configured/)).toBeVisible();
 
+  await settleAnimations(page);
+
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations).toEqual([]);
 });
@@ -35,6 +38,8 @@ test('/data-ops/coverage renders the stat pills + table-or-empty-state, no axe v
   const table = page.getByRole('table', { name: 'Expired-contract coverage' });
   await expect(empty.or(table)).toBeVisible();
 
+  await settleAnimations(page);
+
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations).toEqual([]);
 });
@@ -50,6 +55,8 @@ test('/data-ops/collection renders the stepper + step-0 indices, no axe violatio
   // Do NOT submit — Start backfill POSTs on demand (503 on mock). Just assert it is present.
   await expect(page.getByRole('button', { name: 'Next' })).toBeVisible();
 
+  await settleAnimations(page);
+
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations).toEqual([]);
 });
@@ -61,11 +68,13 @@ test('/data-ops/query renders presets + editor + controls, no axe violations', a
   // Preset buttons (left nav) + the SqlEditor textarea + the row-limit input.
   await expect(page.getByRole('button', { name: 'Recent backfill 1m' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Contracts by expiry' })).toBeVisible();
-  await expect(page.getByLabel('SQL query')).toBeVisible();
-  await expect(page.getByLabel('Row limit')).toBeVisible();
+  await expect(page.getByLabel('SQL query', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Row limit', { exact: true })).toBeVisible();
   // Run + Download CSV present — do NOT click them (read-only allowlist runs server-side; 503 on mock).
   await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Download CSV' })).toBeVisible();
+
+  await settleAnimations(page);
 
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations).toEqual([]);
@@ -79,6 +88,8 @@ test('/data-ops/export renders the stepper + step-0 underlying picker, no axe vi
   await expect(page.getByRole('list', { name: 'Progress' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'NIFTY' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'SENSEX' })).toBeVisible();
+
+  await settleAnimations(page);
 
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations).toEqual([]);

@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.black76.Black76.OptionType;
 import in.arthayantra.strategysignal.scalper.ScalperConfluenceGate.RejectionDiagnostic;
 import in.arthayantra.strategysignal.scalper.StrikePicker;
+import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.strategysignal.testsupport.StrategySignalIntegrationTestBase;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -134,7 +135,7 @@ class ShadowBookIntegrationTest extends StrategySignalIntegrationTestBase {
     seedTick("NFO", tpSym, "140.00");
     seedTick("NFO", slSym, "60.00");
 
-    monitor.evaluate(LocalTime.of(11, 0), LocalDate.now());
+    monitor.evaluate(LocalTime.of(11, 0), LocalDate.now(Ist.ZONE));
 
     var tp = find(tpId);
     assertThat(tp.status()).isEqualTo("CLOSED");
@@ -162,7 +163,7 @@ class ShadowBookIntegrationTest extends StrategySignalIntegrationTestBase {
     seedTick("NFO", futSym, "24150.00");
     seedTick("NFO", optSym, "88.00");
 
-    monitor.evaluate(LocalTime.of(11, 0), LocalDate.now());
+    monitor.evaluate(LocalTime.of(11, 0), LocalDate.now(Ist.ZONE));
 
     var row = find(id);
     assertThat(row.closeReason()).isEqualTo("STRUCTURAL_STOP");
@@ -193,10 +194,10 @@ class ShadowBookIntegrationTest extends StrategySignalIntegrationTestBase {
     seedTick("NFO", soSym, "105.00");
 
     // before the square-off cutoff nothing closes
-    monitor.evaluate(LocalTime.of(15, 11), LocalDate.now());
+    monitor.evaluate(LocalTime.of(15, 11), LocalDate.now(Ist.ZONE));
     assertThat(find(soId).status()).isEqualTo("OPEN");
 
-    monitor.evaluate(LocalTime.of(15, 13), LocalDate.now());
+    monitor.evaluate(LocalTime.of(15, 13), LocalDate.now(Ist.ZONE));
 
     var so = find(soId);
     assertThat(so.closeReason()).isEqualTo("SQUARE_OFF");

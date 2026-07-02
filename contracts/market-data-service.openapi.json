@@ -468,6 +468,34 @@
         }
       }
     },
+    "/api/v1/market/equity/pre-open-scan/capture" : {
+      "post" : {
+        "tags" : [ "equity-controller" ],
+        "operationId" : "preOpenScanCapture",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CaptureResult"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/eod-backfill" : {
       "post" : {
         "tags" : [ "eod-backfill-controller" ],
@@ -3982,6 +4010,42 @@
         }
       }
     },
+    "/api/v1/market/equity/pre-open-scan" : {
+      "get" : {
+        "tags" : [ "equity-controller" ],
+        "operationId" : "preOpenScan",
+        "parameters" : [ {
+          "name" : "date",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PreOpenScanView"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/equity/open-high-low" : {
       "get" : {
         "tags" : [ "open-high-controller" ],
@@ -5186,6 +5250,19 @@
           "to" : {
             "type" : "string",
             "format" : "date"
+          }
+        }
+      },
+      "CaptureResult" : {
+        "type" : "object",
+        "properties" : {
+          "date" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "captured" : {
+            "type" : "integer",
+            "format" : "int32"
           }
         }
       },
@@ -6988,6 +7065,51 @@
           },
           "r1y" : {
             "type" : "number"
+          }
+        }
+      },
+      "PreOpenScanView" : {
+        "type" : "object",
+        "properties" : {
+          "date" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ScanRow"
+            }
+          },
+          "dates" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string",
+              "format" : "date"
+            }
+          }
+        }
+      },
+      "ScanRow" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "preOpenPrice" : {
+            "type" : "number"
+          },
+          "prevClose" : {
+            "type" : "number"
+          },
+          "change" : {
+            "type" : "number"
+          },
+          "changePct" : {
+            "type" : "number"
+          },
+          "prevDayBreak" : {
+            "type" : "string"
           }
         }
       },

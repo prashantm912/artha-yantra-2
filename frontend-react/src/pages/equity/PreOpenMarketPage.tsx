@@ -1,9 +1,15 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Building2, CircleDot, Clock, Landmark, Sunrise, TrendingDown, TrendingUp } from 'lucide-react';
-import { useMarketStatus, usePreOpen } from '../../api/preOpen.ts';
+import {
+  useMarketStatus,
+  usePreOpen,
+  usePreOpenScan,
+  type PreOpenScanRow,
+} from '../../api/preOpen.ts';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
+import { Select } from '../../components/atoms/Select.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { cn } from '../../lib/cn.ts';
@@ -11,12 +17,13 @@ import { compareDecimal, formatDecimal, isNegative } from '../../lib/decimal.ts'
 import { FIELD_HELP } from '../../core/fieldHelp.ts';
 import type { MarketStatus, PreOpenIndex } from '../../api/types.ts';
 
-// Pre-Open Market (§equity/pre-open-market). Two Upstox reads: a session-phase banner for NSE/BSE/MCX
-// (pre-open highlighted via --ay-bull/accent, closed muted) and the NSE pre-open snapshot table (Nifty
-// 50 / Bank / Fin / Sensex). The phase text + an icon carry the meaning (never colour alone, a11y #2).
-// Net change + %change are sign-aware — the sign + an explicit arrow carry the meaning; --ay-bull/-bear
-// are supportive. Prices arrive as decimal STRINGS and are formatted exact (never parseFloat). The page
-// is useful 24/7: outside 09:00–09:15 IST it shows the live phase + the last/closing index quotes.
+// Pre-Open Market (§equity/pre-open-market). Three reads: a session-phase banner for NSE/BSE/MCX
+// (pre-open highlighted via --ay-bull/accent, closed muted), the NSE pre-open snapshot table (Nifty
+// 50 / Bank / Fin / Sensex), and the FULL F&O stock scanner (audit §9.4, Wave 5) — the ~09:09:30
+// capture preserved all day + across sessions (a date picker over the captured history), split into
+// advances/declines with the prev-day H/L break badge. The phase text + an icon carry the meaning
+// (never colour alone, a11y #2). Prices arrive as decimal STRINGS and are formatted exact (never
+// parseFloat). The page is useful 24/7.
 
 const EXCHANGE_ICON: Record<string, typeof Landmark> = {
   NSE: Landmark,
@@ -96,11 +103,48 @@ function ChangeCell({ value, suffix = '' }: { value: string | null; suffix?: str
   );
 }
 
+/** The full-scanner column set (both the advances and declines tables). */
+const scanColumns: DataColumn<PreOpenScanRow>[] = [
+  { id: 'name', header: 'Name', align: 'left', help: 'The F&O stock (cash symbol).', sortValue: (r) => r.symbol, sortType: 'text', render: (r) => <span className="font-medium text-ay-text">{r.symbol}</span>, mobileLabel: 'Name' },
+  { id: 'open', header: 'Today Open', align: 'right', help: 'The captured pre-open (auction) price.', sortValue: (r) => r.preOpenPrice, sortType: 'decimal', render: (r) => (r.preOpenPrice ? <span className="nums">{formatDecimal(r.preOpenPrice, 2)}</span> : <span className="text-ay-muted">—</span>), mobileLabel: 'Open' },
+  { id: 'prevClose', header: 'Prev. Close', align: 'right', help: FIELD_HELP.prevClose, sortValue: (r) => r.prevClose, sortType: 'decimal', render: (r) => (r.prevClose ? <span className="nums text-ay-muted">{formatDecimal(r.prevClose, 2)}</span> : <span className="text-ay-muted">—</span>), mobileLabel: 'Prev Close' },
+  { id: 'chgPct', header: 'LTP Chng %', align: 'right', help: FIELD_HELP.changePct, sortValue: (r) => r.changePct, sortType: 'decimal', render: (r) => <ChangeCell value={r.changePct} suffix="%" />, mobileLabel: '% Chg' },
+  { id: 'chg', header: 'LTP Chng', align: 'right', help: FIELD_HELP.netChange, sortValue: (r) => r.change, sortType: 'decimal', render: (r) => <ChangeCell value={r.change} />, mobileLabel: 'Chg' },
+  {
+    id: 'break',
+    header: 'Prev. Day Break',
+    align: 'center',
+    help: "The pre-open price broke the previous day's High (bullish) or Low (bearish).",
+    render: (r) =>
+      r.prevDayBreak === 'H' ? (
+        <span className="rounded bg-bull/15 px-1.5 py-0.5 text-xs font-semibold text-bull">High Break</span>
+      ) : r.prevDayBreak === 'L' ? (
+        <span className="rounded bg-bear/15 px-1.5 py-0.5 text-xs font-semibold text-bear">Low Break</span>
+      ) : (
+        <span className="text-ay-muted">—</span>
+      ),
+    mobileLabel: 'Break',
+  },
+];
+
 export function PreOpenMarketPage() {
   const statusQ = useMarketStatus();
   const preOpenQ = usePreOpen();
   const indices = preOpenQ.data?.indices ?? [];
   const asOf = indices.find((r) => r.asOf)?.asOf;
+
+  // The preserved full scanner (audit §9.4): default = today; the picker walks captured sessions.
+  const [scanDate, setScanDate] = useState<string | null>(null);
+  const scanQ = usePreOpenScan(scanDate);
+  const scanRows = useMemo(() => scanQ.data?.items ?? [], [scanQ.data]);
+  const advances = useMemo(
+    () => scanRows.filter((r) => r.changePct != null && !isNegative(r.changePct)),
+    [scanRows],
+  );
+  const declines = useMemo(
+    () => scanRows.filter((r) => r.changePct != null && isNegative(r.changePct)),
+    [scanRows],
+  );
 
   const columns = useMemo<DataColumn<PreOpenIndex>[]>(
     () => [
@@ -216,6 +260,78 @@ export function PreOpenMarketPage() {
                 emptyMessage="No index pre-open snapshot available."
                 ariaLabel="Pre-open index snapshot"
               />
+            </BeatBlock>
+          )}
+        </QueryState>
+      </section>
+
+      {/* The preserved F&O full scanner (audit §9.4, Wave 5). */}
+      <section aria-label="Pre-open stock scanner" className="mt-6">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <h2 className="text-h2 text-ay-text">Stock Scanner</h2>
+          {(scanQ.data?.dates?.length ?? 0) > 0 && (
+            <Select
+              ariaLabel="Scan date"
+              title="Pick a captured session — the ~09:09:30 pre-open snapshot is preserved per day."
+              value={scanDate ?? scanQ.data?.date ?? null}
+              options={scanQ.data?.dates ?? []}
+              onChange={setScanDate}
+            />
+          )}
+          {scanRows.length > 0 && (
+            <span className="text-xs text-ay-muted">
+              Advances: <span className="font-semibold text-bull">{advances.length}</span> · Declines:{' '}
+              <span className="font-semibold text-bear">{declines.length}</span> · captured pre-open
+              (~09:09:30 IST), preserved all day
+            </span>
+          )}
+        </div>
+        <QueryState
+          query={scanQ}
+          isEmpty={() => scanRows.length === 0}
+          empty={{
+            icon: Sunrise,
+            title: 'No captured pre-open scan for this session yet.',
+            hint: 'The scanner captures once at ~09:09:30 IST on trading days; history accrues from there.',
+          }}
+          errorTitle="Couldn't load the pre-open scanner"
+          skeleton={
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <Skeleton variant="table-rows" rows={8} cols={6} />
+              <Skeleton variant="table-rows" rows={8} cols={6} />
+            </div>
+          }
+        >
+          {() => (
+            <BeatBlock className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <div>
+                <h3 className="mb-1 flex items-center gap-1.5 text-h3 font-semibold text-bull">
+                  <TrendingUp aria-hidden="true" className="size-4" /> Pre-open Advances
+                </h3>
+                <DataTable
+                  columns={scanColumns}
+                  rows={advances}
+                  rowKey={(r) => r.symbol}
+                  pageSize={10}
+                  initialSort={{ id: 'chgPct', dir: 'desc' }}
+                  ariaLabel="Pre-open market advances"
+                  emptyMessage="No advancing stocks."
+                />
+              </div>
+              <div>
+                <h3 className="mb-1 flex items-center gap-1.5 text-h3 font-semibold text-bear">
+                  <TrendingDown aria-hidden="true" className="size-4" /> Pre-open Declines
+                </h3>
+                <DataTable
+                  columns={scanColumns}
+                  rows={declines}
+                  rowKey={(r) => r.symbol}
+                  pageSize={10}
+                  initialSort={{ id: 'chgPct', dir: 'asc' }}
+                  ariaLabel="Pre-open market declines"
+                  emptyMessage="No declining stocks."
+                />
+              </div>
             </BeatBlock>
           )}
         </QueryState>

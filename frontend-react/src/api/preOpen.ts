@@ -30,3 +30,38 @@ export function usePreOpen() {
     refetchInterval: 30 * 1000,
   });
 }
+
+/** One preserved pre-open scan row (audit §9.4 Wave 5 — the full F&O stock scanner). */
+export interface PreOpenScanRow {
+  symbol: string;
+  preOpenPrice: string | null;
+  prevClose: string | null;
+  change: string | null;
+  changePct: string | null;
+  prevDayBreak: 'H' | 'L' | null;
+}
+
+/** GET /market/equity/pre-open-scan — the captured scan for a day + the captured-session list. */
+export interface PreOpenScan {
+  date: string;
+  items: PreOpenScanRow[];
+  dates: string[];
+}
+
+/**
+ * The preserved full-scanner read: every F&O stock's ~09:09:30 pre-open capture vs prev close +
+ * the prev-day H/L break — reviewable all day and across sessions (`date` = history mode).
+ */
+export function usePreOpenScan(date: string | null) {
+  return useQuery({
+    queryKey: ['market', 'pre-open-scan', date],
+    queryFn: () => {
+      const p = new URLSearchParams();
+      if (date) p.set('date', date);
+      const qs = p.toString();
+      return apiFetch<PreOpenScan>(`/market/equity/pre-open-scan${qs ? `?${qs}` : ''}`, {
+        silenceToast: true,
+      });
+    },
+  });
+}

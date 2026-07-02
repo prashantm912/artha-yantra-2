@@ -23,6 +23,7 @@ class CronConventionsTest {
           in.arthayantra.marketdata.options.OptionsSnapshotService.class,
           in.arthayantra.marketdata.futures.FuturesOiSnapshotService.class,
           in.arthayantra.marketdata.kite.session.SessionHealthProbe.class,
+          in.arthayantra.marketdata.nse.preopen.PreOpenEquityScanService.class,
           in.arthayantra.marketdata.candles.CandlesConfig.CandleHousekeeping.class);
 
   @Test

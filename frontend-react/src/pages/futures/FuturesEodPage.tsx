@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useFuturesEod } from '../../api/oiAnalytics.ts';
 import { useUnderlyings } from '../../api/instruments.ts';
-import { foldFuturesEod, type FuturesEodRow } from '../../api/futuresEodFold.ts';
+import { foldFuturesEod, orderContractsFrontFirst, type FuturesEodRow } from '../../api/futuresEodFold.ts';
 import { useSymbolContext } from '../../stores/symbolContext.store.ts';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
@@ -41,12 +41,9 @@ export function FuturesEodPage() {
   const from = useMemo(() => isoDaysAgo(180), []);
   const q = useFuturesEod(name, from, to);
 
-  // Group by contract; default-select the one with the most captured rows (the active front).
-  const contracts = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const r of q.data ?? []) counts.set(r.tradingsymbol, (counts.get(r.tradingsymbol) ?? 0) + 1);
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([sym]) => sym);
-  }, [q.data]);
+  // Contracts front-month-first; default-select the front (§10.2-4 — the old most-captured-rows
+  // heuristic landed on a far month once several contracts had equal history).
+  const contracts = useMemo(() => orderContractsFrontFirst(q.data ?? []), [q.data]);
 
   const [contract, setContract] = useState<string | null>(null);
   useEffect(() => {

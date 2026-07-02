@@ -27,6 +27,31 @@ export interface FuturesEodRow {
   interpretation: OiInterpretation | null;
 }
 
+const FUT_MONTHS: Record<string, number> = {
+  JAN: 1, FEB: 2, MAR: 3, APR: 4, MAY: 5, JUN: 6, JUL: 7, AUG: 8, SEP: 9, OCT: 10, NOV: 11, DEC: 12,
+};
+
+/** Expiry rank of a dated FUT symbol ("NIFTY26JULFUT" → 26·12+7); unparseable sorts last. */
+function futExpiryRank(tradingsymbol: string): number {
+  const m = /(\d{2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)FUT$/.exec(tradingsymbol);
+  return m ? Number(m[1]) * 12 + FUT_MONTHS[m[2]] : Number.MAX_SAFE_INTEGER;
+}
+
+/**
+ * Contract list for the selector, FRONT MONTH FIRST (audit 2026-07-02 §10.2-4: the old
+ * most-captured-rows heuristic defaulted to a far month). Contracts still trading (rows on the
+ * latest captured session) rank before expired ones; within each group the nearest expiry wins.
+ */
+export function orderContractsFrontFirst(rows: FutEodRow[]): string[] {
+  if (rows.length === 0) return [];
+  const latest = rows.reduce((max, r) => (r.tradeDate > max ? r.tradeDate : max), '');
+  const alive = new Set(rows.filter((r) => r.tradeDate === latest).map((r) => r.tradingsymbol));
+  return [...new Set(rows.map((r) => r.tradingsymbol))].sort(
+    (a, b) =>
+      Number(alive.has(b)) - Number(alive.has(a)) || futExpiryRank(a) - futExpiryRank(b),
+  );
+}
+
 /** Signed change % of (curr − base) / base — a derived ratio (not a displayed/compared price). */
 function changePct(curr: string, base: string): string | null {
   const b = Number(base);

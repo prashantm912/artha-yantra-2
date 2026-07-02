@@ -157,6 +157,31 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
   }
 
   @Test
+  void trendingServesTheFullSessionFromTheOpen() throws Exception {
+    // Regression for the ~20-bucket window cap: the client folds cumulative Δ columns against the
+    // FIRST returned bucket, so a rolling window silently rebased the session-open baseline.
+    String u = "TRENDFULLSESS";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    OffsetDateTime open =
+        OffsetDateTime.of(2026, 6, 22, 9, 15, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    for (int i = 0; i < 25; i++) {
+      OptionsSnapshotReaderIntegrationTest.insertRow(
+          jdbc, open.plusMinutes(5L * i), u, exp, "22500", "CE", "100", 1000L + i, 0L);
+    }
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/trending")
+                .param("name", u)
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items.length()").value(25))
+        // first row = the real 09:15 open bucket (oi 1000), not a mid-session rebase (oi 1005)
+        .andExpect(jsonPath("$.items[0].totalOi").value(1000));
+  }
+
+  @Test
   void strikeSeriesReturnsOnlyTheChosenStrikeBuckets() throws Exception {
     String u = "STRIKESERIES";
     LocalDate exp = LocalDate.of(2026, 6, 25);

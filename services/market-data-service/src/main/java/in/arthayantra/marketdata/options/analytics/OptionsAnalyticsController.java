@@ -749,7 +749,7 @@ public class OptionsAnalyticsController {
     return out;
   }
 
-  /** /trending: oipulse OI Trending — per-bucket total/CE/PE OI + UP/DOWN/FLAT over the last N buckets. */
+  /** /trending: oipulse OI Trending — per-bucket total/CE/PE OI + UP/DOWN/FLAT across the session. */
   @GetMapping("/trending")
   public OiTrendingService.TrendSeries trending(
       @RequestParam(required = false) String mode,
@@ -759,14 +759,21 @@ public class OptionsAnalyticsController {
       @RequestParam(required = false) String expiry) {
     OiQuery q = OiQuery.of(mode, name, date, interval, expiry);
     LocalDate exp = requireExpiry(q);
-    // Anchor on the newest captured bucket (clock-independent); span the last trendBuckets buckets.
+    // Anchor on the newest captured bucket (clock-independent), then serve the FULL session from the
+    // 09:15 IST open: the client folds its cumulative Δ columns against the first returned bucket, so
+    // a rolling window would silently rebase the session-open baseline mid-day.
     List<OptionsSnapshotReader.StrikePoint> latest =
         reader.latest(q.name(), exp, q.interval(), q.date());
     if (latest.isEmpty()) {
       throw new ApiException(422, ErrorCodes.DATA_GAP, "no snapshot for " + q.name() + " " + exp);
     }
     OffsetDateTime newest = latest.get(0).bucket();
-    OffsetDateTime from = newest.minus(q.interval().bucket().multipliedBy(trendBuckets - 1L));
+    OffsetDateTime from =
+        newest
+            .atZoneSameInstant(Ist.ZONE)
+            .toLocalDate()
+            .atTime(MarketCalendar.SESSION_OPEN)
+            .atOffset(Ist.OFFSET);
     List<OptionsSnapshotReader.StrikePoint> series =
         reader.series(q.name(), exp, q.interval(), from, newest.plus(q.interval().bucket()));
     return trendingService.trending(series);

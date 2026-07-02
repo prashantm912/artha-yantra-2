@@ -64,14 +64,19 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
   are keyed by the **run id** (the job's `resultRef`), not the jobId. Submission + the
   worker now **auto-warm** the primary 1m + benchmark (+ contexts) via market-data's
   cache-first GET before the pre-flight, so a fresh window no longer 422s — but
-  `libs/market-calendar` covers only the CURRENT year, so a window outside it (2024/2025)
-  500s with "NSE holiday calendar covers years [...]".
+  `libs/market-calendar` covers a FIXED bundled set (currently **2024–2026**; NSE Tuesday +
+  BSE Thursday weekly expiries via `MarketCalendar.nse()`/`.bse()`), so a window outside it
+  (e.g. 2023 or 2027) 500s with "NSE holiday calendar covers years [...]". A horizon-canary
+  test goes red ~45 days before the max covered year ends — the CD-2 yearly-CSV-refresh reminder.
 - **Candle sources split by interval:** `CandleReader.read()` serves the `candles_<iv>`
   caggs (5m/15m/1h/1d/1w), **sparse on a fresh boot**; native daily lives in `candles`@1d
   (dense — `readDailyWithWarmup`). The two diverge for 1d (chart overlays hit this).
-- **3m has NO cagg — it is a read-time 1m→3m rollup** (`CandleRepository.rangeRolledFromOneMinute`,
-  #365); `candles_3m` exists but is empty/unwired (refreshing it OOMs). `/candles?interval=3m` works;
-  the live SignalEngine 3m-primary depends on this rollup, not the cagg.
+- **3m reads are a read-time 1m→3m rollup, NOT the cagg** (`CandleRepository.rangeRolledFromOneMinute`,
+  #365): the read path deliberately bypasses `candles_3m` and the live SignalEngine 3m-primary
+  depends on this rollup. The `candles_3m` cagg (V019) DOES exist and carries an active incremental
+  refresh policy (1-day window) — a wide/historical refresh over the stitched CONT + expired-contract
+  1m series is what OOMs, not the bounded nightly one; nothing reads the materialized view. (Whether
+  to drop the unused cagg+policy is a tracked P2 decision.)
 - **Historical OI is VIRTUAL (read-time derived), never a snapshot backfill:** there are no real
   `options_chain_snapshots` rows before ~2026-06-15 (live capture start). `CandleDerivedChainReader`
   pivots the per-contract `candles` + `expired_contracts` into the StrikePoint shape on the fly

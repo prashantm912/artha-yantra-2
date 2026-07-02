@@ -89,11 +89,21 @@ public class StreamBootstrap implements ApplicationRunner {
     }
   }
 
-  /** Reprocesses this consumer's already-delivered-but-unacked entries (clears the PEL). */
+  /**
+   * Clears this consumer's already-delivered-but-unacked entries by ACK-and-DROP — NOT by
+   * reprocessing (audit P2). Reprocessing ran a FULL backtest per PEL entry inline on this
+   * ApplicationRunner thread, serially, BEFORE {@code workerPool.start()} — so a crash that left
+   * several long jobs delivered-but-unacked stalled readiness (and the compose health gate + the
+   * optimizer's depends_on) for the whole multi-hour recovery. The PEL entry is pure transport
+   * residue: {@code requeueStaleRunning} (already run above) flipped any orphaned {@code running}
+   * row back to {@code queued}, and {@code findQueuedIds}→{@code dispatchBacktest} (run next) emits
+   * a FRESH stream entry for it — so acking the stale one loses no work, and a job whose row is
+   * already terminal (its ack merely lost) is correctly not re-run.
+   */
   private void drainPending() {
     StreamReadOptions options = StreamReadOptions.empty().count(50);
     StreamOffset<String> offset = StreamOffset.create(Streams.BACKTEST, ReadOffset.from("0"));
-    int drained = 0;
+    int acked = 0;
     while (true) {
       List<MapRecord<String, Object, Object>> pending;
       try {
@@ -112,15 +122,18 @@ public class StreamBootstrap implements ApplicationRunner {
         break;
       }
       for (MapRecord<String, Object, Object> record : pending) {
-        workerPool.process(record);
-        drained++;
+        redis.opsForStream().acknowledge(Streams.GROUP_BACKTEST, record);
+        acked++;
       }
       if (pending.size() < 50) {
         break;
       }
     }
-    if (drained > 0) {
-      log.info("drained {} pending stream entr(ies) on startup", drained);
+    if (acked > 0) {
+      log.info(
+          "acked {} stale pending stream entr(ies) on startup (re-dispatched from the"
+              + " authoritative table, not replayed inline)",
+          acked);
     }
   }
 

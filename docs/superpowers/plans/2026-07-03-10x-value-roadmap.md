@@ -225,9 +225,19 @@ and NO broker-number hunt. Capital = `GET /v2/user/get-funds-and-margin` (live; 
 offline/backtest fallback (`SpanEngine` gets a second, Upstox-backed impl for live). **Gotcha:**
 `quantity` must be a multiple of the contract lot size (UDAPI1104 otherwise — read it from the
 Upstox instrument master); ≤20 legs/basket.
+**Status 2026-07-04 — SPAN SOURCE SHIPPED ([#510](https://github.com/prashantm912/artha-yantra-2/pull/510)):**
+the margin capability (the `.spn`-blocked piece) is BUILT + deployed: `UpstoxMarginClient` +
+`POST /api/v1/market/margin` (typed record, fail-soft, gated on the analytics token) compute
+broker-real SPAN server-side. Remaining = the F9 *application* layer (below), which needs owner
+risk numbers + the advisory week.
 **Acceptance criteria:**
-- [ ] Paper entries carry `advised_lots` + margin snapshot from Upstox `/v2/charges/margin`; the returned SPAN is broker-real by construction (Upstox IS a broker), so no separate parity step — one live session sanity-checked that `advised_lots × margin ≤ available funds`.
-- [ ] Governor drill on mock: inject losses past the daily cap → new entries blocked, ntfy fired, existing positions untouched.
+- [x] **SPAN source: broker-real margins available, no `.spn` file** — `POST /api/v1/market/margin`
+  resolves the leg → Upstox key → `/v2/charges/margin`; live-verified. (#510)
+- [ ] Paper entries carry `advised_lots` + margin snapshot from the margin endpoint — needs the owner's
+  per-trade-risk %; the returned SPAN is broker-real by construction (Upstox IS a broker), so no
+  separate parity step, just `advised_lots × margin ≤ available funds` (`GET /v2/user/get-funds-and-margin`).
+- [ ] Governor drill on mock: inject losses past the daily cap → new entries blocked, ntfy fired,
+  existing positions untouched — needs the owner's daily-loss + heat-cap numbers.
 - [ ] Flag default OFF; ON in compose only after one clean advisory-mode week.
 
 ---

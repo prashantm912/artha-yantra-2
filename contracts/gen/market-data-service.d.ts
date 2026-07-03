@@ -116,6 +116,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/margin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["margin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/equity/pre-open-scan/capture": {
         parameters: {
             query?: never;
@@ -1754,6 +1770,33 @@ export interface components {
             /** Format: date */
             to?: string;
         };
+        MarginLeg: {
+            exchange?: string;
+            underlying?: string;
+            optionType?: string;
+            /** Format: date */
+            expiry?: string;
+            strike?: number;
+            /** Format: int32 */
+            quantity?: number;
+            side?: string;
+            product?: string;
+        };
+        MarginRequest: {
+            legs?: components["schemas"]["MarginLeg"][];
+        };
+        MarginResponse: {
+            priced?: boolean;
+            unpricedReason?: string;
+            spanMargin?: number;
+            exposureMargin?: number;
+            equityMargin?: number;
+            netBuyPremium?: number;
+            additionalMargin?: number;
+            totalMargin?: number;
+            requiredMargin?: number;
+            finalMargin?: number;
+        };
         CaptureResult: {
             /** Format: date */
             date?: string;
@@ -3203,6 +3246,39 @@ export interface operations {
                     "*/*": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    margin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MarginRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["MarginResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

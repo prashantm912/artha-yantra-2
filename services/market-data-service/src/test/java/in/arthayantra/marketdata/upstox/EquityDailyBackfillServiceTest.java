@@ -98,7 +98,7 @@ class EquityDailyBackfillServiceTest {
 
     @SuppressWarnings("unchecked")
     ArgumentCaptor<List<Candle>> rows = ArgumentCaptor.forClass(List.class);
-    verify(candles, times(2)).upsertAll(rows.capture());
+    verify(candles, times(2)).upsertAuthoritativeAll(rows.capture());
     Candle row = rows.getAllValues().get(0).get(0);
     assertThat(row.exchange()).isEqualTo("NSE");
     assertThat(row.interval()).isEqualTo("1d");
@@ -124,7 +124,7 @@ class EquityDailyBackfillServiceTest {
     assertThat(s.state()).isEqualTo("OK");
     assertThat(s.written()).isEqualTo(1);
     assertThat(s.skipped()).isEqualTo(1);
-    verify(candles, times(1)).upsertAll(any());
+    verify(candles, times(1)).upsertAuthoritativeAll(any());
   }
 
   @Test
@@ -147,7 +147,7 @@ class EquityDailyBackfillServiceTest {
     assertThat(s.state()).isEqualTo("OK");
     assertThat(s.failed()).isGreaterThanOrEqualTo(1);
     assertThat(s.written()).isEqualTo(1);
-    verify(candles, times(1)).upsertAll(any());
+    verify(candles, times(1)).upsertAuthoritativeAll(any());
   }
 
   @Test
@@ -196,6 +196,6 @@ class EquityDailyBackfillServiceTest {
     org.assertj.core.api.Assertions.assertThatThrownBy(
             () -> service.triggerAsync(List.of("RELIANCE"), null))
         .isInstanceOf(in.arthayantra.common.web.error.ApiException.class);
-    verify(mock(CandleRepository.class), never()).upsertAll(any());
+    verify(mock(CandleRepository.class), never()).upsertAuthoritativeAll(any());
   }
 }

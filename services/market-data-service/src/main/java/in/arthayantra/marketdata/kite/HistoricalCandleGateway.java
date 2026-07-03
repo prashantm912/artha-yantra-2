@@ -26,4 +26,14 @@ public interface HistoricalCandleGateway {
 
   /** Candles for {@code key} at {@code interval} within {@code [from, to)}. */
   List<Candle> fetch(InstrumentKey key, String interval, Instant from, Instant to);
+
+  /**
+   * Provenance tag stamped into {@code candles.source} for bars persisted from this gateway — the
+   * FETCHING impl labels its own bars (audit row 10: the old profile ternary stamped an
+   * OpenAlgo-routed fetch as KITE). Defaults to the incumbent Kite live gateway's tag; every
+   * swapped-in source ({@code artha.marketdata.source.candles}) MUST override.
+   */
+  default String sourceLabel() {
+    return "KITE";
+  }
 }

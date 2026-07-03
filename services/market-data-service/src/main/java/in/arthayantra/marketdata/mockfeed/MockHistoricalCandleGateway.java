@@ -63,6 +63,11 @@ public class MockHistoricalCandleGateway implements HistoricalCandleGateway {
     return out;
   }
 
+  @Override
+  public String sourceLabel() {
+    return "MOCK";
+  }
+
   private Candle synthesize(InstrumentKey key, String interval, OffsetDateTime bucket) {
     long symbolSeed = seed * 31 + key.canonical().hashCode();
     long bucketEpoch = bucket.toEpochSecond();

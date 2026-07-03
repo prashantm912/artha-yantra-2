@@ -267,7 +267,7 @@ public class EquityDailyBackfillService {
       for (Bar b : bars) {
         rows.add(toCandle(symbol, b));
       }
-      candles.upsertAll(rows);
+      candles.upsertAuthoritativeAll(rows);
       p.written.incrementAndGet();
       p.rows.addAndGet(rows.size());
       p.log(symbol + ": " + rows.size() + " daily candles");

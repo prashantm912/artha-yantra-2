@@ -476,7 +476,7 @@ public class ExpiredBackfillService {
               b.open(), b.high(), b.low(), b.close(), b.volume(), b.oi(), BACKFILL));
     }
     if (!candleRows.isEmpty()) {
-      candles.upsertAll(candleRows);
+      candles.upsertAuthoritativeAll(candleRows);
     }
     // Complete iff the data reaches the liquid expiry tail, OR this was already a re-attempt of a short
     // contract (cov != NONE) — accept it then so a genuinely-short or twice-empty leg can't re-fetch forever.

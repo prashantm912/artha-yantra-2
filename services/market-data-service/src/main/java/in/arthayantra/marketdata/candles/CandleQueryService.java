@@ -14,7 +14,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
 
 /**
@@ -56,13 +55,14 @@ public class CandleQueryService {
       HistoricalCandleGateway gateway,
       GapDetector gapDetector,
       Clock clock,
-      Environment environment,
       MeterRegistry meterRegistry) {
     this.repository = repository;
     this.gateway = gateway;
     this.gapDetector = gapDetector;
     this.clock = clock;
-    this.fetchSource = environment.matchesProfiles("live") ? "KITE" : "MOCK";
+    // provenance from the gateway impl, not the Spring profile — an OpenAlgo-routed fetch
+    // must never persist as KITE (artha.marketdata.source.candles selects the impl)
+    this.fetchSource = gateway.sourceLabel();
     this.cacheHits = meterRegistry.counter("ay_candle_cache_requests_total", "result", "hit");
     this.cacheMisses = meterRegistry.counter("ay_candle_cache_requests_total", "result", "miss");
     meterRegistry.gauge(
@@ -134,7 +134,7 @@ public class CandleQueryService {
         List<HistoricalCandleGateway.Candle> fetched =
             gateway.fetch(key, baseInterval, page.from().toInstant(), page.to().toInstant());
         if (!fetched.isEmpty()) {
-          repository.upsertAll(
+          repository.upsertAuthoritativeAll(
               fetched.stream()
                   .map(
                       c ->
@@ -223,7 +223,7 @@ public class CandleQueryService {
     for (GapDetector.Gap page : GapDetector.pages(new GapDetector.Gap(from, to))) {
       List<HistoricalCandleGateway.Candle> fetched =
           gateway.fetch(key, baseInterval, page.from().toInstant(), page.to().toInstant());
-      repository.upsertAll(
+      repository.upsertAuthoritativeAll(
           fetched.stream()
               .map(
                   c ->

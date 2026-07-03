@@ -45,6 +45,17 @@ vi.mock('../../api/paper.ts', () => ({
   usePaperPnl: () => ({ data: { summary: { realizedTotal: '12500.00', trades: 4, winRate: '0.75' } } }),
   usePaperPositions: () => ({ data: { items: [{ id: 1 }] } }),
 }));
+vi.mock('../../api/health.ts', () => ({
+  useDataHealth: () => ({
+    data: {
+      status: 'GREEN',
+      marketOpen: true,
+      asOf: '2026-06-23T13:30:00+05:30',
+      tickedTokens: 42,
+      problems: [],
+    },
+  }),
+}));
 
 import { DashboardPage } from './DashboardPage.tsx';
 
@@ -63,6 +74,7 @@ describe('DashboardPage', () => {
   it('renders the status strip, active signals, paper P&L and in-flight jobs', () => {
     renderPage();
     expect(screen.getByText('OPEN')).toBeInTheDocument(); // market phase
+    expect(screen.getByText('OK · 42 live')).toBeInTheDocument(); // data-health canary tile
     expect(screen.getByText('1 running · 2 queued')).toBeInTheDocument();
     expect(screen.getByText('RELIANCE')).toBeInTheDocument(); // active signal
     expect(screen.getByText('12500.00')).toBeInTheDocument(); // realized P&L

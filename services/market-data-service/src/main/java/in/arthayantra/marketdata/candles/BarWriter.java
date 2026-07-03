@@ -1,6 +1,7 @@
 package in.arthayantra.marketdata.candles;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import in.arthayantra.marketdata.canary.DataHealthState;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import java.time.Clock;
@@ -28,6 +29,7 @@ public class BarWriter implements CandleBuilder.BarSink {
   private final ObjectMapper objectMapper;
   private final Clock clock;
   private final Timer builderLag;
+  private final DataHealthState healthState;
 
   /** Wires persistence + publish. */
   public BarWriter(
@@ -35,12 +37,14 @@ public class BarWriter implements CandleBuilder.BarSink {
       StringRedisTemplate redis,
       ObjectMapper objectMapper,
       Clock clock,
-      MeterRegistry meterRegistry) {
+      MeterRegistry meterRegistry,
+      DataHealthState healthState) {
     this.repository = repository;
     this.redis = redis;
     this.objectMapper = objectMapper;
     this.clock = clock;
     this.builderLag = meterRegistry.timer("ay_candle_builder_lag_seconds");
+    this.healthState = healthState;
   }
 
   @Override
@@ -49,6 +53,7 @@ public class BarWriter implements CandleBuilder.BarSink {
       repository.upsert(bar);
       String channel = "candles.1m." + bar.exchange() + "." + bar.tradingsymbol();
       redis.convertAndSend(channel, objectMapper.writeValueAsString(bar));
+      healthState.recordBar(bar.exchange(), bar.tradingsymbol());
       OffsetDateTime barEnd = bar.bucket().plusMinutes(1);
       long lagMs = Duration.between(barEnd.toInstant(), clock.instant()).toMillis();
       builderLag.record(Math.max(0, lagMs), TimeUnit.MILLISECONDS);

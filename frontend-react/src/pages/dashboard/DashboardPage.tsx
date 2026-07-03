@@ -6,6 +6,7 @@ import {
   ArrowUpRight,
   CalendarClock,
   Cog,
+  HeartPulse,
   KeyRound,
   Radar,
   Radio,
@@ -17,6 +18,7 @@ import { cn } from '../../lib/cn.ts';
 import { useSignals } from '../../api/signals.ts';
 import { usePaperAccount, usePaperPnl, usePaperPositions } from '../../api/paper.ts';
 import { JOB_ACTIVE_STATES, useRecentJobs, useSystemStatus } from '../../api/dashboard.ts';
+import { useDataHealth } from '../../api/health.ts';
 import { PageHeader, LiveDot } from '../../components/PageHeader.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
@@ -84,6 +86,7 @@ const phaseTone: Record<string, string> = {
 
 export function DashboardPage() {
   const status = useSystemStatus();
+  const dataHealth = useDataHealth();
   const activeSignals = useSignals('ACTIVE');
   const account = usePaperAccount();
   const pnl = usePaperPnl();
@@ -98,6 +101,22 @@ export function DashboardPage() {
 
   const s = status.data;
   const summary = pnl.data?.summary ?? null;
+  const health = dataHealth.data;
+  const healthValue = !health
+    ? '—'
+    : !health.marketOpen
+      ? 'CLOSED'
+      : health.status === 'GREEN'
+        ? `OK · ${health.tickedTokens} live`
+        : `${health.status} (${health.problems.length})`;
+  const healthTone = !health || !health.marketOpen
+    ? 'text-ay-muted'
+    : health.status === 'GREEN'
+      ? 'text-bull'
+      : health.status === 'AMBER'
+        ? 'text-warn'
+        : 'text-bear';
+  const healthDetail = health?.problems.map((p) => `${p.check} ${p.key}: ${p.detail}`).join('\n');
 
   return (
     <LoadBeat>
@@ -112,10 +131,15 @@ export function DashboardPage() {
       {s ? (
         <BeatStrip
           data-testid="dashboard-status"
-          className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5"
+          className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6"
         >
           <BeatItem>
             <StatusTile icon={Activity} label="System" value={s.overall} tone={s.overall === 'UP' ? 'text-bull' : 'text-warn'} />
+          </BeatItem>
+          <BeatItem>
+            <div title={healthDetail || undefined}>
+              <StatusTile icon={HeartPulse} label="Data health" value={healthValue} tone={healthTone} />
+            </div>
           </BeatItem>
           <BeatItem>
             <StatusTile icon={CalendarClock} label="Market" value={s.market.phase} tone={phaseTone[s.market.phase] ?? 'text-ay-text'} />

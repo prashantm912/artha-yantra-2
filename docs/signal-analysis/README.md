@@ -255,9 +255,13 @@ Proposed 2026-07-03 from the first pass — each is small and parity-safe (rejec
    Analysis keeps mis-reading dead-data dots as bearish evidence until this is uniform.
 7. **FE funnel view** on /signal-rejections — per-strategy Sankey/waterfall (bars → rail₁ → … →
    composite → fired) per day; the §3 pass at a glance.
-8. **`DataHealthCanary` (code, FeedWatchdog pattern)** — a live scheduled check that inspects the
-   NEWEST rejection's context fields against a known-dead baseline and ntfy-pings when a field goes
-   newly dead (or newly alive). Replaces the scheduled 09:42 agent-run data-health check with a
-   machine watcher once a few sessions prove the check stable — agents investigate on ping, code
-   does the watching. (Interim: scheduled tasks `live-data-health-check` 09:42 + the 15:47
-   post-market forensics run.)
+8. **`DataHealthCanary` (code, FeedWatchdog pattern)** — **v1 SHIPPED 2026-07-03 (roadmap F4)**:
+   `marketdata.canary` runs a 60 s in-session sweep for per-instrument tick/bar divergence (the
+   2026-07-03 CandleBuilder-poison signature — ticks flowing, no 1m bars closing) plus
+   options/futures OI capture-freshness probes, ntfy-alerting with a 15 min cooldown, feed-wide
+   aggregation and recovery notes. Read surface: `GET /api/v1/market/health/data` (also the
+   dashboard "Data health" tile). **Agents: read that endpoint FIRST and deep-dive only on
+   non-GREEN.** Still agent-side (v2 candidates): per-DOT rejection-context field liveness
+   (ivRank/breadth/dow newly-dead detection) — the canary watches the data plane, not yet the
+   gate's inputs. Fault drill: `artha.canary.drill-suppress-key` suppresses one instrument's bar
+   recording end-to-end; `artha.canary.force-open` un-gates the session check for off-hours drills.

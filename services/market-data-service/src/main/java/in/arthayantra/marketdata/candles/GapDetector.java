@@ -9,15 +9,27 @@ import java.util.Set;
 
 /**
  * Gap math (Phase 11 / Flow 3): expected buckets from the calendar minus present buckets →
- * contiguous missing sub-ranges, each then fetched in ≤ 60-day pages. The trailing 2 h is always
- * re-fetched (the B-4 recency rule — closed bars outside it are immutable).
+ * contiguous missing sub-ranges, each then fetched in ≤ 60-day pages. Buckets whose END sits
+ * inside the trailing recency window are always re-fetched (the B-4 recency rule: an in-progress
+ * bar — today's 1d bucket especially — must keep refreshing; closed bars outside the window are
+ * immutable).
+ *
+ * <p>The window was 2 h until 2026-07-03 (deliberate NARROWING of the frozen B-4 constant, live
+ * evidence in `docs/signal-analysis/2026-07-03-session-findings.md` ledger #9): with a 2 h tail,
+ * EVERY cache-first read whose {@code to} touched "now" re-fetched two hours of already-covered
+ * bars from Kite — a session-long re-fetch treadmill across all pollers (signal engine, charts,
+ * EOD job) that burned rate budget and re-stamped tick-agg provenance. 10 min keeps the whole
+ * point of the rule (the in-progress bucket's end is always after now, so it always refreshes;
+ * just-closed bars get a revision tail) while making closed coverage cache-final. Official-bar
+ * convergence beyond the tail is owned by the EOD paths, exactly as before (the old rule only
+ * ever converged a rolling 2 h, never the full session).
  */
 public final class GapDetector {
 
   /** A contiguous missing sub-range, half-open {@code [from, to)}. */
   public record Gap(OffsetDateTime from, OffsetDateTime to) {}
 
-  static final Duration RECENCY_WINDOW = Duration.ofHours(2);
+  static final Duration RECENCY_WINDOW = Duration.ofMinutes(10);
   static final Duration MAX_PAGE = Duration.ofDays(60);
 
   private final TradingBuckets buckets;
@@ -54,7 +66,7 @@ public final class GapDetector {
     OffsetDateTime previous = null;
     for (OffsetDateTime bucket : expected) {
       // recency compares the bucket END: an in-progress bar (today's 1d bucket especially)
-      // must keep re-fetching until 2h after it CLOSES — start-based checks froze it mid-day
+      // must keep re-fetching until the window clears its CLOSE — start-based checks froze it
       boolean missing =
           !have.contains(bucket.toInstant().atOffset(java.time.ZoneOffset.UTC))
               || bucket.plus(step).isAfter(recencyStart);

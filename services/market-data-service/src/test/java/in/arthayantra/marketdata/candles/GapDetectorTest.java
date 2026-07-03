@@ -60,22 +60,52 @@ class GapDetectorTest {
   }
 
   @Test
-  void trailingRecencyWindowIsAlwaysRefetchedEvenWhenPresent() {
+  void onlyTheTrailingRecencyTailIsRefetchedWhenPresent() {
+    // TREADMILL REGRESSION (2026-07-03 ledger #9): with a 2 h window, every cache-first read whose
+    // `to` touched "now" re-fetched two hours of ALREADY-COVERED bars from Kite all session long.
+    // The tail is now 10 min: covered CLOSED bars older than that are cache-final; only buckets
+    // whose END clears now-10m re-fetch (the in-progress bucket always does — that is B-4's point).
     List<OffsetDateTime> present =
         buckets.minuteBuckets(ist("2026-02-03T09:15:00"), ist("2026-02-03T10:15:00"));
 
-    // now is 10:30 the same day — everything after 08:30 sits inside the 2 h window
-    List<GapDetector.Gap> gaps =
+    // now is 10:30 — recencyStart 10:20; every present bucket ENDS at/before 10:15 → pure hit
+    List<GapDetector.Gap> allClosed =
         detector.gaps(
             "1m",
             ist("2026-02-03T09:15:00"),
             ist("2026-02-03T10:15:00"),
             present,
             ist("2026-02-03T10:30:00"));
+    assertThat(allClosed).isEmpty();
+
+    // now is 10:16 — recencyStart 10:06; buckets 10:06..10:14 (ends 10:07..10:15) re-fetch,
+    // everything before stays a cache hit
+    List<GapDetector.Gap> tail =
+        detector.gaps(
+            "1m",
+            ist("2026-02-03T09:15:00"),
+            ist("2026-02-03T10:15:00"),
+            present,
+            ist("2026-02-03T10:16:00"));
+    assertThat(tail).hasSize(1);
+    assertThat(tail.get(0).from()).isEqualTo(ist("2026-02-03T10:06:00"));
+    assertThat(tail.get(0).to()).isEqualTo(ist("2026-02-03T10:15:00"));
+  }
+
+  @Test
+  void inProgressDayBucketAlwaysRefetches() {
+    // the B-4 intent the recency rule exists for: today's 1d bucket ENDS tomorrow, so it must
+    // re-fetch mid-day even when a stale row is cached — narrowing the window must not break this
+    List<GapDetector.Gap> gaps =
+        detector.gaps(
+            "1d",
+            ist("2026-02-03T00:00:00"),
+            ist("2026-02-04T00:00:00"),
+            List.of(ist("2026-02-03T00:00:00")),
+            ist("2026-02-03T12:00:00"));
 
     assertThat(gaps).hasSize(1);
-    assertThat(gaps.get(0).from()).isEqualTo(ist("2026-02-03T09:15:00"));
-    assertThat(gaps.get(0).to()).isEqualTo(ist("2026-02-03T10:15:00"));
+    assertThat(gaps.get(0).from()).isEqualTo(ist("2026-02-03T00:00:00"));
   }
 
   @Test

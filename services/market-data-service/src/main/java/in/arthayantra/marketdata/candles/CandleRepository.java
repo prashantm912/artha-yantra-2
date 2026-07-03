@@ -27,7 +27,17 @@ public class CandleRepository {
         close = EXCLUDED.close,
         volume = EXCLUDED.volume,
         oi = COALESCE(EXCLUDED.oi, candles.oi),
-        source = EXCLUDED.source,
+        -- provenance (2026-07-03 ledger #8): an upsert that changes NOTHING (a re-fetch landing
+        -- the identical bar) keeps the original source instead of re-stamping last-writer, so
+        -- "did tick aggregation produce this bar" stays answerable; a value-changing write
+        -- honestly takes the new source (the row now IS that source's data).
+        source = CASE
+          WHEN candles.close = EXCLUDED.close
+           AND candles.volume = EXCLUDED.volume
+           AND GREATEST(candles.high, EXCLUDED.high) = candles.high
+           AND LEAST(candles.low, EXCLUDED.low) = candles.low
+           AND COALESCE(EXCLUDED.oi, candles.oi) IS NOT DISTINCT FROM candles.oi
+          THEN candles.source ELSE EXCLUDED.source END,
         fetched_at = now()
       """;
 

@@ -57,16 +57,14 @@ canary tile green through the session + zero false alerts; NIFTY26JULFUT TICK_AG
 composite-070) populate with net-₹ labels; breadth dot scores intraday (advances/declines non-zero
 in rejections' context). The 09:42 + 15:47 agents cover all of it.
 
-### 3b. Audit-register fix queue (reconciled 2026-07-03, code-verified)
+### 3b. Audit-register fix queue — **CLOSED 2026-07-04**
 
-Reconciliation DONE — full verdict table lives as the dated addendum at the bottom of
+All 22 surviving rows shipped in the weekend batch, PRs **#500–#507** (every one CI-green,
+squash-merged; #506 replay-fallback re-verified against the goldens/parity suite before merge).
+Per-row outcomes live in the addendum table at the bottom of
 [`archive/2026-07-02-full-codebase-audit-findings-register.md`](archive/2026-07-02-full-codebase-audit-findings-register.md).
-Net: 4 FIXED since the freeze · 4 accepted-risk (single-owner posture, closed) · **22 real
-survivors** forming the standing quality fix queue. Work them in waves (S-effort live-path batch
-first: resubscribe gap, emit transactionality, ticker-status truth, pipeline decoupling, eval
-counter, interval strictness; then ops/FE S-items; the five M-items last — note #3
-replay-fallback is PARITY-SENSITIVE and needs a golden re-verify). Mark rows fixed in the
-addendum table as they land.
+The whole 2026-07-02 audit is now fully closed: 90 findings → 54 fixed same-day (#407–#435) +
+4 accepted-risk + 1 refuted + 22 fixed here + the rest resolved by intervening waves.
 
 ## 4. Scheduled maintenance
 
@@ -74,11 +72,16 @@ addendum table as they land.
 |---|---|
 | **before ~2026-11-16** | **CD-2 yearly calendar CSV refresh** — add 2027 NSE/BSE holiday CSVs to `libs/market-calendar`. `CalendarHorizonCanaryTest` goes red ~45 days before year-end; unrefreshed, the monthly-expiry look-ahead cliff starts 2026-12-29 and OI capture silently halts 2027-01-01. |
 
-## 5. Small optional nits (low value — batch when touching the area)
+## 5. Small optional nits — **CLOSED 2026-07-04** (with the fix-queue batch)
 
-- Value-verify residuals: F3 heatmap UTC label edge case; F5 strike-series ΔOI basis; per-leg IV=greeks
-  display class on derived history.
-- FE revamp leftovers: options-chain Radix-Select, "Columns" rename, table density toggle.
+- Value-verify residuals: F3 heatmap UTC labels were already fixed (#402, stale entry); F5
+  strike-series ΔOI is now the bucket-lag delta (#503 — full-chain `series()`/`latest()` reads
+  deliberately keep the captured semantics so the live gate's dots stay byte-identical); the
+  single per-strike Black-76 IV (CE==PE) is documented on the chain's IV column header (#503).
+- FE revamp leftovers: "Columns" rename + chain density toggle had already shipped (stale
+  entries). Options-chain Radix-Select migration: **decided SKIP** — the shared Select atom is a
+  native `<select>` by design (a11y-strong, zero-dep); the migration is cosmetic with
+  e2e-selector risk on the platform's most-used control. Never re-flag as pending.
 
 ## 6. Deferred-by-design — build only when a consumer appears
 
@@ -108,12 +111,14 @@ captured bank-radar) · SENSEX point-scale constant (dead — signals ride NIFTY
 
 ---
 
-## Net (refreshed 2026-07-03 evening)
+## Net (refreshed 2026-07-04, post fix-queue closeout)
 
-Everything currently buildable is BUILT (roadmap P1+F8+F4v2 + treadmill/provenance fixes,
-#483–#491, all deployed). What remains: **the data month** (rollup accrues per session, proposals
-pass self-triggers at ≥5 sessions → then the tuning session with the exit-band runbook) · the
-**roadmap's gated phases** (§1 row — telegram token, always-on-host hardware, graduation numbers,
-real `.spn`) · **Minervini** (owner-deferred behind the roadmap) · a **Nov-2026 calendar refresh**
-(§4) · §2 owner toggles/sign-offs · §3 next-session verifies. Machines watch the machines now:
-two in-code canaries + two scheduled agents cover live health and per-session forensics.
+Everything currently buildable is BUILT: roadmap P1+F8+F4v2 (#483–#491) **plus the entire
+audit-register fix queue — all 22 rows + §5 nits, PRs #500–#507 (2026-07-04 weekend batch)**.
+The 2026-07-02 audit is fully closed. What remains: **the data month** (rollup accrues per
+session, proposals pass self-triggers at ≥5 sessions → then the tuning session with the exit-band
+runbook) · the **roadmap's gated phases** (§1 row — always-on-host hardware, graduation numbers,
+real `.spn`; telegram bot went LIVE 2026-07-03) · **Minervini** (owner-deferred behind the
+roadmap) · a **Nov-2026 calendar refresh** (§4) · §2 owner toggles/sign-offs · §3 next-session
+verifies. Machines watch the machines: two in-code canaries + two scheduled agents + the weekly
+backup round-trip CI cover live health, per-session forensics and disaster-recovery integrity.

@@ -51,7 +51,10 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
   `SignalEvent`/`Trade` fields ride as a NON-serialized side-channel — golden stays
   byte-identical and parity holds *iff* both deterministic replays compute the same value
   (compute at entry, e.g. `ExitEvaluator.entryLevels`, never per-run random). Verify with
-  GoldenDeterminismTest + BacktestParityTest.
+  GoldenDeterminismTest + BacktestParityTest. **Premium-exit semantics are pinned by a shared
+  fixture** (`contracts/fixtures/exit-equivalence.json`, #505): backtest's PremiumExitEvaluator
+  and the live bracket chain (PremiumBracketRules + PaperBracketEvaluator) both test against it —
+  change exit semantics only by updating the fixture + BOTH suites in one PR.
 - **Contract spec drift (springdoc):** `ContractCaptureTest` snapshots `/v3/api-docs`;
   re-capture with `-Dcontracts.capture=true`, regen TS via `npx openapi-typescript@7` →
   `contracts/gen/*.d.ts`. Generic `Map<String,Object>` returns are NOT enumerated, so adding
@@ -83,8 +86,12 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
 - **Cache-first candle reads re-fetch only a 10-min trailing tail** (B-4 recency, NARROWED from
   2 h in #490 — the old window made every `to`≈now read re-fetch 2 h of covered bars from Kite all
   session). `GapDetector` marks a bucket missing iff absent OR its END clears now−10m, so the
-  in-progress bucket (today's 1d especially) always refreshes; the upsert keeps the original
-  `source` when a re-fetched bar is value-identical (provenance stays diagnosable). Live watchers:
+  in-progress bucket (today's 1d especially) always refreshes. **Candle writes are TWO upserts**
+  (#507): fetched history rides `upsertAuthoritativeAll` (REPLACES o/h/l/c/volume/oi — a poisoned
+  tick-agg spike is correctable by re-fetch), the GREATEST/LEAST merge is tick-agg-only
+  (`BarWriter`), bhavcopy stays DO-NOTHING; BOTH keep the original `source` on a value-identical
+  write (provenance stays diagnosable), and the fetch `source` label comes from
+  `HistoricalCandleGateway.sourceLabel()`, never the Spring profile. Live watchers:
   `GET /api/v1/market/health/data` (per-token tick/bar divergence + capture freshness) and
   `GET /api/v1/signal-rejections/dot-health` (per-dot gate-input liveness) — check these BEFORE
   hand-digging a "feed looks dead" report.

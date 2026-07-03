@@ -1,5 +1,8 @@
 # Trade management: targets, trailing, SL alternates, exits
 
+> **ARCHIVED (2026-07-03 doc sweep):** historical planning doc — the work here is delivered, superseded, or consciously parked. Anything still open lives in `../2026-07-02-remaining-items.md` (ledger) or `../2026-07-03-10x-value-roadmap.md`. Do not mine this file for TODOs.
+
+
 Status: PLAN (implementation-ready). Owner: single-owner. Date: 2026-06-27.
 Target modules: `libs/strategy-engine` (the `ExitEvaluator` + golden harness), `libs/strategy-schema`
 (the `exit_rules` grammar), `services/strategy-signal-service` (the scalper seam + the 36 YAMLs +

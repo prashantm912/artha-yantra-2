@@ -1,5 +1,8 @@
 # IV fidelity — per-strike IV direction, absolute band, both-sides-flat
 
+> **ARCHIVED (2026-07-03 doc sweep):** historical planning doc — the work here is delivered, superseded, or consciously parked. Anything still open lives in `../2026-07-02-remaining-items.md` (ledger) or `../2026-07-03-10x-value-roadmap.md`. Do not mine this file for TODOs.
+
+
 Status: ✅ BUILT / DONE (E4 — shipped #282/#288/#289/#290: iv-per-strike + iv-absolute-band dots, iv-buyer-cap
 >40 veto, hero-zero both-sides-flat skip, low-iv-straddle LOW-IV skip). Kept as the as-built design ref (the
 scalper-to-100 roadmap §E4 links it). Original status below.

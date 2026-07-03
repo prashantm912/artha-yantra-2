@@ -1,5 +1,8 @@
 # Scalper tunable-infra build (2b) — forward plan
 
+> **ARCHIVED (2026-07-03 doc sweep):** historical planning doc — the work here is delivered, superseded, or consciously parked. Anything still open lives in `../2026-07-02-remaining-items.md` (ledger) or `../2026-07-03-10x-value-roadmap.md`. Do not mine this file for TODOs.
+
+
 **Owner goal:** make the 12 Siva scalper strategies tunable + paper-ready on the now-complete
 expired-premium archive, then tune on LIVE forward paper. Status as of 2026-06-26: the keystone
 blocker is fixed; the remaining build is specced below.

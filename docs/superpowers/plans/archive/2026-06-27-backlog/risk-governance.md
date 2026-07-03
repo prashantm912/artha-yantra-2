@@ -1,5 +1,8 @@
 # Risk governance — daily caps, 5-account ledgers, max-positions wiring, auto-journal
 
+> **ARCHIVED (2026-07-03 doc sweep):** historical planning doc — the work here is delivered, superseded, or consciously parked. Anything still open lives in `../2026-07-02-remaining-items.md` (ledger) or `../2026-07-03-10x-value-roadmap.md`. Do not mine this file for TODOs.
+
+
 Status: ✅ BUILT / DONE (E10 — shipped #77 (daily-loss/max-positions wiring), #300 (auto-journal),
 #314 (five-account first-loss-freeze ledger), #315 (ledger stamping); daily caps 10% loss / 1.5% profit /
 20% deploy live). Kept as the as-built design ref (the scalper-to-100 roadmap §E10 links it). Original status

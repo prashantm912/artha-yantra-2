@@ -1,5 +1,8 @@
 # Open=High Per-Strike Probability (faithful Table-1/Table-2 grading) Implementation Plan
 
+> **ARCHIVED (2026-07-03 doc sweep):** historical planning doc — the work here is delivered, superseded, or consciously parked. Anything still open lives in `../2026-07-02-remaining-items.md` (ledger) or `../2026-07-03-10x-value-roadmap.md`. Do not mine this file for TODOs.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax.
 
 **Goal:** Replace the #2 Open=High/Open=Low v1 proxy (front-Future OH/OL x OI-quadrant) with the **source-faithful** probability grading from the Siva "Open & High" deck (Day 14): the per-strike OH/OL **FNO-structure table (Table 1)** + the **price/volume modifier (Table 2)**, graded HIGH / MILD / LOW / STAND_ASIDE — by exposing per-strike option-premium session OHLC + volume from the existing snapshot store.

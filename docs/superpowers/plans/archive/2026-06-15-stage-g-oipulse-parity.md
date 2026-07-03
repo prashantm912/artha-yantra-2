@@ -1,5 +1,8 @@
 # Stage G — oipulse-parity completion Implementation Plan
 
+> **ARCHIVED (2026-07-03 doc sweep):** historical planning doc — the work here is delivered, superseded, or consciously parked. Anything still open lives in `../2026-07-02-remaining-items.md` (ledger) or `../2026-07-03-10x-value-roadmap.md`. Do not mine this file for TODOs.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Complete the oipulse-parity OI-analytics suite — the remaining options endpoints, the full futures family (incl. OHLC capture), FII/DII + breadth EOD reads, history-mode wiring, and the frontend pages/charts that consume them.

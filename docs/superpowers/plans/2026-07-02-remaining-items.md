@@ -41,6 +41,12 @@ Ran live 2026-07-03 (findings addendum A2 in `docs/signal-analysis/2026-07-03-se
   (#377) — **PASS**.
 - [ ] NSE announcement field mapping on live data (#378) — not exercised 2026-07-03; check next
   session with fresh announcements.
+- [ ] **sentimentPct formula reconcile (master-plan §18.6, found in the 2026-07-03 doc sweep):**
+  `ActiveStrikeService.sentimentPct` is ΔOI-based (`100·(ΣpeΔOI−ΣceΔOI)/Σ(ceOi+peOi)`); oipulse's
+  dashboard figure is LEVEL-based (`(ΣPut−ΣCall)/ΣPut·100`), and the Siva cheat-sheet thresholds
+  were read off oipulse. One live-session compare of our number vs theirs; if they diverge
+  materially, add a level-based method beside the existing one (never silently change it) and
+  decide which the sentiment gate should read.
 - [ ] Stock-chain warm on a SECOND symbol during market hours (#472 verified on RELIANCE
   off-hours) — not exercised 2026-07-03.
 - [ ] Owner hard-reload (Ctrl+Shift+R) after each FE redeploy — standing owner action.
@@ -50,6 +56,15 @@ canary tile green through the session + zero false alerts; NIFTY26JULFUT TICK_AG
 (#482 fix) + watch for "dropping future-stamped tick" WARNs; variant books (vol-off / vol-12k5 /
 composite-070) populate with net-₹ labels; breadth dot scores intraday (advances/declines non-zero
 in rejections' context). The 09:42 + 15:47 agents cover all of it.
+
+### 3b. Audit-register reconciliation (found in the 2026-07-03 doc sweep)
+
+The archived `archive/2026-07-02-full-codebase-audit-findings-register.md` left **31 MEDIUM/LOW
+findings marked OPEN** as a standing quality backlog outside this ledger — and its OPEN column is
+STALE: several were closed by the later UI-audit waves (#440–#475; e.g. cockpit as-of/refresh,
+the signals 200-row cap). One future session: reconcile the 31 rows against shipped PRs, mark the
+closed ones, and carry any still-real MEDIUMs (e.g. `calendar-spread-expiry-dead-end`) into §5
+here. Until then, that register is the only place those rows live.
 
 ## 4. Scheduled maintenance
 

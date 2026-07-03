@@ -1,5 +1,8 @@
 # Phase 3 — Track-2 Siva Options Scalper (execution plan)
 
+> **ARCHIVED (2026-07-03 doc sweep):** historical planning doc — the work here is delivered, superseded, or consciously parked. Anything still open lives in `../2026-07-02-remaining-items.md` (ledger) or `../2026-07-03-10x-value-roadmap.md`. Do not mine this file for TODOs.
+
+
 **Branch:** `feat/scalper-track2` · **Started:** 2026-06-20 · **Authority:** master plan
 [§12](2026-06-19-openalgo-react-integration-master-plan.md) (+ §8 SPAN, §17.3 OrderGateway,
 §18.4 push). This file is the *execution* layer — the staged build order, scope decisions, and the

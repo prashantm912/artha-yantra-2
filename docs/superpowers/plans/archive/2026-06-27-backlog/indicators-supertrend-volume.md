@@ -1,5 +1,8 @@
 # Indicators: multi-TF Supertrend, volume MA, pattern arming, trendline (backlog stream)
 
+> **ARCHIVED (2026-07-03 doc sweep):** historical planning doc — the work here is delivered, superseded, or consciously parked. Anything still open lives in `../2026-07-02-remaining-items.md` (ledger) or `../2026-07-03-10x-value-roadmap.md`. Do not mine this file for TODOs.
+
+
 Status: PLAN (implementation-ready). Owner: single-owner. Date: 2026-06-27.
 Target services: `services/strategy-signal-service` (scalper confluence seam + gates) ·
 `libs/strategy-engine` (indicators) · the `scalper-strategies/*.yaml` set. No market-data

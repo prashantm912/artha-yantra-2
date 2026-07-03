@@ -1,5 +1,8 @@
 # Strike/premium selection — backtest premium band, dynamic recenter, premium skew
 
+> **ARCHIVED (2026-07-03 doc sweep):** historical planning doc — the work here is delivered, superseded, or consciously parked. Anything still open lives in `../2026-07-02-remaining-items.md` (ledger) or `../2026-07-03-10x-value-roadmap.md`. Do not mine this file for TODOs.
+
+
 Status: PLAN (implementation-ready). Owner: single-owner. Target services:
 `services/backtest-service` (premium-replay strike selector — the bulk), `services/strategy-signal-service`
 (scalper OI-window recenter + a per-side-premium-skew confluence dot), and a thin read-only field in

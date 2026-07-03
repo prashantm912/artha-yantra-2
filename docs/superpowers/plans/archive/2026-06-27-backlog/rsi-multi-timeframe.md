@@ -1,5 +1,8 @@
 # RSI work-stream — multi-timeframe caps, per-strategy bands, cool-off
 
+> **ARCHIVED (2026-07-03 doc sweep):** historical planning doc — the work here is delivered, superseded, or consciously parked. Anything still open lives in `../2026-07-02-remaining-items.md` (ledger) or `../2026-07-03-10x-value-roadmap.md`. Do not mine this file for TODOs.
+
+
 Status: PLAN (implementation-ready). Owner: single-owner. Target service:
 `services/strategy-signal-service` (scalper confluence seam) + the `scalper-strategies/` YAMLs.
 Supporting libs/engine read: `libs/strategy-engine` (already multi-timeframe-capable — no change).

@@ -45,6 +45,7 @@ public class LiveTickerFeed implements MarketFeed, SubscriptionRegistry.TickerCo
   private final AtomicBoolean connectedBefore = new AtomicBoolean();
   private volatile TickerHandle handle;
   private volatile TickListener listener;
+  private volatile java.util.function.Consumer<Boolean> connectionStateSink;
 
   /**
    * Wires the supervisor; registers itself as the registry's ticker. The handle is created
@@ -89,7 +90,11 @@ public class LiveTickerFeed implements MarketFeed, SubscriptionRegistry.TickerCo
       if (handle == null) {
         TickerHandle created = handleFactory.get();
         created.onConnected(this::onConnected);
-        created.onDisconnected(() -> log.warn("kite ticker disconnected"));
+        created.onDisconnected(
+            () -> {
+              log.warn("kite ticker disconnected");
+              notifyConnectionState(false);
+            });
         created.onTicks(this::onTicks);
         created.onError(message -> log.warn("kite ticker error: {}", message));
         handle = created;
@@ -139,8 +144,21 @@ public class LiveTickerFeed implements MarketFeed, SubscriptionRegistry.TickerCo
     }
   }
 
+  @Override
+  public void onConnectionState(java.util.function.Consumer<Boolean> sink) {
+    this.connectionStateSink = sink;
+  }
+
+  private void notifyConnectionState(boolean connected) {
+    java.util.function.Consumer<Boolean> sink = connectionStateSink;
+    if (sink != null) {
+      sink.accept(connected);
+    }
+  }
+
   /** Reconnect supervision: replay the registry idempotently, then scan for tick gaps. */
   void onConnected() {
+    notifyConnectionState(true); // status truth BEFORE the replay — a replay failure ≠ not connected
     if (connectedBefore.getAndSet(true)) {
       reconnects.increment();
     }

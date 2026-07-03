@@ -135,6 +135,11 @@ public class SignalEngine {
 
   private final Timer evalTimer;
   private final Counter emitted;
+  private final Counter evalFailures;
+  // Audit emit-entry-not-transactional: each emit path's dependent writes commit atomically —
+  // a mid-sequence failure must never leave an ENTRY without its option leg / suggested qty,
+  // or an EXIT inserted with the entry anchor still ACTIVE (duplicate EXIT next bar).
+  private final org.springframework.transaction.support.TransactionTemplate tx;
 
   /** Wires the engine. */
   public SignalEngine(
@@ -152,6 +157,7 @@ public class SignalEngine {
       java.util.Optional<ScalperConfluenceGate> scalperGate,
       SignalRejectionRepository rejections,
       ShadowBookService shadowBook,
+      org.springframework.transaction.PlatformTransactionManager transactionManager,
       @Value("${artha.signals.ttl-minutes:60}") int signalTtlMinutes) {
     this.registry = registry;
     this.signals = signals;
@@ -169,6 +175,8 @@ public class SignalEngine {
     this.scalperGate = scalperGate;
     this.evalTimer = meterRegistry.timer("ay_signal_eval_duration_seconds");
     this.emitted = meterRegistry.counter("ay_signals_emitted_total");
+    this.evalFailures = meterRegistry.counter("ay_signal_eval_failures_total");
+    this.tx = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
   }
 
   /** Boots subscriptions once the app is ready. */
@@ -220,6 +228,17 @@ public class SignalEngine {
           log.warn(
               "scalper {} has no hard stop / time-stop exit — not loaded (§0B hard-SL rule)",
               strategy.slug());
+          continue;
+        }
+        // A non-rollable primary (e.g. '1d' on a non-btst strategy) used to silently degrade to
+        // per-1m evaluation via intervalDuration's old 1m default — hundreds of pointless REST
+        // refreshes/hour and a live-vs-replay divergence (the golden runner throws). Refuse the
+        // load loudly instead (audit interval-duration-silent-default).
+        if (!"btst".equals(definition.session().style())
+            && !ROLLABLE_PRIMARIES.contains(definition.primaryTimeframe())) {
+          log.warn(
+              "strategy {} primary '{}' is not live-rollable (needs 1m/3m/5m/15m/1h) — not loaded",
+              strategy.slug(), definition.primaryTimeframe());
           continue;
         }
         List<StrategyDefinition.InstrumentRef> universe = resolveUniverse(config);
@@ -322,9 +341,10 @@ public class SignalEngine {
   }
 
   private synchronized void resubscribe() {
-    if (container != null) {
-      container.stop();
-    }
+    // Start the NEW container BEFORE stopping the old one: Redis pub/sub is fire-and-forget, so a
+    // stop-then-start gap permanently loses any 1m bar published in between (the 1m series is
+    // never re-fetched after warm-up — audit resubscribe-gap-drops-1m-bars). A bar delivered by
+    // BOTH containers during the overlap is skipped in onClosedBar (duplicate append ⇒ no re-eval).
     RedisMessageListenerContainer fresh = new RedisMessageListenerContainer();
     fresh.setConnectionFactory(connectionFactory);
     Set<String> channels = new LinkedHashSet<>();
@@ -351,7 +371,11 @@ public class SignalEngine {
         new ChannelTopic(in.arthayantra.strategysignal.registry.StrategyChangedPublisher.CHANNEL));
     fresh.afterPropertiesSet();
     fresh.start();
+    RedisMessageListenerContainer old = this.container;
     this.container = fresh;
+    if (old != null) {
+      old.stop();
+    }
     log.info("subscribed {} candle channels (universes + context series only)", channels.size());
   }
 
@@ -392,7 +416,12 @@ public class SignalEngine {
   }
 
   private void onClosedBar(String exchange, String tradingsymbol, EngineCandle bar) {
-    seriesStore.append(new SeriesKey(exchange, tradingsymbol, "1m"), bar);
+    if (!seriesStore.append(new SeriesKey(exchange, tradingsymbol, "1m"), bar)) {
+      // Duplicate/stale redelivery (the resubscribe overlap window, or a replayed message):
+      // re-evaluating the same bar could fire a phantom instant exit (an entry-candle structural
+      // stop touches its own extreme by definition) or a stale-priced entry — skip entirely.
+      return;
+    }
     for (Loaded strategy : loaded) {
       boolean inUniverse =
           strategy.universe().stream()
@@ -413,6 +442,10 @@ public class SignalEngine {
         }
         // btst primaries evaluate ONLY at the pre-close clock (scheduled below)
       } catch (RuntimeException e) {
+        // The bar is already consumed off the queue — a failed ENTRY decision for it is gone for
+        // good (the next qualifying bar re-fires; EXIT anchors stay ACTIVE and self-heal). The
+        // counter makes a burst alertable instead of log-only (audit bar-eval-failure-drops-entry).
+        evalFailures.increment();
         log.error(
             "evaluation failed for {} on {}:{}: {}",
             strategy.slug(), exchange, tradingsymbol, e.getMessage());
@@ -746,12 +779,10 @@ public class SignalEngine {
     // deterministic and identical to the replay harness.
     OffsetDateTime generatedAt = bar.bucketStart().withOffsetSameInstant(Ist.OFFSET);
     OffsetDateTime expiresAt = generatedAt.plusMinutes(signalTtlMinutes);
-    long id =
-        signals.insert(
-            strategy.versionId(), exchange, tradingsymbol, interval, "ENTRY", side,
-            entryPrice, stopLoss, target, evaluation.breakdown().composite(), breakdownJson,
-            generatedAt, expiresAt);
-    // A12 suggested qty (lot-rounded sizing vs paper equity), stamped OUTSIDE the score breakdown
+    // A12 suggested qty (lot-rounded sizing vs paper equity), stamped OUTSIDE the score breakdown.
+    // Computed BEFORE the insert (it may call market-data REST) so the row + its stamps commit in
+    // one tight transaction below — never a DB txn held open across an HTTP call.
+    BigDecimal suggestedQty = null;
     if (emissionGuard.isPresent()) {
       BigDecimal stopDistance = stopLoss == null ? null : entryPrice.subtract(stopLoss).abs();
       // E8 §3.2: a probability-graded size multiplier off the confluence aggregate — scalper decisions
@@ -762,7 +793,7 @@ public class SignalEngine {
               ? null
               : in.arthayantra.strategysignal.scalper.ScalperSizing.sizeMultiplier(
                   decision.confluence().aggregate(), decision.oiImbalancePct(), decision.vixLevel());
-      BigDecimal suggestedQty =
+      suggestedQty =
           emissionGuard.get().suggestedQty(
               strategy.definition().sizing(), exchange, tradingsymbol, entryPrice, stopDistance,
               sizeMultiplier);
@@ -783,18 +814,34 @@ public class SignalEngine {
           suggestedQty = hzQty;
         }
       }
-      if (suggestedQty != null) {
-        signals.stampSuggestedQty(id, suggestedQty);
-      }
     }
     // §12.9 Track-2 side-channel: the signal is keyed on the index future; record the option the
     // confluence picked (the order/paper layer trades it) + the confluence detail, OUTSIDE the
     // frozen score breakdown. Options trade on the same derivatives exchange as the index future.
-    if (decision != null) {
-      signals.stampScalperDetail(
-          id, exchange, decision.pick().candidate().tradingsymbol(),
-          scalperDetailJson(decision, strategy.scalper(), exchange));
-    }
+    String scalperDetail =
+        decision == null ? null : scalperDetailJson(decision, strategy.scalper(), exchange);
+    // One transaction: the ENTRY row, its suggested qty and its option leg are all-or-nothing. A
+    // partial commit left an ACTIVE entry with no tradeable leg — the exit side then read a null
+    // scalper_detail and silently fell back to the definition direction (wrong side for a PE scalp).
+    BigDecimal stampQty = suggestedQty;
+    BigDecimal stopLevel = stopLoss;
+    long id =
+        tx.execute(
+            status -> {
+              long newId =
+                  signals.insert(
+                      strategy.versionId(), exchange, tradingsymbol, interval, "ENTRY", side,
+                      entryPrice, stopLevel, target, evaluation.breakdown().composite(),
+                      breakdownJson, generatedAt, expiresAt);
+              if (stampQty != null) {
+                signals.stampSuggestedQty(newId, stampQty);
+              }
+              if (scalperDetail != null) {
+                signals.stampScalperDetail(
+                    newId, exchange, decision.pick().candidate().tradingsymbol(), scalperDetail);
+              }
+              return newId;
+            });
     emitted.increment();
     // the channel carries EXACTLY the persisted canonical bytes (divergence = FAIL criterion)
     JsonNode canonicalBreakdown;
@@ -1039,13 +1086,20 @@ public class SignalEngine {
       EngineCandle bar, SignalRepository.SignalRow anchor, String exitReason) {
     String side = "SELL".equals(anchor.side()) ? "BUY" : "SELL"; // the closing side
     OffsetDateTime generatedAt = bar.bucketStart().withOffsetSameInstant(Ist.OFFSET);
+    // Insert + anchor transition commit atomically: a failure between them left the entry ACTIVE
+    // next to a persisted EXIT — the next bar then emitted a duplicate EXIT for the same anchor.
     long id =
-        signals.insert(
-            strategy.versionId(), exchange, tradingsymbol, interval, type, side,
-            bar.close(), null, null, anchor.compositeScore(),
-            anchor.scoreBreakdown().toString(), generatedAt,
-            generatedAt.plusMinutes(signalTtlMinutes));
-    signals.transition(anchor.id(), "EXPIRED"); // the entry resolved — the pair is closed
+        tx.execute(
+            status -> {
+              long newId =
+                  signals.insert(
+                      strategy.versionId(), exchange, tradingsymbol, interval, type, side,
+                      bar.close(), null, null, anchor.compositeScore(),
+                      anchor.scoreBreakdown().toString(), generatedAt,
+                      generatedAt.plusMinutes(signalTtlMinutes));
+              signals.transition(anchor.id(), "EXPIRED"); // the entry resolved — the pair is closed
+              return newId;
+            });
     emitted.increment();
     publisher.publish(
         id, strategy.versionId(), strategy.name(), strategy.slug(), strategy.version(),
@@ -1229,13 +1283,19 @@ public class SignalEngine {
     return entryPrice.subtract(a).abs().compareTo(entryPrice.subtract(b).abs()) <= 0 ? a : b;
   }
 
-  private static Duration intervalDuration(String interval) {
+  /** The coarse primaries the live engine can roll off the 1m stream (reload() enforces this). */
+  static final Set<String> ROLLABLE_PRIMARIES = Set.of("1m", "3m", "5m", "15m", "1h");
+
+  static Duration intervalDuration(String interval) {
     return switch (interval) {
       case "3m" -> Duration.ofMinutes(3);
       case "5m" -> Duration.ofMinutes(5);
       case "15m" -> Duration.ofMinutes(15);
       case "1h" -> Duration.ofHours(1);
-      default -> Duration.ofMinutes(1);
+      // Match the golden runner: an unknown primary must never silently mean "evaluate every 1m
+      // bar". reload() refuses such strategies, so reaching this is a programming error.
+      default ->
+          throw new IllegalArgumentException("unsupported live primary interval: " + interval);
     };
   }
 

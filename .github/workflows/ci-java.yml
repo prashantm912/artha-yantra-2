@@ -52,6 +52,21 @@ jobs:
           curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz | tar -xz gitleaks
           ./gitleaks git --redact --no-banner .
 
+  it-naming-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # No failsafe plugin exists: *IT.java / *ITCase.java classes are silently NEVER run by
+      # surefire (CLAUDE.md build rule). Fail loudly on the naming instead of trusting prose.
+      - name: No silently-skipped *IT.java test classes
+        run: |
+          hits=$(git ls-files '*IT.java' '*ITCase.java')
+          if [ -n "$hits" ]; then
+            echo "::error::These test classes match *IT/*ITCase and are silently skipped by surefire — rename to *IntegrationTest or *Test:"
+            echo "$hits"
+            exit 1
+          fi
+
   build-test:
     runs-on: ubuntu-latest
     # Shard the reactor by service so the Testcontainers ITs (the 2-core
@@ -90,6 +105,19 @@ jobs:
         # occasionally time out on the 2-core runner); a genuinely failing test still fails after
         # the retries, so this hides flakes without hiding real breakage.
         run: ./mvnw -ntp -B -pl ${{ matrix.modules }} -am verify -Dsurefire.rerunFailingTestsCount=2
+      # surefire records rerun results as <flakyFailure>/<flakyError> in TEST-*.xml; without this
+      # a retried-green test vanishes — surface it so flake accumulation stays visible.
+      - name: Flaky-test paper trail (retried-green markers)
+        if: always()
+        run: |
+          flaky=$(grep -rl -e '<flakyFailure' -e '<flakyError' --include 'TEST-*.xml' . || true)
+          if [ -n "$flaky" ]; then
+            echo "::warning title=Flaky tests retried green (shard ${{ matrix.shard }})::see step log for details"
+            for f in $flaky; do
+              echo "== $f"
+              grep -o 'testcase name="[^"]*"' "$f" | sort -u
+            done
+          fi
 
   build-images:
     needs: build-test

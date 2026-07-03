@@ -34,7 +34,14 @@ function Set-ProfileEnv {
         $m = Select-String -Path $EnvFile -Pattern '^SPRING_PROFILES_ACTIVE=(.*)$'
         if ($m) { $activeProfile = $m.Matches[0].Groups[1].Value.Trim() }
     }
-    if ($activeProfile -eq 'mock') {
+    # Spring treats SPRING_PROFILES_ACTIVE as a comma-separated LIST ('mock,debug'
+    # still activates mock beans), so classify by list membership, not exact match.
+    $profileList = @($activeProfile -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    if (($profileList -contains 'mock') -and ($profileList -contains 'live')) {
+        Write-Host "[ay] ERROR: SPRING_PROFILES_ACTIVE='$activeProfile' mixes mock and live - refusing"
+        exit 1
+    }
+    if ($profileList -contains 'mock') {
         $env:ARTHA_DB_NAME = 'artha_mock'; $env:ARTHA_REDIS_DB = '1'
         # Mock notifier targets the WireMock stub (audit P0-6: the compose default is now
         # fail-closed blank, so live can never silently post to the stub).
@@ -210,9 +217,18 @@ switch ($Verb) {
         Write-Host "[ay] restored row counts (sanity):"
         Invoke-ComposeAllowFail @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', "$db", '-c',
             "SELECT 'candles' t, count(*) FROM marketdata.candles UNION ALL SELECT 'oi_snapshots', count(*) FROM marketdata.options_chain_snapshots UNION ALL SELECT 'signals', count(*) FROM strategy.signals")
+        # Hard gate, not an eyeball check: Timescale hypertable rows live in _timescaledb_internal,
+        # so a bad dump pg_restores "successfully" with 0 rows (the #395 class).
+        $candleCountRaw = Invoke-ComposeAllowFail @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', "$db", '-t', '-A', '-c', 'SELECT count(*) FROM marketdata.candles')
+        $candleCount = 0; $parsed = ($candleCountRaw | Where-Object { $_ -match '^\s*\d+\s*$' } | Select-Object -First 1)
+        if ($parsed) { $candleCount = [long]$parsed.Trim() }
+        if ($candleCount -le 0) {
+            Write-Host "[ay] RESTORE FAILED: marketdata.candles is EMPTY after restore (the #395 silent-hypertable-loss class). Stack NOT restarted."
+            exit 1
+        }
         # 5) bring the full stack back; flyway-init validates the restored history head -> no-op
         Invoke-Compose @('up', '-d', '--wait')
-        Write-Host "[ay] restore complete -> '$db'"
+        Write-Host "[ay] restore complete -> '$db' (marketdata.candles=$candleCount rows)"
     }
     'reset-db' {
         # down, drop volumes, re-up -> flyway-init rebuilds all schemas (D17)

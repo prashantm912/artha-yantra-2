@@ -130,7 +130,11 @@ post-market by an agent. The same class of fault during a *fired* trade is a mon
 - [ ] The 09:42 live-health agent reads the canary endpoint first and only deep-dives on amber/red — agent runtime drops accordingly.
 
 ### F5. Always-on host — unattended market days
-**What:** move the stack (or at minimum market-data capture + strategy-signal + DB) off the
+**Status 2026-07-03 — DECISION BRIEF ready:** measured footprint + 3-option comparison + migration
+runbook in [`2026-07-03-always-on-host-brief.md`](2026-07-03-always-on-host-brief.md); recommendation
+= Windows mini-PC on LAN (~Rs 35-50k one-time, zero architecture change, Claude agents move onto the
+box). Awaiting the owner's option pick.
+**What (original):** move the stack (or at minimum market-data capture + strategy-signal + DB) off the
 laptop to an always-on box — mini-PC on the LAN or a small VPS. Loopback-only gateway stance
 is preserved (LAN/VPN access only, no public exposure). Includes: compose bring-up on boot,
 `ay backup` to off-box storage nightly, and the scheduled agents' host story (they run in the

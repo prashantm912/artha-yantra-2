@@ -22,10 +22,13 @@ import org.springframework.web.bind.annotation.RestController;
 public class SignalRejectionsController {
 
   private final SignalRejectionRepository repository;
+  private final ShadowPositionRepository shadows;
 
-  /** Wires the repository. */
-  public SignalRejectionsController(SignalRejectionRepository repository) {
+  /** Wires the repositories. */
+  public SignalRejectionsController(
+      SignalRejectionRepository repository, ShadowPositionRepository shadows) {
     this.repository = repository;
+    this.shadows = shadows;
   }
 
   /** Paged/filtered rejection history, newest first. */
@@ -71,6 +74,33 @@ public class SignalRejectionsController {
                   Map<String, Object> m = new LinkedHashMap<>();
                   m.put("rail", c.rail());
                   m.put("count", c.count());
+                  return m;
+                })
+            .toList());
+  }
+
+  /**
+   * The shadow-book league table (roadmap F1): per-variant open/closed/wins/losses + realized
+   * points over an optional opened-at window — champion vs challenger configs on identical data.
+   */
+  @GetMapping("/shadow-summary")
+  public Map<String, Object> shadowSummary(
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+          OffsetDateTime from,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+          OffsetDateTime to) {
+    return Map.of(
+        "items",
+        shadows.variantSummary(from, to).stream()
+            .map(
+                v -> {
+                  Map<String, Object> m = new LinkedHashMap<>();
+                  m.put("variant", v.variant());
+                  m.put("open", v.open());
+                  m.put("closed", v.closed());
+                  m.put("wins", v.wins());
+                  m.put("losses", v.losses());
+                  m.put("pnlPoints", v.pnlPoints());
                   return m;
                 })
             .toList());

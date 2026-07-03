@@ -46,7 +46,12 @@ public class ShadowPositionRepository {
       String closeReason,
       OffsetDateTime closedAt,
       BigDecimal pnlPoints,
-      BigDecimal pnlPct) {}
+      BigDecimal pnlPct,
+      String variant) {}
+
+  /** Per-variant book rollup (roadmap F1): counts + realized points over an optional window. */
+  public record VariantSummary(
+      String variant, long open, long closed, long wins, long losses, BigDecimal pnlPoints) {}
 
   private final JdbcTemplate jdbc;
 
@@ -74,20 +79,22 @@ public class ShadowPositionRepository {
       String signalTradingsymbol,
       String blockingRail,
       BigDecimal compositeScore,
-      OffsetDateTime barTime) {
+      OffsetDateTime barTime,
+      String variant) {
     Long id =
         jdbc.queryForObject(
             """
             INSERT INTO shadow_positions
               (rejection_id, strategy_version_id, strategy_slug, side, underlying, exchange,
                tradingsymbol, strike, expiry, entry_ltp, stop_loss, take_profit, structural_stop,
-               signal_exchange, signal_tradingsymbol, blocking_rail, composite_score, bar_time)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+               signal_exchange, signal_tradingsymbol, blocking_rail, composite_score, bar_time,
+               variant)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
             """,
             Long.class,
             rejectionId, strategyVersionId, strategySlug, side, underlying, exchange,
             tradingsymbol, strike, expiry, entryLtp, stopLoss, takeProfit, structuralStop,
-            signalExchange, signalTradingsymbol, blockingRail, compositeScore, barTime);
+            signalExchange, signalTradingsymbol, blockingRail, compositeScore, barTime, variant);
     return id == null ? -1 : id;
   }
 
@@ -97,21 +104,44 @@ public class ShadowPositionRepository {
         "SELECT * FROM shadow_positions WHERE status = 'OPEN' ORDER BY id", this::row);
   }
 
-  /** True when an OPEN shadow already exists for this strategy+side (the dedup rule). */
-  public boolean hasOpen(String strategySlug, String side) {
+  /** True when an OPEN shadow already exists for this strategy+side+variant (the dedup rule). */
+  public boolean hasOpen(String strategySlug, String side, String variant) {
     Long n =
         jdbc.queryForObject(
-            "SELECT count(*) FROM shadow_positions WHERE strategy_slug = ? AND side = ? AND status = 'OPEN'",
-            Long.class, strategySlug, side);
+            "SELECT count(*) FROM shadow_positions "
+                + "WHERE strategy_slug = ? AND side = ? AND variant = ? AND status = 'OPEN'",
+            Long.class, strategySlug, side, variant);
     return n != null && n > 0;
   }
 
-  /** Total OPEN shadow positions (the global safety cap). */
-  public long countOpen() {
+  /** OPEN positions in one variant book (each book has its own safety cap). */
+  public long countOpen(String variant) {
     Long n =
         jdbc.queryForObject(
-            "SELECT count(*) FROM shadow_positions WHERE status = 'OPEN'", Long.class);
+            "SELECT count(*) FROM shadow_positions WHERE variant = ? AND status = 'OPEN'",
+            Long.class, variant);
     return n == null ? 0 : n;
+  }
+
+  /** Per-variant league rollup over an optional opened-at window (nulls = all history). */
+  public List<VariantSummary> variantSummary(OffsetDateTime from, OffsetDateTime to) {
+    return jdbc.query(
+        """
+        SELECT variant,
+               count(*) FILTER (WHERE status = 'OPEN') AS open,
+               count(*) FILTER (WHERE status = 'CLOSED') AS closed,
+               count(*) FILTER (WHERE status = 'CLOSED' AND pnl_points > 0) AS wins,
+               count(*) FILTER (WHERE status = 'CLOSED' AND pnl_points <= 0) AS losses,
+               coalesce(sum(pnl_points) FILTER (WHERE status = 'CLOSED'), 0) AS pnl_points
+        FROM shadow_positions
+        WHERE (?::timestamptz IS NULL OR opened_at >= ?) AND (?::timestamptz IS NULL OR opened_at < ?)
+        GROUP BY variant ORDER BY variant
+        """,
+        (rs, i) ->
+            new VariantSummary(
+                rs.getString("variant"), rs.getLong("open"), rs.getLong("closed"),
+                rs.getLong("wins"), rs.getLong("losses"), rs.getBigDecimal("pnl_points")),
+        from, from, to, to);
   }
 
   /**
@@ -158,6 +188,7 @@ public class ShadowPositionRepository {
         rs.getString("close_reason"),
         rs.getObject("closed_at", OffsetDateTime.class),
         rs.getBigDecimal("pnl_points"),
-        rs.getBigDecimal("pnl_pct"));
+        rs.getBigDecimal("pnl_pct"),
+        rs.getString("variant"));
   }
 }

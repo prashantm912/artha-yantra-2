@@ -11,6 +11,7 @@ import { LoadBeat, BeatBlock } from '../../components/LoadBeat.tsx';
 import {
   useSignalRejections,
   useRejectionRailCounts,
+  useShadowSummary,
   type Num,
   type SignalRejectionDto,
 } from '../../api/signalRejections.ts';
@@ -72,8 +73,10 @@ export function RejectionsPage() {
 
   const q = useSignalRejections(null, rail || null, bounds.from, bounds.to, PAGE_SIZE, offset);
   const counts = useRejectionRailCounts(null, bounds.from, bounds.to);
+  const shadow = useShadowSummary(bounds.from, bounds.to);
   const rows = q.data?.items ?? [];
   const railOptions = counts.data?.items ?? [];
+  const shadowBooks = shadow.data?.items ?? [];
 
   const toggle = (id: number) =>
     setExpanded((prev) => {
@@ -114,6 +117,26 @@ export function RejectionsPage() {
           ]}
         />
       </div>
+
+      {/* Shadow-book league — champion vs challenger variants on this day's rejections */}
+      {shadowBooks.length > 0 && (
+        <div className="mb-3 flex flex-wrap gap-2" data-testid="shadow-league">
+          {shadowBooks.map((b) => {
+            const pnl = b.pnlPoints == null ? NaN : Number(b.pnlPoints);
+            return (
+              <div key={b.variant} className="rounded-md border px-2 py-1 text-xs">
+                <span className="font-semibold text-ay-text">{b.variant}</span>{' '}
+                <span className="text-ay-muted">
+                  {b.open} open · {b.closed} closed · {b.wins}W/{b.losses}L ·
+                </span>{' '}
+                <span className={Number.isNaN(pnl) ? 'text-ay-muted' : pnl < 0 ? 'text-bear' : 'text-bull'}>
+                  {Number.isNaN(pnl) ? '—' : `${pnl >= 0 ? '+' : ''}${fmtNum(b.pnlPoints, 2)} pts`}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Which rail blocks most — a quick rollup strip */}
       {railOptions.length > 0 && (

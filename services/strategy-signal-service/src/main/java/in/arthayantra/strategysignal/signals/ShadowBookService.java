@@ -15,13 +15,23 @@ import org.springframework.stereotype.Component;
  * long-premium position so the exit machinery labels it with a real PnL — the evidence base for
  * tuning the entry gates ("rail X keeps blocking winners" vs "rail X earns its keep").
  *
- * <p>Eligibility (v1): the composite PASSED its threshold (the would-have-fired class — a rail
- * other than the confluence vetoed the entry; optionally widened via {@code min-composite}), the
- * StrikePicker resolved a leg with a live premium, and no OPEN shadow already exists for the same
- * strategy+side (dedup — the same blocked setup re-evaluates every primary bar). A global open cap
- * bounds the book. Default-OFF ({@code artha.scalper.shadow-book.enabled}); LIVE-only by
- * construction (only the live engine persists rejections). Failures never propagate — the shadow
- * book must never break the live signal path.
+ * <p>Two book kinds share the ledger, told apart by {@code variant} (roadmap F1):
+ *
+ * <ul>
+ *   <li><b>champion</b> — the original book: the composite PASSED its threshold (the
+ *       would-have-fired class — a rail other than the confluence vetoed the entry; optionally
+ *       widened via {@code min-composite}).
+ *   <li><b>challenger variants</b> ({@link ShadowVariants}) — the same diagnostic re-scored under a
+ *       config diff (rail threshold override / rail disable / composite floor); a variant that
+ *       ACCEPTS the entry opens its own tagged position, so knob proposals earn real PnL labels
+ *       side by side on identical market data.
+ * </ul>
+ *
+ * <p>Common eligibility: the StrikePicker resolved a leg with a live premium. Dedup is one OPEN per
+ * (strategy, side, variant) — the same blocked setup re-evaluates every primary bar; the open cap
+ * bounds each book independently. Default-OFF ({@code artha.scalper.shadow-book.enabled});
+ * LIVE-only by construction (only the live engine persists rejections). Failures never propagate —
+ * the shadow book must never break the live signal path.
  */
 @Component
 public class ShadowBookService {
@@ -30,6 +40,7 @@ public class ShadowBookService {
 
   private final ShadowPositionRepository shadows;
   private final SignalRepository signals;
+  private final ShadowVariants variants;
   private final boolean enabled;
   private final BigDecimal minComposite;
   private final long maxOpen;
@@ -38,19 +49,21 @@ public class ShadowBookService {
   public ShadowBookService(
       ShadowPositionRepository shadows,
       SignalRepository signals,
+      ShadowVariants variants,
       @Value("${artha.scalper.shadow-book.enabled:false}") boolean enabled,
       @Value("${artha.scalper.shadow-book.min-composite:#{null}}") BigDecimal minComposite,
       @Value("${artha.scalper.shadow-book.max-open:50}") long maxOpen) {
     this.shadows = shadows;
     this.signals = signals;
+    this.variants = variants;
     this.enabled = enabled;
     this.minComposite = minComposite;
     this.maxOpen = maxOpen;
   }
 
   /**
-   * Opens a shadow position for an eligible rejection; returns the shadow id or null when not
-   * eligible (disabled / no leg / composite short / dedup / cap). Never throws.
+   * Opens the champion shadow (when the rejection is would-have-fired class) plus every challenger
+   * variant that accepts it; returns the champion's shadow id or null. Never throws.
    */
   public Long maybeOpen(
       long rejectionId,
@@ -72,36 +85,62 @@ public class ShadowBookService {
       if (entryLtp == null || entryLtp.signum() <= 0) {
         return null;
       }
+      Long championId = null;
       BigDecimal floor = minComposite != null ? minComposite : d.compositeThreshold();
-      if (d.compositeScore() == null || floor == null || d.compositeScore().compareTo(floor) < 0) {
-        return null; // not a would-have-fired-class entry — PnL would label noise
+      if (d.compositeScore() != null && floor != null && d.compositeScore().compareTo(floor) >= 0) {
+        championId =
+            openBook(
+                ShadowVariants.CHAMPION, rejectionId, strategyVersionId, strategySlug,
+                signalExchange, signalTradingsymbol, barTime, d, leg, entryLtp);
       }
-      String side = d.side().name();
-      if (shadows.hasOpen(strategySlug, side)) {
-        return null; // one live experiment per strategy+side at a time
+      for (ShadowVariants.Variant v : variants.all()) {
+        if (ShadowVariants.accepts(d, v)) {
+          openBook(
+              v.name(), rejectionId, strategyVersionId, strategySlug,
+              signalExchange, signalTradingsymbol, barTime, d, leg, entryLtp);
+        }
       }
-      if (shadows.countOpen() >= maxOpen) {
-        log.warn("shadow book at max-open cap {} — skipping rejection {}", maxOpen, rejectionId);
-        return null;
-      }
-      PremiumBracketRules.Brackets brackets =
-          PremiumBracketRules.resolve(
-              signals.versionConfig(strategyVersionId).orElse(null), entryLtp);
-      long id =
-          shadows.insert(
-              rejectionId, strategyVersionId, strategySlug, side, d.underlying(),
-              optionExchange(d.underlying()), leg.tradingsymbol(), leg.strike(), d.expiry(),
-              entryLtp, brackets.stopLoss(), brackets.takeProfit(), d.structuralStop(),
-              signalExchange, signalTradingsymbol, d.blockingRail(), d.compositeScore(), barTime);
-      log.info(
-          "shadow open: {} {} {} @ {} (rejection {} rail={} composite={}) sl={} tp={} structStop={}",
-          strategySlug, side, leg.tradingsymbol(), entryLtp, rejectionId, d.blockingRail(),
-          d.compositeScore(), brackets.stopLoss(), brackets.takeProfit(), d.structuralStop());
-      return id;
+      return championId;
     } catch (RuntimeException e) {
       log.warn("shadow open failed for rejection {}: {}", rejectionId, e.toString());
       return null;
     }
+  }
+
+  private Long openBook(
+      String variant,
+      long rejectionId,
+      UUID strategyVersionId,
+      String strategySlug,
+      String signalExchange,
+      String signalTradingsymbol,
+      OffsetDateTime barTime,
+      ScalperConfluenceGate.RejectionDiagnostic d,
+      StrikePicker.Candidate leg,
+      BigDecimal entryLtp) {
+    String side = d.side().name();
+    if (shadows.hasOpen(strategySlug, side, variant)) {
+      return null; // one live experiment per strategy+side+book at a time
+    }
+    if (shadows.countOpen(variant) >= maxOpen) {
+      log.warn("shadow book '{}' at max-open cap {} — skipping rejection {}", variant, maxOpen, rejectionId);
+      return null;
+    }
+    PremiumBracketRules.Brackets brackets =
+        PremiumBracketRules.resolve(
+            signals.versionConfig(strategyVersionId).orElse(null), entryLtp);
+    long id =
+        shadows.insert(
+            rejectionId, strategyVersionId, strategySlug, side, d.underlying(),
+            optionExchange(d.underlying()), leg.tradingsymbol(), leg.strike(), d.expiry(),
+            entryLtp, brackets.stopLoss(), brackets.takeProfit(), d.structuralStop(),
+            signalExchange, signalTradingsymbol, d.blockingRail(), d.compositeScore(), barTime,
+            variant);
+    log.info(
+        "shadow open [{}]: {} {} {} @ {} (rejection {} rail={} composite={}) sl={} tp={} structStop={}",
+        variant, strategySlug, side, leg.tradingsymbol(), entryLtp, rejectionId, d.blockingRail(),
+        d.compositeScore(), brackets.stopLoss(), brackets.takeProfit(), d.structuralStop());
+    return id;
   }
 
   /** The option leg's derivatives exchange from the option root (BSE roots trade on BFO). */

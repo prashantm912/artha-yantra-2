@@ -1529,6 +1529,52 @@
         }
       }
     },
+    "/api/v1/signal-rejections/shadow-summary" : {
+      "get" : {
+        "tags" : [ "signal-rejections-controller" ],
+        "operationId" : "shadowSummary",
+        "parameters" : [ {
+          "name" : "from",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }, {
+          "name" : "to",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/signal-rejections/rail-counts" : {
       "get" : {
         "tags" : [ "signal-rejections-controller" ],

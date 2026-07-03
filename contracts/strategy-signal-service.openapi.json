@@ -1628,6 +1628,34 @@
         }
       }
     },
+    "/api/v1/signal-rejections/dot-health" : {
+      "get" : {
+        "tags" : [ "signal-rejections-controller" ],
+        "operationId" : "dotHealth",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DotHealth"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/paper/trades" : {
       "get" : {
         "tags" : [ "paper-controller" ],
@@ -2286,6 +2314,44 @@
           },
           "pnlNet" : {
             "type" : "number"
+          }
+        }
+      },
+      "DotHealth" : {
+        "type" : "object",
+        "properties" : {
+          "asOf" : {
+            "type" : "string"
+          },
+          "session" : {
+            "type" : "boolean"
+          },
+          "rowsInspected" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "dots" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/DotState"
+            }
+          }
+        }
+      },
+      "DotState" : {
+        "type" : "object",
+        "properties" : {
+          "dot" : {
+            "type" : "string"
+          },
+          "alive" : {
+            "type" : "boolean"
+          },
+          "required" : {
+            "type" : "boolean"
+          },
+          "detail" : {
+            "type" : "string"
           }
         }
       },

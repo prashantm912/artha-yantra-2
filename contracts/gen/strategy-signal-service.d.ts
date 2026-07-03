@@ -452,6 +452,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/signal-rejections/dot-health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["dotHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/paper/trades": {
         parameters: {
             query?: never;
@@ -730,6 +746,19 @@ export interface components {
             losses?: number;
             pnlPoints?: number;
             pnlNet?: number;
+        };
+        DotHealth: {
+            asOf?: string;
+            session?: boolean;
+            /** Format: int32 */
+            rowsInspected?: number;
+            dots?: components["schemas"]["DotState"][];
+        };
+        DotState: {
+            dot?: string;
+            alive?: boolean;
+            required?: boolean;
+            detail?: string;
         };
         Funds: {
             status?: string;
@@ -1970,6 +1999,35 @@ export interface operations {
                     "*/*": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    dotHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["DotHealth"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

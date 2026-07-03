@@ -29,9 +29,15 @@ Arguments: `post [YYYY-MM-DD]` (default: the most recent completed session) · `
 5. Write `docs/signal-analysis/YYYY-MM-DD-session-findings.md` from the §5 template (named by DATA
    date; immutable — dated addendum if correcting). Update the §7 tuning-candidate ledger statuses
    (carry forward prior PROPOSED rows; never silently drop one).
-6. If you found a NEW analysis dimension or data point, append it to README §3 (numbered,
+6. **Append ONE session row to `docs/signal-analysis/rollup.md` (roadmap F2 accrual):** the session
+   log gets a row (rejections/strategies/fired/first-block/composite-≥thr/shadow-books/dead-dots),
+   the per-variant league table is refreshed from the §6 league SQL (NET ₹ first), and the
+   structural-vs-regime watchlist gains/clears items. Session log rows are append-only. When the
+   log holds ≥5 sessions and §Proposals is still empty, run the rollup pass (below) in the same
+   sitting and fill it.
+7. If you found a NEW analysis dimension or data point, append it to README §3 (numbered,
    append-only) with its SQL in §6 — that is how the method is designed to grow.
-7. Ship as a docs-only PR (squash, admin-merge allowed for docs). Report the headline verdict +
+8. Ship as a docs-only PR (squash, admin-merge allowed for docs). Report the headline verdict +
    tuning candidates to the owner. **Propose tunes; never arm/change a strategy knob without the
    owner's explicit OK.**
 
@@ -50,13 +56,16 @@ config changes, no `ay` verbs that touch containers. SELECTs + `docker logs` onl
 
 ## Mode: rollup — multi-session consolidation
 
-After ~5 sessions (or on ask): read ALL findings files, stack the per-session tables (rail
-histograms, dot support rates, data-health, counterfactual outcomes), separate STRUCTURAL findings
-(present every session) from REGIME ones (day-dependent), write
-`docs/signal-analysis/YYYY-MM-DD-multi-session-rollup.md` with a consolidated tuning proposal
-(knob → evidence across sessions → proposed value → expected effect). Cross-reference the exit-band
-runbook (`docs/superpowers/plans/2026-06-30-live-signal-analysis-runbook.md`) — entry-gate tunes
-(this track) and exit-band tunes (that track) land as ONE coordinated owner decision.
+After ~5 sessions (or on ask): `docs/signal-analysis/rollup.md` already holds the accrued session
+log + league + watchlist (post mode appends per session) — verify it against the findings files,
+then fill its **§Proposals** with ranked tune proposals as LITERAL config diffs (knob → exact
+YAML/env diff → evidence citations by session date + shadow/variant NET-₹ numbers → risk note).
+Judge variant keep/cut on `pnl_net`, never raw points. Every proposal must be reproducible from
+the cited findings files alone; no auto-apply — applying one remains an owner-approved PR.
+Separate STRUCTURAL findings (present every session) from REGIME ones (day-dependent).
+Cross-reference the exit-band runbook
+(`docs/superpowers/plans/2026-06-30-live-signal-analysis-runbook.md`) — entry-gate tunes (this
+track) and exit-band tunes (that track) land as ONE coordinated owner decision.
 
 ## Shared guardrails
 

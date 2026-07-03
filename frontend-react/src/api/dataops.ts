@@ -84,6 +84,9 @@ export interface ExportContract {
   instrumentType: string;
 }
 
+/** Which expired legs to pull. BOTH = the pre-selector default (option + future legs). */
+export type ContractType = 'OPTIONS' | 'FUTURES' | 'BOTH';
+
 /** POST /market/admin/expired-backfill body (all optional; resume = empty). */
 export interface BackfillRequest {
   underlyings?: string[];
@@ -91,6 +94,19 @@ export interface BackfillRequest {
   to?: string;
   interval?: string;
   force?: boolean;
+  contractType?: ContractType;
+}
+
+/** One row of the backfill run-audit ledger (V030). params is the trigger request JSON (stringified). */
+export interface BackfillJobRow {
+  id: number;
+  kind: string; // EXPIRED | EQUITY_DAILY
+  params: string | null;
+  status: string; // RUNNING | COMPLETED | FAILED
+  rowsWritten: number | null;
+  error: string | null;
+  startedAt: string;
+  finishedAt: string | null;
 }
 
 export interface ExportRequest {
@@ -134,6 +150,19 @@ export function useQuota(): UseQueryResult<QuotaStatus> {
     queryKey: ['dataops', 'quota'],
     queryFn: () => apiFetch<QuotaStatus>('/market/admin/upstox-quota-status'),
     refetchInterval: POLL_MS,
+  });
+}
+
+/** Recent backfill runs (newest first) for the Status page history table. Polls so an in-flight run resolves. */
+export function useBackfillJobs(limit = 50): UseQueryResult<BackfillJobRow[]> {
+  return useQuery({
+    queryKey: ['dataops', 'backfill-jobs', limit],
+    queryFn: async () =>
+      listItems(
+        await apiFetch<{ items: BackfillJobRow[] }>(`/market/admin/backfill-jobs?limit=${limit}`),
+      ),
+    refetchInterval: (q) =>
+      (q.state.data ?? []).some((j) => j.status === 'RUNNING') ? POLL_MS : false,
   });
 }
 

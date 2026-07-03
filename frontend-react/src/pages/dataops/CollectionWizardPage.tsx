@@ -4,7 +4,7 @@ import { Stepper } from '../../components/dataops/Stepper.tsx';
 import { MultiCheckboxGroup } from '../../components/dataops/MultiCheckboxGroup.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
-import { triggerBackfill } from '../../api/dataops.ts';
+import { triggerBackfill, type ContractType } from '../../api/dataops.ts';
 import { ApiError } from '../../api/client.ts';
 import { cn } from '../../lib/cn.ts';
 
@@ -13,6 +13,12 @@ const STEPS = ['Underlyings', 'Date range', 'Options', 'Review'];
 const UNDERLYING_OPTIONS = [
   { value: 'NIFTY', label: 'NIFTY' },
   { value: 'SENSEX', label: 'SENSEX' },
+];
+
+const CONTRACT_TYPE_OPTIONS: { value: ContractType; label: string }[] = [
+  { value: 'BOTH', label: 'Both' },
+  { value: 'OPTIONS', label: 'Options' },
+  { value: 'FUTURES', label: 'Futures' },
 ];
 
 /** Local YYYY-MM-DD for a Date, offset by `daysAgo` days. */
@@ -26,9 +32,9 @@ function isoDate(daysAgo: number): string {
 
 /**
  * B3 Collection Wizard — guided 4-step setup over the existing
- * POST /market/admin/expired-backfill. Divergence: contract-type is not
- * selectable; the server always pulls both options and futures legs, and
- * the interval is fixed at 1-minute with strikes auto-bounded to ±20%.
+ * POST /market/admin/expired-backfill. Contract-type (options / futures / both)
+ * is selectable and defaults to both (the pre-selector behaviour); the interval
+ * is fixed at 1-minute with strikes auto-bounded to ±20%.
  */
 export function CollectionWizardPage() {
   const navigate = useNavigate();
@@ -38,6 +44,7 @@ export function CollectionWizardPage() {
   const [from, setFrom] = useState(isoDate(365));
   const [to, setTo] = useState(isoDate(0));
   const [force, setForce] = useState(false);
+  const [contractType, setContractType] = useState<ContractType>('BOTH');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,7 +61,7 @@ export function CollectionWizardPage() {
     setSubmitting(true);
     setError(null);
     try {
-      await triggerBackfill({ underlyings, from, to, force });
+      await triggerBackfill({ underlyings, from, to, force, contractType });
       navigate('/data-ops/status');
     } catch (err) {
       if (err instanceof ApiError) {
@@ -130,6 +137,30 @@ export function CollectionWizardPage() {
 
           {step === 2 && (
             <div className="space-y-3">
+              <fieldset className="space-y-1">
+                <legend className="text-xs text-ay-muted">Contract type</legend>
+                <div className="flex flex-wrap gap-2">
+                  {CONTRACT_TYPE_OPTIONS.map((opt) => (
+                    <label
+                      key={opt.value}
+                      className={cn(
+                        'flex cursor-pointer items-center gap-2 rounded border bg-surface-2 px-2 py-1.5 text-sm text-ay-text hover:border-accent',
+                        contractType === opt.value ? 'border-accent' : 'border-ay-border',
+                      )}
+                    >
+                      <input
+                        type="radio"
+                        name="contract-type"
+                        className="accent-accent"
+                        title={`Collect ${opt.label.toLowerCase()} legs`}
+                        checked={contractType === opt.value}
+                        onChange={() => setContractType(opt.value)}
+                      />
+                      <span>{opt.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
               <label className="flex cursor-pointer items-center gap-2 rounded border border-ay-border bg-surface-2 px-2 py-1.5 text-sm text-ay-text hover:border-accent">
                 <input
                   type="checkbox"
@@ -144,9 +175,6 @@ export function CollectionWizardPage() {
               <p className="text-xs text-ay-muted">
                 Strikes are auto-bounded to &plusmn;20% server-side.
               </p>
-              <p className="text-xs text-ay-muted">
-                Contract type is not selectable — the server pulls both options and futures.
-              </p>
             </div>
           )}
 
@@ -160,6 +188,12 @@ export function CollectionWizardPage() {
                 <dt className="text-ay-muted">Date range</dt>
                 <dd className="text-right text-ay-text">
                   {from} &rarr; {to}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-4">
+                <dt className="text-ay-muted">Contract type</dt>
+                <dd className="text-right text-ay-text">
+                  {CONTRACT_TYPE_OPTIONS.find((o) => o.value === contractType)?.label ?? contractType}
                 </dd>
               </div>
               <div className="flex justify-between gap-4">

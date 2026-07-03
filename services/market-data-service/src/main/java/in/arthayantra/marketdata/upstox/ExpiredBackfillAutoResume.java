@@ -106,7 +106,8 @@ public class ExpiredBackfillAutoResume {
   private void trigger(String reason) {
     try {
       LocalDate to = LocalDate.now(Ist.ZONE);
-      service.triggerAsync(UNDERLYINGS, to.minusYears(1), to, null, false);
+      service.triggerAsync(
+          UNDERLYINGS, to.minusYears(1), to, null, false, ExpiredBackfillService.ContractType.BOTH);
       log.info("expired-backfill auto-resume ({}): coverage-aware resume started", reason);
     } catch (RuntimeException e) {
       // 409 already-running or 503 source-absent (a race with another trigger) — benign; skip quietly.

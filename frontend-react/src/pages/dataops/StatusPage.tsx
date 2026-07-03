@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import {
+  useBackfillJobs,
   useExpiredStatus,
   useOiStatus,
   useQuota,
+  type BackfillJobRow,
   type BackfillState,
   type ExpiredStatus,
   type OiStatus,
@@ -162,10 +164,83 @@ function OiCard({ oi }: { oi: OiStatus }) {
   );
 }
 
+/** Ring/text colour per run-audit status (COMPLETED/RUNNING/FAILED — distinct from the live BackfillState). */
+function jobStatusClass(status: string): string {
+  switch (status) {
+    case 'RUNNING':
+      return 'text-accent ring-accent/40';
+    case 'COMPLETED':
+      return 'text-bull ring-bull/40';
+    case 'FAILED':
+      return 'text-bear ring-bear/40';
+    default:
+      return 'text-ay-muted ring-ay-border';
+  }
+}
+
+/** Short local timestamp for a table cell (ISO in → locale string), or an em dash for null. */
+function ts(iso: string | null): string {
+  return iso ? new Date(iso).toLocaleString() : '—';
+}
+
+/** B1 history: the recent backfill runs from the V030 audit ledger (kind · status · rows · timings · error). */
+function BackfillHistoryCard({ jobs }: { jobs: BackfillJobRow[] }) {
+  return (
+    <section
+      className="rounded border border-ay-border bg-surface-1 p-3"
+      aria-label="Backfill run history"
+    >
+      <h2 className="mb-2 text-h3 text-ay-text">Backfill history</h2>
+      {jobs.length === 0 ? (
+        <p className="text-xs text-ay-muted">No backfill runs recorded yet.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-caption uppercase tracking-wide text-ay-muted">
+                <th className="py-1 pr-3 font-medium">Kind</th>
+                <th className="py-1 pr-3 font-medium">Status</th>
+                <th className="py-1 pr-3 text-right font-medium">Rows</th>
+                <th className="py-1 pr-3 font-medium">Started</th>
+                <th className="py-1 pr-3 font-medium">Finished</th>
+                <th className="py-1 font-medium">Error</th>
+              </tr>
+            </thead>
+            <tbody>
+              {jobs.map((job) => (
+                <tr key={job.id} className="border-t border-ay-border align-top">
+                  <td className="py-1 pr-3 text-ay-text">{job.kind}</td>
+                  <td className="py-1 pr-3">
+                    <span
+                      className={cn(
+                        'inline-block rounded px-2 py-0.5 text-xs font-semibold ring-1',
+                        jobStatusClass(job.status),
+                      )}
+                    >
+                      {job.status}
+                    </span>
+                  </td>
+                  <td className="nums py-1 pr-3 text-right text-ay-text">
+                    {job.rowsWritten == null ? '—' : fmt(job.rowsWritten)}
+                  </td>
+                  <td className="py-1 pr-3 text-ay-muted">{ts(job.startedAt)}</td>
+                  <td className="py-1 pr-3 text-ay-muted">{ts(job.finishedAt)}</td>
+                  <td className="py-1 text-bear">{job.error ?? ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function StatusPage() {
   const expiredQ = useExpiredStatus();
   const oiQ = useOiStatus();
   const quotaQ = useQuota();
+  const jobsQ = useBackfillJobs();
 
   return (
     <LoadBeat>
@@ -188,6 +263,16 @@ export function StatusPage() {
             {(quota) => <QuotaGauge configured={quota.configured} windows={quota.windows} />}
           </QueryState>
         </div>
+      </BeatBlock>
+
+      <BeatBlock>
+        <QueryState
+          query={jobsQ}
+          isEmpty={() => false}
+          errorTitle="Couldn't load backfill history"
+        >
+          {(jobs) => <BackfillHistoryCard jobs={jobs} />}
+        </QueryState>
       </BeatBlock>
     </LoadBeat>
   );

@@ -1540,6 +1540,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/admin/backfill-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["backfillJobs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instruments": {
         parameters: {
             query?: never;
@@ -1853,6 +1869,7 @@ export interface components {
             to?: string;
             interval?: string;
             force?: boolean;
+            contractType?: string;
         };
         EquityDailyBackfillRequest: {
             symbols?: string[];
@@ -2731,6 +2748,23 @@ export interface components {
         };
         CoverageSummary: {
             items?: components["schemas"]["CoverageRow"][];
+        };
+        BackfillJobRow: {
+            /** Format: int64 */
+            id?: number;
+            kind?: string;
+            params?: string;
+            status?: string;
+            /** Format: int64 */
+            rowsWritten?: number;
+            error?: string;
+            /** Format: date-time */
+            startedAt?: string;
+            /** Format: date-time */
+            finishedAt?: string;
+        };
+        BackfillJobsResponse: {
+            items?: components["schemas"]["BackfillJobRow"][];
         };
         Instrument: {
             exchange?: string;
@@ -6253,6 +6287,37 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["CoverageSummary"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    backfillJobs: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["BackfillJobsResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

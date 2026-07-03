@@ -110,6 +110,25 @@ public class ExpiredBackfillService {
   private static final Map<String, String[]> INDEX_SERIES =
       Map.of("NIFTY", new String[] {"NSE", "NIFTY 50"}, "SENSEX", new String[] {"BSE", "SENSEX"});
 
+  /** Which expired legs to fetch: option (CE/PE) legs, future (FUT) legs, or both (the default). */
+  public enum ContractType {
+    OPTIONS,
+    FUTURES,
+    BOTH;
+
+    /** Parses the request token case-insensitively; null/blank/unknown ⇒ {@link #BOTH} (no filter). */
+    public static ContractType parse(String raw) {
+      if (raw == null || raw.isBlank()) {
+        return BOTH;
+      }
+      return switch (raw.trim().toUpperCase(java.util.Locale.ROOT)) {
+        case "OPTIONS" -> OPTIONS;
+        case "FUTURES" -> FUTURES;
+        default -> BOTH;
+      };
+    }
+  }
+
   /** Outcome of one backfill run — coverage + the candle rows written. */
   public record BackfillSummary(
       String jobId,
@@ -193,6 +212,8 @@ public class ExpiredBackfillService {
   private final ObjectProvider<UpstoxExpiredInstrumentsClient> clientProvider;
   private final CandleRepository candles;
   private final ExpiredBackfillRepository repo;
+  /** Run-audit ledger (V030) — nullable in the test seams; every call here is fail-soft. */
+  private final BackfillJobRepository jobRepo;
   private final long throttleMs;
   private final long legTimeoutSec;
   private final AtomicBoolean running = new AtomicBoolean(false);
@@ -211,17 +232,18 @@ public class ExpiredBackfillService {
   public ExpiredBackfillService(
       ObjectProvider<UpstoxExpiredInstrumentsClient> clientProvider,
       CandleRepository candles,
-      ExpiredBackfillRepository repo) {
-    this(clientProvider, candles, repo, THROTTLE_MS, DEFAULT_LEG_TIMEOUT_SEC);
+      ExpiredBackfillRepository repo,
+      BackfillJobRepository jobRepo) {
+    this(clientProvider, candles, repo, jobRepo, THROTTLE_MS, DEFAULT_LEG_TIMEOUT_SEC);
   }
 
-  /** Test seam: stub client + zero throttle (default per-leg timeout). */
+  /** Test seam: stub client + zero throttle (default per-leg timeout); no run-audit. */
   ExpiredBackfillService(
       ObjectProvider<UpstoxExpiredInstrumentsClient> clientProvider,
       CandleRepository candles,
       ExpiredBackfillRepository repo,
       long throttleMs) {
-    this(clientProvider, candles, repo, throttleMs, DEFAULT_LEG_TIMEOUT_SEC);
+    this(clientProvider, candles, repo, null, throttleMs, DEFAULT_LEG_TIMEOUT_SEC);
   }
 
   /** Test seam: also override the per-leg fetch timeout (to exercise the stuck-leg guard). */
@@ -231,20 +253,38 @@ public class ExpiredBackfillService {
       ExpiredBackfillRepository repo,
       long throttleMs,
       long legTimeoutSec) {
+    this(clientProvider, candles, repo, null, throttleMs, legTimeoutSec);
+  }
+
+  private ExpiredBackfillService(
+      ObjectProvider<UpstoxExpiredInstrumentsClient> clientProvider,
+      CandleRepository candles,
+      ExpiredBackfillRepository repo,
+      BackfillJobRepository jobRepo,
+      long throttleMs,
+      long legTimeoutSec) {
     this.clientProvider = clientProvider;
     this.candles = candles;
     this.repo = repo;
+    this.jobRepo = jobRepo;
     this.throttleMs = throttleMs;
     this.legTimeoutSec = legTimeoutSec;
   }
 
   /**
    * 202-style async trigger: validates the source + acquires the single-run lock SYNCHRONOUSLY (so the
-   * caller gets the 503/409 immediately), then runs the backfill on the daemon thread.
+   * caller gets the 503/409 immediately), then runs the backfill on the daemon thread. {@code
+   * contractType} filters which legs are fetched (defaults to {@link ContractType#BOTH} — existing
+   * callers stay byte-identical).
    */
   @SuppressWarnings("FutureReturnValueIgnored")
   public Map<String, String> triggerAsync(
-      List<String> underlyings, LocalDate from, LocalDate to, String interval, boolean force) {
+      List<String> underlyings,
+      LocalDate from,
+      LocalDate to,
+      String interval,
+      boolean force,
+      ContractType contractType) {
     UpstoxExpiredInstrumentsClient client = requireClient();
     if (interval != null && !UPSTOX_INTERVAL.equals(interval)) {
       throw new ApiException(
@@ -254,24 +294,28 @@ public class ExpiredBackfillService {
       throw new ApiException(
           409, ErrorCodes.CONFLICT_BACKFILL_RUNNING, "an expired backfill is already in progress");
     }
+    ContractType type = contractType == null ? ContractType.BOTH : contractType;
     String jobId = UUID.randomUUID().toString();
     Instant started = Instant.now();
     RunProgress p = new RunProgress(jobId, started);
     progress = p;
     status.set(p.snapshot("RUNNING", null, 0, null));
+    long auditId = auditStart(underlyings, from, to, force, type);
     executor.submit(
         () -> {
           try {
-            BackfillSummary s = run(client, underlyings, from, to, jobId, force);
+            BackfillSummary s = run(client, underlyings, from, to, jobId, force, type);
             log.info(
                 "expired-backfill {} done: {} expiries, {} contracts, {} written, {} skipped, {} failed, {} rows",
                 jobId, s.expiries(), s.contracts(),
                 s.legsWritten(), s.legsSkipped(), s.legsFailed(), s.candleRows());
+            auditComplete(auditId, s.candleRows());
             Instant ended = Instant.now();
             status.set(
                 p.snapshot("OK", ended, java.time.Duration.between(started, ended).toMillis(), null));
           } catch (Exception e) {
             log.error("expired-backfill {} failed", jobId, e);
+            auditFail(auditId, e.toString());
             Instant ended = Instant.now();
             status.set(
                 p.snapshot(
@@ -305,7 +349,9 @@ public class ExpiredBackfillService {
       LocalDate from,
       LocalDate to,
       String jobId,
-      boolean force) {
+      boolean force,
+      ContractType contractType) {
+    ContractType type = contractType == null ? ContractType.BOTH : contractType;
     RunProgress p =
         (progress != null && jobId.equals(progress.jobId))
             ? progress
@@ -355,7 +401,7 @@ public class ExpiredBackfillService {
             p.log(underlying + " " + expiry + " SKIPPED (transient): " + e.getMessage());
             continue;
           }
-          List<Leg> bounded = boundStrikes(legs, indexRef, expiry);
+          List<Leg> bounded = filterType(boundStrikes(legs, indexRef, expiry), type);
           contracts.addAndGet(bounded.size());
 
           List<Future<?>> inflight = new ArrayList<>(bounded.size());
@@ -436,6 +482,25 @@ public class ExpiredBackfillService {
       }
       BigDecimal strike = leg.strike();
       if (strike != null && strike.compareTo(lo) >= 0 && strike.compareTo(hi) <= 0) {
+        kept.add(leg);
+      }
+    }
+    return kept;
+  }
+
+  /**
+   * Keeps only the leg types the operator asked for. {@link ContractType#BOTH} (the default) is a
+   * no-op, so an unfiltered run is byte-identical to the pre-selector behaviour. Options = CE/PE,
+   * futures = FUT (the {@code instrument_type} the Upstox roster carries).
+   */
+  private static List<Leg> filterType(List<Leg> legs, ContractType type) {
+    if (type == ContractType.BOTH) {
+      return legs;
+    }
+    boolean wantFut = type == ContractType.FUTURES;
+    List<Leg> kept = new ArrayList<>(legs.size());
+    for (Leg leg : legs) {
+      if ("FUT".equals(leg.instrumentType()) == wantFut) {
         kept.add(leg);
       }
     }
@@ -570,6 +635,68 @@ public class ExpiredBackfillService {
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
     }
+  }
+
+  /**
+   * Opens a {@code backfill_jobs} audit row for this run — best-effort. A logging-DB failure (or a null
+   * {@code jobRepo} in the test seams) returns -1 and is swallowed with a warn: the audit must never
+   * break the backfill it records.
+   */
+  private long auditStart(
+      List<String> underlyings, LocalDate from, LocalDate to, boolean force, ContractType type) {
+    if (jobRepo == null) {
+      return -1;
+    }
+    try {
+      String params =
+          String.format(
+              "{\"underlyings\":%s,\"from\":%s,\"to\":%s,\"force\":%s,\"contractType\":\"%s\"}",
+              jsonArray(underlyings), jsonOrNull(from), jsonOrNull(to), force, type);
+      return jobRepo.start("EXPIRED", params);
+    } catch (RuntimeException e) {
+      log.warn("expired-backfill: could not open audit row (non-fatal): {}", e.toString());
+      return -1;
+    }
+  }
+
+  private void auditComplete(long auditId, long rows) {
+    if (jobRepo == null || auditId < 0) {
+      return;
+    }
+    try {
+      jobRepo.complete(auditId, rows);
+    } catch (RuntimeException e) {
+      log.warn("expired-backfill: could not close audit row (non-fatal): {}", e.toString());
+    }
+  }
+
+  private void auditFail(long auditId, String error) {
+    if (jobRepo == null || auditId < 0) {
+      return;
+    }
+    try {
+      jobRepo.fail(auditId, error);
+    } catch (RuntimeException e) {
+      log.warn("expired-backfill: could not mark audit row failed (non-fatal): {}", e.toString());
+    }
+  }
+
+  private static String jsonArray(List<String> values) {
+    if (values == null || values.isEmpty()) {
+      return "null";
+    }
+    StringBuilder sb = new StringBuilder("[");
+    for (int i = 0; i < values.size(); i++) {
+      if (i > 0) {
+        sb.append(',');
+      }
+      sb.append('"').append(values.get(i).replace("\"", "\\\"")).append('"');
+    }
+    return sb.append(']').toString();
+  }
+
+  private static String jsonOrNull(LocalDate date) {
+    return date == null ? "null" : "\"" + date + "\"";
   }
 
   private UpstoxExpiredInstrumentsClient requireClient() {

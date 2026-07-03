@@ -715,6 +715,21 @@ export interface components {
             enabled?: boolean;
             channel?: string;
         };
+        ShadowSummaryResponse: {
+            items?: components["schemas"]["VariantSummary"][];
+        };
+        VariantSummary: {
+            variant?: string;
+            /** Format: int64 */
+            open?: number;
+            /** Format: int64 */
+            closed?: number;
+            /** Format: int64 */
+            wins?: number;
+            /** Format: int64 */
+            losses?: number;
+            pnlPoints?: number;
+        };
         Funds: {
             status?: string;
             availableCash?: number;
@@ -1918,9 +1933,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["ShadowSummaryResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

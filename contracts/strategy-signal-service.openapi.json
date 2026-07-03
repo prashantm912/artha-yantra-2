@@ -1556,8 +1556,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/ShadowSummaryResponse"
                 }
               }
             }
@@ -2246,6 +2245,44 @@
           },
           "channel" : {
             "type" : "string"
+          }
+        }
+      },
+      "ShadowSummaryResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/VariantSummary"
+            }
+          }
+        }
+      },
+      "VariantSummary" : {
+        "type" : "object",
+        "properties" : {
+          "variant" : {
+            "type" : "string"
+          },
+          "open" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "closed" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "wins" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "losses" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "pnlPoints" : {
+            "type" : "number"
           }
         }
       },

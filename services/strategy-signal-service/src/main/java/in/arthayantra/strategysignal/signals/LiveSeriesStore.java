@@ -50,10 +50,13 @@ public class LiveSeriesStore implements SeriesProvider {
         });
   }
 
-  /** Appends a live bar (creates the series cold when warm-up was unavailable). */
-  public void append(SeriesKey key, EngineCandle candle) {
+  /**
+   * Appends a live bar (creates the series cold when warm-up was unavailable). Returns {@code
+   * false} for a duplicate/stale bar — the engine must skip evaluation for those, never re-run it.
+   */
+  public boolean append(SeriesKey key, EngineCandle candle) {
     EngineSeries target = series.computeIfAbsent(key, EngineSeries::new);
-    appendQuietly(target, candle);
+    return appendQuietly(target, candle);
   }
 
   @Override
@@ -77,11 +80,13 @@ public class LiveSeriesStore implements SeriesProvider {
     }
   }
 
-  private static void appendQuietly(EngineSeries target, EngineCandle candle) {
+  private static boolean appendQuietly(EngineSeries target, EngineCandle candle) {
     try {
       target.append(candle);
+      return true;
     } catch (IllegalArgumentException outOfOrder) {
       // replayed/stale bar — the series stays strictly increasing
+      return false;
     }
   }
 

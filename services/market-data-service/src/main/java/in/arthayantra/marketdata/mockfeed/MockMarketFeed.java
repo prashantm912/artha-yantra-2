@@ -34,6 +34,7 @@ public class MockMarketFeed implements MarketFeed {
   private final String scenario;
 
   private volatile boolean running;
+  private volatile java.util.function.Consumer<Boolean> connectionStateSink;
   private ScheduledExecutorService scheduler;
 
   public MockMarketFeed(
@@ -95,6 +96,7 @@ public class MockMarketFeed implements MarketFeed {
         ticksPerSecond,
         scenario,
         seed);
+    notifyConnectionState(true); // no socket — the mock is "connected" while running
   }
 
   @Override
@@ -102,6 +104,19 @@ public class MockMarketFeed implements MarketFeed {
     running = false;
     if (scheduler != null) {
       scheduler.shutdownNow();
+    }
+    notifyConnectionState(false);
+  }
+
+  @Override
+  public void onConnectionState(java.util.function.Consumer<Boolean> sink) {
+    this.connectionStateSink = sink;
+  }
+
+  private void notifyConnectionState(boolean connected) {
+    java.util.function.Consumer<Boolean> sink = connectionStateSink;
+    if (sink != null) {
+      sink.accept(connected);
     }
   }
 

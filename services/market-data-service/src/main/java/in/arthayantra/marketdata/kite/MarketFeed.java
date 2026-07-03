@@ -14,4 +14,11 @@ public interface MarketFeed {
 
   /** Whether the feed is currently delivering. */
   boolean running();
+
+  /**
+   * Registers a socket-state sink invoked with {@code true} on connect and {@code false} on
+   * disconnect — the truth source behind {@code kite:ticker:status}. Live wires the WS callbacks;
+   * mock reports connected-while-running. Default no-op so test fakes stay one-method.
+   */
+  default void onConnectionState(java.util.function.Consumer<Boolean> sink) {}
 }

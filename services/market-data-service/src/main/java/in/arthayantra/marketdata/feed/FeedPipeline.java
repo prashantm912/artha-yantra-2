@@ -22,6 +22,9 @@ public class FeedPipeline implements SmartLifecycle, in.arthayantra.marketdata.k
   /** Canonical Redis key for Kite session/ticker state (COMMON §3). */
   public static final String SESSION_STATUS_KEY = "kite:session:status";
 
+  /** B-13 ticker sub-field: CONNECTING → CONNECTED/DISCONNECTED, driven by the socket callbacks. */
+  public static final String TICKER_STATUS_KEY = "kite:ticker:status";
+
   private static final Logger log = LoggerFactory.getLogger(FeedPipeline.class);
 
   private final MarketFeed marketFeed;
@@ -73,7 +76,12 @@ public class FeedPipeline implements SmartLifecycle, in.arthayantra.marketdata.k
     }
     running = true;
     redis.opsForValue().set(SESSION_STATUS_KEY, sessionGateway.statusLabel());
-    redis.opsForValue().set("kite:ticker:status", "CONNECTED"); // B-13 ticker sub-field
+    // Seeded CONNECTING; the feed's connect/disconnect callbacks own the CONNECTED/DISCONNECTED
+    // transitions (an eager CONNECTED write here asserted a socket that a stale-token 403 never
+    // opened — the status surface lied all day exactly when it mattered).
+    redis.opsForValue().set(TICKER_STATUS_KEY, "CONNECTING");
+    marketFeed.onConnectionState(
+        connected -> writeTickerStatus(connected ? "CONNECTED" : "DISCONNECTED"));
     normalizerThread = new Thread(this::normalizerLoop, "tick-normalizer");
     normalizerThread.setDaemon(true);
     normalizerThread.start();
@@ -108,16 +116,7 @@ public class FeedPipeline implements SmartLifecycle, in.arthayantra.marketdata.k
         if (raw == null) {
           continue;
         }
-        normalizer
-            .normalize(raw)
-            .ifPresent(
-                tick -> {
-                  lastTickStore.update(tick);
-                  publisher.publish(tick);
-                  for (NormalizedTickListener listener : listeners) {
-                    listener.onNormalizedTick(tick);
-                  }
-                });
+        normalizer.normalize(raw).ifPresent(this::fanOut);
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
         return;
@@ -127,12 +126,44 @@ public class FeedPipeline implements SmartLifecycle, in.arthayantra.marketdata.k
     }
   }
 
+  /**
+   * Per-tick fan-out: candle building must NEVER be lost to a Redis publish failure (and one
+   * failing listener must never starve the others) — each step is isolated, so a brief Redis
+   * hiccup degrades the WS bridge without dropping 1m bars from the store.
+   */
+  void fanOut(NormalizedTick tick) {
+    lastTickStore.update(tick);
+    try {
+      publisher.publish(tick);
+    } catch (RuntimeException publishFailure) {
+      log.warn("tick publish failed (bar building continues): {}", publishFailure.getMessage());
+    }
+    for (NormalizedTickListener listener : listeners) {
+      try {
+        listener.onNormalizedTick(tick);
+      } catch (RuntimeException listenerFailure) {
+        log.warn(
+            "tick listener {} failed: {}",
+            listener.getClass().getSimpleName(),
+            listenerFailure.getMessage());
+      }
+    }
+  }
+
+  private void writeTickerStatus(String state) {
+    try {
+      redis.opsForValue().set(TICKER_STATUS_KEY, state);
+    } catch (RuntimeException redisGone) {
+      log.warn("ticker status write failed: {}", redisGone.getMessage());
+    }
+  }
+
   @Override
   public void stop() {
     running = false;
     marketFeed.stop();
     try {
-      redis.opsForValue().set("kite:ticker:status", "DISCONNECTED");
+      redis.opsForValue().set(TICKER_STATUS_KEY, "DISCONNECTED");
     } catch (RuntimeException redisGone) {
       log.debug("ticker status write skipped on shutdown: {}", redisGone.getMessage());
     }

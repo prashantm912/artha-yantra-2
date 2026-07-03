@@ -31,9 +31,11 @@ import in.arthayantra.strategyengine.series.SeriesKey;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
 import java.util.function.IntConsumer;
@@ -173,8 +175,13 @@ public class BacktestRunner {
     // Part 2: an options_of_underlying strategy is replayed premium-as-primary — signals on the
     // underlying (the signal instrument here), fills/marks/exits on the option's own premium series.
     // Every other strategy stays on the byte-identical candle-close ReplayEngine path (its goldens hold).
+    boolean optionsStrategy = premiumProvenance.isOptionsStrategy(config);
+    // Audit row 6: an armed OI gate's replay-time Connecting-Dots lookups can silently return EMPTY
+    // (MarketDataClient swallows failures) — the gate then degrades to no-filtering. Tally
+    // fetched-vs-total per run so a degraded-gate run is distinguishable on the metrics JSONB.
+    OptionsPremiumReplay.GateCoverage oiGateCoverage = new OptionsPremiumReplay.GateCoverage();
     ReplayResult result =
-        premiumProvenance.isOptionsStrategy(config)
+        optionsStrategy
             ? optionsPremiumReplay.replay(
                 definition,
                 config,
@@ -183,7 +190,8 @@ public class BacktestRunner {
                 primary1m,
                 strikeRef1m,
                 contexts,
-                initialEquity)
+                initialEquity,
+                oiGateCoverage)
             : replayEngine.replay(
                 definition,
                 signal.exchange(),
@@ -208,6 +216,9 @@ public class BacktestRunner {
             result.totalBars(),
             result.barsInPosition());
     m.full().put("strategyChecksum", resolved.checksum());
+    if (oiGateCoverage.armed()) {
+      m.full().put("oiGateCoverage", oiGateCoverage.label()); // e.g. "42/45" fetched-vs-total
+    }
 
     // §D.4 fold-mode trigger (Phase 31): a plain /backtests/run job is FULL-WINDOW (folds == null,
     // the four fold columns stay NULL). Fold-mode activates ONLY when the future optimizer/stress
@@ -261,7 +272,9 @@ public class BacktestRunner {
             from,
             to,
             primary1m.size(),
-            candleReader.maxFetchedAt(signal.exchange(), signal.tradingsymbol(), from, to));
+            candleReader.maxFetchedAt(signal.exchange(), signal.tradingsymbol(), from, to),
+            extraSeriesLegs(signal, strikeRef, strikeRef1m, contexts, optionsStrategy,
+                result.trades(), from, to));
 
     UUID runId =
         runs.insert(
@@ -298,6 +311,63 @@ public class BacktestRunner {
 
     progress.accept(100);
     log.info("backtest run {} completed: {} trades", runId, result.trades().size());
+  }
+
+  /**
+   * The additional {@link DataHash.SeriesLeg}s for every series the run consumed beyond the primary
+   * 1m (audit row 6, datahash-partial-coverage): the strike-reference series (options path, when
+   * decoupled from the signal), each context series, and each traded option contract's premium
+   * series (its stored 1m bar count + max fetched_at over the run window). Legs mirror the primary
+   * tuple's shape; option contracts are sorted so the tuple order is stable. Empty for a run that
+   * consumed ONLY the primary series — its hash stays byte-identical to the pre-extension algorithm.
+   */
+  private List<DataHash.SeriesLeg> extraSeriesLegs(
+      SeriesKey signal,
+      SeriesKey strikeRef,
+      List<EngineCandle> strikeRef1m,
+      Map<SeriesKey, List<EngineCandle>> contexts,
+      boolean optionsStrategy,
+      List<Trade> trades,
+      OffsetDateTime from,
+      OffsetDateTime to) {
+    List<DataHash.SeriesLeg> legs = new ArrayList<>();
+    if (optionsStrategy && !strikeRef.equals(signal)) {
+      legs.add(
+          new DataHash.SeriesLeg(
+              strikeRef.exchange(),
+              strikeRef.tradingsymbol(),
+              "1m",
+              strikeRef1m.size(),
+              candleReader.maxFetchedAt(strikeRef.exchange(), strikeRef.tradingsymbol(), from, to)));
+    }
+    for (Map.Entry<SeriesKey, List<EngineCandle>> e : contexts.entrySet()) {
+      SeriesKey k = e.getKey();
+      legs.add(
+          new DataHash.SeriesLeg(
+              k.exchange(),
+              k.tradingsymbol(),
+              k.interval(),
+              e.getValue().size(),
+              candleReader.maxFetchedAt(k.exchange(), k.tradingsymbol(), from, to)));
+    }
+    if (optionsStrategy) {
+      // one leg per DISTINCT traded contract (the options-path Trade carries the contract's
+      // exchange/tradingsymbol) — a TreeMap so the leg order is stable across replays
+      Map<String, Trade> byContract = new TreeMap<>();
+      for (Trade t : trades) {
+        byContract.putIfAbsent(t.exchange() + "|" + t.tradingsymbol(), t);
+      }
+      for (Trade t : byContract.values()) {
+        legs.add(
+            new DataHash.SeriesLeg(
+                t.exchange(),
+                t.tradingsymbol(),
+                "1m",
+                candleReader.count1mBuckets(t.exchange(), t.tradingsymbol(), from, to),
+                candleReader.maxFetchedAt(t.exchange(), t.tradingsymbol(), from, to)));
+      }
+    }
+    return legs;
   }
 
   /** The per-fold OOS objective (OOS sharpe) array for the pruner; empty for a full-window trial. */

@@ -4615,8 +4615,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/LiveBreadth"
                 }
               }
             }
@@ -7815,6 +7814,45 @@
           },
           "pctChange" : {
             "type" : "number"
+          }
+        }
+      },
+      "LiveBreadth" : {
+        "type" : "object",
+        "properties" : {
+          "index" : {
+            "type" : "string"
+          },
+          "summary" : {
+            "$ref" : "#/components/schemas/LiveBreadthSummary"
+          },
+          "live" : {
+            "type" : "boolean"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        }
+      },
+      "LiveBreadthSummary" : {
+        "type" : "object",
+        "properties" : {
+          "advances" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "declines" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "unchanged" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "total" : {
+            "type" : "integer",
+            "format" : "int32"
           }
         }
       },

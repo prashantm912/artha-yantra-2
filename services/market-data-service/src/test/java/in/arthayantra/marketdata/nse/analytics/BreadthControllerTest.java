@@ -8,7 +8,6 @@ import static org.mockito.Mockito.when;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -35,14 +34,12 @@ class BreadthControllerTest {
     BreadthController controller =
         new BreadthController(mock(BreadthService.class), contributions);
 
-    Map<String, Object> out = controller.live("NIFTY 50");
+    BreadthController.LiveBreadth out = controller.live("NIFTY 50");
 
-    @SuppressWarnings("unchecked")
-    Map<String, Object> summary = (Map<String, Object>) out.get("summary");
-    assertThat(summary.get("advances")).isEqualTo(3);
-    assertThat(summary.get("declines")).isEqualTo(1);
-    assertThat(summary.get("total")).isEqualTo(4);
-    assertThat(out.get("live")).isEqualTo(true);
-    assertThat(out.get("index")).isEqualTo("NIFTY 50");
+    assertThat(out.summary().advances()).isEqualTo(3);
+    assertThat(out.summary().declines()).isEqualTo(1);
+    assertThat(out.summary().total()).isEqualTo(4);
+    assertThat(out.live()).isTrue();
+    assertThat(out.index()).isEqualTo("NIFTY 50");
   }
 }

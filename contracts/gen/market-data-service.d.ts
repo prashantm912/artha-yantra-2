@@ -2622,6 +2622,23 @@ export interface components {
             close?: number;
             pctChange?: number;
         };
+        LiveBreadth: {
+            index?: string;
+            summary?: components["schemas"]["LiveBreadthSummary"];
+            live?: boolean;
+            /** Format: date */
+            asOf?: string;
+        };
+        LiveBreadthSummary: {
+            /** Format: int32 */
+            advances?: number;
+            /** Format: int32 */
+            declines?: number;
+            /** Format: int32 */
+            unchanged?: number;
+            /** Format: int32 */
+            total?: number;
+        };
         QuotaStatus: {
             configured?: boolean;
             windows?: components["schemas"]["WindowStat"][];
@@ -5914,9 +5931,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["LiveBreadth"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

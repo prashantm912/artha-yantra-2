@@ -87,7 +87,9 @@ The whole 2026-07-02 audit is now fully closed: 90 findings → 54 fixed same-da
 
 Provenance rows live in [`docs/DEFERRED_BACKLOG.md`](../../DEFERRED_BACKLOG.md) (cross-cutting + parked tables):
 
-- `candles_1h` IST re-anchor (before any 1h chart/overlay consumer; drop+recreate the cagg).
+- ~~`candles_1h` IST re-anchor~~ **DONE (#513, 2026-07-04):** V029 drops+recreates `candles_1h` with
+  `time_bucket('1 hour', bucket, 'Asia/Kolkata')` (was UTC-hour, unlike its IST 1d/1w siblings), `WITH
+  NO DATA` + the same refresh policy so the live DB never does a heavy one-shot materialization.
 - ~~Upstox `/pcr` … dormant `source.pcr` flag~~ **FLAG ALREADY BUILT as `source.optionanalytics=upstox|native`**
   (routes `/pcr-series` to Upstox `/pcr` vs native; mapping tested). Only a LIVE market-hours freshness
   check remains before flipping it (§4-adjacent; not an offline build). Do not re-flag as buildable.
@@ -101,7 +103,10 @@ Provenance rows live in [`docs/DEFERRED_BACKLOG.md`](../../DEFERRED_BACKLOG.md) 
   the third-order gamma-sensitivity trio speed/zomma/color added + FD-verified in `black76-math` and
   surfaced on the chain `Leg` (#511, 2026-07-04).** Still open: §6.3 BSM-on-spot seam (stock options);
   20-level depth flattening.
-- Native 3-min option-snapshot capture (config-only; wanted for 3-min Table-2 volume fidelity).
+- ~~Native 3-min option-snapshot capture~~ **MOOT (2026-07-04 empirical check) — do not re-flag:** the
+  backlog premise (5-min capture, want 3-min for Table-2 fidelity) is stale. Live capture already runs
+  at ~1-minute granularity (verified in `options_chain_snapshots`), FINER than 3-min; any coarser
+  interval (incl. 3-min) is a read-time rollup off the 1-min base. Fidelity goal already exceeded.
 - Data-Ops parked: `backfill_jobs` audit table, per-expiry bulk export, STOMP status, contract-type selector.
 - Per-check server audit on signal Take; full-auto execution flag (semi-auto "Take" is the v1 safety boundary).
 - AdvanceChart TV-binary extras (drawing tools, study templates, OI-bar, trade-history, audio alerts).

@@ -10,6 +10,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The single-writer 1m candle builder (Phase 10 / B-6 candle math): minute-boundary close with a
@@ -26,7 +28,14 @@ public class CandleBuilder implements NormalizedTickListener {
     void onClosedBar(Candle bar);
   }
 
+  private static final Logger log = LoggerFactory.getLogger(CandleBuilder.class);
+
   static final Duration LATE_TICK_GRACE = Duration.ofSeconds(5);
+  // P1 (2026-07-03): how far a tick's bucket may sit AHEAD of the wall clock before the tick is
+  // rejected as mis-stamped. Generous vs feed-host clock skew (a real print's minute bucket starts
+  // at/before "now"), tiny vs the observed poison (a ≥15:30-stamped print clamping into the 15:29
+  // close bucket at 12:40 — 2h49m ahead).
+  static final Duration FUTURE_TICK_ALLOWANCE = Duration.ofSeconds(60);
 
   private final SessionBucketer bucketer;
   private final BarSink sink;
@@ -69,6 +78,19 @@ public class CandleBuilder implements NormalizedTickListener {
         return; // duplicate / reconnect-overlap (B-6: drop seq <= lastSeen)
       }
       OffsetDateTime bucket = bucketer.bucketFor(tick.timestamp());
+      // P1 REGRESSION (2026-07-03, NIFTY26JULFUT): ONE mis-stamped print whose clamped bucket sat
+      // hours ahead of the wall clock opened a far-future bar; every real tick for the rest of the
+      // session then dropped silently as "out-of-order" and the signal engine starved while ticks
+      // kept flowing. A bucket meaningfully ahead of "now" cannot be a real print — drop the TICK
+      // before it touches any accumulator state (not even lastSeq: a later replay must not be
+      // shadowed by a rogue frame).
+      if (bucket.toInstant().isAfter(clock.instant().plus(FUTURE_TICK_ALLOWANCE))) {
+        log.warn(
+            "dropping future-stamped tick {} ts={} bucket={} now={} — mis-stamped frame, "
+                + "would poison the 1m stream",
+            key, tick.timestamp(), bucket, clock.instant());
+        return;
+      }
       // a flushed bar is CLOSED FOREVER (B-7 closed-bars-immutable): post-close prints clamp
       // into the 15:29 bucket all evening — re-opening it would clobber the true session close
       if (acc.lastClosedBucket != null && !bucket.isAfter(acc.lastClosedBucket)) {

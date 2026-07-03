@@ -174,7 +174,7 @@ cutover) is now the ONLY remaining pending wave** — prepped, gated on a live m
 | #2 Open=High **per-strike Table-1/Table-2 faithful grading** | **DONE (#44)** | — | New `/options/strike-session-stats` endpoint derives per-strike session OHLC+volume from `options_chain_snapshots`. A standalone **Open & High Strategy** oipulse page + trigger-probability series also added (#153). |
 | **OiPulse ≥90% AI badge** (#2) | DEFERRED | Phase 4 (OiPulse-parity) | External proprietary oipulse.com AI model; not ours; the faithful Table-1/Table-2 HIGH tier is our equivalent. |
 | **drasticFloor per-index tuning** (#6 `drastic_oi`) | DEFERRED | live calibration | The source gives no number; default `50000` is a placeholder; tune per index (NIFTY vs BANKNIFTY) once live OI magnitudes are observed. |
-| **Native 3-min option-snapshot capture** | DEFERRED (config) | when 3-min Table-2 volume fidelity is wanted | 5-min snapshots → 5-min volume candles; native 3-min needs `artha.options.snapshot-interval-ms`=180000 (more storage). The endpoint already serves both via the `interval` param; Table-1 OH/OL is resolution-robust. |
+| ~~**Native 3-min option-snapshot capture**~~ | **MOOT (2026-07-04)** | — | Row premise (5-min capture) is stale: live capture already runs at ~1-min granularity (verified in `options_chain_snapshots`), FINER than 3-min. Any interval (incl. 3-min) is a read-time rollup off the 1-min base — the endpoint already serves all of them via the `interval` param. Fidelity goal exceeded; nothing to build. |
 
 ## Phase 4 — React migration (§10/§11) — IN PROGRESS (substantially built)
 

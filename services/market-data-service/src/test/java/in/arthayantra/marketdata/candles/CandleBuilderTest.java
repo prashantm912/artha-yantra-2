@@ -74,6 +74,7 @@ class CandleBuilderTest {
     // AUDIT REGRESSION (B-6/B-7): every after-close print clamps into the 15:29 bucket;
     // once the flush sweep closes that bar it must stay closed FOREVER — the mock feed
     // free-runs all evening and used to clobber the true session close once per sweep
+    now.set(Instant.parse("2026-06-10T09:59:30Z")); // 15:29:30 IST — wall clock at the close
     Run run = run();
     run.builder.onNormalizedTick(tick("2026-06-10T15:29:10", "100.00", 1000, null, 1));
     run.builder.onNormalizedTick(tick("2026-06-10T15:29:50", "101.00", 1500, null, 2));
@@ -148,9 +149,11 @@ class CandleBuilderTest {
 
   @Test
   void cumulativeVolumeResetRollsBaselineToZero() {
+    now.set(Instant.parse("2026-06-10T09:59:30Z")); // 15:29:30 IST — wall clock at the close
     Run run = run();
     run.builder.onNormalizedTick(tick("2026-06-10T15:29:10", "100.00", 50_000, null, 1));
     // next session day: cumulative reset by the exchange
+    now.set(Instant.parse("2026-06-11T03:45:30Z")); // 09:15:30 IST next day
     run.builder.onNormalizedTick(tick("2026-06-11T09:15:05", "102.00", 400, null, 2));
 
     now.set(Instant.parse("2026-06-11T03:46:10Z")); // 09:16:10 IST next day
@@ -173,7 +176,35 @@ class CandleBuilderTest {
   }
 
   @Test
+  void futureStampedTickIsDroppedAndNeverPoisonsTheStream() {
+    // P1 REGRESSION (2026-07-03, NIFTY26JULFUT): at 12:40 IST one rogue print stamped past the
+    // session close clamped into the 15:29 bucket, opened a far-future bar, and EVERY real tick
+    // for the rest of the session was silently ignored as out-of-order — the signal engine
+    // starved all afternoon while 22k+ ticks kept flowing. A tick whose bucket sits ahead of the
+    // wall clock beyond the skew allowance must be dropped WITHOUT touching accumulator state.
+    now.set(Instant.parse("2026-06-10T07:10:00Z")); // 12:40:00 IST
+    Run run = run();
+    run.builder.onNormalizedTick(tick("2026-06-10T12:39:10", "100.00", 1000, null, 1));
+    run.builder.onNormalizedTick(tick("2026-06-10T12:39:40", "101.00", 1200, null, 2));
+    // the rogue frame: stamped 15:31 (clamps to the 15:29 close bucket) at a 12:40 wall clock
+    run.builder.onNormalizedTick(tick("2026-06-10T15:31:00", "999.00", 9_999, null, 3));
+    // the live stream continues and MUST keep building bars
+    run.builder.onNormalizedTick(tick("2026-06-10T12:40:05", "102.00", 1500, null, 4));
+    now.set(Instant.parse("2026-06-10T07:11:05Z")); // 12:41:05 IST
+    run.builder.onNormalizedTick(tick("2026-06-10T12:41:02", "103.00", 1800, null, 5));
+
+    assertThat(run.bars).hasSize(2); // 12:39 + 12:40 closed by their successors
+    assertThat(run.bars.get(0).close()).isEqualByComparingTo("101.00");
+    assertThat(run.bars.get(1).open()).isEqualByComparingTo("102.00");
+    assertThat(run.bars.get(1).volume()).as("rogue tick never became the volume baseline").isEqualTo(300);
+    assertThat(run.bars)
+        .as("the rogue print never lands in any bar")
+        .noneMatch(b -> b.high().compareTo(new BigDecimal("999.00")) == 0);
+  }
+
+  @Test
   void identicalTickStreamsProduceIdenticalBars() {
+    now.set(Instant.parse("2026-06-10T04:47:05Z")); // 10:17:05 IST — past the last tick's stamp
     List<NormalizedTick> ticks =
         List.of(
             tick("2026-06-10T10:15:01", "100.00", 1000, 10L, 1),

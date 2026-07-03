@@ -172,9 +172,66 @@ manual premium-path replay is needed.
 | 5 | iv_rank null semantics | null scores against | null = neutral / excluded | §3/§4: honest-null punished both sessions | PROPOSED (code) |
 | 6 | composite threshold 0.6 | keep | keep (fix inputs) | §3 cap math (0.765 ceiling) | DECIDED-KEEP |
 | 7 | `DataHealthCanary` live staleness watcher (README §7.8) | not built | ping when newest rejection lags wall-clock / a field goes newly dead | §6: 12:40 SignalEngine stall went undetected until EOD | **PROPOSED (build) — NEW, promoted from §6** |
+| 8 | candle upsert `source = EXCLUDED.source` | last-writer clobbers provenance | preserve TICK_AGG on REST overwrite | Addendum A1: re-fetches masked the tick-agg trail during the stall hunt | PROPOSED — NEW |
+| 9 | covered-range 1m re-fetch treadmill | re-fetches covered ranges (~30-min cadence) | fetch only true gaps | Addendum A1: wasted Kite budget + feeds #8 | PROPOSED (dig) — NEW |
 
 **Two-session caveat:** items 1–3 are structural (threshold outside the operand's physical range — not
 day-dependent). Item 1's *tuning urgency* is now genuinely two-sided: structurally the floor is mis-calibrated,
 but on 07-03 it vetoed 20/20 losers, so the fix must be a **relative** floor (filters chop, admits impulse
 volume), not merely a lower fixed number. Dot rates (`drastic_oi`, `trending_cross`, `oi-divergence-magnitude`)
 swing hard between the two sessions — hold all dot-threshold moves for the multi-session rollup.
+
+---
+
+## Addendum (2026-07-03 evening) — §6 stall ROOT-CAUSED + fixed; morning live-verification evidence
+
+### A1. The 12:40 stall — full root cause (corrects the §6 "bar-consumer stalled" hypothesis)
+
+Evidence chain (post-market forensics on the still-running processes):
+
+1. `signal-eval` thread dump: **idle, queue empty** — the engine was healthy and starving, not stuck.
+2. `PUBSUB NUMSUB candles.1m.NFO.NIFTY26JULFUT` = **1** — the engine's Redis subscription was ALIVE
+   all along. The PUBLISHER stopped.
+3. `ticks:last` for NFO:NIFTY26JULFUT: **seq 35,376, last 15:29:59** — ticks flowed ALL DAY. The drop
+   was inside `CandleBuilder`.
+4. `BarWriter` is the only `candles.1m.*` publisher; the builder DID publish 09:15→12:40 (the engine's
+   eval log cadence proves it). The DB rows reading `source=KITE` were an ILLUSION: the candle upsert
+   sets `source = EXCLUDED.source`, and periodic REST re-fetches re-stamped the tick-agg rows (proven:
+   the 10:00 bar's `fetched_at` = 10:31).
+5. At 12:40:16 ONE mis-stamped print (timestamp ≥15:30, clamped by the session bucketer into TODAY'S
+   15:29 close bucket) opened a far-future bar in the accumulator. Every subsequent real tick then hit
+   the `bucket.isBefore(acc.bucket)` guard — silently ignored, no log, no counter, no self-heal. 22k+
+   ticks eaten; the engine starved for the whole afternoon.
+6. The same trap explains the historical signature on this token: single 15:29 zero-volume TICK_AGG
+   bars on 2026-06-30/07-02 (the trap firing, then the 15:30 flush emitting the one poisoned bar).
+
+**FIX SHIPPED:** `CandleBuilder` now REJECTS any tick whose bucket sits more than 60 s ahead of the
+wall clock, before it touches accumulator state (WARN-logged — the DataHealthCanary/logs will show
+every occurrence, finally answering "which frames are mis-stamped and how often"). Regression test:
+`futureStampedTickIsDroppedAndNeverPoisonsTheStream`.
+
+**Two follow-on defects filed to the ledger (§7):**
+- #8 `source = EXCLUDED.source` clobbers provenance — REST re-fetches over tick-agg rows re-stamp
+  them KITE, blinding source-based diagnostics (this hunt burned an hour on it). Fix: preserve
+  TICK_AGG on overwrite, or stop re-fetching covered ranges.
+- #9 covered-range re-fetch treadmill — something re-fetches already-covered 1m ranges (~30-min
+  cadence observed). Wasted Kite budget + the source clobber above. Needs its own dig.
+
+### A2. Morning live verification (owner-driven session, all PASS)
+
+- **Routine firings:** pre-open equity scan 09:09:30 → 210 rows (first live, #470); capture timestamps
+  13/13 at exact :00 (T2 mechanical ✓); rejections + shadow book live from 09:21.
+- **T2 row-for-row vs oipulse (SENSEX 78000 / 5m / 2026-07-09, live side-by-side ~09:30):** window
+  labels row-for-row IDENTICAL (the audit's one-bucket skew GONE); Call OI EXACT 3/3 settled rows;
+  Put OI boundary row EXACT. Residual: two older put rows differ by exactly one 2-min capture —
+  oipulse's poll caught a LAGGING BSE OI dissemination batch (their values == our 09:18/09:22 raw
+  captures; ours == the true 09:20/09:24 boundary states). Exchange-side phase; our semantics correct.
+- **Live page-walk (7 changed pages) all PASS:** trending full-session + graph view (#440/#464);
+  Open&High with a real `O=L Hit ✓ 09:15` badge (#465); pre-open scanner (172 adv/38 dec) (#470);
+  index-contribution live +0.76% @ 24356 (#468); big-OI top-10 (#463); rejections page rail chips;
+  cockpit fully live. One cosmetic nit: cockpit Live-signals empty-state says "publish a strategy to
+  start emitting" while 21 are published.
+- **Shadow-book intra-day watch:** dedup held visibly (09:24 composite 0.6633 did not double-open);
+  instant structural stops verified LEGIT against 1m future candles; 15:12 square-off worked first day.
+- NOTE for the breadth build (§7 #4): the pre-open scan (172/38) and the index-contribution live path
+  (42/8) already compute advances/declines from live quotes — ready-made producers.

@@ -6507,6 +6507,15 @@
           "vomma" : {
             "type" : "number"
           },
+          "speed" : {
+            "type" : "number"
+          },
+          "zomma" : {
+            "type" : "number"
+          },
+          "color" : {
+            "type" : "number"
+          },
           "ivReason" : {
             "type" : "string"
           },

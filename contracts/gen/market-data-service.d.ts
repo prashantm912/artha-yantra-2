@@ -2144,6 +2144,9 @@ export interface components {
             vanna?: number;
             charm?: number;
             vomma?: number;
+            speed?: number;
+            zomma?: number;
+            color?: number;
             ivReason?: string;
             priceSource?: string;
         };

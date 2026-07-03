@@ -90,10 +90,16 @@ Provenance rows live in [`docs/DEFERRED_BACKLOG.md`](../../DEFERRED_BACKLOG.md) 
 
 - `candles_1h` IST re-anchor (before any 1h chart/overlay consumer; drop+recreate the cagg).
 - Upstox `/pcr` live-freshness test → dormant `source.pcr` flag (display-only today, no urgency).
-- optimizer `requirements.txt` hash-pinning (`pip-compile --generate-hashes`, CI hardening).
+- ~~optimizer `requirements.txt` hash-pinning~~ **ALREADY DONE (2026-07-04 audit) — remove, do not re-flag:**
+  `requirements.lock` (799 SHA-256 hashes) + `requirements-dev.lock` (922) via `uv pip compile
+  --generate-hashes`; Dockerfile installs `--require-hashes`, `ci-optimizer.yml` installs
+  `--require-hashes -r requirements-dev.lock`. Supply-chain guard is live.
 - Recorded real Kite binary-frame capture + B-9 frame-guard production wiring (needs a first-party WS client).
 - Options-fidelity SNAPSHOT/SYNTHETIC_B76 live walk; walk-forward fold + MedianPruner live walk (multi-month data).
-- Second-order greeks (speed/zomma/color); §6.3 BSM-on-spot seam (stock options); 20-level depth flattening.
+- ~~Second-order greeks (speed/zomma/color)~~ **DONE — vanna/charm/vomma were already shipped (§17.6);
+  the third-order gamma-sensitivity trio speed/zomma/color added + FD-verified in `black76-math` and
+  surfaced on the chain `Leg` (#511, 2026-07-04).** Still open: §6.3 BSM-on-spot seam (stock options);
+  20-level depth flattening.
 - Native 3-min option-snapshot capture (config-only; wanted for 3-min Table-2 volume fidelity).
 - Data-Ops parked: `backfill_jobs` audit table, per-expiry bulk export, STOMP status, contract-type selector.
 - Per-check server audit on signal Take; full-auto execution flag (semi-auto "Take" is the v1 safety boundary).

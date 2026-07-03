@@ -58,6 +58,9 @@ public class OptionsChainService {
       BigDecimal vanna,
       BigDecimal charm,
       BigDecimal vomma,
+      BigDecimal speed,
+      BigDecimal zomma,
+      BigDecimal color,
       String ivReason,
       String priceSource) {}
 
@@ -325,6 +328,9 @@ public class OptionsChainService {
     BigDecimal vanna = null;
     BigDecimal charm = null;
     BigDecimal vomma = null;
+    BigDecimal speed = null;
+    BigDecimal zomma = null;
+    BigDecimal color = null;
     String reason;
     String priceSource = null;
 
@@ -378,6 +384,9 @@ public class OptionsChainService {
           vanna = greeks.vanna();
           charm = greeks.charm();
           vomma = greeks.vomma();
+          speed = greeks.speed();
+          zomma = greeks.zomma();
+          color = greeks.color();
         }
       }
     }
@@ -398,6 +407,9 @@ public class OptionsChainService {
         scale6(vanna),
         scale6(charm),
         scale6(vomma),
+        scale6(speed),
+        scale6(zomma),
+        scale6(color),
         reason,
         priceSource);
   }

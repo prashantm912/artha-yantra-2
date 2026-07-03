@@ -147,6 +147,54 @@ class Black76GoldenVectorTest {
     assertThat(checked).isEqualTo(48);
   }
 
+  /**
+   * Independent proof the THIRD-order closed forms are correct: speed/zomma/color are ∂Γ/∂F, ∂Γ/∂σ
+   * and ∂Γ/∂t, so each must match a CENTRAL finite difference of the code's OWN gamma in the SAME
+   * reporting units (speed raw per-F, zomma ÷100 per vol-point, color ÷365 per day) — same grid +
+   * tolerance discipline as the second-order proof.
+   */
+  @Test
+  void thirdOrderGreeksMatchFiniteDifferenceOfGamma() {
+    double[][] grid = {{20000, 30.0 / 365}, {22000, 30.0 / 365}, {24000, 7.0 / 365},
+        {22000, 90.0 / 365}, {21000, 60.0 / 365}, {23000, 14.0 / 365}};
+    double f = 22000;
+    double r = 0.065;
+    int checked = 0;
+    for (double sigma : new double[] {0.12, 0.20, 0.35, 0.55}) {
+      for (double[] gk : grid) {
+        double k = gk[0];
+        double t = gk[1];
+        for (Black76.OptionType type : Black76.OptionType.values()) {
+          Black76.Greeks g = Black76.greeks(type, f, k, t, r, sigma);
+
+          double stepF = 1.0; // F ≈ 22000 → ~5e-5 relative; gamma smooth in F
+          double fdSpeed =
+              (Black76.greeks(type, f + stepF, k, t, r, sigma).gamma().doubleValue()
+                      - Black76.greeks(type, f - stepF, k, t, r, sigma).gamma().doubleValue())
+                  / (2 * stepF); // gamma is raw per-F; speed reports the same scale
+          double stepSigma = 1e-5;
+          double fdZomma =
+              (Black76.greeks(type, f, k, t, r, sigma + stepSigma).gamma().doubleValue()
+                      - Black76.greeks(type, f, k, t, r, sigma - stepSigma).gamma().doubleValue())
+                  / (2 * stepSigma)
+                  / 100.0; // ∂Γ/∂σ per vol-point
+          double stepT = 1e-8;
+          double fdColor =
+              (Black76.greeks(type, f, k, t + stepT, r, sigma).gamma().doubleValue()
+                      - Black76.greeks(type, f, k, t - stepT, r, sigma).gamma().doubleValue())
+                  / (2 * stepT)
+                  / 365.0; // ∂Γ/∂t per calendar day
+
+          assertCloseToFd("speed", type, k, t, sigma, g.speed().doubleValue(), fdSpeed);
+          assertCloseToFd("zomma", type, k, t, sigma, g.zomma().doubleValue(), fdZomma);
+          assertCloseToFd("color", type, k, t, sigma, g.color().doubleValue(), fdColor);
+          checked++;
+        }
+      }
+    }
+    assertThat(checked).isEqualTo(48);
+  }
+
   private static void assertCloseToFd(
       String what, Black76.OptionType type, double k, double t, double sigma, double analytic,
       double fd) {

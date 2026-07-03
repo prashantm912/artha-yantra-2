@@ -4920,6 +4920,44 @@
         }
       }
     },
+    "/api/v1/market/admin/backfill-jobs" : {
+      "get" : {
+        "tags" : [ "backfill-jobs-controller" ],
+        "operationId" : "backfillJobs",
+        "parameters" : [ {
+          "name" : "limit",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 50
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BackfillJobsResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/instruments" : {
       "get" : {
         "tags" : [ "instruments-controller" ],
@@ -5717,6 +5755,9 @@
           },
           "force" : {
             "type" : "boolean"
+          },
+          "contractType" : {
+            "type" : "string"
           }
         }
       },
@@ -8105,6 +8146,50 @@
             "type" : "array",
             "items" : {
               "$ref" : "#/components/schemas/CoverageRow"
+            }
+          }
+        }
+      },
+      "BackfillJobRow" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "kind" : {
+            "type" : "string"
+          },
+          "params" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "rowsWritten" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "error" : {
+            "type" : "string"
+          },
+          "startedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "finishedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "BackfillJobsResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/BackfillJobRow"
             }
           }
         }

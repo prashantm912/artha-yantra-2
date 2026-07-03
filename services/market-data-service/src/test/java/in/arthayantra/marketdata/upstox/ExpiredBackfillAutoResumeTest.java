@@ -49,7 +49,10 @@ class ExpiredBackfillAutoResumeTest {
   }
 
   private void verifyResumed(int times) {
-    verify(service, times(times)).triggerAsync(any(), any(), any(), isNull(), eq(false));
+    verify(service, times(times))
+        .triggerAsync(
+            any(), any(), any(), isNull(), eq(false),
+            eq(ExpiredBackfillService.ContractType.BOTH));
   }
 
   // ---- startup ----------------------------------------------------------------------------------
@@ -147,7 +150,9 @@ class ExpiredBackfillAutoResumeTest {
   @Test
   void trigger_swallowsServiceException() {
     clientPresent();
-    when(service.triggerAsync(any(), any(), any(), isNull(), eq(false)))
+    when(service.triggerAsync(
+            any(), any(), any(), isNull(), eq(false),
+            eq(ExpiredBackfillService.ContractType.BOTH)))
         .thenThrow(new RuntimeException("409 already running"));
     // The boot hook must never propagate a trigger failure (would crash app startup).
     assertThatCode(() -> autoResume(true).onReady()).doesNotThrowAnyException();

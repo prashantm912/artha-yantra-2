@@ -54,6 +54,12 @@ class ExpiredBackfillServiceTest {
         new BigDecimal("21200"), 65, new BigDecimal("5"), true);
   }
 
+  private static Leg fut() {
+    return new Leg(
+        "NSE_FO", "NSE_FO|FUT|16-06-2026", "FUT", "NIFTY", NIFTY_KEY, EXPIRY,
+        null, 65, new BigDecimal("5"), true);
+  }
+
   private static Bar barAt(String ts) {
     return new Bar(
         OffsetDateTime.parse(ts),
@@ -89,7 +95,9 @@ class ExpiredBackfillServiceTest {
 
     ExpiredBackfillService service = new ExpiredBackfillService(provider(), candles, repo, 0L);
     ExpiredBackfillService.BackfillSummary summary =
-        service.run(client, List.of("NIFTY"), EXPIRY.minusDays(7), EXPIRY, "job-1", false);
+        service.run(
+            client, List.of("NIFTY"), EXPIRY.minusDays(7), EXPIRY, "job-1", false,
+            ExpiredBackfillService.ContractType.BOTH);
 
     assertThat(summary.legsWritten()).isEqualTo(1);
     assertThat(summary.legsSkipped()).isEqualTo(1);
@@ -136,7 +144,9 @@ class ExpiredBackfillServiceTest {
     // legTimeoutSec = 1 → the stuck leg is cancelled + counted failed, and run() returns promptly.
     ExpiredBackfillService service = new ExpiredBackfillService(provider(), candles, repo, 0L, 1L);
     ExpiredBackfillService.BackfillSummary summary =
-        service.run(client, List.of("NIFTY"), EXPIRY.minusDays(7), EXPIRY, "job-stuck", false);
+        service.run(
+            client, List.of("NIFTY"), EXPIRY.minusDays(7), EXPIRY, "job-stuck", false,
+            ExpiredBackfillService.ContractType.BOTH);
 
     assertThat(summary.legsFailed()).isGreaterThanOrEqualTo(1);
     verify(candles, never()).upsertAuthoritativeAll(any());
@@ -159,7 +169,9 @@ class ExpiredBackfillServiceTest {
         .thenReturn(List.of(barAt("2026-06-10T15:29:00+05:30")), List.of());
 
     ExpiredBackfillService service = new ExpiredBackfillService(provider(), candles, repo, 0L);
-    service.run(client, List.of("NIFTY"), EXPIRY.minusDays(7), EXPIRY, "job-a", false);
+    service.run(
+        client, List.of("NIFTY"), EXPIRY.minusDays(7), EXPIRY, "job-a", false,
+        ExpiredBackfillService.ContractType.BOTH);
 
     verify(repo).upsertContract(
         eq("NFO"), eq(ceSymbol), any(), any(), any(), any(), anyInt(), any(), anyBoolean(),
@@ -184,7 +196,9 @@ class ExpiredBackfillServiceTest {
 
     ExpiredBackfillService service = new ExpiredBackfillService(provider(), candles, repo, 0L);
     ExpiredBackfillService.BackfillSummary s =
-        service.run(client, List.of("NIFTY"), EXPIRY.minusDays(7), EXPIRY, "job-b", false);
+        service.run(
+            client, List.of("NIFTY"), EXPIRY.minusDays(7), EXPIRY, "job-b", false,
+            ExpiredBackfillService.ContractType.BOTH);
 
     assertThat(s.legsWritten()).isEqualTo(1);
     assertThat(s.legsSkipped()).isZero();
@@ -211,7 +225,9 @@ class ExpiredBackfillServiceTest {
 
     ExpiredBackfillService service = new ExpiredBackfillService(provider(), candles, repo, 0L);
     ExpiredBackfillService.BackfillSummary s =
-        service.run(client, List.of("NIFTY"), EXPIRY.minusDays(7), EXPIRY, "job-c", false);
+        service.run(
+            client, List.of("NIFTY"), EXPIRY.minusDays(7), EXPIRY, "job-c", false,
+            ExpiredBackfillService.ContractType.BOTH);
 
     // without the retry the first (false-)empty would have yielded zero data; the bar proves the retry.
     assertThat(s.candleRows()).isEqualTo(1);
@@ -235,7 +251,9 @@ class ExpiredBackfillServiceTest {
         .thenReturn(List.of(barAt("2026-06-16T15:29:00+05:30")), List.of(), List.of());
 
     ExpiredBackfillService service = new ExpiredBackfillService(provider(), candles, repo, 0L);
-    service.run(client, List.of("NIFTY"), EXPIRY.minusDays(40), EXPIRY, "job-d", false);
+    service.run(
+        client, List.of("NIFTY"), EXPIRY.minusDays(40), EXPIRY, "job-d", false,
+        ExpiredBackfillService.ContractType.BOTH);
 
     // exactly 3 calls: w0 (data, 1) + w1 (far empty, NOT retried, 1) + w2 (far empty, 1) → 2-empty stop.
     // The old retry-every-empty behaviour would have made 5. Far-back retries are the wasted quota.
@@ -266,11 +284,45 @@ class ExpiredBackfillServiceTest {
     ExpiredBackfillService service = new ExpiredBackfillService(provider(), candles, repo, 0L);
     // The run does NOT throw despite the transient on the first expiry...
     ExpiredBackfillService.BackfillSummary s =
-        service.run(client, List.of("NIFTY"), badExpiry.minusDays(7), EXPIRY, "job-e", false);
+        service.run(
+            client, List.of("NIFTY"), badExpiry.minusDays(7), EXPIRY, "job-e", false,
+            ExpiredBackfillService.ContractType.BOTH);
 
     // ...the SECOND expiry is still processed (1 leg written) and the blip is counted as a failure.
     assertThat(s.legsWritten()).isEqualTo(1);
     assertThat(s.legsFailed()).isGreaterThanOrEqualTo(1);
     verify(candles).upsertAuthoritativeAll(any());
+  }
+
+  @Test
+  void contractTypeFuturesFetchesOnlyTheFutureLeg() {
+    UpstoxExpiredInstrumentsClient client = mock(UpstoxExpiredInstrumentsClient.class);
+    CandleRepository candles = mock(CandleRepository.class);
+    ExpiredBackfillRepository repo = mock(ExpiredBackfillRepository.class);
+    String futSymbol = OpenAlgoSymbols.futureSymbol("NIFTY", EXPIRY);
+
+    when(client.expiries(NIFTY_KEY)).thenReturn(List.of(EXPIRY));
+    when(client.optionContracts(NIFTY_KEY, EXPIRY)).thenReturn(List.of(ce(), pe()));
+    when(client.futureContracts(NIFTY_KEY, EXPIRY)).thenReturn(List.of(fut()));
+    stubBand(repo);
+    when(repo.coverage(any(), any())).thenReturn(Coverage.NONE);
+    when(client.candles(eq("NSE_FO|FUT|16-06-2026"), eq("1minute"), any(), any()))
+        .thenReturn(List.of(barAt("2026-06-16T15:29:00+05:30")), List.of());
+
+    ExpiredBackfillService service = new ExpiredBackfillService(provider(), candles, repo, 0L);
+    ExpiredBackfillService.BackfillSummary summary =
+        service.run(
+            client, List.of("NIFTY"), EXPIRY.minusDays(7), EXPIRY, "job-fut", false,
+            ExpiredBackfillService.ContractType.FUTURES);
+
+    // Only the FUT leg is in the fetch set — the two option legs are filtered out before the fetch loop.
+    assertThat(summary.contracts()).isEqualTo(1);
+    assertThat(summary.legsWritten()).isEqualTo(1);
+    verify(client, never()).candles(eq("NSE_FO|CE|16-06-2026"), any(), any(), any());
+    verify(client, never()).candles(eq("NSE_FO|PE|16-06-2026"), any(), any(), any());
+    verify(repo)
+        .upsertContract(
+            eq("NFO"), eq(futSymbol), eq("FUT"), any(), any(), any(), anyInt(), any(),
+            anyBoolean(), any(), any(), any(), any(), anyInt(), anyBoolean());
   }
 }

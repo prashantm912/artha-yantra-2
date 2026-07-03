@@ -136,6 +136,8 @@ public class EquityDailyBackfillService {
   private final ObjectProvider<UpstoxExpiredInstrumentsClient> upstoxProvider;
   private final CandleRepository candles;
   private final JdbcTemplate jdbc;
+  /** Run-audit ledger (V030) — nullable in the test seam; every call here is fail-soft. */
+  private final BackfillJobRepository jobRepo;
   private final java.time.Clock clock;
   private final long throttleMs;
   private final AtomicBoolean running = new AtomicBoolean(false);
@@ -156,11 +158,12 @@ public class EquityDailyBackfillService {
       ObjectProvider<UpstoxExpiredInstrumentsClient> upstoxProvider,
       CandleRepository candles,
       JdbcTemplate jdbc,
+      BackfillJobRepository jobRepo,
       java.time.Clock clock) {
-    this(masterProvider, upstoxProvider, candles, jdbc, clock, THROTTLE_MS);
+    this(masterProvider, upstoxProvider, candles, jdbc, jobRepo, clock, THROTTLE_MS);
   }
 
-  /** Test seam: zero/short throttle. */
+  /** Test seam: zero/short throttle; no run-audit. */
   EquityDailyBackfillService(
       ObjectProvider<UpstoxEquityMasterClient> masterProvider,
       ObjectProvider<UpstoxExpiredInstrumentsClient> upstoxProvider,
@@ -168,10 +171,22 @@ public class EquityDailyBackfillService {
       JdbcTemplate jdbc,
       java.time.Clock clock,
       long throttleMs) {
+    this(masterProvider, upstoxProvider, candles, jdbc, null, clock, throttleMs);
+  }
+
+  private EquityDailyBackfillService(
+      ObjectProvider<UpstoxEquityMasterClient> masterProvider,
+      ObjectProvider<UpstoxExpiredInstrumentsClient> upstoxProvider,
+      CandleRepository candles,
+      JdbcTemplate jdbc,
+      BackfillJobRepository jobRepo,
+      java.time.Clock clock,
+      long throttleMs) {
     this.masterProvider = masterProvider;
     this.upstoxProvider = upstoxProvider;
     this.candles = candles;
     this.jdbc = jdbc;
+    this.jobRepo = jobRepo;
     this.clock = clock;
     this.throttleMs = throttleMs;
   }
@@ -200,6 +215,7 @@ public class EquityDailyBackfillService {
     RunProgress p = new RunProgress(jobId, started);
     progress = p;
     status.set(p.snapshot("RUNNING", null, 0, null));
+    long auditId = auditStart(universe, lookback);
     executor.submit(
         () -> {
           try {
@@ -207,10 +223,12 @@ public class EquityDailyBackfillService {
             log.info(
                 "equity-daily-backfill {} done: {} symbols, {} written, {} skipped, {} failed, {} rows",
                 jobId, s.symbols(), s.written(), s.skipped(), s.failed(), s.candleRows());
+            auditComplete(auditId, s.candleRows());
             Instant ended = Instant.now();
             status.set(p.snapshot("OK", ended, Duration.between(started, ended).toMillis(), null));
           } catch (Exception e) {
             log.error("equity-daily-backfill {} failed", jobId, e);
+            auditFail(auditId, e.toString());
             Instant ended = Instant.now();
             status.set(
                 p.snapshot("FAILED", ended, Duration.between(started, ended).toMillis(), e.toString()));
@@ -308,6 +326,46 @@ public class EquityDailyBackfillService {
     } catch (InterruptedException ie) {
       Thread.currentThread().interrupt();
       throw new IllegalStateException("interrupted during equity-backfill throttle", ie);
+    }
+  }
+
+  /**
+   * Opens a {@code backfill_jobs} audit row for this run — best-effort. A logging-DB failure (or a null
+   * {@code jobRepo} in the test seam) returns -1 and is swallowed with a warn: the audit must never
+   * break the backfill it records.
+   */
+  private long auditStart(List<String> universe, int days) {
+    if (jobRepo == null) {
+      return -1;
+    }
+    try {
+      String params = String.format("{\"symbols\":%d,\"days\":%d}", universe.size(), days);
+      return jobRepo.start("EQUITY_DAILY", params);
+    } catch (RuntimeException e) {
+      log.warn("equity-daily-backfill: could not open audit row (non-fatal): {}", e.toString());
+      return -1;
+    }
+  }
+
+  private void auditComplete(long auditId, long rows) {
+    if (jobRepo == null || auditId < 0) {
+      return;
+    }
+    try {
+      jobRepo.complete(auditId, rows);
+    } catch (RuntimeException e) {
+      log.warn("equity-daily-backfill: could not close audit row (non-fatal): {}", e.toString());
+    }
+  }
+
+  private void auditFail(long auditId, String error) {
+    if (jobRepo == null || auditId < 0) {
+      return;
+    }
+    try {
+      jobRepo.fail(auditId, error);
+    } catch (RuntimeException e) {
+      log.warn("equity-daily-backfill: could not mark audit row failed (non-fatal): {}", e.toString());
     }
   }
 

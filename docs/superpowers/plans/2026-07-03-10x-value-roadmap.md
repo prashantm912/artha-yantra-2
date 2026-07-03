@@ -1,9 +1,17 @@
 # 10x-value roadmap (2026-07-03)
 
-**Status:** PROPOSED — strategic forward plan, complements (does not replace) the
+**Status:** ACTIVE — strategic forward plan, complements (does not replace) the
 [remaining-items ledger](2026-07-02-remaining-items.md). The ledger tracks *finishing* the
 platform; this document answers a different question: **what would make the platform 10x more
 valuable?**
+
+**P1 SHIPPED 2026-07-03 (same day):** F4 DataHealthCanary ([#484](https://github.com/prashantm912/artha-yantra-2/pull/484)
+`f6ced3a1`) · F1 champion/challenger shadow variants ([#485](https://github.com/prashantm912/artha-yantra-2/pull/485)
+`ec7cd9bb`, first experiments `vol-off` / `vol-12k5` / `composite-070` live) · F3.1 live constituent
+breadth ([#486](https://github.com/prashantm912/artha-yantra-2/pull/486) `05678806`). All three
+deployed + endpoint-verified same evening; live acceptance criteria (checkboxes below) accrue from
+the 2026-07-06 session onward. Build lesson: the Map-return ratchet caught BOTH new endpoints —
+typed records from the start next time.
 
 **The honest framing:** the build is complete — data capture, 12 live-validated scalpers, a
 strict confluence gate, rejection forensics, the shadow book, backtest + optimizer, the OI

@@ -1143,3 +1143,50 @@ For the record — do not re-raise these without new evidence:
   MATCH; the stale claim is CLAUDE.md's.
 - **CLAUDE.md "market-calendar covers only the CURRENT year"** — false: CSV covers 2024-2026.
 
+
+
+---
+
+## Reconciliation addendum (2026-07-03, code-verified)
+
+Every OPEN row re-checked against main (verdicts require code evidence, not inference).
+
+**FIXED since freeze:** `live-cockpit-fetch-once-no-as-of` (CockpitPage 45s market-hours refresh +
+LiveDot as-of) · `calendar-spread-expiry-dead-end` (page-local expiry heal) ·
+`signals-hard-cap-200-silent-drop` (server-offset Pager on signals + rejections) ·
+`frontend-e2e-and-axe-run-in-no-ci` (now FULLY fixed — blocking shard, #474).
+
+**Materially narrowed:** `candle-upsert-merge-asymmetry` (provenance half fixed #490; GREATEST/LEAST
+asymmetry remains) · `dead-seams-inventory` (3 of 4 gone; `IndicatorValueCache` pair remains) ·
+`fetchsource-profile-not-gateway` (impact collapsed by the stay-Kite decision).
+
+**Accepted-risk, no action (single-owner, loopback-only):** `owner-hash-plain-env` ·
+`pubsub-profile-unqualified` · `downstream-no-auth-devtools-bypass` ·
+`auth-session-preauth-profile-disclosure`.
+
+**STILL OPEN — the fix queue (22, by impact; S/M = effort):**
+
+| # | id | sev | fix sketch | eff |
+|---|---|---|---|---|
+| 1 | no-live-vs-backtest-exit-equivalence-test | H(test) | one YAML + synthetic premium path through PremiumExitEvaluator AND the live bracket path; assert same exit | M |
+| 2 | resubscribe-gap-drops-1m-bars (+dup) | M | SignalEngine hot-swap: start new container before stopping old (appendQuietly dedupes) | S |
+| 3 | replay-legs-silent-index0-fallback | M | ceiling-lookup >= signal ts or DATA_GAP throw; PARITY-SENSITIVE — golden re-verify required | S |
+| 4 | emit-entry-not-transactional | M | TransactionTemplate around insert+stamps per emit path | S |
+| 5 | ticker-status-connected-lie | M | CONNECTED from onConnected callback; CONNECTING seed | S |
+| 6 | datahash-partial-coverage | M | fold premium/context/strikeRef (count,maxFetchedAt) into DataHash | M |
+| 7 | profile-detection-exact-string-match | M | ay.ps1: profile LIST contains 'mock'; exit on mock+live mix | S |
+| 8 | restore-verification-is-eyeball-only | M | capture candle count; non-zero exit + no stack start on 0 | S |
+| 9 | backup-restore-no-automated-roundtrip | M | scheduled CI: tiny hypertable+compressed+cagg through exact dump/restore | M |
+| 10 | fetchsource-profile-not-gateway | M | sourceLabel() on the gateway (low urgency — stay-Kite) | S |
+| 11 | tick-overlay-prefers-stale-tick | L | receipt-time per tick; fall back to mark when stale; clear on reconnect | S |
+| 12 | tick-pipeline-redis-coupled-bar-loss | L | CandleBuilder listener independent of publish (own try/catch) | S |
+| 13 | bar-eval-failure-drops-entry | L | ay_signal_eval_failures_total counter | S |
+| 14 | interval-duration-silent-default | L | throw/loud-skip on unknown primary interval | S |
+| 15 | ws-reconnect-global-invalidation | L | scope invalidation to WS-fed keys; drop redundant hook | S |
+| 16 | candle-upsert-merge-asymmetry | L | replace-outright upsert for authoritative fetches, or purge-range admin | M |
+| 17 | format-decimal-truncates | L | round half-up in string math | S |
+| 18 | handwritten-dtos-unbound-to-contracts (+dup) | L | assignability bridges vs contracts/gen for 3 core DTO families | M |
+| 19 | it-naming-silent-skip-unguarded | L | enforcer/scan failing on *IT.java | S |
+| 20 | rerun-retries-plus-dirty-singleton-db | L | CI flaky-marker report step | S |
+| 21 | frontend-vitest-no-coverage-floor | L | vitest v8 coverage floor ~50% on core/api | S |
+| 22 | dead-seams-inventory (residual) | L | delete IndicatorValueCache pair + its test section | S |

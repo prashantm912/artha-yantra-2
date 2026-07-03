@@ -57,14 +57,16 @@ canary tile green through the session + zero false alerts; NIFTY26JULFUT TICK_AG
 composite-070) populate with net-₹ labels; breadth dot scores intraday (advances/declines non-zero
 in rejections' context). The 09:42 + 15:47 agents cover all of it.
 
-### 3b. Audit-register reconciliation (found in the 2026-07-03 doc sweep)
+### 3b. Audit-register fix queue (reconciled 2026-07-03, code-verified)
 
-The archived `archive/2026-07-02-full-codebase-audit-findings-register.md` left **31 MEDIUM/LOW
-findings marked OPEN** as a standing quality backlog outside this ledger — and its OPEN column is
-STALE: several were closed by the later UI-audit waves (#440–#475; e.g. cockpit as-of/refresh,
-the signals 200-row cap). One future session: reconcile the 31 rows against shipped PRs, mark the
-closed ones, and carry any still-real MEDIUMs (e.g. `calendar-spread-expiry-dead-end`) into §5
-here. Until then, that register is the only place those rows live.
+Reconciliation DONE — full verdict table lives as the dated addendum at the bottom of
+[`archive/2026-07-02-full-codebase-audit-findings-register.md`](archive/2026-07-02-full-codebase-audit-findings-register.md).
+Net: 4 FIXED since the freeze · 4 accepted-risk (single-owner posture, closed) · **22 real
+survivors** forming the standing quality fix queue. Work them in waves (S-effort live-path batch
+first: resubscribe gap, emit transactionality, ticker-status truth, pipeline decoupling, eval
+counter, interval strictness; then ops/FE S-items; the five M-items last — note #3
+replay-fallback is PARITY-SENSITIVE and needs a golden re-verify). Mark rows fixed in the
+addendum table as they land.
 
 ## 4. Scheduled maintenance
 

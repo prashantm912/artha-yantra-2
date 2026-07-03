@@ -1164,29 +1164,30 @@ asymmetry remains) · `dead-seams-inventory` (3 of 4 gone; `IndicatorValueCache`
 `pubsub-profile-unqualified` · `downstream-no-auth-devtools-bypass` ·
 `auth-session-preauth-profile-disclosure`.
 
-**STILL OPEN — the fix queue (22, by impact; S/M = effort):**
+**FIX QUEUE CLOSED (2026-07-04, weekend batch — PRs #500–#507, all CI-green squash-merges):**
+every one of the 22 surviving rows shipped. Per-row outcome:
 
-| # | id | sev | fix sketch | eff |
+| # | id | sev | outcome | PR |
 |---|---|---|---|---|
-| 1 | no-live-vs-backtest-exit-equivalence-test | H(test) | one YAML + synthetic premium path through PremiumExitEvaluator AND the live bracket path; assert same exit | M |
-| 2 | resubscribe-gap-drops-1m-bars (+dup) | M | SignalEngine hot-swap: start new container before stopping old (appendQuietly dedupes) | S |
-| 3 | replay-legs-silent-index0-fallback | M | ceiling-lookup >= signal ts or DATA_GAP throw; PARITY-SENSITIVE — golden re-verify required | S |
-| 4 | emit-entry-not-transactional | M | TransactionTemplate around insert+stamps per emit path | S |
-| 5 | ticker-status-connected-lie | M | CONNECTED from onConnected callback; CONNECTING seed | S |
-| 6 | datahash-partial-coverage | M | fold premium/context/strikeRef (count,maxFetchedAt) into DataHash | M |
-| 7 | profile-detection-exact-string-match | M | ay.ps1: profile LIST contains 'mock'; exit on mock+live mix | S |
-| 8 | restore-verification-is-eyeball-only | M | capture candle count; non-zero exit + no stack start on 0 | S |
-| 9 | backup-restore-no-automated-roundtrip | M | scheduled CI: tiny hypertable+compressed+cagg through exact dump/restore | M |
-| 10 | fetchsource-profile-not-gateway | M | sourceLabel() on the gateway (low urgency — stay-Kite) | S |
-| 11 | tick-overlay-prefers-stale-tick | L | receipt-time per tick; fall back to mark when stale; clear on reconnect | S |
-| 12 | tick-pipeline-redis-coupled-bar-loss | L | CandleBuilder listener independent of publish (own try/catch) | S |
-| 13 | bar-eval-failure-drops-entry | L | ay_signal_eval_failures_total counter | S |
-| 14 | interval-duration-silent-default | L | throw/loud-skip on unknown primary interval | S |
-| 15 | ws-reconnect-global-invalidation | L | scope invalidation to WS-fed keys; drop redundant hook | S |
-| 16 | candle-upsert-merge-asymmetry | L | replace-outright upsert for authoritative fetches, or purge-range admin | M |
-| 17 | format-decimal-truncates | L | round half-up in string math | S |
-| 18 | handwritten-dtos-unbound-to-contracts (+dup) | L | assignability bridges vs contracts/gen for 3 core DTO families | M |
-| 19 | it-naming-silent-skip-unguarded | L | enforcer/scan failing on *IT.java | S |
-| 20 | rerun-retries-plus-dirty-singleton-db | L | CI flaky-marker report step | S |
-| 21 | frontend-vitest-no-coverage-floor | L | vitest v8 coverage floor ~50% on core/api | S |
-| 22 | dead-seams-inventory (residual) | L | delete IndicatorValueCache pair + its test section | S |
+| 1 | no-live-vs-backtest-exit-equivalence-test | H(test) | shared fixture `contracts/fixtures/exit-equivalence.json` + PremiumExitEquivalenceTest (backtest) + PremiumBracketEquivalenceTest / PaperBracketEquivalenceTest (live) — semantic drift turns exactly one suite red | #505 |
+| 2 | resubscribe-gap-drops-1m-bars (+dup) | M | new container starts BEFORE old stops; LiveSeriesStore.append reports duplicates, onClosedBar skips them (overlap redelivery can never re-evaluate a bar) | #500 |
+| 3 | replay-legs-silent-index0-fallback | M | BarIndexResolver: exact hits byte-identical, misses → first bar at/after (Instant-keyed, #214-safe), unresolvable entry drops the leg loudly; goldens/parity re-verified | #506 |
+| 4 | emit-entry-not-transactional | M | emitEntry/emit writes ride one TransactionTemplate; qty computed pre-txn (no txn across REST) | #500 |
+| 5 | ticker-status-connected-lie | M | CONNECTING seed; CONNECTED/DISCONNECTED driven by the socket callbacks (mock = connected-while-running) | #500 |
+| 6 | datahash-partial-coverage | M | DataHash SeriesLeg extension (strikeRef/context/option-contract series); primary-only hash unchanged; `oiGateCoverage` on run metrics | #502 |
+| 7 | profile-detection-exact-string-match | M | ay.ps1 classifies the profile LIST (`mock,debug`→mock DB); mock+live mix refuses | #501 |
+| 8 | restore-verification-is-eyeball-only | M | `ay restore` hard-fails (no stack start) on 0 restored candles | #501 |
+| 9 | backup-restore-no-automated-roundtrip | M | ci-backup-roundtrip.yml: weekly + on ay.ps1/backup.sh PRs; exact dump/restore sequence over hypertable+compressed chunk+cagg; token-grep lockstep tripwire | #504 |
+| 10 | fetchsource-profile-not-gateway | M | `HistoricalCandleGateway.sourceLabel()` (KITE/OPENALGO/MOCK) replaces the profile ternary | #507 |
+| 11 | tick-overlay-prefers-stale-tick | L | per-tick receipt time + 15s staleness sweep + clear/re-seed on WS reconnect | #503 |
+| 12 | tick-pipeline-redis-coupled-bar-loss | L | FeedPipeline fan-out isolates publish + each listener (bar building survives a Redis hiccup) | #500 |
+| 13 | bar-eval-failure-drops-entry | L | `ay_signal_eval_failures_total` counter on the eval catch | #500 |
+| 14 | interval-duration-silent-default | L | intervalDuration throws; reload() refuses non-rollable primaries loudly | #500 |
+| 15 | ws-reconnect-global-invalidation | L | 2s debounced + connected-gated gap-heal; redundant signals hook dropped | #503 |
+| 16 | candle-upsert-merge-asymmetry | L | `upsertAuthoritativeAll` replaces o/h/l/c/volume/oi for fetched history (spike correctable by re-fetch); merge stays tick-agg-only; bhavcopy stays DO NOTHING by design | #507 |
+| 17 | format-decimal-truncates | L | formatDecimal rounds half-up on the first dropped digit (string/BigInt) | #503 |
+| 18 | handwritten-dtos-unbound-to-contracts (+dup) | L | `contracts.bridge.ts` key-presence bridges (paper/funds/variant/dot-health) vs contracts/gen; Map-return endpoints stay the accepted untypeable boundary | #503 |
+| 19 | it-naming-silent-skip-unguarded | L | ci-java `it-naming-guard` job fails on `*IT.java`/`*ITCase.java` | #501 |
+| 20 | rerun-retries-plus-dirty-singleton-db | L | flaky-retry paper-trail step (surefire `<flakyFailure>` markers → per-shard warning) | #501 |
+| 21 | frontend-vitest-no-coverage-floor | L | vitest v8 floor: 50% lines on src/core+src/api in test:ci (53.3% at intro) | #503 |
+| 22 | dead-seams-inventory (residual) | L | IndicatorValueCache pair + test section deleted | #501 |

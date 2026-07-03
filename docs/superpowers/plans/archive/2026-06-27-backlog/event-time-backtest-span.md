@@ -1,5 +1,8 @@
 # Stream — Event/time gates + backtest-fidelity rails + SPAN sell legs
 
+> **ARCHIVED (2026-07-03 doc sweep):** historical planning doc — the work here is delivered, superseded, or consciously parked. Anything still open lives in `../2026-07-02-remaining-items.md` (ledger) or `../2026-07-03-10x-value-roadmap.md`. Do not mine this file for TODOs.
+
+
 Status: PLAN (implementation-ready). Owner: single-owner. Date: 2026-06-27.
 Target services: `services/strategy-signal-service` (scalper seam), `services/backtest-service`
 (replay + YAML `gate.all`), `services/margin-service` (SPAN), the scalper YAMLs.

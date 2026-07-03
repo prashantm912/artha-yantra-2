@@ -1,5 +1,8 @@
 # VWAP-distance + probability-graded position sizing
 
+> **ARCHIVED (2026-07-03 doc sweep):** historical planning doc — the work here is delivered, superseded, or consciously parked. Anything still open lives in `../2026-07-02-remaining-items.md` (ledger) or `../2026-07-03-10x-value-roadmap.md`. Do not mine this file for TODOs.
+
+
 Status: PLAN (implementation-ready). Owner: single-owner. Date: 2026-06-27.
 Target modules: `services/strategy-signal-service` (the scalper confluence seam + `ScalperConfig` +
 `ScalperOiProps` + `ScalperGates` + the 36 YAMLs + `SignalEngine.emitEntry` sizing stamp), and the

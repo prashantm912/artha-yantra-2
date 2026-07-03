@@ -1,5 +1,8 @@
 # OI-Analytics Suite (oipulse parity) — Master Implementation Plan
 
+> **ARCHIVED (2026-07-03 doc sweep):** historical planning doc — the work here is delivered, superseded, or consciously parked. Anything still open lives in `../2026-07-02-remaining-items.md` (ledger) or `../2026-07-03-10x-value-roadmap.md`. Do not mine this file for TODOs.
+
+
 > **For agentic workers:** This is a MASTER/PROGRAM plan spanning multiple subsystems. Do NOT execute it directly task-by-task. At execution time, write a detailed bite-sized sub-plan per phase (REQUIRED SUB-SKILL: `superpowers:writing-plans` again, scoped to one phase), then implement with `superpowers:subagent-driven-development`. Steps here are phase-level deliverables with verification, not 2-minute code steps.
 
 **Goal:** Reproduce oipulse.com's full options/OI analytics suite (~40 pages, 12 layout archetypes) inside ArthaYantra — same data, same interface conventions — sourced entirely from our own Kite feed + free NSE EOD, self-hosted and backtestable.

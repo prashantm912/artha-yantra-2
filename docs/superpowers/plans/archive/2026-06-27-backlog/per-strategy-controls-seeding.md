@@ -1,5 +1,8 @@
 # Per-strategy controls + bearish/PE seeding + BTST routing + Sensex scaling
 
+> **ARCHIVED (2026-07-03 doc sweep):** historical planning doc — the work here is delivered, superseded, or consciously parked. Anything still open lives in `../2026-07-02-remaining-items.md` (ledger) or `../2026-07-03-10x-value-roadmap.md`. Do not mine this file for TODOs.
+
+
 **Stream slug:** `per-strategy-controls-seeding`
 **Source map:** `docs/strategy-audit/GAP-DISPOSITION.md` §3 (work-package backlog) + the per-dimension
 disposition files under `docs/strategy-audit/disposition/` (btst-stbt, two-candle, morning-trade,

@@ -1,5 +1,8 @@
 # Tier-1 OI-Analytics Fidelity + Tier-2 Defined-Risk Scalpers — Implementation Plan
 
+> **ARCHIVED (2026-07-03 doc sweep):** historical planning doc — the work here is delivered, superseded, or consciously parked. Anything still open lives in `../2026-07-02-remaining-items.md` (ledger) or `../2026-07-03-10x-value-roadmap.md`. Do not mine this file for TODOs.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax. Each task is a fresh subagent + spec-review + quality-review.
 
 **Goal:** Close the Phase-3.5 Tier-2 OI-analytics fidelity gaps (T2.1–T2.8) so the scalper confluence matches Siva's full spec, and add the four feasible index-option defined-risk strategies (#4 Gap, #12 Trend-Change, #2 O=H/O=L, #9 Morning-Trade) — all the pre-Phase-4 backend that the React cockpit will consume.

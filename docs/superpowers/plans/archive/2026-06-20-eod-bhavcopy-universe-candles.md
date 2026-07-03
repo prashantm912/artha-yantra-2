@@ -1,5 +1,8 @@
 # EOD bhavcopy → universe daily candles + split/bonus adjustment
 
+> **ARCHIVED (2026-07-03 doc sweep):** historical planning doc — the work here is delivered, superseded, or consciously parked. Anything still open lives in `../2026-07-02-remaining-items.md` (ledger) or `../2026-07-03-10x-value-roadmap.md`. Do not mine this file for TODOs.
+
+
 **Branch:** `feat/eod-bhavcopy-candles` · **Status:** built + verified (299-test module `verify` green) · **Date:** 2026-06-20
 
 Bulk daily-EOD loader so **every** NSE + BSE cash equity (~22k) has a 1d candle for

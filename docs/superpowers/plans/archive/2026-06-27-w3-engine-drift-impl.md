@@ -1,5 +1,8 @@
 # W3 — Engine-Drift Implementation Plan (parity-safe, default-OFF)
 
+> **ARCHIVED (2026-07-03 doc sweep):** historical planning doc — the work here is delivered, superseded, or consciously parked. Anything still open lives in `../2026-07-02-remaining-items.md` (ledger) or `../2026-07-03-10x-value-roadmap.md`. Do not mine this file for TODOs.
+
+
 **Status:** PLAN (forward work). Drives the 6 ratified S24 engine-drift fixes.
 **Date:** 2026-06-27.
 **Ratification:** owner ratified S24 doc values in `docs/strategy-audit/RATIFICATION-PACK.md`

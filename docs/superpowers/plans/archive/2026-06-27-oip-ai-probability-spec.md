@@ -1,5 +1,8 @@
 # OIP-AI Probability — build spec (our deterministic Open=High success probability)
 
+> **ARCHIVED (2026-07-03 doc sweep):** historical planning doc — the work here is delivered, superseded, or consciously parked. Anything still open lives in `../2026-07-02-remaining-items.md` (ledger) or `../2026-07-03-10x-value-roadmap.md`. Do not mine this file for TODOs.
+
+
 **Status:** SPEC only (owner asked spec, not build, 2026-06-27). Forward-work plan.
 **Owner decisions (2026-06-27):** tier→% = **HIGH 90 / MILD 60 / LOW 30 / AVOID 0**; scope = doc remap (done) + this spec; OSPL chart signal handled separately via `docs/oipulse-study/advance-chart/ospl-signal.md`.
 

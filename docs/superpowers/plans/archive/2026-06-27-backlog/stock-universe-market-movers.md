@@ -1,5 +1,8 @@
 # Stock universe + Market-Movers per-stock track (foundational)
 
+> **ARCHIVED (2026-07-03 doc sweep):** historical planning doc — the work here is delivered, superseded, or consciously parked. Anything still open lives in `../2026-07-02-remaining-items.md` (ledger) or `../2026-07-03-10x-value-roadmap.md`. Do not mine this file for TODOs.
+
+
 Status: PLAN (implementation-ready). Owner: single-owner. Date: 2026-06-27.
 Target services: `market-data-service` (equity-futures capture + screener + per-stock series),
 `strategy-signal-service` (the Market-Movers per-stock seam path).

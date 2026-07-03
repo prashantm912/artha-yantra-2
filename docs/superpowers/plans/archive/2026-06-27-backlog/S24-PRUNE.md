@@ -1,5 +1,8 @@
 # S24-PRUNE — backlog gaps that automate an S24-dropped rule
 
+> **ARCHIVED (2026-07-03 doc sweep):** historical planning doc — the work here is delivered, superseded, or consciously parked. Anything still open lives in `../2026-07-02-remaining-items.md` (ledger) or `../2026-07-03-10x-value-roadmap.md`. Do not mine this file for TODOs.
+
+
 Status: PRUNE MAPPING (W2 backlog-prune). Owner: single-owner. Date: 2026-06-27.
 
 ## What this is

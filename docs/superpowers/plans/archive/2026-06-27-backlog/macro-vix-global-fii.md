@@ -1,5 +1,8 @@
 # Macro confluence: directional VIX, global cues, FII/DII, constituent weight
 
+> **ARCHIVED (2026-07-03 doc sweep):** historical planning doc — the work here is delivered, superseded, or consciously parked. Anything still open lives in `../2026-07-02-remaining-items.md` (ledger) or `../2026-07-03-10x-value-roadmap.md`. Do not mine this file for TODOs.
+
+
 Status: PLAN (implementation-ready). Owner: single-owner. Primary service:
 `services/strategy-signal-service` (scalper confluence seam) + `services/market-data-service`
 (macro analytics feeds). Date: 2026-06-27. Stream slug: **`macro-vix-global-fii`**.

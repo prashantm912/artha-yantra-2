@@ -1,6 +1,19 @@
 # ArthaYantra — OpenAlgo Integration, marketcalls Repos, React Migration & Strategy Master Plan
 
-> Status: PLAN (no code changed). Authored 2026-06-19. Source of truth for the OpenAlgo/React/strategy integration work.
+> Status: PLAN — **substantially DELIVERED (delivery note 2026-07-03).** The React cutover, oipulse
+> page parity, OpenAlgo spine, scalper phases, expired/OI backfill and orders read-surface all
+> shipped (see git history + `2026-07-02-remaining-items.md`). §17/§18 entry gates verified
+> delivered or superseded: source-enum CHECK = marketdata V020 (incl. OPENALGO/EXPIRYTRACK/
+> OPENCHART/BHAVCOPY) · 3m cagg (§17.4.2) SUPERSEDED by the read-time 1m→3m rollup (#365; the
+> unused cagg was dropped in V027) · calendar = 2024–2026 bundled + the CD-2 yearly refresh
+> (ledger §4) · /orders page (§18.1) live · value-verify (§20.8) PASSED live-vs-live 2026-07-01.
+> OpenAlgo capture-cutover gates (§17.11 canary-green, §17.12 OPENALGO limiter) apply only IF the
+> source flags ever flip — parked with the stay-Kite decision (ledger §7). Known open verify:
+> **§18.6 sentimentPct formula reconcile** (ours is ΔOI-based; oipulse's is level-based — ledger
+> §3). §19.3 per-phase manual guides were superseded in practice by live-verify + the
+> signal-analysis findings discipline. **Do not mine §1–§16 for TODOs — the ledger is the forward
+> authority.** Original header follows.
+> Authored 2026-06-19. Source of truth for the OpenAlgo/React/strategy integration work.
 > A new session should read CLAUDE.md + this file before implementing any phase. Phases, dependencies and verify gates are in the final section.
 > **AUTHORITY NOTE:** §17 (Errata & Addendum) and §18 (Gap Addendum) were added after review passes and are AUTHORITATIVE and co-equal — where any body section (§1–§16) conflicts with §17 or §18, the addenda win. §17 fixes 29 internal defects; §18 closes 7 goal-vs-plan gaps. Read BOTH before implementing any phase.
 

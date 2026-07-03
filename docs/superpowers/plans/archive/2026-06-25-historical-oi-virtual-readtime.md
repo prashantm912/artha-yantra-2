@@ -1,5 +1,8 @@
 # Historical OI for backtests — virtual read-time derivation (not snapshot backfill)
 
+> **ARCHIVED (2026-07-03 doc sweep):** historical planning doc — the work here is delivered, superseded, or consciously parked. Anything still open lives in `../2026-07-02-remaining-items.md` (ledger) or `../2026-07-03-10x-value-roadmap.md`. Do not mine this file for TODOs.
+
+
 **Status:** ✅ IMPLEMENTED + DEPLOYED (2026-06-25) — `CandleDerivedChainReader` + `HistoricalOiReader` facade across
 the whole OI-page suite + ConnectingDots + OI-attribution, PRs #203/#204/#210/#211 (the OI factor virtual-derivation
 chosen here; sessionStats twin + future-close spot proxy shipped in #211). ATM-IV recompute + `iv_daily_summary`

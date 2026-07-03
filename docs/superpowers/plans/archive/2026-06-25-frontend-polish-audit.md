@@ -1,5 +1,8 @@
 # Frontend polish audit — hero-standard coverage + beautification plan
 
+> **ARCHIVED (2026-07-03 doc sweep):** historical planning doc — the work here is delivered, superseded, or consciously parked. Anything still open lives in `../2026-07-02-remaining-items.md` (ledger) or `../2026-07-03-10x-value-roadmap.md`. Do not mine this file for TODOs.
+
+
 **Date:** 2026-06-25 · **Method:** 11 parallel section auditors → synthesis → completeness critic
 (workflow `frontend-polish-audit`, 13 agents). Coverage cross-checked against a `git grep` ground truth.
 

@@ -136,6 +136,56 @@ class CandleCaggIntegrationTest extends MarketDataIntegrationTestBase {
   }
 
   @Test
+  void authoritativeRefetchCorrectsAPoisonedSpikeHigh() {
+    // audit row 16: under the GREATEST merge a poisoned tick-agg high could NEVER shrink —
+    // the fetched-history path replaces values outright, so a Kite re-fetch corrects it
+    String symbol = "AUTH1";
+    repository.upsert(
+        new Candle(
+            "NSE", symbol, "1m", ist("2026-06-10T10:15:00"),
+            new BigDecimal("100.00"), new BigDecimal("999.00"), new BigDecimal("99.00"),
+            new BigDecimal("100.50"), 500, null, "TICK_AGG")); // poisoned spike high
+
+    // value-identical authoritative re-fetch: provenance rule holds on replace semantics too
+    repository.upsertAuthoritativeAll(
+        List.of(
+            new Candle(
+                "NSE", symbol, "1m", ist("2026-06-10T10:15:00"),
+                new BigDecimal("100.00"), new BigDecimal("999.00"), new BigDecimal("99.00"),
+                new BigDecimal("100.50"), 500, null, "KITE")));
+    List<Candle> rows =
+        repository.range("NSE", symbol, "1m", ist("2026-06-10T10:00:00"), ist("2026-06-10T11:00:00"));
+    assertThat(rows.get(0).source()).isEqualTo("TICK_AGG");
+
+    // the TRUE bar from Kite historical: high shrinks, source honestly flips
+    repository.upsertAuthoritativeAll(
+        List.of(
+            new Candle(
+                "NSE", symbol, "1m", ist("2026-06-10T10:15:00"),
+                new BigDecimal("100.00"), new BigDecimal("101.00"), new BigDecimal("99.00"),
+                new BigDecimal("100.50"), 500, null, "KITE")));
+    rows =
+        repository.range("NSE", symbol, "1m", ist("2026-06-10T10:00:00"), ist("2026-06-10T11:00:00"));
+    assertThat(rows.get(0).high()).isEqualByComparingTo("101.00"); // spike corrected outright
+    assertThat(rows.get(0).source()).isEqualTo("KITE");
+  }
+
+  @Test
+  void tickAggMergeUpsertStillGreatestLeasts() {
+    // the live tick-agg path keeps the B-6 merge — a replayed narrower bar must not shrink the range
+    String symbol = "MERGE1";
+    repository.upsert(bar(symbol, "2026-06-10T10:15:00", "100.00", "101.00", "99.00", "100.50", 500));
+    repository.upsert(bar(symbol, "2026-06-10T10:15:00", "100.00", "100.75", "98.50", "100.25", 510));
+
+    List<Candle> rows =
+        repository.range("NSE", symbol, "1m", ist("2026-06-10T10:00:00"), ist("2026-06-10T11:00:00"));
+    assertThat(rows).hasSize(1);
+    assertThat(rows.get(0).high()).isEqualByComparingTo("101.00"); // GREATEST kept the wider high
+    assertThat(rows.get(0).low()).isEqualByComparingTo("98.50"); // LEAST took the lower low
+    assertThat(rows.get(0).close()).isEqualByComparingTo("100.25"); // close from the newest write
+  }
+
+  @Test
   void compressionPolicyCoexistsWithUpserts() {
     // AUDIT GAP (Phase 10 Tests & Verification): upserts must keep working against a
     // COMPRESSED chunk — backfills older than the 7-day compress_after hit this in production

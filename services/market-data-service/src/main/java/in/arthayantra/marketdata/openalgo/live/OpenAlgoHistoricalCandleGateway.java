@@ -92,6 +92,11 @@ public class OpenAlgoHistoricalCandleGateway implements HistoricalCandleGateway 
     return parse(key, interval, responseBody);
   }
 
+  @Override
+  public String sourceLabel() {
+    return "OPENALGO";
+  }
+
   private List<Candle> parse(InstrumentKey key, String interval, String responseBody) {
     try {
       OpenAlgoHistoryResponse response =

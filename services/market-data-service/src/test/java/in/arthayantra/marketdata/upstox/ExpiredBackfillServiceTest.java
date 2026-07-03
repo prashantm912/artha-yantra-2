@@ -97,7 +97,7 @@ class ExpiredBackfillServiceTest {
     assertThat(summary.candleRows()).isEqualTo(1);
 
     ArgumentCaptor<List<Candle>> rows = ArgumentCaptor.forClass(List.class);
-    verify(candles).upsertAll(rows.capture());
+    verify(candles).upsertAuthoritativeAll(rows.capture());
     Candle row = rows.getValue().get(0);
     assertThat(row.exchange()).isEqualTo("NFO");
     assertThat(row.tradingsymbol()).isEqualTo(ceSymbol);
@@ -139,7 +139,7 @@ class ExpiredBackfillServiceTest {
         service.run(client, List.of("NIFTY"), EXPIRY.minusDays(7), EXPIRY, "job-stuck", false);
 
     assertThat(summary.legsFailed()).isGreaterThanOrEqualTo(1);
-    verify(candles, never()).upsertAll(any());
+    verify(candles, never()).upsertAuthoritativeAll(any());
   }
 
   @Test
@@ -215,7 +215,7 @@ class ExpiredBackfillServiceTest {
 
     // without the retry the first (false-)empty would have yielded zero data; the bar proves the retry.
     assertThat(s.candleRows()).isEqualTo(1);
-    verify(candles).upsertAll(any());
+    verify(candles).upsertAuthoritativeAll(any());
   }
 
   @Test
@@ -271,6 +271,6 @@ class ExpiredBackfillServiceTest {
     // ...the SECOND expiry is still processed (1 leg written) and the blip is counted as a failure.
     assertThat(s.legsWritten()).isEqualTo(1);
     assertThat(s.legsFailed()).isGreaterThanOrEqualTo(1);
-    verify(candles).upsertAll(any());
+    verify(candles).upsertAuthoritativeAll(any());
   }
 }

@@ -8,10 +8,11 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 /**
- * JDBC access to the candles hypertable (B-7). Writes are idempotent upserts on the natural PK
- * with the B-6 merge math: {@code high=GREATEST}, {@code low=LEAST}, close from the newest write,
- * open kept from the first — replayed ticks can never double-count because volume is a
- * cumulative-day delta computed upstream.
+ * JDBC access to the candles hypertable (B-7). Two idempotent write paths on the natural PK: the
+ * live tick-agg upsert with the B-6 merge math ({@code high=GREATEST}, {@code low=LEAST}, close
+ * from the newest write, open kept from the first — replayed ticks can never double-count because
+ * volume is a cumulative-day delta computed upstream), and the authoritative replace for FETCHED
+ * history ({@link #upsertAuthoritativeAll}) where the upstream bar supersedes whatever is cached.
  */
 @Repository
 public class CandleRepository {
@@ -48,7 +49,7 @@ public class CandleRepository {
     this.jdbc = jdbc;
   }
 
-  /** Upserts one bar. */
+  /** Upserts one bar with the B-6 merge — the live tick-agg path ({@code BarWriter}) only. */
   public void upsert(Candle bar) {
     jdbc.update(
         UPSERT,
@@ -58,10 +59,42 @@ public class CandleRepository {
         bar.volume(), bar.oi(), bar.source());
   }
 
-  /** Batched upsert for fetch pipelines (Phase 11). */
-  public void upsertAll(List<Candle> bars) {
+  private static final String UPSERT_AUTHORITATIVE =
+      """
+      INSERT INTO candles
+        (exchange, tradingsymbol, "interval", bucket, open, high, low, close, volume, oi, source, fetched_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?, now())
+      ON CONFLICT (exchange, tradingsymbol, "interval", bucket) DO UPDATE SET
+        open = EXCLUDED.open,
+        high = EXCLUDED.high,
+        low = EXCLUDED.low,
+        close = EXCLUDED.close,
+        volume = EXCLUDED.volume,
+        oi = EXCLUDED.oi,
+        -- same provenance rule as the merge upsert (2026-07-03 ledger #8), on replace semantics:
+        -- a value-identical re-fetch keeps the original source, a correcting write takes the new one
+        source = CASE
+          WHEN candles.open = EXCLUDED.open
+           AND candles.high = EXCLUDED.high
+           AND candles.low = EXCLUDED.low
+           AND candles.close = EXCLUDED.close
+           AND candles.volume = EXCLUDED.volume
+           AND candles.oi IS NOT DISTINCT FROM EXCLUDED.oi
+          THEN candles.source ELSE EXCLUDED.source END,
+        fetched_at = now()
+      """;
+
+  /**
+   * Batched upsert for the fetch/backfill pipelines (Phase 11), where the fetched bar is
+   * AUTHORITATIVE for its bucket: ON CONFLICT replaces o/h/l/c/volume/oi outright instead of the
+   * B-6 GREATEST/LEAST merge — under the merge a poisoned tick-agg spike (e.g. a bad high) could
+   * NEVER be corrected by a re-fetch. The B-4 10-min recency window routes the in-progress
+   * bucket's re-fetch through here too, which is correct: a fresher Kite partial bar supersedes
+   * the tick-agg partial.
+   */
+  public void upsertAuthoritativeAll(List<Candle> bars) {
     jdbc.batchUpdate(
-        UPSERT,
+        UPSERT_AUTHORITATIVE,
         bars,
         500,
         (ps, bar) -> {

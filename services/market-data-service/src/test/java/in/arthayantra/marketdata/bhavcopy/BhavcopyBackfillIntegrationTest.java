@@ -67,7 +67,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
             "EQ,BE", 10, 90, 7, 420);
 
     // A Kite-owned 1d bar must survive the bhavcopy projection (DO NOTHING; source not in PK).
-    candles.upsertAll(
+    candles.upsertAuthoritativeAll(
         List.of(new Candle("NSE", "UNIVA", "1d", bucket(D1),
             bd("999"), bd("999"), bd("999"), bd("999"), 1L, null, "KITE")));
 

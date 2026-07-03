@@ -89,6 +89,29 @@ public class OptionsPremiumReplay {
       List<EngineCandle> strikeReferenceOneMinute,
       Map<SeriesKey, List<EngineCandle>> contextCandles,
       BigDecimal initialEquity) {
+    return replay(
+        definition,
+        config,
+        underlyingExchange,
+        underlyingTradingsymbol,
+        underlyingOneMinute,
+        strikeReferenceOneMinute,
+        contextCandles,
+        initialEquity,
+        new GateCoverage());
+  }
+
+  /** As above, tallying the OI-gate's per-session lookup coverage into {@code gateCoverage} (audit row 6). */
+  public ReplayResult replay(
+      StrategyDefinition definition,
+      JsonNode config,
+      String underlyingExchange,
+      String underlyingTradingsymbol,
+      List<EngineCandle> underlyingOneMinute,
+      List<EngineCandle> strikeReferenceOneMinute,
+      Map<SeriesKey, List<EngineCandle>> contextCandles,
+      BigDecimal initialEquity,
+      GateCoverage gateCoverage) {
     // NEW: backtest.relax_session (opt-in, default false) disables the intraday clock rail so an
     // armed scalper fires its signal-driven entries across the FULL session for functional evaluation
     // (the live confluence gates are firewalled out of replay anyway). It does NOT relax the signal
@@ -106,7 +129,9 @@ public class OptionsPremiumReplay {
     // is set, {@code underlyingTradingsymbol} == the underlying, so this is byte-identical to before
     // and the premium goldens hold.
     if ((gate.enabled() || gate.iv()) && marketData != null) {
-      legs = filterCounterTrend(legs, underlyingOneMinute, oiGateIndex(config, gate), gate);
+      gateCoverage.arm();
+      legs =
+          filterCounterTrend(legs, underlyingOneMinute, oiGateIndex(config, gate), gate, gateCoverage);
     }
     return replayLegs(
         signals,
@@ -158,6 +183,39 @@ public class OptionsPremiumReplay {
    * are untouched). {@code enabled} = the OI-trend filter; {@code iv} = the IV-confluence filter (#4).
    */
   record OiGate(boolean enabled, String interval, int intervalMin, String index, boolean iv) {}
+
+  /**
+   * Per-run tally of the OI-confluence gate's replay-time Connecting-Dots lookups (one per session).
+   * {@link MarketDataClient#connectingDots} swallows every failure into EMPTY, so an armed gate can
+   * SILENTLY degrade to no-filtering — persisting {@code fetched/total} on the run metrics ({@code
+   * oiGateCoverage}, audit row 6) makes a degraded-gate run distinguishable from a filtered one.
+   */
+  public static final class GateCoverage {
+    private boolean armed;
+    private int fetched;
+    private int total;
+
+    void arm() {
+      armed = true;
+    }
+
+    void record(boolean hasRows) {
+      total++;
+      if (hasRows) {
+        fetched++;
+      }
+    }
+
+    /** Whether the gate actually ran this replay (armed in config AND the client wired). */
+    public boolean armed() {
+      return armed;
+    }
+
+    /** The {@code "fetched/total"} coverage label (e.g. {@code "42/45"}). */
+    public String label() {
+      return fetched + "/" + total;
+    }
+  }
 
   /**
    * Reads {@code backtest.oi_confluence_gate:{enabled,iv,interval,index}} (a backtest-only knob, not the
@@ -214,9 +272,15 @@ public class OptionsPremiumReplay {
    * <p>Both read the SAME per-session Connecting-Dots fetch (one call/session, deterministic: same
    * stored data → same kept legs). A bucket with no OI data (the {@code row} missing) does NOT filter —
    * the leg passes through. Each dimension is independent: a strategy may arm the IV filter alone.
+   * Each session lookup is tallied into {@code coverage} (returned rows vs EMPTY) so an armed gate
+   * that degraded to no-filtering is visible on the run metrics.
    */
   List<PairedLeg> filterCounterTrend(
-      List<PairedLeg> legs, List<EngineCandle> underlying, String indexName, OiGate gate) {
+      List<PairedLeg> legs,
+      List<EngineCandle> underlying,
+      String indexName,
+      OiGate gate,
+      GateCoverage coverage) {
     java.time.ZoneId ist = java.time.ZoneId.of("Asia/Kolkata");
     Map<java.time.LocalDate, Map<String, in.arthayantra.backtest.client.MarketDataClient.CdRow>> bySession =
         new HashMap<>();
@@ -229,8 +293,10 @@ public class OptionsPremiumReplay {
               session,
               s -> {
                 Map<String, in.arthayantra.backtest.client.MarketDataClient.CdRow> m = new HashMap<>();
-                for (in.arthayantra.backtest.client.MarketDataClient.CdRow r :
-                    marketData.connectingDots(indexName, s, gate.interval()).rowsOrEmpty()) {
+                List<in.arthayantra.backtest.client.MarketDataClient.CdRow> rows =
+                    marketData.connectingDots(indexName, s, gate.interval()).rowsOrEmpty();
+                coverage.record(!rows.isEmpty());
+                for (in.arthayantra.backtest.client.MarketDataClient.CdRow r : rows) {
                   m.put(r.timeInterval(), r);
                 }
                 return m;

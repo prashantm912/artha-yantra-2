@@ -419,9 +419,11 @@ class OptionsPremiumReplayTest {
     PairedLeg shortLeg = new PairedLeg(true, 0, 1); // short PE entering into Bearish OI → aligned, KEEP
     OptionsPremiumReplay.OiGate gate = new OptionsPremiumReplay.OiGate(true, "5m", 5, "", false);
 
+    OptionsPremiumReplay.GateCoverage coverage = new OptionsPremiumReplay.GateCoverage();
     List<PairedLeg> kept =
-        replay.filterCounterTrend(List.of(longLeg, shortLeg), underlying, "NIFTY 50", gate);
+        replay.filterCounterTrend(List.of(longLeg, shortLeg), underlying, "NIFTY 50", gate, coverage);
     assertThat(kept).containsExactly(shortLeg); // the counter-trend long is dropped
+    assertThat(coverage.label()).isEqualTo("1/1"); // one session lookup, rows returned
   }
 
   @Test
@@ -446,7 +448,12 @@ class OptionsPremiumReplayTest {
     OptionsPremiumReplay.OiGate ivOnly = new OptionsPremiumReplay.OiGate(false, "5m", 5, "", true);
 
     List<PairedLeg> kept =
-        replay.filterCounterTrend(List.of(longLeg, shortLeg), underlying, "NIFTY 50", ivOnly);
+        replay.filterCounterTrend(
+            List.of(longLeg, shortLeg),
+            underlying,
+            "NIFTY 50",
+            ivOnly,
+            new OptionsPremiumReplay.GateCoverage());
     assertThat(kept).containsExactly(shortLeg);
   }
 
@@ -461,13 +468,16 @@ class OptionsPremiumReplayTest {
             mock(OptionContractSelector.class), mock(CandlePremiumReader.class), md);
     List<EngineCandle> underlying = List.of(bar("10:02", "25000"), bar("10:30", "25010"));
     PairedLeg longLeg = new PairedLeg(false, 0, 1);
+    OptionsPremiumReplay.GateCoverage coverage = new OptionsPremiumReplay.GateCoverage();
     List<PairedLeg> kept =
         replay.filterCounterTrend(
             List.of(longLeg),
             underlying,
             "NIFTY 50",
-            new OptionsPremiumReplay.OiGate(true, "5m", 5, "", false));
+            new OptionsPremiumReplay.OiGate(true, "5m", 5, "", false),
+            coverage);
     assertThat(kept).containsExactly(longLeg);
+    assertThat(coverage.label()).isEqualTo("0/1"); // the lookup came back EMPTY — a degraded gate
   }
 
   @Test

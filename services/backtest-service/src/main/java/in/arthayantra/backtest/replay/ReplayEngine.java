@@ -96,13 +96,8 @@ public class ReplayEngine {
             definition.session().style(), definition.session().fillTiming());
     TouchBasis touchBasis = TouchBasisClassifier.classify(definition, oneMinuteCovered);
 
-    Map<String, Integer> indexByTs = new HashMap<>();
-    for (int i = 0; i < primaryOneMinute.size(); i++) {
-      indexByTs.put(primaryOneMinute.get(i).bucketStart().toString(), i);
-    }
-
     // pair entry/exit events into directed legs over the 1m series
-    List<Leg> legs = legs(signals, indexByTs, primaryOneMinute.size());
+    List<Leg> legs = legs(signals, new BarIndexResolver(primaryOneMinute), primaryOneMinute.size());
 
     // map each leg to its entry/exit FILL bar
     Map<Integer, Leg> openAt = new HashMap<>();
@@ -220,7 +215,7 @@ public class ReplayEngine {
   }
 
   /** A directed entry→exit leg with the 1m indices of the signalling bars + entry protective levels. */
-  private record Leg(
+  record Leg(
       boolean shortSide,
       int entryIndex,
       int exitIndex,
@@ -229,21 +224,28 @@ public class ReplayEngine {
       BigDecimal stopLoss,
       BigDecimal takeProfit) {}
 
-  private static List<Leg> legs(List<SignalEvent> signals, Map<String, Integer> indexByTs, int bars) {
+  static List<Leg> legs(List<SignalEvent> signals, BarIndexResolver resolver, int bars) {
     List<Leg> legs = new ArrayList<>();
     SignalEvent openEntry = null;
     for (SignalEvent ev : signals) {
       if ("EXIT".equals(ev.direction())) {
         if (openEntry != null) {
-          legs.add(
-              new Leg(
-                  "SHORT".equals(openEntry.direction()),
-                  indexByTs.getOrDefault(openEntry.timestamp(), 0),
-                  indexByTs.getOrDefault(ev.timestamp(), bars - 1),
-                  "signal_exit",
-                  openEntry.breakdown(),
-                  openEntry.stopLoss(),
-                  openEntry.takeProfit()));
+          // an entry with NO bar at/after its timestamp cannot be priced — drop the leg loudly
+          // rather than fabricate a bar-0 trade (audit replay-legs-silent-index0-fallback);
+          // an unresolvable exit force-closes at the last bar (the end_of_data convention)
+          int entryIndex = resolver.atOrAfter(openEntry.timestamp());
+          if (entryIndex >= 0) {
+            int exitIndex = resolver.atOrAfter(ev.timestamp());
+            legs.add(
+                new Leg(
+                    "SHORT".equals(openEntry.direction()),
+                    entryIndex,
+                    exitIndex >= 0 ? exitIndex : bars - 1,
+                    "signal_exit",
+                    openEntry.breakdown(),
+                    openEntry.stopLoss(),
+                    openEntry.takeProfit()));
+          }
           openEntry = null;
         }
       } else if (openEntry == null) {
@@ -252,15 +254,18 @@ public class ReplayEngine {
     }
     if (openEntry != null) {
       // open at end → forced close at the last bar
-      legs.add(
-          new Leg(
-              "SHORT".equals(openEntry.direction()),
-              indexByTs.getOrDefault(openEntry.timestamp(), 0),
-              bars - 1,
-              "end_of_data",
-              openEntry.breakdown(),
-              openEntry.stopLoss(),
-              openEntry.takeProfit()));
+      int entryIndex = resolver.atOrAfter(openEntry.timestamp());
+      if (entryIndex >= 0) {
+        legs.add(
+            new Leg(
+                "SHORT".equals(openEntry.direction()),
+                entryIndex,
+                bars - 1,
+                "end_of_data",
+                openEntry.breakdown(),
+                openEntry.stopLoss(),
+                openEntry.takeProfit()));
+      }
     }
     return legs;
   }

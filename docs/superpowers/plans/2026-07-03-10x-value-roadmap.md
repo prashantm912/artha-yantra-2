@@ -146,7 +146,15 @@ quality inherits this.
 - [ ] Kite daily login flow works from the box (redirect handling documented; token lands in the box's stack).
 
 ### F6. Two-way Telegram command surface
-**What:** upgrade the existing one-way notifier to a command bot: `/status` (feed, canary,
+**Status 2026-07-03 — BUILT + deployed dormant (#493):** `telegram` module in strategy-signal —
+/status /pnl /positions + confirm-guarded /pause /resume /flatten (existing kill-switch +
+mark-to-close levers only), triple fail-closed (flag + shared bot token + chat-id allowlist),
+silent to unknown chats, pre-boot updates drained, audits to `bot_commands` (V019). **Owner
+go-live (~5 min, any time):** BotFather token → `.env` `ARTHA_NOTIFIER_TELEGRAM_BOT_TOKEN`
+(escape `$` as `$$`), chat id → `ARTHA_NOTIFIER_TELEGRAM_CHAT_ID`,
+`ARTHA_TELEGRAM_COMMANDS_ENABLED=true`, `ay up`, send /status. Acceptance drills (flatten on
+mock, second-account silence) run after go-live.
+**What (original):** upgrade the existing one-way notifier to a command bot: `/status` (feed, canary,
 open positions), `/pnl` (paper + shadow today), `/flatten` (paper square-off now),
 `/pause` `/resume` (per-strategy paper entry gate), `/last` (most recent signals/rejections).
 Auth = chat-id allowlist (owner only) + a confirm step on mutating commands.

@@ -1,18 +1,43 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AdvanceChart } from '../../components/charts/AdvanceChart.tsx';
+import { AdvanceChart, type TradeMark } from '../../components/charts/AdvanceChart.tsx';
 import { Select } from '../../components/atoms/Select.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { CHART_INTERVALS, fetchOlderCandles, useCandles } from '../../api/charts.ts';
 import { useInstrumentSearch } from '../../api/watchlists.ts';
+import { usePaperTrades } from '../../api/paper.ts';
 import type { MarketCandle } from '../../api/types.ts';
 
 // Advance Chart (oipulse §advance-chart) — the pro charting page on lightweight-charts with the default
 // OiPulse study set (VWAP / VWMA 20 / SuperTrend 10,2 on price + volume MA, RSI 14 + SMA 14 below). A
 // symbol typeahead + interval toolbar bind the cache-first /market/candles read; older bars lazy-load on
-// scroll-back. The TradingView-binary extras (drawing tools, study-template save/load, OI-bar overlay,
-// trade-history, audio alerts) are deferred — see core/indicators for the (tested) study math.
+// scroll-back. The feasible TradingView-binary extras ride an off-by-default extras toolbar: an OI-bar
+// histogram overlay (from the candle `oi` field), paper trade-history entry/exit markers, a user-armed
+// audio price alert (Web Audio beep — never auto-plays), and add/remove horizontal price lines. Interactive
+// freehand drawing tools (trendline/fib/rectangle) + user-configurable study-template save/load stay
+// deferred — a large LWC-primitive/canvas lift with no consumer. Study math lives in core/indicators
+// (tested); the alert crossing rule in core/priceAlert (tested).
+
+/** Short CSP-safe confirmation beep via the Web Audio API (no external asset, no autoplay). */
+function beep() {
+  try {
+    const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 880;
+    gain.gain.value = 0.08;
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.18);
+    osc.onended = () => void ctx.close();
+  } catch {
+    // Audio unavailable (autoplay policy / no output device) — the visual confirmation still shows.
+  }
+}
 
 const LEGEND: { label: string; color: string }[] = [
   { label: 'VWAP', color: '#3b82f6' },
@@ -67,6 +92,45 @@ export function AdvanceChartPage() {
         loadingOlder.current = false;
       });
   }, [bars, symbol, interval]);
+
+  // ── Extras (all off/empty by default → the default render is byte-identical) ─────────────────────
+  const [showOi, setShowOi] = useState(false);
+  const [showTrades, setShowTrades] = useState(false);
+  const [priceLines, setPriceLines] = useState<number[]>([]);
+  const [alertPrice, setAlertPrice] = useState<number | null>(null);
+  const [alertDraft, setAlertDraft] = useState('');
+  const [alertFired, setAlertFired] = useState(false);
+
+  const chartExchange = symbol.slice(0, symbol.indexOf(':'));
+  const chartTradingsymbol = symbol.slice(symbol.indexOf(':') + 1);
+  const paperTrades = usePaperTrades();
+  // Filter the closed paper trades to the charted instrument, mapped to entry/exit marks.
+  const tradeMarks: TradeMark[] = useMemo(() => {
+    if (!showTrades) return [];
+    return (paperTrades.data?.items ?? [])
+      .filter((t) => t.exchange === chartExchange && t.tradingsymbol === chartTradingsymbol)
+      .map((t) => ({ openedAt: t.openedAt, closedAt: t.closedAt, side: t.side, label: `#${t.id}` }));
+  }, [showTrades, paperTrades.data, chartExchange, chartTradingsymbol]);
+
+  const lastClose = bars.length ? Number(bars[bars.length - 1].close) : null;
+  const addLineAtLast = () => {
+    if (lastClose != null) setPriceLines((prev) => [...prev, lastClose]);
+  };
+  const armAlert = () => {
+    const v = Number(alertDraft);
+    if (Number.isFinite(v) && alertDraft.trim()) {
+      setAlertPrice(v);
+      setAlertFired(false);
+    }
+  };
+  const disarmAlert = () => {
+    setAlertPrice(null);
+    setAlertFired(false);
+  };
+  const onAlertCross = useCallback(() => {
+    beep();
+    setAlertFired(true);
+  }, []);
 
   return (
     <LoadBeat>
@@ -124,12 +188,78 @@ export function AdvanceChartPage() {
         </div>
       </div>
 
+      {/* Extras toolbar — OI overlay, trade markers, horizontal lines, audio alert (all off/empty by default). */}
+      <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+        <label className="inline-flex items-center gap-1.5 text-ay-text" title="Overlay the candle open-interest as a histogram (derivative symbols only).">
+          <input type="checkbox" checked={showOi} onChange={(e) => setShowOi(e.target.checked)} className="accent-accent" />
+          OI overlay
+        </label>
+        <label className="inline-flex items-center gap-1.5 text-ay-text" title="Mark your closed paper trades for this symbol as entry/exit arrows.">
+          <input type="checkbox" checked={showTrades} onChange={(e) => setShowTrades(e.target.checked)} className="accent-accent" />
+          Trade markers
+        </label>
+        <div className="inline-flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={addLineAtLast}
+            disabled={lastClose == null}
+            title="Drop a horizontal line at the last price."
+            className="h-8 rounded-md border border-ay-border px-2.5 text-sm hover:border-accent disabled:opacity-50"
+          >
+            + Line at last
+          </button>
+          {priceLines.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setPriceLines([])}
+              title="Remove all horizontal lines."
+              className="h-8 rounded-md border border-ay-border px-2.5 text-sm hover:border-accent"
+            >
+              Clear lines ({priceLines.length})
+            </button>
+          )}
+        </div>
+        <div className="inline-flex items-center gap-1.5">
+          <label htmlFor="alert-price" className="text-ay-muted">Alert @</label>
+          <input
+            id="alert-price"
+            type="number"
+            inputMode="decimal"
+            value={alertDraft}
+            onChange={(e) => setAlertDraft(e.target.value)}
+            placeholder="price"
+            aria-label="Audio alert price"
+            title="Play a beep once when the latest close crosses this level."
+            className="h-8 w-24 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text"
+          />
+          {alertPrice == null ? (
+            <button type="button" onClick={armAlert} title="Arm the audio price alert." className="h-8 rounded-md border border-ay-border px-2.5 text-sm hover:border-accent">
+              Arm
+            </button>
+          ) : (
+            <button type="button" onClick={disarmAlert} title="Disarm the audio price alert." className="h-8 rounded-md border border-ay-border px-2.5 text-sm hover:border-accent">
+              Disarm
+            </button>
+          )}
+          {/* Always mounted so the armed→crossed transition is announced (the beep alone is not a
+              sufficient cue for a deaf user). */}
+          <span className="text-caption text-ay-muted" role="status" aria-live="polite">
+            {alertPrice == null ? '' : alertFired ? `crossed ${alertPrice}` : `armed @ ${alertPrice}`}
+          </span>
+        </div>
+      </div>
+
       <BeatBlock>
         {bars.length > 0 ? (
           <AdvanceChart
             bars={bars}
             intraday={interval !== '1d' && interval !== '1w'}
             onReachStart={loadOlder}
+            showOi={showOi}
+            tradeMarks={tradeMarks}
+            alertPrice={alertPrice}
+            onAlertCross={onAlertCross}
+            priceLines={priceLines}
             className="h-[28rem] sm:h-[34rem] lg:h-[40rem]"
             ariaLabel={`${symbol} ${interval} advance chart`}
           />

@@ -13,6 +13,14 @@ deployed + endpoint-verified same evening; live acceptance criteria (checkboxes 
 the 2026-07-06 session onward. Build lesson: the Map-return ratchet caught BOTH new endpoints —
 typed records from the start next time.
 
+**Same-evening follow-through (#488–#491):** F8 cost model shipped (see the F8 status block —
+scope corrected: paper was already net; the gap was the shadow book). F2's ACCRUAL MECHANISM
+shipped (#489: `docs/signal-analysis/rollup.md` + the 15:47 agent's append step — the proposals
+pass self-triggers at ≥5 sessions, ~2026-07-09/10). F4 v2 shipped (#491 `DotHealthCanary`:
+per-dot gate-input liveness + `/signal-rejections/dot-health`, required-dots ntfy — the F3
+"canary asserts dots can score" acceptance line is now real). Plus the treadmill/provenance fix
+(#490, findings ledger #8/#9). F10 Minervini is owner-DEFERRED until the roadmap phases finish.
+
 **The honest framing:** the build is complete — data capture, 12 live-validated scalpers, a
 strict confluence gate, rejection forensics, the shadow book, backtest + optimizer, the OI
 suite, and a default-disabled semi-auto order path (`execution/RestOpenAlgoOrderGateway`,

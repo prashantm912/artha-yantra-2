@@ -10,11 +10,12 @@ the two 2026-07-02 audits (both fix queues fully closed) and the open-PR/issue l
 
 ---
 
-## 1. Net-new code — ONE item
+## 1. Net-new code
 
 | id | item | authority | state |
 |---|---|---|---|
-| `phase5-minervini-trend-template` | **Phase-5 Minervini Track-1 screener** — daily 8-gate Trend Template + RS-rank preset in `ScreenerService` (master-plan §13). VCP/pivot/Cheat/Power-Play stay deferred (owner reads entries manually). | master-plan §13; `DEFERRED_BACKLOG.md` Phase-5 row | **UNBLOCKED** — 200-day equity daily history seeded (#389, live-verified 222 candles/symbol). The lone remaining net-new build on the platform. |
+| `phase5-minervini-trend-template` | **Phase-5 Minervini Track-1 screener** — daily 8-gate Trend Template + RS-rank preset in `ScreenerService` (master-plan §13). VCP/pivot/Cheat/Power-Play stay deferred (owner reads entries manually). | master-plan §13; `DEFERRED_BACKLOG.md` Phase-5 row | UNBLOCKED but **owner-DEFERRED (2026-07-03) until the 10x-roadmap phases finish**. |
+| `10x-roadmap-p2-p5` | **The 10x-value roadmap's remaining phases** — F2 proposals pass (self-triggers at ≥5 rollup sessions), F3.2–.5 dot fixes (variant-evidence-gated), F6 telegram bot, F5 always-on host, F7 graduation framework, F9 risk layer. P1+F8+F4v2 all SHIPPED 2026-07-03 (#483–#491). | [`2026-07-03-10x-value-roadmap.md`](2026-07-03-10x-value-roadmap.md) | ACTIVE — each phase's gate (data / owner input) is listed in the roadmap; nothing buildable without a gate opening. |
 
 ## 2. Owner-gated — needs owner input/time, not code
 
@@ -90,8 +91,12 @@ captured bank-radar) · SENSEX point-scale constant (dead — signals ride NIFTY
 
 ---
 
-## Net
+## Net (refreshed 2026-07-03 evening)
 
-One build (Minervini screener) · one month of live-paper data then the tuning session · a Nov-2026
-calendar refresh · next-session live verifies · the rest is owner toggles/sign-offs or
-deferred-until-needed. The platform build is otherwise **complete**.
+Everything currently buildable is BUILT (roadmap P1+F8+F4v2 + treadmill/provenance fixes,
+#483–#491, all deployed). What remains: **the data month** (rollup accrues per session, proposals
+pass self-triggers at ≥5 sessions → then the tuning session with the exit-band runbook) · the
+**roadmap's gated phases** (§1 row — telegram token, always-on-host hardware, graduation numbers,
+real `.spn`) · **Minervini** (owner-deferred behind the roadmap) · a **Nov-2026 calendar refresh**
+(§4) · §2 owner toggles/sign-offs · §3 next-session verifies. Machines watch the machines now:
+two in-code canaries + two scheduled agents cover live health and per-session forensics.

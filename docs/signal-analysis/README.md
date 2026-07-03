@@ -295,7 +295,11 @@ Proposed 2026-07-03 from the first pass — each is small and parity-safe (rejec
    options/futures OI capture-freshness probes, ntfy-alerting with a 15 min cooldown, feed-wide
    aggregation and recovery notes. Read surface: `GET /api/v1/market/health/data` (also the
    dashboard "Data health" tile). **Agents: read that endpoint FIRST and deep-dive only on
-   non-GREEN.** Still agent-side (v2 candidates): per-DOT rejection-context field liveness
-   (ivRank/breadth/dow newly-dead detection) — the canary watches the data plane, not yet the
-   gate's inputs. Fault drill: `artha.canary.drill-suppress-key` suppresses one instrument's bar
-   recording end-to-end; `artha.canary.force-open` un-gates the session check for off-hours drills.
+   non-GREEN.** **v2 SHIPPED same day (#491):** `DotHealthCanary` (strategy-signal) watches the
+   GATE'S inputs — per-dot liveness over today's newest rejections (probe registry mirrors §3.7:
+   breadth/iv_rank/dow/fii/vix/oi_spurt_price), REQUIRED dots (`artha.canary.required-dots`,
+   default `breadth`) ntfy-page once per day on newly-dead + a recovery note; read surface
+   `GET /api/v1/signal-rejections/dot-health` (agents read it instead of hand-running the §3.7
+   SQL; grow the probe registry when §3 grows). Fault drill: `artha.canary.drill-suppress-key`
+   suppresses one instrument's bar recording end-to-end; `artha.canary.force-open` un-gates the
+   session check for off-hours drills.

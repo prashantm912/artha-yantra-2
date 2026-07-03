@@ -57,6 +57,15 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
   `contracts/gen/*.d.ts`. Generic `Map<String,Object>` returns are NOT enumerated, so adding
   response keys does NOT drift the spec; new query params + new `@*Mapping` paths DO.
   ci-contracts fails on BREAKING spec diffs, warns on gen drift, requires `tsc --strict`.
+- **EVERY new endpoint returns a typed record, never `Map<String,Object>`** — edge-gateway's
+  `MapReturnRatchetTest` freezes the Map-returning handler COUNT per service (Maps are invisible
+  to the contract gate); a new Map endpoint fails the strategy-gateway CI shard. Cost 2 CI cycles
+  on 2026-07-03 (both new endpoints caught). Records also enumerate into the spec — strictly better.
+- **Modulith module cycles (strategy-signal):** `notifier` imports `signals` (`SignalEmitted`), so
+  signals code must NEVER import notifier — alert via an in-process event record published from
+  signals + an `@EventListener` in notifier (`DotInputAlert`/`DotAlertListener` is the template).
+  Same class of rule: signals cannot import paper (forced the `PremiumBracketRules` copy).
+  `ModularityTest` (per service) catches violations locally only with a full `-am verify`.
 - **Mock-stack backtest testing:** candle data is real-time/rolling (accrues from
   boot) — derive a recent covered window, never hardcode dates; every windowed run's
   regime pre-flight needs ~272 daily benchmark sessions, so backfill `NIFTY 50` 1d
@@ -71,6 +80,14 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
 - **Candle sources split by interval:** `CandleReader.read()` serves the `candles_<iv>`
   caggs (5m/15m/1h/1d/1w), **sparse on a fresh boot**; native daily lives in `candles`@1d
   (dense — `readDailyWithWarmup`). The two diverge for 1d (chart overlays hit this).
+- **Cache-first candle reads re-fetch only a 10-min trailing tail** (B-4 recency, NARROWED from
+  2 h in #490 — the old window made every `to`≈now read re-fetch 2 h of covered bars from Kite all
+  session). `GapDetector` marks a bucket missing iff absent OR its END clears now−10m, so the
+  in-progress bucket (today's 1d especially) always refreshes; the upsert keeps the original
+  `source` when a re-fetched bar is value-identical (provenance stays diagnosable). Live watchers:
+  `GET /api/v1/market/health/data` (per-token tick/bar divergence + capture freshness) and
+  `GET /api/v1/signal-rejections/dot-health` (per-dot gate-input liveness) — check these BEFORE
+  hand-digging a "feed looks dead" report.
 - **3m reads are a read-time 1m→3m rollup** (`CandleRepository.rangeRolledFromOneMinute`, #365): the
   live SignalEngine 3m-primary depends on this rollup. The unused `candles_3m` cagg + its refresh
   policy were DROPPED (V027, #427) — 3m has no materialized view; only the 1m base feeds it.

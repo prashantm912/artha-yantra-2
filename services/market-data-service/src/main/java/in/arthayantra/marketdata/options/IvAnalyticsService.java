@@ -27,7 +27,13 @@ public class IvAnalyticsService {
   /** Default 30-day constant-maturity target. */
   static final int CONSTANT_MATURITY_DAYS = 30;
 
-  /** Trailing-window floor below which rank/percentile is suppressed (insufficient history). */
+  /**
+   * Trailing-window floor below which rank/percentile is suppressed (insufficient history).
+   * DEFAULT for the config knob — capture-era history started 2026-06-15, so 60 keeps the iv_rank
+   * dot honest-null until ~September; `artha.iv.rank-history-floor-days` lets the owner lower it
+   * (rollup-evidence-gated, signal-analysis findings item #5) without a rebuild. Never below ~15:
+   * a rank over a handful of days is noise wearing a percentile.
+   */
   public static final int HISTORY_FLOOR_DAYS = 60;
 
   /** Trailing window length for rank/percentile. */
@@ -57,10 +63,16 @@ public class IvAnalyticsService {
       boolean insufficient) {}
 
   private final IvDailySummaryRepository repository;
+  private final int historyFloorDays;
 
-  /** Wires the rollup repository. */
-  public IvAnalyticsService(IvDailySummaryRepository repository) {
+  /** Wires the rollup repository + the configurable rank floor (default = the pinned 60). */
+  public IvAnalyticsService(
+      IvDailySummaryRepository repository,
+      @org.springframework.beans.factory.annotation.Value(
+              "${artha.iv.rank-history-floor-days:" + HISTORY_FLOOR_DAYS + "}")
+          int historyFloorDays) {
     this.repository = repository;
+    this.historyFloorDays = historyFloorDays;
   }
 
   /** Rolls up one (underlying, IST date); empty when that day has no snapshot. */
@@ -108,7 +120,7 @@ public class IvAnalyticsService {
         ivs.add(iv);
       }
     }
-    RankStat stat = rankStat(ivs, HISTORY_FLOOR_DAYS);
+    RankStat stat = rankStat(ivs, historyFloorDays);
     return new IvHistory(
         underlying,
         series,

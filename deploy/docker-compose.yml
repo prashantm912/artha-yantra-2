@@ -259,6 +259,11 @@ services:
       # Upstox Market-Information analytics side-channel (ADR-0002) — default-OFF.
       ARTHA_UPSTOX_ANALYTICS_ENABLED: ${ARTHA_UPSTOX_ANALYTICS_ENABLED:-false}
       ARTHA_UPSTOX_CANARY_ENABLED: ${ARTHA_UPSTOX_CANARY_ENABLED:-false}
+      # IV rank/percentile trailing-window floor (days). 60 = pinned honest-null default; the
+      # iv_rank dot stays dead until capture history (started 2026-06-15) crosses it. Lower ONLY
+      # on rollup evidence (signal-analysis findings item #5) — never below ~15 (rank over a
+      # handful of days is noise). Config-only revive: no rebuild.
+      ARTHA_IV_RANK_HISTORY_FLOOR_DAYS: ${ARTHA_IV_RANK_HISTORY_FLOOR_DAYS:-60}
     # kite_* + master key + the OpenAlgo API key mount into THIS service only (B-2: the token
     # and the credentials never reach any other container). The openalgo key is read only when
     # capture routes through OpenAlgo (Phase 1); an empty placeholder is harmless otherwise.

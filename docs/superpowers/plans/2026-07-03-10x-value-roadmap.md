@@ -212,13 +212,21 @@ strategy the current numbers call a winner. Graduation criteria (F7) are meaning
 - [ ] Findings docs + rollup switch their PnL tables to cost-adjusted (raw kept alongside).
 - [ ] One session's report shows per-trade latency (signal `generated_at` → entry snapshot ts) p50/p95; p95 > 5s raises a canary amber.
 
-### F9. Risk & capital layer — activate the dormant margin appliance
-**What:** wire marginism (SPAN FastAPI :8086, built dormant #126) into paper sizing: lots =
-f(capital, SPAN+exposure margin, per-trade risk %); portfolio heat cap (max concurrent margin
-at risk); a daily loss governor that pauses new paper entries past a threshold (flatten stays
-manual/F6). All advisory-annotated first, enforcing behind a flag.
+### F9. Risk & capital layer — SPAN sizing via the Upstox margin API
+**What:** wire SPAN+exposure margin into paper sizing: lots = f(capital, SPAN+exposure margin,
+per-trade risk %); portfolio heat cap (max concurrent margin at risk); a daily loss governor
+that pauses new paper entries past a threshold (flatten stays manual/F6). All advisory-annotated
+first, enforcing behind a flag.
+**SPAN source (decided 2026-07-04, VERIFIED LIVE):** route through Upstox `POST /v2/charges/margin`
+— server-side SPAN on the login-free analytics token we already hold (a 1-lot short returned real
+`span_margin`/`exposure_margin`/`total_margin`/`required_margin`/`final_margin`), NO `.spn` file
+and NO broker-number hunt. Capital = `GET /v2/user/get-funds-and-margin` (live; 423 during the
+00:00–05:30 IST funds-maintenance window). The marginism appliance (#126) demotes to the
+offline/backtest fallback (`SpanEngine` gets a second, Upstox-backed impl for live). **Gotcha:**
+`quantity` must be a multiple of the contract lot size (UDAPI1104 otherwise — read it from the
+Upstox instrument master); ≤20 legs/basket.
 **Acceptance criteria:**
-- [ ] Paper entries carry `advised_lots` + margin snapshot from the margin service; one live session's values sanity-checked vs broker margin calculator (blocked on the real `.spn` parity item in ledger §2 — that item is a prerequisite).
+- [ ] Paper entries carry `advised_lots` + margin snapshot from Upstox `/v2/charges/margin`; the returned SPAN is broker-real by construction (Upstox IS a broker), so no separate parity step — one live session sanity-checked that `advised_lots × margin ≤ available funds`.
 - [ ] Governor drill on mock: inject losses past the daily cap → new entries blocked, ntfy fired, existing positions untouched.
 - [ ] Flag default OFF; ON in compose only after one clean advisory-mode week.
 

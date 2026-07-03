@@ -37,12 +37,16 @@ class MarginControllerTest {
   private static MarginLeg leg(String product) {
     return new MarginLeg(
         "NFO", "NIFTY", "CE", LocalDate.parse("2026-07-07"), new BigDecimal("25000"), 75, "SELL",
-        product);
+        product, null);
+  }
+
+  private static in.arthayantra.marketdata.instruments.InstrumentRepository instruments() {
+    return mock(in.arthayantra.marketdata.instruments.InstrumentRepository.class);
   }
 
   @Test
   void unpricedWhenTheUpstoxTokenIsOff() {
-    MarginController c = new MarginController(provider(null), provider(null));
+    MarginController c = new MarginController(provider(null), provider(null), instruments());
     MarginResponse r = c.margin(new MarginRequest(List.of(leg("D"))));
     assertThat(r.priced()).isFalse();
     assertThat(r.unpricedReason()).contains("not configured");
@@ -54,12 +58,42 @@ class MarginControllerTest {
     UpstoxFnoMasterClient master = mock(UpstoxFnoMasterClient.class);
     when(master.keyFor(any(), any(), any(), any(), any())).thenReturn(null);
 
-    MarginController c = new MarginController(provider(client), provider(master));
+    MarginController c = new MarginController(provider(client), provider(master), instruments());
     MarginResponse r = c.margin(new MarginRequest(List.of(leg("D"))));
 
     assertThat(r.priced()).isFalse();
     assertThat(r.unpricedReason()).contains("no Upstox instrument");
     verify(client, never()).quote(any());
+  }
+
+  @Test
+  void resolvesATradingsymbolLegViaTheInstrumentMaster() {
+    UpstoxMarginClient client = mock(UpstoxMarginClient.class);
+    UpstoxFnoMasterClient master = mock(UpstoxFnoMasterClient.class);
+    in.arthayantra.marketdata.instruments.InstrumentRepository repo = instruments();
+    when(repo.findByKey("NFO", "NIFTY2570725000CE"))
+        .thenReturn(
+            java.util.Optional.of(
+                new in.arthayantra.marketdata.instruments.Instrument(
+                    "NFO", "NIFTY2570725000CE", 1L, "NIFTY", "NFO-OPT", "CE", "NSE", "NIFTY 50",
+                    LocalDate.parse("2026-07-07"), new BigDecimal("25000"), new BigDecimal("0.05"),
+                    75, true)));
+    when(master.keyFor(eq("NFO"), eq("NIFTY"), eq("CE"), any(), any())).thenReturn("NSE_FO|44454");
+    when(client.quote(any()))
+        .thenReturn(
+            new MarginQuote(true, null, new BigDecimal("99381.1"), new BigDecimal("31554.38"),
+                BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("130935.48"),
+                new BigDecimal("130935.48"), new BigDecimal("130821.73")));
+
+    // tradingsymbol-only leg (structured fields null) → resolved from the master, then priced
+    MarginLeg symLeg =
+        new MarginLeg("NFO", null, null, null, null, 65, "SELL", "D", "NIFTY2570725000CE");
+    MarginController c = new MarginController(provider(client), provider(master), repo);
+    MarginResponse r = c.margin(new MarginRequest(List.of(symLeg)));
+
+    assertThat(r.priced()).isTrue();
+    assertThat(r.spanMargin()).isEqualByComparingTo("99381.1");
+    verify(repo).findByKey("NFO", "NIFTY2570725000CE");
   }
 
   @Test
@@ -75,7 +109,7 @@ class MarginControllerTest {
                 new BigDecimal("372229.45"), new BigDecimal("188604.45")));
 
     // product null → defaults to "D" (NRML, full SPAN — the conservative sizing choice)
-    MarginController c = new MarginController(provider(client), provider(master));
+    MarginController c = new MarginController(provider(client), provider(master), instruments());
     MarginResponse r = c.margin(new MarginRequest(List.of(leg(null))));
 
     assertThat(r.priced()).isTrue();

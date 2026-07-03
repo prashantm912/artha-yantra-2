@@ -17,11 +17,24 @@ export function compareDecimal(a: string, b: string): number {
   return na.sign < 0 ? -magnitude : magnitude;
 }
 
-/** Formats a decimal string to a fixed number of fraction digits (string-safe rounding-free). */
+/**
+ * Formats a decimal string to a fixed number of fraction digits, rounding HALF-UP on the first
+ * dropped digit (string/BigInt math — still parseFloat-free). Truncation biased every displayed
+ * score toward zero (0.66666667 read 0.6666, flipping values across mental thresholds).
+ */
 export function formatDecimal(value: string, fractionDigits: number): string {
   const { sign, int, frac } = normalize(value);
-  const padded = (frac + '0'.repeat(fractionDigits)).slice(0, fractionDigits);
-  const body = fractionDigits === 0 ? int : `${int}.${padded}`;
+  let intOut = int;
+  let kept = (frac + '0'.repeat(fractionDigits)).slice(0, fractionDigits);
+  const dropped = frac.length > fractionDigits ? frac[fractionDigits] : '';
+  if (dropped >= '5' && dropped !== '') {
+    intOut = intOut || '0';
+    const scaled = BigInt(intOut + kept) + 1n;
+    const digits = scaled.toString().padStart(intOut.length + fractionDigits, '0');
+    intOut = digits.slice(0, digits.length - fractionDigits) || '0';
+    kept = digits.slice(digits.length - fractionDigits);
+  }
+  const body = fractionDigits === 0 ? intOut : `${intOut}.${kept}`;
   return sign < 0 ? `-${body}` : body;
 }
 

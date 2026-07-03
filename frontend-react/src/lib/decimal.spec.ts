@@ -24,6 +24,17 @@ describe('decimal utility (exact strings, never parseFloat)', () => {
     expect(formatDecimal('42', 0)).toBe('42');
   });
 
+  it('rounds half-up on the first dropped digit (audit format-decimal-truncates)', () => {
+    expect(formatDecimal('0.66666667', 4)).toBe('0.6667'); // was 0.6666 truncated
+    expect(formatDecimal('0.58999', 4)).toBe('0.5900');
+    expect(formatDecimal('0.69995', 2)).toBe('0.70'); // only the first dropped digit decides
+    expect(formatDecimal('0.6949', 2)).toBe('0.69'); // 4 stays down
+    expect(formatDecimal('9.999', 2)).toBe('10.00'); // carry into the integer part
+    expect(formatDecimal('0.5', 0)).toBe('1'); // zero fraction digits still round
+    expect(formatDecimal('-0.66666667', 4)).toBe('-0.6667'); // half away from zero on negatives
+    expect(formatDecimal('21750.50', 2)).toBe('21750.50'); // exact-scale inputs untouched
+  });
+
   it('detects sign', () => {
     expect(isNegative('-0.0001')).toBe(true);
     expect(isNegative('0')).toBe(false);

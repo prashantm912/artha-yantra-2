@@ -78,6 +78,14 @@ public class OptionsSnapshotReader {
    * As {@link #series} but scoped to a SINGLE {@code strike} (both CE + PE) — the per-strike
    * intraday time-series the oipulse "Options OI Analysis" page (buckets-on-rows) needs. Filtering
    * in SQL keeps the read bounded (~buckets × 2 rows) rather than pulling the full chain's session.
+   *
+   * <p>{@code oi_change} here is the BUCKET-LAG delta ({@code last(oi)} vs the prior bucket's), not
+   * the carried 3-min captured {@code oi_change} — on a resampled interval (5m/15m/…) the carried
+   * value is only the final capture slice's delta, which diverged from oipulse's
+   * endpoint-to-endpoint Δ (value-verify F5). This also matches {@code CandleDerivedChainReader}'s
+   * derived-history semantics (bucket-lag, first bucket null). The full-chain {@link #series} read
+   * deliberately keeps the captured value — the live gate's sentiment/trending dots are calibrated
+   * on it and must stay byte-identical.
    */
   public List<StrikePoint> strikeSeries(
       String underlying,
@@ -87,16 +95,19 @@ public class OptionsSnapshotReader {
       OffsetDateTime from,
       OffsetDateTime to) {
     String sql =
-        "SELECT public.time_bucket(INTERVAL '"
+        "SELECT b, strike, option_type, ltp, oi, "
+            + "  oi - lag(oi) OVER (PARTITION BY option_type ORDER BY b) AS oi_change, "
+            + "  iv, spot, volume FROM ("
+            + "SELECT public.time_bucket(INTERVAL '"
             + interval.pgInterval()
             + "', ts - INTERVAL '1 second', 'Asia/Kolkata') AS b, "
             + "  strike, option_type, "
             + "  public.last(ltp, ts) AS ltp, public.last(oi, ts) AS oi, "
-            + "  public.last(oi_change, ts) AS oi_change, public.last(iv, ts) AS iv, "
+            + "  public.last(iv, ts) AS iv, "
             + "  public.last(spot_price, ts) AS spot, public.last(volume, ts) AS volume "
             + "FROM options_chain_snapshots "
             + "WHERE underlying = ? AND expiry = ? AND strike = ? AND ts >= ? AND ts < ? "
-            + "GROUP BY b, strike, option_type "
+            + "GROUP BY b, strike, option_type) t "
             + "ORDER BY b, option_type";
     return jdbc.query(
         sql,

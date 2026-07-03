@@ -192,12 +192,10 @@ export function useSignalsLive(
       });
     };
     const offTopic = wsClient.topic('/topic/signals', merge);
-    const offReconnect = wsClient.onReconnect(() =>
-      qc.invalidateQueries({ queryKey: [SIGNALS_KEY] }),
-    );
+    // reconnect gap-heal rides the app-wide debounced invalidation in main.tsx — a per-hook
+    // invalidation here was a redundant second refetch of the same key
     return () => {
       offTopic();
-      offReconnect();
     };
   }, [qc, status, from, to, live]);
 }

@@ -51,5 +51,14 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     css: false,
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    // Coverage floor (audit frontend-vitest-no-coverage-floor): the pure calculation (core/) and
+    // API-fold (api/) layers are the FE's money math — hold their line coverage so it can't erode.
+    // Pages ride the e2e/axe shard instead of chasing RTL specs for all of them.
+    coverage: {
+      provider: 'v8' as const,
+      include: ['src/core/**', 'src/api/**'],
+      thresholds: { lines: 50 },
+      reporter: ['text-summary'],
+    },
   },
 });

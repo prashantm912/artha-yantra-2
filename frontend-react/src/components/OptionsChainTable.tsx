@@ -41,6 +41,8 @@ interface ChainCellCtx {
 interface ChainColumn {
   key: string;
   header: string;
+  /** Native hover tooltip on the column header (semantics notes, e.g. the IV method). */
+  headerTitle?: string;
   render: (cell: ChainTableLeg | null, ctx: ChainCellCtx) => ReactNode;
   /** Per-cell <td> class (max-cell highlight / ITM tint) from the side context. */
   tdClass?: (ctx: ChainCellCtx) => string;
@@ -92,7 +94,14 @@ const VISIBLE_COLUMNS: ChainColumn[] = [
     },
     tdClass: (ctx) => (ctx.isMaxOiChange ? MAX_CELL : ''),
   },
-  { key: 'iv', header: 'IV', render: (c) => <span className="tabular-nums">{ivPct(c?.leg.iv)}</span> },
+  {
+    key: 'iv',
+    header: 'IV',
+    // value-verify divergence note (greeks class): oipulse serves distinct per-leg IVs.
+    headerTitle:
+      'Single per-strike Black-76 IV — CE and PE share the value (on derived history the ATM-band recompute)',
+    render: (c) => <span className="tabular-nums">{ivPct(c?.leg.iv)}</span>,
+  },
   {
     key: 'ltp',
     header: 'LTP',
@@ -277,7 +286,7 @@ export function OptionsChainTable({
             </tr>
             <tr>
               {callColumns.map((c) => (
-                <th key={`ceh-${c.key}`} scope="col" className="px-2 py-1 text-right font-medium">
+                <th key={`ceh-${c.key}`} scope="col" title={c.headerTitle} className="px-2 py-1 text-right font-medium">
                   {c.header}
                 </th>
               ))}
@@ -285,7 +294,7 @@ export function OptionsChainTable({
                 Strike
               </th>
               {putColumns.map((c) => (
-                <th key={`peh-${c.key}`} scope="col" className="px-2 py-1 text-right font-medium">
+                <th key={`peh-${c.key}`} scope="col" title={c.headerTitle} className="px-2 py-1 text-right font-medium">
                   {c.header}
                 </th>
               ))}

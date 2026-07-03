@@ -6828,6 +6828,9 @@
           "sentimentPct" : {
             "type" : "number"
           },
+          "sentimentLevelPct" : {
+            "type" : "number"
+          },
           "items" : {
             "type" : "array",
             "items" : {
@@ -6872,6 +6875,9 @@
             "format" : "date-time"
           },
           "sentimentPct" : {
+            "type" : "number"
+          },
+          "levelPct" : {
             "type" : "number"
           }
         }

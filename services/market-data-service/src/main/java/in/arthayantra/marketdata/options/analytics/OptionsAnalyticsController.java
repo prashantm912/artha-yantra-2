@@ -119,6 +119,8 @@ public class OptionsAnalyticsController {
 
   public record ActiveStrikesResponse(
       BigDecimal sentimentPct,
+      // §18.6: the oipulse LEVEL-based sentiment beside the ΔOI-flow number, for the live compare.
+      @JsonInclude(JsonInclude.Include.NON_NULL) BigDecimal sentimentLevelPct,
       List<StrikeView> items,
       @JsonInclude(JsonInclude.Include.NON_NULL) List<ActiveStrikeService.SentimentPoint>
               sentimentSeries,
@@ -356,6 +358,7 @@ public class OptionsAnalyticsController {
     }
     List<ActiveStrikeService.StrikeOiSnap> snaps = toSnaps(latest);
     BigDecimal sentiment = activeStrikes.sentimentPct(snaps);
+    BigDecimal sentimentLevel = activeStrikes.sentimentLevelPct(snaps);
     List<StrikeView> items =
         activeStrikes.activeStrikes(snaps).stream()
             .map(s -> new StrikeView(s.strike(), s.ceOi(), s.peOi()))
@@ -363,7 +366,7 @@ public class OptionsAnalyticsController {
     OffsetDateTime asOf = latest.get(latest.size() - 1).bucket();
     if (buckets == null) {
       // NON_NULL on all series omits the keys, keeping the absent-buckets response byte-identical.
-      return new ActiveStrikesResponse(sentiment, items, null, null, null, null, asOf);
+      return new ActiveStrikesResponse(sentiment, sentimentLevel, items, null, null, null, null, asOf);
     }
     // Anchor on the newest captured bucket (clock-independent); span the last `buckets` buckets.
     OffsetDateTime newest = latest.get(0).bucket();
@@ -383,6 +386,7 @@ public class OptionsAnalyticsController {
         activeStrikes.activeStrikeSideIvSeries(series, exp, riskFreeRate);
     return new ActiveStrikesResponse(
         sentiment,
+        sentimentLevel,
         items,
         sentimentSeries,
         activeStrikeOiSeries,

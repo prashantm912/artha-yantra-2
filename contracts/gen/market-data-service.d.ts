@@ -2265,6 +2265,7 @@ export interface components {
         };
         ActiveStrikesResponse: {
             sentimentPct?: number;
+            sentimentLevelPct?: number;
             items?: components["schemas"]["StrikeView"][];
             sentimentSeries?: components["schemas"]["SentimentPoint"][];
             activeStrikeOiSeries?: components["schemas"]["ActiveStrikeOiPoint"][];
@@ -2277,6 +2278,7 @@ export interface components {
             /** Format: date-time */
             bucket?: string;
             sentimentPct?: number;
+            levelPct?: number;
         };
         StrikeView: {
             strike?: number;

@@ -28,8 +28,14 @@ public class ActiveStrikeService {
   public record StrikeOiSnap(
       BigDecimal strike, long ceOi, long ceOiChange, long peOi, long peOiChange) {}
 
-  /** One Active Strike Sentiment % point per snapshot bucket (newest-last in the series). */
-  public record SentimentPoint(OffsetDateTime bucket, BigDecimal sentimentPct) {}
+  /**
+   * One Active Strike Sentiment % point per snapshot bucket (newest-last). {@code sentimentPct} is
+   * the ΔOI-flow number (v1); {@code levelPct} is the oipulse-dashboard LEVEL-based number (§18.6),
+   * carried ALONGSIDE so a live compare can pick which the sentiment gate should read — the existing
+   * ΔOI number is never changed.
+   */
+  public record SentimentPoint(
+      OffsetDateTime bucket, BigDecimal sentimentPct, BigDecimal levelPct) {}
 
   /** One active-strike Call/Put OI point per snapshot bucket (newest-last) — the LEFT chart series. */
   public record ActiveStrikeOiPoint(OffsetDateTime bucket, long ceOi, long peOi) {}
@@ -67,6 +73,29 @@ public class ActiveStrikeService {
   }
 
   /**
+   * oipulse-dashboard convention: 100 · (ΣputOI − ΣcallOI) / ΣputOI over the active strikes — a
+   * LEVEL-based read (OI stock, not the ΔOI flow {@link #sentimentPct} uses). §18.6: the Siva
+   * cheat-sheet thresholds were read off oipulse, which shows this figure. Added BESIDE the flow
+   * number (never replacing it) so a live compare vs oipulse can decide which the sentiment gate
+   * should read. Null when there is no put OI.
+   */
+  public BigDecimal sentimentLevelPct(List<StrikeOiSnap> chain) {
+    List<StrikeOiSnap> active = activeStrikes(chain);
+    long put = 0;
+    long call = 0;
+    for (StrikeOiSnap s : active) {
+      put += s.peOi();
+      call += s.ceOi();
+    }
+    if (put == 0) {
+      return null;
+    }
+    return BigDecimal.valueOf(put - call)
+        .multiply(BigDecimal.valueOf(100))
+        .divide(BigDecimal.valueOf(put), 2, RoundingMode.HALF_UP);
+  }
+
+  /**
    * Active Strike Sentiment % per snapshot bucket: groups {@code series} (ordered oldest-first, as
    * {@link OptionsSnapshotReader#series} returns) by bucket, folds each bucket's points per strike,
    * and applies the same top-N formula. One point per bucket, newest-last; a bucket with no base OI
@@ -93,7 +122,7 @@ public class ActiveStrikeService {
         (bucket, m) -> {
           List<StrikeOiSnap> snaps = new ArrayList<>();
           m.forEach((strike, v) -> snaps.add(new StrikeOiSnap(strike, v[0], v[1], v[2], v[3])));
-          out.add(new SentimentPoint(bucket, sentimentPct(snaps)));
+          out.add(new SentimentPoint(bucket, sentimentPct(snaps), sentimentLevelPct(snaps)));
         });
     return out;
   }

@@ -389,6 +389,13 @@ services:
         [{"name":"vol-off","rails":[{"rail":"volume-floor","disable":true}]},
          {"name":"vol-12k5","rails":[{"rail":"volume-floor","threshold":12500,"passWhen":"GTE"}]},
          {"name":"composite-070","compositeThreshold":0.70}]
+      # F6 Telegram command bot (two-way, PAPER stack only: /status /pnl /positions + confirm-
+      # guarded /pause /resume /flatten). Triple fail-closed: needs this flag AND the shared
+      # notifier bot token AND the chat-id allowlist, all from .env. Unknown chats are ignored
+      # silently; accepted commands audit to strategy.bot_commands (V019).
+      ARTHA_TELEGRAM_COMMANDS_ENABLED: ${ARTHA_TELEGRAM_COMMANDS_ENABLED:-false}
+      ARTHA_NOTIFIER_TELEGRAM_BOT_TOKEN: ${ARTHA_NOTIFIER_TELEGRAM_BOT_TOKEN:-}
+      ARTHA_NOTIFIER_TELEGRAM_CHAT_ID: ${ARTHA_NOTIFIER_TELEGRAM_CHAT_ID:-}
     secrets: [postgres_password]
     depends_on:
       flyway-init:

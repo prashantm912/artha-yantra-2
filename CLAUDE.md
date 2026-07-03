@@ -115,6 +115,19 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
   `+05:30` but JDBC `time_bucket` returns `+00`, so `map.get(bar.bucket)` missed EVERY lookup and 3
   Connecting-Dots factors (activeStrikeOi/IV/VIX) read NEUTRAL on every history session for months. Key
   cross-source time maps by `.toInstant()`, never the offset-bearing `OffsetDateTime`.
+- **SPAN margin = Upstox server-side, NO `.spn` file (F9 source, #510):** `UpstoxMarginClient`
+  POSTs a ≤20-leg basket to Upstox `POST /v2/charges/margin` on the login-free analytics token and
+  gets `span_margin`/`exposure_margin`/`total_margin` + basket `required_margin`/`final_margin`
+  back — Upstox loads the NSCCL file, we never do. `POST /api/v1/market/margin` (typed record,
+  fail-soft: `unpriced` reason on any gap, never a 5xx) takes structured legs
+  `(exchange, underlying, optionType, expiry, strike, quantity, side, product)`, resolves each to
+  the Upstox `instrument_key` via `UpstoxFnoMasterClient.keyFor`, defaults `product=D` (NRML, full
+  SPAN — conservative). Bound only when `artha.upstox.analytics.enabled=true` (ObjectProvider → mock
+  stack returns `unpriced`). **`quantity` MUST be a lot multiple** or Upstox 400s `UDAPI1104`
+  (surfaced as the unpriced reason) — the scalper already emits lot-aligned qty. The marginism
+  appliance (#126) stays the offline/backtest fallback. Verified live 2026-07-04 (1-lot short →
+  span 337004.85 / final 188604.45). The path is `/v2/charges/margin`; the doc's `/charges/margin`
+  404s.
 - **Kite REST → full-mirror DTOs (`kite/wire/`):** one record per endpoint (quote / historical /
   session / profile / instrument-CSV) mirrors **every** documented Kite field, each
   `@JsonIgnoreProperties(ignoreUnknown=true)` so a field Kite ADDS can never crash the live feed.

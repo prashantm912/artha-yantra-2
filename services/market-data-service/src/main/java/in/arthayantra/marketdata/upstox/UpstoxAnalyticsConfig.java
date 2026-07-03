@@ -152,6 +152,20 @@ public class UpstoxAnalyticsConfig {
   }
 
   /**
+   * Direct-Upstox pre-trade SPAN margin client (F9 risk-layer source). Bound whenever the analytics
+   * token is enabled — {@code POST /v2/charges/margin} computes SPAN+exposure server-side on the
+   * login-free analytics token, so the platform never needs an {@code .spn} file. {@code
+   * MarginController} consumes it via an {@code ObjectProvider}, so absent (analytics off) ⇒ the
+   * margin endpoint returns an {@code unpriced} response, never a 5xx.
+   */
+  @Bean
+  @ConditionalOnProperty(name = "artha.upstox.analytics.enabled", havingValue = "true")
+  public UpstoxMarginClient upstoxMarginClient(
+      RestClient.Builder restClientBuilder, UpstoxAnalyticsProperties properties) {
+    return new UpstoxMarginClient(restClientBuilder, properties);
+  }
+
+  /**
    * Daily Upstox Market-Information contract canary (U7) — wired only when {@code
    * artha.upstox.canary-enabled=true}. Off by default so a stack without the analytics token needs
    * no Upstox probe. Self-scheduled (daily cron, IST); raw-JSON probes diffed vs the committed

@@ -566,6 +566,44 @@
         }
       }
     },
+    "/api/v1/market/margin" : {
+      "post" : {
+        "tags" : [ "margin-controller" ],
+        "operationId" : "margin",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/MarginRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MarginResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/equity/pre-open-scan/capture" : {
       "post" : {
         "tags" : [ "equity-controller" ],
@@ -5451,6 +5489,83 @@
           "to" : {
             "type" : "string",
             "format" : "date"
+          }
+        }
+      },
+      "MarginLeg" : {
+        "type" : "object",
+        "properties" : {
+          "exchange" : {
+            "type" : "string"
+          },
+          "underlying" : {
+            "type" : "string"
+          },
+          "optionType" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "strike" : {
+            "type" : "number"
+          },
+          "quantity" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "side" : {
+            "type" : "string"
+          },
+          "product" : {
+            "type" : "string"
+          }
+        }
+      },
+      "MarginRequest" : {
+        "type" : "object",
+        "properties" : {
+          "legs" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/MarginLeg"
+            }
+          }
+        }
+      },
+      "MarginResponse" : {
+        "type" : "object",
+        "properties" : {
+          "priced" : {
+            "type" : "boolean"
+          },
+          "unpricedReason" : {
+            "type" : "string"
+          },
+          "spanMargin" : {
+            "type" : "number"
+          },
+          "exposureMargin" : {
+            "type" : "number"
+          },
+          "equityMargin" : {
+            "type" : "number"
+          },
+          "netBuyPremium" : {
+            "type" : "number"
+          },
+          "additionalMargin" : {
+            "type" : "number"
+          },
+          "totalMargin" : {
+            "type" : "number"
+          },
+          "requiredMargin" : {
+            "type" : "number"
+          },
+          "finalMargin" : {
+            "type" : "number"
           }
         }
       },

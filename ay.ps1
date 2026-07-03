@@ -176,6 +176,7 @@ switch ($Verb) {
         # Restore a WHOLE-DATABASE -Fc dump (produced by `ay backup`) into the active
         # profile's database. Accepts a backup DIRECTORY (uses its globals.sql + *-full.dump)
         # or a single *-full.dump file. DESTRUCTIVE: drops + recreates the target DB.
+        # CI mirror: .github/workflows/ci-backup-roundtrip.yml exercises this exact sequence weekly — keep in lockstep.
         if ($Rest.Count -lt 1) { Write-Error 'usage: ay restore <backup-dir-or-full-dump>' }
         Set-ProfileEnv
         $db  = $env:ARTHA_DB_NAME

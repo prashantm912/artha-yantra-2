@@ -1,5 +1,7 @@
 package in.arthayantra.marketdata.margin;
 
+import in.arthayantra.marketdata.instruments.Instrument;
+import in.arthayantra.marketdata.instruments.InstrumentRepository;
 import in.arthayantra.marketdata.upstox.UpstoxFnoMasterClient;
 import in.arthayantra.marketdata.upstox.UpstoxMarginClient;
 import in.arthayantra.marketdata.upstox.UpstoxMarginClient.MarginQuote;
@@ -7,33 +9,47 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Pre-trade SPAN margin for an F&amp;O basket (F9 risk-layer SPAN source). Resolves each structured
- * leg to its Upstox {@code instrument_key} off the F&amp;O master, then asks Upstox to compute
- * SPAN+exposure server-side ({@link UpstoxMarginClient}) — no {@code .spn} file. Typed record in/out
- * (never a {@code Map} — the contract ratchet). Both collaborators resolve via {@link
- * ObjectProvider}, so when the Upstox analytics token is off (mock stack, Kite-only live) the
- * endpoint returns an {@code unpriced} response instead of 500-ing — advisory only, fail-soft.
+ * Pre-trade SPAN margin for an F&amp;O basket (F9 risk-layer SPAN source). Resolves each leg to its
+ * Upstox {@code instrument_key} off the F&amp;O master, then asks Upstox to compute SPAN+exposure
+ * server-side ({@link UpstoxMarginClient}) — no {@code .spn} file. Typed record in/out (never a
+ * {@code Map} — the contract ratchet). Both Upstox collaborators resolve via {@link ObjectProvider},
+ * so when the analytics token is off (mock stack, Kite-only live) the endpoint returns an {@code
+ * unpriced} response instead of 500-ing — advisory only, fail-soft.
+ *
+ * <p>A leg may be specified either STRUCTURALLY ({@code underlying}/{@code optionType}/{@code
+ * expiry}/{@code strike}) or by {@code tradingsymbol} — the latter is resolved to those fields from
+ * the instrument master, so a caller holding only an option symbol (e.g. the paper book's margin
+ * heat read) needn't re-derive the tuple.
  */
 @RestController
 public class MarginController {
 
   private final ObjectProvider<UpstoxMarginClient> client;
   private final ObjectProvider<UpstoxFnoMasterClient> master;
+  private final InstrumentRepository instruments;
 
-  /** Wires the optional Upstox collaborators. */
+  /** Wires the optional Upstox collaborators + the instrument master. */
   public MarginController(
-      ObjectProvider<UpstoxMarginClient> client, ObjectProvider<UpstoxFnoMasterClient> master) {
+      ObjectProvider<UpstoxMarginClient> client,
+      ObjectProvider<UpstoxFnoMasterClient> master,
+      InstrumentRepository instruments) {
     this.client = client;
     this.master = master;
+    this.instruments = instruments;
   }
 
-  /** One structured basket leg. {@code optionType} = {@code CE}/{@code PE}/{@code FUT}; strike null for a future. */
+  /**
+   * One basket leg. Either give the structured tuple ({@code underlying}/{@code optionType}/{@code
+   * expiry}/{@code strike}) OR just {@code tradingsymbol} (resolved from the instrument master).
+   * {@code optionType} = {@code CE}/{@code PE}/{@code FUT}; strike null for a future.
+   */
   public record MarginLeg(
       String exchange,
       String underlying,
@@ -42,7 +58,8 @@ public class MarginController {
       BigDecimal strike,
       int quantity,
       String side,
-      String product) {}
+      String product,
+      String tradingsymbol) {}
 
   /** The basket request (≤20 legs). */
   public record MarginRequest(List<MarginLeg> legs) {}
@@ -85,14 +102,29 @@ public class MarginController {
     }
     List<UpstoxMarginClient.Leg> resolved = new ArrayList<>();
     for (MarginLeg leg : request.legs()) {
-      String key =
-          fnoMaster.keyFor(
-              leg.exchange(), leg.underlying(), leg.optionType(), leg.expiry(), leg.strike());
+      // A tradingsymbol-only leg is resolved to its structured tuple from the instrument master.
+      String underlying = leg.underlying();
+      String optionType = leg.optionType();
+      LocalDate expiry = leg.expiry();
+      BigDecimal strike = leg.strike();
+      if (leg.tradingsymbol() != null && underlying == null) {
+        Optional<Instrument> row = instruments.findByKey(leg.exchange(), leg.tradingsymbol());
+        if (row.isEmpty()) {
+          return MarginResponse.unpriced(
+              "unknown instrument " + leg.exchange() + ":" + leg.tradingsymbol());
+        }
+        Instrument i = row.get();
+        underlying = i.name();
+        optionType = i.instrumentType();
+        expiry = i.expiry();
+        strike = i.strike();
+      }
+      String key = fnoMaster.keyFor(leg.exchange(), underlying, optionType, expiry, strike);
       if (key == null) {
         return MarginResponse.unpriced(
             "no Upstox instrument for "
-                + leg.underlying() + " " + leg.optionType() + " " + leg.expiry()
-                + (leg.strike() == null ? "" : " " + leg.strike()));
+                + underlying + " " + optionType + " " + expiry
+                + (strike == null ? "" : " " + strike));
       }
       resolved.add(
           new UpstoxMarginClient.Leg(

@@ -1785,6 +1785,34 @@
         }
       }
     },
+    "/api/v1/paper/margin-heat" : {
+      "get" : {
+        "tags" : [ "paper-margin-controller" ],
+        "operationId" : "marginHeat",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MarginHeat"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/orders/tradebook" : {
       "get" : {
         "tags" : [ "orders-controller" ],
@@ -2352,6 +2380,44 @@
           },
           "detail" : {
             "type" : "string"
+          }
+        }
+      },
+      "MarginHeat" : {
+        "type" : "object",
+        "properties" : {
+          "priced" : {
+            "type" : "boolean"
+          },
+          "unpricedReason" : {
+            "type" : "string"
+          },
+          "spanMargin" : {
+            "type" : "number"
+          },
+          "exposureMargin" : {
+            "type" : "number"
+          },
+          "totalMargin" : {
+            "type" : "number"
+          },
+          "requiredMargin" : {
+            "type" : "number"
+          },
+          "finalMargin" : {
+            "type" : "number"
+          },
+          "openPositions" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "pricedLegs" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
           }
         }
       },

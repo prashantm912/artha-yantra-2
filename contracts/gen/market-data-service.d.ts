@@ -1781,6 +1781,7 @@ export interface components {
             quantity?: number;
             side?: string;
             product?: string;
+            tradingsymbol?: string;
         };
         MarginRequest: {
             legs?: components["schemas"]["MarginLeg"][];

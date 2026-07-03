@@ -233,6 +233,9 @@ risk numbers + the advisory week.
 **Acceptance criteria:**
 - [x] **SPAN source: broker-real margins available, no `.spn` file** — `POST /api/v1/market/margin`
   resolves the leg → Upstox key → `/v2/charges/margin`; live-verified. (#510)
+- [x] **Advisory heat read: open paper book's total SPAN margin-at-risk** — `GET /api/v1/paper/margin-heat`
+  prices every open leg (by tradingsymbol, resolved market-data-side) as one basket; advisory only,
+  no threshold. (#514)
 - [ ] Paper entries carry `advised_lots` + margin snapshot from the margin endpoint — needs the owner's
   per-trade-risk %; the returned SPAN is broker-real by construction (Upstox IS a broker), so no
   separate parity step, just `advised_lots × margin ≤ available funds` (`GET /v2/user/get-funds-and-margin`).

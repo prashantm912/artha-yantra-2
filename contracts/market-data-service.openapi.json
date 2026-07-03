@@ -5520,6 +5520,9 @@
           },
           "product" : {
             "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
           }
         }
       },

@@ -516,6 +516,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/paper/margin-heat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["marginHeat"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/orders/tradebook": {
         parameters: {
             query?: never;
@@ -759,6 +775,21 @@ export interface components {
             alive?: boolean;
             required?: boolean;
             detail?: string;
+        };
+        MarginHeat: {
+            priced?: boolean;
+            unpricedReason?: string;
+            spanMargin?: number;
+            exposureMargin?: number;
+            totalMargin?: number;
+            requiredMargin?: number;
+            finalMargin?: number;
+            /** Format: int32 */
+            openPositions?: number;
+            /** Format: int32 */
+            pricedLegs?: number;
+            /** Format: date-time */
+            asOf?: string;
         };
         Funds: {
             status?: string;
@@ -2127,6 +2158,35 @@ export interface operations {
                     "*/*": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    marginHeat: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["MarginHeat"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

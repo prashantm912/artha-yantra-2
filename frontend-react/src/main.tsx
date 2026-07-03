@@ -30,8 +30,16 @@ const queryClient = new QueryClient({
   mutationCache: new MutationCache({ onError: (error) => reportError(error, 'The action failed.') }),
 });
 
-// Gap-heal: on every WS reconnect, re-fetch the REST snapshots (replaces Angular's reconnects$).
-wsClient.onReconnect(() => void queryClient.invalidateQueries());
+// Gap-heal: on WS reconnect, re-fetch the REST snapshots (replaces Angular's reconnects$).
+// Debounced 2s and gated on the connection still holding — a flapping socket used to refire the
+// ENTIRE query cache per flap, storming services that were still coming back up.
+let reconnectHealTimer: number | undefined;
+wsClient.onReconnect(() => {
+  window.clearTimeout(reconnectHealTimer);
+  reconnectHealTimer = window.setTimeout(() => {
+    if (wsClient.state === 'connected') void queryClient.invalidateQueries();
+  }, 2000);
+});
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

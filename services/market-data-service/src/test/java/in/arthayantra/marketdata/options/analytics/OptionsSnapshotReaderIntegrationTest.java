@@ -45,6 +45,31 @@ class OptionsSnapshotReaderIntegrationTest extends MarketDataIntegrationTestBase
   }
 
   @Test
+  void strikeSeriesOiChangeIsTheBucketLagNotTheCarriedCaptureDelta() {
+    // Value-verify F5: on a resampled interval the carried 3-min oi_change is only the FINAL
+    // capture slice's delta — strikeSeries must report last(oi) minus the prior bucket's instead
+    // (first bucket null), matching CandleDerivedChainReader + oipulse's endpoint-to-endpoint Δ.
+    String u = "READER_LAG";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    OffsetDateTime t0 =
+        OffsetDateTime.of(2026, 6, 20, 9, 16, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    // bucket [09:15,09:20): two captures; captured deltas 10 then 25 (only 25 would be carried)
+    insertRow(jdbc, t0, u, exp, "22500", "CE", "100.00", 1000L, 10L);
+    insertRow(jdbc, t0.plusMinutes(2), u, exp, "22500", "CE", "120.00", 1500L, 25L);
+    // bucket [09:20,09:25): one capture; captured delta 40, but the bucket lag is 2100-1500=600
+    insertRow(jdbc, t0.plusMinutes(6), u, exp, "22500", "CE", "130.00", 2100L, 40L);
+
+    List<OptionsSnapshotReader.StrikePoint> pts =
+        reader.strikeSeries(
+            u, exp, new java.math.BigDecimal("22500"), OiInterval.M5,
+            t0.minusMinutes(1), t0.plusMinutes(10));
+
+    assertThat(pts).hasSize(2);
+    assertThat(pts.get(0).oiChange()).isNull(); // first bucket has no prior
+    assertThat(pts.get(1).oiChange()).isEqualTo(600L); // 2100 − 1500, NOT the carried 40
+  }
+
+  @Test
   void latestReturnsMostRecentBucketRows() {
     String u = "READER_LATEST";
     LocalDate exp = LocalDate.of(2026, 6, 25);

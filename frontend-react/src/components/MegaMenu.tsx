@@ -100,6 +100,7 @@ const SECTIONS: MenuSection[] = [
     title: 'Strategies',
     items: [
       { label: 'Strategies', to: '/strategies' }, // cockpit — registry list + versions/publish (E-11)
+      { label: 'Graduation', to: '/strategies/graduation' }, // F7 — per-strategy paper-readiness board
       { label: 'Strategy Builder', to: '/strategies/strategy-builder' }, // Wave 3 — payoff + greeks
     ],
   },

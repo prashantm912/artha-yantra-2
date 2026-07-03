@@ -185,10 +185,18 @@ scaled**, each with written, measurable criteria (e.g. ≥20 fired paper trades,
 ≥1.3 cost-adjusted, max drawdown ≤X, slippage-adjusted expectancy > 0, zero canary reds during
 its trades). A dashboard page shows every published strategy's progress against the bar.
 Promotion itself = owner action; the framework only measures.
+**Status 2026-07-04 — MEASUREMENT + DASHBOARD SHIPPED ([#515](https://github.com/prashantm912/artha-yantra-2/pull/515)):**
+`GraduationService` + `GET /api/v1/strategies/graduation` (typed) + a read-only Graduation dashboard
+compute each published strategy's trades / net / win-rate / cost-adjusted profit-factor / expectancy
+/ max-drawdown (attributed `paper_positions→paper_orders→signals→strategy_versions`; `realized_pnl`
+already net per F8) vs **configurable thresholds** (`artha.graduation.*`, defaults 20 trades / PF 1.3
+/ expectancy>0 / DD≤25%) → a `PAPER` vs `TAKE_ELIGIBLE` stage. Read-only, never promotes/arms.
 **Acceptance criteria:**
-- [ ] Criteria document reviewed + numbers set by owner (this is the E9-band conversation's natural home).
-- [ ] Dashboard: per-strategy stage, trades-so-far vs required, each criterion green/red, computed nightly from `paper_positions` + shadow + execution-quality data (F8).
-- [ ] A strategy meeting the bar triggers a one-time ntfy "graduation candidate" note — never an order.
+- [x] Dashboard: per-strategy stage, trades-so-far, each criterion green/red, computed on-demand from
+  `paper_positions` + F8-net realized. (#515)
+- [ ] Criteria NUMBERS set by owner (the defaults are placeholders — the E9-band conversation's home).
+- [ ] "graduation candidate" ntfy note — deferred until the owner ratifies the numbers (avoids noise
+  on placeholder thresholds).
 
 ### F8. Execution-quality analytics — does the edge survive costs?
 **Status 2026-07-03 — v1 SHIPPED, scope corrected on inspection:** the paper ledger was ALREADY

@@ -15,7 +15,7 @@ the two 2026-07-02 audits (both fix queues fully closed) and the open-PR/issue l
 | id | item | authority | state |
 |---|---|---|---|
 | `phase5-minervini-trend-template` | **Phase-5 Minervini Track-1 screener** — daily 8-gate Trend Template + RS-rank preset in `ScreenerService` (master-plan §13). VCP/pivot/Cheat/Power-Play stay deferred (owner reads entries manually). | master-plan §13; `DEFERRED_BACKLOG.md` Phase-5 row | UNBLOCKED but **owner-DEFERRED (2026-07-03) until the 10x-roadmap phases finish**. |
-| `10x-roadmap-p2-p5` | **The 10x-value roadmap's remaining phases** — F2 proposals pass (self-triggers at ≥5 rollup sessions), F3.2–.5 dot fixes (variant-evidence-gated), F6 telegram bot, F5 always-on host, F7 graduation framework, F9 risk layer. P1+F8+F4v2 all SHIPPED 2026-07-03 (#483–#491). | [`2026-07-03-10x-value-roadmap.md`](2026-07-03-10x-value-roadmap.md) | ACTIVE — each phase's gate (data / owner input) is listed in the roadmap; F9 now BUILDABLE (see next row). |
+| `10x-roadmap-p2-p5` | **The 10x-value roadmap's remaining phases.** SHIPPED: P1+F8+F4v2 (#483–#491), F6 telegram bot (#493, LIVE), **F7 graduation-measurement dashboard (#515)**, **F9 SPAN capability + advisory heat read (#510/#514)**. REMAINING: F2 proposals pass (self-triggers at ≥5 rollup sessions), F3.2–.5 dot fixes (variant-evidence-gated), F5 always-on host (owner pick), F7 promotion numbers + F9 app-layer sizing/governor (owner risk numbers + advisory week). | [`2026-07-03-10x-value-roadmap.md`](2026-07-03-10x-value-roadmap.md) | ACTIVE — every remaining sub-item is data-gated or owner-gated; nothing more buildable without a gate opening. |
 | `upstox-margin-route` | **F9 SPAN source via Upstox margin API** — `UpstoxMarginClient` + `POST /api/v1/market/margin` (typed record, fail-soft, gated on the analytics token) compute broker-real SPAN server-side, NO `.spn` file. Live-verified 2026-07-04 (1-lot short → span 337004.85 / final 188604.45). `GET /v2/user/get-funds-and-margin` = live capital (down 00:00–05:30 IST → 423); `GET /v2/charges/brokerage` = pre-trade charges (cross-checks F8 `FeeConstants`). marginism appliance #126 = offline/backtest fallback. **Gotcha:** `quantity` must be a lot multiple (UDAPI1104 else) — scalper qty already lot-aligned; ≤20 legs/basket. | roadmap F9; ADR-0002 | **SPAN CAPABILITY SHIPPED [#510](https://github.com/prashantm912/artha-yantra-2/pull/510) + advisory heat read [#514](https://github.com/prashantm912/artha-yantra-2/pull/514) (`GET /api/v1/paper/margin-heat`), deployed 2026-07-04.** Remaining F9 app layer = paper `advised_lots` sizing + daily-loss governor + heat cap — needs owner risk numbers + an advisory week. Supersedes `span-real-spn-broker-parity` (§2). |
 
 ## 2. Owner-gated — needs owner input/time, not code
@@ -107,9 +107,15 @@ Provenance rows live in [`docs/DEFERRED_BACKLOG.md`](../../DEFERRED_BACKLOG.md) 
   backlog premise (5-min capture, want 3-min for Table-2 fidelity) is stale. Live capture already runs
   at ~1-minute granularity (verified in `options_chain_snapshots`), FINER than 3-min; any coarser
   interval (incl. 3-min) is a read-time rollup off the 1-min base. Fidelity goal already exceeded.
-- Data-Ops parked: `backfill_jobs` audit table, per-expiry bulk export, STOMP status, contract-type selector.
+- Data-Ops parked: ~~`backfill_jobs` audit table~~ **DONE (#517)** — V030 run-audit table + `GET
+  /market/admin/backfill-jobs` + Status-page history; ~~contract-type selector~~ **DONE (#517)** —
+  Both/Options/Futures on the Collection wizard (default Both). Remaining (low-value, no consumer):
+  per-expiry BULK export (single-contract export exists) + STOMP status push (the Status page polls
+  today — works fine). Do not re-flag the two done sub-items.
 - Per-check server audit on signal Take; full-auto execution flag (semi-auto "Take" is the v1 safety boundary).
-- AdvanceChart TV-binary extras (drawing tools, study templates, OI-bar, trade-history, audio alerts).
+- AdvanceChart TV-binary extras: ~~OI-bar, trade-history, audio alerts~~ **+ horizontal price lines DONE
+  (#516)** on the lightweight-charts v5 chart (all off/empty by default). Remaining (large LWC-primitive
+  lift, no consumer): interactive freehand drawing tools + user-configurable study-template save/load.
 
 ## 7. Decided WON'T DO — never re-flag as pending
 
@@ -124,14 +130,19 @@ captured bank-radar) · SENSEX point-scale constant (dead — signals ride NIFTY
 
 ---
 
-## Net (refreshed 2026-07-04, post fix-queue closeout)
+## Net (refreshed 2026-07-04, post buildable-items sweep)
 
-Everything currently buildable is BUILT: roadmap P1+F8+F4v2 (#483–#491) **plus the entire
-audit-register fix queue — all 22 rows + §5 nits, PRs #500–#507 (2026-07-04 weekend batch)**.
-The 2026-07-02 audit is fully closed. What remains: **the data month** (rollup accrues per
-session, proposals pass self-triggers at ≥5 sessions → then the tuning session with the exit-band
-runbook) · the **roadmap's gated phases** (§1 row — always-on-host hardware, graduation numbers,
-real `.spn`; telegram bot went LIVE 2026-07-03) · **Minervini** (owner-deferred behind the
-roadmap) · a **Nov-2026 calendar refresh** (§4) · §2 owner toggles/sign-offs · §3 next-session
-verifies. Machines watch the machines: two in-code canaries + two scheduled agents + the weekly
-backup round-trip CI cover live health, per-session forensics and disaster-recovery integrity.
+Everything currently buildable is BUILT: roadmap P1+F8+F4v2 (#483–#491) · the entire audit-register
+fix queue (#500–#508) · the **F9 SPAN capability + advisory heat read** (#510/#514) · and the
+**2026-07-04 buildable-items batch (#511–#517)** — third-order greeks, level-based sentiment,
+candles_1h IST re-anchor, **F7 graduation framework**, Data-Ops backfill-audit + contract-type, and
+the AdvanceChart feasible extras. Items that turned out already-done/moot were reconciled in the
+docs (optimizer hash-pinning, the `source.optionanalytics` PCR flag, sub-3-min capture). What
+remains is **owner-gated or data-gated only**: **the data month** (rollup → proposals pass at ≥5
+sessions → the exit-band tuning session) · the **F9 app layer** (`advised_lots` sizing + governor —
+owner risk numbers + an advisory week) · **F7 promotion numbers** + **F5 host pick** + **SENSEX-PE
+publish** + **per-strategy notif toggles** + **value-verify ratify** (owner decisions) ·
+**Minervini** (owner-deferred) · a **Nov-2026 calendar refresh** (§4) · §3 next-session verifies.
+Genuinely-deferred-with-no-consumer leftovers: Data-Ops bulk-export + STOMP-push, AdvanceChart
+freehand drawing tools + study-template save/load. Machines watch the machines: two in-code canaries
++ two scheduled agents + the weekly backup round-trip CI.

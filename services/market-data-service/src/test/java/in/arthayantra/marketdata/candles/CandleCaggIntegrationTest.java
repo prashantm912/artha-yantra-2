@@ -102,6 +102,40 @@ class CandleCaggIntegrationTest extends MarketDataIntegrationTestBase {
   }
 
   @Test
+  void identicalRefetchKeepsProvenanceButValueChangeTakesTheNewSource() {
+    // ledger #8 (2026-07-03): REST re-fetches used to re-stamp tick-agg rows as KITE even when
+    // the bar was byte-identical — "did tick aggregation run" became unanswerable post-hoc
+    String symbol = "PROV1";
+    Candle tickAgg =
+        new Candle(
+            "NSE", symbol, "1m", ist("2026-06-10T10:15:00"),
+            new BigDecimal("100.00"), new BigDecimal("101.00"), new BigDecimal("99.00"),
+            new BigDecimal("100.50"), 500, null, "TICK_AGG");
+    repository.upsert(tickAgg);
+
+    // identical bar arriving from the REST path: values unchanged → provenance preserved
+    repository.upsert(
+        new Candle(
+            "NSE", symbol, "1m", ist("2026-06-10T10:15:00"),
+            new BigDecimal("100.00"), new BigDecimal("101.00"), new BigDecimal("99.00"),
+            new BigDecimal("100.50"), 500, null, "KITE"));
+    List<Candle> rows =
+        repository.range("NSE", symbol, "1m", ist("2026-06-10T10:00:00"), ist("2026-06-10T11:00:00"));
+    assertThat(rows.get(0).source()).isEqualTo("TICK_AGG");
+
+    // a CORRECTING bar (different close/volume) honestly takes the new source
+    repository.upsert(
+        new Candle(
+            "NSE", symbol, "1m", ist("2026-06-10T10:15:00"),
+            new BigDecimal("100.00"), new BigDecimal("101.00"), new BigDecimal("99.00"),
+            new BigDecimal("100.75"), 520, null, "KITE"));
+    rows =
+        repository.range("NSE", symbol, "1m", ist("2026-06-10T10:00:00"), ist("2026-06-10T11:00:00"));
+    assertThat(rows.get(0).source()).isEqualTo("KITE");
+    assertThat(rows.get(0).close()).isEqualByComparingTo("100.75");
+  }
+
+  @Test
   void compressionPolicyCoexistsWithUpserts() {
     // AUDIT GAP (Phase 10 Tests & Verification): upserts must keep working against a
     // COMPRESSED chunk — backfills older than the 7-day compress_after hit this in production

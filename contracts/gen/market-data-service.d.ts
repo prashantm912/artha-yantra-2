@@ -820,6 +820,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/health/data": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["data"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/global/dow": {
         parameters: {
             query?: never;
@@ -2206,6 +2222,21 @@ export interface components {
             ceOi?: number;
             /** Format: int64 */
             peOi?: number;
+        };
+        CanaryReport: {
+            status?: string;
+            marketOpen?: boolean;
+            asOf?: string;
+            /** Format: int32 */
+            tickedTokens?: number;
+            problems?: components["schemas"]["CheckResult"][];
+        };
+        CheckResult: {
+            check?: string;
+            key?: string;
+            status?: string;
+            detail?: string;
+            since?: string;
         };
         DowQuote: {
             ltp?: number;
@@ -4684,6 +4715,35 @@ export interface operations {
                     "*/*": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    data: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["CanaryReport"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

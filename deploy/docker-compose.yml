@@ -378,6 +378,17 @@ services:
       # Code default is false; ON for the stack — separate shadow_positions table, never touches
       # paper/risk/notifications. Flip to false to disable without a rebuild.
       ARTHA_SCALPER_SHADOW_BOOK_ENABLED: ${ARTHA_SCALPER_SHADOW_BOOK_ENABLED:-true}
+      # Challenger shadow variants (roadmap F1): each entry re-scores every rejection under a config
+      # diff and virtually trades what it would have accepted — per-variant PnL labels the knob
+      # change before the champion config is touched. Evidence base: 2026-07-02/03 forensics
+      # (volume floor 125k unpassable live — bracket it with OFF + the observed p50; composite-070
+      # isolates "lower the confluence threshold"). Code default is [] (no challengers); edit the
+      # literal below to change experiments (flip ARTHA_SCALPER_SHADOW_BOOK_ENABLED off to kill the
+      # whole book, challengers included).
+      ARTHA_SCALPER_SHADOW_BOOK_VARIANTS_JSON: >-
+        [{"name":"vol-off","rails":[{"rail":"volume-floor","disable":true}]},
+         {"name":"vol-12k5","rails":[{"rail":"volume-floor","threshold":12500,"passWhen":"GTE"}]},
+         {"name":"composite-070","compositeThreshold":0.70}]
     secrets: [postgres_password]
     depends_on:
       flyway-init:

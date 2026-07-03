@@ -420,6 +420,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/signal-rejections/shadow-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["shadowSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/signal-rejections/rail-counts": {
         parameters: {
             query?: never;
@@ -698,6 +714,21 @@ export interface components {
         NotificationRequest: {
             enabled?: boolean;
             channel?: string;
+        };
+        ShadowSummaryResponse: {
+            items?: components["schemas"]["VariantSummary"][];
+        };
+        VariantSummary: {
+            variant?: string;
+            /** Format: int64 */
+            open?: number;
+            /** Format: int64 */
+            closed?: number;
+            /** Format: int64 */
+            wins?: number;
+            /** Format: int64 */
+            losses?: number;
+            pnlPoints?: number;
         };
         Funds: {
             status?: string;
@@ -1871,6 +1902,38 @@ export interface operations {
                     "*/*": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    shadowSummary: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ShadowSummaryResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

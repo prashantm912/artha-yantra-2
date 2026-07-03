@@ -1529,6 +1529,51 @@
         }
       }
     },
+    "/api/v1/signal-rejections/shadow-summary" : {
+      "get" : {
+        "tags" : [ "signal-rejections-controller" ],
+        "operationId" : "shadowSummary",
+        "parameters" : [ {
+          "name" : "from",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }, {
+          "name" : "to",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ShadowSummaryResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/signal-rejections/rail-counts" : {
       "get" : {
         "tags" : [ "signal-rejections-controller" ],
@@ -2200,6 +2245,44 @@
           },
           "channel" : {
             "type" : "string"
+          }
+        }
+      },
+      "ShadowSummaryResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/VariantSummary"
+            }
+          }
+        }
+      },
+      "VariantSummary" : {
+        "type" : "object",
+        "properties" : {
+          "variant" : {
+            "type" : "string"
+          },
+          "open" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "closed" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "wins" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "losses" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "pnlPoints" : {
+            "type" : "number"
           }
         }
       },

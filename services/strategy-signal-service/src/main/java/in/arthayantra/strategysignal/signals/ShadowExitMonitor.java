@@ -138,9 +138,9 @@ public class ShadowExitMonitor {
                 .divide(row.entryLtp(), 2, RoundingMode.HALF_UP);
     shadows.close(row.id(), reason, exitLtp, points, pct);
     log.info(
-        "shadow close: {} {} {} {} @ {} → {} pts ({}%) [rail {}]",
-        row.strategySlug(), row.side(), row.tradingsymbol(), reason, exitLtp, points, pct,
-        row.blockingRail());
+        "shadow close [{}]: {} {} {} {} @ {} → {} pts ({}%) [rail {}]",
+        row.variant(), row.strategySlug(), row.side(), row.tradingsymbol(), reason, exitLtp,
+        points, pct, row.blockingRail());
   }
 
   /** True when the signal future's last tick has crossed the structural stop against the side. */

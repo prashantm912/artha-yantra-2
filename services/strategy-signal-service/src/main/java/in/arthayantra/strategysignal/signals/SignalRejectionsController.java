@@ -22,10 +22,13 @@ import org.springframework.web.bind.annotation.RestController;
 public class SignalRejectionsController {
 
   private final SignalRejectionRepository repository;
+  private final ShadowPositionRepository shadows;
 
-  /** Wires the repository. */
-  public SignalRejectionsController(SignalRejectionRepository repository) {
+  /** Wires the repositories. */
+  public SignalRejectionsController(
+      SignalRejectionRepository repository, ShadowPositionRepository shadows) {
     this.repository = repository;
+    this.shadows = shadows;
   }
 
   /** Paged/filtered rejection history, newest first. */
@@ -74,6 +77,22 @@ public class SignalRejectionsController {
                   return m;
                 })
             .toList());
+  }
+
+  /** The typed shadow-league envelope (the Map-return ratchet forbids new Map endpoints). */
+  public record ShadowSummaryResponse(List<ShadowPositionRepository.VariantSummary> items) {}
+
+  /**
+   * The shadow-book league table (roadmap F1): per-variant open/closed/wins/losses + realized
+   * points over an optional opened-at window — champion vs challenger configs on identical data.
+   */
+  @GetMapping("/shadow-summary")
+  public ShadowSummaryResponse shadowSummary(
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+          OffsetDateTime from,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+          OffsetDateTime to) {
+    return new ShadowSummaryResponse(shadows.variantSummary(from, to));
   }
 
   private static Map<String, Object> dto(SignalRejectionRepository.RejectionRow row) {

@@ -48,12 +48,17 @@ or `AT TIME ZONE 'Asia/Kolkata'`.
 - `strategy.signals` (+ `scalper_detail` side-channel) — what DID fire (so far: nothing; when it does,
   cross-check entry context vs the rejection population).
 - `strategy.paper_positions` / paper trades — executed-outcome side (the runbook's domain).
-- `strategy.shadow_positions` (V016) — **the shadow book**: every composite-passing rejection opened
-  as a virtual 1-lot long-premium position (leg from the gate's own StrikePicker, entry at the
-  candidate LTP) and closed by `ShadowExitMonitor` (premium brackets from the YAML premium_pct rules
-  / structural stop on the signal future / 15:12 square-off / STALE for prior-day leftovers). One
-  row per rejection (FK `rejection_id`), PnL in points + %. Dedup = one OPEN per strategy+side;
-  flag `ARTHA_SCALPER_SHADOW_BOOK_ENABLED`. **Exit-fidelity caveat: indicator-driven exits
+- `strategy.shadow_positions` (V016, `variant` since V017) — **the shadow book**: every
+  composite-passing rejection opened as a virtual 1-lot long-premium position (leg from the gate's
+  own StrikePicker, entry at the candidate LTP) and closed by `ShadowExitMonitor` (premium brackets
+  from the YAML premium_pct rules / structural stop on the signal future / 15:12 square-off / STALE
+  for prior-day leftovers). One row per rejection (FK `rejection_id`) **per book**, PnL in points
+  + %. `variant='champion'` is the original book; **challenger variants (roadmap F1)** re-score the
+  same diagnostic under a config diff (rail threshold override / rail disable / composite floor —
+  `ShadowVariants`, env `ARTHA_SCALPER_SHADOW_BOOK_VARIANTS_JSON`) and trade what THEIR config would
+  have accepted, so a proposed knob change earns per-variant PnL on identical market data. League
+  table: `GET /api/v1/signal-rejections/shadow-summary` + the /signal-rejections page strip. Dedup =
+  one OPEN per strategy+side+variant; flag `ARTHA_SCALPER_SHADOW_BOOK_ENABLED` kills all books. **Exit-fidelity caveat: indicator-driven exits
   (trend-flip / signal-exit) are NOT replicated — brackets/structural/square-off only; state this
   in every findings file.** Rejections blocked before the leg resolved (time-window, chain, straddle
   path) never shadow. The rejection JSON also carries `wouldBeLeg` for non-shadowed analysis.
@@ -222,6 +227,22 @@ SELECT strategy_slug, side, close_reason, count(*), round(avg(pnl_pct),1) avg_pc
 FROM strategy.shadow_positions
 WHERE (opened_at AT TIME ZONE 'Asia/Kolkata')::date = :d
 GROUP BY 1,2,3 ORDER BY 1;
+
+-- SHADOW BOOK: variant league — champion vs challenger configs on identical data (roadmap F1).
+-- Interpret pnl per book: a challenger's edge over champion = the trades ONLY it took.
+SELECT variant, count(*) FILTER (WHERE status='OPEN') open,
+       count(*) FILTER (WHERE status='CLOSED') closed,
+       count(*) FILTER (WHERE status='CLOSED' AND pnl_points > 0) wins,
+       round(sum(pnl_points) FILTER (WHERE status='CLOSED'),2) total_pts
+FROM strategy.shadow_positions GROUP BY 1 ORDER BY 1;
+
+-- SHADOW BOOK: challenger-only entries (rows a variant took that champion did not — the true delta)
+SELECT v.variant, v.tradingsymbol, v.bar_time AT TIME ZONE 'Asia/Kolkata' t, v.pnl_points
+FROM strategy.shadow_positions v
+WHERE v.variant <> 'champion' AND NOT EXISTS (
+  SELECT 1 FROM strategy.shadow_positions c
+  WHERE c.variant='champion' AND c.rejection_id = v.rejection_id)
+ORDER BY v.bar_time;
 
 -- SHADOW BOOK ⨯ REJECTION dots: PnL by whether a given dot supported at entry
 SELECT d->>'dot' dot, (d->>'supports')::boolean supported,

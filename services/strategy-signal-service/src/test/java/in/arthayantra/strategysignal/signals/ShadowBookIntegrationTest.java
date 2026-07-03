@@ -125,13 +125,13 @@ class ShadowBookIntegrationTest extends StrategySignalIntegrationTestBase {
             rejection(v, "shadow-it-tp-" + tpSym, "SHDFUT2"), v, "shadow-it-tp-" + tpSym, "CE",
             "NIFTY 50", "NFO", tpSym, new BigDecimal("24250"), LocalDate.now().plusDays(5),
             new BigDecimal("100.00"), new BigDecimal("65.00"), new BigDecimal("135.00"), null,
-            "NFO", "SHDFUT2", "volume-floor", new BigDecimal("0.70"), OffsetDateTime.now());
+            "NFO", "SHDFUT2", "volume-floor", new BigDecimal("0.70"), OffsetDateTime.now(), "champion");
     long slId =
         shadows.insert(
             rejection(v, "shadow-it-sl-" + slSym, "SHDFUT2"), v, "shadow-it-sl-" + slSym, "CE",
             "NIFTY 50", "NFO", slSym, new BigDecimal("24250"), LocalDate.now().plusDays(5),
             new BigDecimal("100.00"), new BigDecimal("65.00"), new BigDecimal("135.00"), null,
-            "NFO", "SHDFUT2", "volume-floor", new BigDecimal("0.70"), OffsetDateTime.now());
+            "NFO", "SHDFUT2", "volume-floor", new BigDecimal("0.70"), OffsetDateTime.now(), "champion");
     seedTick("NFO", tpSym, "140.00");
     seedTick("NFO", slSym, "60.00");
 
@@ -158,7 +158,7 @@ class ShadowBookIntegrationTest extends StrategySignalIntegrationTestBase {
             rejection(v, "shadow-it-st-" + optSym, futSym), v, "shadow-it-st-" + optSym, "CE",
             "NIFTY 50", "NFO", optSym, new BigDecimal("24250"), LocalDate.now().plusDays(5),
             new BigDecimal("100.00"), null, null, new BigDecimal("24200"),
-            "NFO", futSym, "rsi-band", new BigDecimal("0.70"), OffsetDateTime.now());
+            "NFO", futSym, "rsi-band", new BigDecimal("0.70"), OffsetDateTime.now(), "champion");
     // the CE structural stop trips when the SIGNAL FUTURE trades at/below the level
     seedTick("NFO", futSym, "24150.00");
     seedTick("NFO", optSym, "88.00");
@@ -181,14 +181,14 @@ class ShadowBookIntegrationTest extends StrategySignalIntegrationTestBase {
             rejection(v, "shadow-it-so-" + soSym, "SHDFUT3"), v, "shadow-it-so-" + soSym, "CE",
             "NIFTY 50", "NFO", soSym, new BigDecimal("24250"), LocalDate.now().plusDays(5),
             new BigDecimal("100.00"), null, null, null,
-            "NFO", "SHDFUT3", "volume-floor", new BigDecimal("0.70"), OffsetDateTime.now());
+            "NFO", "SHDFUT3", "volume-floor", new BigDecimal("0.70"), OffsetDateTime.now(), "champion");
     long staleId =
         shadows.insert(
             rejection(v, "shadow-it-stale-" + staleSym, "SHDFUT3"), v,
             "shadow-it-stale-" + staleSym, "CE", "NIFTY 50", "NFO", staleSym,
             new BigDecimal("24250"), LocalDate.now().plusDays(5), new BigDecimal("100.00"),
             null, null, null, "NFO", "SHDFUT3", "volume-floor", new BigDecimal("0.70"),
-            OffsetDateTime.now());
+            OffsetDateTime.now(), "champion");
     jdbc.update(
         "UPDATE shadow_positions SET opened_at = opened_at - INTERVAL '1 day' WHERE id = ?", staleId);
     seedTick("NFO", soSym, "105.00");
@@ -217,7 +217,7 @@ class ShadowBookIntegrationTest extends StrategySignalIntegrationTestBase {
                 id, 0, null, null, null, null, null, null, null, null, BigDecimal.ONE, null, null,
                 null, null, null, null, null, null, null, rs.getString("status"),
                 rs.getBigDecimal("exit_ltp"), rs.getString("close_reason"), null,
-                rs.getBigDecimal("pnl_points"), rs.getBigDecimal("pnl_pct")),
+                rs.getBigDecimal("pnl_points"), rs.getBigDecimal("pnl_pct"), "champion"),
         id);
   }
 }

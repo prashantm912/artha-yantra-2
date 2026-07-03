@@ -121,6 +121,32 @@ export function useSignalRejections(
   });
 }
 
+/** One shadow-book variant rollup row (champion vs challenger configs on identical data). */
+export interface ShadowVariantSummary {
+  variant: string;
+  open: number;
+  closed: number;
+  wins: number;
+  losses: number;
+  pnlPoints: Num;
+}
+
+/** The per-variant shadow-book league table over an optional opened-at window. */
+export function useShadowSummary(from: string | null = null, to: string | null = null) {
+  return useQuery({
+    queryKey: [KEY, 'shadow-summary', from, to],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (from) params.set('from', from);
+      if (to) params.set('to', to);
+      const qs = params.toString();
+      return apiFetch<{ items: ShadowVariantSummary[] }>(
+        `/signal-rejections/shadow-summary${qs ? `?${qs}` : ''}`,
+      );
+    },
+  });
+}
+
 /** The per-rail block rollup (which condition blocks most) over the same optional window. */
 export function useRejectionRailCounts(
   strategyVersionId: string | null = null,

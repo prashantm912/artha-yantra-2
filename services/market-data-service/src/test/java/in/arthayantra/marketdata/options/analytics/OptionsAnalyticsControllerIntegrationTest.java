@@ -446,6 +446,10 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
         .andExpect(jsonPath("$.sentimentSeries.length()").value(2))
         .andExpect(jsonPath("$.sentimentSeries[0].sentimentPct").value("25.00"))
         .andExpect(jsonPath("$.sentimentSeries[1].sentimentPct").value("-25.00")) // newest-last
+        // §18.6 level-based number rides the SAME series: b0 (CE 1000/PE 1000) → 0.00; b1 (CE 900/PE
+        // 1100) → 100*(1100-900)/1100 = 18.18. Distinct from the ΔOI-flow sentimentPct above.
+        .andExpect(jsonPath("$.sentimentSeries[0].levelPct").value("0.00"))
+        .andExpect(jsonPath("$.sentimentSeries[1].levelPct").value("18.18"))
         // The LEFT-chart OI series rides the SAME buckets param + same active strike (22500), one DB read.
         .andExpect(jsonPath("$.activeStrikeOiSeries.length()").value(2))
         .andExpect(jsonPath("$.activeStrikeOiSeries[0].ceOi").value(1000))

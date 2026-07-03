@@ -42,12 +42,11 @@ Ran live 2026-07-03 (findings addendum A2 in `docs/signal-analysis/2026-07-03-se
   (#377) — **PASS**.
 - [ ] NSE announcement field mapping on live data (#378) — not exercised 2026-07-03; check next
   session with fresh announcements.
-- [ ] **sentimentPct formula reconcile (master-plan §18.6, found in the 2026-07-03 doc sweep):**
-  `ActiveStrikeService.sentimentPct` is ΔOI-based (`100·(ΣpeΔOI−ΣceΔOI)/Σ(ceOi+peOi)`); oipulse's
-  dashboard figure is LEVEL-based (`(ΣPut−ΣCall)/ΣPut·100`), and the Siva cheat-sheet thresholds
-  were read off oipulse. One live-session compare of our number vs theirs; if they diverge
-  materially, add a level-based method beside the existing one (never silently change it) and
-  decide which the sentiment gate should read.
+- [ ] **sentimentPct formula reconcile (master-plan §18.6):** the level-based method is now BUILT
+  (#512, 2026-07-04) — `ActiveStrikeService.sentimentLevelPct` (`100·(ΣputOI−ΣcallOI)/ΣputOI`) rides
+  BESIDE the ΔOI-flow `sentimentPct` on the active-strikes response (`sentimentLevelPct` + per-bucket
+  `levelPct`); the ΔOI number and the sentiment GATE are untouched. **Remaining (owner, live):** one
+  live-session compare of both numbers vs the oipulse dashboard → decide which the gate should read.
 - [ ] Stock-chain warm on a SECOND symbol during market hours (#472 verified on RELIANCE
   off-hours) — not exercised 2026-07-03.
 - [ ] Owner hard-reload (Ctrl+Shift+R) after each FE redeploy — standing owner action.
@@ -89,7 +88,9 @@ The whole 2026-07-02 audit is now fully closed: 90 findings → 54 fixed same-da
 Provenance rows live in [`docs/DEFERRED_BACKLOG.md`](../../DEFERRED_BACKLOG.md) (cross-cutting + parked tables):
 
 - `candles_1h` IST re-anchor (before any 1h chart/overlay consumer; drop+recreate the cagg).
-- Upstox `/pcr` live-freshness test → dormant `source.pcr` flag (display-only today, no urgency).
+- ~~Upstox `/pcr` … dormant `source.pcr` flag~~ **FLAG ALREADY BUILT as `source.optionanalytics=upstox|native`**
+  (routes `/pcr-series` to Upstox `/pcr` vs native; mapping tested). Only a LIVE market-hours freshness
+  check remains before flipping it (§4-adjacent; not an offline build). Do not re-flag as buildable.
 - ~~optimizer `requirements.txt` hash-pinning~~ **ALREADY DONE (2026-07-04 audit) — remove, do not re-flag:**
   `requirements.lock` (799 SHA-256 hashes) + `requirements-dev.lock` (922) via `uv pip compile
   --generate-hashes`; Dockerfile installs `--require-hashes`, `ci-optimizer.yml` installs

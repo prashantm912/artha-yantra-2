@@ -43,6 +43,16 @@ class ActiveStrikeServiceTest {
     assertThat(new ActiveStrikeService(5).sentimentPct(List.of())).isNull();
   }
 
+  @Test
+  void levelSentimentUsesOiStockNotFlow() {
+    // active strike 22500: PE OI 1200, CE OI 800 (the flow deltas are irrelevant to the LEVEL number)
+    List<ActiveStrikeService.StrikeOiSnap> chain = List.of(snap("22500", 800, 999, 1200, -999));
+    ActiveStrikeService svc = new ActiveStrikeService(1);
+    // level = 100*(1200-800)/1200 = 33.33 (oipulse §18.6); flow number is a separate figure
+    assertThat(svc.sentimentLevelPct(chain)).isEqualByComparingTo("33.33");
+    assertThat(new ActiveStrikeService(5).sentimentLevelPct(List.of())).isNull();
+  }
+
   private static OptionsSnapshotReader.StrikePoint pt(
       java.time.OffsetDateTime b, String strike, String type, long oi, long oiChange) {
     return new OptionsSnapshotReader.StrikePoint(

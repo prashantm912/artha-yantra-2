@@ -1,0 +1,38 @@
+{
+  "comment": "Live-vs-backtest premium-exit equivalence fixture (audit no-live-vs-backtest-exit-equivalence-test). BOTH suites assert against THIS file: backtest-service PremiumExitEquivalenceTest runs PremiumExitEvaluator over each scenario; strategy-signal PremiumBracketEquivalenceTest derives the live bracket levels (PremiumBracketRules) and PaperBracketEquivalenceTest walks the same premium closes through PaperBracketEvaluator.breach. If either implementation drifts from the recorded semantics, its suite goes red. Semantics pinned: long option, close-based checks, SL <= level, TP >= level, SL checked before TP, entry bar (index 0) never exits.",
+  "entryPremium": "100.00",
+  "config": {
+    "exit_rules": [
+      { "type": "stop_loss", "params": { "basis": "premium_pct", "value": 50 } },
+      { "type": "take_profit", "params": { "basis": "premium_pct", "value": 35 } }
+    ]
+  },
+  "expectedLevels": { "stopLoss": "50.00", "takeProfit": "135.00" },
+  "scenarios": [
+    {
+      "name": "stop-hit",
+      "premiums": ["100.00", "80.00", "49.50", "60.00"],
+      "expect": { "reason": "STOP_LOSS", "barOffset": 2 }
+    },
+    {
+      "name": "stop-exact-touch",
+      "premiums": ["100.00", "75.00", "50.00", "70.00"],
+      "expect": { "reason": "STOP_LOSS", "barOffset": 2 }
+    },
+    {
+      "name": "gap-through-stop",
+      "premiums": ["100.00", "30.00"],
+      "expect": { "reason": "STOP_LOSS", "barOffset": 1 }
+    },
+    {
+      "name": "target-hit",
+      "premiums": ["100.00", "120.00", "135.00", "140.00"],
+      "expect": { "reason": "TAKE_PROFIT", "barOffset": 2 }
+    },
+    {
+      "name": "no-hit",
+      "premiums": ["100.00", "90.00", "110.00", "120.00"],
+      "expect": { "reason": null, "barOffset": null }
+    }
+  ]
+}

@@ -23,12 +23,25 @@ public class SignalRejectionsController {
 
   private final SignalRejectionRepository repository;
   private final ShadowPositionRepository shadows;
+  private final DotHealthCanary dotHealth;
 
-  /** Wires the repositories. */
+  /** Wires the repositories + the dot canary. */
   public SignalRejectionsController(
-      SignalRejectionRepository repository, ShadowPositionRepository shadows) {
+      SignalRejectionRepository repository,
+      ShadowPositionRepository shadows,
+      DotHealthCanary dotHealth) {
     this.repository = repository;
     this.shadows = shadows;
+    this.dotHealth = dotHealth;
+  }
+
+  /**
+   * Per-DOT input liveness over today's newest rejections (roadmap F4 v2): which gate inputs are
+   * live vs dead, and which are REQUIRED alive. The 09:42 agent reads this instead of hand-SQL.
+   */
+  @GetMapping("/dot-health")
+  public DotHealthCanary.DotHealth dotHealth() {
+    return dotHealth.evaluate();
   }
 
   /** Paged/filtered rejection history, newest first. */

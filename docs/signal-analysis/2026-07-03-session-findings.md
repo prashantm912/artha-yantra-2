@@ -171,9 +171,9 @@ manual premium-path replay is needed.
 | 4 | breadth live producer | EOD bhavcopy → 0/0 intraday | live A/D from N50 batch quotes | §3/§4: dead in every session (0/0 both) | PROPOSED (build) |
 | 5 | iv_rank null semantics | null scores against | null = neutral / excluded | §3/§4: honest-null punished both sessions | PROPOSED (code) |
 | 6 | composite threshold 0.6 | keep | keep (fix inputs) | §3 cap math (0.765 ceiling) | DECIDED-KEEP |
-| 7 | `DataHealthCanary` live staleness watcher (README §7.8) | not built | ping when newest rejection lags wall-clock / a field goes newly dead | §6: 12:40 SignalEngine stall went undetected until EOD | **PROPOSED (build) — NEW, promoted from §6** |
-| 8 | candle upsert `source = EXCLUDED.source` | last-writer clobbers provenance | preserve TICK_AGG on REST overwrite | Addendum A1: re-fetches masked the tick-agg trail during the stall hunt | PROPOSED — NEW |
-| 9 | covered-range 1m re-fetch treadmill | re-fetches covered ranges (~30-min cadence) | fetch only true gaps | Addendum A1: wasted Kite budget + feeds #8 | PROPOSED (dig) — NEW |
+| 7 | `DataHealthCanary` live staleness watcher (README §7.8) | not built | ping when newest rejection lags wall-clock / a field goes newly dead | §6: 12:40 SignalEngine stall went undetected until EOD | **BUILT 2026-07-03: data plane #484 (tick/bar divergence + capture probes) + gate inputs = DotHealthCanary `/signal-rejections/dot-health` (per-dot liveness, required-dot ntfy)** |
+| 8 | candle upsert `source = EXCLUDED.source` | last-writer clobbers provenance | preserve TICK_AGG on REST overwrite | Addendum A1: re-fetches masked the tick-agg trail during the stall hunt | **BUILT 2026-07-03: identical-value upserts keep the original source; value-changing writes honestly take the new one** |
+| 9 | covered-range 1m re-fetch treadmill | re-fetches covered ranges (~30-min cadence) | fetch only true gaps | Addendum A1: wasted Kite budget + feeds #8 | **ROOT-CAUSED + FIXED 2026-07-03: GapDetector B-4 recency window marked every bucket ENDING within 2 h of now missing regardless of cache → every to≈now read re-fetched 2 h of covered bars; narrowed to a 10-min tail (in-progress-bucket rule preserved via the end-based check)** |
 
 **Two-session caveat:** items 1–3 are structural (threshold outside the operand's physical range — not
 day-dependent). Item 1's *tuning urgency* is now genuinely two-sided: structurally the floor is mis-calibrated,

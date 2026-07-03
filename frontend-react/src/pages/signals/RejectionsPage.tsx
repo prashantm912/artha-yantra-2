@@ -123,12 +123,18 @@ export function RejectionsPage() {
         <div className="mb-3 flex flex-wrap gap-2" data-testid="shadow-league">
           {shadowBooks.map((b) => {
             const pnl = b.pnlPoints == null ? NaN : Number(b.pnlPoints);
+            const net = b.pnlNet == null ? NaN : Number(b.pnlNet);
             return (
               <div key={b.variant} className="rounded-md border px-2 py-1 text-xs">
                 <span className="font-semibold text-ay-text">{b.variant}</span>{' '}
                 <span className="text-ay-muted">
                   {b.open} open · {b.closed} closed · {b.wins}W/{b.losses}L ·
                 </span>{' '}
+                {!Number.isNaN(net) && (
+                  <span className={net < 0 ? 'text-bear' : 'text-bull'}>
+                    {net >= 0 ? '+' : ''}₹{fmtNum(b.pnlNet, 2)} net ·
+                  </span>
+                )}{' '}
                 <span className={Number.isNaN(pnl) ? 'text-ay-muted' : pnl < 0 ? 'text-bear' : 'text-bull'}>
                   {Number.isNaN(pnl) ? '—' : `${pnl >= 0 ? '+' : ''}${fmtNum(b.pnlPoints, 2)} pts`}
                 </span>

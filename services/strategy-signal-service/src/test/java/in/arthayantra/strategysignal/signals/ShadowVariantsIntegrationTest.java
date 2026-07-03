@@ -138,7 +138,7 @@ class ShadowVariantsIntegrationTest extends in.arthayantra.strategysignal.testsu
             "NFO", "SHVFUT", "volume-floor", new BigDecimal("0.70"), OffsetDateTime.now(),
             "vol-off");
     shadows.close(id, "TAKE_PROFIT", new BigDecimal("140.00"), new BigDecimal("40.00"),
-        new BigDecimal("40.00"));
+        new BigDecimal("40.00"), null, null);
 
     var league = shadows.variantSummary(null, null);
     var volOff = league.stream().filter(s -> s.variant().equals("vol-off")).findFirst().orElseThrow();

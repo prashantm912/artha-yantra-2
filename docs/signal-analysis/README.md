@@ -230,10 +230,23 @@ GROUP BY 1,2,3 ORDER BY 1;
 
 -- SHADOW BOOK: variant league — champion vs challenger configs on identical data (roadmap F1).
 -- Interpret pnl per book: a challenger's edge over champion = the trades ONLY it took.
+-- pnl_net (F8, V018) = 1-lot INR through the engine fill model (statutory costs + Rs20/lot
+-- brokerage) — judge keep/cut on NET; points are scale-free comparison only. Paper realized_pnl
+-- has been net-of-costs since Phase 43 (same FillSimulator) — never cost-adjust it twice.
 SELECT variant, count(*) FILTER (WHERE status='OPEN') open,
        count(*) FILTER (WHERE status='CLOSED') closed,
        count(*) FILTER (WHERE status='CLOSED' AND pnl_points > 0) wins,
-       round(sum(pnl_points) FILTER (WHERE status='CLOSED'),2) total_pts
+       count(*) FILTER (WHERE status='CLOSED' AND pnl_net > 0) net_wins,
+       round(sum(pnl_points) FILTER (WHERE status='CLOSED'),2) total_pts,
+       round(sum(pnl_net) FILTER (WHERE status='CLOSED'),2) total_net_inr,
+       round(sum(cost) FILTER (WHERE status='CLOSED'),2) total_cost_inr
+FROM strategy.shadow_positions GROUP BY 1 ORDER BY 1;
+
+-- LATENCY (F8): signal-bar close → shadow entry stamp, per session. p95 > ~5s means the entry LTP
+-- is stale vs the bar the gate scored — flag it in the findings file.
+SELECT (opened_at AT TIME ZONE 'Asia/Kolkata')::date d,
+       percentile_disc(0.5) WITHIN GROUP (ORDER BY opened_at - bar_time) p50,
+       percentile_disc(0.95) WITHIN GROUP (ORDER BY opened_at - bar_time) p95, count(*)
 FROM strategy.shadow_positions GROUP BY 1 ORDER BY 1;
 
 -- SHADOW BOOK: challenger-only entries (rows a variant took that champion did not — the true delta)

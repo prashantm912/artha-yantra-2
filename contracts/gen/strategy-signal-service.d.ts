@@ -729,6 +729,7 @@ export interface components {
             /** Format: int64 */
             losses?: number;
             pnlPoints?: number;
+            pnlNet?: number;
         };
         Funds: {
             status?: string;

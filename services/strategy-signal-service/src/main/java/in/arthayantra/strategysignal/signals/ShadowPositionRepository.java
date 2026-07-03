@@ -47,11 +47,18 @@ public class ShadowPositionRepository {
       OffsetDateTime closedAt,
       BigDecimal pnlPoints,
       BigDecimal pnlPct,
-      String variant) {}
+      String variant,
+      BigDecimal cost,
+      BigDecimal pnlNet) {}
 
-  /** Per-variant book rollup (roadmap F1): counts + realized points over an optional window. */
+  /**
+   * Per-variant book rollup (roadmap F1): counts + realized points over an optional window.
+   * {@code pnlNet} (F8) is the 1-lot INR sum net of the statutory cost model — the honest number;
+   * points stay for scale-free comparison.
+   */
   public record VariantSummary(
-      String variant, long open, long closed, long wins, long losses, BigDecimal pnlPoints) {}
+      String variant, long open, long closed, long wins, long losses, BigDecimal pnlPoints,
+      BigDecimal pnlNet) {}
 
   private final JdbcTemplate jdbc;
 
@@ -132,7 +139,8 @@ public class ShadowPositionRepository {
                count(*) FILTER (WHERE status = 'CLOSED') AS closed,
                count(*) FILTER (WHERE status = 'CLOSED' AND pnl_points > 0) AS wins,
                count(*) FILTER (WHERE status = 'CLOSED' AND pnl_points <= 0) AS losses,
-               coalesce(sum(pnl_points) FILTER (WHERE status = 'CLOSED'), 0) AS pnl_points
+               coalesce(sum(pnl_points) FILTER (WHERE status = 'CLOSED'), 0) AS pnl_points,
+               sum(pnl_net) FILTER (WHERE status = 'CLOSED') AS pnl_net
         FROM shadow_positions
         WHERE (?::timestamptz IS NULL OR opened_at >= ?) AND (?::timestamptz IS NULL OR opened_at < ?)
         GROUP BY variant ORDER BY variant
@@ -140,24 +148,27 @@ public class ShadowPositionRepository {
         (rs, i) ->
             new VariantSummary(
                 rs.getString("variant"), rs.getLong("open"), rs.getLong("closed"),
-                rs.getLong("wins"), rs.getLong("losses"), rs.getBigDecimal("pnl_points")),
+                rs.getLong("wins"), rs.getLong("losses"), rs.getBigDecimal("pnl_points"),
+                rs.getBigDecimal("pnl_net")),
         from, from, to, to);
   }
 
   /**
    * Closes one shadow position with its outcome. {@code exitLtp}/pnl may be null (the STALE case —
-   * the stack was down at square-off and no honest exit price exists).
+   * the stack was down at square-off and no honest exit price exists); {@code cost}/{@code pnlNet}
+   * (F8, 1-lot INR through the engine fill model) may be null when the lot size was unresolvable.
    */
   public void close(
-      long id, String closeReason, BigDecimal exitLtp, BigDecimal pnlPoints, BigDecimal pnlPct) {
+      long id, String closeReason, BigDecimal exitLtp, BigDecimal pnlPoints, BigDecimal pnlPct,
+      BigDecimal cost, BigDecimal pnlNet) {
     jdbc.update(
         """
         UPDATE shadow_positions
         SET status = 'CLOSED', close_reason = ?, exit_ltp = ?, pnl_points = ?, pnl_pct = ?,
-            closed_at = now()
+            cost = ?, pnl_net = ?, closed_at = now()
         WHERE id = ? AND status = 'OPEN'
         """,
-        closeReason, exitLtp, pnlPoints, pnlPct, id);
+        closeReason, exitLtp, pnlPoints, pnlPct, cost, pnlNet, id);
   }
 
   private ShadowRow row(ResultSet rs, int rowNum) throws SQLException {
@@ -189,6 +200,8 @@ public class ShadowPositionRepository {
         rs.getObject("closed_at", OffsetDateTime.class),
         rs.getBigDecimal("pnl_points"),
         rs.getBigDecimal("pnl_pct"),
-        rs.getString("variant"));
+        rs.getString("variant"),
+        rs.getBigDecimal("cost"),
+        rs.getBigDecimal("pnl_net"));
   }
 }

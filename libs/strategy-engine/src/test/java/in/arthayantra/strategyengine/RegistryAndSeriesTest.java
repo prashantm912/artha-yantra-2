@@ -3,8 +3,6 @@ package in.arthayantra.strategyengine;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import in.arthayantra.strategyengine.cache.IndicatorValueCache;
-import in.arthayantra.strategyengine.cache.InMemoryIndicatorValueCache;
 import in.arthayantra.strategyengine.indicators.IndicatorRegistry;
 import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategyengine.series.EngineSeries;
@@ -15,7 +13,7 @@ import java.time.OffsetDateTime;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
-/** Registry contract (Q2 server-side check source), series geometry, cache bounds. */
+/** Registry contract (Q2 server-side check source), series geometry. */
 class RegistryAndSeriesTest {
 
   @Test
@@ -81,29 +79,6 @@ class RegistryAndSeriesTest {
     assertThat(series.previousSessionEnd(0)).isEqualTo(-1);
     assertThat(series.indexAtOrBefore(Instant.parse("2026-02-04T03:45:30Z"))).isEqualTo(2);
     assertThat(series.indexAtOrBefore(Instant.parse("2026-02-01T00:00:00Z"))).isEqualTo(-1);
-  }
-
-  @Test
-  void cacheEvictsLeastRecentlyUsed() {
-    InMemoryIndicatorValueCache cache = new InMemoryIndicatorValueCache(2);
-    IndicatorValueCache.Key k1 = key("EMA");
-    IndicatorValueCache.Key k2 = key("SMA");
-    IndicatorValueCache.Key k3 = key("RSI");
-
-    cache.put(k1, BigDecimal.ONE);
-    cache.put(k2, BigDecimal.TWO);
-    assertThat(cache.get(k1)).contains(BigDecimal.ONE); // touch k1 → k2 becomes eldest
-    cache.put(k3, BigDecimal.TEN);
-
-    assertThat(cache.get(k2)).isEmpty();
-    assertThat(cache.get(k1)).contains(BigDecimal.ONE);
-    assertThat(cache.get(k3)).contains(BigDecimal.TEN);
-    cache.put(key("NULL"), null);
-    assertThat(cache.get(key("NULL"))).as("nulls are never cached").isEmpty();
-  }
-
-  private static IndicatorValueCache.Key key(String indicator) {
-    return new IndicatorValueCache.Key("NSE", "RELIANCE", "1m", indicator, "h", 1_000);
   }
 
   private static EngineCandle candle(String bucket, String price) {

@@ -15,14 +15,42 @@ import org.springframework.web.bind.annotation.RestController;
 public class BreadthController {
 
   private final BreadthService service;
+  private final EquityIndexContributionService contributions;
 
-  public BreadthController(BreadthService service) {
+  public BreadthController(
+      BreadthService service, EquityIndexContributionService contributions) {
     this.service = service;
+    this.contributions = contributions;
   }
 
   @GetMapping
   public BreadthService.Breadth breadth(@RequestParam String date) {
     return service.breadth(parseDate(date));
+  }
+
+  /**
+   * INTRADAY index-constituent breadth (roadmap F3.1): advance/decline counts over the index's
+   * seeded constituents from live quotes (the same fold the index-contribution page serves), EOD
+   * fallback when quotes are unavailable. This is the scalper breadth dot's live producer — the
+   * §12.3 "advances &gt; 32" rule is a NIFTY-50-universe rule (32 of 50), which the full-bhavcopy
+   * date read can never express intraday (it reads 0/0 until the post-close bhavcopy lands).
+   */
+  /** Constituent-universe advance/decline counts (the scalper dot's operand scale, ~50 not ~2000). */
+  public record LiveBreadthSummary(int advances, int declines, int unchanged, int total) {}
+
+  /** The live-breadth envelope; {@code live} is false when the fold fell back to the EOD read. */
+  public record LiveBreadth(String index, LiveBreadthSummary summary, boolean live, LocalDate asOf) {}
+
+  @GetMapping("/live")
+  public LiveBreadth live(@RequestParam(defaultValue = "NIFTY 50") String index) {
+    EquityIndexContributionService.IndexContribution c = contributions.liveContribution(index);
+    return new LiveBreadth(
+        c.index(),
+        new LiveBreadthSummary(
+            c.advances().size(), c.declines().size(), 0,
+            c.advances().size() + c.declines().size()),
+        c.live(),
+        c.asOf());
   }
 
   private static LocalDate parseDate(String raw) {

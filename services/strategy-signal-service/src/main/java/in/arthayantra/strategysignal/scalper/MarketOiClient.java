@@ -430,12 +430,24 @@ public class MarketOiClient {
     BigDecimal rank = decimal(ivHistory.path("rank"));
     BigDecimal ivRank = rank == null ? null : rank.multiply(HUNDRED);
 
+    // F3.1 live breadth: the "advances > 32" rule is a NIFTY-50-universe rule, and the EOD
+    // bhavcopy read is 0/0 all session (no bhavcopy for today until post-close) — so the dot was
+    // structurally dead live. Prefer the intraday constituent fold (the index-contribution page's
+    // source, counts of ~50); fall back to the EOD date read (history / quotes unavailable).
     int[] breadth =
         get(
-            uri -> uri.path("/api/v1/market/breadth").queryParam("date", tradeDate).build(),
+            uri -> uri.path("/api/v1/market/breadth/live").queryParam("index", "NIFTY 50").build(),
             this::advanceDecline,
-            new int[] {0, 0},
-            "breadth");
+            null,
+            "breadth-live");
+    if (breadth == null) {
+      breadth =
+          get(
+              uri -> uri.path("/api/v1/market/breadth").queryParam("date", tradeDate).build(),
+              this::advanceDecline,
+              new int[] {0, 0},
+              "breadth");
+    }
 
     BigDecimal fiiLongPct =
         get(

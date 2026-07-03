@@ -366,11 +366,37 @@ class MarketOiClientTest {
   }
 
   @Test
+  void breadthFallsBackToEodDateReadWhenTheLiveFoldIsDown() {
+    wire();
+    stub("/api/v1/market/options/iv-history", "{\"currentIv\":\"0.14\",\"rank\":\"0.5\"}");
+    // F3.1: the live constituent fold 500s (quotes down) → the EOD date read still serves
+    server
+        .expect(ExpectedCount.once(), requestTo(containsString("/api/v1/market/breadth/live")))
+        .andRespond(withServerError());
+    stub(
+        "/api/v1/market/breadth?date",
+        "{\"summary\":{\"advances\":35,\"declines\":12,\"unchanged\":3,\"total\":50}}");
+    stub("/api/v1/market/fii-dii/long-short", "{\"items\":[]}");
+    stub("/api/v1/market/options/chain", "{\"spot\":\"20000\",\"rows\":[]}");
+    stub("/api/v1/market/equity/index-contribution", "{}");
+    stub("/api/v1/market/options/active-strikes", "{}");
+    stub("/api/v1/market/vix", "{}");
+    stub("/api/v1/market/global/dow", "{}");
+    stub("/api/v1/market/fii-dii/bias", "{}");
+
+    Macro m = client.macro(UNDERLYING, TRADE_DATE, EXPIRY);
+
+    assertThat(m.advances()).isEqualTo(35);
+    assertThat(m.declines()).isEqualTo(12);
+  }
+
+  @Test
   void breadthDefaultsToZeroZeroSoTheGateCannotConfirm() {
     wire();
     stub("/api/v1/market/options/iv-history", "{\"currentIv\":\"0.14\",\"rank\":\"0.5\"}");
+    // F3.1: BOTH breadth reads down — the live constituent fold and the EOD date fallback
     server
-        .expect(ExpectedCount.once(), requestTo(containsString("/api/v1/market/breadth")))
+        .expect(ExpectedCount.twice(), requestTo(containsString("/api/v1/market/breadth")))
         .andRespond(withServerError());
     stub("/api/v1/market/fii-dii/long-short", "{\"items\":[]}");
     stub("/api/v1/market/options/chain", "{\"spot\":\"20000\",\"rows\":[]}");

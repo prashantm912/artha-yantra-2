@@ -4596,6 +4596,43 @@
         }
       }
     },
+    "/api/v1/market/breadth/live" : {
+      "get" : {
+        "tags" : [ "breadth-controller" ],
+        "operationId" : "live",
+        "parameters" : [ {
+          "name" : "index",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "default" : "NIFTY 50"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LiveBreadth"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/admin/upstox-quota-status" : {
       "get" : {
         "tags" : [ "quota-controller" ],
@@ -7777,6 +7814,45 @@
           },
           "pctChange" : {
             "type" : "number"
+          }
+        }
+      },
+      "LiveBreadth" : {
+        "type" : "object",
+        "properties" : {
+          "index" : {
+            "type" : "string"
+          },
+          "summary" : {
+            "$ref" : "#/components/schemas/LiveBreadthSummary"
+          },
+          "live" : {
+            "type" : "boolean"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        }
+      },
+      "LiveBreadthSummary" : {
+        "type" : "object",
+        "properties" : {
+          "advances" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "declines" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "unchanged" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "total" : {
+            "type" : "integer",
+            "format" : "int32"
           }
         }
       },

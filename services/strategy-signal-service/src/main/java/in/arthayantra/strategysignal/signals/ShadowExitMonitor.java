@@ -50,16 +50,18 @@ public class ShadowExitMonitor {
   private final MarketOiClient oiClient;
   private final ObjectMapper objectMapper;
   private final Clock clock;
+  private final ShadowCostModel costModel;
   private final boolean enabled;
   private final LocalTime squareOff;
 
-  /** Wires the shadow ledger + the two LTP sources. */
+  /** Wires the shadow ledger + the two LTP sources + the F8 cost model. */
   public ShadowExitMonitor(
       ShadowPositionRepository shadows,
       StringRedisTemplate redis,
       MarketOiClient oiClient,
       ObjectMapper objectMapper,
       Clock clock,
+      ShadowCostModel costModel,
       @org.springframework.beans.factory.annotation.Value(
               "${artha.scalper.shadow-book.enabled:false}")
           boolean enabled,
@@ -71,6 +73,7 @@ public class ShadowExitMonitor {
     this.oiClient = oiClient;
     this.objectMapper = objectMapper;
     this.clock = clock;
+    this.costModel = costModel;
     this.enabled = enabled;
     this.squareOff = LocalTime.parse(squareOff);
   }
@@ -101,7 +104,7 @@ public class ShadowExitMonitor {
       try {
         // A prior-day leftover has no honest exit price any more — label it STALE, PnL null.
         if (row.openedAt().atZoneSameInstant(Ist.ZONE).toLocalDate().isBefore(todayIst)) {
-          shadows.close(row.id(), "STALE", null, null, null);
+          shadows.close(row.id(), "STALE", null, null, null, null, null);
           continue;
         }
         BigDecimal ltp = optionLtp(row, chainLtpByUnderlying);
@@ -136,11 +139,14 @@ public class ShadowExitMonitor {
             : points
                 .multiply(new BigDecimal("100"))
                 .divide(row.entryLtp(), 2, RoundingMode.HALF_UP);
-    shadows.close(row.id(), reason, exitLtp, points, pct);
+    // F8: 1-lot INR net of the statutory cost model (same engine fill model as paper/backtest)
+    ShadowCostModel.RoundTrip rt =
+        costModel.price(row.exchange(), row.tradingsymbol(), row.entryLtp(), exitLtp);
+    shadows.close(row.id(), reason, exitLtp, points, pct, rt.cost(), rt.pnlNet());
     log.info(
-        "shadow close [{}]: {} {} {} {} @ {} → {} pts ({}%) [rail {}]",
+        "shadow close [{}]: {} {} {} {} @ {} → {} pts ({}%), net ₹{} (cost {}) [rail {}]",
         row.variant(), row.strategySlug(), row.side(), row.tradingsymbol(), reason, exitLtp,
-        points, pct, row.blockingRail());
+        points, pct, rt.pnlNet(), rt.cost(), row.blockingRail());
   }
 
   /** True when the signal future's last tick has crossed the structural stop against the side. */

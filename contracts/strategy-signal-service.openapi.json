@@ -2283,6 +2283,9 @@
           },
           "pnlPoints" : {
             "type" : "number"
+          },
+          "pnlNet" : {
+            "type" : "number"
           }
         }
       },

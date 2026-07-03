@@ -171,7 +171,16 @@ Promotion itself = owner action; the framework only measures.
 - [ ] A strategy meeting the bar triggers a one-time ntfy "graduation candidate" note — never an order.
 
 ### F8. Execution-quality analytics — does the edge survive costs?
-**What:** every paper/shadow fill today books at LTP with zero cost model. Add: spread capture
+**Status 2026-07-03 — v1 SHIPPED, scope corrected on inspection:** the paper ledger was ALREADY
+fully cost-adjusted (Phase 43: `realized_pnl` = net cash through the shared engine `FillSimulator`
+with the pinned statutory schedule + per-order slippage; `paper_orders` even records bid/ask when
+known) — the roadmap's premise was wrong for paper. The real gap was the SHADOW book (raw premium
+points only). v1 adds `shadow_positions.cost`/`pnl_net` (V018, 1-lot INR through the SAME engine
+fill model, zero added slippage — the recorded LTPs are the fills), the league surfaces net
+first, and the latency SQL (README §6). Spread capture on shadow entries stays open (needs
+bid/ask in the chain source). Zerodha-calculator cross-check fixture = the ShadowCostModelTest
+numbers (buy 100 → sell 140, lot 75 ⇒ cost ₹65.40) — owner verifies once against the calculator.
+**What (original):** every paper/shadow fill today books at LTP with zero cost model. Add: spread capture
 at entry/exit (bid/ask from the depth already in Kite quote mode), a slippage estimate
 (cross-the-spread + 1 tick), brokerage/STT/stamp model for NFO/BFO options, and
 signal-timestamp→entry-LTP latency. Surface cost-adjusted PnL everywhere raw PnL shows.

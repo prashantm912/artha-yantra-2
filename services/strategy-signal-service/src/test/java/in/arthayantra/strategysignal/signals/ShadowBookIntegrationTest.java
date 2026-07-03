@@ -217,7 +217,7 @@ class ShadowBookIntegrationTest extends StrategySignalIntegrationTestBase {
                 id, 0, null, null, null, null, null, null, null, null, BigDecimal.ONE, null, null,
                 null, null, null, null, null, null, null, rs.getString("status"),
                 rs.getBigDecimal("exit_ltp"), rs.getString("close_reason"), null,
-                rs.getBigDecimal("pnl_points"), rs.getBigDecimal("pnl_pct"), "champion"),
+                rs.getBigDecimal("pnl_points"), rs.getBigDecimal("pnl_pct"), "champion", null, null),
         id);
   }
 }

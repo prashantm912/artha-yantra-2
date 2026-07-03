@@ -150,21 +150,25 @@ public class OptionsPremiumReplay {
 
   /** Pairs the signal stream into directed legs (entry→exit bar indices), mirroring the candle path. */
   static List<PairedLeg> pairLegs(List<SignalEvent> signals, List<EngineCandle> underlying) {
-    Map<String, Integer> idx = new HashMap<>();
-    for (int i = 0; i < underlying.size(); i++) {
-      idx.put(underlying.get(i).bucketStart().toString(), i);
-    }
+    in.arthayantra.backtest.replay.BarIndexResolver resolver =
+        new in.arthayantra.backtest.replay.BarIndexResolver(underlying);
     int lastBar = Math.max(underlying.size() - 1, 0);
     List<PairedLeg> legs = new ArrayList<>();
     SignalEvent open = null;
     for (SignalEvent ev : signals) {
       if ("EXIT".equals(ev.direction())) {
         if (open != null) {
-          legs.add(
-              new PairedLeg(
-                  "SHORT".equals(open.direction()),
-                  idx.getOrDefault(open.timestamp(), 0),
-                  idx.getOrDefault(ev.timestamp(), lastBar)));
+          // unresolvable entry ⇒ drop the leg loudly (never a fabricated bar-0 trade);
+          // unresolvable exit ⇒ force-close at the last bar (audit replay-legs-silent-index0-fallback)
+          int entryIndex = resolver.atOrAfter(open.timestamp());
+          if (entryIndex >= 0) {
+            int exitIndex = resolver.atOrAfter(ev.timestamp());
+            legs.add(
+                new PairedLeg(
+                    "SHORT".equals(open.direction()),
+                    entryIndex,
+                    exitIndex >= 0 ? exitIndex : lastBar));
+          }
           open = null;
         }
       } else if (open == null) {
@@ -172,8 +176,10 @@ public class OptionsPremiumReplay {
       }
     }
     if (open != null) {
-      legs.add(
-          new PairedLeg("SHORT".equals(open.direction()), idx.getOrDefault(open.timestamp(), 0), lastBar));
+      int entryIndex = resolver.atOrAfter(open.timestamp());
+      if (entryIndex >= 0) {
+        legs.add(new PairedLeg("SHORT".equals(open.direction()), entryIndex, lastBar));
+      }
     }
     return legs;
   }

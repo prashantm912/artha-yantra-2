@@ -1,0 +1,156 @@
+# ci-backup-roundtrip (audit-register row 9: backup-restore-no-automated-roundtrip):
+# the #395 incident silently lost 224M hypertable rows because a per-schema pg_dump
+# misses _timescaledb_internal chunk data yet pg_restores "successfully". This job
+# mechanically proves — weekly and on any backup-pipeline edit — that the EXACT
+# `ay backup` / `ay restore` command sequence (deploy/backup/backup.sh dump +
+# ay.ps1 'restore' verb) round-trips a hypertable, a compressed chunk, and a
+# continuous aggregate's materialized rows. Keep the commands here in lockstep
+# with ay.ps1 / backup.sh — the tripwire step below fails when they drift.
+name: ci-backup-roundtrip
+
+on:
+  schedule:
+    - cron: "0 3 * * 0" # Sunday 03:00 UTC — weekly proof the DR pipeline still round-trips
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "ay.ps1"
+      - "deploy/backup/backup.sh"
+      - ".github/workflows/ci-backup-roundtrip.yml"
+
+concurrency:
+  group: ci-backup-roundtrip-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # SAME image tag as deploy/docker-compose.yml `timescaledb:` — a skew here would
+  # prove a restore path the owner's stack doesn't actually run.
+  TSDB_IMAGE: timescale/timescaledb:2.17.2-pg17
+
+jobs:
+  roundtrip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Drift tripwire — mirrored tokens still present in the real pipeline
+        run: |
+          # This workflow hardcodes the ay dump/restore sequence. If a load-bearing
+          # token vanishes from ay.ps1 / deploy/backup/backup.sh, this mirror is
+          # stale. (-Fc and --globals-only live in backup.sh — `ay backup` delegates
+          # to it; the pre/post_restore dance and --no-owner live in ay.ps1.)
+          missing=0
+          for tok in '-Fc' '--globals-only' 'timescaledb_pre_restore' 'timescaledb_post_restore' '--no-owner'; do
+            if ! grep -qF -e "$tok" ay.ps1 deploy/backup/backup.sh; then
+              echo "missing token: $tok"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::backup pipeline drifted — keep ci-backup-roundtrip.yml in lockstep with ay.ps1 (and deploy/backup/backup.sh)"
+            exit 1
+          fi
+
+      - name: Start pinned TimescaleDB
+        run: |
+          docker run -d --name tsdb -e POSTGRES_PASSWORD=test "$TSDB_IMAGE"
+          # -h 127.0.0.1 so the init-time temp server (unix-socket only) can't
+          # answer the probe before the real server is up
+          for i in $(seq 1 60); do
+            if docker exec tsdb pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; then
+              echo "postgres ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::timescaledb never became ready"
+          docker logs tsdb
+          exit 1
+
+      - name: Seed fixture DB 'src' (hypertable + compressed chunk + cagg)
+        run: |
+          PSQL="docker exec tsdb psql -U postgres -v ON_ERROR_STOP=1"
+          $PSQL -d postgres -c "CREATE DATABASE src"
+          $PSQL -d src -c "CREATE EXTENSION IF NOT EXISTS timescaledb"
+          $PSQL -d src -c "CREATE SCHEMA marketdata"
+          $PSQL -d src -c "CREATE TABLE marketdata.candles (bucket timestamptz NOT NULL, token int NOT NULL, close double precision NOT NULL)"
+          $PSQL -d src -c "SELECT create_hypertable('marketdata.candles', 'bucket', chunk_time_interval => INTERVAL '1 day')"
+          # 1000 rows x 3 min = ~50 h -> 3 daily chunks
+          $PSQL -d src -c "INSERT INTO marketdata.candles SELECT '2026-01-01T00:00:00Z'::timestamptz + i * INTERVAL '3 minutes', 1, i::double precision FROM generate_series(0, 999) i"
+          # materialized_only=true so the post-restore cagg count reads ONLY
+          # materialized rows (realtime aggregation would recompute from the base
+          # table and mask lost materialization)
+          $PSQL -d src -c "CREATE MATERIALIZED VIEW marketdata.candles_1h WITH (timescaledb.continuous, timescaledb.materialized_only = true) AS SELECT time_bucket('1 hour', bucket) AS bucket, token, avg(close) AS close FROM marketdata.candles GROUP BY 1, 2 WITH NO DATA"
+          $PSQL -d src -c "CALL refresh_continuous_aggregate('marketdata.candles_1h', NULL, NULL)"
+          $PSQL -d src -c "ALTER TABLE marketdata.candles SET (timescaledb.compress, timescaledb.compress_segmentby = 'token')"
+          # compress exactly the first (2026-01-01) chunk
+          $PSQL -d src -c "SELECT compress_chunk(c) FROM show_chunks('marketdata.candles', older_than => '2026-01-02T00:00:00Z'::timestamptz) c"
+
+          src_base=$($PSQL -t -A -d src -c "SELECT count(*) FROM marketdata.candles")
+          src_compressed_range=$($PSQL -t -A -d src -c "SELECT count(*) FROM marketdata.candles WHERE bucket < '2026-01-02T00:00:00Z'")
+          src_cagg=$($PSQL -t -A -d src -c "SELECT count(*) FROM marketdata.candles_1h")
+          src_chunks=$($PSQL -t -A -d src -c "SELECT count(*) FROM timescaledb_information.chunks WHERE hypertable_schema = 'marketdata' AND hypertable_name = 'candles'")
+          src_compressed_chunks=$($PSQL -t -A -d src -c "SELECT count(*) FROM timescaledb_information.chunks WHERE hypertable_schema = 'marketdata' AND hypertable_name = 'candles' AND is_compressed")
+          echo "src: base=$src_base compressed_range=$src_compressed_range cagg=$src_cagg chunks=$src_chunks compressed_chunks=$src_compressed_chunks"
+          # the fixture itself must be meaningful, or the round-trip proves nothing
+          [ "$src_base" -eq 1000 ] || { echo "::error::fixture base count $src_base != 1000"; exit 1; }
+          [ "$src_chunks" -ge 2 ] || { echo "::error::fixture spans $src_chunks chunk(s), need >= 2"; exit 1; }
+          [ "$src_compressed_chunks" -ge 1 ] || { echo "::error::no compressed chunk in fixture"; exit 1; }
+          [ "$src_cagg" -gt 0 ] || { echo "::error::cagg materialized 0 rows"; exit 1; }
+          {
+            echo "SRC_BASE=$src_base"
+            echo "SRC_COMPRESSED_RANGE=$src_compressed_range"
+            echo "SRC_CAGG=$src_cagg"
+          } >> "$GITHUB_ENV"
+
+      - name: Dump exactly as `ay backup` does (deploy/backup/backup.sh)
+        run: |
+          # 1) cluster globals, 2) WHOLE-DATABASE -Fc (never -n per-schema: chunk
+          # data lives in _timescaledb_internal, outside any dumped namespace — #395)
+          docker exec tsdb pg_dumpall -U postgres --globals-only -f /tmp/globals.sql
+          docker exec tsdb pg_dump -U postgres -Fc -d src -f /tmp/src-full.dump
+          docker exec tsdb ls -l /tmp/globals.sql /tmp/src-full.dump
+
+      - name: Restore into 'dst' exactly as `ay restore` does (ay.ps1)
+        run: |
+          docker exec tsdb dropdb -U postgres --if-exists dst
+          docker exec tsdb createdb -U postgres dst
+          # globals into 'postgres'; a CREATE ROLE that already exists is a
+          # tolerated no-op (ay restore uses Invoke-ComposeAllowFail here)
+          docker exec tsdb psql -U postgres -d postgres -v ON_ERROR_STOP=0 -f /tmp/globals.sql || true
+          docker exec tsdb psql -U postgres -d dst -c "CREATE EXTENSION IF NOT EXISTS timescaledb"
+          # pre_restore disables chunk routing + background jobs so pg_restore can
+          # write the _timescaledb_internal chunk data directly; post_restore re-enables
+          docker exec tsdb psql -U postgres -d dst -c "SELECT timescaledb_pre_restore()"
+          # pg_restore returns non-zero if ANY statement errored (duplicate
+          # extension, grants to a missing role) — tolerated exactly as in ay
+          # restore; correctness is asserted by the row counts below
+          docker exec tsdb pg_restore -U postgres -d dst --no-owner /tmp/src-full.dump || echo "pg_restore exited non-zero (tolerated, as in ay restore)"
+          docker exec tsdb psql -U postgres -d dst -c "SELECT timescaledb_post_restore()"
+          docker exec tsdb psql -U postgres -d dst -c "ANALYZE"
+
+      - name: Assert the round-trip lost nothing
+        run: |
+          PSQL="docker exec tsdb psql -U postgres -v ON_ERROR_STOP=1"
+          dst_base=$($PSQL -t -A -d dst -c "SELECT count(*) FROM marketdata.candles")
+          dst_compressed_range=$($PSQL -t -A -d dst -c "SELECT count(*) FROM marketdata.candles WHERE bucket < '2026-01-02T00:00:00Z'")
+          dst_cagg=$($PSQL -t -A -d dst -c "SELECT count(*) FROM marketdata.candles_1h")
+          dst_compressed_chunks=$($PSQL -t -A -d dst -c "SELECT count(*) FROM timescaledb_information.chunks WHERE hypertable_schema = 'marketdata' AND hypertable_name = 'candles' AND is_compressed")
+          echo "dst: base=$dst_base (src $SRC_BASE) compressed_range=$dst_compressed_range (src $SRC_COMPRESSED_RANGE) cagg=$dst_cagg (src $SRC_CAGG) compressed_chunks=$dst_compressed_chunks"
+          fail=0
+          [ "$dst_base" = "$SRC_BASE" ] || { echo "::error::base row count diverged: $dst_base != $SRC_BASE (the #395 silent-hypertable-loss class)"; fail=1; }
+          { [ "$dst_compressed_range" = "$SRC_COMPRESSED_RANGE" ] && [ "$dst_compressed_range" -gt 0 ]; } || { echo "::error::compressed-chunk rows diverged: $dst_compressed_range != $SRC_COMPRESSED_RANGE"; fail=1; }
+          [ "$dst_compressed_chunks" -ge 1 ] || { echo "::error::no compressed chunk survived the restore"; fail=1; }
+          { [ "$dst_cagg" = "$SRC_CAGG" ] && [ "$dst_cagg" -gt 0 ]; } || { echo "::error::cagg materialized rows diverged: $dst_cagg != $SRC_CAGG"; fail=1; }
+          # the candle-style zero-row gate `ay restore` itself applies since #501
+          [ "$dst_base" -gt 0 ] || { echo "::error::marketdata.candles EMPTY after restore"; fail=1; }
+          [ "$fail" -eq 0 ] || exit 1
+          echo "round-trip OK: $dst_base base rows, $dst_cagg cagg rows, compressed chunk intact"
+
+      - name: Container logs (diagnosis)
+        if: failure()
+        run: docker logs tsdb || true

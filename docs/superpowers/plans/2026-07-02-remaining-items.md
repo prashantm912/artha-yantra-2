@@ -28,14 +28,27 @@ the two 2026-07-02 audits (both fix queues fully closed) and the open-PR/issue l
 | `value-verify-ratify` | data-foundation value-verify **PASSED** live-vs-live 2026-07-01 (captured OI == oipulse exact share) | owner ratifies the close; residual low nits in §5 |
 | `soft-dot-arming` | FU2 dots + drasticFloor default built inert | arm only if live forward-paper data proves them (else stays a §7 WON'T) |
 
-## 3. Verification only — next market session (2026-07-03)
+## 3. Verification only — next market session
 
-- [ ] T2 aligned snapshot buckets row-for-row vs the oipulse barometer (capture crons shifted #441).
-- [ ] Capture crons fire on the new boundaries: 09:16 futures / 09:18 options.
-- [ ] First pre-open equity scan lands at 09:09:30 (#470) + futures pre-open page renders live (#377).
-- [ ] NSE announcement field mapping on live data (#378).
-- [ ] Stock-chain warm on a second symbol during market hours (#472 verified on RELIANCE off-hours).
-- [ ] Owner hard-reload (Ctrl+Shift+R) — stale cached FE chunks render the old UI.
+Ran live 2026-07-03 (findings addendum A2 in `docs/signal-analysis/2026-07-03-session-findings.md`):
+
+- [x] T2 aligned snapshot buckets row-for-row vs the oipulse barometer — **PASS** (labels identical;
+  Call OI exact 3/3; put-row residuals = oipulse polling lag on BSE OI dissemination, our
+  end-of-window values are the fresher ones).
+- [x] Capture crons fire on the new boundaries: 09:16 futures / 09:18 options — **PASS**.
+- [x] First pre-open equity scan lands at 09:09:30 (#470) + futures pre-open page renders live
+  (#377) — **PASS**.
+- [ ] NSE announcement field mapping on live data (#378) — not exercised 2026-07-03; check next
+  session with fresh announcements.
+- [ ] Stock-chain warm on a SECOND symbol during market hours (#472 verified on RELIANCE
+  off-hours) — not exercised 2026-07-03.
+- [ ] Owner hard-reload (Ctrl+Shift+R) after each FE redeploy — standing owner action.
+
+**New verifies for 2026-07-06** (P1/F8 live acceptance, roadmap `2026-07-03-10x-value-roadmap.md`):
+canary tile green through the session + zero false alerts; NIFTY26JULFUT TICK_AGG bars past 12:40
+(#482 fix) + watch for "dropping future-stamped tick" WARNs; variant books (vol-off / vol-12k5 /
+composite-070) populate with net-₹ labels; breadth dot scores intraday (advances/declines non-zero
+in rejections' context). The 09:42 + 15:47 agents cover all of it.
 
 ## 4. Scheduled maintenance
 

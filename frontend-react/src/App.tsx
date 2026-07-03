@@ -28,6 +28,7 @@ import { ScalperCockpitPage } from './pages/scalper/ScalperCockpitPage.tsx';
 import { StrategiesListPage } from './pages/strategies/StrategiesListPage.tsx';
 import { StrategyVersionsPage } from './pages/strategies/StrategyVersionsPage.tsx';
 import { StrategyEditorPage } from './pages/strategies/StrategyEditorPage.tsx';
+import { GraduationPage } from './pages/strategies/GraduationPage.tsx';
 import { BacktestRunnerPage } from './pages/backtests/BacktestRunnerPage.tsx';
 import { JobsPage } from './pages/backtests/JobsPage.tsx';
 import { JournalPage } from './pages/journal/JournalPage.tsx';
@@ -242,6 +243,7 @@ export function App() {
           <Route path="/equity/news" element={<Lazy><NewsPage /></Lazy>} />
           {/* Strategies */}
           <Route path="/strategies" element={<StrategiesListPage />} />
+          <Route path="/strategies/graduation" element={<GraduationPage />} />
           <Route path="/strategies/:id/edit" element={<StrategyEditorPage />} />
           <Route path="/strategies/:id/versions" element={<StrategyVersionsPage />} />
           <Route path="/strategies/strategy-builder" element={<Lazy><StrategyBuilderPage /></Lazy>} />

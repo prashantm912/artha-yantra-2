@@ -356,6 +356,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/strategies/graduation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["graduation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/signals": {
         parameters: {
             query?: never;
@@ -746,6 +762,40 @@ export interface components {
         NotificationRequest: {
             enabled?: boolean;
             channel?: string;
+        };
+        Criterion: {
+            name?: string;
+            required?: string;
+            actual?: string;
+            pass?: boolean;
+        };
+        GraduationBoard: {
+            strategies?: components["schemas"]["StrategyGraduation"][];
+            thresholds?: components["schemas"]["Thresholds"];
+            /** Format: date-time */
+            asOf?: string;
+        };
+        StrategyGraduation: {
+            /** Format: uuid */
+            strategyId?: string;
+            slug?: string;
+            name?: string;
+            stage?: string;
+            /** Format: int32 */
+            trades?: number;
+            netRealized?: number;
+            winRate?: number;
+            profitFactor?: number;
+            expectancy?: number;
+            maxDrawdownPct?: number;
+            criteria?: components["schemas"]["Criterion"][];
+        };
+        Thresholds: {
+            /** Format: int32 */
+            minTrades?: number;
+            minProfitFactor?: number;
+            minExpectancy?: number;
+            maxDrawdownPct?: number;
         };
         ShadowSummaryResponse: {
             items?: components["schemas"]["VariantSummary"][];
@@ -1819,6 +1869,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": string;
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    graduation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["GraduationBoard"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

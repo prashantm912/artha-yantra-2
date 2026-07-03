@@ -1276,6 +1276,34 @@
         }
       }
     },
+    "/api/v1/strategies/graduation" : {
+      "get" : {
+        "tags" : [ "graduation-controller" ],
+        "operationId" : "graduation",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/GraduationBoard"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/signals" : {
       "get" : {
         "tags" : [ "signals-controller" ],
@@ -2301,6 +2329,102 @@
           },
           "channel" : {
             "type" : "string"
+          }
+        }
+      },
+      "Criterion" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "required" : {
+            "type" : "string"
+          },
+          "actual" : {
+            "type" : "string"
+          },
+          "pass" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "GraduationBoard" : {
+        "type" : "object",
+        "properties" : {
+          "strategies" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/StrategyGraduation"
+            }
+          },
+          "thresholds" : {
+            "$ref" : "#/components/schemas/Thresholds"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "StrategyGraduation" : {
+        "type" : "object",
+        "properties" : {
+          "strategyId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "slug" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "stage" : {
+            "type" : "string"
+          },
+          "trades" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "netRealized" : {
+            "type" : "number"
+          },
+          "winRate" : {
+            "type" : "number"
+          },
+          "profitFactor" : {
+            "type" : "number"
+          },
+          "expectancy" : {
+            "type" : "number"
+          },
+          "maxDrawdownPct" : {
+            "type" : "number"
+          },
+          "criteria" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Criterion"
+            }
+          }
+        }
+      },
+      "Thresholds" : {
+        "type" : "object",
+        "properties" : {
+          "minTrades" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "minProfitFactor" : {
+            "type" : "number"
+          },
+          "minExpectancy" : {
+            "type" : "number"
+          },
+          "maxDrawdownPct" : {
+            "type" : "number"
           }
         }
       },

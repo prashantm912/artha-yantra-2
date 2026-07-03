@@ -43,6 +43,16 @@ public final class Black76 {
    *   <li><b>vomma</b> (volga) ∂vega/∂σ — per 1 VOL POINT of vega per 1 VOL POINT of σ (÷10 000);
    *       call/put-identical.
    * </ul>
+   *
+   * <p>The THIRD-order gamma-sensitivity trio (speed/zomma/color, §17.6b) rides as further ADDITIVE
+   * fields — all call/put-identical (they derive from gamma, which is call/put-identical), so the
+   * first- and second-order values stay byte-identical and the golden vectors are unaffected:
+   *
+   * <ul>
+   *   <li><b>speed</b> ∂Γ/∂F — reported per unit of F, the same raw scale as gamma.
+   *   <li><b>zomma</b> ∂Γ/∂σ — per 1 VOL POINT (÷100), like vega/vanna.
+   *   <li><b>color</b> ∂Γ/∂t — Γ-decay per CALENDAR DAY (÷365), like theta/charm.
+   * </ul>
    */
   public record Greeks(
       BigDecimal price,
@@ -53,7 +63,10 @@ public final class Black76 {
       BigDecimal rho,
       BigDecimal vanna,
       BigDecimal charm,
-      BigDecimal vomma) {}
+      BigDecimal vomma,
+      BigDecimal speed,
+      BigDecimal zomma,
+      BigDecimal color) {}
 
   /** Undiscounted-forward Black-76 price (discounted by {@code e^-rT}). */
   public static double price(OptionType type, double f, double k, double t, double r, double sigma) {
@@ -107,6 +120,17 @@ public final class Black76 {
                 : r * df * cdf(-d1) + df * pdfD1 * dd1Dt)
             / 365.0;
 
+    // THIRD-ORDER greeks (§17.6b) — gamma sensitivities, all call/put-identical (gamma is), closed
+    // forms cross-checked by a central finite difference of the code's own gamma in the test.
+    // speed = ∂Γ/∂F = −Γ/F·(d1/(σ√T) + 1); reported per unit F, gamma's raw scale (no ÷).
+    double speed = -gamma / f * (d1 / (sigma * sqrtT) + 1.0);
+    // zomma = ∂Γ/∂σ = Γ·(d1·d2 − 1)/σ; reported per VOL POINT (÷100), like vega/vanna.
+    double zomma = gamma * (d1 * d2 - 1.0) / sigma / 100.0;
+    // color = ∂Γ/∂t = Γ·(−r − d1·∂d1/∂T − 1/(2T)); reported per CALENDAR DAY (÷365), like theta/charm
+    // (∂d1/∂T is the SAME dd1Dt the charm term uses). d(lnΓ)/dT = −r + (φ'/φ)(d1)·∂d1/∂T − 1/(2T) and
+    // φ'(d1)/φ(d1) = −d1, giving the bracket below.
+    double color = gamma * (-r - d1 * dd1Dt - 0.5 / tt) / 365.0;
+
     return new Greeks(
         BigDecimal.valueOf(price),
         BigDecimal.valueOf(delta),
@@ -116,7 +140,10 @@ public final class Black76 {
         BigDecimal.valueOf(rho),
         BigDecimal.valueOf(vanna),
         BigDecimal.valueOf(charm),
-        BigDecimal.valueOf(vomma));
+        BigDecimal.valueOf(vomma),
+        BigDecimal.valueOf(speed),
+        BigDecimal.valueOf(zomma),
+        BigDecimal.valueOf(color));
   }
 
   /** The Newton denominator: dPrice/dSigma per 1.0 of vol, NOT the per-point reporting vega. */

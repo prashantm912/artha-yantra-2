@@ -58,7 +58,7 @@ class Black76EdgeCorpusTest {
       for (BigDecimal value :
           new BigDecimal[] {
             g.price(), g.delta(), g.gamma(), g.theta(), g.vega(), g.rho(),
-            g.vanna(), g.charm(), g.vomma()
+            g.vanna(), g.charm(), g.vomma(), g.speed(), g.zomma(), g.color()
           }) {
         assertThat(value).as("finite at T=%s", t).isNotNull();
         // BigDecimal.valueOf(NaN/Infinity) would have thrown — reaching here proves finiteness

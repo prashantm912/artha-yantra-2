@@ -1203,7 +1203,7 @@ public class OptionsAnalyticsController {
     OptionsChainService.Leg leg =
         new OptionsChainService.Leg(
             null, p.ltp(), null, null, p.volume(), p.oi(), null, p.iv(),
-            null, null, null, null, null, null, null, null, null, null);
+            null, null, null, null, null, null, null, null, null, null, null, null, null);
     return new ChainTableLeg(leg, deltas.get(deltaKey(strike, optionType)));
   }
 

@@ -389,6 +389,69 @@
         }
       }
     },
+    "/api/v1/market/screener/minervini/swing-backtest" : {
+      "get" : {
+        "tags" : [ "minervini-controller" ],
+        "operationId" : "swingBacktest",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Report"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post" : {
+        "tags" : [ "minervini-controller" ],
+        "operationId" : "triggerSwingBacktest",
+        "parameters" : [ {
+          "name" : "years",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Report"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/screener/minervini/run" : {
       "post" : {
         "tags" : [ "minervini-controller" ],
@@ -5805,6 +5868,76 @@
           },
           "subscriber" : {
             "type" : "string"
+          }
+        }
+      },
+      "Report" : {
+        "type" : "object",
+        "properties" : {
+          "status" : {
+            "type" : "string"
+          },
+          "fromDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "runAt" : {
+            "type" : "string"
+          },
+          "symbolsScanned" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "totalTrades" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "setups" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SetupStat"
+            }
+          },
+          "note" : {
+            "type" : "string"
+          }
+        }
+      },
+      "SetupStat" : {
+        "type" : "object",
+        "properties" : {
+          "setup" : {
+            "type" : "string"
+          },
+          "trades" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "wins" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "losses" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "winRatePct" : {
+            "type" : "number"
+          },
+          "avgWinPct" : {
+            "type" : "number"
+          },
+          "avgLossPct" : {
+            "type" : "number"
+          },
+          "payoffRatio" : {
+            "type" : "number"
+          },
+          "expectancyPct" : {
+            "type" : "number"
+          },
+          "avgBarsHeld" : {
+            "type" : "number"
           }
         }
       },

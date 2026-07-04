@@ -68,6 +68,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/screener/minervini/swing-backtest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["swingBacktest"];
+        put?: never;
+        post: operations["triggerSwingBacktest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/screener/minervini/run": {
         parameters: {
             query?: never;
@@ -1872,6 +1888,33 @@ export interface components {
             priority?: string;
             subscriber?: string;
         };
+        Report: {
+            status?: string;
+            /** Format: date */
+            fromDate?: string;
+            runAt?: string;
+            /** Format: int32 */
+            symbolsScanned?: number;
+            /** Format: int32 */
+            totalTrades?: number;
+            setups?: components["schemas"]["SetupStat"][];
+            note?: string;
+        };
+        SetupStat: {
+            setup?: string;
+            /** Format: int32 */
+            trades?: number;
+            /** Format: int32 */
+            wins?: number;
+            /** Format: int32 */
+            losses?: number;
+            winRatePct?: number;
+            avgWinPct?: number;
+            avgLossPct?: number;
+            payoffRatio?: number;
+            expectancyPct?: number;
+            avgBarsHeld?: number;
+        };
         Row: {
             symbol?: string;
             exchange?: string;
@@ -3422,6 +3465,66 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    swingBacktest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["Report"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    triggerSwingBacktest: {
+        parameters: {
+            query?: {
+                years?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["Report"];
+                };
             };
             /** @description Error envelope (COMMON 8.3) */
             default: {

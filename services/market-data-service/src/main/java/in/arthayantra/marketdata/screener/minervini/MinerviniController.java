@@ -100,21 +100,24 @@ public class MinerviniController {
   private final MinerviniSetupsRepository setupsRepo;
   private final MinerviniFunnelService funnelService;
   private final MinerviniHitRateService hitRateService;
+  private final MinerviniBacktestService backtestService;
 
-  /** Wires the screener + screen/geometry repositories + the funnel + hit-rate services. */
+  /** Wires the screener + screen/geometry repositories + the funnel + hit-rate + backtest services. */
   public MinerviniController(
       TrendTemplateService screener,
       MinerviniScreenRepository repo,
       MinerviniGeometryService geometryService,
       MinerviniSetupsRepository setupsRepo,
       MinerviniFunnelService funnelService,
-      MinerviniHitRateService hitRateService) {
+      MinerviniHitRateService hitRateService,
+      MinerviniBacktestService backtestService) {
     this.screener = screener;
     this.repo = repo;
     this.geometryService = geometryService;
     this.setupsRepo = setupsRepo;
     this.funnelService = funnelService;
     this.hitRateService = hitRateService;
+    this.backtestService = backtestService;
   }
 
   /** Serves the persisted daily screen (default = latest date, passers only). */
@@ -239,6 +242,47 @@ public class MinerviniController {
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
       @RequestParam(required = false) Integer step) {
     return hitRateService.run(from, to, step);
+  }
+
+  /**
+   * The SWING backtest — a faithful event-driven replay of the 4 setups (VCP-pivot entry + 8%-stop /
+   * 50d-MA-trail exit) over ~11y of {@code candles}@1d, giving trade-level win-rate / payoff /
+   * expectancy that the buy-and-hold hit-rate harness cannot. Compute is minutes, so POST kicks it off
+   * on a background thread (returns the {@code running} report); GET reads the latest result.
+   */
+  @PostMapping("/swing-backtest")
+  public MinerviniBacktestService.Report triggerSwingBacktest(
+      @RequestParam(required = false) Integer years) {
+    backtestService.trigger(years);
+    return latestOrIdle();
+  }
+
+  /** The latest swing-backtest report (or an {@code idle} placeholder before the first run). */
+  @GetMapping("/swing-backtest")
+  public MinerviniBacktestService.Report swingBacktest() {
+    return latestOrIdle();
+  }
+
+  /**
+   * The latest A/B comparison of the swing backtest: v1 (technical-only) vs v2 (adds the real
+   * cross-sectional RS-rank gate + a turnover/liquidity floor). Shows whether the RS + tradability
+   * filter actually sharpens the edge over the raw setup mechanics.
+   */
+  @GetMapping("/swing-backtest/compare")
+  public MinerviniBacktestService.Compare swingBacktestCompare() {
+    MinerviniBacktestService.Compare c = backtestService.latestCompare();
+    return c != null
+        ? c
+        : new MinerviniBacktestService.Compare(
+            "idle", null, null, null, null, "no backtest run yet");
+  }
+
+  private MinerviniBacktestService.Report latestOrIdle() {
+    MinerviniBacktestService.Report r = backtestService.latest();
+    return r != null
+        ? r
+        : new MinerviniBacktestService.Report(
+            "idle", null, null, null, 0, 0, List.of(), "no backtest run yet");
   }
 
   private static Row toRow(TrendCandidate c) {

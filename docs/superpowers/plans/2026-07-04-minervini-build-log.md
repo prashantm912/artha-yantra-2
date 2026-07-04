@@ -138,3 +138,27 @@ non-passer still gets a base read). `MapReturnRatchet` unaffected (typed record)
 
 **Deferred (Phase 6+):** the 6 setup pass/fail signals, `session.style=swing`, swing paper/backtest/live,
 selling discipline, analyzers. Also MV-4.4 (React analyzer page consuming `/candidate`) — a follow-up FE PR.
+
+---
+
+## Phase 6 — recon complete + build-spec (not yet built)
+
+A 4-agent parallel recon mapped the parity-critical subsystems Phase 6 touches (engine indicator
+registry + frozen vectors, `session.style`/square-off/goldens, strategy registry + `scalper_detail`
+V009 side-channel, paper/auto-paper/exits). Captured as an exact file:line, parity-safe build recipe:
+**`docs/superpowers/plans/2026-07-04-minervini-phase6-build-spec.md`**.
+
+**Key correction the recon forced:** MV-6.1's real deliverable is the **context-value family**
+(`VCP_PIVOT`/`VCP_STAGE`/`RS_RANK_PCT`/`TREND_TEMPLATE_PASS`, all `contextLevel` reads of a
+screener-seeded series), NOT `WEEK52_HIGH/LOW` — the 52-week band is a Track-A screener gate injected
+as context, never re-evaluated in the engine; the setups gate on the breakout (`close > VCP_PIVOT`).
+
+**Recommended PR sequence:** PR-E `session.style=swing` engine keystone (schema + `SessionGate` swing
+gate + `intervalDuration("1d")` + `ROLLABLE_PRIMARIES += 1d`, proven by a minimal `golden-minervini/`
+swing fixture; existing goldens byte-identical) → PR-F `vcp` setup + context-values + `minervini_detail`
+V020 → PR-G the other 4 setups + funnel + regime → Phase 7+ paper/backtest/live/selling.
+
+**Not built here** because Phase 6's first shippable unit (the `vcp` setup) is an integrated,
+parity-sensitive slice with subjective per-setup thresholds — it needs owner setup-priority input (see
+build-spec §3) and is built in one focused pass, not an unattended partial merge. Phase-5 geometry
+(#528) remains the deployed Track-B state.

@@ -1,0 +1,43 @@
+# Minervini Power Play (high-tight flag) — live swing long (Phase-9 MV-9.1). The SAME VCP-pivot
+# breakout as the vcp setup, GATED by a prior-thrust precondition (a +100% move in <8 weeks before the
+# base). VCP_PIVOT + THRUST are seeded per-symbol from Phase-5 geometry. Universe = the SEPA funnel;
+# exit doctrine = 8% stop then the 50-day-MA trail. Paper-only (auto-paper) until the reliability bar.
+schema: strategy-schema/v1
+id: minervini-power-play
+name: "Minervini Power Play"
+version: 1.0.0
+description: >-
+  SEPA swing long: buy the VCP-pivot breakout ONLY when a prior +100%/<8wk thrust precedes the
+  base; protect with an 8% stop then trail the 50-day MA. Universe = the daily SEPA funnel.
+author: owner
+tags: [minervini, swing, equity, power-play]
+universe:
+  mode: minervini_funnel
+  bucket: buyable_on_deck
+timeframes: { primary: 1d }
+# Gate-only setup (see minervini-vcp for the scoring rationale): only `vol` scores (linear 0→3), all
+# other indicators are gate/exit inputs at weight 0.0.
+indicators:
+  - { name: SMA, alias: px, timeframe: 1d, params: { period: 1 }, weight: 0.0 }
+  - { name: SMA, alias: sma50, timeframe: 1d, params: { period: 50 }, weight: 0.0 }
+  - { name: VOLUME_RATIO, alias: vol, timeframe: 1d, params: { lookback: 20 }, weight: 1.0,
+      normalize: { type: linear, from: 0, to: 3 } }
+  - { name: VCP_PIVOT, alias: pivot, timeframe: 1d, weight: 0.0,
+      instrument: { exchange: NSE, tradingsymbol: "MINERVINI_PIVOT" } }
+  - { name: THRUST, alias: thrust, timeframe: 1d, weight: 0.0,
+      instrument: { exchange: NSE, tradingsymbol: "MINERVINI_THRUST" } }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - crossover: { fast: px, slow: pivot }
+      - "vol > 1.2"
+      - "thrust > 0"
+  scoring: { threshold: 0.1 }
+exit_rules:
+  - { type: stop_loss, params: { basis: percent, value: 8 } }           # MV-7.2 initial protective stop
+  - { type: trailing_stop, params: { basis: indicator, alias: sma50 } } # MV-7.4 50-day-MA close-below trail
+risk:
+  position_sizing: { method: percent_equity, params: { percent: 5 } }
+  max_positions: 10
+  session: { style: swing }

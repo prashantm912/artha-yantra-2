@@ -15,9 +15,21 @@ import java.util.Set;
  */
 public final class IndicatorRegistry {
 
-  /** One registry entry. */
+  /**
+   * One registry entry. {@code requiresContext} = the indicator reads a second (context) series via
+   * the A7 {@code instrument} override. {@code seeded} = that context is injected at RUNTIME by a
+   * producer (Phase-9 Minervini geometry: {@code VCP_PIVOT}/{@code CHEAT_PIVOT}/{@code THRUST}) rather
+   * than resolved from the instruments master — so the publish-time "context instrument must exist"
+   * gate does NOT apply (its {@code instrument} is a sentinel key, not a tradeable instrument).
+   */
   public record Definition(
-      String id, String description, Set<String> params, boolean requiresContext) {}
+      String id, String description, Set<String> params, boolean requiresContext, boolean seeded) {
+
+    /** A non-seeded entry: any context override names a REAL market instrument (e.g. INDIA VIX). */
+    public Definition(String id, String description, Set<String> params, boolean requiresContext) {
+      this(id, description, params, requiresContext, false);
+    }
+  }
 
   @FunctionalInterface
   private interface Factory {
@@ -155,7 +167,7 @@ public final class IndicatorRegistry {
     // as VIX_LEVEL; NEUTRAL/absent in replay unless a pivot series is seeded (the gate then fails safe).
     register(
         new Definition(
-            "VCP_PIVOT", "VCP pivot / line of least resistance (context-seeded)", Set.of(), true),
+            "VCP_PIVOT", "VCP pivot / line of least resistance (context-seeded)", Set.of(), true, true),
         (s, c, p) -> SessionIndicators.contextLevel(s, c));
     // Minervini MV-6.6 (primary-base): trailing high/low over `period` PRIOR bars (excludes current)
     // — the resistance/support a new-high/low breakout must clear. period=252 ≈ 52-week on a 1d primary.
@@ -170,10 +182,12 @@ public final class IndicatorRegistry {
     // THRUST = 1.0 when the base sits atop a prior +100%/<8wk thrust (§6.5 power-play precondition),
     // else 0.0. Both NEUTRAL/absent in replay unless seeded → the gate fails safe.
     register(
-        new Definition("CHEAT_PIVOT", "Cheat-area pause high (context-seeded)", Set.of(), true),
+        new Definition("CHEAT_PIVOT", "Cheat-area pause high (context-seeded)", Set.of(), true, true),
         (s, c, p) -> SessionIndicators.contextLevel(s, c));
     register(
-        new Definition("THRUST", "Prior-thrust flag: 1.0 when a power-play thrust precedes the base", Set.of(), true),
+        new Definition(
+            "THRUST", "Prior-thrust flag: 1.0 when a power-play thrust precedes the base",
+            Set.of(), true, true),
         (s, c, p) -> SessionIndicators.contextLevel(s, c));
   }
 
@@ -187,6 +201,16 @@ public final class IndicatorRegistry {
   /** True when the registry knows the id (the Q2 save/publish existence check). */
   public static boolean exists(String name) {
     return DEFINITIONS.containsKey(name);
+  }
+
+  /**
+   * True when the indicator's context series is injected at runtime by a producer (Minervini
+   * geometry seeding) rather than resolved from the instruments master — so its {@code instrument}
+   * override is a sentinel key and the publish-time "context instrument must exist" gate is skipped.
+   */
+  public static boolean isSeeded(String name) {
+    Definition d = DEFINITIONS.get(name);
+    return d != null && d.seeded();
   }
 
   /** All known ids in registration order (advisory enum source, editor autocomplete). */

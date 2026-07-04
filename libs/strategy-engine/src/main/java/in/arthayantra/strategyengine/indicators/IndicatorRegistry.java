@@ -150,6 +150,13 @@ public final class IndicatorRegistry {
             "Intraday advance/decline breadth (the context-series close)",
             Set.of(), true),
         (s, c, p) -> SessionIndicators.contextLevel(s, c));
+    // Minervini Track-B (MV-6.1): the VCP pivot level (Phase-5 geometry) seeded into the engine as a
+    // context series — the buy trigger a swing setup breaks out above. Same context-close mechanism
+    // as VIX_LEVEL; NEUTRAL/absent in replay unless a pivot series is seeded (the gate then fails safe).
+    register(
+        new Definition(
+            "VCP_PIVOT", "VCP pivot / line of least resistance (context-seeded)", Set.of(), true),
+        (s, c, p) -> SessionIndicators.contextLevel(s, c));
   }
 
   private IndicatorRegistry() {}

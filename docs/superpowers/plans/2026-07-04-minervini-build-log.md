@@ -192,3 +192,34 @@ would be speculative.
 **Next (PR-F, owner-approved `vcp`-first):** `vcp` setup YAML (MV-6.3) + the context-value indicators
 (MV-6.1: `VCP_PIVOT`/`VCP_STAGE`/`RS_RANK_PCT`/`TREND_TEMPLATE_PASS`) + `minervini_detail` V020 (MV-6.8)
 + a seeded-context replay fixture + a firing golden — the first end-to-end setup.
+
+---
+
+## PR-F — Phase 6: the `vcp` breakout setup (first end-to-end Minervini entry)  (verified, awaiting CI)
+
+The first real setup: a swing (daily-primary) long entry that fires as the close breaks out above the
+Phase-5 VCP pivot on expanding volume. Builds on the PR-E swing keystone.
+
+| MV item | What | Status | Evidence |
+|---|---|---|---|
+| MV-6.1 | `VCP_PIVOT` context indicator (`contextLevel` alias; the Phase-5 buy trigger seeded into the engine) | PARTIAL — VCP_PIVOT DONE | `IndicatorVectorTest` frozen vector; `RegistryAndSeriesTest` freeze + schema enum synced |
+| MV-6.3 | `vcp` setup `minervini-vcp.yaml` — `crossover(px, pivot)` (breakout + don't-chase in one) AND `vol>1.2` (expanding) AND `close>sma20` (health); swing 1d | DONE | `VcpSetupTest`: fires once on the breakout WITH volume; 0 entries WITHOUT (the crossover fires but the volume gate blocks it) |
+
+**The gate-grammar insight:** the rule DSL is comparisons + crossover only (no arithmetic), so
+`crossover(px, pivot)` elegantly encodes BOTH "buy the breakout" AND "don't chase an already-extended
+move" — the crossover fires only on the bar the close crosses above the pivot, never when already far
+above. No `pivot*1.10` arithmetic needed.
+
+**Parity:** all 9 golden + 9 replay-parity vectors byte-identical; strategy-engine 125/125, strategy-schema
+63/63. `VCP_PIVOT` is a pure additive registry entry; the vcp YAML is a NEW definition nothing else
+references — no frozen output moved.
+
+**Deferred (correct scope):** the `~7-8%` flat stop + staggered/sell-into-strength exits (need a
+flat-percent exit basis + a multi-leg executor the engine lacks) → **Phase 7 / MV-7.2-7.4** (interim
+`atr_multiple` stop used). `minervini_detail` V020 side-channel (MV-6.8) + the live screener→engine
+context-seeding producer → **Phase 9** with the live swing operation (their only consumer). The
+replay-parity golden for the vcp setup rides **Phase 8 / MV-8.3**.
+
+**Next (PR-G):** the remaining setups (`cheat_3c`/`power_play`/`primary_base`, MV-6.4/5/6), the `sepa`
+funnel 3-list (MV-6.7, + `RS_RANK_PCT`/`TREND_TEMPLATE_PASS` context-values), and the regime/group gates
+(MV-6.9).

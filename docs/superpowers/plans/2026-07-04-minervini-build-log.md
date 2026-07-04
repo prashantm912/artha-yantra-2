@@ -81,3 +81,25 @@ P/E x net-profit; free-float mcap = market_cap x free-float%/100.
 owner's priority. Full-universe fundamentals load = later with owner (this PR loaded 4 test symbols).
 
 **Next:** PR-C — React screener + analyzer page (Phase 4), consuming the live endpoint.
+
+---
+
+## PR-C — Phase 4: React Minervini screener page  (verified, awaiting CI)
+
+The screener is now visible + usable in the UI (Track A end-to-end).
+
+| MV item | What | Status | Evidence |
+|---|---|---|---|
+| MV-4.1 | `MinerviniScreenerPage.tsx` (`/equity/minervini`) — table: symbol, close, RS, Stage, %from-high/above-low, **8 gate chips** (hover=gate meaning), free-float mcap/%, Recompute button | DONE | lint clean + tsc-strict build OK |
+| MV-4.2 | `api/minervini.ts` hook + route (App.tsx) + MegaMenu "Equity -> Minervini Screener" | DONE | deployed; endpoint serves real screen via gateway |
+
+**Live-verified:** frontend deployed; the page's data source (`GET /api/v1/market/screener/minervini`)
+returns the real 2026-07-03 screen through the gateway — 1,590 scanned, top passers STLTECH (rs 100,
+stage 2, 8/8), SANGINITA, BHAGYANGR, HFCL, BLISSGVS. Owner: hard-reload (Ctrl+Shift+R) to see it.
+
+**Track A COMPLETE** (screener + fundamentals + UI): #524 + #525 + this. The owner can find the daily
+low-cap momentum candidates end-to-end. Low-cap gate + full fundamentals load are config-flag/owner-run.
+
+**Deferred (Track B, larger):** per-candidate analyzer detail + charts (MV-4.4), VCP/Stage detectors
+(Phase 5), the 6 setup pass/fail signals (Phase 6), swing paper/backtest/live (Phases 7-9). These are
+a fresh multi-PR effort — best tackled with the owner (setup priority + reliability process).

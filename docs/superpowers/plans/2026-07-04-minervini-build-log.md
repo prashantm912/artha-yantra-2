@@ -294,3 +294,18 @@ the context-seeding producer — same staging as `VCP_PIVOT`. Thresholds config-
 Test-only (no production code — the engine already handled swing). MV-8.4 (equity-class `CostConfig`:
 delivery brokerage/STT vs option lots) is a later cost-accuracy refinement — the backtest runs with
 default costs today.
+
+---
+
+## PR-M — Phase 7: flat-percent initial stop (MV-7.2 partial)  (verified, awaiting CI)
+
+| MV item | What | Status | Evidence |
+|---|---|---|---|
+| MV-7.2 | flat-`percent` exit basis (= entry×value%, a clear equity alias of the `premium_pct` formula) + schema enum; all 4 setups wired to `{basis: percent, value: 8}` (the locked 7–8% initial stop) | PARTIAL | setups still fire; `SwingBacktestTest` now exits on the 8% stop (multi-day trade); 9 golden vectors byte-identical; strategy-schema 63/63 |
+
+The locked single initial stop + `percent_equity` 5% sizing are in place. **Phase-7 remainder (a distinct
+focused pass — parity + paper-money critical):** the **staggered-stop / scaled-out partial-close
+executor** (MV-7.3/7.4 — the paper ledger currently does full closes; partial closes touch the ledger +
+`ExitEvaluator` + the golden format), the swing paper hold-lifecycle + auto-paper (MV-7.1/7.5, mostly
+free per §1d of the build-spec — intraday square-off is already style-scoped), and the 50d-MA trail
+(`trailing_stop`+`SMA(50)` config, warms ≥50 daily bars).

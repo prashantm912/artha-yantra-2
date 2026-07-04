@@ -38,7 +38,7 @@ entry_rules:
       - "px > sma20"
   scoring: { threshold: 0.0 }
 exit_rules:
-  - { type: stop_loss, params: { basis: atr_multiple, value: 3 } }
+  - { type: stop_loss, params: { basis: percent, value: 8 } } # Minervini MV-7.2 initial stop (7-8%)
 risk:
   position_sizing: { method: percent_equity, params: { percent: 5 } }
   max_positions: 1

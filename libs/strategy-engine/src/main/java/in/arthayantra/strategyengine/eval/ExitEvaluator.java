@@ -234,7 +234,9 @@ public final class ExitEvaluator {
       return null;
     }
     return switch (basis) {
-      case "premium_pct" ->
+      case "premium_pct", "percent" ->
+          // percent-of-entry-price distance: premium_pct on an option leg, percent on cash equity
+          // (Minervini MV-7.2 initial stop, e.g. 8% below entry). Same formula, clearer name.
           position.entryPrice().multiply(value, EngineMath.MC).divide(EngineMath.HUNDRED, EngineMath.MC);
       case "atr_multiple" -> {
         BigDecimal atr = atrAtEntry(series, position, params);

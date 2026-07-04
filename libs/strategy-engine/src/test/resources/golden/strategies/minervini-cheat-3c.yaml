@@ -1,0 +1,33 @@
+# Minervini Cheat (3-C) setup (MV-6.4, §6.3). A swing long that enters EARLY — as the close breaks
+# out above the cheat-area pause high (the C of the A-B-C-D turn), a lower/earlier trigger than the
+# final VCP pivot. crossover(px, cheat) fires only on the breakout bar; vol>1.2 confirms. The cheat
+# level (CHEAT_PIVOT) is the cheat-pause high from Phase-5 geometry, seeded per-symbol; NEUTRAL in
+# replay unless seeded, so it never fires on unseeded history. Thresholds config-tunable, chart-verify.
+schema: strategy-schema/v1
+id: minervini-cheat-3c
+name: "Minervini Cheat (3-C)"
+version: 1.0.0
+universe:
+  mode: explicit
+  instruments:
+    - { exchange: NSE, tradingsymbol: "NIFTY 50" }
+timeframes: { primary: 1d }
+indicators:
+  - { name: SMA, alias: px, timeframe: 1d, params: { period: 1 }, weight: 1.0,
+      normalize: { type: linear, from: 0, to: 100000 } }
+  - { name: VOLUME_RATIO, alias: vol, timeframe: 1d, params: { lookback: 20 }, weight: 1.0 }
+  - { name: CHEAT_PIVOT, alias: cheat, timeframe: 1d, weight: 0.0,
+      instrument: { exchange: NSE, tradingsymbol: "MINERVINI_CHEAT" } }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - crossover: { fast: px, slow: cheat }
+      - "vol > 1.2"
+  scoring: { threshold: 0.0 }
+exit_rules:
+  - { type: stop_loss, params: { basis: atr_multiple, value: 3 } }
+risk:
+  position_sizing: { method: percent_equity, params: { percent: 5 } }
+  max_positions: 1
+  session: { style: swing }

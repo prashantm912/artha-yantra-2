@@ -145,7 +145,7 @@ cutover) is now the ONLY remaining pending wave** — prepped, gated on a live m
 
 | Item | Status | Target | Reason |
 |---|---|---|---|
-| §6 higher-order greeks (vanna/charm/vomma) | **DONE (#156)** | — | Added to `black76-math` (closed-form, FD-cross-checked golden vectors) + surfaced on the option chain (`Leg.vanna/charm/vomma`, live-only/additive, no migration). First-order set byte-identical. Remaining second-order greeks (speed/zomma/color) un-built — add when a consumer needs them. |
+| §6 higher-order greeks (vanna/charm/vomma) | **DONE (#156)** | — | Added to `black76-math` (closed-form, FD-cross-checked golden vectors) + surfaced on the option chain (`Leg.vanna/charm/vomma`, live-only/additive, no migration). First-order set byte-identical. **Third-order gamma-sensitivity greeks (speed/zomma/color) added + FD-verified on `black76-math` + the chain `Leg` (#511, 2026-07-04)** — the "un-built" note was stale; nothing higher-order remains un-built. |
 
 ## Phase 3 — Scalper engine (MERGED, PR #42)
 
@@ -159,7 +159,7 @@ cutover) is now the ONLY remaining pending wave** — prepped, gated on a live m
 | **OpenAlgoOrderGateway** (live broker order impl) | **BUILT (dormant, #154)** | owner arms after the latency gate | `RestOpenAlgoOrderGateway` → OpenAlgo `POST /api/v1/placeorder` (verified vs checkout), WireMock-tested, gateway-failure-never-propagates; bound **only** when `artha.scalper.execution=live` (default `paper` ⇒ `DisabledOrderGateway` places nothing). Owner arms it after the §17.3 place-ack latency gate; never auto-fires. |
 | **§18.1 order read endpoints** (orderbook/positions/tradebook/funds) + React `/orders` page | **BUILT (dormant, #131)** | live-verify | OpenAlgo `openalgo/wire/` anti-corruption DTOs + gated `RestOpenAlgoOrderReadGateway` + `GET /api/v1/orders/*` + read-only `/orders` page, WireMock-tested, ships off (`artha.openalgo.order-read-enabled=false`). Live-broker verify deferred. |
 | **Full-auto execution** (no human "Take") | DEFERRED | a later flag | Semi-auto (human "Take") is the v1 safety boundary. |
-| **Manual-verification checklist UI** (verify + confirm panel) | **DONE** (#125) | — | React `ManualVerifyChecklist` on `/signals` + `/scalper` (soft-warning + override gating, the 7 V009 checks + confluence dots, client-only). |
+| **Manual-verification checklist UI** (verify + confirm panel) | **DONE** (#125) | — | React `ManualVerifyChecklist` on `/signals` + `/scalper` (soft-warning + override gating, the V009 manual checks — 16 as of 2026-06-27 — + confluence dots, client-only). |
 | **Per-check server audit** (which boxes ticked) | DEFERRED | only if an override/exception trail is needed | Would add a `TakenRequest` field (request-schema drift + TS regen). |
 | **Historical scalp backtests** | **DONE (functional, #226–#229)** | forward-paper tuning (2c) | The 36 instrument-agnostic scalper variants run full-window functional backtests on the complete §5 expired-premium archive (36/36 green, #229) — signal on NIFTY-FUT-CONT, premium-as-primary, three-way decoupled. Returns are functional-screening only (NOT tradeable / overfit); OI-led variants read MUTED on history. Final tuning is on FORWARD paper. |
 
@@ -209,9 +209,9 @@ mega-dropdown split into a per-section menu bar** (#177). Authority for the reva
 
 | Item | Status | Target | Reason |
 |---|---|---|---|
-| `backfill_jobs` audit table (run history surviving a restart) | DEFERRED | if run history is wanted | B1 status is in-memory (resets on restart); covers the live need today. |
+| `backfill_jobs` audit table (run history surviving a restart) | **DONE (#517)** | — | V030 `backfill_jobs` run-audit table (kind/params/status/rows_written/error/timings) + `GET /api/v1/market/admin/backfill-jobs` (typed) + Status-page history — survives restart. |
 | B6 per-expiry bulk export + ZIP/Parquet (async streaming) | DEFERRED | when bulk export is needed | v1 is per-contract CSV/JSON (≤100k rows, sync); per-expiry is ~1.3M rows. B5 query console covers arbitrary slices meanwhile. |
-| Contract-type selector in the collection wizard | DEFERRED | only if a CE/PE/FUT filter is wanted | The `expired-backfill` trigger has no contract-type field — it pulls options + futures together. |
+| Contract-type selector in the collection wizard | **DONE (#517)** | — | BOTH/OPTIONS/FUTURES selector on the Collection wizard (default BOTH → byte-identical to the old options+futures pull). |
 | B1 live updates via STOMP (vs the 2s poll) | DEFERRED | consistency polish | A small poll is simpler; the jobs WS topic is backtest-scoped. |
 
 ## Cross-cutting / legacy parking (lower-priority hardening, from Stage A–G)
@@ -220,7 +220,7 @@ mega-dropdown split into a per-section menu bar** (#177). Authority for the reva
 |---|---|---|---|
 | B-9 binary-frame guard production wiring | DEFERRED | when Kite changes its wire format / a first-party WS client | javakiteconnect exposes no raw-frame hook; today's coverage = the daily contract canary + fixture-pinned envelope tests. |
 | `instruments.exchange_token` population | **DONE (#387)** | — | `exchange_token` now threaded wire→domain→DB (`InstrumentRecord` field + Live/Mock dump parsers + `setLong(4, …)`); nullable BIGINT, no migration. |
-| `candles_1h` IST alignment (buckets to UTC = :30 IST) | DEFERRED | before a 1h chart/overlay consumer | Re-anchoring means dropping/recreating the cagg. |
+| `candles_1h` IST alignment (buckets to UTC = :30 IST) | **DONE (#513, V029)** | — | Dropped + recreated `candles_1h` with `time_bucket('1 hour', bucket, 'Asia/Kolkata')` (matches the 1d/1w IST siblings), `WITH NO DATA` + refresh policy so the live DB does no heavy one-shot materialization. |
 | Options fidelity live walk (SNAPSHOT / SYNTHETIC_B76) | DEFERRED | first live-mode options session | IT-green; needs a real options archive + a multi-month window the mock can't supply. |
 | Walk-forward folds + fold-fed MedianPruner live walk | DEFERRED | a real multi-month dataset | Can't be shown on the ~3-day rolling mock window. |
 | ~~`requirements.txt` hash-pinning (optimizer)~~ | **DONE** | — | `requirements.lock`/`requirements-dev.lock` via `uv pip compile --generate-hashes`; Dockerfile + `ci-optimizer.yml` both `--require-hashes` (2026-07-04 audit — stale row, do not re-flag). |

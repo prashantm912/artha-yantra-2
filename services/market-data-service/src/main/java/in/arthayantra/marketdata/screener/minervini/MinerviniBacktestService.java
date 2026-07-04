@@ -96,7 +96,11 @@ public class MinerviniBacktestService {
       BigDecimal avgMonthPct,
       List<YearReturn> annual) {}
 
-  /** One variant's full backtest report — per-setup trade stats + the portfolio equity stats. */
+  /**
+   * One variant's full backtest report — per-setup trade stats + the portfolio equity stats under
+   * BOTH slot-allocation policies: {@code portfolio} fills slots first-come (FIFO), {@code
+   * portfolioRsPriority} lets the strongest names claim scarce slots (RS-rank priority).
+   */
   public record Report(
       String status,
       String variant,
@@ -106,6 +110,7 @@ public class MinerviniBacktestService {
       int totalTrades,
       List<SetupStat> setups,
       PortfolioStat portfolio,
+      PortfolioStat portfolioRsPriority,
       String note) {}
 
   /** The full multi-variant result: technical / rs-only / turnover-only / rs+turnover, side by side. */
@@ -208,7 +213,7 @@ public class MinerviniBacktestService {
     } catch (RuntimeException e) {
       log.error("minervini swing backtest failed: {}", e.getMessage(), e);
       LocalDate from = from(years);
-      latest = new Report("failed", PRIMARY_VARIANT, from, null, 0, 0, List.of(), null, e.getMessage());
+      latest = new Report("failed", PRIMARY_VARIANT, from, null, 0, 0, List.of(), null, null, e.getMessage());
       latestResult = new BacktestResult("failed", from, null, List.of(), e.getMessage());
     } finally {
       running.set(false);
@@ -216,7 +221,8 @@ public class MinerviniBacktestService {
   }
 
   private static Report running(String variant, LocalDate from) {
-    return new Report("running", variant, from, null, 0, 0, List.of(), null, "backtest in progress");
+    return new Report(
+        "running", variant, from, null, 0, 0, List.of(), null, null, "backtest in progress");
   }
 
   /** Runs all four variants over {@code [from, now]} in one pass. Package-visible for tests. */
@@ -309,13 +315,15 @@ public class MinerviniBacktestService {
     }
     List<SetupStat> stats = new ArrayList<>();
     bySetup.forEach((setup, trades) -> stats.add(aggregate(setup, trades)));
-    PortfolioStat portfolio = portfolio(bySetup.get("ALL"));
-    return new Report("completed", variant, from, runAt, scanned, total, stats, portfolio, null);
+    List<BtTrade> allTrades = bySetup.get("ALL");
+    PortfolioStat fifo = portfolio(allTrades, false);
+    PortfolioStat rsPriority = portfolio(allTrades, true);
+    return new Report("completed", variant, from, runAt, scanned, total, stats, fifo, rsPriority, null);
   }
 
-  /** Runs the slot-limited portfolio over a variant's combined trade stream. */
-  private PortfolioStat portfolio(List<BtTrade> trades) {
-    SwingPortfolio.Result r = SwingPortfolio.simulate(trades, slots);
+  /** Runs the slot-limited portfolio over a variant's combined trade stream (FIFO or RS-priority). */
+  private PortfolioStat portfolio(List<BtTrade> trades, boolean rsPriority) {
+    SwingPortfolio.Result r = SwingPortfolio.simulate(trades, slots, rsPriority);
     List<YearReturn> annual =
         r.annual().stream().map(y -> new YearReturn(y.year(), bd2(y.returnPct()), y.trades())).toList();
     return new PortfolioStat(

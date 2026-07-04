@@ -84,6 +84,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/backtests/{backtestId}/report-card": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["reportCard"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/backtests/{backtestId}/oi-attribution": {
         parameters: {
             query?: never;
@@ -230,6 +246,22 @@ export interface components {
             purpose?: string;
         };
         JsonNode: unknown;
+        SwingReportCard: {
+            /** Format: int32 */
+            trades?: number;
+            /** Format: int32 */
+            wins?: number;
+            /** Format: int32 */
+            losses?: number;
+            battingAvgPct?: number;
+            avgWinPct?: number;
+            avgLossPct?: number;
+            payoffRatio?: number;
+            expectancyPct?: number;
+            avgBarsHeld?: number;
+            meetsReliabilityBar?: boolean;
+            grade?: string;
+        };
         ErrorResponse: {
             code?: string;
             message?: string;
@@ -408,6 +440,37 @@ export interface operations {
                     "*/*": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    reportCard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                backtestId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["SwingReportCard"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

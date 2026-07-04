@@ -1,5 +1,9 @@
 ﻿# Strategy Cheat Sheet — Step-by-Step Execution
 
+> **⚠ SUPERSEDED (2026-06-29) — historical.** Current execution guidance lives in the operative doc
+> (`../options-scalper-siva-operative/Options_Scalper_Siva_Operative_Strategy.md`). Retained for
+> provenance only; do not edit for forward work.
+
 > **What this is:** A ready-reference execution checklist for all **12 strategies** (Session 20 + the **Session 21 "Live Scalping 2024"**, **Session 22 "Live Mentoring Prog 2.0 2024"**, **Session 23 "Sensex Scalping with Siva 2025"** and **Session 24 "Big 5 Anniversary — Live Decoding 21 Days 2025"** refinements; **Session 22 adds the Straddle**, **Session 23 adds Trend Change** + a Sensex-scalping focus; **Session 24 adds no new strategy** — a 21-day live re-decoding that confirms S20–23 and sharpens Open=High into a fully-chasable system). Pure algorithm — no terminology, theory, or rationale. **Read [`Options_Scalper_Siva_Consolidated_Strategy.md`](Options_Scalper_Siva_Consolidated_Strategy.md) first** — this assumes you already know every term, indicator, and OI/IV/VIX concept used below. Items tagged **[S21]** / **[S22]** / **[S23]** / **[S24]** are Session-21 / -22 / -23 / -24 additions/refinements.
 >
 > **How to use:** Run **§0 Pre-Flight** on every trade, then jump to the strategy. Each strategy lists only what is *specific or overriding* relative to §0.

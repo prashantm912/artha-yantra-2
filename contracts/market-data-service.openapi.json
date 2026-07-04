@@ -389,6 +389,67 @@
         }
       }
     },
+    "/api/v1/market/screener/minervini/run" : {
+      "post" : {
+        "tags" : [ "minervini-controller" ],
+        "operationId" : "run",
+        "parameters" : [ {
+          "name" : "asOf",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        }, {
+          "name" : "passesAllOnly",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "boolean",
+            "default" : true
+          }
+        }, {
+          "name" : "minRsRank",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "number"
+          }
+        }, {
+          "name" : "limit",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 50
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ScreenResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/options/stock-chain/warm" : {
       "get" : {
         "tags" : [ "stock-chain-warm-controller" ],
@@ -1304,6 +1365,76 @@
                 "schema" : {
                   "type" : "object",
                   "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/screener/minervini" : {
+      "get" : {
+        "tags" : [ "minervini-controller" ],
+        "operationId" : "get_1",
+        "parameters" : [ {
+          "name" : "asOf",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        }, {
+          "name" : "passesAllOnly",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "boolean",
+            "default" : true
+          }
+        }, {
+          "name" : "minRsRank",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "number"
+          }
+        }, {
+          "name" : "limit",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 50
+          }
+        }, {
+          "name" : "offset",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 0
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ScreenResponse"
                 }
               }
             }
@@ -5468,6 +5599,97 @@
           },
           "subscriber" : {
             "type" : "string"
+          }
+        }
+      },
+      "Row" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "exchange" : {
+            "type" : "string"
+          },
+          "close" : {
+            "type" : "number"
+          },
+          "sma50" : {
+            "type" : "number"
+          },
+          "sma150" : {
+            "type" : "number"
+          },
+          "sma200" : {
+            "type" : "number"
+          },
+          "high52w" : {
+            "type" : "number"
+          },
+          "low52w" : {
+            "type" : "number"
+          },
+          "pctFromHigh" : {
+            "type" : "number"
+          },
+          "pctAboveLow" : {
+            "type" : "number"
+          },
+          "rsRank" : {
+            "type" : "number"
+          },
+          "avgTurnover50" : {
+            "type" : "number"
+          },
+          "freeFloatMcapCr" : {
+            "type" : "number"
+          },
+          "freeFloatPct" : {
+            "type" : "number"
+          },
+          "gates" : {
+            "type" : "array",
+            "items" : {
+              "type" : "boolean"
+            }
+          },
+          "gatesPassed" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "passesAll" : {
+            "type" : "boolean"
+          },
+          "stage" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "ScreenResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Row"
+            }
+          },
+          "screenDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "coverage" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "limit" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "offset" : {
+            "type" : "integer",
+            "format" : "int32"
           }
         }
       },

@@ -6288,6 +6288,9 @@
             "type" : "string",
             "format" : "date"
           },
+          "regime" : {
+            "$ref" : "#/components/schemas/Regime"
+          },
           "immediatelyBuyable" : {
             "type" : "array",
             "items" : {
@@ -6335,6 +6338,21 @@
           },
           "pctToPivot" : {
             "type" : "number"
+          }
+        }
+      },
+      "Regime" : {
+        "type" : "object",
+        "properties" : {
+          "regime" : {
+            "type" : "string"
+          },
+          "advanceRatio" : {
+            "type" : "number"
+          },
+          "sessions" : {
+            "type" : "integer",
+            "format" : "int32"
           }
         }
       },

@@ -216,7 +216,7 @@ public class MinerviniController {
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
     LocalDate date = asOf != null ? asOf : screener.latestScreenDate();
     if (date == null) {
-      return new MinerviniFunnelService.Funnel(null, List.of(), List.of(), List.of());
+      return new MinerviniFunnelService.Funnel(null, null, List.of(), List.of(), List.of());
     }
     return funnelService.funnel(date);
   }

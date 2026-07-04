@@ -180,11 +180,14 @@ export function MinerviniScreenerPage() {
             skeleton={<Skeleton variant="table-rows" rows={8} cols={3} />}
           >
             {(f) => (
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                <FunnelColumn title="Immediately buyable" hint="valid VCP, price at the pivot" tone="bull" rows={f.immediatelyBuyable} />
-                <FunnelColumn title="On deck" hint="valid VCP, tightening toward the pivot" tone="accent" rows={f.onDeck} />
-                <FunnelColumn title="Watch" hint="no valid base yet, or extended past the pivot" tone="muted" rows={f.watch} />
-              </div>
+              <>
+                {f.regime && <RegimeBanner regime={f.regime.regime} ratio={f.regime.advanceRatio} />}
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <FunnelColumn title="Immediately buyable" hint="valid VCP, price at the pivot" tone="bull" rows={f.immediatelyBuyable} />
+                  <FunnelColumn title="On deck" hint="valid VCP, tightening toward the pivot" tone="accent" rows={f.onDeck} />
+                  <FunnelColumn title="Watch" hint="no valid base yet, or extended past the pivot" tone="muted" rows={f.watch} />
+                </div>
+              </>
             )}
           </QueryState>
         )}
@@ -232,6 +235,30 @@ function FunnelColumn({
         {rows.length === 0 && <li className="px-3 py-6 text-center text-sm text-ay-muted">None.</li>}
       </ul>
     </BeatBlock>
+  );
+}
+
+function RegimeBanner({ regime, ratio }: { regime: string; ratio?: string | null }) {
+  const tone =
+    regime === 'FAVORABLE'
+      ? 'border-bull/40 bg-bull/10 text-bull'
+      : regime === 'HOSTILE'
+        ? 'border-bear/40 bg-bear/10 text-bear'
+        : 'border-ay-border bg-surface-1 text-ay-muted';
+  const note =
+    regime === 'FAVORABLE'
+      ? 'Market with you — press the buyable breakouts.'
+      : regime === 'HOSTILE'
+        ? 'Hostile tape — hold off pressing new breakouts.'
+        : 'Neutral tape — be selective.';
+  const adv = ratio != null ? ` · ${(Number(ratio) * 100).toFixed(0)}% advancing` : '';
+  return (
+    <div className={cn('mb-3 rounded-lg border px-3 py-2 text-sm', tone)}>
+      <span className="font-semibold capitalize">{regime.toLowerCase()} regime</span>
+      <span className="text-ay-muted">
+        {adv} — {note}
+      </span>
+    </div>
   );
 }
 

@@ -2062,6 +2062,7 @@ export interface components {
         Funnel: {
             /** Format: date */
             screenDate?: string;
+            regime?: components["schemas"]["Regime"];
             immediatelyBuyable?: components["schemas"]["FunnelRow"][];
             onDeck?: components["schemas"]["FunnelRow"][];
             watch?: components["schemas"]["FunnelRow"][];
@@ -2076,6 +2077,12 @@ export interface components {
             pivot?: number;
             footprint?: string;
             pctToPivot?: number;
+        };
+        Regime: {
+            regime?: string;
+            advanceRatio?: number;
+            /** Format: int32 */
+            sessions?: number;
         };
         CandidateAnalysis: {
             symbol?: string;

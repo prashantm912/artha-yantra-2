@@ -149,7 +149,10 @@ final class SwingRotationPortfolio {
               continue;
             }
             double rs = currentRs(weekly, trades.get(hs).symbol(), date);
-            if (!Double.isNaN(rs) && rs < weakRs) {
+            if (Double.isNaN(rs)) {
+              rs = Double.NEGATIVE_INFINITY; // un-assessable RS → weakest (evictable), not protected
+            }
+            if (rs < weakRs) {
               weakRs = rs;
               weakSlot = k;
             }

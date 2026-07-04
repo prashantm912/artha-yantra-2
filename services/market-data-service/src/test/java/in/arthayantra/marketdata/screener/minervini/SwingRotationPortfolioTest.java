@@ -49,6 +49,28 @@ class SwingRotationPortfolioTest {
   }
 
   @Test
+  void aHoldingWithUnassessableRsIsTreatedAsWeakestAndCanBeEvicted() {
+    // A's current RS is NaN on the rotation date (thin cross-section) but its close is known (105).
+    Map<String, WeeklySeries> nanRs =
+        Map.of(
+            "A",
+            new WeeklySeries(
+                new long[] {
+                  LocalDate.parse("2020-01-01").toEpochDay(),
+                  LocalDate.parse("2020-03-01").toEpochDay()
+                },
+                new double[] {50.0, Double.NaN},
+                new double[] {100.0, 105.0}));
+
+    SwingRotationPortfolio.Outcome o =
+        SwingRotationPortfolio.simulate(List.of(a, b), nanRs, 1, null, 5.0);
+
+    assertThat(o.rotations()).as("NaN-RS holding is evictable, not protected").isEqualTo(1);
+    assertThat(o.result().tradesTaken()).isEqualTo(2);
+    assertThat(o.result().totalReturnPct()).isCloseTo(15.5, within(0.01));
+  }
+
+  @Test
   void tooLargeAMarginBlocksRotationSoTheLaggardIsHeldToItsNaturalExit() {
     SwingRotationPortfolio.Outcome o =
         SwingRotationPortfolio.simulate(List.of(a, b), weekly, 1, null, 100.0);

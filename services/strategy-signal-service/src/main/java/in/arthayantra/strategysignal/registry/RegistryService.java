@@ -506,7 +506,10 @@ public class RegistryService {
                 "/indicators", "indicator '" + name + "' does not exist in the engine registry"));
         continue;
       }
-      if (indicator.has("instrument")) {
+      if (indicator.has("instrument") && !IndicatorRegistry.isSeeded(name)) {
+        // Seeded indicators (Minervini VCP_PIVOT/CHEAT_PIVOT/THRUST) carry a SENTINEL instrument key
+        // whose series the live batch injects per-symbol at eval time — it is never resolved from the
+        // instruments master, so the existence gate does not apply (it guards real second series only).
         String exchange = indicator.get("instrument").path("exchange").asText();
         String symbol = indicator.get("instrument").path("tradingsymbol").asText();
         try {
@@ -551,7 +554,7 @@ public class RegistryService {
                 "/indicators",
                 "indicator '" + name + "' is not in the engine registry (binding at publish)"));
       }
-      if (indicator.has("instrument")) {
+      if (indicator.has("instrument") && !IndicatorRegistry.isSeeded(name)) {
         String exchange = indicator.get("instrument").path("exchange").asText();
         String symbol = indicator.get("instrument").path("tradingsymbol").asText();
         try {

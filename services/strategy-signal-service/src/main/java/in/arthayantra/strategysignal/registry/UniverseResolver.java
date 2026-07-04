@@ -54,8 +54,42 @@ public class UniverseResolver {
       case "index_constituents" -> resolveIndex(universe);
       case "futures_of_underlying" -> resolveFutures(universe);
       case "futures_screener" -> resolveFuturesScreener(universe);
+      case "minervini_funnel" -> resolveMinerviniFunnel(universe);
       default -> resolveExplicit(mode, universe);
     };
+  }
+
+  /**
+   * Phase-9 (MV-9.1): the Minervini SEPA-funnel universe — the day's immediately-buyable (+ on-deck)
+   * VCP candidates from market-data's funnel. Pinned by copy like the other dynamic modes; empty when
+   * the funnel is unavailable/unpopulated (off-hours / fresh env), so the batch simply has nothing to
+   * evaluate rather than 5xx-ing. The live daily batch re-reads the funnel each session — this pin is
+   * a display/validation snapshot, never the authoritative evaluation universe.
+   */
+  private ResolvedUniverse resolveMinerviniFunnel(JsonNode universe) {
+    boolean onDeck = !"buyable".equals(universe.path("bucket").asText("buyable_on_deck"));
+    List<Constituent> items = new ArrayList<>();
+    try {
+      JsonNode funnel = get("/api/v1/market/screener/minervini/funnel");
+      collectFunnel(funnel.path("immediatelyBuyable"), items);
+      if (onDeck) {
+        collectFunnel(funnel.path("onDeck"), items);
+      }
+    } catch (ApiException unavailable) {
+      // funnel down / no screen yet -> pin empty (nothing to evaluate this session)
+    }
+    return new ResolvedUniverse("minervini_funnel", null, items, checksum(items), null);
+  }
+
+  /** Appends each funnel row's symbol as an NSE-EQ constituent (dedup-safe). */
+  private static void collectFunnel(JsonNode rows, List<Constituent> items) {
+    for (JsonNode row : rows) {
+      String symbol = row.path("symbol").asText("");
+      Constituent c = new Constituent("NSE", symbol);
+      if (!symbol.isBlank() && !items.contains(c)) {
+        items.add(c);
+      }
+    }
   }
 
   private ResolvedUniverse resolveIndex(JsonNode universe) {

@@ -185,6 +185,19 @@
               "description": "Screener radar: `captured` = the NIFTY-Bank snapshot subset (v1); `upstox` (E1 v2) = the full NIFTY-50 from on-demand Upstox daily candles."
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": {
+            "mode": { "const": "minervini_funnel" },
+            "bucket": {
+              "enum": ["buyable", "buyable_on_deck"],
+              "default": "buyable_on_deck",
+              "description": "Which SEPA-funnel candidates the Phase-9 daily swing batch evaluates: immediately-buyable only, or buyable + on-deck (the VCP names about to cross their pivot). The batch drives the universe from the live funnel each session; this marker documents it and resolves to the current funnel for display."
+            }
+          }
         }
       ]
     },

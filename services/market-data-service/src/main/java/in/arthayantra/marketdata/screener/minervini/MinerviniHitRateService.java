@@ -84,7 +84,7 @@ public class MinerviniHitRateService {
       @Value("${artha.minervini.sma200-rising-sessions:21}") int sma200RisingSessions,
       @Value("${artha.minervini.capital:150000}") BigDecimal capital,
       @Value("${artha.minervini.max-name-pct:0.25}") BigDecimal maxNamePct,
-      @Value("${artha.minervini.liquidity-multiple:100}") BigDecimal liquidityMultiple,
+      @Value("${artha.minervini.liquidity-multiple:25}") BigDecimal liquidityMultiple,
       @Value("${artha.minervini.hitrate.lookback-years:3}") int defaultLookbackYears,
       @Value("${artha.minervini.hitrate.max-span-years:8}") int maxSpanYears,
       @Value("${artha.minervini.hitrate.step-sessions:5}") int defaultStepSessions,

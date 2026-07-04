@@ -68,6 +68,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/screener/minervini/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["run"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/options/stock-chain/warm": {
         parameters: {
             query?: never;
@@ -396,6 +412,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["screen"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/screener/minervini": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_1"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1759,6 +1791,39 @@ export interface components {
             mode?: string;
             priority?: string;
             subscriber?: string;
+        };
+        Row: {
+            symbol?: string;
+            exchange?: string;
+            close?: number;
+            sma50?: number;
+            sma150?: number;
+            sma200?: number;
+            high52w?: number;
+            low52w?: number;
+            pctFromHigh?: number;
+            pctAboveLow?: number;
+            rsRank?: number;
+            avgTurnover50?: number;
+            freeFloatMcapCr?: number;
+            freeFloatPct?: number;
+            gates?: boolean[];
+            /** Format: int32 */
+            gatesPassed?: number;
+            passesAll?: boolean;
+            /** Format: int32 */
+            stage?: number;
+        };
+        ScreenResponse: {
+            items?: components["schemas"]["Row"][];
+            /** Format: date */
+            screenDate?: string;
+            /** Format: int32 */
+            coverage?: number;
+            /** Format: int32 */
+            limit?: number;
+            /** Format: int32 */
+            offset?: number;
         };
         WarmStatus: {
             underlying?: string;
@@ -3163,6 +3228,40 @@ export interface operations {
             };
         };
     };
+    run: {
+        parameters: {
+            query?: {
+                asOf?: string;
+                passesAllOnly?: boolean;
+                minRsRank?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ScreenResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     status: {
         parameters: {
             query: {
@@ -3911,6 +4010,41 @@ export interface operations {
                     "*/*": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_1: {
+        parameters: {
+            query?: {
+                asOf?: string;
+                passesAllOnly?: boolean;
+                minRsRank?: number;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ScreenResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

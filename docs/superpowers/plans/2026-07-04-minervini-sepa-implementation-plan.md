@@ -168,6 +168,12 @@ Wire a `UpstoxFundamentalsClient` (hand-rolled REST, ADR-0002 anti-corruption pa
 
 Legend: **Grounding** = REUSE/EXTEND/NEW. Ship phases in order; within a phase, items may parallelize unless `Depends` says otherwise.
 
+> **⏱ LIVE STATUS (autonomous build 2026-07-04):** per-PR progress + evidence is tracked in the
+> [build log](2026-07-04-minervini-build-log.md) — consult it for the authoritative current state of
+> each item (Status cells below are reconciled at checkpoints, so trust the build log if they differ).
+> **PR-A DONE+verified:** MV-0.1, MV-0.2, MV-2.1, MV-2.2, MV-2.3, MV-2.4, MV-2.5, MV-2.6, MV-2.7(N/A),
+> MV-2.8, MV-2.9 — the price-only Trend-Template screener (IT green).
+
 ### Phase 0 — Foundations & VERIFY gates (unblocks everything; mostly reads, little code)
 
 | ID | Item | Grounding | Depends | Status | Verify | Evidence |

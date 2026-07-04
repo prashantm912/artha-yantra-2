@@ -374,8 +374,9 @@ public final class TickwiseGoldenRunner {
       case "5m" -> Duration.ofMinutes(5);
       case "15m" -> Duration.ofMinutes(15);
       case "1h" -> Duration.ofHours(1);
+      case "1d" -> Duration.ofDays(1); // Minervini swing primary (MV-6.2); epoch-floor aligns to the IST day
       default -> throw new IllegalArgumentException(
-          "tick-wise golden runner rolls up 3m/5m/15m/1h primaries; got " + interval);
+          "tick-wise golden runner rolls up 3m/5m/15m/1h/1d primaries; got " + interval);
     };
   }
 
@@ -403,6 +404,10 @@ public final class TickwiseGoldenRunner {
     // Backtest-only: when true the entry clock rail is OFF (entries fire all session) and the square_off
     // force-close is disabled (positions exit purely on their own exit_rules). false on live + goldens.
     private final boolean relax;
+    // MV-6.2: swing style holds multi-day — the intraday square_off never force-closes it (a daily
+    // primary already never reaches square_off at bucket close, but this makes the semantics explicit
+    // and correct on ANY primary a swing strategy might use). No-op for the intraday/btst goldens.
+    private final boolean swing;
 
     SessionGate(StrategyDefinition.Session s, boolean relax) {
       this.windowFrom = parse(s.windowFrom());
@@ -415,6 +420,7 @@ public final class TickwiseGoldenRunner {
           s.expiryDayAllowed() != null || expiryFrom != null || expiryTo != null;
       this.calendar = expiryDeclared ? MarketCalendar.nse() : null;
       this.relax = relax;
+      this.swing = "swing".equals(s.style());
     }
 
     private static LocalTime parse(String v) {
@@ -441,7 +447,7 @@ public final class TickwiseGoldenRunner {
     }
 
     boolean pastSquareOff(LocalTime t) {
-      return !relax && squareOff != null && !t.isBefore(squareOff);
+      return !relax && !swing && squareOff != null && !t.isBefore(squareOff);
     }
   }
 }

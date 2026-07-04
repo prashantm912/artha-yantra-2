@@ -162,3 +162,33 @@ V020 → PR-G the other 4 setups + funnel + regime → Phase 7+ paper/backtest/l
 parity-sensitive slice with subjective per-setup thresholds — it needs owner setup-priority input (see
 build-spec §3) and is built in one focused pass, not an unattended partial merge. Phase-5 geometry
 (#528) remains the deployed Track-B state.
+
+---
+
+## PR-E — Phase 6 keystone: `session.style=swing` engine enablement  (verified, awaiting CI)
+
+The infrastructure keystone every Track-B swing item depends on: the engine can now run a daily-primary
+strategy that holds a position across multiple sessions with no intraday square-off. Parity-safe +
+non-speculative; the setups (PR-F) build on it.
+
+| MV item | What | Status | Evidence |
+|---|---|---|---|
+| MV-6.2 | `session.style=swing`: schema enum +`swing`; `TickwiseGoldenRunner.intervalDuration` +`case "1d"`; `SessionGate` `!swing` square-off guard | DONE | `SwingSessionTest` (3): 1d swing holds ≥2 sessions (entry, 0 exits); 1h intraday squares off; 1h swing does NOT (isolates the guard from the timeframe) |
+
+**Parity:** all 9 `GoldenDeterminismTest` + 9 `BacktestParityTest` vectors byte-identical; full
+strategy-engine 122/122; strategy-schema 63/63. The `!swing` guard + the new `1d` `intervalDuration`
+case are unreachable by the existing intraday/btst goldens, so nothing frozen moved.
+
+**Engine-only by design (scope discipline):** the LIVE `SignalEngine.ROLLABLE_PRIMARIES` + live
+daily-bar rollup are a distinct, market-hours-only-verifiable concern → **Phase 9** (a published swing
+strategy simply logs "not live-rollable" + is skipped until then, no crash). The swing **golden fixture
+set** (replay-parity for a real swing setup) rides **Phase 8 / MV-8.3** with the setups. PR-E proves the
+GOLDEN-runner swing semantics; that is MV-6.2's verify.
+
+**Correction carried from the recon:** MV-6.1 was re-scoped to the context-value family (not WEEK52) and
+now rides **PR-F** with its first consumer (the `vcp` setup) — building indicators nothing references yet
+would be speculative.
+
+**Next (PR-F, owner-approved `vcp`-first):** `vcp` setup YAML (MV-6.3) + the context-value indicators
+(MV-6.1: `VCP_PIVOT`/`VCP_STAGE`/`RS_RANK_PCT`/`TREND_TEMPLATE_PASS`) + `minervini_detail` V020 (MV-6.8)
++ a seeded-context replay fixture + a firing golden — the first end-to-end setup.

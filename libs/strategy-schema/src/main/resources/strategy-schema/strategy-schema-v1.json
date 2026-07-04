@@ -575,7 +575,7 @@
           "additionalProperties": false,
           "required": ["style"],
           "properties": {
-            "style": { "enum": ["intraday", "btst", "expiry_day", "positional"] },
+            "style": { "enum": ["intraday", "btst", "expiry_day", "positional", "swing"] },
             "window": { "$ref": "#/$defs/sessionWindow" },
             "square_off": { "$ref": "#/$defs/hhmm" },
             "allow_overnight": { "type": "boolean" },

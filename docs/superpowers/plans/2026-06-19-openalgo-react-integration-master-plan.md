@@ -3462,6 +3462,16 @@ The owner's three goals are options scalping (Track 2 §12), Indian momentum/swi
 
 ### 18.4 Scalp signal → phone push via the notifier (amends §12.5; enhancement)
 
+**Status 2026-07-04 — CORE DONE (#152):** `notifier/ScalpAlertService` (Z1) subscribes to the same
+in-process `SignalEmitted` event and fires a ntfy/telegram push **only** for scalper legs (carries
+underlying, option side/strike, BUY/SELL, entry/SL/target, confluence, OI-probability), gated
+`artha.notifier.scalp-alerts.enabled` (default OFF, NOT the `artha.scalper.notify-on-signal` name
+this section proposed) + the per-strategy opt-in, deduped per setup (`ScalpAlertDedupe`), bounded
+retry, LIVE-only (replay never publishes `SignalEmitted`, so parity-safe by construction). **Residual
+vs the spec below (minor, buildable-now):** the push does not yet carry `suggested_qty` or a deep
+link to the §18.1 `/orders` pre-fill ticket. Do not re-flag the whole item as pending — only the two
+payload extras remain.
+
 The notifier (ntfy/telegram, Stage E [[stage-e-progress]]) exists and §1b plans phone access over Tailscale, but §12.5's semi-auto flow assumes the owner is watching the screen to click "Take." For scalping while away, the fresh signal must reach the phone so the owner can act.
 
 - **Wire scalp ENTRY emission → notifier push.** In `strategy-signal-service`, on a scalper `emitEntry` (the §12.3 confluence-gate path), publish a notifier event (reuse the existing ntfy/telegram client + `ARTHA_NTFY_TOPIC`) carrying: strategy, underlying, option symbol, side, entry, SL, target, `suggested_qty`, confluence summary. Behind a flag `artha.scalper.notify-on-signal` (default on for live). Include a deep link to the `/orders` pre-fill ticket (§18.1) so the owner confirms from the phone.

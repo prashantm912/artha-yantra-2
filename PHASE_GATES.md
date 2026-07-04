@@ -572,9 +572,10 @@ each with its target:
 - **Recorded Kite binary-frame capture** — the mixed-frame fixture is
   synthesized from the documented envelope; commit one real capture during the
   first live session (closes the shared-misreading risk).
-- **`candles_1h` IST alignment** — hourly cagg buckets align to UTC hours
-  (= :30 IST boundaries). Deciding to re-anchor means dropping/recreating the
-  cagg; revisit before the Stage-E chart page consumes 1h.
+- ~~**`candles_1h` IST alignment**~~ — **DONE (#513, V029, 2026-07-04):** dropped +
+  recreated `candles_1h` with `time_bucket('1 hour', bucket, 'Asia/Kolkata')` (was
+  UTC-hour = :30 IST boundaries, unlike the 1d/1w IST siblings), `WITH NO DATA` +
+  refresh policy so the live DB does no heavy one-shot materialization.
 - **`kite.rateBudget` on system status** — field present, null until
   market-data-service publishes a budget key (limiter metrics exist; producer
   pends Stage C status work).

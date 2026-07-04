@@ -31,6 +31,8 @@ public class MinerviniFunnelService {
       Integer stage,
       boolean isVcp,
       BigDecimal pivot,
+      BigDecimal cheatPivot,
+      boolean thrust,
       String footprint,
       BigDecimal pctToPivot) {} // (close - pivot) / pivot, null when no pivot
 
@@ -45,7 +47,8 @@ public class MinerviniFunnelService {
   private static final String SQL =
       """
       SELECT r.symbol, r.close_price, r.rs_rank, r.stage,
-             COALESCE(s.is_vcp, FALSE) AS is_vcp, s.pivot, s.footprint
+             COALESCE(s.is_vcp, FALSE) AS is_vcp, s.pivot, s.cheat_pivot,
+             COALESCE(s.thrust, FALSE) AS thrust, s.footprint
       FROM minervini_screen_results r
       LEFT JOIN minervini_setups s
         ON s.screen_date = r.screen_date AND s.symbol = r.symbol
@@ -88,6 +91,7 @@ public class MinerviniFunnelService {
               return new FunnelRow(
                   rs.getString("symbol"), close, rs.getBigDecimal("rs_rank"),
                   rs.getObject("stage", Integer.class), rs.getBoolean("is_vcp"), pivot,
+                  rs.getBigDecimal("cheat_pivot"), rs.getBoolean("thrust"),
                   rs.getString("footprint"), pct);
             },
             java.sql.Date.valueOf(screenDate));

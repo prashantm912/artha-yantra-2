@@ -23,14 +23,15 @@ public class MinerviniSetupsRepository {
       INSERT INTO minervini_setups
         (screen_date, symbol, is_vcp, footprint, pivot, deepest_pct, tightest_pct,
          contraction_count, base_weeks, base_duration_days, volume_dry_up, shakeout, base_count,
-         reject_reason, computed_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, now())
+         cheat_pivot, thrust, reject_reason, computed_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, now())
       ON CONFLICT (screen_date, symbol) DO UPDATE SET
         is_vcp = EXCLUDED.is_vcp, footprint = EXCLUDED.footprint, pivot = EXCLUDED.pivot,
         deepest_pct = EXCLUDED.deepest_pct, tightest_pct = EXCLUDED.tightest_pct,
         contraction_count = EXCLUDED.contraction_count, base_weeks = EXCLUDED.base_weeks,
         base_duration_days = EXCLUDED.base_duration_days, volume_dry_up = EXCLUDED.volume_dry_up,
         shakeout = EXCLUDED.shakeout, base_count = EXCLUDED.base_count,
+        cheat_pivot = EXCLUDED.cheat_pivot, thrust = EXCLUDED.thrust,
         reject_reason = EXCLUDED.reject_reason, computed_at = now()
       """;
 
@@ -53,7 +54,8 @@ public class MinerviniSetupsRepository {
             num(f.deepestPct(), f.vcp()), num(f.tightestPct(), f.vcp()),
             f.vcp() ? f.contractionCount() : null, f.vcp() ? f.baseWeeks() : null,
             f.vcp() ? f.baseDurationDays() : null, f.volumeDryUp(), f.shakeout(),
-            f.vcp() ? f.baseCount() : null, f.rejectReason()
+            f.vcp() ? f.baseCount() : null, num(f.cheatPivot(), f.vcp()), f.thrust(),
+            f.rejectReason()
           });
     }
     int[] r = jdbc.batchUpdate(UPSERT, batch);
@@ -66,7 +68,8 @@ public class MinerviniSetupsRepository {
         jdbc.query(
             """
             SELECT is_vcp, footprint, pivot, deepest_pct, tightest_pct, contraction_count,
-                   base_weeks, base_duration_days, volume_dry_up, shakeout, base_count, reject_reason
+                   base_weeks, base_duration_days, volume_dry_up, shakeout, base_count,
+                   cheat_pivot, thrust, reject_reason
             FROM minervini_setups WHERE screen_date = ? AND symbol = ?
             """,
             (rs, n) ->
@@ -82,6 +85,8 @@ public class MinerviniSetupsRepository {
                     rs.getBoolean("volume_dry_up"),
                     rs.getBoolean("shakeout"),
                     rs.getInt("base_count"),
+                    dbl(rs.getBigDecimal("cheat_pivot")),
+                    rs.getBoolean("thrust"),
                     rs.getString("footprint"),
                     rs.getString("reject_reason")),
             Date.valueOf(screenDate), symbol);

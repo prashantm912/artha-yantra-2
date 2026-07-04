@@ -62,6 +62,8 @@ public class MinerviniController {
       boolean volumeDryUp,
       boolean shakeout,
       Integer baseCount,
+      BigDecimal cheatPivot,
+      boolean thrust,
       String rejectReason) {}
 
   /**
@@ -202,12 +204,13 @@ public class MinerviniController {
     if (!f.vcp()) {
       return new Geometry(
           false, null, null, null, null, null, null, null, f.volumeDryUp(), f.shakeout(), null,
-          f.rejectReason());
+          null, false, f.rejectReason());
     }
     return new Geometry(
         true, f.footprint(), BigDecimal.valueOf(f.pivot()), BigDecimal.valueOf(f.deepestPct()),
         BigDecimal.valueOf(f.tightestPct()), f.contractionCount(), f.baseWeeks(),
-        f.baseDurationDays(), f.volumeDryUp(), f.shakeout(), f.baseCount(), null);
+        f.baseDurationDays(), f.volumeDryUp(), f.shakeout(), f.baseCount(),
+        BigDecimal.valueOf(f.cheatPivot()), f.thrust(), null);
   }
 
   /**

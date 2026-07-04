@@ -420,6 +420,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/signals/minervini-swing/sell-decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["sellDecisions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/signals/active": {
         parameters: {
             query?: never;
@@ -822,6 +838,27 @@ export interface components {
             minProfitFactor?: number;
             minExpectancy?: number;
             maxDrawdownPct?: number;
+        };
+        Report: {
+            /** Format: date-time */
+            asOf?: string;
+            items?: components["schemas"]["SellDecision"][];
+        };
+        SellDecision: {
+            symbol?: string;
+            setup?: string;
+            /** Format: int32 */
+            stage?: number;
+            footprint?: string;
+            entryPrice?: number;
+            currentPrice?: number;
+            unrealizedPct?: number;
+            stopLevel?: number;
+            trailLevel?: number;
+            stillBuyable?: boolean;
+            sellingNow?: boolean;
+            sellReason?: string;
+            verdict?: string;
         };
         ShadowSummaryResponse: {
             items?: components["schemas"]["VariantSummary"][];
@@ -2026,6 +2063,35 @@ export interface operations {
                     "*/*": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    sellDecisions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["Report"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

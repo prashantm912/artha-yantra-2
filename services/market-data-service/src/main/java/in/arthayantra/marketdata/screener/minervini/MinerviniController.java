@@ -282,7 +282,7 @@ public class MinerviniController {
     return r != null
         ? r
         : new MinerviniBacktestService.Report(
-            "idle", null, null, null, 0, 0, List.of(), null, "no backtest run yet");
+            "idle", null, null, null, 0, 0, List.of(), null, null, "no backtest run yet");
   }
 
   private static Row toRow(TrendCandidate c) {

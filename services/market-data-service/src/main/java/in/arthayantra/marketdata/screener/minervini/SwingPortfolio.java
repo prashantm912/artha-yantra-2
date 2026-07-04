@@ -47,8 +47,12 @@ final class SwingPortfolio {
   private static final Result EMPTY =
       new Result(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, List.of());
 
-  /** Simulates the {@code slots}-sleeve portfolio over {@code trades} (any order); returns the stats. */
-  static Result simulate(List<BtTrade> trades, int slots) {
+  /**
+   * Simulates the {@code slots}-sleeve portfolio over {@code trades} (any order). When {@code
+   * rsPriority}, a day's entries compete for scarce slots by RS-rank (the strongest names get the
+   * slots — how you would actually choose); otherwise slots fill first-come (FIFO). Returns the stats.
+   */
+  static Result simulate(List<BtTrade> trades, int slots, boolean rsPriority) {
     if (trades.isEmpty() || slots < 1) {
       return EMPTY;
     }
@@ -71,6 +75,32 @@ final class SwingPortfolio {
       events[e++] = pack(entry[i], 1, i);
     }
     Arrays.sort(events);
+
+    // RS-priority: reorder each maximal run of same-day ENTRY events (contiguous after the sort, since
+    // EXITs sort ahead of ENTRYs on a date) so the strongest names claim the scarce slots first.
+    if (rsPriority) {
+      int i = 0;
+      while (i < events.length) {
+        if (unType(events[i]) != 1) {
+          i++;
+          continue;
+        }
+        long day = events[i] >>> 24;
+        int j = i;
+        while (j < events.length && unType(events[j]) == 1 && (events[j] >>> 24) == day) {
+          j++;
+        }
+        Long[] run = new Long[j - i];
+        for (int k = 0; k < run.length; k++) {
+          run[k] = events[i + k];
+        }
+        Arrays.sort(run, (a, b) -> Double.compare(rsOf(trades, b), rsOf(trades, a))); // desc
+        for (int k = 0; k < run.length; k++) {
+          events[i + k] = run[k];
+        }
+        i = j;
+      }
+    }
 
     double[] sleeve = new double[slots];
     Arrays.fill(sleeve, 1.0 / slots);
@@ -272,5 +302,11 @@ final class SwingPortfolio {
 
   private static int unIdx(long ev) {
     return (int) (ev & 0xFFFFF);
+  }
+
+  /** The entry RS-rank of the trade behind {@code ev}; a NaN (unknown) sorts last. */
+  private static double rsOf(List<BtTrade> trades, long ev) {
+    double r = trades.get(unIdx(ev)).rsRankAtEntry();
+    return Double.isNaN(r) ? Double.NEGATIVE_INFINITY : r;
   }
 }

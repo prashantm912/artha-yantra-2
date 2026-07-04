@@ -452,6 +452,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/screener/minervini/candidate/{symbol}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["candidate"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/pre-open": {
         parameters: {
             query?: never;
@@ -2026,6 +2042,50 @@ export interface components {
             priority?: "PINNED_INDEX" | "STRATEGY" | "UI" | "SPECULATIVE";
             /** Format: int32 */
             subscribers?: number;
+        };
+        CandidateAnalysis: {
+            symbol?: string;
+            exchange?: string;
+            /** Format: date */
+            screenDate?: string;
+            scanned?: boolean;
+            close?: number;
+            sma50?: number;
+            sma150?: number;
+            sma200?: number;
+            high52w?: number;
+            low52w?: number;
+            pctFromHigh?: number;
+            pctAboveLow?: number;
+            rsRank?: number;
+            avgTurnover50?: number;
+            freeFloatMcapCr?: number;
+            freeFloatPct?: number;
+            gates?: boolean[];
+            /** Format: int32 */
+            gatesPassed?: number;
+            passesAll?: boolean;
+            /** Format: int32 */
+            stage?: number;
+            geometry?: components["schemas"]["Geometry"];
+        };
+        Geometry: {
+            isVcp?: boolean;
+            footprint?: string;
+            pivot?: number;
+            deepestPct?: number;
+            tightestPct?: number;
+            /** Format: int32 */
+            contractionCount?: number;
+            /** Format: int32 */
+            baseWeeks?: number;
+            /** Format: int32 */
+            baseDurationDays?: number;
+            volumeDryUp?: boolean;
+            shakeout?: boolean;
+            /** Format: int32 */
+            baseCount?: number;
+            rejectReason?: string;
         };
         TrendPoint: {
             /** Format: date-time */
@@ -4132,6 +4192,39 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ScreenResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    candidate: {
+        parameters: {
+            query?: {
+                asOf?: string;
+            };
+            header?: never;
+            path: {
+                symbol: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["CandidateAnalysis"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

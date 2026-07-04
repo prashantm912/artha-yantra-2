@@ -12,9 +12,10 @@ import org.springframework.stereotype.Service;
 
 /**
  * Minervini SEPA daily Trend-Template screener (Track-1, price-based). Pure parameterized SQL over
- * the DENSE native {@code candles} daily store ({@code interval='1d'}, NSE, EQ) — NOT the sparse
- * {@code candles_1d} continuous aggregate (which only holds the ~200 pinned instruments), and NEVER
- * a Kite/Upstox port (mirrors the {@code ScreenerService} "SQL only" discipline). Evaluates the 8
+ * the broad EOD equity universe {@code nse_eod_bhavcopy} (~2.2k EQ/BE names with a full year) — NOT
+ * the native {@code candles} store, whose dense recent-year history only covers the ~100
+ * subscribed/backfilled names (bhavcopy is DO-NOTHING on the candle PK, so it never fills the year
+ * there); mirrors the {@code ScreenerService} "SQL only" discipline. Evaluates the 8
  * Trend-Template gates (§4.2), the cross-sectional IBD-style RS-rank (§4.10), the derived Stage
  * label (§4.1), and the owner's price + liquidity universe gates. Free-float / market-cap low-cap
  * gates (§ ADR-0005) are layered later by the Upstox fundamentals feed; the columns stay null here.

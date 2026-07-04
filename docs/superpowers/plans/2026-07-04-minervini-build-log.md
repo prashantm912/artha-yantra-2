@@ -388,3 +388,33 @@ the analyzer is a drill-down, not a top-level page.
 **Track A UI is now complete end-to-end:** screener list → funnel triad → per-candidate analyzer with
 the annotated chart + gate/geometry/fundamentals reasoning — the full manual-chart-check surface the
 owner asked for (§0.5 #14).
+
+---
+
+## PR-Q(a) — Phase 7: the 50-day-MA swing trail (MV-7.4)  ✅ verified, parity-safe
+
+The second half of the Minervini exit doctrine after the 8% initial stop (PR-M): sell on a daily close
+below the rising 50-day line.
+
+| MV item | What | Status | Evidence |
+|---|---|---|---|
+| MV-7.4 (trail) | `minervini-vcp-trail.yaml` — vcp entry + `stop_loss percent 8` + `trailing_stop {basis: indicator, alias: sma50}` (the 50-day-MA close-below trail). Uses EXISTING engine exit types — no engine change. | **DONE** | `SwingTrailTest`: enters on the breakout, then exits on a close below the 50-day MA that is ABOVE the 8% stop — so the TRAIL (not the protective stop) is the active exit. **9 golden vectors byte-identical; BacktestParityTest green.** |
+
+Zero parity surface — the `trailing_stop`/`indicator` basis + `SMA` are already in the engine + schema;
+this is a new strategy definition exercising them, so the frozen goldens don't move. The production
+YAML uses `SMA(50)`; the test fires the real 50-day trail on a crafted 58-bar series (isolated from the
+8% stop). Breakeven-at-3R + pyramiding remain (small, config/executor follow-ups).
+
+## PR-P — Phase 7: the staggered/scaled partial-close executor (MV-7.3/7.4)  📋 SPEC (recon done, supervised build)
+
+The one remaining Track-B engine change that touches the parity firewall (frozen golden writer +
+golden-runner position loop + `ReplayEngine` Trade pairing). A full recon produced the exact
+parity-safe design — captured as **`docs/superpowers/plans/2026-07-04-minervini-partial-close-build-spec.md`**
+(6–7 files, side-channel `qtyFraction` on `SignalEvent`/`ExitDecision`, `OpenPosition` remaining-fraction
++ fired-tiers, a shared `applyExit`, fraction-aware `ReplayEngine` legs, new `golden-minervini-scaled/`
+fixtures; the automated `GoldenDeterminismTest`+`BacktestParityTest` byte-identical gate is the hard
+merge gate). **Deliberately not built unattended:** it is parity-safe-additive by design but a slipped
+golden would corrupt the platform's most important invariant, and scaling out is not yet needed (the
+reliability bar wants ≥30–50 single-stop paper trades first, §0.5 #12) — this is the item for a focused,
+supervised pass. The live paper-ledger partial close is a further, separately-gated PR (touches the
+pinned `exit-equivalence.json` + its 3 suites).

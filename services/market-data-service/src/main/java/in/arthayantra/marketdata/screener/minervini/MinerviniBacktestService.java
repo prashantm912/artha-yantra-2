@@ -11,6 +11,7 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -65,9 +66,37 @@ public class MinerviniBacktestService {
       BigDecimal avgLossPct,
       BigDecimal payoffRatio,
       BigDecimal expectancyPct,
-      BigDecimal avgBarsHeld) {}
+      BigDecimal profitFactor,
+      BigDecimal avgBarsHeld,
+      BigDecimal bestTradePct,
+      BigDecimal worstTradePct,
+      int longestHoldBars,
+      int shortestHoldBars,
+      int maxWinStreak,
+      int maxLossStreak,
+      BigDecimal stopOutPct) {}
 
-  /** One variant's full backtest report. */
+  /** One calendar year's realised portfolio return + the trades that closed in it. */
+  public record YearReturn(int year, BigDecimal returnPct, int trades) {}
+
+  /** Portfolio-level stats for one variant (all setups combined through the slot-limited book). */
+  public record PortfolioStat(
+      int slots,
+      BigDecimal totalReturnPct,
+      BigDecimal cagrPct,
+      BigDecimal maxDrawdownPct,
+      BigDecimal sharpe,
+      int tradesTaken,
+      int tradesSkipped,
+      BigDecimal avgExposurePct,
+      int months,
+      BigDecimal positiveMonthsPct,
+      BigDecimal bestMonthPct,
+      BigDecimal worstMonthPct,
+      BigDecimal avgMonthPct,
+      List<YearReturn> annual) {}
+
+  /** One variant's full backtest report — per-setup trade stats + the portfolio equity stats. */
   public record Report(
       String status,
       String variant,
@@ -76,11 +105,15 @@ public class MinerviniBacktestService {
       int symbolsScanned,
       int totalTrades,
       List<SetupStat> setups,
+      PortfolioStat portfolio,
       String note) {}
 
-  /** The A/B: the technical-only baseline (v1) vs the RS-rank + turnover filter (v2). */
-  public record Compare(
-      String status, LocalDate fromDate, String runAt, Report v1, Report v2, String note) {}
+  /** The full multi-variant result: technical / rs-only / turnover-only / rs+turnover, side by side. */
+  public record BacktestResult(
+      String status, LocalDate fromDate, String runAt, List<Report> variants, String note) {}
+
+  /** The full-filter variant (the live-funnel analogue) — the one the plain GET returns. */
+  private static final String PRIMARY_VARIANT = "rs-turnover";
 
   private final JdbcTemplate jdbc;
   private final VcpDetector detector;
@@ -88,9 +121,10 @@ public class MinerviniBacktestService {
   private final int defaultYears;
   private final double turnoverFloor;
   private final double rsMin;
+  private final int slots;
   private final AtomicBoolean running = new AtomicBoolean(false);
   private volatile Report latest;
-  private volatile Compare latestCompare;
+  private volatile BacktestResult latestResult;
 
   /** Wires the marketdata datasource + the VCP detector + config. */
   public MinerviniBacktestService(
@@ -99,45 +133,53 @@ public class MinerviniBacktestService {
       ObjectMapper objectMapper,
       @Value("${artha.minervini.backtest.years:11}") int defaultYears,
       @Value("${artha.minervini.backtest.min-turnover:3750000}") BigDecimal minTurnover,
-      @Value("${artha.minervini.backtest.rs-min:70}") BigDecimal rsMin) {
+      @Value("${artha.minervini.backtest.rs-min:70}") BigDecimal rsMin,
+      @Value("${artha.minervini.backtest.slots:8}") int slots) {
     this.jdbc = jdbc;
     this.detector = detector;
     this.objectMapper = objectMapper;
     this.defaultYears = defaultYears;
     this.turnoverFloor = minTurnover.doubleValue();
     this.rsMin = rsMin.doubleValue();
+    this.slots = slots;
   }
 
-  /** The latest completed (or in-progress) single report — the v2 variant. */
+  /** The latest completed (or in-progress) single report — the full-filter (rs-turnover) variant. */
   public Report latest() {
     if (latest != null) {
       return latest;
     }
-    return jdbc.query(
-            "SELECT report FROM minervini_backtest_runs ORDER BY run_at DESC LIMIT 1",
-            (rs, n) -> parse(rs.getString("report")))
+    return jdbc
+        .query(
+            "SELECT report FROM minervini_backtest_runs WHERE report->>'variant' = ?"
+                + " ORDER BY run_at DESC LIMIT 1",
+            (rs, n) -> parse(rs.getString("report")), PRIMARY_VARIANT)
         .stream()
         .findFirst()
         .orElse(null);
   }
 
-  /** The latest A/B comparison (v1 vs v2); reads the two newest persisted rows on a cold boot. */
-  public Compare latestCompare() {
-    if (latestCompare != null) {
-      return latestCompare;
+  /** The latest multi-variant result; reads the newest run's rows (one per variant) on a cold boot. */
+  public BacktestResult latestResult() {
+    if (latestResult != null) {
+      return latestResult;
     }
     List<Report> recent =
         jdbc.query(
-            "SELECT report FROM minervini_backtest_runs ORDER BY run_at DESC LIMIT 2",
+            "SELECT report FROM minervini_backtest_runs ORDER BY run_at DESC LIMIT 4",
             (rs, n) -> parse(rs.getString("report")));
-    Report v1 = recent.stream().filter(r -> r != null && "v1-technical".equals(r.variant())).findFirst().orElse(null);
-    Report v2 = recent.stream().filter(r -> r != null && "v2-rs-turnover".equals(r.variant())).findFirst().orElse(null);
-    if (v1 == null && v2 == null) {
+    List<Report> variants = new ArrayList<>();
+    for (Report r : recent) {
+      if (r != null && variants.stream().noneMatch(v -> v.variant().equals(r.variant()))) {
+        variants.add(r);
+      }
+    }
+    if (variants.isEmpty()) {
       return null;
     }
-    return new Compare(
-        "completed", v1 != null ? v1.fromDate() : v2.fromDate(),
-        v2 != null ? v2.runAt() : v1.runAt(), v1, v2, "loaded from the last persisted run");
+    Report any = variants.get(0);
+    return new BacktestResult(
+        "completed", any.fromDate(), any.runAt(), variants, "loaded from the last persisted run");
   }
 
   /** Triggers a run on a background thread; returns false if one is already running. */
@@ -146,8 +188,8 @@ public class MinerviniBacktestService {
       return false;
     }
     LocalDate from = from(years);
-    latest = new Report("running", "v2-rs-turnover", from, null, 0, 0, List.of(), "backtest in progress");
-    latestCompare = new Compare("running", from, null, null, null, "backtest in progress");
+    latest = running(PRIMARY_VARIANT, from);
+    latestResult = new BacktestResult("running", from, null, List.of(), "backtest in progress");
     Thread t = new Thread(() -> runOnce(years), "minervini-backtest");
     t.setDaemon(true);
     t.start();
@@ -156,23 +198,29 @@ public class MinerviniBacktestService {
 
   private void runOnce(Integer years) {
     try {
-      Compare compare = run(from(years));
-      latestCompare = compare;
-      latest = compare.v2();
-      persist(compare.v1());
-      persist(compare.v2());
+      BacktestResult result = run(from(years));
+      latestResult = result;
+      result.variants().stream()
+          .filter(r -> r.variant().equals(PRIMARY_VARIANT))
+          .findFirst()
+          .ifPresent(r -> latest = r);
+      result.variants().forEach(this::persist);
     } catch (RuntimeException e) {
       log.error("minervini swing backtest failed: {}", e.getMessage(), e);
       LocalDate from = from(years);
-      latest = new Report("failed", "v2-rs-turnover", from, null, 0, 0, List.of(), e.getMessage());
-      latestCompare = new Compare("failed", from, null, null, null, e.getMessage());
+      latest = new Report("failed", PRIMARY_VARIANT, from, null, 0, 0, List.of(), null, e.getMessage());
+      latestResult = new BacktestResult("failed", from, null, List.of(), e.getMessage());
     } finally {
       running.set(false);
     }
   }
 
-  /** Runs both variants over {@code [from, now]} in one pass. Package-visible for tests. */
-  Compare run(LocalDate from) {
+  private static Report running(String variant, LocalDate from) {
+    return new Report("running", variant, from, null, 0, 0, List.of(), null, "backtest in progress");
+  }
+
+  /** Runs all four variants over {@code [from, now]} in one pass. Package-visible for tests. */
+  BacktestResult run(LocalDate from) {
     LocalDate warmStart = from.minusDays(600); // ≥252 sessions + VCP-lookback warmup before `from`
     List<String> symbols = eqSymbols();
 
@@ -208,9 +256,14 @@ public class MinerviniBacktestService {
     bags.forEach((d, bag) -> dist.put(d, bag.sorted()));
     bags.clear();
 
-    // Pass 2 — replay both variants over the full bars, using the per-bar RS percentile.
+    // Pass 2 — replay the 2×2 of {RS gate off/on} × {turnover floor off/on} over the SAME bars, so the
+    // four variants are a clean apples-to-apples isolation (identical geometry/MAs/triggers).
     List<Variant> variants =
-        List.of(MinerviniSwingBacktest.V1, new Variant("v2-rs-turnover", true, rsMin, turnoverFloor));
+        List.of(
+            new Variant("technical", false, 0, 0), // v1: neither filter
+            new Variant("rs-only", true, rsMin, 0), // RS-rank gate alone
+            new Variant("turnover-only", false, 0, turnoverFloor), // liquidity floor alone
+            new Variant("rs-turnover", true, rsMin, turnoverFloor)); // both (the live-funnel analogue)
     List<BtTrade> all = new ArrayList<>();
     int scanned = 0;
     for (String symbol : symbols) {
@@ -224,20 +277,24 @@ public class MinerviniBacktestService {
     }
 
     String runAt = nowIso();
-    Report v1 = report("v1-technical", from, runAt, scanned, all);
-    Report v2 = report("v2-rs-turnover", from, runAt, scanned, all);
+    List<Report> reports = new ArrayList<>();
+    for (Variant v : variants) {
+      reports.add(report(v.name(), from, runAt, scanned, all));
+    }
     log.info(
-        "minervini swing backtest: {} symbols, v1 {} trades, v2 {} trades, from {}",
-        scanned, v1.totalTrades(), v2.totalTrades(), from);
-    return new Compare(
-        "completed", from, runAt, v1, v2,
-        "candles@1d ~11y; v2 adds a weekly cross-sectional RS-rank≥" + fmt(rsMin)
-            + " gate + a ₹" + fmt(turnoverFloor) + "/day turnover floor; open-at-end positions"
-            + " dropped; costs/slippage not modelled; survivorship-biased (currently-listed names).");
+        "minervini swing backtest: {} symbols, {}, from {}",
+        scanned,
+        reports.stream().map(r -> r.variant() + " " + r.totalTrades()).reduce((a, b) -> a + ", " + b).orElse(""),
+        from);
+    return new BacktestResult(
+        "completed", from, runAt, reports,
+        "candles@1d ~11y over " + slots + " concurrent slots; variants isolate a weekly cross-sectional"
+            + " RS-rank≥" + fmt(rsMin) + " gate and a ₹" + fmt(turnoverFloor) + "/day turnover floor;"
+            + " open-at-end positions dropped; costs/slippage not modelled; survivorship-biased.");
   }
 
-  /** Aggregates every trade for one {@code variant} into per-setup + ALL stats. */
-  private static Report report(String variant, LocalDate from, String runAt, int scanned, List<BtTrade> all) {
+  /** Aggregates every trade for one {@code variant} into per-setup trade stats + a portfolio equity run. */
+  private Report report(String variant, LocalDate from, String runAt, int scanned, List<BtTrade> all) {
     Map<String, List<BtTrade>> bySetup = new LinkedHashMap<>();
     MinerviniSwingBacktest.SETUPS.forEach(s -> bySetup.put(s, new ArrayList<>()));
     bySetup.put("ALL", new ArrayList<>());
@@ -252,13 +309,27 @@ public class MinerviniBacktestService {
     }
     List<SetupStat> stats = new ArrayList<>();
     bySetup.forEach((setup, trades) -> stats.add(aggregate(setup, trades)));
-    return new Report("completed", variant, from, runAt, scanned, total, stats, null);
+    PortfolioStat portfolio = portfolio(bySetup.get("ALL"));
+    return new Report("completed", variant, from, runAt, scanned, total, stats, portfolio, null);
+  }
+
+  /** Runs the slot-limited portfolio over a variant's combined trade stream. */
+  private PortfolioStat portfolio(List<BtTrade> trades) {
+    SwingPortfolio.Result r = SwingPortfolio.simulate(trades, slots);
+    List<YearReturn> annual =
+        r.annual().stream().map(y -> new YearReturn(y.year(), bd2(y.returnPct()), y.trades())).toList();
+    return new PortfolioStat(
+        slots, bd2(r.totalReturnPct()), bd2(r.cagrPct()), bd2(r.maxDrawdownPct()), bd2(r.sharpe()),
+        r.tradesTaken(), r.tradesSkipped(), bd2(r.avgExposurePct()), r.months(),
+        bd2(r.positiveMonthsPct()), bd2(r.bestMonthPct()), bd2(r.worstMonthPct()), bd2(r.avgMonthPct()),
+        annual);
   }
 
   private static SetupStat aggregate(String setup, List<BtTrade> trades) {
     int n = trades.size();
     if (n == 0) {
-      return new SetupStat(setup, 0, 0, 0, z(), z(), z(), z(), z(), z());
+      return new SetupStat(
+          setup, 0, 0, 0, z(), z(), z(), z(), z(), z(), z(), z(), z(), 0, 0, 0, 0, z());
     }
     int w = 0;
     int l = 0;
@@ -266,6 +337,11 @@ public class MinerviniBacktestService {
     BigDecimal sumWin = BigDecimal.ZERO;
     BigDecimal sumLoss = BigDecimal.ZERO;
     long sumBars = 0;
+    double best = Double.NEGATIVE_INFINITY;
+    double worst = Double.POSITIVE_INFINITY;
+    int longest = 0;
+    int shortest = Integer.MAX_VALUE;
+    int stopOuts = 0;
     for (BtTrade t : trades) {
       BigDecimal p = BigDecimal.valueOf(t.pnlPct());
       sumPct = sumPct.add(p);
@@ -277,13 +353,40 @@ public class MinerviniBacktestService {
         l++;
         sumLoss = sumLoss.add(p);
       }
+      best = Math.max(best, t.pnlPct());
+      worst = Math.min(worst, t.pnlPct());
+      longest = Math.max(longest, t.barsHeld());
+      shortest = Math.min(shortest, t.barsHeld());
+      if ("STOP_LOSS".equals(t.exitReason())) {
+        stopOuts++;
+      }
+    }
+    // streaks in the order the trades were entered
+    List<BtTrade> chron = new ArrayList<>(trades);
+    chron.sort(Comparator.comparing(BtTrade::entryDate));
+    int maxWinStreak = 0;
+    int maxLossStreak = 0;
+    int curWin = 0;
+    int curLoss = 0;
+    for (BtTrade t : chron) {
+      if (t.pnlPct() > 0) {
+        curWin++;
+        curLoss = 0;
+      } else {
+        curLoss++;
+        curWin = 0;
+      }
+      maxWinStreak = Math.max(maxWinStreak, curWin);
+      maxLossStreak = Math.max(maxLossStreak, curLoss);
     }
     BigDecimal avgWin = w == 0 ? z() : div(sumWin, w);
     BigDecimal avgLoss = l == 0 ? z() : div(sumLoss, l);
     BigDecimal payoff = avgLoss.signum() == 0 ? z() : div(avgWin, avgLoss.abs());
+    BigDecimal profitFactor = sumLoss.signum() == 0 ? z() : div(sumWin, sumLoss.abs());
     return new SetupStat(
         setup, n, w, l, div(BigDecimal.valueOf(w * 100L), n), avgWin, avgLoss, payoff,
-        div(sumPct, n), div(BigDecimal.valueOf(sumBars), n));
+        div(sumPct, n), profitFactor, div(BigDecimal.valueOf(sumBars), n), bd2(best), bd2(worst),
+        longest, shortest, maxWinStreak, maxLossStreak, div(BigDecimal.valueOf(stopOuts * 100L), n));
   }
 
   // ---- RS-rank helpers --------------------------------------------------------------------------
@@ -506,6 +609,14 @@ public class MinerviniBacktestService {
 
   private static BigDecimal z() {
     return BigDecimal.ZERO.setScale(4, RoundingMode.HALF_UP);
+  }
+
+  /** A double → 2dp BigDecimal (portfolio %/ratio fields); non-finite → 0. */
+  private static BigDecimal bd2(double v) {
+    if (!Double.isFinite(v)) {
+      return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+    }
+    return BigDecimal.valueOf(v).setScale(2, RoundingMode.HALF_UP);
   }
 
   private static BigDecimal div(BigDecimal num, long den) {

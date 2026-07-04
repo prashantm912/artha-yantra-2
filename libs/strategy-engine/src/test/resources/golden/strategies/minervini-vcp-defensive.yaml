@@ -1,0 +1,36 @@
+# Minervini VCP with the DEFENSIVE selling rule (MV-9.2, §3.6/§6.2): after the breakout, sell on a
+# daily close back BELOW the 20-day MA — the "the breakout has failed / momentum broke" defensive exit
+# that is tighter than the 50-day trail, alongside the 8% protective stop. `signal_exit` with
+# `crossunder(px, sma20)` fires only on the bar the close crosses below the 20-day line (an existing
+# engine gate — no new engine surface). Stage-3/4 tops + climax sell-into-strength (the scaled_exit
+# tiers) layer on the same setup; this YAML pins the defensive 20-day-MA break.
+schema: strategy-schema/v1
+id: minervini-vcp-defensive
+name: "Minervini VCP (defensive 20-day-MA sell)"
+version: 1.0.0
+universe:
+  mode: explicit
+  instruments:
+    - { exchange: NSE, tradingsymbol: "NIFTY 50" }
+timeframes: { primary: 1d }
+indicators:
+  - { name: SMA, alias: px, timeframe: 1d, params: { period: 1 }, weight: 1.0,
+      normalize: { type: linear, from: 0, to: 100000 } }
+  - { name: SMA, alias: sma20, timeframe: 1d, params: { period: 20 }, weight: 1.0 }
+  - { name: VOLUME_RATIO, alias: vol, timeframe: 1d, params: { lookback: 20 }, weight: 1.0 }
+  - { name: VCP_PIVOT, alias: pivot, timeframe: 1d, weight: 0.0,
+      instrument: { exchange: NSE, tradingsymbol: "MINERVINI_PIVOT" } }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - crossover: { fast: px, slow: pivot }
+      - "vol > 1.2"
+  scoring: { threshold: 0.0 }
+exit_rules:
+  - { type: stop_loss, params: { basis: percent, value: 8 } }              # MV-7.2 protective stop
+  - { type: signal_exit, params: { rule: "crossunder(px, sma20)" } }       # MV-9.2 defensive 20-day-MA break
+risk:
+  position_sizing: { method: percent_equity, params: { percent: 5 } }
+  max_positions: 1
+  session: { style: swing }

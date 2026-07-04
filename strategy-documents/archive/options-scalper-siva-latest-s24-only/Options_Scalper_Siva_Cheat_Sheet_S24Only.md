@@ -1,5 +1,9 @@
 # Options Scalper Siva — Cheat Sheet (Session-24-Only Edition)
 
+> **⚠ ARCHIVED (2026-07-04) — superseded + orphaned.** Superseded by the operative doc
+> (`../../options-scalper-siva-operative/Options_Scalper_Siva_Operative_Strategy.md`). Retained for
+> provenance only.
+
 > **What this is:** A ready-reference execution checklist for the **12-strategy** framework **as taught/decoded in Session 24 only** ("Big 5 Anniversary — Live Decoding 21 Days", 2025). Built strictly from the Session-24 sources (21 daily live-decoding transcripts + the strategy decks physically in the S24 folder + all 328 rendered page images); earlier sessions (S20–S23) are intentionally excluded. **Session 24 adds no new strategy** — it confirms the framework and sharpens **Open=High** into a fully-chasable system. Pure algorithm — no terminology, theory, or rationale.
 >
 > **Read [`Options_Scalper_Siva_Consolidated_Strategy_S24Only.md`](Options_Scalper_Siva_Consolidated_Strategy_S24Only.md) first** — this assumes you already know every term, indicator, and OI/IV/VIX concept used below. Day-citations (e.g. Day 14) are the S24 provenance.

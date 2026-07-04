@@ -1,5 +1,13 @@
 ﻿# Consolidated Trading-Strategy Document
 
+> **⚠ SUPERSEDED (2026-06-29) — historical, NOT the forward authority.** Current strategy logic + the
+> §6 machine-readable parity spec now live in
+> `../options-scalper-siva-operative/Options_Scalper_Siva_Operative_Strategy.md` (the debloated S24
+> operative doc + owner-ratified keep-rails + drift resolutions). This multi-session doc (S20–S24) is
+> retained only as: (a) the **raw-deck provenance** behind `docs/strategy-sources.md` (its port manifest
+> maps each strategy → `original-source-backup/…`), and (b) **what the Java was originally ported from**
+> (the `last-ported` commits). Do not edit for forward work.
+
 > **Scope:** Implementation-ready consolidation of every trade-execution rule extracted from `StrategySources/OptionsScalperSiva/` — **Session 20 (Live Mentoring Program 2023)**, **Session 21 (Live Scalping Mentoring 2024)**, **Session 22 (Live Mentoring Prog 2.0 2024)**, **Session 23 (Sensex Scalping with Siva 2025)** and **Session 24 (Big 5 Anniversary — Live Decoding 21 Days 2025)**.  
 > Built for both a developer (backtest / trading bot — see §6 JSON appendix) and a manual trader (numbered steps).  
 > Sessions 20, 21, 22, 23 and 24 (all Options) exist today; the structure absorbs later sessions (25, …) and new instrument categories (Futures, Stocks) — see `INSTRUCTIONS.md`. Sessions 21, 22, 23 and 24 re-teach the same finite strategy set with a scalping emphasis; **Session 22 adds the Straddle (§3.11)** and **Session 23 adds the Trend Change strategy (§3.12)** plus a Sensex-scalping focus (trade Sensex via the Nifty chart, ~3× point scaling — §4.16). **Session 24 introduces no new strategy** — it is a 21-day live re-decoding of the same set that confirms Sessions 20–23 and adds refinements (§2.14, §4.17, §5); its "Kingdom Trading Strategy" deck is a chess-metaphor re-framing of Two Candle Theory + the indicator framework, not a 13th strategy. Per the conflict rule the latest session's value wins, with the older value logged in §5.

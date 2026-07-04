@@ -16,12 +16,22 @@ strategy also carries a `@since` / source-tag Javadoc citing the same.
 
 ## Source authority
 
-In-repo base: `strategy-documents/options-scalper-siva/` (all paths below are relative to it).
+**Forward strategy-logic authority (2026-06-29):**
+`strategy-documents/options-scalper-siva-operative/Options_Scalper_Siva_Operative_Strategy.md` — the
+debloated S24 operative doc (S24 base + owner-ratified **[keep-rail]** tags + drift/ruling resolutions),
+carrying its OWN §6 Machine-Readable Appendix. Read it for what a strategy currently does. The
+multi-session docs below are **SUPERSEDED** for strategy logic and kept as **port provenance**: the Java
+was originally hand-ported from the OLD Consolidated (`last-ported` cites its commits), and the raw-deck
+manifest still maps into the OLD dir's `original-source-backup/`. The intermediate S24-only edition was
+archived 2026-07-04 to `strategy-documents/archive/options-scalper-siva-latest-s24-only/`.
 
-- **Authority:** `Options_Scalper_Siva_Consolidated_Strategy.md` — §3 narrative + §6 machine-readable
-  JSON (the parity spec, with per-strategy `uncertain[]` traps) + §7 open questions.
-- **Execution:** `Options_Scalper_Siva_Cheat_Sheet.md` — concise human cheat sheet, derived from the
-  Consolidated doc (secondary — the Consolidated doc wins on any conflict).
+Port-provenance base: `strategy-documents/options-scalper-siva/` (all paths below are relative to it).
+
+- **Port source (superseded authority):** `Options_Scalper_Siva_Consolidated_Strategy.md` — §3 narrative
+  + §6 machine-readable JSON (the port-time parity spec, with per-strategy `uncertain[]` traps) + §7 open
+  questions. What the Java was ported from; the operative doc is now the forward authority.
+- **Execution (superseded):** `Options_Scalper_Siva_Cheat_Sheet.md` — concise human cheat sheet, derived
+  from the Consolidated doc.
 - **Evolution:** `Options_Scalper_Siva_Changelog.md` — session-by-session diff (S20 → S24).
 - **Raw decks:** `original-source-backup/24 Big 5 Anniversery - Live Decoding 21 Days 2025/`
   (`Daywise Sessions/Day 1..21` + `Pre-Mentoring Documents`). The in-repo backup holds **only the

@@ -1,5 +1,10 @@
 # Options Scalper Siva — Consolidated Strategy (Session-24-Only Edition)
 
+> **⚠ ARCHIVED (2026-07-04) — superseded + orphaned.** This clean single-session (S24-only) edition was
+> the base the OPERATIVE doc was built from (`../../options-scalper-siva-operative/Options_Scalper_Siva_Operative_Strategy.md`
+> = this + owner-ratified keep-rails + drift resolutions). Nothing references it; retained for provenance
+> only. Use the operative doc.
+
 
 _Built STRICTLY from Session 24 (Big 5 Anniversary — Live Decoding 21 Days, 2025) sources: the 21 daily live-decoding transcripts plus the strategy decks physically present in the S24 folder. Earlier sessions (S20–S23) are intentionally excluded. Session 24 introduces no new strategy. Where S24 ships no deck and does not re-teach a strategy's base mechanics, the section is marked **reference-only**. Day-citations (e.g. Day 14) are kept as the S24 provenance. Some decks in the S24 folder are byte-identical reused 2022–23 decks; their example figures are marked _(illustrative deck example)_ and are not 2025 live data._
 

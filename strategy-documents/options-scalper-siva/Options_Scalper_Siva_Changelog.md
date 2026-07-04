@@ -1,5 +1,9 @@
 # Options Scalper (Siva) — Strategy Changelog
 
+> **⚠ SUPERSEDED (2026-06-29) — historical.** The S20→S24 evolution is now folded into the operative
+> doc (`../options-scalper-siva-operative/Options_Scalper_Siva_Operative_Strategy.md`). Retained for
+> provenance only; do not edit for forward work.
+
 > **What this is:** a single-glance, session-by-session record of *what changed of what* across the five mentoring sessions (S20 → S24). It is **derived from `Options_Scalper_Siva_Consolidated_Strategy.md`** (its §5 evolution log, §2.11–2.14 risk refinements, and §4.14–4.17 shared-input additions) — the consolidated doc is the single source of truth. Read it first; this changelog never introduces a rule, number, or attribution not already there.
 >
 > **No deprecations anywhere.** Across all five sessions **no rule was ever removed or reversed** — every change is an introduction, a refinement, a tightened threshold, or the resolution of a previously-open question. The conflict rule (latest session's value is primary; older retained) applies but never triggered a hard contradiction.

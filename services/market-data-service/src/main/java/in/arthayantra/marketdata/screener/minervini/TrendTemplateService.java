@@ -216,39 +216,15 @@ public class TrendTemplateService {
   }
 
   private BigDecimal weightedRs(Raw r) {
-    BigDecimal rs = BigDecimal.ZERO;
-    rs = rs.add(ret(r.close(), r.c63()).multiply(new BigDecimal("0.4")));
-    rs = rs.add(ret(r.close(), r.c126()).multiply(new BigDecimal("0.2")));
-    rs = rs.add(ret(r.close(), r.c189()).multiply(new BigDecimal("0.2")));
-    rs = rs.add(ret(r.close(), r.c252()).multiply(new BigDecimal("0.2")));
-    return rs;
-  }
-
-  private static BigDecimal ret(BigDecimal now, BigDecimal past) {
-    if (past == null || past.signum() == 0) {
-      return BigDecimal.ZERO;
-    }
-    return now.subtract(past).divide(past, 6, RoundingMode.HALF_UP);
+    return MinerviniGates.weightedRs(r.close(), r.c63(), r.c126(), r.c189(), r.c252());
   }
 
   private TrendCandidate toCandidate(Raw r, BigDecimal rsRaw, BigDecimal rsRank) {
-    BigDecimal lowGate = r.low52w() == null ? null : r.low52w().multiply(onePlus(pctAbove52wLow));
-    BigDecimal highGate = r.high52w() == null ? null : r.high52w().multiply(oneMinus(within52wHigh));
-    boolean[] g = new boolean[8];
-    g[0] = gt(r.close(), r.sma150()) && gt(r.close(), r.sma200());
-    g[1] = gt(r.sma150(), r.sma200());
-    g[2] = gt(r.sma200(), r.sma200Ago());
-    g[3] = gt(r.sma50(), r.sma150()) && gt(r.sma50(), r.sma200());
-    g[4] = gt(r.close(), r.sma50());
-    g[5] = lowGate != null && r.close().compareTo(lowGate) >= 0;
-    g[6] = highGate != null && r.close().compareTo(highGate) >= 0;
-    g[7] = rsRank.compareTo(rsMin) >= 0;
-    int passed = 0;
-    for (boolean b : g) {
-      if (b) {
-        passed++;
-      }
-    }
+    boolean[] g =
+        MinerviniGates.gates(
+            r.close(), r.sma50(), r.sma150(), r.sma200(), r.sma200Ago(),
+            r.high52w(), r.low52w(), rsRank, rsMin, pctAbove52wLow, within52wHigh);
+    int passed = MinerviniGates.passed(g);
     boolean all = passed == 8;
     BigDecimal fromHigh =
         r.high52w() == null || r.high52w().signum() == 0
@@ -261,39 +237,7 @@ public class TrendTemplateService {
     return new TrendCandidate(
         r.symbol(), "NSE", r.close(), r.sma50(), r.sma150(), r.sma200(), r.high52w(), r.low52w(),
         fromHigh, aboveLow, r.avgTurnover50(), rsRaw, rsRank, g, passed, all,
-        computeStage(r), r.ffMcap(), r.ffPct());
-  }
-
-  /**
-   * MV-2.9 Stage 1-4 (§4.1), a cheap derived label off the moving-average structure: Stage 2 =
-   * above a rising 200-day and above the 50-day (accumulation/advance); Stage 4 = below a falling
-   * 200-day (decline); Stage 3 = above the 200-day but the 200-day has stopped rising (topping);
-   * else Stage 1 (neglect/consolidation).
-   */
-  private int computeStage(Raw r) {
-    boolean above200 = gt(r.close(), r.sma200());
-    boolean rising200 = gt(r.sma200(), r.sma200Ago());
-    if (!above200 && !rising200) {
-      return 4;
-    }
-    if (above200 && rising200 && gt(r.close(), r.sma50())) {
-      return 2;
-    }
-    if (above200 && !rising200) {
-      return 3;
-    }
-    return 1;
-  }
-
-  private static boolean gt(BigDecimal a, BigDecimal b) {
-    return a != null && b != null && a.compareTo(b) > 0;
-  }
-
-  private static BigDecimal onePlus(BigDecimal pct) {
-    return BigDecimal.ONE.add(pct.movePointLeft(2));
-  }
-
-  private static BigDecimal oneMinus(BigDecimal pct) {
-    return BigDecimal.ONE.subtract(pct.movePointLeft(2));
+        MinerviniGates.stage(r.close(), r.sma50(), r.sma200(), r.sma200Ago()),
+        r.ffMcap(), r.ffPct());
   }
 }

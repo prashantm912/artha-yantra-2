@@ -97,19 +97,22 @@ public class MinerviniController {
   private final MinerviniGeometryService geometryService;
   private final MinerviniSetupsRepository setupsRepo;
   private final MinerviniFunnelService funnelService;
+  private final MinerviniHitRateService hitRateService;
 
-  /** Wires the screener + screen/geometry repositories + the funnel service. */
+  /** Wires the screener + screen/geometry repositories + the funnel + hit-rate services. */
   public MinerviniController(
       TrendTemplateService screener,
       MinerviniScreenRepository repo,
       MinerviniGeometryService geometryService,
       MinerviniSetupsRepository setupsRepo,
-      MinerviniFunnelService funnelService) {
+      MinerviniFunnelService funnelService,
+      MinerviniHitRateService hitRateService) {
     this.screener = screener;
     this.repo = repo;
     this.geometryService = geometryService;
     this.setupsRepo = setupsRepo;
     this.funnelService = funnelService;
+    this.hitRateService = hitRateService;
   }
 
   /** Serves the persisted daily screen (default = latest date, passers only). */
@@ -219,6 +222,20 @@ public class MinerviniController {
       return new MinerviniFunnelService.Funnel(null, null, List.of(), List.of(), List.of());
     }
     return funnelService.funnel(date);
+  }
+
+  /**
+   * The screener hit-rate harness (MV-8.1): re-runs the point-in-time 8-gate screen at a weekly
+   * cadence over {@code [from, to]} (defaults to the last ~3y through the latest daily bar) and
+   * reports each passer's forward return at +5/+10/+21/+63 sessions vs NIFTY 50 — a per-horizon
+   * hit-rate + mean excess return. Reads {@code candles}@1d (deep history), price-gates only.
+   */
+  @PostMapping("/backtest")
+  public MinerviniHitRateService.HitRateReport backtest(
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+      @RequestParam(required = false) Integer step) {
+    return hitRateService.run(from, to, step);
   }
 
   private static Row toRow(TrendCandidate c) {

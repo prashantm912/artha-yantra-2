@@ -234,6 +234,45 @@ final class SessionIndicators {
   }
 
   /**
+   * Highest high over the {@code period} bars ENDING AT THE PRIOR bar (excludes the current bar) —
+   * the resistance a new-high breakout must clear (Minervini MV-6.6 primary-base). {@code close >
+   * WEEK52_HIGH} is a fresh high; on a 1d primary period=252 ≈ a 52-week high. Null until {@code
+   * period} prior bars exist.
+   */
+  static EngineIndicator week52High(EngineSeries series, int period) {
+    return indicator(
+        period,
+        series,
+        index -> {
+          BigDecimal max = null;
+          for (int i = index - period; i <= index - 1; i++) {
+            BigDecimal h = series.candle(i).high();
+            if (max == null || h.compareTo(max) > 0) {
+              max = h;
+            }
+          }
+          return max;
+        });
+  }
+
+  /** Lowest low over the {@code period} bars ending at the prior bar (excludes the current bar). */
+  static EngineIndicator week52Low(EngineSeries series, int period) {
+    return indicator(
+        period,
+        series,
+        index -> {
+          BigDecimal min = null;
+          for (int i = index - period; i <= index - 1; i++) {
+            BigDecimal l = series.candle(i).low();
+            if (min == null || l.compareTo(min) < 0) {
+              min = l;
+            }
+          }
+          return min;
+        });
+  }
+
+  /**
    * Futures basis as a percent of futures: (spot - futures) / futures * 100, evaluated on the
    * spot/index signal series against the front-month futures context series (time-aligned
    * at-or-before). Sign convention per the plan §7.7 reference formula (positive = spot above

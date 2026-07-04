@@ -257,3 +257,14 @@ reuses `BreadthService`. All benefit from owner chart-verification of the geomet
 the three-list as three ranked columns (symbol · footprint · close+%-to-pivot · RS). Verify trio green
 (lint / build / test:ci 257-257); deployed. The daily buyable workflow is now end-to-end usable
 (screener → geometry → funnel → UI, all live).
+
+---
+
+## PR-I — Phase 6: `WEEK52_HIGH/LOW` + `primary_base` setup (MV-6.6)  (verified, awaiting CI)
+
+| MV item | What | Status | Evidence |
+|---|---|---|---|
+| MV-6.6 | `WEEK52_HIGH/LOW(period)` trailing high/low (EXCLUDES the current bar → `close>w52h` = fresh high) + `minervini-primary-base.yaml` (new-52w-high breakout on volume, swing) | DONE | `Week52BehaviorTest` (trailing max/min on a known series); `PrimaryBaseSetupTest` fires on the new-high breakout WITH volume, 0 WITHOUT |
+
+Parity-safe: registry-freeze + schema enum synced; all 9 golden vectors byte-identical. The production
+YAML uses `WEEK52_HIGH` period 252; the test uses an inline period-20 variant (identical mechanism).

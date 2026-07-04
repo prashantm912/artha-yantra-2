@@ -1,0 +1,35 @@
+# Minervini primary-base breakout setup (MV-6.6, §6.6). A swing (daily-primary) long that fires as
+# the close breaks out above the prior 52-week high (a fresh high after the first base) on expanding
+# volume. crossover(px, w52h) fires ONLY on the bar the close clears the trailing high — the breakout
+# bar, not a chase. The "post-IPO first base / ≤35% depth" preconditions are a screener/candidate
+# filter (like the Trend-Template pass), not an engine gate.
+#
+# NOTE (Phase 7): the ~7-8% initial stop + staggered exits ride the swing risk framework; interim
+# atr_multiple stop here.
+schema: strategy-schema/v1
+id: minervini-primary-base
+name: "Minervini Primary Base"
+version: 1.0.0
+universe:
+  mode: explicit
+  instruments:
+    - { exchange: NSE, tradingsymbol: "NIFTY 50" }
+timeframes: { primary: 1d }
+indicators:
+  - { name: SMA, alias: px, timeframe: 1d, params: { period: 1 }, weight: 1.0,
+      normalize: { type: linear, from: 0, to: 100000 } }
+  - { name: WEEK52_HIGH, alias: w52h, timeframe: 1d, params: { period: 252 }, weight: 1.0 }
+  - { name: VOLUME_RATIO, alias: vol, timeframe: 1d, params: { lookback: 50 }, weight: 1.0 }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - crossover: { fast: px, slow: w52h }
+      - "vol > 1.2"
+  scoring: { threshold: 0.0 }
+exit_rules:
+  - { type: stop_loss, params: { basis: atr_multiple, value: 3 } }
+risk:
+  position_sizing: { method: percent_equity, params: { percent: 5 } }
+  max_positions: 1
+  session: { style: swing }

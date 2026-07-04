@@ -157,6 +157,14 @@ public final class IndicatorRegistry {
         new Definition(
             "VCP_PIVOT", "VCP pivot / line of least resistance (context-seeded)", Set.of(), true),
         (s, c, p) -> SessionIndicators.contextLevel(s, c));
+    // Minervini MV-6.6 (primary-base): trailing high/low over `period` PRIOR bars (excludes current)
+    // — the resistance/support a new-high/low breakout must clear. period=252 ≈ 52-week on a 1d primary.
+    register(
+        new Definition("WEEK52_HIGH", "Highest high over the prior `period` bars", Set.of("period"), false),
+        (s, c, p) -> SessionIndicators.week52High(s, requirePositive(p, "period", 252)));
+    register(
+        new Definition("WEEK52_LOW", "Lowest low over the prior `period` bars", Set.of("period"), false),
+        (s, c, p) -> SessionIndicators.week52Low(s, requirePositive(p, "period", 252)));
   }
 
   private IndicatorRegistry() {}

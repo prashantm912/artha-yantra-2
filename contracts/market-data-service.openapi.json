@@ -450,6 +450,59 @@
         }
       }
     },
+    "/api/v1/market/screener/minervini/backtest" : {
+      "post" : {
+        "tags" : [ "minervini-controller" ],
+        "operationId" : "backtest",
+        "parameters" : [ {
+          "name" : "from",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        }, {
+          "name" : "to",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        }, {
+          "name" : "step",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/HitRateReport"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/options/stock-chain/warm" : {
       "get" : {
         "tags" : [ "stock-chain-warm-controller" ],
@@ -5843,6 +5896,78 @@
           "offset" : {
             "type" : "integer",
             "format" : "int32"
+          }
+        }
+      },
+      "HitRateReport" : {
+        "type" : "object",
+        "properties" : {
+          "from" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "to" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "stepSessions" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "asOfCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "universeCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "totalPasserSamples" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "benchmark" : {
+            "type" : "string"
+          },
+          "note" : {
+            "type" : "string"
+          },
+          "horizons" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/HorizonStat"
+            }
+          }
+        }
+      },
+      "HorizonStat" : {
+        "type" : "object",
+        "properties" : {
+          "horizonSessions" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "sampleCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "winRatePct" : {
+            "type" : "number"
+          },
+          "beatBenchmarkRatePct" : {
+            "type" : "number"
+          },
+          "meanReturnPct" : {
+            "type" : "number"
+          },
+          "meanBenchmarkReturnPct" : {
+            "type" : "number"
+          },
+          "meanExcessReturnPct" : {
+            "type" : "number"
+          },
+          "medianReturnPct" : {
+            "type" : "number"
           }
         }
       },

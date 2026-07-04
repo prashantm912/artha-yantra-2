@@ -84,6 +84,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/screener/minervini/backtest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["backtest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/options/stock-chain/warm": {
         parameters: {
             query?: never;
@@ -1889,6 +1905,35 @@ export interface components {
             /** Format: int32 */
             offset?: number;
         };
+        HitRateReport: {
+            /** Format: date */
+            from?: string;
+            /** Format: date */
+            to?: string;
+            /** Format: int32 */
+            stepSessions?: number;
+            /** Format: int32 */
+            asOfCount?: number;
+            /** Format: int32 */
+            universeCount?: number;
+            /** Format: int32 */
+            totalPasserSamples?: number;
+            benchmark?: string;
+            note?: string;
+            horizons?: components["schemas"]["HorizonStat"][];
+        };
+        HorizonStat: {
+            /** Format: int32 */
+            horizonSessions?: number;
+            /** Format: int32 */
+            sampleCount?: number;
+            winRatePct?: number;
+            beatBenchmarkRatePct?: number;
+            meanReturnPct?: number;
+            meanBenchmarkReturnPct?: number;
+            meanExcessReturnPct?: number;
+            medianReturnPct?: number;
+        };
         WarmStatus: {
             underlying?: string;
             /** Format: date */
@@ -3406,6 +3451,39 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ScreenResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    backtest: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+                step?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["HitRateReport"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

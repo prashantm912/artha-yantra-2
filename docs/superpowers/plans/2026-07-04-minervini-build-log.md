@@ -309,3 +309,56 @@ executor** (MV-7.3/7.4 — the paper ledger currently does full closes; partial 
 `ExitEvaluator` + the golden format), the swing paper hold-lifecycle + auto-paper (MV-7.1/7.5, mostly
 free per §1d of the build-spec — intraday square-off is already style-scoped), and the 50d-MA trail
 (`trailing_stop`+`SMA(50)` config, warms ≥50 daily bars).
+
+---
+
+## PR-N — Phase 8: the screener hit-rate harness (MV-8.1)  ✅ verified + LIVE
+
+The reliability-evidence deliverable — "do the Minervini passers actually go up?" A point-in-time
+re-screen at a weekly cadence over deep daily history, measuring each passer's forward return vs
+NIFTY 50. This is the number the whole Track-B trust process (§0.5 #12) is judged against.
+
+| MV item | What | Status | Evidence |
+|---|---|---|---|
+| MV-8.1 | `MinerviniHitRateService` + `POST /api/v1/market/screener/minervini/backtest` (typed `HitRateReport`) — re-runs the 8-gate screen at weekly steps over `candles`@1d (deep history), forward returns at +5/+10/+21/+63 sessions vs NIFTY 50, per-horizon win-rate + beat-benchmark rate + mean excess. **Price-gates only** (§3-E; no lookahead fundamentals). | **DONE** | `MinerviniHitRateIntegrationTest` (2/2) + `MinerviniScreenerIntegrationTest` (2/2, refactor unchanged). **LIVE 2026-07-04** (see below). |
+
+**Shared-gate refactor (drift guard):** extracted `MinerviniGates` (pure: 8 gates + weighted RS +
+Stage) from `TrendTemplateService`; the live screener and the harness now compute gates from ONE
+definition so a historical re-screen can never silently drift from the live screen. `TrendTemplateService`
+delegates; `MinerviniScreenerIntegrationTest` stays green (behaviour byte-identical).
+
+**Data source = `candles`@1d, not `nse_eod_bhavcopy`.** Bhavcopy holds only ~1y — far short of the
+252-session warmup + 63-session forward window; `candles`@1d has ~20y depth (2006→) for the
+~1,800-name backfilled/subscribed EQ universe (verified live). Universe scoped by an `instruments`
+`instrument_type='EQ'` join; the same session/price/liquidity pre-filters + cross-sectional RS
+percentile as the live screener.
+
+**LIVE result (2026-07-04, default 3y / weekly / 149 asOf steps / 1,559-name universe / 104,523 samples):**
+
+| horizon | n | win% | beat-NIFTY% | mean ret% | mean excess% | median% |
+|---|---|---|---|---|---|---|
+| +5  | 27,341 | 48.83 | 47.72 | 0.41 | 0.27 | -0.14 |
+| +10 | 27,079 | 48.83 | 47.68 | 0.83 | 0.56 | -0.20 |
+| +21 | 26,458 | 50.04 | 47.86 | 1.79 | 1.22 | 0.02 |
+| +63 | 23,645 | 53.02 | 47.93 | 5.63 | **2.92** | 1.64 |
+
+**Read:** a real, modest, *asymmetric* edge — the beat-NIFTY RATE hovers near a coin-flip (~47.7–47.9%)
+but the mean excess is positive at every horizon and GROWS with the hold (+2.92% at 63 sessions), and
+the median return turns positive by +21. The winners are fat-tailed; the method's payoff is in
+magnitude, not frequency — exactly the momentum thesis. Survivorship is accepted + surfaced in the
+report note (today's listed universe → a real forward book fares somewhat worse).
+
+**Adversarial review (4-critic + verify workflow, 2 CONFIRMED, both fixed pre-merge):**
+1. (medium) benchmark/excess stats divided a non-NaN-benchmark numerator by the FULL sample count →
+   self-inconsistent `beatBenchmarkRatePct` vs `winRatePct` when `idx+h` ran off the benchmark series.
+2. (low) the passer forward return used `lead(close,h)` over the STOCK's sessions while the benchmark
+   used `idx+h` over the BENCHMARK's sessions → a halted/gapped stock was measured over a longer
+   calendar window than the NIFTY it was differenced against.
+   **One fix for both:** measure each passer's forward return to the SAME benchmark session date
+   (`lead(d,h)` + a date-match); one denominator backs every stat; misaligned samples are dropped +
+   counted in the note (4,208 on the live run). Byte-identical screener behaviour retained.
+
+**Parity/contract:** no engine path, no golden surface (a market-data read-only analytics endpoint).
+Typed record → `MapReturnRatchet` unaffected; springdoc recaptured + `contracts/gen` regen (additive:
+the new path + `HitRateReport`). Config `artha.minervini.hitrate.*` (lookback-years 3, max-span-years 8,
+step-sessions 5, benchmark "NIFTY 50").

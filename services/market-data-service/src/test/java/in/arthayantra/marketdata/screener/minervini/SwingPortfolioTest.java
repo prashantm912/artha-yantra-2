@@ -76,13 +76,36 @@ class SwingPortfolioTest {
     assertThat(rsp.totalReturnPct()).as("RS-priority takes the stronger-RS name").isCloseTo(5.0, within(1e-6));
   }
 
+  @Test
+  void costsHaircutTheIlliquidNameFarHarder() {
+    // A +20% trade on a ₹10L / 1-slot book (order = ₹10L). One name is liquid (₹100 Cr/day), one thin
+    // (₹5 L/day). Same gross return; the impact model (participation = order / turnover) punishes the
+    // thin name — the whole reason the turnover floor exists.
+    SwingPortfolio.Costs costs = new SwingPortfolio.Costs(1_000_000, 0.25, 0.05, 0.10, 5.0);
+    SwingPortfolio.Result liquid =
+        SwingPortfolio.simulate(List.of(t("2020-01-01", "2020-03-01", 20, 50, 1e9)), 1, false, costs);
+    SwingPortfolio.Result thin =
+        SwingPortfolio.simulate(List.of(t("2020-01-01", "2020-03-01", 20, 50, 500_000)), 1, false, costs);
+
+    // liquid: participation ~0 → cost ≈ fixed 0.25% + 2·spread 0.05% = 0.37% → net ≈ 19.63%
+    assertThat(liquid.totalReturnPct()).isCloseTo(19.63, within(0.05));
+    // thin: participation 2.0 → impact caps at 5%/side → round-trip 10.35% → net ≈ 9.65%
+    assertThat(thin.totalReturnPct()).isCloseTo(9.65, within(0.05));
+    assertThat(liquid.totalReturnPct()).isGreaterThan(thin.totalReturnPct());
+  }
+
   private static BtTrade t(String entry, String exit, double pnlPct) {
-    return t(entry, exit, pnlPct, 50.0);
+    return t(entry, exit, pnlPct, 50.0, 1e12);
   }
 
   private static BtTrade t(String entry, String exit, double pnlPct, double rsRank) {
+    return t(entry, exit, pnlPct, rsRank, 1e12);
+  }
+
+  private static BtTrade t(String entry, String exit, double pnlPct, double rsRank, double avgTurnover) {
     return new BtTrade(
         "technical", "vcp", "X", LocalDate.parse(entry), 100.0, LocalDate.parse(exit),
-        100.0 * (1 + pnlPct / 100.0), pnlPct, 20, pnlPct > 0 ? "TRAILING_STOP" : "STOP_LOSS", rsRank);
+        100.0 * (1 + pnlPct / 100.0), pnlPct, 20, pnlPct > 0 ? "TRAILING_STOP" : "STOP_LOSS", rsRank,
+        avgTurnover);
   }
 }

@@ -48,7 +48,8 @@ final class MinerviniSwingBacktest {
       double pnlPct,
       int barsHeld,
       String exitReason,
-      double rsRankAtEntry) {}
+      double rsRankAtEntry,
+      double avgTurnoverAtEntry) {}
 
   /**
    * One backtest configuration. {@code useRealRs} gates on the caller-supplied per-bar RS-rank at
@@ -183,7 +184,7 @@ final class MinerviniSwingBacktest {
               new BtTrade(
                   v.name(), setup, symbol, bars.get(entryIdx).date(), entryPrice, date, exitPrice,
                   (exitPrice - entryPrice) / entryPrice * 100.0, i - entryIdx, reason,
-                  rsRank[entryIdx]));
+                  rsRank[entryIdx], turnover20[entryIdx]));
           inTrade = false;
         }
       }

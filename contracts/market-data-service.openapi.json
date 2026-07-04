@@ -665,6 +665,42 @@
         }
       }
     },
+    "/api/v1/market/fundamentals/refresh" : {
+      "post" : {
+        "tags" : [ "fundamentals-controller" ],
+        "operationId" : "refresh",
+        "parameters" : [ {
+          "name" : "symbols",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RefreshResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/equity/pre-open-scan/capture" : {
       "post" : {
         "tags" : [ "equity-controller" ],
@@ -727,7 +763,7 @@
     "/api/v1/market/candles/refresh" : {
       "post" : {
         "tags" : [ "candles-controller" ],
-        "operationId" : "refresh",
+        "operationId" : "refresh_1",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -4001,6 +4037,42 @@
         }
       }
     },
+    "/api/v1/market/fundamentals/{symbol}" : {
+      "get" : {
+        "tags" : [ "fundamentals-controller" ],
+        "operationId" : "get_2",
+        "parameters" : [ {
+          "name" : "symbol",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/EquityFundamentals"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/fii-dii/participant-oi" : {
       "get" : {
         "tags" : [ "fii-dii-controller" ],
@@ -5832,6 +5904,26 @@
           }
         }
       },
+      "RefreshResponse" : {
+        "type" : "object",
+        "properties" : {
+          "available" : {
+            "type" : "boolean"
+          },
+          "requested" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "written" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "skipped" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
       "CaptureResult" : {
         "type" : "object",
         "properties" : {
@@ -7512,6 +7604,48 @@
           "interpretation" : {
             "type" : "string",
             "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
+          }
+        }
+      },
+      "EquityFundamentals" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "isin" : {
+            "type" : "string"
+          },
+          "marketCapCr" : {
+            "type" : "number"
+          },
+          "freeFloatMcapCr" : {
+            "type" : "number"
+          },
+          "freeFloatPct" : {
+            "type" : "number"
+          },
+          "promoterPct" : {
+            "type" : "number"
+          },
+          "pe" : {
+            "type" : "number"
+          },
+          "roe" : {
+            "type" : "number"
+          },
+          "netProfitCr" : {
+            "type" : "number"
+          },
+          "revenueCr" : {
+            "type" : "number"
+          },
+          "revenuePrevCr" : {
+            "type" : "number"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date"
           }
         }
       },

@@ -148,6 +148,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/fundamentals/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["refresh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/equity/pre-open-scan/capture": {
         parameters: {
             query?: never;
@@ -189,7 +205,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["refresh"];
+        post: operations["refresh_1"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1140,6 +1156,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/fundamentals/{symbol}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_2"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/fii-dii/participant-oi": {
         parameters: {
             query?: never;
@@ -1879,6 +1911,15 @@ export interface components {
             requiredMargin?: number;
             finalMargin?: number;
         };
+        RefreshResponse: {
+            available?: boolean;
+            /** Format: int32 */
+            requested?: number;
+            /** Format: int32 */
+            written?: number;
+            /** Format: int32 */
+            skipped?: number;
+        };
         CaptureResult: {
             /** Format: date */
             date?: string;
@@ -2495,6 +2536,21 @@ export interface components {
             oiPct?: number;
             /** @enum {string} */
             interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+        };
+        EquityFundamentals: {
+            symbol?: string;
+            isin?: string;
+            marketCapCr?: number;
+            freeFloatMcapCr?: number;
+            freeFloatPct?: number;
+            promoterPct?: number;
+            pe?: number;
+            roe?: number;
+            netProfitCr?: number;
+            revenueCr?: number;
+            revenuePrevCr?: number;
+            /** Format: date */
+            asOf?: string;
         };
         Bias: {
             /** Format: date */
@@ -3431,6 +3487,37 @@ export interface operations {
             };
         };
     };
+    refresh: {
+        parameters: {
+            query: {
+                symbols: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["RefreshResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     preOpenScanCapture: {
         parameters: {
             query?: never;
@@ -3491,7 +3578,7 @@ export interface operations {
             };
         };
     };
-    refresh: {
+    refresh_1: {
         parameters: {
             query?: never;
             header?: never;
@@ -5571,6 +5658,37 @@ export interface operations {
                     "*/*": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_2: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                symbol: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["EquityFundamentals"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

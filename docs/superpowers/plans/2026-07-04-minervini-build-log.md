@@ -282,3 +282,15 @@ Both are seeded-context breakout setups (same pattern as `vcp`): `CHEAT_PIVOT`/`
 `contextLevel` registry entries, NEUTRAL in replay. All 9 golden vectors byte-identical. The Phase-5
 geometry that COMPUTES the cheat-pause high + thrust flag (and seeds them live) rides **Phase 9** with
 the context-seeding producer — same staging as `VCP_PIVOT`. Thresholds config-tunable (owner chart-verify).
+
+---
+
+## PR-L — Phase 8: swing backtest (MV-8.2/8.3)  (verified, awaiting CI)
+
+| MV item | What | Status | Evidence |
+|---|---|---|---|
+| MV-8.2/8.3 | Swing setups backtest through `ReplayEngine` (which drives the shared `TickwiseGoldenRunner` → the 1d/swing handling from PR-E carries into replay for FREE) | DONE | `SwingBacktestTest`: `vcp` swing replays to a multi-day trade (entry<exit, barsHeld≥2, held not squared off) + two-replay determinism; existing parity 9/9 green |
+
+Test-only (no production code — the engine already handled swing). MV-8.4 (equity-class `CostConfig`:
+delivery brokerage/STT vs option lots) is a later cost-accuracy refinement — the backtest runs with
+default costs today.

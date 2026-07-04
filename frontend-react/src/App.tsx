@@ -123,6 +123,11 @@ const OiBuzzPage = lazy(() =>
 const DeliveryDataPage = lazy(() =>
   import('./pages/equity/DeliveryDataPage.tsx').then((m) => ({ default: m.DeliveryDataPage })),
 );
+const MinerviniCandidatePage = lazy(() =>
+  import('./pages/equity/MinerviniCandidatePage.tsx').then((m) => ({
+    default: m.MinerviniCandidatePage,
+  })),
+);
 const EquityReturnsPage = lazy(() =>
   import('./pages/equity/EquityReturnsPage.tsx').then((m) => ({ default: m.EquityReturnsPage })),
 );
@@ -238,6 +243,7 @@ export function App() {
           <Route path="/equity/delivery-data" element={<Lazy><DeliveryDataPage /></Lazy>} />
           <Route path="/equity/equity-returns" element={<Lazy><EquityReturnsPage /></Lazy>} />
           <Route path="/equity/minervini" element={<MinerviniScreenerPage />} />
+          <Route path="/equity/minervini/:symbol" element={<Lazy><MinerviniCandidatePage /></Lazy>} />
           <Route path="/equity/sector-heatmap" element={<Lazy><SectorHeatmapPage /></Lazy>} />
           <Route path="/equity/sector-stats" element={<Lazy><SectorStatsPage /></Lazy>} />
           <Route path="/equity/index-contribution" element={<Lazy><IndexContributionPage /></Lazy>} />

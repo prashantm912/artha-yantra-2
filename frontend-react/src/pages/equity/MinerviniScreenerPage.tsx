@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { m } from 'motion/react';
 import { formatDecimal } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
@@ -134,7 +135,11 @@ export function MinerviniScreenerPage() {
                   <tbody>
                     {(data?.items ?? []).map((r) => (
                       <tr key={r.symbol} className="border-t border-ay-border">
-                        <td className="px-2 py-2 font-medium">{r.symbol}</td>
+                        <td className="px-2 py-2 font-medium">
+                          <Link to={`/equity/minervini/${r.symbol}`} className="text-accent hover:underline">
+                            {r.symbol}
+                          </Link>
+                        </td>
                         <td className="px-2 py-2 text-right tabular-nums">{formatDecimal(r.close, 2)}</td>
                         <td className="px-2 py-2 text-right tabular-nums">{r.rsRank ? formatDecimal(r.rsRank, 0) : '—'}</td>
                         <td className="px-2 py-2">{r.stage ? STAGE_LABEL[r.stage] : '—'}</td>
@@ -221,7 +226,9 @@ function FunnelColumn({
       <ul className="max-h-[32rem] divide-y divide-ay-border overflow-auto">
         {rows.map((r) => (
           <li key={r.symbol} className="flex items-center gap-2 px-3 py-2">
-            <span className="font-medium text-ay-text">{r.symbol}</span>
+            <Link to={`/equity/minervini/${r.symbol}`} className="font-medium text-accent hover:underline">
+              {r.symbol}
+            </Link>
             {r.footprint && <span className="text-[11px] text-ay-muted">{r.footprint}</span>}
             <span className="ml-auto flex items-center gap-3 text-xs tabular-nums text-ay-muted">
               <span title="Close / pivot">

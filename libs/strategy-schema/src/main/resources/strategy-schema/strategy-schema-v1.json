@@ -407,7 +407,7 @@
               "additionalProperties": false,
               "required": ["basis"],
               "properties": {
-                "basis": { "enum": ["premium_pct", "atr_multiple", "index_points", "indicator"] },
+                "basis": { "enum": ["premium_pct", "percent", "atr_multiple", "index_points", "indicator"] },
                 "value": { "type": "number", "exclusiveMinimum": 0 },
                 "activate_at": { "type": "number", "exclusiveMinimum": 0 },
                 "trail_by": { "type": "number", "exclusiveMinimum": 0 },
@@ -469,7 +469,7 @@
       "additionalProperties": false,
       "required": ["basis", "value"],
       "properties": {
-        "basis": { "enum": ["premium_pct", "atr_multiple", "r_multiple", "index_points"] },
+        "basis": { "enum": ["premium_pct", "percent", "atr_multiple", "r_multiple", "index_points"] },
         "value": { "type": "number", "exclusiveMinimum": 0 },
         "atr_period": { "type": "integer", "minimum": 1, "maximum": 200 }
       }

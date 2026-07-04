@@ -362,3 +362,29 @@ report note (today's listed universe → a real forward book fares somewhat wors
 Typed record → `MapReturnRatchet` unaffected; springdoc recaptured + `contracts/gen` regen (additive:
 the new path + `HitRateReport`). Config `artha.minervini.hitrate.*` (lookback-years 3, max-span-years 8,
 step-sessions 5, benchmark "NIFTY 50").
+
+---
+
+## PR-O — Phase 4: the per-candidate analyzer page (MV-4.4)  ✅ verified + deployed
+
+The React drill-down that closes Track A's UI: click a symbol on the screener or the funnel → a full
+per-candidate SEPA analysis with a chart.
+
+| MV item | What | Status | Evidence |
+|---|---|---|---|
+| MV-4.4 | `MinerviniCandidatePage` (`/equity/minervini/:symbol`) — summary strip (close/RS/Stage/gates/VCP) over a daily chart, 3 tabs: Trend Template (8 gates + MA structure), Base geometry (VCP footprint/pivot/contractions/depth/shakeout), Fundamentals (free-float mcap/%). Consumes the live `GET /candidate/{symbol}`. | **DONE** | verify trio green (lint / build tsc-strict / test:ci **257/257**); deployed; SPA route serves 200; `/candidate` live-returns real geometry (DEEDEV 8/8, Stage 2, VCP `1W 12/7 4T`, pivot 682.95). |
+
+**Chart (`MinerviniCandidateChart`):** daily candles + 50/150/200-day MA overlays (computed
+client-side, legend-labelled) + volume underlay + a dashed price line at the VCP pivot. Reuses the
+`CandleChart` lightweight-charts v5 pattern (`autoSize`, `--ay-*` theming re-applied on `data-theme`
+flips, `+19800s` IST daily-bucket shift). A dedicated component so the shared `CandleChart` (used by
+every other chart page) is untouched. `useDeepDailyCandles` requests ~420 daily bars so the 200-day MA
+renders across the base, not just the last ~20 sessions of a 220-bar window.
+
+**Wiring:** symbol links from the screener table + the funnel three-list → the analyzer; lazy route
+(`/equity/minervini/:symbol`, sibling of the static `/equity/minervini` screener). No new menu entry —
+the analyzer is a drill-down, not a top-level page.
+
+**Track A UI is now complete end-to-end:** screener list → funnel triad → per-candidate analyzer with
+the annotated chart + gate/geometry/fundamentals reasoning — the full manual-chart-check surface the
+owner asked for (§0.5 #14).

@@ -485,3 +485,18 @@ The Minervini defensive exit after the breakout: sell on a daily close back belo
 context gate seeded in Phase 9. **MV-9.3 daily sell-decision report** (the §2.10 buy-now/why-holding/
 where-seller triad per open swing position) needs live open positions → it rides the Phase-9 live
 producer with its data.
+
+---
+
+## PR-T / PR-U — Phase 9/10: alerts (reuse) + swing report card (MV-9.4, MV-10.1/10.2)  ✅ verified
+
+| MV item | What | Status | Evidence |
+|---|---|---|---|
+| MV-9.4 | Notifier alerts (entry / stop / candidate-buyable) | **DONE-BY-REUSE (entry/stop)** | **Already built — no new code.** `NotifierService.onSignal(SignalEmitted)` fires a per-strategy opt-in alert for ANY published strategy via `targetForVersion` — a published minervini swing strategy gets entry/stop alerts the moment the owner toggles notifications ON. A minervini-specific listener would be a redundant DUPLICATE (verify-before-building). Net-new = the funnel "candidate-now-buyable" transition push (market-data producer + cross-service) → rides the Phase-9 live producer. |
+| MV-10.1/10.2 | Swing report card + self-measurement | **DONE (PR-U)** | `SwingReportCard.of(List<Trade>)` — batting avg, avg-win/avg-loss %, payoff ratio, expectancy %, avg bars-held + a letter grade against the §0.5 #12 reliability bar (positive expectancy AND payoff ≥ 2 AND batting ≥ ~45%). `SwingReportCardTest` (3): A-grade winning book / D-grade losing book / N/A empty. Pure analytics, single-strategy (never blended), complements `MetricsCalculator`, computes over any run's trades. |
+
+This closes the buildable Track-B surface. **Everything that produces observable value now is shipped**;
+the only remaining Minervini work is the Phase-9 LIVE operation (context-seeding producer, live daily-bar
+rollup, published swing strategies, auto-paper, the candidate-buyable push, the daily sell-decision
+report) — gated on the owner publishing swing strategies + an owner hit-rate sign-off (§9), and
+market-hours-verifiable only. That is a supervised Phase-9 pass, not more unattended dormant code.

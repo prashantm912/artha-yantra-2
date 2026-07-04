@@ -223,3 +223,32 @@ replay-parity golden for the vcp setup rides **Phase 8 / MV-8.3**.
 **Next (PR-G):** the remaining setups (`cheat_3c`/`power_play`/`primary_base`, MV-6.4/5/6), the `sepa`
 funnel 3-list (MV-6.7, + `RS_RANK_PCT`/`TREND_TEMPLATE_PASS` context-values), and the regime/group gates
 (MV-6.9).
+
+---
+
+## PR-G — Phase 6: the SEPA funnel 3-list (MV-6.7)  (verified + LIVE)
+
+The owner's actual daily deliverable: the day's Trend-Template passers ranked into the actionable
+three-list — immediately-buyable / on-deck / watch — by converging the Phase-5 screen (pass + RS-rank)
+with the base geometry (valid VCP + pivot). A market-data endpoint reusing the persisted Phase-5 rows
+(simpler + live-verifiable than an engine meta-strategy; zero parity surface).
+
+| MV item | What | Status | Evidence |
+|---|---|---|---|
+| MV-6.7 | `GET /api/v1/market/screener/minervini/funnel` — join screen + setups, bucket by pivot proximity + valid VCP, rank by RS (typed record) | DONE | IT buckets buyable/on-deck/no-base/extended correctly; **LIVE 2026-07-03: 62 buyable / 35 on-deck / 113 watch (=210 passers)** |
+
+**Buckets:** a valid VCP with close in [pivot·0.98, pivot·1.05] = immediately buyable (at the breakout,
+not chased); [pivot·0.90, pivot·0.98) = on-deck (tightening toward the pivot); no valid base or extended
+past the pivot = watch. Config `artha.minervini.funnel.*`.
+
+**Live sample (2026-07-03):** buyable DEEDEV (704.35 vs pivot 682.95, RS 99.56), OMAXAUTO, NINSYS;
+on-deck VENUSREM (1720.90 vs pivot 1797, RS 99.62), RPTECH. Sensible convergence.
+
+**Deployed:** market-data rebuilt + recreated (no migration — reads existing tables); spec recaptured +
+TS regen + tsc-strict; typed record (MapReturnRatchet unaffected); gateway `/api/v1/market/**` covers it.
+
+**Remaining Phase 6 (engine setups, distinct effort):** `cheat_3c` / `power_play` need a Phase-5
+geometry extension (the cheat pause high / high-tight-flag level Phase-5 does not yet emit);
+`primary_base` needs a `WEEK52_HIGH` new-high-breakout indicator; the market-regime gate (MV-6.9)
+reuses `BreadthService`. All benefit from owner chart-verification of the geometry thresholds.
+**FE:** a `/equity/minervini` funnel view + the MV-4.4 analyzer page consume `/funnel` + `/candidate`.

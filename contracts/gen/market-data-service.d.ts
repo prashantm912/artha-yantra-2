@@ -452,6 +452,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/screener/minervini/funnel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["funnel"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/screener/minervini/candidate/{symbol}": {
         parameters: {
             query?: never;
@@ -2042,6 +2058,24 @@ export interface components {
             priority?: "PINNED_INDEX" | "STRATEGY" | "UI" | "SPECULATIVE";
             /** Format: int32 */
             subscribers?: number;
+        };
+        Funnel: {
+            /** Format: date */
+            screenDate?: string;
+            immediatelyBuyable?: components["schemas"]["FunnelRow"][];
+            onDeck?: components["schemas"]["FunnelRow"][];
+            watch?: components["schemas"]["FunnelRow"][];
+        };
+        FunnelRow: {
+            symbol?: string;
+            close?: number;
+            rsRank?: number;
+            /** Format: int32 */
+            stage?: number;
+            isVcp?: boolean;
+            pivot?: number;
+            footprint?: string;
+            pctToPivot?: number;
         };
         CandidateAnalysis: {
             symbol?: string;
@@ -4192,6 +4226,37 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ScreenResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    funnel: {
+        parameters: {
+            query?: {
+                asOf?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["Funnel"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

@@ -1488,6 +1488,43 @@
         }
       }
     },
+    "/api/v1/market/screener/minervini/funnel" : {
+      "get" : {
+        "tags" : [ "minervini-controller" ],
+        "operationId" : "funnel",
+        "parameters" : [ {
+          "name" : "asOf",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Funnel"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/screener/minervini/candidate/{symbol}" : {
       "get" : {
         "tags" : [ "minervini-controller" ],
@@ -6241,6 +6278,63 @@
           "subscribers" : {
             "type" : "integer",
             "format" : "int32"
+          }
+        }
+      },
+      "Funnel" : {
+        "type" : "object",
+        "properties" : {
+          "screenDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "immediatelyBuyable" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/FunnelRow"
+            }
+          },
+          "onDeck" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/FunnelRow"
+            }
+          },
+          "watch" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/FunnelRow"
+            }
+          }
+        }
+      },
+      "FunnelRow" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "close" : {
+            "type" : "number"
+          },
+          "rsRank" : {
+            "type" : "number"
+          },
+          "stage" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "isVcp" : {
+            "type" : "boolean"
+          },
+          "pivot" : {
+            "type" : "number"
+          },
+          "footprint" : {
+            "type" : "string"
+          },
+          "pctToPivot" : {
+            "type" : "number"
           }
         }
       },

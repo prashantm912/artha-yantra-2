@@ -80,6 +80,20 @@ public class UpstoxAnalyticsConfig {
   }
 
   /**
+   * Upstox <b>Company Fundamentals</b> client (ADR-0004) — the ISIN-keyed financial endpoints
+   * (share-holdings / key-ratios / income-statement) that source the Minervini low-cap universe gate
+   * (free-float market cap + free-float %) and the §4.8 ROE read. Bound only when the analytics token
+   * is enabled; {@code FundamentalsService} consumes it via an {@code ObjectProvider}, so its absence
+   * makes a fundamentals refresh report everything skipped (never a 5xx).
+   */
+  @Bean
+  @ConditionalOnProperty(name = "artha.upstox.analytics.enabled", havingValue = "true")
+  public UpstoxFundamentalsClient upstoxFundamentalsClient(
+      RestClient.Builder restClientBuilder, UpstoxAnalyticsProperties properties) {
+    return new UpstoxFundamentalsClient(restClientBuilder, properties);
+  }
+
+  /**
    * Upstox <b>global-instrument</b> client — feeds the World Indices page ({@code GET
    * /api/v1/market/world-indices}). It downloads the public global instrument master from the assets
    * CDN ({@code assets.upstox.com}, no token) and live-quotes the {@code GLOBAL_INDEX} /

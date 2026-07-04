@@ -52,3 +52,32 @@ exclude-F&O) — columns exist in V031 (null), gated on the Upstox fundamentals 
 
 **Next:** deploy market-data + live-verify the endpoint on real data → then PR-B (Upstox fundamentals
 client + market-cap/free-float low-cap gate + 2–3mo fundamentals load).
+
+---
+
+## PR-B — Phase 1/3: Upstox fundamentals feed + low-cap gate  (verified, awaiting CI)
+
+The fundamentals data pipeline that was the plan's "biggest gap" — now a first-class Upstox feed on
+the analytics token (ADR-0004), plus the low-cap universe gate inputs (ADR-0005).
+
+| MV item | What | Status | Evidence |
+|---|---|---|---|
+| MV-0.6 | Upstox fundamentals fields verified | DONE | share-holdings->free-float%; key-ratios->P/E,ROE; income-statement->net-profit/revenue (crore); company mcap derived (P/E x net-profit) |
+| MV-1.2 | `FundamentalsService` derivation | DONE | `FundamentalsServiceTest` (pure math, 2/2) |
+| MV-1.3 | `UpstoxFundamentalsClient` (replaces the openscreener scraper) | DONE | 3 wire DTOs; bean gated on `analytics.enabled` |
+| MV-3.1 | Low-cap gate inputs + ROE, V032 `equity_fundamentals` | DONE | **live-verified: RELIANCE mcap Rs 16.68L cr / promoter 50.07% / PE 22.5 / ROE 10.94 / NP 74,088cr — all real** |
+| screener | LEFT JOIN `equity_fundamentals` + optional low-cap gate (`artha.minervini.lowcap-gate.enabled`, default off) | DONE | `TrendTemplateService`; `MinerviniScreenerIntegrationTest` still green |
+
+**Live-probe (real Upstox, 4 symbols):** RELIANCE/TCS/STLTECH/HFCL fetched + derived correctly; all 4
+correctly FAIL the low-cap gate (ff% > 35% and ff-mcap > Rs 5,000 cr) — large/mid-caps, exactly what
+the owner's gate excludes. Derivations crore-consistent: free-float% = 100 - promoter%; market_cap =
+P/E x net-profit; free-float mcap = market_cap x free-float%/100.
+
+**Config:** `artha.minervini.lowcap-gate.enabled` (false until loaded), `.max-free-float-mcap-cr`
+(5000), `.max-free-float-pct` (35). Endpoints: `POST /api/v1/market/fundamentals/refresh?symbols=CSV`
++ `GET /api/v1/market/fundamentals/{symbol}`.
+
+**Deferred:** Code-33 quarterly EPS/sales/margin accel (§4.8) — the hard low-cap gate (this PR) was the
+owner's priority. Full-universe fundamentals load = later with owner (this PR loaded 4 test symbols).
+
+**Next:** PR-C — React screener + analyzer page (Phase 4), consuming the live endpoint.

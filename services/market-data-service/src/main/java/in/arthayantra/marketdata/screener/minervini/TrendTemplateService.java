@@ -37,6 +37,9 @@ public class TrendTemplateService {
   private final BigDecimal within52wHigh; // e.g. 25 -> close >= high * 0.75
   private final int sma200RisingSessions; // gate 3: 200d rising over N sessions (~1 month)
   private final BigDecimal liquidityThreshold; // capital * maxNamePct * multiple
+  private final boolean lowCapGateEnabled; // ADR-0005 low-cap universe gate (off until fundamentals loaded)
+  private final BigDecimal maxFreeFloatMcapCr; // < 5000 cr
+  private final BigDecimal maxFreeFloatPct; // < 35 %
 
   /** Wires the marketdata datasource + the config-tunable Minervini thresholds. */
   public TrendTemplateService(
@@ -49,7 +52,10 @@ public class TrendTemplateService {
       @Value("${artha.minervini.sma200-rising-sessions:21}") int sma200RisingSessions,
       @Value("${artha.minervini.capital:150000}") BigDecimal capital,
       @Value("${artha.minervini.max-name-pct:0.25}") BigDecimal maxNamePct,
-      @Value("${artha.minervini.liquidity-multiple:100}") BigDecimal liquidityMultiple) {
+      @Value("${artha.minervini.liquidity-multiple:100}") BigDecimal liquidityMultiple,
+      @Value("${artha.minervini.lowcap-gate.enabled:false}") boolean lowCapGateEnabled,
+      @Value("${artha.minervini.max-free-float-mcap-cr:5000}") BigDecimal maxFreeFloatMcapCr,
+      @Value("${artha.minervini.max-free-float-pct:35}") BigDecimal maxFreeFloatPct) {
     this.jdbc = jdbc;
     this.minSessions = minSessions;
     this.minPrice = minPrice;
@@ -58,6 +64,9 @@ public class TrendTemplateService {
     this.within52wHigh = within52wHigh;
     this.sma200RisingSessions = sma200RisingSessions;
     this.liquidityThreshold = capital.multiply(maxNamePct).multiply(liquidityMultiple);
+    this.lowCapGateEnabled = lowCapGateEnabled;
+    this.maxFreeFloatMcapCr = maxFreeFloatMcapCr;
+    this.maxFreeFloatPct = maxFreeFloatPct;
   }
 
   /** The latest daily bhavcopy trade date (IST calendar date). */
@@ -81,7 +90,9 @@ public class TrendTemplateService {
       BigDecimal c63,
       BigDecimal c126,
       BigDecimal c189,
-      BigDecimal c252) {}
+      BigDecimal c252,
+      BigDecimal ffMcap,
+      BigDecimal ffPct) {}
 
   private static final String SQL =
       """
@@ -124,13 +135,16 @@ public class TrendTemplateService {
           row_number() OVER (PARTITION BY symbol ORDER BY bucket DESC) AS rn
         FROM calc
       )
-      SELECT symbol, close, sma50, sma150, sma200, sma200_ago, high_52w, low_52w,
-             avg_turnover_50, c63, c126, c189, c252
+      SELECT calc2.symbol, calc2.close, calc2.sma50, calc2.sma150, calc2.sma200, calc2.sma200_ago,
+             calc2.high_52w, calc2.low_52w, calc2.avg_turnover_50,
+             calc2.c63, calc2.c126, calc2.c189, calc2.c252,
+             ef.free_float_mcap_cr AS ff_mcap, ef.free_float_pct AS ff_pct
       FROM calc2
-      WHERE rn = 1
-        AND sessions >= ?
-        AND close >= ?
-        AND avg_turnover_50 >= ?
+      LEFT JOIN equity_fundamentals ef ON ef.symbol = calc2.symbol
+      WHERE calc2.rn = 1
+        AND calc2.sessions >= ?
+        AND calc2.close >= ?
+        AND calc2.avg_turnover_50 >= ?
       """;
 
   /** Runs the screen as of {@code asOf} (default = latest). Computes gates + RS-rank + Stage. */
@@ -157,8 +171,24 @@ public class TrendTemplateService {
                     rs.getBigDecimal("c63"),
                     rs.getBigDecimal("c126"),
                     rs.getBigDecimal("c189"),
-                    rs.getBigDecimal("c252")),
+                    rs.getBigDecimal("c252"),
+                    rs.getBigDecimal("ff_mcap"),
+                    rs.getBigDecimal("ff_pct")),
             d, d, sma200RisingSessions, minSessions, minPrice, liquidityThreshold);
+
+    if (lowCapGateEnabled) {
+      // Low-cap universe gate (ADR-0005): drop names with a KNOWN large free-float cap or a high
+      // free-float %; keep low-caps AND unknowns (unknown → owner manual-checklist, never a silent
+      // drop). Applied BEFORE the RS-rank so the percentile is over the low-cap universe.
+      raws =
+          raws.stream()
+              .filter(
+                  r ->
+                      r.ffMcap() == null
+                          || (r.ffMcap().compareTo(maxFreeFloatMcapCr) < 0
+                              && (r.ffPct() == null || r.ffPct().compareTo(maxFreeFloatPct) < 0)))
+              .toList();
+    }
 
     // Cross-sectional RS-rank: weighted trailing relative strength, percentile 0..100 across the
     // whole liquid universe (IBD-style, §4.10). Compute raw RS, rank ascending, then percentile.
@@ -230,7 +260,7 @@ public class TrendTemplateService {
     return new TrendCandidate(
         r.symbol(), "NSE", r.close(), r.sma50(), r.sma150(), r.sma200(), r.high52w(), r.low52w(),
         fromHigh, aboveLow, r.avgTurnover50(), rsRaw, rsRank, g, passed, all,
-        computeStage(r), null, null);
+        computeStage(r), r.ffMcap(), r.ffPct());
   }
 
   /**

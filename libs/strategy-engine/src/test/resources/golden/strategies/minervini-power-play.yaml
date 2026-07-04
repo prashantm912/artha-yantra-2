@@ -1,0 +1,36 @@
+# Minervini Power Play (high-tight flag) setup (MV-6.5, §6.4). "A VCP riding on a violent prior
+# thrust": the entry is the SAME VCP-pivot breakout as the vcp setup, but GATED by a prior-thrust
+# precondition (a +100% move in <8 weeks before the base). crossover(px, pivot) + vol>1.2 + thrust>0.
+# THRUST is a 1.0/0.0 flag seeded per-symbol from Phase-5 geometry (§6.5); the pivot is VCP_PIVOT.
+# Both NEUTRAL in replay unless seeded → fails safe. Thresholds config-tunable, chart-verify.
+schema: strategy-schema/v1
+id: minervini-power-play
+name: "Minervini Power Play"
+version: 1.0.0
+universe:
+  mode: explicit
+  instruments:
+    - { exchange: NSE, tradingsymbol: "NIFTY 50" }
+timeframes: { primary: 1d }
+indicators:
+  - { name: SMA, alias: px, timeframe: 1d, params: { period: 1 }, weight: 1.0,
+      normalize: { type: linear, from: 0, to: 100000 } }
+  - { name: VOLUME_RATIO, alias: vol, timeframe: 1d, params: { lookback: 20 }, weight: 1.0 }
+  - { name: VCP_PIVOT, alias: pivot, timeframe: 1d, weight: 0.0,
+      instrument: { exchange: NSE, tradingsymbol: "MINERVINI_PIVOT" } }
+  - { name: THRUST, alias: thrust, timeframe: 1d, weight: 0.0,
+      instrument: { exchange: NSE, tradingsymbol: "MINERVINI_THRUST" } }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - crossover: { fast: px, slow: pivot }
+      - "vol > 1.2"
+      - "thrust > 0"
+  scoring: { threshold: 0.0 }
+exit_rules:
+  - { type: stop_loss, params: { basis: atr_multiple, value: 3 } }
+risk:
+  position_sizing: { method: percent_equity, params: { percent: 5 } }
+  max_positions: 1
+  session: { style: swing }

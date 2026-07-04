@@ -268,3 +268,17 @@ the three-list as three ranked columns (symbol · footprint · close+%-to-pivot 
 
 Parity-safe: registry-freeze + schema enum synced; all 9 golden vectors byte-identical. The production
 YAML uses `WEEK52_HIGH` period 252; the test uses an inline period-20 variant (identical mechanism).
+
+---
+
+## PR-J — Phase 6: `cheat_3c` + `power_play` setups (MV-6.4/6.5)  (verified, awaiting CI)
+
+| MV item | What | Status | Evidence |
+|---|---|---|---|
+| MV-6.4 | `CHEAT_PIVOT` context indicator + `minervini-cheat-3c.yaml` (breakout above the cheat-pause high) | DONE | `CheatPowerSetupTest` fires on the seeded cheat breakout |
+| MV-6.5 | `THRUST` context flag + `minervini-power-play.yaml` (VCP-pivot breakout + `thrust>0`) | DONE | fires WITH thrust, blocked WITHOUT (thrust gate load-bearing) |
+
+Both are seeded-context breakout setups (same pattern as `vcp`): `CHEAT_PIVOT`/`THRUST` are additive
+`contextLevel` registry entries, NEUTRAL in replay. All 9 golden vectors byte-identical. The Phase-5
+geometry that COMPUTES the cheat-pause high + thrust flag (and seeds them live) rides **Phase 9** with
+the context-seeding producer — same staging as `VCP_PIVOT`. Thresholds config-tunable (owner chart-verify).

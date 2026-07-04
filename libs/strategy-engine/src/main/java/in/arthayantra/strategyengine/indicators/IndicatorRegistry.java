@@ -165,6 +165,16 @@ public final class IndicatorRegistry {
     register(
         new Definition("WEEK52_LOW", "Lowest low over the prior `period` bars", Set.of("period"), false),
         (s, c, p) -> SessionIndicators.week52Low(s, requirePositive(p, "period", 252)));
+    // Minervini MV-6.4/6.5 — context-seeded levels/flags from Phase-5 geometry (like VCP_PIVOT):
+    // CHEAT_PIVOT = the cheat-area pause high (§6.3, an earlier/lower entry than the final pivot);
+    // THRUST = 1.0 when the base sits atop a prior +100%/<8wk thrust (§6.5 power-play precondition),
+    // else 0.0. Both NEUTRAL/absent in replay unless seeded → the gate fails safe.
+    register(
+        new Definition("CHEAT_PIVOT", "Cheat-area pause high (context-seeded)", Set.of(), true),
+        (s, c, p) -> SessionIndicators.contextLevel(s, c));
+    register(
+        new Definition("THRUST", "Prior-thrust flag: 1.0 when a power-play thrust precedes the base", Set.of(), true),
+        (s, c, p) -> SessionIndicators.contextLevel(s, c));
   }
 
   private IndicatorRegistry() {}

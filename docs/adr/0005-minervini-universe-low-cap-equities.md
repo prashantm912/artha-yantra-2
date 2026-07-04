@@ -29,7 +29,7 @@ Hard gates (all configurable, all always-on):
 | free-float market cap | < ₹5,000 cr | `max_free_float_mcap_cr` |
 | free-float % of total | < 35% (tightly-held = small float) | `max_free_float_pct` |
 | exclude F&O-listed | true | `exclude_fno` |
-| avg-50d turnover | ≥ `liquidity_multiple × capital × max_name_pct` (= ₹37.5L/day default) | `liquidity_multiple` |
+| avg-50d turnover | ≥ `liquidity_multiple × capital × max_name_pct` (= ₹9.375L/day default: `liquidity_multiple` lowered 100→25 on 2026-07-05 per the v6 turnover-floor sweep — ₹37.5L was a local-minimum floor at every book size; see `docs/strategies/minervini-swing-backtest-results.md` §6c) | `liquidity_multiple` |
 | min history | ≥ 200 sessions | — |
 
 Free-float % and free-float market cap come from the Upstox Share Holdings + Key Ratios endpoints

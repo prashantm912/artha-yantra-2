@@ -53,7 +53,7 @@ public class TrendTemplateService {
       @Value("${artha.minervini.sma200-rising-sessions:21}") int sma200RisingSessions,
       @Value("${artha.minervini.capital:150000}") BigDecimal capital,
       @Value("${artha.minervini.max-name-pct:0.25}") BigDecimal maxNamePct,
-      @Value("${artha.minervini.liquidity-multiple:100}") BigDecimal liquidityMultiple,
+      @Value("${artha.minervini.liquidity-multiple:25}") BigDecimal liquidityMultiple,
       @Value("${artha.minervini.lowcap-gate.enabled:false}") boolean lowCapGateEnabled,
       @Value("${artha.minervini.max-free-float-mcap-cr:5000}") BigDecimal maxFreeFloatMcapCr,
       @Value("${artha.minervini.max-free-float-pct:35}") BigDecimal maxFreeFloatPct) {

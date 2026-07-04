@@ -245,6 +245,12 @@ Legend: **Grounding** = REUSE/EXTEND/NEW. Ship phases in order; within a phase, 
 
 Each setup is a registry strategy (`category='MomentumTradingMarkMinervini'`, `tags=['equity','swing','minervini','<key>']`) whose gate tree encodes §6's entry_conditions, referencing the Phase-5 geometry + Phase-2 gates as engine inputs.
 
+> **BUILD-SPEC (recon done 2026-07-04):** exact file:line, parity-safe recipe for all of Phase 6 lives in
+> [`2026-07-04-minervini-phase6-build-spec.md`](2026-07-04-minervini-phase6-build-spec.md). **Correction it
+> forces:** MV-6.1's real deliverable is the **context-value family** (`VCP_PIVOT`/`VCP_STAGE`/`RS_RANK_PCT`/
+> `TREND_TEMPLATE_PASS`), NOT `WEEK52_HIGH/LOW` (the 52-week band is a Track-A gate injected as context,
+> never re-evaluated). Recommended PR order: PR-E swing keystone → PR-F `vcp` setup + side-channel → PR-G rest.
+
 | ID | Item | Grounding | Depends | Status | Verify | Evidence |
 |---|---|---|---|---|---|---|
 | MV-6.1 | New engine indicators: `WEEK52_HIGH`/`WEEK52_LOW`(252), a `VCP_PIVOT`/`VCP_STAGE` context value seeded from Phase-5, and an `RS_RANK_PCT` context value (cross-sectional, seeded from the screener; NEUTRAL in replay) | EXTEND `IndicatorRegistry` | MV-2.2, MV-5.2 | TODO | `IndicatorVectorTest`-style frozen vectors for the new indicators; parity holds | |

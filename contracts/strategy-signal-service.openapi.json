@@ -1463,6 +1463,34 @@
         }
       }
     },
+    "/api/v1/signals/minervini-swing/sell-decisions" : {
+      "get" : {
+        "tags" : [ "minervini-swing-controller" ],
+        "operationId" : "sellDecisions",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Report"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/signals/active" : {
       "get" : {
         "tags" : [ "signals-controller" ],
@@ -2474,6 +2502,66 @@
           },
           "maxDrawdownPct" : {
             "type" : "number"
+          }
+        }
+      },
+      "Report" : {
+        "type" : "object",
+        "properties" : {
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SellDecision"
+            }
+          }
+        }
+      },
+      "SellDecision" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "setup" : {
+            "type" : "string"
+          },
+          "stage" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "footprint" : {
+            "type" : "string"
+          },
+          "entryPrice" : {
+            "type" : "number"
+          },
+          "currentPrice" : {
+            "type" : "number"
+          },
+          "unrealizedPct" : {
+            "type" : "number"
+          },
+          "stopLevel" : {
+            "type" : "number"
+          },
+          "trailLevel" : {
+            "type" : "number"
+          },
+          "stillBuyable" : {
+            "type" : "boolean"
+          },
+          "sellingNow" : {
+            "type" : "boolean"
+          },
+          "sellReason" : {
+            "type" : "string"
+          },
+          "verdict" : {
+            "type" : "string"
           }
         }
       },

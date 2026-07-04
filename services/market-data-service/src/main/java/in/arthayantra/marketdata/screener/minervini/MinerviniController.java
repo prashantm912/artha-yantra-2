@@ -1,10 +1,12 @@
 package in.arthayantra.marketdata.screener.minervini;
 
+import in.arthayantra.marketdata.screener.minervini.geometry.VcpFootprint;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -47,13 +49,64 @@ public class MinerviniController {
   public record ScreenResponse(
       List<Row> items, LocalDate screenDate, int coverage, int limit, int offset) {}
 
+  /** VCP / base geometry for one candidate (MV-5.5). Null-valued when the base is not a VCP. */
+  public record Geometry(
+      boolean isVcp,
+      String footprint,
+      BigDecimal pivot,
+      BigDecimal deepestPct,
+      BigDecimal tightestPct,
+      Integer contractionCount,
+      Integer baseWeeks,
+      Integer baseDurationDays,
+      boolean volumeDryUp,
+      boolean shakeout,
+      Integer baseCount,
+      String rejectReason) {}
+
+  /**
+   * The full analyzer payload for one candidate (MV-5.5): the 8 Trend-Template gates + Stage + the
+   * screen numerics (from the persisted screen row — {@code scanned=false} when the symbol was not
+   * in the screen), the low-cap fundamentals, and the live VCP geometry.
+   */
+  public record CandidateAnalysis(
+      String symbol,
+      String exchange,
+      LocalDate screenDate,
+      boolean scanned,
+      BigDecimal close,
+      BigDecimal sma50,
+      BigDecimal sma150,
+      BigDecimal sma200,
+      BigDecimal high52w,
+      BigDecimal low52w,
+      BigDecimal pctFromHigh,
+      BigDecimal pctAboveLow,
+      BigDecimal rsRank,
+      BigDecimal avgTurnover50,
+      BigDecimal freeFloatMcapCr,
+      BigDecimal freeFloatPct,
+      boolean[] gates,
+      int gatesPassed,
+      boolean passesAll,
+      Integer stage,
+      Geometry geometry) {}
+
   private final TrendTemplateService screener;
   private final MinerviniScreenRepository repo;
+  private final MinerviniGeometryService geometryService;
+  private final MinerviniSetupsRepository setupsRepo;
 
-  /** Wires the screener + repository. */
-  public MinerviniController(TrendTemplateService screener, MinerviniScreenRepository repo) {
+  /** Wires the screener + screen/geometry repositories. */
+  public MinerviniController(
+      TrendTemplateService screener,
+      MinerviniScreenRepository repo,
+      MinerviniGeometryService geometryService,
+      MinerviniSetupsRepository setupsRepo) {
     this.screener = screener;
     this.repo = repo;
+    this.geometryService = geometryService;
+    this.setupsRepo = setupsRepo;
   }
 
   /** Serves the persisted daily screen (default = latest date, passers only). */
@@ -88,6 +141,13 @@ public class MinerviniController {
       return new ScreenResponse(List.of(), null, 0, cappedLimit, 0);
     }
     repo.upsertAll(res.screenDate(), res.candidates());
+    // Persist geometry for the passers too, so POST /run leaves minervini_setups consistent with the
+    // screen (matches the scheduled/boot paths). Best-effort — a geometry hiccup must not 5xx the run.
+    try {
+      geometryService.persistForPassers(res.screenDate(), res.candidates());
+    } catch (RuntimeException ignored) {
+      // geometry is a diagnostic side-channel; the screen result is still authoritative
+    }
     List<Row> items =
         res.candidates().stream()
             .filter(c -> !passesAllOnly || c.passesAll())
@@ -96,6 +156,52 @@ public class MinerviniController {
             .map(MinerviniController::toRow)
             .toList();
     return new ScreenResponse(items, res.screenDate(), res.coverage(), cappedLimit, 0);
+  }
+
+  /**
+   * Analyzer payload for one candidate (MV-5.5): the persisted gates/stage/fundamentals + freshly
+   * computed VCP geometry. Works for any symbol — geometry is read from the persisted setups if the
+   * symbol was a passer, else computed on demand (so a non-passer still gets a base read).
+   */
+  @GetMapping("/candidate/{symbol}")
+  public CandidateAnalysis candidate(
+      @PathVariable String symbol,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
+    String sym = symbol.toUpperCase(java.util.Locale.ROOT);
+    LocalDate date = asOf != null ? asOf : screener.latestScreenDate();
+    if (date == null) {
+      return new CandidateAnalysis(
+          sym, "NSE", null, false, null, null, null, null, null, null, null, null, null, null,
+          null, null, new boolean[0], 0, false, null, toGeometry(VcpFootprint.rejected("no data")));
+    }
+    VcpFootprint fp = setupsRepo.find(date, sym);
+    if (fp == null) {
+      fp = geometryService.detect(sym, date);
+    }
+    Geometry geo = toGeometry(fp);
+    TrendCandidate c = repo.findOne(date, sym);
+    if (c == null) {
+      return new CandidateAnalysis(
+          sym, "NSE", date, false, null, null, null, null, null, null, null, null, null, null,
+          null, null, new boolean[0], 0, false, null, geo);
+    }
+    return new CandidateAnalysis(
+        c.symbol(), c.exchange(), date, true, c.close(), c.sma50(), c.sma150(), c.sma200(),
+        c.high52w(), c.low52w(), c.pctFromHigh(), c.pctAboveLow(), c.rsRank(), c.avgTurnover50(),
+        c.freeFloatMcapCr(), c.freeFloatPct(), c.gates(), c.gatesPassed(), c.passesAll(), c.stage(),
+        geo);
+  }
+
+  private static Geometry toGeometry(VcpFootprint f) {
+    if (!f.vcp()) {
+      return new Geometry(
+          false, null, null, null, null, null, null, null, f.volumeDryUp(), f.shakeout(), null,
+          f.rejectReason());
+    }
+    return new Geometry(
+        true, f.footprint(), BigDecimal.valueOf(f.pivot()), BigDecimal.valueOf(f.deepestPct()),
+        BigDecimal.valueOf(f.tightestPct()), f.contractionCount(), f.baseWeeks(),
+        f.baseDurationDays(), f.volumeDryUp(), f.shakeout(), f.baseCount(), null);
   }
 
   private static Row toRow(TrendCandidate c) {

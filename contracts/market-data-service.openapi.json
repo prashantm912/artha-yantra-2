@@ -1488,6 +1488,50 @@
         }
       }
     },
+    "/api/v1/market/screener/minervini/candidate/{symbol}" : {
+      "get" : {
+        "tags" : [ "minervini-controller" ],
+        "operationId" : "candidate",
+        "parameters" : [ {
+          "name" : "symbol",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "asOf",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CandidateAnalysis"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/pre-open" : {
       "get" : {
         "tags" : [ "pre-open-controller" ],
@@ -6197,6 +6241,125 @@
           "subscribers" : {
             "type" : "integer",
             "format" : "int32"
+          }
+        }
+      },
+      "CandidateAnalysis" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "exchange" : {
+            "type" : "string"
+          },
+          "screenDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "scanned" : {
+            "type" : "boolean"
+          },
+          "close" : {
+            "type" : "number"
+          },
+          "sma50" : {
+            "type" : "number"
+          },
+          "sma150" : {
+            "type" : "number"
+          },
+          "sma200" : {
+            "type" : "number"
+          },
+          "high52w" : {
+            "type" : "number"
+          },
+          "low52w" : {
+            "type" : "number"
+          },
+          "pctFromHigh" : {
+            "type" : "number"
+          },
+          "pctAboveLow" : {
+            "type" : "number"
+          },
+          "rsRank" : {
+            "type" : "number"
+          },
+          "avgTurnover50" : {
+            "type" : "number"
+          },
+          "freeFloatMcapCr" : {
+            "type" : "number"
+          },
+          "freeFloatPct" : {
+            "type" : "number"
+          },
+          "gates" : {
+            "type" : "array",
+            "items" : {
+              "type" : "boolean"
+            }
+          },
+          "gatesPassed" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "passesAll" : {
+            "type" : "boolean"
+          },
+          "stage" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "geometry" : {
+            "$ref" : "#/components/schemas/Geometry"
+          }
+        }
+      },
+      "Geometry" : {
+        "type" : "object",
+        "properties" : {
+          "isVcp" : {
+            "type" : "boolean"
+          },
+          "footprint" : {
+            "type" : "string"
+          },
+          "pivot" : {
+            "type" : "number"
+          },
+          "deepestPct" : {
+            "type" : "number"
+          },
+          "tightestPct" : {
+            "type" : "number"
+          },
+          "contractionCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "baseWeeks" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "baseDurationDays" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "volumeDryUp" : {
+            "type" : "boolean"
+          },
+          "shakeout" : {
+            "type" : "boolean"
+          },
+          "baseCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "rejectReason" : {
+            "type" : "string"
           }
         }
       },

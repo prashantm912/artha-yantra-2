@@ -103,3 +103,38 @@ low-cap momentum candidates end-to-end. Low-cap gate + full fundamentals load ar
 **Deferred (Track B, larger):** per-candidate analyzer detail + charts (MV-4.4), VCP/Stage detectors
 (Phase 5), the 6 setup pass/fail signals (Phase 6), swing paper/backtest/live (Phases 7-9). These are
 a fresh multi-PR effort — best tackled with the owner (setup priority + reliability process).
+
+---
+
+## PR-D — Phase 5: VCP / base geometry + analyzer endpoint (Track B foundation)  (verified, awaiting CI)
+
+The first Track-B building block: net-new base-geometry detectors + a per-candidate analyzer surface.
+Pure computation, strongly unit-tested, no live/trade/backfill surface.
+
+| MV item | What | Status | Evidence |
+|---|---|---|---|
+| MV-5.1 | `ZigZag` percentage swing extractor (pure, config threshold; peaks off high / troughs off low) | DONE | `ZigZagTest` (alternating swings; sub-threshold wiggle ignored) |
+| MV-5.2 | `VcpDetector` — 2-6 narrowing contractions (ratio 0.2-0.9), pivot = final-contraction high, volume-dry-up, shakeout, footprint `[W] [deep/tight] [count]T` | DONE | `VcpDetectorTest` reproduces canonical **`40W 31/3 4T`**; rejects V-shape + expanding base; +neg volume-dry-up case |
+| MV-5.4 | `V033__minervini_setups` (sibling of screen, `(screen_date,symbol)` PK) + `MinerviniSetupsRepository` + `MinerviniGeometryService.persistForPassers` (single writer, passers-only, `vcp.enabled` gate) | DONE | geometry IT persists + round-trips an `is_vcp=true` row |
+| MV-5.5 | Analyzer endpoint `GET /candidate/{symbol}` → typed `CandidateAnalysis` (persisted gates/stage/fundamentals + live VCP geometry + `scanned` flag) | DONE | geometry IT reproduces footprint + pivot end-to-end through the endpoint; spec recaptured + TS regen + `tsc --strict` |
+
+**Config (all `artha.minervini.vcp.*`, tunable):** `zigzag-pct` 2.5 (must be < the tightest contraction
+you want to resolve), `min/max-contractions` 2/6, `ratio-min/max` 0.2/0.9, `final-vol-low-fraction` 0.5,
+`lookback-days` 400, `enabled` true.
+
+**Adversarial review (12-agent workflow, 6 confirmed findings, all fixed before PR):**
+1. (medium) **volume-dry-up baseline contamination** — the 50-day avg window overlapped the contraction it
+   measured; corrected to the 50 sessions **ending at the pivot**, pullback measured over the days after.
+2. (low) POST /run skipped geometry persist → extracted `persistForPassers`, now shared by scheduler + controller.
+3. (medium) scheduler persist path never positively verified an `is_vcp=true` row → added a positive persist IT.
+4. (low) IT asserted pivot `.exists()` not value → now asserts the pivot value.
+5. (low) IT hermeticity (universe RS coupling) → geometry assertions pass an explicit passer, never the RS universe.
+6. (low) volume-dry-up gate not independently pinned → added a normal-volume negative unit case.
+
+**Design notes:** geometry lives in `screener/minervini/geometry/` (pure, replay-safe — no clock/IO in the
+detector); reads the same broad `nse_eod_bhavcopy` universe as the screener; geometry computed for **passers
+only** (per-symbol scan is expensive); the analyzer endpoint recomputes on demand for any symbol (so a
+non-passer still gets a base read). `MapReturnRatchet` unaffected (typed record).
+
+**Deferred (Phase 6+):** the 6 setup pass/fail signals, `session.style=swing`, swing paper/backtest/live,
+selling discipline, analyzers. Also MV-4.4 (React analyzer page consuming `/candidate`) — a follow-up FE PR.

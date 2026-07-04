@@ -104,6 +104,32 @@ public class MinerviniScreenRepository {
         args.toArray());
   }
 
+  /** Reads one persisted screen row (the analyzer fast path), or {@code null} if not scanned. */
+  public TrendCandidate findOne(LocalDate screenDate, String symbol) {
+    List<TrendCandidate> rows =
+        jdbc.query(
+            "SELECT * FROM minervini_screen_results WHERE screen_date = ? AND symbol = ?",
+            (rs, n) -> {
+              boolean[] g =
+                  new boolean[] {
+                    rs.getBoolean("gate1"), rs.getBoolean("gate2"), rs.getBoolean("gate3"),
+                    rs.getBoolean("gate4"), rs.getBoolean("gate5"), rs.getBoolean("gate6"),
+                    rs.getBoolean("gate7"), rs.getBoolean("gate8")
+                  };
+              Integer stage = rs.getObject("stage", Integer.class);
+              return new TrendCandidate(
+                  rs.getString("symbol"), rs.getString("exchange"), rs.getBigDecimal("close_price"),
+                  rs.getBigDecimal("sma50"), rs.getBigDecimal("sma150"), rs.getBigDecimal("sma200"),
+                  rs.getBigDecimal("high_52w"), rs.getBigDecimal("low_52w"),
+                  rs.getBigDecimal("pct_from_high"), rs.getBigDecimal("pct_above_low"),
+                  rs.getBigDecimal("avg_turnover_50"), null, rs.getBigDecimal("rs_rank"),
+                  g, rs.getInt("gates_passed"), rs.getBoolean("passes_all"), stage,
+                  rs.getBigDecimal("free_float_mcap_cr"), rs.getBigDecimal("free_float_pct"));
+            },
+            Date.valueOf(screenDate), symbol);
+    return rows.isEmpty() ? null : rows.get(0);
+  }
+
   /** How many symbols were scanned on a screen date (coverage). */
   public int coverage(LocalDate screenDate) {
     Integer n =

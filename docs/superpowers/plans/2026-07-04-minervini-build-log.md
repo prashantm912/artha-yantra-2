@@ -418,3 +418,18 @@ golden would corrupt the platform's most important invariant, and scaling out is
 reliability bar wants ≥30–50 single-stop paper trades first, §0.5 #12) — this is the item for a focused,
 supervised pass. The live paper-ledger partial close is a further, separately-gated PR (touches the
 pinned `exit-equivalence.json` + its 3 suites).
+
+---
+
+## PR-R — Phase 9: the `minervini_detail` side-channel (MV-6.8)  ✅ verified
+
+The per-signal setup-detail channel a live minervini swing signal writes to — the Phase-9 producer's
+persistence target (`scalper_detail` V009 is the exact template).
+
+| MV item | What | Status | Evidence |
+|---|---|---|---|
+| MV-6.8 | `V020__minervini_signal_detail` (JSONB on `signals`, OUTSIDE the frozen score_breakdown — a strategy-specific key inside score_breakdown is a parity FAIL) + `SignalRepository.stampMinerviniDetail(id, json)` + `SignalRow.minerviniDetail` read-back. | **DONE** | `MinerviniDetailIntegrationTest`: stamp→read round-trip (setup=vcp / stage=2 / footprint `40W 31/3 4T`), a non-stamped signal reads null, the scalper channel untouched. Strategy Flyway head V019→**V020**. The 6 positional `SignalRow(...)` sites updated (+`null`). |
+
+The live PRODUCER (computing the detail JSON when a swing setup fires + calling `stampMinerviniDetail`)
+rides Phase 9 with the context-seeding producer — this PR lands the storage + stamp so the producer has
+its target. Non-minervini signals never stamp it → null, exactly like `scalper_detail`.

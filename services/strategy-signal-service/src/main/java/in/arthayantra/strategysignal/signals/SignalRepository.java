@@ -37,7 +37,8 @@ public class SignalRepository {
       BigDecimal suggestedQty,
       String tradeableExchange,
       String tradeableTradingsymbol,
-      JsonNode scalperDetail) {}
+      JsonNode scalperDetail,
+      JsonNode minerviniDetail) {}
 
   private final JdbcTemplate jdbc;
   private final ObjectMapper objectMapper;
@@ -203,7 +204,8 @@ public class SignalRepository {
         rs.getBigDecimal("suggested_qty"),
         rs.getString("tradeable_exchange"),
         rs.getString("tradeable_tradingsymbol"),
-        nullableTree(rs.getString("scalper_detail")));
+        nullableTree(rs.getString("scalper_detail")),
+        nullableTree(rs.getString("minervini_detail")));
   }
 
   /** Stamps the engine-computed suggested qty (A12) — outside the frozen score breakdown. */
@@ -221,6 +223,15 @@ public class SignalRepository {
         "UPDATE signals SET tradeable_exchange = ?, tradeable_tradingsymbol = ?, "
             + "scalper_detail = ?::jsonb WHERE id = ?",
         tradeableExchange, tradeableTradingsymbol, detailJson, id);
+  }
+
+  /**
+   * Stamps the MV-6.8 minervini side-channel: the fired swing setup's detail (setup type, stage, VCP
+   * footprint, pivot, gate booleans) as JSON — outside the frozen score breakdown, the same rule as
+   * {@link #stampScalperDetail}. NULL for every non-minervini signal (never stamped).
+   */
+  public void stampMinerviniDetail(long id, String detailJson) {
+    jdbc.update("UPDATE signals SET minervini_detail = ?::jsonb WHERE id = ?", detailJson, id);
   }
 
   private JsonNode readTree(String json) {

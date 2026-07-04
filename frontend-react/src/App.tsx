@@ -34,6 +34,7 @@ import { JobsPage } from './pages/backtests/JobsPage.tsx';
 import { JournalPage } from './pages/journal/JournalPage.tsx';
 import { OrdersPage } from './pages/orders/OrdersPage.tsx';
 import { WatchlistsPage } from './pages/watchlists/WatchlistsPage.tsx';
+import { MinerviniScreenerPage } from './pages/equity/MinerviniScreenerPage.tsx';
 import { SettingsPage } from './pages/settings/SettingsPage.tsx';
 import { StatusPage } from './pages/dataops/StatusPage.tsx';
 import { CoveragePage } from './pages/dataops/CoveragePage.tsx';
@@ -236,6 +237,7 @@ export function App() {
           <Route path="/equity/breadth" element={<Lazy><BreadthPage /></Lazy>} />
           <Route path="/equity/delivery-data" element={<Lazy><DeliveryDataPage /></Lazy>} />
           <Route path="/equity/equity-returns" element={<Lazy><EquityReturnsPage /></Lazy>} />
+          <Route path="/equity/minervini" element={<MinerviniScreenerPage />} />
           <Route path="/equity/sector-heatmap" element={<Lazy><SectorHeatmapPage /></Lazy>} />
           <Route path="/equity/sector-stats" element={<Lazy><SectorStatsPage /></Lazy>} />
           <Route path="/equity/index-contribution" element={<Lazy><IndexContributionPage /></Lazy>} />

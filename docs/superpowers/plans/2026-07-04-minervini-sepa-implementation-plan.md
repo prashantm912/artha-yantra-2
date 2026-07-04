@@ -168,11 +168,18 @@ Wire a `UpstoxFundamentalsClient` (hand-rolled REST, ADR-0002 anti-corruption pa
 
 Legend: **Grounding** = REUSE/EXTEND/NEW. Ship phases in order; within a phase, items may parallelize unless `Depends` says otherwise.
 
-> **⏱ LIVE STATUS (autonomous build 2026-07-04):** per-PR progress + evidence is tracked in the
-> [build log](2026-07-04-minervini-build-log.md) — consult it for the authoritative current state of
-> each item (Status cells below are reconciled at checkpoints, so trust the build log if they differ).
-> **PR-A DONE+verified:** MV-0.1, MV-0.2, MV-2.1, MV-2.2, MV-2.3, MV-2.4, MV-2.5, MV-2.6, MV-2.7(N/A),
-> MV-2.8, MV-2.9 — the price-only Trend-Template screener (IT green).
+> **⏱ LIVE STATUS — TRACK A COMPLETE + LIVE-VERIFIED (autonomous build 2026-07-04).** Per-PR
+> progress + evidence: [build log](2026-07-04-minervini-build-log.md) (authoritative — the §4 Status
+> cells below are NOT individually flipped; trust the build log + this banner). **DONE & merged:**
+> - **#524** (price-gate screener): MV-0.1, MV-0.2 (source = `nse_eod_bhavcopy`), MV-2.1, MV-2.2, MV-2.3,
+>   MV-2.4, MV-2.5, MV-2.6, MV-2.7 (N/A — gateway wildcard), MV-2.8, MV-2.9. **Live: 1,590 scanned → 210 pass.**
+> - **#525** (Upstox fundamentals): MV-0.6, MV-1.2, MV-1.3, MV-3.1 (low-cap gate + free-float/mcap; Code-33
+>   accel deferred). Low-cap gate is `artha.minervini.lowcap-gate.enabled` (default OFF until a full load).
+> - **#526** (React UI): MV-4.1, MV-4.2 — `/equity/minervini` screener page.
+>
+> **STILL TODO:** MV-0.3/0.4/0.5, MV-1.1 (full-universe fundamentals load — owner-run), MV-3.2, MV-4.3,
+> MV-4.4, and **all of Phases 5–10** (VCP/Stage detectors, the 6 setups, swing paper/backtest/live,
+> selling, analyzers) — Track B, a fresh multi-PR effort.
 
 ### Phase 0 — Foundations & VERIFY gates (unblocks everything; mostly reads, little code)
 

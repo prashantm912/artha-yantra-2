@@ -274,7 +274,7 @@ public class MinerviniController {
     return r != null
         ? r
         : new MinerviniBacktestService.BacktestResult(
-            "idle", null, null, List.of(), "no backtest run yet");
+            "idle", null, null, List.of(), List.of(), "no backtest run yet");
   }
 
   private MinerviniBacktestService.Report latestOrIdle() {

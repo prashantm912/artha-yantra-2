@@ -55,6 +55,12 @@ public class MinerviniBacktestService {
   private static final int MIN_SERIES = 260; // min bars to be rankable AND tradable — ONE threshold
   private static final int MIN_DIST = 20; // don't trust a percentile from a degenerate thin cross-section
 
+  // v6 turnover-floor sweep grids (₹): book sizes × candidate turnover floors.
+  private static final long[] SWEEP_CAPITALS = {150_000, 1_000_000, 5_000_000, 10_000_000, 50_000_000};
+  private static final long[] SWEEP_FLOORS = {
+    0, 500_000, 1_000_000, 2_500_000, 3_750_000, 7_500_000, 15_000_000, 30_000_000
+  };
+
   /** Per-setup aggregate over the backtest window. Decimals ride as JSON strings. */
   public record SetupStat(
       String setup,
@@ -115,9 +121,27 @@ public class MinerviniBacktestService {
       PortfolioStat portfolioRsPriorityNet,
       String note) {}
 
+  /**
+   * One cell of the turnover-floor sweep: at a given {@code capital} (book) and {@code
+   * floorTurnover}, the NET-of-cost RS-priority portfolio over the RS-gated signals kept above the
+   * floor. Finds the liquidity threshold that maximises net CAGR for a given book size.
+   */
+  public record SweepCell(
+      long capital,
+      long floorTurnover,
+      int trades,
+      BigDecimal netCagrPct,
+      BigDecimal netDrawdownPct,
+      BigDecimal netSharpe) {}
+
   /** The full multi-variant result: technical / rs-only / turnover-only / rs+turnover, side by side. */
   public record BacktestResult(
-      String status, LocalDate fromDate, String runAt, List<Report> variants, String note) {}
+      String status,
+      LocalDate fromDate,
+      String runAt,
+      List<Report> variants,
+      List<SweepCell> sweep,
+      String note) {}
 
   /** The full-filter variant (the live-funnel analogue) — the one the plain GET returns. */
   private static final String PRIMARY_VARIANT = "rs-turnover";
@@ -195,7 +219,8 @@ public class MinerviniBacktestService {
     }
     Report any = variants.get(0);
     return new BacktestResult(
-        "completed", any.fromDate(), any.runAt(), variants, "loaded from the last persisted run");
+        "completed", any.fromDate(), any.runAt(), variants, List.of(),
+        "loaded from the last persisted run (sweep is in-memory only; re-run to populate)");
   }
 
   /** Triggers a run on a background thread; returns false if one is already running. */
@@ -205,7 +230,8 @@ public class MinerviniBacktestService {
     }
     LocalDate from = from(years);
     latest = running(PRIMARY_VARIANT, from);
-    latestResult = new BacktestResult("running", from, null, List.of(), "backtest in progress");
+    latestResult =
+        new BacktestResult("running", from, null, List.of(), List.of(), "backtest in progress");
     Thread t = new Thread(() -> runOnce(years), "minervini-backtest");
     t.setDaemon(true);
     t.start();
@@ -227,7 +253,7 @@ public class MinerviniBacktestService {
       latest =
           new Report(
               "failed", PRIMARY_VARIANT, from, null, 0, 0, List.of(), null, null, null, e.getMessage());
-      latestResult = new BacktestResult("failed", from, null, List.of(), e.getMessage());
+      latestResult = new BacktestResult("failed", from, null, List.of(), List.of(), e.getMessage());
     } finally {
       running.set(false);
     }
@@ -300,16 +326,43 @@ public class MinerviniBacktestService {
     for (Variant v : variants) {
       reports.add(report(v.name(), from, runAt, scanned, all));
     }
+    List<SweepCell> sweep = turnoverSweep(all);
     log.info(
         "minervini swing backtest: {} symbols, {}, from {}",
         scanned,
         reports.stream().map(r -> r.variant() + " " + r.totalTrades()).reduce((a, b) -> a + ", " + b).orElse(""),
         from);
     return new BacktestResult(
-        "completed", from, runAt, reports,
+        "completed", from, runAt, reports, sweep,
         "candles@1d ~11y over " + slots + " concurrent slots; variants isolate a weekly cross-sectional"
             + " RS-rank≥" + fmt(rsMin) + " gate and a ₹" + fmt(turnoverFloor) + "/day turnover floor;"
-            + " open-at-end positions dropped; costs/slippage not modelled; survivorship-biased.");
+            + " open-at-end positions dropped; portfolio is net-of-cost; survivorship-biased.");
+  }
+
+  /**
+   * The turnover-floor sweep (v6): over the RS-gated signal set, for each (book size, turnover floor)
+   * it keeps signals above the floor and runs the NET-of-cost RS-priority portfolio — showing the
+   * liquidity threshold that maximises net CAGR per book size. This is a portfolio-level (allocation)
+   * filter over the {@code rs-only} signals, not a per-floor re-run of the setup books, so it is an
+   * approximation: a true re-run would let a floored-out entry free its slot for the next signal.
+   */
+  private List<SweepCell> turnoverSweep(List<BtTrade> all) {
+    List<BtTrade> rsGated = all.stream().filter(t -> t.variant().equals("rs-only")).toList();
+    List<SweepCell> out = new ArrayList<>();
+    for (long capital : SWEEP_CAPITALS) {
+      SwingPortfolio.Costs c =
+          new SwingPortfolio.Costs(
+              capital, costs.fixedPct(), costs.spreadPct(), costs.impactCoeff(), costs.impactCapPct());
+      for (long floor : SWEEP_FLOORS) {
+        List<BtTrade> kept = rsGated.stream().filter(t -> t.avgTurnoverAtEntry() >= floor).toList();
+        SwingPortfolio.Result r = SwingPortfolio.simulate(kept, slots, true, c);
+        out.add(
+            new SweepCell(
+                capital, floor, r.tradesTaken(), bd2(r.cagrPct()), bd2(r.maxDrawdownPct()),
+                bd2(r.sharpe())));
+      }
+    }
+    return out;
   }
 
   /** Aggregates every trade for one {@code variant} into per-setup trade stats + a portfolio equity run. */

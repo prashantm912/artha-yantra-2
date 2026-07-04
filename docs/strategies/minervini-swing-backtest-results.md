@@ -10,7 +10,7 @@ Endpoints (market-data-service): `POST /api/v1/market/screener/minervini/swing-b
 (trigger), `GET …/swing-backtest` (latest single, full-filter variant), `GET …/swing-backtest/compare`
 (all variants side by side). Config: `artha.minervini.backtest.{years,min-turnover,rs-min,slots}`.
 
-Shipped in PRs **#556** (v1/v2), **#557** (v3), **#558** (v4), **#559** (v5 costs).
+Shipped in PRs **#556** (v1/v2), **#557** (v3), **#558** (v4), **#559** (v5 costs), **#560** (v6 sweep).
 
 ---
 
@@ -296,15 +296,46 @@ Net drawdowns are 57–69% (worse than gross — costs add churn on every entry/
 
 ---
 
+## 6c. v6 — turnover-floor sweep (PR #560)
+
+v5 showed the floor's value is capital-dependent but at one book size. v6 sweeps the grid: for each
+(book size, turnover floor) it keeps the RS-gated signals above the floor and runs the net-of-cost
+RS-priority portfolio. Trades taken are book-invariant per floor (book size changes only the cost, not
+which signals fill the 8 slots), so the grid is pure cost sensitivity.
+
+### Net CAGR % by book size (rows) × turnover floor (columns)
+
+| Book ↓ / Floor → | ₹0 | ₹5 L | ₹10 L | ₹25 L | ₹37.5 L | ₹75 L | ₹1.5 Cr | ₹3 Cr | **Best** |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| ₹1.5 L | **45.5** | 29.3 | 34.1 | 34.9 | 20.7 | 20.5 | 24.3 | 26.6 | floor **0** |
+| ₹10 L | **38.8** | 25.9 | 31.5 | 33.9 | 20.0 | 20.1 | 24.1 | 26.4 | floor **0** |
+| ₹50 L | 28.7 | 13.7 | 20.2 | **29.3** | 16.6 | 18.1 | 23.0 | 25.8 | floor **₹25 L** |
+| ₹1 Cr | 22.8 | 6.5 | 12.6 | 23.7 | 12.4 | 15.6 | 21.7 | **24.9** | floor **₹3 Cr** |
+| ₹5 Cr | 7.2 | −9.2 | −3.7 | 6.3 | −5.1 | −0.6 | 11.8 | **18.6** | floor **₹3 Cr** |
+
+**Findings:**
+1. **The optimal floor rises monotonically with book size** — small book: no floor (thin names are
+   cheap at small size); big book: high floor (thin names become cost-prohibitive). ₹1.5 L → floor 0
+   (45.5%); ₹10 L → floor 0 (38.8%); ₹50 L → ₹25 L (29.3%); ₹1 Cr+ → ≥₹3 Cr (the grid max — the true
+   optimum is likely beyond it).
+2. **The current ₹37.5 L live floor is a poor choice at every book size** — it lands in a local-minimum
+   band. At ₹10 L it yields 20.0% vs 38.8% (floor 0) or 33.9% (₹25 L): ~15–19 pp/yr left on the table.
+
+**Caveat:** the row is non-monotonic (the ₹37.5–75 L band dips then recovers) — a few big-winner names
+cluster at specific turnover levels and survivorship amplifies it. Treat the *rule* (floor scales with
+book) as robust and the exact optimum as noisy. Also, this sweep is a portfolio-level (allocation)
+filter over the rs-only signals, not a per-floor re-run of the setup books.
+
+---
+
 ## 7. Synthesis + recommendation
 
 - **Keep RS-rank ON.** It is the single most valuable filter — nearly doubles CAGR and gives the best
   Sharpe. The live funnel already gates on cross-sectional RS-rank; this validates it hard.
-- **Size the turnover floor to your capital (v5).** After realistic, liquidity-scaled costs the floor
-  does *not* earn its keep at a small book — `rs-only` net (38.8% CAGR at ₹10 L) still beats
-  `rs-turnover` net (24.8%). At a ₹1.5 L pilot the floor is pure cost (drop or lower it, capture the
-  edge); at ₹50 L+ the thin names become unfillable (keep it). Lower the floor for a pilot, raise it as
-  the book scales.
+- **Size the turnover floor to your capital (v5/v6).** The optimal floor scales with book size: the
+  v6 sweep gives floor 0 at ₹1.5–10 L (net CAGR 38–45%), ~₹25 L at ₹50 L, ≥₹3 Cr at ₹1 Cr+. The
+  current ₹37.5 L live default is a local minimum at *every* book size (~20% at ₹10 L vs 38.8% at floor
+  0) — **lower it well below ₹37.5 L for a pilot** (₹0–10 L), raise it as the book scales.
 - **Pick candidates by RS-rank when slots are scarce (v4).** RS-priority allocation lifts every
   variant's CAGR by 6–16 points — the cheapest improvement available (pure allocation policy, no new
   data). The live funnel already RS-ranks its buyable list, so live behaviour already captures this.

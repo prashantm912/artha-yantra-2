@@ -316,10 +316,21 @@ public class PaperService {
    */
   @Transactional
   public int closeForSignal(long signalId, String closeReason) {
+    return closeForSignal(signalId, closeReason, null);
+  }
+
+  /**
+   * Closes every OPEN position linked to a signal at an EXPLICIT settlement price ({@code null} → the
+   * live-LTP fallback in {@code doSettle}). The Phase-9 Minervini swing batch passes the fresh
+   * daily-bar close: its equities do not tick, so the LTP fallback would otherwise settle every swing
+   * close at the entry price (breakeven) and lose the real daily-close exit.
+   */
+  @Transactional
+  public int closeForSignal(long signalId, String closeReason, BigDecimal price) {
     int closed = 0;
     for (PositionRow pos : positions.openForSignal(signalId)) {
       try {
-        settle(pos, null, closeReason);
+        settle(pos, price, closeReason);
         closed++;
       } catch (Exception e) {
         log.warn("signal-exit close failed for position {}: {}", pos.id(), e.getMessage());

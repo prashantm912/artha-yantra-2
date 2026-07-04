@@ -196,6 +196,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/signals/minervini-swing/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["run"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/paper/reset": {
         parameters: {
             query?: never;
@@ -706,6 +722,16 @@ export interface components {
             /** Format: int32 */
             qty?: number;
             note?: string;
+        };
+        SwingRun: {
+            /** Format: int32 */
+            strategies?: number;
+            /** Format: int32 */
+            candidates?: number;
+            /** Format: int32 */
+            entries?: number;
+            /** Format: int32 */
+            exits?: number;
         };
         ResetBody: {
             confirm?: boolean;
@@ -1491,6 +1517,35 @@ export interface operations {
                     "*/*": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["SwingRun"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

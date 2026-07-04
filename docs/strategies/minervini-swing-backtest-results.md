@@ -10,7 +10,7 @@ Endpoints (market-data-service): `POST /api/v1/market/screener/minervini/swing-b
 (trigger), `GET …/swing-backtest` (latest single, full-filter variant), `GET …/swing-backtest/compare`
 (all variants side by side). Config: `artha.minervini.backtest.{years,min-turnover,rs-min,slots}`.
 
-Shipped in PRs **#556** (v1/v2), **#557** (v3), **#558** (v4).
+Shipped in PRs **#556** (v1/v2), **#557** (v3), **#558** (v4), **#559** (v5 costs).
 
 ---
 
@@ -256,19 +256,61 @@ both runs furthest and reverses hardest.
 
 ---
 
+## 6b. v5 — net of transaction costs (PR #559)
+
+The v4 result raised a sharp question: under RS-priority the turnover floor gives up ~22pp CAGR for ~0
+drawdown benefit, so it looks like pure cost. But the backtest is **gross** — it charges nothing for
+trading illiquid names, which is exactly where `rs-only`'s edge (and the floor's value) lives. v5 nets
+each trade of round-trip cost = statutory (~0.25%) + half-spread + **market impact**, where impact per
+side = `coeff · (orderValue / avgTurnover)` capped at 5%/side. Order value = book ÷ slots, so impact
+scales with participation — illiquid names pay far more. Model config (this run): book **₹10 L**,
+`impact-coeff` 0.10, cap 5%/side.
+
+### RS-priority: gross vs net (₹10 L book)
+
+| Variant | Gross CAGR | Net CAGR | Cost drag | Net DD | Net Sharpe |
+|---|--:|--:|--:|--:|--:|
+| technical | 43.96% | 28.80% | −15.2pp | −69.1% | 0.67 |
+| **rs-only** | 51.49% | **38.76%** | −12.7pp | −65.8% | **0.75** |
+| turnover-only | 32.90% | 28.25% | −4.7pp | −51.8% | 0.65 |
+| **rs-turnover** | 29.55% | **24.82%** | −4.7pp | −57.0% | 0.66 |
+
+**Verdict — does the turnover floor earn its 22pp?** At a ₹10 L book, **no.** `rs-only` net (38.8%)
+still beats `rs-turnover` net (24.8%) by ~14pp and wins on Sharpe (0.75 vs 0.66). The cost model works
+— the no-floor variants are haircut ~3× harder (rs-only −12.7pp vs rs-turnover −4.7pp), confirming the
+illiquidity penalty — but it only closed ~8pp of the 22pp gross gap, not enough to flip the ranking.
+
+**The answer is capital-dependent** (order value = book ÷ slots):
+
+| Book size | Thin-name cost | Turnover-floor call |
+|---|---|---|
+| ₹1.5 L (pilot) | ~0.4% (negligible) | **Drop it** — `rs-only` wins by ~20pp; you can trade thin names |
+| ₹10 L (this run) | up to the 5%/side cap | **Lower it** — floor costs ~14pp of CAGR |
+| ₹50 L – 1 Cr+ | genuinely unfillable* | **Keep it** — thin trades can't be executed at size |
+
+*The 5%/side impact cap *under*-charges the most illiquid trades (participation > 1× daily volume is
+effectively unfillable, not 5% costly), so at a large book `rs-only`'s net is still optimistic — the
+real gap narrows or flips.
+
+Net drawdowns are 57–69% (worse than gross — costs add churn on every entry/exit).
+
+---
+
 ## 7. Synthesis + recommendation
 
 - **Keep RS-rank ON.** It is the single most valuable filter — nearly doubles CAGR and gives the best
   Sharpe. The live funnel already gates on cross-sectional RS-rank; this validates it hard.
-- **Keep the turnover floor for executability.** It costs return but buys tradeability (you cannot
-  actually trade the illiquid names at size) and cuts drawdown. Accept the give-up.
+- **Size the turnover floor to your capital (v5).** After realistic, liquidity-scaled costs the floor
+  does *not* earn its keep at a small book — `rs-only` net (38.8% CAGR at ₹10 L) still beats
+  `rs-turnover` net (24.8%). At a ₹1.5 L pilot the floor is pure cost (drop or lower it, capture the
+  edge); at ₹50 L+ the thin names become unfillable (keep it). Lower the floor for a pilot, raise it as
+  the book scales.
 - **Pick candidates by RS-rank when slots are scarce (v4).** RS-priority allocation lifts every
   variant's CAGR by 6–16 points — the cheapest improvement available (pure allocation policy, no new
   data). The live funnel already RS-ranks its buyable list, so live behaviour already captures this.
-- **Realistic live expectation = `rs-turnover` under RS-priority: ~29.6% CAGR, ~53% max drawdown**
-  (the FIFO figure was ~23%). `rs-only` under RS-priority (~51% CAGR) is the optimistic upper bound —
-  its edge lives in illiquid small-caps that survivorship + zero-slippage inflate and you cannot fully
-  capture.
+- **Realistic live expectation (net of costs, RS-priority, ₹10 L book): ~25% CAGR for `rs-turnover`,
+  ~39% for `rs-only`** — both with ~57–66% drawdowns. The gross figures (23–51%) are upper bounds;
+  costs, survivorship, and the impact cap all cut the true number, most for the illiquid small-cap edge.
 - **This is high-octane.** Budget for 40–50% drawdowns and long losing streaks before committing real
   capital. The forward live paper book (with the pinned 8%-stop + 50d-trail exits) is the real test; the
   backtest establishes the mechanics have edge, not the exact return you will realise.
@@ -288,6 +330,9 @@ GET  /api/v1/market/screener/minervini/swing-backtest
 GET  /api/v1/market/screener/minervini/swing-backtest/compare
 ```
 
-Config (`artha.minervini.backtest.*`): `years` (default 11), `min-turnover` (₹3,750,000/day),
-`rs-min` (70), `slots` (8). Results persist to `marketdata.minervini_backtest_runs` (one row per
-variant per run).
+Config (`artha.minervini.backtest.*`): `years` (11), `min-turnover` (₹3,750,000/day), `rs-min` (70),
+`slots` (8), `capital` (₹1,000,000), `cost.fixed-pct` (0.25), `cost.spread-pct` (0.05),
+`cost.impact-coeff` (0.10), `cost.impact-cap-pct` (5.0). Each variant's `/compare` report carries three
+portfolios: `portfolio` (FIFO, gross), `portfolioRsPriority` (RS-priority, gross), and
+`portfolioRsPriorityNet` (RS-priority, net of costs). Results persist to
+`marketdata.minervini_backtest_runs` (one row per variant per run).

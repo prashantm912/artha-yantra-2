@@ -1,0 +1,45 @@
+# Minervini VCP breakout setup (MV-6.3, §4.5/§6.2). A swing (daily-primary) long entry that fires
+# as price breaks out above the Phase-5 VCP pivot on expanding volume, above the 20-day MA.
+#
+# - px      = SMA(1) = the daily close, as an alias so it can drive a crossover.
+# - pivot   = VCP_PIVOT context (the Phase-5 buy trigger, seeded per-symbol from minervini_setups).
+# - vol     = VOLUME_RATIO(20): breakout volume vs the 20-day average (§4.5 "expanding on breakout").
+# - sma20   = the 20-day MA (§6.2 post-breakout health: hold above it).
+#
+# crossover(px, pivot) fires ONLY on the bar close crosses above the pivot — inherently "buy the
+# breakout, don't chase an already-extended move" (§4.5), no arithmetic gate needed. NEUTRAL in
+# replay unless a pivot series is seeded, so it never fires on unseeded history.
+#
+# NOTE (deferred to Phase 7 / MV-7.2-7.4): the ~7-8% initial stop + staggered/sell-into-strength
+# exits need a flat-percent exit basis + a multi-leg executor that the engine does not have yet;
+# this uses an atr_multiple volatility stop as the interim protective level.
+schema: strategy-schema/v1
+id: minervini-vcp
+name: "Minervini VCP Breakout"
+version: 1.0.0
+universe:
+  mode: explicit
+  instruments:
+    - { exchange: NSE, tradingsymbol: "NIFTY 50" }
+timeframes: { primary: 1d }
+indicators:
+  - { name: SMA, alias: px, timeframe: 1d, params: { period: 1 }, weight: 1.0,
+      normalize: { type: linear, from: 0, to: 100000 } }
+  - { name: SMA, alias: sma20, timeframe: 1d, params: { period: 20 }, weight: 1.0 }
+  - { name: VOLUME_RATIO, alias: vol, timeframe: 1d, params: { lookback: 20 }, weight: 1.0 }
+  - { name: VCP_PIVOT, alias: pivot, timeframe: 1d, weight: 0.0,
+      instrument: { exchange: NSE, tradingsymbol: "MINERVINI_PIVOT" } }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - crossover: { fast: px, slow: pivot }
+      - "vol > 1.2"
+      - "px > sma20"
+  scoring: { threshold: 0.0 }
+exit_rules:
+  - { type: stop_loss, params: { basis: atr_multiple, value: 3 } }
+risk:
+  position_sizing: { method: percent_equity, params: { percent: 5 } }
+  max_positions: 1
+  session: { style: swing }

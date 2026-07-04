@@ -48,6 +48,7 @@ class IndicatorVectorTest {
     new Vector("VWMA_period20", "VWMA", Map.of("period", 20), false),
     new Vector("BASIS_PCT", "BASIS_PCT", Map.of(), true),
     new Vector("ADVANCE_DECLINE_RATIO", "ADVANCE_DECLINE_RATIO", Map.of(), true),
+    new Vector("VCP_PIVOT", "VCP_PIVOT", Map.of(), true),
   };
 
   @TestFactory

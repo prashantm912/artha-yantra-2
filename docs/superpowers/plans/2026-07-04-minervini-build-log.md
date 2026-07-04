@@ -405,19 +405,54 @@ this is a new strategy definition exercising them, so the frozen goldens don't m
 YAML uses `SMA(50)`; the test fires the real 50-day trail on a crafted 58-bar series (isolated from the
 8% stop). Breakeven-at-3R + pyramiding remain (small, config/executor follow-ups).
 
-## PR-P — Phase 7: the staggered/scaled partial-close executor (MV-7.3/7.4)  📋 SPEC (recon done, supervised build)
+## PR-P — Phase 7: the staggered/scaled partial-close executor (MV-7.3/7.4)  ✅ BUILT + parity-verified
 
-The one remaining Track-B engine change that touches the parity firewall (frozen golden writer +
-golden-runner position loop + `ReplayEngine` Trade pairing). A full recon produced the exact
-parity-safe design — captured as **`docs/superpowers/plans/2026-07-04-minervini-partial-close-build-spec.md`**
-(6–7 files, side-channel `qtyFraction` on `SignalEvent`/`ExitDecision`, `OpenPosition` remaining-fraction
-+ fired-tiers, a shared `applyExit`, fraction-aware `ReplayEngine` legs, new `golden-minervini-scaled/`
-fixtures; the automated `GoldenDeterminismTest`+`BacktestParityTest` byte-identical gate is the hard
-merge gate). **Deliberately not built unattended:** it is parity-safe-additive by design but a slipped
-golden would corrupt the platform's most important invariant, and scaling out is not yet needed (the
-reliability bar wants ≥30–50 single-stop paper trades first, §0.5 #12) — this is the item for a focused,
-supervised pass. The live paper-ledger partial close is a further, separately-gated PR (touches the
-pinned `exit-equivalence.json` + its 3 suites).
+The Track-B engine change that touches the parity firewall — built exactly to the recon spec
+(`2026-07-04-minervini-partial-close-build-spec.md`), gated on byte-identical goldens.
+
+| MV item | What | Status | Evidence |
+|---|---|---|---|
+| MV-7.3/7.4 | `scaled_exit` sell-into-strength tiers (`tiers:[{profit_pct, qty_pct}]`) — the multi-leg partial-close engine (a staggered/tiered stop rides the same mechanism). | **DONE** | `ScaledExitTest` (2 partial exits of 0.5 on the +10%/+20% path + determinism) + `ScaledBacktestTest` (2 fractional trades summing to the whole, ascending fills). **GoldenDeterminism 9/9 + BacktestParity 9/9 byte-identical; full strategy-engine + backtest sweep = 66 test classes, 0 failures.** |
+
+**The parity-safe-additive implementation (7 files):**
+1. `strategy-schema-v1.json` — new `scaled_exit` exit-rule shape (`tiers` array, `qty_pct` 0<x≤1). Additive.
+2. `GoldenSignalsJson.SignalEvent` += `qtyFraction` **side-channel** (a 7-arg convenience ctor keeps all
+   call sites; `write()` never serializes it → frozen goldens byte-identical).
+3. `ExitEvaluator.ExitDecision` += `qtyFraction`+`tier` (2-arg ctor = full close, every existing site
+   unchanged); `evaluate` gains a `firedTiers` overload + the `scaled_exit` branch (lowest not-yet-fired
+   tier whose `profit_pct` is met returns its partial fraction).
+4. `TickwiseGoldenRunner` — `OpenPosition` += `remainingFraction`+`firedTiers`; a shared `applyExit`
+   emits the leg's fraction, reduces the remainder, records the tier; the 3 exit sites route through it.
+   A full close of `remainingFraction==1` is byte-identical to before.
+5. `StrategyCompiler.paramsMap` — recursive array/object conversion (the `tiers` array was previously
+   `asText()`→`""`; no existing param is an array so scalar params compile identically, parity held).
+6. `ReplayEngine` — the entry↔exit pairing became one-entry→N-partial-close legs (`Leg` += `qtyFraction`,
+   `opensPosition`, `closesPosition`); the fill loop closes fractional qty per leg with pro-rated entry
+   cost + the lot residual on the final leg. An un-scaled strategy = one full-close leg (unchanged).
+7. New fixtures/tests: `minervini-vcp-scaled.yaml`, `ScaledExitTest`, `ScaledBacktestTest`.
+
+**Blast radius:** the *scaled tier* logic runs only through the backtest/golden runner (the 5-arg
+`ExitEvaluator.evaluate`). The LIVE `SignalEngine` also calls `ExitEvaluator.evaluate` (the 4-arg
+overload) — so the 4-arg is made **scaled-blind** (`scaledEnabled=false`): a live `scaled_exit`
+strategy simply does NOT fire the scaled tiers (fail-safe, never a wrong full close) until Phase 9
+wires a partial-position ledger. The **live paper-ledger partial close** is that further, separately-
+gated PR (touches the pinned `exit-equivalence.json` + its 3 suites). Scaling out still needs the
+reliability bar met (≥30–50 single-stop paper trades, §0.5 #12) before it's used in anger.
+
+**Adversarial review (4-critic + verify, 10 agents, 5 CONFIRMED — ALL fixed pre-merge):**
+1. (medium, PARITY) `ReplayEngine` close loop dropped the removed `closing == openLeg` guard → a
+   stale/colliding close leg (two positions' exits on one end-of-window fill bar) could close the
+   wrong position — an un-scaled trade-list change `BacktestParityTest` doesn't catch (it never pins
+   trades to a golden). **Fixed:** an `openLeg`-identity guard — a leg only closes the position whose
+   `entryIndex` it shares (partials share the opener's entry, so all a scaled position's tiers fire).
+2. (medium, LIVE) the 4-arg `evaluate` (live `SignalEngine`) ran the `scaled_exit` branch → a live
+   scaled strategy would full-close at tier 0. **Fixed:** 4-arg is scaled-blind (above).
+3. (medium) partial `closeQty` wasn't lot-aligned (latent — all callers use lot=1). **Fixed:** floor
+   each partial to a lot multiple; the final leg absorbs the residual.
+4. (low) `FRACTION_FULL=0.999999` could diverge from the runner's exact `remaining.signum()<=0`.
+   **Fixed:** exact `cumFraction >= ONE`.
+5. (low) HALF_UP rounding let a 1-unit position close whole at tier 0. **Fixed** by the floor (#3).
+Re-verified after the fixes: GoldenDeterminism 9/9 + BacktestParity 9/9 byte-identical, full sweep 0 fails.
 
 ---
 

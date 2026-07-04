@@ -1,0 +1,34 @@
+# Minervini VCP breakout with a SCALED (sell-into-strength) exit (MV-7.4): after the pivot breakout,
+# sell half the position at +10% and the other half at +20%, with the ~8% initial stop protecting the
+# remainder throughout. `scaled_exit` tiers close qty_pct of the ORIGINAL position when it reaches
+# profit_pct; the position stays open for the remainder until the last tier (or the stop) closes it.
+schema: strategy-schema/v1
+id: minervini-vcp-scaled
+name: "Minervini VCP (scaled exit)"
+version: 1.0.0
+universe:
+  mode: explicit
+  instruments:
+    - { exchange: NSE, tradingsymbol: "NIFTY 50" }
+timeframes: { primary: 1d }
+indicators:
+  - { name: SMA, alias: px, timeframe: 1d, params: { period: 1 }, weight: 1.0,
+      normalize: { type: linear, from: 0, to: 100000 } }
+  - { name: VOLUME_RATIO, alias: vol, timeframe: 1d, params: { lookback: 20 }, weight: 1.0 }
+  - { name: VCP_PIVOT, alias: pivot, timeframe: 1d, weight: 0.0,
+      instrument: { exchange: NSE, tradingsymbol: "MINERVINI_PIVOT" } }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - crossover: { fast: px, slow: pivot }
+      - "vol > 1.2"
+  scoring: { threshold: 0.0 }
+exit_rules:
+  - { type: stop_loss, params: { basis: percent, value: 8 } }         # MV-7.2 initial stop on the remainder
+  - { type: scaled_exit, params: { tiers: [ { profit_pct: 10, qty_pct: 0.5 },
+                                            { profit_pct: 20, qty_pct: 0.5 } ] } }  # MV-7.4 sell half at +10%, half at +20%
+risk:
+  position_sizing: { method: percent_equity, params: { percent: 5 } }
+  max_positions: 1
+  session: { style: swing }

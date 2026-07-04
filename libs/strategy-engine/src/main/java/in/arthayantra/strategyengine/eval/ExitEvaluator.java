@@ -9,6 +9,7 @@ import in.arthayantra.strategyengine.series.EngineSeries;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -31,8 +32,18 @@ public final class ExitEvaluator {
   /** Open-position state the evaluator needs. */
   public record Position(Direction direction, BigDecimal entryPrice, int entryIndex) {}
 
-  /** A triggered exit. */
-  public record ExitDecision(String type, String reason) {}
+  /**
+   * A triggered exit. {@code qtyFraction} is the fraction of the ORIGINAL position this leg closes
+   * (1 = full close of the remaining); {@code tier} is the {@code scaled_exit} tier index that fired
+   * (-1 = not a scaled tier). The 2-arg constructor is a full close, so every existing exit type is
+   * unchanged and parity-safe.
+   */
+  public record ExitDecision(String type, String reason, BigDecimal qtyFraction, int tier) {
+    /** A full-close decision (stop_loss / trailing_stop / take_profit / time_stop / signal_exit). */
+    public ExitDecision(String type, String reason) {
+      this(type, reason, BigDecimal.ONE, -1);
+    }
+  }
 
   /** The entry-time protective levels (absolute prices); either may be {@code null}. */
   public record EntryLevels(BigDecimal stopLoss, BigDecimal takeProfit) {}
@@ -161,17 +172,47 @@ public final class ExitEvaluator {
     return trailing(null, priceSeries, pricePosition, priceIndex, rule, close);
   }
 
-  /** Evaluates all exit rules at a bar; first match in precedence order wins. */
+  /**
+   * The LIVE {@code SignalEngine} entry point — first match in precedence order wins, {@code scaled_exit}
+   * is NOT evaluated. The live path has no partial-position ledger yet (that is Phase 9), so a scaled
+   * tier must never fire here (it would be mishandled as a full close of the whole position). A live
+   * {@code scaled_exit} strategy simply doesn't scale out until Phase 9 wires the ledger — fail-safe,
+   * never a wrong full close. The backtest/golden runner uses the 5-arg overload where tiers are active.
+   */
+  public static Optional<ExitDecision> evaluate(
+      StrategyDefinition definition, IndicatorBank bank, Position position, int primaryIndex) {
+    return evaluate(definition, bank, position, primaryIndex, Set.of(), false);
+  }
+
+  /**
+   * The backtest/golden-runner entry point — first match in precedence order wins, {@code scaled_exit}
+   * tiers ACTIVE. {@code firedTiers} are the tier indices already closed on this position, so a tier
+   * never re-fires; a scaled tier returns a PARTIAL {@link ExitDecision} (its {@code qty_pct}) and the
+   * position stays open for the remainder. Protective stops still win the precedence and close it all.
+   */
   public static Optional<ExitDecision> evaluate(
       StrategyDefinition definition,
       IndicatorBank bank,
       Position position,
-      int primaryIndex) {
+      int primaryIndex,
+      Set<Integer> firedTiers) {
+    return evaluate(definition, bank, position, primaryIndex, firedTiers, true);
+  }
+
+  private static Optional<ExitDecision> evaluate(
+      StrategyDefinition definition,
+      IndicatorBank bank,
+      Position position,
+      int primaryIndex,
+      Set<Integer> firedTiers,
+      boolean scaledEnabled) {
     EngineSeries series = bank.primarySeries();
     BigDecimal close = series.candle(primaryIndex).close();
 
     for (String type :
-        new String[] {"stop_loss", "trailing_stop", "take_profit", "time_stop", "signal_exit"}) {
+        new String[] {
+          "stop_loss", "trailing_stop", "take_profit", "scaled_exit", "time_stop", "signal_exit"
+        }) {
       for (StrategyDefinition.ExitRuleSpec rule : definition.exitRules()) {
         if (!rule.type().equals(type)) {
           continue;
@@ -181,6 +222,8 @@ public final class ExitEvaluator {
               case "stop_loss" -> level(definition, series, position, rule, close, true);
               case "take_profit" -> level(definition, series, position, rule, close, false);
               case "trailing_stop" -> trailing(bank, series, position, primaryIndex, rule, close);
+              case "scaled_exit" ->
+                  scaledEnabled ? scaledExit(position, close, rule, firedTiers) : Optional.empty();
               case "time_stop" -> timeStop(series, position, primaryIndex, rule);
               case "signal_exit" -> signalExit(bank, primaryIndex, rule);
               default -> Optional.empty();
@@ -188,6 +231,39 @@ public final class ExitEvaluator {
         if (decision.isPresent()) {
           return decision;
         }
+      }
+    }
+    return Optional.empty();
+  }
+
+  /**
+   * Sell-into-strength (MV-7.4): the lowest not-yet-fired tier whose {@code profit_pct} the position
+   * has reached returns a partial close of its {@code qty_pct} (fraction of the ORIGINAL position).
+   * One tier per bar — a gap past two tiers fires the nearer this bar, the next on the following bar.
+   */
+  private static Optional<ExitDecision> scaledExit(
+      Position position, BigDecimal close, StrategyDefinition.ExitRuleSpec rule, Set<Integer> firedTiers) {
+    if (!(rule.params().get("tiers") instanceof List<?> tiers)) {
+      return Optional.empty();
+    }
+    boolean isLong = position.direction() == Direction.LONG;
+    for (int i = 0; i < tiers.size(); i++) {
+      if (firedTiers.contains(i) || !(tiers.get(i) instanceof Map<?, ?> tier)) {
+        continue;
+      }
+      BigDecimal profitPct = decimal(tier.get("profit_pct"));
+      BigDecimal qtyPct = decimal(tier.get("qty_pct"));
+      if (profitPct == null || qtyPct == null) {
+        continue;
+      }
+      BigDecimal gainPct =
+          (isLong ? close.subtract(position.entryPrice()) : position.entryPrice().subtract(close))
+              .divide(position.entryPrice(), EngineMath.MC)
+              .multiply(EngineMath.HUNDRED, EngineMath.MC);
+      if (gainPct.compareTo(profitPct) >= 0) {
+        return Optional.of(
+            new ExitDecision(
+                "scaled_exit", "tier " + i + " +" + profitPct + "% sell " + qtyPct, qtyPct, i));
       }
     }
     return Optional.empty();

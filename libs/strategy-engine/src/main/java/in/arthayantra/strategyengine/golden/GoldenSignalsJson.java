@@ -31,7 +31,23 @@ public final class GoldenSignalsJson {
       String direction,
       ScoreBreakdown breakdown,
       BigDecimal stopLoss,
-      BigDecimal takeProfit) {}
+      BigDecimal takeProfit,
+      BigDecimal qtyFraction) {
+
+    /**
+     * A full-position event (entry, or an exit that closes the whole remaining position):
+     * {@code qtyFraction} defaults to 1. Partial (scaled) exits use the canonical constructor with
+     * the fraction of the ORIGINAL position closed on this leg. {@code qtyFraction} is a pure
+     * side-channel like {@code stopLoss}/{@code takeProfit} — {@link #write} never serializes it, so
+     * the frozen golden vectors stay byte-identical.
+     */
+    public SignalEvent(
+        String timestamp, String exchange, String tradingsymbol, String direction,
+        ScoreBreakdown breakdown, BigDecimal stopLoss, BigDecimal takeProfit) {
+      this(timestamp, exchange, tradingsymbol, direction, breakdown, stopLoss, takeProfit,
+          BigDecimal.ONE);
+    }
+  }
 
   private static final JsonNodeFactory F = JsonNodeFactory.instance;
 

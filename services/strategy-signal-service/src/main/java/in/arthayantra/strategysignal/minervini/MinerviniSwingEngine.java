@@ -82,6 +82,7 @@ public class MinerviniSwingEngine {
   private final TransactionTemplate tx;
   private final ObjectMapper objectMapper;
   private final Clock clock;
+  private final boolean enabled;
   private final int warmupDays;
   private final int minBars;
   private final long ttlMinutes;
@@ -98,6 +99,7 @@ public class MinerviniSwingEngine {
       TransactionTemplate tx,
       ObjectMapper objectMapper,
       Clock clock,
+      @Value("${artha.minervini.swing.enabled:false}") boolean enabled,
       @Value("${artha.minervini.swing.warmup-days:520}") int warmupDays,
       @Value("${artha.minervini.swing.min-bars:60}") int minBars,
       @Value("${artha.minervini.swing.signal-ttl-minutes:1440}") long ttlMinutes) {
@@ -111,6 +113,7 @@ public class MinerviniSwingEngine {
     this.tx = tx;
     this.objectMapper = objectMapper;
     this.clock = clock;
+    this.enabled = enabled;
     this.warmupDays = warmupDays;
     this.minBars = minBars;
     this.ttlMinutes = ttlMinutes;
@@ -118,6 +121,15 @@ public class MinerviniSwingEngine {
 
   /** Runs one full daily batch: the entry pass over the funnel, then the exit pass over open swings. */
   public SwingRun runDaily() {
+    // The single arming gate for BOTH the scheduler AND the on-demand POST /run: with
+    // artha.minervini.swing.enabled off the batch is a NO-OP — it can never emit a signal or open a
+    // paper position, whoever calls it. The scheduler bean only exists when the flag is on, but the
+    // on-demand endpoint is reachable regardless, so the engine itself must gate (audit P9 — else a
+    // curious authenticated POST /run fires entries + auto-paper before the owner has armed the flag).
+    if (!enabled) {
+      log.debug("minervini swing batch disabled (artha.minervini.swing.enabled=false) — skipping");
+      return new SwingRun(0, 0, 0, 0);
+    }
     List<SwingStrategy> swings = loadPublishedSwingStrategies();
     if (swings.isEmpty()) {
       return new SwingRun(0, 0, 0, 0);

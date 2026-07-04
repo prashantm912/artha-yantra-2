@@ -1,6 +1,8 @@
 package in.arthayantra.strategysignal.minervini;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import in.arthayantra.strategyengine.config.StrategyCompiler;
 import in.arthayantra.strategyengine.config.StrategyDefinition;
@@ -9,6 +11,7 @@ import in.arthayantra.strategyengine.eval.ExitEvaluator;
 import in.arthayantra.strategyengine.eval.IndicatorBank;
 import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategyschema.StrategyDocuments;
+import in.arthayantra.strategysignal.registry.StrategyRepository;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
@@ -31,6 +34,38 @@ class MinerviniSwingEngineTest {
 
   private static final ZoneOffset IST = ZoneOffset.ofHoursMinutes(5, 30);
   private static final BigDecimal PIVOT = new BigDecimal("150");
+
+  @Test
+  void runDailyIsAnInertNoOpWhenDisabled() {
+    // The arming gate (audit P9): with artha.minervini.swing.enabled=false, runDaily() must never
+    // touch the registry / funnel / signals / publisher — so an on-demand POST /run cannot fire a
+    // signal or open a paper position before the owner arms the batch.
+    StrategyRepository registry = mock(StrategyRepository.class);
+    MinerviniFunnelClient funnel = mock(MinerviniFunnelClient.class);
+    in.arthayantra.strategysignal.signals.MarketDataCandlesClient candles =
+        mock(in.arthayantra.strategysignal.signals.MarketDataCandlesClient.class);
+    in.arthayantra.strategysignal.signals.SignalRepository signals =
+        mock(in.arthayantra.strategysignal.signals.SignalRepository.class);
+    in.arthayantra.strategysignal.signals.SignalPublisher publisher =
+        mock(in.arthayantra.strategysignal.signals.SignalPublisher.class);
+    org.springframework.context.ApplicationEventPublisher events =
+        mock(org.springframework.context.ApplicationEventPublisher.class);
+    org.springframework.transaction.support.TransactionTemplate tx =
+        mock(org.springframework.transaction.support.TransactionTemplate.class);
+
+    MinerviniSwingEngine engine =
+        new MinerviniSwingEngine(
+            registry, funnel, candles, signals, publisher, events, Optional.empty(), tx,
+            new com.fasterxml.jackson.databind.ObjectMapper(),
+            java.time.Clock.systemUTC(), false, 520, 60, 1440);
+
+    MinerviniSwingEngine.SwingRun run = engine.runDaily();
+
+    assertThat(run.strategies()).isZero();
+    assertThat(run.entries()).isZero();
+    assertThat(run.exits()).isZero();
+    verifyNoInteractions(registry, funnel, candles, signals, publisher, events, tx);
+  }
 
   private static StrategyDefinition vcp() throws IOException {
     try (InputStream in =

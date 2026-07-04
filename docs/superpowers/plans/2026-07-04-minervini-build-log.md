@@ -252,3 +252,8 @@ geometry extension (the cheat pause high / high-tight-flag level Phase-5 does no
 `primary_base` needs a `WEEK52_HIGH` new-high-breakout indicator; the market-regime gate (MV-6.9)
 reuses `BreadthService`. All benefit from owner chart-verification of the geometry thresholds.
 **FE:** a `/equity/minervini` funnel view + the MV-4.4 analyzer page consume `/funnel` + `/candidate`.
+
+**Funnel FE view (#533):** `/equity/minervini` gains a Screen | Funnel toggle; the Funnel view renders
+the three-list as three ranked columns (symbol · footprint · close+%-to-pivot · RS). Verify trio green
+(lint / build / test:ci 257-257); deployed. The daily buyable workflow is now end-to-end usable
+(screener → geometry → funnel → UI, all live).

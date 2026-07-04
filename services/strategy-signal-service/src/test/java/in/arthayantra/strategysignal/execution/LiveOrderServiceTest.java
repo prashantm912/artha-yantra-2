@@ -24,7 +24,7 @@ class LiveOrderServiceTest {
     return new SignalRow(
         1L, UUID.randomUUID(), "NSE", "NIFTY24JUNFUT", "3m", "ENTRY", side,
         new BigDecimal("100"), null, null, null, null, "ACTIVE", null, null, null,
-        tradeableExch, tradeableSym, null);
+        tradeableExch, tradeableSym, null, null);
   }
 
   @Test

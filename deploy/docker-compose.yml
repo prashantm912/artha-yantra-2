@@ -250,6 +250,9 @@ services:
       # ARTHA_MD_SOURCE_TICKER below).
       ARTHA_NTFY_TOPIC: ${ARTHA_NTFY_TOPIC:-}
       ARTHA_NTFY_URL: ${ARTHA_NTFY_URL:-https://ntfy.sh}
+      # Phase-9 Minervini (MV-9.4): push an ntfy alert when a SEPA funnel candidate transitions into
+      # the immediately-buyable band. Default off; flip in the live .env (goes to ARTHA_NTFY_TOPIC).
+      ARTHA_MINERVINI_BUYABLE_ALERTS_ENABLED: ${ARTHA_MINERVINI_BUYABLE_ALERTS_ENABLED:-false}
       # WS live ticker source (Wave-U4 §C). The application.yml binding existed but this passthrough
       # was missing, so a .env ARTHA_MD_SOURCE_TICKER never reached the container (default Kite either
       # way). Added so the owner's ticker flip is a one-line .env change. Default kite (no behaviour change).
@@ -378,6 +381,12 @@ services:
       # clean; the live/mock .env flips it true to seed the 36 scalper drafts on boot (idempotent,
       # 409-skips existing). Drafts NEVER auto-emit — the owner publishes each from the UI.
       ARTHA_SCALPER_SEED_STRATEGIES: ${ARTHA_SCALPER_SEED_STRATEGIES:-false}
+      # Phase-9 Minervini SEPA swing (MV-9): seed the 4 swing-setup drafts on boot (idempotent) +
+      # enable the 20:00-IST daily live-PAPER batch. Default off so CI/mock/fresh stacks stay clean;
+      # the live .env flips them true once the owner has published the swing strategies. The batch
+      # drives only paper positions (equities do not tick — it evaluates the daily bar post-close).
+      ARTHA_MINERVINI_SEED_STRATEGIES: ${ARTHA_MINERVINI_SEED_STRATEGIES:-false}
+      ARTHA_MINERVINI_SWING_ENABLED: ${ARTHA_MINERVINI_SWING_ENABLED:-false}
       # Shadow book (signal-analysis §7.1/§7.2): open composite-passing REJECTED entries as virtual
       # 1-lot positions so the exit sweep labels them with a real PnL (entry-gate tuning evidence).
       # Code default is false; ON for the stack — separate shadow_positions table, never touches

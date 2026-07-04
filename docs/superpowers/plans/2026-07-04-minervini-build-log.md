@@ -500,3 +500,41 @@ the only remaining Minervini work is the Phase-9 LIVE operation (context-seeding
 rollup, published swing strategies, auto-paper, the candidate-buyable push, the daily sell-decision
 report) — gated on the owner publishing swing strategies + an owner hit-rate sign-off (§9), and
 market-hours-verifiable only. That is a supervised Phase-9 pass, not more unattended dormant code.
+
+---
+
+## Phase 9 — LIVE-OPERATION pass (P9-A … P9-Z, 2026-07-04)  ✅ built + deployed
+
+The owner reviewed the hit-rate evidence (LIVE 3y: mean excess vs NIFTY +0.27→+2.92% at +5→+63
+sessions — an asymmetric momentum edge, payoff in magnitude not frequency) and said **go**: all 4
+setups, full Phase-9 in one pass. Built as 6 parity-verified code PRs + a go-live deploy.
+
+**Design (the crux):** the ~62 funnel equities do NOT tick (the live feed is index/options only), so
+the tick-driven `SignalEngine` — which refuses non-rollable `1d` primaries — never evaluates them.
+Live Minervini is therefore a **daily EOD batch** (`MinerviniSwingEngine`) that reuses the FROZEN
+`EntryEvaluator`/`ExitEvaluator`/`IndicatorBank` verbatim over the fresh daily bar. Zero edits to the
+shared eval core ⇒ goldens 9/9 byte-identical; the batch scores each bar identically to the backtest.
+This matches the plan's own MV-9.1 "no intraday equity tick needed".
+
+| PR | Item | What |
+|---|---|---|
+| [#548](https://github.com/prashantm912/artha-yantra-2/pull/548) | P9-B | `cheat_pivot` + `thrust` geometry (V034) — the `cheat_3c`/`power_play` seeds; on the funnel + analyzer. `VcpDetectorTest` pins cheat=91.605 on the canonical base + a thrust-true fixture. |
+| [#549](https://github.com/prashantm912/artha-yantra-2/pull/549) | P9-A | Seed the 4 swing setups (drafts, idempotent) + the `minervini_funnel` universe branch + `UniverseResolver` mode. `IndicatorRegistry.Definition.seeded` flag → publish-validation skips the "context instrument must exist" gate for the seeded VCP_PIVOT/CHEAT_PIVOT/THRUST (per-symbol sentinels the batch injects — no synthetic master rows). Gate-only entries: `vol` is the sole scorer (linear 0→3, threshold 0.1) so the composite clears exactly when the gate holds. |
+| [#550](https://github.com/prashantm912/artha-yantra-2/pull/550) | **P9-C** (keystone) | `MinerviniSwingEngine` — entry pass (funnel → per-symbol bank + seeded geometry → EntryEvaluator → emit ENTRY + `SignalEmitted`, auto-papered) + exit pass (active swing anchors → ExitEvaluator on the daily bar → emit EXIT + `SignalExited`, closes at the daily close). `MinerviniSwingScheduler` (20:00 IST, gated) + `POST /minervini-swing/run`. **Adversarial review (2 reviewers) found + fixed 4 issues:** (HIGH) stamp `suggested_qty` (else AutoPaperListener skips → inert); (MED) exit settles at the daily-bar close via a price-aware `closeForSignal` (else breakeven); (MED) warmup 420→520 (252-bar WEEK52 gate); (LOW) out-of-window entry → skip+log. Reviewers confirmed sound: seeded-context timestamp alignment, daily-bar freshness, money paths. Full suite 532/532. |
+| — | P9-D/P9-E | Auto-paper hold-across-sessions = DONE-BY-REUSE (auto-paper is global+on; swing is excluded from the 15:45 square-off by the existing `intradayOpen` `style='intraday'` filter; exits are batch-driven). `minervini_detail` populated in `emitEntry`. |
+| [#551](https://github.com/prashantm912/artha-yantra-2/pull/551) | P9-I | `GET /backtests/{id}/report-card` → typed `SwingReportCard` (MV-10.1/10.2 wiring). |
+| [#552](https://github.com/prashantm912/artha-yantra-2/pull/552) | P9-H | `MinerviniBuyableProducer` — one ntfy push naming the funnel candidates that transitioned into the buyable band (MV-9.4 net-new). |
+| [#553](https://github.com/prashantm912/artha-yantra-2/pull/553) | P9-F | `GET /minervini-swing/sell-decisions` — the MV-9.3 daily triad (buy-now / why-holding / where-seller) per open swing position, reusing the engine bank + frozen evaluators. |
+
+**P9-G (Stage-3/4 exit gate) — DEFERRED BY DOCTRINE.** The owner pinned the exit doctrine to the
+single 8%-stop + 50-day-MA trail (§0.5 grill). A Stage-3/4 exit both changes the reliability-measured
+doctrine and needs current-stage seeding in the exit bank — so it is an A/B variant to add AFTER the
+base doctrine proves out on forward paper, not a silent alteration of the pinned setups.
+
+**P9-Z go-live (deploy):** compose flag-passthroughs (`ARTHA_MINERVINI_SEED_STRATEGIES` /
+`ARTHA_MINERVINI_SWING_ENABLED` / `ARTHA_MINERVINI_BUYABLE_ALERTS_ENABLED`, default off) → live `.env`
+flips seed + swing on → rebuild strategy-signal + market-data + backtest → publish the 4 swing
+strategies → smoke-test (`POST /run` + `GET /sell-decisions` + `GET /funnel`). The batch fires for real
+Monday post-close (20:00 IST); positions accrue as the ~30–50 forward paper trades the §0.5 #12
+reliability bar needs. **That paper book — with the 8%-stop + 50d-trail exits — is the real test; the
+hit-rate harness was necessary-but-not-sufficient.**

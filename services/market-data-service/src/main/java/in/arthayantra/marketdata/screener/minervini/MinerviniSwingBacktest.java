@@ -18,14 +18,27 @@ import java.util.List;
  * strategies use, so the trade-level stats (win-rate / payoff / expectancy / hold-time) reflect the
  * real strategy over ~11 years — what the buy-and-hold hit-rate harness cannot show.
  *
- * <p>v1 relaxes the cross-sectional RS gate (gate 7) — RS is a per-date percentile across the whole
- * universe, which this per-symbol stream cannot compute; the 7 price-structure Trend-Template gates
- * still apply. Pure + deterministic (no IO, no clock); the caller supplies the bars + the detector.
+ * <p>The sim runs one or more {@link Variant}s over the SAME single pass of the bars, so an A/B is a
+ * clean apples-to-apples comparison (identical geometry, MAs, and setup triggers; only the entry
+ * FILTER differs):
+ *
+ * <ul>
+ *   <li><b>v1 (technical-only)</b> — the 7 price-structure Trend-Template gates + the setup trigger;
+ *       the cross-sectional RS gate is relaxed (a per-symbol stream cannot compute a per-date
+ *       percentile) and there is no tradability floor.
+ *   <li><b>v2 (rs + turnover)</b> — adds the real cross-sectional RS-rank gate (the caller supplies
+ *       the per-bar percentile it computed across the universe) and a turnover/liquidity floor (the
+ *       only unbiased fundamentals proxy — real fundamentals have no point-in-time history).
+ * </ul>
+ *
+ * Pure + deterministic (no IO, no clock); the caller supplies the bars, the detector, and the
+ * pre-computed per-bar RS-rank series.
  */
 final class MinerviniSwingBacktest {
 
-  /** One closed backtest trade. */
+  /** One closed backtest trade, tagged with the {@link Variant} that took it. */
   record BtTrade(
+      String variant,
       String setup,
       String symbol,
       LocalDate entryDate,
@@ -36,25 +49,49 @@ final class MinerviniSwingBacktest {
       int barsHeld,
       String exitReason) {}
 
+  /**
+   * One backtest configuration. {@code useRealRs} gates on the caller-supplied per-bar RS-rank at
+   * {@code rsMin} (else the RS gate is relaxed — fed a passing constant); {@code turnoverFloor} in
+   * rupees/day gates on the 20-day average traded value (0 = off).
+   */
+  record Variant(String name, boolean useRealRs, double rsMin, double turnoverFloor) {}
+
+  /** The technical-only baseline (reproduces the original v1 numbers exactly). */
+  static final Variant V1 = new Variant("v1-technical", false, 0, 0);
+
   // the live doctrine, as config-tunable constants mirrored from the production YAMLs
   private static final double STOP_PCT = 0.08; // MV-7.2 protective stop
   private static final double VOL_MIN = 1.2; // §4.5 expanding-volume gate
   private static final int WEEKLY = 5; // geometry recompute cadence (sessions)
   private static final int VCP_LOOKBACK = 400; // detector window
   private static final int MIN_BARS = 260; // need 252 for the 52-week gate + a little slack
+  private static final int TURNOVER_LOOKBACK = 20; // avg traded-value window for the liquidity floor
 
   // the 4 setups
   static final List<String> SETUPS = List.of("vcp", "primary-base", "cheat-3c", "power-play");
 
   private MinerviniSwingBacktest() {}
 
-  /**
-   * Simulates all 4 setups over {@code bars} (oldest→newest) for {@code symbol}, from the first bar on
-   * or after {@code from}. Each setup runs an independent single-position book (flat→long→flat); an
-   * open-at-end position is dropped (not counted). Returns every closed trade across the setups.
-   */
+  /** Backward-compatible single-variant (v1) entry point — used by the unit test. */
   static List<BtTrade> simulate(
       String symbol, List<DailyBar> bars, VcpDetector detector, LocalDate from) {
+    return simulate(symbol, bars, detector, from, null, List.of(V1));
+  }
+
+  /**
+   * Simulates every {@code variant} of all 4 setups over {@code bars} (oldest→newest) for {@code
+   * symbol}, from the first bar on or after {@code from}. Each (variant, setup) runs an independent
+   * single-position book (flat→long→flat); an open-at-end position is dropped (not counted). {@code
+   * rsRank} is the per-bar cross-sectional RS percentile the caller computed (may be null when no
+   * variant needs it). Returns every closed trade across the variants and setups.
+   */
+  static List<BtTrade> simulate(
+      String symbol,
+      List<DailyBar> bars,
+      VcpDetector detector,
+      LocalDate from,
+      double[] rsRank,
+      List<Variant> variants) {
     int n = bars.size();
     if (n < MIN_BARS) {
       return List.of();
@@ -78,6 +115,8 @@ final class MinerviniSwingBacktest {
     double[] low52w = rollingMin(low, 252);
     double[] volRatio20 = volumeRatio(volume, 20);
     double[] volRatio50 = volumeRatio(volume, 50);
+    double[] turnover20 = avgTurnover(close, volume, TURNOVER_LOOKBACK);
+    double[] rs = rsRank != null ? rsRank : new double[n]; // absent → 0 (only used when useRealRs)
 
     // weekly geometry: pivot / cheat / thrust / is-vcp, valid until the next weekly recompute
     double[] pivot = new double[n];
@@ -104,19 +143,21 @@ final class MinerviniSwingBacktest {
     }
 
     List<BtTrade> trades = new ArrayList<>();
-    for (String setup : SETUPS) {
-      simulateSetup(
-          setup, symbol, bars, from, close, sma20, sma50, sma150, sma200, high52wPrior, low52w,
-          volRatio20, volRatio50, pivot, cheat, thrust, isVcp, trades);
+    for (Variant v : variants) {
+      for (String setup : SETUPS) {
+        simulateSetup(
+            v, setup, symbol, bars, from, close, sma20, sma50, sma150, sma200, high52wPrior, low52w,
+            volRatio20, volRatio50, turnover20, rs, pivot, cheat, thrust, isVcp, trades);
+      }
     }
     return trades;
   }
 
   private static void simulateSetup(
-      String setup, String symbol, List<DailyBar> bars, LocalDate from, double[] close,
+      Variant v, String setup, String symbol, List<DailyBar> bars, LocalDate from, double[] close,
       double[] sma20, double[] sma50, double[] sma150, double[] sma200, double[] high52wPrior,
-      double[] low52w, double[] volRatio20, double[] volRatio50, double[] pivot, double[] cheat,
-      boolean[] thrust, boolean[] isVcp, List<BtTrade> out) {
+      double[] low52w, double[] volRatio20, double[] volRatio50, double[] turnover20, double[] rsRank,
+      double[] pivot, double[] cheat, boolean[] thrust, boolean[] isVcp, List<BtTrade> out) {
     int n = close.length;
     boolean inTrade = false;
     int entryIdx = 0;
@@ -127,8 +168,8 @@ final class MinerviniSwingBacktest {
         if (date.isBefore(from)) {
           continue;
         }
-        if (entryFires(setup, i, close, sma20, sma50, sma150, sma200, high52wPrior, low52w,
-            volRatio20, volRatio50, pivot, cheat, thrust, isVcp)) {
+        if (entryFires(v, setup, i, close, sma20, sma50, sma150, sma200, high52wPrior, low52w,
+            volRatio20, volRatio50, turnover20, rsRank, pivot, cheat, thrust, isVcp)) {
           inTrade = true;
           entryIdx = i;
           entryPrice = close[i];
@@ -139,7 +180,7 @@ final class MinerviniSwingBacktest {
           double exitPrice = close[i];
           out.add(
               new BtTrade(
-                  setup, symbol, bars.get(entryIdx).date(), entryPrice, date, exitPrice,
+                  v.name(), setup, symbol, bars.get(entryIdx).date(), entryPrice, date, exitPrice,
                   (exitPrice - entryPrice) / entryPrice * 100.0, i - entryIdx, reason));
           inTrade = false;
         }
@@ -150,10 +191,15 @@ final class MinerviniSwingBacktest {
 
   /** The setup-specific entry gate on bar {@code i} — the Trend-Template price gates + the setup trigger. */
   private static boolean entryFires(
-      String setup, int i, double[] close, double[] sma20, double[] sma50, double[] sma150,
+      Variant v, String setup, int i, double[] close, double[] sma20, double[] sma50, double[] sma150,
       double[] sma200, double[] high52wPrior, double[] low52w, double[] volRatio20,
-      double[] volRatio50, double[] pivot, double[] cheat, boolean[] thrust, boolean[] isVcp) {
-    if (!trendTemplate(i, close, sma50, sma150, sma200, high52wPrior, low52w)) {
+      double[] volRatio50, double[] turnover20, double[] rsRank, double[] pivot, double[] cheat,
+      boolean[] thrust, boolean[] isVcp) {
+    if (!trendTemplate(v, i, close, sma50, sma150, sma200, high52wPrior, low52w, rsRank)) {
+      return false;
+    }
+    if (v.turnoverFloor() > 0
+        && (Double.isNaN(turnover20[i]) || turnover20[i] < v.turnoverFloor())) {
       return false;
     }
     return switch (setup) {
@@ -180,16 +226,25 @@ final class MinerviniSwingBacktest {
     return null;
   }
 
-  /** The 7 price-structure Trend-Template gates (v1 relaxes the cross-sectional RS gate). */
+  /**
+   * The 8 Trend-Template gates. v1 relaxes the cross-sectional RS gate (fed a passing constant); v2
+   * feeds the caller-computed per-bar RS percentile at {@code rsMin} (a NaN percentile — pre-warmup or
+   * no universe distribution yet — fails the gate, so an unconfirmed-RS bar takes no trade).
+   */
   private static boolean trendTemplate(
-      int i, double[] close, double[] sma50, double[] sma150, double[] sma200, double[] high52wPrior,
-      double[] low52w) {
+      Variant v, int i, double[] close, double[] sma50, double[] sma150, double[] sma200,
+      double[] high52wPrior, double[] low52w, double[] rsRank) {
+    double rsForGate = v.useRealRs() ? rsRank[i] : 100.0;
+    if (Double.isNaN(rsForGate)) {
+      return false;
+    }
+    double rsMin = v.useRealRs() ? v.rsMin() : 0.0;
     boolean[] g =
         MinerviniGates.gates(
             bd(close[i]), bd(sma50[i]), bd(sma150[i]), bd(sma200[i]),
             i >= 20 ? bd(sma200[i - 20]) : null, // 200-day rising over ~1 month
             bd(high52wPrior[i]), bd(low52w[i]),
-            new BigDecimal("100"), BigDecimal.ZERO, // rsRank=100 clears the relaxed RS gate
+            BigDecimal.valueOf(rsForGate), BigDecimal.valueOf(rsMin),
             new BigDecimal("30"), // pctAbove52wLow (must be ≥30% above the low)
             new BigDecimal("25")); // within 25% of the 52w high
     return MinerviniGates.passed(g) == 8;
@@ -273,6 +328,23 @@ final class MinerviniSwingBacktest {
       }
       double avg = sum / lookback;
       out[i] = avg > 0 ? v[i] / avg : 0;
+    }
+    return out;
+  }
+
+  /** Trailing {@code lookback}-day average traded value (close·volume) — the liquidity/tradability floor. */
+  private static double[] avgTurnover(double[] close, double[] volume, int lookback) {
+    double[] out = new double[close.length];
+    for (int i = 0; i < close.length; i++) {
+      if (i < lookback - 1) {
+        out[i] = Double.NaN;
+        continue;
+      }
+      double sum = 0;
+      for (int j = i - lookback + 1; j <= i; j++) {
+        sum += close[j] * volume[j];
+      }
+      out[i] = sum / lookback;
     }
     return out;
   }

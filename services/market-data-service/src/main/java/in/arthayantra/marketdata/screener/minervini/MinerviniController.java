@@ -263,12 +263,26 @@ public class MinerviniController {
     return latestOrIdle();
   }
 
+  /**
+   * The latest A/B comparison of the swing backtest: v1 (technical-only) vs v2 (adds the real
+   * cross-sectional RS-rank gate + a turnover/liquidity floor). Shows whether the RS + tradability
+   * filter actually sharpens the edge over the raw setup mechanics.
+   */
+  @GetMapping("/swing-backtest/compare")
+  public MinerviniBacktestService.Compare swingBacktestCompare() {
+    MinerviniBacktestService.Compare c = backtestService.latestCompare();
+    return c != null
+        ? c
+        : new MinerviniBacktestService.Compare(
+            "idle", null, null, null, null, "no backtest run yet");
+  }
+
   private MinerviniBacktestService.Report latestOrIdle() {
     MinerviniBacktestService.Report r = backtestService.latest();
     return r != null
         ? r
         : new MinerviniBacktestService.Report(
-            "idle", null, null, 0, 0, List.of(), "no backtest run yet");
+            "idle", null, null, null, 0, 0, List.of(), "no backtest run yet");
   }
 
   private static Row toRow(TrendCandidate c) {

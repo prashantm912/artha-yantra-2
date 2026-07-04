@@ -3,10 +3,12 @@ package in.arthayantra.marketdata.screener.minervini;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import in.arthayantra.marketdata.screener.minervini.MinerviniSwingBacktest.BtTrade;
+import in.arthayantra.marketdata.screener.minervini.MinerviniSwingBacktest.Variant;
 import in.arthayantra.marketdata.screener.minervini.geometry.DailyBar;
 import in.arthayantra.marketdata.screener.minervini.geometry.VcpDetector;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -51,6 +53,56 @@ class MinerviniSwingBacktestTest {
     assertThat(t.exitReason()).isIn("STOP_LOSS", "TRAILING_STOP");
     assertThat(t.pnlPct()).as("the rollover closes the trade at a loss").isNegative();
     assertThat(t.barsHeld()).isPositive();
+  }
+
+  @Test
+  void v2RsGateBlocksTheTradeWhenTheCrossSectionalRankIsBelowTheFloor() {
+    List<DailyBar> bars = breakoutSeries();
+    double[] rsRank = new double[bars.size()];
+    Arrays.fill(rsRank, 50.0); // below the 70 floor everywhere
+
+    Variant v1 = MinerviniSwingBacktest.V1;
+    Variant v2 = new Variant("v2", true, 70, 0); // RS gate on, no turnover floor
+    List<BtTrade> trades =
+        MinerviniSwingBacktest.simulate(
+            "TESTCO", bars, detector, LocalDate.of(2020, 1, 1).plusDays(264), rsRank, List.of(v1, v2));
+
+    assertThat(trades.stream().filter(t -> t.variant().equals("v1-technical")))
+        .as("v1 (RS relaxed) still takes the breakout").isNotEmpty();
+    assertThat(trades.stream().filter(t -> t.variant().equals("v2")))
+        .as("v2 skips it — the RS-rank (50) is below the 70 gate").isEmpty();
+  }
+
+  @Test
+  void v2TurnoverFloorBlocksAnIlliquidName() {
+    List<DailyBar> bars = breakoutSeries(); // price ~185, volume ~1k → turnover ~185k
+    double[] rsRank = new double[bars.size()];
+    Arrays.fill(rsRank, 100.0); // RS passes — isolate the turnover gate
+
+    Variant v2 = new Variant("v2", true, 0, 3_750_000); // ₹37.5L/day floor, RS min 0
+    List<BtTrade> trades =
+        MinerviniSwingBacktest.simulate(
+            "TESTCO", bars, detector, LocalDate.of(2020, 1, 1).plusDays(264), rsRank, List.of(v2));
+
+    assertThat(trades).as("the ~₹185k/day turnover is far below the floor → no trade").isEmpty();
+  }
+
+  /** The shared synthetic series: Stage-2 uptrend → consolidation → fresh-high breakout → rollover. */
+  private static List<DailyBar> breakoutSeries() {
+    List<DailyBar> bars = new ArrayList<>();
+    for (int i = 0; i < 256; i++) {
+      bars.add(bar(i, 100.0 + 80.0 * i / 255.0, 1_000));
+    }
+    double[] base = {175, 173, 176, 174, 175, 173, 176, 174};
+    for (int i = 0; i < base.length; i++) {
+      bars.add(bar(256 + i, base[i], 1_000));
+    }
+    double[] tail = {185, 188, 182, 174, 165};
+    long[] vol = {3_000, 1_000, 1_000, 1_000, 1_000};
+    for (int i = 0; i < tail.length; i++) {
+      bars.add(bar(264 + i, tail[i], vol[i]));
+    }
+    return bars;
   }
 
   private static DailyBar bar(int day, double price, long volume) {

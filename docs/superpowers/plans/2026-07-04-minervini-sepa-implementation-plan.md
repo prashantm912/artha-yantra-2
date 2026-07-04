@@ -30,7 +30,53 @@ The build decomposes into two independently-shippable tracks:
 - **Track A — the daily screener (Phases 1–4).** Already largely designed (master-plan §13). Produces a ranked candidate shortlist: 8-gate Trend Template + Minervini cross-sectional RS-rank, optional fundamentals confirmation, persisted daily, surfaced as a React screener page + per-candidate analyzer. **This is the load-bearing 80/20** — it delivers the owner's core workflow (find the names) even if nothing else is built; the owner reads the chart for the entry.
 - **Track B — automated setups, entries, paper, backtest, live (Phases 5–10).** Net-new: VCP/base geometry + Stage detection, the six §6 setups as strategy definitions, a **swing** position lifecycle (new `session.style=swing`, daily-bar primary, staggered stops, sell-into-strength), a swing paper book, a screener-hit-rate + swing-replay backtest, live operation, and the §3.6 selling discipline + alerts.
 
-**The single biggest risk is fundamentals data.** Upstox exposes *no* per-stock quarterly EPS/sales/margin/surprise/estimate-revision feed (verified). Fundamentals must come from Screener.in (the `openscreener` appliance, master-plan §9) or a vendor, and **earnings-surprise + estimate-revisions are not available from Screener.in at all** (§9.5). Therefore fundamentals is an **optional confirmation layer layered strictly after the price gates**, never a blocker (SEPA's price-based Trend Template is the always-available primary filter). See §3-D and §9.
+**Fundamentals was the plan's presumed biggest risk — the grill dissolved it.** The **Upstox Company Fundamentals API** (8 ISIN-keyed endpoints on the analytics token already funded) supplies financials, shareholding, ratios, corporate actions, and sector — so EPS/sales/margins (Code-33), ROE, P/E, **free-float %**, and **market cap** are all sourceable without a scraper (this reverses master-plan §9 — see [ADR-0004](../../adr/0004-minervini-fundamentals-via-upstox-api.md) and §0.5). Only **earnings-surprise + analyst estimate-revisions** stay unmodeled (no Indian consensus feed). Fundamentals still layers strictly *after* the price gates. The **remaining real risks** are: (1) VCP/base-geometry false positives (§5) — mitigated by Track-B paper-proving before trust; (2) a **shallow daily-history depth** (~1.2y today) that a deep backfill must fix *before* any backtest (§0.5 decision 11). See §3-D and §9.
+
+---
+
+## 0.5 Grilling decisions — LOCKED 2026-07-04
+
+A `/grill-with-docs` session with the owner resolved every open point. These are authoritative; the phase items, §5 data model, and §9 below are updated to match. Hard/surprising calls are captured as [ADR-0004](../../adr/0004-minervini-fundamentals-via-upstox-api.md) (Upstox fundamentals) and [ADR-0005](../../adr/0005-minervini-universe-low-cap-equities.md) (universe + low-cap gates).
+
+**Configurable defaults (all ride config/DB rows — "tuning rides DB, never Java", CLAUDE.md):**
+
+| Config key | Default | Q |
+|---|---|---|
+| `artha.minervini.capital` | ₹1,50,000 | Q3 |
+| `artha.minervini.pilot_position_pct` | 5–6% | Q4 |
+| `artha.minervini.max_name_pct` | 20–25% | Q4 |
+| `artha.minervini.max_concurrent` | 4–8 | Q4 |
+| `artha.minervini.single_ceiling_pct` | 50% | Q4 |
+| `artha.minervini.liquidity_multiple` | 100 (×) | Q3 |
+| `artha.minervini.min_price` | ₹30 | Q1 |
+| `artha.minervini.max_free_float_mcap_cr` | 5000 | Q2 |
+| `artha.minervini.max_free_float_pct` | 35% | Q2 |
+| `artha.minervini.exclude_fno` | true | Q2 |
+| `artha.minervini.rs_min` | 70 | Q6 |
+| `artha.minervini.pct_above_52w_low` | 25% | Q6 |
+| `artha.minervini.within_52w_high` | 25% | Q6 |
+| `artha.minervini.sma200_rising_sessions` | 21 | Q6 |
+| `artha.minervini.rs_weights` | 0.4/0.2/0.2/0.2 @ 63/126/189/252 | Q6 |
+| `artha.minervini.initial_stop_pct` | 7–8% (hard cap 10) | Q7 |
+
+**Decisions:**
+
+1. **Universe (Q1) → ADR-0005:** full NSE EQ; RS-rank computed across the liquidity-filtered set. NIFTY-500 = optional toggle, **default OFF**.
+2. **Low-cap gates (Q2) → ADR-0005 — ALL HARD:** free-float mcap **< ₹5,000 cr** AND free-float **< 35%** of total AND **not F&O-listed** AND price **> ₹30** AND avg-50d turnover **≥ 100 × (capital × max_name_pct) = ₹37.5L/day** AND **≥ 200 sessions**. "Low market cap is the edge; no large caps, no derivatives."
+3. **Fundamentals + market-cap source (Q2) → ADR-0004:** the **Upstox Company Fundamentals API** — 8 endpoints, **ISIN-keyed, on the analytics token already funded**: Income Statement (sales/margins), Key Ratios (EPS/ROE/P·E), Share Holdings (promoter/FII/DII/public → free-float%), Company Profile + Competitors (sector/peers), Corporate Actions. **Reverses master-plan §9** (Screener.in scraper). Earnings-surprise + estimate-revisions stay **UNMODELED** (no consensus feed). `openscreener` → fallback only.
+4. **Corporate-action adjustment (Q2, newly surfaced):** daily closes must be **split/bonus-adjusted** before MAs / 52w-hi-lo (bhavcopy CA-adjusts per #41 → add a VERIFY the screener reads the adjusted series; Upstox Corporate Actions cross-checks).
+5. **Sizing / concentration (Q3/Q4):** pilot **5–6%** → pyramid to **20–25%** per name (add-on-strength, never average down); **4–8** concurrent names; single ≤ **50%**. Minervini concentration, not flat 5%.
+6. **Build depth (Q5):** Track A hands candidates **+** Track B runs **ALL** setups per candidate → **pass/fail + per-rule reasoning** shown alongside, **+ paper-traded** to measure reliability. Owner verifies on chart, executes **manually** until Track B proven. No VCP-first sequencing — all setups first-class.
+7. **Execution (OD-4):** manual now; semi-auto (OpenAlgo `OrderGateway`) a later decision gated on Track-B reliability + a safety/latency gate.
+8. **Screener gates + RS (Q6):** the 8 Trend-Template gates per §4.2; gate-6 = **25%**; RS = the weighted formula above, percentile **1–99** across the filtered universe.
+9. **Setups (Q7):** VCP / Cheat-3C / Power-Play / Primary-Base / SEPA-funnel per §6 defaults — all first-class, all configurable.
+10. **Exit (Q7):** single **7–8%** stop (cap 10%); breakeven at ~3×R; then **50-day-MA close-below trail**; sell-into-strength on climax; Stage-3/4 exit. **Staggered stops DEFERRED** (add after single-stop proves out).
+11. **Backtest (Q8):** a **DEEP daily backfill (~3–5y, CA-adjusted, Upstox historical API, `market-calendar` extended) is a PREREQUISITE** — build it *before* the backtest. Then the screener hit-rate harness + swing replay. Survivorship accepted + documented.
+12. **Reliability bar (Q8):** a Track-B setup flips **watch → trusted** after **≥ 30–50 forward paper trades** with **positive expectancy (avg win ≥ ~2× avg loss)** at a **~45–55% hit-rate**.
+13. **Cadence (Q9):** one daily EOD screen after the ~19:00–19:30 IST bhavcopy pull + a boot one-shot. Swing = daily; no intraday equity feed needed.
+14. **Output (Q9):** screener **list** = per-candidate setup **pass/fail chips**; **analyzer** = full per-rule reasoning + a daily chart (50/150/200-MA overlays + volume + annotated VCP contractions/pivot) for the manual chart check. Reasoning **persisted** via the `signal_rejections`/`score_breakdown` forensics pattern (every fail explainable + queryable).
+15. **Alerts (Q9):** candidate-turns-buyable + pivot pre-alert + stop alert via the notifier (event-listener pattern, ntfy/Telegram), flag-gated, default off.
+16. **Lineage (OD-5):** screen-results in **marketdata** (writer-aligned — the scheduler lives in market-data-service). §17.1 deviation recorded in ADR-0005.
 
 ---
 
@@ -96,11 +142,14 @@ The §6 machine-readable appendix keys map to build items as follows. "Screener-
 
 **C. Where entries/positions live.** Strategy-signal-service, as **strategy definitions** (registry rows, `category='MomentumTradingMarkMinervini'`, `tags=['equity','swing','minervini']`, never `scalper`), evaluated by the existing engine on a **daily primary bar**, persisted via the standard `signals` table with a new **`minervini_detail` side-channel** (mirrors the `scalper_detail` V009 pattern: setup type, stage, VCP footprint, pivot, gate booleans). Parity-safe additive. **Alerts (Phase 9) use the in-process event + `@EventListener` pattern** — the signals slice publishes a `MinerviniEntryFired` / candidate-buyable event and notifier listens; signals code **never imports notifier** (Modulith cycle rule; `DotInputAlert`/`DotAlertListener` is the template).
 
-**D. Fundamentals sourcing (the critical gap).** Upstox has none. Options, in order of recommendation:
-1. **`openscreener` appliance** (Screener.in Playwright scraper, MIT, master-plan §9) → writes the existing `fundamentals` tall table (`source='OPENSCREENER'`). Gives EPS/Sales/margins/ratios. **Recommended** — no cost, fits the schema, contained as an appliance.
-2. Existing CSV backfill (`tools/historical-import`) — already loaded, static.
-3. A paid fundamentals vendor — only if surprise/estimate-revisions become must-have.
-**Locked consequence:** earnings-surprise (§4.8) and estimate-revisions (§4.7 #6) are **UNMODELED** (no free Indian source) — the fundamentals filter implements the **Code-33 spirit** (EPS accel + Sales accel + margin expansion) only, and missing fundamentals → `UNKNOWN` label, never an exclusion. Fundamentals is **`artha.minervini.fundamentals.enabled=false` by default**.
+**D. Fundamentals + market-cap sourcing — RESOLVED via the Upstox Fundamentals API (ADR-0004).** The earlier "Upstox has none" claim was wrong. The **Upstox Company Fundamentals API** (8 endpoints, ISIN-keyed, on the analytics token we already fund) is the primary source:
+- **Company Profile / Competitors** → sector classification + peers (§4.11 industry group).
+- **Income Statement** → revenue, operating/net profit → sales growth + margin expansion.
+- **Key Ratios** → EPS, **ROE** (§4.8 cutoff), **P/E** (§4.9 expansion), P/B (→ market cap).
+- **Share Holdings** → promoter/FII/DII/public % → **free-float %** (your low-cap gate) + free-float market cap.
+- **Corporate Actions** → dividends/bonus/splits/rights → CA-adjustment cross-check.
+
+Wire a `UpstoxFundamentalsClient` (hand-rolled REST, ADR-0002 anti-corruption pattern, parallel to `UpstoxAnalyticsClient`) + a `FundamentalsService`/`FundamentalsReader` over the existing `fundamentals` tall table. ISIN comes free from the Upstox equity key `NSE_EQ|<ISIN>` (`UpstoxEquityMasterClient`). **Fallbacks:** the `openscreener` Screener.in scraper (master-plan §9) and the CSV backfill — kept as backup only. **Locked consequence:** earnings-surprise (§4.8) and estimate-revisions (§4.7 #6) stay **UNMODELED** (no Indian consensus feed) — fundamentals implements the **Code-33 spirit** (EPS+Sales+margin accel) + ROE only; missing data → `UNKNOWN` label, never a silent exclusion. Because the **low-cap gate depends on this feed**, fundamentals moves from "optional/default-off" to a **first-class required feed** (the EPS/sales *confirmation* filter can still be toggled; the market-cap/free-float *gate* is always on).
 
 **E. Point-in-time / lookahead (prescriptive).** `fundamentals` is latest-restatement, not as-reported → **fundamentals data is NEVER used in any backtest.** It is **watchlist-only** (the Phase 3 filter feeds the Phase 4 UI + the live screen). The screener hit-rate harness (MV-8.1) and all swing backtests (Phase 8) use **price gates ONLY**. Lifting this ban would require a point-in-time fundamentals snapshot — out of scope.
 
@@ -291,11 +340,11 @@ Every new endpoint returns a **typed record** (never `Map<String,Object>` — `M
 ## 9. Deferred / out-of-scope / owner-gated (explicit — prevents re-flagging)
 
 **Owner decisions (answer, then unblock):**
-- **OD-1 Universe scope** — Rec: NIFTY 500 (when `index_constituents` populated) else full NSE EQ + liquidity pre-filter. *Owner answer:* _____
-- **OD-2 Fundamentals source** — Rec: build `openscreener` behind the default-off flag; screener ships without it. *Owner answer:* _____
-- **OD-3 Build depth** — Rec: Track A end-to-end first, reassess Track B against live screener value. *Owner answer:* _____
-- **OD-4 Execution** — Rec: manual/paper first; live order routing (`OrderGateway`/OpenAlgo) is a separate gated deliverable. *Owner answer:* _____
-- **OD-5 Screen-results lineage** — Rec: marketdata (writer-aligned) + explicitly ratify the §17.1 deviation in this plan; alternative = move the screener scheduler into strategy-signal-service and use `strategy/V020`. Blocks MV-2.4. *Owner answer:* _____
+- **OD-1 Universe scope** — **ANSWERED 2026-07-04:** full NSE EQ; RS-rank across the liquidity-filtered set; NIFTY-500 toggle default OFF. Low-cap-only (see OD-2). → §0.5 #1, ADR-0005.
+- **OD-2 Fundamentals source** — **ANSWERED 2026-07-04:** Upstox Company Fundamentals API (analytics token), *not* the Screener.in scraper. Also sources the market-cap / free-float low-cap gate. → §0.5 #3, ADR-0004.
+- **OD-3 Build depth** — **ANSWERED 2026-07-04:** Track A candidates **+** Track B all-setups pass/fail+reasoning alongside, + Track-B paper for reliability; manual execution until proven. → §0.5 #6.
+- **OD-4 Execution** — **ANSWERED 2026-07-04:** manual now; semi-auto (OpenAlgo) a later gated decision. → §0.5 #7.
+- **OD-5 Screen-results lineage** — **ANSWERED 2026-07-04:** **marketdata** (writer-aligned; scheduler lives in market-data-service). §17.1 deviation ratified in ADR-0005. → §0.5 #16.
 
 **Structurally deferred (documented, not gaps):**
 - Earnings-surprise + estimate-revisions (§4.8/§4.7) — **no free Indian source**; unmodeled; fundamentals filter is Code-33-spirit only.
@@ -330,5 +379,6 @@ MV-6.1/6.2 (indicators + swing style) ─> MV-6.3 (vcp entry) ─> MV-6.4..6.8 �
 |---|---|---|---|
 | 2026-07-04 | plan created | (this doc) | Full plan drafted. No code yet. |
 | 2026-07-04 | 4-critic audit applied | (this doc) | Grounding + version/path critics: **0 findings** (factual base verified against code). Applied completeness + design-authority fixes: MV-0.6 (Upstox API inventory), MV-2.9 (Stage label moved from Phase 5→2), MV-6.9 (market-regime + industry-group + catalyst, reuses `BreadthService`), sharpened Code-33 (MV-3.1), **OD-5** (screen-results lineage vs authoritative §17.1, engaged not silently overridden), notifier event-listener wiring, prescriptive no-fundamentals-in-backtest, US→India scope note; reclassified sequenced Track-B rows `DEFERRED`→`TODO` (parked ≠ later). |
+| 2026-07-04 | `/grill-with-docs` — OD-1..OD-5 + 9 decisions locked | (this doc) | Owner grill resolved every open point → new §0.5 decision block + config-defaults table; OD-1..OD-5 answered in §9. Key changes: **fundamentals + market-cap now via the Upstox Fundamentals API** (reverses master-plan §9 → [ADR-0004]) — dissolves the "biggest gap"; **universe = full NSE EQ, low-cap-only** hard gates (free-float mcap <₹5,000cr, free-float% <35%, no F&O, price>₹30, turnover ≥₹37.5L/day → [ADR-0005]); Minervini concentration (pilot 5–6% → 20–25%/name, 4–8 names); Track B = all setups pass/fail+reasoning + paper reliability bar (≥30–50 trades, 2:1, ~50%); **deep 3–5y CA-adjusted backfill is a prerequisite**; corporate-action adjustment surfaced; single 7–8% stop + 50d-MA trail. |
 
 <!-- Append one row per shipped item. Update the item's Status + Evidence in place in §4. -->

@@ -26,6 +26,16 @@ final class SwingPortfolio {
   /** One calendar year's realised return + the trades that closed in it. */
   record Year(int year, double returnPct, int trades) {}
 
+  /**
+   * The transaction-cost model. {@code capital} is the total book (₹); an order deploys {@code
+   * capital/slots}. Round-trip cost per trade = {@code fixedPct} (statutory: STT + stamp + exchange +
+   * GST) + 2·({@code spreadPct} half-spread + market impact), where impact per side =
+   * {@code impactCoeff · (orderValue / avgDailyTurnover)} capped at {@code impactCapPct}. Impact scales
+   * with participation, so illiquid names (small turnover) are penalised far more — the whole point.
+   */
+  record Costs(
+      double capital, double fixedPct, double spreadPct, double impactCoeff, double impactCapPct) {}
+
   /** The portfolio-level result for one variant. */
   record Result(
       double totalReturnPct,
@@ -47,12 +57,19 @@ final class SwingPortfolio {
   private static final Result EMPTY =
       new Result(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, List.of());
 
+  /** Gross (no-cost) portfolio — delegates with {@code costs = null}. */
+  static Result simulate(List<BtTrade> trades, int slots, boolean rsPriority) {
+    return simulate(trades, slots, rsPriority, null);
+  }
+
   /**
    * Simulates the {@code slots}-sleeve portfolio over {@code trades} (any order). When {@code
    * rsPriority}, a day's entries compete for scarce slots by RS-rank (the strongest names get the
-   * slots — how you would actually choose); otherwise slots fill first-come (FIFO). Returns the stats.
+   * slots — how you would actually choose); otherwise slots fill first-come (FIFO). When {@code costs}
+   * is non-null, each trade's return is netted of round-trip transaction costs (impact scaled by the
+   * name's turnover). Returns the stats.
    */
-  static Result simulate(List<BtTrade> trades, int slots, boolean rsPriority) {
+  static Result simulate(List<BtTrade> trades, int slots, boolean rsPriority, Costs costs) {
     if (trades.isEmpty() || slots < 1) {
       return EMPTY;
     }
@@ -60,11 +77,20 @@ final class SwingPortfolio {
     LocalDate[] entry = new LocalDate[n];
     LocalDate[] exit = new LocalDate[n];
     double[] pnlFrac = new double[n];
+    double orderValue = costs == null ? 0 : costs.capital() / slots;
     for (int i = 0; i < n; i++) {
       BtTrade t = trades.get(i);
       entry[i] = t.entryDate();
       exit[i] = t.exitDate();
-      pnlFrac[i] = t.pnlPct() / 100.0;
+      double net = t.pnlPct() / 100.0;
+      if (costs != null) {
+        double adv = t.avgTurnoverAtEntry();
+        double participation = (adv > 0 && !Double.isNaN(adv)) ? orderValue / adv : 1.0;
+        double impactPerSide = Math.min(costs.impactCapPct() / 100.0, costs.impactCoeff() * participation);
+        double roundTrip = costs.fixedPct() / 100.0 + 2.0 * (costs.spreadPct() / 100.0 + impactPerSide);
+        net = Math.max(-1.0, net - roundTrip); // cannot lose more than the position
+      }
+      pnlFrac[i] = net;
     }
 
     // event stream: (date, type, tradeIdx); type 0 = EXIT, 1 = ENTRY (EXIT first on a shared date).

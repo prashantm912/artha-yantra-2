@@ -97,9 +97,10 @@ public class MinerviniBacktestService {
       List<YearReturn> annual) {}
 
   /**
-   * One variant's full backtest report — per-setup trade stats + the portfolio equity stats under
-   * BOTH slot-allocation policies: {@code portfolio} fills slots first-come (FIFO), {@code
-   * portfolioRsPriority} lets the strongest names claim scarce slots (RS-rank priority).
+   * One variant's full backtest report — per-setup trade stats + three portfolio equity runs:
+   * {@code portfolio} (FIFO, gross), {@code portfolioRsPriority} (RS-rank-priority slots, gross), and
+   * {@code portfolioRsPriorityNet} (RS-priority, NET of turnover-scaled transaction costs — the
+   * realistic-live estimate).
    */
   public record Report(
       String status,
@@ -111,6 +112,7 @@ public class MinerviniBacktestService {
       List<SetupStat> setups,
       PortfolioStat portfolio,
       PortfolioStat portfolioRsPriority,
+      PortfolioStat portfolioRsPriorityNet,
       String note) {}
 
   /** The full multi-variant result: technical / rs-only / turnover-only / rs+turnover, side by side. */
@@ -127,6 +129,7 @@ public class MinerviniBacktestService {
   private final double turnoverFloor;
   private final double rsMin;
   private final int slots;
+  private final SwingPortfolio.Costs costs;
   private final AtomicBoolean running = new AtomicBoolean(false);
   private volatile Report latest;
   private volatile BacktestResult latestResult;
@@ -139,7 +142,12 @@ public class MinerviniBacktestService {
       @Value("${artha.minervini.backtest.years:11}") int defaultYears,
       @Value("${artha.minervini.backtest.min-turnover:3750000}") BigDecimal minTurnover,
       @Value("${artha.minervini.backtest.rs-min:70}") BigDecimal rsMin,
-      @Value("${artha.minervini.backtest.slots:8}") int slots) {
+      @Value("${artha.minervini.backtest.slots:8}") int slots,
+      @Value("${artha.minervini.backtest.capital:1000000}") double capital,
+      @Value("${artha.minervini.backtest.cost.fixed-pct:0.25}") double costFixedPct,
+      @Value("${artha.minervini.backtest.cost.spread-pct:0.05}") double costSpreadPct,
+      @Value("${artha.minervini.backtest.cost.impact-coeff:0.10}") double costImpactCoeff,
+      @Value("${artha.minervini.backtest.cost.impact-cap-pct:5.0}") double costImpactCapPct) {
     this.jdbc = jdbc;
     this.detector = detector;
     this.objectMapper = objectMapper;
@@ -147,6 +155,9 @@ public class MinerviniBacktestService {
     this.turnoverFloor = minTurnover.doubleValue();
     this.rsMin = rsMin.doubleValue();
     this.slots = slots;
+    this.costs =
+        new SwingPortfolio.Costs(
+            capital, costFixedPct, costSpreadPct, costImpactCoeff, costImpactCapPct);
   }
 
   /** The latest completed (or in-progress) single report — the full-filter (rs-turnover) variant. */
@@ -213,7 +224,9 @@ public class MinerviniBacktestService {
     } catch (RuntimeException e) {
       log.error("minervini swing backtest failed: {}", e.getMessage(), e);
       LocalDate from = from(years);
-      latest = new Report("failed", PRIMARY_VARIANT, from, null, 0, 0, List.of(), null, null, e.getMessage());
+      latest =
+          new Report(
+              "failed", PRIMARY_VARIANT, from, null, 0, 0, List.of(), null, null, null, e.getMessage());
       latestResult = new BacktestResult("failed", from, null, List.of(), e.getMessage());
     } finally {
       running.set(false);
@@ -222,7 +235,7 @@ public class MinerviniBacktestService {
 
   private static Report running(String variant, LocalDate from) {
     return new Report(
-        "running", variant, from, null, 0, 0, List.of(), null, null, "backtest in progress");
+        "running", variant, from, null, 0, 0, List.of(), null, null, null, "backtest in progress");
   }
 
   /** Runs all four variants over {@code [from, now]} in one pass. Package-visible for tests. */
@@ -316,14 +329,16 @@ public class MinerviniBacktestService {
     List<SetupStat> stats = new ArrayList<>();
     bySetup.forEach((setup, trades) -> stats.add(aggregate(setup, trades)));
     List<BtTrade> allTrades = bySetup.get("ALL");
-    PortfolioStat fifo = portfolio(allTrades, false);
-    PortfolioStat rsPriority = portfolio(allTrades, true);
-    return new Report("completed", variant, from, runAt, scanned, total, stats, fifo, rsPriority, null);
+    PortfolioStat fifo = portfolio(allTrades, false, null);
+    PortfolioStat rsPriority = portfolio(allTrades, true, null);
+    PortfolioStat rsPriorityNet = portfolio(allTrades, true, costs);
+    return new Report(
+        "completed", variant, from, runAt, scanned, total, stats, fifo, rsPriority, rsPriorityNet, null);
   }
 
-  /** Runs the slot-limited portfolio over a variant's combined trade stream (FIFO or RS-priority). */
-  private PortfolioStat portfolio(List<BtTrade> trades, boolean rsPriority) {
-    SwingPortfolio.Result r = SwingPortfolio.simulate(trades, slots, rsPriority);
+  /** Runs the slot-limited portfolio over a variant's combined trade stream (FIFO/RS-priority, gross/net). */
+  private PortfolioStat portfolio(List<BtTrade> trades, boolean rsPriority, SwingPortfolio.Costs c) {
+    SwingPortfolio.Result r = SwingPortfolio.simulate(trades, slots, rsPriority, c);
     List<YearReturn> annual =
         r.annual().stream().map(y -> new YearReturn(y.year(), bd2(y.returnPct()), y.trades())).toList();
     return new PortfolioStat(

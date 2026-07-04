@@ -60,11 +60,10 @@ public class TrendTemplateService {
     this.liquidityThreshold = capital.multiply(maxNamePct).multiply(liquidityMultiple);
   }
 
-  /** The latest daily screen date available in the dense store (IST calendar date). */
+  /** The latest daily bhavcopy trade date (IST calendar date). */
   public LocalDate latestScreenDate() {
     return jdbc.queryForObject(
-        "SELECT max((bucket AT TIME ZONE 'Asia/Kolkata')::date) FROM candles"
-            + " WHERE \"interval\" = '1d' AND exchange = 'NSE'",
+        "SELECT max(trade_date) FROM nse_eod_bhavcopy WHERE series IN ('EQ','BE')",
         LocalDate.class);
   }
 
@@ -87,14 +86,16 @@ public class TrendTemplateService {
   private static final String SQL =
       """
       WITH base AS (
-        SELECT c.tradingsymbol AS symbol, c.bucket, c.close, c.high, c.low, c.volume
-        FROM candles c
-        JOIN instruments i ON i.exchange = c.exchange AND i.tradingsymbol = c.tradingsymbol
-        WHERE c."interval" = '1d' AND c.exchange = 'NSE'
-          AND i.instrument_type = 'EQ' AND i.is_active
-          AND i.segment NOT IN ('INDICES','SYN-CONT')
-          AND (c.bucket AT TIME ZONE 'Asia/Kolkata')::date <= ?::date
-          AND (c.bucket AT TIME ZONE 'Asia/Kolkata')::date >  (?::date - 420)
+        -- The BROAD equity universe = the daily bhavcopy (nse_eod_bhavcopy, ~2.2k EQ/BE names with a
+        -- full year), NOT native candles@1d (whose dense recent-year history only covers the ~100
+        -- subscribed/backfilled names — bhavcopy is DO-NOTHING on the candle PK, so it never fills
+        -- the year there). trade_date is already an IST calendar date (no tz cast). Master-plan §13.2.
+        SELECT symbol, trade_date AS bucket, close_price AS close, high_price AS high,
+               low_price AS low, ttl_trd_qnty AS volume
+        FROM nse_eod_bhavcopy
+        WHERE series IN ('EQ','BE')
+          AND trade_date <= ?::date
+          AND trade_date >  (?::date - 420)
       ),
       calc AS (
         SELECT symbol, bucket, close, volume,

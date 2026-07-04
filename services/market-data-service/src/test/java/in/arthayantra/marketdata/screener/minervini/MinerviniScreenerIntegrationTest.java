@@ -50,13 +50,8 @@ class MinerviniScreenerIntegrationTest extends MarketDataIntegrationTestBase {
   @BeforeEach
   void seed() {
     for (String s : SYMS) {
-      jdbc.update("DELETE FROM candles WHERE exchange='NSE' AND tradingsymbol=?", s);
-      jdbc.update("DELETE FROM instruments WHERE exchange='NSE' AND tradingsymbol=?", s);
+      jdbc.update("DELETE FROM nse_eod_bhavcopy WHERE symbol=?", s);
       jdbc.update("DELETE FROM minervini_screen_results WHERE symbol=?", s);
-      jdbc.update(
-          "INSERT INTO instruments(exchange,tradingsymbol,name,segment,instrument_type,is_active)"
-              + " VALUES('NSE',?,?, 'EQ','EQ',true)",
-          s, s);
     }
     // rising 100->200 (winner), falling 200->100 (loser), flat 100 (middle)
     seedSeries(WIN, i -> 100.0 + 100.0 * i / (DAYS - 1));
@@ -69,13 +64,11 @@ class MinerviniScreenerIntegrationTest extends MarketDataIntegrationTestBase {
     for (int i = 0; i < DAYS; i++) {
       LocalDate day = AS_OF.minusDays(DAYS - 1L - i);
       double px = Math.round(shape.applyAsDouble(i) * 100.0) / 100.0;
-      String bucket = day + "T09:15:00+05:30";
-      batch.add(new Object[] {symbol, bucket, px, px, px, px});
+      batch.add(new Object[] {day, symbol, px, px, px, 100_000L});
     }
     jdbc.batchUpdate(
-        "INSERT INTO candles(exchange,tradingsymbol,\"interval\",bucket,open,high,low,close,"
-            + "volume,source) VALUES('NSE',?, '1d', ?::timestamptz, ?,?,?,?, 100000,'BACKFILL')"
-            + " ON CONFLICT DO NOTHING",
+        "INSERT INTO nse_eod_bhavcopy(trade_date,symbol,series,close_price,high_price,low_price,"
+            + "ttl_trd_qnty) VALUES(?,?, 'EQ', ?,?,?,?) ON CONFLICT DO NOTHING",
         batch);
   }
 

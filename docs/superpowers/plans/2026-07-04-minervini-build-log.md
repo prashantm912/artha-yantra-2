@@ -10,9 +10,12 @@ live-verify where possible; branch + PR per batch; **auto-merge only on CI-green
 push `main` directly.
 
 **Key recon (2026-07-04, live stack up, profile=live, analytics enabled):**
-- Dense daily source = **native `candles` interval='1d'** (NOT the sparse `candles_1d` cagg). NSE
-  ≥252-session universe ≈ **1,773 names** today; native store has **11y depth** (2015→2026) for
-  ~1,671 backfilled names + ~1y broad (bhavcopy, 8,899 syms). → the backtest already has depth.
+- **Screener source = `nse_eod_bhavcopy`** (master-plan §13.2; corrected during PR-A live-verify).
+  The BROAD equity universe with a full recent year lives here (**2,224 EQ/BE names ≥252 sessions;
+  1,590 scanned / 210 pass all 8 gates on 2026-07-03**). Native `candles`@1d recent-year is only
+  ~106 names (bhavcopy is `DO-NOTHING` on the candle PK so it never fills the year there; the deep
+  candle history is source=KITE/BACKFILL for subscribed/backfilled names only). candles@1d keeps its
+  **11y depth** for those ~1,671 names → the *backtest* uses candles@1d; the *screener* uses bhavcopy.
 - Upstox **Fundamentals API is real** (analytics token): Share-Holdings → free-float%; Key-Ratios →
   P/E, P/B, ROE; Income-Statement → sales/margins. **No company market cap** field → derive
   `mcap = P/E × net_income`. Company Profile market cap is *sector-level* only.
@@ -29,8 +32,8 @@ persisted + served, with an integration test.
 | MV item | What | Status | Evidence |
 |---|---|---|---|
 | MV-0.1 | Flyway heads confirmed | DONE | marketdata V030→**V031** allocated |
-| MV-0.2 | Canonical dense source picked | DONE | live query: native `candles`@1d (1,773 NSE ≥252-sess); screener reads it |
-| MV-2.1 | `TrendTemplateService` — 8 gates SQL over native `candles`@1d + price/liquidity/session pre-filters | DONE | `MinerviniScreenerIntegrationTest` (hand-computed, 0 gateway ports) |
+| MV-0.2 | Canonical dense source picked | DONE | **`nse_eod_bhavcopy`** (2,224 EQ/BE ≥252-sess); live screen 1,590 scanned / 210 pass |
+| MV-2.1 | `TrendTemplateService` — 8 gates SQL over `nse_eod_bhavcopy` + price/liquidity/session pre-filters | DONE | IT (hand-computed, 0 gateway ports) + **live-verified: real passers STLTECH/HFCL/VENUSREM…** |
 | MV-2.2 | Minervini cross-sectional RS-rank (0.4/0.2/0.2/0.2 @ 63/126/189/252, percentile 1–99) | DONE | IT asserts 100/50/0 percentiles |
 | MV-2.3 | Liquidity turnover gate (avg-50d `close×volume` ≥ capital×maxNamePct×100) | DONE | in `TrendTemplateService` (replaces raw vol_ratio) |
 | MV-2.4 | `V031__minervini_screen_results` + `MinerviniScreenRepository` | DONE | migration applies (35→v031); upsert/latest round-trip |

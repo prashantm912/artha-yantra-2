@@ -78,8 +78,15 @@ export interface FunnelRow {
   pctToPivot?: string | null; // (close - pivot) / pivot
 }
 
+export interface Regime {
+  regime: string; // FAVORABLE | NEUTRAL | HOSTILE
+  advanceRatio?: string | null;
+  sessions: number;
+}
+
 export interface MinerviniFunnel {
   screenDate: string | null;
+  regime: Regime | null;
   immediatelyBuyable: FunnelRow[];
   onDeck: FunnelRow[];
   watch: FunnelRow[];

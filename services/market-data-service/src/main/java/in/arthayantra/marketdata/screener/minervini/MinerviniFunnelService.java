@@ -34,9 +34,10 @@ public class MinerviniFunnelService {
       String footprint,
       BigDecimal pctToPivot) {} // (close - pivot) / pivot, null when no pivot
 
-  /** The three-list for a screen date. */
+  /** The three-list for a screen date + the market regime (MV-6.9) the owner should buy WITH. */
   public record Funnel(
       LocalDate screenDate,
+      RegimeService.Regime regime,
       List<FunnelRow> immediatelyBuyable,
       List<FunnelRow> onDeck,
       List<FunnelRow> watch) {}
@@ -53,17 +54,20 @@ public class MinerviniFunnelService {
       """;
 
   private final JdbcTemplate jdbc;
+  private final RegimeService regimeService;
   private final BigDecimal buyableLow; // close >= pivot * buyableLow  (at/just below the pivot)
   private final BigDecimal buyableHigh; // close <= pivot * buyableHigh (not chased past it)
   private final BigDecimal onDeckFloor; // close >= pivot * onDeckFloor (tightening toward the pivot)
 
-  /** Wires the marketdata datasource + the config-tunable funnel bands (fractions of the pivot). */
+  /** Wires the marketdata datasource + regime + the config-tunable funnel bands (fractions of the pivot). */
   public MinerviniFunnelService(
       JdbcTemplate jdbc,
+      RegimeService regimeService,
       @Value("${artha.minervini.funnel.buyable-low:0.98}") BigDecimal buyableLow,
       @Value("${artha.minervini.funnel.buyable-high:1.05}") BigDecimal buyableHigh,
       @Value("${artha.minervini.funnel.on-deck-floor:0.90}") BigDecimal onDeckFloor) {
     this.jdbc = jdbc;
+    this.regimeService = regimeService;
     this.buyableLow = buyableLow;
     this.buyableHigh = buyableHigh;
     this.onDeckFloor = onDeckFloor;
@@ -98,7 +102,7 @@ public class MinerviniFunnelService {
         default -> watch.add(row);
       }
     }
-    return new Funnel(screenDate, buyable, onDeck, watch);
+    return new Funnel(screenDate, regimeService.regime(screenDate), buyable, onDeck, watch);
   }
 
   private enum Bucket {

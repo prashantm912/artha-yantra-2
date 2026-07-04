@@ -461,6 +461,36 @@
               }
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "params"],
+          "properties": {
+            "type": { "const": "scaled_exit" },
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["tiers"],
+              "properties": {
+                "tiers": {
+                  "description": "Sell-into-strength tiers (MV-7.4): close qty_pct of the ORIGINAL position when it is profit_pct in profit. Partial closes; the remainder keeps running under the stop / trail.",
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 8,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["profit_pct", "qty_pct"],
+                    "properties": {
+                      "profit_pct": { "type": "number", "exclusiveMinimum": 0 },
+                      "qty_pct": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
       ]
     },

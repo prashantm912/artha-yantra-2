@@ -99,22 +99,28 @@ public class ReplayEngine {
     // pair entry/exit events into directed legs over the 1m series
     List<Leg> legs = legs(signals, new BarIndexResolver(primaryOneMinute), primaryOneMinute.size());
 
-    // map each leg to its entry/exit FILL bar
+    // map each entry to its OPEN fill bar (opener leg only) and each partial close to its exit bar
     Map<Integer, Leg> openAt = new HashMap<>();
-    Map<Integer, Leg> closeAt = new HashMap<>();
+    Map<Integer, List<Leg>> closeAt = new HashMap<>();
     for (Leg leg : legs) {
-      openAt.put(fillBar(leg.entryIndex(), timing, primaryOneMinute.size()), leg);
-      closeAt.put(fillBar(leg.exitIndex(), timing, primaryOneMinute.size()), leg);
+      if (leg.opensPosition()) {
+        openAt.put(fillBar(leg.entryIndex(), timing, primaryOneMinute.size()), leg);
+      }
+      closeAt
+          .computeIfAbsent(
+              fillBar(leg.exitIndex(), timing, primaryOneMinute.size()), k -> new ArrayList<>())
+          .add(leg);
     }
 
     BigDecimal cash = initialEquity;
     int posSign = 0;
     long posQty = 0;
+    long originalQty = 0;
+    long remainingQty = 0;
     BigDecimal entryPrice = null;
     BigDecimal entryNet = BigDecimal.ZERO;
     java.time.OffsetDateTime entryTs = null;
     int entryFillBar = -1;
-    Leg openLeg = null;
 
     List<Trade> trades = new ArrayList<>();
     List<EquityPoint> equityCurve = new ArrayList<>();
@@ -130,40 +136,69 @@ public class ReplayEngine {
       }
       EngineCandle bar = primaryOneMinute.get(i);
 
-      Leg closing = closeAt.get(i);
-      if (closing != null && posSign != 0 && closing == openLeg) {
-        BigDecimal ref = reference(primaryOneMinute, closing.exitIndex(), timing, i);
-        Side side = posSign > 0 ? Side.SELL : Side.BUY;
-        Fill fill = fill(costs, side, posQty, ref);
-        cash = cash.add(fill.netValue());
-        BigDecimal pnl = entryNet.add(fill.netValue()).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal notional = entryPrice.multiply(BigDecimal.valueOf(posQty)).abs();
-        BigDecimal pnlPct =
-            notional.signum() == 0
-                ? BigDecimal.ZERO
-                : pnl.multiply(HUNDRED).divide(notional, 6, RoundingMode.HALF_UP);
-        trades.add(
-            new Trade(
-                ++seq,
-                posSign > 0 ? Side.BUY : Side.SELL,
-                posQty,
-                entryTs,
-                entryPrice,
-                bar.bucketStart(),
-                fill.fillPrice(),
-                pnl,
-                pnlPct,
-                closing.exitReason(),
-                i - entryFillBar,
-                touchBasis,
-                contributions(closing.entryBreakdown()),
-                exchange,
-                tradingsymbol,
-                closing.stopLoss(),
-                closing.takeProfit()));
-        posSign = 0;
-        posQty = 0;
-        openLeg = null;
+      List<Leg> closes = closeAt.get(i);
+      if (closes != null) {
+        for (Leg closing : closes) {
+          if (posSign == 0) {
+            break;
+          }
+          // a scaled tier closes qty_pct of the ORIGINAL; the final leg takes the remainder so the
+          // lot-rounding residual never strands a sliver open. An un-scaled strategy has one leg with
+          // closesPosition = true → closeQty = remainingQty = the whole position (unchanged path).
+          long closeQty =
+              closing.closesPosition()
+                  ? remainingQty
+                  : Math.min(
+                      remainingQty,
+                      BigDecimal.valueOf(originalQty)
+                          .multiply(closing.qtyFraction())
+                          .setScale(0, RoundingMode.HALF_UP)
+                          .longValueExact());
+          if (closeQty <= 0) {
+            continue;
+          }
+          BigDecimal ref = reference(primaryOneMinute, closing.exitIndex(), timing, i);
+          Side side = posSign > 0 ? Side.SELL : Side.BUY;
+          Fill fill = fill(costs, side, closeQty, ref);
+          cash = cash.add(fill.netValue());
+          // pro-rate the entry cost to this slice (entryNet is the fill net of the full original qty)
+          BigDecimal sliceEntryNet =
+              entryNet
+                  .multiply(BigDecimal.valueOf(closeQty))
+                  .divide(BigDecimal.valueOf(originalQty), 10, RoundingMode.HALF_UP);
+          BigDecimal pnl = sliceEntryNet.add(fill.netValue()).setScale(2, RoundingMode.HALF_UP);
+          BigDecimal notional = entryPrice.multiply(BigDecimal.valueOf(closeQty)).abs();
+          BigDecimal pnlPct =
+              notional.signum() == 0
+                  ? BigDecimal.ZERO
+                  : pnl.multiply(HUNDRED).divide(notional, 6, RoundingMode.HALF_UP);
+          trades.add(
+              new Trade(
+                  ++seq,
+                  posSign > 0 ? Side.BUY : Side.SELL,
+                  closeQty,
+                  entryTs,
+                  entryPrice,
+                  bar.bucketStart(),
+                  fill.fillPrice(),
+                  pnl,
+                  pnlPct,
+                  closing.exitReason(),
+                  i - entryFillBar,
+                  touchBasis,
+                  contributions(closing.entryBreakdown()),
+                  exchange,
+                  tradingsymbol,
+                  closing.stopLoss(),
+                  closing.takeProfit()));
+          remainingQty -= closeQty;
+          posQty = remainingQty;
+          if (remainingQty <= 0 || closing.closesPosition()) {
+            posSign = 0;
+            posQty = 0;
+            remainingQty = 0;
+          }
+        }
       }
 
       Leg opening = openAt.get(i);
@@ -177,10 +212,11 @@ public class ReplayEngine {
           entryNet = fill.netValue();
           posSign = opening.shortSide() ? -1 : 1;
           posQty = qty;
+          originalQty = qty;
+          remainingQty = qty;
           entryPrice = fill.fillPrice();
           entryTs = bar.bucketStart();
           entryFillBar = i;
-          openLeg = opening;
         }
       }
 
@@ -214,7 +250,14 @@ public class ReplayEngine {
         barsInPosition);
   }
 
-  /** A directed entry→exit leg with the 1m indices of the signalling bars + entry protective levels. */
+  /**
+   * A directed close leg with the 1m indices of the signalling bars + entry protective levels.
+   * {@code qtyFraction} is the fraction of the ORIGINAL position this leg closes (1 = a whole close,
+   * the common case); {@code opensPosition} = the first leg of an entry (it triggers the open);
+   * {@code closesPosition} = this leg closes the remainder (so the fractional-qty rounding residual
+   * is absorbed here). An un-scaled strategy has exactly one leg per entry: opens + closes with
+   * fraction 1 — byte-identical to before.
+   */
   record Leg(
       boolean shortSide,
       int entryIndex,
@@ -222,50 +265,73 @@ public class ReplayEngine {
       String exitReason,
       in.arthayantra.strategyengine.eval.ScoreBreakdown entryBreakdown,
       BigDecimal stopLoss,
-      BigDecimal takeProfit) {}
+      BigDecimal takeProfit,
+      BigDecimal qtyFraction,
+      boolean opensPosition,
+      boolean closesPosition) {}
+
+  private static final BigDecimal FRACTION_FULL = new BigDecimal("0.999999");
 
   static List<Leg> legs(List<SignalEvent> signals, BarIndexResolver resolver, int bars) {
     List<Leg> legs = new ArrayList<>();
     SignalEvent openEntry = null;
+    int entryIndex = -1;
+    BigDecimal cumFraction = BigDecimal.ZERO;
+    boolean opener = true;
     for (SignalEvent ev : signals) {
       if ("EXIT".equals(ev.direction())) {
-        if (openEntry != null) {
-          // an entry with NO bar at/after its timestamp cannot be priced — drop the leg loudly
-          // rather than fabricate a bar-0 trade (audit replay-legs-silent-index0-fallback);
+        if (openEntry != null && entryIndex >= 0) {
           // an unresolvable exit force-closes at the last bar (the end_of_data convention)
-          int entryIndex = resolver.atOrAfter(openEntry.timestamp());
-          if (entryIndex >= 0) {
-            int exitIndex = resolver.atOrAfter(ev.timestamp());
-            legs.add(
-                new Leg(
-                    "SHORT".equals(openEntry.direction()),
-                    entryIndex,
-                    exitIndex >= 0 ? exitIndex : bars - 1,
-                    "signal_exit",
-                    openEntry.breakdown(),
-                    openEntry.stopLoss(),
-                    openEntry.takeProfit()));
+          int exitIndex = resolver.atOrAfter(ev.timestamp());
+          BigDecimal frac = ev.qtyFraction() == null ? BigDecimal.ONE : ev.qtyFraction();
+          cumFraction = cumFraction.add(frac);
+          boolean closes = cumFraction.compareTo(FRACTION_FULL) >= 0;
+          legs.add(
+              new Leg(
+                  "SHORT".equals(openEntry.direction()),
+                  entryIndex,
+                  exitIndex >= 0 ? exitIndex : bars - 1,
+                  "signal_exit",
+                  openEntry.breakdown(),
+                  openEntry.stopLoss(),
+                  openEntry.takeProfit(),
+                  frac,
+                  opener,
+                  closes));
+          opener = false;
+          if (closes) {
+            openEntry = null;
+            entryIndex = -1;
+            cumFraction = BigDecimal.ZERO;
+            opener = true;
           }
-          openEntry = null;
         }
       } else if (openEntry == null) {
-        openEntry = ev;
+        // an entry with NO bar at/after its timestamp cannot be priced — drop the leg loudly rather
+        // than fabricate a bar-0 trade (audit replay-legs-silent-index0-fallback).
+        int idx = resolver.atOrAfter(ev.timestamp());
+        if (idx >= 0) {
+          openEntry = ev;
+          entryIndex = idx;
+          cumFraction = BigDecimal.ZERO;
+          opener = true;
+        }
       }
     }
-    if (openEntry != null) {
-      // open at end → forced close at the last bar
-      int entryIndex = resolver.atOrAfter(openEntry.timestamp());
-      if (entryIndex >= 0) {
-        legs.add(
-            new Leg(
-                "SHORT".equals(openEntry.direction()),
-                entryIndex,
-                bars - 1,
-                "end_of_data",
-                openEntry.breakdown(),
-                openEntry.stopLoss(),
-                openEntry.takeProfit()));
-      }
+    if (openEntry != null && entryIndex >= 0) {
+      // open (or partially open) at end → forced close of the remainder at the last bar
+      legs.add(
+          new Leg(
+              "SHORT".equals(openEntry.direction()),
+              entryIndex,
+              bars - 1,
+              "end_of_data",
+              openEntry.breakdown(),
+              openEntry.stopLoss(),
+              openEntry.takeProfit(),
+              BigDecimal.ONE.subtract(cumFraction).max(BigDecimal.ZERO),
+              opener,
+              true));
     }
     return legs;
   }

@@ -17,10 +17,12 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.IntConsumer;
 
 /**
@@ -168,10 +170,9 @@ public final class TickwiseGoldenRunner {
                     definition, bank,
                     new ExitEvaluator.Position(
                         open.direction(), open.entryPrice(), open.entryPrimaryIndex()),
-                    primaryIndex);
+                    primaryIndex, open.firedTiers());
             if (exit.isPresent()) {
-              events.add(exitEvent(bar.bucketStart(), open));
-              open = null;
+              open = applyExit(open, exit.get(), bar.bucketStart(), events);
             }
           }
           if (open == null) {
@@ -200,8 +201,7 @@ public final class TickwiseGoldenRunner {
                   open.direction(), open.entryPrice(), open.entryOneMinuteIndex(),
                   live1m.size() - 1);
           if (exit.isPresent()) {
-            events.add(exitEvent(bar.bucketStart(), open));
-            open = null;
+            open = applyExit(open, exit.get(), bar.bucketStart(), events);
           }
         }
         continue;
@@ -238,10 +238,9 @@ public final class TickwiseGoldenRunner {
                 definition, bank,
                 new ExitEvaluator.Position(
                     open.direction(), open.entryPrice(), open.entryPrimaryIndex()),
-                index);
+                index, open.firedTiers());
         if (exit.isPresent()) {
-          events.add(exitEvent(bar.bucketStart(), open));
-          open = null;
+          open = applyExit(open, exit.get(), bar.bucketStart(), events);
         }
       }
       if (open == null) {
@@ -290,8 +289,14 @@ public final class TickwiseGoldenRunner {
   }
 
   private GoldenSignalsJson.SignalEvent exitEvent(OffsetDateTime at, OpenPosition open) {
+    return exitEvent(at, open, open.remainingFraction());
+  }
+
+  private GoldenSignalsJson.SignalEvent exitEvent(
+      OffsetDateTime at, OpenPosition open, BigDecimal qtyFraction) {
     return new GoldenSignalsJson.SignalEvent(
-        at.toString(), exchange, tradingsymbol, "EXIT", open.entryBreakdown(), null, null);
+        at.toString(), exchange, tradingsymbol, "EXIT", open.entryBreakdown(), null, null,
+        qtyFraction);
   }
 
   /** Entry-time protective levels at {@code primaryIndex} (both {@code null} when no such rule). */
@@ -317,7 +322,36 @@ public final class TickwiseGoldenRunner {
         primary.candle(primaryIndex).close(),
         primaryIndex,
         oneMinuteIndex,
-        evaluation.breakdown());
+        evaluation.breakdown(),
+        BigDecimal.ONE,
+        Set.of());
+  }
+
+  /**
+   * Applies an exit decision to the open position, emitting an EXIT event for the fraction closed.
+   * A full-close decision (any protective/time/signal exit, {@code tier < 0}) closes the whole
+   * REMAINING fraction and returns {@code null}. A scaled tier closes its {@code qty_pct} of the
+   * original (capped at the remainder), records the tier so it never re-fires, and returns the
+   * reduced position — {@code null} once the remainder is exhausted. Parity: an un-tiered strategy
+   * only ever sees a full close with {@code remainingFraction == 1}, so the emitted event stream is
+   * byte-identical to before.
+   */
+  private OpenPosition applyExit(
+      OpenPosition open, ExitEvaluator.ExitDecision decision, OffsetDateTime at,
+      List<GoldenSignalsJson.SignalEvent> events) {
+    boolean fullClose = decision.tier() < 0;
+    BigDecimal legFraction =
+        fullClose ? open.remainingFraction() : decision.qtyFraction().min(open.remainingFraction());
+    events.add(exitEvent(at, open, legFraction));
+    BigDecimal remaining = open.remainingFraction().subtract(legFraction);
+    if (fullClose || remaining.signum() <= 0) {
+      return null;
+    }
+    Set<Integer> fired = new HashSet<>(open.firedTiers());
+    fired.add(decision.tier());
+    return new OpenPosition(
+        open.direction(), open.entryPrice(), open.entryPrimaryIndex(),
+        open.entryOneMinuteIndex(), open.entryBreakdown(), remaining, fired);
   }
 
   /** The deterministic pre-close bar view (A9): OHLC of the session's 1m bars so far. */
@@ -385,7 +419,9 @@ public final class TickwiseGoldenRunner {
       BigDecimal entryPrice,
       int entryPrimaryIndex,
       int entryOneMinuteIndex,
-      ScoreBreakdown entryBreakdown) {}
+      ScoreBreakdown entryBreakdown,
+      BigDecimal remainingFraction,
+      Set<Integer> firedTiers) {}
 
   /**
    * The IST session-time gate (parity-inert unless declared). Entries are allowed only inside the

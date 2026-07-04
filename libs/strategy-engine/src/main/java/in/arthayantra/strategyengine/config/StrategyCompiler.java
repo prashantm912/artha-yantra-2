@@ -200,23 +200,35 @@ public final class StrategyCompiler {
   private static Map<String, Object> paramsMap(JsonNode params) {
     Map<String, Object> map = new LinkedHashMap<>();
     if (params != null && params.isObject()) {
-      params
-          .properties()
-          .forEach(
-              entry -> {
-                JsonNode v = entry.getValue();
-                if (v.isNumber()) {
-                  map.put(
-                      entry.getKey(),
-                      v.isIntegralNumber() ? (Object) v.longValue() : v.decimalValue());
-                } else if (v.isBoolean()) {
-                  map.put(entry.getKey(), v.booleanValue());
-                } else {
-                  map.put(entry.getKey(), v.asText());
-                }
-              });
+      params.properties().forEach(entry -> map.put(entry.getKey(), convertParam(entry.getValue())));
     }
     return Map.copyOf(map);
+  }
+
+  /**
+   * Converts a params value node to a plain Java value: numbers → Long/BigDecimal, booleans → Boolean,
+   * ARRAYS → {@code List} and nested OBJECTS → {@code Map} (recursively — needed for structured params
+   * like {@code scaled_exit.tiers = [{profit_pct, qty_pct}, …]}), else the text. Scalar params compile
+   * byte-identically to before, so no existing strategy's compiled form changes.
+   */
+  private static Object convertParam(JsonNode v) {
+    if (v.isNumber()) {
+      return v.isIntegralNumber() ? (Object) v.longValue() : v.decimalValue();
+    }
+    if (v.isBoolean()) {
+      return v.booleanValue();
+    }
+    if (v.isArray()) {
+      List<Object> list = new ArrayList<>();
+      v.forEach(e -> list.add(convertParam(e)));
+      return List.copyOf(list);
+    }
+    if (v.isObject()) {
+      Map<String, Object> nested = new LinkedHashMap<>();
+      v.properties().forEach(e -> nested.put(e.getKey(), convertParam(e.getValue())));
+      return Map.copyOf(nested);
+    }
+    return v.asText();
   }
 
   private static BigDecimal decimal(JsonNode node) {

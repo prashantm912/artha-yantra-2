@@ -45,14 +45,25 @@ class MinerviniScreenerIntegrationTest extends MarketDataIntegrationTestBase {
   @Autowired private MockMvc mockMvc;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private TrendTemplateService screener;
-  @Autowired private MinerviniScreenRepository repo;
 
-  @BeforeEach
-  void seed() {
+  private void purge() {
     for (String s : SYMS) {
       jdbc.update("DELETE FROM nse_eod_bhavcopy WHERE symbol=?", s);
       jdbc.update("DELETE FROM minervini_screen_results WHERE symbol=?", s);
     }
+  }
+
+  // The ITs share a singleton DB with no per-method cleanup — clean up BOTH before (isolation from
+  // prior runs) and AFTER (so the seeded bhavcopy rows never leak into sibling tests, e.g. the
+  // breadth counter that reads nse_eod_bhavcopy).
+  @org.junit.jupiter.api.AfterEach
+  void tearDown() {
+    purge();
+  }
+
+  @BeforeEach
+  void seed() {
+    purge();
     // rising 100->200 (winner), falling 200->100 (loser), flat 100 (middle)
     seedSeries(WIN, i -> 100.0 + 100.0 * i / (DAYS - 1));
     seedSeries(LOSE, i -> 200.0 - 100.0 * i / (DAYS - 1));

@@ -468,3 +468,20 @@ persistence target (`scalper_detail` V009 is the exact template).
 The live PRODUCER (computing the detail JSON when a swing setup fires + calling `stampMinerviniDetail`)
 rides Phase 9 with the context-seeding producer — this PR lands the storage + stamp so the producer has
 its target. Non-minervini signals never stamp it → null, exactly like `scalper_detail`.
+
+---
+
+## PR-S — Phase 9: defensive selling discipline (MV-9.2)  ✅ verified, parity-safe
+
+The Minervini defensive exit after the breakout: sell on a daily close back below the 20-day line.
+
+| MV item | What | Status | Evidence |
+|---|---|---|---|
+| MV-9.2 | `minervini-vcp-defensive.yaml` — vcp entry + `stop_loss percent 8` + `signal_exit crossunder(px, sma20)` (the "close below the 20-day MA" defensive sell). Existing `signal_exit`+`crossunder` engine, no new surface. | **DONE** | `SellingDisciplineTest`: enters on the breakout, exits on the 20-MA crossunder that stays ABOVE the 8% stop, so the DEFENSIVE rule (not the stop) is the active exit. 9 golden vectors byte-identical. |
+
+**The full Minervini exit doctrine is now expressible + parity-verified:** 8% initial stop (PR-M) →
+50-day-MA trail (PR-Q) → scaled sell-into-strength tiers (PR-P) → defensive 20-day-MA break (this).
+**Offensive** climax sell-into-strength = the `scaled_exit` tiers. **Stage-3/4 top exit** rides a Stage
+context gate seeded in Phase 9. **MV-9.3 daily sell-decision report** (the §2.10 buy-now/why-holding/
+where-seller triad per open swing position) needs live open positions → it rides the Phase-9 live
+producer with its data.

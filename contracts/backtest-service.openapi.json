@@ -265,6 +265,43 @@
         }
       }
     },
+    "/api/v1/backtests/{backtestId}/report-card" : {
+      "get" : {
+        "tags" : [ "results-controller" ],
+        "operationId" : "reportCard",
+        "parameters" : [ {
+          "name" : "backtestId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SwingReportCard"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/backtests/{backtestId}/oi-attribution" : {
       "get" : {
         "tags" : [ "oi-attribution-controller" ],
@@ -727,6 +764,47 @@
         }
       },
       "JsonNode" : { },
+      "SwingReportCard" : {
+        "type" : "object",
+        "properties" : {
+          "trades" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "wins" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "losses" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "battingAvgPct" : {
+            "type" : "number"
+          },
+          "avgWinPct" : {
+            "type" : "number"
+          },
+          "avgLossPct" : {
+            "type" : "number"
+          },
+          "payoffRatio" : {
+            "type" : "number"
+          },
+          "expectancyPct" : {
+            "type" : "number"
+          },
+          "avgBarsHeld" : {
+            "type" : "number"
+          },
+          "meetsReliabilityBar" : {
+            "type" : "boolean"
+          },
+          "grade" : {
+            "type" : "string"
+          }
+        }
+      },
       "ErrorResponse" : {
         "type" : "object",
         "properties" : {

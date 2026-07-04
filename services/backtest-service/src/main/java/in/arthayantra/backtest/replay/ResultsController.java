@@ -61,6 +61,21 @@ public class ResultsController {
   }
 
   /**
+   * MV-10.1/10.2: the Minervini swing report card for one run — grades the run's closed trades A/B/C/D
+   * against the §0.5 #12 reliability bar (positive expectancy AND payoff ≥ 2 AND batting ≥ ~45%). A
+   * TYPED record (never a Map — the market-data/strategy ratchet), so it enumerates into the contract.
+   * Works for any run; a run with no closed trades grades {@code "N/A"}.
+   */
+  @GetMapping("/{backtestId}/report-card")
+  public SwingReportCard reportCard(@PathVariable UUID backtestId) {
+    if (runs.findResult(backtestId).isEmpty()) {
+      throw new NotFoundException(
+          ErrorCodes.NOT_FOUND_RESOURCE, "no such backtest run: " + backtestId);
+    }
+    return SwingReportCard.of(trades.loadByRun(backtestId));
+  }
+
+  /**
    * Latest-backtest summary for a set of strategy versions (Stage F follow-on) — the strategy-list
    * enrichment join done client-side keeps the schema boundary intact. Returns one item per
    * requested {@code strategyVersionIds} value that has at least one completed run; unknown / never-

@@ -23,6 +23,39 @@ public class TradeRepository {
     this.objectMapper = objectMapper;
   }
 
+  /**
+   * Loads a run's trades (sequence order) as {@link Trade} records — the typed read behind the
+   * MV-10.1 SwingReportCard grade. Populates the fields the report card reads (pnlPct, barsHeld) plus
+   * the cheap scalars; {@code touchBasis}/{@code contributions} are left null (the grade never reads
+   * them). Empty when the run has no trades.
+   */
+  public List<Trade> loadByRun(UUID runId) {
+    return jdbc.query(
+        "SELECT seq, side, qty, entry_ts, entry_price, exit_ts, exit_price, pnl, pnl_pct,"
+            + " exit_reason, bars_held, exchange, tradingsymbol, stop_loss, take_profit"
+            + " FROM backtest_trades WHERE run_id=? ORDER BY seq",
+        (rs, n) ->
+            new Trade(
+                rs.getInt("seq"),
+                in.arthayantra.strategyengine.fills.Side.valueOf(rs.getString("side")),
+                rs.getLong("qty"),
+                rs.getObject("entry_ts", OffsetDateTime.class),
+                rs.getBigDecimal("entry_price"),
+                rs.getObject("exit_ts", OffsetDateTime.class),
+                rs.getBigDecimal("exit_price"),
+                rs.getBigDecimal("pnl"),
+                rs.getBigDecimal("pnl_pct"),
+                rs.getString("exit_reason"),
+                rs.getInt("bars_held"),
+                null,
+                null,
+                rs.getString("exchange"),
+                rs.getString("tradingsymbol"),
+                rs.getBigDecimal("stop_loss"),
+                rs.getBigDecimal("take_profit")),
+        runId);
+  }
+
   /** Batch-inserts a run's trades. */
   public void insertAll(UUID runId, List<Trade> trades) {
     jdbc.batchUpdate(

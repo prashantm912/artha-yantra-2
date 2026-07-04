@@ -15,8 +15,9 @@ import org.junit.jupiter.api.Test;
  */
 class VcpDetectorTest {
 
-  // Default thresholds (mirror the @Value defaults): 2.5% zig-zag, 2–6 contractions, ratio 0.2–0.9.
-  private final VcpDetector detector = new VcpDetector(2.5, 2, 6, 0.2, 0.9, 0.5);
+  // Default thresholds (mirror the @Value defaults): 2.5% zig-zag, 2–6 contractions, ratio 0.2–0.9,
+  // final-vol-low 0.5, cheat-fraction 0.5, thrust +100% in ≤40 sessions.
+  private final VcpDetector detector = new VcpDetector(2.5, 2, 6, 0.2, 0.9, 0.5, 0.5, 100, 40);
 
   @Test
   void reproducesCanonicalFootprint() {
@@ -33,6 +34,28 @@ class VcpDetectorTest {
     assertThat(f.pivot()).isEqualTo(93.0); // high of the final tightest contraction
     assertThat(f.volumeDryUp()).isTrue();
     assertThat(f.shakeout()).isFalse(); // troughs step up (69 < 80.5 < 87.4 < 90.2), no undercut
+    // §6.3 cheat: halfway up the final contraction T4(90.21)→pivot(93) = 91.605 — earlier & below pivot.
+    assertThat(f.cheatPivot()).isCloseTo(91.605, within(0.01));
+    assertThat(f.cheatPivot()).isLessThan(f.pivot()); // the cheat is always an earlier/lower trigger
+    // The pre-base rally is only 70→100 (+43%), well under +100% → no power-play thrust.
+    assertThat(f.thrust()).isFalse();
+  }
+
+  @Test
+  void thrustFlagSetWhenPriceDoublesBeforeTheBase() {
+    // A blast-off 45→95 (+111%) over 30 sessions THEN a valid 2-contraction base — the power-play
+    // precondition (§6.4). C1 95→76 (−20%), C2 92→87 (−5.4%, narrowing); pivot = 92.
+    List<DailyBar> bars = new ArrayList<>();
+    append(bars, 0, 45.0, 30, 95.0, 1_000_000); //   0..30  thrust rally into base high P1(95)
+    append(bars, 30, 95.0, 25, 76.0, 1_000_000); //  30..55  C1 −20% → T1
+    append(bars, 55, 76.0, 20, 92.0, 1_000_000); //  55..75  rally → P2
+    append(bars, 75, 92.0, 15, 87.0, 1_000_000); //  75..90  C2 −5.4% (narrowing) → pivot 92
+
+    VcpFootprint f = detector.detect(bars);
+
+    assertThat(f.vcp()).isTrue();
+    assertThat(f.pivot()).isEqualTo(92.0);
+    assertThat(f.thrust()).isTrue(); // +111% in 30 sessions before the base
   }
 
   @Test

@@ -41,6 +41,9 @@ public class VcpDetector {
   private final double ratioMin;
   private final double ratioMax;
   private final double finalVolLowFraction;
+  private final double cheatFraction;
+  private final double thrustFraction;
+  private final int thrustWindow;
 
   /** Wires the config-tunable VCP thresholds. */
   public VcpDetector(
@@ -49,13 +52,19 @@ public class VcpDetector {
       @Value("${artha.minervini.vcp.max-contractions:6}") int maxContractions,
       @Value("${artha.minervini.vcp.ratio-min:0.2}") double ratioMin,
       @Value("${artha.minervini.vcp.ratio-max:0.9}") double ratioMax,
-      @Value("${artha.minervini.vcp.final-vol-low-fraction:0.5}") double finalVolLowFraction) {
+      @Value("${artha.minervini.vcp.final-vol-low-fraction:0.5}") double finalVolLowFraction,
+      @Value("${artha.minervini.vcp.cheat-fraction:0.5}") double cheatFraction,
+      @Value("${artha.minervini.vcp.thrust-pct:100}") double thrustPctWhole,
+      @Value("${artha.minervini.vcp.thrust-window:40}") int thrustWindow) {
     this.zigzagPct = zigzagPctWhole / 100.0;
     this.minContractions = minContractions;
     this.maxContractions = maxContractions;
     this.ratioMin = ratioMin;
     this.ratioMax = ratioMax;
     this.finalVolLowFraction = finalVolLowFraction;
+    this.cheatFraction = cheatFraction;
+    this.thrustFraction = thrustPctWhole / 100.0;
+    this.thrustWindow = thrustWindow;
   }
 
   /** Detects the most recent VCP base in {@code bars} (oldest→newest). */
@@ -89,11 +98,42 @@ public class VcpDetector {
     boolean volumeDryUp = volumeDryUp(bars, last);
     boolean shakeout = shakeout(base);
     int baseCount = countContractingRuns(all);
+    // §6.3 cheat: an earlier/lower breakout trigger than the final pivot. In a classic VCP the
+    // contraction peaks DESCEND (e.g. 100→97→95→93), so an earlier peak sits ABOVE the pivot — the
+    // wrong direction for a "cheat". A deterministic, always-below-pivot proxy: a cheatFraction step
+    // up the FINAL contraction (trough → pivot), i.e. entering partway through the last tightening
+    // rather than waiting for the full breakout. Guaranteed in (lastTrough, pivot); config-tunable.
+    double cheatPivot = last.trough() + cheatFraction * (last.peak() - last.trough());
+    // §6.4/§6.5 power-play precondition: a prior ≈+100% move in <8 weeks (thrustWindow sessions)
+    // anywhere before the base begins (the base's first peak).
+    boolean thrust = thrust(bars, first.peakIdx());
     String footprint =
         String.format("%dW %.0f/%.0f %dT", baseWeeks, deepest, tightest, base.size());
     return new VcpFootprint(
         true, base.size(), deepest, tightest, baseWeeks, durationDays, last.peak(), deepest,
-        volumeDryUp, shakeout, baseCount, footprint, null);
+        volumeDryUp, shakeout, baseCount, cheatPivot, thrust, footprint, null);
+  }
+
+  /**
+   * The power-play thrust (§6.4): true iff some low in the run-up BEFORE the base ({@code [0,
+   * baseStartIdx)}) is followed within {@code thrustWindow} sessions (and not past the base start) by
+   * a high at least {@code (1 + thrustFraction)}× that low — a ≈+100%-in-&lt;8-weeks blast-off. O(n·w).
+   */
+  private boolean thrust(List<DailyBar> bars, int baseStartIdx) {
+    double target = 1.0 + thrustFraction;
+    for (int i = 0; i < baseStartIdx; i++) {
+      double low = bars.get(i).low();
+      if (low <= 0) {
+        continue;
+      }
+      int lookaheadEnd = Math.min(i + thrustWindow, baseStartIdx);
+      for (int j = i + 1; j <= lookaheadEnd; j++) {
+        if (bars.get(j).high() >= target * low) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   /** Pairs each swing high with its following swing low into a high→low contraction. */

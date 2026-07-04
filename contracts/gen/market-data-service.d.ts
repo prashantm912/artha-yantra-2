@@ -2120,6 +2120,8 @@ export interface components {
             stage?: number;
             isVcp?: boolean;
             pivot?: number;
+            cheatPivot?: number;
+            thrust?: boolean;
             footprint?: string;
             pctToPivot?: number;
         };
@@ -2171,6 +2173,8 @@ export interface components {
             shakeout?: boolean;
             /** Format: int32 */
             baseCount?: number;
+            cheatPivot?: number;
+            thrust?: boolean;
             rejectReason?: string;
         };
         TrendPoint: {

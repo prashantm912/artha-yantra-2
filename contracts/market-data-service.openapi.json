@@ -6458,6 +6458,12 @@
           "pivot" : {
             "type" : "number"
           },
+          "cheatPivot" : {
+            "type" : "number"
+          },
+          "thrust" : {
+            "type" : "boolean"
+          },
           "footprint" : {
             "type" : "string"
           },
@@ -6594,6 +6600,12 @@
           "baseCount" : {
             "type" : "integer",
             "format" : "int32"
+          },
+          "cheatPivot" : {
+            "type" : "number"
+          },
+          "thrust" : {
+            "type" : "boolean"
           },
           "rejectReason" : {
             "type" : "string"

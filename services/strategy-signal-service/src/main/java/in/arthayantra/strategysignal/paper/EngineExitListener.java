@@ -24,11 +24,15 @@ public class EngineExitListener {
     this.paper = paper;
   }
 
-  /** Settles every open position linked to the exited anchor at LTP, with the engine's reason. */
+  /**
+   * Settles every open position linked to the exited anchor with the engine's reason — at the event's
+   * explicit price when present (the Phase-9 swing batch's daily-bar close for non-ticking equities),
+   * else at the live LTP (the tick-engine default).
+   */
   @EventListener
   public void onSignalExited(SignalExited event) {
     try {
-      int closed = paper.closeForSignal(event.anchorSignalId(), event.reason());
+      int closed = paper.closeForSignal(event.anchorSignalId(), event.reason(), event.price());
       if (closed > 0) {
         log.info(
             "engine EXIT ({}) closed {} paper position(s) for signal {}",

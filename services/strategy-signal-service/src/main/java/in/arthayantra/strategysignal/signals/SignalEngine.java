@@ -230,6 +230,13 @@ public class SignalEngine {
               strategy.slug());
           continue;
         }
+        // Phase-9: swing strategies (session.style=swing, 1d primary) are driven by the Minervini
+        // daily batch (MinerviniSwingEngine), NOT the tick loop — their equities do not tick. Skip
+        // them here cleanly (not an error) so the batch owns them and the ROLLABLE check below never
+        // logs a spurious "not live-rollable" warning for a strategy that is working as designed.
+        if ("swing".equals(definition.session().style())) {
+          continue;
+        }
         // A non-rollable primary (e.g. '1d' on a non-btst strategy) used to silently degrade to
         // per-1m evaluation via intervalDuration's old 1m default — hundreds of pointless REST
         // refreshes/hour and a live-vs-replay divergence (the golden runner throws). Refuse the

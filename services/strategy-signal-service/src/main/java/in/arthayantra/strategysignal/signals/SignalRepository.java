@@ -120,6 +120,18 @@ public class SignalRepository {
         this::row);
   }
 
+  /**
+   * Every live ENTRY anchor across all strategies (ACTIVE or TAKEN) — the Phase-9 Minervini swing
+   * batch's exit-pass driver: each active swing entry is a held-position anchor whose exit rules the
+   * daily batch re-evaluates on the fresh daily bar (the tick engine can't, since equities don't tick).
+   */
+  public List<SignalRow> activeEntries() {
+    return jdbc.query(
+        "SELECT * FROM signals WHERE signal_type = 'ENTRY' AND status IN ('ACTIVE', 'TAKEN')"
+            + " ORDER BY generated_at DESC, id DESC",
+        this::row);
+  }
+
   /** One signal. */
   public Optional<SignalRow> find(long id) {
     return jdbc.query("SELECT * FROM signals WHERE id = ?", this::row, id).stream().findFirst();

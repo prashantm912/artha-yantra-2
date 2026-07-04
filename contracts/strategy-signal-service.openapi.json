@@ -766,6 +766,34 @@
         }
       }
     },
+    "/api/v1/signals/minervini-swing/run" : {
+      "post" : {
+        "tags" : [ "minervini-swing-controller" ],
+        "operationId" : "run",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SwingRun"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/paper/reset" : {
       "post" : {
         "tags" : [ "paper-controller" ],
@@ -2185,6 +2213,27 @@
           },
           "note" : {
             "type" : "string"
+          }
+        }
+      },
+      "SwingRun" : {
+        "type" : "object",
+        "properties" : {
+          "strategies" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "candidates" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "entries" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "exits" : {
+            "type" : "integer",
+            "format" : "int32"
           }
         }
       },

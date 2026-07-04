@@ -96,17 +96,20 @@ public class MinerviniController {
   private final MinerviniScreenRepository repo;
   private final MinerviniGeometryService geometryService;
   private final MinerviniSetupsRepository setupsRepo;
+  private final MinerviniFunnelService funnelService;
 
-  /** Wires the screener + screen/geometry repositories. */
+  /** Wires the screener + screen/geometry repositories + the funnel service. */
   public MinerviniController(
       TrendTemplateService screener,
       MinerviniScreenRepository repo,
       MinerviniGeometryService geometryService,
-      MinerviniSetupsRepository setupsRepo) {
+      MinerviniSetupsRepository setupsRepo,
+      MinerviniFunnelService funnelService) {
     this.screener = screener;
     this.repo = repo;
     this.geometryService = geometryService;
     this.setupsRepo = setupsRepo;
+    this.funnelService = funnelService;
   }
 
   /** Serves the persisted daily screen (default = latest date, passers only). */
@@ -202,6 +205,20 @@ public class MinerviniController {
         true, f.footprint(), BigDecimal.valueOf(f.pivot()), BigDecimal.valueOf(f.deepestPct()),
         BigDecimal.valueOf(f.tightestPct()), f.contractionCount(), f.baseWeeks(),
         f.baseDurationDays(), f.volumeDryUp(), f.shakeout(), f.baseCount(), null);
+  }
+
+  /**
+   * The SEPA funnel three-list (MV-6.7): the day's passers ranked into immediately-buyable / on-deck
+   * / watch by convergence of the Trend-Template pass + RS-rank + a valid VCP base + pivot proximity.
+   */
+  @GetMapping("/funnel")
+  public MinerviniFunnelService.Funnel funnel(
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
+    LocalDate date = asOf != null ? asOf : screener.latestScreenDate();
+    if (date == null) {
+      return new MinerviniFunnelService.Funnel(null, List.of(), List.of(), List.of());
+    }
+    return funnelService.funnel(date);
   }
 
   private static Row toRow(TrendCandidate c) {

@@ -64,3 +64,33 @@ export function useRunMinervini() {
       apiFetch<MinerviniScreen>(`/market/screener/minervini/run?${qs(p)}`, { method: 'POST' }),
   });
 }
+
+// --- SEPA funnel three-list (MV-6.7): the day's passers ranked into the actionable triad. ---
+
+export interface FunnelRow {
+  symbol: string;
+  close: string;
+  rsRank?: string | null;
+  stage?: number | null;
+  isVcp: boolean;
+  pivot?: string | null;
+  footprint?: string | null;
+  pctToPivot?: string | null; // (close - pivot) / pivot
+}
+
+export interface MinerviniFunnel {
+  screenDate: string | null;
+  immediatelyBuyable: FunnelRow[];
+  onDeck: FunnelRow[];
+  watch: FunnelRow[];
+}
+
+/** The SEPA funnel three-list (immediately-buyable / on-deck / watch) for the latest screen. */
+export function useMinerviniFunnel(asOf?: string, enabled = true) {
+  const suffix = asOf ? `?asOf=${asOf}` : '';
+  return useQuery({
+    queryKey: ['minervini-funnel', asOf ?? 'latest'],
+    queryFn: () => apiFetch<MinerviniFunnel>(`/market/screener/minervini/funnel${suffix}`),
+    enabled,
+  });
+}

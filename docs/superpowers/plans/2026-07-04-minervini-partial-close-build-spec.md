@@ -37,10 +37,12 @@ persists with a reduced remaining fraction until fully closed.**
   and `BacktestParityTest` (Trade record-equality) is unchanged.
 - New scaled/staggered strategies emit MULTIPLE partial exit events — these live in a **new**
   `golden-minervini-scaled/` fixture set, never mixed with the frozen scalper goldens.
-- `ExitEvaluator.evaluate` is called **only** by `TickwiseGoldenRunner` (+ `ReplayEngine` delegates to
-  it). Live scalper exits use the separate `PremiumBracketRules`/`PaperBracketEvaluator` chain; live
-  swing exits are Phase 9 (unbuilt). So the blast radius is **backtest + golden only** — the live
-  money path is untouched.
+- The *scaled tier* logic runs only through the backtest/golden runner (the 5-arg
+  `ExitEvaluator.evaluate`). **Correction (adversarial review):** the LIVE `SignalEngine` ALSO calls
+  `ExitEvaluator.evaluate` — the 4-arg overload — so it is made **scaled-blind** (`scaledEnabled=false`):
+  a live `scaled_exit` strategy does NOT fire the scaled tiers (fail-safe, never a wrong full close)
+  until Phase 9 wires a partial-position ledger. Live scalper exits still use the separate
+  `PremiumBracketRules`/`PaperBracketEvaluator` chain. So the *scaled* blast radius is backtest + golden.
 
 ## Blast radius — the exact files + changes
 

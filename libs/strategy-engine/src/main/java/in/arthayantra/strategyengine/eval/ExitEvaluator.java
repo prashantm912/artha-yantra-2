@@ -172,17 +172,23 @@ public final class ExitEvaluator {
     return trailing(null, priceSeries, pricePosition, priceIndex, rule, close);
   }
 
-  /** Evaluates all exit rules at a bar; first match in precedence order wins (no scaled tiers fired). */
+  /**
+   * The LIVE {@code SignalEngine} entry point — first match in precedence order wins, {@code scaled_exit}
+   * is NOT evaluated. The live path has no partial-position ledger yet (that is Phase 9), so a scaled
+   * tier must never fire here (it would be mishandled as a full close of the whole position). A live
+   * {@code scaled_exit} strategy simply doesn't scale out until Phase 9 wires the ledger — fail-safe,
+   * never a wrong full close. The backtest/golden runner uses the 5-arg overload where tiers are active.
+   */
   public static Optional<ExitDecision> evaluate(
       StrategyDefinition definition, IndicatorBank bank, Position position, int primaryIndex) {
-    return evaluate(definition, bank, position, primaryIndex, Set.of());
+    return evaluate(definition, bank, position, primaryIndex, Set.of(), false);
   }
 
   /**
-   * Evaluates all exit rules at a bar; first match in precedence order wins. {@code firedTiers} are
-   * the {@code scaled_exit} tier indices already closed on this position, so a tier never re-fires.
-   * A scaled tier returns a PARTIAL {@link ExitDecision} (its {@code qty_pct}); the position stays
-   * open for the remainder. Protective stops still win the precedence and close the whole remainder.
+   * The backtest/golden-runner entry point — first match in precedence order wins, {@code scaled_exit}
+   * tiers ACTIVE. {@code firedTiers} are the tier indices already closed on this position, so a tier
+   * never re-fires; a scaled tier returns a PARTIAL {@link ExitDecision} (its {@code qty_pct}) and the
+   * position stays open for the remainder. Protective stops still win the precedence and close it all.
    */
   public static Optional<ExitDecision> evaluate(
       StrategyDefinition definition,
@@ -190,6 +196,16 @@ public final class ExitEvaluator {
       Position position,
       int primaryIndex,
       Set<Integer> firedTiers) {
+    return evaluate(definition, bank, position, primaryIndex, firedTiers, true);
+  }
+
+  private static Optional<ExitDecision> evaluate(
+      StrategyDefinition definition,
+      IndicatorBank bank,
+      Position position,
+      int primaryIndex,
+      Set<Integer> firedTiers,
+      boolean scaledEnabled) {
     EngineSeries series = bank.primarySeries();
     BigDecimal close = series.candle(primaryIndex).close();
 
@@ -206,7 +222,8 @@ public final class ExitEvaluator {
               case "stop_loss" -> level(definition, series, position, rule, close, true);
               case "take_profit" -> level(definition, series, position, rule, close, false);
               case "trailing_stop" -> trailing(bank, series, position, primaryIndex, rule, close);
-              case "scaled_exit" -> scaledExit(position, close, rule, firedTiers);
+              case "scaled_exit" ->
+                  scaledEnabled ? scaledExit(position, close, rule, firedTiers) : Optional.empty();
               case "time_stop" -> timeStop(series, position, primaryIndex, rule);
               case "signal_exit" -> signalExit(bank, primaryIndex, rule);
               default -> Optional.empty();

@@ -121,6 +121,7 @@ public class ReplayEngine {
     BigDecimal entryNet = BigDecimal.ZERO;
     java.time.OffsetDateTime entryTs = null;
     int entryFillBar = -1;
+    Leg openLeg = null;
 
     List<Trade> trades = new ArrayList<>();
     List<EquityPoint> equityCurve = new ArrayList<>();
@@ -142,18 +143,25 @@ public class ReplayEngine {
           if (posSign == 0) {
             break;
           }
-          // a scaled tier closes qty_pct of the ORIGINAL; the final leg takes the remainder so the
-          // lot-rounding residual never strands a sliver open. An un-scaled strategy has one leg with
-          // closesPosition = true → closeQty = remainingQty = the whole position (unchanged path).
+          // only close a leg that belongs to the CURRENTLY-OPEN position — a stale/colliding leg from
+          // a different (never-opened) entry must NOT close this position (parity-safety: an un-scaled
+          // position is never closed by another position's leg). Partial legs share the opener's
+          // entryIndex, so all of a scaled position's tiers still fire.
+          if (openLeg == null || closing.entryIndex() != openLeg.entryIndex()) {
+            continue;
+          }
+          // a scaled tier closes qty_pct of the ORIGINAL, FLOORED to a whole lot (so partial + final
+          // legs are both valid lot multiples and a tiny position rides to the final leg); the final
+          // leg takes the exact remainder. An un-scaled strategy has one closesPosition leg →
+          // closeQty = remainingQty = the whole position (unchanged path).
+          long lot = Math.max(1L, costs.lotSize());
+          long rawQty =
+              BigDecimal.valueOf(originalQty)
+                  .multiply(closing.qtyFraction())
+                  .setScale(0, RoundingMode.DOWN)
+                  .longValueExact();
           long closeQty =
-              closing.closesPosition()
-                  ? remainingQty
-                  : Math.min(
-                      remainingQty,
-                      BigDecimal.valueOf(originalQty)
-                          .multiply(closing.qtyFraction())
-                          .setScale(0, RoundingMode.HALF_UP)
-                          .longValueExact());
+              closing.closesPosition() ? remainingQty : Math.min(remainingQty, rawQty - (rawQty % lot));
           if (closeQty <= 0) {
             continue;
           }
@@ -217,6 +225,7 @@ public class ReplayEngine {
           entryPrice = fill.fillPrice();
           entryTs = bar.bucketStart();
           entryFillBar = i;
+          openLeg = opening;
         }
       }
 
@@ -270,8 +279,6 @@ public class ReplayEngine {
       boolean opensPosition,
       boolean closesPosition) {}
 
-  private static final BigDecimal FRACTION_FULL = new BigDecimal("0.999999");
-
   static List<Leg> legs(List<SignalEvent> signals, BarIndexResolver resolver, int bars) {
     List<Leg> legs = new ArrayList<>();
     SignalEvent openEntry = null;
@@ -285,7 +292,9 @@ public class ReplayEngine {
           int exitIndex = resolver.atOrAfter(ev.timestamp());
           BigDecimal frac = ev.qtyFraction() == null ? BigDecimal.ONE : ev.qtyFraction();
           cumFraction = cumFraction.add(frac);
-          boolean closes = cumFraction.compareTo(FRACTION_FULL) >= 0;
+          // close exactly when cumulative reaches the whole position — matches the runner's
+          // applyExit boundary (remaining.signum() <= 0), so replay legs never diverge from the events.
+          boolean closes = cumFraction.compareTo(BigDecimal.ONE) >= 0;
           legs.add(
               new Leg(
                   "SHORT".equals(openEntry.direction()),

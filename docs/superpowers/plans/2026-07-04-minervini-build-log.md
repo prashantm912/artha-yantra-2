@@ -431,12 +431,28 @@ The Track-B engine change that touches the parity firewall — built exactly to 
    cost + the lot residual on the final leg. An un-scaled strategy = one full-close leg (unchanged).
 7. New fixtures/tests: `minervini-vcp-scaled.yaml`, `ScaledExitTest`, `ScaledBacktestTest`.
 
-**Blast radius = backtest + golden only** — `ExitEvaluator.evaluate` is called solely by the runner
-(live scalper exits use the separate `PremiumBracketRules`; live swing exits are Phase 9). The **live
-paper-ledger partial close** is a further, separately-gated PR (touches the pinned
-`exit-equivalence.json` + its 3 suites) — kept out of this engine/backtest PR. Scaling out still needs
-the reliability bar met (≥30–50 single-stop paper trades, §0.5 #12) before it's used in anger, but the
-machinery is now built + proven.
+**Blast radius:** the *scaled tier* logic runs only through the backtest/golden runner (the 5-arg
+`ExitEvaluator.evaluate`). The LIVE `SignalEngine` also calls `ExitEvaluator.evaluate` (the 4-arg
+overload) — so the 4-arg is made **scaled-blind** (`scaledEnabled=false`): a live `scaled_exit`
+strategy simply does NOT fire the scaled tiers (fail-safe, never a wrong full close) until Phase 9
+wires a partial-position ledger. The **live paper-ledger partial close** is that further, separately-
+gated PR (touches the pinned `exit-equivalence.json` + its 3 suites). Scaling out still needs the
+reliability bar met (≥30–50 single-stop paper trades, §0.5 #12) before it's used in anger.
+
+**Adversarial review (4-critic + verify, 10 agents, 5 CONFIRMED — ALL fixed pre-merge):**
+1. (medium, PARITY) `ReplayEngine` close loop dropped the removed `closing == openLeg` guard → a
+   stale/colliding close leg (two positions' exits on one end-of-window fill bar) could close the
+   wrong position — an un-scaled trade-list change `BacktestParityTest` doesn't catch (it never pins
+   trades to a golden). **Fixed:** an `openLeg`-identity guard — a leg only closes the position whose
+   `entryIndex` it shares (partials share the opener's entry, so all a scaled position's tiers fire).
+2. (medium, LIVE) the 4-arg `evaluate` (live `SignalEngine`) ran the `scaled_exit` branch → a live
+   scaled strategy would full-close at tier 0. **Fixed:** 4-arg is scaled-blind (above).
+3. (medium) partial `closeQty` wasn't lot-aligned (latent — all callers use lot=1). **Fixed:** floor
+   each partial to a lot multiple; the final leg absorbs the residual.
+4. (low) `FRACTION_FULL=0.999999` could diverge from the runner's exact `remaining.signum()<=0`.
+   **Fixed:** exact `cumFraction >= ONE`.
+5. (low) HALF_UP rounding let a 1-unit position close whole at tier 0. **Fixed** by the floor (#3).
+Re-verified after the fixes: GoldenDeterminism 9/9 + BacktestParity 9/9 byte-identical, full sweep 0 fails.
 
 ---
 

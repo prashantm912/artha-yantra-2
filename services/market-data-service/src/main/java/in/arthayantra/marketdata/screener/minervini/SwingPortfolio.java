@@ -6,7 +6,9 @@ import java.time.YearMonth;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * A minimal, deterministic PORTFOLIO simulator over a variant's trade list — the bridge from
@@ -147,6 +149,7 @@ final class SwingPortfolio {
     curveDate.add(first);
     curveEq.add(1.0);
 
+    List<Integer> takenExitYears = new ArrayList<>();
     double expoAccum = 0; // Σ busy·days
     long expoDays = 0;
     LocalDate prev = null;
@@ -167,6 +170,7 @@ final class SwingPortfolio {
           freeStack[freeTop++] = k;
           sleeveOf[idx] = -1;
           busy--;
+          takenExitYears.add(date.getYear());
           curveDate.add(date);
           curveEq.add(sum(sleeve));
         }
@@ -182,16 +186,25 @@ final class SwingPortfolio {
         }
       }
     }
+    double avgExpo = expoDays > 0 ? 100.0 * expoAccum / expoDays / slots : 0.0;
+    return finalize(curveDate, curveEq, taken, skipped, avgExpo, takenExitYears);
+  }
 
-    double finalEq = sum(sleeve);
+  /**
+   * Assembles a {@link Result} from a realised-equity step curve + trade counts. Shared by the base
+   * portfolio and {@link SwingRotationPortfolio} so the returns/drawdown/Sharpe math is defined once.
+   */
+  static Result finalize(
+      List<LocalDate> curveDate, List<Double> curveEq, int tradesTaken, int tradesSkipped,
+      double avgExposurePct, List<Integer> takenExitYears) {
+    double finalEq = curveEq.get(curveEq.size() - 1);
+    LocalDate first = curveDate.get(0);
     LocalDate last = curveDate.get(curveDate.size() - 1);
     double years = Math.max(1e-9, ChronoUnit.DAYS.between(first, last) / 365.25);
     double totalRet = (finalEq - 1.0) * 100.0;
     double cagr = (Math.pow(finalEq, 1.0 / years) - 1.0) * 100.0;
     double maxDd = maxDrawdown(curveEq) * 100.0;
-    double avgExpo = expoDays > 0 ? 100.0 * expoAccum / expoDays / slots : 0.0;
 
-    // monthly returns off the realised-equity step curve
     List<Double> monthly = monthlyReturns(curveDate, curveEq, first, last);
     int months = monthly.size();
     double best = 0;
@@ -213,11 +226,10 @@ final class SwingPortfolio {
     double avgMonth = months > 0 ? sum / months : 0;
     double sharpe = sharpe(monthly, avgMonth);
     double posPct = months > 0 ? 100.0 * positive / months : 0;
-
-    List<Year> annual = annualReturns(curveDate, curveEq, exit, sleeveOf, first, last);
+    List<Year> annual = annualReturns(curveDate, curveEq, takenExitYears, first, last);
 
     return new Result(
-        totalRet, cagr, maxDd, sharpe, taken, skipped, avgExpo, months, posPct,
+        totalRet, cagr, maxDd, sharpe, tradesTaken, tradesSkipped, avgExposurePct, months, posPct,
         best == Double.NEGATIVE_INFINITY ? 0 : best * 100.0,
         worst == Double.POSITIVE_INFINITY ? 0 : worst * 100.0,
         avgMonth * 100.0, annual);
@@ -239,20 +251,17 @@ final class SwingPortfolio {
   }
 
   private static List<Year> annualReturns(
-      List<LocalDate> curveDate, List<Double> curveEq, LocalDate[] exit, int[] sleeveOf,
+      List<LocalDate> curveDate, List<Double> curveEq, List<Integer> takenExitYears,
       LocalDate first, LocalDate last) {
+    Map<Integer, Integer> perYear = new HashMap<>();
+    for (int y : takenExitYears) {
+      perYear.merge(y, 1, Integer::sum);
+    }
     List<Year> out = new ArrayList<>();
     double prevEq = 1.0;
     for (int y = first.getYear(); y <= last.getYear(); y++) {
       double eq = equityAsOf(curveDate, curveEq, LocalDate.of(y, 12, 31));
-      int trades = 0;
-      for (int i = 0; i < exit.length; i++) {
-        // count only TAKEN trades that closed in year y (sleeveOf==-1); skipped trades are -3.
-        if (exit[i].getYear() == y && sleeveOf[i] == -1) {
-          trades++;
-        }
-      }
-      out.add(new Year(y, (eq / prevEq - 1.0) * 100.0, trades));
+      out.add(new Year(y, (eq / prevEq - 1.0) * 100.0, perYear.getOrDefault(y, 0)));
       prevEq = eq;
     }
     return out;

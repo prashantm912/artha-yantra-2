@@ -130,6 +130,14 @@ public class MinerviniScreenRepository {
     return rows.isEmpty() ? null : rows.get(0);
   }
 
+  /** The most recent distinct persisted screen dates, newest first (the buyable-transition diff). */
+  public List<LocalDate> recentScreenDates(int limit) {
+    return jdbc.query(
+        "SELECT DISTINCT screen_date FROM minervini_screen_results ORDER BY screen_date DESC LIMIT ?",
+        (rs, n) -> rs.getObject("screen_date", LocalDate.class),
+        limit);
+  }
+
   /** How many symbols were scanned on a screen date (coverage). */
   public int coverage(LocalDate screenDate) {
     Integer n =

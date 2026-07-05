@@ -95,19 +95,23 @@ public class ManasController {
   private final ManasGeometryService geometryService;
   private final ManasSetupsRepository setupsRepo;
   private final ManasFunnelService funnelService;
+  private final ManasAroraBacktestService
+      backtestService;
 
-  /** Wires the screener + screen/geometry repositories + the funnel service. */
+  /** Wires the screener + screen/geometry repositories + the funnel + swing-backtest service. */
   public ManasController(
       ManasScreenService screener,
       ManasScreenRepository repo,
       ManasGeometryService geometryService,
       ManasSetupsRepository setupsRepo,
-      ManasFunnelService funnelService) {
+      ManasFunnelService funnelService,
+      ManasAroraBacktestService backtestService) {
     this.screener = screener;
     this.repo = repo;
     this.geometryService = geometryService;
     this.setupsRepo = setupsRepo;
     this.funnelService = funnelService;
+    this.backtestService = backtestService;
   }
 
   /** Serves the persisted daily screen (default = latest date, passers only). */
@@ -202,6 +206,55 @@ public class ManasController {
         c.low52w(), c.withinHighPct(), c.aboveLowPct(), c.avgVol20(), c.avgVol50(), c.turnover50(),
         c.withinHigh(), c.aboveSma50(), c.liquidVolume(), c.liquidDepth(), c.lowCap(),
         c.freeFloatMcapCr(), c.freeFloatPct(), c.gates(), c.gatesPassed(), c.passesAll(), setupViews);
+  }
+
+  /**
+   * The Manas swing backtest — a faithful event-driven replay of the two setups (breakout + vcp
+   * pivot entry, ATR-stop / ATR-trail / fast-move / parabolic exit, pyramiding) over ~11y of {@code
+   * candles}@1d, giving trade-level win-rate / payoff / expectancy the screener alone cannot.
+   * Compute is minutes, so POST kicks it off on a background thread (returns the {@code running}
+   * report); GET reads the latest result.
+   */
+  @PostMapping("/swing-backtest")
+  public ManasAroraBacktestService.Report
+      triggerSwingBacktest(@RequestParam(required = false) Integer years) {
+    backtestService.trigger(years);
+    return latestOrIdle();
+  }
+
+  /** The latest swing-backtest report (or an {@code idle} placeholder before the first run). */
+  @GetMapping("/swing-backtest")
+  public ManasAroraBacktestService.Report
+      swingBacktest() {
+    return latestOrIdle();
+  }
+
+  /**
+   * The latest multi-variant swing-backtest comparison — technical / rs / turnover / rs-turnover /
+   * pyramiding A/B side by side, with per-variant portfolio stats (annual/monthly returns, CAGR,
+   * drawdown, Sharpe) and the slot sweep. Isolates whether the RS-rank gate, the turnover floor, and
+   * add-to-winner each sharpen the edge.
+   */
+  @GetMapping("/swing-backtest/compare")
+  public ManasAroraBacktestService.BacktestResult
+      swingBacktestCompare() {
+    ManasAroraBacktestService.BacktestResult r =
+        backtestService.latestResult();
+    return r != null
+        ? r
+        : new ManasAroraBacktestService
+            .BacktestResult(
+            "idle", null, null, List.of(), List.of(), "no backtest run yet");
+  }
+
+  private ManasAroraBacktestService.Report
+      latestOrIdle() {
+    ManasAroraBacktestService.Report r =
+        backtestService.latest();
+    return r != null
+        ? r
+        : new ManasAroraBacktestService.Report(
+            "idle", null, null, null, 0, 0, List.of(), null, null, null, "no backtest run yet");
   }
 
   private static SetupView toSetupView(ManasSetup s) {

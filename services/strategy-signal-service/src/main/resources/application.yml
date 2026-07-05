@@ -111,6 +111,8 @@ artha:
     promotion-enabled: ${ARTHA_GRADUATION_PROMOTION_ENABLED:false}
     promotion-min-trades: ${ARTHA_GRADUATION_PROMOTION_MIN_TRADES:50}
     promotion-min-sharpe: ${ARTHA_GRADUATION_PROMOTION_MIN_SHARPE:0.5}
+    promotion-min-expectancy: ${ARTHA_GRADUATION_PROMOTION_MIN_EXPECTANCY:0}
+    promotion-max-drawdown-pct: ${ARTHA_GRADUATION_PROMOTION_MAX_DRAWDOWN_PCT:25}
 
 management:
   endpoints:

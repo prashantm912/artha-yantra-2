@@ -18,3 +18,7 @@ CREATE TABLE strategy_graduations (
 
 COMMENT ON TABLE strategy_graduations IS
   'F7: the set of strategies the daily promotion evaluator has marked GRADUATED (a measurement stage + ntfy, never a live action). Presence of a row = graduated; the row is upserted with the latest qualifying metrics snapshot.';
+
+-- Match the lineage's least-privilege convention (every prior CREATE TABLE grants to ay_strategy).
+-- The service writes as the owner `artha`, so this is convention/forward-compat, not a runtime need.
+GRANT SELECT, INSERT, UPDATE ON strategy_graduations TO ay_strategy;

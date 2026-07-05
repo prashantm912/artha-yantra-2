@@ -159,24 +159,6 @@ public class PaperPositionRepository {
         id);
   }
 
-  /** The F9 advisory annotation of a position: risk-based lots + the SPAN margin it ties up. */
-  public record Advisory(Long advisedLots, BigDecimal marginSnapshot, BigDecimal marginPct) {}
-
-  /** The advisory annotation for a position, if the row exists. */
-  public Optional<Advisory> advisoryFor(long id) {
-    return jdbc
-        .query(
-            "SELECT advised_lots, margin_snapshot, margin_pct FROM paper_positions WHERE id=?",
-            (rs, n) ->
-                new Advisory(
-                    (Long) rs.getObject("advised_lots"),
-                    rs.getBigDecimal("margin_snapshot"),
-                    rs.getBigDecimal("margin_pct")),
-            id)
-        .stream()
-        .findFirst();
-  }
-
   /** Grows an open position (averaged entry). */
   public void updateOpen(long id, long qty, BigDecimal avgEntryPrice) {
     jdbc.update(

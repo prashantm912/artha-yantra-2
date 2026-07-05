@@ -15,10 +15,13 @@ import org.springframework.transaction.event.TransactionalEventListener;
  * market-data's {@link PaperMarginClient}) and stamps {@code margin_snapshot} + {@code margin_pct}
  * (margin as % of book equity) on the row. Purely advisory — it never blocks a fill or changes qty.
  *
- * <p>AFTER_COMMIT + {@code @Async} (the {@code TakenSignalResolver}/{@code AutoJournalListener}
- * AFTER_COMMIT pattern, moved off-thread so the HTTP margin call never adds latency to the ledger
- * write). Fail-soft: an unpriced quote (cash-equity leg Upstox does not margin / analytics token off
- * / market-data unreachable) leaves the columns NULL and logs at debug — never touches the position.
+ * <p>Runs AFTER_COMMIT (like {@code TakenSignalResolver}/{@code AutoJournalListener}) so an
+ * annotation failure can never roll back the fill, and additionally {@code @Async} on the existing
+ * {@code notifierExecutor} pool so the HTTP margin round-trip runs off the ledger-write thread. The
+ * async listener has no bound transaction — {@code updateMarginSnapshot} uses its own JdbcTemplate
+ * connection, guarded {@code WHERE status='OPEN'} so a race with a close is a safe no-op. Fail-soft:
+ * an unpriced quote (cash-equity leg Upstox does not margin / analytics token off / market-data
+ * unreachable) leaves the columns NULL and logs at debug — never touches the position.
  */
 @Component
 public class PaperMarginAnnotator {

@@ -125,16 +125,19 @@ public class RiskService {
         return false;
       }
     }
-    // F9 portfolio heat cap — the open book's total SPAN margin as % of equity. Advisory (audit +
-    // ntfy) always; BLOCKS a new entry only when the master flag is on. Fail-soft: an unpriced book
-    // (analytics off / market-data down) cannot be assessed, so it never blocks (heatPct == null).
-    Optional<Setting> heatCap = settings.get(book, HEAT_CAP_PCT);
-    if (enabled(heatCap)) {
-      BigDecimal capPct = heatCap.get().value().path("value").decimalValue();
-      BigDecimal heatPct = currentHeatPct(book);
-      if (heatPct != null && heatPct.compareTo(capPct) >= 0) {
-        recordHeatTrip(book, heatPct, capPct);
-        if (enforcementEnabled) {
+    // F9 portfolio heat cap — the open book's total SPAN margin as % of equity, blocks a new entry
+    // when at/over the cap. Priced ONLY when enforcement is on: the margin call is a synchronous HTTP
+    // round-trip to market-data and must NOT sit on the emission hot path in the default advisory-off
+    // state. During the advisory week the owner watches heat via GET /api/v1/paper/margin-heat (+ the
+    // per-position margin_snapshot annotation), then flips artha.paper.risk.enabled to enforce. Then
+    // fail-soft: an unpriced book (analytics off / market-data down) cannot be assessed → never blocks.
+    if (enforcementEnabled) {
+      Optional<Setting> heatCap = settings.get(book, HEAT_CAP_PCT);
+      if (enabled(heatCap)) {
+        BigDecimal capPct = heatCap.get().value().path("value").decimalValue();
+        BigDecimal heatPct = currentHeatPct(book);
+        if (heatPct != null && heatPct.compareTo(capPct) >= 0) {
+          recordHeatTrip(book, heatPct, capPct);
           return false;
         }
       }
@@ -181,8 +184,8 @@ public class RiskService {
     }
     trippedOn.put(dedupKey, today);
     String detail =
-        "heat " + heatPct.toPlainString() + "% ≥ cap " + capPct.toPlainString() + "%"
-            + (enforcementEnabled ? " — new entries paused" : " — advisory only (enforcement off)");
+        "heat " + heatPct.toPlainString() + "% ≥ cap " + capPct.toPlainString()
+            + "% — new entries paused";
     settings.audit(book, HEAT_CAP_PCT, "TRIP", detail);
     log.warn("risk heat cap {} tripped ({})", book, detail);
     pushAlert("ArthaYantra Risk — heat cap (" + book + ")", detail);

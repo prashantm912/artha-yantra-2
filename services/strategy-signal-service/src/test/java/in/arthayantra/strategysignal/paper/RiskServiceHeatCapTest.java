@@ -99,12 +99,13 @@ class RiskServiceHeatCapTest {
   }
 
   @Test
-  void overCapAdvisoryOnlyDoesNotBlock() {
-    Harness h = harness(false, "{\"enabled\": true, \"value\": 60.0}"); // enforcement OFF
-    when(h.margin().margin(anyList())).thenReturn(priced("100000"));
-    assertThat(h.risk().entryAllowed(BOOK)).isTrue(); // advisory: audits + alerts but never blocks
-    verify(h.settings()).audit(eq(BOOK), eq(RiskService.HEAT_CAP_PCT), eq("TRIP"), any());
-    verify(h.notifier()).send(eq("NTFY"), any(), any());
+  void enforcementOffSkipsHeatCheckEntirely() {
+    // Master flag OFF (default): the heat block is not even priced — no market-data HTTP call on the
+    // emission hot path, no audit, never blocks. The owner watches heat via GET /paper/margin-heat.
+    Harness h = harness(false, "{\"enabled\": true, \"value\": 60.0}");
+    assertThat(h.risk().entryAllowed(BOOK)).isTrue();
+    verify(h.margin(), never()).margin(anyList());
+    verify(h.settings(), never()).audit(any(), any(), any(), any());
   }
 
   @Test

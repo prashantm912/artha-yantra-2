@@ -691,7 +691,8 @@ public class MinerviniBacktestService {
     return jdbc.queryForList(
         "SELECT DISTINCT c.tradingsymbol FROM candles c JOIN instruments i"
             + " ON i.exchange=c.exchange AND i.tradingsymbol=c.tradingsymbol AND i.instrument_type='EQ'"
-            + " WHERE c.interval='1d' AND c.exchange='NSE'",
+            + " WHERE c.interval='1d' AND c.exchange='NSE'"
+            + " ORDER BY c.tradingsymbol", // stable symbol order → run-to-run reproducible portfolio stats
         String.class);
   }
 

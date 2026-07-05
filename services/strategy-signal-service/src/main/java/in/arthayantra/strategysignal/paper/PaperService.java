@@ -298,8 +298,8 @@ public class PaperService {
    * The shared close path (manual close, the 15:45 sweep, bracket SL/TP, engine exit). {@code
    * @Transactional} + public so the ONE external caller that isn't already in a transaction — {@link
    * PaperBracketEvaluator} on the @Scheduled thread — runs in a transaction; without it the
-   * {@code PaperPositionClosed} event was published outside any tx and the AFTER_COMMIT listeners
-   * (TAKEN-anchor resolver, margin annotator, auto-journal) silently never fired. Self-invoking
+   * {@code PaperPositionClosed} event was published outside any tx and its AFTER_COMMIT listeners
+   * (the TAKEN-anchor resolver + auto-journal) silently never fired. Self-invoking
    * callers (closePosition/closeForSignal/markToCloseIntraday) simply join their own tx.
    */
   @Transactional

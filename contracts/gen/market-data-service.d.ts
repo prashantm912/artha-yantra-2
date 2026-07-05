@@ -116,6 +116,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/screener/manas-arora/swing-backtest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["swingBacktest_1"];
+        put?: never;
+        post: operations["triggerSwingBacktest_1"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/screener/manas-arora/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["run_1"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/options/stock-chain/warm": {
         parameters: {
             query?: never;
@@ -324,6 +356,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/admin/export/bulk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["exportBulk"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/admin/expired-backfill": {
         parameters: {
             query?: never;
@@ -484,6 +532,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/screener/minervini/swing-backtest/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["swingBacktestCompare"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/screener/minervini/funnel": {
         parameters: {
             query?: never;
@@ -508,6 +572,70 @@ export interface paths {
             cookie?: never;
         };
         get: operations["candidate"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/screener/manas-arora": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_2"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/screener/manas-arora/swing-backtest/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["swingBacktestCompare_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/screener/manas-arora/funnel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["funnel_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/screener/manas-arora/candidate/{symbol}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["candidate_1"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1227,7 +1355,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["get_2"];
+        get: operations["get_3"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1888,8 +2016,29 @@ export interface components {
             priority?: string;
             subscriber?: string;
         };
+        PortfolioStat: {
+            /** Format: int32 */
+            slots?: number;
+            totalReturnPct?: number;
+            cagrPct?: number;
+            maxDrawdownPct?: number;
+            sharpe?: number;
+            /** Format: int32 */
+            tradesTaken?: number;
+            /** Format: int32 */
+            tradesSkipped?: number;
+            avgExposurePct?: number;
+            /** Format: int32 */
+            months?: number;
+            positiveMonthsPct?: number;
+            bestMonthPct?: number;
+            worstMonthPct?: number;
+            avgMonthPct?: number;
+            annual?: components["schemas"]["YearReturn"][];
+        };
         Report: {
             status?: string;
+            variant?: string;
             /** Format: date */
             fromDate?: string;
             runAt?: string;
@@ -1898,6 +2047,9 @@ export interface components {
             /** Format: int32 */
             totalTrades?: number;
             setups?: components["schemas"]["SetupStat"][];
+            portfolio?: components["schemas"]["PortfolioStat"];
+            portfolioRsPriority?: components["schemas"]["PortfolioStat"];
+            portfolioRsPriorityNet?: components["schemas"]["PortfolioStat"];
             note?: string;
         };
         SetupStat: {
@@ -1913,7 +2065,26 @@ export interface components {
             avgLossPct?: number;
             payoffRatio?: number;
             expectancyPct?: number;
+            profitFactor?: number;
             avgBarsHeld?: number;
+            bestTradePct?: number;
+            worstTradePct?: number;
+            /** Format: int32 */
+            longestHoldBars?: number;
+            /** Format: int32 */
+            shortestHoldBars?: number;
+            /** Format: int32 */
+            maxWinStreak?: number;
+            /** Format: int32 */
+            maxLossStreak?: number;
+            stopOutPct?: number;
+        };
+        YearReturn: {
+            /** Format: int32 */
+            year?: number;
+            returnPct?: number;
+            /** Format: int32 */
+            trades?: number;
         };
         Row: {
             symbol?: string;
@@ -2087,6 +2258,16 @@ export interface components {
             to?: string;
             format?: string;
         };
+        BulkRequest: {
+            underlying?: string;
+            /** Format: date */
+            expiry?: string;
+            /** Format: date */
+            from?: string;
+            /** Format: date */
+            to?: string;
+            format?: string;
+        };
         ExpiredBackfillRequest: {
             underlyings?: string[];
             /** Format: date */
@@ -2146,6 +2327,48 @@ export interface components {
             priority?: "PINNED_INDEX" | "STRATEGY" | "UI" | "SPECULATIVE";
             /** Format: int32 */
             subscribers?: number;
+        };
+        BacktestResult: {
+            status?: string;
+            /** Format: date */
+            fromDate?: string;
+            runAt?: string;
+            variants?: components["schemas"]["Report"][];
+            sweep?: components["schemas"]["SweepCell"][];
+            slotSweep?: components["schemas"]["SlotCell"][];
+            rotation?: components["schemas"]["RotationResult"];
+            note?: string;
+        };
+        RotationResult: {
+            /** Format: int32 */
+            slots?: number;
+            marginPct?: number;
+            /** Format: int32 */
+            rotations?: number;
+            net?: components["schemas"]["PortfolioStat"];
+        };
+        SlotCell: {
+            /** Format: int32 */
+            slots?: number;
+            /** Format: int32 */
+            tradesTaken?: number;
+            /** Format: int32 */
+            tradesSkipped?: number;
+            grossCagrPct?: number;
+            netCagrPct?: number;
+            netDrawdownPct?: number;
+            netSharpe?: number;
+        };
+        SweepCell: {
+            /** Format: int64 */
+            capital?: number;
+            /** Format: int64 */
+            floorTurnover?: number;
+            /** Format: int32 */
+            trades?: number;
+            netCagrPct?: number;
+            netDrawdownPct?: number;
+            netSharpe?: number;
         };
         Funnel: {
             /** Format: date */
@@ -3604,6 +3827,99 @@ export interface operations {
             };
         };
     };
+    swingBacktest_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["Report"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    triggerSwingBacktest_1: {
+        parameters: {
+            query?: {
+                years?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["Report"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_1: {
+        parameters: {
+            query?: {
+                asOf?: string;
+                passesAllOnly?: boolean;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ScreenResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     status: {
         parameters: {
             query: {
@@ -4068,6 +4384,39 @@ export interface operations {
             };
         };
     };
+    exportBulk: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulkRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     backfill_1: {
         parameters: {
             query?: never;
@@ -4431,6 +4780,35 @@ export interface operations {
             };
         };
     };
+    swingBacktestCompare: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["BacktestResult"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     funnel: {
         parameters: {
             query?: {
@@ -4463,6 +4841,133 @@ export interface operations {
         };
     };
     candidate: {
+        parameters: {
+            query?: {
+                asOf?: string;
+            };
+            header?: never;
+            path: {
+                symbol: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["CandidateAnalysis"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_2: {
+        parameters: {
+            query?: {
+                asOf?: string;
+                passesAllOnly?: boolean;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ScreenResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    swingBacktestCompare_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["BacktestResult"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    funnel_1: {
+        parameters: {
+            query?: {
+                asOf?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["Funnel"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    candidate_1: {
         parameters: {
             query?: {
                 asOf?: string;
@@ -6021,7 +6526,7 @@ export interface operations {
             };
         };
     };
-    get_2: {
+    get_3: {
         parameters: {
             query?: never;
             header?: never;

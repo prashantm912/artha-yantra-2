@@ -566,6 +566,123 @@
         }
       }
     },
+    "/api/v1/market/screener/manas-arora/swing-backtest" : {
+      "get" : {
+        "tags" : [ "manas-controller" ],
+        "operationId" : "swingBacktest_1",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Report"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post" : {
+        "tags" : [ "manas-controller" ],
+        "operationId" : "triggerSwingBacktest_1",
+        "parameters" : [ {
+          "name" : "years",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Report"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/screener/manas-arora/run" : {
+      "post" : {
+        "tags" : [ "manas-controller" ],
+        "operationId" : "run_1",
+        "parameters" : [ {
+          "name" : "asOf",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        }, {
+          "name" : "passesAllOnly",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "boolean",
+            "default" : true
+          }
+        }, {
+          "name" : "limit",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 50
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ScreenResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/options/stock-chain/warm" : {
       "get" : {
         "tags" : [ "stock-chain-warm-controller" ],
@@ -1128,6 +1245,45 @@
         }
       }
     },
+    "/api/v1/market/admin/export/bulk" : {
+      "post" : {
+        "tags" : [ "export-controller" ],
+        "operationId" : "exportBulk",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/BulkRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "string",
+                  "format" : "byte"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/admin/expired-backfill" : {
       "post" : {
         "tags" : [ "expired-backfill-controller" ],
@@ -1604,6 +1760,34 @@
         }
       }
     },
+    "/api/v1/market/screener/minervini/swing-backtest/compare" : {
+      "get" : {
+        "tags" : [ "minervini-controller" ],
+        "operationId" : "swingBacktestCompare",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BacktestResult"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/screener/minervini/funnel" : {
       "get" : {
         "tags" : [ "minervini-controller" ],
@@ -1645,6 +1829,178 @@
       "get" : {
         "tags" : [ "minervini-controller" ],
         "operationId" : "candidate",
+        "parameters" : [ {
+          "name" : "symbol",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "asOf",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CandidateAnalysis"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/screener/manas-arora" : {
+      "get" : {
+        "tags" : [ "manas-controller" ],
+        "operationId" : "get_2",
+        "parameters" : [ {
+          "name" : "asOf",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        }, {
+          "name" : "passesAllOnly",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "boolean",
+            "default" : true
+          }
+        }, {
+          "name" : "limit",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 50
+          }
+        }, {
+          "name" : "offset",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 0
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ScreenResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/screener/manas-arora/swing-backtest/compare" : {
+      "get" : {
+        "tags" : [ "manas-controller" ],
+        "operationId" : "swingBacktestCompare_1",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BacktestResult"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/screener/manas-arora/funnel" : {
+      "get" : {
+        "tags" : [ "manas-controller" ],
+        "operationId" : "funnel_1",
+        "parameters" : [ {
+          "name" : "asOf",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Funnel"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/screener/manas-arora/candidate/{symbol}" : {
+      "get" : {
+        "tags" : [ "manas-controller" ],
+        "operationId" : "candidate_1",
         "parameters" : [ {
           "name" : "symbol",
           "in" : "path",
@@ -4237,7 +4593,7 @@
     "/api/v1/market/fundamentals/{symbol}" : {
       "get" : {
         "tags" : [ "fundamentals-controller" ],
-        "operationId" : "get_2",
+        "operationId" : "get_3",
         "parameters" : [ {
           "name" : "symbol",
           "in" : "path",
@@ -5871,10 +6227,67 @@
           }
         }
       },
+      "PortfolioStat" : {
+        "type" : "object",
+        "properties" : {
+          "slots" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "totalReturnPct" : {
+            "type" : "number"
+          },
+          "cagrPct" : {
+            "type" : "number"
+          },
+          "maxDrawdownPct" : {
+            "type" : "number"
+          },
+          "sharpe" : {
+            "type" : "number"
+          },
+          "tradesTaken" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "tradesSkipped" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "avgExposurePct" : {
+            "type" : "number"
+          },
+          "months" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "positiveMonthsPct" : {
+            "type" : "number"
+          },
+          "bestMonthPct" : {
+            "type" : "number"
+          },
+          "worstMonthPct" : {
+            "type" : "number"
+          },
+          "avgMonthPct" : {
+            "type" : "number"
+          },
+          "annual" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/YearReturn"
+            }
+          }
+        }
+      },
       "Report" : {
         "type" : "object",
         "properties" : {
           "status" : {
+            "type" : "string"
+          },
+          "variant" : {
             "type" : "string"
           },
           "fromDate" : {
@@ -5897,6 +6310,15 @@
             "items" : {
               "$ref" : "#/components/schemas/SetupStat"
             }
+          },
+          "portfolio" : {
+            "$ref" : "#/components/schemas/PortfolioStat"
+          },
+          "portfolioRsPriority" : {
+            "$ref" : "#/components/schemas/PortfolioStat"
+          },
+          "portfolioRsPriorityNet" : {
+            "$ref" : "#/components/schemas/PortfolioStat"
           },
           "note" : {
             "type" : "string"
@@ -5936,8 +6358,52 @@
           "expectancyPct" : {
             "type" : "number"
           },
+          "profitFactor" : {
+            "type" : "number"
+          },
           "avgBarsHeld" : {
             "type" : "number"
+          },
+          "bestTradePct" : {
+            "type" : "number"
+          },
+          "worstTradePct" : {
+            "type" : "number"
+          },
+          "longestHoldBars" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "shortestHoldBars" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "maxWinStreak" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "maxLossStreak" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "stopOutPct" : {
+            "type" : "number"
+          }
+        }
+      },
+      "YearReturn" : {
+        "type" : "object",
+        "properties" : {
+          "year" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "returnPct" : {
+            "type" : "number"
+          },
+          "trades" : {
+            "type" : "integer",
+            "format" : "int32"
           }
         }
       },
@@ -6386,6 +6852,29 @@
           }
         }
       },
+      "BulkRequest" : {
+        "type" : "object",
+        "properties" : {
+          "underlying" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "from" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "to" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "format" : {
+            "type" : "string"
+          }
+        }
+      },
       "ExpiredBackfillRequest" : {
         "type" : "object",
         "properties" : {
@@ -6536,6 +7025,119 @@
           "subscribers" : {
             "type" : "integer",
             "format" : "int32"
+          }
+        }
+      },
+      "BacktestResult" : {
+        "type" : "object",
+        "properties" : {
+          "status" : {
+            "type" : "string"
+          },
+          "fromDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "runAt" : {
+            "type" : "string"
+          },
+          "variants" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Report"
+            }
+          },
+          "sweep" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SweepCell"
+            }
+          },
+          "slotSweep" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SlotCell"
+            }
+          },
+          "rotation" : {
+            "$ref" : "#/components/schemas/RotationResult"
+          },
+          "note" : {
+            "type" : "string"
+          }
+        }
+      },
+      "RotationResult" : {
+        "type" : "object",
+        "properties" : {
+          "slots" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "marginPct" : {
+            "type" : "number"
+          },
+          "rotations" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "net" : {
+            "$ref" : "#/components/schemas/PortfolioStat"
+          }
+        }
+      },
+      "SlotCell" : {
+        "type" : "object",
+        "properties" : {
+          "slots" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "tradesTaken" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "tradesSkipped" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "grossCagrPct" : {
+            "type" : "number"
+          },
+          "netCagrPct" : {
+            "type" : "number"
+          },
+          "netDrawdownPct" : {
+            "type" : "number"
+          },
+          "netSharpe" : {
+            "type" : "number"
+          }
+        }
+      },
+      "SweepCell" : {
+        "type" : "object",
+        "properties" : {
+          "capital" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "floorTurnover" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "trades" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "netCagrPct" : {
+            "type" : "number"
+          },
+          "netDrawdownPct" : {
+            "type" : "number"
+          },
+          "netSharpe" : {
+            "type" : "number"
           }
         }
       },

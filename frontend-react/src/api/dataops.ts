@@ -246,3 +246,17 @@ export function downloadQueryCsv(sql: string): Promise<void> {
 export function downloadExport(req: ExportRequest): Promise<void> {
   return download('/market/admin/export', req, `${req.symbol}.${req.format}`);
 }
+
+export interface BulkExportRequest {
+  underlying: string;
+  expiry: string; // YYYY-MM-DD
+  from: string;
+  to: string;
+  format: 'csv' | 'json';
+}
+
+/** Download a ZIP of EVERY contract of a whole (underlying, expiry) chain (B6 bulk). */
+export function downloadBulkExport(req: BulkExportRequest): Promise<void> {
+  const name = `${req.underlying.replace(/ /g, '_')}_${req.expiry}.zip`;
+  return download('/market/admin/export/bulk', req, name);
+}

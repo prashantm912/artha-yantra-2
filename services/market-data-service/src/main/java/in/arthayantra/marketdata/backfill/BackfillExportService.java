@@ -9,6 +9,8 @@ import in.arthayantra.marketdata.candles.Candle;
 import in.arthayantra.marketdata.candles.CandleRepository;
 import in.arthayantra.marketdata.upstox.ExpiredBackfillRepository;
 import in.arthayantra.marketdata.upstox.ExpiredBackfillRepository.ExportContract;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -16,6 +18,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 import org.springframework.stereotype.Service;
 
 /**
@@ -29,6 +33,8 @@ import org.springframework.stereotype.Service;
 public class BackfillExportService {
 
   private static final int MAX_ROWS = 100_000;
+  /** Per-expiry bulk cap: bounds the SYNCHRONOUS zip work (an option chain is ~100-300 contracts). */
+  private static final int MAX_CONTRACTS = 500;
   private static final String INTERVAL = "1m";
 
   /** A built export artifact: bytes + a download filename + its content type. */
@@ -81,6 +87,41 @@ public class BackfillExportService {
       case "json" -> new Export(json(bars), symbol + ".json", "application/json");
       default -> throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "format must be csv or json");
     };
+  }
+
+  /**
+   * A ZIP of the per-contract CSV/JSON exports of EVERY registered contract of one (underlying,
+   * expiry) — the whole option chain in one download (the Part-2 premium-replay value-verify inspects
+   * a full expiry, previously one contract at a time). Synchronous, bounded to {@value #MAX_CONTRACTS}
+   * contracts (each entry still row-capped by {@link #export}); a larger expiry is the async-job follow-up.
+   */
+  public Export exportBulk(
+      String underlying, LocalDate expiry, LocalDate fromDate, LocalDate toDate, String format) {
+    List<ExportContract> chain = contracts(underlying, expiry); // validates underlying + expiry
+    if (chain.isEmpty()) {
+      throw new ApiException(
+          404, ErrorCodes.NOT_FOUND_RESOURCE, "no registered contracts for " + underlying + " " + expiry);
+    }
+    if (chain.size() > MAX_CONTRACTS) {
+      throw new ApiException(
+          400,
+          ErrorCodes.VALIDATION_FAILED,
+          chain.size() + " contracts exceeds the " + MAX_CONTRACTS
+              + "-contract sync bulk cap — narrow the expiry or use the per-contract export");
+    }
+    ByteArrayOutputStream buf = new ByteArrayOutputStream();
+    try (ZipOutputStream zip = new ZipOutputStream(buf)) {
+      for (ExportContract c : chain) {
+        Export one = export(c.exchange(), c.tradingsymbol(), fromDate, toDate, format);
+        zip.putNextEntry(new ZipEntry(one.filename()));
+        zip.write(one.body());
+        zip.closeEntry();
+      }
+    } catch (IOException e) {
+      throw new ApiException(500, ErrorCodes.INTERNAL_ERROR, "bulk export zip failed");
+    }
+    String name = require(underlying, "underlying").replace(' ', '_') + "_" + expiry + ".zip";
+    return new Export(buf.toByteArray(), name, "application/zip");
   }
 
   private static String csv(List<Candle> bars) {

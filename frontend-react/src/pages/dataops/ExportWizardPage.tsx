@@ -4,6 +4,7 @@ import { PageHeader } from '../../components/PageHeader.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import {
   downloadExport,
+  downloadBulkExport,
   useExportContracts,
   useExportExpiries,
   type ExportContract,
@@ -98,6 +99,24 @@ export function ExportWizardPage() {
         setError(e.message || `Export failed (HTTP ${e.status}).`);
       } else {
         setError(e instanceof Error ? e.message : 'Export failed.');
+      }
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  // Bulk: zip EVERY contract of the chosen (underlying, expiry) — the whole chain in one download.
+  async function handleBulkDownload() {
+    if (!underlying || !expiry) return;
+    setDownloading(true);
+    setError(null);
+    try {
+      await downloadBulkExport({ underlying, expiry, from, to, format });
+    } catch (e) {
+      if (e instanceof ApiError) {
+        setError(e.message || `Bulk export failed (HTTP ${e.status}).`);
+      } else {
+        setError(e instanceof Error ? e.message : 'Bulk export failed.');
       }
     } finally {
       setDownloading(false);
@@ -315,15 +334,26 @@ export function ExportWizardPage() {
                 </div>
               </fieldset>
 
-              <button
-                type="button"
-                onClick={handleDownload}
-                disabled={downloading || !from || !to}
-                title="Stream this contract's candles over the chosen date window to a file in the selected format"
-                className="rounded-md bg-accent px-3 py-1.5 text-sm text-surface-0 hover:opacity-90 disabled:opacity-50"
-              >
-                {downloading ? 'Downloading…' : 'Download'}
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={handleDownload}
+                  disabled={downloading || !contract || !from || !to}
+                  title="Stream this contract's candles over the chosen date window to a file in the selected format"
+                  className="rounded-md bg-accent px-3 py-1.5 text-sm text-surface-0 hover:opacity-90 disabled:opacity-50"
+                >
+                  {downloading ? 'Downloading…' : 'Download'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleBulkDownload}
+                  disabled={downloading || !underlying || !expiry || !from || !to}
+                  title="Zip EVERY contract of this expiry over the chosen date window (the whole chain in one download)"
+                  className="rounded-md border border-ay-border px-3 py-1.5 text-sm text-ay-text hover:bg-surface-2 disabled:opacity-50"
+                >
+                  {downloading ? 'Downloading…' : 'Download whole expiry (ZIP)'}
+                </button>
+              </div>
 
               {error && (
                 <p role="alert" className="text-sm text-bear">

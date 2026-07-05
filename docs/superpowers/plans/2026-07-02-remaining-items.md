@@ -102,8 +102,16 @@ Provenance rows live in [`docs/DEFERRED_BACKLOG.md`](../../DEFERRED_BACKLOG.md) 
 - Options-fidelity SNAPSHOT/SYNTHETIC_B76 live walk; walk-forward fold + MedianPruner live walk (multi-month data).
 - ~~Second-order greeks (speed/zomma/color)~~ **DONE — vanna/charm/vomma were already shipped (§17.6);
   the third-order gamma-sensitivity trio speed/zomma/color added + FD-verified in `black76-math` and
-  surfaced on the chain `Leg` (#511, 2026-07-04).** Still open: §6.3 BSM-on-spot seam (stock options);
-  20-level depth flattening.
+  surfaced on the chain `Leg` (#511, 2026-07-04).** ~~§6.3 BSM-on-spot seam (stock options)~~ **DONE
+  ([#582](https://github.com/prashantm912/artha-yantra-2/pull/582), 2026-07-05):** `BScholesMerton`
+  in `black76-math` — spot+dividend-yield q pricing (price/IV reuse Black-76 on F=S·e^((r-q)T);
+  spot greeks are the distinct BSM closed forms), FD-verified. DORMANT — index options keep Black-76,
+  and a live equity-option wire-in additionally needs a dividend-yield (q) data source we don't have.
+  **~~20-level depth flattening~~ SOURCE-BLOCKED (2026-07-05 recon) — do NOT build dead code:** the
+  Kite/Upstox retail feeds only disseminate **5** levels (their wire DTOs hold what the feed sends);
+  true 20-level needs NSE's separate paid depth feed we don't subscribe to. Plus depth is dropped at
+  the domain `Quote` boundary with ZERO consumer and is live-only (mock can't test it). Nothing to
+  flatten to 20, no reader — DEFER until the 20-depth feed is subscribed.
 - ~~Native 3-min option-snapshot capture~~ **MOOT (2026-07-04 empirical check) — do not re-flag:** the
   backlog premise (5-min capture, want 3-min for Table-2 fidelity) is stale. Live capture already runs
   at ~1-minute granularity (verified in `options_chain_snapshots`), FINER than 3-min; any coarser

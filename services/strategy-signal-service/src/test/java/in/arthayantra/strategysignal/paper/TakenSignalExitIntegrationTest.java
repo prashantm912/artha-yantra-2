@@ -84,7 +84,7 @@ class TakenSignalExitIntegrationTest extends StrategySignalIntegrationTestBase {
 
     events.publishEvent(new SignalExited(seed.signalId(), -1, "STRUCTURAL_STOP"));
 
-    assertThat(positions.findOpen("NFO", seed.sym(), "BUY")).isEmpty();
+    assertThat(positions.findOpen("other", "NFO", seed.sym(), "BUY")).isEmpty();
     var settled = positions.listClosed(null, null, seed.sym(), 10, 0);
     assertThat(settled).hasSize(1);
     assertThat(settled.get(0).closeReason()).isEqualTo("STRUCTURAL_STOP");
@@ -101,7 +101,7 @@ class TakenSignalExitIntegrationTest extends StrategySignalIntegrationTestBase {
 
     assertThat(paper.markToCloseIntraday()).isGreaterThanOrEqualTo(1);
 
-    assertThat(positions.findOpen("NFO", seed.sym(), "BUY")).isEmpty();
+    assertThat(positions.findOpen("other", "NFO", seed.sym(), "BUY")).isEmpty();
     await()
         .atMost(Duration.ofSeconds(5))
         .untilAsserted(
@@ -112,7 +112,7 @@ class TakenSignalExitIntegrationTest extends StrategySignalIntegrationTestBase {
   void takenSingleLegOpenCarriesTheSignalBrackets() {
     Seed seed = seedTakenSignalWithPosition("brackets");
 
-    var pos = positions.findOpen("NFO", seed.sym(), "BUY").orElseThrow();
+    var pos = positions.findOpen("other", "NFO", seed.sym(), "BUY").orElseThrow();
     assertThat(pos.stopLoss()).isEqualByComparingTo("40.00");
     assertThat(pos.takeProfit()).isEqualByComparingTo("120.00");
   }
@@ -144,7 +144,7 @@ class TakenSignalExitIntegrationTest extends StrategySignalIntegrationTestBase {
     signals.transition(signalId, "TAKEN");
     // The PaperSignalListener path (SignalTaken → openSingle) opens the primary leg + brackets.
     events.publishEvent(new SignalTaken(signalId, 50, new BigDecimal("80.00")));
-    assertThat(positions.findOpen("NFO", sym, "BUY")).isPresent();
+    assertThat(positions.findOpen("other", "NFO", sym, "BUY")).isPresent();
     return new Seed(versionId, signalId, sym);
   }
 }

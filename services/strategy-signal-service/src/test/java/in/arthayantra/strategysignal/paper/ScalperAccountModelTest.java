@@ -34,12 +34,12 @@ class ScalperAccountModelTest {
 
   private static ScalperAccountModel model(WinLoss wl, List<SubAccountTally> tallies) {
     PaperPositionRepository repo = mock(PaperPositionRepository.class);
-    when(repo.winLossOn(any())).thenReturn(wl);
+    when(repo.winLossOn(any(), any())).thenReturn(wl); // model calls winLossOn(SCALPER, today)
     when(repo.subAccountTalliesOn(any())).thenReturn(tallies);
     when(repo.subAccountCapitalFractions())
         .thenReturn(Map.of(1, FRACTION, 2, FRACTION, 3, FRACTION, 4, FRACTION, 5, FRACTION));
     PaperAccountService account = mock(PaperAccountService.class);
-    when(account.startingCapital()).thenReturn(STARTING_CAPITAL);
+    when(account.startingCapital("scalper")).thenReturn(STARTING_CAPITAL);
     return new ScalperAccountModel(repo, account, CLOCK);
   }
 

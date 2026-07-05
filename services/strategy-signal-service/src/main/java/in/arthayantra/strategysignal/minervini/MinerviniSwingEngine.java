@@ -209,9 +209,14 @@ public class MinerviniSwingEngine {
     // master / paper equity) so the row + its stamps commit in one tight transaction. Null when the
     // emission guard is absent (mock/no-risk contexts) — then the entry simply is not auto-papered.
     BigDecimal stopDistance = stopLoss == null ? null : entryPrice.subtract(stopLoss).abs();
+    // Sized against the MINERVINI book's paper equity (its own ₹1.5 L capital, not the global book).
     BigDecimal suggestedQty =
         emissionGuard
-            .map(g -> g.suggestedQty(strat.definition().sizing(), EX, c.symbol(), entryPrice, stopDistance))
+            .map(
+                g ->
+                    g.suggestedQty(
+                        strat.definition().sizing(), EX, c.symbol(), entryPrice, stopDistance,
+                        in.arthayantra.strategysignal.signals.Books.MINERVINI))
             .orElse(null);
     long id =
         tx.execute(

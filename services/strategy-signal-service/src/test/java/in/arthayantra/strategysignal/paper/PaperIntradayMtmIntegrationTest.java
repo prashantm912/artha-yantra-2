@@ -85,12 +85,12 @@ class PaperIntradayMtmIntegrationTest extends StrategySignalIntegrationTestBase 
     paper.openOrder(
         new PaperService.OrderRequest(
             signalId, "NFO", sym, "BUY", 50, new BigDecimal("80.00"), null, null));
-    assertThat(positions.findOpen("NFO", sym, "BUY")).isPresent();
+    assertThat(positions.findOpen("other", "NFO", sym, "BUY")).isPresent();
 
     // >= 1: the shared DB may carry other tests' intraday leftovers; ours MUST be among the closed.
     assertThat(paper.markToCloseIntraday()).isGreaterThanOrEqualTo(1);
 
-    assertThat(positions.findOpen("NFO", sym, "BUY")).isEmpty();
+    assertThat(positions.findOpen("other", "NFO", sym, "BUY")).isEmpty();
     var settled = positions.listClosed(null, null, sym, 10, 0);
     assertThat(settled).hasSize(1);
     assertThat(settled.get(0).closeReason()).isEqualTo("INTRADAY_MTM");

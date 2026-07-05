@@ -44,11 +44,13 @@ class AutoPaperListenerTest {
   @Test
   void offIsInert() {
     RiskService risk = mock(RiskService.class);
-    when(risk.autoPaperTradeEnabled()).thenReturn(false);
+    BookResolver books = mock(BookResolver.class);
+    when(books.bookForSignal(anyLong())).thenReturn("scalper");
+    when(risk.autoPaperTradeEnabled("scalper")).thenReturn(false);
     SignalRepository signals = mock(SignalRepository.class);
     ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
 
-    new AutoPaperListener(risk, signals, events).onSignalEmitted(emitted(7));
+    new AutoPaperListener(risk, signals, books, events).onSignalEmitted(emitted(7));
 
     verifyNoInteractions(signals, events); // the toggle is OFF — nothing happens
   }
@@ -56,12 +58,14 @@ class AutoPaperListenerTest {
   @Test
   void onTakesAtSuggestedQty() {
     RiskService risk = mock(RiskService.class);
-    when(risk.autoPaperTradeEnabled()).thenReturn(true);
+    BookResolver books = mock(BookResolver.class);
+    when(books.bookForSignal(anyLong())).thenReturn("scalper");
+    when(risk.autoPaperTradeEnabled("scalper")).thenReturn(true);
     SignalRepository signals = mock(SignalRepository.class);
     when(signals.find(7L)).thenReturn(Optional.of(row(new BigDecimal("5"), null)));
     ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
 
-    new AutoPaperListener(risk, signals, events).onSignalEmitted(emitted(7));
+    new AutoPaperListener(risk, signals, books, events).onSignalEmitted(emitted(7));
 
     verify(signals).transition(7L, "TAKEN");
     ArgumentCaptor<SignalTaken> taken = ArgumentCaptor.forClass(SignalTaken.class);
@@ -74,12 +78,14 @@ class AutoPaperListenerTest {
   @Test
   void onWithNoSuggestedQtyIsSkipped() {
     RiskService risk = mock(RiskService.class);
-    when(risk.autoPaperTradeEnabled()).thenReturn(true);
+    BookResolver books = mock(BookResolver.class);
+    when(books.bookForSignal(anyLong())).thenReturn("scalper");
+    when(risk.autoPaperTradeEnabled("scalper")).thenReturn(true);
     SignalRepository signals = mock(SignalRepository.class);
     when(signals.find(7L)).thenReturn(Optional.of(row(null, null)));
     ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
 
-    new AutoPaperListener(risk, signals, events).onSignalEmitted(emitted(7));
+    new AutoPaperListener(risk, signals, books, events).onSignalEmitted(emitted(7));
 
     verify(signals, never()).transition(anyLong(), any());
     verifyNoInteractions(events);

@@ -135,7 +135,7 @@ public class PaperExpiryService {
     String message =
         pos.side() + " " + pos.qty() + " " + pos.exchange() + ":" + pos.tradingsymbol() + " — roll or close?";
     Optional<NotifyTarget> target =
-        positions.notifyTargetFor(pos.exchange(), pos.tradingsymbol(), pos.side());
+        positions.notifyTargetFor(pos.book(), pos.exchange(), pos.tradingsymbol(), pos.side());
     String channel = target.map(NotifyTarget::channel).orElse("NTFY");
     try {
       if (notifier.configured(channel)) {

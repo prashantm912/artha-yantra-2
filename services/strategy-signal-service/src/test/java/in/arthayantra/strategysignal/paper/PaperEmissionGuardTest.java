@@ -42,10 +42,10 @@ class PaperEmissionGuardTest {
         .thenReturn(new InstrumentMeta(InstrumentClass.OPTION, bd("0.05"), 75L));
 
     // ample profit ₹150k -> budget ₹15k; premium 20 × lot 75 = ₹1,500/lot -> 10 lots -> 750 units.
-    when(account.realisedProfit()).thenReturn(bd("150000"));
+    when(account.realisedProfit("scalper")).thenReturn(bd("150000"));
     assertThat(guard.heroZeroSuggestedQty("NFO", "NIFTY25000CE", bd("20"))).isEqualByComparingTo("750");
     // thin profit -> the ₹2.5k floor; ₹2,500 / ₹1,500-per-lot = 1 lot -> 75 units.
-    when(account.realisedProfit()).thenReturn(BigDecimal.ZERO);
+    when(account.realisedProfit("scalper")).thenReturn(BigDecimal.ZERO);
     assertThat(guard.heroZeroSuggestedQty("NFO", "NIFTY25000CE", bd("20"))).isEqualByComparingTo("75");
     // a premium the floor cannot fund a full lot of (100 × 75 = 7,500 > 2,500) -> still ONE lot (fired entry).
     assertThat(guard.heroZeroSuggestedQty("NFO", "NIFTY25000CE", bd("100"))).isEqualByComparingTo("75");

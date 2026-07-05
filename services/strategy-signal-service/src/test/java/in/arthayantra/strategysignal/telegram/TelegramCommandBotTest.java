@@ -112,7 +112,7 @@ class TelegramCommandBotTest {
     bot.handle(update(1, OWNER_CHAT, "/pause"));
     now.set(now.get().plusSeconds(61));
     bot.handle(update(2, OWNER_CHAT, "/confirm"));
-    verify(riskSettings, never()).upsert(anyString(), anyString());
+    verify(riskSettings, never()).upsert(anyString(), anyString(), anyString());
     verify(api).sendMessage(eq(OWNER_CHAT), contains("expired"));
   }
 
@@ -121,11 +121,14 @@ class TelegramCommandBotTest {
     TelegramCommandBot bot = bot(true);
     bot.handle(update(1, OWNER_CHAT, "/pause"));
     bot.handle(update(2, OWNER_CHAT, "/confirm"));
-    verify(riskSettings).upsert(RiskService.KILL_SWITCH, "{\"enabled\":true}");
+    // the kill switch flips across ALL four paper books (scalper/minervini/manas-arora/manual)
+    verify(riskSettings, times(4))
+        .upsert(anyString(), eq(RiskService.KILL_SWITCH), eq("{\"enabled\":true}"));
 
     bot.handle(update(3, OWNER_CHAT, "/resume"));
     bot.handle(update(4, OWNER_CHAT, "/confirm"));
-    verify(riskSettings).upsert(RiskService.KILL_SWITCH, "{\"enabled\":false}");
+    verify(riskSettings, times(4))
+        .upsert(anyString(), eq(RiskService.KILL_SWITCH), eq("{\"enabled\":false}"));
   }
 
   @Test
@@ -135,8 +138,8 @@ class TelegramCommandBotTest {
             new DotHealthCanary.DotHealth(
                 "t", true, 40,
                 List.of(new DotHealthCanary.DotState("breadth", true, true, "ok"))));
-    when(risk.entryAllowed()).thenReturn(true);
-    when(paper.openPositions()).thenReturn(List.of());
+    when(risk.entryAllowed(anyString())).thenReturn(true);
+    when(paper.openPositions(null)).thenReturn(List.of());
 
     bot(true).handle(update(1, OWNER_CHAT, "/status"));
 
@@ -146,7 +149,7 @@ class TelegramCommandBotTest {
 
   @Test
   void pnlFormatsTheSummary() {
-    when(paper.pnl())
+    when(paper.pnl(null))
         .thenReturn(
             Map.of("points", List.of(), "summary",
                 Map.of("realizedTotal", "1234.50", "trades", 4, "winRate", "0.75", "expectancy", "308.62")));
@@ -163,7 +166,7 @@ class TelegramCommandBotTest {
         .thenReturn(List.of(update(11, OWNER_CHAT, "/status")));
     when(dotHealth.evaluate())
         .thenReturn(new DotHealthCanary.DotHealth("t", true, 0, List.of()));
-    when(paper.openPositions()).thenReturn(List.of());
+    when(paper.openPositions(null)).thenReturn(List.of());
 
     TelegramCommandBot bot = bot(true);
     bot.poll();

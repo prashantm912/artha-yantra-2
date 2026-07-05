@@ -29,11 +29,12 @@ public class PaperPositionRepository {
       OffsetDateTime closedAt,
       String closeReason,
       BigDecimal stopLoss,
-      BigDecimal takeProfit) {}
+      BigDecimal takeProfit,
+      String book) {}
 
   private static final String COLUMNS =
       "id, exchange, tradingsymbol, side, qty, avg_entry_price, realized_pnl, status,"
-          + " opened_at, closed_at, close_reason, stop_loss, take_profit";
+          + " opened_at, closed_at, close_reason, stop_loss, take_profit, book";
 
   private final JdbcTemplate jdbc;
 
@@ -56,16 +57,18 @@ public class PaperPositionRepository {
         rs.getObject("closed_at", OffsetDateTime.class),
         rs.getString("close_reason"),
         rs.getBigDecimal("stop_loss"),
-        rs.getBigDecimal("take_profit"));
+        rs.getBigDecimal("take_profit"),
+        rs.getString("book"));
   }
 
-  /** The OPEN position for a key+side, if any. */
-  public Optional<PositionRow> findOpen(String exchange, String tradingsymbol, String side) {
+  /** The OPEN position for a book+key+side, if any (the per-book §F.6 averaging key). */
+  public Optional<PositionRow> findOpen(String book, String exchange, String tradingsymbol, String side) {
     return jdbc
         .query(
-            "SELECT " + COLUMNS + " FROM paper_positions WHERE exchange=? AND tradingsymbol=?"
+            "SELECT " + COLUMNS + " FROM paper_positions WHERE book=? AND exchange=? AND tradingsymbol=?"
                 + " AND side=? AND status='OPEN'",
             PaperPositionRepository::map,
+            book,
             exchange,
             tradingsymbol,
             side)
@@ -81,8 +84,9 @@ public class PaperPositionRepository {
         .findFirst();
   }
 
-  /** Opens a new position (optional SL/TP bracket levels), unstamped sub-account; returns the id. */
+  /** Opens a new position in a book (optional SL/TP bracket levels), unstamped sub-account. */
   public long insertOpen(
+      String book,
       String exchange,
       String tradingsymbol,
       String side,
@@ -90,11 +94,12 @@ public class PaperPositionRepository {
       BigDecimal avgEntryPrice,
       BigDecimal stopLoss,
       BigDecimal takeProfit) {
-    return insertOpen(exchange, tradingsymbol, side, qty, avgEntryPrice, stopLoss, takeProfit, null);
+    return insertOpen(book, exchange, tradingsymbol, side, qty, avgEntryPrice, stopLoss, takeProfit, null);
   }
 
-  /** Opens a new position charged to a 5-account sub-ledger (E10); {@code subaccountIdx} null = unstamped. */
+  /** Opens a new position in a book, charged to a 5-account sub-ledger (E10); idx null = unstamped. */
   public long insertOpen(
+      String book,
       String exchange,
       String tradingsymbol,
       String side,
@@ -107,10 +112,11 @@ public class PaperPositionRepository {
         jdbc.queryForObject(
             """
             INSERT INTO paper_positions
-              (exchange, tradingsymbol, side, qty, avg_entry_price, status, opened_at, stop_loss, take_profit, subaccount_idx)
-            VALUES (?,?,?,?,?, 'OPEN', now(), ?, ?, ?) RETURNING id
+              (book, exchange, tradingsymbol, side, qty, avg_entry_price, status, opened_at, stop_loss, take_profit, subaccount_idx)
+            VALUES (?,?,?,?,?,?, 'OPEN', now(), ?, ?, ?) RETURNING id
             """,
             Long.class,
+            book,
             exchange,
             tradingsymbol,
             side,
@@ -140,23 +146,40 @@ public class PaperPositionRepository {
         id);
   }
 
-  /** All OPEN positions. */
+  /** All OPEN positions across every book (mechanical evaluators: brackets, expiry, margin heat). */
   public List<PositionRow> listOpen() {
-    return jdbc.query(
-        "SELECT " + COLUMNS + " FROM paper_positions WHERE status='OPEN' ORDER BY opened_at DESC",
-        PaperPositionRepository::map);
+    return listOpen(null);
   }
 
-  /** Closed trades in a window (optionally one tradingsymbol — the chart-marks fetch), newest first. */
+  /** OPEN positions in a book ({@code book} null → all books), newest first. */
+  public List<PositionRow> listOpen(String book) {
+    return jdbc.query(
+        "SELECT " + COLUMNS + " FROM paper_positions WHERE status='OPEN'"
+            + " AND (?::text IS NULL OR book = ?) ORDER BY opened_at DESC",
+        PaperPositionRepository::map,
+        book,
+        book);
+  }
+
+  /** Closed trades in a window across every book. */
   public List<PositionRow> listClosed(
       OffsetDateTime from, OffsetDateTime to, String tradingsymbol, int limit, int offset) {
+    return listClosed(null, from, to, tradingsymbol, limit, offset);
+  }
+
+  /** Closed trades in a window (optionally one book + one tradingsymbol), newest first. */
+  public List<PositionRow> listClosed(
+      String book, OffsetDateTime from, OffsetDateTime to, String tradingsymbol, int limit, int offset) {
     return jdbc.query(
         "SELECT " + COLUMNS + " FROM paper_positions WHERE status='CLOSED'"
+            + " AND (?::text IS NULL OR book = ?)"
             + " AND (?::timestamptz IS NULL OR closed_at >= ?)"
             + " AND (?::timestamptz IS NULL OR closed_at <= ?)"
             + " AND (?::text IS NULL OR tradingsymbol = ?)"
             + " ORDER BY closed_at DESC LIMIT ? OFFSET ?",
         PaperPositionRepository::map,
+        book,
+        book,
         from,
         from,
         to,
@@ -176,11 +199,11 @@ public class PaperPositionRepository {
         """
         SELECT DISTINCT p.id, p.exchange, p.tradingsymbol, p.side, p.qty, p.avg_entry_price,
                p.realized_pnl, p.status, p.opened_at, p.closed_at, p.close_reason,
-               p.stop_loss, p.take_profit
+               p.stop_loss, p.take_profit, p.book
         FROM paper_positions p
         JOIN paper_orders o
-          ON o.exchange = p.exchange AND o.tradingsymbol = p.tradingsymbol AND o.side = p.side
-          AND o.signal_id IS NOT NULL
+          ON o.book = p.book AND o.exchange = p.exchange AND o.tradingsymbol = p.tradingsymbol
+          AND o.side = p.side AND o.signal_id IS NOT NULL
         JOIN signals s ON s.id = o.signal_id
         JOIN strategy_versions sv ON sv.id = s.strategy_version_id
         WHERE p.status = 'OPEN' AND sv.config->'risk'->'session'->>'style' = 'intraday'
@@ -194,22 +217,28 @@ public class PaperPositionRepository {
         """
         SELECT DISTINCT p.id, p.exchange, p.tradingsymbol, p.side, p.qty, p.avg_entry_price,
                p.realized_pnl, p.status, p.opened_at, p.closed_at, p.close_reason,
-               p.stop_loss, p.take_profit
+               p.stop_loss, p.take_profit, p.book
         FROM paper_positions p
         JOIN paper_orders o
-          ON o.exchange = p.exchange AND o.tradingsymbol = p.tradingsymbol AND o.side = p.side
+          ON o.book = p.book AND o.exchange = p.exchange AND o.tradingsymbol = p.tradingsymbol
+          AND o.side = p.side
         WHERE p.status = 'OPEN' AND o.signal_id = ?
         """,
         PaperPositionRepository::map,
         signalId);
   }
 
-  /** The signal ids whose orders opened this position key (usually one; averaged adds share it). */
-  public List<Long> signalIdsFor(String exchange, String tradingsymbol, String side) {
+  /**
+   * The signal ids whose orders opened this position key in a book (usually one; averaged adds share
+   * it). Book-scoped so two books holding the same {@code (exchange, tradingsymbol, side)} never bleed
+   * each other's signal ids into a resolve/expire pass.
+   */
+  public List<Long> signalIdsFor(String book, String exchange, String tradingsymbol, String side) {
     return jdbc.queryForList(
         "SELECT DISTINCT signal_id FROM paper_orders"
-            + " WHERE exchange=? AND tradingsymbol=? AND side=? AND signal_id IS NOT NULL",
+            + " WHERE book=? AND exchange=? AND tradingsymbol=? AND side=? AND signal_id IS NOT NULL",
         Long.class,
+        book,
         exchange,
         tradingsymbol,
         side);
@@ -229,8 +258,8 @@ public class PaperPositionRepository {
         SELECT DISTINCT p.id, o.signal_id, s.scalper_detail::text AS scalper_detail
         FROM paper_positions p
         JOIN paper_orders o
-          ON o.exchange = p.exchange AND o.tradingsymbol = p.tradingsymbol AND o.side = p.side
-          AND o.signal_id IS NOT NULL
+          ON o.book = p.book AND o.exchange = p.exchange AND o.tradingsymbol = p.tradingsymbol
+          AND o.side = p.side AND o.signal_id IS NOT NULL
         JOIN signals s ON s.id = o.signal_id
         WHERE p.status = 'OPEN' AND s.scalper_detail->>'side' = 'NEUTRAL'
         """,
@@ -239,9 +268,9 @@ public class PaperPositionRepository {
                 rs.getLong("id"), rs.getLong("signal_id"), rs.getString("scalper_detail")));
   }
 
-  /** The strategy that opened a position (via its first signal-linked order), for the T-1 audit. */
+  /** The strategy that opened a position in a book (via its first signal-linked order), for T-1. */
   public java.util.Optional<NotifyTarget> notifyTargetFor(
-      String exchange, String tradingsymbol, String side) {
+      String book, String exchange, String tradingsymbol, String side) {
     return jdbc
         .query(
             """
@@ -250,12 +279,13 @@ public class PaperPositionRepository {
             JOIN signals sg ON sg.id = o.signal_id
             JOIN strategy_versions sv ON sv.id = sg.strategy_version_id
             JOIN strategies s2 ON s2.id = sv.strategy_id
-            WHERE o.exchange=? AND o.tradingsymbol=? AND o.side=? AND o.signal_id IS NOT NULL
+            WHERE o.book=? AND o.exchange=? AND o.tradingsymbol=? AND o.side=? AND o.signal_id IS NOT NULL
             ORDER BY o.id LIMIT 1
             """,
             (rs, n) ->
                 new NotifyTarget(
                     java.util.UUID.fromString(rs.getString("strategy_id")), rs.getString("channel")),
+            book,
             exchange,
             tradingsymbol,
             side)
@@ -266,46 +296,81 @@ public class PaperPositionRepository {
   /** A position's originating strategy + its notification channel. */
   public record NotifyTarget(java.util.UUID strategyId, String channel) {}
 
-  /** Wipes the position ledger (paper reset). */
-  public int deleteAll() {
-    return jdbc.update("DELETE FROM paper_positions");
+  /** Wipes a book's position ledger ({@code book} null → all books; paper reset). */
+  public int deleteAll(String book) {
+    return jdbc.update(
+        "DELETE FROM paper_positions WHERE (?::text IS NULL OR book = ?)", book, book);
   }
 
-  /** Count of OPEN positions (the {@code max_open_paper_positions} gate). */
+  /** Count of OPEN positions across every book. */
   public int openCount() {
-    Integer count = jdbc.queryForObject("SELECT count(*) FROM paper_positions WHERE status='OPEN'", Integer.class);
+    return openCount(null);
+  }
+
+  /** Count of OPEN positions in a book ({@code book} null → all) — the {@code max_open} gate. */
+  public int openCount(String book) {
+    Integer count =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM paper_positions WHERE status='OPEN' AND (?::text IS NULL OR book = ?)",
+            Integer.class,
+            book,
+            book);
     return count == null ? 0 : count;
   }
 
-  /** Total realized P&amp;L over all closed trades. */
+  /** Total realized P&amp;L over all closed trades across every book. */
   public BigDecimal realizedTotal() {
-    return jdbc.queryForObject(
-        "SELECT COALESCE(SUM(realized_pnl),0) FROM paper_positions WHERE status='CLOSED'", BigDecimal.class);
+    return realizedTotal(null);
   }
 
-  /** Realized P&amp;L of trades closed on a given IST day (day-P&L input). */
+  /** Total realized P&amp;L over closed trades in a book ({@code book} null → all). */
+  public BigDecimal realizedTotal(String book) {
+    return jdbc.queryForObject(
+        "SELECT COALESCE(SUM(realized_pnl),0) FROM paper_positions WHERE status='CLOSED'"
+            + " AND (?::text IS NULL OR book = ?)",
+        BigDecimal.class,
+        book,
+        book);
+  }
+
+  /** Realized P&amp;L of trades closed on a given IST day across every book. */
   public BigDecimal realizedOn(java.time.LocalDate istDate) {
+    return realizedOn(null, istDate);
+  }
+
+  /** Realized P&amp;L of trades closed on a given IST day in a book ({@code book} null → all). */
+  public BigDecimal realizedOn(String book, java.time.LocalDate istDate) {
     return jdbc.queryForObject(
         "SELECT COALESCE(SUM(realized_pnl),0) FROM paper_positions"
-            + " WHERE status='CLOSED' AND (closed_at AT TIME ZONE 'Asia/Kolkata')::date = ?",
+            + " WHERE status='CLOSED' AND (?::text IS NULL OR book = ?)"
+            + " AND (closed_at AT TIME ZONE 'Asia/Kolkata')::date = ?",
         BigDecimal.class,
+        book,
+        book,
         java.sql.Date.valueOf(istDate));
   }
 
   /** Win/loss counts of trades closed on an IST day. */
   public record WinLoss(int wins, int losses) {}
 
-  /**
-   * Winning vs losing trades closed on a given IST day (the scalper 5-account discipline input —
-   * §12.7). A trade with realized P&amp;L &gt; 0 is a win; ≤ 0 (flat or losing) is counted as a loss.
-   */
+  /** Winning vs losing trades closed on a given IST day across every book. */
   public WinLoss winLossOn(java.time.LocalDate istDate) {
+    return winLossOn(null, istDate);
+  }
+
+  /**
+   * Winning vs losing trades closed on a given IST day in a book ({@code book} null → all) — the
+   * scalper 5-account discipline input (§12.7). Realized P&amp;L &gt; 0 is a win; ≤ 0 a loss.
+   */
+  public WinLoss winLossOn(String book, java.time.LocalDate istDate) {
     return jdbc.queryForObject(
         "SELECT COUNT(*) FILTER (WHERE realized_pnl > 0) AS wins,"
             + " COUNT(*) FILTER (WHERE realized_pnl <= 0) AS losses"
-            + " FROM paper_positions WHERE status='CLOSED'"
+            + " FROM paper_positions WHERE status='CLOSED' AND (?::text IS NULL OR book = ?)"
             + " AND (closed_at AT TIME ZONE 'Asia/Kolkata')::date = ?",
         (rs, n) -> new WinLoss(rs.getInt("wins"), rs.getInt("losses")),
+        book,
+        book,
         java.sql.Date.valueOf(istDate));
   }
 

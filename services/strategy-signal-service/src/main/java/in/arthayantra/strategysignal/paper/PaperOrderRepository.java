@@ -38,8 +38,9 @@ public class PaperOrderRepository {
     this.jdbc = jdbc;
   }
 
-  /** Inserts a FILLED order with its fill-audit trail; returns the generated id. */
+  /** Inserts a FILLED order in a book with its fill-audit trail; returns the generated id. */
   public long insertFilled(
+      String book,
       Long signalId,
       String exchange,
       String tradingsymbol,
@@ -54,12 +55,13 @@ public class PaperOrderRepository {
         jdbc.queryForObject(
             """
             INSERT INTO paper_orders
-              (signal_id, exchange, tradingsymbol, side, qty, order_type, status, placed_at,
+              (book, signal_id, exchange, tradingsymbol, side, qty, order_type, status, placed_at,
                filled_at, fill_price, fill_simulator, slippage_applied, quote_bid, quote_ask)
-            VALUES (?,?,?,?,?, 'MARKET', 'FILLED', now(), now(), ?,?,?,?,?)
+            VALUES (?,?,?,?,?,?, 'MARKET', 'FILLED', now(), now(), ?,?,?,?,?)
             RETURNING id
             """,
             Long.class,
+            book,
             signalId,
             exchange,
             tradingsymbol,
@@ -101,8 +103,8 @@ public class PaperOrderRepository {
         Math.max(offset, 0));
   }
 
-  /** Wipes the order log (paper reset). */
-  public int deleteAll() {
-    return jdbc.update("DELETE FROM paper_orders");
+  /** Wipes a book's order log ({@code book} null → all books; paper reset). */
+  public int deleteAll(String book) {
+    return jdbc.update("DELETE FROM paper_orders WHERE (?::text IS NULL OR book = ?)", book, book);
   }
 }

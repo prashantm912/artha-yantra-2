@@ -27,37 +27,44 @@ public class RiskSettingsRepository {
     this.objectMapper = objectMapper;
   }
 
-  /** All limit rows. */
-  public List<Setting> all() {
-    return jdbc.query("SELECT key, value, updated_at FROM risk_settings ORDER BY key", this::map);
+  /** All limit rows for a book. */
+  public List<Setting> all(String book) {
+    return jdbc.query(
+        "SELECT key, value, updated_at FROM risk_settings WHERE book=? ORDER BY key", this::map, book);
   }
 
-  /** One limit row by key. */
-  public Optional<Setting> get(String key) {
-    return jdbc.query("SELECT key, value, updated_at FROM risk_settings WHERE key=?", this::map, key).stream()
+  /** One limit row by (book, key). */
+  public Optional<Setting> get(String book, String key) {
+    return jdbc
+        .query(
+            "SELECT key, value, updated_at FROM risk_settings WHERE book=? AND key=?", this::map, book, key)
+        .stream()
         .findFirst();
   }
 
-  /** Upserts a limit row (the typed JSONB payload). */
-  public void upsert(String key, String valueJson) {
+  /** Upserts a limit row for a book (the typed JSONB payload). */
+  public void upsert(String book, String key, String valueJson) {
     jdbc.update(
         """
-        INSERT INTO risk_settings (key, value, updated_at) VALUES (?, ?::jsonb, now())
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+        INSERT INTO risk_settings (book, key, value, updated_at) VALUES (?, ?, ?::jsonb, now())
+        ON CONFLICT (book, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
         """,
+        book,
         key,
         valueJson);
   }
 
-  /** Appends a risk trip / flip audit row. */
-  public void audit(String key, String action, String detail) {
-    jdbc.update("INSERT INTO risk_audit (key, action, detail) VALUES (?,?,?)", key, action, detail);
+  /** Appends a risk trip / flip audit row for a book. */
+  public void audit(String book, String key, String action, String detail) {
+    jdbc.update(
+        "INSERT INTO risk_audit (book, key, action, detail) VALUES (?,?,?,?)", book, key, action, detail);
   }
 
-  /** Recent audit rows (newest first). */
-  public List<java.util.Map<String, Object>> auditTail(int limit) {
+  /** Recent audit rows for a book (newest first). */
+  public List<java.util.Map<String, Object>> auditTail(String book, int limit) {
     return jdbc.queryForList(
-        "SELECT key, action, detail, created_at FROM risk_audit ORDER BY created_at DESC LIMIT ?",
+        "SELECT key, action, detail, created_at FROM risk_audit WHERE book=? ORDER BY created_at DESC LIMIT ?",
+        book,
         Math.min(Math.max(limit, 1), 200));
   }
 

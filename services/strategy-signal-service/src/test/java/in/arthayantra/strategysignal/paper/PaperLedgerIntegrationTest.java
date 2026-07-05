@@ -90,7 +90,7 @@ class PaperLedgerIntegrationTest extends StrategySignalIntegrationTestBase {
 
     assertThat(positions.find(id)).get().extracting(p -> p.status()).isEqualTo("CLOSED");
     assertThat(positions.find(id)).get().extracting(p -> p.closeReason()).isEqualTo("STOP_LOSS");
-    assertThat(positions.findOpen("NFO", sym, "BUY")).isEmpty();
+    assertThat(positions.findOpen("manual", "NFO", sym, "BUY")).isEmpty();
   }
 
   @Test
@@ -110,7 +110,7 @@ class PaperLedgerIntegrationTest extends StrategySignalIntegrationTestBase {
 
     // a second open on the same key averages into the SAME open position (one row, qty 100)
     order(sym, "SELL", 50, "100.00").andExpect(status().isCreated()).andExpect(jsonPath("$.qty").value(100));
-    assertThat(positions.findOpen("NFO", sym, "SELL")).isPresent();
+    assertThat(positions.findOpen("manual", "NFO", sym, "SELL")).isPresent();
     assertThat(positions.listOpen().stream().filter(p -> p.tradingsymbol().equals(sym)).count())
         .isEqualTo(1);
   }
@@ -132,7 +132,7 @@ class PaperLedgerIntegrationTest extends StrategySignalIntegrationTestBase {
     // a short sold at ~120 and bought back at ~100 is profitable, and the position is CLOSED
     assertThat(positions.find(id)).get().extracting(p -> p.status()).isEqualTo("CLOSED");
     assertThat(positions.find(id)).get().extracting(p -> p.realizedPnl().signum()).isEqualTo(1);
-    assertThat(positions.findOpen("NFO", sym, "SELL")).isEmpty(); // key released
+    assertThat(positions.findOpen("manual", "NFO", sym, "SELL")).isEmpty(); // key released
 
     mockMvc
         .perform(get("/api/v1/paper/trades"))
@@ -143,8 +143,8 @@ class PaperLedgerIntegrationTest extends StrategySignalIntegrationTestBase {
   @Test
   void partialUniqueOpenKeyRejectsASecondRawOpen() {
     String sym = "TESTOPT-" + UUID.randomUUID();
-    positions.insertOpen("NFO", sym, "SELL", 50, new BigDecimal("99.95"), null, null);
-    assertThatThrownBy(() -> positions.insertOpen("NFO", sym, "SELL", 25, new BigDecimal("99.90"), null, null))
+    positions.insertOpen("manual", "NFO", sym, "SELL", 50, new BigDecimal("99.95"), null, null);
+    assertThatThrownBy(() -> positions.insertOpen("manual", "NFO", sym, "SELL", 25, new BigDecimal("99.90"), null, null))
         .isInstanceOf(DataIntegrityViolationException.class);
   }
 
@@ -179,7 +179,7 @@ class PaperLedgerIntegrationTest extends StrategySignalIntegrationTestBase {
                 .content(json(Map.of("qty", 10))))
         .andExpect(status().isOk());
 
-    assertThat(positions.findOpen("NSE", sym, "BUY")).isPresent();
+    assertThat(positions.findOpen("other", "NSE", sym, "BUY")).isPresent();
   }
 
   @Test

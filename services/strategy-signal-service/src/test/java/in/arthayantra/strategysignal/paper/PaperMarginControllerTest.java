@@ -24,7 +24,7 @@ class PaperMarginControllerTest {
   private static PositionRow pos(String sym, String side, long qty) {
     return new PositionRow(
         1L, "NFO", sym, side, qty, new BigDecimal("100"), BigDecimal.ZERO, "OPEN",
-        OffsetDateTime.parse("2026-07-03T09:20:00+05:30"), null, null, null, null);
+        OffsetDateTime.parse("2026-07-03T09:20:00+05:30"), null, null, null, null, "scalper");
   }
 
   @Test

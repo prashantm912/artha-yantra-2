@@ -24,20 +24,22 @@ public class AutoPaperListener {
 
   private final RiskService risk;
   private final SignalRepository signals;
+  private final BookResolver books;
   private final ApplicationEventPublisher events;
 
-  /** Wires the risk toggle, the signal store, and the event bus the paper listener reads. */
+  /** Wires the risk toggle, the signal store, the book resolver, and the paper listener's event bus. */
   public AutoPaperListener(
-      RiskService risk, SignalRepository signals, ApplicationEventPublisher events) {
+      RiskService risk, SignalRepository signals, BookResolver books, ApplicationEventPublisher events) {
     this.risk = risk;
     this.signals = signals;
+    this.books = books;
     this.events = events;
   }
 
-  /** Auto-take an emitted entry at its suggested qty when the toggle is ON. */
+  /** Auto-take an emitted entry at its suggested qty when the signal's BOOK has the toggle ON. */
   @EventListener
   public void onSignalEmitted(SignalEmitted event) {
-    if (!risk.autoPaperTradeEnabled()) {
+    if (!risk.autoPaperTradeEnabled(books.bookForSignal(event.signalId()))) {
       return;
     }
     SignalRepository.SignalRow row = signals.find(event.signalId()).orElse(null);

@@ -34,6 +34,10 @@ public class ExportController {
   public record DownloadRequest(
       String exchange, String symbol, LocalDate from, LocalDate to, String format) {}
 
+  /** Bulk export request: EVERY contract of one (underlying, expiry) + the date range + format. */
+  public record BulkRequest(
+      String underlying, LocalDate expiry, LocalDate from, LocalDate to, String format) {}
+
   private final BackfillExportService service;
 
   public ExportController(BackfillExportService service) {
@@ -60,6 +64,18 @@ public class ExportController {
     Export export =
         service.export(
             request.exchange(), request.symbol(), request.from(), request.to(), request.format());
+    return ResponseEntity.ok()
+        .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + export.filename() + "\"")
+        .contentType(MediaType.parseMediaType(export.contentType()))
+        .body(export.body());
+  }
+
+  /** Builds + returns a ZIP of the per-contract exports of a whole (underlying, expiry) chain. */
+  @PostMapping("/export/bulk")
+  public ResponseEntity<byte[]> exportBulk(@RequestBody BulkRequest request) {
+    Export export =
+        service.exportBulk(
+            request.underlying(), request.expiry(), request.from(), request.to(), request.format());
     return ResponseEntity.ok()
         .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + export.filename() + "\"")
         .contentType(MediaType.parseMediaType(export.contentType()))

@@ -127,6 +127,7 @@ public class PaperService {
   private final PaperAccountService accountService;
   private final BookResolver books;
   private final ApplicationEventPublisher events;
+  private final BigDecimal perTradeRiskPct;
 
   /** Wires the ledger collaborators. */
   public PaperService(
@@ -138,7 +139,9 @@ public class PaperService {
       SignalRepository signals,
       PaperAccountService accountService,
       BookResolver books,
-      ApplicationEventPublisher events) {
+      ApplicationEventPublisher events,
+      @org.springframework.beans.factory.annotation.Value("${artha.paper.risk.per-trade-risk-pct:1.0}")
+          BigDecimal perTradeRiskPct) {
     this.orders = orders;
     this.positions = positions;
     this.fills = fills;
@@ -148,6 +151,7 @@ public class PaperService {
     this.accountService = accountService;
     this.books = books;
     this.events = events;
+    this.perTradeRiskPct = perTradeRiskPct;
   }
 
   /** Simulates an entry; fills via {@code ltp_slippage/v1} against the next-tick LTP + cost model. */
@@ -194,9 +198,18 @@ public class PaperService {
     orders.insertFilled(
         book, request.signalId(), exchange, tradingsymbol, side, request.qty(), fill.fillPrice(),
         fills.simulatorId(), fill.slippageApplied(), null, null);
+    Long advisedLots = advisedLots(book, fill.fillPrice(), request.stopLoss());
     upsertPosition(
         book, exchange, tradingsymbol, side, request.qty(), fill.fillPrice(),
-        request.stopLoss(), request.takeProfit(), request.subaccountIdx());
+        request.stopLoss(), request.takeProfit(), request.subaccountIdx(), advisedLots);
+    // F9: after the ledger commits, price the position's SPAN margin (fail-soft, off the txn) and stamp
+    // margin_snapshot/margin_pct. The event fires only if a row exists (an averaged add still re-prices).
+    Optional<PositionRow> opened = positions.findOpen(book, exchange, tradingsymbol, side);
+    if (opened.isPresent()) {
+      PositionRow row = opened.get();
+      events.publishEvent(
+          new PaperPositionOpened(row.id(), book, exchange, tradingsymbol, side, row.qty()));
+    }
     String warning =
         accountService.buyingPowerWarning(
             book,
@@ -217,7 +230,8 @@ public class PaperService {
       BigDecimal fillPrice,
       BigDecimal stopLoss,
       BigDecimal takeProfit,
-      Integer subaccountIdx) {
+      Integer subaccountIdx,
+      Long advisedLots) {
     Optional<PositionRow> existing = positions.findOpen(book, exchange, tradingsymbol, side);
     if (existing.isPresent()) {
       // averaging onto an open position keeps its original bracket levels AND its original
@@ -232,8 +246,37 @@ public class PaperService {
       positions.updateOpen(row.id(), newQty, newAvg);
     } else {
       positions.insertOpen(
-          book, exchange, tradingsymbol, side, qty, fillPrice, stopLoss, takeProfit, subaccountIdx);
+          book, exchange, tradingsymbol, side, qty, fillPrice, stopLoss, takeProfit, subaccountIdx,
+          advisedLots);
     }
+  }
+
+  /** F9 advisory sizing for a book's open (short-circuits the equity read when there is no stop). */
+  private Long advisedLots(String book, BigDecimal fillPrice, BigDecimal stopLoss) {
+    if (stopLoss == null || fillPrice == null) {
+      return null;
+    }
+    return advisedLots(accountService.equity(book), perTradeRiskPct, fillPrice, stopLoss);
+  }
+
+  /**
+   * F9 advisory: the risk-based quantity a {@code riskPct}-of-equity / stop-distance sizing would
+   * suggest — {@code floor(riskPct% × equity ÷ |fill − stop|)}. Advisory only (never overrides the
+   * actual qty). {@code null} when a required input is missing or the stop distance is non-positive
+   * (nothing to risk-size against). Pure + package-visible for unit coverage.
+   */
+  static Long advisedLots(
+      BigDecimal equity, BigDecimal riskPct, BigDecimal fillPrice, BigDecimal stopLoss) {
+    if (equity == null || riskPct == null || fillPrice == null || stopLoss == null) {
+      return null;
+    }
+    BigDecimal stopDistance = fillPrice.subtract(stopLoss).abs();
+    if (stopDistance.signum() <= 0) {
+      return null;
+    }
+    BigDecimal riskBudget = equity.multiply(riskPct).divide(BigDecimal.valueOf(100));
+    // longValue (not longValueExact): advisory only — it must never throw and roll back a real fill.
+    return riskBudget.divide(stopDistance, 0, RoundingMode.DOWN).longValue();
   }
 
   /** Closes a position at the stated price (or the last tick); realized = exit + entry-basis cash. */

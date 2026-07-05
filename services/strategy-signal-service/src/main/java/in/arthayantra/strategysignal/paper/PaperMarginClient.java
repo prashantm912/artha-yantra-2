@@ -1,11 +1,13 @@
 package in.arthayantra.strategysignal.paper;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
@@ -23,10 +25,18 @@ public class PaperMarginClient {
 
   private final RestClient restClient;
 
-  /** Wires the configured market-data base URL (same seam as the other paper→market-data clients). */
+  /**
+   * Wires the configured market-data base URL (same seam as the other paper→market-data clients),
+   * with an explicit short connect/read timeout so the F9 heat-cap gate — which prices synchronously
+   * on the entry-emission path when enforcement is on — can never stall the tick thread on a slow (not
+   * merely down) market-data; a timeout surfaces as an {@code unpriced} quote (fail-soft, never blocks).
+   */
   public PaperMarginClient(
       RestClient.Builder builder, @Value("${artha.marketdata.base-url}") String baseUrl) {
-    this.restClient = builder.baseUrl(baseUrl).build();
+    SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+    factory.setConnectTimeout(Duration.ofMillis(1500));
+    factory.setReadTimeout(Duration.ofMillis(2000));
+    this.restClient = builder.baseUrl(baseUrl).requestFactory(factory).build();
   }
 
   /** One basket leg by symbol (the structured tuple is resolved market-data-side). */

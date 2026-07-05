@@ -169,7 +169,18 @@ Owner batch ("implement autonomously while I sleep"), all merged + deployed to t
   `docs/strategies/manas-arora-swing-backtest-results.md`**.
 - **Deploy:** backup + `:62fb38f3` rollback images taken first; go-live flags in `.env` + compose
   passthroughs. Each PR got adversarial + domain review before merge (all PASS).
-- **Remaining = owner-gated only:** the supervised forward-paper watch on the Manas book + the owner's
-  reliability sign-off (same bar as Minervini); a possible v2 that gives the vcp setup a distinct live
-  gate (currently vcp + breakout fire off the same funnel pivot in the live engine — distinct only in
-  the screener/backtest) and adds the true 2×ATR trail + square-off exits (backtest-only in v1).
+- **Doc-fidelity follow-ups SHIPPED 2026-07-05 (owner "build full §3.5 live" + "per-setup pivots"):**
+  §3.5 ATR exit doctrine LIVE ([#573](https://github.com/prashantm912/artha-yantra-2/pull/573) —
+  `atr_multiple` stop cap_pct 10 + armed trail arm_pct 9 + new `square_off` type, additive, goldens
+  9/9 byte-identical); per-setup live pivots ([#574](https://github.com/prashantm912/artha-yantra-2/pull/574)
+  — breakout→`MANAS_BREAKOUT_PIVOT`, vcp→`MANAS_VCP_PIVOT`, so vcp + breakout no longer fire off the same
+  funnel pivot; live-proof: 2 real entries SENORES+SBCL where the same data gave 0 before). The v1 "possible
+  v2" is now DONE — the live engine is doc-faithful.
+- **Backtest review follow-up DONE 2026-07-05:** the 2 adversarial Manas-backtest reviewers ran (task
+  `adaf…` PASS + `a6dd6a…` 1-bug/1-risk/1-question). Only real finding = missing `ORDER BY` in
+  `eqSymbols()` (portfolio-stat reproducibility) — fixed in both the Manas fork (#569) and the Minervini
+  original ([#575](https://github.com/prashantm912/artha-yantra-2/pull/575)). The `a6dd6a` reviewer's
+  L545 volumeRatio "off-by-one" = FALSE POSITIVE (50 bars, verified); its stale-pivot + RS-sparse flags =
+  verified non-issues (weekly-fixed pivot is intended; Pass 1/Pass 2 gate RS_LOOKBACK identically).
+- **Remaining = owner-gated ONLY:** the supervised forward-paper watch on the Manas ₹1.5 L book + the
+  owner's reliability sign-off (same §0.5 #12 bar as Minervini). No buildable code left in this family.

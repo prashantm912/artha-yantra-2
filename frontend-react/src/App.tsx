@@ -35,6 +35,7 @@ import { JournalPage } from './pages/journal/JournalPage.tsx';
 import { OrdersPage } from './pages/orders/OrdersPage.tsx';
 import { WatchlistsPage } from './pages/watchlists/WatchlistsPage.tsx';
 import { MinerviniScreenerPage } from './pages/equity/MinerviniScreenerPage.tsx';
+import { ManasAroraScreenerPage } from './pages/equity/ManasAroraScreenerPage.tsx';
 import { SettingsPage } from './pages/settings/SettingsPage.tsx';
 import { StatusPage } from './pages/dataops/StatusPage.tsx';
 import { CoveragePage } from './pages/dataops/CoveragePage.tsx';
@@ -126,6 +127,16 @@ const DeliveryDataPage = lazy(() =>
 const MinerviniCandidatePage = lazy(() =>
   import('./pages/equity/MinerviniCandidatePage.tsx').then((m) => ({
     default: m.MinerviniCandidatePage,
+  })),
+);
+const ManasAroraCandidatePage = lazy(() =>
+  import('./pages/equity/ManasAroraCandidatePage.tsx').then((m) => ({
+    default: m.ManasAroraCandidatePage,
+  })),
+);
+const ManasAroraBacktestPage = lazy(() =>
+  import('./pages/equity/ManasAroraBacktestPage.tsx').then((m) => ({
+    default: m.ManasAroraBacktestPage,
   })),
 );
 const EquityReturnsPage = lazy(() =>
@@ -246,6 +257,9 @@ export function App() {
           <Route path="/equity/equity-returns" element={<Lazy><EquityReturnsPage /></Lazy>} />
           <Route path="/equity/minervini" element={<MinerviniScreenerPage />} />
           <Route path="/equity/minervini/:symbol" element={<Lazy><MinerviniCandidatePage /></Lazy>} />
+          <Route path="/equity/manas-arora" element={<ManasAroraScreenerPage />} />
+          <Route path="/equity/manas-arora/backtest" element={<Lazy><ManasAroraBacktestPage /></Lazy>} />
+          <Route path="/equity/manas-arora/:symbol" element={<Lazy><ManasAroraCandidatePage /></Lazy>} />
           <Route path="/equity/sector-heatmap" element={<Lazy><SectorHeatmapPage /></Lazy>} />
           <Route path="/equity/sector-stats" element={<Lazy><SectorStatsPage /></Lazy>} />
           <Route path="/equity/index-contribution" element={<Lazy><IndexContributionPage /></Lazy>} />

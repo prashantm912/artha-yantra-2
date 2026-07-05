@@ -132,6 +132,13 @@ public class SignalEngine {
           });
 
   private volatile List<Loaded> loaded = List.of();
+  /**
+   * The registry's published+enabled version-id set AS OF the last {@link #reload()} — the reconcile
+   * baseline. Comparing the CURRENT published set against this (not against the LOADED subset) is what
+   * lets the 20s reconcile detect a genuine registry change while NOT looping forever on strategies
+   * the engine deliberately skips at load (swing, non-rollable-primary, empty-universe, load-error).
+   */
+  private volatile String lastReloadedPublishedSet = "";
   private volatile RedisMessageListenerContainer container;
 
   private final Timer evalTimer;
@@ -199,7 +206,8 @@ public class SignalEngine {
     reloadRequested.set(false);
     bankCache.clear(); // definitions/universes may have changed — banks rebuild on next bar (P1-12)
     List<Loaded> fresh = new ArrayList<>();
-    for (StrategyRepository.StrategyRow strategy : registry.listAll()) {
+    List<StrategyRepository.StrategyRow> all = registry.listAll();
+    for (StrategyRepository.StrategyRow strategy : all) {
       if (!strategy.enabled() || strategy.publishedVersionId() == null) {
         continue;
       }
@@ -295,6 +303,9 @@ public class SignalEngine {
       }
     }
     this.loaded = List.copyOf(fresh);
+    // Snapshot the published set THIS reload was based on (from the same registry read), so the 20s
+    // reconcile compares registry-vs-registry and converges even though `loaded` is a subset.
+    this.lastReloadedPublishedSet = publishedVersionSetOf(all);
     resubscribe();
     log.info("signal engine loaded {} published strategies", fresh.size());
   }
@@ -1153,24 +1164,26 @@ public class SignalEngine {
    */
   @Scheduled(fixedDelay = 20_000L, initialDelay = 20_000L)
   public void reconcilePublishedStrategies() {
-    if (!publishedVersionSet().equals(loadedVersionSet())) {
-      log.info("reconcile: published-strategy set drifted from the engine — reloading");
+    // Compare the registry's CURRENT published set against the set the last reload was based on — NOT
+    // against the LOADED subset (the engine deliberately skips swing / non-rollable / empty-universe
+    // strategies, so loaded < published is the steady state, not drift). This reloads on a genuine
+    // publish/unpublish/enable/disable and then converges.
+    if (!publishedVersionSet().equals(lastReloadedPublishedSet)) {
+      log.info("reconcile: published-strategy set changed in the registry — reloading");
       reloadRequested.set(true);
       evalExecutor.execute(this::drainReloadOnly);
     }
   }
 
   private String publishedVersionSet() {
-    return registry.listAll().stream()
-        .filter(s -> s.enabled() && s.publishedVersionId() != null)
-        .map(s -> s.publishedVersionId().toString())
-        .sorted()
-        .collect(java.util.stream.Collectors.joining(","));
+    return publishedVersionSetOf(registry.listAll());
   }
 
-  private String loadedVersionSet() {
-    return loaded.stream()
-        .map(l -> l.versionId().toString())
+  /** The sorted, comma-joined published-version-id set of the enabled+published rows in {@code all}. */
+  private static String publishedVersionSetOf(List<StrategyRepository.StrategyRow> all) {
+    return all.stream()
+        .filter(s -> s.enabled() && s.publishedVersionId() != null)
+        .map(s -> s.publishedVersionId().toString())
         .sorted()
         .collect(java.util.stream.Collectors.joining(","));
   }

@@ -188,7 +188,11 @@ public class MinerviniSellDecisionService {
               v -> {
                 try {
                   StrategyDefinition def = StrategyCompiler.compile(v.config());
-                  if ("swing".equals(def.session().style())) {
+                  // scoped to this family's own universe mode, so the triad never lists another
+                  // swing family's holdings (the mirror of the engine's + Manas sibling's scoping).
+                  if ("swing".equals(def.session().style())
+                      && "minervini_funnel"
+                          .equals(v.config().path("universe").path("mode").asText())) {
                     out.put(strategy.publishedVersionId(), def);
                   }
                 } catch (RuntimeException ignored) {

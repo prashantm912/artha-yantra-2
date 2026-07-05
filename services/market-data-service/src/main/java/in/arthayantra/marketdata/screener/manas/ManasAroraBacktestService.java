@@ -636,7 +636,11 @@ public class ManasAroraBacktestService {
     return jdbc.queryForList(
         "SELECT DISTINCT c.tradingsymbol FROM candles c JOIN instruments i"
             + " ON i.exchange=c.exchange AND i.tradingsymbol=c.tradingsymbol AND i.instrument_type='EQ'"
-            + " WHERE c.interval='1d' AND c.exchange='NSE'",
+            + " WHERE c.interval='1d' AND c.exchange='NSE'"
+            // Deterministic symbol order: the trade index (its position in `all`) is the final tiebreak
+            // in SwingPortfolio's same-day slot contest, so a stable order makes the portfolio stats
+            // (CAGR/DD/Sharpe, taken/skipped) byte-reproducible run-to-run.
+            + " ORDER BY c.tradingsymbol",
         String.class);
   }
 

@@ -118,13 +118,21 @@ Provenance rows live in [`docs/DEFERRED_BACKLOG.md`](../../DEFERRED_BACKLOG.md) 
   interval (incl. 3-min) is a read-time rollup off the 1-min base. Fidelity goal already exceeded.
 - Data-Ops parked: ~~`backfill_jobs` audit table~~ **DONE (#517)** — V030 run-audit table + `GET
   /market/admin/backfill-jobs` + Status-page history; ~~contract-type selector~~ **DONE (#517)** —
-  Both/Options/Futures on the Collection wizard (default Both). Remaining (low-value, no consumer):
-  per-expiry BULK export (single-contract export exists) + STOMP status push (the Status page polls
-  today — works fine). Do not re-flag the two done sub-items.
+  Both/Options/Futures on the Collection wizard (default Both). ~~per-expiry BULK export~~ **DONE
+  ([#584](https://github.com/prashantm912/artha-yantra-2/pull/584), 2026-07-05):** `POST
+  /market/admin/export/bulk` zips one per-contract CSV/JSON of a whole (underlying, expiry) chain
+  (`BackfillExportService.exportBulk`, ≤500 contracts sync) + a "Download whole expiry (ZIP)" button.
+  **STOMP status push = NOT-WORTH-BUILDING (2026-07-05):** market-data has NO WebSocket infra; ~200
+  lines of new plumbing to replace a working 2s poll for a single operator (net-negative). Deferred
+  until a multi-dashboard consumer exists. Do not re-flag.
 - Per-check server audit on signal Take; full-auto execution flag (semi-auto "Take" is the v1 safety boundary).
 - AdvanceChart TV-binary extras: ~~OI-bar, trade-history, audio alerts~~ **+ horizontal price lines DONE
-  (#516)** on the lightweight-charts v5 chart (all off/empty by default). Remaining (large LWC-primitive
-  lift, no consumer): interactive freehand drawing tools + user-configurable study-template save/load.
+  (#516)** on the lightweight-charts v5 chart (all off/empty by default). ~~study-template save/load~~
+  **chart-state persistence DONE ([#583](https://github.com/prashantm912/artha-yantra-2/pull/583),
+  2026-07-05):** symbol/interval + the extras toolbar persist to localStorage (`core/chartPrefs`),
+  restored on reload — the ADR-A13 chart-state v1. **Freehand drawing tools = DEFERRED (ADR A13):** a
+  ~5-day custom lightweight-charts-primitive/canvas lift with a KLineCharts library-re-eval trigger,
+  no consumer — not built as speculative dead code.
 
 ## 7. Decided WON'T DO — never re-flag as pending
 

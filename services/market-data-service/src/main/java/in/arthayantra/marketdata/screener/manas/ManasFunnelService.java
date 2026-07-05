@@ -55,7 +55,9 @@ public class ManasFunnelService {
         FROM manas_arora_setups s
         WHERE s.screen_date = r.screen_date AND s.symbol = r.symbol
           AND s.is_valid = TRUE AND s.pivot IS NOT NULL
-        ORDER BY abs(s.pivot - r.close_price) ASC
+        -- Prefer the nearest pivot AT/ABOVE the close (the one price is approaching → the buyable/
+        -- on-deck test uses it), falling back to the nearest below when both setups sit under price.
+        ORDER BY (s.pivot >= r.close_price) DESC, abs(s.pivot - r.close_price) ASC
         LIMIT 1
       ) v ON TRUE
       WHERE r.screen_date = ? AND r.passes_all = TRUE

@@ -1,6 +1,5 @@
 package in.arthayantra.marketdata.screener.manas;
 
-import java.time.LocalDate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -13,9 +12,12 @@ import org.springframework.stereotype.Component;
 /**
  * Runs the Manas Arora daily selection screen + persists it. Fires a boot one-shot (so a fresh stack
  * has a screen immediately) and a nightly cron AFTER the ~19:00 IST bhavcopy pull (so the day's daily
- * bars are present). Fail-soft: a screen failure is logged, never fatal. Gated
- * DEFAULT-OFF by {@code artha.manas-arora.screen.enabled} — the whole component is only created when
- * the flag is true (so nothing runs until a deploy wires it), mirroring the Minervini screen enable.
+ * bars are present). Fail-soft: a screen failure is logged, never fatal. Gated DEFAULT-OFF by
+ * {@code artha.manas-arora.screen.enabled} — the whole component is created ONLY when the flag is
+ * true, so nothing runs until a deploy wires it (this differs from the always-on Minervini scheduler,
+ * which guards inside its method; Manas defaults off/absent as a new, deploy-gated screener). The
+ * on-demand {@code POST /run} path drives {@code ManasScreenService}/{@code ManasGeometryService}
+ * directly and works regardless of this flag.
  */
 @Component
 @ConditionalOnProperty(prefix = "artha.manas-arora.screen", name = "enabled", havingValue = "true")
@@ -45,17 +47,6 @@ public class ManasScheduler {
   @Scheduled(cron = "${artha.manas-arora.cron:0 40 19 * * MON-FRI}", zone = "Asia/Kolkata")
   void scheduled() {
     runQuietly("scheduled");
-  }
-
-  /** On-demand run (used by the controller's POST /run). Returns rows written. */
-  public int runOnce(LocalDate asOf) {
-    ManasScreenService.ScreenResult r = screener.screen(asOf);
-    if (r.screenDate() == null) {
-      return 0;
-    }
-    int written = repo.upsertAll(r.screenDate(), r.candidates());
-    computeGeometry(r);
-    return written;
   }
 
   private void runQuietly(String trigger) {

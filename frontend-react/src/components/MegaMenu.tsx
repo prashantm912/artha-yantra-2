@@ -85,6 +85,8 @@ const SECTIONS: MenuSection[] = [
       { label: 'Breadth', to: '/equity/breadth' }, // Wave 3 — advance/decline + delivery leaders (zero-BE)
       { label: 'Equity Returns', to: '/equity/equity-returns' }, // Wave 3 — multi-window returns screener
       { label: 'Minervini Screener', to: '/equity/minervini' }, // Track-1 — 8-gate Trend Template + RS-rank
+      { label: 'Manas Arora Screener', to: '/equity/manas-arora' }, // 6-criteria selection + universe/liquidity/float
+      { label: 'Manas Arora Backtest', to: '/equity/manas-arora/backtest' }, // deep-history swing-backtest comparison
       { label: 'Delivery Data', to: '/equity/delivery-data' }, // Wave 3 — per-stock delivery series
       { label: 'Sector Heatmap', to: '/equity/sector-heatmap' }, // Wave 3 — sector-grouped %change treemap
       { label: 'Sector Stats', to: '/equity/sector-stats' }, // Wave 3 — per-sector cards + factor table

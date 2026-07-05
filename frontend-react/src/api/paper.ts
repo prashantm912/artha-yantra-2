@@ -3,9 +3,31 @@
 // curve, the account header and the global risk limits (kill switch / max-open / daily-loss). The MTM
 // stays fresh via a short refetchInterval (the BE computes markPrice/unrealizedPnl server-side); the
 // WS per-symbol tick overlay the Angular page layered on top is a later enhancement.
+//
+// Per-book split (owner request): the single paper book is now three per-family books — `scalper`,
+// `minervini`, `manas-arora` — each with its own capital/risk/positions. Every hook takes an optional
+// `book`: passed → `?book=` on the read + `book` in the query key (so switching books refetches);
+// omitted → today's all-books aggregate. The capital + risk mutations REQUIRE a book (the BE 400s a
+// blank one); reset accepts an optional book (omitted → all books).
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from './client.ts';
+
+/** A per-family paper book — its own capital, risk config, positions and signals. */
+export type PaperBook = 'scalper' | 'minervini' | 'manas-arora';
+
+/** The paper books in menu order, with their human labels. */
+export const PAPER_BOOKS: { book: PaperBook; label: string }[] = [
+  { book: 'scalper', label: 'Scalper' },
+  { book: 'minervini', label: 'Minervini' },
+  { book: 'manas-arora', label: 'Manas Arora' },
+];
+
+/** The human label for a book slug (falls back to the raw slug for an unknown book). */
+export function bookLabel(book: string | undefined): string | undefined {
+  if (!book) return undefined;
+  return PAPER_BOOKS.find((b) => b.book === book)?.label ?? book;
+}
 
 /** An open paper position with its server-computed mark-to-market. */
 export interface PaperPosition {
@@ -73,40 +95,48 @@ const PAPER = 'paper';
 const RISK = 'risk';
 const MTM_REFETCH_MS = 5000;
 
-export function usePaperPositions() {
+/** Appends `?book=` when a book is set (omitted → the all-books aggregate). */
+function bookQuery(book: string | undefined, extra = ''): string {
+  const params = new URLSearchParams(extra);
+  if (book) params.set('book', book);
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
+}
+
+export function usePaperPositions(book?: string) {
   return useQuery({
-    queryKey: [PAPER, 'positions'],
-    queryFn: () => apiFetch<{ items: PaperPosition[] }>('/paper/positions'),
+    queryKey: [PAPER, 'positions', book ?? null],
+    queryFn: () => apiFetch<{ items: PaperPosition[] }>(`/paper/positions${bookQuery(book)}`),
     refetchInterval: MTM_REFETCH_MS,
   });
 }
 
-export function usePaperTrades() {
+export function usePaperTrades(book?: string) {
   return useQuery({
-    queryKey: [PAPER, 'trades'],
-    queryFn: () => apiFetch<{ items: PaperTrade[] }>('/paper/trades?limit=200'),
+    queryKey: [PAPER, 'trades', book ?? null],
+    queryFn: () => apiFetch<{ items: PaperTrade[] }>(`/paper/trades${bookQuery(book, 'limit=200')}`),
   });
 }
 
-export function usePaperPnl() {
+export function usePaperPnl(book?: string) {
   return useQuery({
-    queryKey: [PAPER, 'pnl'],
-    queryFn: () => apiFetch<PaperPnl>('/paper/pnl'),
+    queryKey: [PAPER, 'pnl', book ?? null],
+    queryFn: () => apiFetch<PaperPnl>(`/paper/pnl${bookQuery(book)}`),
   });
 }
 
-export function usePaperAccount() {
+export function usePaperAccount(book?: string) {
   return useQuery({
-    queryKey: [PAPER, 'account'],
-    queryFn: () => apiFetch<PaperAccount>('/paper/account'),
+    queryKey: [PAPER, 'account', book ?? null],
+    queryFn: () => apiFetch<PaperAccount>(`/paper/account${bookQuery(book)}`),
     refetchInterval: MTM_REFETCH_MS,
   });
 }
 
-export function useRiskSettings() {
+export function useRiskSettings(book?: string) {
   return useQuery({
-    queryKey: [RISK, 'settings'],
-    queryFn: () => apiFetch<{ items: RiskSetting[] }>('/risk/settings'),
+    queryKey: [RISK, 'settings', book ?? null],
+    queryFn: () => apiFetch<{ items: RiskSetting[] }>(`/risk/settings${bookQuery(book)}`),
   });
 }
 
@@ -118,11 +148,12 @@ function usePaperInvalidate() {
   };
 }
 
-export function useUpdateCapital() {
+/** Edit a book's starting capital — the BE requires the book (a blank one 400s). */
+export function useUpdateCapital(book?: string) {
   const invalidate = usePaperInvalidate();
   return useMutation({
     mutationFn: (startingCapital: string) =>
-      apiFetch<PaperAccount>('/paper/account', { method: 'PUT', json: { startingCapital } }),
+      apiFetch<PaperAccount>('/paper/account', { method: 'PUT', json: { startingCapital, book } }),
     onSuccess: invalidate,
   });
 }
@@ -138,6 +169,7 @@ export interface PaperOrderRequest {
   price?: string;
   stopLoss?: string;
   takeProfit?: string;
+  book?: string;
 }
 
 export function usePlacePaperOrder() {
@@ -161,20 +193,26 @@ export function useClosePosition() {
   });
 }
 
-export function useResetLedger() {
+/** Wipe a book's ledger (book omitted → all books). */
+export function useResetLedger(book?: string) {
   const invalidate = usePaperInvalidate();
   return useMutation({
-    mutationFn: () => apiFetch<void>('/paper/reset', { method: 'POST', json: { confirm: true } }),
+    mutationFn: () =>
+      apiFetch<void>('/paper/reset', { method: 'POST', json: { confirm: true, book } }),
     onSuccess: invalidate,
   });
 }
 
-export function useUpdateRisk() {
+/** Upsert one of a book's risk limits — the BE requires the book (a blank one 400s). */
+export function useUpdateRisk(book?: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ key, value }: { key: string; value: Record<string, unknown> }) =>
-      apiFetch<{ items: RiskSetting[] }>('/risk/settings', { method: 'PUT', json: { key, value } }),
-    onSuccess: (res) => qc.setQueryData([RISK, 'settings'], res),
+      apiFetch<{ items: RiskSetting[] }>('/risk/settings', {
+        method: 'PUT',
+        json: { book, key, value },
+      }),
+    onSuccess: (res) => qc.setQueryData([RISK, 'settings', book ?? null], res),
   });
 }
 

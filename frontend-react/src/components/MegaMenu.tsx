@@ -24,11 +24,17 @@ const SECTIONS: MenuSection[] = [
       { label: 'Paper Ticket', to: '/scalper' }, // Phase 4b — live signals + paper order ticket + P&L (renamed from Scalper Cockpit, §11 item 16)
       { label: 'Dashboard', to: '/dashboard' }, // cockpit — at-a-glance status/signals/paper/jobs (E-2)
       { label: 'Signals', to: '/signals' }, // cockpit — live feed + reasoning breakdown (C-2.26)
+      { label: 'Scalper Signals', to: '/signals/scalper' }, // per-book — scalper-family calls only
+      { label: 'Minervini Signals', to: '/signals/minervini' }, // per-book — Minervini-family calls only
+      { label: 'Manas Arora Signals', to: '/signals/manas-arora' }, // per-book — Manas-Arora-family calls only
       { label: 'Signal Rejections', to: '/signal-rejections' }, // why the confluence gate blocked each scalper entry (rail + margin + dots)
       { label: 'Charts', to: '/charts' }, // cockpit — candlestick + trade/signal overlays (A13)
       { label: 'Advance Chart', to: '/advance-chart' }, // §1b — LWC pro chart + default study set (VWAP/VWMA/SuperTrend/RSI)
       { label: 'Multiframe Chart', to: '/multiframe-chart' }, // §1b — 2×2 multi-timeframe grid of Advance Charts
       { label: 'Paper Trading', to: '/paper' }, // cockpit — positions + ledger + risk limits (F-43)
+      { label: 'Scalper Paper', to: '/paper/scalper' }, // per-book — scalper book (own capital/risk/positions)
+      { label: 'Minervini Paper', to: '/paper/minervini' }, // per-book — Minervini book (own capital/risk/positions)
+      { label: 'Manas Arora Paper', to: '/paper/manas-arora' }, // per-book — Manas Arora book (own capital/risk/positions)
       { label: 'Orders', to: '/orders' }, // §18.1 — broker orderbook/positions/tradebook/funds (read-only)
       { label: 'Journal', to: '/journal' }, // cockpit — weekly-review entries (F-44A)
       { label: 'Watchlists', to: '/watchlists' }, // cockpit — named lists + screener (E-8)

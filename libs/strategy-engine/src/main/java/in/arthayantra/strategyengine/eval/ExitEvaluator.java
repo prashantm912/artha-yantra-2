@@ -97,6 +97,90 @@ public final class ExitEvaluator {
   }
 
   /**
+   * The current trailing-stop PRICE a position sits at — the level {@link #evaluate}'s
+   * {@code trailing_stop} rule would fire on the bar at {@code index}, as an absolute price (empty
+   * when the strategy declares no {@code trailing_stop} rule, the trail has not yet armed/activated,
+   * or the level is unresolvable — e.g. a warming ATR/indicator). Read-only reporting for the daily
+   * sell-decision "where am I a seller" read: it mirrors {@link #trailing}'s per-basis peak/ATR/
+   * indicator arithmetic EXACTLY, so the reported number equals the price the live exit check uses —
+   * but unlike {@code trailing} it returns the level whether or not price has breached it. Pure
+   * reporting: never affects emitted signals; adds no new code to the evaluated exit path, so the
+   * golden vectors stay byte-identical. Uses the FIRST {@code trailing_stop} rule (as {@code evaluate}
+   * does). Keep this in lockstep with {@link #trailing} if the trail arithmetic ever changes.
+   */
+  public static Optional<BigDecimal> trailStop(
+      StrategyDefinition definition, IndicatorBank bank, Position position, int index) {
+    EngineSeries series = bank.primarySeries();
+    for (StrategyDefinition.ExitRuleSpec rule : definition.exitRules()) {
+      if ("trailing_stop".equals(rule.type())) {
+        return trailStopLevel(bank, series, position, index, rule);
+      }
+    }
+    return Optional.empty();
+  }
+
+  /** The trailing-stop level for one rule (mirrors {@link #trailing}'s per-basis LEVEL math). */
+  private static Optional<BigDecimal> trailStopLevel(
+      IndicatorBank bank,
+      EngineSeries series,
+      Position position,
+      int index,
+      StrategyDefinition.ExitRuleSpec rule) {
+    Map<String, Object> params = rule.params();
+    String basis = String.valueOf(params.get("basis"));
+    boolean isLong = position.direction() == Direction.LONG;
+    BigDecimal peak = favorableExtreme(series, position, index);
+    switch (basis) {
+      case "atr_multiple" -> {
+        BigDecimal value = decimal(params.get("value"));
+        BigDecimal atr = atrAtEntry(series, position, params);
+        if (value == null || atr == null || !trailArmed(isLong, peak, position, params.get("arm_pct"))) {
+          return Optional.empty();
+        }
+        BigDecimal dist = atr.multiply(value, EngineMath.MC);
+        return Optional.of(isLong ? peak.subtract(dist) : peak.add(dist));
+      }
+      case "premium_pct" -> {
+        BigDecimal trailBy =
+            decimal(params.containsKey("trail_by") ? params.get("trail_by") : params.get("value"));
+        if (trailBy == null || !trailArmed(isLong, peak, position, params.get("activate_at"))) {
+          return Optional.empty();
+        }
+        BigDecimal dist = peak.multiply(trailBy, EngineMath.MC).divide(EngineMath.HUNDRED, EngineMath.MC);
+        return Optional.of(isLong ? peak.subtract(dist) : peak.add(dist));
+      }
+      case "index_points" -> {
+        BigDecimal offset = decimal(params.get("value"));
+        return offset == null ? Optional.empty() : Optional.of(isLong ? peak.subtract(offset) : peak.add(offset));
+      }
+      case "indicator" -> {
+        return Optional.ofNullable(indicatorLevel(bank, String.valueOf(params.get("alias")), index));
+      }
+      default -> {
+        return Optional.empty();
+      }
+    }
+  }
+
+  /**
+   * Whether an {@code arm_pct}/{@code activate_at} gate is satisfied — the favourable extreme is up
+   * {@code threshold}% off entry (identical to the gate inside {@link #trailing}). Null threshold →
+   * always armed (no gate), matching {@code trailing}.
+   */
+  private static boolean trailArmed(
+      boolean isLong, BigDecimal peak, Position position, Object thresholdRaw) {
+    BigDecimal threshold = decimal(thresholdRaw);
+    if (threshold == null) {
+      return true;
+    }
+    BigDecimal gainPct =
+        (isLong ? peak.subtract(position.entryPrice()) : position.entryPrice().subtract(peak))
+            .divide(position.entryPrice(), EngineMath.MC)
+            .multiply(EngineMath.HUNDRED, EngineMath.MC);
+    return gainPct.compareTo(threshold) >= 0;
+  }
+
+  /**
    * A9 [FP-5] intrabar exits: when {@code exit_intrabar} is on and the primary timeframe is
    * coarser than 1m, the LEVEL exits (stop_loss / trailing_stop / take_profit) are evaluated on
    * each CLOSED 1m bar — the same rule replay applies at the 1m floor. time_stop/signal_exit

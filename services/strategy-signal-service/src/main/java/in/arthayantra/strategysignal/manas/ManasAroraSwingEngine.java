@@ -64,10 +64,14 @@ import org.springframework.transaction.support.TransactionTemplate;
  * are loaded here (the mirror of the Minervini engine's own minervini_funnel scoping) — so the two
  * swing families never evaluate each other's universe.
  *
- * <p><b>Exit doctrine (parity-safe):</b> the ~10% protective stop ({@code stop_loss percent}) + a
- * 20-day-MA close-below trail ({@code trailing_stop indicator sma20}) — a live-v1 PROXY for the
- * "+8-10% then 2×ATR trail" doctrine. The true 2×ATR trail + the too-fast/parabolic square-off are
- * modelled in the BACKTEST, not the live v1 (exactly as Minervini deferred its Stage-3/4 exits).
+ * <p><b>Exit doctrine (parity-safe):</b> the doc-faithful §3.5 exits, live since #573 — a 2×ATR
+ * initial stop capped at 10% of entry ({@code stop_loss atr_multiple value 2 cap_pct 10}) and a
+ * 2×ATR trailing stop that arms once the position is +9% ({@code trailing_stop atr_multiple value 2
+ * arm_pct 9}), the SAME rules the backtest runs — so the live and backtest exit planes match on
+ * stop/trail. Only the too-fast/parabolic square-offs remain backtest-only (a forward-paper A/B,
+ * exactly as Minervini deferred its Stage-3/4 exits). {@code sma20} is an ENTRY-gate input
+ * ({@code px > sma20}), NOT the trail — the daily sell-decision reads the real trail via
+ * {@code ExitEvaluator.trailStop} (audit M32/M33).
  *
  * <p><b>Pyramiding (§3.4, flag-gated {@code artha.manas-arora.pyramid.enabled}, default OFF):</b> when a
  * held winner has moved up ≥ {@code pyramid.min-gain-pct} since its most-recent lot AND makes a fresh

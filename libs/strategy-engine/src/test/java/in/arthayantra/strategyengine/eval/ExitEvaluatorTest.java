@@ -602,6 +602,82 @@ class ExitEvaluatorTest {
   }
 
   @Test
+  void trailStopReportsTheArmedAtrTrailAndAgreesWithEvaluate() {
+    // audit M33: the read-only trailStop accessor mirrors the evaluated trailing_stop level exactly,
+    // so the daily sell-decision reports the price the live exit fires on (not a proxy like sma20).
+    StrategyDefinition def =
+        definitionWith(
+            "  - { type: trailing_stop, params: { basis: atr_multiple, value: 2, atr_period: 5,"
+                + " arm_pct: 9 } }\n");
+    // reuse the armed-trail fixture: 30 flat warmup bars then +4% / pull / +10% / +15% / drop.
+    long[] warm = new long[35];
+    for (int i = 0; i < 30; i++) {
+      warm[i] = 10000;
+    }
+    warm[30] = 10400;
+    warm[31] = 10300;
+    warm[32] = 11000;
+    warm[33] = 11500;
+    warm[34] = 11000;
+    EngineSeries s = series(warm);
+    ExitEvaluator.Position pos =
+        new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, new BigDecimal("100.00"), 29);
+    IndicatorBank b = bank(def, s);
+
+    // before the 9% arm (peak only +4% at index 31): no trail level to report yet
+    assertThat(ExitEvaluator.trailStop(def, b, pos, 31)).as("unarmed → no level").isEmpty();
+
+    // armed after +10%: a level exists and is consistent with the evaluator at the boundary —
+    // close above the level → the evaluator is quiet, close at/below → it fires trailing_stop.
+    Optional<BigDecimal> lvl33 = ExitEvaluator.trailStop(def, b, pos, 33);
+    assertThat(lvl33).isPresent();
+    assertThat(s.candle(33).close()).isGreaterThan(lvl33.get());
+    assertThat(ExitEvaluator.evaluate(def, b, pos, 33)).isEmpty();
+
+    Optional<BigDecimal> lvl34 = ExitEvaluator.trailStop(def, b, pos, 34);
+    assertThat(lvl34).isPresent();
+    assertThat(s.candle(34).close()).isLessThanOrEqualTo(lvl34.get());
+    assertThat(ExitEvaluator.evaluate(def, b, pos, 34))
+        .get()
+        .extracting(ExitEvaluator.ExitDecision::type)
+        .isEqualTo("trailing_stop");
+  }
+
+  @Test
+  void trailStopReportsTheIndicatorLevelForAnIndicatorBasisTrail() {
+    // the Minervini-style indicator trail (its own sma50/vwap): trailStop returns the alias level the
+    // evaluator crosses, so both swing families read an honest number off the one accessor.
+    StrategyDefinition def =
+        definitionWith("  - { type: trailing_stop, params: { basis: indicator, alias: vwap } }\n");
+    EngineSeries s = series(10000, 10000, 10500, 11000, 8000);
+    ExitEvaluator.Position pos =
+        new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, new BigDecimal("100.00"), 1);
+    IndicatorBank b = bank(def, s);
+
+    Optional<BigDecimal> lvl = ExitEvaluator.trailStop(def, b, pos, 4);
+    assertThat(lvl).isPresent();
+    assertThat(s.candle(4).close()).isLessThan(lvl.get()); // 80 below the running vwap → exits here
+    assertThat(ExitEvaluator.evaluate(def, b, pos, 4))
+        .get()
+        .extracting(ExitEvaluator.ExitDecision::type)
+        .isEqualTo("trailing_stop");
+  }
+
+  @Test
+  void trailStopIsEmptyWithoutATrailingStopRule() {
+    StrategyDefinition def =
+        definitionWith("  - { type: stop_loss, params: { basis: premium_pct, value: 10 } }\n");
+    EngineSeries s = series(10000, 10000, 10000);
+    assertThat(
+            ExitEvaluator.trailStop(
+                def,
+                bank(def, s),
+                new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, new BigDecimal("100.00"), 1),
+                2))
+        .isEmpty();
+  }
+
+  @Test
   void positionSizerRoundsLotsAndCapsKelly() {
     var inputs =
         new PositionSizer.Inputs(

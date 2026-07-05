@@ -7,6 +7,7 @@ import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { CHART_INTERVALS, fetchOlderCandles, useCandles } from '../../api/charts.ts';
 import { useInstrumentSearch } from '../../api/watchlists.ts';
 import { usePaperTrades } from '../../api/paper.ts';
+import { loadChartPrefs, saveChartPrefs } from '../../core/chartPrefs.ts';
 import type { MarketCandle } from '../../api/types.ts';
 
 // Advance Chart (oipulse §advance-chart) — the pro charting page on lightweight-charts with the default
@@ -14,10 +15,11 @@ import type { MarketCandle } from '../../api/types.ts';
 // symbol typeahead + interval toolbar bind the cache-first /market/candles read; older bars lazy-load on
 // scroll-back. The feasible TradingView-binary extras ride an off-by-default extras toolbar: an OI-bar
 // histogram overlay (from the candle `oi` field), paper trade-history entry/exit markers, a user-armed
-// audio price alert (Web Audio beep — never auto-plays), and add/remove horizontal price lines. Interactive
-// freehand drawing tools (trendline/fib/rectangle) + user-configurable study-template save/load stay
-// deferred — a large LWC-primitive/canvas lift with no consumer. Study math lives in core/indicators
-// (tested); the alert crossing rule in core/priceAlert (tested).
+// audio price alert (Web Audio beep — never auto-plays), and add/remove horizontal price lines. The
+// view state (symbol/interval + all four extras) PERSISTS to localStorage (core/chartPrefs), so a
+// reload restores the session — the ADR-A13 chart-state-save/load v1. Interactive freehand drawing
+// tools (trendline/fib/rectangle) stay deferred — a large LWC-primitive/canvas lift with no consumer.
+// Study math lives in core/indicators (tested); the alert crossing rule in core/priceAlert (tested).
 
 /** Short CSP-safe confirmation beep via the Web Audio API (no external asset, no autoplay). */
 function beep() {
@@ -48,8 +50,9 @@ const LEGEND: { label: string; color: string }[] = [
 
 export function AdvanceChartPage() {
   const [params] = useSearchParams();
-  const [symbol, setSymbol] = useState(params.get('symbol') ?? 'NSE:NIFTY 50');
-  const [interval, setInterval] = useState(params.get('interval') ?? '5m');
+  const [prefs] = useState(loadChartPrefs); // one-shot localStorage read (lazy init)
+  const [symbol, setSymbol] = useState(params.get('symbol') ?? prefs.symbol ?? 'NSE:NIFTY 50');
+  const [interval, setInterval] = useState(params.get('interval') ?? prefs.interval ?? '5m');
   const [symbolDraft, setSymbolDraft] = useState(symbol);
 
   const hits = useInstrumentSearch(symbolDraft);
@@ -93,13 +96,19 @@ export function AdvanceChartPage() {
       });
   }, [bars, symbol, interval]);
 
-  // ── Extras (all off/empty by default → the default render is byte-identical) ─────────────────────
-  const [showOi, setShowOi] = useState(false);
-  const [showTrades, setShowTrades] = useState(false);
-  const [priceLines, setPriceLines] = useState<number[]>([]);
-  const [alertPrice, setAlertPrice] = useState<number | null>(null);
+  // ── Extras (default off/empty; a saved session restores them — ADR A13 chart-state persistence) ──
+  const [showOi, setShowOi] = useState(prefs.showOi ?? false);
+  const [showTrades, setShowTrades] = useState(prefs.showTrades ?? false);
+  const [priceLines, setPriceLines] = useState<number[]>(prefs.priceLines ?? []);
+  const [alertPrice, setAlertPrice] = useState<number | null>(prefs.alertPrice ?? null);
   const [alertDraft, setAlertDraft] = useState('');
   const [alertFired, setAlertFired] = useState(false);
+
+  // Persist the view state so a reload restores the symbol/interval + extras (volatile React state
+  // otherwise). A URL ?symbol/?interval still wins on next load (handled in the initializers above).
+  useEffect(() => {
+    saveChartPrefs({ symbol, interval, showOi, showTrades, priceLines, alertPrice });
+  }, [symbol, interval, showOi, showTrades, priceLines, alertPrice]);
 
   const chartExchange = symbol.slice(0, symbol.indexOf(':'));
   const chartTradingsymbol = symbol.slice(symbol.indexOf(':') + 1);

@@ -23,10 +23,10 @@ import java.util.Map;
  * (realised P&amp;L only — no intraday mark-to-market, standard for a trade-list backtest), and monthly
  * / annual returns + drawdown are sampled off that curve. Pure: no IO, no clock.
  */
-final class SwingPortfolio {
+public final class SwingPortfolio {
 
   /** One calendar year's realised return + the trades that closed in it. */
-  record Year(int year, double returnPct, int trades) {}
+  public record Year(int year, double returnPct, int trades) {}
 
   /**
    * The transaction-cost model. {@code capital} is the total book (₹); an order deploys {@code
@@ -35,11 +35,11 @@ final class SwingPortfolio {
    * {@code impactCoeff · (orderValue / avgDailyTurnover)} capped at {@code impactCapPct}. Impact scales
    * with participation, so illiquid names (small turnover) are penalised far more — the whole point.
    */
-  record Costs(
+  public record Costs(
       double capital, double fixedPct, double spreadPct, double impactCoeff, double impactCapPct) {}
 
   /** The portfolio-level result for one variant. */
-  record Result(
+  public record Result(
       double totalReturnPct,
       double cagrPct,
       double maxDrawdownPct,
@@ -60,7 +60,7 @@ final class SwingPortfolio {
       new Result(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, List.of());
 
   /** Gross (no-cost) portfolio — delegates with {@code costs = null}. */
-  static Result simulate(List<BtTrade> trades, int slots, boolean rsPriority) {
+  public static Result simulate(List<BtTrade> trades, int slots, boolean rsPriority) {
     return simulate(trades, slots, rsPriority, null);
   }
 
@@ -71,7 +71,7 @@ final class SwingPortfolio {
    * is non-null, each trade's return is netted of round-trip transaction costs (impact scaled by the
    * name's turnover). Returns the stats.
    */
-  static Result simulate(List<BtTrade> trades, int slots, boolean rsPriority, Costs costs) {
+  public static Result simulate(List<BtTrade> trades, int slots, boolean rsPriority, Costs costs) {
     if (trades.isEmpty() || slots < 1) {
       return EMPTY;
     }

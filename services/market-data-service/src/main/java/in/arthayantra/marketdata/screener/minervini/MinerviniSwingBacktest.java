@@ -34,10 +34,10 @@ import java.util.List;
  * Pure + deterministic (no IO, no clock); the caller supplies the bars, the detector, and the
  * pre-computed per-bar RS-rank series.
  */
-final class MinerviniSwingBacktest {
+public final class MinerviniSwingBacktest {
 
   /** One closed backtest trade, tagged with the {@link Variant} that took it. */
-  record BtTrade(
+  public record BtTrade(
       String variant,
       String setup,
       String symbol,

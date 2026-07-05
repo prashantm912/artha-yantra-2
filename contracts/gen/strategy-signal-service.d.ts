@@ -404,6 +404,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/strategies/graduation/promotions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["promotions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/signals": {
         parameters: {
             query?: never;
@@ -782,6 +798,8 @@ export interface components {
             entries?: number;
             /** Format: int32 */
             exits?: number;
+            /** Format: int32 */
+            exitSkipped?: number;
         };
         ManasSwingRun: {
             /** Format: int32 */
@@ -792,6 +810,8 @@ export interface components {
             entries?: number;
             /** Format: int32 */
             exits?: number;
+            /** Format: int32 */
+            exitSkipped?: number;
         };
         ResetBody: {
             confirm?: boolean;
@@ -883,6 +903,17 @@ export interface components {
             minTrades?: number;
             minProfitFactor?: number;
             minExpectancy?: number;
+            maxDrawdownPct?: number;
+        };
+        Promotion: {
+            /** Format: uuid */
+            strategyId?: string;
+            /** Format: date-time */
+            graduatedAt?: string;
+            /** Format: int32 */
+            trades?: number;
+            expectancy?: number;
+            sharpe?: number;
             maxDrawdownPct?: number;
         };
         Report: {
@@ -2089,6 +2120,35 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["GraduationBoard"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    promotions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["Promotion"][];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

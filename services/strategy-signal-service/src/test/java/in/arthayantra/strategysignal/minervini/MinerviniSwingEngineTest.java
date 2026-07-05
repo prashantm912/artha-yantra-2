@@ -267,6 +267,104 @@ class MinerviniSwingEngineTest {
         .isZero();
   }
 
+  @Test
+  void exitPassRetriesAFailedFetchOnceThenEvaluatesTheStop() throws IOException {
+    // Audit P0-3: MarketDataCandlesClient fail-softs to an empty list and the per-run cache pins
+    // it — pre-fix the held anchor's ONLY daily stop evaluation was silently skipped. The fix
+    // retries once outside the cache; here the retry succeeds and the 8% stop fires.
+    ExitHarness h = new ExitHarness();
+    org.mockito.Mockito.when(h.candles.fetch(
+            org.mockito.ArgumentMatchers.eq("NSE"), org.mockito.ArgumentMatchers.eq("TESTCO"),
+            org.mockito.ArgumentMatchers.eq("1d"), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any()))
+        .thenReturn(List.of())
+        .thenReturn(h.series);
+
+    MinerviniSwingEngine.SwingRun run = h.engine().runDaily();
+
+    assertThat(run.exits()).as("the retry recovers the series and the stop fires").isEqualTo(1);
+    assertThat(run.exitSkipped()).isZero();
+    org.mockito.Mockito.verify(h.candles, org.mockito.Mockito.times(2))
+        .fetch(org.mockito.ArgumentMatchers.eq("NSE"), org.mockito.ArgumentMatchers.eq("TESTCO"),
+            org.mockito.ArgumentMatchers.eq("1d"), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any());
+  }
+
+  @Test
+  void exitPassCountsAndScreamsWhenTheSeriesIsUnavailableAfterRetry() throws IOException {
+    // Both fetches fail → the anchor's stop is NOT evaluated today; the run must say so loudly
+    // (exitSkipped > 0) instead of the pre-fix silent skip.
+    ExitHarness h = new ExitHarness();
+    org.mockito.Mockito.when(h.candles.fetch(
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any()))
+        .thenReturn(List.of());
+
+    MinerviniSwingEngine.SwingRun run = h.engine().runDaily();
+
+    assertThat(run.exits()).isZero();
+    assertThat(run.exitSkipped()).as("the unevaluated stop is surfaced, not swallowed").isEqualTo(1);
+  }
+
+  /** Shared wiring for the exit-pass fetch-failure tests: one published anchor, empty funnel. */
+  private final class ExitHarness {
+    final StrategyRepository registry = mock(StrategyRepository.class);
+    final in.arthayantra.strategysignal.signals.SignalRepository signals =
+        mock(in.arthayantra.strategysignal.signals.SignalRepository.class);
+    final MinerviniFunnelClient funnel = mock(MinerviniFunnelClient.class);
+    final in.arthayantra.strategysignal.signals.MarketDataCandlesClient candles =
+        mock(in.arthayantra.strategysignal.signals.MarketDataCandlesClient.class);
+    final List<EngineCandle> series = craftDecline();
+
+    ExitHarness() throws IOException {
+      java.util.UUID strategyId = java.util.UUID.randomUUID();
+      java.util.UUID publishedVersion = java.util.UUID.randomUUID();
+      com.fasterxml.jackson.databind.JsonNode config = vcpConfig();
+      StrategyRepository.StrategyRow strategyRow =
+          new StrategyRepository.StrategyRow(
+              strategyId, "minervini-vcp", "Minervini VCP", null, null, List.of("minervini"),
+              true, publishedVersion, null, null, false, null);
+      org.mockito.Mockito.when(registry.listAll()).thenReturn(List.of(strategyRow));
+      org.mockito.Mockito.when(registry.findVersionById(publishedVersion))
+          .thenReturn(Optional.of(version(publishedVersion, strategyId, "1", config)));
+      org.mockito.Mockito.when(signals.activeEntries())
+          .thenReturn(
+              List.of(
+                  new in.arthayantra.strategysignal.signals.SignalRepository.SignalRow(
+                      42L, publishedVersion, "NSE", "TESTCO", "1d", "ENTRY", "BUY",
+                      new BigDecimal("152"), null, null, BigDecimal.ONE,
+                      new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode(),
+                      "TAKEN", series.get(0).bucketStart(), series.get(0).bucketStart().plusDays(1),
+                      null, null, null, null, null, null)));
+      org.mockito.Mockito.when(signals.insert(
+              org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+              org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+              org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+              org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+              org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+              org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+              org.mockito.ArgumentMatchers.any()))
+          .thenReturn(43L);
+      org.mockito.Mockito.when(funnel.buyableAndOnDeck()).thenReturn(List.of());
+    }
+
+    MinerviniSwingEngine engine() {
+      org.springframework.transaction.support.TransactionTemplate tx =
+          mock(org.springframework.transaction.support.TransactionTemplate.class);
+      org.mockito.Mockito.when(tx.execute(org.mockito.ArgumentMatchers.any()))
+          .thenAnswer(inv ->
+              inv.<org.springframework.transaction.support.TransactionCallback<Long>>getArgument(0)
+                  .doInTransaction(null));
+      return new MinerviniSwingEngine(
+          registry, funnel, candles, signals,
+          mock(in.arthayantra.strategysignal.signals.SignalPublisher.class),
+          mock(org.springframework.context.ApplicationEventPublisher.class), Optional.empty(),
+          tx, new com.fasterxml.jackson.databind.ObjectMapper(),
+          java.time.Clock.systemUTC(), true, 520, 60, 1440);
+    }
+  }
+
   private static com.fasterxml.jackson.databind.JsonNode vcpConfig() throws IOException {
     try (InputStream in =
         MinerviniSwingEngineTest.class.getResourceAsStream("/minervini-strategies/minervini-vcp.yaml")) {

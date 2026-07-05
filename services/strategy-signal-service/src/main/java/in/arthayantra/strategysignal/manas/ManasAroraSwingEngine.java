@@ -96,8 +96,20 @@ public class ManasAroraSwingEngine {
       UUID versionId, String slug, String name, String version, String checksum, String setup,
       StrategyDefinition definition) {}
 
-  /** Summary of one batch run (for logging / the manual-trigger endpoint). */
-  public record ManasSwingRun(int strategies, int candidates, int entries, int exits) {}
+  /**
+   * Summary of one batch run (for logging / the manual-trigger endpoint). {@code exitSkipped}
+   * counts held anchors whose stop/trail could NOT be evaluated this run (no daily series even
+   * after a retry) — this batch is the position's ONLY exit evaluator, so a non-zero value is an
+   * ops signal, never routine.
+   */
+  public record ManasSwingRun(
+      int strategies, int candidates, int entries, int exits, int exitSkipped) {}
+
+  /** Entry-pass outcome: how many funnel candidates were scanned + how many entries fired. */
+  private record EntryResult(int candidates, int fired) {}
+
+  /** Exit-pass outcome: closed anchors + held anchors whose exit could NOT be evaluated. */
+  private record ExitResult(int closed, int skipped) {}
 
   private final StrategyRepository registry;
   private final ManasFunnelClient funnel;
@@ -155,18 +167,23 @@ public class ManasAroraSwingEngine {
     // authenticated POST /run fires entries + auto-paper before the owner has armed the flag).
     if (!enabled) {
       log.debug("manas swing batch disabled (artha.manas-arora.swing.enabled=false) — skipping");
-      return new ManasSwingRun(0, 0, 0, 0);
+      return new ManasSwingRun(0, 0, 0, 0, 0);
     }
     List<SwingStrategy> swings = loadPublishedSwingStrategies();
     if (swings.isEmpty()) {
-      return new ManasSwingRun(0, 0, 0, 0);
+      return new ManasSwingRun(0, 0, 0, 0, 0);
     }
     Map<String, List<EngineCandle>> seriesCache = new HashMap<>();
     AnchorResolution resolution = new AnchorResolution(swings);
-    int entries = entryPass(swings, resolution, seriesCache);
-    int exits = exitPass(resolution, seriesCache);
-    log.info("manas swing batch: {} strategies, {} entries, {} exits", swings.size(), entries, exits);
-    return new ManasSwingRun(swings.size(), 0, entries, exits);
+    EntryResult entryResult = entryPass(swings, resolution, seriesCache);
+    ExitResult exitResult = exitPass(resolution, seriesCache);
+    log.info(
+        "manas swing batch: {} strategies, {} candidates, {} entries, {} exits, {} exit-skipped",
+        swings.size(), entryResult.candidates(), entryResult.fired(), exitResult.closed(),
+        exitResult.skipped());
+    return new ManasSwingRun(
+        swings.size(), entryResult.candidates(), entryResult.fired(), exitResult.closed(),
+        exitResult.skipped());
   }
 
   // ---- anchor resolution (audit H2) -----------------------------------------------------------
@@ -244,7 +261,7 @@ public class ManasAroraSwingEngine {
 
   // ---- entry pass ---------------------------------------------------------------------------
 
-  private int entryPass(
+  private EntryResult entryPass(
       List<SwingStrategy> swings,
       AnchorResolution resolution,
       Map<String, List<EngineCandle>> seriesCache) {
@@ -252,11 +269,11 @@ public class ManasAroraSwingEngine {
     // daily-profit-target / max-open on the MANAS_ARORA book pauses ALL swing entries for this run.
     if (emissionGuard.map(g -> !g.entryAllowed(in.arthayantra.strategysignal.signals.Books.MANAS_ARORA))
         .orElse(false)) {
-      return 0;
+      return new EntryResult(0, 0);
     }
     List<ManasFunnelClient.Candidate> candidates = funnel.buyableAndOnDeck();
     if (candidates.isEmpty()) {
-      return 0;
+      return new EntryResult(0, 0);
     }
     // A symbol already holding an open swing entry is skipped for ALL setups this run — the paper book
     // keeps one open position per (symbol, side), so a second setup would only average in.
@@ -290,7 +307,7 @@ public class ManasAroraSwingEngine {
         }
       }
     }
-    return fired;
+    return new EntryResult(candidates.size(), fired);
   }
 
   /** The pivot the strategy's setup trades: the §3.2 breakout pivot or the §3.3 VCP pivot (or null). */
@@ -387,8 +404,10 @@ public class ManasAroraSwingEngine {
 
   // ---- exit pass ----------------------------------------------------------------------------
 
-  private int exitPass(AnchorResolution resolution, Map<String, List<EngineCandle>> seriesCache) {
+  private ExitResult exitPass(
+      AnchorResolution resolution, Map<String, List<EngineCandle>> seriesCache) {
     int closed = 0;
+    int skipped = 0;
     for (SignalRepository.SignalRow anchor : signals.activeEntries()) {
       SwingStrategy strat = resolution.resolve(anchor.strategyVersionId()).orElse(null);
       if (strat == null) {
@@ -396,6 +415,17 @@ public class ManasAroraSwingEngine {
       }
       List<EngineCandle> series = series(anchor.tradingsymbol(), seriesCache);
       if (series.isEmpty()) {
+        // One retry OUTSIDE the per-run cache: MarketDataCandlesClient fail-softs to an empty list
+        // on any REST hiccup and the cache pins it — silently skipping the position's ONLY daily
+        // stop/trail evaluation (audit P0-3). A held anchor's series is worth a second round-trip.
+        series = retryFetch(anchor.tradingsymbol(), seriesCache);
+      }
+      if (series.isEmpty()) {
+        log.error(
+            "manas swing exit: no daily series for held anchor #{} {} even after retry —"
+                + " STOP NOT EVALUATED TODAY",
+            anchor.id(), anchor.tradingsymbol());
+        skipped++;
         continue;
       }
       // geometry is irrelevant to the exit rules (ATR stop/trail + square-off), so the pivot
@@ -406,12 +436,12 @@ public class ManasAroraSwingEngine {
       int entryIndex = bank.primarySeries().indexAtOrBefore(anchor.generatedAt().toInstant());
       if (entryIndex < 0) {
         // the entry bar fell outside the fetched window (position held > warmupDays, or a dropped
-        // entry bucket) — any entry-relative exit distance would be unreliable, so skip this anchor
-        // rather than default to bar 0. The shipped exits (percent stop + indicator trail) do not read
-        // entryIndex, but a future time_stop / atr_multiple rule would silently mis-compute from bar 0.
+        // entry bucket) — the #573 ATR exits (entry-pinned ATR, peak-since-entry trail) are
+        // entry-index-DEPENDENT, so evaluating from bar 0 would silently mis-anchor every level.
         log.warn(
             "manas swing exit: entry bar for #{} {} is outside the fetched window — skipped",
             anchor.id(), anchor.tradingsymbol());
+        skipped++;
         continue;
       }
       Optional<ExitEvaluator.ExitDecision> exit =
@@ -424,7 +454,21 @@ public class ManasAroraSwingEngine {
         closed++;
       }
     }
-    return closed;
+    return new ExitResult(closed, skipped);
+  }
+
+  /**
+   * Re-fetches a held anchor's daily series once, bypassing (and on success repairing) the per-run
+   * cache — the fail-soft empty from a transient REST hiccup must not stand between an open
+   * position and its only daily stop evaluation.
+   */
+  private List<EngineCandle> retryFetch(String symbol, Map<String, List<EngineCandle>> cache) {
+    OffsetDateTime now = OffsetDateTime.now(clock).withOffsetSameInstant(IST);
+    List<EngineCandle> fresh = candles.fetch(EX, symbol, IV, now.minusDays(warmupDays), now);
+    if (!fresh.isEmpty()) {
+      cache.put(symbol, fresh);
+    }
+    return fresh;
   }
 
   private void emitExit(

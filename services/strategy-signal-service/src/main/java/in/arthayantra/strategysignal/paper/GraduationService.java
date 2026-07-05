@@ -101,32 +101,41 @@ public class GraduationService {
     return new GraduationBoard(rows, thresholds(), java.time.OffsetDateTime.now());
   }
 
+  /**
+   * A strategy's CLOSED-trade realized-P&L series, oldest-first (the drawdown-walk order). SAME-schema
+   * join: {@code paper_orders} carries the signal_id (there is no {@code paper_positions.signal_id}),
+   * signals carries the version, strategy_versions carries the strategy — DISTINCT because an averaged
+   * add can link a position to several signal-carrying orders of the same strategy. Package-visible so
+   * the F7 promotion evaluator can compute its own risk-adjusted stats off the same series.
+   */
+  List<BigDecimal> closedPnls(UUID strategyId) {
+    return jdbc.query(
+        """
+        SELECT p.realized_pnl AS pnl
+        FROM (
+          SELECT DISTINCT p.id, p.realized_pnl, p.closed_at
+          FROM paper_positions p
+          JOIN paper_orders o
+            ON o.exchange = p.exchange AND o.tradingsymbol = p.tradingsymbol AND o.side = p.side
+            AND o.signal_id IS NOT NULL
+          JOIN signals sig ON sig.id = o.signal_id
+          JOIN strategy_versions sv ON sv.id = sig.strategy_version_id
+          WHERE p.status = 'CLOSED' AND sv.strategy_id = ?
+        ) p
+        ORDER BY p.closed_at ASC, p.id ASC
+        """,
+        (rs, n) -> rs.getBigDecimal("pnl"),
+        strategyId);
+  }
+
+  /** The fixed notional the drawdown % is measured against ({@code artha.graduation.base-capital}). */
+  public BigDecimal baseCapital() {
+    return baseCapital;
+  }
+
   /** Aggregates one strategy's CLOSED paper positions and scores them. */
   private StrategyGraduation score(StrategyRow s) {
-    // Each closed trade's realized P&L, ordered oldest-first for the drawdown walk. SAME-schema join:
-    // paper_orders carries the signal_id (there is no paper_positions.signal_id), signals carries the
-    // version, strategy_versions carries the strategy — DISTINCT because an averaged add can link a
-    // position to several signal-carrying orders of the same strategy.
-    List<BigDecimal> pnls =
-        jdbc.query(
-            """
-            SELECT p.realized_pnl AS pnl
-            FROM (
-              SELECT DISTINCT p.id, p.realized_pnl, p.closed_at
-              FROM paper_positions p
-              JOIN paper_orders o
-                ON o.exchange = p.exchange AND o.tradingsymbol = p.tradingsymbol AND o.side = p.side
-                AND o.signal_id IS NOT NULL
-              JOIN signals sig ON sig.id = o.signal_id
-              JOIN strategy_versions sv ON sv.id = sig.strategy_version_id
-              WHERE p.status = 'CLOSED' AND sv.strategy_id = ?
-            ) p
-            ORDER BY p.closed_at ASC, p.id ASC
-            """,
-            (rs, n) -> rs.getBigDecimal("pnl"),
-            s.id());
-
-    Metrics m = metrics(pnls, baseCapital);
+    Metrics m = metrics(closedPnls(s.id()), baseCapital);
     List<Criterion> criteria = criteria(m);
     boolean allPass = criteria.stream().allMatch(Criterion::pass);
     String stage = allPass ? "TAKE_ELIGIBLE" : "PAPER";

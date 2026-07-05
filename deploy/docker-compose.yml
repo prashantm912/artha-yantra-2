@@ -397,6 +397,12 @@ services:
       # manas_arora_funnel so it never touches the Minervini funnel. Default off; live .env flips true.
       ARTHA_MANAS_ARORA_SEED_STRATEGIES: ${ARTHA_MANAS_ARORA_SEED_STRATEGIES:-false}
       ARTHA_MANAS_ARORA_SWING_ENABLED: ${ARTHA_MANAS_ARORA_SWING_ENABLED:-false}
+      # F9 paper risk enforcement (advised_lots + margin snapshot are always-on advisory; this flag
+      # only ARMS the portfolio heat-cap BLOCK). Default off — flip true after a clean advisory week.
+      ARTHA_PAPER_RISK_ENABLED: ${ARTHA_PAPER_RISK_ENABLED:-false}
+      # F7 auto-promotion: the daily 21:00-IST evaluator that marks a strategy GRADUATED (measurement +
+      # ntfy only, never a live action). Default off; flip true to arm the marker pass.
+      ARTHA_GRADUATION_PROMOTION_ENABLED: ${ARTHA_GRADUATION_PROMOTION_ENABLED:-false}
       # Shadow book (signal-analysis §7.1/§7.2): open composite-passing REJECTED entries as virtual
       # 1-lot positions so the exit sweep labels them with a real PnL (entry-gate tuning evidence).
       # Code default is false; ON for the stack — separate shadow_positions table, never touches

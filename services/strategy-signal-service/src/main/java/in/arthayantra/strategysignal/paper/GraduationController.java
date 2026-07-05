@@ -20,10 +20,13 @@ import org.springframework.web.bind.annotation.RestController;
 public class GraduationController {
 
   private final GraduationService graduation;
+  private final StrategyGraduationRepository graduations;
 
-  /** Wires the graduation service. */
-  public GraduationController(GraduationService graduation) {
+  /** Wires the graduation service + the GRADUATED-marker store. */
+  public GraduationController(
+      GraduationService graduation, StrategyGraduationRepository graduations) {
     this.graduation = graduation;
+    this.graduations = graduations;
   }
 
   /** The thresholds each strategy is scored against (echoed so the board is self-describing). */
@@ -82,5 +85,26 @@ public class GraduationController {
         rows,
         new Thresholds(t.minTrades(), t.minProfitFactor(), t.minExpectancy(), t.maxDrawdownPct()),
         b.asOf());
+  }
+
+  /** One GRADUATED strategy (F7): the marker + the metrics snapshot captured at graduation. */
+  public record Promotion(
+      UUID strategyId,
+      OffsetDateTime graduatedAt,
+      int trades,
+      BigDecimal expectancy,
+      BigDecimal sharpe,
+      BigDecimal maxDrawdownPct) {}
+
+  /** The strategies the F7 evaluator has marked GRADUATED, newest first (measurement only). */
+  @GetMapping("/graduation/promotions")
+  public List<Promotion> promotions() {
+    return graduations.list().stream()
+        .map(
+            r ->
+                new Promotion(
+                    r.strategyId(), r.graduatedAt(), r.trades(), r.expectancy(), r.sharpe(),
+                    r.maxDrawdownPct()))
+        .toList();
   }
 }

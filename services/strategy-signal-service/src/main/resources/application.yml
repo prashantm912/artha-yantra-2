@@ -104,6 +104,13 @@ artha:
     # any miss (appliance down, no .spn) falls back to flat-pct. Advisory only.
     span-enabled: ${ARTHA_MARGIN_SPAN_ENABLED:false}
     base: ${ARTHA_ROUTE_MARGIN:http://margin-service:8086}
+  graduation:
+    # F7 auto-promotion: the daily 21:00-IST evaluator that marks a published strategy GRADUATED once
+    # its closed paper trades clear a stricter bar than TAKE_ELIGIBLE. Measurement + ntfy only — never
+    # a live action. Default OFF; dormant until a strategy accrues promotion-min-trades closed trades.
+    promotion-enabled: ${ARTHA_GRADUATION_PROMOTION_ENABLED:false}
+    promotion-min-trades: ${ARTHA_GRADUATION_PROMOTION_MIN_TRADES:50}
+    promotion-min-sharpe: ${ARTHA_GRADUATION_PROMOTION_MIN_SHARPE:0.5}
 
 management:
   endpoints:

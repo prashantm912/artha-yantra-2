@@ -38,6 +38,6 @@ exit_rules:
   - { type: stop_loss, params: { basis: percent, value: 8 } }           # MV-7.2 initial protective stop
   - { type: trailing_stop, params: { basis: indicator, alias: sma50 } } # MV-7.4 50-day-MA close-below trail
 risk:
-  position_sizing: { method: percent_equity, params: { percent: 5 } }
+  position_sizing: { method: percent_equity, params: { percent: 6.5 } }
   max_positions: 10
   session: { style: swing }

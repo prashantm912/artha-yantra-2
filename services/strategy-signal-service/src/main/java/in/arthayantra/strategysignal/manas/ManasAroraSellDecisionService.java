@@ -84,12 +84,19 @@ public class ManasAroraSellDecisionService {
   /** Builds the sell-decision triad for every open Manas swing position. */
   public ManasSellReport report() {
     Map<UUID, StrategyDefinition> swings = loadSwingDefs();
+    Map<UUID, Optional<StrategyDefinition>> adopted = new HashMap<>();
     OffsetDateTime now = OffsetDateTime.now(clock).withOffsetSameInstant(IST);
     List<ManasSellDecision> items = new ArrayList<>();
     for (SignalRepository.SignalRow anchor : signals.activeEntries()) {
       StrategyDefinition def = swings.get(anchor.strategyVersionId());
       if (def == null) {
-        continue; // not a published manas swing anchor
+        // Adopt a superseded/unpublished version's anchor (audit H2, mirror of the engine): the
+        // triad must keep showing holdings whose strategy was republished/disabled — the owner
+        // manages them off this report, so a vanishing row IS the failure.
+        def = adopted.computeIfAbsent(anchor.strategyVersionId(), this::adoptDef).orElse(null);
+      }
+      if (def == null) {
+        continue; // another family's anchor, or unmanageable
       }
       try {
         items.add(decide(def, anchor, now));
@@ -98,6 +105,25 @@ public class ManasAroraSellDecisionService {
       }
     }
     return new ManasSellReport(now, items);
+  }
+
+  /** Compiles a superseded/unpublished version's own frozen config (family-scoped). */
+  private Optional<StrategyDefinition> adoptDef(UUID versionId) {
+    return registry
+        .findVersionById(versionId)
+        .filter(v -> UNIVERSE_MODE.equals(v.config().path("universe").path("mode").asText()))
+        .flatMap(
+            v -> {
+              try {
+                StrategyDefinition def = StrategyCompiler.compile(v.config());
+                return "swing".equals(def.session().style()) ? Optional.of(def) : Optional.empty();
+              } catch (RuntimeException e) {
+                log.warn(
+                    "manas sell-decision: anchor version {} failed to compile — skipped: {}",
+                    versionId, e.getMessage());
+                return Optional.empty();
+              }
+            });
   }
 
   private ManasSellDecision decide(

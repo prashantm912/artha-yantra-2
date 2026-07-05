@@ -162,15 +162,92 @@ public class ManasAroraSwingEngine {
       return new ManasSwingRun(0, 0, 0, 0);
     }
     Map<String, List<EngineCandle>> seriesCache = new HashMap<>();
-    int entries = entryPass(swings, seriesCache);
-    int exits = exitPass(swings, seriesCache);
+    AnchorResolution resolution = new AnchorResolution(swings);
+    int entries = entryPass(swings, resolution, seriesCache);
+    int exits = exitPass(resolution, seriesCache);
     log.info("manas swing batch: {} strategies, {} entries, {} exits", swings.size(), entries, exits);
     return new ManasSwingRun(swings.size(), 0, entries, exits);
   }
 
+  // ---- anchor resolution (audit H2) -----------------------------------------------------------
+
+  /**
+   * Per-run anchor→strategy resolution that ADOPTS anchors of superseded/unpublished versions
+   * (mirror of the Minervini engine's). Keying the exit pass on the CURRENT published version id
+   * silently orphaned every open anchor whenever a strategy was republished (the boot seeder
+   * auto-publishes on any YAML change — the #573/#574 republishes orphaned the pre-deploy
+   * anchors), disabled, or its config later failed to compile. Resolution order:
+   * currently-published strategy, else the anchor's OWN version row compiled on the fly. Empty =
+   * another family's anchor, or genuinely unmanageable (logged at ERROR).
+   */
+  private final class AnchorResolution {
+    private final Map<UUID, SwingStrategy> published = new HashMap<>();
+    private final Map<UUID, Optional<SwingStrategy>> adopted = new HashMap<>();
+
+    AnchorResolution(List<SwingStrategy> swings) {
+      swings.forEach(s -> published.put(s.versionId(), s));
+    }
+
+    Optional<SwingStrategy> resolve(UUID versionId) {
+      SwingStrategy current = published.get(versionId);
+      if (current != null) {
+        return Optional.of(current);
+      }
+      return adopted.computeIfAbsent(versionId, ManasAroraSwingEngine.this::adoptVersion);
+    }
+  }
+
+  /**
+   * Adopts one superseded/unpublished version for exit management. The strategy's {@code enabled}
+   * flag is deliberately NOT checked — a disabled strategy no longer ENTERS (the published load
+   * skips it) but its open positions must still be exit-managed to their close.
+   */
+  private Optional<SwingStrategy> adoptVersion(UUID versionId) {
+    Optional<StrategyRepository.VersionRow> versionRow = registry.findVersionById(versionId);
+    if (versionRow.isEmpty()) {
+      log.error(
+          "manas swing: anchor version {} has no version row — OPEN POSITION UNMANAGED", versionId);
+      return Optional.empty();
+    }
+    JsonNode config = versionRow.get().config();
+    if (!UNIVERSE_MODE.equals(config.path("universe").path("mode").asText())) {
+      return Optional.empty(); // another family's anchor — its own engine manages it
+    }
+    try {
+      StrategyDefinition definition = StrategyCompiler.compile(config);
+      if (!"swing".equals(definition.session().style())) {
+        return Optional.empty();
+      }
+      StrategyRepository.StrategyRow strategy =
+          registry.findById(versionRow.get().strategyId()).orElse(null);
+      if (strategy == null) {
+        log.error(
+            "manas swing: strategy for anchor version {} not found — OPEN POSITION UNMANAGED",
+            versionId);
+        return Optional.empty();
+      }
+      log.warn(
+          "manas swing: adopting anchors of superseded version {} of {} — exit-managed with the"
+              + " version's own frozen config",
+          versionRow.get().version(), strategy.slug());
+      return Optional.of(
+          new SwingStrategy(
+              versionId, strategy.slug(), strategy.name(), versionRow.get().version(),
+              versionRow.get().checksum(), setupOf(config, strategy.slug()), definition));
+    } catch (RuntimeException e) {
+      log.error(
+          "manas swing: anchor version {} failed to compile — OPEN POSITION UNMANAGED: {}",
+          versionId, e.getMessage());
+      return Optional.empty();
+    }
+  }
+
   // ---- entry pass ---------------------------------------------------------------------------
 
-  private int entryPass(List<SwingStrategy> swings, Map<String, List<EngineCandle>> seriesCache) {
+  private int entryPass(
+      List<SwingStrategy> swings,
+      AnchorResolution resolution,
+      Map<String, List<EngineCandle>> seriesCache) {
     // Per-book risk governor (mirrors SignalEngine.emitEntry): a tripped kill-switch / daily-loss /
     // daily-profit-target / max-open on the MANAS_ARORA book pauses ALL swing entries for this run.
     if (emissionGuard.map(g -> !g.entryAllowed(in.arthayantra.strategysignal.signals.Books.MANAS_ARORA))
@@ -183,7 +260,7 @@ public class ManasAroraSwingEngine {
     }
     // A symbol already holding an open swing entry is skipped for ALL setups this run — the paper book
     // keeps one open position per (symbol, side), so a second setup would only average in.
-    Set<String> held = heldSymbols(swings);
+    Set<String> held = heldSymbols(resolution);
     int fired = 0;
     for (ManasFunnelClient.Candidate c : candidates) {
       if (held.contains(c.symbol())) {
@@ -221,12 +298,12 @@ public class ManasAroraSwingEngine {
     return SETUP_VCP.equals(strat.setup()) ? c.vcpPivot() : c.breakoutPivot();
   }
 
-  private Set<String> heldSymbols(List<SwingStrategy> swings) {
-    Set<UUID> versions = new HashSet<>();
-    swings.forEach(s -> versions.add(s.versionId()));
+  private Set<String> heldSymbols(AnchorResolution resolution) {
+    // Resolution (not a current-published-version set) so a symbol held by a SUPERSEDED version's
+    // anchor still blocks re-entry — the audit-H2 double-exposure path.
     Set<String> held = new HashSet<>();
     for (SignalRepository.SignalRow anchor : signals.activeEntries()) {
-      if (versions.contains(anchor.strategyVersionId())) {
+      if (resolution.resolve(anchor.strategyVersionId()).isPresent()) {
         held.add(anchor.tradingsymbol());
       }
     }
@@ -310,14 +387,12 @@ public class ManasAroraSwingEngine {
 
   // ---- exit pass ----------------------------------------------------------------------------
 
-  private int exitPass(List<SwingStrategy> swings, Map<String, List<EngineCandle>> seriesCache) {
-    Map<UUID, SwingStrategy> byVersion = new HashMap<>();
-    swings.forEach(s -> byVersion.put(s.versionId(), s));
+  private int exitPass(AnchorResolution resolution, Map<String, List<EngineCandle>> seriesCache) {
     int closed = 0;
     for (SignalRepository.SignalRow anchor : signals.activeEntries()) {
-      SwingStrategy strat = byVersion.get(anchor.strategyVersionId());
+      SwingStrategy strat = resolution.resolve(anchor.strategyVersionId()).orElse(null);
       if (strat == null) {
-        continue; // not a published manas swing anchor
+        continue; // another family's anchor, or unmanageable (already logged at ERROR)
       }
       List<EngineCandle> series = series(anchor.tradingsymbol(), seriesCache);
       if (series.isEmpty()) {

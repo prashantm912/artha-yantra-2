@@ -55,8 +55,17 @@ public class SwingBatchCanary {
     LocalDate today = LocalDate.now(clock.withZone(IST));
     // The last day a batch SHOULD have run for: the most recent NSE trading day strictly before
     // today. (Batches run post-close on the trading day itself; a weekday-holiday run records
-    // against the stale date and is simply an extra row.)
-    LocalDate expected = calendar.previousTradingDay(today);
+    // against the stale date and is simply an extra row.) previousTradingDay throws once candidate
+    // dates leave the bundled calendar coverage (the CD-2 CSV-refresh cliff) — guard it exactly
+    // like DotHealthCanary does, so a stale calendar disables THIS canary quietly rather than
+    // killing the @Scheduled tick (the calendar cliff has its own horizon canary).
+    LocalDate expected;
+    try {
+      expected = calendar.previousTradingDay(today);
+    } catch (RuntimeException e) {
+      log.warn("swing canary: NSE calendar does not cover {} — skipping (calendar-cliff)", today);
+      return;
+    }
     checkBatch("minervini", minerviniArmed, expected);
     checkBatch("manas-arora", manasArmed, expected);
   }
@@ -76,8 +85,7 @@ public class SwingBatchCanary {
         String message =
             "Expected a run for " + expected + "; last recorded " + last.get()
                 + ". Open positions' stops were NOT evaluated that evening — run"
-                + " POST /api/v1/signals/" + ("minervini".equals(batch) ? "minervini" : batch)
-                + "-swing/run to catch up.";
+                + " POST /api/v1/signals/" + batch + "-swing/run to catch up.";
         log.error("swing canary: {} — {}", title, message);
         events.publishEvent(new SwingBatchAlert(batch, title, message));
       }

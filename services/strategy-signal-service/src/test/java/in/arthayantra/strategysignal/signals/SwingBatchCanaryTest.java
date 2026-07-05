@@ -64,6 +64,20 @@ class SwingBatchCanaryTest {
   }
 
   @Test
+  void staysQuietWhenABatchRanLATERThanExpected() {
+    // A weekday-holiday run records against the (stale) last-trading-day BUT a batch could also
+    // record a date >= expected (e.g. the batch already ran today's session before the 08:30
+    // check on a same-day cron misconfig). isBefore — not !isEqual — keeps this quiet; a
+    // regression to !isEqual would false-alarm every weekday-holiday morning.
+    when(runs.lastRunDate("minervini")).thenReturn(Optional.of(FRIDAY.plusDays(3))); // Monday
+    when(runs.lastRunDate("manas-arora")).thenReturn(Optional.of(FRIDAY));
+
+    new SwingBatchCanary(runs, events, MONDAY_0830, true, true).check();
+
+    verify(events, never()).publishEvent(any());
+  }
+
+  @Test
   void neverRecordedBatchIsSkippedNotAlerted() {
     // Fresh deploy: the marker table starts empty — a missing-run alert can only fire after the
     // first successful recording (else every fresh stack false-alarms on day one).

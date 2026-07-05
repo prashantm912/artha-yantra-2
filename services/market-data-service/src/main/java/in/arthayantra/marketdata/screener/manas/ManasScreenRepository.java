@@ -93,6 +93,17 @@ public class ManasScreenRepository {
     return rows.isEmpty() ? null : rows.get(0);
   }
 
+  /**
+   * The latest PERSISTED screen date — the read-side watermark. Read endpoints default to this,
+   * NOT the bhavcopy watermark (which can point at a date with zero screen rows between the
+   * bhavcopy landing and the screen running — the audit-H1 empty-funnel window). Null when no
+   * screen has ever persisted.
+   */
+  public LocalDate latestScreenDate() {
+    return jdbc.queryForObject(
+        "SELECT max(screen_date) FROM manas_arora_screen_results", LocalDate.class);
+  }
+
   /** How many symbols were scanned on a screen date (coverage). */
   public int coverage(LocalDate screenDate) {
     Integer n =

@@ -120,6 +120,18 @@ public class MinerviniController {
     this.backtestService = backtestService;
   }
 
+  /**
+   * Default date for READ endpoints (screen/candidate/funnel): the latest PERSISTED screen date,
+   * falling back to the bhavcopy watermark only when no screen has ever run. Defaulting to the
+   * bhavcopy watermark directly served an empty screen/funnel in the window between the day's
+   * bhavcopy landing and the screen running for it (audit H1 2026-07-05) — the 20:00 swing batch
+   * read a zero-row funnel every unattended evening.
+   */
+  private LocalDate defaultReadDate() {
+    LocalDate persisted = repo.latestScreenDate();
+    return persisted != null ? persisted : screener.latestScreenDate();
+  }
+
   /** Serves the persisted daily screen (default = latest date, passers only). */
   @GetMapping
   public ScreenResponse get(
@@ -128,7 +140,7 @@ public class MinerviniController {
       @RequestParam(required = false) BigDecimal minRsRank,
       @RequestParam(defaultValue = "50") int limit,
       @RequestParam(defaultValue = "0") int offset) {
-    LocalDate date = asOf != null ? asOf : screener.latestScreenDate();
+    LocalDate date = asOf != null ? asOf : defaultReadDate();
     int cappedLimit = Math.min(Math.max(1, limit), 500);
     if (date == null) {
       return new ScreenResponse(List.of(), null, 0, cappedLimit, offset);
@@ -179,7 +191,7 @@ public class MinerviniController {
       @PathVariable String symbol,
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
     String sym = symbol.toUpperCase(java.util.Locale.ROOT);
-    LocalDate date = asOf != null ? asOf : screener.latestScreenDate();
+    LocalDate date = asOf != null ? asOf : defaultReadDate();
     if (date == null) {
       return new CandidateAnalysis(
           sym, "NSE", null, false, null, null, null, null, null, null, null, null, null, null,
@@ -223,7 +235,7 @@ public class MinerviniController {
   @GetMapping("/funnel")
   public MinerviniFunnelService.Funnel funnel(
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
-    LocalDate date = asOf != null ? asOf : screener.latestScreenDate();
+    LocalDate date = asOf != null ? asOf : defaultReadDate();
     if (date == null) {
       return new MinerviniFunnelService.Funnel(null, null, List.of(), List.of(), List.of());
     }

@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.screener.manas;
 
+import in.arthayantra.marketdata.bhavcopy.BhavcopyBackfillCompleted;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -10,9 +11,12 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * Runs the Manas Arora daily selection screen + persists it. Fires a boot one-shot (so a fresh stack
- * has a screen immediately) and a nightly cron AFTER the ~19:00 IST bhavcopy pull (so the day's daily
- * bars are present). Fail-soft: a screen failure is logged, never fatal. Gated DEFAULT-OFF by
+ * Runs the Manas Arora daily selection screen + persists it. The PRIMARY trigger is the
+ * {@link BhavcopyBackfillCompleted} event — the screen keys on the bhavcopy watermark, so it must
+ * run AFTER the day's rows land (the old 19:40 cron had only ~10 min of accidental headroom over
+ * the 19:30 backfill; audit H1 2026-07-05). A boot one-shot and a 19:55 IST fallback cron (in case
+ * the backfill fails and never publishes) remain — all three paths are idempotent upserts.
+ * Fail-soft: a screen failure is logged, never fatal. Gated DEFAULT-OFF by
  * {@code artha.manas-arora.screen.enabled} — the whole component is created ONLY when the flag is
  * true, so nothing runs until a deploy wires it (this differs from the always-on Minervini scheduler,
  * which guards inside its method; Manas defaults off/absent as a new, deploy-gated screener). The
@@ -43,8 +47,14 @@ public class ManasScheduler {
     runQuietly("startup");
   }
 
-  /** Nightly, after the bhavcopy pull. */
-  @Scheduled(cron = "${artha.manas-arora.cron:0 40 19 * * MON-FRI}", zone = "Asia/Kolkata")
+  /** Primary trigger: the day's bhavcopy rows just landed — screen against the fresh watermark. */
+  @EventListener(BhavcopyBackfillCompleted.class)
+  void onBhavcopyBackfillCompleted() {
+    runQuietly("bhavcopy-complete");
+  }
+
+  /** Fallback cron (bhavcopy backfill failed → no event). 19:55, before the 20:05 swing batch. */
+  @Scheduled(cron = "${artha.manas-arora.cron:0 55 19 * * MON-FRI}", zone = "Asia/Kolkata")
   void scheduled() {
     runQuietly("scheduled");
   }

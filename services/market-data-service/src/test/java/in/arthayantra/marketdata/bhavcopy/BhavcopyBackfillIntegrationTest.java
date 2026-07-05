@@ -64,7 +64,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
     BhavcopyBackfillService svc =
         new BhavcopyBackfillService(
             nseStub(), nseRepo, bseStub(), bseRepo, caStub(), bseCaStub(), caRepo, candles, CLOCK,
-            "EQ,BE", 10, 90, 7, 420);
+            event -> {}, "EQ,BE", 10, 90, 7, 420);
 
     // A Kite-owned 1d bar must survive the bhavcopy projection (DO NOTHING; source not in PK).
     candles.upsertAuthoritativeAll(
@@ -146,7 +146,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
     BhavcopyBackfillService svc =
         new BhavcopyBackfillService(
             flaky, nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo, candles, CLOCK,
-            "EQ,BE", 10, 90, 7, 420);
+            event -> {}, "EQ,BE", 10, 90, 7, 420);
 
     // Run 1: trd2 missed; the watermark must NOT advance past it.
     svc.runNse();

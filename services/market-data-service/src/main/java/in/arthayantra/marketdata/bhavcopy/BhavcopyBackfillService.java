@@ -35,6 +35,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -64,6 +65,7 @@ public class BhavcopyBackfillService {
   private final EodCorporateActionRepository caRepo;
   private final CandleRepository candles;
   private final Clock clock;
+  private final ApplicationEventPublisher events;
 
   /** How far back to refresh corporate-action ratios each run (one cheap API call). */
   private final int caLookbackDays;
@@ -106,6 +108,7 @@ public class BhavcopyBackfillService {
       EodCorporateActionRepository caRepo,
       CandleRepository candles,
       Clock clock,
+      ApplicationEventPublisher events,
       @Value("${artha.nse.bhavcopy.candle-series:EQ,BE}") String candleSeriesCsv,
       @Value("${artha.bhavcopy.catchup-floor-days:10}") int catchupFloorDays,
       @Value("${artha.bhavcopy.catchup-max-days:90}") int catchupMaxDays,
@@ -120,6 +123,7 @@ public class BhavcopyBackfillService {
     this.caRepo = caRepo;
     this.candles = candles;
     this.clock = clock;
+    this.events = events;
     this.reconcileLookbackDays = reconcileLookbackDays;
     this.caLookbackDays = caLookbackDays;
     this.candleSeries =
@@ -198,11 +202,26 @@ public class BhavcopyBackfillService {
           nse.days(), nse.bhavRows(), nse.candleRows(),
           bse.days(), bse.bhavRows(), bse.candleRows(),
           ok.durationMs());
+      publishCompleted(jobId);
     } catch (RuntimeException e) {
       log.error("EOD bhavcopy backfill {} failed", jobId, e);
       status.set(Status.failed(jobId, started, clock.instant(), e.getMessage()));
     } finally {
       running.set(false);
+    }
+  }
+
+  /**
+   * Notifies listeners (the Minervini/Manas screen schedulers) that fresh daily bars are in. Fired
+   * only on a successful run, AFTER the ok status is set; a listener failure must never flip the
+   * backfill status to failed, so the publish is isolated. Listeners run synchronously on this
+   * (bhavcopy-executor) thread — the screens are seconds of windowed SQL, which is fine here.
+   */
+  private void publishCompleted(String jobId) {
+    try {
+      events.publishEvent(new BhavcopyBackfillCompleted(jobId));
+    } catch (RuntimeException e) {
+      log.warn("bhavcopy-completed listeners failed for {} — non-fatal", jobId, e);
     }
   }
 

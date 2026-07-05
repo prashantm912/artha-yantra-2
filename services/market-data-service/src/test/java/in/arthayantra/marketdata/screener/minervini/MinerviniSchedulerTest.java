@@ -21,6 +21,8 @@ class MinerviniSchedulerTest {
   private final TrendTemplateService screener = mock(TrendTemplateService.class);
   private final MinerviniScreenRepository repo = mock(MinerviniScreenRepository.class);
   private final MinerviniGeometryService geometry = mock(MinerviniGeometryService.class);
+  private final in.arthayantra.marketdata.alerts.NtfyClient ntfy =
+      mock(in.arthayantra.marketdata.alerts.NtfyClient.class);
 
   @Test
   void bhavcopyCompletedEventRunsAndPersistsTheScreen() {
@@ -28,7 +30,7 @@ class MinerviniSchedulerTest {
     when(screener.screen(null))
         .thenReturn(new TrendTemplateService.ScreenResult(day, 0, List.of()));
 
-    new MinerviniScheduler(screener, repo, geometry, true).onBhavcopyBackfillCompleted();
+    new MinerviniScheduler(screener, repo, geometry, ntfy, true).onBhavcopyBackfillCompleted();
 
     verify(repo).upsertAll(eq(day), any());
     verify(geometry).persistForPassers(eq(day), any());
@@ -36,7 +38,7 @@ class MinerviniSchedulerTest {
 
   @Test
   void disabledFlagKeepsTheEventPathInert() {
-    new MinerviniScheduler(screener, repo, geometry, false).onBhavcopyBackfillCompleted();
+    new MinerviniScheduler(screener, repo, geometry, ntfy, false).onBhavcopyBackfillCompleted();
 
     verifyNoInteractions(screener, repo, geometry);
   }
@@ -49,7 +51,7 @@ class MinerviniSchedulerTest {
     when(repo.latestScreenDate()).thenReturn(day);
     when(screener.latestScreenDate()).thenReturn(day);
 
-    new MinerviniScheduler(screener, repo, geometry, true).onBhavcopyBackfillCompleted();
+    new MinerviniScheduler(screener, repo, geometry, ntfy, true).onBhavcopyBackfillCompleted();
 
     org.mockito.Mockito.verify(screener, org.mockito.Mockito.never()).screen(any());
     org.mockito.Mockito.verify(repo, org.mockito.Mockito.never()).upsertAll(any(), any());
@@ -67,7 +69,7 @@ class MinerviniSchedulerTest {
     new org.springframework.boot.test.context.runner.ApplicationContextRunner()
         .withBean(
             MinerviniScheduler.class,
-            () -> new MinerviniScheduler(screener, repo, geometry, true))
+            () -> new MinerviniScheduler(screener, repo, geometry, ntfy, true))
         .run(
             ctx -> {
               ctx.getSourceApplicationContext()

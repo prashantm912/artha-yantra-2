@@ -15,20 +15,24 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/signals/minervini-swing")
 public class MinerviniSwingController {
 
-  private final MinerviniSwingEngine engine;
+  private final MinerviniSwingRunRecorder recorder;
   private final MinerviniSellDecisionService sellDecisions;
 
-  /** Wires the swing engine + the sell-decision service. */
+  /** Wires the run recorder + the sell-decision service. */
   public MinerviniSwingController(
-      MinerviniSwingEngine engine, MinerviniSellDecisionService sellDecisions) {
-    this.engine = engine;
+      MinerviniSwingRunRecorder recorder, MinerviniSellDecisionService sellDecisions) {
+    this.recorder = recorder;
     this.sellDecisions = sellDecisions;
   }
 
-  /** Runs one daily swing batch now (entry pass + exit pass) and returns the counts. */
+  /**
+   * Runs one daily swing batch now (entry pass + exit pass) and returns the counts. Goes through
+   * the recorder (audit P0-4 review): a manual catch-up run records its {@code swing_batch_runs}
+   * marker, else the did-not-run canary keeps alerting for a date the owner already ran.
+   */
   @PostMapping("/run")
   public MinerviniSwingEngine.SwingRun run() {
-    return engine.runDaily();
+    return recorder.runAndRecord();
   }
 
   /** The daily sell-decision triad for every open swing position (MV-9.3) — read-only. */

@@ -1376,6 +1376,37 @@
         }
       }
     },
+    "/api/v1/strategies/graduation/promotions" : {
+      "get" : {
+        "tags" : [ "graduation-controller" ],
+        "operationId" : "promotions",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/Promotion"
+                  }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/signals" : {
       "get" : {
         "tags" : [ "signals-controller" ],
@@ -2370,6 +2401,10 @@
           "exits" : {
             "type" : "integer",
             "format" : "int32"
+          },
+          "exitSkipped" : {
+            "type" : "integer",
+            "format" : "int32"
           }
         }
       },
@@ -2389,6 +2424,10 @@
             "format" : "int32"
           },
           "exits" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "exitSkipped" : {
             "type" : "integer",
             "format" : "int32"
           }
@@ -2633,6 +2672,32 @@
             "type" : "number"
           },
           "minExpectancy" : {
+            "type" : "number"
+          },
+          "maxDrawdownPct" : {
+            "type" : "number"
+          }
+        }
+      },
+      "Promotion" : {
+        "type" : "object",
+        "properties" : {
+          "strategyId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "graduatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "trades" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "expectancy" : {
+            "type" : "number"
+          },
+          "sharpe" : {
             "type" : "number"
           },
           "maxDrawdownPct" : {

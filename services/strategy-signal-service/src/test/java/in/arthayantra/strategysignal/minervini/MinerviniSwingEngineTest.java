@@ -195,6 +195,78 @@ class MinerviniSwingEngineTest {
     org.mockito.Mockito.verify(signals).transition(42L, "EXPIRED");
   }
 
+  @Test
+  void heldSymbolsBlocksReEntryForSupersededVersionAnchors() throws IOException {
+    // The second half of audit H2 (double exposure): a symbol held by a SUPERSEDED version's anchor
+    // must still block a new-version entry. Pre-fix, heldSymbols counted only current published
+    // versions, so this breakout candidate would fire a fresh ENTRY on the already-held symbol.
+    java.util.UUID strategyId = java.util.UUID.randomUUID();
+    java.util.UUID publishedVersion = java.util.UUID.randomUUID();
+    java.util.UUID supersededVersion = java.util.UUID.randomUUID();
+
+    com.fasterxml.jackson.databind.JsonNode config = vcpConfig();
+    StrategyRepository registry = mock(StrategyRepository.class);
+    StrategyRepository.StrategyRow strategyRow =
+        new StrategyRepository.StrategyRow(
+            strategyId, "minervini-vcp", "Minervini VCP", null, null, List.of("minervini"), true,
+            publishedVersion, null, null, false, null);
+    org.mockito.Mockito.when(registry.listAll()).thenReturn(List.of(strategyRow));
+    org.mockito.Mockito.when(registry.findById(strategyId)).thenReturn(Optional.of(strategyRow));
+    org.mockito.Mockito.when(registry.findVersionById(publishedVersion))
+        .thenReturn(Optional.of(version(publishedVersion, strategyId, "2", config)));
+    org.mockito.Mockito.when(registry.findVersionById(supersededVersion))
+        .thenReturn(Optional.of(version(supersededVersion, strategyId, "1", config)));
+
+    // A breakout series that WOULD fire the entry gate (pivot crossover on 3x volume) — the only
+    // thing standing between the candidate and a duplicate position is the held-symbol block.
+    List<EngineCandle> series = craft(3_000L);
+    in.arthayantra.strategysignal.signals.SignalRepository signals =
+        mock(in.arthayantra.strategysignal.signals.SignalRepository.class);
+    org.mockito.Mockito.when(signals.activeEntries())
+        .thenReturn(
+            List.of(
+                new in.arthayantra.strategysignal.signals.SignalRepository.SignalRow(
+                    42L, supersededVersion, "NSE", "TESTCO", "1d", "ENTRY", "BUY",
+                    new BigDecimal("100"), null, null, BigDecimal.ONE,
+                    new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode(), "TAKEN",
+                    series.get(0).bucketStart(), series.get(0).bucketStart().plusDays(1), null,
+                    null, null, null, null, null)));
+
+    MinerviniFunnelClient funnel = mock(MinerviniFunnelClient.class);
+    org.mockito.Mockito.when(funnel.buyableAndOnDeck())
+        .thenReturn(
+            List.of(
+                new MinerviniFunnelClient.Candidate(
+                    "TESTCO", new BigDecimal("152"), PIVOT, null, false, 2, "40W 31/3 4T")));
+    in.arthayantra.strategysignal.signals.MarketDataCandlesClient candles =
+        mock(in.arthayantra.strategysignal.signals.MarketDataCandlesClient.class);
+    org.mockito.Mockito.when(candles.fetch(
+            org.mockito.ArgumentMatchers.eq("NSE"), org.mockito.ArgumentMatchers.eq("TESTCO"),
+            org.mockito.ArgumentMatchers.eq("1d"), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any()))
+        .thenReturn(series);
+    org.springframework.transaction.support.TransactionTemplate tx =
+        mock(org.springframework.transaction.support.TransactionTemplate.class);
+    org.mockito.Mockito.when(tx.execute(org.mockito.ArgumentMatchers.any()))
+        .thenAnswer(inv ->
+            inv.<org.springframework.transaction.support.TransactionCallback<Long>>getArgument(0)
+                .doInTransaction(null));
+
+    MinerviniSwingEngine engine =
+        new MinerviniSwingEngine(
+            registry, funnel, candles, signals,
+            mock(in.arthayantra.strategysignal.signals.SignalPublisher.class),
+            mock(org.springframework.context.ApplicationEventPublisher.class), Optional.empty(),
+            tx, new com.fasterxml.jackson.databind.ObjectMapper(),
+            java.time.Clock.systemUTC(), true, 520, 60, 1440);
+
+    MinerviniSwingEngine.SwingRun run = engine.runDaily();
+
+    assertThat(run.entries())
+        .as("the superseded-version anchor's symbol blocks the new-version re-entry")
+        .isZero();
+  }
+
   private static com.fasterxml.jackson.databind.JsonNode vcpConfig() throws IOException {
     try (InputStream in =
         MinerviniSwingEngineTest.class.getResourceAsStream("/minervini-strategies/minervini-vcp.yaml")) {

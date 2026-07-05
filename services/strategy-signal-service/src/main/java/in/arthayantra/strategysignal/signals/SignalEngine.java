@@ -1164,15 +1164,23 @@ public class SignalEngine {
    */
   @Scheduled(fixedDelay = 20_000L, initialDelay = 20_000L)
   public void reconcilePublishedStrategies() {
-    // Compare the registry's CURRENT published set against the set the last reload was based on — NOT
-    // against the LOADED subset (the engine deliberately skips swing / non-rollable / empty-universe
-    // strategies, so loaded < published is the steady state, not drift). This reloads on a genuine
-    // publish/unpublish/enable/disable and then converges.
-    if (!publishedVersionSet().equals(lastReloadedPublishedSet)) {
+    if (publishedSetDrifted()) {
       log.info("reconcile: published-strategy set changed in the registry — reloading");
       reloadRequested.set(true);
       evalExecutor.execute(this::drainReloadOnly);
     }
+  }
+
+  /**
+   * The reconcile drift predicate: the registry's CURRENT published set differs from the set the last
+   * reload was based on. Deliberately compared against the last-reload SNAPSHOT, NOT the LOADED subset
+   * — the engine skips swing / non-rollable / empty-universe / failed strategies, so {@code loaded <
+   * published} is the steady state, not drift; comparing against loaded would reload forever (fixed
+   * #579). Package-visible so the regression test can assert convergence when a skipped (swing)
+   * strategy is published.
+   */
+  boolean publishedSetDrifted() {
+    return !publishedVersionSet().equals(lastReloadedPublishedSet);
   }
 
   private String publishedVersionSet() {

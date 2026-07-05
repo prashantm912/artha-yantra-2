@@ -121,6 +121,37 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
         session: { style: intraday }
       """;
 
+  /** A SWING strategy the tick engine deliberately SKIPS at load (session.style=swing) — used to
+   *  regression-guard the reconcile: published (incl. this) must equal the reload snapshot even though
+   *  it is not in the LOADED set, so the 20s reconcile must NOT see drift (else it loops — #579). */
+  private static final String SWING_YAML =
+      """
+      schema: strategy-schema/v1
+      id: engine-it-swing
+      name: "Engine IT Swing"
+      version: 1.0.0
+      universe:
+        mode: explicit
+        instruments:
+          - { exchange: NSE, tradingsymbol: SWINGTEST }
+      timeframes: { primary: 1d }
+      indicators:
+        - { name: RSI, alias: rsi_1d, timeframe: 1d, params: { period: 14 }, weight: 1.0,
+            normalize: { type: rsi_momentum } }
+      entry_rules:
+        direction: long
+        gate:
+          all:
+            - "close > 1"
+        scoring: { threshold: 0.2 }
+      exit_rules:
+        - { type: stop_loss, params: { basis: percent, value: 8 } }
+      risk:
+        position_sizing: { method: fixed_quantity, params: { quantity: 1 } }
+        max_positions: 1
+        session: { style: swing }
+      """;
+
   @Autowired private RegistryService registryService;
   @Autowired private SignalEngine engine;
   @Autowired private SignalRepository signals;
@@ -257,6 +288,22 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
     mockMvc
         .perform(MockMvcRequestBuilders.get("/api/v1/signals/99999999"))
         .andExpect(MockMvcResultMatchers.status().isNotFound());
+  }
+
+  @Test
+  @Order(4)
+  void reconcileConvergesWhenASkippedSwingStrategyIsPublished() {
+    // Regression for #579: a published+enabled SWING strategy is deliberately SKIPPED by the tick
+    // engine at load (session.style=swing → the daily batch owns it). It is therefore in the published
+    // set but NOT the loaded set. The 20s reconcile must compare the published set against the
+    // last-reload SNAPSHOT (which includes it), NOT the loaded subset — otherwise loaded < published
+    // reads as perpetual "drift" and the engine reloads all strategies every 20s forever.
+    UUID swingId = (UUID) registryService.create("Engine IT Swing", null, null, SWING_YAML).get("id");
+    registryService.publish(swingId, null, null);
+    engine.reload();
+
+    assertThat(engine.loadedVersions()).doesNotContainKey("engine-it-swing"); // skipped, by design
+    assertThat(engine.publishedSetDrifted()).isFalse(); // ...yet the reconcile sees NO drift → no loop
   }
 
   private void publishBar(String tradingsymbol, OffsetDateTime bucket, BigDecimal close)

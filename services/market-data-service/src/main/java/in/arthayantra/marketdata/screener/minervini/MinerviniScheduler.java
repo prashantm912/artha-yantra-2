@@ -75,6 +75,16 @@ public class MinerviniScheduler {
       return;
     }
     try {
+      // Already screened the current bhavcopy watermark? Skip — makes the fallback cron, the boot
+      // one-shot on an up-to-date stack, and a holiday's no-op-backfill event all cheap no-ops
+      // instead of a second full screen + ~210-symbol geometry fan-out on the shared Timescale box.
+      // POST /run (runOnce) deliberately bypasses this — it is the forced-recompute path, and the
+      // heal for the rare screen-persisted-but-geometry-failed evening.
+      LocalDate persisted = repo.latestScreenDate();
+      if (persisted != null && persisted.equals(screener.latestScreenDate())) {
+        log.debug("minervini screen already current for {} — skipped ({})", persisted, trigger);
+        return;
+      }
       TrendTemplateService.ScreenResult r = screener.screen(null);
       if (r.screenDate() == null) {
         log.info("minervini screen skipped ({}) — no daily equity data yet", trigger);

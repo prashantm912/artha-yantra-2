@@ -212,10 +212,15 @@ public class BhavcopyBackfillService {
   }
 
   /**
-   * Notifies listeners (the Minervini/Manas screen schedulers) that fresh daily bars are in. Fired
-   * only on a successful run, AFTER the ok status is set; a listener failure must never flip the
-   * backfill status to failed, so the publish is isolated. Listeners run synchronously on this
-   * (bhavcopy-executor) thread — the screens are seconds of windowed SQL, which is fine here.
+   * Notifies listeners (the Minervini/Manas screen schedulers) that the backfill run completed.
+   * Fired AFTER the ok status is set; a listener failure must never flip the backfill status to
+   * failed, so the publish is isolated. Listeners run synchronously on this (bhavcopy-executor)
+   * thread — the screen SQL is fast but the per-passer geometry fan-out can take minutes; nothing
+   * queues behind this executor (next cron is a day away), so that is acceptable. NOTE:
+   * "completed" ≠ "fresh data" — {@code safe()} swallows per-exchange failures, so a run where
+   * both exchanges returned nothing still publishes (the listeners' watermark guard makes that a
+   * cheap no-op). The screens' fallback crons therefore exist for a CRASHED/HUNG run, not for a
+   * fetch failure.
    */
   private void publishCompleted(String jobId) {
     try {

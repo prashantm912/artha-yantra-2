@@ -61,6 +61,14 @@ public class ManasScheduler {
 
   private void runQuietly(String trigger) {
     try {
+      // Already screened the current bhavcopy watermark? Skip (mirror of the Minervini scheduler):
+      // the fallback cron / boot one-shot / holiday no-op event become cheap no-ops instead of a
+      // second full screen + geometry fan-out. POST /run stays the forced-recompute path.
+      java.time.LocalDate persisted = repo.latestScreenDate();
+      if (persisted != null && persisted.equals(screener.latestScreenDate())) {
+        log.debug("manas screen already current for {} — skipped ({})", persisted, trigger);
+        return;
+      }
       ManasScreenService.ScreenResult r = screener.screen(null);
       if (r.screenDate() == null) {
         log.info("manas screen skipped ({}) — no daily equity data yet", trigger);

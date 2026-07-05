@@ -32,4 +32,37 @@ class ManasSchedulerTest {
     verify(repo).upsertAll(eq(day), any());
     verify(geometry).persistForPassers(eq(day), any());
   }
+
+  @Test
+  void alreadyCurrentScreenIsSkippedOnTheEventAndCronPaths() {
+    LocalDate day = LocalDate.of(2026, 7, 6);
+    when(repo.latestScreenDate()).thenReturn(day);
+    when(screener.latestScreenDate()).thenReturn(day);
+
+    new ManasScheduler(screener, repo, geometry).onBhavcopyBackfillCompleted();
+
+    org.mockito.Mockito.verify(screener, org.mockito.Mockito.never()).screen(any());
+    org.mockito.Mockito.verify(repo, org.mockito.Mockito.never()).upsertAll(any(), any());
+  }
+
+  @Test
+  void eventListenerWiringFiresTheScreenOnBhavcopyCompletion() {
+    // Pins the @EventListener wiring itself (mirror of the Minervini twin's wiring test).
+    LocalDate day = LocalDate.of(2026, 7, 6);
+    when(screener.screen(null))
+        .thenReturn(new ManasScreenService.ScreenResult(day, 0, List.of()));
+
+    new org.springframework.boot.test.context.runner.ApplicationContextRunner()
+        // the class-level @ConditionalOnProperty is evaluated even for withBean registrations —
+        // without the flag the bean (and its listener) is silently skipped
+        .withPropertyValues("artha.manas-arora.screen.enabled=true")
+        .withBean(ManasScheduler.class, () -> new ManasScheduler(screener, repo, geometry))
+        .run(
+            ctx -> {
+              ctx.getSourceApplicationContext()
+                  .publishEvent(
+                      new in.arthayantra.marketdata.bhavcopy.BhavcopyBackfillCompleted("job"));
+              verify(repo).upsertAll(eq(day), any());
+            });
+  }
 }

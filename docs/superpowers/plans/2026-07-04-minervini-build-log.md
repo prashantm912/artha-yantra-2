@@ -538,3 +538,58 @@ strategies → smoke-test (`POST /run` + `GET /sell-decisions` + `GET /funnel`).
 Monday post-close (20:00 IST); positions accrue as the ~30–50 forward paper trades the §0.5 #12
 reliability bar needs. **That paper book — with the 8%-stop + 50d-trail exits — is the real test; the
 hit-rate harness was necessary-but-not-sufficient.**
+
+**Live-fired ahead of Monday (owner clarification):** daily-bar signals are analysed post-close on ANY
+session, not only Monday — so the batch was run on the 2026-07-04 (Fri) close: **8 entries fired → 8
+swing paper positions open**; the `.env` seed + swing flags persist `true`. The forward paper book is
+now accruing for real.
+
+---
+
+## Deep-history backtest + live tuning (v1–v7 + config, #556–#563, 2026-07-04/05)
+
+After go-live the owner asked to *calibrate the live knobs on evidence*, not defaults — an ~11-year
+event-driven backtest over the dense native `candles`@1d (~1,789 EQ names, ~40k signals), then a
+7-version A/B chain, then apply the winners to the live paper config. New pure-computation classes
+(`MinerviniSwingBacktest` / `SwingPortfolio` / `SwingRotationPortfolio` / `MinerviniBacktestService`,
+`V035__minervini_backtest_runs`), all outside the parity firewall (a market-data analytics read; the
+live engine reuses the FROZEN evaluators unchanged). Full write-up + every grid:
+[`docs/strategies/minervini-swing-backtest-results.md`](../../strategies/minervini-swing-backtest-results.md).
+
+| ver | PR | question | finding |
+|---|---|---|---|
+| v1 | [#556](https://github.com/prashantm912/artha-yantra-2/pull/556) | technical-only baseline over ~11y | 39,531 trades, 33.5% win, payoff 4.61, **expectancy +5.68%/trade** — asymmetric momentum edge (payoff in magnitude, not frequency). |
+| v2 | [#556](https://github.com/prashantm912/artha-yantra-2/pull/556) | + real cross-sectional RS-rank ≥70 + ₹37.5 L turnover floor | 22,714 trades, payoff 4.11, +5.10%/tr. Filters did NOT sharpen per-trade edge but v2 is the *trustworthy* number (turnover floor removes illiquid names where survivorship inflates v1 + slippage guts thin trades). |
+| v3 | [#557](https://github.com/prashantm912/artha-yantra-2/pull/557) | 2×2 RS/turnover isolation + `SwingPortfolio` (K compounding sleeves) → CAGR/DD/Sharpe/annual/streaks | **BIG FINDING: the portfolio view FLIPS the per-trade A/B.** 8 slots hold only ~750 of 39k signals (capacity-bound) → *which* you pick is everything. 8-slot CAGR: technical 28% / **rs-only 43% (best, Sharpe 0.96)** / turnover-only 27% / rs-turnover 23%. **RS-rank is the edge** (nearly doubles CAGR). Turnover floor alone hurts return but cuts DD (53→42%) as a realism tax. Worst trade −94.93% gap-through-stop; DD 28–61%; max-loss-streak 140–169. |
+| v4 | [#558](https://github.com/prashantm912/artha-yantra-2/pull/558) | RS-priority slot allocation vs FIFO | RS-priority lifts every variant's CAGR by **6–16 points** — a free lunch (pure allocation policy, no new data). The live funnel already RS-ranks its buyable list, so live already captures this. |
+| v5 | [#559](https://github.com/prashantm912/artha-yantra-2/pull/559) | net of transaction costs / slippage (fixed statutory + spread + size-scaled market impact, capped) | gross figures are upper bounds; costs cut most from the illiquid small-cap edge. Net RS-priority ₹10 L book: **rs-only ~39% CAGR, rs-turnover ~25%**, both ~57–66% DD. |
+| v6 | [#560](https://github.com/prashantm912/artha-yantra-2/pull/560) | turnover-floor sweep (book size × floor) | the optimal floor **scales with capital**: floor 0 at ₹1.5–10 L (38–45% net CAGR), ~₹25 L at ₹50 L, ≥₹3 Cr at ₹1 Cr+. The old **₹37.5 L default was a local minimum at *every* book size** (~20% vs 38.8% at floor 0) → lower it for a small pilot book. |
+| v7 | [#562](https://github.com/prashantm912/artha-yantra-2/pull/562) | slot sweep {8,12,16,20,24} + RS-rotation (evict laggard, buy leader) | **12 slots is the sweet spot** — best net CAGR *and* lower DD *and* higher Sharpe than 8; past 12 the extra slots dilute into weaker trades. **RS-rotation is catastrophic** (+39% → −41% CAGR): it cuts winners before the multibagger tail runs → confirms the hold-to-natural-exit doctrine. |
+
+**Adversarial review across the chain (2-reviewer passes):** v2 fixed 3 real bugs (percentile
+strictly-below → midpoint; RS membership 252 vs 260 mismatch → one 260; rank-date-only → as-of
+contribution) and v1 byte-reproduces after; v3 self-caught a skipped-vs-closed marker collision
+(−3 distinct from −1); v7 fixed F1 (a NaN current-RS holding was eviction-*protected*, biasing the
+rotation rate down → NaN now evictable). **Trap surfaced:** `BacktestParityTest` checks determinism +
+signal-JSON but NEVER pins the trade list to a golden — a trade-list-only change slips through, so the
+scaled-executor + these sims lean on adversarial review, not the golden gate.
+
+**Live config tuned from the findings (owner-confirmed via AskUserQuestion on the money-adjacent picks):**
+
+| knob | where | was | now | source |
+|---|---|---|---|---|
+| turnover floor | `artha.minervini.liquidity-multiple` (`TrendTemplateService` + `MinerviniHitRateService` `@Value` default) | 100 (⇒ ₹37.5 L) | **25 (⇒ ₹9.375 L)** — owner picked "multiple 25 / ~4% of daily volume" | v5/v6; [#561](https://github.com/prashantm912/artha-yantra-2/pull/561) |
+| concurrent positions | `risk.max_open_paper_positions` (RiskService DB row, GLOBAL cap) | disabled (uncapped) | **12** | v7 |
+| deployment cap | `risk.max_deployment_pct` (DB row) | 20% | **80%** — owner picked "80% deploy" | fills the 12-slot book |
+| per-name sizing | `position_sizing.percent` (4 Minervini YAMLs → re-publish) | 5% | **6.5%** (12 × 6.5% ≈ 78%) | [#563](https://github.com/prashantm912/artha-yantra-2/pull/563) |
+
+The 4 swing strategies re-published at **v1.0.1** with `percent: 6.5` (verified live in the published
+config). Risk-settings changes went through the audited `PUT /api/v1/risk/settings` API; the sizing
+through YAML → rebuild → `MinerviniStrategySeeder` re-sync → `POST /strategies/{id}/publish`. `liquidity-
+multiple` derived-value note also reconciled in `docs/adr/0005-minervini-universe-low-cap-equities.md`.
+
+**Net:** the buildable Minervini surface AND its live calibration are complete. Realistic net-of-cost
+expectation for the tuned book (RS-priority, ₹10 L, 12 slots): **~25% CAGR rs-turnover (live-funnel
+equivalent) → ~39% rs-only (optimistic upper bound)**, budget 40–50% drawdowns. **REMAINING = only the
+supervised forward-paper watch + the owner's §0.5 #12 reliability sign-off** — the backtest establishes
+the mechanics have edge, the live paper book (pinned 8%-stop + 50d-trail) is the real test.

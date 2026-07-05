@@ -171,6 +171,12 @@ public class ManasAroraSwingEngine {
   // ---- entry pass ---------------------------------------------------------------------------
 
   private int entryPass(List<SwingStrategy> swings, Map<String, List<EngineCandle>> seriesCache) {
+    // Per-book risk governor (mirrors SignalEngine.emitEntry): a tripped kill-switch / daily-loss /
+    // daily-profit-target / max-open on the MANAS_ARORA book pauses ALL swing entries for this run.
+    if (emissionGuard.map(g -> !g.entryAllowed(in.arthayantra.strategysignal.signals.Books.MANAS_ARORA))
+        .orElse(false)) {
+      return 0;
+    }
     List<ManasFunnelClient.Candidate> candidates = funnel.buyableAndOnDeck();
     if (candidates.isEmpty()) {
       return 0;

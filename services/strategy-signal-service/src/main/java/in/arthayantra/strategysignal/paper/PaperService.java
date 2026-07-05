@@ -294,13 +294,22 @@ public class PaperService {
         .orElseThrow(() -> new ApiException(500, ErrorCodes.INTERNAL_ERROR, "close failed"));
   }
 
-  /** The shared close path (used by manual close, the 15:45 sweep, and expiry settlement). */
-  BigDecimal settle(PositionRow pos, BigDecimal price, String closeReason) {
+  /**
+   * The shared close path (manual close, the 15:45 sweep, bracket SL/TP, engine exit). {@code
+   * @Transactional} + public so the ONE external caller that isn't already in a transaction — {@link
+   * PaperBracketEvaluator} on the @Scheduled thread — runs in a transaction; without it the
+   * {@code PaperPositionClosed} event was published outside any tx and the AFTER_COMMIT listeners
+   * (TAKEN-anchor resolver, margin annotator, auto-journal) silently never fired. Self-invoking
+   * callers (closePosition/closeForSignal/markToCloseIntraday) simply join their own tx.
+   */
+  @Transactional
+  public BigDecimal settle(PositionRow pos, BigDecimal price, String closeReason) {
     return doSettle(pos, price, closeReason, false);
   }
 
-  /** Expiry settlement at intrinsic/spot — exercise STT leg, no slippage (Phase 43B). */
-  BigDecimal settleExpiry(PositionRow pos, BigDecimal reference, boolean exercise) {
+  /** Expiry settlement at intrinsic/spot — exercise STT leg, no slippage (Phase 43B). Tx: see {@link #settle}. */
+  @Transactional
+  public BigDecimal settleExpiry(PositionRow pos, BigDecimal reference, boolean exercise) {
     return doSettle(pos, reference, "EXPIRY_SETTLEMENT", exercise);
   }
 
@@ -315,10 +324,15 @@ public class PaperService {
             : fills.fill(exitSide, pos.qty(), reference, meta);
     Fill entryBasis = fills.costBasis(Side.valueOf(pos.side()), pos.qty(), pos.avgEntryPrice(), meta);
     BigDecimal realized = exit.netValue().add(entryBasis.netValue()).setScale(4, RoundingMode.HALF_UP);
+    // CAS close FIRST: only the thread that actually flips OPEN→CLOSED (rowcount==1) books the exit
+    // fill + fires the closed event. A concurrent closer (e.g. the 15s bracket poll racing an engine
+    // exit) that lost the CAS returns without inserting a duplicate exit order or double-publishing.
+    if (positions.close(pos.id(), realized, closeReason) == 0) {
+      return realized;
+    }
     orders.insertFilled(
         pos.book(), null, pos.exchange(), pos.tradingsymbol(), exitSide.name(), pos.qty(), exit.fillPrice(),
         fills.simulatorId(), exit.slippageApplied(), null, null);
-    positions.close(pos.id(), realized, closeReason);
     // Auto-journal hook: the journal module listens AFTER_COMMIT (so a journal failure can never
     // roll back the close). Publishing inside the close tx is fine — delivery is deferred to commit.
     events.publishEvent(new PaperPositionClosed(pos.id(), realized, closeReason));

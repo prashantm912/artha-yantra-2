@@ -168,10 +168,16 @@ public class PaperPositionRepository {
         id);
   }
 
-  /** Closes a position with its realized P&amp;L + close reason (releases the partial-unique key). */
-  public void close(long id, BigDecimal realizedPnl, String closeReason) {
-    jdbc.update(
-        "UPDATE paper_positions SET status='CLOSED', realized_pnl=?, closed_at=now(), close_reason=? WHERE id=?",
+  /**
+   * Closes a position with its realized P&amp;L + close reason (releases the partial-unique key).
+   * The {@code AND status='OPEN'} guard makes the close a compare-and-set: it returns 1 iff THIS caller
+   * won the transition, 0 if a concurrent closer already flipped it — so a bracket-vs-engine-exit race
+   * cannot double-book the exit fill / journal / resolver (the caller acts only on rowcount==1).
+   */
+  public int close(long id, BigDecimal realizedPnl, String closeReason) {
+    return jdbc.update(
+        "UPDATE paper_positions SET status='CLOSED', realized_pnl=?, closed_at=now(), close_reason=?"
+            + " WHERE id=? AND status='OPEN'",
         realizedPnl,
         closeReason,
         id);

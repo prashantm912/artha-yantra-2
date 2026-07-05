@@ -438,6 +438,7 @@
                 "activate_at": { "type": "number", "exclusiveMinimum": 0 },
                 "trail_by": { "type": "number", "exclusiveMinimum": 0 },
                 "atr_period": { "type": "integer", "minimum": 1, "maximum": 200 },
+                "arm_pct": { "type": "number", "exclusiveMinimum": 0, "maximum": 100, "description": "Manas §3.5B: an atr_multiple trail stays INERT until the favourable extreme is up arm_pct% off entry, then ratchets peak − value×ATR (monotone up). Absent → armed from entry (byte-identical to before)." },
                 "alias": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
               },
               "anyOf": [
@@ -517,6 +518,29 @@
               }
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "params"],
+          "properties": {
+            "type": { "const": "square_off" },
+            "params": {
+              "description": "Manas §3.5C exhaustion square-off (whole-position exit). A too-fast clause (fast_pct + fast_bars) and/or a parabolic clause (parabolic_ma + parabolic_dist_pct); either fired clause exits. At least one COMPLETE clause is required.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "fast_pct": { "type": "number", "exclusiveMinimum": 0, "description": "Too-fast: exit when close >= close[fast_bars ago] * (1 + fast_pct%). Doc: ~30-50% in 2-4 days." },
+                "fast_bars": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Lookback (sessions) for the too-fast move." },
+                "parabolic_ma": { "type": "integer", "minimum": 1, "maximum": 200, "description": "Short-MA period for the parabolic extension (doc default 10)." },
+                "parabolic_dist_pct": { "type": "number", "exclusiveMinimum": 0, "description": "Parabolic: exit when close >= SMA(parabolic_ma) * (1 + parabolic_dist_pct%)." }
+              },
+              "anyOf": [
+                { "required": ["fast_pct", "fast_bars"] },
+                { "required": ["parabolic_ma", "parabolic_dist_pct"] }
+              ]
+            }
+          }
         }
       ]
     },
@@ -527,7 +551,8 @@
       "properties": {
         "basis": { "enum": ["premium_pct", "percent", "atr_multiple", "r_multiple", "index_points"] },
         "value": { "type": "number", "exclusiveMinimum": 0 },
-        "atr_period": { "type": "integer", "minimum": 1, "maximum": 200 }
+        "atr_period": { "type": "integer", "minimum": 1, "maximum": 200 },
+        "cap_pct": { "type": "number", "exclusiveMinimum": 0, "maximum": 100, "description": "Manas §3.5A: caps an atr_multiple stop DISTANCE at cap_pct% of entry (the tighter of value×ATR and the cap wins), so a wide-ATR stop never exceeds ~10%. Ignored by non-ATR bases." }
       }
     },
 

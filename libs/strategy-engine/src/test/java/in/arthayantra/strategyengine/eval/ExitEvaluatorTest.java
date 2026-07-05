@@ -385,6 +385,184 @@ class ExitEvaluatorTest {
         .isPresent();
   }
 
+  /** Wide-range bars: close in cents, each bar's high/low span ±{@code halfRangeCents} → large ATR. */
+  private static EngineSeries wideSeries(int halfRangeCents, long... closesCents) {
+    List<EngineCandle> candles = new ArrayList<>();
+    for (int i = 0; i < closesCents.length; i++) {
+      BigDecimal close = BigDecimal.valueOf(closesCents[i], 2);
+      candles.add(
+          new EngineCandle(
+              OffsetDateTime.of(2026, 2, 3, 9, 15, 0, 0, IST).plusMinutes(i),
+              close,
+              close.add(BigDecimal.valueOf(halfRangeCents, 2)),
+              close.subtract(BigDecimal.valueOf(halfRangeCents, 2)),
+              close,
+              100));
+    }
+    return EngineSeries.of(new SeriesKey("NSE", "EXIT", "1m"), candles);
+  }
+
+  @Test
+  void atrStopCapPctBoundsAWideAtrStopAtTenPercent() {
+    // §3.5A: 2×ATR would imply a wide stop, so cap_pct=10 binds → stop distance = 10% of entry.
+    StrategyDefinition capped =
+        definitionWith(
+            """
+              - { type: stop_loss, params: { basis: atr_multiple, value: 2, atr_period: 5, cap_pct: 10 } }
+            """);
+    StrategyDefinition uncapped =
+        definitionWith(
+            """
+              - { type: stop_loss, params: { basis: atr_multiple, value: 2, atr_period: 5 } }
+            """);
+    // 30 bars, each ±3.00 wide (TR ≈ 6.00 → ATR(5) ≈ 6.00), entry ~100 → 2×ATR ≈ 12 > the 10-pt cap.
+    long[] closes = new long[30];
+    for (int i = 0; i < 30; i++) {
+      closes[i] = 10000; // flat closes, wide intrabar range → the whole TR is the ±3.00 span
+    }
+    EngineSeries s = wideSeries(300, closes);
+    ExitEvaluator.Position position =
+        new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, new BigDecimal("100.00"), 29);
+
+    ExitEvaluator.EntryLevels cappedLevels =
+        ExitEvaluator.entryLevels(capped, bank(capped, s), position);
+    ExitEvaluator.EntryLevels uncappedLevels =
+        ExitEvaluator.entryLevels(uncapped, bank(uncapped, s), position);
+    assertThat(cappedLevels.stopLoss())
+        .as("cap binds: stop distance = 10% of 100 → stop at 90.00")
+        .isEqualByComparingTo("90.00");
+    assertThat(uncappedLevels.stopLoss())
+        .as("uncapped 2×ATR(~6) stop is wider (lower) than the capped 90")
+        .isLessThan(new BigDecimal("90.00"));
+  }
+
+  @Test
+  void atrStopCapPctIsInertWhenTwoAtrIsTighterThanTheCap() {
+    // A cap_pct that is LOOSER than 2×ATR never binds → the stop equals the plain 2×ATR stop.
+    StrategyDefinition capped =
+        definitionWith(
+            """
+              - { type: stop_loss, params: { basis: atr_multiple, value: 2, atr_period: 5, cap_pct: 50 } }
+            """);
+    StrategyDefinition uncapped =
+        definitionWith(
+            """
+              - { type: stop_loss, params: { basis: atr_multiple, value: 2, atr_period: 5 } }
+            """);
+    long[] closes = new long[30];
+    for (int i = 0; i < 30; i++) {
+      closes[i] = 10000;
+    }
+    EngineSeries s = wideSeries(300, closes); // 2×ATR ≈ 12 < 50% cap
+    ExitEvaluator.Position position =
+        new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, new BigDecimal("100.00"), 29);
+    assertThat(ExitEvaluator.entryLevels(capped, bank(capped, s), position).stopLoss())
+        .as("loose cap is inert → equals the plain 2×ATR stop")
+        .isEqualByComparingTo(
+            ExitEvaluator.entryLevels(uncapped, bank(uncapped, s), position).stopLoss());
+  }
+
+  @Test
+  void atrTrailArmPctStaysInertUntilArmedThenTrails() {
+    // §3.5B: arm_pct=9 keeps the ATR trail inert until the position is up 9%, then it trails.
+    StrategyDefinition def =
+        definitionWith(
+            """
+              - { type: trailing_stop, params: { basis: atr_multiple, value: 2, atr_period: 5, arm_pct: 9 } }
+            """);
+    StrategyDefinition unarmed =
+        definitionWith(
+            """
+              - { type: trailing_stop, params: { basis: atr_multiple, value: 2, atr_period: 5 } }
+            """);
+    // 30 tight warmup bars flat at 100 (ATR(5) ≈ 0.10), entry at index 29 = 100.00, then a small run.
+    long[] warm = new long[35];
+    for (int i = 0; i < 30; i++) {
+      warm[i] = 10000;
+    }
+    warm[30] = 10400; // +4% peak — below the 9% arm
+    warm[31] = 10300; // pull back: unarmed trail (peak 104 − 2×ATR~0.10 ≈ 103.8) would fire; armed stays inert
+    warm[32] = 11000; // +10% peak — now armed
+    warm[33] = 11500; // higher peak 115
+    warm[34] = 11000; // drop of 5.00 off the 115 peak >> 2×ATR(~0.10) → armed trail fires
+    EngineSeries s = series(warm);
+    ExitEvaluator.Position position =
+        new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, new BigDecimal("100.00"), 29);
+    IndicatorBank b = bank(def, s);
+
+    assertThat(ExitEvaluator.evaluate(def, b, position, 31))
+        .as("peak only +4% (< 9% arm) → trail inert despite a pullback")
+        .isEmpty();
+    assertThat(ExitEvaluator.evaluate(unarmed, bank(unarmed, s), position, 31))
+        .as("the same series WITHOUT arm_pct trails from entry → the pullback exits")
+        .isPresent();
+    Optional<ExitEvaluator.ExitDecision> armedExit = ExitEvaluator.evaluate(def, b, position, 34);
+    assertThat(armedExit)
+        .as("armed after +10%, the 5-pt drop off the 115 peak fires the ATR trail")
+        .get()
+        .extracting(ExitEvaluator.ExitDecision::type)
+        .isEqualTo("trailing_stop");
+  }
+
+  @Test
+  void squareOffFiresOnATooFastMove() {
+    // §3.5C too-fast: close ≥ close[fast_bars ago] × (1 + fast_pct%).
+    StrategyDefinition def =
+        definitionWith(
+            """
+              - { type: square_off, params: { fast_pct: 35, fast_bars: 3 } }
+            """);
+    // index 3 = 140 vs index 0 = 100 → +40% ≥ +35% over 3 bars → fires. index 2 = 120 (< +35% over 3) no.
+    EngineSeries s = series(10000, 10500, 12000, 14000);
+    ExitEvaluator.Position position =
+        new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, new BigDecimal("100.00"), 0);
+    IndicatorBank b = bank(def, s);
+
+    assertThat(ExitEvaluator.evaluate(def, b, position, 2))
+        .as("+20% over 2 bars — no fast-move (needs 3-bar lookback anyway)")
+        .isEmpty();
+    Optional<ExitEvaluator.ExitDecision> exit = ExitEvaluator.evaluate(def, b, position, 3);
+    assertThat(exit).get().extracting(ExitEvaluator.ExitDecision::type).isEqualTo("square_off");
+    assertThat(exit.get().reason()).contains("too-fast");
+  }
+
+  @Test
+  void squareOffFiresOnAParabolicExtension() {
+    // §3.5C parabolic: close ≥ SMA(parabolic_ma) × (1 + parabolic_dist_pct%).
+    StrategyDefinition def =
+        definitionWith(
+            """
+              - { type: square_off, params: { parabolic_ma: 5, parabolic_dist_pct: 40 } }
+            """);
+    // 5 bars flat at 100, then a spike to 160. At the spike bar SMA(5)=(100·4+160)/5=112, trigger
+    // 112×1.40=156.8, close 160 ≥ 156.8 → the parabolic extension fires. At the pre-spike bar SMA=100,
+    // trigger 140, close 100 → not extended.
+    EngineSeries s = series(10000, 10000, 10000, 10000, 10000, 16000);
+    ExitEvaluator.Position position =
+        new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, new BigDecimal("100.00"), 0);
+    IndicatorBank b = bank(def, s);
+
+    assertThat(ExitEvaluator.evaluate(def, b, position, 4))
+        .as("price on the SMA — not extended")
+        .isEmpty();
+    Optional<ExitEvaluator.ExitDecision> exit = ExitEvaluator.evaluate(def, b, position, 5);
+    assertThat(exit).get().extracting(ExitEvaluator.ExitDecision::type).isEqualTo("square_off");
+    assertThat(exit.get().reason()).contains("parabolic");
+  }
+
+  @Test
+  void squareOffIsInertWhenNeitherClauseIsConfigured() {
+    // An empty-ish square_off (only one incomplete clause) never fires — additive safety.
+    StrategyDefinition def =
+        definitionWith("  - { type: square_off, params: { fast_bars: 3 } }\n");
+    EngineSeries s = series(10000, 12000, 14000, 20000);
+    ExitEvaluator.Position position =
+        new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, new BigDecimal("100.00"), 0);
+    assertThat(ExitEvaluator.evaluate(def, bank(def, s), position, 3))
+        .as("fast_bars without fast_pct is an incomplete clause → inert")
+        .isEmpty();
+  }
+
   @Test
   void entryLevelsComputeProtectivePricesForLongAndShort() {
     StrategyDefinition def =

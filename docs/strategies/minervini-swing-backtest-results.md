@@ -10,7 +10,8 @@ Endpoints (market-data-service): `POST /api/v1/market/screener/minervini/swing-b
 (trigger), `GET …/swing-backtest` (latest single, full-filter variant), `GET …/swing-backtest/compare`
 (all variants side by side). Config: `artha.minervini.backtest.{years,min-turnover,rs-min,slots}`.
 
-Shipped in PRs **#556** (v1/v2), **#557** (v3), **#558** (v4), **#559** (v5 costs), **#560** (v6 sweep).
+Shipped in PRs **#556** (v1/v2), **#557** (v3), **#558** (v4), **#559** (v5 costs), **#560** (v6 sweep),
+**#562** (v7 slots + rotation).
 
 ---
 
@@ -328,6 +329,45 @@ filter over the rs-only signals, not a per-floor re-run of the setup books.
 
 ---
 
+## 6d. v7 — slot sweep + RS-rotation (PR #562)
+
+Two follow-on experiments over the rs-only signal set, RS-priority, net of costs.
+
+### Slot sweep — how many concurrent positions?
+
+| Slots | Taken | Gross CAGR | Net CAGR | Net DD | Net Sharpe |
+|--:|--:|--:|--:|--:|--:|
+| 8 | 733 | 51.5% | 38.8% | −65.8% | 0.75 |
+| **12** | 1,112 | 52.1% | **39.6%** | **−51.5%** | 0.80 |
+| 16 | 1,464 | 46.0% | 35.2% | −60.7% | 0.92 |
+| 20 | 1,835 | 33.0% | 23.6% | −58.1% | 0.78 |
+| 24 | 2,215 | 33.4% | 25.6% | −54.8% | 0.83 |
+
+**12 slots is the sweet spot** — best net CAGR *and* lower drawdown (−51.5% vs −65.8%) *and* higher
+Sharpe than 8. More names capture more winners and diversify the drawdown; smaller per-position size
+also lowers per-trade impact cost. Past 12 it degrades — the extra slots fill with lower-RS-priority
+(weaker) trades and returns collapse (16 is smoothest at Sharpe 0.92 but lower return). **Run ~12
+concurrent positions, not 8.**
+
+### RS-rotation — evict the laggard, buy the leader
+
+| | Net CAGR | Net DD | Sharpe | Trades |
+|---|--:|--:|--:|--:|
+| baseline (hold to natural exit) | +38.8% | −65.8% | 0.75 | 733 |
+| rotation (margin 5, 1,005 rotations) | **−40.6%** | −99.8% | −0.11 | 1,806 |
+
+**Rotation is catastrophic** (+39% → −41% CAGR, near-total ruin). It **cuts winners before they run** —
+Minervini's edge is the fat right tail (the +2,000% multibaggers that must be held for months). Rotating
+out any position the instant a fresher, higher-RS name appears means no position ever runs to its full
+potential: you only ever hold trades in their early, failure-prone phase (33% win) and never the
+mature-winner phase, destroying exactly the tail that is the edge. RS is also noisy week-to-week
+(transient dips trigger bad sells) and turnover doubles (double the cost drag). **Do NOT rotate — this
+confirms the pinned hold-to-exit doctrine (8%-stop / 50d-MA trail) is correct.** A valuable negative
+result. (Model: rotation reads a held name's current RS + early-exit price from a per-symbol weekly
+series; an adversarial review confirmed the sim logic, one NaN-RS eviction-protection defect fixed.)
+
+---
+
 ## 7. Synthesis + recommendation
 
 - **Keep RS-rank ON.** It is the single most valuable filter — nearly doubles CAGR and gives the best
@@ -339,6 +379,12 @@ filter over the rs-only signals, not a per-floor re-run of the setup books.
 - **Pick candidates by RS-rank when slots are scarce (v4).** RS-priority allocation lifts every
   variant's CAGR by 6–16 points — the cheapest improvement available (pure allocation policy, no new
   data). The live funnel already RS-ranks its buyable list, so live behaviour already captures this.
+- **Run ~12 concurrent positions, not 8 (v7).** 12 slots gives the best net CAGR *and* a lower
+  drawdown *and* a higher Sharpe than 8; past 12 the extra slots dilute into weaker trades. More names
+  capture more of the winner tail and spread the drawdown.
+- **Do NOT rotate positions on RS (v7).** Evicting a holding when a stronger newcomer appears is
+  catastrophic (+39% → −41% CAGR): it cuts winners before they run, and the multibagger tail — held for
+  months — IS the edge. Hold to the natural exit doctrine.
 - **Realistic live expectation (net of costs, RS-priority, ₹10 L book): ~25% CAGR for `rs-turnover`,
   ~39% for `rs-only`** — both with ~57–66% drawdowns. The gross figures (23–51%) are upper bounds;
   costs, survivorship, and the impact cap all cut the true number, most for the illiquid small-cap edge.

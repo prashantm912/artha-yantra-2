@@ -61,6 +61,9 @@ public class MinerviniBacktestService {
     0, 500_000, 1_000_000, 2_500_000, 3_750_000, 7_500_000, 15_000_000, 30_000_000
   };
 
+  // v7 slot sweep: does adding concurrent positions capture more of the signal flood?
+  private static final int[] SLOT_SWEEP = {8, 12, 16, 20, 24};
+
   /** Per-setup aggregate over the backtest window. Decimals ride as JSON strings. */
   public record SetupStat(
       String setup,
@@ -134,6 +137,23 @@ public class MinerviniBacktestService {
       BigDecimal netDrawdownPct,
       BigDecimal netSharpe) {}
 
+  /** One slot-sweep row: the RS-priority portfolio at {@code slots} concurrent positions (v7). */
+  public record SlotCell(
+      int slots,
+      int tradesTaken,
+      int tradesSkipped,
+      BigDecimal grossCagrPct,
+      BigDecimal netCagrPct,
+      BigDecimal netDrawdownPct,
+      BigDecimal netSharpe) {}
+
+  /**
+   * The RS-rotation result (v7): the net-of-cost portfolio that evicts the weakest current holding for
+   * a stronger newcomer (vs holding to the natural stop/trail exit), plus how many rotations fired.
+   * Compare {@code net} against the same variant's {@code portfolioRsPriorityNet} (no-rotation baseline).
+   */
+  public record RotationResult(int slots, BigDecimal marginPct, int rotations, PortfolioStat net) {}
+
   /** The full multi-variant result: technical / rs-only / turnover-only / rs+turnover, side by side. */
   public record BacktestResult(
       String status,
@@ -141,6 +161,8 @@ public class MinerviniBacktestService {
       String runAt,
       List<Report> variants,
       List<SweepCell> sweep,
+      List<SlotCell> slotSweep,
+      RotationResult rotation,
       String note) {}
 
   /** The full-filter variant (the live-funnel analogue) — the one the plain GET returns. */
@@ -154,6 +176,7 @@ public class MinerviniBacktestService {
   private final double rsMin;
   private final int slots;
   private final SwingPortfolio.Costs costs;
+  private final double rotationMargin;
   private final AtomicBoolean running = new AtomicBoolean(false);
   private volatile Report latest;
   private volatile BacktestResult latestResult;
@@ -171,7 +194,8 @@ public class MinerviniBacktestService {
       @Value("${artha.minervini.backtest.cost.fixed-pct:0.25}") double costFixedPct,
       @Value("${artha.minervini.backtest.cost.spread-pct:0.05}") double costSpreadPct,
       @Value("${artha.minervini.backtest.cost.impact-coeff:0.10}") double costImpactCoeff,
-      @Value("${artha.minervini.backtest.cost.impact-cap-pct:5.0}") double costImpactCapPct) {
+      @Value("${artha.minervini.backtest.cost.impact-cap-pct:5.0}") double costImpactCapPct,
+      @Value("${artha.minervini.backtest.rotation-margin:5}") double rotationMargin) {
     this.jdbc = jdbc;
     this.detector = detector;
     this.objectMapper = objectMapper;
@@ -182,6 +206,7 @@ public class MinerviniBacktestService {
     this.costs =
         new SwingPortfolio.Costs(
             capital, costFixedPct, costSpreadPct, costImpactCoeff, costImpactCapPct);
+    this.rotationMargin = rotationMargin;
   }
 
   /** The latest completed (or in-progress) single report — the full-filter (rs-turnover) variant. */
@@ -219,8 +244,8 @@ public class MinerviniBacktestService {
     }
     Report any = variants.get(0);
     return new BacktestResult(
-        "completed", any.fromDate(), any.runAt(), variants, List.of(),
-        "loaded from the last persisted run (sweep is in-memory only; re-run to populate)");
+        "completed", any.fromDate(), any.runAt(), variants, List.of(), List.of(), null,
+        "loaded from the last persisted run (sweep/slots/rotation are in-memory only; re-run to populate)");
   }
 
   /** Triggers a run on a background thread; returns false if one is already running. */
@@ -231,7 +256,8 @@ public class MinerviniBacktestService {
     LocalDate from = from(years);
     latest = running(PRIMARY_VARIANT, from);
     latestResult =
-        new BacktestResult("running", from, null, List.of(), List.of(), "backtest in progress");
+        new BacktestResult(
+            "running", from, null, List.of(), List.of(), List.of(), null, "backtest in progress");
     Thread t = new Thread(() -> runOnce(years), "minervini-backtest");
     t.setDaemon(true);
     t.start();
@@ -253,7 +279,9 @@ public class MinerviniBacktestService {
       latest =
           new Report(
               "failed", PRIMARY_VARIANT, from, null, 0, 0, List.of(), null, null, null, e.getMessage());
-      latestResult = new BacktestResult("failed", from, null, List.of(), List.of(), e.getMessage());
+      latestResult =
+          new BacktestResult(
+              "failed", from, null, List.of(), List.of(), List.of(), null, e.getMessage());
     } finally {
       running.set(false);
     }
@@ -310,6 +338,9 @@ public class MinerviniBacktestService {
             new Variant("turnover-only", false, 0, turnoverFloor), // liquidity floor alone
             new Variant("rs-turnover", true, rsMin, turnoverFloor)); // both (the live-funnel analogue)
     List<BtTrade> all = new ArrayList<>();
+    // per-symbol weekly (RS, close) series for the rotation sim's held-position lookups — captured only
+    // for symbols that produce rs-only signals (bounds the memory on the small heap).
+    Map<String, SwingRotationPortfolio.WeeklySeries> weekly = new HashMap<>();
     int scanned = 0;
     for (String symbol : symbols) {
       List<DailyBar> bars = readSeries(symbol, warmStart);
@@ -318,7 +349,12 @@ public class MinerviniBacktestService {
       }
       scanned++;
       double[] rsRank = perBarRsRank(bars, rankDates, dist);
-      all.addAll(MinerviniSwingBacktest.simulate(symbol, bars, detector, from, rsRank, variants));
+      List<BtTrade> got =
+          MinerviniSwingBacktest.simulate(symbol, bars, detector, from, rsRank, variants);
+      all.addAll(got);
+      if (got.stream().anyMatch(t -> t.variant().equals("rs-only"))) {
+        weekly.put(symbol, downsampleWeekly(bars, rsRank));
+      }
     }
 
     String runAt = nowIso();
@@ -327,16 +363,61 @@ public class MinerviniBacktestService {
       reports.add(report(v.name(), from, runAt, scanned, all));
     }
     List<SweepCell> sweep = turnoverSweep(all);
+    List<SlotCell> slotSweep = slotSweep(all);
+    RotationResult rotation = rotation(all, weekly);
     log.info(
-        "minervini swing backtest: {} symbols, {}, from {}",
+        "minervini swing backtest: {} symbols, {}, rotations {}, from {}",
         scanned,
         reports.stream().map(r -> r.variant() + " " + r.totalTrades()).reduce((a, b) -> a + ", " + b).orElse(""),
+        rotation.rotations(),
         from);
     return new BacktestResult(
-        "completed", from, runAt, reports, sweep,
+        "completed", from, runAt, reports, sweep, slotSweep, rotation,
         "candles@1d ~11y over " + slots + " concurrent slots; variants isolate a weekly cross-sectional"
             + " RS-rank≥" + fmt(rsMin) + " gate and a ₹" + fmt(turnoverFloor) + "/day turnover floor;"
             + " open-at-end positions dropped; portfolio is net-of-cost; survivorship-biased.");
+  }
+
+  /** v7 slot sweep: the RS-priority portfolio at 8/12/16/20/24 slots, gross + net. */
+  private List<SlotCell> slotSweep(List<BtTrade> all) {
+    List<BtTrade> rsGated = all.stream().filter(t -> t.variant().equals("rs-only")).toList();
+    List<SlotCell> out = new ArrayList<>();
+    for (int k : SLOT_SWEEP) {
+      SwingPortfolio.Result gross = SwingPortfolio.simulate(rsGated, k, true, null);
+      SwingPortfolio.Result net = SwingPortfolio.simulate(rsGated, k, true, costs);
+      out.add(
+          new SlotCell(
+              k, net.tradesTaken(), net.tradesSkipped(), bd2(gross.cagrPct()), bd2(net.cagrPct()),
+              bd2(net.maxDrawdownPct()), bd2(net.sharpe())));
+    }
+    return out;
+  }
+
+  /** v7 RS-rotation: the net-of-cost rotating book (evict weakest holding for a stronger newcomer). */
+  private RotationResult rotation(
+      List<BtTrade> all, Map<String, SwingRotationPortfolio.WeeklySeries> weekly) {
+    List<BtTrade> rsGated = all.stream().filter(t -> t.variant().equals("rs-only")).toList();
+    SwingRotationPortfolio.Outcome o =
+        SwingRotationPortfolio.simulate(rsGated, weekly, slots, costs, rotationMargin);
+    return new RotationResult(slots, bd2(rotationMargin), o.rotations(), toStat(o.result(), slots));
+  }
+
+  /** Weekly (every 5th session) downsample of a symbol's (RS, close) series for as-of lookups. */
+  private static SwingRotationPortfolio.WeeklySeries downsampleWeekly(
+      List<DailyBar> bars, double[] rsRank) {
+    int n = bars.size();
+    int m = (n + RANK_CADENCE - 1) / RANK_CADENCE;
+    long[] days = new long[m];
+    double[] rs = new double[m];
+    double[] close = new double[m];
+    int j = 0;
+    for (int i = 0; i < n; i += RANK_CADENCE) {
+      days[j] = bars.get(i).date().toEpochDay();
+      rs[j] = rsRank[i];
+      close[j] = bars.get(i).close();
+      j++;
+    }
+    return new SwingRotationPortfolio.WeeklySeries(days, rs, close);
   }
 
   /**
@@ -391,11 +472,15 @@ public class MinerviniBacktestService {
 
   /** Runs the slot-limited portfolio over a variant's combined trade stream (FIFO/RS-priority, gross/net). */
   private PortfolioStat portfolio(List<BtTrade> trades, boolean rsPriority, SwingPortfolio.Costs c) {
-    SwingPortfolio.Result r = SwingPortfolio.simulate(trades, slots, rsPriority, c);
+    return toStat(SwingPortfolio.simulate(trades, slots, rsPriority, c), slots);
+  }
+
+  /** Maps a raw {@link SwingPortfolio.Result} to the JSON {@link PortfolioStat} (decimals → strings). */
+  private PortfolioStat toStat(SwingPortfolio.Result r, int slotCount) {
     List<YearReturn> annual =
         r.annual().stream().map(y -> new YearReturn(y.year(), bd2(y.returnPct()), y.trades())).toList();
     return new PortfolioStat(
-        slots, bd2(r.totalReturnPct()), bd2(r.cagrPct()), bd2(r.maxDrawdownPct()), bd2(r.sharpe()),
+        slotCount, bd2(r.totalReturnPct()), bd2(r.cagrPct()), bd2(r.maxDrawdownPct()), bd2(r.sharpe()),
         r.tradesTaken(), r.tradesSkipped(), bd2(r.avgExposurePct()), r.months(),
         bd2(r.positiveMonthsPct()), bd2(r.bestMonthPct()), bd2(r.worstMonthPct()), bd2(r.avgMonthPct()),
         annual);

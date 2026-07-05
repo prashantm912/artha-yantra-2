@@ -1,5 +1,5 @@
 # Manas Arora live-swing fixture: the manas_arora_funnel dynamic universe (the daily selection funnel).
-# Sibling of the minervini_funnel mode — a gate-only daily-primary breakout, 8%-stop + 50-day-MA trail,
+# Sibling of the minervini_funnel mode — a gate-only daily-primary breakout, 10%-stop + 20-day-MA trail,
 # atr_risk sizing. Proves the schema accepts the new universe mode + bucket.
 schema: strategy-schema/v1
 id: manas-arora-breakout

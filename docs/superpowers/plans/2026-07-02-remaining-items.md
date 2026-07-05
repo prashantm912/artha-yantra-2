@@ -148,3 +148,28 @@ publish** + **per-strategy notif toggles** + **value-verify ratify** (owner deci
 Genuinely-deferred-with-no-consumer leftovers: Data-Ops bulk-export + STOMP-push, AdvanceChart
 freehand drawing tools + study-template save/load. Machines watch the machines: two in-code canaries
 + two scheduled agents + the weekly backup round-trip CI.
+
+---
+
+## Manas Arora + per-strategy paper books (2026-07-05 autonomous batch — BUILT + DEPLOYED LIVE)
+
+Owner batch ("implement autonomously while I sleep"), all merged + deployed to the LIVE stack same day:
+- **Task 1** — Manas Arora strategy doc committed + merged (#565).
+- **Tasks 2/3 — separate paper/signals BOOKS** (#566 backend + #568 frontend): the single global paper
+  book split into 5 per-family books (scalper/minervini/manas-arora/manual/other), each **₹1.5 L**
+  (owner "all 1.5L each"), own capital + risk config + auto-paper toggle; `book` = the strategy's first
+  family tag; V021 migration (per-book paper_account + `(book,key)` risk_settings + `book` on
+  positions/orders; existing paper positions WIPED per owner). `?book=` on the paper/risk/signals
+  endpoints; per-book FE pages `/paper/:book` + `/signals/:book`. Minervini now sizes off its own ₹1.5 L.
+- **Task 4 — Manas Arora family** (#567 screener / #570 live engine / #569 10yr backtest / #571 FE):
+  a separate, non-interfering swing family (India-adapted Minervini). Screener live = 2,224 scanned →
+  **97 pass all 6 gates**, funnel 41 buyable + 70 on-deck. Live engine (parity-safe, goldens
+  byte-identical; cross-family isolation via `universe.mode`) auto-papers into the manas ₹1.5 L book;
+  cron 20:05 IST. 10-yr backtest ran over ~11 yr candles@1d — **results + best setup:
+  `docs/strategies/manas-arora-swing-backtest-results.md`**.
+- **Deploy:** backup + `:62fb38f3` rollback images taken first; go-live flags in `.env` + compose
+  passthroughs. Each PR got adversarial + domain review before merge (all PASS).
+- **Remaining = owner-gated only:** the supervised forward-paper watch on the Manas book + the owner's
+  reliability sign-off (same bar as Minervini); a possible v2 that gives the vcp setup a distinct live
+  gate (currently vcp + breakout fire off the same funnel pivot in the live engine — distinct only in
+  the screener/backtest) and adds the true 2×ATR trail + square-off exits (backtest-only in v1).

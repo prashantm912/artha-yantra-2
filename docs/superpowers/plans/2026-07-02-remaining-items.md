@@ -27,7 +27,7 @@ the two 2026-07-02 audits (both fix queues fully closed) and the open-PR/issue l
 | `span-real-spn-broker-parity` | ~~`.spn` loader + parity harness (#144)~~ **SUPERSEDED 2026-07-04** — the `.spn` file is no longer needed. See `upstox-margin-route` in §1: Upstox computes SPAN server-side (`POST /v2/charges/margin`) on the analytics token we already hold — no NSCCL file, no broker-number hunt. The marginism appliance (#126) stays the offline/backtest fallback; live sizing routes through Upstox. **No owner action** — moved to buildable. |
 | `telegram-scalp-alert-optin` | notifier path built (#152) | owner sets the bot token |
 | `per-strategy-notifications` | ntfy verified end-to-end (direct + service path, 2026-07-02) | only `scalp-connect-the-dots-nifty` has notifications ON — owner toggles the other 11 published strategies per taste |
-| `sensex-pe-publish` | 18 SENSEX-PE drafts seeded (#382) | owner publish decision (9 NIFTY-PE already live) |
+| ~~`sensex-pe-publish`~~ **DONE 2026-07-05** | 18 SENSEX-PE drafts seeded (#382) | ~~owner publish decision~~ — owner said "publish"; all 18 PUT-side drafts published live via the internal registry endpoint (`docker exec … wget POST /strategies/{id}/publish`, bypasses gateway auth); engine reconciled 21→39 scalpers. (The publish also surfaced + fixed the reconcile-loop bug #579.) No PR (a live data action). |
 | `value-verify-ratify` | data-foundation value-verify **PASSED** live-vs-live 2026-07-01 (captured OI == oipulse exact share) | owner ratifies the close; residual low nits in §5 |
 | `soft-dot-arming` | FU2 dots + drasticFloor default built inert | arm only if live forward-paper data proves them (else stays a §7 WON'T) |
 

@@ -191,12 +191,20 @@ compute each published strategy's trades / net / win-rate / cost-adjusted profit
 / max-drawdown (attributed `paper_positions→paper_orders→signals→strategy_versions`; `realized_pnl`
 already net per F8) vs **configurable thresholds** (`artha.graduation.*`, defaults 20 trades / PF 1.3
 / expectancy>0 / DD≤25%) → a `PAPER` vs `TAKE_ELIGIBLE` stage. Read-only, never promotes/arms.
+**Status 2026-07-05 — AUTO-PROMOTION SHIPPED + DEPLOYED ([#577](https://github.com/prashantm912/artha-yantra-2/pull/577), `cdf0c20a`):**
+owner picked the SAFE reading = a **strategy graduation STAGE** (a marker + one ntfy, NEVER arms/rewrites a
+live gate/places an order). A daily 21:00-IST `GraduationPromotionScheduler` marks a published strategy
+`GRADUATED` (V024 `strategy_graduations`) once its closed paper trades clear a **stricter** bar than
+TAKE_ELIGIBLE — **owner numbers: ≥50 trades + positive net expectancy + per-trade Sharpe ≥0.5 + maxDD ≤25%** —
+and fires one ntfy on first graduation. `GET /api/v1/strategies/graduation/promotions` (typed). Gated
+`@ConditionalOnProperty artha.graduation.promotion-enabled` (`ARTHA_GRADUATION_PROMOTION_ENABLED`), **default
+OFF**, dormant until a strategy hits 50 closed trades. Measurement-only; promotion-to-real-money stays owner action.
 **Acceptance criteria:**
 - [x] Dashboard: per-strategy stage, trades-so-far, each criterion green/red, computed on-demand from
   `paper_positions` + F8-net realized. (#515)
-- [ ] Criteria NUMBERS set by owner (the defaults are placeholders — the E9-band conversation's home).
-- [ ] "graduation candidate" ntfy note — deferred until the owner ratifies the numbers (avoids noise
-  on placeholder thresholds).
+- [x] Criteria NUMBERS set by owner — ≥50 trades / net expectancy>0 / Sharpe≥0.5 / DD≤25% (#577).
+- [x] "graduation candidate" ntfy note — one ntfy on first GRADUATED, gated behind the promotion flag (#577).
+- [ ] Owner ACTIVATION only: flip `ARTHA_GRADUATION_PROMOTION_ENABLED=true` after a strategy accrues ≥50 closed paper trades.
 
 ### F8. Execution-quality analytics — does the edge survive costs?
 **Status 2026-07-03 — v1 SHIPPED, scope corrected on inspection:** the paper ledger was ALREADY
@@ -238,18 +246,29 @@ the margin capability (the `.spn`-blocked piece) is BUILT + deployed: `UpstoxMar
 `POST /api/v1/market/margin` (typed record, fail-soft, gated on the analytics token) compute
 broker-real SPAN server-side. Remaining = the F9 *application* layer (below), which needs owner
 risk numbers + the advisory week.
+**Status 2026-07-05 — APPLICATION LAYER SHIPPED + DEPLOYED ([#576](https://github.com/prashantm912/artha-yantra-2/pull/576), `b266d151`):**
+owner numbers **per-trade risk 1% / daily-loss 3% / heat cap 60%**. V023: `advised_lots`/`margin_snapshot`/
+`margin_pct` on `paper_positions` + per-book `heat_cap_pct` (scalper 60% enabled, cash-equity swing books
+inert) + scalper daily-loss 10%→3%. `advised_lots` = risk-based sizing stamped at open (advisory, pure static
+helper); `margin_snapshot` = `PaperMarginAnnotator` prices each open position's SPAN AFTER_COMMIT+@Async
+(fail-soft, 1.5s/2s timeout); the heat-cap gate in `RiskService.entryAllowed` blocks new entries at ≥60% book
+SPAN **only when `artha.paper.risk.enabled` (`ARTHA_PAPER_RISK_ENABLED`) is ON** — default OFF (advisory-dormant,
+zero hot-path cost — the enforcement flag also gates the synchronous margin pricing off the emission path).
+governor ntfy on daily-loss/profit/heat trips (paper→notifier is a pre-existing edge, no new module cycle).
+2-reviewer pass (adversarial + timescale-domain, both PASS).
 **Acceptance criteria:**
 - [x] **SPAN source: broker-real margins available, no `.spn` file** — `POST /api/v1/market/margin`
   resolves the leg → Upstox key → `/v2/charges/margin`; live-verified. (#510)
 - [x] **Advisory heat read: open paper book's total SPAN margin-at-risk** — `GET /api/v1/paper/margin-heat`
   prices every open leg (by tradingsymbol, resolved market-data-side) as one basket; advisory only,
   no threshold. (#514)
-- [ ] Paper entries carry `advised_lots` + margin snapshot from the margin endpoint — needs the owner's
-  per-trade-risk %; the returned SPAN is broker-real by construction (Upstox IS a broker), so no
-  separate parity step, just `advised_lots × margin ≤ available funds` (`GET /v2/user/get-funds-and-margin`).
-- [ ] Governor drill on mock: inject losses past the daily cap → new entries blocked, ntfy fired,
-  existing positions untouched — needs the owner's daily-loss + heat-cap numbers.
-- [ ] Flag default OFF; ON in compose only after one clean advisory-mode week.
+- [x] Paper entries carry `advised_lots` + margin snapshot — `advised_lots` = 1%×equity÷stop-distance stamped
+  at open; `margin_snapshot`/`margin_pct` from the SPAN annotator (AFTER_COMMIT, fail-soft). (#576)
+- [x] Governor: heat-cap block (≥60% book SPAN) + daily-loss (3%) pause new entries + ntfy, existing positions
+  untouched — enforced only behind the flag. (#576)
+- [x] Flag default OFF; arm in `.env` only after one clean advisory-mode week. (#576)
+- [ ] Owner ACTIVATION only: after a clean advisory week (watch `GET /paper/margin-heat` + per-position
+  `margin_snapshot`), set `ARTHA_PAPER_RISK_ENABLED=true` to arm heat-cap enforcement.
 
 ---
 
@@ -274,13 +293,15 @@ intraday scalp book.
 | **P1 — now, during the data month** | F4 canary · F1 variants · F3.1 breadth producer | ~4–6 sessions of build | Everything downstream consumes this month's data; canary protects it, variants multiply it. |
 | **P2 — as rollup data lands** | F2 rollup generator · F3.2–.5 dot fixes (evidence-gated) · F8 cost model | ~4–5 sessions | Proposals need ≥5 sessions anyway; cost model must exist before any keep/cut verdict. |
 | **P3 — autonomy** | F6 telegram bot · F5 always-on host | ~3–4 sessions + hardware decision | Makes the unattended operation real; F5 has an owner purchase/choice gate. |
-| **P4 — graduation stack** | F7 framework · F9 risk layer | ~3–4 sessions | Only meaningful once F8 numbers exist and the tuning month concludes. |
+| **P4 — graduation stack** | F7 framework · F9 risk layer | **BUILT + DEPLOYED (#515/#576/#577), both flag-OFF** | F8 numbers exist; code done — remaining is owner ACTIVATION after the advisory week / 50-trade accrual, not a build. |
 | **P5 — parallel/filler** | F10 Minervini | ~2–3 sessions | Independent of everything; can slot into any quiet phase. |
 
-**Owner decision points:** F5 hardware (mini-PC vs VPS vs stay-laptop), F7 criteria numbers
-(the E9-band conversation), F9 prerequisite (`.spn` file, ledger §2), and — after the whole
-stack proves itself — whether to revisit the order-arming WON'T-DO. Everything else is
-buildable autonomously under the existing per-PR discipline.
+**Owner decision points (residual):** F5 hardware (mini-PC vs VPS vs stay-laptop), the two P4
+ACTIVATION flags (`ARTHA_PAPER_RISK_ENABLED` / `ARTHA_GRADUATION_PROMOTION_ENABLED`, both built +
+default OFF), and — after the whole stack proves itself — whether to revisit the order-arming
+WON'T-DO. ~~F7 criteria numbers~~ set 2026-07-05 (#577); ~~F9 `.spn` prerequisite~~ obsolete —
+SPAN routes through the Upstox margin API (#510), no file. Everything else is buildable autonomously
+under the existing per-PR discipline.
 
 **What this roadmap deliberately does NOT contain:** more UI pages, more indicators, more
 scalper variants, broker cutovers, or anything on the ledger §7 WON'T-DO list. The thesis is

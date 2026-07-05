@@ -593,3 +593,31 @@ expectation for the tuned book (RS-priority, ₹10 L, 12 slots): **~25% CAGR rs-
 equivalent) → ~39% rs-only (optimistic upper bound)**, budget 40–50% drawdowns. **REMAINING = only the
 supervised forward-paper watch + the owner's §0.5 #12 reliability sign-off** — the backtest establishes
 the mechanics have edge, the live paper book (pinned 8%-stop + 50d-trail) is the real test.
+
+## Post-calibration live-path hardening (2026-07-05)
+
+After the calibration, a live-path pass caught bugs that touch the swing family (all paper-only,
+goldens untouched — the parity firewall held):
+
+- **[#575](https://github.com/prashantm912/artha-yantra-2/pull/575)** — stable symbol order in
+  `MinerviniBacktestService.eqSymbols()` (added `ORDER BY c.tradingsymbol`). Run-to-run portfolio-stat
+  reproducibility: without it the 8-slot FIFO sleeves filled in DB-arbitrary order → non-deterministic
+  CAGR/DD. The Manas fork already had it (#569); this fixes the Minervini original.
+- **[#579](https://github.com/prashantm912/artha-yantra-2/pull/579)** — SignalEngine reconcile reload
+  loop stopped. The 20s safety-net compared the registry's published set (45) vs the LOADED subset (39) —
+  but the tick engine deliberately SKIPS the swing strategies (`session.style=swing`, driven by the daily
+  `MinerviniSwingEngine`), so `loaded < published` is the steady state, not drift → it reloaded all 39
+  every ~20s forever. Fix: compare the current published set vs the set AS OF the last reload
+  (`lastReloadedPublishedSet`). Lesson: a reconcile that compares "what's published" vs "what loaded"
+  loops whenever the loader legitimately skips a subset.
+- **[#580](https://github.com/prashantm912/artha-yantra-2/pull/580)** — 6 live-path bugs from an
+  adversarial Workflow bug-hunt; the two swing-relevant ones: swing `emitEntry` never called
+  `entryAllowed(book)` so the risk governor (kill/loss/max-open) was bypassed for minervini/manas →
+  `MinerviniSwingEngine.entryPass`/`ManasAroraSwingEngine.entryPass` now gate on it; and the 15:45
+  `expireAllActive` sweep had no style filter so it EXPIRED the ACTIVE swing anchors the daily batch
+  holds → scoped to exclude swing versions.
+- **[#581](https://github.com/prashantm912/artha-yantra-2/pull/581)** — regression IT locking #579:
+  `reconcileConvergesWhenASkippedSwingStrategyIsPublished()` asserts `!engine.publishedSetDrifted()`
+  when a swing strategy is published + skipped.
+
+The forward-paper book is now the sole remaining gate — see the ledger's Minervini row.

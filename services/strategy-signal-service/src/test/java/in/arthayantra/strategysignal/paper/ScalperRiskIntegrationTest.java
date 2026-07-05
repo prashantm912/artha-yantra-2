@@ -111,7 +111,7 @@ class ScalperRiskIntegrationTest extends StrategySignalIntegrationTestBase {
     assertThat(scalperAccounts.scalperEntryAllowed()).as("4 frozen — account 5 free").isTrue();
     // ₹10L starting capital × 0.20 × 1% = ₹2,000 target; a ₹10,000 win on account 5 clears it → banked.
     BigDecimal target =
-        paperAccount.startingCapital().multiply(new BigDecimal("0.20")).multiply(new BigDecimal("0.01"));
+        paperAccount.startingCapital("scalper").multiply(new BigDecimal("0.20")).multiply(new BigDecimal("0.01"));
     assertThat(target).as("sanity: target well under the staged win").isLessThan(new BigDecimal("10000"));
     insertClosedOnAccount("10000.0000", 5);
     assertThat(scalperAccounts.scalperEntryAllowed()).as("account 5 profit-banked — all 5 frozen").isFalse();
@@ -130,8 +130,8 @@ class ScalperRiskIntegrationTest extends StrategySignalIntegrationTestBase {
     jdbc.update(
         """
         INSERT INTO paper_positions
-          (exchange, tradingsymbol, side, qty, avg_entry_price, realized_pnl, status, opened_at, closed_at, subaccount_idx)
-        VALUES ('NFO', 'SCALPTEST', 'BUY', 50, '100.0000', ?, 'CLOSED', now(), now(), ?)
+          (exchange, tradingsymbol, side, qty, avg_entry_price, realized_pnl, status, opened_at, closed_at, subaccount_idx, book)
+        VALUES ('NFO', 'SCALPTEST', 'BUY', 50, '100.0000', ?, 'CLOSED', now(), now(), ?, 'scalper')
         """,
         new BigDecimal(realized),
         idx);
@@ -141,8 +141,8 @@ class ScalperRiskIntegrationTest extends StrategySignalIntegrationTestBase {
     jdbc.update(
         """
         INSERT INTO paper_positions
-          (exchange, tradingsymbol, side, qty, avg_entry_price, realized_pnl, status, opened_at, closed_at)
-        VALUES ('NFO', 'SCALPTEST', 'BUY', 50, '100.0000', ?, 'CLOSED', now(), now())
+          (exchange, tradingsymbol, side, qty, avg_entry_price, realized_pnl, status, opened_at, closed_at, book)
+        VALUES ('NFO', 'SCALPTEST', 'BUY', 50, '100.0000', ?, 'CLOSED', now(), now(), 'scalper')
         """,
         new BigDecimal(realized));
   }

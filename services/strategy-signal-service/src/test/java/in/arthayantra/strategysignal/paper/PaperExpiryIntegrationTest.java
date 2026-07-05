@@ -100,7 +100,7 @@ class PaperExpiryIntegrationTest extends StrategySignalIntegrationTestBase {
   void indexOptionSettlesAtIntrinsicWithCloseReasonAndReleasesTheKey() {
     String sym = "EXPOPT-" + UUID.randomUUID();
     paper.openOrder(new PaperService.OrderRequest(null, "NFO", sym, "BUY", 50, new BigDecimal("80.00"), null, null));
-    assertThat(positions.findOpen("NFO", sym, "BUY")).isPresent();
+    assertThat(positions.findOpen("manual", "NFO", sym, "BUY")).isPresent();
 
     assertThat(expiry.settleExpiries()).isEqualTo(1);
 
@@ -108,7 +108,7 @@ class PaperExpiryIntegrationTest extends StrategySignalIntegrationTestBase {
     assertThat(settled).hasSize(1);
     assertThat(settled.get(0).closeReason()).isEqualTo("EXPIRY_SETTLEMENT");
     // no derivative position remains OPEN past expiry; the key is re-openable
-    assertThat(positions.findOpen("NFO", sym, "BUY")).isEmpty();
+    assertThat(positions.findOpen("manual", "NFO", sym, "BUY")).isEmpty();
   }
 
   @Test
@@ -118,7 +118,7 @@ class PaperExpiryIntegrationTest extends StrategySignalIntegrationTestBase {
     paper.openOrder(new PaperService.OrderRequest(null, "NFO", sym, "BUY", 50, new BigDecimal("40.00"), null, null));
 
     assertThat(expiry.settleExpiries()).isEqualTo(1);
-    assertThat(positions.findOpen("NFO", sym, "BUY")).isEmpty();
+    assertThat(positions.findOpen("manual", "NFO", sym, "BUY")).isEmpty();
     assertThat(positions.listClosed(null, null, sym, 10, 0).get(0).closeReason()).isEqualTo("EXPIRY_SETTLEMENT");
   }
 
@@ -146,7 +146,7 @@ class PaperExpiryIntegrationTest extends StrategySignalIntegrationTestBase {
             post("/api/v1/signals/" + signalId + "/taken")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(Map.of("qty", 50))));
-    assertThat(positions.findOpen("NFO", sym, "BUY")).isPresent();
+    assertThat(positions.findOpen("other", "NFO", sym, "BUY")).isPresent();
 
     assertThat(expiry.notifyExpiring()).isEqualTo(1); // expires tomorrow -> one push
     assertThat(expiry.notifyExpiring()).isEqualTo(0); // deduped on re-run

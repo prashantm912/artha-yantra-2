@@ -13,7 +13,8 @@ class PaperBracketEvaluatorTest {
     return new PositionRow(
         1L, "NFO", "X", side, 50, new BigDecimal("100"), BigDecimal.ZERO, "OPEN", null, null, null,
         sl == null ? null : new BigDecimal(sl),
-        tp == null ? null : new BigDecimal(tp));
+        tp == null ? null : new BigDecimal(tp),
+        "scalper");
   }
 
   @Test

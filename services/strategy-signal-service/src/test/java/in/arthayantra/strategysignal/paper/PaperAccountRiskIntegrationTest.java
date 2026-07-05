@@ -57,19 +57,20 @@ class PaperAccountRiskIntegrationTest extends StrategySignalIntegrationTestBase 
   @BeforeEach
   @org.junit.jupiter.api.AfterEach
   void reset() {
-    // clean global paper/risk state so leftover limits never suppress another class's emission
-    risk.update("daily_loss_limit", "{\"enabled\":false}"); // clears the in-memory per-day trip dedup
+    // clean the scalper book's paper/risk state so leftover limits never suppress another class's emission
+    risk.update("scalper", "daily_loss_limit", "{\"enabled\":false}"); // clears the in-memory per-day trip dedup
     jdbc.update("DELETE FROM paper_positions");
     jdbc.update("DELETE FROM paper_orders");
     jdbc.update("DELETE FROM risk_settings");
     jdbc.update("DELETE FROM risk_audit");
-    jdbc.update("UPDATE paper_account SET starting_capital=1000000, cash=1000000 WHERE id=1");
+    // repurpose the scalper book (id=1) at the ₹10 L base these assertions are written against
+    jdbc.update("UPDATE paper_account SET starting_capital=1000000, cash=1000000 WHERE book='scalper'");
   }
 
   @Test
   void equityIsStartingCapitalPlusRealized() {
     insertClosed("BUY", 50, "5000.0000");
-    assertThat(account.equity()).isEqualByComparingTo("1005000");
+    assertThat(account.equity("scalper")).isEqualByComparingTo("1005000");
   }
 
   @Test
@@ -77,7 +78,7 @@ class PaperAccountRiskIntegrationTest extends StrategySignalIntegrationTestBase 
     StrategyDefinition.SizingSpec spec =
         new StrategyDefinition.SizingSpec("percent_equity", Map.of("percent", new BigDecimal("10")));
     // 10% of 1,000,000 = 100,000 budget / price 100 = 1000 units (lot 1)
-    BigDecimal qty = guard.suggestedQty(spec, "NSE", "RELIANCE", new BigDecimal("100"), null);
+    BigDecimal qty = guard.suggestedQty(spec, "NSE", "RELIANCE", new BigDecimal("100"), null, "scalper");
     assertThat(qty).isEqualByComparingTo("1000");
   }
 
@@ -85,23 +86,23 @@ class PaperAccountRiskIntegrationTest extends StrategySignalIntegrationTestBase 
   void gradedMultiplierScalesTheSuggestedQtyLotRoundedDown() {
     StrategyDefinition.SizingSpec spec =
         new StrategyDefinition.SizingSpec("percent_equity", Map.of("percent", new BigDecimal("10")));
-    BigDecimal full = guard.suggestedQty(spec, "NSE", "RELIANCE", new BigDecimal("100"), null); // 1000
-    // E8 §3.2: a null multiplier (6-arg) == the ungraded sizing (byte-identical to today's 5-arg path)
-    assertThat(guard.suggestedQty(spec, "NSE", "RELIANCE", new BigDecimal("100"), null, null))
+    BigDecimal full = guard.suggestedQty(spec, "NSE", "RELIANCE", new BigDecimal("100"), null, "scalper"); // 1000
+    // E8 §3.2: a null multiplier (7-arg) == the ungraded sizing (byte-identical to the 6-arg path)
+    assertThat(guard.suggestedQty(spec, "NSE", "RELIANCE", new BigDecimal("100"), null, null, "scalper"))
         .isEqualByComparingTo(full);
     // a 0.5 multiplier halves the qty, lot-rounded DOWN (RELIANCE lot 1 -> 1000 -> 500)
-    assertThat(guard.suggestedQty(spec, "NSE", "RELIANCE", new BigDecimal("100"), null, new BigDecimal("0.5")))
+    assertThat(guard.suggestedQty(spec, "NSE", "RELIANCE", new BigDecimal("100"), null, new BigDecimal("0.5"), "scalper"))
         .isEqualByComparingTo("500");
     // a 1.0 multiplier leaves it unchanged
-    assertThat(guard.suggestedQty(spec, "NSE", "RELIANCE", new BigDecimal("100"), null, BigDecimal.ONE))
+    assertThat(guard.suggestedQty(spec, "NSE", "RELIANCE", new BigDecimal("100"), null, BigDecimal.ONE, "scalper"))
         .isEqualByComparingTo(full);
   }
 
   @Test
   void dailyLossTripPausesEntryAndWritesAnAuditRow() {
     insertClosed("BUY", 50, "-100000.0000"); // a big loss today
-    risk.update("daily_loss_limit", "{\"enabled\":true,\"mode\":\"inr\",\"value\":50000}");
-    assertThat(risk.entryAllowed()).isFalse();
+    risk.update("scalper", "daily_loss_limit", "{\"enabled\":true,\"mode\":\"inr\",\"value\":50000}");
+    assertThat(risk.entryAllowed("scalper")).isFalse();
     Integer trips =
         jdbc.queryForObject("SELECT count(*) FROM risk_audit WHERE action='TRIP'", Integer.class);
     assertThat(trips).isGreaterThanOrEqualTo(1);
@@ -111,22 +112,22 @@ class PaperAccountRiskIntegrationTest extends StrategySignalIntegrationTestBase 
   void pctModeDailyLossTripsOnPercentOfEquity() {
     // E10 #1: the seeded mode the V011 migration uses — 10% of the 1,000,000 equity = 100,000 cap.
     insertClosed("BUY", 50, "-150000.0000"); // a day loss past the 10% cap
-    risk.update("daily_loss_limit", "{\"enabled\":true,\"mode\":\"pct\",\"value\":10}");
-    assertThat(risk.entryAllowed()).isFalse();
+    risk.update("scalper", "daily_loss_limit", "{\"enabled\":true,\"mode\":\"pct\",\"value\":10}");
+    assertThat(risk.entryAllowed("scalper")).isFalse();
     // a small loss within the cap does not pause entries.
-    risk.update("daily_loss_limit", "{\"enabled\":false}"); // re-arm
+    risk.update("scalper", "daily_loss_limit", "{\"enabled\":false}"); // re-arm
     jdbc.update("DELETE FROM paper_positions");
     insertClosed("BUY", 50, "-50000.0000");
-    risk.update("daily_loss_limit", "{\"enabled\":true,\"mode\":\"pct\",\"value\":10}");
-    assertThat(risk.entryAllowed()).isTrue();
+    risk.update("scalper", "daily_loss_limit", "{\"enabled\":true,\"mode\":\"pct\",\"value\":10}");
+    assertThat(risk.entryAllowed("scalper")).isTrue();
   }
 
   @Test
   void dailyProfitTargetPausesEntryAndAuditsItsOwnKey() {
     // E10: a banked WIN past the daily profit target stops fresh entries for the day.
     insertClosed("BUY", 50, "50000.0000"); // +50,000 realized today
-    risk.update("daily_profit_target", "{\"enabled\":true,\"mode\":\"inr\",\"value\":20000}");
-    assertThat(risk.entryAllowed()).isFalse();
+    risk.update("scalper", "daily_profit_target", "{\"enabled\":true,\"mode\":\"inr\",\"value\":20000}");
+    assertThat(risk.entryAllowed("scalper")).isFalse();
     Integer trips =
         jdbc.queryForObject(
             "SELECT count(*) FROM risk_audit WHERE action='TRIP' AND key='daily_profit_target'",
@@ -138,22 +139,22 @@ class PaperAccountRiskIntegrationTest extends StrategySignalIntegrationTestBase 
   void profitTargetPctModeSizesAgainstEquity() {
     // mode=pct value=1.5 -> threshold = 1.5% of 1,000,000 equity = 15,000.
     insertClosed("BUY", 50, "20000.0000"); // +20,000 > 15,000 cap
-    risk.update("daily_profit_target", "{\"enabled\":true,\"mode\":\"pct\",\"value\":1.5}");
-    assertThat(risk.entryAllowed()).isFalse();
+    risk.update("scalper", "daily_profit_target", "{\"enabled\":true,\"mode\":\"pct\",\"value\":1.5}");
+    assertThat(risk.entryAllowed("scalper")).isFalse();
     // a smaller win within the 15,000 threshold does not pause entries.
-    risk.update("daily_profit_target", "{\"enabled\":false}"); // re-arm
+    risk.update("scalper", "daily_profit_target", "{\"enabled\":false}"); // re-arm
     jdbc.update("DELETE FROM paper_positions");
     insertClosed("BUY", 50, "10000.0000");
-    risk.update("daily_profit_target", "{\"enabled\":true,\"mode\":\"pct\",\"value\":1.5}");
-    assertThat(risk.entryAllowed()).isTrue();
+    risk.update("scalper", "daily_profit_target", "{\"enabled\":true,\"mode\":\"pct\",\"value\":1.5}");
+    assertThat(risk.entryAllowed("scalper")).isTrue();
   }
 
   @Test
   void maxDeploymentPctBlocksWhenOpenDeploymentExceedsCap() {
     // an open EQUITY position deploys its full notional (500,000); cap = 20% of 1,000,000 = 200,000.
     insertOpen("DEPLOYTEST", "BUY", 5000, "100.0000");
-    risk.update("max_deployment_pct", "{\"enabled\":true,\"value\":20.0}");
-    assertThat(risk.entryAllowed()).isFalse();
+    risk.update("scalper", "max_deployment_pct", "{\"enabled\":true,\"value\":20.0}");
+    assertThat(risk.entryAllowed("scalper")).isFalse();
     Integer trips =
         jdbc.queryForObject(
             "SELECT count(*) FROM risk_audit WHERE action='TRIP' AND key='max_deployment_pct'",
@@ -163,15 +164,15 @@ class PaperAccountRiskIntegrationTest extends StrategySignalIntegrationTestBase 
 
   @Test
   void killSwitchPausesAllEntries() {
-    assertThat(risk.entryAllowed()).isTrue();
-    risk.update("kill_switch", "{\"enabled\":true}");
-    assertThat(risk.entryAllowed()).isFalse();
+    assertThat(risk.entryAllowed("scalper")).isTrue();
+    risk.update("scalper", "kill_switch", "{\"enabled\":true}");
+    assertThat(risk.entryAllowed("scalper")).isFalse();
   }
 
   @Test
   void aRiskFlipMintsNoStrategyVersion() {
     Integer before = jdbc.queryForObject("SELECT count(*) FROM strategy_versions", Integer.class);
-    risk.update("kill_switch", "{\"enabled\":true}");
+    risk.update("scalper", "kill_switch", "{\"enabled\":true}");
     Integer after = jdbc.queryForObject("SELECT count(*) FROM strategy_versions", Integer.class);
     assertThat(after).isEqualTo(before);
   }
@@ -179,7 +180,7 @@ class PaperAccountRiskIntegrationTest extends StrategySignalIntegrationTestBase 
   @Test
   void accountEndpointReturnsTheComputedEquityHeader() throws Exception {
     mockMvc
-        .perform(get("/api/v1/paper/account"))
+        .perform(get("/api/v1/paper/account").param("book", "scalper"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.startingCapital").value("1000000.00"))
         .andExpect(jsonPath("$.equity").value("1000000.00"))
@@ -189,7 +190,7 @@ class PaperAccountRiskIntegrationTest extends StrategySignalIntegrationTestBase 
 
   @Test
   void overSizedOrderReturnsANonBlockingBuyingPowerWarning() throws Exception {
-    jdbc.update("UPDATE paper_account SET starting_capital=100, cash=100 WHERE id=1");
+    jdbc.update("UPDATE paper_account SET starting_capital=100, cash=100 WHERE book='scalper'");
     String sym = "TESTOPT-" + UUID.randomUUID();
     mockMvc
         .perform(
@@ -202,7 +203,8 @@ class PaperAccountRiskIntegrationTest extends StrategySignalIntegrationTestBase 
                             "tradingsymbol", sym,
                             "side", "BUY",
                             "qty", 50,
-                            "price", "100.00"))))
+                            "price", "100.00",
+                            "book", "scalper"))))
         .andExpect(status().isCreated())
         .andExpect(jsonPath("$.buyingPowerWarning").isString());
   }
@@ -211,8 +213,8 @@ class PaperAccountRiskIntegrationTest extends StrategySignalIntegrationTestBase 
     jdbc.update(
         """
         INSERT INTO paper_positions
-          (exchange, tradingsymbol, side, qty, avg_entry_price, realized_pnl, status, opened_at, closed_at)
-        VALUES ('NSE', 'PNLTEST', ?, ?, '100.0000', ?, 'CLOSED', now(), now())
+          (exchange, tradingsymbol, side, qty, avg_entry_price, realized_pnl, status, opened_at, closed_at, book)
+        VALUES ('NSE', 'PNLTEST', ?, ?, '100.0000', ?, 'CLOSED', now(), now(), 'scalper')
         """,
         side,
         qty,
@@ -223,8 +225,8 @@ class PaperAccountRiskIntegrationTest extends StrategySignalIntegrationTestBase 
     jdbc.update(
         """
         INSERT INTO paper_positions
-          (exchange, tradingsymbol, side, qty, avg_entry_price, status, opened_at)
-        VALUES ('NSE', ?, ?, ?, ?, 'OPEN', now())
+          (exchange, tradingsymbol, side, qty, avg_entry_price, status, opened_at, book)
+        VALUES ('NSE', ?, ?, ?, ?, 'OPEN', now(), 'scalper')
         """,
         tradingsymbol,
         side,

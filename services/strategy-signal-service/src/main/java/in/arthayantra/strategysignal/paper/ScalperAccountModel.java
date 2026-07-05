@@ -68,7 +68,7 @@ public class ScalperAccountModel {
    * have banked the day. */
   public boolean scalperEntryAllowed() {
     LocalDate today = LocalDate.ofInstant(clock.instant(), IST);
-    WinLoss wl = positions.winLossOn(today);
+    WinLoss wl = positions.winLossOn(BookResolver.SCALPER, today);
     if (wl.wins() >= MAX_WINS_PER_DAY) {
       log.info("scalper entries paused — {} wins banked today (cap {})", wl.wins(), MAX_WINS_PER_DAY);
       return false;
@@ -104,7 +104,7 @@ public class ScalperAccountModel {
    * fixed allocation makes {@code realized ≥ target} monotonic, like the binary first-loss latch.
    */
   private java.util.Set<Integer> frozenAccounts(List<SubAccountTally> tallies) {
-    BigDecimal startingCapital = account.startingCapital();
+    BigDecimal startingCapital = account.startingCapital(BookResolver.SCALPER);
     java.util.Map<Integer, BigDecimal> fractions = positions.subAccountCapitalFractions();
     java.util.Set<Integer> frozen = new java.util.HashSet<>();
     for (SubAccountTally t : tallies) {

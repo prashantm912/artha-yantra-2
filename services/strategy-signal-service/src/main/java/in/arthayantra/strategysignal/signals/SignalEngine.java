@@ -89,7 +89,8 @@ public class SignalEngine {
       StrategyDefinition definition,
       List<StrategyDefinition.InstrumentRef> universe,
       Set<SeriesKey> seriesKeys,
-      ScalperConfig scalper) {}
+      ScalperConfig scalper,
+      String book) {}
 
   private final StrategyRepository registry;
   private final SignalRepository signals;
@@ -288,7 +289,7 @@ public class SignalEngine {
             new Loaded(
                 strategy.id(), versionRow.get().id(), strategy.slug(), strategy.name(),
                 versionRow.get().version(), versionRow.get().checksum(), definition,
-                universe, keys, scalper));
+                universe, keys, scalper, Books.fromTags(strategy.tags())));
       } catch (RuntimeException e) {
         log.error("strategy {} failed to load — skipped: {}", strategy.slug(), e.getMessage());
       }
@@ -750,10 +751,11 @@ public class SignalEngine {
   private void emitEntry(
       Loaded strategy, String exchange, String tradingsymbol, String interval, EngineCandle bar,
       EntryEvaluator.Evaluation evaluation, ScalperConfluenceGate.Decision decision) {
-    // A12 global risk gate: a daily-loss trip / kill switch / max-open cap pauses ENTRY emission
-    // for the rest of the IST day — exit/stop evaluation (emit()) is deliberately NOT gated.
-    if (emissionGuard.isPresent() && !emissionGuard.get().entryAllowed()) {
-      log.info("ENTRY suppressed by global risk gate: {} {}:{}", strategy.slug(), exchange, tradingsymbol);
+    // Per-book risk gate: a daily-loss trip / kill switch / max-open cap pauses ENTRY emission for
+    // this strategy's book for the rest of the IST day — exit/stop evaluation (emit()) is NOT gated.
+    if (emissionGuard.isPresent() && !emissionGuard.get().entryAllowed(strategy.book())) {
+      log.info("ENTRY suppressed by {} risk gate: {} {}:{}",
+          strategy.book(), strategy.slug(), exchange, tradingsymbol);
       return;
     }
     BigDecimal entryPrice = bar.close();
@@ -803,7 +805,7 @@ public class SignalEngine {
       suggestedQty =
           emissionGuard.get().suggestedQty(
               strategy.definition().sizing(), exchange, tradingsymbol, entryPrice, stopDistance,
-              sizeMultiplier);
+              sizeMultiplier, strategy.book());
       // E9/§3.7 hero-zero profit-funded sizing: the expiry-day hero-zero leg deploys ~10% of accumulated
       // realised PROFIT ("play with house money, never capital") with a ₹2.5k floor when profits are thin
       // (owner: mode a if enough profit, else mode b). Sized off the OPTION premium (not the index-priced

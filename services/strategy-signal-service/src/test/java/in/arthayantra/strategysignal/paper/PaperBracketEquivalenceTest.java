@@ -43,7 +43,8 @@ class PaperBracketEquivalenceTest {
             new BigDecimal(fx.path("entryPremium").asText()), BigDecimal.ZERO, "OPEN",
             OffsetDateTime.parse("2026-07-03T09:18:00+05:30"), null, null,
             new BigDecimal(fx.path("expectedLevels").path("stopLoss").asText()),
-            new BigDecimal(fx.path("expectedLevels").path("takeProfit").asText()));
+            new BigDecimal(fx.path("expectedLevels").path("takeProfit").asText()),
+            "scalper");
 
     for (JsonNode sc : fx.path("scenarios")) {
       String name = sc.path("name").asText();

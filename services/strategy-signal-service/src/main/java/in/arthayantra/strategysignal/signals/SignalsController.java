@@ -39,6 +39,7 @@ public class SignalsController {
   @GetMapping
   public Map<String, Object> list(
       @RequestParam(required = false) String status,
+      @RequestParam(required = false) String book,
       @RequestParam(required = false) UUID strategyVersionId,
       @RequestParam(required = false) String exchange,
       @RequestParam(required = false) String tradingsymbol,
@@ -52,7 +53,7 @@ public class SignalsController {
     int boundedOffset = Math.max(offset, 0);
     List<SignalRepository.SignalRow> items =
         repository.list(
-            status, strategyVersionId, exchange, tradingsymbol, from, to, boundedLimit,
+            status, book, strategyVersionId, exchange, tradingsymbol, from, to, boundedLimit,
             boundedOffset);
     Map<String, Object> response = new LinkedHashMap<>();
     response.put("items", items.stream().map(SignalsController::dto).toList());

@@ -65,29 +65,29 @@ public class PaperAccountService {
     this.shortOptionMarginPct = shortOptionMarginPct;
   }
 
-  /** equity = starting capital + Σ realized + Σ mark-to-market unrealized (never stored). */
-  public BigDecimal equity() {
-    return account.get().startingCapital().add(positions.realizedTotal()).add(unrealizedTotal());
+  /** equity = book's starting capital + Σ realized + Σ mark-to-market unrealized (never stored). */
+  public BigDecimal equity(String book) {
+    return account.get(book).startingCapital().add(positions.realizedTotal(book)).add(unrealizedTotal(book));
   }
 
   /**
-   * §3.7 hero-zero: accumulated REALISED profit (Σ closed-trade P&amp;L) — "your profits", the funding
-   * base for the hero-zero "deploy ~10% of profits, never capital" rule. Negative when the account is
-   * net-down (the caller floors the deploy to the ₹2-3k minimum then).
+   * §3.7 hero-zero: a book's accumulated REALISED profit (Σ closed-trade P&amp;L) — "your profits", the
+   * funding base for the hero-zero "deploy ~10% of profits, never capital" rule. Negative when the
+   * book is net-down (the caller floors the deploy to the ₹2-3k minimum then).
    */
-  public BigDecimal realisedProfit() {
-    return positions.realizedTotal();
+  public BigDecimal realisedProfit(String book) {
+    return positions.realizedTotal(book);
   }
 
-  /** The configured account size (day-stable; the fixed-allocation base for per-account caps). */
-  public BigDecimal startingCapital() {
-    return account.get().startingCapital();
+  /** A book's configured account size (day-stable; the fixed-allocation base for per-account caps). */
+  public BigDecimal startingCapital(String book) {
+    return account.get(book).startingCapital();
   }
 
-  /** Σ mark-to-market unrealized over the open positions. */
-  public BigDecimal unrealizedTotal() {
+  /** Σ mark-to-market unrealized over a book's open positions ({@code book} null → all books). */
+  public BigDecimal unrealizedTotal(String book) {
     BigDecimal total = BigDecimal.ZERO;
-    for (PositionRow pos : positions.listOpen()) {
+    for (PositionRow pos : positions.listOpen(book)) {
       BigDecimal mark = lastTick.lastPrice(pos.exchange(), pos.tradingsymbol()).orElse(pos.avgEntryPrice());
       BigDecimal move =
           "BUY".equals(pos.side()) ? mark.subtract(pos.avgEntryPrice()) : pos.avgEntryPrice().subtract(mark);
@@ -136,13 +136,13 @@ public class PaperAccountService {
     return usage.setScale(2, RoundingMode.HALF_UP);
   }
 
-  /** Capital usage by class over the open positions. */
-  public Map<String, BigDecimal> usageByClass() {
+  /** Capital usage by class over a book's open positions ({@code book} null → all books). */
+  public Map<String, BigDecimal> usageByClass(String book) {
     Map<String, BigDecimal> usage = new LinkedHashMap<>();
     usage.put("equities", BigDecimal.ZERO);
     usage.put("longOptions", BigDecimal.ZERO);
     usage.put("futuresAndShortOptions", BigDecimal.ZERO);
-    for (PositionRow pos : positions.listOpen()) {
+    for (PositionRow pos : positions.listOpen(book)) {
       InstrumentMeta meta = instruments.meta(pos.exchange(), pos.tradingsymbol());
       BigDecimal amount =
           usageFor(meta, pos.exchange(), pos.tradingsymbol(), pos.side(), pos.avgEntryPrice(), pos.qty());
@@ -157,19 +157,19 @@ public class PaperAccountService {
     return usage;
   }
 
-  /** Total capital tied up in open positions. */
-  public BigDecimal capitalUsed() {
-    return usageByClass().values().stream().reduce(BigDecimal.ZERO, BigDecimal::add);
+  /** Total capital tied up in a book's open positions ({@code book} null → all books). */
+  public BigDecimal capitalUsed(String book) {
+    return usageByClass(book).values().stream().reduce(BigDecimal.ZERO, BigDecimal::add);
   }
 
-  /** Free cash = equity − capital used (the buying-power budget). */
-  public BigDecimal freeCash() {
-    return equity().subtract(capitalUsed());
+  /** A book's free cash = equity − capital used (the buying-power budget). */
+  public BigDecimal freeCash(String book) {
+    return equity(book).subtract(capitalUsed(book));
   }
 
-  /** A non-blocking warning when an order's projected usage exceeds free cash (paper stays paper). */
-  public String buyingPowerWarning(BigDecimal projectedUsage) {
-    BigDecimal free = freeCash();
+  /** A non-blocking warning when an order's projected usage exceeds the book's free cash. */
+  public String buyingPowerWarning(String book, BigDecimal projectedUsage) {
+    BigDecimal free = freeCash(book);
     if (projectedUsage.compareTo(free) > 0) {
       return "Projected capital usage "
           + projectedUsage.toPlainString()
@@ -180,33 +180,33 @@ public class PaperAccountService {
     return null;
   }
 
-  /** The day's P&L = today's realized + current mark-to-market unrealized. */
-  public BigDecimal dayPnl() {
+  /** A book's day P&L = today's realized + current mark-to-market unrealized. */
+  public BigDecimal dayPnl(String book) {
     LocalDate today = LocalDate.ofInstant(clock.instant(), ZoneId.of("Asia/Kolkata"));
-    return positions.realizedOn(today).add(unrealizedTotal());
+    return positions.realizedOn(book, today).add(unrealizedTotal(book));
   }
 
-  /** The /paper account header. */
-  public AccountDto account() {
-    BigDecimal realized = positions.realizedTotal();
-    BigDecimal unrealized = unrealizedTotal();
-    BigDecimal startingCapital = account.get().startingCapital();
+  /** The /paper account header for a book ({@code book} null → the aggregate across all books). */
+  public AccountDto account(String book) {
+    BigDecimal realized = positions.realizedTotal(book);
+    BigDecimal unrealized = unrealizedTotal(book);
+    BigDecimal startingCapital = account.get(book).startingCapital();
     BigDecimal equity = startingCapital.add(realized).add(unrealized);
     return new AccountDto(
         startingCapital,
-        freeCash(),
+        freeCash(book),
         equity,
         realized,
         unrealized,
-        dayPnl(),
-        positions.openCount(),
-        capitalUsed(),
-        usageByClass(),
+        dayPnl(book),
+        positions.openCount(book),
+        capitalUsed(book),
+        usageByClass(book),
         Map.of("future", futureMarginPct, "shortOption", shortOptionMarginPct));
   }
 
-  /** Owner edit of the starting capital. */
-  public void updateStartingCapital(BigDecimal startingCapital) {
-    account.updateStartingCapital(startingCapital);
+  /** Owner edit of a book's starting capital. */
+  public void updateStartingCapital(String book, BigDecimal startingCapital) {
+    account.updateStartingCapital(book, startingCapital);
   }
 }

@@ -40,8 +40,8 @@ public class PaperEmissionGuard implements EmissionGuard {
   }
 
   @Override
-  public boolean entryAllowed() {
-    return risk.entryAllowed();
+  public boolean entryAllowed(String book) {
+    return risk.entryAllowed(book);
   }
 
   @Override
@@ -55,8 +55,9 @@ public class PaperEmissionGuard implements EmissionGuard {
       String exchange,
       String tradingsymbol,
       BigDecimal price,
-      BigDecimal stopDistance) {
-    return suggestedQty(sizing, exchange, tradingsymbol, price, stopDistance, null);
+      BigDecimal stopDistance,
+      String book) {
+    return suggestedQty(sizing, exchange, tradingsymbol, price, stopDistance, null, book);
   }
 
   @Override
@@ -66,12 +67,13 @@ public class PaperEmissionGuard implements EmissionGuard {
       String tradingsymbol,
       BigDecimal price,
       BigDecimal stopDistance,
-      BigDecimal multiplier) {
+      BigDecimal multiplier,
+      String book) {
     InstrumentMeta meta = instruments.meta(exchange, tradingsymbol);
     long lot = Math.max(1, meta.lotSize());
     long base =
         PositionSizer.size(
-            sizing, new PositionSizer.Inputs(account.equity(), price, stopDistance, meta.lotSize()));
+            sizing, new PositionSizer.Inputs(account.equity(book), price, stopDistance, meta.lotSize()));
     if (base <= 0) {
       return null;
     }
@@ -97,7 +99,8 @@ public class PaperEmissionGuard implements EmissionGuard {
     }
     InstrumentMeta meta = instruments.meta(exchange, tradingsymbol);
     long lot = Math.max(1, meta.lotSize());
-    BigDecimal budget = heroZeroDeployBudget(account.realisedProfit());
+    // Hero-zero is a scalper (expiry-day options) concept — funded off the scalper book's realised P&L.
+    BigDecimal budget = heroZeroDeployBudget(account.realisedProfit(BookResolver.SCALPER));
     BigDecimal perLotCost = premium.multiply(BigDecimal.valueOf(lot));
     long affordableLots = budget.divide(perLotCost, 0, RoundingMode.DOWN).longValueExact();
     long lots = Math.max(1L, affordableLots); // a fired entry deploys at least one lot (advisory)

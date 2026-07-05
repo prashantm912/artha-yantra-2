@@ -39,7 +39,8 @@ public class TakenSignalResolver {
       if (pos == null) {
         return;
       }
-      for (Long signalId : positions.signalIdsFor(pos.exchange(), pos.tradingsymbol(), pos.side())) {
+      for (Long signalId :
+          positions.signalIdsFor(pos.book(), pos.exchange(), pos.tradingsymbol(), pos.side())) {
         if (positions.openForSignal(signalId).isEmpty()
             && signals.transitionIf(signalId, "TAKEN", "EXPIRED")) {
           log.info("taken signal {} resolved (position {} closed: {})",

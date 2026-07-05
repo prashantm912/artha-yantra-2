@@ -11,8 +11,8 @@ import java.math.BigDecimal;
  */
 public interface EmissionGuard {
 
-  /** False when global risk pauses ENTRY emission (daily-loss trip, kill switch, max open). */
-  boolean entryAllowed();
+  /** False when the book's risk pauses ENTRY emission (daily-loss trip, kill switch, max open). */
+  boolean entryAllowed(String book);
 
   /**
    * False when the scalper 5-sub-account discipline pauses a fresh scalper ENTRY for the IST day
@@ -24,7 +24,7 @@ public interface EmissionGuard {
   }
 
   /**
-   * The strategy's position-sizing run against the paper-account equity, lot-rounded for the
+   * The strategy's position-sizing run against the BOOK's paper-account equity, lot-rounded for the
    * instrument; null when it sizes to zero or the equity is unknown. Stamped on the signal OUTSIDE
    * the frozen score breakdown.
    */
@@ -33,7 +33,8 @@ public interface EmissionGuard {
       String exchange,
       String tradingsymbol,
       BigDecimal price,
-      BigDecimal stopDistance);
+      BigDecimal stopDistance,
+      String book);
 
   /**
    * The {@link #suggestedQty} variant that also applies an E8 §3.2 probability-graded size
@@ -47,8 +48,9 @@ public interface EmissionGuard {
       String tradingsymbol,
       BigDecimal price,
       BigDecimal stopDistance,
-      BigDecimal multiplier) {
-    return suggestedQty(sizing, exchange, tradingsymbol, price, stopDistance);
+      BigDecimal multiplier,
+      String book) {
+    return suggestedQty(sizing, exchange, tradingsymbol, price, stopDistance, book);
   }
 
   /**

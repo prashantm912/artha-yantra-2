@@ -36,7 +36,11 @@ public class PaperService {
   private static final Logger log = LoggerFactory.getLogger(PaperService.class);
   private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
-  /** Open-order request (from a signal, or a manual entry); optional SL/TP bracket levels. */
+  /**
+   * Open-order request (from a signal, or a manual entry); optional SL/TP bracket levels. {@code book}
+   * is the paper book to charge; null → resolved from the signal's strategy family, or {@code MANUAL}
+   * for a hand order with no signal.
+   */
   public record OrderRequest(
       Long signalId,
       String exchange,
@@ -46,7 +50,22 @@ public class PaperService {
       BigDecimal price,
       BigDecimal stopLoss,
       BigDecimal takeProfit,
-      Integer subaccountIdx) {
+      Integer subaccountIdx,
+      String book) {
+
+    /** E10 9-arg form: sub-account set, book resolved from the signal. */
+    public OrderRequest(
+        Long signalId,
+        String exchange,
+        String tradingsymbol,
+        String side,
+        long qty,
+        BigDecimal price,
+        BigDecimal stopLoss,
+        BigDecimal takeProfit,
+        Integer subaccountIdx) {
+      this(signalId, exchange, tradingsymbol, side, qty, price, stopLoss, takeProfit, subaccountIdx, null);
+    }
 
     /** Pre-E10 8-arg form: no sub-account (manual / non-scalper order leaves the ledger key NULL). */
     public OrderRequest(
@@ -58,7 +77,7 @@ public class PaperService {
         BigDecimal price,
         BigDecimal stopLoss,
         BigDecimal takeProfit) {
-      this(signalId, exchange, tradingsymbol, side, qty, price, stopLoss, takeProfit, null);
+      this(signalId, exchange, tradingsymbol, side, qty, price, stopLoss, takeProfit, null, null);
     }
   }
 
@@ -106,6 +125,7 @@ public class PaperService {
   private final InstrumentMetaClient instruments;
   private final SignalRepository signals;
   private final PaperAccountService accountService;
+  private final BookResolver books;
   private final ApplicationEventPublisher events;
 
   /** Wires the ledger collaborators. */
@@ -117,6 +137,7 @@ public class PaperService {
       InstrumentMetaClient instruments,
       SignalRepository signals,
       PaperAccountService accountService,
+      BookResolver books,
       ApplicationEventPublisher events) {
     this.orders = orders;
     this.positions = positions;
@@ -125,6 +146,7 @@ public class PaperService {
     this.instruments = instruments;
     this.signals = signals;
     this.accountService = accountService;
+    this.books = books;
     this.events = events;
   }
 
@@ -160,25 +182,34 @@ public class PaperService {
     if (reference == null) {
       throw new ApiException(422, ErrorCodes.DATA_STALE, "no price available to fill " + exchange + ":" + tradingsymbol);
     }
+    // The book to charge: explicit on the request, else the signal's strategy family, else MANUAL.
+    String book =
+        request.book() != null
+            ? request.book()
+            : request.signalId() != null
+                ? books.bookForSignal(request.signalId())
+                : BookResolver.MANUAL;
     InstrumentMeta meta = instruments.meta(exchange, tradingsymbol);
     Fill fill = fills.fill(Side.valueOf(side), request.qty(), reference, meta);
     orders.insertFilled(
-        request.signalId(), exchange, tradingsymbol, side, request.qty(), fill.fillPrice(),
+        book, request.signalId(), exchange, tradingsymbol, side, request.qty(), fill.fillPrice(),
         fills.simulatorId(), fill.slippageApplied(), null, null);
     upsertPosition(
-        exchange, tradingsymbol, side, request.qty(), fill.fillPrice(),
+        book, exchange, tradingsymbol, side, request.qty(), fill.fillPrice(),
         request.stopLoss(), request.takeProfit(), request.subaccountIdx());
     String warning =
         accountService.buyingPowerWarning(
+            book,
             accountService.usageFor(
                 meta, exchange, tradingsymbol, side, fill.fillPrice(), request.qty()));
     return positions
-        .findOpen(exchange, tradingsymbol, side)
+        .findOpen(book, exchange, tradingsymbol, side)
         .map(row -> toPositionDto(row).withWarning(warning))
         .orElseThrow(() -> new ApiException(500, ErrorCodes.INTERNAL_ERROR, "position not opened"));
   }
 
   private void upsertPosition(
+      String book,
       String exchange,
       String tradingsymbol,
       String side,
@@ -187,7 +218,7 @@ public class PaperService {
       BigDecimal stopLoss,
       BigDecimal takeProfit,
       Integer subaccountIdx) {
-    Optional<PositionRow> existing = positions.findOpen(exchange, tradingsymbol, side);
+    Optional<PositionRow> existing = positions.findOpen(book, exchange, tradingsymbol, side);
     if (existing.isPresent()) {
       // averaging onto an open position keeps its original bracket levels AND its original
       // sub-account (set at first open) — a later add never re-charges the trade to a new account.
@@ -201,7 +232,7 @@ public class PaperService {
       positions.updateOpen(row.id(), newQty, newAvg);
     } else {
       positions.insertOpen(
-          exchange, tradingsymbol, side, qty, fillPrice, stopLoss, takeProfit, subaccountIdx);
+          book, exchange, tradingsymbol, side, qty, fillPrice, stopLoss, takeProfit, subaccountIdx);
     }
   }
 
@@ -242,7 +273,7 @@ public class PaperService {
     Fill entryBasis = fills.costBasis(Side.valueOf(pos.side()), pos.qty(), pos.avgEntryPrice(), meta);
     BigDecimal realized = exit.netValue().add(entryBasis.netValue()).setScale(4, RoundingMode.HALF_UP);
     orders.insertFilled(
-        null, pos.exchange(), pos.tradingsymbol(), exitSide.name(), pos.qty(), exit.fillPrice(),
+        pos.book(), null, pos.exchange(), pos.tradingsymbol(), exitSide.name(), pos.qty(), exit.fillPrice(),
         fills.simulatorId(), exit.slippageApplied(), null, null);
     positions.close(pos.id(), realized, closeReason);
     // Auto-journal hook: the journal module listens AFTER_COMMIT (so a journal failure can never
@@ -251,22 +282,22 @@ public class PaperService {
     return realized;
   }
 
-  /** Open positions with mark-to-market P&amp;L from the last-tick map (unrealized never stored). */
-  public List<PositionDto> openPositions() {
-    return positions.listOpen().stream().map(this::toPositionDto).toList();
+  /** Open positions with mark-to-market P&amp;L ({@code book} null → all books; unrealized never stored). */
+  public List<PositionDto> openPositions(String book) {
+    return positions.listOpen(book).stream().map(this::toPositionDto).toList();
   }
 
-  /** The closed-trade ledger (optionally one tradingsymbol — the chart-marks fetch, FP-67). */
+  /** The closed-trade ledger for a book ({@code book} null → all; optionally one tradingsymbol). */
   public List<TradeDto> trades(
-      OffsetDateTime from, OffsetDateTime to, String tradingsymbol, int limit, int offset) {
-    return positions.listClosed(from, to, tradingsymbol, limit, offset).stream()
+      String book, OffsetDateTime from, OffsetDateTime to, String tradingsymbol, int limit, int offset) {
+    return positions.listClosed(book, from, to, tradingsymbol, limit, offset).stream()
         .map(this::toTradeDto)
         .toList();
   }
 
-  /** Daily realized-equity curve + win rate / expectancy over the closed trades. */
-  public Map<String, Object> pnl() {
-    List<PositionRow> closed = positions.listClosed(null, null, null, 500, 0);
+  /** Daily realized-equity curve + win rate / expectancy over a book's closed trades (null → all). */
+  public Map<String, Object> pnl(String book) {
+    List<PositionRow> closed = positions.listClosed(book, null, null, null, 500, 0);
     // listClosed is newest-first; walk oldest-first for the cumulative curve
     List<PositionRow> chrono = new ArrayList<>(closed);
     java.util.Collections.reverse(chrono);
@@ -298,14 +329,14 @@ public class PaperService {
     return Map.of("points", points, "summary", summary);
   }
 
-  /** Wipes the paper ledger (confirm-guarded). */
+  /** Wipes a book's paper ledger ({@code book} null → all books; confirm-guarded). */
   @Transactional
-  public void reset(boolean confirm) {
+  public void reset(String book, boolean confirm) {
     if (!confirm) {
       throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "reset requires confirm=true");
     }
-    positions.deleteAll();
-    orders.deleteAll();
+    positions.deleteAll(book);
+    orders.deleteAll(book);
   }
 
   /**

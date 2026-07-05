@@ -84,14 +84,31 @@ public class SignalRepository {
   public List<SignalRow> list(
       String status, UUID strategyVersionId, String exchange, String tradingsymbol,
       OffsetDateTime from, OffsetDateTime to, int limit, int offset) {
-    StringBuilder sql = new StringBuilder("SELECT * FROM signals WHERE 1=1");
+    return list(status, null, strategyVersionId, exchange, tradingsymbol, from, to, limit, offset);
+  }
+
+  /**
+   * Paged history with optional filters, including a paper BOOK (strategy family) filter — a family
+   * tag ({@code scalper}/{@code minervini}/{@code manas-arora}) matched against the originating
+   * strategy's {@code strategies.tags} so each book's signals page shows only its own signals.
+   */
+  public List<SignalRow> list(
+      String status, String book, UUID strategyVersionId, String exchange, String tradingsymbol,
+      OffsetDateTime from, OffsetDateTime to, int limit, int offset) {
+    StringBuilder sql = new StringBuilder("SELECT s.* FROM signals s WHERE 1=1");
     List<Object> args = new java.util.ArrayList<>();
     if (status != null) {
-      sql.append(" AND status = ?");
+      sql.append(" AND s.status = ?");
       args.add(status);
     }
+    if (book != null && !book.isBlank()) {
+      sql.append(
+          " AND EXISTS (SELECT 1 FROM strategy_versions sv JOIN strategies st ON st.id = sv.strategy_id"
+              + " WHERE sv.id = s.strategy_version_id AND ? = ANY(st.tags))");
+      args.add(book);
+    }
     if (strategyVersionId != null) {
-      sql.append(" AND strategy_version_id = ?");
+      sql.append(" AND s.strategy_version_id = ?");
       args.add(strategyVersionId);
     }
     if (exchange != null && tradingsymbol != null) {

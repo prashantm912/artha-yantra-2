@@ -151,6 +151,19 @@ public class TelegramCommandBot {
         });
   }
 
+  /** Flips the kill switch across every paper book (a true global pause/resume). */
+  private void killSwitchAllBooks(boolean on) {
+    String json = on ? "{\"enabled\":true}" : "{\"enabled\":false}";
+    for (String book :
+        java.util.List.of(
+            in.arthayantra.strategysignal.signals.Books.SCALPER,
+            in.arthayantra.strategysignal.signals.Books.MINERVINI,
+            in.arthayantra.strategysignal.signals.Books.MANAS_ARORA,
+            in.arthayantra.strategysignal.signals.Books.MANUAL)) {
+      riskSettings.upsert(book, RiskService.KILL_SWITCH, json);
+    }
+  }
+
   private void confirm(String chatId) {
     PendingAction action = pending.remove(chatId);
     if (action == null || clock.instant().isAfter(action.expiresAt())) {
@@ -160,14 +173,14 @@ public class TelegramCommandBot {
     }
     switch (action.command()) {
       case "/pause" -> {
-        riskSettings.upsert(RiskService.KILL_SWITCH, "{\"enabled\":true}");
+        killSwitchAllBooks(true);
         audit(chatId, "/pause", "EXECUTED");
-        api.sendMessage(chatId, "paused — kill switch ON, no new paper entries");
+        api.sendMessage(chatId, "paused — kill switch ON (all books), no new paper entries");
       }
       case "/resume" -> {
-        riskSettings.upsert(RiskService.KILL_SWITCH, "{\"enabled\":false}");
+        killSwitchAllBooks(false);
         audit(chatId, "/resume", "EXECUTED");
-        api.sendMessage(chatId, "resumed — kill switch OFF");
+        api.sendMessage(chatId, "resumed — kill switch OFF (all books)");
       }
       default -> {
         int closed = paper.markToCloseIntraday();
@@ -186,8 +199,13 @@ public class TelegramCommandBot {
     out.append("dot canary: ")
         .append(dead == 0 ? "required dots alive" : dead + " REQUIRED dot(s) DEAD")
         .append(" (").append(dots.rowsInspected()).append(" rejections inspected)\n");
-    out.append("entries: ").append(risk.entryAllowed() ? "allowed" : "BLOCKED (kill switch / risk cap)").append('\n');
-    out.append("open paper positions: ").append(paper.openPositions().size());
+    out.append("entries: ")
+        .append(
+            risk.entryAllowed(in.arthayantra.strategysignal.signals.Books.SCALPER)
+                ? "allowed"
+                : "BLOCKED (kill switch / risk cap)")
+        .append('\n');
+    out.append("open paper positions: ").append(paper.openPositions(null).size());
     return out.toString();
   }
 
@@ -208,7 +226,7 @@ public class TelegramCommandBot {
 
   @SuppressWarnings("unchecked")
   private String pnl() {
-    Map<String, Object> summary = (Map<String, Object>) paper.pnl().get("summary");
+    Map<String, Object> summary = (Map<String, Object>) paper.pnl(null).get("summary");
     return "realized total: ₹" + summary.get("realizedTotal")
         + "\ntrades: " + summary.get("trades")
         + "\nwin rate: " + orDash(summary.get("winRate"))
@@ -216,7 +234,7 @@ public class TelegramCommandBot {
   }
 
   private String positions() {
-    List<PaperService.PositionDto> open = paper.openPositions();
+    List<PaperService.PositionDto> open = paper.openPositions(null);
     if (open.isEmpty()) {
       return "no open paper positions";
     }

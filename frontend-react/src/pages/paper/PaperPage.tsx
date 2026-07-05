@@ -155,7 +155,7 @@ export function PaperPage() {
             <button
               type="button"
               onClick={() => updateRisk.mutate({ key: 'auto_paper_trade', value: { enabled: !autoOn } })}
-              title="Auto-paper-trade — when on, every emitted entry signal is taken automatically at its suggested quantity (no manual click)."
+              title={`Auto-paper-trade for the ${label} book — when on, every emitted ${label}-book entry is taken automatically at its suggested quantity (this book only).`}
               className={cn(
                 'h-9 rounded-md px-3 text-sm font-semibold ring-1',
                 autoOn ? 'bg-bull/15 text-bull ring-bull/50' : 'text-ay-muted ring-ay-border hover:border-accent',
@@ -166,7 +166,7 @@ export function PaperPage() {
             <button
               type="button"
               onClick={() => updateRisk.mutate({ key: 'kill_switch', value: { enabled: !killOn } })}
-              title="Master kill switch — when on, blocks all new paper entries."
+              title={`Kill switch for the ${label} book — when on, blocks new ${label}-book paper entries ONLY (audit M19: this is per-book, not global — use the Telegram /pause command to halt every book at once).`}
               className={cn(
                 'h-9 rounded-md px-3 text-sm font-semibold ring-1',
                 killOn ? 'bg-bear/15 text-bear ring-bear/50' : 'text-ay-muted ring-ay-border hover:border-accent',
@@ -255,10 +255,24 @@ export function PaperPage() {
         <div className="flex-1" />
         <button
           type="button"
-          onClick={() => resetLedger.mutate()}
-          className="h-9 rounded-md px-3 text-sm font-medium text-bear ring-1 ring-bear/50 hover:bg-bear/10"
+          disabled={resetLedger.isPending}
+          onClick={() => {
+            // Audit H7: reset is an IRREVERSIBLE hard-delete of this book's open + closed positions
+            // and orders (the F7 graduation + reliability evidence). Confirm, naming the book, so a
+            // stray click on /paper/:book can't wipe the forward-paper track (the API layer already
+            // sends confirm:true, so the FE guard is the only safeguard).
+            if (
+              window.confirm(
+                `Permanently delete ALL ${label}-book paper positions and trades? This wipes the ` +
+                  `forward-paper track (open + closed) and CANNOT be undone.`,
+              )
+            ) {
+              resetLedger.mutate();
+            }
+          }}
+          className="h-9 rounded-md px-3 text-sm font-medium text-bear ring-1 ring-bear/50 hover:bg-bear/10 disabled:opacity-50"
         >
-          🗑 Reset ledger
+          🗑 Reset {label} ledger
         </button>
       </section>
 

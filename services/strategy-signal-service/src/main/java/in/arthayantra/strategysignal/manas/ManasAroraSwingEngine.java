@@ -51,9 +51,12 @@ import org.springframework.transaction.support.TransactionTemplate;
  *
  * <p><b>Parity:</b> it reuses the FROZEN engine evaluators ({@link EntryEvaluator}/{@link
  * ExitEvaluator}/{@link IndicatorBank}) verbatim — no new scoring/exit code — so the golden vectors
- * are untouched and the batch scores each bar identically to the backtest. The per-symbol base pivot
- * is seeded exactly like the Minervini engine's context series (a flat context bar the {@code
- * VCP_PIVOT} indicator, bound to {@code MANAS_PIVOT}, reads).
+ * are untouched and the batch scores each bar identically to the backtest. The per-symbol base pivots
+ * are seeded exactly like the Minervini engine's context series (flat context bars the {@code
+ * VCP_PIVOT} indicator reads): each strategy binds to its OWN setup's pivot — the breakout strategy to
+ * {@code MANAS_BREAKOUT_PIVOT} (§3.2), the VCP strategy to {@code MANAS_VCP_PIVOT} (§3.3) — so a signal
+ * always fires off the pivot of the setup it names ({@code MANAS_PIVOT} carries the best-setup pivot
+ * for any other reader).
  *
  * <p><b>Cross-family isolation:</b> only strategies whose {@code universe.mode == manas_arora_funnel}
  * are loaded here (the mirror of the Minervini engine's own minervini_funnel scoping) — so the two
@@ -77,10 +80,20 @@ public class ManasAroraSwingEngine {
   private static final String IV = "1d";
   private static final String UNIVERSE_MODE = "manas_arora_funnel";
   private static final String PIVOT_CTX = "MANAS_PIVOT";
+  private static final String BREAKOUT_PIVOT_CTX = "MANAS_BREAKOUT_PIVOT";
+  private static final String VCP_PIVOT_CTX = "MANAS_VCP_PIVOT";
+  private static final String SETUP_BREAKOUT = "breakout";
+  private static final String SETUP_VCP = "vcp";
 
-  /** A loaded published Manas swing strategy (identity + compiled definition). */
+  /**
+   * A loaded published Manas swing strategy (identity + compiled definition + the setup it trades).
+   * {@code setup} is {@code "breakout"} or {@code "vcp"} — derived from the slug suffix (the tags'
+   * 4th element is the same token) — so the breakout strategy only evaluates candidates with a valid
+   * §3.2 breakout pivot and the VCP strategy only those with a valid §3.3 VCP pivot, each off its own
+   * seeded context series.
+   */
   private record SwingStrategy(
-      UUID versionId, String slug, String name, String version, String checksum,
+      UUID versionId, String slug, String name, String version, String checksum, String setup,
       StrategyDefinition definition) {}
 
   /** Summary of one batch run (for logging / the manual-trigger endpoint). */
@@ -175,7 +188,15 @@ public class ManasAroraSwingEngine {
         continue;
       }
       for (SwingStrategy strat : swings) {
-        IndicatorBank bank = buildBank(strat.definition(), c.symbol(), series, c.pivot());
+        // Route by setup: the breakout strategy fires off the §3.2 breakout pivot, the VCP strategy
+        // off the §3.3 VCP pivot — a candidate with only one valid setup fires only that strategy.
+        BigDecimal setupPivot = pivotFor(strat, c);
+        if (setupPivot == null) {
+          continue; // this candidate has no valid base for this strategy's setup
+        }
+        IndicatorBank bank =
+            buildBank(strat.definition(), c.symbol(), series, c.pivot(),
+                c.breakoutPivot(), c.vcpPivot());
         Optional<EntryEvaluator.Evaluation> eval =
             EntryEvaluator.evaluate(strat.definition(), bank, series.size() - 1);
         if (eval.isPresent() && eval.get().entry()) {
@@ -187,6 +208,11 @@ public class ManasAroraSwingEngine {
       }
     }
     return fired;
+  }
+
+  /** The pivot the strategy's setup trades: the §3.2 breakout pivot or the §3.3 VCP pivot (or null). */
+  private static BigDecimal pivotFor(SwingStrategy strat, ManasFunnelClient.Candidate c) {
+    return SETUP_VCP.equals(strat.setup()) ? c.vcpPivot() : c.breakoutPivot();
   }
 
   private Set<String> heldSymbols(List<SwingStrategy> swings) {
@@ -291,9 +317,11 @@ public class ManasAroraSwingEngine {
       if (series.isEmpty()) {
         continue;
       }
-      // geometry is irrelevant to the exit rules (percent stop + 20-day-MA trail), so the pivot
-      // context is seeded neutral — the bank still builds, the exit eval never reads it.
-      IndicatorBank bank = buildBank(strat.definition(), anchor.tradingsymbol(), series, BigDecimal.ZERO);
+      // geometry is irrelevant to the exit rules (ATR stop/trail + square-off), so the pivot
+      // contexts are seeded neutral (0) — the bank still builds, the exit eval never reads them.
+      IndicatorBank bank =
+          buildBank(strat.definition(), anchor.tradingsymbol(), series,
+              BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
       int entryIndex = bank.primarySeries().indexAtOrBefore(anchor.generatedAt().toInstant());
       if (entryIndex < 0) {
         // the entry bar fell outside the fetched window (position held > warmupDays, or a dropped
@@ -350,25 +378,38 @@ public class ManasAroraSwingEngine {
   // ---- shared helpers -----------------------------------------------------------------------
 
   /**
-   * Builds the indicator bank for one symbol over its daily {@code series} with the per-symbol base
-   * pivot seeded as a flat context series ({@code MANAS_PIVOT}, read by the {@code VCP_PIVOT}
-   * indicator) — the same context-close mechanism the golden runner uses. Package-visible for tests.
+   * Builds the indicator bank for one symbol over its daily {@code series} with the per-setup base
+   * pivots seeded as flat context series — the same context-close mechanism the golden runner uses.
+   * Three pivot contexts are seeded (only the non-null ones): {@code MANAS_PIVOT} (the best-setup
+   * pivot, kept for any other reader), {@code MANAS_BREAKOUT_PIVOT} (the §3.2 pivot the breakout
+   * strategy's indicator binds to), and {@code MANAS_VCP_PIVOT} (the §3.3 pivot the VCP strategy binds
+   * to). A strategy's YAML reads only its own context, so the others are simply unread. Package-visible
+   * for tests.
    */
   static IndicatorBank buildBank(
-      StrategyDefinition definition, String symbol, List<EngineCandle> series, BigDecimal pivot) {
+      StrategyDefinition definition, String symbol, List<EngineCandle> series,
+      BigDecimal pivot, BigDecimal breakoutPivot, BigDecimal vcpPivot) {
     SeriesKey primaryKey = new SeriesKey(EX, symbol, definition.primaryTimeframe());
     EngineSeries primary = new EngineSeries(primaryKey);
     for (EngineCandle candle : series) {
       primary.append(candle);
     }
     OffsetDateTime start = series.get(0).bucketStart();
-    EngineSeries pivotCtx = flat(PIVOT_CTX, start, pivot);
+    EngineSeries pivotCtx = pivot == null ? null : flat(PIVOT_CTX, start, pivot);
+    EngineSeries breakoutCtx =
+        breakoutPivot == null ? null : flat(BREAKOUT_PIVOT_CTX, start, breakoutPivot);
+    EngineSeries vcpCtx = vcpPivot == null ? null : flat(VCP_PIVOT_CTX, start, vcpPivot);
     SeriesProvider provider =
         key -> {
           if (key.equals(primaryKey)) {
             return primary;
           }
-          return PIVOT_CTX.equals(key.tradingsymbol()) ? pivotCtx : null;
+          return switch (key.tradingsymbol()) {
+            case PIVOT_CTX -> pivotCtx;
+            case BREAKOUT_PIVOT_CTX -> breakoutCtx;
+            case VCP_PIVOT_CTX -> vcpCtx;
+            default -> null;
+          };
         };
     return IndicatorBank.build(
         definition, new StrategyDefinition.InstrumentRef(EX, symbol), provider);
@@ -414,15 +455,35 @@ public class ManasAroraSwingEngine {
             versionRow.get().config().path("universe").path("mode").asText())) {
           continue;
         }
+        String setup = setupOf(versionRow.get().config(), strategy.slug());
         out.add(
             new SwingStrategy(
                 strategy.publishedVersionId(), strategy.slug(), strategy.name(),
-                versionRow.get().version(), versionRow.get().checksum(), definition));
+                versionRow.get().version(), versionRow.get().checksum(), setup, definition));
       } catch (RuntimeException e) {
         log.warn("manas swing strategy {} failed to compile — skipped: {}",
             strategy.slug(), e.getMessage());
       }
     }
     return out;
+  }
+
+  /**
+   * The setup a strategy trades: {@code "vcp"} or {@code "breakout"}. Prefers the tags' setup token
+   * ({@code manas-arora, swing, equity, breakout|vcp} — the 4th tag), falling back to the slug suffix
+   * ({@code manas-arora-breakout} / {@code manas-arora-vcp}). Defaults to {@code "breakout"} (the
+   * gate/exit math is identical across the two, only the pivot the crossover reads differs).
+   */
+  private static String setupOf(JsonNode config, String slug) {
+    for (JsonNode tag : config.path("tags")) {
+      String t = tag.asText();
+      if (SETUP_VCP.equals(t)) {
+        return SETUP_VCP;
+      }
+      if (SETUP_BREAKOUT.equals(t)) {
+        return SETUP_BREAKOUT;
+      }
+    }
+    return slug != null && slug.endsWith("-" + SETUP_VCP) ? SETUP_VCP : SETUP_BREAKOUT;
   }
 }

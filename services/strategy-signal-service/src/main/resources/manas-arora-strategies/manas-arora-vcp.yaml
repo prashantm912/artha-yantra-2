@@ -2,7 +2,8 @@
 # breakout setup but off a tightening VCP base (the Manas geometry marks the vcp footprint + pivot).
 # Fires a long ENTRY as the daily close breaks out above the VCP pivot on expanding volume, above the
 # 20-day MA. Universe = the Manas selection funnel; the daily EOD batch drives evaluation per funnel
-# symbol with the per-symbol pivot seeded into MANAS_PIVOT. Same exit doctrine as the breakout setup
+# symbol with the §3.3 VCP pivot seeded into MANAS_VCP_PIVOT (this strategy fires off its OWN setup's
+# pivot, not the shared best). Same exit doctrine as the breakout setup
 # (§3.5, faithful to the doc, same math as the BACKTEST): the 2×ATR(20) stop capped ~10%, an armed
 # 2×ATR trail (+9%), and a too-fast/parabolic square-off. Paper-only (auto-paper into the manas-arora
 # book) until the reliability bar is met. Mirrors minervini-vcp.
@@ -29,7 +30,7 @@ indicators:
   - { name: VOLUME_RATIO, alias: vol, timeframe: 1d, params: { lookback: 20 }, weight: 1.0,
       normalize: { type: linear, from: 0, to: 3 } }
   - { name: VCP_PIVOT, alias: pivot, timeframe: 1d, weight: 0.0,
-      instrument: { exchange: NSE, tradingsymbol: "MANAS_PIVOT" } }
+      instrument: { exchange: NSE, tradingsymbol: "MANAS_VCP_PIVOT" } }
 entry_rules:
   direction: long
   gate:

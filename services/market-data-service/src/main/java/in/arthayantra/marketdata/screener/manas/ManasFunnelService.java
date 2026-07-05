@@ -25,7 +25,15 @@ import org.springframework.stereotype.Service;
 @Service
 public class ManasFunnelService {
 
-  /** One funnel candidate: the screen numbers + the chosen setup + its distance to the pivot. */
+  /**
+   * One funnel candidate: the screen numbers + the chosen (BEST) setup + its distance to the pivot,
+   * plus BOTH setups' pivots so the live engine can route each strategy to its own. {@code
+   * setupType}/{@code pivot}/{@code pctToPivot} carry the BEST valid setup (side-aware nearest pivot)
+   * and drive the buyable/on-deck/watch bucketing + the FE funnel page — UNCHANGED. {@code
+   * breakoutPivot}/{@code vcpPivot} carry the valid pivot of each setup_type (null when that setup is
+   * invalid/absent) so the breakout strategy fires off the §3.2 breakout pivot and the VCP strategy
+   * off the §3.3 VCP pivot.
+   */
   public record FunnelRow(
       String symbol,
       BigDecimal close,
@@ -33,7 +41,9 @@ public class ManasFunnelService {
       String setupType,
       BigDecimal pivot,
       String footprint,
-      BigDecimal pctToPivot) {} // (close - pivot) / pivot, null when no pivot
+      BigDecimal pctToPivot, // (close - pivot) / pivot, null when no pivot
+      BigDecimal breakoutPivot, // §3.2 consolidation-breakout pivot, null when that setup is invalid
+      BigDecimal vcpPivot) {} // §3.3 VCP-contraction pivot, null when that setup is invalid
 
   /** The three-list for a screen date + the market regime (§4.9) the owner should buy WITH. */
   public record Funnel(
@@ -43,12 +53,15 @@ public class ManasFunnelService {
       List<FunnelRow> onDeck,
       List<FunnelRow> watch) {}
 
-  // One row per passer with its BEST valid setup: the valid setup whose pivot is closest at/above the
-  // close (so the buyable/on-deck test uses the pivot the price is approaching), else any valid pivot.
+  // One row per passer with its BEST valid setup (v: nearest pivot at/above the close, else any valid
+  // pivot — drives the buyable/on-deck bucketing) AND each setup_type's own valid pivot side-channel
+  // (b/vc) so the live engine can route the breakout strategy to the §3.2 pivot and the VCP strategy
+  // to the §3.3 pivot. Each join is null when that setup is invalid/absent for the symbol.
   private static final String SQL =
       """
       SELECT r.symbol, r.close_price, r.above_low_pct,
-             v.setup_type, v.pivot, v.footprint
+             v.setup_type, v.pivot, v.footprint,
+             b.pivot AS breakout_pivot, vc.pivot AS vcp_pivot
       FROM manas_arora_screen_results r
       LEFT JOIN LATERAL (
         SELECT s.setup_type, s.pivot, s.footprint
@@ -60,6 +73,12 @@ public class ManasFunnelService {
         ORDER BY (s.pivot >= r.close_price) DESC, abs(s.pivot - r.close_price) ASC
         LIMIT 1
       ) v ON TRUE
+      LEFT JOIN manas_arora_setups b
+        ON b.screen_date = r.screen_date AND b.symbol = r.symbol
+          AND b.setup_type = 'breakout' AND b.is_valid = TRUE AND b.pivot IS NOT NULL
+      LEFT JOIN manas_arora_setups vc
+        ON vc.screen_date = r.screen_date AND vc.symbol = r.symbol
+          AND vc.setup_type = 'vcp' AND vc.is_valid = TRUE AND vc.pivot IS NOT NULL
       WHERE r.screen_date = ? AND r.passes_all = TRUE
       ORDER BY r.above_low_pct DESC NULLS LAST
       """;
@@ -98,7 +117,8 @@ public class ManasFunnelService {
                       : close.subtract(pivot).divide(pivot, 4, RoundingMode.HALF_UP);
               return new FunnelRow(
                   rs.getString("symbol"), close, rs.getBigDecimal("above_low_pct"),
-                  rs.getString("setup_type"), pivot, rs.getString("footprint"), pct);
+                  rs.getString("setup_type"), pivot, rs.getString("footprint"), pct,
+                  rs.getBigDecimal("breakout_pivot"), rs.getBigDecimal("vcp_pivot"));
             },
             java.sql.Date.valueOf(screenDate));
 

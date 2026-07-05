@@ -110,7 +110,14 @@ public class ManasAroraSellDecisionService {
       throw new IllegalStateException("no daily series");
     }
     int last = series.size() - 1;
-    IndicatorBank bank = ManasAroraSwingEngine.buildBank(def, anchor.tradingsymbol(), series, pivot);
+    // Seed the persisted base pivot into the context the anchor's setup reads (the breakout strategy's
+    // crossover binds to MANAS_BREAKOUT_PIVOT, the VCP's to MANAS_VCP_PIVOT). The detail's "setup" field
+    // is the emitting strategy's slug (manas-arora-breakout / -vcp); "vcp"-suffixed → the VCP slot.
+    boolean vcp = text(detail, "setup") != null && text(detail, "setup").endsWith("-vcp");
+    IndicatorBank bank =
+        ManasAroraSwingEngine.buildBank(
+            def, anchor.tradingsymbol(), series,
+            pivot, vcp ? null : pivot, vcp ? pivot : null);
     BigDecimal entryPrice = anchor.entryPrice();
     BigDecimal currentPrice = series.get(last).close();
     BigDecimal unrealizedPct =

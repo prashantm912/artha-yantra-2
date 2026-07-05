@@ -1,4 +1,4 @@
-package in.arthayantra.strategysignal.minervini;
+package in.arthayantra.strategysignal.manas;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -14,7 +14,9 @@ import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategyengine.series.EngineSeries;
 import in.arthayantra.strategyengine.series.SeriesKey;
 import in.arthayantra.strategysignal.registry.StrategyRepository;
+import in.arthayantra.strategysignal.signals.Books;
 import in.arthayantra.strategysignal.signals.EmissionGuard;
+import in.arthayantra.strategysignal.signals.MarketDataCandlesClient;
 import in.arthayantra.strategysignal.signals.SignalEmitted;
 import in.arthayantra.strategysignal.signals.SignalExited;
 import in.arthayantra.strategysignal.signals.SignalPublisher;
@@ -34,51 +36,63 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * The Phase-9 (MV-9.1) Minervini swing engine: a post-close DAILY batch that generates live-paper
- * swing signals for the published {@code session.style=swing} strategies over the SEPA-funnel
- * universe. It exists because the funnel equities do NOT tick (the platform's live feed is
- * index/options only), so the tick-driven {@code SignalEngine} — which refuses non-rollable 1d
- * primaries — never evaluates them. This batch drives them off the daily bar instead.
+ * The Manas Arora daily swing engine: a post-close DAILY batch that generates live-paper swing
+ * signals for the published Manas-Arora {@code session.style=swing} strategies over the selection
+ * funnel. It is the direct sibling of {@link
+ * in.arthayantra.strategysignal.minervini.MinerviniSwingEngine} and exists for the same reason: the
+ * funnel equities do NOT tick (the platform's live feed is index/options only), so the tick-driven
+ * {@code SignalEngine} — which refuses non-rollable 1d primaries — never evaluates them. This batch
+ * drives them off the daily bar instead.
  *
  * <p><b>Parity:</b> it reuses the FROZEN engine evaluators ({@link EntryEvaluator}/{@link
  * ExitEvaluator}/{@link IndicatorBank}) verbatim — no new scoring/exit code — so the golden vectors
- * are untouched and the batch scores each bar identically to the backtest. The per-symbol VCP
- * geometry (pivot / cheat / thrust) is seeded exactly like the golden runner's context series (a
- * flat context bar the {@code VCP_PIVOT}/{@code CHEAT_PIVOT}/{@code THRUST} indicators read).
+ * are untouched and the batch scores each bar identically to the backtest. The per-symbol base pivot
+ * is seeded exactly like the Minervini engine's context series (a flat context bar the {@code
+ * VCP_PIVOT} indicator, bound to {@code MANAS_PIVOT}, reads).
  *
- * <p>Emission mirrors {@code SignalEngine.emitEntry}/{@code emit}: an ENTRY row + {@code SignalEmitted}
- * (auto-papered by {@link in.arthayantra.strategysignal.paper.AutoPaperListener}), and on an exit an
- * EXIT row + {@code SignalExited} (closes the paper position). Swing positions are never squared off
- * intraday (the 15:45 mark-to-close filters {@code style='intraday'}); the exit doctrine (8% stop +
- * 50-day-MA trail) is checked here on the fresh daily bar.
+ * <p><b>Cross-family isolation:</b> only strategies whose {@code universe.mode == manas_arora_funnel}
+ * are loaded here (the mirror of the Minervini engine's own minervini_funnel scoping) — so the two
+ * swing families never evaluate each other's universe.
+ *
+ * <p><b>Exit doctrine (parity-safe):</b> the ~10% protective stop ({@code stop_loss percent}) + a
+ * 20-day-MA close-below trail ({@code trailing_stop indicator sma20}) — a live-v1 PROXY for the
+ * "+8-10% then 2×ATR trail" doctrine. The true 2×ATR trail + the too-fast/parabolic square-off are
+ * modelled in the BACKTEST, not the live v1 (exactly as Minervini deferred its Stage-3/4 exits).
+ *
+ * <p><b>Pyramiding:</b> in the live paper ledger a same-book same-symbol re-entry AVERAGES (the
+ * per-book open-key), so live pyramiding = add-on-strength-averaging; a symbol already holding an open
+ * Manas swing entry is skipped for the run. The true multi-lot pyramiding is the backtest's job.
  */
 @Component
-public class MinerviniSwingEngine {
+public class ManasAroraSwingEngine {
 
-  private static final Logger log = LoggerFactory.getLogger(MinerviniSwingEngine.class);
+  private static final Logger log = LoggerFactory.getLogger(ManasAroraSwingEngine.class);
   private static final ZoneOffset IST = ZoneOffset.ofHoursMinutes(5, 30);
   private static final String EX = "NSE";
   private static final String IV = "1d";
+  private static final String UNIVERSE_MODE = "manas_arora_funnel";
+  private static final String PIVOT_CTX = "MANAS_PIVOT";
 
-  /** A loaded published swing strategy (identity + compiled definition). */
+  /** A loaded published Manas swing strategy (identity + compiled definition). */
   private record SwingStrategy(
       UUID versionId, String slug, String name, String version, String checksum,
       StrategyDefinition definition) {}
 
   /** Summary of one batch run (for logging / the manual-trigger endpoint). */
-  public record SwingRun(int strategies, int candidates, int entries, int exits) {}
+  public record ManasSwingRun(int strategies, int candidates, int entries, int exits) {}
 
   private final StrategyRepository registry;
-  private final MinerviniFunnelClient funnel;
-  private final in.arthayantra.strategysignal.signals.MarketDataCandlesClient candles;
+  private final ManasFunnelClient funnel;
+  private final MarketDataCandlesClient candles;
   private final SignalRepository signals;
   private final SignalPublisher publisher;
-  private final org.springframework.context.ApplicationEventPublisher events;
-  private final java.util.Optional<EmissionGuard> emissionGuard;
+  private final ApplicationEventPublisher events;
+  private final Optional<EmissionGuard> emissionGuard;
   private final TransactionTemplate tx;
   private final ObjectMapper objectMapper;
   private final Clock clock;
@@ -88,21 +102,21 @@ public class MinerviniSwingEngine {
   private final long ttlMinutes;
 
   /** Wires the registry, funnel + candle clients, the signal repo/publisher, and the event bus. */
-  public MinerviniSwingEngine(
+  public ManasAroraSwingEngine(
       StrategyRepository registry,
-      MinerviniFunnelClient funnel,
-      in.arthayantra.strategysignal.signals.MarketDataCandlesClient candles,
+      ManasFunnelClient funnel,
+      MarketDataCandlesClient candles,
       SignalRepository signals,
       SignalPublisher publisher,
-      org.springframework.context.ApplicationEventPublisher events,
-      java.util.Optional<EmissionGuard> emissionGuard,
+      ApplicationEventPublisher events,
+      Optional<EmissionGuard> emissionGuard,
       TransactionTemplate tx,
       ObjectMapper objectMapper,
       Clock clock,
-      @Value("${artha.minervini.swing.enabled:false}") boolean enabled,
-      @Value("${artha.minervini.swing.warmup-days:520}") int warmupDays,
-      @Value("${artha.minervini.swing.min-bars:60}") int minBars,
-      @Value("${artha.minervini.swing.signal-ttl-minutes:1440}") long ttlMinutes) {
+      @Value("${artha.manas-arora.swing.enabled:false}") boolean enabled,
+      @Value("${artha.manas-arora.swing.warmup-days:520}") int warmupDays,
+      @Value("${artha.manas-arora.swing.min-bars:60}") int minBars,
+      @Value("${artha.manas-arora.swing.signal-ttl-minutes:1440}") long ttlMinutes) {
     this.registry = registry;
     this.funnel = funnel;
     this.candles = candles;
@@ -120,41 +134,39 @@ public class MinerviniSwingEngine {
   }
 
   /** Runs one full daily batch: the entry pass over the funnel, then the exit pass over open swings. */
-  public SwingRun runDaily() {
+  public ManasSwingRun runDaily() {
     // The single arming gate for BOTH the scheduler AND the on-demand POST /run: with
-    // artha.minervini.swing.enabled off the batch is a NO-OP — it can never emit a signal or open a
+    // artha.manas-arora.swing.enabled off the batch is a NO-OP — it can never emit a signal or open a
     // paper position, whoever calls it. The scheduler bean only exists when the flag is on, but the
-    // on-demand endpoint is reachable regardless, so the engine itself must gate (audit P9 — else a
-    // curious authenticated POST /run fires entries + auto-paper before the owner has armed the flag).
+    // on-demand endpoint is reachable regardless, so the engine itself must gate (else a curious
+    // authenticated POST /run fires entries + auto-paper before the owner has armed the flag).
     if (!enabled) {
-      log.debug("minervini swing batch disabled (artha.minervini.swing.enabled=false) — skipping");
-      return new SwingRun(0, 0, 0, 0);
+      log.debug("manas swing batch disabled (artha.manas-arora.swing.enabled=false) — skipping");
+      return new ManasSwingRun(0, 0, 0, 0);
     }
     List<SwingStrategy> swings = loadPublishedSwingStrategies();
     if (swings.isEmpty()) {
-      return new SwingRun(0, 0, 0, 0);
+      return new ManasSwingRun(0, 0, 0, 0);
     }
     Map<String, List<EngineCandle>> seriesCache = new HashMap<>();
     int entries = entryPass(swings, seriesCache);
     int exits = exitPass(swings, seriesCache);
-    log.info(
-        "minervini swing batch: {} strategies, {} entries, {} exits",
-        swings.size(), entries, exits);
-    return new SwingRun(swings.size(), 0, entries, exits);
+    log.info("manas swing batch: {} strategies, {} entries, {} exits", swings.size(), entries, exits);
+    return new ManasSwingRun(swings.size(), 0, entries, exits);
   }
 
   // ---- entry pass ---------------------------------------------------------------------------
 
   private int entryPass(List<SwingStrategy> swings, Map<String, List<EngineCandle>> seriesCache) {
-    List<MinerviniFunnelClient.Candidate> candidates = funnel.buyableAndOnDeck();
+    List<ManasFunnelClient.Candidate> candidates = funnel.buyableAndOnDeck();
     if (candidates.isEmpty()) {
       return 0;
     }
-    // A symbol already holding an open swing entry is skipped for ALL setups this run — the paper
-    // book keeps one open position per (symbol, side), so a second setup would only average in.
+    // A symbol already holding an open swing entry is skipped for ALL setups this run — the paper book
+    // keeps one open position per (symbol, side), so a second setup would only average in.
     Set<String> held = heldSymbols(swings);
     int fired = 0;
-    for (MinerviniFunnelClient.Candidate c : candidates) {
+    for (ManasFunnelClient.Candidate c : candidates) {
       if (held.contains(c.symbol())) {
         continue;
       }
@@ -163,8 +175,7 @@ public class MinerviniSwingEngine {
         continue;
       }
       for (SwingStrategy strat : swings) {
-        IndicatorBank bank =
-            buildBank(strat.definition(), c.symbol(), series, c.pivot(), c.cheatPivot(), c.thrust());
+        IndicatorBank bank = buildBank(strat.definition(), c.symbol(), series, c.pivot());
         Optional<EntryEvaluator.Evaluation> eval =
             EntryEvaluator.evaluate(strat.definition(), bank, series.size() - 1);
         if (eval.isPresent() && eval.get().entry()) {
@@ -191,7 +202,7 @@ public class MinerviniSwingEngine {
   }
 
   private void emitEntry(
-      SwingStrategy strat, MinerviniFunnelClient.Candidate c, EngineCandle bar,
+      SwingStrategy strat, ManasFunnelClient.Candidate c, EngineCandle bar,
       EntryEvaluator.Evaluation eval, IndicatorBank bank, int index) {
     BigDecimal entryPrice = bar.close();
     ExitEvaluator.EntryLevels levels =
@@ -203,20 +214,20 @@ public class MinerviniSwingEngine {
     String breakdownJson = ScoreBreakdownJson.write(eval.breakdown());
     OffsetDateTime generatedAt = bar.bucketStart().withOffsetSameInstant(IST);
     OffsetDateTime expiresAt = generatedAt.plusMinutes(ttlMinutes);
-    String detailJson = minerviniDetailJson(strat, c);
+    String detailJson = manasDetailJson(strat, c);
     // The advisory (lot-rounded) size vs paper equity — REQUIRED for auto-paper: AutoPaperListener
-    // skips any ENTRY whose suggested_qty is null. Computed before the tx (it reads the instrument
-    // master / paper equity) so the row + its stamps commit in one tight transaction. Null when the
-    // emission guard is absent (mock/no-risk contexts) — then the entry simply is not auto-papered.
+    // skips any ENTRY whose suggested_qty is null. atr_risk sizing reads the stopDistance off the
+    // percent stop. Null when the emission guard is absent (mock/no-risk contexts) — then the entry
+    // simply is not auto-papered.
     BigDecimal stopDistance = stopLoss == null ? null : entryPrice.subtract(stopLoss).abs();
-    // Sized against the MINERVINI book's paper equity (its own ₹1.5 L capital, not the global book).
+    // Sized against the MANAS-ARORA book's paper equity (its own capital, not the global book).
     BigDecimal suggestedQty =
         emissionGuard
             .map(
                 g ->
                     g.suggestedQty(
                         strat.definition().sizing(), EX, c.symbol(), entryPrice, stopDistance,
-                        in.arthayantra.strategysignal.signals.Books.MINERVINI))
+                        Books.MANAS_ARORA))
             .orElse(null);
     long id =
         tx.execute(
@@ -228,7 +239,7 @@ public class MinerviniSwingEngine {
               if (suggestedQty != null) {
                 signals.stampSuggestedQty(newId, suggestedQty);
               }
-              signals.stampMinerviniDetail(newId, detailJson);
+              signals.stampManasAroraDetail(newId, detailJson);
               return newId;
             });
     JsonNode canonical;
@@ -246,15 +257,15 @@ public class MinerviniSwingEngine {
             id, strat.versionId(), EX, c.symbol(), "BUY", entryPrice, stopLoss, target,
             eval.breakdown().composite(), eval.breakdown().threshold(), null));
     log.info(
-        "minervini swing ENTRY #{} {} {} at {} (composite {})",
+        "manas swing ENTRY #{} {} {} at {} (composite {})",
         id, strat.slug(), c.symbol(), entryPrice, eval.breakdown().composite());
   }
 
-  private String minerviniDetailJson(SwingStrategy strat, MinerviniFunnelClient.Candidate c) {
+  private String manasDetailJson(SwingStrategy strat, ManasFunnelClient.Candidate c) {
     ObjectNode root = objectMapper.createObjectNode();
     root.put("setup", strat.slug());
-    if (c.stage() != null) {
-      root.put("stage", c.stage());
+    if (c.setupType() != null) {
+      root.put("setupType", c.setupType());
     }
     if (c.footprint() != null) {
       root.put("footprint", c.footprint());
@@ -262,10 +273,6 @@ public class MinerviniSwingEngine {
     if (c.pivot() != null) {
       root.put("pivot", c.pivot().toPlainString());
     }
-    if (c.cheatPivot() != null) {
-      root.put("cheatPivot", c.cheatPivot().toPlainString());
-    }
-    root.put("thrust", c.thrust());
     return root.toString();
   }
 
@@ -278,17 +285,15 @@ public class MinerviniSwingEngine {
     for (SignalRepository.SignalRow anchor : signals.activeEntries()) {
       SwingStrategy strat = byVersion.get(anchor.strategyVersionId());
       if (strat == null) {
-        continue; // not a published swing anchor
+        continue; // not a published manas swing anchor
       }
       List<EngineCandle> series = series(anchor.tradingsymbol(), seriesCache);
       if (series.isEmpty()) {
         continue;
       }
-      // geometry is irrelevant to the exit rules (percent stop + 50-day-MA trail), so the context
-      // sentinels are seeded neutral — the bank still builds, the exit eval never reads them.
-      IndicatorBank bank =
-          buildBank(strat.definition(), anchor.tradingsymbol(), series, BigDecimal.ZERO,
-              BigDecimal.ZERO, false);
+      // geometry is irrelevant to the exit rules (percent stop + 20-day-MA trail), so the pivot
+      // context is seeded neutral — the bank still builds, the exit eval never reads it.
+      IndicatorBank bank = buildBank(strat.definition(), anchor.tradingsymbol(), series, BigDecimal.ZERO);
       int entryIndex = bank.primarySeries().indexAtOrBefore(anchor.generatedAt().toInstant());
       if (entryIndex < 0) {
         // the entry bar fell outside the fetched window (position held > warmupDays, or a dropped
@@ -296,7 +301,7 @@ public class MinerviniSwingEngine {
         // rather than default to bar 0. The shipped exits (percent stop + indicator trail) do not read
         // entryIndex, but a future time_stop / atr_multiple rule would silently mis-compute from bar 0.
         log.warn(
-            "minervini swing exit: entry bar for #{} {} is outside the fetched window — skipped",
+            "manas swing exit: entry bar for #{} {} is outside the fetched window — skipped",
             anchor.id(), anchor.tradingsymbol());
         continue;
       }
@@ -335,43 +340,35 @@ public class MinerviniSwingEngine {
         anchor.tradingsymbol(), IV, "EXIT", "SELL", bar.close(), null, null, anchor.compositeScore(),
         anchor.scoreBreakdown(), generatedAt);
     // settle the paper position at the fresh DAILY-BAR close — the equities don't tick, so an LTP
-    // close would book breakeven (DEFECT-2). The price rides the SignalExited event to closeForSignal.
+    // close would book breakeven. The price rides the SignalExited event to closeForSignal.
     events.publishEvent(new SignalExited(anchor.id(), id, reason, bar.close()));
     log.info(
-        "minervini swing EXIT #{} {} {} at {} ({})",
+        "manas swing EXIT #{} {} {} at {} ({})",
         id, strat.slug(), anchor.tradingsymbol(), bar.close(), reason);
   }
 
   // ---- shared helpers -----------------------------------------------------------------------
 
   /**
-   * Builds the indicator bank for one symbol over its daily {@code series} with the per-symbol VCP
-   * geometry seeded as flat context series ({@code VCP_PIVOT}/{@code CHEAT_PIVOT}/{@code THRUST}) —
-   * the same context-close mechanism the golden runner uses. Package-visible for unit tests.
+   * Builds the indicator bank for one symbol over its daily {@code series} with the per-symbol base
+   * pivot seeded as a flat context series ({@code MANAS_PIVOT}, read by the {@code VCP_PIVOT}
+   * indicator) — the same context-close mechanism the golden runner uses. Package-visible for tests.
    */
   static IndicatorBank buildBank(
-      StrategyDefinition definition, String symbol, List<EngineCandle> series,
-      BigDecimal pivot, BigDecimal cheat, boolean thrust) {
+      StrategyDefinition definition, String symbol, List<EngineCandle> series, BigDecimal pivot) {
     SeriesKey primaryKey = new SeriesKey(EX, symbol, definition.primaryTimeframe());
     EngineSeries primary = new EngineSeries(primaryKey);
     for (EngineCandle candle : series) {
       primary.append(candle);
     }
     OffsetDateTime start = series.get(0).bucketStart();
-    EngineSeries pivotCtx = flat("MINERVINI_PIVOT", start, pivot);
-    EngineSeries cheatCtx = flat("MINERVINI_CHEAT", start, cheat);
-    EngineSeries thrustCtx = flat("MINERVINI_THRUST", start, thrust ? BigDecimal.ONE : BigDecimal.ZERO);
+    EngineSeries pivotCtx = flat(PIVOT_CTX, start, pivot);
     SeriesProvider provider =
         key -> {
           if (key.equals(primaryKey)) {
             return primary;
           }
-          return switch (key.tradingsymbol()) {
-            case "MINERVINI_PIVOT" -> pivotCtx;
-            case "MINERVINI_CHEAT" -> cheatCtx;
-            case "MINERVINI_THRUST" -> thrustCtx;
-            default -> null;
-          };
+          return PIVOT_CTX.equals(key.tradingsymbol()) ? pivotCtx : null;
         };
     return IndicatorBank.build(
         definition, new StrategyDefinition.InstrumentRef(EX, symbol), provider);
@@ -410,13 +407,11 @@ public class MinerviniSwingEngine {
         if (!"swing".equals(definition.session().style())) {
           continue;
         }
-        // Scope this engine to its OWN funnel universe: only strategies whose universe.mode is
-        // minervini_funnel are evaluated against the SEPA funnel here. A NO-OP for the 4 existing
-        // Minervini setups (all minervini_funnel), it stops a sibling swing family (e.g. the
-        // manas_arora_funnel strategies, also session.style=swing) from being wrongly evaluated
-        // against the Minervini funnel — each funnel engine owns exactly its own universe mode.
-        if (!"minervini_funnel"
-            .equals(versionRow.get().config().path("universe").path("mode").asText())) {
+        // Scope this engine to its OWN funnel universe: only manas_arora_funnel strategies are
+        // evaluated against the Manas funnel here (the mirror of the Minervini engine's own scoping),
+        // so the two swing families never evaluate each other's universe.
+        if (!UNIVERSE_MODE.equals(
+            versionRow.get().config().path("universe").path("mode").asText())) {
           continue;
         }
         out.add(
@@ -424,7 +419,7 @@ public class MinerviniSwingEngine {
                 strategy.publishedVersionId(), strategy.slug(), strategy.name(),
                 versionRow.get().version(), versionRow.get().checksum(), definition));
       } catch (RuntimeException e) {
-        log.warn("minervini swing strategy {} failed to compile — skipped: {}",
+        log.warn("manas swing strategy {} failed to compile — skipped: {}",
             strategy.slug(), e.getMessage());
       }
     }

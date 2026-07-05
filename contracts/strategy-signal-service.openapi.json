@@ -129,6 +129,14 @@
       "get" : {
         "tags" : [ "risk-controller" ],
         "operationId" : "settings",
+        "parameters" : [ {
+          "name" : "book",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
         "responses" : {
           "200" : {
             "description" : "OK",
@@ -195,6 +203,14 @@
       "get" : {
         "tags" : [ "paper-controller" ],
         "operationId" : "account",
+        "parameters" : [ {
+          "name" : "book",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
         "responses" : {
           "200" : {
             "description" : "OK",
@@ -794,6 +810,34 @@
         }
       }
     },
+    "/api/v1/signals/manas-arora-swing/run" : {
+      "post" : {
+        "tags" : [ "manas-arora-swing-controller" ],
+        "operationId" : "run_1",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ManasSwingRun"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/paper/reset" : {
       "post" : {
         "tags" : [ "paper-controller" ],
@@ -1344,6 +1388,13 @@
             "type" : "string"
           }
         }, {
+          "name" : "book",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
           "name" : "strategyVersionId",
           "in" : "query",
           "required" : false,
@@ -1474,6 +1525,34 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/Report"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/signals/manas-arora-swing/sell-decisions" : {
+      "get" : {
+        "tags" : [ "manas-arora-swing-controller" ],
+        "operationId" : "sellDecisions_1",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ManasSellReport"
                 }
               }
             }
@@ -1745,6 +1824,13 @@
         "tags" : [ "paper-controller" ],
         "operationId" : "trades",
         "parameters" : [ {
+          "name" : "book",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
           "name" : "from",
           "in" : "query",
           "required" : false,
@@ -1815,6 +1901,14 @@
       "get" : {
         "tags" : [ "paper-controller" ],
         "operationId" : "positions",
+        "parameters" : [ {
+          "name" : "book",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
         "responses" : {
           "200" : {
             "description" : "OK",
@@ -1844,6 +1938,14 @@
       "get" : {
         "tags" : [ "paper-controller" ],
         "operationId" : "pnl",
+        "parameters" : [ {
+          "name" : "book",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
         "responses" : {
           "200" : {
             "description" : "OK",
@@ -2033,6 +2135,9 @@
       "UpdateBody" : {
         "type" : "object",
         "properties" : {
+          "book" : {
+            "type" : "string"
+          },
           "key" : {
             "type" : "string"
           },
@@ -2046,6 +2151,9 @@
         "properties" : {
           "startingCapital" : {
             "type" : "number"
+          },
+          "book" : {
+            "type" : "string"
           }
         }
       },
@@ -2265,11 +2373,35 @@
           }
         }
       },
+      "ManasSwingRun" : {
+        "type" : "object",
+        "properties" : {
+          "strategies" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "candidates" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "entries" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "exits" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
       "ResetBody" : {
         "type" : "object",
         "properties" : {
           "confirm" : {
             "type" : "boolean"
+          },
+          "book" : {
+            "type" : "string"
           }
         }
       },
@@ -2345,6 +2477,9 @@
           },
           "takeProfit" : {
             "type" : "number"
+          },
+          "book" : {
+            "type" : "string"
           }
         }
       },
@@ -2562,6 +2697,65 @@
           },
           "verdict" : {
             "type" : "string"
+          }
+        }
+      },
+      "ManasSellDecision" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "setup" : {
+            "type" : "string"
+          },
+          "setupType" : {
+            "type" : "string"
+          },
+          "footprint" : {
+            "type" : "string"
+          },
+          "entryPrice" : {
+            "type" : "number"
+          },
+          "currentPrice" : {
+            "type" : "number"
+          },
+          "unrealizedPct" : {
+            "type" : "number"
+          },
+          "stopLevel" : {
+            "type" : "number"
+          },
+          "trailLevel" : {
+            "type" : "number"
+          },
+          "stillBuyable" : {
+            "type" : "boolean"
+          },
+          "sellingNow" : {
+            "type" : "boolean"
+          },
+          "sellReason" : {
+            "type" : "string"
+          },
+          "verdict" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ManasSellReport" : {
+        "type" : "object",
+        "properties" : {
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ManasSellDecision"
+            }
           }
         }
       },

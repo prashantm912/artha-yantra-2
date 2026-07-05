@@ -38,7 +38,8 @@ public class SignalRepository {
       String tradeableExchange,
       String tradeableTradingsymbol,
       JsonNode scalperDetail,
-      JsonNode minerviniDetail) {}
+      JsonNode minerviniDetail,
+      JsonNode manasAroraDetail) {}
 
   private final JdbcTemplate jdbc;
   private final ObjectMapper objectMapper;
@@ -234,7 +235,8 @@ public class SignalRepository {
         rs.getString("tradeable_exchange"),
         rs.getString("tradeable_tradingsymbol"),
         nullableTree(rs.getString("scalper_detail")),
-        nullableTree(rs.getString("minervini_detail")));
+        nullableTree(rs.getString("minervini_detail")),
+        nullableTree(rs.getString("manas_arora_detail")));
   }
 
   /** Stamps the engine-computed suggested qty (A12) — outside the frozen score breakdown. */
@@ -261,6 +263,15 @@ public class SignalRepository {
    */
   public void stampMinerviniDetail(long id, String detailJson) {
     jdbc.update("UPDATE signals SET minervini_detail = ?::jsonb WHERE id = ?", detailJson, id);
+  }
+
+  /**
+   * Stamps the Manas Arora swing side-channel (V022): the fired setup's detail (setup type, base
+   * footprint, pivot) as JSON — outside the frozen score breakdown, the same rule as {@link
+   * #stampMinerviniDetail}. NULL for every non-manas signal (never stamped).
+   */
+  public void stampManasAroraDetail(long id, String detailJson) {
+    jdbc.update("UPDATE signals SET manas_arora_detail = ?::jsonb WHERE id = ?", detailJson, id);
   }
 
   private JsonNode readTree(String json) {

@@ -80,7 +80,7 @@ class PaperSignalListenerTest {
                     7L, java.util.UUID.randomUUID(), "NFO", "NIFTY26JULFUT", "3m", "ENTRY", "BUY",
                     new BigDecimal("25000"), new BigDecimal("24800"), new BigDecimal("25400"),
                     new BigDecimal("0.8"), null, "TAKEN", null, null, new BigDecimal("75"),
-                    "NFO", "NIFTY26JUL24900PE", detail, null)));
+                    "NFO", "NIFTY26JUL24900PE", detail, null, null)));
 
     // The auto-take's fillPrice is the FUTURE entry price — the option leg must ignore it.
     new PaperSignalListener(paper, accounts, signals)
@@ -115,7 +115,7 @@ class PaperSignalListenerTest {
                     7L, versionId, "NFO", "NIFTY26JULFUT", "3m", "ENTRY", "BUY",
                     new BigDecimal("25000"), new BigDecimal("24800"), new BigDecimal("25400"),
                     new BigDecimal("0.8"), null, "TAKEN", null, null, new BigDecimal("75"),
-                    "NFO", "NIFTY26JUL25100CE", detail, null)));
+                    "NFO", "NIFTY26JUL25100CE", detail, null, null)));
     when(signals.versionConfig(versionId))
         .thenReturn(
             Optional.of(
@@ -149,7 +149,7 @@ class PaperSignalListenerTest {
                     7L, java.util.UUID.randomUUID(), "NSE", "RELIANCE", "1m", "ENTRY", "BUY",
                     new BigDecimal("2500"), new BigDecimal("2450"), new BigDecimal("2600"),
                     new BigDecimal("0.8"), null, "TAKEN", null, null, new BigDecimal("10"),
-                    null, null, null, null)));
+                    null, null, null, null, null)));
 
     new PaperSignalListener(paper, accounts, signals)
         .onSignalTaken(new SignalTaken(7L, 10, new BigDecimal("2500"), false));

@@ -52,9 +52,12 @@ public class AutoPaperListener {
     }
     boolean scalper = row.scalperDetail() != null;
     try {
-      signals.transition(event.signalId(), "TAKEN");
-      // the fill is the entry price captured on the signal (mirrors a manual take with no override).
-      events.publishEvent(new SignalTaken(event.signalId(), qty, event.entryPrice(), scalper));
+      // Guarded CAS ACTIVE→TAKEN: only the winner opens a paper position, so a race with a concurrent
+      // manual take (POST /signals/{id}/taken) or a duplicate SignalEmitted can't double-open the leg.
+      if (signals.transitionIf(event.signalId(), "ACTIVE", "TAKEN")) {
+        // the fill is the entry price captured on the signal (mirrors a manual take with no override).
+        events.publishEvent(new SignalTaken(event.signalId(), qty, event.entryPrice(), scalper));
+      }
     } catch (Exception e) {
       log.warn("auto-paper-trade failed for signal {}: {}", event.signalId(), e.getMessage());
     }

@@ -63,16 +63,35 @@ class AutoPaperListenerTest {
     when(risk.autoPaperTradeEnabled("scalper")).thenReturn(true);
     SignalRepository signals = mock(SignalRepository.class);
     when(signals.find(7L)).thenReturn(Optional.of(row(new BigDecimal("5"), null)));
+    when(signals.transitionIf(7L, "ACTIVE", "TAKEN")).thenReturn(true); // this caller wins the CAS
     ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
 
     new AutoPaperListener(risk, signals, books, events).onSignalEmitted(emitted(7));
 
-    verify(signals).transition(7L, "TAKEN");
+    verify(signals).transitionIf(7L, "ACTIVE", "TAKEN");
     ArgumentCaptor<SignalTaken> taken = ArgumentCaptor.forClass(SignalTaken.class);
     verify(events).publishEvent(taken.capture());
     assertThat(taken.getValue().signalId()).isEqualTo(7L);
     assertThat(taken.getValue().qty()).isEqualTo(5);
     assertThat(taken.getValue().fillPrice()).isEqualByComparingTo("100"); // the signal's entry price
+  }
+
+  @Test
+  void lostTakeRacePublishesNothing() {
+    // A concurrent manual / duplicate take already flipped ACTIVE→TAKEN — the CAS returns false, so
+    // this auto-take must NOT double-open a position.
+    RiskService risk = mock(RiskService.class);
+    BookResolver books = mock(BookResolver.class);
+    when(books.bookForSignal(anyLong())).thenReturn("scalper");
+    when(risk.autoPaperTradeEnabled("scalper")).thenReturn(true);
+    SignalRepository signals = mock(SignalRepository.class);
+    when(signals.find(7L)).thenReturn(Optional.of(row(new BigDecimal("5"), null)));
+    when(signals.transitionIf(7L, "ACTIVE", "TAKEN")).thenReturn(false); // lost the CAS
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+
+    new AutoPaperListener(risk, signals, books, events).onSignalEmitted(emitted(7));
+
+    verifyNoInteractions(events);
   }
 
   @Test
@@ -87,7 +106,7 @@ class AutoPaperListenerTest {
 
     new AutoPaperListener(risk, signals, books, events).onSignalEmitted(emitted(7));
 
-    verify(signals, never()).transition(anyLong(), any());
+    verify(signals, never()).transitionIf(anyLong(), any(), any());
     verifyNoInteractions(events);
   }
 }

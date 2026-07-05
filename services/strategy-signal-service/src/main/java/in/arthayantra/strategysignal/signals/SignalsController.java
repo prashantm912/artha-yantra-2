@@ -82,14 +82,17 @@ public class SignalsController {
   public Map<String, Object> taken(
       @PathVariable long id, @RequestBody(required = false) TakenRequest request) {
     requireExists(id);
-    repository.transition(id, "TAKEN");
     Integer qty = request == null ? null : request.qty();
     BigDecimal fillPrice =
         request == null || request.fillPrice() == null ? null : new BigDecimal(request.fillPrice());
     // A signal carries a scalper_detail side-channel iff a scalper strategy emitted it (E10) — the
     // flag rides the event so the paper listener charges the open to a 5-account sub-ledger.
     boolean scalper = repository.find(id).map(r -> r.scalperDetail() != null).orElse(false);
-    events.publishEvent(new SignalTaken(id, qty, fillPrice, scalper));
+    // Guarded CAS ACTIVE→TAKEN: publish (and thus open a paper position) only if THIS call won the
+    // transition — an already-TAKEN signal (auto-paper or a double-submit) is an idempotent no-op.
+    if (repository.transitionIf(id, "ACTIVE", "TAKEN")) {
+      events.publishEvent(new SignalTaken(id, qty, fillPrice, scalper));
+    }
     return detail(id);
   }
 

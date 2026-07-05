@@ -146,6 +146,13 @@ public class MinerviniSwingEngine {
   // ---- entry pass ---------------------------------------------------------------------------
 
   private int entryPass(List<SwingStrategy> swings, Map<String, List<EngineCandle>> seriesCache) {
+    // Per-book risk governor (mirrors SignalEngine.emitEntry, which the tick engine applies and the
+    // swing batch previously skipped): a tripped kill-switch / daily-loss / daily-profit-target /
+    // max-open on the MINERVINI book pauses ALL swing entries for this run (and thus their auto-paper).
+    if (emissionGuard.map(g -> !g.entryAllowed(in.arthayantra.strategysignal.signals.Books.MINERVINI))
+        .orElse(false)) {
+      return 0;
+    }
     List<MinerviniFunnelClient.Candidate> candidates = funnel.buyableAndOnDeck();
     if (candidates.isEmpty()) {
       return 0;

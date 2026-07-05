@@ -209,9 +209,19 @@ public class SignalRepository {
         .findFirst();
   }
 
-  /** The 15:45 sweep: every stale ACTIVE row expires. */
+  /**
+   * The 15:45 INTRADAY sweep: expires stale ACTIVE rows — but NOT swing (session.style=swing) anchors,
+   * which the daily Minervini/Manas batches hold across sessions (an ACTIVE swing ENTRY that has not
+   * yet been auto-taken must survive to be evaluated / manually taken the next evening, mirroring the
+   * style filter the paper 15:45 mark-to-close already uses). Swing versions are excluded by id; every
+   * other (intraday / null-style) ACTIVE row expires as before.
+   */
   public int expireAllActive() {
-    return jdbc.update("UPDATE signals SET status = 'EXPIRED' WHERE status = 'ACTIVE'");
+    return jdbc.update(
+        "UPDATE signals SET status = 'EXPIRED' WHERE status = 'ACTIVE'"
+            + " AND strategy_version_id NOT IN ("
+            + "   SELECT sv.id FROM strategy_versions sv"
+            + "   WHERE sv.config->'risk'->'session'->>'style' = 'swing')");
   }
 
   private SignalRow row(ResultSet rs, int rowNum) throws SQLException {

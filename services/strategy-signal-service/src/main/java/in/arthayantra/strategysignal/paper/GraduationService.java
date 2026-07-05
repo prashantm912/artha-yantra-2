@@ -116,8 +116,8 @@ public class GraduationService {
           SELECT DISTINCT p.id, p.realized_pnl, p.closed_at
           FROM paper_positions p
           JOIN paper_orders o
-            ON o.exchange = p.exchange AND o.tradingsymbol = p.tradingsymbol AND o.side = p.side
-            AND o.signal_id IS NOT NULL
+            ON o.book = p.book AND o.exchange = p.exchange AND o.tradingsymbol = p.tradingsymbol
+            AND o.side = p.side AND o.signal_id IS NOT NULL
           JOIN signals sig ON sig.id = o.signal_id
           JOIN strategy_versions sv ON sv.id = sig.strategy_version_id
           WHERE p.status = 'CLOSED' AND sv.strategy_id = ?

@@ -212,6 +212,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/signals/manas-arora-swing/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["run_1"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/paper/reset": {
         parameters: {
             query?: never;
@@ -428,6 +444,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["sellDecisions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/signals/manas-arora-swing/sell-decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["sellDecisions_1"];
         put?: never;
         post?: never;
         delete?: never;
@@ -655,11 +687,13 @@ export interface components {
         };
         JsonNode: unknown;
         UpdateBody: {
+            book?: string;
             key?: string;
             value?: components["schemas"]["JsonNode"];
         };
         AccountBody: {
             startingCapital?: number;
+            book?: string;
         };
         AccountDto: {
             startingCapital?: number;
@@ -749,8 +783,19 @@ export interface components {
             /** Format: int32 */
             exits?: number;
         };
+        ManasSwingRun: {
+            /** Format: int32 */
+            strategies?: number;
+            /** Format: int32 */
+            candidates?: number;
+            /** Format: int32 */
+            entries?: number;
+            /** Format: int32 */
+            exits?: number;
+        };
         ResetBody: {
             confirm?: boolean;
+            book?: string;
         };
         CloseBody: {
             price?: number;
@@ -781,6 +826,7 @@ export interface components {
             price?: number;
             stopLoss?: number;
             takeProfit?: number;
+            book?: string;
         };
         PositionDto: {
             /** Format: int64 */
@@ -859,6 +905,26 @@ export interface components {
             sellingNow?: boolean;
             sellReason?: string;
             verdict?: string;
+        };
+        ManasSellDecision: {
+            symbol?: string;
+            setup?: string;
+            setupType?: string;
+            footprint?: string;
+            entryPrice?: number;
+            currentPrice?: number;
+            unrealizedPct?: number;
+            stopLevel?: number;
+            trailLevel?: number;
+            stillBuyable?: boolean;
+            sellingNow?: boolean;
+            sellReason?: string;
+            verdict?: string;
+        };
+        ManasSellReport: {
+            /** Format: date-time */
+            asOf?: string;
+            items?: components["schemas"]["ManasSellDecision"][];
         };
         ShadowSummaryResponse: {
             items?: components["schemas"]["VariantSummary"][];
@@ -1029,7 +1095,9 @@ export interface operations {
     };
     settings: {
         parameters: {
-            query?: never;
+            query?: {
+                book?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1095,7 +1163,9 @@ export interface operations {
     };
     account: {
         parameters: {
-            query?: never;
+            query?: {
+                book?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1596,6 +1666,35 @@ export interface operations {
             };
         };
     };
+    run_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ManasSwingRun"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     reset: {
         parameters: {
             query?: never;
@@ -2007,6 +2106,7 @@ export interface operations {
         parameters: {
             query?: {
                 status?: string;
+                book?: string;
                 strategyVersionId?: string;
                 exchange?: string;
                 tradingsymbol?: string;
@@ -2092,6 +2192,35 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["Report"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    sellDecisions_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ManasSellReport"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -2275,6 +2404,7 @@ export interface operations {
     trades: {
         parameters: {
             query?: {
+                book?: string;
                 from?: string;
                 to?: string;
                 symbol?: string;
@@ -2311,7 +2441,9 @@ export interface operations {
     };
     positions: {
         parameters: {
-            query?: never;
+            query?: {
+                book?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2342,7 +2474,9 @@ export interface operations {
     };
     pnl: {
         parameters: {
-            query?: never;
+            query?: {
+                book?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;

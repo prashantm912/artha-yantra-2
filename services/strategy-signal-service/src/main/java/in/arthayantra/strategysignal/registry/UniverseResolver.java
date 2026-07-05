@@ -55,6 +55,7 @@ public class UniverseResolver {
       case "futures_of_underlying" -> resolveFutures(universe);
       case "futures_screener" -> resolveFuturesScreener(universe);
       case "minervini_funnel" -> resolveMinerviniFunnel(universe);
+      case "manas_arora_funnel" -> resolveManasAroraFunnel(universe);
       default -> resolveExplicit(mode, universe);
     };
   }
@@ -79,6 +80,28 @@ public class UniverseResolver {
       // funnel down / no screen yet -> pin empty (nothing to evaluate this session)
     }
     return new ResolvedUniverse("minervini_funnel", null, items, checksum(items), null);
+  }
+
+  /**
+   * The Manas Arora selection-funnel universe — the day's immediately-buyable (+ on-deck) base
+   * candidates from market-data's manas-arora funnel. The exact sibling of {@link
+   * #resolveMinerviniFunnel}: pinned by copy, empty when the funnel is unavailable/unpopulated
+   * (off-hours / fresh env), and re-read live each session by the daily batch (this pin is a
+   * display/validation snapshot, never the authoritative evaluation universe).
+   */
+  private ResolvedUniverse resolveManasAroraFunnel(JsonNode universe) {
+    boolean onDeck = !"buyable".equals(universe.path("bucket").asText("buyable_on_deck"));
+    List<Constituent> items = new ArrayList<>();
+    try {
+      JsonNode funnel = get("/api/v1/market/screener/manas-arora/funnel");
+      collectFunnel(funnel.path("immediatelyBuyable"), items);
+      if (onDeck) {
+        collectFunnel(funnel.path("onDeck"), items);
+      }
+    } catch (ApiException unavailable) {
+      // funnel down / no screen yet -> pin empty (nothing to evaluate this session)
+    }
+    return new ResolvedUniverse("manas_arora_funnel", null, items, checksum(items), null);
   }
 
   /** Appends each funnel row's symbol as an NSE-EQ constituent (dedup-safe). */

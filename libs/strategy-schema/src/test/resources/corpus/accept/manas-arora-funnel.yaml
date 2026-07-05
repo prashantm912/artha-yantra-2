@@ -1,0 +1,35 @@
+# Manas Arora live-swing fixture: the manas_arora_funnel dynamic universe (the daily selection funnel).
+# Sibling of the minervini_funnel mode — a gate-only daily-primary breakout, 8%-stop + 50-day-MA trail,
+# atr_risk sizing. Proves the schema accepts the new universe mode + bucket.
+schema: strategy-schema/v1
+id: manas-arora-breakout
+name: "Manas Arora Breakout"
+version: 1.0.0
+tags: [manas-arora, swing, equity, breakout]
+universe:
+  mode: manas_arora_funnel
+  bucket: buyable_on_deck
+timeframes: { primary: 1d }
+indicators:
+  - { name: SMA, alias: px, timeframe: 1d, params: { period: 1 }, weight: 0.0 }
+  - { name: SMA, alias: sma20, timeframe: 1d, params: { period: 20 }, weight: 0.0 }
+  - { name: SMA, alias: sma50, timeframe: 1d, params: { period: 50 }, weight: 0.0 }
+  - { name: VOLUME_RATIO, alias: vol, timeframe: 1d, params: { lookback: 20 }, weight: 1.0,
+      normalize: { type: linear, from: 0, to: 3 } }
+  - { name: VCP_PIVOT, alias: pivot, timeframe: 1d, weight: 0.0,
+      instrument: { exchange: NSE, tradingsymbol: "MANAS_PIVOT" } }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - crossover: { fast: px, slow: pivot }
+      - "vol > 1.2"
+      - "px > sma20"
+  scoring: { threshold: 0.1 }
+exit_rules:
+  - { type: stop_loss, params: { basis: percent, value: 10 } }
+  - { type: trailing_stop, params: { basis: indicator, alias: sma20 } }
+risk:
+  position_sizing: { method: atr_risk, params: { risk_pct_equity: 1.0 } }
+  max_positions: 7
+  session: { style: swing }

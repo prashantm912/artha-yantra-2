@@ -265,10 +265,9 @@ public class ManasAroraSwingEngine {
       List<SwingStrategy> swings,
       AnchorResolution resolution,
       Map<String, List<EngineCandle>> seriesCache) {
-    // Per-book risk governor (mirrors SignalEngine.emitEntry): a tripped kill-switch / daily-loss /
-    // daily-profit-target / max-open on the MANAS_ARORA book pauses ALL swing entries for this run.
-    if (emissionGuard.map(g -> !g.entryAllowed(in.arthayantra.strategysignal.signals.Books.MANAS_ARORA))
-        .orElse(false)) {
+    // Per-book risk governor early-out: a book already kill-switched / daily-loss-tripped at the
+    // START of the run takes no entries at all (cheap — skips the whole candidate scan).
+    if (entryBlocked()) {
       return new EntryResult(0, 0);
     }
     List<ManasFunnelClient.Candidate> candidates = funnel.buyableAndOnDeck();
@@ -300,6 +299,15 @@ public class ManasAroraSwingEngine {
         Optional<EntryEvaluator.Evaluation> eval =
             EntryEvaluator.evaluate(strat.definition(), bank, series.size() - 1);
         if (eval.isPresent() && eval.get().entry()) {
+          // Audit H3: re-check the per-book gate BEFORE each emit (auto-paper is a synchronous
+          // @EventListener, so entries fired earlier this run are already counted) — so
+          // max_open / max_deployment_pct / daily_loss bound a single batch.
+          if (entryBlocked()) {
+            log.info(
+                "manas swing: MANAS_ARORA book gate tripped mid-run after {} entries — stopping",
+                fired);
+            return new EntryResult(candidates.size(), fired);
+          }
           emitEntry(strat, c, series.get(series.size() - 1), eval.get(), bank, series.size() - 1);
           held.add(c.symbol()); // one setup per symbol per run
           fired++;
@@ -308,6 +316,13 @@ public class ManasAroraSwingEngine {
       }
     }
     return new EntryResult(candidates.size(), fired);
+  }
+
+  /** True when the MANAS_ARORA book's per-book gate (kill-switch / caps / daily-loss) blocks entry. */
+  private boolean entryBlocked() {
+    return emissionGuard
+        .map(g -> !g.entryAllowed(in.arthayantra.strategysignal.signals.Books.MANAS_ARORA))
+        .orElse(false);
   }
 
   /** The pivot the strategy's setup trades: the §3.2 breakout pivot or the §3.3 VCP pivot (or null). */

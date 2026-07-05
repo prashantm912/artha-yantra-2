@@ -241,11 +241,9 @@ public class MinerviniSwingEngine {
       List<SwingStrategy> swings,
       AnchorResolution resolution,
       Map<String, List<EngineCandle>> seriesCache) {
-    // Per-book risk governor (mirrors SignalEngine.emitEntry, which the tick engine applies and the
-    // swing batch previously skipped): a tripped kill-switch / daily-loss / daily-profit-target /
-    // max-open on the MINERVINI book pauses ALL swing entries for this run (and thus their auto-paper).
-    if (emissionGuard.map(g -> !g.entryAllowed(in.arthayantra.strategysignal.signals.Books.MINERVINI))
-        .orElse(false)) {
+    // Per-book risk governor early-out: a book already kill-switched / daily-loss-tripped at the
+    // START of the run takes no entries at all (cheap — skips the whole candidate scan).
+    if (entryBlocked()) {
       return new EntryResult(0, 0);
     }
     List<MinerviniFunnelClient.Candidate> candidates = funnel.buyableAndOnDeck();
@@ -270,6 +268,16 @@ public class MinerviniSwingEngine {
         Optional<EntryEvaluator.Evaluation> eval =
             EntryEvaluator.evaluate(strat.definition(), bank, series.size() - 1);
         if (eval.isPresent() && eval.get().entry()) {
+          // Audit H3: re-check the per-book gate BEFORE each emit, not once per pass. Auto-paper is
+          // a synchronous @EventListener, so positions opened earlier THIS run are already counted
+          // — so max_open / max_deployment_pct / daily_loss actually bound a single batch. Without
+          // this, a broad-breakout day fired every funnel candidate (>100% of the book) in one run.
+          if (entryBlocked()) {
+            log.info(
+                "minervini swing: MINERVINI book gate tripped mid-run after {} entries — stopping",
+                fired);
+            return new EntryResult(candidates.size(), fired);
+          }
           emitEntry(strat, c, series.get(series.size() - 1), eval.get(), bank, series.size() - 1);
           held.add(c.symbol()); // one setup per symbol per run
           fired++;
@@ -278,6 +286,13 @@ public class MinerviniSwingEngine {
       }
     }
     return new EntryResult(candidates.size(), fired);
+  }
+
+  /** True when the MINERVINI book's per-book gate (kill-switch / caps / daily-loss) blocks entry. */
+  private boolean entryBlocked() {
+    return emissionGuard
+        .map(g -> !g.entryAllowed(in.arthayantra.strategysignal.signals.Books.MINERVINI))
+        .orElse(false);
   }
 
   private Set<String> heldSymbols(AnchorResolution resolution) {

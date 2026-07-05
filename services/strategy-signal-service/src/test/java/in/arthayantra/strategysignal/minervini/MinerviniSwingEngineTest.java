@@ -365,6 +365,83 @@ class MinerviniSwingEngineTest {
     }
   }
 
+  @Test
+  void entryGateIsReCheckedPerEntryAndStopsTheRunWhenTheBookTrips() throws IOException {
+    // Audit H3: the per-book gate is consulted BEFORE EACH emit (not once per pass), so a mid-run
+    // max-open / daily-loss trip halts further entries. Here entryAllowed returns true for the
+    // early-out + the first candidate, then false — so only ONE of two firing candidates opens.
+    java.util.UUID strategyId = java.util.UUID.randomUUID();
+    java.util.UUID publishedVersion = java.util.UUID.randomUUID();
+    com.fasterxml.jackson.databind.JsonNode config = vcpConfig();
+    StrategyRepository registry = mock(StrategyRepository.class);
+    StrategyRepository.StrategyRow strategyRow =
+        new StrategyRepository.StrategyRow(
+            strategyId, "minervini-vcp", "Minervini VCP", null, null, List.of("minervini"), true,
+            publishedVersion, null, null, false, null);
+    org.mockito.Mockito.when(registry.listAll()).thenReturn(List.of(strategyRow));
+    org.mockito.Mockito.when(registry.findVersionById(publishedVersion))
+        .thenReturn(Optional.of(version(publishedVersion, strategyId, "1", config)));
+
+    List<EngineCandle> series = craft(3_000L); // both candidates would fire an entry
+    MinerviniFunnelClient funnel = mock(MinerviniFunnelClient.class);
+    org.mockito.Mockito.when(funnel.buyableAndOnDeck())
+        .thenReturn(
+            List.of(
+                new MinerviniFunnelClient.Candidate(
+                    "AAA", new BigDecimal("152"), PIVOT, null, false, 2, "40W 31/3 4T"),
+                new MinerviniFunnelClient.Candidate(
+                    "BBB", new BigDecimal("152"), PIVOT, null, false, 2, "40W 31/3 4T")));
+    in.arthayantra.strategysignal.signals.MarketDataCandlesClient candles =
+        mock(in.arthayantra.strategysignal.signals.MarketDataCandlesClient.class);
+    org.mockito.Mockito.when(candles.fetch(
+            org.mockito.ArgumentMatchers.eq("NSE"), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.eq("1d"), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any()))
+        .thenReturn(series);
+    in.arthayantra.strategysignal.signals.SignalRepository signals =
+        mock(in.arthayantra.strategysignal.signals.SignalRepository.class);
+    org.mockito.Mockito.when(signals.activeEntries()).thenReturn(List.of());
+    org.mockito.Mockito.when(signals.insert(
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any()))
+        .thenReturn(1L);
+
+    in.arthayantra.strategysignal.signals.EmissionGuard guard =
+        mock(in.arthayantra.strategysignal.signals.EmissionGuard.class);
+    org.mockito.Mockito.when(
+            guard.entryAllowed(in.arthayantra.strategysignal.signals.Books.MINERVINI))
+        .thenReturn(true, true, false); // early-out, candidate-AAA, then TRIPPED before candidate-BBB
+    org.mockito.Mockito.when(
+            guard.suggestedQty(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+        .thenReturn(new BigDecimal("10"));
+    org.springframework.transaction.support.TransactionTemplate tx =
+        mock(org.springframework.transaction.support.TransactionTemplate.class);
+    org.mockito.Mockito.when(tx.execute(org.mockito.ArgumentMatchers.any()))
+        .thenAnswer(inv ->
+            inv.<org.springframework.transaction.support.TransactionCallback<Long>>getArgument(0)
+                .doInTransaction(null));
+
+    MinerviniSwingEngine engine =
+        new MinerviniSwingEngine(
+            registry, funnel, candles, signals,
+            mock(in.arthayantra.strategysignal.signals.SignalPublisher.class),
+            mock(org.springframework.context.ApplicationEventPublisher.class), Optional.of(guard),
+            tx, new com.fasterxml.jackson.databind.ObjectMapper(),
+            java.time.Clock.systemUTC(), true, 520, 10, 1440); // minBars=10 for the 25-bar fixture
+
+    MinerviniSwingEngine.SwingRun run = engine.runDaily();
+
+    assertThat(run.entries()).as("the mid-run book trip halts entries after the first").isEqualTo(1);
+  }
+
   private static com.fasterxml.jackson.databind.JsonNode vcpConfig() throws IOException {
     try (InputStream in =
         MinerviniSwingEngineTest.class.getResourceAsStream("/minervini-strategies/minervini-vcp.yaml")) {

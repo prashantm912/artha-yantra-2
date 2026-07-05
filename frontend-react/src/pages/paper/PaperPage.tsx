@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
+import { useParams } from 'react-router-dom';
 import type { EChartsOption } from 'echarts';
 import { formatDecimal, isNegative, multiplyByInt, subtractDecimal } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
@@ -11,6 +12,7 @@ import { LoadBeat } from '../../components/LoadBeat.tsx';
 import { useLiveTicks } from '../../api/ticks.ts';
 import type { PaperPosition } from '../../api/paper.ts';
 import {
+  bookLabel,
   riskEnabled,
   useClosePosition,
   usePaperAccount,
@@ -45,15 +47,20 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: boo
 }
 
 export function PaperPage() {
-  const positions = usePaperPositions();
-  const trades = usePaperTrades();
-  const pnl = usePaperPnl();
-  const account = usePaperAccount();
-  const risk = useRiskSettings();
-  const updateCapital = useUpdateCapital();
-  const updateRisk = useUpdateRisk();
+  // /paper/:book scopes to one per-family book; bare /paper defaults to the scalper book.
+  const { book: bookParam } = useParams<{ book: string }>();
+  const book = bookParam ?? 'scalper';
+  const label = bookLabel(book) ?? 'Scalper';
+
+  const positions = usePaperPositions(book);
+  const trades = usePaperTrades(book);
+  const pnl = usePaperPnl(book);
+  const account = usePaperAccount(book);
+  const risk = useRiskSettings(book);
+  const updateCapital = useUpdateCapital(book);
+  const updateRisk = useUpdateRisk(book);
   const closePosition = useClosePosition();
-  const resetLedger = useResetLedger();
+  const resetLedger = useResetLedger(book);
 
   const [capitalDraft, setCapitalDraft] = useState('');
   const [maxOpenDraft, setMaxOpenDraft] = useState('');
@@ -116,7 +123,7 @@ export function PaperPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Paper trading" subtitle="Paper ledger — open positions, closed trades, realized equity and global risk limits" help="Your simulated trading account: live mark-to-market on open positions, the closed-trade ledger, the realized-equity curve and risk limits — no real money." />
+      <PageHeader title={`${label} paper trading`} subtitle={`${label} book — open positions, closed trades, realized equity and its own risk limits`} help={`The ${label} paper book: its own capital, live mark-to-market on open positions, the closed-trade ledger, the realized-equity curve and per-book risk limits — no real money. Scalper / Minervini / Manas Arora each have a separate book, so their trades never mix.`} />
 
       {acct && (
         <>

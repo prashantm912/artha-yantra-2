@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { Inbox } from 'lucide-react';
 import { formatDecimal } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
+import { bookLabel } from '../../api/paper.ts';
 import { Select } from '../../components/atoms/Select.tsx';
 import { DateInput } from '../../components/atoms/DateInput.tsx';
 import { Pager } from '../../components/atoms/Pager.tsx';
@@ -65,6 +66,10 @@ function Badge({ label, tone }: { label: string; tone: string }) {
 }
 
 export function SignalsPage() {
+  // /signals/:book filters to one strategy family; bare /signals keeps the all-books view.
+  const { book } = useParams<{ book: string }>();
+  const label = bookLabel(book);
+
   const [status, setStatus] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   // Live = today (the STOMP feed merges in); Historical = a picked past day (static snapshot).
@@ -74,9 +79,9 @@ export function SignalsPage() {
   const [offset, setOffset] = useState(0);
   const effectiveDate = mode === 'live' ? todayIst() : date;
   const { from, to } = dayBoundsIst(effectiveDate);
-  useEffect(() => setOffset(0), [status, from, to]);
-  const q = useSignals(status, from, to, offset);
-  useSignalsLive(status, from, to, mode === 'live');
+  useEffect(() => setOffset(0), [status, from, to, book]);
+  const q = useSignals(status, from, to, offset, book ?? null);
+  useSignalsLive(status, from, to, mode === 'live', book ?? null);
   const take = useTakeSignal();
   const dismiss = useDismissSignal();
 
@@ -97,7 +102,7 @@ export function SignalsPage() {
   return (
     <LoadBeat>
       <div className="flex h-full flex-col">
-      <PageHeader title="Live signals" subtitle="Live feed + history — click a row for the per-indicator reasoning breakdown" help="Shows your strategies' buy/sell calls as they fire plus past ones; click any row to see why the signal triggered and take or dismiss it." />
+      <PageHeader title={label ? `${label} signals` : 'Live signals'} subtitle={label ? `${label} book — live feed + history; click a row for the per-indicator reasoning breakdown` : 'Live feed + history — click a row for the per-indicator reasoning breakdown'} help={label ? `Shows the ${label} book's buy/sell calls as they fire plus past ones; click any row to see why the signal triggered and take or dismiss it.` : "Shows your strategies' buy/sell calls as they fire plus past ones; click any row to see why the signal triggered and take or dismiss it."} />
       <BeatBlock className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[1.4fr_minmax(20rem,1fr)]">
       <section className="min-w-0">
         <div className="mb-3 flex flex-wrap items-center gap-2">

@@ -193,8 +193,10 @@ export function App() {
           <Route path="/scalper" element={<ScalperCockpitPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/signals" element={<SignalsPage />} />
+          <Route path="/signals/:book" element={<SignalsPage />} />
           <Route path="/signal-rejections" element={<RejectionsPage />} />
           <Route path="/paper" element={<Lazy><PaperPage /></Lazy>} />
+          <Route path="/paper/:book" element={<Lazy><PaperPage /></Lazy>} />
           <Route path="/orders" element={<OrdersPage />} />
           <Route path="/journal" element={<JournalPage />} />
           <Route path="/watchlists" element={<WatchlistsPage />} />

@@ -3,6 +3,14 @@
 **Date:** 2026-07-05 · **Owner-approved, autonomous overnight build.** · Source strategy doc:
 `strategy-documents/manas-arora-operative/MomentumTradingManasArora_Consolidated_Strategy.md` (merged #565).
 
+> **STATUS 2026-07-05 — FULLY SHIPPED + DEPLOYED LIVE.** All PRs merged: books (#566/#568), Manas
+> screener/geometry/funnel (#567), live engine + daily EOD (#570), 10-yr backtest (#569), FE pages
+> (#571), go-live (#572). Doc-fidelity follow-ups: §3.5 ATR exit doctrine (#573), per-setup live pivots
+> (#574). Backtest-review fix: stable `eqSymbols()` order (#569 fork + #575 Minervini original). Live =
+> 3 separate ₹1.5 L books; screener 2,224→97 pass; auto-papers into the Manas book nightly (cron 20:05
+> IST). **Remaining = owner-gated only:** the supervised forward-paper watch + the §0.5 #12 reliability
+> sign-off. No buildable code left. Full record in the forward ledger's "Manas Arora" section.
+
 This plan covers three owner requests, built one-by-one, each as its own PR (build → test →
 adversarial review → CI-green → admin-merge):
 

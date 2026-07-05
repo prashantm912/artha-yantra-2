@@ -1,8 +1,9 @@
 # Manas Arora Breakout — the live swing (daily-primary) strategy. Fires a long ENTRY as the daily
 # close breaks out above the base pivot (the consolidation-breakout level from the Manas geometry) on
 # expanding volume, above the 20-day MA. Universe = the Manas selection funnel (the day's buyable +
-# on-deck names); the daily EOD batch drives evaluation per funnel symbol with the per-symbol pivot
-# seeded into MANAS_PIVOT. Exit doctrine (§3.5, now faithful to the doc, same math as the BACKTEST):
+# on-deck names); the daily EOD batch drives evaluation per funnel symbol with the §3.2 breakout pivot
+# seeded into MANAS_BREAKOUT_PIVOT (this strategy fires off its OWN setup's pivot, not the shared best).
+# Exit doctrine (§3.5, now faithful to the doc, same math as the BACKTEST):
 # the initial stop = entry − 2×ATR(20) capped at ~10%; the armed ATR trail (2×ATR, arms once up ~9%);
 # and the exhaustion square-off (too-fast +35% in ≤3 sessions OR parabolic +40% over the 10-day MA).
 # Paper-only (auto-paper into the manas-arora book) until the reliability bar is met.
@@ -31,7 +32,7 @@ indicators:
   - { name: VOLUME_RATIO, alias: vol, timeframe: 1d, params: { lookback: 20 }, weight: 1.0,
       normalize: { type: linear, from: 0, to: 3 } }
   - { name: VCP_PIVOT, alias: pivot, timeframe: 1d, weight: 0.0,
-      instrument: { exchange: NSE, tradingsymbol: "MANAS_PIVOT" } }
+      instrument: { exchange: NSE, tradingsymbol: "MANAS_BREAKOUT_PIVOT" } }
 entry_rules:
   direction: long
   gate:

@@ -15,18 +15,30 @@ import org.springframework.web.client.RestClient;
  * Reads the Manas Arora selection funnel from market-data (D8 — this service holds no marketdata
  * grant) for the daily swing batch. The exact sibling of {@link
  * in.arthayantra.strategysignal.minervini.MinerviniFunnelClient}. Returns the day's
- * immediately-buyable + on-deck base candidates with the per-symbol pivot the engine seeds into the
- * entry gate ({@code MANAS_PIVOT}) plus the setup type + base footprint. Empty on any upstream failure
- * — a missing funnel means the batch simply has nothing to evaluate, never a crash.
+ * immediately-buyable + on-deck base candidates with the BEST-setup pivot (reported on the detail)
+ * plus BOTH setups' pivots ({@code breakoutPivot}/{@code vcpPivot}) so the engine seeds each strategy
+ * its own §3.2/§3.3 pivot, plus the setup type + base footprint. Empty on any upstream failure — a
+ * missing funnel means the batch simply has nothing to evaluate, never a crash.
  */
 @Component
 public class ManasFunnelClient {
 
   private static final Logger log = LoggerFactory.getLogger(ManasFunnelClient.class);
 
-  /** One funnel candidate + its seeded base geometry (the manas funnel has no cheat/thrust/stage). */
+  /**
+   * One funnel candidate + its seeded base geometry (the manas funnel has no cheat/thrust/stage).
+   * {@code pivot} is the BEST setup's pivot (kept for the detail); {@code breakoutPivot}/{@code
+   * vcpPivot} are the per-setup §3.2/§3.3 pivots (null when that setup is invalid) the engine routes
+   * to the matching strategy.
+   */
   public record Candidate(
-      String symbol, BigDecimal close, BigDecimal pivot, String setupType, String footprint) {}
+      String symbol,
+      BigDecimal close,
+      BigDecimal pivot,
+      String setupType,
+      String footprint,
+      BigDecimal breakoutPivot,
+      BigDecimal vcpPivot) {}
 
   private final RestClient restClient;
   private final ObjectMapper objectMapper;
@@ -72,7 +84,9 @@ public class ManasFunnelClient {
               decimal(row, "close"),
               decimal(row, "pivot"),
               row.path("setupType").asText(null),
-              row.path("footprint").asText(null)));
+              row.path("footprint").asText(null),
+              decimal(row, "breakoutPivot"),
+              decimal(row, "vcpPivot")));
     }
   }
 

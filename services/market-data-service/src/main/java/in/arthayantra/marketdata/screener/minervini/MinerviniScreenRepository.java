@@ -130,6 +130,17 @@ public class MinerviniScreenRepository {
     return rows.isEmpty() ? null : rows.get(0);
   }
 
+  /**
+   * The latest PERSISTED screen date — the read-side watermark. Read endpoints default to this,
+   * NOT the bhavcopy watermark: after the day's bhavcopy lands but before the screen has run for
+   * it, the bhavcopy watermark points at a date with zero screen rows (the audit-H1 empty-funnel
+   * window). Null when no screen has ever persisted.
+   */
+  public LocalDate latestScreenDate() {
+    return jdbc.queryForObject(
+        "SELECT max(screen_date) FROM minervini_screen_results", LocalDate.class);
+  }
+
   /** The most recent distinct persisted screen dates, newest first (the buyable-transition diff). */
   public List<LocalDate> recentScreenDates(int limit) {
     return jdbc.query(

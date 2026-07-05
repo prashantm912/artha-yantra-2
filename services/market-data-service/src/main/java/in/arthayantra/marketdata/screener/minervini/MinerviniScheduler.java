@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.screener.minervini;
 
+import in.arthayantra.marketdata.bhavcopy.BhavcopyBackfillCompleted;
 import java.time.LocalDate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -10,10 +11,13 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * Runs the Minervini daily screen + persists it. Fires a boot one-shot (so a fresh stack has a
- * screen immediately) and a nightly cron AFTER the ~19:00 IST bhavcopy pull (so the day's daily
- * bars are present). Fail-soft: a screen failure is logged, never fatal (mirrors
- * {@code NseEodScheduler.pullBhavcopy}). Gated by {@code artha.minervini.screen.enabled}.
+ * Runs the Minervini daily screen + persists it. The PRIMARY trigger is the
+ * {@link BhavcopyBackfillCompleted} event — the screen keys on {@code max(trade_date)} of
+ * {@code nse_eod_bhavcopy}, so it must run AFTER the day's bhavcopy rows land (the old identical
+ * 19:30 cron raced the backfill and screened yesterday; audit H1 2026-07-05). A boot one-shot (so
+ * a fresh stack has a screen immediately) and a 19:50 IST fallback cron (in case the backfill
+ * fails and never publishes) remain — all three paths are idempotent upserts. Fail-soft: a screen
+ * failure is logged, never fatal. Gated by {@code artha.minervini.screen.enabled}.
  */
 @Component
 public class MinerviniScheduler {
@@ -43,8 +47,14 @@ public class MinerviniScheduler {
     runQuietly("startup");
   }
 
-  /** Nightly, after the bhavcopy pull. */
-  @Scheduled(cron = "${artha.minervini.cron:0 30 19 * * MON-FRI}", zone = "Asia/Kolkata")
+  /** Primary trigger: the day's bhavcopy rows just landed — screen against the fresh watermark. */
+  @EventListener(BhavcopyBackfillCompleted.class)
+  void onBhavcopyBackfillCompleted() {
+    runQuietly("bhavcopy-complete");
+  }
+
+  /** Fallback cron (bhavcopy backfill failed → no event). 19:50, before the 20:00 swing batch. */
+  @Scheduled(cron = "${artha.minervini.cron:0 50 19 * * MON-FRI}", zone = "Asia/Kolkata")
   void scheduled() {
     runQuietly("scheduled");
   }
@@ -65,6 +75,16 @@ public class MinerviniScheduler {
       return;
     }
     try {
+      // Already screened the current bhavcopy watermark? Skip — makes the fallback cron, the boot
+      // one-shot on an up-to-date stack, and a holiday's no-op-backfill event all cheap no-ops
+      // instead of a second full screen + ~210-symbol geometry fan-out on the shared Timescale box.
+      // POST /run (runOnce) deliberately bypasses this — it is the forced-recompute path, and the
+      // heal for the rare screen-persisted-but-geometry-failed evening.
+      LocalDate persisted = repo.latestScreenDate();
+      if (persisted != null && persisted.equals(screener.latestScreenDate())) {
+        log.debug("minervini screen already current for {} — skipped ({})", persisted, trigger);
+        return;
+      }
       TrendTemplateService.ScreenResult r = screener.screen(null);
       if (r.screenDate() == null) {
         log.info("minervini screen skipped ({}) — no daily equity data yet", trigger);

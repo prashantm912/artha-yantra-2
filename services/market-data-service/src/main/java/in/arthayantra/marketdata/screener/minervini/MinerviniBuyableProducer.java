@@ -27,30 +27,54 @@ public class MinerviniBuyableProducer {
   private static final int MAX_NAMED = 15; // cap the names in the push body; the count is always exact
 
   private final MinerviniScreenRepository screenRepo;
+  private final TrendTemplateService screener;
   private final MinerviniFunnelService funnel;
   private final NtfyClient ntfy;
 
-  /** Wires the screen repo, the funnel, and the ntfy client. */
+  /** The screen date last pushed for — one aggregate push per screen date (restart re-arms). */
+  private volatile LocalDate lastPushedScreenDate;
+
+  /** Wires the screen repo, the screener (bhavcopy watermark), the funnel, and the ntfy client. */
   public MinerviniBuyableProducer(
-      MinerviniScreenRepository screenRepo, MinerviniFunnelService funnel, NtfyClient ntfy) {
+      MinerviniScreenRepository screenRepo,
+      TrendTemplateService screener,
+      MinerviniFunnelService funnel,
+      NtfyClient ntfy) {
     this.screenRepo = screenRepo;
+    this.screener = screener;
     this.funnel = funnel;
     this.ntfy = ntfy;
   }
 
-  /** Post-screen daily run (19:45 IST, weekdays) — one aggregate push naming the newly-buyable set. */
-  @Scheduled(cron = "${artha.minervini.buyable-alerts.cron:0 45 19 * * MON-FRI}", zone = "Asia/Kolkata")
+  /**
+   * Post-screen daily run (19:58 IST, weekdays — AFTER the 19:50/19:55 fallback screens, so the
+   * diff always sees a completed screen even on an evening where the bhavcopy→screen event chain
+   * failed) — one aggregate push naming the newly-buyable set. Skips when the persisted screen is
+   * STALE vs the bhavcopy watermark (would re-diff yesterday's data) and dedupes per screen date
+   * (a stale-screen evening would otherwise re-push yesterday's alert verbatim).
+   */
+  @Scheduled(cron = "${artha.minervini.buyable-alerts.cron:0 58 19 * * MON-FRI}", zone = "Asia/Kolkata")
   public void alertNewlyBuyable() {
     try {
       List<LocalDate> dates = screenRepo.recentScreenDates(2);
       if (dates.size() < 2) {
         return; // no prior screen to diff against (first run) — nothing to compare
       }
+      if (dates.get(0).equals(lastPushedScreenDate)) {
+        return; // already pushed this screen date's transitions
+      }
+      if (!dates.get(0).equals(screener.latestScreenDate())) {
+        log.info(
+            "minervini buyable alert skipped — screen for {} is stale vs the bhavcopy watermark",
+            dates.get(0));
+        return;
+      }
       Set<String> today = buyableSymbols(dates.get(0));
       Set<String> prior = buyableSymbols(dates.get(1));
       Set<String> fresh = new LinkedHashSet<>(today);
       fresh.removeAll(prior);
       if (fresh.isEmpty()) {
+        lastPushedScreenDate = dates.get(0); // nothing new — but this date is done
         return;
       }
       String names =
@@ -60,6 +84,7 @@ public class MinerviniBuyableProducer {
           "Minervini: " + fresh.size() + " name(s) now buyable",
           "default",
           names + " — reached the VCP pivot (screen " + dates.get(0) + ")");
+      lastPushedScreenDate = dates.get(0);
       log.info("minervini buyable alert: {} newly buyable on {}", fresh.size(), dates.get(0));
     } catch (RuntimeException e) {
       log.warn("minervini buyable alert skipped: {}", e.getMessage());

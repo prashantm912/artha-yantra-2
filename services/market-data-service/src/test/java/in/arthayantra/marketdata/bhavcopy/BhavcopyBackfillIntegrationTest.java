@@ -64,7 +64,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
     BhavcopyBackfillService svc =
         new BhavcopyBackfillService(
             nseStub(), nseRepo, bseStub(), bseRepo, caStub(), bseCaStub(), caRepo, candles, CLOCK,
-            "EQ,BE", 10, 90, 7, 420);
+            event -> {}, "EQ,BE", 10, 90, 7, 420);
 
     // A Kite-owned 1d bar must survive the bhavcopy projection (DO NOTHING; source not in PK).
     candles.upsertAuthoritativeAll(
@@ -146,7 +146,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
     BhavcopyBackfillService svc =
         new BhavcopyBackfillService(
             flaky, nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo, candles, CLOCK,
-            "EQ,BE", 10, 90, 7, 420);
+            event -> {}, "EQ,BE", 10, 90, 7, 420);
 
     // Run 1: trd2 missed; the watermark must NOT advance past it.
     svc.runNse();
@@ -158,6 +158,44 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
     svc.runNse();
     assertThat(close("NSE", "TRZ", trd2)).isEqualByComparingTo("12");
     assertThat(nseRepo.maxTradeDate()).isEqualTo(trd2);
+  }
+
+  @Test
+  @Order(3)
+  void aCompletedRunPublishesBhavcopyBackfillCompleted() {
+    // Pins the PRODUCER half of the audit-H1 fix: the screens chain off this event, so a run that
+    // finishes without publishing silently reverts the system to fallback-crons-only. Publication
+    // must happen even for a no-new-days run (holiday/outage) — the listeners' watermark guard
+    // makes that a cheap no-op, but the wiring must fire.
+    List<Object> published = new java.util.concurrent.CopyOnWriteArrayList<>();
+    BhavcopyBackfillService svc =
+        new BhavcopyBackfillService(
+            emptyNse(), nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo, candles,
+            CLOCK, published::add, "EQ,BE", 10, 90, 7, 420);
+
+    svc.runIfFree(); // the scheduler/startup entry — submits runLocked to the service's executor
+
+    org.awaitility.Awaitility.await()
+        .atMost(java.time.Duration.ofSeconds(10))
+        .untilAsserted(
+            () ->
+                assertThat(published)
+                    .filteredOn(e -> e instanceof BhavcopyBackfillCompleted)
+                    .hasSize(1));
+  }
+
+  private static BhavcopyFetcher emptyNse() {
+    return new BhavcopyFetcher() {
+      @Override
+      public List<BhavcopyRow> fetchLatest() {
+        return List.of();
+      }
+
+      @Override
+      public List<BhavcopyRow> fetchForDate(LocalDate date) {
+        return List.of();
+      }
+    };
   }
 
   private static BseBhavcopyFetcher emptyBse() {

@@ -58,7 +58,7 @@ public class TelegramApi {
           ? java.util.stream.StreamSupport.stream(result.spliterator(), false).toList()
           : List.of();
     } catch (Exception e) {
-      log.warn("telegram getUpdates failed: {}", e.getMessage());
+      log.warn("telegram getUpdates failed: {}", redact(e.getMessage()));
       return List.of();
     }
   }
@@ -72,7 +72,22 @@ public class TelegramApi {
           .retrieve()
           .toBodilessEntity();
     } catch (Exception e) {
-      log.warn("telegram sendMessage failed: {}", e.getMessage());
+      log.warn("telegram sendMessage failed: {}", redact(e.getMessage()));
     }
+  }
+
+  /**
+   * Strips the bot token from an exception message before logging (audit M24). Spring's
+   * {@code ResourceAccessException} keeps the request URI path — which embeds {@code /bot<token>/}
+   * — so a raw {@code getMessage()} on a DNS/timeout blip would write the full 46-char bot token to
+   * the docker logs (full Bot-API control if pasted into an issue/AI session). Replace both the
+   * literal token and any {@code /bot.../ } path segment with {@code ***}.
+   */
+  String redact(String message) {
+    if (message == null) {
+      return null;
+    }
+    String out = token.isBlank() ? message : message.replace(token, "***");
+    return out.replaceAll("/bot[^/\\s]+/", "/bot***/");
   }
 }

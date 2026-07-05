@@ -155,6 +155,7 @@ public class ManasAroraBacktestService {
   private final double rsMin;
   private final int slots;
   private final SwingPortfolio.Costs costs;
+  private final in.arthayantra.marketdata.alerts.NtfyClient ntfy;
   private final AtomicBoolean running = new AtomicBoolean(false);
   private volatile Report latest;
   private volatile BacktestResult latestResult;
@@ -165,6 +166,7 @@ public class ManasAroraBacktestService {
       VcpDetector vcpDetector,
       ConsolidationBreakout breakoutDetector,
       ObjectMapper objectMapper,
+      in.arthayantra.marketdata.alerts.NtfyClient ntfy,
       @Value("${artha.manas-arora.backtest.years:11}") int defaultYears,
       @Value("${artha.manas-arora.backtest.min-turnover:3750000}") BigDecimal minTurnover,
       @Value("${artha.manas-arora.backtest.rs-min:70}") BigDecimal rsMin,
@@ -190,6 +192,7 @@ public class ManasAroraBacktestService {
     this.vcpDetector = vcpDetector;
     this.breakoutDetector = breakoutDetector;
     this.objectMapper = objectMapper;
+    this.ntfy = ntfy;
     this.sim =
         new ManasAroraSwingBacktest(
             atrMult, atrPeriod, stopCapPct, trailArmPct, fastMovePct, fastMoveBars, parabolicPct,
@@ -267,17 +270,26 @@ public class ManasAroraBacktestService {
           .ifPresent(r -> latest = r);
       result.variants().forEach(this::persist);
     } catch (RuntimeException e) {
-      log.error("manas-arora swing backtest failed: {}", e.getMessage(), e);
-      LocalDate from = from(years);
-      latest =
-          new Report(
-              "failed", PRIMARY_VARIANT, from, null, 0, 0, List.of(), null, null, null,
-              e.getMessage());
-      latestResult =
-          new BacktestResult("failed", from, null, List.of(), List.of(), e.getMessage());
+      recordFailed(years, e);
+    } catch (Error e) {
+      // OOME / StackOverflow etc. skip a RuntimeException catch — without this the daemon thread
+      // dies and `latest` stays pinned at "running" forever with no operator signal (audit M26).
+      recordFailed(years, e);
+      throw e;
     } finally {
       running.set(false);
     }
+  }
+
+  /** Marks the run failed (both report shapes) + fires one fail-soft ntfy alert (audit M26). */
+  private void recordFailed(Integer years, Throwable t) {
+    log.error("manas-arora swing backtest failed: {}", t.toString(), t);
+    LocalDate from = from(years);
+    latest =
+        new Report(
+            "failed", PRIMARY_VARIANT, from, null, 0, 0, List.of(), null, null, null, t.toString());
+    latestResult = new BacktestResult("failed", from, null, List.of(), List.of(), t.toString());
+    ntfy.send("ArthaYantra — Manas Arora backtest failed", "high", t.toString());
   }
 
   private static Report running(String variant, LocalDate from) {

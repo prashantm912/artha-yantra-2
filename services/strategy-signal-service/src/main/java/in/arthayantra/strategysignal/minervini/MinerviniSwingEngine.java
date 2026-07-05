@@ -408,8 +408,9 @@ public class MinerviniSwingEngine {
         // entry bucket) — any entry-relative exit distance would be unreliable, so skip this anchor
         // rather than default to bar 0. The shipped exits (percent stop + indicator trail) do not read
         // entryIndex, but a future time_stop / atr_multiple rule would silently mis-compute from bar 0.
-        log.warn(
-            "minervini swing exit: entry bar for #{} {} is outside the fetched window — skipped",
+        log.error(
+            "minervini swing exit: entry bar for #{} {} is outside the fetched window —"
+                + " STOP NOT EVALUATED TODAY",
             anchor.id(), anchor.tradingsymbol());
         skipped++;
         continue;

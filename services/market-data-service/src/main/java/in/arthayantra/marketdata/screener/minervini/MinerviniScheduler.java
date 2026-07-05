@@ -27,17 +27,20 @@ public class MinerviniScheduler {
   private final TrendTemplateService screener;
   private final MinerviniScreenRepository repo;
   private final MinerviniGeometryService geometry;
+  private final in.arthayantra.marketdata.alerts.NtfyClient ntfy;
   private final boolean enabled;
 
-  /** Wires the screener + screen repository + geometry service. */
+  /** Wires the screener + screen repository + geometry service + the ops ntfy client. */
   public MinerviniScheduler(
       TrendTemplateService screener,
       MinerviniScreenRepository repo,
       MinerviniGeometryService geometry,
+      in.arthayantra.marketdata.alerts.NtfyClient ntfy,
       @Value("${artha.minervini.screen.enabled:true}") boolean enabled) {
     this.screener = screener;
     this.repo = repo;
     this.geometry = geometry;
+    this.ntfy = ntfy;
     this.enabled = enabled;
   }
 
@@ -97,7 +100,13 @@ public class MinerviniScheduler {
           "minervini screen upserted {} rows for {} ({} pass all 8 gates, {} geometry rows) [{}]",
           written, r.screenDate(), passing, geo, trigger);
     } catch (Exception e) {
+      // Audit P0-4/H10: a failed screen leaves the 20:00 swing batch on yesterday's funnel — the
+      // owner must hear about it, not find it in a log next week. NtfyClient never throws.
       log.warn("minervini screen failed ({}) — non-fatal", trigger, e);
+      ntfy.send(
+          "Minervini screen FAILED", "high",
+          "Trigger " + trigger + ": " + e.getMessage()
+              + " — the 20:00 swing batch will read a stale funnel.");
     }
   }
 

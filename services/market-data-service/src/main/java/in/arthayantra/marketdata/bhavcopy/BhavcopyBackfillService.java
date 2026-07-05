@@ -66,6 +66,7 @@ public class BhavcopyBackfillService {
   private final CandleRepository candles;
   private final Clock clock;
   private final ApplicationEventPublisher events;
+  private final in.arthayantra.marketdata.alerts.NtfyClient ntfy;
 
   /** How far back to refresh corporate-action ratios each run (one cheap API call). */
   private final int caLookbackDays;
@@ -109,6 +110,7 @@ public class BhavcopyBackfillService {
       CandleRepository candles,
       Clock clock,
       ApplicationEventPublisher events,
+      in.arthayantra.marketdata.alerts.NtfyClient ntfy,
       @Value("${artha.nse.bhavcopy.candle-series:EQ,BE}") String candleSeriesCsv,
       @Value("${artha.bhavcopy.catchup-floor-days:10}") int catchupFloorDays,
       @Value("${artha.bhavcopy.catchup-max-days:90}") int catchupMaxDays,
@@ -124,6 +126,7 @@ public class BhavcopyBackfillService {
     this.candles = candles;
     this.clock = clock;
     this.events = events;
+    this.ntfy = ntfy;
     this.reconcileLookbackDays = reconcileLookbackDays;
     this.caLookbackDays = caLookbackDays;
     this.candleSeries =
@@ -204,8 +207,15 @@ public class BhavcopyBackfillService {
           ok.durationMs());
       publishCompleted(jobId);
     } catch (RuntimeException e) {
+      // Audit P0-4/H10: a failed backfill silently starves the whole EOD chain (no completion
+      // event → screens stay stale → the swing batches trade yesterday's funnel). NtfyClient
+      // never throws.
       log.error("EOD bhavcopy backfill {} failed", jobId, e);
       status.set(Status.failed(jobId, started, clock.instant(), e.getMessage()));
+      ntfy.send(
+          "EOD bhavcopy backfill FAILED", "high",
+          "Job " + jobId + ": " + e.getMessage()
+              + " — screens/funnel/swing batches will run on the stale watermark.");
     } finally {
       running.set(false);
     }

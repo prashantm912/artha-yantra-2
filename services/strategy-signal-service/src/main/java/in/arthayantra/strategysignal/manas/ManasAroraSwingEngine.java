@@ -438,8 +438,9 @@ public class ManasAroraSwingEngine {
         // the entry bar fell outside the fetched window (position held > warmupDays, or a dropped
         // entry bucket) — the #573 ATR exits (entry-pinned ATR, peak-since-entry trail) are
         // entry-index-DEPENDENT, so evaluating from bar 0 would silently mis-anchor every level.
-        log.warn(
-            "manas swing exit: entry bar for #{} {} is outside the fetched window — skipped",
+        log.error(
+            "manas swing exit: entry bar for #{} {} is outside the fetched window —"
+                + " STOP NOT EVALUATED TODAY",
             anchor.id(), anchor.tradingsymbol());
         skipped++;
         continue;

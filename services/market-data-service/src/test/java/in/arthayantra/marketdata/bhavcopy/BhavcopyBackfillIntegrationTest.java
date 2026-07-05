@@ -64,7 +64,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
     BhavcopyBackfillService svc =
         new BhavcopyBackfillService(
             nseStub(), nseRepo, bseStub(), bseRepo, caStub(), bseCaStub(), caRepo, candles, CLOCK,
-            event -> {}, "EQ,BE", 10, 90, 7, 420);
+            event -> {}, noopNtfy(), "EQ,BE", 10, 90, 7, 420);
 
     // A Kite-owned 1d bar must survive the bhavcopy projection (DO NOTHING; source not in PK).
     candles.upsertAuthoritativeAll(
@@ -146,7 +146,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
     BhavcopyBackfillService svc =
         new BhavcopyBackfillService(
             flaky, nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo, candles, CLOCK,
-            event -> {}, "EQ,BE", 10, 90, 7, 420);
+            event -> {}, noopNtfy(), "EQ,BE", 10, 90, 7, 420);
 
     // Run 1: trd2 missed; the watermark must NOT advance past it.
     svc.runNse();
@@ -171,7 +171,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
     BhavcopyBackfillService svc =
         new BhavcopyBackfillService(
             emptyNse(), nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo, candles,
-            CLOCK, published::add, "EQ,BE", 10, 90, 7, 420);
+            CLOCK, published::add, noopNtfy(), "EQ,BE", 10, 90, 7, 420);
 
     svc.runIfFree(); // the scheduler/startup entry — submits runLocked to the service's executor
 
@@ -196,6 +196,12 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
         return List.of();
       }
     };
+  }
+
+  /** Blank-topic NtfyClient — a silent no-op (the client short-circuits before any HTTP). */
+  private static in.arthayantra.marketdata.alerts.NtfyClient noopNtfy() {
+    return new in.arthayantra.marketdata.alerts.NtfyClient(
+        org.springframework.web.client.RestClient.builder(), "https://ntfy.sh", "");
   }
 
   private static BseBhavcopyFetcher emptyBse() {

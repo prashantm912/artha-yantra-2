@@ -32,13 +32,18 @@ public class ManasScheduler {
   private final ManasScreenService screener;
   private final ManasScreenRepository repo;
   private final ManasGeometryService geometry;
+  private final in.arthayantra.marketdata.alerts.NtfyClient ntfy;
 
-  /** Wires the screener + screen repository + geometry service. */
+  /** Wires the screener + screen repository + geometry service + the ops ntfy client. */
   public ManasScheduler(
-      ManasScreenService screener, ManasScreenRepository repo, ManasGeometryService geometry) {
+      ManasScreenService screener,
+      ManasScreenRepository repo,
+      ManasGeometryService geometry,
+      in.arthayantra.marketdata.alerts.NtfyClient ntfy) {
     this.screener = screener;
     this.repo = repo;
     this.geometry = geometry;
+    this.ntfy = ntfy;
   }
 
   /** Boot one-shot. */
@@ -81,7 +86,13 @@ public class ManasScheduler {
           "manas screen upserted {} rows for {} ({} pass all gates, {} geometry rows) [{}]",
           written, r.screenDate(), passing, geo, trigger);
     } catch (Exception e) {
+      // Audit P0-4/H10: a failed screen leaves the 20:05 swing batch on yesterday's funnel — the
+      // owner must hear about it, not find it in a log next week. NtfyClient never throws.
       log.warn("manas screen failed ({}) — non-fatal", trigger, e);
+      ntfy.send(
+          "Manas screen FAILED", "high",
+          "Trigger " + trigger + ": " + e.getMessage()
+              + " — the 20:05 swing batch will read a stale funnel.");
     }
   }
 

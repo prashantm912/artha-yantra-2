@@ -1,5 +1,5 @@
 import { cn } from '../../lib/cn.ts';
-import { formatDecimal, isNegative } from '../../lib/decimal.ts';
+import { formatDecimal, isNegative, multiplyByInt } from '../../lib/decimal.ts';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
@@ -119,7 +119,9 @@ export function GraduationPage() {
                       <Money value={s.netRealized} />
                     </td>
                     <td className="px-2 py-2 text-right tabular-nums">
-                      {s.winRate == null ? '—' : `${formatDecimal(s.winRate, 4)}`}
+                      {/* Audit M21: winRate is a 0-1 fraction on the wire — render as a percent
+                          under the "Win%" header (was "0.7500", now "75.0%"). */}
+                      {s.winRate == null ? '—' : `${formatDecimal(multiplyByInt(s.winRate, 100), 1)}%`}
                     </td>
                     <td className="px-2 py-2 text-right tabular-nums">{fmt(s.profitFactor, 2)}</td>
                     <td className="px-2 py-2 text-right tabular-nums">

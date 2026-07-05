@@ -101,8 +101,12 @@ describe('PaperPage', () => {
     fireEvent.click(screen.getByText('Close'));
     expect(closePosition).toHaveBeenCalledWith({ id: 3 });
 
-    fireEvent.click(screen.getByText(/Reset ledger/));
+    // The reset button now names the book ("Reset Scalper ledger") and confirms first (audit H7).
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    fireEvent.click(screen.getByText(/Reset .*ledger/i));
+    expect(confirmSpy).toHaveBeenCalled();
     expect(resetLedger).toHaveBeenCalled();
+    confirmSpy.mockRestore();
 
     fireEvent.click(screen.getByText(/Kill switch/));
     expect(updateRisk).toHaveBeenCalledWith({ key: 'kill_switch', value: { enabled: true } });

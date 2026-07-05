@@ -181,11 +181,14 @@ public class MinerviniBacktestService {
   private volatile Report latest;
   private volatile BacktestResult latestResult;
 
+  private final in.arthayantra.marketdata.alerts.NtfyClient ntfy;
+
   /** Wires the marketdata datasource + the VCP detector + config. */
   public MinerviniBacktestService(
       JdbcTemplate jdbc,
       VcpDetector detector,
       ObjectMapper objectMapper,
+      in.arthayantra.marketdata.alerts.NtfyClient ntfy,
       @Value("${artha.minervini.backtest.years:11}") int defaultYears,
       @Value("${artha.minervini.backtest.min-turnover:3750000}") BigDecimal minTurnover,
       @Value("${artha.minervini.backtest.rs-min:70}") BigDecimal rsMin,
@@ -199,6 +202,7 @@ public class MinerviniBacktestService {
     this.jdbc = jdbc;
     this.detector = detector;
     this.objectMapper = objectMapper;
+    this.ntfy = ntfy;
     this.defaultYears = defaultYears;
     this.turnoverFloor = minTurnover.doubleValue();
     this.rsMin = rsMin.doubleValue();
@@ -274,17 +278,28 @@ public class MinerviniBacktestService {
           .ifPresent(r -> latest = r);
       result.variants().forEach(this::persist);
     } catch (RuntimeException e) {
-      log.error("minervini swing backtest failed: {}", e.getMessage(), e);
-      LocalDate from = from(years);
-      latest =
-          new Report(
-              "failed", PRIMARY_VARIANT, from, null, 0, 0, List.of(), null, null, null, e.getMessage());
-      latestResult =
-          new BacktestResult(
-              "failed", from, null, List.of(), List.of(), List.of(), null, e.getMessage());
+      recordFailed(years, e);
+    } catch (Error e) {
+      // OOME / StackOverflow etc. skip a RuntimeException catch — without this the daemon thread
+      // dies and `latest` stays pinned at "running" forever with no operator signal (audit M26).
+      // Record + alert, then rethrow so the JVM's default handler still logs the fatal Error.
+      recordFailed(years, e);
+      throw e;
     } finally {
       running.set(false);
     }
+  }
+
+  /** Marks the run failed (both report shapes) + fires one fail-soft ntfy alert (audit M26). */
+  private void recordFailed(Integer years, Throwable t) {
+    log.error("minervini swing backtest failed: {}", t.toString(), t);
+    LocalDate from = from(years);
+    latest =
+        new Report(
+            "failed", PRIMARY_VARIANT, from, null, 0, 0, List.of(), null, null, null, t.toString());
+    latestResult =
+        new BacktestResult("failed", from, null, List.of(), List.of(), List.of(), null, t.toString());
+    ntfy.send("ArthaYantra — Minervini backtest failed", "high", t.toString());
   }
 
   private static Report running(String variant, LocalDate from) {

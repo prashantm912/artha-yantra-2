@@ -58,6 +58,18 @@ public class RiskService {
   /** Per-day, per-cap trip dedup (key -> IST day it last tripped); re-armed on an {@code update}. */
   private final java.util.Map<String, LocalDate> trippedOn = new java.util.concurrent.ConcurrentHashMap<>();
 
+  /**
+   * Composite dedup-key delimiter (audit M34). A space would let {@code ("a b", "c")} and
+   * {@code ("a", "b c")} collide; a NUL char never appears in a book slug or a limit-key constant.
+   * Written as the integer literal {@code 0} so the source stays plain ASCII (no NUL byte / no
+   * {@code \\u0000} escape that a JSON edit pipeline can re-inject as a real NUL).
+   */
+  private static final char DEDUP_DELIM = 0;
+
+  private static String tripKey(String book, String key) {
+    return book + DEDUP_DELIM + key;
+  }
+
   /** Wires the risk inputs. */
   public RiskService(
       RiskSettingsRepository settings,
@@ -178,7 +190,7 @@ public class RiskService {
   /** Audits + ntfy-alerts a heat-cap breach (deduped per IST day, like {@link #recordTrip}). */
   private void recordHeatTrip(String book, BigDecimal heatPct, BigDecimal capPct) {
     LocalDate today = LocalDate.ofInstant(clock.instant(), IST);
-    String dedupKey = book + ' ' + HEAT_CAP_PCT;
+    String dedupKey = tripKey(book, HEAT_CAP_PCT);
     if (today.equals(trippedOn.get(dedupKey))) {
       return;
     }
@@ -213,7 +225,7 @@ public class RiskService {
 
   private void recordTrip(String book, String key, BigDecimal dayPnl, BigDecimal limit) {
     LocalDate today = LocalDate.ofInstant(clock.instant(), IST);
-    String dedupKey = book + ' ' + key;
+    String dedupKey = tripKey(book, key);
     if (!today.equals(trippedOn.get(dedupKey))) {
       trippedOn.put(dedupKey, today);
       String detail = "day P&L " + dayPnl.toPlainString() + " breached limit " + limit.toPlainString();
@@ -237,7 +249,7 @@ public class RiskService {
   public void update(String book, String key, String valueJson) {
     settings.upsert(book, key, valueJson);
     settings.audit(book, key, "UPDATE", valueJson);
-    trippedOn.remove(book + ' ' + key); // re-arm this cap's per-day trip dedup on a limit change
+    trippedOn.remove(tripKey(book, key)); // re-arm this cap's per-day trip dedup on a limit change
   }
 
   private boolean boolFlag(String book, String key) {

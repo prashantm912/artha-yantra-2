@@ -16,10 +16,18 @@ import java.util.Set;
 
 /**
  * Bar-close exit evaluation (Phase 20). Precedence is FIXED and documented: stop_loss →
- * trailing_stop → take_profit → time_stop → signal_exit — protective stops always win a tie on
- * the same bar. Deterministic choices (identical in live and replay): ATR-based distances use
- * the ATR at ENTRY (never recomputed mid-trade), trailing peaks/troughs use bar highs/lows since
- * entry, r_multiple reads the initial risk off the first stop_loss rule.
+ * trailing_stop → take_profit → scaled_exit → square_off → time_stop → signal_exit — protective
+ * stops always win a tie on the same bar. Deterministic choices (identical in live and replay):
+ * ATR-based distances use the ATR at ENTRY (never recomputed mid-trade), trailing peaks/troughs use
+ * bar highs/lows since entry, r_multiple reads the initial risk off the first stop_loss rule.
+ *
+ * <p>Manas Arora §3.5 exit doctrine (parity-safe additive, mirrors {@code ManasAroraSwingBacktest}):
+ * an {@code atr_multiple} stop takes an optional {@code cap_pct} → distance = min(mult×ATR,
+ * cap_pct%×entry) so a wide-ATR stop never exceeds ~10%; an {@code atr_multiple} trail takes an
+ * optional {@code arm_pct} → the trail is inert until the FAVOURABLE extreme is up arm_pct, then
+ * ratchets close − mult×ATR off the peak (monotone up); {@code square_off} exits on a too-fast move
+ * (close ≥ close[fast_bars ago]×(1+fast_pct%)) OR a parabolic extension (close ≥
+ * SMA(parabolic_ma)×(1+parabolic_dist_pct%)). All ATR/SMA reads are deterministic bar functions.
  */
 public final class ExitEvaluator {
 
@@ -158,8 +166,22 @@ public final class ExitEvaluator {
         return Optional.empty();
       }
       BigDecimal peak = favorableExtreme(priceSeries, pricePosition, priceIndex);
-      BigDecimal trailDistance = atr.multiply(value, EngineMath.MC);
       boolean isLong = pricePosition.direction() == Direction.LONG;
+      // Manas §3.5B arm_pct on the 1m intrabar path (mirrors the bar-close branch): inert until the
+      // 1m favourable extreme is up arm_pct. Absent → armed from entry, byte-identical to before.
+      BigDecimal armPct = decimal(params.get("arm_pct"));
+      if (armPct != null) {
+        BigDecimal gainPct =
+            (isLong
+                    ? peak.subtract(pricePosition.entryPrice())
+                    : pricePosition.entryPrice().subtract(peak))
+                .divide(pricePosition.entryPrice(), EngineMath.MC)
+                .multiply(EngineMath.HUNDRED, EngineMath.MC);
+        if (gainPct.compareTo(armPct) < 0) {
+          return Optional.empty();
+        }
+      }
+      BigDecimal trailDistance = atr.multiply(value, EngineMath.MC);
       boolean hit =
           isLong
               ? close.compareTo(peak.subtract(trailDistance)) <= 0
@@ -211,7 +233,8 @@ public final class ExitEvaluator {
 
     for (String type :
         new String[] {
-          "stop_loss", "trailing_stop", "take_profit", "scaled_exit", "time_stop", "signal_exit"
+          "stop_loss", "trailing_stop", "take_profit", "scaled_exit", "square_off", "time_stop",
+          "signal_exit"
         }) {
       for (StrategyDefinition.ExitRuleSpec rule : definition.exitRules()) {
         if (!rule.type().equals(type)) {
@@ -224,6 +247,7 @@ public final class ExitEvaluator {
               case "trailing_stop" -> trailing(bank, series, position, primaryIndex, rule, close);
               case "scaled_exit" ->
                   scaledEnabled ? scaledExit(position, close, rule, firedTiers) : Optional.empty();
+              case "square_off" -> squareOff(series, position, primaryIndex, rule, close);
               case "time_stop" -> timeStop(series, position, primaryIndex, rule);
               case "signal_exit" -> signalExit(bank, primaryIndex, rule);
               default -> Optional.empty();
@@ -264,6 +288,58 @@ public final class ExitEvaluator {
         return Optional.of(
             new ExitDecision(
                 "scaled_exit", "tier " + i + " +" + profitPct + "% sell " + qtyPct, qtyPct, i));
+      }
+    }
+    return Optional.empty();
+  }
+
+  /**
+   * Manas §3.5C square-off (long-only doctrine): exit when the trend goes exhaustive — either a
+   * TOO-FAST move (close ≥ close[{@code fast_bars} ago]×(1+{@code fast_pct}%)) OR a PARABOLIC
+   * extension (close ≥ SMA({@code parabolic_ma})×(1+{@code parabolic_dist_pct}%)). Mirrors
+   * {@code ManasAroraSwingBacktest.positionExit} (bar-close close/SMA reads, entry-independent), so
+   * it is fully deterministic. The SMA warms {@code parabolic_ma} bars; before that the parabolic
+   * clause is simply inert. Any param absent → that clause is skipped (both absent → never fires).
+   */
+  private static Optional<ExitDecision> squareOff(
+      EngineSeries series,
+      Position position,
+      int primaryIndex,
+      StrategyDefinition.ExitRuleSpec rule,
+      BigDecimal close) {
+    Map<String, Object> params = rule.params();
+    BigDecimal fastPct = decimal(params.get("fast_pct"));
+    Object fastBarsRaw = params.get("fast_bars");
+    if (fastPct != null && fastBarsRaw != null) {
+      int fastBars = ((Number) fastBarsRaw).intValue();
+      if (primaryIndex - fastBars >= 0) {
+        BigDecimal past = series.candle(primaryIndex - fastBars).close();
+        BigDecimal trigger =
+            past.multiply(
+                BigDecimal.ONE.add(fastPct.divide(EngineMath.HUNDRED, EngineMath.MC)), EngineMath.MC);
+        if (close.compareTo(trigger) >= 0) {
+          return Optional.of(
+              new ExitDecision("square_off", "too-fast +" + fastPct + "% in " + fastBars + " bars"));
+        }
+      }
+    }
+    Object parabolicMaRaw = params.get("parabolic_ma");
+    BigDecimal parabolicDistPct = decimal(params.get("parabolic_dist_pct"));
+    if (parabolicMaRaw != null && parabolicDistPct != null) {
+      int parabolicMa = ((Number) parabolicMaRaw).intValue();
+      BigDecimal sma =
+          IndicatorRegistry.create("SMA", series, null, Map.of("period", parabolicMa))
+              .valueAt(primaryIndex);
+      if (sma != null && sma.signum() > 0) {
+        BigDecimal trigger =
+            sma.multiply(
+                BigDecimal.ONE.add(parabolicDistPct.divide(EngineMath.HUNDRED, EngineMath.MC)),
+                EngineMath.MC);
+        if (close.compareTo(trigger) >= 0) {
+          return Optional.of(
+              new ExitDecision(
+                  "square_off", "parabolic +" + parabolicDistPct + "% over sma" + parabolicMa));
+        }
       }
     }
     return Optional.empty();
@@ -316,7 +392,20 @@ public final class ExitEvaluator {
           position.entryPrice().multiply(value, EngineMath.MC).divide(EngineMath.HUNDRED, EngineMath.MC);
       case "atr_multiple" -> {
         BigDecimal atr = atrAtEntry(series, position, params);
-        yield atr == null ? null : atr.multiply(value, EngineMath.MC);
+        if (atr == null) {
+          yield null;
+        }
+        BigDecimal atrDistance = atr.multiply(value, EngineMath.MC);
+        // Manas §3.5A: an optional cap_pct bounds the stop DISTANCE at cap_pct% of entry — the
+        // tighter of mult×ATR and the cap wins, so a wide-ATR stop never exceeds ~10%. Absent →
+        // unchanged (parity-safe-additive). Applies to stop/take_profit; harmless on take_profit.
+        BigDecimal capPct = decimal(params.get("cap_pct"));
+        if (capPct == null) {
+          yield atrDistance;
+        }
+        BigDecimal cap =
+            position.entryPrice().multiply(capPct, EngineMath.MC).divide(EngineMath.HUNDRED, EngineMath.MC);
+        yield atrDistance.min(cap);
       }
       case "r_multiple" -> {
         BigDecimal initialRisk = initialRisk(definition, series, position);
@@ -371,6 +460,20 @@ public final class ExitEvaluator {
       BigDecimal atr = atrAtEntry(series, position, params);
       if (value == null || atr == null) {
         return Optional.empty();
+      }
+      // Manas §3.5B: an optional arm_pct keeps the ATR trail INERT until the favourable extreme is
+      // up arm_pct off entry — before then the initial stop holds. Absent → armed from entry, so
+      // every existing atr_multiple trail is byte-identical. Deterministic: the peak is a bar-high
+      // function, the ATR is the entry-ATR, so once armed the stop = peak − mult×ATR ratchets up.
+      BigDecimal armPct = decimal(params.get("arm_pct"));
+      if (armPct != null) {
+        BigDecimal gainPct =
+            (isLong ? peak.subtract(position.entryPrice()) : position.entryPrice().subtract(peak))
+                .divide(position.entryPrice(), EngineMath.MC)
+                .multiply(EngineMath.HUNDRED, EngineMath.MC);
+        if (gainPct.compareTo(armPct) < 0) {
+          return Optional.empty();
+        }
       }
       BigDecimal trailDistance = atr.multiply(value, EngineMath.MC);
       boolean hit =

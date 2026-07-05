@@ -16,9 +16,10 @@ import org.junit.jupiter.api.Test;
 /**
  * Every seeded Manas Arora swing setup must be schema-valid, compile into an engine definition, and
  * carry the live-swing shape: a {@code manas_arora_funnel} universe, a {@code swing} session, a
- * {@code 1d} primary, and the ~10%-stop + 20-day-MA-trail exit doctrine. Pure: no DB, no market-data —
- * the classpath resources ARE the docs the seeder loads, so this list MUST stay in lockstep with
- * {@link ManasAroraStrategySeeder}'s STRATEGIES. Mirrors {@code MinerviniStrategyLoadTest}.
+ * {@code 1d} primary, and the §3.5 exit doctrine — a 2×ATR(20) stop capped ~10%, an armed 2×ATR trail,
+ * and a too-fast/parabolic square-off. Pure: no DB, no market-data — the classpath resources ARE the
+ * docs the seeder loads, so this list MUST stay in lockstep with {@link ManasAroraStrategySeeder}'s
+ * STRATEGIES. Mirrors {@code MinerviniStrategyLoadTest}.
  */
 class ManasAroraStrategyLoadTest {
 
@@ -54,11 +55,26 @@ class ManasAroraStrategyLoadTest {
       assertThat(def.primaryTimeframe()).as(id + " is daily-primary").isEqualTo("1d");
       assertThat(def.sizing().method()).as(id + " sizes by atr_risk").isEqualTo("atr_risk");
 
-      List<String> exitTypes = new ArrayList<>();
-      config.path("exit_rules").forEach(e -> exitTypes.add(e.path("type").asText()));
+      List<JsonNode> exitRules = new ArrayList<>();
+      config.path("exit_rules").forEach(exitRules::add);
+      List<String> exitTypes = exitRules.stream().map(e -> e.path("type").asText()).toList();
       assertThat(exitTypes)
-          .as(id + " carries the ~10%-stop + 20-day-MA-trail exit doctrine")
-          .containsExactly("stop_loss", "trailing_stop");
+          .as(id + " carries the §3.5 ATR-stop + armed-ATR-trail + square-off doctrine")
+          .containsExactly("stop_loss", "trailing_stop", "square_off");
+
+      JsonNode stopParams = exitRules.get(0).path("params");
+      assertThat(stopParams.path("basis").asText()).as(id + " stop is 2×ATR").isEqualTo("atr_multiple");
+      assertThat(stopParams.path("cap_pct").asInt()).as(id + " stop caps at ~10%").isEqualTo(10);
+      JsonNode trailParams = exitRules.get(1).path("params");
+      assertThat(trailParams.path("basis").asText()).as(id + " trail is 2×ATR").isEqualTo("atr_multiple");
+      assertThat(trailParams.path("arm_pct").asInt()).as(id + " trail arms once up ~9%").isEqualTo(9);
+      JsonNode squareOffParams = exitRules.get(2).path("params");
+      assertThat(squareOffParams.path("fast_pct").isMissingNode())
+          .as(id + " square-off has a too-fast clause")
+          .isFalse();
+      assertThat(squareOffParams.path("parabolic_ma").isMissingNode())
+          .as(id + " square-off has a parabolic clause")
+          .isFalse();
 
       List<String> tags = new ArrayList<>();
       config.path("tags").forEach(t -> tags.add(t.asText()));

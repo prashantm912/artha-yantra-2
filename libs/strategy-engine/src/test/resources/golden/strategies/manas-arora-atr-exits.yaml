@@ -1,0 +1,42 @@
+# Manas Arora §3.5 exit doctrine on the NEW additive engine exit-types — the golden coverage for the
+# ATR-cap stop, the armed ATR trail, and the exhaustion square-off. Same vcp-style pivot-breakout entry
+# as minervini-vcp-trail.yaml (close crosses the seeded pivot on expanding volume, above the 20-day MA),
+# so the entry mechanics are the proven ones; only the exit_rules exercise the new types:
+#   - stop_loss  basis=atr_multiple value=2 cap_pct=10  → entry − min(2×ATR(20), 10%×entry)
+#   - trailing_stop basis=atr_multiple value=2 arm_pct=9 → inert until +9%, then peak − 2×ATR (ratchets)
+#   - square_off fast_pct=35 fast_bars=3 parabolic_ma=10 parabolic_dist_pct=40
+# The ATR/SMA are entry-independent bar functions, so the run is fully deterministic (proven by a
+# byte-equal second replay). NOT in GoldenDeterminismTest.FEATURES — a focused ManasAtrExitsTest drives
+# it, so the frozen goldens stay byte-identical.
+schema: strategy-schema/v1
+id: manas-arora-atr-exits
+name: "Manas Arora (ATR §3.5 exits)"
+version: 1.0.0
+universe:
+  mode: explicit
+  instruments:
+    - { exchange: NSE, tradingsymbol: "NIFTY 50" }
+timeframes: { primary: 1d }
+indicators:
+  - { name: SMA, alias: px, timeframe: 1d, params: { period: 1 }, weight: 1.0,
+      normalize: { type: linear, from: 0, to: 100000 } }
+  - { name: SMA, alias: sma20, timeframe: 1d, params: { period: 20 }, weight: 1.0 }
+  - { name: VOLUME_RATIO, alias: vol, timeframe: 1d, params: { lookback: 20 }, weight: 1.0 }
+  - { name: VCP_PIVOT, alias: pivot, timeframe: 1d, weight: 0.0,
+      instrument: { exchange: NSE, tradingsymbol: "MINERVINI_PIVOT" } }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - crossover: { fast: px, slow: pivot }
+      - "vol > 1.2"
+      - "px > sma20"
+  scoring: { threshold: 0.0 }
+exit_rules:
+  - { type: stop_loss, params: { basis: atr_multiple, value: 2, atr_period: 20, cap_pct: 10 } }
+  - { type: trailing_stop, params: { basis: atr_multiple, value: 2, atr_period: 20, arm_pct: 9 } }
+  - { type: square_off, params: { fast_pct: 35, fast_bars: 3, parabolic_ma: 10, parabolic_dist_pct: 40 } }
+risk:
+  position_sizing: { method: percent_equity, params: { percent: 5 } }
+  max_positions: 1
+  session: { style: swing }

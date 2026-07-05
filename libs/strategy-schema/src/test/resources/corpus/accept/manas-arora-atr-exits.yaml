@@ -1,0 +1,34 @@
+# Manas Arora §3.5 exit doctrine on the new engine exit-types: a 2×ATR(20) stop capped ~10%, an armed
+# ATR trail (2×ATR, arm 9%), and the exhaustion square-off (too-fast + parabolic). Exercises the
+# additive schema keys: levelParams.cap_pct, trailing_stop.arm_pct, and the square_off exit type.
+schema: strategy-schema/v1
+id: accept-manas-arora-atr-exits
+name: "Manas Arora ATR exits"
+version: 1.0.0
+universe:
+  mode: manas_arora_funnel
+  bucket: buyable_on_deck
+timeframes: { primary: 1d }
+indicators:
+  - { name: SMA, alias: px, timeframe: 1d, params: { period: 1 }, weight: 0.0 }
+  - { name: SMA, alias: sma20, timeframe: 1d, params: { period: 20 }, weight: 0.0 }
+  - { name: VOLUME_RATIO, alias: vol, timeframe: 1d, params: { lookback: 20 }, weight: 1.0,
+      normalize: { type: linear, from: 0, to: 3 } }
+  - { name: VCP_PIVOT, alias: pivot, timeframe: 1d, weight: 0.0,
+      instrument: { exchange: NSE, tradingsymbol: "MANAS_PIVOT" } }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - crossover: { fast: px, slow: pivot }
+      - "vol > 1.2"
+      - "px > sma20"
+  scoring: { threshold: 0.1 }
+exit_rules:
+  - { type: stop_loss, params: { basis: atr_multiple, value: 2, atr_period: 20, cap_pct: 10 } }
+  - { type: trailing_stop, params: { basis: atr_multiple, value: 2, atr_period: 20, arm_pct: 9 } }
+  - { type: square_off, params: { fast_pct: 35, fast_bars: 3, parabolic_ma: 10, parabolic_dist_pct: 40 } }
+risk:
+  position_sizing: { method: atr_risk, params: { risk_pct_equity: 1.0 } }
+  max_positions: 7
+  session: { style: swing }

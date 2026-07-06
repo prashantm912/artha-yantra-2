@@ -34,6 +34,20 @@ ask you to confirm if you try to edit an existing `V*.sql`.)
 5. Apply locally: `./ay.ps1 reset-db` rebuilds all lineages from empty, or the running
    flyway-init picks it up on the next `ay up`.
 
+## Before a risky migration on the LIVE stack (audit M30)
+
+A destructive or data-mutating migration on the live DB warrants a safety net. The nightly
+3-slot retention can evict an ordinary `ay backup` before you've confirmed the migration is
+good, so take a **rotation-exempt** dump instead:
+
+```powershell
+./ay.ps1 backup keep    # whole-db pg_dump into backups/pinned/ — the retention never evicts it
+```
+
+Roll back with `ay restore backups/pinned/<stamp>`; delete the pinned dir yourself once the
+migration is proven good. (Never migrate an `ALTER` on the live DB while the nightly pg_dump
+is running — it can deadlock; see [[owner-gated-f9-f7-sensexpe]].)
+
 ## Example
 `deploy/flyway/backtest/V004__optimization_trials.sql`:
 ```sql

@@ -7,6 +7,11 @@
 # evicts the oldest. On failure the script POSTs the ops ntfy topic directly —
 # shell-side, no shared code; a no-op when ARTHA_NTFY_TOPIC is unset.
 #
+# mode=pinned (audit M30): a ROTATION-EXEMPT dump for a deliberate pre-migration
+# safety net. It writes to pinned/ (which retention never scans) and never prunes, so
+# a nightly can't evict the dump you took right before a risky migration. `ay backup
+# keep` runs this. Prune it yourself when the migration is proven good.
+#
 # WHY WHOLE-DATABASE (not per-schema): a `pg_dump -n <schema>` does NOT capture
 # TimescaleDB hypertable DATA — chunks live in the _timescaledb_internal schema,
 # OUTSIDE the dumped namespace — so candles / options_chain_snapshots (200M+
@@ -68,7 +73,8 @@ fi
 # stamp dir name is YYYYMMDD-HHMMSS, so a lexical sort is chronological; the just-written
 # $dest is the newest and always survives. weekly/ is no longer written to but is still
 # scanned so pre-existing weekly copies of this DB age out too. manual/ dumps are NOT
-# exempt — they count toward the cap.
+# exempt — they count toward the cap. pinned/ dumps (mode=pinned, M30) are NEVER scanned
+# here, so they are rotation-exempt and never counted.
 KEEP_PER_DB=3
 prune_db() {
   keep="$1"
@@ -88,7 +94,8 @@ prune_db() {
     echo "[backup] rotated out $old"
   done
 }
-prune_db "$KEEP_PER_DB"
+# A pinned (pre-migration) dump is deliberate — never rotate anything on its behalf.
+[ "$MODE" != "pinned" ] && prune_db "$KEEP_PER_DB"
 
 # Dead-man signal (audit P0-5): a SUCCESS ping too, so "no message by morning" means the
 # nightly did not run (stack down at 00:30, crond dead) — a silent miss was previously

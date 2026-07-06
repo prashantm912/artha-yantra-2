@@ -76,8 +76,9 @@ import org.springframework.transaction.support.TransactionTemplate;
  * pyramid.max-portfolio-risk-pct} (§3.4.3 "add without increasing risk exposure"). Each add auto-papers
  * through the ordinary path, so the per-book open key AVERAGES it into the ONE position (grown qty,
  * averaged entry): under §3.5.D a pyramided position closes ALL lots together, so an averaged single lot
- * is cash-identical to N physically-separate lots (Σ lot-price×qty == avg×totalQty) while touching no
- * shared uniqueness/close-join surface. The exit pass drives off the OLDEST lot per symbol — its trailed
+ * is cash-equivalent to the paisa to N physically-separate lots (Σ lot-price×qty ≈ avg×totalQty — a
+ * ≤1-paisa drift from the 4dp weighted-average entry) while touching no shared uniqueness/close-join
+ * surface. The exit pass drives off the OLDEST lot per symbol — its trailed
  * stop is the tightest, the pyramid's governing stop — and on exit closes the whole position and expires
  * every sibling lot. With the flag OFF a held symbol is simply skipped (the pre-F2 behavior). The
  * finer-grained per-lot backtest remains the modelling job.
@@ -428,9 +429,13 @@ public class ManasAroraSwingEngine {
    * §3.4.3 portfolio-risk gate for a pyramid ADD: true when opening the prospective new lot would push
    * the book's aggregate open risk over {@code pyramidMaxPortfolioRiskPct}% of book equity. The new
    * lot's risk = its advisory qty × the 2×ATR stop distance (the very sizing/stop the emit will use);
-   * the existing open risk + equity come from the {@link EmissionGuard} port. Returns false (does not
-   * block) when the guard is absent or equity/qty/stop is unknown — then the add simply is not
-   * auto-papered (no risk to gate).
+   * the existing open risk + equity come from the {@link EmissionGuard} port. This is a CONSERVATIVE
+   * PROXY, not the exact post-average book risk: the add averages into one position (new blended entry,
+   * total qty, keeping the ORIGINAL lot-1 bracket), so the true post-add risk is {@code (newAvg −
+   * origStop) × totalQty}; summing existing + {@code newQty × newStopDistance} instead never understates
+   * (the original stop only ever trails up), which is the safe direction for a "do not increase risk"
+   * gate. Returns false (does not block) when the guard is absent or equity/qty/stop is unknown — then
+   * the add simply is not auto-papered (no risk to gate).
    */
   private boolean wouldBreachRiskCap(
       SwingStrategy strat, String symbol, IndicatorBank bank, int index, BigDecimal entryPrice) {
@@ -557,8 +562,11 @@ public class ManasAroraSwingEngine {
     if (c.pivot() != null) {
       root.put("pivot", c.pivot().toPlainString());
     }
-    // §3.4 pyramiding: lot 1 = the first entry, ≥2 = an add-to-winner lot (audit + report/UI read).
-    root.put("pyramidLot", lotNumber);
+    // §3.4 pyramiding: stamp the lot number ONLY for an add (≥2) so a first entry's detail JSON stays
+    // byte-identical to pre-F2 (this is a DB side-channel — no golden/contract, but keep it stable).
+    if (lotNumber > 1) {
+      root.put("pyramidLot", lotNumber);
+    }
     return root.toString();
   }
 
@@ -570,7 +578,9 @@ public class ManasAroraSwingEngine {
     // paper position (§3.4); the pyramid's governing stop is the OLDEST lot's trailed stop — the
     // tightest, first to hit (§3.5.D). So the exit is driven off that lot and, when it fires, closes the
     // whole position and expires every sibling lot. A single-lot symbol behaves exactly as before
-    // (primary == the only lot, no siblings).
+    // (primary == the only lot, no siblings). INVARIANT: with pyramiding OFF the entry-block guarantees
+    // ≤1 active anchor per Manas symbol, so every group is a singleton and this grouping is byte-behaviour
+    // -identical to the pre-F2 per-anchor loop; a pyramid (flag ON) is the only source of multi-lot groups.
     Map<String, List<SignalRepository.SignalRow>> bySymbol = openLotsBySymbol(resolution);
     int closed = 0;
     int skipped = 0;

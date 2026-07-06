@@ -158,6 +158,134 @@ class ManasAroraSwingEngineTest {
     verify(h.events, never()).publishEvent(argThat((Object e) -> e instanceof SignalEmitted));
   }
 
+  @Test
+  void aHeldWinnerThatMakesAFreshPivotWithinTheRiskCapTakesAPyramidAdd() throws IOException {
+    AddResult r = runPyramidAdd(new BigDecimal("10000")); // existing book open risk 1% of a ₹10L equity
+
+    assertThat(r.run().entries()).as("the add fires as a 2nd lot").isEqualTo(1);
+    // the add is emitted (auto-paper averages it into the one position downstream) …
+    verify(r.events()).publishEvent(argThat((Object e) -> e instanceof SignalEmitted));
+    // … and the detail side-channel marks it lot 2 (§3.4).
+    org.mockito.ArgumentCaptor<String> detail = org.mockito.ArgumentCaptor.forClass(String.class);
+    verify(r.signals()).stampManasAroraDetail(org.mockito.ArgumentMatchers.anyLong(), detail.capture());
+    assertThat(detail.getValue()).contains("\"pyramidLot\":2");
+  }
+
+  @Test
+  void aPyramidAddIsBlockedWhenItWouldBreachTheOpenRiskCap() throws IOException {
+    // Existing book open risk already at the 6% cap of a ₹10L equity — §3.4.3 blocks the add
+    // ("add without increasing risk exposure"), even though the gain trigger + fresh pivot both hold.
+    AddResult r = runPyramidAdd(new BigDecimal("60000"));
+
+    assertThat(r.run().entries()).as("the risk cap blocks the add").isZero();
+    verify(r.events(), never()).publishEvent(argThat((Object e) -> e instanceof SignalEmitted));
+  }
+
+  /** Result of a pyramid-add scenario: the run plus the signal/event mocks for verification. */
+  private record AddResult(
+      ManasAroraSwingEngine.ManasSwingRun run,
+      in.arthayantra.strategysignal.signals.SignalRepository signals,
+      org.springframework.context.ApplicationEventPublisher events) {}
+
+  /**
+   * Wires a held TESTCO winner (entry 142) that is back in the funnel making a fresh 150-pivot breakout
+   * on 3× volume at 152 (a +7% move since the lot → over the +5% pyramid trigger), with pyramiding ON,
+   * and runs one batch. {@code existingOpenRiskInr} is what the book already has at risk (the §3.4.3
+   * gate input against a ₹10L equity). Returns the run + the mocks to assert on.
+   */
+  private AddResult runPyramidAdd(BigDecimal existingOpenRiskInr) throws IOException {
+    java.util.UUID strategyId = java.util.UUID.randomUUID();
+    java.util.UUID publishedVersion = java.util.UUID.randomUUID();
+    com.fasterxml.jackson.databind.JsonNode config = breakoutConfig();
+
+    StrategyRepository registry = mock(StrategyRepository.class);
+    StrategyRepository.StrategyRow strategyRow =
+        new StrategyRepository.StrategyRow(
+            strategyId, "manas-arora-breakout", "Manas Breakout", null, null,
+            List.of("manas-arora"), true, publishedVersion, null, null, false, null);
+    org.mockito.Mockito.when(registry.listAll()).thenReturn(List.of(strategyRow));
+    org.mockito.Mockito.when(registry.findVersionById(publishedVersion))
+        .thenReturn(
+            Optional.of(
+                new StrategyRepository.VersionRow(
+                    publishedVersion, strategyId, "1", null, config, "1", "chk", "published",
+                    null, null, null, null)));
+
+    List<EngineCandle> series = craft(3_000L); // pivot-150 breakout to 152 on 3× volume, LAST bar
+    in.arthayantra.strategysignal.signals.SignalRepository signals =
+        mock(in.arthayantra.strategysignal.signals.SignalRepository.class);
+    org.mockito.Mockito.when(signals.activeEntries())
+        .thenReturn(
+            List.of(
+                new in.arthayantra.strategysignal.signals.SignalRepository.SignalRow(
+                    42L, publishedVersion, "NSE", "TESTCO", "1d", "ENTRY", "BUY",
+                    new BigDecimal("142"), null, null, BigDecimal.ONE,
+                    new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode(),
+                    "TAKEN", series.get(19).bucketStart(), series.get(19).bucketStart().plusDays(1),
+                    null, null, null, null, null, null)));
+    org.mockito.Mockito.when(signals.insert(
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any()))
+        .thenReturn(55L);
+
+    ManasFunnelClient funnel = mock(ManasFunnelClient.class);
+    org.mockito.Mockito.when(funnel.buyableAndOnDeck())
+        .thenReturn(
+            List.of(
+                new ManasFunnelClient.Candidate(
+                    "TESTCO", new BigDecimal("152"), new BigDecimal("150"), "breakout", null,
+                    new BigDecimal("150"), null)));
+    in.arthayantra.strategysignal.signals.MarketDataCandlesClient candles =
+        mock(in.arthayantra.strategysignal.signals.MarketDataCandlesClient.class);
+    org.mockito.Mockito.when(candles.fetch(
+            org.mockito.ArgumentMatchers.eq("NSE"), org.mockito.ArgumentMatchers.eq("TESTCO"),
+            org.mockito.ArgumentMatchers.eq("1d"), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any()))
+        .thenReturn(series);
+
+    in.arthayantra.strategysignal.signals.EmissionGuard guard =
+        mock(in.arthayantra.strategysignal.signals.EmissionGuard.class);
+    org.mockito.Mockito.when(
+            guard.entryAllowed(in.arthayantra.strategysignal.signals.Books.MANAS_ARORA))
+        .thenReturn(true);
+    org.mockito.Mockito.when(
+            guard.bookEquity(in.arthayantra.strategysignal.signals.Books.MANAS_ARORA))
+        .thenReturn(new BigDecimal("1000000"));
+    org.mockito.Mockito.when(
+            guard.openRiskInr(in.arthayantra.strategysignal.signals.Books.MANAS_ARORA))
+        .thenReturn(existingOpenRiskInr);
+    org.mockito.Mockito.when(
+            guard.suggestedQty(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+        .thenReturn(new BigDecimal("100"));
+
+    org.springframework.context.ApplicationEventPublisher events =
+        mock(org.springframework.context.ApplicationEventPublisher.class);
+    org.springframework.transaction.support.TransactionTemplate tx =
+        mock(org.springframework.transaction.support.TransactionTemplate.class);
+    org.mockito.Mockito.when(tx.execute(org.mockito.ArgumentMatchers.any()))
+        .thenAnswer(inv ->
+            inv.<org.springframework.transaction.support.TransactionCallback<Long>>getArgument(0)
+                .doInTransaction(null));
+
+    ManasAroraSwingEngine engine =
+        new ManasAroraSwingEngine(
+            registry, funnel, candles, signals,
+            mock(in.arthayantra.strategysignal.signals.SignalPublisher.class),
+            events, Optional.of(guard), tx, new com.fasterxml.jackson.databind.ObjectMapper(),
+            java.time.Clock.systemUTC(), true, 520, 10, 1440,
+            true, new BigDecimal("5.0"), 3, new BigDecimal("6.0")); // minBars=10 for the 25-bar fixture
+
+    return new AddResult(engine.runDaily(), signals, events);
+  }
+
   // ---- harness --------------------------------------------------------------------------------
 
   /** Shared wiring: one published Manas strategy (real breakout YAML) + a held anchor, empty funnel. */
@@ -267,6 +395,30 @@ class ManasAroraSwingEngineTest {
     BigDecimal high = BigDecimal.valueOf(price + 1);
     BigDecimal low = BigDecimal.valueOf(price - 1);
     return new EngineCandle(bucket, c, high, low, c, 1_000L, null);
+  }
+
+  /**
+   * 25 daily bars that FIRE the breakout gate on the LAST bar: a rise 100→149, a consolidation 146–148
+   * below the 150 pivot, then a breakout to 152 on {@code breakoutVolume} (the §3.2 crossover above the
+   * pivot + the vol>1.2 gate). Mirrors the Minervini engine test's firing fixture.
+   */
+  private static List<EngineCandle> craft(long breakoutVolume) {
+    double[] tail = {146, 148, 146, 148, 147}; // consolidation below the pivot
+    List<EngineCandle> bars = new ArrayList<>();
+    for (int d = 0; d <= 18; d++) {
+      bars.add(volBar(d, 100.0 + (149.0 - 100.0) * d / 18.0, 1_000L));
+    }
+    for (int i = 0; i < tail.length; i++) {
+      bars.add(volBar(19 + i, tail[i], 1_000L));
+    }
+    bars.add(volBar(24, 152.0, breakoutVolume)); // the breakout bar (crossover above 150) — LAST bar
+    return bars;
+  }
+
+  private static EngineCandle volBar(int day, double price, long volume) {
+    OffsetDateTime bucket = OffsetDateTime.of(2026, 6, 1, 0, 0, 0, 0, IST).plusDays(day);
+    BigDecimal p = BigDecimal.valueOf(price);
+    return new EngineCandle(bucket, p, p, p, p, volume, null);
   }
 
   private static BigDecimal bd(long v) {

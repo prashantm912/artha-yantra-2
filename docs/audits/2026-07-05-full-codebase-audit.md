@@ -551,6 +551,7 @@ Every PR: build → test → adversarial review → CI-green → merge-or-hold.
 | H9 | Stale-jar deploy guard: every service jar bakes its git sha (`git.properties`) + build time (`build-info.properties`) → surfaced at `/actuator/info`; `ay verify-deploy` compares each running container's sha to source HEAD and fails loud on a STALE jar (the mutable `:dev` trap) | [#617] |
 | H11 | Manas swing zero-tests closed — engine covered by F2 (#612); new `ManasAroraSwingSchedulerTest` (delegation / batch-fail→alert / alert-publish-swallow) + `ManasAroraSellDecisionServiceTest` (family scoping / superseded-version adoption / per-symbol exception isolation) | [#618] |
 | H12 | Per-book paper isolation now tested — `BooksTest` (precedence copy) + `PaperBookIsolationIntegrationTest` (real V021 partial-unique index: cross-book coexistence + same-book double-open reject + close-frees-reopen; reset scoping; `bookForSignal` SQL precedence vs `Books.fromTags`) | [#619] |
+| H5 | Graduation P&L attributed to the ONE opening strategy — V026 `paper_positions.opening_signal_id` + fill-path stamp (first-open only; averaged/pyramid add keeps the original) + `closedPnls` joins it directly (each CLOSED position → exactly one strategy). 2-reviewer adversarial PASS; 18/18 tests. **MERGED on owner OK** (F7 flag-OFF → no live behaviour change; graduation figures become correct on next strategy-signal deploy) | [#621] |
 
 ### Medium — MERGED (auto-merge tier)
 | # | fix | PR |
@@ -575,7 +576,7 @@ Every PR: build → test → adversarial review → CI-green → merge-or-hold.
 | M32 | Corrected the stale Manas exit-doctrine comment (live IS 2×ATR, not an sma20 proxy — since #573) | [#594] | doctrine text |
 | M33 | Manas sell-decision reports the real 2×ATR trail via a new parity-safe `ExitEvaluator.trailStop` accessor (was reporting sma20) | [#594] | changes the daily sell-decision "trail level" number |
 | M12/M35/M39 | (above) | [#591] | screener selection change — owner eyeballs the new pass-set |
-| H5 | Graduation P&L attributed to the ONE opening strategy (V026 `paper_positions.opening_signal_id` + fill-path stamp + `closedPnls` join); 2-reviewer adversarial PASS; 18/18 tests green | [#621] | shifts the (now-correct) F7 graduation numbers — F7 is flag-OFF / measurement-only, no live behaviour change |
+| H5 | (owner approved 2026-07-07 → **MERGED**, moved to High — DONE above) | [#621] | — |
 
 ### Remaining (NOT done — reason)
 - **High:** **H4** (Manas live ATR-trail semantics vs backtest — arm-anchor/ATR-pinning/breakeven-floor; the deeper parity fix — #594 only corrected the sell-decision *report*, not the exit *engine*), **H6** (screener reads CA-unadjusted bhavcopy), **H8** (cheat-3c mislabel — doctrine). *(DONE this pass: H9 stale-jar guard [#617], H11 Manas swing tests [#618], H12 per-book isolation tests [#619]; H5 graduation attribution BUILT + adversarial-PASS, HELD for owner [#621].)*

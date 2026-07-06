@@ -47,11 +47,14 @@ export function ChartsPage() {
   const [older, setOlder] = useState<MarketCandle[]>([]);
   const loadingOlder = useRef(false);
   const noMoreOlder = useRef(false);
+  // Reset scroll-back ONLY on symbol/interval change — not on every candles.data change, else the
+  // market-hours auto-refresh would wipe scrolled-back history each ~10s poll (the bars merge dedups
+  // base vs older by bucket, so an overlapping refresh is safe).
   useEffect(() => {
     setOlder([]);
     loadingOlder.current = false;
     noMoreOlder.current = false;
-  }, [symbol, interval, candles.data]);
+  }, [symbol, interval]);
 
   const bars = useMemo(() => {
     const base = candles.data?.items ?? [];

@@ -8,6 +8,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from './client.ts';
 import { useCalendarStatus } from './marketCalendar.ts';
+import { isMarketHoursIst } from '../lib/marketHours.ts';
 import type { MarketCandle } from './types.ts';
 
 export const CHART_INTERVALS = ['1m', '3m', '5m', '15m', '1h', '1d', '1w'] as const;
@@ -82,8 +83,15 @@ export function useCandles(symbol: string, interval: string) {
   // though the bars exist for the last session. Falls back to `now` until the calendar resolves.
   const lastDay = useCalendarStatus().data?.lastTradingDay;
   const roll = ROLLUP[interval];
+  const intraday = interval !== '1d' && interval !== '1w';
   return useQuery({
     queryKey: ['candles', symbol, interval, lastDay ?? null],
+    // Auto-refresh the series during the IST cash session so intraday candles advance without a
+    // manual reload (the streaming datafeed is still deferred — this is the polite-poll bridge, the
+    // documented sole consumer of isMarketHoursIst). ~10s picks up each newly-completed bar and
+    // refreshes the still-forming one; daily/weekly and off-hours stay a one-shot fetch. Since queryFn
+    // recomputes `to = now` each run, every poll advances the window to the latest bar.
+    refetchInterval: intraday ? () => (isMarketHoursIst() ? 10_000 : false) : false,
     queryFn: async () => {
       const span = SPAN_MS[interval] ?? SPAN_MS['1d'];
       // Anchor `to` at the EARLIER of the last session's 15:30 close and now. On a weekend/holiday

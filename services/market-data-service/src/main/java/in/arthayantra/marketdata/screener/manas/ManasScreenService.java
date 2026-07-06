@@ -134,12 +134,19 @@ public class ManasScreenService {
       calc2 AS (
         SELECT calc.*,
           lag(sma200, ?) OVER (PARTITION BY symbol ORDER BY bucket) AS sma200_ago,
+          -- Trailing closes for the IBD-style weighted RS (§4.1): 3/6/9/12-month lookbacks. The 420-day
+          -- base window + the sessions>=252 filter guarantees these exist for every passing name.
+          lag(close,  63) OVER (PARTITION BY symbol ORDER BY bucket) AS c63,
+          lag(close, 126) OVER (PARTITION BY symbol ORDER BY bucket) AS c126,
+          lag(close, 189) OVER (PARTITION BY symbol ORDER BY bucket) AS c189,
+          lag(close, 252) OVER (PARTITION BY symbol ORDER BY bucket) AS c252,
           row_number() OVER (PARTITION BY symbol ORDER BY bucket DESC) AS rn
         FROM calc
       )
       SELECT calc2.symbol, calc2.close, calc2.sma50, calc2.sma200, calc2.sma200_ago,
              calc2.high_52w, calc2.low_52w, calc2.recent_high,
              calc2.avg_vol_20, calc2.avg_vol_50, calc2.turnover_50,
+             calc2.c63, calc2.c126, calc2.c189, calc2.c252,
              ef.free_float_mcap_cr AS ff_mcap, ef.free_float_pct AS ff_pct
       FROM calc2
       LEFT JOIN equity_fundamentals ef ON ef.symbol = calc2.symbol

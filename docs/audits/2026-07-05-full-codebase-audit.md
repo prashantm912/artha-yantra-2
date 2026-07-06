@@ -573,8 +573,7 @@ Every PR: build → test → adversarial review → CI-green → merge-or-hold.
 ### HELD green-unmerged — owner reviews on wake (changes an owner-facing number / doctrine)
 | # | fix | PR | why held |
 |---|---|---|---|
-| M32 | Corrected the stale Manas exit-doctrine comment (live IS 2×ATR, not an sma20 proxy — since #573) | [#594] | doctrine text |
-| M33 | Manas sell-decision reports the real 2×ATR trail via a new parity-safe `ExitEvaluator.trailStop` accessor (was reporting sma20) | [#594] | changes the daily sell-decision "trail level" number |
+| M32/M33 | (owner approved 2026-07-07 → **MERGED + DEPLOYED LIVE**: rebased onto current main, 147 strategy-engine + 14 Manas + 9 BacktestParity tests green, goldens byte-identical; strategy-signal recreated on the #594 build, running sha == HEAD; sell-decision `trailLevel` now the real 2×ATR trail — verified null-when-not-armed on the 2 open positions vs the old misleading sma20) | [#594] | — |
 | M12/M35/M39 | (above) | [#591] | screener selection change — owner eyeballs the new pass-set |
 | H5 | (owner approved 2026-07-07 → **MERGED**, moved to High — DONE above) | [#621] | — |
 

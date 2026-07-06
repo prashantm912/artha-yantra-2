@@ -214,3 +214,24 @@ is now **fully two-sided with both regimes sampled**: chop (07-03, veto saved 51
 veto cost +₹19,274) — the relative-floor form is the only fix that honours both. Dot rates
 (`drastic_oi` 56↔97%, `trending_cross` 12↔42%, `vix` 2↔100%, `oi-divergence-magnitude` 6→16→24) swing hard
 across the three sessions — hold ALL dot-threshold moves for the multi-session rollup (now 3 of ~5 needed).
+
+---
+
+## Addendum (2026-07-06, post-close ~19:35 IST) — gate/screener changes SHIPPED AFTER this session's data window
+Recorded so the NEXT session's forensics (2026-07-07, which carries this ledger forward per README §1) reads the
+shifted population as EXPECTED, not as a data anomaly:
+
+- **§7 item 1 — volume-floor: RELATIVE FLOOR ARMED, status PROPOSED → SHIPPED/ARMED (#605).** All 21 published
+  NIFTY scalpers now carry the `relative-volume-floor` tag: the §0B floor is `k × median(prior-N bar volumes)`
+  (k=1.5 / N=20 / minBars=10, `artha.scalper.oi.relativeVolume*`), scale-invariant. **From 2026-07-07 expect
+  volume-floor to block FAR fewer bars** (was 525/643 first-blocks) and the composite-passing entries it used to
+  veto (today's shadow-book +312pts/+₹19,274 class) to **FIRE FOR REAL → real paper positions, not shadow rows.**
+  For 07-07: (a) re-run §3.2 to find the NEXT binding rail once the wall is relaxed, (b) judge whether k=1.5 fires
+  too much/little, (c) compare real fills vs the shadow promise. **Do NOT re-propose lowering a fixed floor.**
+- **F1 shadow-league null-net misreport — FIXED + LIVE.** The league now returns `unpriced` (count of CLOSED rows
+  with null pnl_net); champion reads `unpriced:20`, so its +₹19,274 net is no longer mis-read as covering all 35
+  closed. The §6 "pnlNet vs pnlPoints sign clash" is confirmed a coverage artifact, now surfaced in the API.
+- **Screener #607 DEPLOYED** — Manas liquidity 25×→50× (M35) + deterministic RS tie-break (M12) + M39 depth/65wk
+  caps active with the min-base-weeks floor DISABLED. Affects the equity swing funnel, NOT this scalper session.
+
+This addendum is informational (file stays immutable otherwise). See memory `relative-vol-floor-armed.md`.

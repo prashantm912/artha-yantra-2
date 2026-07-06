@@ -566,6 +566,7 @@ Every PR: build → test → adversarial review → CI-green → merge-or-hold.
 | M25 | Single-permit `SwingBacktestGate` — two deep sims can't OOM the 448 MB live heap | [#595] |
 | M22 | Screener Recompute invalidates the derived funnel + candidate caches | [#596] |
 | M23 | Clickable table rows keep `<tr>` grid semantics (in-cell toggle button; dropped `role="button"`) | [#596] |
+| M29 | Ops knobs (9 graduation thresholds + per-trade-risk-pct + 4 batch crons) now have compose env passthroughs (defaults mirror the code `@Value`) + `.env.example` docs — settable via `.env` without editing the image | [#623] |
 
 ### HELD green-unmerged — owner reviews on wake (changes an owner-facing number / doctrine)
 | # | fix | PR | why held |
@@ -577,7 +578,7 @@ Every PR: build → test → adversarial review → CI-green → merge-or-hold.
 
 ### Remaining (NOT done — reason)
 - **High:** **H4** (Manas live ATR-trail semantics vs backtest — arm-anchor/ATR-pinning/breakeven-floor; the deeper parity fix — #594 only corrected the sell-decision *report*, not the exit *engine*), **H6** (screener reads CA-unadjusted bhavcopy), **H8** (cheat-3c mislabel — doctrine). *(DONE this pass: H9 stale-jar guard [#617], H11 Manas swing tests [#618], H12 per-book isolation tests [#619]; H5 graduation attribution BUILT + adversarial-PASS, HELD for owner [#621].)*
-- **Medium:** M1 (margin-heat `?book=` — needs a contract recapture), M2 (reconcile transient-retry — first attempt broke `#579` IT; needs the resolver to signal transient-vs-stable), M3/M4/M6/M7/M8/M9/M10/M11/M27 (swing exit-parity + backtest-methodology — a coherent HOLD batch), M13/M14 (holiday-guard / freshness — entangled with the owner's "analyse the last close any session" preference), M15 (historical, doc-only), M16 (book-DEFAULT fail-open — first attempt broke `PaperAccountRiskIntegrationTest`; needs a Books-scoped startup assertion not a runtime guard), M17/M18/M20 (larger FE surfaces), M29/M30 (ops-knob exposure / backup-before-migration convention), M31 (fork-debt refactor — high blast radius), M36/M37/M38/M40 (setup-doctrine — owner calls).
+- **Medium:** M1 (margin-heat `?book=` — needs a contract recapture), M2 (reconcile transient-retry — first attempt broke `#579` IT; needs the resolver to signal transient-vs-stable), M3/M4/M6/M7/M8/M9/M10/M11/M27 (swing exit-parity + backtest-methodology — a coherent HOLD batch), M13/M14 (holiday-guard / freshness — entangled with the owner's "analyse the last close any session" preference), M15 (historical, doc-only), M16 (book-DEFAULT fail-open — first attempt broke `PaperAccountRiskIntegrationTest`; needs a Books-scoped startup assertion not a runtime guard), M17/M18/M20 (larger FE surfaces), M30 (backup-before-migration convention), M31 (fork-debt refactor — high blast radius), M36/M37/M38/M40 (setup-doctrine — owner calls). *(M29 ops-knob exposure DONE — [#623].)*
 - **Low:** ~28 items — none started this pass (all cosmetic / long-tail / test-nicety).
 
 *Fix pass authored autonomously 2026-07-06; PR links are on the repo. HELD PRs await the owner's

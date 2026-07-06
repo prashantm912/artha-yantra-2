@@ -79,7 +79,12 @@ export function foldParticipantOi(rows: ParticipantOiRow[]): ParticipantGroup[] 
   const at = (date: string, participant: string) =>
     rows.find((r) => r.tradeDate === date && r.clientType.toUpperCase() === participant.toUpperCase());
 
-  const participants = [...new Set(rows.filter((r) => r.tradeDate === latest).map((r) => r.clientType))];
+  // Exclude the synthetic market-clearing `TOTAL` row (audit 2026-07-06 D1): the feed returns a
+  // TOTAL client type equal to the sum of the four real participants (Client/DII/FII/Pro). Left in, it
+  // rendered a spurious 5th "TOTAL" table AND doubled the segment denominator below — halving every
+  // participant's Long%/Short% share.
+  const isReal = (r: { clientType: string }) => r.clientType.toUpperCase() !== 'TOTAL';
+  const participants = [...new Set(rows.filter((r) => r.tradeDate === latest && isReal(r)).map((r) => r.clientType))];
   participants.sort((a, b) => {
     const ia = PARTICIPANT_ORDER.indexOf(a);
     const ib = PARTICIPANT_ORDER.indexOf(b);
@@ -88,7 +93,7 @@ export function foldParticipantOi(rows: ParticipantOiRow[]): ParticipantGroup[] 
 
   // Market-wide denominators per segment (the standard % reading): every participant's long/short
   // summed for the latest date. One pass, keyed by segment label.
-  const latestRows = rows.filter((r) => r.tradeDate === latest);
+  const latestRows = rows.filter((r) => r.tradeDate === latest && isReal(r));
   const segmentTotals = new Map<string, { long: number; short: number }>(
     SEGMENTS.map((s) => [
       s.label,

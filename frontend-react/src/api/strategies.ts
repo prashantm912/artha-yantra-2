@@ -71,6 +71,9 @@ export function useStrategies(q: string, status: string | null) {
       const params = new URLSearchParams();
       if (q) params.set('q', q);
       if (status) params.set('status', status);
+      // Ask for the full list — the endpoint defaults to 50, silently hiding rows once the strategy
+      // count exceeds it (audit 2026-07-06 D2: 73 strategies → a published one dropped off at 50).
+      params.set('limit', '200');
       const qs = params.toString();
       return apiFetch<{ items: StrategySummary[] }>(`/strategies${qs ? `?${qs}` : ''}`);
     },

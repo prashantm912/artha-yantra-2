@@ -17,7 +17,7 @@ class VcpDetectorTest {
 
   // Default thresholds (mirror the @Value defaults): 2.5% zig-zag, 2–6 contractions, ratio 0.2–0.9,
   // final-vol-low 0.5, cheat-fraction 0.5, thrust +100% in ≤40 sessions.
-  private final VcpDetector detector = new VcpDetector(2.5, 2, 6, 0.2, 0.9, 0.5, 0.5, 100, 40);
+  private final VcpDetector detector = new VcpDetector(2.5, 2, 6, 0.2, 0.9, 0.5, 0.5, 100, 40, 60, 3, 65);
 
   @Test
   void reproducesCanonicalFootprint() {
@@ -69,6 +69,28 @@ class VcpDetectorTest {
     assertThat(f.vcp()).isTrue();
     assertThat(f.footprint()).isEqualTo("40W 31/3 4T");
     assertThat(f.volumeDryUp()).isFalse();
+  }
+
+  @Test
+  void rejectsATooDeepBase() {
+    // Audit M39 / doc §3.2 precondition 5: a base whose deepest contraction is >= 60% is heavy
+    // overhead supply, not a proper VCP — even if the contractions narrow. Same PROVEN canonical
+    // structure (4 narrowing contractions), but C1 is 65% deep instead of 31%. Pre-fix this passed
+    // as a valid VCP and seeded a live pivot.
+    List<DailyBar> bars = new ArrayList<>();
+    append(bars, 0, 70.0, 5, 100.0, 1_000_000); //   0..5   rally into base high P1
+    append(bars, 5, 100.0, 33, 35.0, 1_000_000); //   5..38  C1 -65% -> T1 (too deep)
+    append(bars, 38, 35.0, 33, 97.0, 1_000_000); //  38..71  rally -> P2
+    append(bars, 71, 97.0, 33, 80.51, 1_000_000); // 71..104 C2 -17% -> T2
+    append(bars, 104, 80.51, 33, 95.0, 1_000_000); // 104..137 rally -> P3
+    append(bars, 137, 95.0, 33, 87.40, 1_000_000); // 137..170 C3 -8% -> T3
+    append(bars, 170, 87.40, 35, 93.0, 1_000_000); // 170..205 rally -> P4 (pivot)
+    appendFinalContraction(bars, 205, 93.0, 10, 90.21, true); // C4 -3%
+
+    VcpFootprint f = detector.detect(bars);
+
+    assertThat(f.vcp()).isFalse();
+    assertThat(f.rejectReason()).contains("too deep");
   }
 
   @Test

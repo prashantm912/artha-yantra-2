@@ -20,7 +20,7 @@ import org.junit.jupiter.api.Test;
  */
 class MinerviniSwingBacktestTest {
 
-  private final VcpDetector detector = new VcpDetector(2.5, 2, 6, 0.2, 0.9, 0.5, 0.5, 100, 40);
+  private final VcpDetector detector = new VcpDetector(2.5, 2, 6, 0.2, 0.9, 0.5, 0.5, 100, 40, 60, 3, 65);
 
   @Test
   void primaryBaseTakesABreakoutTradeAndStopsOutOnTheRollover() {

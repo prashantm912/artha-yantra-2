@@ -51,7 +51,11 @@ public class ManasScreenService {
       @Value("${artha.manas-arora.new-high-lookback-sessions:126}") int newHighLookbackSessions,
       @Value("${artha.manas-arora.min-avg-volume:5000}") BigDecimal minAvgVolume,
       @Value("${artha.manas-arora.intended-qty:100}") BigDecimal intendedQty,
-      @Value("${artha.manas-arora.liquidity-multiple:25}") BigDecimal liquidityMultiple,
+      // Doc §4.3: 10-week average volume must be >= 50x (ideally 50-100x) the intended quantity —
+      // the "you can (almost) always exit" structural-safety floor. The old 25x default (copied from
+      // the Minervini screen's different turnover-in-rupees formula) admitted names with HALF the
+      // required depth into the funnel + the ₹1.5L Manas paper book (audit M35).
+      @Value("${artha.manas-arora.liquidity-multiple:50}") BigDecimal liquidityMultiple,
       @Value("${artha.manas-arora.lowcap-gate.enabled:false}") boolean lowCapGateEnabled,
       @Value("${artha.manas-arora.max-free-float-mcap-cr:5000}") BigDecimal maxFreeFloatMcapCr,
       @Value("${artha.manas-arora.max-free-float-pct:35}") BigDecimal maxFreeFloatPct) {

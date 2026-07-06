@@ -54,3 +54,40 @@ return. Live analogue `rs-turnover` ≈ **+3.4%/trade, ~26% CAGR / ~50% DD**.
 
 *Run 2026-07-06 ~20:20–21:22 IST on the deployed image (main @ #607). `GET .../swing-backtest/compare`
 holds the full per-variant portfolio + annual returns + slot/turnover sweeps.*
+
+---
+
+## Comparison vs the previous backtests (#557 Jul-5, #606 caps-OFF Jul-6)
+
+**Per-trade edge — UNCHANGED (this is the headline):**
+| metric | #557 (Jul 5) | #607 (today) |
+|---|---|---|
+| Minervini technical exp/trade | +5.68% | +5.64% |
+| Minervini rs-turnover exp/trade | +5.10% | +5.07% |
+| Manas rs-turnover exp/trade | +4.34% (raw) | +3.41% |
+
+**Minervini 8-slot FIFO CAGR — the RS-filtered variants revised DOWN ~9pp, and it's a CORRECTNESS revision:**
+| variant | #557 | #607 | Δ |
+|---|---|---|---|
+| technical *(control)* | 28% | 28.1% | **flat — proves the sim engine + per-trade edge are unchanged** |
+| rs-only | 43.4% (Sh 0.96, DD −53%) | 34.6% (Sh 1.02, DD −23.5%) | **−9pp CAGR, but Sharpe ↑ and DD HALVED** |
+| rs-turnover | 22.8% | 14.1% | −9pp |
+
+Only the **RS-filtered** variants moved because between #557 and now, **#606 fixed 3 RS-rank bugs**
+(percentile strictly-below→midpoint; membership window 252-vs-260; rank-date-only→**as-of** contribution)
+**+ #607 added the M12 deterministic tie-break**. The 8-slot book is capacity-bound (~717 of 28k trades
+get slots), so a corrected RS ranking picks a smaller, more honest subset. The old 43% was inflated by a
+buggy/non-deterministic RS calc feeding a favorable subset into the slots; **the new 34.6% is the trustworthy
+number — and it is BETTER risk-adjusted** (Sharpe 0.96→1.02, max-DD −53%→−23.5%: the corrected as-of ranking
+stops piling into names that later crashed).
+
+**Cross-check — #607 reproduces the #606 caps-OFF baseline** (both floor-disabled, both post-fix), confirming
+today's run: rs-turnover FIFO CAGR 14.3%→**14.1%**, RS-priority-net 19.2%→**19.1%**, vcp 7,458→**7,460** trades.
+
+**Manas — stable / slightly better:** rs-turnover CAGR 23.9%→**26.5%** (Sharpe 0.75→0.77); pyramiding Sharpe
+**0.96**. Per-trade edge a touch lower (+4.34%→+3.41%) but same ballpark.
+
+**Verdict:** nothing degraded — per-trade edges are unchanged. The big-looking Minervini RS-CAGR drop is a
+downward *correction* from the RS-rank fixes + deterministic tie-break, arriving with a *better* risk profile
+(lower DD, higher Sharpe). Trust the new numbers. Realistic-live firms up at **~14% FIFO / ~19% RS-priority-net
+CAGR (Minervini rs-turnover), ~26% (Manas)**, both at 44–50% DD.

@@ -7,7 +7,9 @@ import in.arthayantra.strategysignal.scalper.ScalperGateContext.Oi;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalTime;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * The Siva §0B universal pre-flight gates as pure functions (master plan §12.1). Each returns a
@@ -170,6 +172,31 @@ public final class ScalperGates {
    */
   public static BigDecimal volumeFloorFor(String underlying, BigDecimal override) {
     return override != null ? override : VOL_FLOOR.getOrDefault(underlying, INDEX_VOL);
+  }
+
+  /**
+   * RELATIVE volume floor (signal-analysis rollup 2026-07-06 §7#1, tag {@code relative-volume-floor}):
+   * resolve the §0B floor to {@code multiplier ×} the MEDIAN of {@code priorVolumes} — the bars strictly
+   * BEFORE the deploy bar (excluded, so a quiet bar can never lower its own floor). SCALE-INVARIANT: the
+   * median is taken over the SAME series the {@link #volume} rail's operand reads, so it self-calibrates
+   * whatever the bar's volume basis (1m vs 3m) — the fixed 125k floor sat above the physical 3m range on
+   * the live tick-agg series (max ~95k on 2026-07-06) and never passed. Falls back to
+   * {@code absoluteFallback} while fewer than {@code minBars} prior bars exist (session warmup), so the
+   * open is never left floor-less. The rail stays byte-identical for every unarmed strategy (the tag is
+   * default-OFF and no shipped YAML carries it) because the caller only substitutes this when armed.
+   */
+  public static BigDecimal relativeVolumeFloor(
+      List<BigDecimal> priorVolumes, BigDecimal multiplier, int minBars, BigDecimal absoluteFallback) {
+    List<BigDecimal> vols = priorVolumes.stream().filter(Objects::nonNull).sorted().toList();
+    if (vols.size() < minBars) {
+      return absoluteFallback;
+    }
+    int n = vols.size();
+    BigDecimal median =
+        n % 2 == 1
+            ? vols.get(n / 2)
+            : vols.get(n / 2 - 1).add(vols.get(n / 2)).divide(BigDecimal.valueOf(2));
+    return median.multiply(multiplier);
   }
 
   /**

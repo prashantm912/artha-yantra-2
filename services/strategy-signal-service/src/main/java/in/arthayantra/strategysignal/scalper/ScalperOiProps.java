@@ -36,7 +36,10 @@ public record ScalperOiProps(
     BigDecimal rsiDailyPeFloor,
     BigDecimal rsiOversoldTrough,
     BigDecimal rsiRecoveryLevel,
-    BigDecimal rsiRecoveryLookback) {
+    BigDecimal rsiRecoveryLookback,
+    BigDecimal relativeVolumeMultiplier,
+    BigDecimal relativeVolumeWindow,
+    BigDecimal relativeVolumeMinBars) {
 
   // T2.1: the #5 call-put delta-imbalance HARD pre-gate floor (>= 50% of the larger leg).
   private static final BigDecimal DEFAULT_CROSS_FILTER_PCT = new BigDecimal("50");
@@ -81,6 +84,13 @@ public record ScalperOiProps(
   private static final BigDecimal DEFAULT_RSI_OVERSOLD_TROUGH = new BigDecimal("20");
   private static final BigDecimal DEFAULT_RSI_RECOVERY_LEVEL = new BigDecimal("40");
   private static final BigDecimal DEFAULT_RSI_RECOVERY_LOOKBACK = new BigDecimal("10");
+  // signal-analysis rollup 2026-07-06 §7#1 (tag relative-volume-floor, default-OFF): the RELATIVE
+  // volume floor = k × median(prior-N bar volumes). k=1.5 → a real participation spike vs the recent
+  // norm; N=20 ≈ the last hour on 3m; below minBars=10 prior bars the rail falls back to the fixed §0B
+  // floor (session warmup). Starting values — owner-tunable as the live veto rate is observed.
+  private static final BigDecimal DEFAULT_RELATIVE_VOLUME_MULTIPLIER = new BigDecimal("1.5");
+  private static final BigDecimal DEFAULT_RELATIVE_VOLUME_WINDOW = new BigDecimal("20");
+  private static final BigDecimal DEFAULT_RELATIVE_VOLUME_MIN_BARS = new BigDecimal("10");
 
   /** Fills any unset field with its documented default (so a partial yaml override is honoured). */
   public ScalperOiProps {
@@ -109,12 +119,18 @@ public record ScalperOiProps(
     rsiOversoldTrough = rsiOversoldTrough == null ? DEFAULT_RSI_OVERSOLD_TROUGH : rsiOversoldTrough;
     rsiRecoveryLevel = rsiRecoveryLevel == null ? DEFAULT_RSI_RECOVERY_LEVEL : rsiRecoveryLevel;
     rsiRecoveryLookback = rsiRecoveryLookback == null ? DEFAULT_RSI_RECOVERY_LOOKBACK : rsiRecoveryLookback;
+    relativeVolumeMultiplier =
+        relativeVolumeMultiplier == null ? DEFAULT_RELATIVE_VOLUME_MULTIPLIER : relativeVolumeMultiplier;
+    relativeVolumeWindow =
+        relativeVolumeWindow == null ? DEFAULT_RELATIVE_VOLUME_WINDOW : relativeVolumeWindow;
+    relativeVolumeMinBars =
+        relativeVolumeMinBars == null ? DEFAULT_RELATIVE_VOLUME_MIN_BARS : relativeVolumeMinBars;
   }
 
   /** The all-defaults instance (used where config is absent — tests, the pure-scorer fallback). */
   public static ScalperOiProps defaults() {
     return new ScalperOiProps(
         null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
-        null, null, null, null, null);
+        null, null, null, null, null, null, null, null);
   }
 }

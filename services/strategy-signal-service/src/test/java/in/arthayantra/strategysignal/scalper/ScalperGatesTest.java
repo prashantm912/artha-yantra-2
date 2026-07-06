@@ -9,6 +9,8 @@ import in.arthayantra.strategysignal.scalper.ScalperGateContext.Macro;
 import in.arthayantra.strategysignal.scalper.ScalperGateContext.Oi;
 import java.math.BigDecimal;
 import java.time.LocalTime;
+import java.util.ArrayList;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /** §0B universal pre-flight gates — boundary coverage (master plan §12.1). */
@@ -26,6 +28,49 @@ class ScalperGatesTest {
     assertThat(ScalperGates.confluenceFlippedAgainst("CE", "NEUTRAL")).isFalse(); // weak, not a flip
     assertThat(ScalperGates.confluenceFlippedAgainst("NEUTRAL", "PE")).isFalse(); // no held side
     assertThat(ScalperGates.confluenceFlippedAgainst("", "CE")).isFalse();
+  }
+
+  @Test
+  void relativeVolumeFloorScalesTheMedianOfPriorBars() {
+    // odd count: median of [10,20,30,40,50] = 30; k=1.5 -> 45. Order-independent (sorted internally).
+    assertThat(
+            ScalperGates.relativeVolumeFloor(
+                List.of(bd("30"), bd("10"), bd("50"), bd("20"), bd("40")), bd("1.5"), 3, bd("125000")))
+        .isEqualByComparingTo("45");
+    // even count: median of [10,20,30,40] = 25; k=2 -> 50.
+    assertThat(
+            ScalperGates.relativeVolumeFloor(
+                List.of(bd("40"), bd("10"), bd("30"), bd("20")), bd("2"), 3, bd("125000")))
+        .isEqualByComparingTo("50");
+  }
+
+  @Test
+  void relativeVolumeFloorFallsBackToFixedFloorBelowWarmup() {
+    // 2 prior bars but minBars=3 -> the fixed §0B fallback, unchanged (never left floor-less at the open).
+    assertThat(ScalperGates.relativeVolumeFloor(List.of(bd("10"), bd("20")), bd("1.5"), 3, bd("125000")))
+        .isEqualByComparingTo("125000");
+    assertThat(ScalperGates.relativeVolumeFloor(List.of(), bd("1.5"), 3, bd("125000")))
+        .isEqualByComparingTo("125000");
+  }
+
+  @Test
+  void relativeVolumeFloorIgnoresNullBarsWhenCountingWarmup() {
+    // 3 non-null of [null,10,null,20,30] meets minBars=3; median 20; k=1 -> 20 (NOT the fallback).
+    var withNulls = new ArrayList<BigDecimal>();
+    withNulls.add(null);
+    withNulls.add(bd("10"));
+    withNulls.add(null);
+    withNulls.add(bd("20"));
+    withNulls.add(bd("30"));
+    assertThat(ScalperGates.relativeVolumeFloor(withNulls, bd("1"), 3, bd("125000")))
+        .isEqualByComparingTo("20");
+    // if nulls drop the real count below minBars, fall back to the fixed floor.
+    var mostlyNull = new ArrayList<BigDecimal>();
+    mostlyNull.add(null);
+    mostlyNull.add(bd("10"));
+    mostlyNull.add(null);
+    assertThat(ScalperGates.relativeVolumeFloor(mostlyNull, bd("1"), 3, bd("125000")))
+        .isEqualByComparingTo("125000");
   }
 
   @Test

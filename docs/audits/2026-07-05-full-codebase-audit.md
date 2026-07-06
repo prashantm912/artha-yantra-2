@@ -522,3 +522,56 @@ PaperMarginAnnotator test · bare /paper vs /signals default asymmetry.
 
 *Phase 1: 8 recon agents (~1.2M tokens). Phase 2: 25 agents (~3.8M tokens, 976 tool calls).
 All high/medium findings adversarially verified; severities re-graded by verifier verdicts.*
+
+---
+
+## 13. Fix log (2026-07-06 autonomous implementation pass)
+
+Owner mandate: implement P0 → High → Med → Low autonomously overnight. Policy adopted:
+**auto-merge** clean correctness/ops/a11y fixes on CI-green; **HOLD green-but-unmerged** any PR
+that changes an owner-facing number, exit doctrine, or a parity surface (owner reviews on wake).
+Every PR: build → test → adversarial review → CI-green → merge-or-hold.
+
+### Priority (P0 — screen/bhavcopy race + swing anchor orphans) — SHIPPED + DEPLOYED + LIVE-VERIFIED
+| id | fix | PR |
+|---|---|---|
+| P0-1 (=H1) | Minervini screen no longer races its bhavcopy — event-chain'd off the bhavcopy completion | merged |
+| P0-2 (=H2) | Both swing engines adopt orphaned/superseded-version anchors (strategy-keyed) so open positions keep stop evaluation + stay in sell-decisions | merged |
+| P0-3 | Loud exit-pass on candle-fetch failure (retry + `exitSkipped` counter, no silent skip) | merged |
+| P0-4 (=H10) | EOD-batch failure ntfy + `swing_batch_runs` did-not-run canary (V025) | merged |
+
+### High — DONE
+| # | fix | PR |
+|---|---|---|
+| H3 | Per-entry risk gate inside the candidate loop (YAML `max_positions` now enforced live, not once-per-batch) | [#590] |
+| H7 | Reset-ledger one-click now `window.confirm`-gated (names the book) + disabled while pending | [#592] |
+
+### Medium — MERGED (auto-merge tier)
+| # | fix | PR |
+|---|---|---|
+| M12 | RS tie-rank deterministic (stable `ORDER BY` secondary key) | [#591] · HOLD-for-review |
+| M35 | Manas liquidity depth 25×→50× (doc-faithful, config-tunable) | [#591] · HOLD-for-review |
+| M39 | VCP detector base-depth (≥60% reject) + 3–65wk duration caps | [#591] · HOLD-for-review |
+| M19 | Kill-switch labelled per-book (was misleading "Master"); tooltips name the book + point to Telegram /pause | [#592] |
+| M21 | Graduation Win% renders as a percent, not the raw `0.7500` fraction | [#592] |
+| M24 | Telegram bot token redacted from WARN logs on transport failures | [#593] |
+| M26 | Both swing backtest daemons: `Error` → failed report + ntfy (was stuck "running" forever) | [#593] |
+| M34 | RiskService trip-dedup delimiter unified (was mixed space/NUL → heat-cap never re-armed); removed 2 committed NUL bytes | [#593] |
+| M25 | Single-permit `SwingBacktestGate` — two deep sims can't OOM the 448 MB live heap | [#595] |
+| M22 | Screener Recompute invalidates the derived funnel + candidate caches | [#596] |
+| M23 | Clickable table rows keep `<tr>` grid semantics (in-cell toggle button; dropped `role="button"`) | [#596] |
+
+### HELD green-unmerged — owner reviews on wake (changes an owner-facing number / doctrine)
+| # | fix | PR | why held |
+|---|---|---|---|
+| M32 | Corrected the stale Manas exit-doctrine comment (live IS 2×ATR, not an sma20 proxy — since #573) | [#594] | doctrine text |
+| M33 | Manas sell-decision reports the real 2×ATR trail via a new parity-safe `ExitEvaluator.trailStop` accessor (was reporting sma20) | [#594] | changes the daily sell-decision "trail level" number |
+| M12/M35/M39 | (above) | [#591] | screener selection change — owner eyeballs the new pass-set |
+
+### Remaining (NOT done — reason)
+- **High:** **H4** (Manas live ATR-trail semantics vs backtest — arm-anchor/ATR-pinning/breakeven-floor; the deeper parity fix — #594 only corrected the sell-decision *report*, not the exit *engine*), **H5** (graduation PnL cross-attribution — needs a `position_id` FK migration), **H6** (screener reads CA-unadjusted bhavcopy), **H8** (cheat-3c mislabel — doctrine), **H9** (stale-jar deploy guard — build-info/sha infra), **H11** (Manas swing engine/sell-decision/scheduler zero tests), **H12** (per-book paper isolation untested).
+- **Medium:** M1 (margin-heat `?book=` — needs a contract recapture), M2 (reconcile transient-retry — first attempt broke `#579` IT; needs the resolver to signal transient-vs-stable), M3/M4/M6/M7/M8/M9/M10/M11/M27 (swing exit-parity + backtest-methodology — a coherent HOLD batch), M13/M14 (holiday-guard / freshness — entangled with the owner's "analyse the last close any session" preference), M15 (historical, doc-only), M16 (book-DEFAULT fail-open — first attempt broke `PaperAccountRiskIntegrationTest`; needs a Books-scoped startup assertion not a runtime guard), M17/M18/M20 (larger FE surfaces), M29/M30 (ops-knob exposure / backup-before-migration convention), M31 (fork-debt refactor — high blast radius), M36/M37/M38/M40 (setup-doctrine — owner calls).
+- **Low:** ~28 items — none started this pass (all cosmetic / long-tail / test-nicety).
+
+*Fix pass authored autonomously 2026-07-06; PR links are on the repo. HELD PRs await the owner's
+sign-off before merge.*

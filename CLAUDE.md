@@ -288,3 +288,8 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   OpenAlgo-ecosystem + React-migration + strategy re-platform authority is
   `docs/superpowers/plans/2026-06-19-openalgo-react-integration-master-plan.md` —
   read §17 (Errata) + §18 (Gap Addendum) FIRST; they override §1–§16 on conflict.
+- `.claude/skills/` = executable runbooks. **Start every non-trivial task with
+  `fable-method`** (decompose / verify / decide-next), then the matching routine skill —
+  `ship-a-change`, `build-service`, `adversarial-review`, `swing-backtest`,
+  `scalper-backtest`, `live-verify`, `arm-flag`, `daily-ops`, `session-analysis`,
+  `run-artha-yantra`, `mock-walk`, `new-migration` — instead of improvising inline.

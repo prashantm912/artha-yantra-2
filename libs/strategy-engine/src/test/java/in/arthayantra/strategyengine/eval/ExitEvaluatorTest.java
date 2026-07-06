@@ -162,12 +162,21 @@ class ExitEvaluatorTest {
     IndicatorBank b = bank(def, s);
 
     assertThat(ExitEvaluator.evaluate(def, b, pos, 2)).as("+5% peak — not yet armed (<9%)").isEmpty();
+    assertThat(ExitEvaluator.trailStop(def, b, pos, 2)).as("no trail level before arming").isEmpty();
     assertThat(ExitEvaluator.evaluate(def, b, pos, 3))
         .as("armed at +10% but the 110 close sits above the trail level")
         .isEmpty();
+    // the #594 report accessor mirrors the evaluated Chandelier level in lockstep, and the breakeven
+    // floor holds (level never below the 100 entry).
+    Optional<BigDecimal> level3 = ExitEvaluator.trailStop(def, b, pos, 3);
+    assertThat(level3).as("armed → report exposes a level").isPresent();
+    assertThat(level3.get()).isGreaterThanOrEqualTo(new BigDecimal("100.00"));
     Optional<ExitEvaluator.ExitDecision> exit = ExitEvaluator.evaluate(def, b, pos, 4);
     assertThat(exit).as("close 95 breaks the breakeven-floored trail (>=100)").isPresent();
     assertThat(exit.get().type()).isEqualTo("trailing_stop");
+    assertThat(new BigDecimal("95.00"))
+        .as("the fired close is at or below the level the report shows")
+        .isLessThanOrEqualTo(ExitEvaluator.trailStop(def, b, pos, 4).orElseThrow());
   }
 
   @Test

@@ -528,8 +528,8 @@ public final class ExitEvaluator {
 
     BigDecimal ext = null; // running favourable extreme (highest high / lowest low) since entry
     boolean armed = armPct == null;
-    BigDecimal level = floor ? entry : null; // breakeven floor, else unbounded until first ratchet
-    for (int j = position.entryIndex(); j <= index; j++) {
+    BigDecimal level = null; // set ONLY from a real ATR-based candidate (breakeven-floored) — never a
+    for (int j = position.entryIndex(); j <= index; j++) { // bare breakeven if the ATR never ratchets
       BigDecimal cand = isLong ? series.candle(j).high() : series.candle(j).low();
       ext = ext == null ? cand : (isLong ? ext.max(cand) : ext.min(cand));
       if (!armed) {
@@ -544,9 +544,13 @@ public final class ExitEvaluator {
       }
       BigDecimal a = atr.valueAt(j);
       if (a == null) {
-        continue;
+        continue; // ATR still warming — no ratchet this bar (so no bare-breakeven-only trail)
       }
-      BigDecimal c = isLong ? ext.subtract(a.multiply(value, EngineMath.MC)) : ext.add(a.multiply(value, EngineMath.MC));
+      BigDecimal c =
+          isLong ? ext.subtract(a.multiply(value, EngineMath.MC)) : ext.add(a.multiply(value, EngineMath.MC));
+      if (floor) {
+        c = isLong ? c.max(entry) : c.min(entry); // breakeven floor applied to each ATR candidate
+      }
       level = level == null ? c : (isLong ? level.max(c) : level.min(c));
     }
     return armed && level != null ? Optional.of(level) : Optional.empty();

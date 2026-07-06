@@ -120,6 +120,14 @@
               <goal>repackage</goal>
             </goals>
           </execution>
+          <execution>
+            <!-- H9 stale-jar guard: bake build.time/version into build-info.properties so
+                 /actuator/info reveals when this jar was built (pairs with git.properties). -->
+            <id>build-info</id>
+            <goals>
+              <goal>build-info</goal>
+            </goals>
+          </execution>
         </executions>
       </plugin>
     </plugins>

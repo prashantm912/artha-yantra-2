@@ -158,6 +158,35 @@
           </execution>
         </executions>
       </plugin>
+      <plugin>
+        <!-- H9 stale-jar guard: bake the git sha into every jar (git.properties) so a
+             running service reveals the exact commit it was built from at /actuator/info,
+             and a stale-jar deploy (the mutable :dev tag trap) is mechanically detectable
+             via `ay verify-deploy`. Version managed by spring-boot-starter-parent. Never
+             fails the build when .git is absent (source tarball / detached build). -->
+        <groupId>io.github.git-commit-id</groupId>
+        <artifactId>git-commit-id-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>get-the-git-infos</id>
+            <phase>initialize</phase>
+            <goals>
+              <goal>revision</goal>
+            </goals>
+          </execution>
+        </executions>
+        <configuration>
+          <failOnNoGitDirectory>false</failOnNoGitDirectory>
+          <failOnUnableToExtractRepoInfo>false</failOnUnableToExtractRepoInfo>
+          <generateGitPropertiesFile>true</generateGitPropertiesFile>
+          <includeOnlyProperties>
+            <property>git.branch</property>
+            <property>git.commit.id</property>
+            <property>git.commit.id.abbrev</property>
+            <property>git.commit.time</property>
+          </includeOnlyProperties>
+        </configuration>
+      </plugin>
     </plugins>
   </build>
 </project>

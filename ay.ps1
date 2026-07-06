@@ -253,6 +253,43 @@ switch ($Verb) {
         }
         Write-Host "[ay] rollback: docker tag arthayantra/<svc>:$sha arthayantra/<svc>:dev; ay up"
     }
+    'verify-deploy' {
+        # H9 stale-jar guard: the deployable services now bake their build git sha into
+        # /actuator/info (git.properties). A running container whose sha != the source HEAD
+        # is a STALE jar — the ":dev tag is mutable, COPY baked an old jar" trap that has
+        # bitten before with no mechanical signal. This turns that into a loud check.
+        $head = (git rev-parse HEAD 2>$null)
+        if ($head) { $head = $head.Trim() }
+        if (-not $head) { Write-Host '[ay] verify-deploy: not a git checkout — cannot compare.'; break }
+        $svcPorts = [ordered]@{
+            'ay-edge-gateway'            = 8080
+            'ay-market-data-service'     = 8081
+            'ay-strategy-signal-service' = 8082
+            'ay-backtest-service'        = 8083
+        }
+        Write-Host "[ay] source HEAD = $head"
+        $stale = 0; $checked = 0
+        foreach ($name in $svcPorts.Keys) {
+            $port = $svcPorts[$name]
+            $json = docker exec $name wget -qO- "http://127.0.0.1:$port/actuator/info" 2>$null
+            if (-not $json) { Write-Host "[ay]   $name : DOWN or no /actuator/info (pre-H9 image?)"; continue }
+            $running = $null
+            try { $running = ($json | ConvertFrom-Json).git.commit.id } catch {}
+            if (-not $running) { Write-Host "[ay]   $name : /actuator/info has no git sha (pre-H9 image?)"; continue }
+            $checked++
+            if ($head.StartsWith($running) -or $running.StartsWith($head.Substring(0, [Math]::Min(7, $running.Length)))) {
+                Write-Host "[ay]   $name : OK ($running)"
+            } else {
+                Write-Host "[ay]   $name : STALE — running $running, source HEAD $($head.Substring(0,12))"
+                $stale++
+            }
+        }
+        if ($stale -gt 0) {
+            Write-Host "[ay] verify-deploy: $stale of $checked checked service(s) run a STALE jar — rebuild the artifact THEN the image (see build-service)."
+            exit 1
+        }
+        Write-Host "[ay] verify-deploy: all $checked checked service(s) match HEAD."
+    }
     default {
         Write-Host @'
 ay - ArthaYantra operator CLI (project-scoped docker compose)
@@ -265,6 +302,7 @@ ay - ArthaYantra operator CLI (project-scoped docker compose)
   ay restore <dir|file>     restore a whole-db backup (dir or *-full.dump) — DROPS+recreates the DB
   ay reset-db               down, DROP VOLUMES, re-up (flyway rebuilds schemas, empty)
   ay tag-images             snapshot the current :dev images to :<git-sha> (a rollback target)
+  ay verify-deploy          compare each running service's baked git sha to source HEAD (stale-jar guard)
 '@
     }
 }

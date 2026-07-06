@@ -548,6 +548,7 @@ Every PR: build → test → adversarial review → CI-green → merge-or-hold.
 |---|---|---|
 | H3 | Per-entry risk gate inside the candidate loop (YAML `max_positions` now enforced live, not once-per-batch) | [#590] |
 | H7 | Reset-ledger one-click now `window.confirm`-gated (names the book) + disabled while pending | [#592] |
+| H9 | Stale-jar deploy guard: every service jar bakes its git sha (`git.properties`) + build time (`build-info.properties`) → surfaced at `/actuator/info`; `ay verify-deploy` compares each running container's sha to source HEAD and fails loud on a STALE jar (the mutable `:dev` trap) | [#617] |
 
 ### Medium — MERGED (auto-merge tier)
 | # | fix | PR |
@@ -572,7 +573,7 @@ Every PR: build → test → adversarial review → CI-green → merge-or-hold.
 | M12/M35/M39 | (above) | [#591] | screener selection change — owner eyeballs the new pass-set |
 
 ### Remaining (NOT done — reason)
-- **High:** **H4** (Manas live ATR-trail semantics vs backtest — arm-anchor/ATR-pinning/breakeven-floor; the deeper parity fix — #594 only corrected the sell-decision *report*, not the exit *engine*), **H5** (graduation PnL cross-attribution — needs a `position_id` FK migration), **H6** (screener reads CA-unadjusted bhavcopy), **H8** (cheat-3c mislabel — doctrine), **H9** (stale-jar deploy guard — build-info/sha infra), **H11** (Manas swing engine/sell-decision/scheduler zero tests), **H12** (per-book paper isolation untested).
+- **High:** **H4** (Manas live ATR-trail semantics vs backtest — arm-anchor/ATR-pinning/breakeven-floor; the deeper parity fix — #594 only corrected the sell-decision *report*, not the exit *engine*), **H5** (graduation PnL cross-attribution — needs a `position_id` FK migration), **H6** (screener reads CA-unadjusted bhavcopy), **H8** (cheat-3c mislabel — doctrine), **H11** (Manas swing engine/sell-decision/scheduler zero tests), **H12** (per-book paper isolation untested). *(H9 stale-jar guard DONE — [#617].)*
 - **Medium:** M1 (margin-heat `?book=` — needs a contract recapture), M2 (reconcile transient-retry — first attempt broke `#579` IT; needs the resolver to signal transient-vs-stable), M3/M4/M6/M7/M8/M9/M10/M11/M27 (swing exit-parity + backtest-methodology — a coherent HOLD batch), M13/M14 (holiday-guard / freshness — entangled with the owner's "analyse the last close any session" preference), M15 (historical, doc-only), M16 (book-DEFAULT fail-open — first attempt broke `PaperAccountRiskIntegrationTest`; needs a Books-scoped startup assertion not a runtime guard), M17/M18/M20 (larger FE surfaces), M29/M30 (ops-knob exposure / backup-before-migration convention), M31 (fork-debt refactor — high blast radius), M36/M37/M38/M40 (setup-doctrine — owner calls).
 - **Low:** ~28 items — none started this pass (all cosmetic / long-tail / test-nicety).
 

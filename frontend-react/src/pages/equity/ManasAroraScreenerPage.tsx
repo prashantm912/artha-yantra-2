@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { m } from 'motion/react';
 import { formatDecimal } from '../../lib/decimal.ts';
@@ -39,8 +40,19 @@ export function ManasAroraScreenerPage() {
   const screen = useManasScreen(params, view === 'screen');
   const funnel = useManasFunnel(undefined, view === 'funnel');
   const run = useRunManas();
+  const qc = useQueryClient();
 
-  const recompute = () => run.mutate(params, { onSuccess: () => screen.refetch() });
+  // Recompute re-runs the daily screen server-side; the funnel + per-candidate reads are DERIVED from
+  // that same run, so invalidate them too (audit M22 — refetching only the screen left the Funnel view
+  // and any open candidate analyzer showing the pre-recompute selection).
+  const recompute = () =>
+    run.mutate(params, {
+      onSuccess: () => {
+        screen.refetch();
+        qc.invalidateQueries({ queryKey: ['manas-arora-funnel'] });
+        qc.invalidateQueries({ queryKey: ['manas-arora-candidate'] });
+      },
+    });
   const data = screen.data;
 
   return (

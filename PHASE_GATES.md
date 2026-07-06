@@ -38,6 +38,13 @@ notification toggles + Telegram token, next-session live verifies (T2 buckets / 
 settled owner NO (stay Kite, split-by-capability). The expired/OI backfill is **COMPLETE/idle**; the Data Ops
 Console is DEPLOYED + live.
 
+**2026-07-07 currency update:** both swing families are now BUILT + LIVE (Minervini Phase-5→Phase-9 + deep-history
+calibration → 12-slot/80%/6.5% book #563; Manas Arora family + doc-faithful exits, plus the two
+backtest-improvement follow-ups **F1 RS-rank funnel #611** and **F2 §3.4 pyramiding #612** armed live 2026-07-07).
+The lone net-new build frontier (Phase-5 Minervini screener) is CLOSED — everything remaining across both
+families is the supervised forward-paper watch + the owner's §0.5 #12 reliability sign-off (owner-gated, not
+code). Live forward-state detail: `docs/superpowers/plans/2026-07-02-remaining-items.md`.
+
 **Scalper engine → 100% (2026-06-28):** the S24 incorporation is closed (debloated operative doc + W3 drift
 tags + W4 gates + 2b infra, all BUILT/inert). Finishing the engine to "nothing-deferred" is now tracked in
 the consolidated roadmap [`docs/superpowers/plans/archive/2026-06-28-scalper-to-100-roadmap.md`](docs/superpowers/plans/archive/2026-06-28-scalper-to-100-roadmap.md)

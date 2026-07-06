@@ -112,3 +112,29 @@ The two findings above that Manas lacked (Minervini already had both) were built
   migration. Flag-gated `artha.manas-arora.pyramid.enabled`, armed live 2026-07-07; un-arm = flip the `.env`
   flag + redeploy. First live pass = the scheduled 20:05-IST batch. Judge on the forward paper book, not this
   weak-history backtest.
+
+## 2026-07-07 re-run — reproduced byte-identical + the Manas slot sweep
+
+Re-ran the Manas swing backtest 2026-07-07 (fromDate 2015-07-06, 1,796 symbols). Every variant reproduced
+the table above **to the decimal** (trades 16,035 / 13,971 / 13,405 / 11,734 / 15,534; win% / exp% / CAGR /
+DD / Sharpe all identical) — confirming the sim is deterministic and **unchanged since #595**; F1 (#611) and
+F2 (#612) were live-path changes and do NOT touch the backtest. (Aside: the sim did ~1,800 sequential
+per-symbol `readSeries` reads and, under a concurrent nightly `pg_dump`, took ~40 min — the audit-LOW
+"serial/N+1 backtest reads" item.)
+
+**Manas slot sweep** (RS-priority, net-of-cost, over the pyramid variant) — does Manas want more concurrent
+slots like Minervini's v7 (which found **12** optimal)?
+
+| slots | trades taken | gross CAGR | net CAGR | net DD | net Sharpe |
+|---|---|---|---|---|---|
+| 8 (doctrine/live) | 992 | 28.1% | **21.7%** | 62.1% | 0.64 |
+| 12 | 1,427 | 20.4% | **15.4%** | 54.0% | 0.60 |
+| 16 | 1,813 | 37.2% | **32.7%** | 43.6% | **0.90** |
+| 20 | 2,186 | 27.4% | 22.7% | 46.4% | 0.87 |
+
+**Read — the Minervini 12-slot lesson does NOT transfer to Manas.** For Manas, **12 slots is the *worst*** of the
+four (net CAGR 15.4% vs 21.7% at 8, and the lowest Sharpe 0.60). The sweep is **non-monotonic** (28→20→37→27
+gross) — a noisy/capacity-dependent signal, not a clean optimum — so even the 16-slot peak isn't trustworthy.
+And 12/16/20 all violate Manas's own doctrine (§2.2 caps the book at **5–7 names**), spreading capital into
+more marginal/illiquid small-caps (the survivorship + slippage caveat bites harder). So Manas correctly stays
+at **7 live / 8 backtest-headline** — bumping it toward 12 would be off-doctrine *and* backtest-worse.

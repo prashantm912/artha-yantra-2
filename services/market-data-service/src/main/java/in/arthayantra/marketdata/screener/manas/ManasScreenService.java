@@ -139,7 +139,9 @@ public class ManasScreenService {
         SELECT calc.*,
           lag(sma200, ?) OVER (PARTITION BY symbol ORDER BY bucket) AS sma200_ago,
           -- Trailing closes for the IBD-style weighted RS (§4.1): 3/6/9/12-month lookbacks. The 420-day
-          -- base window + the sessions>=252 filter guarantees these exist for every passing name.
+          -- base window + the sessions>=252 filter make these present for essentially every name (a name
+          -- with exactly 252 sessions lacks c252 — lag(252) needs 253 rows — but ManasGates.ret treats a
+          -- null lag as 0, so that leg just drops out; never NPEs).
           lag(close,  63) OVER (PARTITION BY symbol ORDER BY bucket) AS c63,
           lag(close, 126) OVER (PARTITION BY symbol ORDER BY bucket) AS c126,
           lag(close, 189) OVER (PARTITION BY symbol ORDER BY bucket) AS c189,

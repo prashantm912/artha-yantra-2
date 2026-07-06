@@ -91,3 +91,24 @@ today's run: rs-turnover FIFO CAGR 14.3%→**14.1%**, RS-priority-net 19.2%→**
 downward *correction* from the RS-rank fixes + deterministic tie-break, arriving with a *better* risk profile
 (lower DD, higher Sharpe). Trust the new numbers. Realistic-live firms up at **~14% FIFO / ~19% RS-priority-net
 CAGR (Minervini rs-turnover), ~26% (Manas)**, both at 44–50% DD.
+
+## Applied to the live Manas strategy (the two doctrine-faithful findings)
+
+The two findings above that Manas lacked (Minervini already had both) were built into the live Manas swing engine:
+
+- **F1 — RS-rank gate + RS-priority funnel admission — SHIPPED + LIVE ([#611](https://github.com/prashantm912/artha-yantra-2/pull/611), `329e9d71`).**
+  RS-rank is "the dominant filter on both families" above, and Manas previously strength-ordered by
+  `above_low_pct` (a proxy) with no RS at all. Now the screener computes the same 0.4/0.2/0.2/0.2 weighted
+  trailing-return RS as Minervini over the full scanned universe, percentile-ranks 0..100, and the funnel
+  gates + orders by it (`WHERE rs_rank >= artha.manas-arora.funnel-rs-min`, default **70**). Live-verified:
+  2,229 scanned, 0 nulls, 96 passers ≥70.
+
+- **F2 — §3.4 multi-lot pyramiding (add-to-winner) — SHIPPED + LIVE + ARMED ([#612](https://github.com/prashantm912/artha-yantra-2/pull/612), `32b717c6`, 2026-07-07).**
+  The `rs-turnover-pyramid` A/B row above (Sharpe 0.96 vs 0.77 non-pyramid in this run; **but** #569 had it
+  slightly negative — mixed, so it's built for doctrine faithfulness + forward paper evidence, not as a proven
+  edge). A held winner now takes an averaged add-lot on a fresh +5%-since-last-lot pivot within a ≤6% book
+  open-risk cap; the pyramid closes all lots together off the oldest lot's governing stop (§3.5.D). Averaged
+  single lot (owner-picked) is cash-equivalent to N separate lots under close-together and avoids a shared-surface
+  migration. Flag-gated `artha.manas-arora.pyramid.enabled`, armed live 2026-07-07; un-arm = flip the `.env`
+  flag + redeploy. First live pass = the scheduled 20:05-IST batch. Judge on the forward paper book, not this
+  weak-history backtest.

@@ -148,6 +148,29 @@ class ExitEvaluatorTest {
   }
 
   @Test
+  void chandelierRollingAtrTrailArmsFloorsBreakevenAndExitsOnClose() {
+    // H4 canonical Chandelier (atr_basis:rolling + breakeven_floor): highest-high − 2×rolling-ATR,
+    // floored at breakeven, armed at +9%. entry 100 @ idx1.
+    StrategyDefinition def =
+        definitionWith(
+            """
+              - { type: trailing_stop, params: { basis: atr_multiple, value: 2, atr_period: 3, arm_pct: 9, atr_basis: rolling, breakeven_floor: true } }
+            """);
+    EngineSeries s = series(10000, 10000, 10500, 11000, 9500);
+    ExitEvaluator.Position pos =
+        new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, new BigDecimal("100.00"), 1);
+    IndicatorBank b = bank(def, s);
+
+    assertThat(ExitEvaluator.evaluate(def, b, pos, 2)).as("+5% peak — not yet armed (<9%)").isEmpty();
+    assertThat(ExitEvaluator.evaluate(def, b, pos, 3))
+        .as("armed at +10% but the 110 close sits above the trail level")
+        .isEmpty();
+    Optional<ExitEvaluator.ExitDecision> exit = ExitEvaluator.evaluate(def, b, pos, 4);
+    assertThat(exit).as("close 95 breaks the breakeven-floored trail (>=100)").isPresent();
+    assertThat(exit.get().type()).isEqualTo("trailing_stop");
+  }
+
+  @Test
   void trailingStopBeforeActivationStaysQuiet() {
     StrategyDefinition def =
         definitionWith(

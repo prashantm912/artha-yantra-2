@@ -26,22 +26,53 @@ public class PaperEmissionGuard implements EmissionGuard {
   private final PaperAccountService account;
   private final InstrumentMetaClient instruments;
   private final ScalperAccountModel scalperAccounts;
+  private final PaperPositionRepository positions;
 
-  /** Wires the risk gate + capital model + the scalper 5-account discipline. */
+  /** Wires the risk gate + capital model + the scalper 5-account discipline + the position ledger. */
   public PaperEmissionGuard(
       RiskService risk,
       PaperAccountService account,
       InstrumentMetaClient instruments,
-      ScalperAccountModel scalperAccounts) {
+      ScalperAccountModel scalperAccounts,
+      PaperPositionRepository positions) {
     this.risk = risk;
     this.account = account;
     this.instruments = instruments;
     this.scalperAccounts = scalperAccounts;
+    this.positions = positions;
   }
 
   @Override
   public boolean entryAllowed(String book) {
     return risk.entryAllowed(book);
+  }
+
+  @Override
+  public BigDecimal bookEquity(String book) {
+    return account.equity(book);
+  }
+
+  @Override
+  public BigDecimal openRiskInr(String book) {
+    return openRiskInr(positions.listOpen(book));
+  }
+
+  /**
+   * Aggregate open risk (₹) over a set of open positions: {@code Σ qty × max(0, avgEntry − stopLoss)},
+   * a stop-less position contributing 0 (no defined risk to sum). Pure + package-visible for a unit test.
+   */
+  static BigDecimal openRiskInr(java.util.List<PaperPositionRepository.PositionRow> open) {
+    BigDecimal total = BigDecimal.ZERO;
+    for (PaperPositionRepository.PositionRow p : open) {
+      if (p.stopLoss() == null) {
+        continue;
+      }
+      BigDecimal perUnit = p.avgEntryPrice().subtract(p.stopLoss());
+      if (perUnit.signum() > 0) {
+        total = total.add(perUnit.multiply(BigDecimal.valueOf(p.qty())));
+      }
+    }
+    return total;
   }
 
   @Override

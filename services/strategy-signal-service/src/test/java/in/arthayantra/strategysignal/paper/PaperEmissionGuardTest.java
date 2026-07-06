@@ -7,14 +7,37 @@ import static org.mockito.Mockito.when;
 
 import in.arthayantra.strategyengine.fills.InstrumentClass;
 import in.arthayantra.strategysignal.paper.InstrumentMetaClient.InstrumentMeta;
+import in.arthayantra.strategysignal.paper.PaperPositionRepository.PositionRow;
 import java.math.BigDecimal;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
-/** §3.7 hero-zero profit-funded sizing: deploy ~10% of realised profit, floored to the ₹2.5k minimum. */
+/**
+ * §3.7 hero-zero profit-funded sizing (deploy ~10% of realised profit, floored to the ₹2.5k minimum)
+ * and the F2 Manas §3.4.3 open-risk read the pyramiding gate consults.
+ */
 class PaperEmissionGuardTest {
 
   private static BigDecimal bd(String s) {
     return new BigDecimal(s);
+  }
+
+  @Test
+  void openRiskInrSumsPerPositionRiskAndTreatsTrailedOrStoplessPositionsAsZero() {
+    // Position A: 100 qty, entry 200, stop 190 -> risk 100 × 10 = ₹1,000.
+    PositionRow a = position(100, "200", "190");
+    // Position B: 50 qty, entry 300, stop 320 (trailed ABOVE entry) -> open risk 0 (§3.5.B).
+    PositionRow b = position(50, "300", "320");
+    // Position C: 10 qty, entry 100, NO stop -> contributes 0 (no defined risk to sum).
+    PositionRow c = position(10, "100", null);
+    assertThat(PaperEmissionGuard.openRiskInr(List.of(a, b, c))).isEqualByComparingTo("1000");
+    assertThat(PaperEmissionGuard.openRiskInr(List.of())).isEqualByComparingTo("0");
+  }
+
+  private static PositionRow position(long qty, String avgEntry, String stop) {
+    return new PositionRow(
+        1L, "NSE", "TESTCO", "BUY", qty, bd(avgEntry), BigDecimal.ZERO, "OPEN",
+        null, null, null, stop == null ? null : bd(stop), null, "manas-arora");
   }
 
   @Test
@@ -37,7 +60,8 @@ class PaperEmissionGuardTest {
     InstrumentMetaClient instruments = mock(InstrumentMetaClient.class);
     PaperEmissionGuard guard =
         new PaperEmissionGuard(
-            mock(RiskService.class), account, instruments, mock(ScalperAccountModel.class));
+            mock(RiskService.class), account, instruments, mock(ScalperAccountModel.class),
+            mock(PaperPositionRepository.class));
     when(instruments.meta(any(), any()))
         .thenReturn(new InstrumentMeta(InstrumentClass.OPTION, bd("0.05"), 75L));
 

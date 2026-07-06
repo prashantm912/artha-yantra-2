@@ -54,6 +54,27 @@ public interface EmissionGuard {
   }
 
   /**
+   * The book's paper-account equity (the sizing base), or {@code null} when unknown (paper disabled).
+   * Consulted by the Manas pyramiding gate (§3.4.3) to express the current + prospective open risk as a
+   * fraction of book capital. Default null ⇒ the caller treats the risk cap as unknown and does not block.
+   */
+  default BigDecimal bookEquity(String book) {
+    return null;
+  }
+
+  /**
+   * The book's current aggregate OPEN risk in ₹: {@code Σ qty × max(0, avgEntry − stopLoss)} over its
+   * open positions (a position whose stop has trailed above its entry contributes 0 — "trailing reduces
+   * open risk", §2.2/§3.5.B). The persisted stop is the position's ORIGINAL bracket, so this is a
+   * conservative (never-understated) read. The Manas pyramiding gate adds the prospective new lot's risk
+   * to this and blocks the add if the total would breach the ≤5–6% portfolio cap (§3.4.3). Default 0 ⇒
+   * paper disabled / no open positions (the gate then never blocks on risk).
+   */
+  default BigDecimal openRiskInr(String book) {
+    return BigDecimal.ZERO;
+  }
+
+  /**
    * §3.7 hero-zero profit-funded sizing — the lot-rounded qty for an expiry-day hero-zero leg sized to
    * "deploy ~10% of accumulated realised PROFIT, never capital" (mode a), with a ₹2-3k minimum deploy
    * when profits are thin (mode b — owner: "a if we have enough profit, else b"). Computed off the

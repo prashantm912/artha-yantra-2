@@ -22,10 +22,12 @@ import in.arthayantra.strategysignal.signals.SignalExited;
 import in.arthayantra.strategysignal.signals.SignalPublisher;
 import in.arthayantra.strategysignal.signals.SignalRepository;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -67,9 +69,18 @@ import org.springframework.transaction.support.TransactionTemplate;
  * "+8-10% then 2×ATR trail" doctrine. The true 2×ATR trail + the too-fast/parabolic square-off are
  * modelled in the BACKTEST, not the live v1 (exactly as Minervini deferred its Stage-3/4 exits).
  *
- * <p><b>Pyramiding:</b> in the live paper ledger a same-book same-symbol re-entry AVERAGES (the
- * per-book open-key), so live pyramiding = add-on-strength-averaging; a symbol already holding an open
- * Manas swing entry is skipped for the run. The true multi-lot pyramiding is the backtest's job.
+ * <p><b>Pyramiding (§3.4, flag-gated {@code artha.manas-arora.pyramid.enabled}, default OFF):</b> when a
+ * held winner has moved up ≥ {@code pyramid.min-gain-pct} since its most-recent lot AND makes a fresh
+ * valid pivot (the {@link EntryEvaluator} fires again on today's bar), the engine ADDS another lot —
+ * up to {@code pyramid.max-lots} — provided the book's aggregate open risk stays ≤ {@code
+ * pyramid.max-portfolio-risk-pct} (§3.4.3 "add without increasing risk exposure"). Each add auto-papers
+ * through the ordinary path, so the per-book open key AVERAGES it into the ONE position (grown qty,
+ * averaged entry): under §3.5.D a pyramided position closes ALL lots together, so an averaged single lot
+ * is cash-identical to N physically-separate lots (Σ lot-price×qty == avg×totalQty) while touching no
+ * shared uniqueness/close-join surface. The exit pass drives off the OLDEST lot per symbol — its trailed
+ * stop is the tightest, the pyramid's governing stop — and on exit closes the whole position and expires
+ * every sibling lot. With the flag OFF a held symbol is simply skipped (the pre-F2 behavior). The
+ * finer-grained per-lot backtest remains the modelling job.
  */
 @Component
 public class ManasAroraSwingEngine {
@@ -125,6 +136,10 @@ public class ManasAroraSwingEngine {
   private final int warmupDays;
   private final int minBars;
   private final long ttlMinutes;
+  private final boolean pyramidEnabled;
+  private final BigDecimal pyramidMinGainPct;
+  private final int pyramidMaxLots;
+  private final BigDecimal pyramidMaxPortfolioRiskPct;
 
   /** Wires the registry, funnel + candle clients, the signal repo/publisher, and the event bus. */
   public ManasAroraSwingEngine(
@@ -141,7 +156,12 @@ public class ManasAroraSwingEngine {
       @Value("${artha.manas-arora.swing.enabled:false}") boolean enabled,
       @Value("${artha.manas-arora.swing.warmup-days:520}") int warmupDays,
       @Value("${artha.manas-arora.swing.min-bars:60}") int minBars,
-      @Value("${artha.manas-arora.swing.signal-ttl-minutes:1440}") long ttlMinutes) {
+      @Value("${artha.manas-arora.swing.signal-ttl-minutes:1440}") long ttlMinutes,
+      @Value("${artha.manas-arora.pyramid.enabled:false}") boolean pyramidEnabled,
+      @Value("${artha.manas-arora.pyramid.min-gain-pct:5.0}") BigDecimal pyramidMinGainPct,
+      @Value("${artha.manas-arora.pyramid.max-lots:3}") int pyramidMaxLots,
+      @Value("${artha.manas-arora.pyramid.max-portfolio-risk-pct:6.0}")
+          BigDecimal pyramidMaxPortfolioRiskPct) {
     this.registry = registry;
     this.funnel = funnel;
     this.candles = candles;
@@ -156,6 +176,10 @@ public class ManasAroraSwingEngine {
     this.warmupDays = warmupDays;
     this.minBars = minBars;
     this.ttlMinutes = ttlMinutes;
+    this.pyramidEnabled = pyramidEnabled;
+    this.pyramidMinGainPct = pyramidMinGainPct;
+    this.pyramidMaxLots = pyramidMaxLots;
+    this.pyramidMaxPortfolioRiskPct = pyramidMaxPortfolioRiskPct;
   }
 
   /** Runs one full daily batch: the entry pass over the funnel, then the exit pass over open swings. */
@@ -274,17 +298,28 @@ public class ManasAroraSwingEngine {
     if (candidates.isEmpty()) {
       return new EntryResult(0, 0);
     }
-    // A symbol already holding an open swing entry is skipped for ALL setups this run — the paper book
-    // keeps one open position per (symbol, side), so a second setup would only average in.
-    Set<String> held = heldSymbols(resolution);
+    // The open Manas lots per symbol at the START of the run (a DB snapshot). A symbol with ≥1 lot is
+    // "held": with pyramiding OFF it is skipped for the run (the pre-F2 behavior); with pyramiding ON it
+    // may take an ADD (§3.4) — a fresh lot averaged into the one paper position.
+    Map<String, List<SignalRepository.SignalRow>> openLots = openLotsBySymbol(resolution);
+    Set<String> firedThisRun = new HashSet<>();
     int fired = 0;
     for (ManasFunnelClient.Candidate c : candidates) {
-      if (held.contains(c.symbol())) {
-        continue;
+      if (firedThisRun.contains(c.symbol())) {
+        continue; // already emitted an entry/add for this symbol earlier in the run
+      }
+      List<SignalRepository.SignalRow> lots = openLots.getOrDefault(c.symbol(), List.of());
+      boolean isAdd = !lots.isEmpty();
+      if (isAdd && (!pyramidEnabled || lots.size() >= pyramidMaxLots)) {
+        continue; // held & no pyramid room → skip (identical to the pre-F2 held-skip)
       }
       List<EngineCandle> series = series(c.symbol(), seriesCache);
       if (series.size() < minBars) {
         continue;
+      }
+      EngineCandle bar = series.get(series.size() - 1);
+      if (isAdd && !movedUp(bar.close(), lastLotEntry(lots), pyramidMinGainPct)) {
+        continue; // §3.4.1: an add needs a fresh +min-gain% move since the most-recent lot
       }
       for (SwingStrategy strat : swings) {
         // Route by setup: the breakout strategy fires off the §3.2 breakout pivot, the VCP strategy
@@ -308,8 +343,17 @@ public class ManasAroraSwingEngine {
                 fired);
             return new EntryResult(candidates.size(), fired);
           }
-          emitEntry(strat, c, series.get(series.size() - 1), eval.get(), bank, series.size() - 1);
-          held.add(c.symbol()); // one setup per symbol per run
+          // §3.4.3: an ADD only goes on if the book's aggregate open risk stays within the ≤5–6%
+          // portfolio cap ("add without increasing risk exposure"). A fresh (first) entry is unbounded
+          // here — the ordinary book governor (entryBlocked) already bounds it.
+          if (isAdd && wouldBreachRiskCap(strat, c.symbol(), bank, series.size() - 1, bar.close())) {
+            log.info(
+                "manas swing: pyramid add for {} would breach the {}% open-risk cap — skipped",
+                c.symbol(), pyramidMaxPortfolioRiskPct);
+            break; // no setup may add more risk for this symbol this run
+          }
+          emitEntry(strat, c, bar, eval.get(), bank, series.size() - 1, lots.size() + 1);
+          firedThisRun.add(c.symbol()); // one entry/add per symbol per run
           fired++;
           break;
         }
@@ -330,21 +374,120 @@ public class ManasAroraSwingEngine {
     return SETUP_VCP.equals(strat.setup()) ? c.vcpPivot() : c.breakoutPivot();
   }
 
-  private Set<String> heldSymbols(AnchorResolution resolution) {
-    // Resolution (not a current-published-version set) so a symbol held by a SUPERSEDED version's
-    // anchor still blocks re-entry — the audit-H2 double-exposure path.
-    Set<String> held = new HashSet<>();
+  /**
+   * The open Manas lots (active ENTRY anchors) grouped by tradingsymbol, resolved through {@link
+   * AnchorResolution} so a lot held by a SUPERSEDED version still counts (the audit-H2 double-exposure
+   * path). A symbol with ≥1 lot is "held"; the list size is its current lot count for the pyramid cap.
+   */
+  private Map<String, List<SignalRepository.SignalRow>> openLotsBySymbol(AnchorResolution resolution) {
+    Map<String, List<SignalRepository.SignalRow>> bySymbol = new HashMap<>();
     for (SignalRepository.SignalRow anchor : signals.activeEntries()) {
       if (resolution.resolve(anchor.strategyVersionId()).isPresent()) {
-        held.add(anchor.tradingsymbol());
+        bySymbol.computeIfAbsent(anchor.tradingsymbol(), k -> new ArrayList<>()).add(anchor);
       }
     }
-    return held;
+    return bySymbol;
+  }
+
+  /** The most-recent lot's entry price (§3.4.1 measures the fresh move since the LAST add). */
+  private static BigDecimal lastLotEntry(List<SignalRepository.SignalRow> lots) {
+    return lots.stream()
+        .max(
+            Comparator.comparing(SignalRepository.SignalRow::generatedAt)
+                .thenComparing(SignalRepository.SignalRow::id))
+        .map(SignalRepository.SignalRow::entryPrice)
+        .orElse(null);
+  }
+
+  /** The oldest (earliest-generated) lot — the pyramid's governing exit driver (§3.5.D). */
+  private static SignalRepository.SignalRow oldestLot(List<SignalRepository.SignalRow> lots) {
+    return lots.stream()
+        .min(
+            Comparator.comparing(SignalRepository.SignalRow::generatedAt)
+                .thenComparing(SignalRepository.SignalRow::id))
+        .orElseThrow();
+  }
+
+  /**
+   * §3.4.1 pyramid trigger: the current close is ≥ {@code minGainPct}% above the most-recent lot's entry
+   * (evidence of a strong move). False when the entry is unknown / non-positive. Pure for a unit test.
+   */
+  static boolean movedUp(BigDecimal currentClose, BigDecimal lastLotEntry, BigDecimal minGainPct) {
+    if (currentClose == null || lastLotEntry == null || lastLotEntry.signum() <= 0) {
+      return false;
+    }
+    BigDecimal gainPct =
+        currentClose
+            .subtract(lastLotEntry)
+            .divide(lastLotEntry, 6, RoundingMode.HALF_UP)
+            .multiply(BigDecimal.valueOf(100));
+    return gainPct.compareTo(minGainPct) >= 0;
+  }
+
+  /**
+   * §3.4.3 portfolio-risk gate for a pyramid ADD: true when opening the prospective new lot would push
+   * the book's aggregate open risk over {@code pyramidMaxPortfolioRiskPct}% of book equity. The new
+   * lot's risk = its advisory qty × the 2×ATR stop distance (the very sizing/stop the emit will use);
+   * the existing open risk + equity come from the {@link EmissionGuard} port. Returns false (does not
+   * block) when the guard is absent or equity/qty/stop is unknown — then the add simply is not
+   * auto-papered (no risk to gate).
+   */
+  private boolean wouldBreachRiskCap(
+      SwingStrategy strat, String symbol, IndicatorBank bank, int index, BigDecimal entryPrice) {
+    EmissionGuard guard = emissionGuard.orElse(null);
+    if (guard == null) {
+      return false;
+    }
+    ExitEvaluator.EntryLevels levels =
+        ExitEvaluator.entryLevels(
+            strat.definition(),
+            bank,
+            new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, entryPrice, index));
+    BigDecimal stop = levels.stopLoss();
+    if (stop == null) {
+      return false; // no stop → no risk-sized qty → not auto-papered; nothing to gate
+    }
+    BigDecimal stopDistance = entryPrice.subtract(stop).abs();
+    BigDecimal newQty =
+        guard.suggestedQty(
+            strat.definition().sizing(), EX, symbol, entryPrice, stopDistance, Books.MANAS_ARORA);
+    return breachesRiskCap(
+        guard.openRiskInr(Books.MANAS_ARORA),
+        newQty,
+        stopDistance,
+        guard.bookEquity(Books.MANAS_ARORA),
+        pyramidMaxPortfolioRiskPct);
+  }
+
+  /**
+   * §3.4.3: does the existing book open risk plus the prospective new lot's risk exceed the cap? Pure
+   * for a unit test. Returns false (never blocks) when equity/qty/stop is missing or non-positive.
+   */
+  static boolean breachesRiskCap(
+      BigDecimal existingRiskInr,
+      BigDecimal newQty,
+      BigDecimal stopDistance,
+      BigDecimal equity,
+      BigDecimal capPct) {
+    if (equity == null
+        || equity.signum() <= 0
+        || newQty == null
+        || newQty.signum() <= 0
+        || stopDistance == null
+        || stopDistance.signum() <= 0) {
+      return false;
+    }
+    BigDecimal totalRisk =
+        (existingRiskInr == null ? BigDecimal.ZERO : existingRiskInr)
+            .add(newQty.multiply(stopDistance));
+    BigDecimal totalPct =
+        totalRisk.divide(equity, 6, RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100));
+    return totalPct.compareTo(capPct) > 0;
   }
 
   private void emitEntry(
       SwingStrategy strat, ManasFunnelClient.Candidate c, EngineCandle bar,
-      EntryEvaluator.Evaluation eval, IndicatorBank bank, int index) {
+      EntryEvaluator.Evaluation eval, IndicatorBank bank, int index, int lotNumber) {
     BigDecimal entryPrice = bar.close();
     ExitEvaluator.EntryLevels levels =
         ExitEvaluator.entryLevels(
@@ -355,7 +498,7 @@ public class ManasAroraSwingEngine {
     String breakdownJson = ScoreBreakdownJson.write(eval.breakdown());
     OffsetDateTime generatedAt = bar.bucketStart().withOffsetSameInstant(IST);
     OffsetDateTime expiresAt = generatedAt.plusMinutes(ttlMinutes);
-    String detailJson = manasDetailJson(strat, c);
+    String detailJson = manasDetailJson(strat, c, lotNumber);
     // The advisory (lot-rounded) size vs paper equity — REQUIRED for auto-paper: AutoPaperListener
     // skips any ENTRY whose suggested_qty is null. atr_risk sizing reads the stopDistance off the
     // percent stop. Null when the emission guard is absent (mock/no-risk contexts) — then the entry
@@ -402,7 +545,7 @@ public class ManasAroraSwingEngine {
         id, strat.slug(), c.symbol(), entryPrice, eval.breakdown().composite());
   }
 
-  private String manasDetailJson(SwingStrategy strat, ManasFunnelClient.Candidate c) {
+  private String manasDetailJson(SwingStrategy strat, ManasFunnelClient.Candidate c, int lotNumber) {
     ObjectNode root = objectMapper.createObjectNode();
     root.put("setup", strat.slug());
     if (c.setupType() != null) {
@@ -414,6 +557,8 @@ public class ManasAroraSwingEngine {
     if (c.pivot() != null) {
       root.put("pivot", c.pivot().toPlainString());
     }
+    // §3.4 pyramiding: lot 1 = the first entry, ≥2 = an add-to-winner lot (audit + report/UI read).
+    root.put("pyramidLot", lotNumber);
     return root.toString();
   }
 
@@ -421,34 +566,42 @@ public class ManasAroraSwingEngine {
 
   private ExitResult exitPass(
       AnchorResolution resolution, Map<String, List<EngineCandle>> seriesCache) {
+    // Group the open Manas lots by symbol. A pyramided symbol holds several lots that share ONE averaged
+    // paper position (§3.4); the pyramid's governing stop is the OLDEST lot's trailed stop — the
+    // tightest, first to hit (§3.5.D). So the exit is driven off that lot and, when it fires, closes the
+    // whole position and expires every sibling lot. A single-lot symbol behaves exactly as before
+    // (primary == the only lot, no siblings).
+    Map<String, List<SignalRepository.SignalRow>> bySymbol = openLotsBySymbol(resolution);
     int closed = 0;
     int skipped = 0;
-    for (SignalRepository.SignalRow anchor : signals.activeEntries()) {
-      SwingStrategy strat = resolution.resolve(anchor.strategyVersionId()).orElse(null);
+    for (Map.Entry<String, List<SignalRepository.SignalRow>> e : bySymbol.entrySet()) {
+      List<SignalRepository.SignalRow> lots = e.getValue();
+      SignalRepository.SignalRow primary = oldestLot(lots);
+      SwingStrategy strat = resolution.resolve(primary.strategyVersionId()).orElse(null);
       if (strat == null) {
         continue; // another family's anchor, or unmanageable (already logged at ERROR)
       }
-      List<EngineCandle> series = series(anchor.tradingsymbol(), seriesCache);
+      List<EngineCandle> series = series(primary.tradingsymbol(), seriesCache);
       if (series.isEmpty()) {
         // One retry OUTSIDE the per-run cache: MarketDataCandlesClient fail-softs to an empty list
         // on any REST hiccup and the cache pins it — silently skipping the position's ONLY daily
         // stop/trail evaluation (audit P0-3). A held anchor's series is worth a second round-trip.
-        series = retryFetch(anchor.tradingsymbol(), seriesCache);
+        series = retryFetch(primary.tradingsymbol(), seriesCache);
       }
       if (series.isEmpty()) {
         log.error(
             "manas swing exit: no daily series for held anchor #{} {} even after retry —"
                 + " STOP NOT EVALUATED TODAY",
-            anchor.id(), anchor.tradingsymbol());
+            primary.id(), primary.tradingsymbol());
         skipped++;
         continue;
       }
       // geometry is irrelevant to the exit rules (ATR stop/trail + square-off), so the pivot
       // contexts are seeded neutral (0) — the bank still builds, the exit eval never reads them.
       IndicatorBank bank =
-          buildBank(strat.definition(), anchor.tradingsymbol(), series,
+          buildBank(strat.definition(), primary.tradingsymbol(), series,
               BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
-      int entryIndex = bank.primarySeries().indexAtOrBefore(anchor.generatedAt().toInstant());
+      int entryIndex = bank.primarySeries().indexAtOrBefore(primary.generatedAt().toInstant());
       if (entryIndex < 0) {
         // the entry bar fell outside the fetched window (position held > warmupDays, or a dropped
         // entry bucket) — the #573 ATR exits (entry-pinned ATR, peak-since-entry trail) are
@@ -456,17 +609,18 @@ public class ManasAroraSwingEngine {
         log.error(
             "manas swing exit: entry bar for #{} {} is outside the fetched window —"
                 + " STOP NOT EVALUATED TODAY",
-            anchor.id(), anchor.tradingsymbol());
+            primary.id(), primary.tradingsymbol());
         skipped++;
         continue;
       }
       Optional<ExitEvaluator.ExitDecision> exit =
           ExitEvaluator.evaluate(
               strat.definition(), bank,
-              new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, anchor.entryPrice(), entryIndex),
+              new ExitEvaluator.Position(
+                  ExitEvaluator.Direction.LONG, primary.entryPrice(), entryIndex),
               series.size() - 1);
       if (exit.isPresent()) {
-        emitExit(strat, anchor, series.get(series.size() - 1), exit.get());
+        emitExit(strat, primary, lots, series.get(series.size() - 1), exit.get());
         closed++;
       }
     }
@@ -488,8 +642,8 @@ public class ManasAroraSwingEngine {
   }
 
   private void emitExit(
-      SwingStrategy strat, SignalRepository.SignalRow anchor, EngineCandle bar,
-      ExitEvaluator.ExitDecision exit) {
+      SwingStrategy strat, SignalRepository.SignalRow primary,
+      List<SignalRepository.SignalRow> lots, EngineCandle bar, ExitEvaluator.ExitDecision exit) {
     OffsetDateTime generatedAt = bar.bucketStart().withOffsetSameInstant(IST);
     // the paper close_reason taxonomy is UPPERCASE (STOP_LOSS / TRAILING_STOP / SIGNAL_EXIT / …)
     String reason = exit.type().toUpperCase(java.util.Locale.ROOT);
@@ -498,22 +652,31 @@ public class ManasAroraSwingEngine {
             status -> {
               long newId =
                   signals.insert(
-                      strat.versionId(), EX, anchor.tradingsymbol(), IV, "EXIT", "SELL", bar.close(),
-                      null, null, anchor.compositeScore(), anchor.scoreBreakdown().toString(),
+                      strat.versionId(), EX, primary.tradingsymbol(), IV, "EXIT", "SELL", bar.close(),
+                      null, null, primary.compositeScore(), primary.scoreBreakdown().toString(),
                       generatedAt, generatedAt.plusMinutes(ttlMinutes));
-              signals.transition(anchor.id(), "EXPIRED");
+              // A pyramided position closes ALL lots at once (§3.5.D): expire every lot of the symbol so
+              // no add lingers as a phantom active anchor once its shared position is gone.
+              for (SignalRepository.SignalRow lot : lots) {
+                signals.transition(lot.id(), "EXPIRED");
+              }
               return newId;
             });
     publisher.publish(
         id, strat.versionId(), strat.name(), strat.slug(), strat.version(), strat.checksum(), EX,
-        anchor.tradingsymbol(), IV, "EXIT", "SELL", bar.close(), null, null, anchor.compositeScore(),
-        anchor.scoreBreakdown(), generatedAt);
-    // settle the paper position at the fresh DAILY-BAR close — the equities don't tick, so an LTP
-    // close would book breakeven. The price rides the SignalExited event to closeForSignal.
-    events.publishEvent(new SignalExited(anchor.id(), id, reason, bar.close()));
+        primary.tradingsymbol(), IV, "EXIT", "SELL", bar.close(), null, null, primary.compositeScore(),
+        primary.scoreBreakdown(), generatedAt);
+    // Settle the paper position at the fresh DAILY-BAR close — the equities don't tick, so an LTP close
+    // would book breakeven. Fire a close for EACH lot's linked signal so the shared averaged position
+    // closes regardless of which lot's order opened it (closeForSignal is a CAS: the first wins, the
+    // rest no-op). The daily close rides the SignalExited event to closeForSignal.
+    for (SignalRepository.SignalRow lot : lots) {
+      events.publishEvent(new SignalExited(lot.id(), id, reason, bar.close()));
+    }
     log.info(
-        "manas swing EXIT #{} {} {} at {} ({})",
-        id, strat.slug(), anchor.tradingsymbol(), bar.close(), reason);
+        "manas swing EXIT #{} {} {} at {} ({}{})",
+        id, strat.slug(), primary.tradingsymbol(), bar.close(), reason,
+        lots.size() > 1 ? " — " + lots.size() + " lots" : "");
   }
 
   // ---- shared helpers -----------------------------------------------------------------------

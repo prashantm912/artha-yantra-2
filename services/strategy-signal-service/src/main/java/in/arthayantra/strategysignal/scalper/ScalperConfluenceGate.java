@@ -347,6 +347,23 @@ public class ScalperConfluenceGate {
     diag.underlying = cfg.underlying();
     diag.expiry = chain.expiry();
     Chart chart = chart(bank, index);
+    // signal-analysis rollup 2026-07-06 §7#1 (tag relative-volume-floor, default-OFF): the fixed §0B
+    // floor (NIFTY 125k) sits above the physical 3m volume range on the live tick-agg series (max ~95k on
+    // 2026-07-06), so the §0B volume rail never passes live and vetoes every scalper — but the same veto
+    // SAVES money on chop, so the fix is a RELATIVE floor, not a lower fixed number. When armed, resolve
+    // the floor to k × the median of the prior-N bar volumes (the SAME series chart.volume() reads →
+    // scale-invariant: it self-calibrates whatever the bar's volume basis). Unarmed ⇒ the resolved fixed
+    // floor, so the rail stays byte-identical for every shipped strategy. Computed ONCE, used by both the
+    // straddle branch and the directional §0B volume check below.
+    BigDecimal absVolFloor = ScalperGates.volumeFloorFor(cfg.signalIndex(), cfg.params().volumeFloor());
+    BigDecimal effVolFloor =
+        cfg.has("relative-volume-floor")
+            ? ScalperGates.relativeVolumeFloor(
+                priorVolumes(bank, index, oiProps.relativeVolumeWindow().intValue()),
+                oiProps.relativeVolumeMultiplier(),
+                oiProps.relativeVolumeMinBars().intValue(),
+                absVolFloor)
+            : absVolFloor;
     // #11 (section 3.11) Straddle: a direction-NEUTRAL volatility position trading BOTH legs of the
     // SAME ATM strike (delta≈0.5 each). It must NOT take the CE/PE directional split below — there is no
     // single side — so it branches here on the side-agnostic §0B rails (time window already passed +
@@ -358,8 +375,8 @@ public class ScalperConfluenceGate {
       // All-eval: record every straddle condition (no short-circuit) so the DB holds the full matrix.
       diag.fails(
           "volume-floor",
-          ScalperGates.volume(cfg.signalIndex(), chart.volume(), cfg.params().volumeFloor()),
-          ScalperGates.volumeFloorFor(cfg.signalIndex(), cfg.params().volumeFloor()));
+          ScalperGates.volume(cfg.signalIndex(), chart.volume(), effVolFloor),
+          effVolFloor);
       // E4 §3.A.4 low-iv-straddle: a LONG straddle wants LOW IV (cheap both legs); skip when either
       // side's 6-strike IV avg is rich. Armed via the tag only (else the neutral path pays no extra
       // fetch). Pass cfg.underlying() so the index/expiry are a matched pair (the macro IV pair is the
@@ -436,8 +453,8 @@ public class ScalperConfluenceGate {
     // every other strategy, so the goldens never move.
     diag.fails(
         "volume-floor",
-        ScalperGates.volume(cfg.signalIndex(), chart.volume(), cfg.params().volumeFloor()),
-        ScalperGates.volumeFloorFor(cfg.signalIndex(), cfg.params().volumeFloor()));
+        ScalperGates.volume(cfg.signalIndex(), chart.volume(), effVolFloor),
+        effVolFloor);
     ScalperParams.RsiBand band = cfg.params().rsiBand();
     GateOutcome rsiOutcome =
         cfg.requireOpenHighLow()
@@ -1064,6 +1081,21 @@ public class ScalperConfluenceGate {
         // "alias not in the bank"); a strategy without the caps gets null and the gates are unarmed anyway.
         bank.has(RSI_5M) ? bank.valueAt(RSI_5M, index) : null,
         bank.has(RSI_DAILY) ? bank.valueAt(RSI_DAILY, index) : null);
+  }
+
+  /**
+   * The volumes of up to {@code window} bars immediately BEFORE {@code index} (the deploy bar itself is
+   * excluded so a quiet bar can never lower its own floor), read from the SAME series as {@link #chart}'s
+   * {@code volume} so the relative floor is scale-consistent. Stops at the series start, so an early-
+   * session bar yields a short list and {@link ScalperGates#relativeVolumeFloor} falls back to the fixed
+   * §0B floor below its {@code minBars} warmup.
+   */
+  private static List<BigDecimal> priorVolumes(BarValues bank, int index, int window) {
+    List<BigDecimal> out = new ArrayList<>();
+    for (int j = 1; j <= window && index - j >= 0; j++) {
+      out.add(bank.builtin("volume", index - j));
+    }
+    return out;
   }
 
   private int bias60m(BarValues bank, int index) {

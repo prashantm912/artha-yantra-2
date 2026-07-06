@@ -182,6 +182,7 @@ public class MinerviniBacktestService {
   private volatile BacktestResult latestResult;
 
   private final in.arthayantra.marketdata.alerts.NtfyClient ntfy;
+  private final in.arthayantra.marketdata.screener.SwingBacktestGate gate;
 
   /** Wires the marketdata datasource + the VCP detector + config. */
   public MinerviniBacktestService(
@@ -189,6 +190,7 @@ public class MinerviniBacktestService {
       VcpDetector detector,
       ObjectMapper objectMapper,
       in.arthayantra.marketdata.alerts.NtfyClient ntfy,
+      in.arthayantra.marketdata.screener.SwingBacktestGate gate,
       @Value("${artha.minervini.backtest.years:11}") int defaultYears,
       @Value("${artha.minervini.backtest.min-turnover:3750000}") BigDecimal minTurnover,
       @Value("${artha.minervini.backtest.rs-min:70}") BigDecimal rsMin,
@@ -203,6 +205,7 @@ public class MinerviniBacktestService {
     this.detector = detector;
     this.objectMapper = objectMapper;
     this.ntfy = ntfy;
+    this.gate = gate;
     this.defaultYears = defaultYears;
     this.turnoverFloor = minTurnover.doubleValue();
     this.rsMin = rsMin.doubleValue();
@@ -252,9 +255,17 @@ public class MinerviniBacktestService {
         "loaded from the last persisted run (sweep/slots/rotation are in-memory only; re-run to populate)");
   }
 
-  /** Triggers a run on a background thread; returns false if one is already running. */
+  /**
+   * Triggers a run on a background thread; returns false if one is already running (this family) OR
+   * the other swing backtest holds the shared single-permit heap gate (audit M25) — either way the
+   * caller reports "already running" rather than piling a second ~11-year sim onto the live heap.
+   */
   public boolean trigger(Integer years) {
     if (!running.compareAndSet(false, true)) {
+      return false;
+    }
+    if (!gate.tryAcquire()) {
+      running.set(false); // the other family's deep sim is running — do not stack on the heap
       return false;
     }
     LocalDate from = from(years);
@@ -287,6 +298,7 @@ public class MinerviniBacktestService {
       throw e;
     } finally {
       running.set(false);
+      gate.release(); // release the shared heap permit (paired with the trigger's tryAcquire)
     }
   }
 

@@ -497,7 +497,10 @@ stale-bar freshness polish (mainline dup blocked) · entry-bar churn (Minervini 
 screener/rejections/shadow tables unbounded (year-one safe) · V023 silent daily-loss tighten ·
 V021 CHECK-drop name-guessing pattern · bulk-export heap ZIP + unsanitized names ·
 Telegram chat-scoped auth · chartPrefs blind cast · trust-model documentation (dev-tools socat) ·
-notifierExecutor choke point · uncached 30s meta lookup on eval thread · serial backtest queries ·
+notifierExecutor choke point · uncached 30s meta lookup on eval thread · serial/N+1 backtest series
+reads (`ManasAroraBacktestService.readSeries` + the Minervini twin issue ~1,800 per-symbol DB
+round-trips; the ~11yr sim stretched to ~40 min under a concurrent nightly `pg_dump` on 2026-07-07 —
+batch into ONE windowed query / temp-table join to cut wall-time) ·
 signals EXISTS scaling · annotator on shared Upstox limiter · graduation one-way ratchet ·
 advised_lots units-vs-lots · armed heat-cap sync HTTP (memoize) · advisory heat ntfy unreachable
 flag-OFF (more inert than its contract) · fast-move pre-entry window is doctrine-fidelity (both

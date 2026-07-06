@@ -198,7 +198,13 @@ public class TrendTemplateService {
     for (Raw r : raws) {
       scored.add(new Scored(r, weightedRs(r)));
     }
-    scored.sort(Comparator.comparing(Scored::rs));
+    // Deterministic tie-break by symbol (audit M12): weightedRs ties are real — MinerviniGates.ret()
+    // returns exact 0 for null/zero lag closes, so a whole block sits at 0 — and without a tie-break
+    // the stable sort kept arbitrary Postgres return order, then handed tied names DIFFERENT ordinal
+    // percentiles i/(n-1); two runs of the SAME screen date could flip a name across the rsRank>=70
+    // gate, making the persisted screen + funnel non-reproducible (the harness already sorts by
+    // (d, symbol); MinerviniHitRateService.PANEL_SQL). thenComparing(symbol) pins the order.
+    scored.sort(Comparator.comparing(Scored::rs).thenComparing(s -> s.raw().symbol()));
     int n = scored.size();
     List<TrendCandidate> out = new ArrayList<>(n);
     for (int i = 0; i < n; i++) {

@@ -44,6 +44,9 @@ public class VcpDetector {
   private final double cheatFraction;
   private final double thrustFraction;
   private final int thrustWindow;
+  private final double maxBaseDepthPct;
+  private final int minBaseWeeks;
+  private final int maxBaseWeeks;
 
   /** Wires the config-tunable VCP thresholds. */
   public VcpDetector(
@@ -55,7 +58,20 @@ public class VcpDetector {
       @Value("${artha.minervini.vcp.final-vol-low-fraction:0.5}") double finalVolLowFraction,
       @Value("${artha.minervini.vcp.cheat-fraction:0.5}") double cheatFraction,
       @Value("${artha.minervini.vcp.thrust-pct:100}") double thrustPctWhole,
-      @Value("${artha.minervini.vcp.thrust-window:40}") int thrustWindow) {
+      @Value("${artha.minervini.vcp.thrust-window:40}") int thrustWindow,
+      // Doc §3.2 preconditions 4-5 (audit M39): a proper base AVOIDS corrections of 60%+ (heavy
+      // overhead supply) and is not absurdly long. The detector computed `deepest`/`baseWeeks` but
+      // never rejected on them, so a 70%→35%→18% collapse passed as a valid VCP and seeded a live pivot.
+      // The depth cap (60%) and the 65-week ceiling stay ACTIVE — correct doctrine, harmless (on the
+      // live screen depth avg ~8% / base max 6wk, so neither binds). The min-base-weeks FLOOR defaults
+      // to 0 (DISABLED): the deep backtest A/B (docs/strategies/m39-vcp-caps-backtest-2026-07-06.md, #606)
+      // showed a 3-week floor annihilates ~99% of VCP trades — profitable ones (~+4.6%/trade) — because
+      // `baseWeeks = round(durationDays/5)` measures only the tight trailing contraction (~0.7wk avg),
+      // NOT the classical multi-week base the [3,65] window assumes. Re-enable the floor via config only
+      // after aligning the base-length measurement to the full base.
+      @Value("${artha.minervini.vcp.max-base-depth-pct:60}") double maxBaseDepthPct,
+      @Value("${artha.minervini.vcp.min-base-weeks:0}") int minBaseWeeks,
+      @Value("${artha.minervini.vcp.max-base-weeks:65}") int maxBaseWeeks) {
     this.zigzagPct = zigzagPctWhole / 100.0;
     this.minContractions = minContractions;
     this.maxContractions = maxContractions;
@@ -65,6 +81,9 @@ public class VcpDetector {
     this.cheatFraction = cheatFraction;
     this.thrustFraction = thrustPctWhole / 100.0;
     this.thrustWindow = thrustWindow;
+    this.maxBaseDepthPct = maxBaseDepthPct;
+    this.minBaseWeeks = minBaseWeeks;
+    this.maxBaseWeeks = maxBaseWeeks;
   }
 
   /** Detects the most recent VCP base in {@code bars} (oldest→newest). */
@@ -95,6 +114,16 @@ public class VcpDetector {
     double tightest = last.depthPct();
     int durationDays = last.peakIdx() - first.peakIdx();
     int baseWeeks = (int) Math.round(durationDays / 5.0);
+    // §3.2 preconditions 4-5 (M39): reject a too-deep or wrong-duration base — heavy overhead
+    // supply (>=60% correction) or a base outside the 3-65 week window is not a proper VCP.
+    if (deepest >= maxBaseDepthPct) {
+      return VcpFootprint.rejected(
+          String.format("base too deep (%.0f%% >= %.0f%% overhead-supply cap)", deepest, maxBaseDepthPct));
+    }
+    if (baseWeeks < minBaseWeeks || baseWeeks > maxBaseWeeks) {
+      return VcpFootprint.rejected(
+          String.format("base duration %dW outside [%d,%d] weeks", baseWeeks, minBaseWeeks, maxBaseWeeks));
+    }
     boolean volumeDryUp = volumeDryUp(bars, last);
     boolean shakeout = shakeout(base);
     int baseCount = countContractingRuns(all);

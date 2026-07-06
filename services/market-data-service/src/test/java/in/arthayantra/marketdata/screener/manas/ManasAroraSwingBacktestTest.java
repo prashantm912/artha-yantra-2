@@ -22,7 +22,7 @@ import org.junit.jupiter.api.Test;
  */
 class ManasAroraSwingBacktestTest {
 
-  private final VcpDetector vcp = new VcpDetector(2.5, 2, 6, 0.2, 0.9, 0.5, 0.5, 100, 40);
+  private final VcpDetector vcp = new VcpDetector(2.5, 2, 6, 0.2, 0.9, 0.5, 0.5, 100, 40, 60, 3, 65);
   private final ConsolidationBreakout breakout = new ConsolidationBreakout(2.5, 10, 40, 25);
   private final ManasAroraSwingBacktest sim = new ManasAroraSwingBacktest();
   private static final LocalDate ENTRY_FROM = LocalDate.of(2020, 1, 1).plusDays(264);

@@ -157,13 +157,18 @@ public class ManasAroraSellDecisionService {
     // would I buy it now? — the entry gate re-evaluated on today's bar
     boolean stillBuyable =
         EntryEvaluator.evaluate(def, bank, last).map(EntryEvaluator.Evaluation::entry).orElse(false);
-    // where am I a seller? — the entry-time stop + the current 20-day-MA trail level
-    BigDecimal stopLevel =
-        ExitEvaluator.entryLevels(
-                def, bank, new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, entryPrice,
-                    Math.max(entryIndex, 0)))
-            .stopLoss();
-    BigDecimal trailLevel = bank.has("sma20") ? bank.valueAt("sma20", last) : null;
+    // where am I a seller? — the entry-time stop + the CURRENT trail level. The Manas doctrine trail
+    // is 2×ATR below the high-water since entry (armed at +9%), NOT sma20 (audit M33 — sma20 is only
+    // the entry gate). trailStop mirrors the frozen exit arithmetic, so this equals the price the
+    // live trailing_stop fires on; null until the trail arms.
+    ExitEvaluator.Position pos =
+        new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, entryPrice, Math.max(entryIndex, 0));
+    BigDecimal stopLevel = ExitEvaluator.entryLevels(def, bank, pos).stopLoss();
+    // The trail level scans the high-water over [entryIndex..last], so it is only meaningful when the
+    // entry bar is still in the window — with the entry bar gone a clamped index 0 would report a
+    // trail off the whole warmup peak. Skip it then (same guard as the sellingNow block below).
+    BigDecimal trailLevel =
+        entryIndex >= 0 ? ExitEvaluator.trailStop(def, bank, pos, last).orElse(null) : null;
     // am I a seller today? — the frozen exit doctrine on today's bar (skipped if the entry bar is gone)
     boolean sellingNow = false;
     String sellReason = null;

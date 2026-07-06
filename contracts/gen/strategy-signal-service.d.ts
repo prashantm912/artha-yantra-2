@@ -972,6 +972,8 @@ export interface components {
             losses?: number;
             pnlPoints?: number;
             pnlNet?: number;
+            /** Format: int64 */
+            unpriced?: number;
         };
         DotHealth: {
             asOf?: string;

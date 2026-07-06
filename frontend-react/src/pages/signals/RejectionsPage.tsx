@@ -135,6 +135,11 @@ export function RejectionsPage() {
                     {net >= 0 ? '+' : ''}₹{fmtNum(b.pnlNet, 2)} net ·
                   </span>
                 )}{' '}
+                {b.unpriced > 0 && (
+                  <span className="text-ay-muted" title="closed rows with no cost-model net — excluded from the ₹ net">
+                    {b.unpriced} unpriced ·
+                  </span>
+                )}{' '}
                 <span className={Number.isNaN(pnl) ? 'text-ay-muted' : pnl < 0 ? 'text-bear' : 'text-bull'}>
                   {Number.isNaN(pnl) ? '—' : `${pnl >= 0 ? '+' : ''}${fmtNum(b.pnlPoints, 2)} pts`}
                 </span>

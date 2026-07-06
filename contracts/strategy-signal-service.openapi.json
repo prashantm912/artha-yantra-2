@@ -2862,6 +2862,10 @@
           },
           "pnlNet" : {
             "type" : "number"
+          },
+          "unpriced" : {
+            "type" : "integer",
+            "format" : "int64"
           }
         }
       },

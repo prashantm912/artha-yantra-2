@@ -87,6 +87,19 @@ class ManasGatesTest {
     assertThat(ManasGates.lowCap(null, null, MAX_FF_MCAP_CR, MAX_FF_PCT)).isTrue(); // unknown kept
   }
 
+  @Test
+  void weightedRsBlendsTrailingReturnsAndTreatsNullLagsAsZero() {
+    // All four lookbacks doubled (ret = 1.0 each): 0.4·1 + 0.2·1 + 0.2·1 + 0.2·1 = 1.0.
+    assertThat(ManasGates.weightedRs(bd(200), bd(100), bd(100), bd(100), bd(100)))
+        .isEqualByComparingTo("1.0");
+    // A null/edge lag contributes 0 (ManasGates.ret returns 0): only the 3-month leg counts → 0.4·1.0.
+    assertThat(ManasGates.weightedRs(bd(200), bd(100), null, null, null)).isEqualByComparingTo("0.4");
+    // A stronger-momentum name ranks above a weaker one (the cross-sectional order the RS-rank needs).
+    BigDecimal strong = ManasGates.weightedRs(bd(300), bd(100), bd(120), bd(140), bd(150));
+    BigDecimal weak = ManasGates.weightedRs(bd(110), bd(100), bd(105), bd(108), bd(109));
+    assertThat(strong).isGreaterThan(weak);
+  }
+
   private static BigDecimal bd(long v) {
     return BigDecimal.valueOf(v);
   }

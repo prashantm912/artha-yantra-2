@@ -21,6 +21,29 @@ final class ManasGates {
   private ManasGates() {}
 
   /**
+   * Weighted trailing relative strength (§4.10, IBD-style): {@code 0.4·r63 + 0.2·r126 + 0.2·r189 +
+   * 0.2·r252} over the 3/6/9/12-month lookbacks. A null/zero trailing close contributes 0 (see
+   * {@link #ret}). Same math as the sibling {@code MinerviniGates.weightedRs}; the caller ranks these
+   * cross-sectionally into the 0..100 RS-rank percentile.
+   */
+  static BigDecimal weightedRs(
+      BigDecimal close, BigDecimal c63, BigDecimal c126, BigDecimal c189, BigDecimal c252) {
+    return ret(close, c63)
+        .multiply(new BigDecimal("0.4"))
+        .add(ret(close, c126).multiply(new BigDecimal("0.2")))
+        .add(ret(close, c189).multiply(new BigDecimal("0.2")))
+        .add(ret(close, c252).multiply(new BigDecimal("0.2")));
+  }
+
+  /** Simple return {@code (now−past)/past}; 0 when {@code past} is null/zero (insufficient history). */
+  static BigDecimal ret(BigDecimal now, BigDecimal past) {
+    if (now == null || past == null || past.signum() == 0) {
+      return BigDecimal.ZERO;
+    }
+    return now.subtract(past).divide(past, 6, RoundingMode.HALF_UP);
+  }
+
+  /**
    * The 6 §4.1 selection gates as a {@code boolean[6]}: (0) close ≥ minPrice; (1) 200-SMA rising
    * (sma200 &gt; sma200Ago); (2) sma50 &gt; sma200; (3) close &gt; sma200; (4) close ≥ 52w-low·(1 +
    * pctAboveLow/100); (5) a new 52-week high within the last {@code newHighLookback} sessions, i.e.

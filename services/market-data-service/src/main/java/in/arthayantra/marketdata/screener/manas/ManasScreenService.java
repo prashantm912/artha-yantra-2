@@ -93,6 +93,10 @@ public class ManasScreenService {
       BigDecimal avgVol20,
       BigDecimal avgVol50,
       BigDecimal turnover50,
+      BigDecimal c63, // trailing closes for the §4.10 weighted RS (3/6/9/12-month)
+      BigDecimal c126,
+      BigDecimal c189,
+      BigDecimal c252,
       BigDecimal ffMcap,
       BigDecimal ffPct) {}
 
@@ -180,18 +184,40 @@ public class ManasScreenService {
                     rs.getBigDecimal("avg_vol_20"),
                     rs.getBigDecimal("avg_vol_50"),
                     rs.getBigDecimal("turnover_50"),
+                    rs.getBigDecimal("c63"),
+                    rs.getBigDecimal("c126"),
+                    rs.getBigDecimal("c189"),
+                    rs.getBigDecimal("c252"),
                     rs.getBigDecimal("ff_mcap"),
                     rs.getBigDecimal("ff_pct")),
             d, d, sma200RisingSessions, minSessions);
 
-    List<ManasCandidate> out = new ArrayList<>(raws.size());
+    // Cross-sectional RS-rank (§4.10, IBD-style): the weighted trailing relative strength as a 0..100
+    // percentile across the screened universe. Sort ascending with a deterministic symbol tie-break
+    // (ManasGates.ret returns 0 for a null/edge lag, so a whole block can tie at 0 — without the
+    // tie-break two runs of the same screen date could hand tied names different ordinal percentiles).
+    record Scored(Raw raw, BigDecimal rs) {}
+    List<Scored> scored = new ArrayList<>(raws.size());
     for (Raw r : raws) {
-      out.add(toCandidate(r));
+      scored.add(
+          new Scored(r, ManasGates.weightedRs(r.close(), r.c63(), r.c126(), r.c189(), r.c252())));
     }
-    return new ScreenResult(date, raws.size(), out);
+    scored.sort(java.util.Comparator.comparing(Scored::rs).thenComparing(s -> s.raw().symbol()));
+    int n = scored.size();
+    List<ManasCandidate> out = new ArrayList<>(n);
+    for (int i = 0; i < n; i++) {
+      BigDecimal rsRank =
+          n <= 1
+              ? BigDecimal.valueOf(100)
+              : BigDecimal.valueOf(i)
+                  .multiply(BigDecimal.valueOf(100))
+                  .divide(BigDecimal.valueOf(n - 1L), 2, RoundingMode.HALF_UP);
+      out.add(toCandidate(scored.get(i).raw(), rsRank));
+    }
+    return new ScreenResult(date, n, out);
   }
 
-  private ManasCandidate toCandidate(Raw r) {
+  private ManasCandidate toCandidate(Raw r, BigDecimal rsRank) {
     boolean[] g =
         ManasGates.gates(
             r.close(), r.sma50(), r.sma200(), r.sma200Ago(), r.high52w(), r.low52w(),
@@ -221,6 +247,7 @@ public class ManasScreenService {
     return new ManasCandidate(
         r.symbol(), "NSE", r.close(), r.sma50(), r.sma200(), r.high52w(), r.low52w(),
         r.avgVol20(), r.avgVol50(), r.turnover50(), fromHigh, aboveLow, withinHigh, aboveSma50,
-        liquidVolume, liquidDepth, lowCap, g, selectionPassed, passesAll, r.ffMcap(), r.ffPct());
+        liquidVolume, liquidDepth, lowCap, g, selectionPassed, passesAll, r.ffMcap(), r.ffPct(),
+        rsRank);
   }
 }

@@ -80,7 +80,13 @@ public class ManasFunnelService {
         ON vc.screen_date = r.screen_date AND vc.symbol = r.symbol
           AND vc.setup_type = 'vcp' AND vc.is_valid = TRUE AND vc.pivot IS NOT NULL
       WHERE r.screen_date = ? AND r.passes_all = TRUE
-      ORDER BY r.above_low_pct DESC NULLS LAST
+        -- §4.1/§4.10 RS-rank gate: only the top cross-sectional relative-strength names reach the book
+        -- (the backtest's "rs" variant, the method validator). Config-tunable; a NULL rank (pre-migration
+        -- / edge) is never dropped. funnel-rs-min=0 disables the gate.
+        AND (r.rs_rank >= ? OR r.rs_rank IS NULL)
+      -- RS-PRIORITY admission: the daily batch admits candidates in this order until the book's slots
+      -- fill, so the highest-RS names get the scarce slots (matches the backtest's RS-priority portfolio).
+      ORDER BY r.rs_rank DESC NULLS LAST, r.above_low_pct DESC NULLS LAST
       """;
 
   private final JdbcTemplate jdbc;
@@ -88,6 +94,7 @@ public class ManasFunnelService {
   private final BigDecimal buyableLow; // close >= pivot * buyableLow  (at/just below the pivot)
   private final BigDecimal buyableHigh; // close <= pivot * buyableHigh (not chased past it)
   private final BigDecimal onDeckFloor; // close >= pivot * onDeckFloor (tightening toward the pivot)
+  private final BigDecimal funnelRsMin; // §4.10 RS-rank gate: only names with rs_rank >= this reach the book
 
   /** Wires the marketdata datasource + regime + the config-tunable funnel bands (fractions of the pivot). */
   public ManasFunnelService(
@@ -95,12 +102,16 @@ public class ManasFunnelService {
       RegimeService regimeService,
       @Value("${artha.manas-arora.funnel.buyable-low:0.98}") BigDecimal buyableLow,
       @Value("${artha.manas-arora.funnel.buyable-high:1.05}") BigDecimal buyableHigh,
-      @Value("${artha.manas-arora.funnel.on-deck-floor:0.90}") BigDecimal onDeckFloor) {
+      @Value("${artha.manas-arora.funnel.on-deck-floor:0.90}") BigDecimal onDeckFloor,
+      // Doctrine §4.1/§4.10: the cross-sectional RS-rank gate — "the single biggest edge a filter can
+      // add" (the backtest's rs≥70 method-validator). Default 70; set 0 to disable.
+      @Value("${artha.manas-arora.funnel-rs-min:70}") BigDecimal funnelRsMin) {
     this.jdbc = jdbc;
     this.regimeService = regimeService;
     this.buyableLow = buyableLow;
     this.buyableHigh = buyableHigh;
     this.onDeckFloor = onDeckFloor;
+    this.funnelRsMin = funnelRsMin;
   }
 
   /** Builds the three-list as of {@code screenDate}. */
@@ -120,7 +131,7 @@ public class ManasFunnelService {
                   rs.getString("setup_type"), pivot, rs.getString("footprint"), pct,
                   rs.getBigDecimal("breakout_pivot"), rs.getBigDecimal("vcp_pivot"));
             },
-            java.sql.Date.valueOf(screenDate));
+            java.sql.Date.valueOf(screenDate), funnelRsMin);
 
     List<FunnelRow> buyable = new ArrayList<>();
     List<FunnelRow> onDeck = new ArrayList<>();

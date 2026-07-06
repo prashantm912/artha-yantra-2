@@ -169,8 +169,11 @@ switch ($Verb) {
         Invoke-Compose @('ps', '-a', '--format', 'table {{.Name}}\t{{.Service}}\t{{.Status}}\t{{.Publishers}}')
     }
     'backup' {
-        # manual pg_dump via the db-backup sidecar (A.11)
-        Invoke-Compose @('exec', 'db-backup', '/usr/local/bin/backup.sh', 'manual')
+        # manual pg_dump via the db-backup sidecar (A.11). `ay backup keep` (audit M30) takes a
+        # ROTATION-EXEMPT pre-migration dump into pinned/ that the 3-slot retention never evicts.
+        $mode = if ($Rest.Count -gt 0 -and ($Rest[0] -eq 'keep' -or $Rest[0] -eq 'pinned')) { 'pinned' } else { 'manual' }
+        Invoke-Compose @('exec', 'db-backup', '/usr/local/bin/backup.sh', $mode)
+        if ($mode -eq 'pinned') { Write-Host "[ay] pinned (rotation-exempt) backup taken -> backups/pinned/ (prune it yourself once the migration is proven good)" }
     }
     'restore' {
         # Restore a WHOLE-DATABASE -Fc dump (produced by `ay backup`) into the active
@@ -298,7 +301,8 @@ ay - ArthaYantra operator CLI (project-scoped docker compose)
   ay down                   stop project containers (volumes kept)
   ay logs <svc>             follow logs for one service
   ay status                 healthcheck summary of all containers
-  ay backup                 manual whole-db pg_dump (+ globals) into ./backups
+  ay backup [keep]          manual whole-db pg_dump (+ globals) into ./backups
+                            (`keep` = a rotation-EXEMPT pre-migration dump into backups/pinned/)
   ay restore <dir|file>     restore a whole-db backup (dir or *-full.dump) — DROPS+recreates the DB
   ay reset-db               down, DROP VOLUMES, re-up (flyway rebuilds schemas, empty)
   ay tag-images             snapshot the current :dev images to :<git-sha> (a rollback target)

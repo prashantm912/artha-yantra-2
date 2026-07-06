@@ -133,8 +133,15 @@ public final class ExitEvaluator {
     switch (basis) {
       case "atr_multiple" -> {
         BigDecimal value = decimal(params.get("value"));
+        if (value == null) {
+          return Optional.empty();
+        }
+        // H4: mirror trailing()'s opt-in rolling-ATR Chandelier level for the daily sell-decision read.
+        if ("rolling".equals(String.valueOf(params.get("atr_basis")))) {
+          return rollingAtrTrailLevel(series, position, index, params, value);
+        }
         BigDecimal atr = atrAtEntry(series, position, params);
-        if (value == null || atr == null || !trailArmed(isLong, peak, position, params.get("arm_pct"))) {
+        if (atr == null || !trailArmed(isLong, peak, position, params.get("arm_pct"))) {
           return Optional.empty();
         }
         BigDecimal dist = atr.multiply(value, EngineMath.MC);
@@ -500,6 +507,51 @@ public final class ExitEvaluator {
     };
   }
 
+  /**
+   * H4 canonical Chandelier ATR-trail LEVEL: the highest-high (LONG) / lowest-low (SHORT) since entry
+   * minus/plus {@code value × ROLLING ATR(atr_period)} (the engine's Wilder ATR, re-read at each bar),
+   * RATCHETED monotone in the favourable direction, and — when {@code breakeven_floor:true} — never
+   * worse than the entry (cost basis). Opt-in via {@code atr_basis: rolling}; the default entry-pinned
+   * single-formula path is untouched, so every rule WITHOUT these params stays byte-identical. Empty
+   * until armed ({@code arm_pct} off the favourable extreme, else armed from entry). Level-only — no
+   * evaluated-exit path is changed by adding this helper.
+   */
+  private static Optional<BigDecimal> rollingAtrTrailLevel(
+      EngineSeries series, Position position, int index, Map<String, Object> params, BigDecimal value) {
+    boolean isLong = position.direction() == Direction.LONG;
+    BigDecimal entry = position.entryPrice();
+    BigDecimal armPct = decimal(params.get("arm_pct"));
+    boolean floor = "true".equals(String.valueOf(params.get("breakeven_floor")));
+    Object p = params.get("atr_period");
+    int atrPeriod = p == null ? 14 : ((Number) p).intValue();
+    var atr = IndicatorRegistry.create("ATR", series, null, Map.of("period", atrPeriod));
+
+    BigDecimal ext = null; // running favourable extreme (highest high / lowest low) since entry
+    boolean armed = armPct == null;
+    BigDecimal level = floor ? entry : null; // breakeven floor, else unbounded until first ratchet
+    for (int j = position.entryIndex(); j <= index; j++) {
+      BigDecimal cand = isLong ? series.candle(j).high() : series.candle(j).low();
+      ext = ext == null ? cand : (isLong ? ext.max(cand) : ext.min(cand));
+      if (!armed) {
+        BigDecimal gain =
+            (isLong ? ext.subtract(entry) : entry.subtract(ext))
+                .divide(entry, EngineMath.MC)
+                .multiply(EngineMath.HUNDRED, EngineMath.MC);
+        armed = gain.compareTo(armPct) >= 0;
+      }
+      if (!armed) {
+        continue;
+      }
+      BigDecimal a = atr.valueAt(j);
+      if (a == null) {
+        continue;
+      }
+      BigDecimal c = isLong ? ext.subtract(a.multiply(value, EngineMath.MC)) : ext.add(a.multiply(value, EngineMath.MC));
+      level = level == null ? c : (isLong ? level.max(c) : level.min(c));
+    }
+    return armed && level != null ? Optional.of(level) : Optional.empty();
+  }
+
   private static Optional<ExitDecision> trailing(
       IndicatorBank bank,
       EngineSeries series,
@@ -541,8 +593,25 @@ public final class ExitEvaluator {
     }
     if ("atr_multiple".equals(basis)) {
       BigDecimal value = decimal(params.get("value"));
+      if (value == null) {
+        return Optional.empty();
+      }
+      // H4 opt-in: the canonical Chandelier trail (rolling ATR + breakeven floor). Default path below
+      // (entry-pinned ATR, no floor) is untouched, so every rule without atr_basis:rolling is byte-identical.
+      if ("rolling".equals(String.valueOf(params.get("atr_basis")))) {
+        Optional<BigDecimal> lvl = rollingAtrTrailLevel(series, position, index, params, value);
+        if (lvl.isEmpty()) {
+          return Optional.empty();
+        }
+        boolean rollingHit =
+            isLong ? close.compareTo(lvl.get()) <= 0 : close.compareTo(lvl.get()) >= 0;
+        return rollingHit
+            ? Optional.of(
+                new ExitDecision("trailing_stop", value + "x rolling-ATR Chandelier off " + lvl.get()))
+            : Optional.empty();
+      }
       BigDecimal atr = atrAtEntry(series, position, params);
-      if (value == null || atr == null) {
+      if (atr == null) {
         return Optional.empty();
       }
       // Manas §3.5B: an optional arm_pct keeps the ATR trail INERT until the favourable extreme is

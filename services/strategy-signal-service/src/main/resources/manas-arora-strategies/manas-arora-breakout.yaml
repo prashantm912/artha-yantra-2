@@ -45,8 +45,9 @@ exit_rules:
   # §3.5A initial stop = entry − 2×ATR(20), capped at ~10% of entry (the tighter wins). atr_risk sizes
   # off THIS stop's distance (min(2×ATR, 10%)), so a wide-ATR name takes a smaller position.
   - { type: stop_loss, params: { basis: atr_multiple, value: 2, atr_period: 20, cap_pct: 10 } }
-  # §3.5B armed ATR trail: inert until up ~9%, then ratchets peak − 2×ATR (monotone up).
-  - { type: trailing_stop, params: { basis: atr_multiple, value: 2, atr_period: 20, arm_pct: 9 } }
+  # §3.5B armed Chandelier ATR trail (H4 doctrine-faithful): inert until up ~9%, then ratchets
+  # highest-high − 2×ROLLING-ATR(20), floored at breakeven (cost). Same doctrine as the backtest.
+  - { type: trailing_stop, params: { basis: atr_multiple, value: 2, atr_period: 20, arm_pct: 9, atr_basis: rolling, breakeven_floor: true } }
   # §3.5C exhaustion square-off: too-fast (+35% in ≤3 sessions) OR parabolic (+40% over the 10-day MA).
   - { type: square_off, params: { fast_pct: 35, fast_bars: 3, parabolic_ma: 10, parabolic_dist_pct: 40 } }
 risk:

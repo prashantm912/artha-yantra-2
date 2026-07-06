@@ -34,7 +34,7 @@ entry_rules:
   scoring: { threshold: 0.0 }
 exit_rules:
   - { type: stop_loss, params: { basis: atr_multiple, value: 2, atr_period: 20, cap_pct: 10 } }
-  - { type: trailing_stop, params: { basis: atr_multiple, value: 2, atr_period: 20, arm_pct: 9 } }
+  - { type: trailing_stop, params: { basis: atr_multiple, value: 2, atr_period: 20, arm_pct: 9, atr_basis: rolling, breakeven_floor: true } }
   - { type: square_off, params: { fast_pct: 35, fast_bars: 3, parabolic_ma: 10, parabolic_dist_pct: 40 } }
 risk:
   position_sizing: { method: percent_equity, params: { percent: 5 } }

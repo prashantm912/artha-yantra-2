@@ -349,17 +349,29 @@ export function BacktestResultsPage() {
                   return (
                   <tr
                     key={tr.seq}
-                    role="button"
-                    tabIndex={0}
                     onClick={() => setSelected(tr)}
-                    onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setSelected(tr))}
-                    aria-pressed={selected?.seq === tr.seq}
                     className={cn(
-                      'cursor-pointer border-t border-ay-border hover:bg-surface-2 focus:bg-surface-2 focus:outline-none',
+                      'cursor-pointer border-t border-ay-border hover:bg-surface-2',
                       selected?.seq === tr.seq && 'bg-surface-2',
                     )}
                   >
-                    <td className="px-2 py-2 tabular-nums">{tr.seq}</td>
+                    {/* Audit M23: the row keeps its table `row` semantics (a `role="button"` on a
+                        <tr> destroys the grid for AT). The keyboard/AT activator is a real toggle
+                        button in the first cell; the row onClick stays a mouse-only convenience. */}
+                    <td className="px-2 py-2 tabular-nums">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelected(tr);
+                        }}
+                        aria-pressed={selected?.seq === tr.seq}
+                        aria-label={`Show details for trade ${tr.seq}`}
+                        className="rounded tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                      >
+                        {tr.seq}
+                      </button>
+                    </td>
                     <td className="px-2 py-2">
                       {/* real trades carry side=BUY (option legs) — the old ==='LONG' check never
                           matched, so every BUY rendered bear-red (audit 2026-07-02 §3) */}

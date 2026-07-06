@@ -194,22 +194,29 @@ export function SignalsPage() {
                   {rows.map((s) => (
                     <tr
                       key={s.id}
-                      role="button"
-                      tabIndex={0}
                       onClick={() => setSelectedId(s.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          setSelectedId(s.id);
-                        }
-                      }}
-                      aria-pressed={s.id === selectedId}
                       className={cn(
-                        'cursor-pointer border-t border-ay-border hover:bg-surface-2 focus:bg-surface-2 focus:outline-none',
+                        'cursor-pointer border-t border-ay-border hover:bg-surface-2',
                         s.id === selectedId && 'bg-surface-2',
                       )}
                     >
-                      <td className="px-2 py-2 nums">{s.generatedAt.slice(11, 19)}</td>
+                      {/* Audit M23: the row keeps its table `row` semantics (a `role="button"` on a
+                          <tr> destroys the grid for AT). The keyboard/AT activator is a real toggle
+                          button in the first cell; the row onClick stays a mouse-only convenience. */}
+                      <td className="px-2 py-2 nums">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedId(s.id);
+                          }}
+                          aria-pressed={s.id === selectedId}
+                          aria-label={`Show details for the ${s.exchange}:${s.tradingsymbol} ${s.signalType} signal`}
+                          className="rounded text-left tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                        >
+                          {s.generatedAt.slice(11, 19)}
+                        </button>
+                      </td>
                       <td className="px-2 py-2">{s.strategyId ?? s.strategyVersionId?.slice(0, 8) ?? '—'}</td>
                       <td className="px-2 py-2">
                         {s.exchange}:{s.tradingsymbol}

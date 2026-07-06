@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { m } from 'motion/react';
 import { formatDecimal } from '../../lib/decimal.ts';
@@ -41,8 +42,19 @@ export function MinerviniScreenerPage() {
   const screen = useMinerviniScreen(params, view === 'screen');
   const funnel = useMinerviniFunnel(undefined, view === 'funnel');
   const run = useRunMinervini();
+  const qc = useQueryClient();
 
-  const recompute = () => run.mutate(params, { onSuccess: () => screen.refetch() });
+  // Recompute re-runs the daily screen server-side; the funnel + per-candidate reads are DERIVED from
+  // that same run, so invalidate them too (audit M22 — refetching only the screen left the Funnel view
+  // and any open candidate analyzer showing the pre-recompute selection).
+  const recompute = () =>
+    run.mutate(params, {
+      onSuccess: () => {
+        screen.refetch();
+        qc.invalidateQueries({ queryKey: ['minervini-funnel'] });
+        qc.invalidateQueries({ queryKey: ['minervini-candidate'] });
+      },
+    });
   const data = screen.data;
   const inputCls = 'h-9 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text';
 

@@ -68,11 +68,15 @@ export function AdvanceChartPage() {
   const [older, setOlder] = useState<MarketCandle[]>([]);
   const loadingOlder = useRef(false);
   const noMoreOlder = useRef(false);
+  // Reset the lazy-loaded scroll-back ONLY when the symbol/interval changes — NOT on every
+  // candles.data change, else the market-hours auto-refresh (every ~10s) would wipe the owner's
+  // scrolled-back history each poll. The `bars` merge dedups base vs older by bucket, so an
+  // overlapping refresh is safe.
   useEffect(() => {
     setOlder([]);
     loadingOlder.current = false;
     noMoreOlder.current = false;
-  }, [symbol, interval, candles.data]);
+  }, [symbol, interval]);
 
   const bars = useMemo(() => {
     const base = candles.data?.items ?? [];

@@ -86,8 +86,16 @@ export function useCandles(symbol: string, interval: string) {
     queryKey: ['candles', symbol, interval, lastDay ?? null],
     queryFn: async () => {
       const span = SPAN_MS[interval] ?? SPAN_MS['1d'];
-      const to =
-        lastDay && lastDay.length === 10 ? new Date(`${lastDay}T15:30:00+05:30`) : new Date();
+      // Anchor `to` at the EARLIER of the last session's 15:30 close and now. On a weekend/holiday
+      // the last trading day is in the past, so we read that session (the original intent). But
+      // DURING a live session lastTradingDay == today, so today's 15:30 close is in the FUTURE —
+      // clamping to `now` is essential, else the whole [from,to] window is future and intraday
+      // charts read blank until ~afternoon (owner-reported 2026-07-06: NIFTY26JULFUT 1m empty at
+      // 10:01 IST because the window was 11:50→15:30 IST).
+      const now = new Date();
+      const close =
+        lastDay && lastDay.length === 10 ? new Date(`${lastDay}T15:30:00+05:30`) : now;
+      const to = close.getTime() < now.getTime() ? close : now;
       const from = new Date(to.getTime() - span * 220);
       const p = new URLSearchParams({
         exchange,

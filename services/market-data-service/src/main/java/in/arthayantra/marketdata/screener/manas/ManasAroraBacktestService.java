@@ -156,6 +156,7 @@ public class ManasAroraBacktestService {
   private final int slots;
   private final SwingPortfolio.Costs costs;
   private final in.arthayantra.marketdata.alerts.NtfyClient ntfy;
+  private final in.arthayantra.marketdata.screener.SwingBacktestGate gate;
   private final AtomicBoolean running = new AtomicBoolean(false);
   private volatile Report latest;
   private volatile BacktestResult latestResult;
@@ -167,6 +168,7 @@ public class ManasAroraBacktestService {
       ConsolidationBreakout breakoutDetector,
       ObjectMapper objectMapper,
       in.arthayantra.marketdata.alerts.NtfyClient ntfy,
+      in.arthayantra.marketdata.screener.SwingBacktestGate gate,
       @Value("${artha.manas-arora.backtest.years:11}") int defaultYears,
       @Value("${artha.manas-arora.backtest.min-turnover:3750000}") BigDecimal minTurnover,
       @Value("${artha.manas-arora.backtest.rs-min:70}") BigDecimal rsMin,
@@ -193,6 +195,7 @@ public class ManasAroraBacktestService {
     this.breakoutDetector = breakoutDetector;
     this.objectMapper = objectMapper;
     this.ntfy = ntfy;
+    this.gate = gate;
     this.sim =
         new ManasAroraSwingBacktest(
             atrMult, atrPeriod, stopCapPct, trailArmPct, fastMovePct, fastMoveBars, parabolicPct,
@@ -245,9 +248,17 @@ public class ManasAroraBacktestService {
         "loaded from the last persisted run (slot sweep is in-memory only; re-run to populate)");
   }
 
-  /** Triggers a run on a background thread; returns false if one is already running. */
+  /**
+   * Triggers a run on a background thread; returns false if one is already running (this family) OR
+   * the other swing backtest holds the shared single-permit heap gate (audit M25) — either way the
+   * caller reports "already running" rather than piling a second ~11-year sim onto the live heap.
+   */
   public boolean trigger(Integer years) {
     if (!running.compareAndSet(false, true)) {
+      return false;
+    }
+    if (!gate.tryAcquire()) {
+      running.set(false); // the other family's deep sim is running — do not stack on the heap
       return false;
     }
     LocalDate from = from(years);
@@ -278,6 +289,7 @@ public class ManasAroraBacktestService {
       throw e;
     } finally {
       running.set(false);
+      gate.release(); // release the shared heap permit (paired with the trigger's tryAcquire)
     }
   }
 

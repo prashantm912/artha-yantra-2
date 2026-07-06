@@ -131,6 +131,8 @@ export interface ShadowVariantSummary {
   pnlPoints: Num;
   /** 1-lot INR net of the statutory cost model (F8); null before the cost columns existed. */
   pnlNet: Num;
+  /** CLOSED rows with no pnl_net (STALE / pre-F8 history) — in `closed` but NOT in `pnlNet`. */
+  unpriced: number;
 }
 
 /** The per-variant shadow-book league table over an optional opened-at window. */

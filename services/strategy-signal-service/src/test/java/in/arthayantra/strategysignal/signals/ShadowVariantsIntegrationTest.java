@@ -144,5 +144,8 @@ class ShadowVariantsIntegrationTest extends in.arthayantra.strategysignal.testsu
     var volOff = league.stream().filter(s -> s.variant().equals("vol-off")).findFirst().orElseThrow();
     assertThat(volOff.closed()).isGreaterThanOrEqualTo(1);
     assertThat(volOff.wins()).isGreaterThanOrEqualTo(1);
+    // Closed here with a null pnl_net (no cost model on this path) — it must count as unpriced so the
+    // book total can never silently drop it (the 2026-07-06 champion-book artifact this guards against).
+    assertThat(volOff.unpriced()).isGreaterThanOrEqualTo(1);
   }
 }

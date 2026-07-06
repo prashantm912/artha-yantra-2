@@ -54,11 +54,14 @@ public class ShadowPositionRepository {
   /**
    * Per-variant book rollup (roadmap F1): counts + realized points over an optional window.
    * {@code pnlNet} (F8) is the 1-lot INR sum net of the statutory cost model — the honest number;
-   * points stay for scale-free comparison.
+   * points stay for scale-free comparison. {@code unpriced} is the count of CLOSED rows whose
+   * {@code pnl_net} is null (STALE closes, or pre-F8-cost-model history) — those rows are IN the
+   * {@code closed} count but NOT in the {@code pnlNet} sum, so a consumer must surface it or the
+   * book total reads as if the unpriced losers never happened.
    */
   public record VariantSummary(
       String variant, long open, long closed, long wins, long losses, BigDecimal pnlPoints,
-      BigDecimal pnlNet) {}
+      BigDecimal pnlNet, long unpriced) {}
 
   private final JdbcTemplate jdbc;
 
@@ -140,7 +143,8 @@ public class ShadowPositionRepository {
                count(*) FILTER (WHERE status = 'CLOSED' AND pnl_points > 0) AS wins,
                count(*) FILTER (WHERE status = 'CLOSED' AND pnl_points <= 0) AS losses,
                coalesce(sum(pnl_points) FILTER (WHERE status = 'CLOSED'), 0) AS pnl_points,
-               sum(pnl_net) FILTER (WHERE status = 'CLOSED') AS pnl_net
+               sum(pnl_net) FILTER (WHERE status = 'CLOSED') AS pnl_net,
+               count(*) FILTER (WHERE status = 'CLOSED' AND pnl_net IS NULL) AS unpriced
         FROM shadow_positions
         WHERE (?::timestamptz IS NULL OR opened_at >= ?) AND (?::timestamptz IS NULL OR opened_at < ?)
         GROUP BY variant ORDER BY variant
@@ -149,7 +153,7 @@ public class ShadowPositionRepository {
             new VariantSummary(
                 rs.getString("variant"), rs.getLong("open"), rs.getLong("closed"),
                 rs.getLong("wins"), rs.getLong("losses"), rs.getBigDecimal("pnl_points"),
-                rs.getBigDecimal("pnl_net")),
+                rs.getBigDecimal("pnl_net"), rs.getLong("unpriced")),
         from, from, to, to);
   }
 

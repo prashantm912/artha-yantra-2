@@ -51,6 +51,9 @@ class ScalperGatesTest {
         .isEqualByComparingTo("125000");
     assertThat(ScalperGates.relativeVolumeFloor(List.of(), bd("1.5"), 3, bd("125000")))
         .isEqualByComparingTo("125000");
+    // minBars<=0 (armed misconfiguration) must still fall back on an empty window, never IOOBE.
+    assertThat(ScalperGates.relativeVolumeFloor(List.of(), bd("1.5"), 0, bd("125000")))
+        .isEqualByComparingTo("125000");
   }
 
   @Test

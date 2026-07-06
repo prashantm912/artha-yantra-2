@@ -188,7 +188,9 @@ public final class ScalperGates {
   public static BigDecimal relativeVolumeFloor(
       List<BigDecimal> priorVolumes, BigDecimal multiplier, int minBars, BigDecimal absoluteFallback) {
     List<BigDecimal> vols = priorVolumes.stream().filter(Objects::nonNull).sorted().toList();
-    if (vols.size() < minBars) {
+    // Math.max(minBars, 1) so an empty window ALWAYS falls back — guards the median math against a
+    // deliberate armed misconfiguration (relativeVolumeMinBars <= 0) at the session open.
+    if (vols.size() < Math.max(minBars, 1)) {
       return absoluteFallback;
     }
     int n = vols.size();

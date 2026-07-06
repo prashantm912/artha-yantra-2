@@ -199,5 +199,23 @@ Owner batch ("implement autonomously while I sleep"), all merged + deployed to t
   original ([#575](https://github.com/prashantm912/artha-yantra-2/pull/575)). The `a6dd6a` reviewer's
   L545 volumeRatio "off-by-one" = FALSE POSITIVE (50 bars, verified); its stale-pivot + RS-sparse flags =
   verified non-issues (weekly-fixed pivot is intended; Pass 1/Pass 2 gate RS_LOOKBACK identically).
-- **Remaining = owner-gated ONLY:** the supervised forward-paper watch on the Manas ₹1.5 L book + the
-  owner's reliability sign-off (same §0.5 #12 bar as Minervini). No buildable code left in this family.
+- **Backtest-improvement follow-ups SHIPPED + LIVE 2026-07-06/07** (from the 2026-07-06 swing-backtest
+  comparison — two doctrine-faithful edges Manas lacked but Minervini already had):
+  - **F1 — RS-rank gate + RS-priority funnel admission** ([#611](https://github.com/prashantm912/artha-yantra-2/pull/611),
+    `329e9d71`): the screener computes weighted trailing-return RS (0.4/0.2/0.2/0.2, same math as
+    Minervini) over the full scanned universe, percentile-ranks 0..100, and the funnel now gates + orders
+    by it (`artha.manas-arora.funnel-rs-min`, default **70**). §4.10 "the single biggest edge a filter
+    adds." Live-verified: 2,229 scanned, 0 nulls, **96 passers ≥70**.
+  - **F2 — §3.4 multi-lot pyramiding (add-to-winner)** ([#612](https://github.com/prashantm912/artha-yantra-2/pull/612),
+    `32b717c6`; **armed live 2026-07-07**): a held winner takes an **averaged** add-lot (owner-picked over
+    subaccount separate-lots — cash-equivalent under §3.5.D close-together, no shared-surface migration) on
+    a fresh **+6%**-since-last-lot pivot, up to 3 lots, within a ≤6% book open-risk cap; the pyramid closes
+    all lots together off the oldest lot's governing stop. Flag `artha.manas-arora.pyramid.enabled`
+    (default OFF; arm +6% aligned to the backtest `PYRAMID_ARM_PCT`, un-arm = `.env` flip + redeploy).
+    2 adversarial reviewers clean; backtest evidence MIXED → built for doctrine faithfulness + forward
+    paper, not a proven edge. Applied-findings record in `docs/strategies/swing-backtest-latest-2026-07-06.md`
+    ([#613](https://github.com/prashantm912/artha-yantra-2/pull/613)).
+- **Remaining = owner-gated ONLY:** the supervised forward-paper watch on the Manas ₹1.5 L book (now
+  running the F1 RS-priority funnel + F2 pyramiding config) + the owner's reliability sign-off (same
+  §0.5 #12 bar as Minervini). No buildable code left in this family; the one open perf follow-up is the
+  audit LOW "serial/N+1 backtest reads" (`ManasAroraBacktestService.readSeries`).

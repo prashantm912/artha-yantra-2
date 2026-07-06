@@ -43,6 +43,27 @@ Endpoint evidence (NIFTY26JULFUT, 09:15→15:30 IST window, ~09:54 IST): `1m`=40
   `from` down to `time_bucket(interval, from)` for the coarse caggs. Parity-neutral (read-only chart
   path, no engine/golden surface).
 
+## AC-3 (LOW, QUEUED — do NOT start until the owner asks) — true tick-smooth candle streaming
+The chart auto-refreshes during market hours via a ~10s polite poll (`useCandles` `refetchInterval`,
+shipped #600) — this killed the "manually refresh every few minutes" pain, but the last candle jumps
+every ~10s rather than sliding tick-by-tick. The owner asked to **queue** true tick-streaming (the
+deferred datafeed) as a follow-up, explicitly **not to start it yet**.
+
+- **What it is:** wire the existing live-tick WS (`useLiveTicks`, `/topic/ticks.{exch}.{sym}`, already
+  used by paper/scalper MTM) into the forming candle so its close/high/low updates on every tick, with
+  a new bar appended at each interval-bucket rollover — the sub-second smooth movement a pro chart has.
+- **Scope (why it's not a quick nit):** touch the chart components (`AdvanceChart` /
+  `CandleChart`) to accept a live-LTP prop and mutate the last series point without a full re-render
+  (lightweight-charts `series.update()` on the last bar), plus bucket-rollover logic (when `now`
+  crosses the next interval boundary, seal the bar and open a new one seeded at the LTP). Reconcile
+  with the 10s poll so the poll's authoritative bar replaces the tick-synthesised one on arrival
+  (dedupe by bucket — the merge already keys by bucket). Only the 1m/3m/5m/15m intraday intervals
+  need it; 1h+/daily stay poll-only. Keep it read-only/parity-neutral (chart path only).
+- **Effort:** moderate FE (LWC series-update + rollover + WS wiring + a test for the rollover/seal).
+  The 10s poll (#600) is the 90% fix; this is the last 10% of smoothness.
+
 ---
-*Filed 2026-07-06 during the live session. Both are UX/windowing, not data integrity. Priority: AC-1
-first (discoverability), AC-2 is a polish nit.*
+*Filed 2026-07-06 during the live session. AC-1/AC-2 are UX/windowing; AC-3 is a queued polish lift.
+Priority: AC-1 first (discoverability), then AC-3 (smoothness) if the owner wants it, AC-2 is a nit.
+Status: the live-session future-window bug (separate from AC-2) was fixed in #599; the ~10s
+auto-refresh shipped in #600.*

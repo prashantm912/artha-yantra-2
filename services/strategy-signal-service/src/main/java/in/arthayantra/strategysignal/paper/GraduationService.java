@@ -102,26 +102,22 @@ public class GraduationService {
   }
 
   /**
-   * A strategy's CLOSED-trade realized-P&L series, oldest-first (the drawdown-walk order). SAME-schema
-   * join: {@code paper_orders} carries the signal_id (there is no {@code paper_positions.signal_id}),
-   * signals carries the version, strategy_versions carries the strategy — DISTINCT because an averaged
-   * add can link a position to several signal-carrying orders of the same strategy. Package-visible so
-   * the F7 promotion evaluator can compute its own risk-adjusted stats off the same series.
+   * A strategy's CLOSED-trade realized-P&L series, oldest-first (the drawdown-walk order). Audit H5:
+   * attributes each position via its OWN {@code opening_signal_id} (the signal that opened it, V026),
+   * so a position counts for EXACTLY the strategy that opened it — not, as before, every strategy that
+   * ever traded the same (book, symbol, side) key (which cross-attributed the promotion evidence). A
+   * position with no opening signal (a hand order, or a pre-V026 row that could not be backfilled)
+   * counts toward no strategy, which is correct. Package-visible so the F7 promotion evaluator can
+   * compute its own risk-adjusted stats off the same series.
    */
   List<BigDecimal> closedPnls(UUID strategyId) {
     return jdbc.query(
         """
         SELECT p.realized_pnl AS pnl
-        FROM (
-          SELECT DISTINCT p.id, p.realized_pnl, p.closed_at
-          FROM paper_positions p
-          JOIN paper_orders o
-            ON o.book = p.book AND o.exchange = p.exchange AND o.tradingsymbol = p.tradingsymbol
-            AND o.side = p.side AND o.signal_id IS NOT NULL
-          JOIN signals sig ON sig.id = o.signal_id
-          JOIN strategy_versions sv ON sv.id = sig.strategy_version_id
-          WHERE p.status = 'CLOSED' AND sv.strategy_id = ?
-        ) p
+        FROM paper_positions p
+        JOIN signals sig ON sig.id = p.opening_signal_id
+        JOIN strategy_versions sv ON sv.id = sig.strategy_version_id
+        WHERE p.status = 'CLOSED' AND sv.strategy_id = ?
         ORDER BY p.closed_at ASC, p.id ASC
         """,
         (rs, n) -> rs.getBigDecimal("pnl"),

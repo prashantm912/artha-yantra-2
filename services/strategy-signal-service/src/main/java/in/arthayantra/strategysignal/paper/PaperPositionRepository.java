@@ -109,14 +109,17 @@ public class PaperPositionRepository {
       BigDecimal takeProfit,
       Integer subaccountIdx) {
     return insertOpen(
-        book, exchange, tradingsymbol, side, qty, avgEntryPrice, stopLoss, takeProfit, subaccountIdx, null);
+        book, exchange, tradingsymbol, side, qty, avgEntryPrice, stopLoss, takeProfit, subaccountIdx,
+        null, null);
   }
 
   /**
    * Opens a new position, additionally stamping the F9 {@code advised_lots} advisory (the risk-based
    * qty a 1%-of-book / stop-distance sizing would suggest; {@code null} when the entry carries no
-   * stop). Advisory only — never overrides the actual filled {@code qty}; the SPAN margin snapshot is
-   * priced fail-soft after commit ({@link #updateMarginSnapshot}).
+   * stop) and the {@code openingSignalId} — the signal that opened this position (audit H5: lets F7
+   * graduation attribute a position to the ONE strategy that opened it, not every strategy that ever
+   * traded the same key). Advisory only — never overrides the actual filled {@code qty}; the SPAN
+   * margin snapshot is priced fail-soft after commit ({@link #updateMarginSnapshot}).
    */
   public long insertOpen(
       String book,
@@ -128,13 +131,14 @@ public class PaperPositionRepository {
       BigDecimal stopLoss,
       BigDecimal takeProfit,
       Integer subaccountIdx,
-      Long advisedLots) {
+      Long advisedLots,
+      Long openingSignalId) {
     Long id =
         jdbc.queryForObject(
             """
             INSERT INTO paper_positions
-              (book, exchange, tradingsymbol, side, qty, avg_entry_price, status, opened_at, stop_loss, take_profit, subaccount_idx, advised_lots)
-            VALUES (?,?,?,?,?,?, 'OPEN', now(), ?, ?, ?, ?) RETURNING id
+              (book, exchange, tradingsymbol, side, qty, avg_entry_price, status, opened_at, stop_loss, take_profit, subaccount_idx, advised_lots, opening_signal_id)
+            VALUES (?,?,?,?,?,?, 'OPEN', now(), ?, ?, ?, ?, ?) RETURNING id
             """,
             Long.class,
             book,
@@ -146,7 +150,8 @@ public class PaperPositionRepository {
             stopLoss,
             takeProfit,
             subaccountIdx,
-            advisedLots);
+            advisedLots,
+            openingSignalId);
     return id == null ? 0 : id;
   }
 

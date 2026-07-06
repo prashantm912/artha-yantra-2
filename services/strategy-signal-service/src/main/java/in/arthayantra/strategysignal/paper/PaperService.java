@@ -201,7 +201,8 @@ public class PaperService {
     Long advisedLots = advisedLots(book, fill.fillPrice(), request.stopLoss());
     upsertPosition(
         book, exchange, tradingsymbol, side, request.qty(), fill.fillPrice(),
-        request.stopLoss(), request.takeProfit(), request.subaccountIdx(), advisedLots);
+        request.stopLoss(), request.takeProfit(), request.subaccountIdx(), advisedLots,
+        request.signalId());
     // F9: after the ledger commits, price the position's SPAN margin (fail-soft, off the txn) and stamp
     // margin_snapshot/margin_pct. The event fires only if a row exists (an averaged add still re-prices).
     Optional<PositionRow> opened = positions.findOpen(book, exchange, tradingsymbol, side);
@@ -231,11 +232,15 @@ public class PaperService {
       BigDecimal stopLoss,
       BigDecimal takeProfit,
       Integer subaccountIdx,
-      Long advisedLots) {
+      Long advisedLots,
+      Long openingSignalId) {
     Optional<PositionRow> existing = positions.findOpen(book, exchange, tradingsymbol, side);
     if (existing.isPresent()) {
       // averaging onto an open position keeps its original bracket levels AND its original
       // sub-account (set at first open) — a later add never re-charges the trade to a new account.
+      // It likewise KEEPS its original opening_signal_id (audit H5): a pyramid add of the same
+      // strategy must not re-attribute the position, and it can never span two strategies (the
+      // per-book open-key means only one strategy holds a given key open at a time).
       PositionRow row = existing.get();
       long newQty = row.qty() + qty;
       BigDecimal newAvg =
@@ -247,7 +252,7 @@ public class PaperService {
     } else {
       positions.insertOpen(
           book, exchange, tradingsymbol, side, qty, fillPrice, stopLoss, takeProfit, subaccountIdx,
-          advisedLots);
+          advisedLots, openingSignalId);
     }
   }
 

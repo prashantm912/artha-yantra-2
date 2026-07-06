@@ -24,8 +24,8 @@ public class ManasScreenRepository {
          avg_vol_20, avg_vol_50, turnover_50, within_high_pct, above_low_pct,
          within_high, above_sma50, liquid_volume, liquid_depth, low_cap,
          free_float_mcap_cr, free_float_pct,
-         gate1, gate2, gate3, gate4, gate5, gate6, gates_passed, passes_all, computed_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, now())
+         gate1, gate2, gate3, gate4, gate5, gate6, gates_passed, passes_all, rs_rank, computed_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, now())
       ON CONFLICT (screen_date, symbol) DO UPDATE SET
         exchange = EXCLUDED.exchange, close_price = EXCLUDED.close_price,
         sma50 = EXCLUDED.sma50, sma200 = EXCLUDED.sma200,
@@ -38,7 +38,8 @@ public class ManasScreenRepository {
         free_float_mcap_cr = EXCLUDED.free_float_mcap_cr, free_float_pct = EXCLUDED.free_float_pct,
         gate1 = EXCLUDED.gate1, gate2 = EXCLUDED.gate2, gate3 = EXCLUDED.gate3,
         gate4 = EXCLUDED.gate4, gate5 = EXCLUDED.gate5, gate6 = EXCLUDED.gate6,
-        gates_passed = EXCLUDED.gates_passed, passes_all = EXCLUDED.passes_all, computed_at = now()
+        gates_passed = EXCLUDED.gates_passed, passes_all = EXCLUDED.passes_all,
+        rs_rank = EXCLUDED.rs_rank, computed_at = now()
       """;
 
   private final JdbcTemplate jdbc;
@@ -60,7 +61,7 @@ public class ManasScreenRepository {
             c.withinHighPct(), c.aboveLowPct(), c.withinHigh(), c.aboveSma50(),
             c.liquidVolume(), c.liquidDepth(), c.lowCap(), c.freeFloatMcapCr(), c.freeFloatPct(),
             c.gate(1), c.gate(2), c.gate(3), c.gate(4), c.gate(5), c.gate(6),
-            c.gatesPassed(), c.passesAll()
+            c.gatesPassed(), c.passesAll(), c.rsRank()
           });
     }
     int[] r = jdbc.batchUpdate(UPSERT, batch);
@@ -128,6 +129,7 @@ public class ManasScreenRepository {
         rs.getBigDecimal("above_low_pct"), rs.getBoolean("within_high"), rs.getBoolean("above_sma50"),
         rs.getBoolean("liquid_volume"), rs.getBoolean("liquid_depth"), rs.getBoolean("low_cap"),
         g, rs.getInt("gates_passed"), rs.getBoolean("passes_all"),
-        rs.getBigDecimal("free_float_mcap_cr"), rs.getBigDecimal("free_float_pct"));
+        rs.getBigDecimal("free_float_mcap_cr"), rs.getBigDecimal("free_float_pct"),
+        rs.getBigDecimal("rs_rank"));
   }
 }

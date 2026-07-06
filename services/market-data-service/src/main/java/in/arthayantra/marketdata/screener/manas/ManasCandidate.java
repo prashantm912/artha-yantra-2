@@ -32,7 +32,10 @@ public record ManasCandidate(
     int gatesPassed,
     boolean passesAll,
     BigDecimal freeFloatMcapCr,
-    BigDecimal freeFloatPct) {
+    BigDecimal freeFloatPct,
+    // §4.1/§4.10 cross-sectional RS-rank (0..100 percentile of the weighted trailing relative strength
+    // over the screened universe). Drives the funnel's RS-priority admission.
+    BigDecimal rsRank) {
 
   /** Gate i (1-based) as stored (gates[0] = gate1). */
   public boolean gate(int i) {

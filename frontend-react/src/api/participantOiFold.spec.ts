@@ -45,6 +45,20 @@ describe('foldParticipantOi', () => {
     expect(futIdx.shortPct).toBe('90.0');
   });
 
+  it('excludes the synthetic TOTAL row from the groups AND the %-denominator (audit D1)', () => {
+    // The feed returns a TOTAL client = the sum of the real participants. Left in, it rendered a 5th
+    // "TOTAL" group and doubled the denominator, halving every share (FII 10.0% → 5.0%).
+    const groups = foldParticipantOi([
+      row({ clientType: 'FII', futureIndexLong: 32476, futureIndexShort: 292535 }),
+      row({ clientType: 'Client', futureIndexLong: 292535, futureIndexShort: 32476 }),
+      row({ clientType: 'TOTAL', futureIndexLong: 325011, futureIndexShort: 325011 }),
+    ]);
+    expect(groups.map((g) => g.participant)).not.toContain('TOTAL');
+    expect(groups).toHaveLength(2);
+    const fii = groups.find((g) => g.participant === 'FII')!.segments.find((s) => s.segment === 'Future Index')!;
+    expect(fii.longPct).toBe('10.0'); // NOT 5.0 — denominator excludes TOTAL
+  });
+
   it('put segments read INVERTED on the day-delta (puts added = bearish)', () => {
     const groups = foldParticipantOi([
       row({ tradeDate: '2026-06-12', optionIndexPutLong: 1000, optionIndexPutShort: 500 }),

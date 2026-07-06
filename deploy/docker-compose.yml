@@ -397,6 +397,14 @@ services:
       # manas_arora_funnel so it never touches the Minervini funnel. Default off; live .env flips true.
       ARTHA_MANAS_ARORA_SEED_STRATEGIES: ${ARTHA_MANAS_ARORA_SEED_STRATEGIES:-false}
       ARTHA_MANAS_ARORA_SWING_ENABLED: ${ARTHA_MANAS_ARORA_SWING_ENABLED:-false}
+      # F2 §3.4 pyramiding: add a lot to a held Manas winner (+min-gain% since the last lot AND a fresh
+      # pivot), averaged into the one position, capped at max-lots and the ≤max-portfolio-risk-pct book
+      # open-risk cap. Default off (a held symbol is skipped, pre-F2). Tunables live in .env like the
+      # scalper relative-volume knobs — no rebuild to re-tune.
+      ARTHA_MANAS_ARORA_PYRAMID_ENABLED: ${ARTHA_MANAS_ARORA_PYRAMID_ENABLED:-false}
+      ARTHA_MANAS_ARORA_PYRAMID_MIN_GAIN_PCT: ${ARTHA_MANAS_ARORA_PYRAMID_MIN_GAIN_PCT:-5.0}
+      ARTHA_MANAS_ARORA_PYRAMID_MAX_LOTS: ${ARTHA_MANAS_ARORA_PYRAMID_MAX_LOTS:-3}
+      ARTHA_MANAS_ARORA_PYRAMID_MAX_PORTFOLIO_RISK_PCT: ${ARTHA_MANAS_ARORA_PYRAMID_MAX_PORTFOLIO_RISK_PCT:-6.0}
       # F9 paper risk enforcement (advised_lots + margin snapshot are always-on advisory; this flag
       # only ARMS the portfolio heat-cap BLOCK). Default off — flip true after a clean advisory week.
       ARTHA_PAPER_RISK_ENABLED: ${ARTHA_PAPER_RISK_ENABLED:-false}

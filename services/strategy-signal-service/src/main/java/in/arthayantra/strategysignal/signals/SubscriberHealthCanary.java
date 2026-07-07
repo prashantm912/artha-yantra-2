@@ -8,6 +8,7 @@ import java.time.ZonedDateTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -46,6 +47,10 @@ import org.springframework.stereotype.Component;
  * if the engine ever moves to per-channel connections.
  */
 @Component
+@ConditionalOnProperty(
+    value = "artha.signals.engine-enabled",
+    havingValue = "true",
+    matchIfMissing = true) // shares SignalEngine's lifecycle — meaningless (and unwireable) without it
 public class SubscriberHealthCanary {
 
   private static final Logger log = LoggerFactory.getLogger(SubscriberHealthCanary.class);
@@ -144,7 +149,7 @@ public class SubscriberHealthCanary {
     }
   }
 
-  /** ms since market-data's {@code ticks:last-at} heartbeat; MAX ⇒ unknown/down: DO NOT act. */
+  /** Age in ms of market-data's {@code ticks:last-at} heartbeat. Returns MAX when unknown/down. */
   private long feedAgeMs(long nowMs) {
     try {
       String raw = redis.opsForValue().get(FEED_HEARTBEAT_KEY);

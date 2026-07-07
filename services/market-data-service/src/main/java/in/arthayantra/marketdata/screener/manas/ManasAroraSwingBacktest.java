@@ -28,7 +28,8 @@ import java.util.List;
  * </ul>
  *
  * <p>Exit (§3.5): an initial stop of {@code entry − 2×ATR(20)} capped at {@code stopCapPct}; once the
- * position is up {@code trailArmPct}, an ATR trailing stop (cost basis − 2×ATR) ratchets up; a
+ * position is up {@code trailArmPct}, a canonical Chandelier trailing stop ({@code highest-high since
+ * entry − 2×rolling-ATR}, floored at the cost basis / breakeven) ratchets up; a
  * too-fast move ({@code fastMovePct} in ≤{@code fastMoveBars} sessions) and a parabolic extension
  * ({@code parabolicPct} above the 10-day MA) both force a square-off. No hard time-in-trade — hold
  * while the trend and stop hold.
@@ -221,7 +222,7 @@ public final class ManasAroraSwingBacktest {
     for (Variant v : variants) {
       for (String setup : SETUPS) {
         simulateSetup(
-            v, setup, symbol, bars, from, close, sma50, sma200, sma10, high52wIncl, low52w,
+            v, setup, symbol, bars, from, close, high, sma50, sma200, sma10, high52wIncl, low52w,
             recentHigh, volRatio50, turnover20, atr, rs, vcpPivot, isVcp, breakoutPivot, trades);
       }
     }
@@ -245,6 +246,7 @@ public final class ManasAroraSwingBacktest {
 
   private void simulateSetup(
       Variant v, String setup, String symbol, List<DailyBar> bars, LocalDate from, double[] close,
+      double[] high,
       double[] sma50, double[] sma200, double[] sma10, double[] high52wIncl, double[] low52w,
       double[] recentHigh, double[] volRatio50, double[] turnover20, double[] atr, double[] rsRank,
       double[] vcpPivot, boolean[] isVcp, double[] breakoutPivot, List<BtTrade> out) {
@@ -253,6 +255,7 @@ public final class ManasAroraSwingBacktest {
     double basisCost = 0; // the position's cost basis (first-lot entry) — the ATR trail anchor
     boolean trailArmed = false;
     double trailStop = 0;
+    double runHigh = 0; // H4: running highest HIGH since entry — the Chandelier trail anchor
     for (int i = MIN_BARS; i < n; i++) {
       LocalDate date = bars.get(i).date();
       if (lots.isEmpty()) {
@@ -266,8 +269,23 @@ public final class ManasAroraSwingBacktest {
           basisCost = close[i];
           trailArmed = false;
           trailStop = 0;
+          runHigh = high[i];
         }
         continue;
+      }
+
+      // H4 §3.5B canonical Chandelier trail, evaluated SAME-BAR (the EOD batch has the full bar):
+      // anchor = highest HIGH since entry, distance = atrMult × ROLLING ATR(i), floored at breakeven
+      // (cost basis) once armed. Armed once the high is up trailArmPct off the cost basis. Computed
+      // BEFORE the exits so today's close is checked against today's ratcheted level (matches the live
+      // ExitEvaluator, which reads peak/close on the same bar).
+      runHigh = Math.max(runHigh, high[i]);
+      if (!trailArmed && runHigh >= basisCost * (1.0 + trailArmPct)) {
+        trailArmed = true;
+        trailStop = basisCost; // breakeven floor
+      }
+      if (trailArmed && !Double.isNaN(atr[i])) {
+        trailStop = Math.max(trailStop, runHigh - atrMult * atr[i]);
       }
 
       // 1) whole-position square-offs (trailing stop / fast-move / parabolic) close EVERY lot.
@@ -296,15 +314,6 @@ public final class ManasAroraSwingBacktest {
           trailArmed = false;
           continue;
         }
-      }
-
-      // 3) arm / ratchet the ATR trailing stop off the cost basis once the position is up trailArmPct.
-      if (!trailArmed && close[i] >= basisCost * (1.0 + trailArmPct)) {
-        trailArmed = true;
-        trailStop = basisCost;
-      }
-      if (trailArmed && !Double.isNaN(atr[i])) {
-        trailStop = Math.max(trailStop, close[i] - atrMult * atr[i]);
       }
 
       // 4) pyramiding (§3.4): a fresh valid entry adds a lot while up pyramidArmPct and risk is bounded.

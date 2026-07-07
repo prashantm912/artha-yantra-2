@@ -3,7 +3,8 @@
 # as minervini-vcp-trail.yaml (close crosses the seeded pivot on expanding volume, above the 20-day MA),
 # so the entry mechanics are the proven ones; only the exit_rules exercise the new types:
 #   - stop_loss  basis=atr_multiple value=2 cap_pct=10  → entry − min(2×ATR(20), 10%×entry)
-#   - trailing_stop basis=atr_multiple value=2 arm_pct=9 → inert until +9%, then peak − 2×ATR (ratchets)
+#   - trailing_stop basis=atr_multiple value=2 arm_pct=9 atr_basis=rolling breakeven_floor=true (H4
+#     canonical Chandelier) → inert until +9%, then highest-high − 2×ROLLING-ATR floored at breakeven
 #   - square_off fast_pct=35 fast_bars=3 parabolic_ma=10 parabolic_dist_pct=40
 # The ATR/SMA are entry-independent bar functions, so the run is fully deterministic (proven by a
 # byte-equal second replay). NOT in GoldenDeterminismTest.FEATURES — a focused ManasAtrExitsTest drives
@@ -34,7 +35,7 @@ entry_rules:
   scoring: { threshold: 0.0 }
 exit_rules:
   - { type: stop_loss, params: { basis: atr_multiple, value: 2, atr_period: 20, cap_pct: 10 } }
-  - { type: trailing_stop, params: { basis: atr_multiple, value: 2, atr_period: 20, arm_pct: 9 } }
+  - { type: trailing_stop, params: { basis: atr_multiple, value: 2, atr_period: 20, arm_pct: 9, atr_basis: rolling, breakeven_floor: true } }
   - { type: square_off, params: { fast_pct: 35, fast_bars: 3, parabolic_ma: 10, parabolic_dist_pct: 40 } }
 risk:
   position_sizing: { method: percent_equity, params: { percent: 5 } }

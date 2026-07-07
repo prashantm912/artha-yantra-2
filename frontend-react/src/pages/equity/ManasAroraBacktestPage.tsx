@@ -18,8 +18,8 @@ import {
 // variant's per-setup trade stats + its RS-priority portfolio summary. A "Run backtest" button kicks
 // off a fresh run (~minutes, background thread). Lean by design — tables, not charts.
 
-/** The variant the plain funnel analogue reports (the full-filter run). */
-const PRIMARY_VARIANT = 'rs-turnover-pyramid';
+/** The variant the plain funnel analogue reports (the full-filter, non-pyramid run — pyramid disarmed per H4). */
+const PRIMARY_VARIANT = 'rs-turnover-nopyramid';
 
 export function ManasAroraBacktestPage() {
   const compare = useManasBacktestCompare();

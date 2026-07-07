@@ -142,8 +142,13 @@ public class ManasAroraBacktestService {
       List<SlotCell> slotSweep,
       String note) {}
 
-  /** The full-filter variant (the live-funnel analogue) — the one the plain GET returns. */
-  private static final String PRIMARY_VARIANT = "rs-turnover-pyramid";
+  /**
+   * The full-filter variant (the live-funnel analogue) — the one the plain GET returns. Non-pyramid:
+   * pyramiding was disarmed live + as the headline here (H4 Chandelier decision — under the canonical
+   * highest-high trail the add-to-winner variant degrades Sharpe, so single-lot is the operative config).
+   * The {@code rs-turnover-pyramid} variant is retained in the run set purely as a labeled A/B probe.
+   */
+  private static final String PRIMARY_VARIANT = "rs-turnover-nopyramid";
 
   private final JdbcTemplate jdbc;
   private final VcpDetector vcpDetector;
@@ -209,7 +214,7 @@ public class ManasAroraBacktestService {
             capital, costFixedPct, costSpreadPct, costImpactCoeff, costImpactCapPct);
   }
 
-  /** The latest completed (or in-progress) single report — the full-filter (rs-turnover-pyramid) variant. */
+  /** The latest completed (or in-progress) single report — the full-filter (rs-turnover-nopyramid) variant. */
   public Report latest() {
     if (latest != null) {
       return latest;

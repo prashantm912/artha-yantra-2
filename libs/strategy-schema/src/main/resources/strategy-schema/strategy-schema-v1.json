@@ -439,6 +439,8 @@
                 "trail_by": { "type": "number", "exclusiveMinimum": 0 },
                 "atr_period": { "type": "integer", "minimum": 1, "maximum": 200 },
                 "arm_pct": { "type": "number", "exclusiveMinimum": 0, "maximum": 100, "description": "Manas §3.5B: an atr_multiple trail stays INERT until the favourable extreme is up arm_pct% off entry, then ratchets peak − value×ATR (monotone up). Absent → armed from entry (byte-identical to before)." },
+                "atr_basis": { "enum": ["entry", "rolling"], "description": "H4: the atr_multiple trail's ATR basis — 'entry' (default; ATR pinned at the entry bar) or 'rolling' (the canonical Chandelier; ATR re-read at each bar, ratcheted off the highest-high). Absent → entry (byte-identical to before)." },
+                "breakeven_floor": { "type": "boolean", "description": "H4: when true, an armed atr_multiple trail is never worse than the entry (cost basis) — the breakeven floor. Default false. Pairs with atr_basis:rolling for the Manas §3.5B Chandelier." },
                 "alias": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
               },
               "anyOf": [

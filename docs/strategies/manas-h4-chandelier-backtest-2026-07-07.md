@@ -54,8 +54,21 @@ Previous = `docs/strategies/swing-backtest-latest-2026-07-06.md`.*
   basis (backtest uses the FIRST lot's cost, the live averaged single-lot uses the weighted average —
   inherited from the F2 averaged-vs-per-lot model, not new here).
 
+## Decision (2026-07-07 — owner approved both recommendations)
+Owner: *"deploy chandelier and disarm pyramid on both live and back."* Both recommendations improve
+risk-adjusted performance, so:
+1. **Chandelier deployed live** — the canonical trail is now the operative live-paper Manas exit
+   (`ExitEvaluator` rolling-ATR/highest-high/+9%-arm/breakeven-floor/close-exit) via strategy-signal.
+2. **Pyramiding disarmed** —
+   - **Live**: `ARTHA_MANAS_ARORA_PYRAMID_ENABLED=false` (was `true`); the live engine reverts to
+     single-lot. F2 pyramiding stays code-present but un-armed (reversible `.env` flip).
+   - **Backtest**: the headline/primary variant flips `rs-turnover-pyramid → rs-turnover-nopyramid`
+     (`ManasAroraBacktestService.PRIMARY_VARIANT` + the FE `ManasAroraBacktestPage`). The pyramid
+     variant is retained in the run set purely as a labeled A/B probe (ongoing regression evidence that
+     it degrades Sharpe under the Chandelier), not the operative config.
+
 ## Status
 Built + 2-reviewer adversarial PASS + tested (37 strategy-engine incl. a new Chandelier regression test,
-15 Manas strategy-signal, goldens byte-identical). market-data is deployed on the H4 build (the backtest
-above ran on it). **The live-exit side (strategy-signal) is HELD — not deployed** — it changes how live
-paper positions exit; awaits owner sign-off (and the pyramiding call).
+15 Manas strategy-signal, goldens byte-identical). Shipped in #628 (rebased on main); market-data +
+strategy-signal + frontend rebuilt and redeployed on the merged build. Live-verified: running sha == HEAD,
+pyramid flag off in the strategy-signal container, Manas strategies loaded and the trail level computes.

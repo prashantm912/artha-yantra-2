@@ -215,7 +215,27 @@ Owner batch ("implement autonomously while I sleep"), all merged + deployed to t
     2 adversarial reviewers clean; backtest evidence MIXED → built for doctrine faithfulness + forward
     paper, not a proven edge. Applied-findings record in `docs/strategies/swing-backtest-latest-2026-07-06.md`
     ([#613](https://github.com/prashantm912/artha-yantra-2/pull/613)).
-- **Remaining = owner-gated ONLY:** the supervised forward-paper watch on the Manas ₹1.5 L book (now
-  running the F1 RS-priority funnel + F2 pyramiding config) + the owner's reliability sign-off (same
-  §0.5 #12 bar as Minervini). No buildable code left in this family; the one open perf follow-up is the
-  audit LOW "serial/N+1 backtest reads" (`ManasAroraBacktestService.readSeries`).
+- **H4 canonical Chandelier + pyramid-disarm — MERGED + DEPLOYED LIVE 2026-07-07** ([#628](https://github.com/prashantm912/artha-yantra-2/pull/628),
+  `c0d36310`; owner "deploy chandelier + disarm pyramid on both live and back"): the canonical Chandelier
+  (highest-high − 2×rolling-ATR(20), +9% arm, breakeven floor, close exit) is now the operative live-paper
+  Manas exit in BOTH engines — doctrine-equivalent, not byte-identical (double[] vs BigDecimal). Pyramiding
+  **DISARMED** — live `ARTHA_MANAS_ARORA_PYRAMID_ENABLED=false` (it degrades Sharpe 0.96→0.61 under the tight
+  Chandelier trail), backtest headline flipped `rs-turnover-pyramid → rs-turnover-nopyramid` (pyramid kept as
+  a labeled A/B probe). Live-verified (sha==HEAD, pyramid off in-container, Manas re-published). Doc:
+  `docs/strategies/manas-h4-chandelier-backtest-2026-07-07.md`.
+- **OPEN (owner "add to pending, take it later") — FIFO vs RS-priority slot admission for the RS-gated funnel.**
+  The H4 compare's headline "45 vs 24" was FIFO-**gross** vs RS-priority-**net** (confounded). Like-for-like on
+  `rs-turnover` (our live config, H4 run 2026-07-07): FIFO-gross **45.0** > RS-priority-gross **32.1** at equal
+  DD (~50%) and Sharpe (~0.96), turnover ~equal (1270 vs 1322 trades) → inferred **FIFO-net ~34–37% >
+  RS-priority-net 23.8%**. RS-priority IS a real edge (it crushes FIFO in the non-gated `technical`/`turnover`
+  variants, 53 vs 30 gross) but is **redundant with the funnel's RS-rank gate** (F1) — re-sorting freed slots
+  by RS just concentrates into the top-RS names for no extra selection edge. **To decide (both cheap,
+  reversible, no live change):** (a) add a `portfolioFifoNet` accounting to `ManasAroraBacktestService` +
+  re-run → a direct net-vs-net read (clean, analytics-only, outside the parity firewall; the FIFO-net figure
+  above is inferred, not measured); (b) measure how often the live 20:05 batch actually exceeds the 7-slot
+  cap (if rare, the whole question is low-impact live). If confirmed, move live admission to FIFO within the
+  gated pool (or raise `max_positions`) — a HOLD-tier live-admission change. Caveat: literal "FIFO" doesn't
+  map to a same-day batch (entries fire together at EOD), so the real live lever is "don't pile into top-RS on
+  an over-subscribed day / raise the cap."
+- **No buildable code left otherwise;** the one open perf follow-up is the audit LOW "serial/N+1 backtest
+  reads" (`ManasAroraBacktestService.readSeries`).

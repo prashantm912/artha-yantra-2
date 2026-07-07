@@ -132,6 +132,13 @@ public class SignalEngine {
           });
 
   private volatile List<Loaded> loaded = List.of();
+
+  // Subscriber-liveness heartbeat: wall-clock (clock) millis of the last candle message RECEIVED on
+  // any candles.1m.* channel. SubscriberHealthCanary compares this against market-data's ticks:last-at
+  // to catch a SILENT Redis subscription drop (feed alive, but this consumer stopped receiving) — the
+  // 2026-07-07 eval-starvation signature. Stamped on receipt in onCandleMessage; sole writer is the
+  // receive path (a forced re-subscribe does NOT stamp it, so the latch clears only on a real bar).
+  private volatile long lastBarReceivedAtMs;
   /**
    * The registry's published+enabled version-id set AS OF the last {@link #reload()} — the reconcile
    * baseline. Comparing the CURRENT published set against this (not against the LOADED subset) is what
@@ -178,6 +185,7 @@ public class SignalEngine {
     this.connectionFactory = connectionFactory;
     this.objectMapper = objectMapper;
     this.clock = clock;
+    this.lastBarReceivedAtMs = clock.millis(); // boot grace — no false stall before the first bar
     this.signalTtlMinutes = signalTtlMinutes;
     this.emissionGuard = emissionGuard;
     this.scalperGate = scalperGate;
@@ -398,8 +406,50 @@ public class SignalEngine {
     log.info("subscribed {} candle channels (universes + context series only)", channels.size());
   }
 
+  /** Wall-clock millis of the last candle message received — the subscriber-liveness heartbeat. */
+  long lastBarReceivedAtMs() {
+    return lastBarReceivedAtMs;
+  }
+
+  /**
+   * True iff any loaded strategy subscribes a 1m channel, so {@link SubscriberHealthCanary} stays
+   * quiet when there is nothing to receive (no intraday strategy loaded / all-empty-universe session).
+   */
+  boolean hasOneMinuteSubscriptions() {
+    for (Loaded strategy : loaded) {
+      for (SeriesKey key : strategy.seriesKeys()) {
+        if (key.interval().equals("1m")) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Watchdog recovery: request a candle re-subscription (overlap-safe — see {@link #resubscribe()}).
+   * Runs the rebuild ON the single eval thread (the same hot-swap route {@code strategy.changed} uses
+   * via {@link #drainReloadOnly()}), NOT on the caller's thread — so the watchdog never holds the
+   * SignalEngine monitor across the container's blocking Redis I/O and can never freeze the eval loop
+   * from outside; the (already-starved) eval thread simply does its own recovery. Does NOT stamp the
+   * receive heartbeat — the stall latch clears only when a REAL bar arrives, so a re-subscribe that
+   * fails to restore delivery keeps being retried (and stays visibly stalled).
+   */
+  void forceResubscribe(String reason) {
+    log.warn("subscriber watchdog: requesting candle re-subscription — {}", reason);
+    evalExecutor.execute(
+        () -> {
+          try {
+            resubscribe();
+          } catch (RuntimeException e) {
+            log.error("subscriber watchdog: forced re-subscription failed: {}", e.toString());
+          }
+        });
+  }
+
   /** Redis receive thread: parse + conflate + hand off. NEVER evaluates here. */
   void onCandleMessage(String json) {
+    lastBarReceivedAtMs = clock.millis(); // subscriber-liveness heartbeat (SubscriberHealthCanary)
     try {
       JsonNode node = objectMapper.readTree(json);
       EngineCandle candle =

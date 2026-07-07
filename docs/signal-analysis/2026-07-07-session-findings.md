@@ -234,3 +234,40 @@ ARMED and in a live tuning window — judge k=1.5 on real fires over the coming 
 rsi 66%→45%, oi-divergence 6→16→24→25) — hold ALL dot-threshold moves for the multi-session rollup
 (now **4** of ~5 sessions logged). **This session is TRUNCATED (09:19–14:22)** — treat afternoon as
 missing, not empty.
+
+## 8 Deep RCA of the "eval stall" (§6 item #14) — CORRECTED (live investigation, post-report)
+
+A follow-up live investigation (thread-dump + Redis `PUBSUB` + per-10-min eval-log histogram) **revises the
+§6 diagnosis**. It is **NOT** a strategy-signal consumer *hang*, and **NOT** a market-data feed death:
+
+- **`signal-eval` thread is HEALTHY-IDLE, not hung.** The JVM thread-dump shows it parked on
+  `LinkedBlockingQueue.take()` (a `ThreadPoolExecutor` worker WAITING for work) — no lock, no deadlock, no
+  stuck I/O. The executor drains a FIFO fed by the Redis `candles.1m.*` listener (`SignalEngine`), so an
+  empty queue = nothing being enqueued, i.e. **no bars received**, not a hang.
+- **Market-data was fine for NIFTY.** `NIFTY26JULFUT` **never** went canary-RED; the health endpoint is
+  GREEN; DB candles exist to 15:29. The many `DataHealthCanary RED` lines are all **`FINNIFTY26AUG/SEP FUT`**
+  — the known illiquid-far-month false-positive ("ticks flowing but no 1m bar closed"), firing all session,
+  unrelated to the eval gap.
+- **There were TWO silent eval gaps, not one.** Per-10-min `signal-eval` log counts show a gap **~12:18–13:20
+  IST that RECOVERED on its own**, then the terminal stop at **14:22:45 IST that did not recover before
+  close**. Recurring + intermittent.
+- **Root cause: silent, intermittent drops of the strategy-signal Redis `candles.1m.*` subscription.** The
+  bar→eval pipeline breaks in the publish→receive→enqueue link; the executor parks (starved), and **nothing
+  logs it** (no error / no reconnect line) and **no canary covers it** (market-data's `DataHealthCanary`
+  watches bar *closes* on the PRODUCER side, not consumer receipt). The afternoon `telegram getUpdates`
+  connect-timeouts hint at a network blip as the trigger. Currently RE-SUBSCRIBED and healthy (verified via
+  `PUBSUB CHANNELS` — the NIFTY channel has a live subscriber; market-data GREEN).
+- **Severity ↑:** a silent mid-session receive gap could miss a stop-loss **EXIT** eval, not just entries —
+  the very failure the FIFO-never-conflate design protects against, but only while the subscription lives.
+- **Answers §7 #7 (canary coverage):** a canary DID fire (market-data, correctly, on the producer side), but
+  there is **no strategy-signal-side watchdog** for "market-data GREEN yet I've received no bar for N min
+  during market hours." That is the gap.
+- **No emergency action taken** (read-only run): both sides healthy/connected now; tonight's 20:05 Manas
+  batch is a scheduled DB-reading job, unaffected. **NO restart** (already in a clean subscribed state; a
+  restart would not prevent recurrence).
+
+**Corrected ledger:** item #14 is **NOT** a strategy-signal eval hang — it is a **silent recurring Redis
+subscriber drop on the `candles.1m.*` listener** (feed + executor both healthy). Fix = harden
+`RedisMessageListenerContainer` (log drops/recoveries) + a **subscriber-side receive-gap watchdog**
+(re-subscribe + alert when GREEN-feed-but-no-bar-received during market hours). HOLD-tier (live signal
+path) — build + review, do not hot-patch. Tracked in the forward ledger.

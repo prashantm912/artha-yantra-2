@@ -19,6 +19,7 @@ carry null). Champion book = would-have-fired class (composite passed, some rail
 | 2026-07-02 | 524 | 16 | 0 | volume-floor 350/524 (67%) | 118 | — (book shipped EOD) | volume, iv_rank, iv_pair, breadth, oi_spurt (composite capped 0.765) | first forensics pass; findings `2026-07-02-session-findings.md` |
 | 2026-07-03 | 438 (09:19–12:40 only — CandleBuilder stall #482) | 12 | 0 | volume-floor 357/438 (82%) | 208 (all CE, 1 PE) | 20, 0W/20L, −513.1 pts, net n/a (pre-F8) | same 5 | theta-bleed grind day: volume floor vetoed only losers; stall RCA + fix #482; findings `2026-07-03-session-findings.md` |
 | 2026-07-06 | 643 (09:19–15:19 FULL, no stall) | 17 | 0 | volume-floor 525/643 (82%) | 254 (all CE, 0 PE) | 15, 10W/15, +312.1 pts, **+₹19,274.61** | **4** (breadth REVIVED #486) | **trend-up day (+97 pts): volume floor vetoed WINNERS** (mirror of 07-03); breadth live → cap 0.765→0.816; findings `2026-07-06-session-findings.md` |
+| 2026-07-07 | 638 (09:19–**14:22** — strategy-signal EVAL STALL, feed alive) | 31 | **3** (straddle) | volume-floor 458/638 (RELATIVE #605) | 184 (all CE; **189 PE rows appeared**) | **0 opens** (would-have-fired class dissolved) | 4 (breadth 0% today = REGIME, data alive) | **expiry Tue, −94 pts rangebound. FIRST FIRES: 2× `scalp-straddle-nifty` 0DTE straddles, BOTH LOST (−19%, −6.8%), advisory-only. Relative floor's 1st live session — correctly blocked no-expansion morning. NEW: eval stall 14:22; findings `2026-07-07-session-findings.md` |
 
 ## Per-variant league (cumulative — refresh each rollup pass from the §6 league SQL)
 
@@ -31,22 +32,32 @@ carry null). Champion book = would-have-fired class (composite passed, some rail
 
 ## Structural-vs-regime watchlist
 
-- **volume-floor 125k** — unpassable ALL THREE sessions (operand p50 ~6–12k). **Both regimes now sampled:**
-  07-03 grind (veto SAVED 513 pts, 20/20 losers) vs 07-06 trend (veto COST +₹19,274, 10/15 winners). The
-  effect is regime-flipped ⇒ the fix is a **relative `k×rolling-median` floor** (filters chop, admits
-  impulse), NOT a lower fixed number. vol-off shadow (+₹4,051 on 07-06) agrees. This is now the #1 proposal
-  candidate for the ≥5-session pass — evidence is complete, just needs 1–2 more variant sessions to size `k`.
-- **Dead dots capping composite** — cap was 0.765 (5 dead), now **0.816 (4 dead)** after breadth revival.
-  Remaining dead: iv_rank (honest-null until IV history floor), iv_pair (unit-gap suspicion, README §7),
-  oi_spurt price-floor 50 (0% support all 3 sessions), volume (the 125k floor). breadth **CLEARED — #486
-  live, 44.9% support on 07-06** (was 0/0). dow stays by-design.
-- **PE mirror silence** — 07-02/03/06 all up-ish; still 0–1 PE rows. Watch whether PE evaluates on a down
-  day or something structural suppresses the PE side.
-- **`context.macro.vix` NULL while vix dot works** (NEW 07-06) — macro snapshot mirror blind though the dot
-  path is fine; candidate for a data-health flag, not a gate defect.
-- **shadow entry latency p95 ~105s** (NEW 07-06, F8 first measure) — likely inherent to the 3m-bar →
-  next-tick-eval cadence; watch on a fast-reversal day where 90s drift could flip a fill.
+- **volume-floor — RELATIVE floor ARMED #605 (from 2026-07-07).** Fixed 125k was unpassable all 3 prior
+  sessions and regime-flipped in effect (07-03 grind veto SAVED 513 pts / 07-06 trend veto COST +₹19,274).
+  Now `k×median(prior-20)`, k=1.5. **1st live session (07-07): behaved correctly** — on a no-expansion
+  expiry morning it still (rightly) blocked directional scalpers (bar vol < 1.5× median = no impulse), and
+  the single-rail would-have-fired/shadow class **dissolved** (0 shadow opens). **Evidence source shifts
+  from shadow book → real fires.** Owner tuning question is no longer "fixed vs relative" (settled) but
+  "is k=1.5 right" — judge on real paper fills over ~1 month. SENSEX scalpers still un-armed (fixed 125k).
+- **Dead dots capping composite** — cap **0.816 (4 structural-dead)**: iv_rank (honest-null), iv_pair
+  (unit-gap), oi_spurt (price-floor 50), volume (relative floor, no-expansion days). breadth is LIVE (#486)
+  — its 0% support on 07-07 is REGIME (A/D non-zero, breadth against CE on a down day), NOT dead; it was
+  44.9% on 07-06. dow by-design.
+- **PE mirror silence — LOOSENING toward REGIME.** 07-02/03/06 were 0–1 PE rows (all up-ish days); **07-07
+  (down-biased expiry) produced 189 PE rows** — PE evaluates on a down day (scored low, none passed). Watch
+  a clean trend-down day for whether PE composites can pass threshold.
+- **`context.macro.vix` NULL while vix dot works** (07-06/07) — macro snapshot mirror blind though the dot
+  path is fine (60.9% support on 07-07); candidate for a data-health flag, not a gate defect.
+- **shadow entry latency p95 ~105s** (07-06 F8 measure) — no new shadows on 07-07 (0 opens); carry.
+- **strategy-signal EVAL STALL (NEW 07-07)** — `signal-eval` hung 14:22:45 IST → close, NO exception,
+  **market-data feed healthy the whole session** (candles/chain to 15:29–15:31). NEW signature vs 07-03's
+  market-data tick/bar divergence — this is a consumer-side hang. Watch for recurrence; thread-dump on next
+  occurrence; verify DataHealthCanary covers a strategy-signal-side hang (it watched market-data feed
+  health, may not catch a live-feed eval hang).
+- **`scalp-straddle-nifty` fires 0DTE ATM straddles (NEW 07-07)** — first fires ever, both LOST (−19%,
+  −6.8%), one fired at composite 0.5 (below the 0.6 directional threshold), none auto-papered. Owner:
+  confirm straddle-path threshold + whether 0DTE straddles should route to a paper book.
 
-## Proposals (locked until ≥5 sessions — target 2026-07-09/10; now 3 of ~5 sessions logged)
+## Proposals (locked until ≥5 sessions — target 2026-07-09/10; now 4 of ~5 sessions logged)
 
 *(none yet — the rollup pass writes ranked config diffs here, each with evidence citations)*

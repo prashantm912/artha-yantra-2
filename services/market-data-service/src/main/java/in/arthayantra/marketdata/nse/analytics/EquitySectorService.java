@@ -126,12 +126,16 @@ public class EquitySectorService {
   /** Latest-session change for every sector-mapped EQ stock (unmapped stocks are dropped). */
   private List<StockChange> latestMapped() {
     record Raw(String symbol, BigDecimal close, BigDecimal prevClose) {}
+    // Pin to the latest accrued session (audit D3/latestMapped): rank WITHIN the max trade_date only,
+    // so a thin/delisted name whose last row predates it drops out instead of showing a stale close
+    // under the "as of <max date>" badge (asOf() = same max). rn=1 still dedupes any same-date dup.
     List<Raw> rows =
         jdbc.query(
             "WITH ranked AS ("
                 + "  SELECT symbol, close_price, prev_close, "
                 + "    ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY trade_date DESC) AS rn "
-                + "  FROM nse_eod_bhavcopy WHERE series = 'EQ') "
+                + "  FROM nse_eod_bhavcopy WHERE series = 'EQ' "
+                + "    AND trade_date = (SELECT max(trade_date) FROM nse_eod_bhavcopy WHERE series = 'EQ')) "
                 + "SELECT symbol, close_price, prev_close FROM ranked WHERE rn = 1",
             (rs, n) ->
                 new Raw(rs.getString("symbol"), rs.getBigDecimal("close_price"), rs.getBigDecimal("prev_close")));

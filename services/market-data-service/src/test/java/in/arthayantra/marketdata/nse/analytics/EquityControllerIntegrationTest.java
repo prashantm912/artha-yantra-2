@@ -5,6 +5,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketdata.testsupport.MarketDataIntegrationTestBase;
 import java.time.LocalDate;
 import org.junit.jupiter.api.Test;
@@ -94,21 +95,42 @@ class EquityControllerIntegrationTest extends MarketDataIntegrationTestBase {
 
   @Test
   void returnsComputesWindowsFromRankedCloses() throws Exception {
-    // 6 sessions (rn 1..6 by recency): rn1=110 (latest), rn2=100 (1D base), rn6=88 (1W base).
-    // AARTIIND is in the static sector map (the screener restricts to mapped symbols).
+    // rn 1..6 by recency; the LTP row (rn1) must sit on the max accrued session (today IST) so it
+    // survives the as-of-latest Drop (audit D3 — a symbol whose latest row predates the badge date is
+    // excluded). AARTIIND is in the static sector map (the screener restricts to mapped symbols).
     String sym = "AARTIIND";
-    insertClose(LocalDate.of(2026, 6, 5), sym, "88"); // rn6 → 1W
-    insertClose(LocalDate.of(2026, 6, 8), sym, "101");
-    insertClose(LocalDate.of(2026, 6, 9), sym, "103");
-    insertClose(LocalDate.of(2026, 6, 10), sym, "105");
-    insertClose(LocalDate.of(2026, 6, 11), sym, "100"); // rn2 → 1D
-    insertClose(LocalDate.of(2026, 6, 12), sym, "110"); // rn1 → LTP
+    jdbc.update("DELETE FROM nse_eod_bhavcopy WHERE symbol = ?", sym); // own the symbol (shared DB)
+    LocalDate max = LocalDate.now(Ist.ZONE);
+    insertClose(max.minusDays(9), sym, "88"); // rn6 → 1W base
+    insertClose(max.minusDays(5), sym, "101");
+    insertClose(max.minusDays(4), sym, "103");
+    insertClose(max.minusDays(3), sym, "105");
+    insertClose(max.minusDays(1), sym, "100"); // rn2 → 1D base
+    insertClose(max, sym, "110"); // rn1 → LTP, on the max session
 
     mockMvc
         .perform(get("/api/v1/market/equity/returns"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.items[?(@.symbol=='AARTIIND')].r1d", hasItem("10.00"))) // (110-100)/100
         .andExpect(jsonPath("$.items[?(@.symbol=='AARTIIND')].r1w", hasItem("25.00"))); // (110-88)/88
+  }
+
+  @Test
+  void returnsDropsSymbolsWhoseLatestPredatesTheAsOfSession() throws Exception {
+    // A thin/delisted name whose newest EQ row is older than the max accrued session must NOT appear
+    // (audit D3 Drop): otherwise it shows a stale close under the "as of <latest>" badge. WIPRO is
+    // sector-mapped. Seed it OLD; seed a fresh mapped name (SUNPHARMA) on the max session so the
+    // global max is today and WIPRO is provably stale.
+    jdbc.update("DELETE FROM nse_eod_bhavcopy WHERE symbol IN ('WIPRO','SUNPHARMA')");
+    LocalDate max = LocalDate.now(Ist.ZONE);
+    insertClose(max.minusDays(40), "WIPRO", "300"); // stale — latest row 40 days old
+    insertDay(max, "SUNPHARMA", "500", "510"); // fresh — pins the as-of to today
+
+    mockMvc
+        .perform(get("/api/v1/market/equity/returns"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items[?(@.symbol=='SUNPHARMA')]").exists())
+        .andExpect(jsonPath("$.items[?(@.symbol=='WIPRO')]").doesNotExist());
   }
 
   private void insertDay(LocalDate d, String sym, String prevClose, String close) {
@@ -122,22 +144,35 @@ class EquityControllerIntegrationTest extends MarketDataIntegrationTestBase {
         close);
   }
 
+  /** Deletes then seeds one symbol on the max accrued session (today IST), so the row survives the
+   * as-of-latest Drop and can't collide with another method's same-symbol seed in the shared DB. */
+  private void seedToday(String sym, String prevClose, String close) {
+    LocalDate today = LocalDate.now(Ist.ZONE);
+    jdbc.update(
+        "DELETE FROM nse_eod_bhavcopy WHERE symbol = ? AND trade_date = ?",
+        sym,
+        java.sql.Date.valueOf(today));
+    insertDay(today, sym, prevClose, close);
+  }
+
   @Test
   void sectorStatsGroupsConstituentsBySector() throws Exception {
-    // Fresh, newest date so these rows are rn=1 (the latest session) regardless of other ITs.
-    insertDay(LocalDate.of(2026, 6, 20), "AARTIIND", "100", "105"); // Chemicals, +5%
+    // Seed on the max accrued session (today IST) so the row survives the as-of-latest Drop (audit D3).
+    // CIPLA (Healthcare) — its own symbol, so it can't collide with the returns test's AARTIIND@today.
+    seedToday("CIPLA", "100", "105"); // +5%
 
     mockMvc
         .perform(get("/api/v1/market/equity/sector-stats"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.stocks[?(@.symbol=='AARTIIND')].sector", hasItem("Chemicals")))
-        .andExpect(jsonPath("$.stocks[?(@.symbol=='AARTIIND')].changePct", hasItem("5.00")))
-        .andExpect(jsonPath("$.sectors[?(@.sector=='Chemicals')].total").exists());
+        .andExpect(jsonPath("$.stocks[?(@.symbol=='CIPLA')].sector", hasItem("Healthcare")))
+        .andExpect(jsonPath("$.stocks[?(@.symbol=='CIPLA')].changePct", hasItem("5.00")))
+        .andExpect(jsonPath("$.sectors[?(@.sector=='Healthcare')].total").exists());
   }
 
   @Test
   void sectorHeatmapPicksIndexConstituents() throws Exception {
-    insertDay(LocalDate.of(2026, 6, 20), "RELIANCE", "1000", "1010"); // NIFTY 50 member, +1%
+    // Same RELIANCE@today seed as the contribution test (identical values → no shared-DB collision).
+    seedToday("RELIANCE", "1000", "1020"); // NIFTY 50 member
 
     mockMvc
         .perform(get("/api/v1/market/equity/sector-heatmap").param("name", "NIFTY 50"))
@@ -151,8 +186,10 @@ class EquityControllerIntegrationTest extends MarketDataIntegrationTestBase {
 
   @Test
   void indexContributionWeightsTheChange() throws Exception {
-    // RELIANCE NIFTY-50 weight = 8.27; +2% → contribution = 8.27 * 2 / 100 = 0.1654.
-    insertDay(LocalDate.of(2026, 6, 21), "RELIANCE", "1000", "1020");
+    // RELIANCE NIFTY-50 weight = 8.27; +2% → contribution = 8.27 * 2 / 100 = 0.1654. On the max
+    // accrued session (today IST) so it survives the as-of-latest Drop; same RELIANCE@today seed as
+    // the heatmap test.
+    seedToday("RELIANCE", "1000", "1020");
 
     mockMvc
         .perform(get("/api/v1/market/equity/index-contribution").param("name", "NIFTY 50"))

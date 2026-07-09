@@ -216,11 +216,15 @@ public class EquityIndexContributionService {
   /** Latest-session % change + close for every EQ symbol (keyed by symbol). */
   private Map<String, Latest> latestChange() {
     Map<String, Latest> map = new java.util.HashMap<>();
+    // Pin to the latest accrued session (audit D3/latestMapped): rank WITHIN the max trade_date only
+    // so a name whose last row predates it drops out instead of contributing a stale close under the
+    // asOf() = same-max badge; rn=1 dedupes any same-date dup.
     jdbc.query(
         "WITH ranked AS ("
             + "  SELECT symbol, close_price, prev_close, "
             + "    ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY trade_date DESC) AS rn "
-            + "  FROM nse_eod_bhavcopy WHERE series = 'EQ') "
+            + "  FROM nse_eod_bhavcopy WHERE series = 'EQ' "
+            + "    AND trade_date = (SELECT max(trade_date) FROM nse_eod_bhavcopy WHERE series = 'EQ')) "
             + "SELECT symbol, close_price, prev_close FROM ranked WHERE rn = 1",
         rs -> {
           String sym = rs.getString("symbol");

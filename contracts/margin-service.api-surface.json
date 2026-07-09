@@ -1,0 +1,32 @@
+{
+  "GET /health": {
+    "params": [],
+    "requestBody": false,
+    "responses": [
+      "200"
+    ]
+  },
+  "GET /metrics": {
+    "params": [],
+    "requestBody": false,
+    "responses": [
+      "200"
+    ]
+  },
+  "POST /api/v1/margin": {
+    "params": [],
+    "requestBody": true,
+    "responses": [
+      "200",
+      "422"
+    ]
+  },
+  "POST /api/v1/margin/size": {
+    "params": [],
+    "requestBody": true,
+    "responses": [
+      "200",
+      "422"
+    ]
+  }
+}

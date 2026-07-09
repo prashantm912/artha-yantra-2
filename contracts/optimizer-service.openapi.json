@@ -1,151 +1,13 @@
 {
-  "components": {
-    "schemas": {
-      "HTTPValidationError": {
-        "properties": {
-          "detail": {
-            "items": {
-              "$ref": "#/components/schemas/ValidationError"
-            },
-            "title": "Detail",
-            "type": "array"
-          }
-        },
-        "title": "HTTPValidationError",
-        "type": "object"
-      },
-      "ValidationError": {
-        "properties": {
-          "ctx": {
-            "title": "Context",
-            "type": "object"
-          },
-          "input": {
-            "title": "Input"
-          },
-          "loc": {
-            "items": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "integer"
-                }
-              ]
-            },
-            "title": "Location",
-            "type": "array"
-          },
-          "msg": {
-            "title": "Message",
-            "type": "string"
-          },
-          "type": {
-            "title": "Error Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "loc",
-          "msg",
-          "type"
-        ],
-        "title": "ValidationError",
-        "type": "object"
-      }
-    }
-  },
+  "openapi": "3.1.0",
   "info": {
     "title": "optimizer-service",
     "version": "1.0.0"
   },
-  "openapi": "3.1.0",
   "paths": {
-    "/api/v1/optimizations/jobs/{job_id}": {
-      "delete": {
-        "description": "Cancel a sweep (queued trials dropped; running finish at a checkpoint).",
-        "operationId": "cancel_api_v1_optimizations_jobs__job_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "job_id",
-            "required": true,
-            "schema": {
-              "title": "Job Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Cancel Api V1 Optimizations Jobs  Job Id  Delete",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Cancel"
-      },
-      "get": {
-        "description": "Sweep status / progress / trials completed.",
-        "operationId": "job_api_v1_optimizations_jobs__job_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "job_id",
-            "required": true,
-            "schema": {
-              "title": "Job Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Job Api V1 Optimizations Jobs  Job Id  Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Job"
-      }
-    },
     "/api/v1/optimizations/run": {
       "post": {
+        "summary": "Run",
         "description": "Submit a sweep \u2192 202 {jobId, status:\"queued\"}.",
         "operationId": "run_api_v1_optimizations_run_post",
         "requestBody": {
@@ -153,8 +15,8 @@
             "application/json": {
               "schema": {
                 "additionalProperties": true,
-                "title": "Body",
-                "type": "object"
+                "type": "object",
+                "title": "Body"
               }
             }
           },
@@ -162,164 +24,130 @@
         },
         "responses": {
           "202": {
+            "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Run Api V1 Optimizations Run Post",
-                  "type": "object"
+                  "type": "object",
+                  "title": "Response Run Api V1 Optimizations Run Post"
                 }
               }
-            },
-            "description": "Successful Response"
+            }
           },
           "422": {
+            "description": "Validation Error",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
-            },
-            "description": "Validation Error"
+            }
           }
-        },
-        "summary": "Run"
+        }
       }
     },
-    "/api/v1/optimizations/{sweep_id}/best": {
+    "/api/v1/optimizations/jobs/{job_id}": {
       "get": {
-        "description": "Top-N leaderboard; default sort is plateau-adjusted, ``sort=raw`` for raw objective.",
-        "operationId": "best_api_v1_optimizations__sweep_id__best_get",
+        "summary": "Job",
+        "description": "Sweep status / progress / trials completed.",
+        "operationId": "job_api_v1_optimizations_jobs__job_id__get",
         "parameters": [
           {
+            "name": "job_id",
             "in": "path",
-            "name": "sweep_id",
             "required": true,
             "schema": {
-              "title": "Sweep Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "top",
-            "required": false,
-            "schema": {
-              "default": 10,
-              "title": "Top",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort",
-            "required": false,
-            "schema": {
-              "default": "plateau",
-              "title": "Sort",
-              "type": "string"
+              "type": "string",
+              "title": "Job Id"
             }
           }
         ],
         "responses": {
           "200": {
+            "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "object",
                   "additionalProperties": true,
-                  "title": "Response Best Api V1 Optimizations  Sweep Id  Best Get",
-                  "type": "object"
+                  "title": "Response Job Api V1 Optimizations Jobs  Job Id  Get"
                 }
               }
-            },
-            "description": "Successful Response"
+            }
           },
           "422": {
+            "description": "Validation Error",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
-            },
-            "description": "Validation Error"
+            }
           }
-        },
-        "summary": "Best"
-      }
-    },
-    "/api/v1/optimizations/{sweep_id}/promote": {
-      "post": {
-        "description": "Promote a COMPLETE trial's params to a new draft version (\u00a7D.9); 409 if not promotable.",
-        "operationId": "promote_api_v1_optimizations__sweep_id__promote_post",
+        }
+      },
+      "delete": {
+        "summary": "Cancel",
+        "description": "Cancel a sweep (queued trials dropped; running finish at a checkpoint).",
+        "operationId": "cancel_api_v1_optimizations_jobs__job_id__delete",
         "parameters": [
           {
+            "name": "job_id",
             "in": "path",
-            "name": "sweep_id",
             "required": true,
             "schema": {
-              "title": "Sweep Id",
-              "type": "string"
+              "type": "string",
+              "title": "Job Id"
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": true,
-                "title": "Body",
-                "type": "object"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
-          "201": {
+          "202": {
+            "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "object",
                   "additionalProperties": true,
-                  "title": "Response Promote Api V1 Optimizations  Sweep Id  Promote Post",
-                  "type": "object"
+                  "title": "Response Cancel Api V1 Optimizations Jobs  Job Id  Delete"
                 }
               }
-            },
-            "description": "Successful Response"
+            }
           },
           "422": {
+            "description": "Validation Error",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
-            },
-            "description": "Validation Error"
+            }
           }
-        },
-        "summary": "Promote"
+        }
       }
     },
     "/api/v1/optimizations/{sweep_id}/trials": {
       "get": {
+        "summary": "Trials",
         "description": "Paged trial leaderboard rows for a sweep.",
         "operationId": "trials_api_v1_optimizations__sweep_id__trials_get",
         "parameters": [
           {
-            "in": "path",
             "name": "sweep_id",
+            "in": "path",
             "required": true,
             "schema": {
-              "title": "Sweep Id",
-              "type": "string"
+              "type": "string",
+              "title": "Sweep Id"
             }
           },
           {
-            "in": "query",
             "name": "state",
+            "in": "query",
             "required": false,
             "schema": {
               "anyOf": [
@@ -334,139 +162,288 @@
             }
           },
           {
-            "in": "query",
             "name": "limit",
+            "in": "query",
             "required": false,
             "schema": {
+              "type": "integer",
               "default": 100,
-              "title": "Limit",
-              "type": "integer"
+              "title": "Limit"
             }
           },
           {
-            "in": "query",
             "name": "offset",
+            "in": "query",
             "required": false,
             "schema": {
+              "type": "integer",
               "default": 0,
-              "title": "Offset",
-              "type": "integer"
+              "title": "Offset"
             }
           }
         ],
         "responses": {
           "200": {
+            "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "object",
                   "additionalProperties": true,
-                  "title": "Response Trials Api V1 Optimizations  Sweep Id  Trials Get",
-                  "type": "object"
+                  "title": "Response Trials Api V1 Optimizations  Sweep Id  Trials Get"
                 }
               }
-            },
-            "description": "Successful Response"
+            }
           },
           "422": {
+            "description": "Validation Error",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
-            },
-            "description": "Validation Error"
+            }
           }
-        },
-        "summary": "Trials"
+        }
       }
     },
-    "/api/v1/optimizations/{sweep_id}/trials/{trial_id}/folds": {
+    "/api/v1/optimizations/{sweep_id}/best": {
       "get": {
-        "description": "The per-fold metric array for one trial (resolved via its ``backtest_run_id``).",
-        "operationId": "trial_folds_api_v1_optimizations__sweep_id__trials__trial_id__folds_get",
+        "summary": "Best",
+        "description": "Top-N leaderboard; default sort is plateau-adjusted, ``sort=raw`` for raw objective.",
+        "operationId": "best_api_v1_optimizations__sweep_id__best_get",
         "parameters": [
           {
-            "in": "path",
             "name": "sweep_id",
+            "in": "path",
             "required": true,
             "schema": {
-              "title": "Sweep Id",
-              "type": "string"
+              "type": "string",
+              "title": "Sweep Id"
             }
           },
           {
-            "in": "path",
-            "name": "trial_id",
-            "required": true,
+            "name": "top",
+            "in": "query",
+            "required": false,
             "schema": {
-              "title": "Trial Id",
-              "type": "integer"
+              "type": "integer",
+              "default": 10,
+              "title": "Top"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "plateau",
+              "title": "Sort"
             }
           }
         ],
         "responses": {
           "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Best Api V1 Optimizations  Sweep Id  Best Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/optimizations/{sweep_id}/trials/{trial_id}/folds": {
+      "get": {
+        "summary": "Trial Folds",
+        "description": "The per-fold metric array for one trial (resolved via its ``backtest_run_id``).",
+        "operationId": "trial_folds_api_v1_optimizations__sweep_id__trials__trial_id__folds_get",
+        "parameters": [
+          {
+            "name": "sweep_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Sweep Id"
+            }
+          },
+          {
+            "name": "trial_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Trial Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
                   "title": "Response Trial Folds Api V1 Optimizations  Sweep Id  Trials  Trial Id  Folds Get"
                 }
               }
-            },
-            "description": "Successful Response"
+            }
           },
           "422": {
+            "description": "Validation Error",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
-            },
-            "description": "Validation Error"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/optimizations/{sweep_id}/promote": {
+      "post": {
+        "summary": "Promote",
+        "description": "Promote a COMPLETE trial's params to a new draft version (\u00a7D.9); 409 if not promotable.",
+        "operationId": "promote_api_v1_optimizations__sweep_id__promote_post",
+        "parameters": [
+          {
+            "name": "sweep_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Sweep Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Body"
+              }
+            }
           }
         },
-        "summary": "Trial Folds"
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Promote Api V1 Optimizations  Sweep Id  Promote Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/health": {
       "get": {
+        "summary": "Health",
         "operationId": "health_health_get",
         "responses": {
           "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Health Health Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Health"
-      }
-    },
-    "/metrics": {
-      "get": {
-        "description": "Endpoint that serves Prometheus metrics.",
-        "operationId": "metrics_metrics_get",
-        "responses": {
-          "200": {
+            "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {}
               }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
             },
-            "description": "Successful Response"
+            "type": "array",
+            "title": "Detail"
           }
         },
-        "summary": "Metrics"
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
       }
     }
   }

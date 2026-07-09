@@ -164,6 +164,33 @@ class SweepService:
             if not request.get(field):
                 raise ApiError(400, "VALIDATION_FAILED", f"missing required field: {field}")
 
+        # Validate the request-only knobs BEFORE the strategy-resolve round-trip (register §9-8):
+        # objective / walkForward / maxTrials / seed / earlyStopping all come from the request, not
+        # the config, so an obviously-bad value is a fast, clean 400 — never a resolve-dependent 500
+        # (resolve() raise_for_status()es a bad strategyId), and no wasted call to strategy-signal.
+        walk_forward = request.get("walkForward")
+        if walk_forward is not None and not isinstance(walk_forward, dict):
+            raise ApiError(
+                400, "VALIDATION_FAILED", f"walkForward must be an object, got {walk_forward!r}"
+            )
+        # Fold-sweep objective guard: a walk-forward sweep on an in-sample metric overfits — steer
+        # it to oos_fold_mean (+ warn). Run before the echo so the job records the EFFECTIVE
+        # objective, not the as-submitted one.
+        objective = request.get("objective", {"metric": "sharpe", "direction": "maximize"})
+        objective, fold_warning = _fold_objective_guard(objective, walk_forward)
+        if fold_warning:
+            _LOG.warning(fold_warning)
+        _validate_objective_metrics(method, objective)
+        max_trials = _coerce_int(request.get("maxTrials", 100), "maxTrials")
+        if not 1 <= max_trials <= _MAX_TRIALS_CAP:
+            raise ApiError(
+                400,
+                "VALIDATION_FAILED",
+                f"maxTrials must be between 1 and {_MAX_TRIALS_CAP}, got {max_trials}",
+            )
+        seed = _coerce_int(request.get("seed", 0), "seed")
+        early_stopping = _early_stopping(request)
+
         # strategyVersion is OPTIONAL — when omitted we pin the strategy's current resolution
         # (latest published, else latest draft), matching /backtests/run (§D.5).
         version, config = self._strategy.resolve(
@@ -185,32 +212,6 @@ class SweepService:
         optimize_block = config.get("backtest", {}).get("optimize") or config.get("optimize") or {}
         for warning in _yaml_precedence_warnings(optimize_block, request):
             _LOG.warning(warning)
-
-        # Fold-sweep objective guard: a walk-forward sweep on an in-sample metric overfits — steer
-        # it to oos_fold_mean (+ warn). Run before the echo so the job records the EFFECTIVE
-        # objective, not the as-submitted one.
-        objective = request.get("objective", {"metric": "sharpe", "direction": "maximize"})
-        walk_forward = request.get("walkForward")
-        if walk_forward is not None and not isinstance(walk_forward, dict):
-            raise ApiError(
-                400, "VALIDATION_FAILED", f"walkForward must be an object, got {walk_forward!r}"
-            )
-        objective, fold_warning = _fold_objective_guard(objective, walk_forward)
-        if fold_warning:
-            _LOG.warning(fold_warning)
-        _validate_objective_metrics(method, objective)
-
-        # Coerce the numeric knobs up front so a non-numeric value is a 400 (not an opaque int()
-        # 500 raised deep in the thread-kwargs build) and maxTrials can't run away (register §9-8).
-        max_trials = _coerce_int(request.get("maxTrials", 100), "maxTrials")
-        if not 1 <= max_trials <= _MAX_TRIALS_CAP:
-            raise ApiError(
-                400,
-                "VALIDATION_FAILED",
-                f"maxTrials must be between 1 and {_MAX_TRIALS_CAP}, got {max_trials}",
-            )
-        seed = _coerce_int(request.get("seed", 0), "seed")
-        early_stopping = _early_stopping(request)
 
         jobs = self._jobs_factory()
         try:

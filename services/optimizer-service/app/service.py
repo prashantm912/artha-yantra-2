@@ -27,6 +27,28 @@ def resolve_parameters(config: dict[str, Any], override: list[dict] | None) -> l
     return optimize.get("parameters", [])
 
 
+def _yaml_precedence_warnings(optimize: dict[str, Any], request: dict[str, Any]) -> list[str]:
+    """Sweep-control fields come from the /optimizations/run REQUEST, never the strategy YAML.
+
+    Only ``optimize.parameters`` is read from the YAML (see resolve_parameters); method / maxTrials
+    / objective / walkForward come from the request body. A user who sets, say, ``walk_forward`` in
+    the YAML optimize block and omits it from the request would silently get a plain in-sample sweep
+    with empty OOS folds (register §9-7). Return a warning for each control field the YAML sets but
+    the request omits, so the ignored value is surfaced instead of swallowed."""
+    fields = (
+        ("method", "method"),
+        ("max_trials", "maxTrials"),
+        ("objective", "objective"),
+        ("walk_forward", "walkForward"),
+    )
+    return [
+        f"optimize.{yaml_key} in the strategy YAML is IGNORED — {req_key} is read from the "
+        f"/optimizations/run request only; add it to the request body to take effect"
+        for yaml_key, req_key in fields
+        if optimize.get(yaml_key) is not None and request.get(req_key) is None
+    ]
+
+
 def _fold_objective_guard(
     objective: dict[str, Any], walk_forward: Any
 ) -> tuple[dict[str, Any], str | None]:
@@ -88,6 +110,11 @@ class SweepService:
             raise ApiError(422, "VALIDATION_FAILED", "no tunable parameters in the optimize block")
         for parameter in parameters:
             path_grammar.validate(parameter["path"])  # raises InvalidParameterPath -> 400 handler
+
+        # Surface any YAML optimize-block control field the request omits (else silently ignored).
+        optimize_block = config.get("backtest", {}).get("optimize") or config.get("optimize") or {}
+        for warning in _yaml_precedence_warnings(optimize_block, request):
+            _LOG.warning(warning)
 
         # Fold-sweep objective guard: a walk-forward sweep on an in-sample metric overfits — steer
         # it to oos_fold_mean (+ warn). Run before the echo so the job records the EFFECTIVE
@@ -151,6 +178,10 @@ class SweepService:
                 **kwargs,
             )
         except Exception:  # noqa: BLE001 - mark the sweep failed, never crash the thread
+            # Log the traceback BEFORE marking failed: without it a config typo, a strategy-resolve
+            # 500, and an infra outage all present identically as a bare "failed" status with no
+            # diagnosable cause (register §9-6).
+            _LOG.exception("sweep %s failed", sweep_id)
             jobs.set_status(sweep_id, "failed")
         finally:
             jobs.close()

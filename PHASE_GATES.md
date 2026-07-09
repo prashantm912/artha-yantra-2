@@ -45,6 +45,18 @@ The lone net-new build frontier (Phase-5 Minervini screener) is CLOSED — every
 families is the supervised forward-paper watch + the owner's §0.5 #12 reliability sign-off (owner-gated, not
 code). Live forward-state detail: `docs/superpowers/plans/2026-07-02-remaining-items.md`.
 
+**2026-07-10 currency update:** the external **batch-liveness dead-man's-switch** is ARMED (healthchecks.io ping @ 20:15
+IST — catches a whole-stack outage the in-process P0-4 did-not-run canary can't). The **swing sell-decision FE** (audit M20)
+shipped LIVE at `/strategies/swing-sell-decisions` (Minervini + Manas HOLD/SELL triad, was curl-only). **Optimizer
+`/optimizations/run` request-dict validation** hardened (#648/#651 — bad `maxTrials`/objective → 400, not a 500 / silent
+empty sweep; validated pre-resolve). **F9/F7 arm-effects verified against live code** (both deployed-dormant, flag-off):
+arming **F9** (`ARTHA_PAPER_RISK_ENABLED`) = a scalper-only heat circuit-breaker (open SPAN ≥60% of book equity pauses NEW
+scalper entries + a TRIP audit + ntfy; ZERO displayed-number change; swing books inert); arming **F7**
+(`ARTHA_GRADUATION_PROMOTION_ENABLED`) = an inert `strategy_graduations` marker + one push — it promotes NOTHING live
+(never republishes / swaps config). Fixed the per-trade-risk `.env` knob name mismatch (#653). Everything still owner/data-gated:
+the forward-paper reliability month, an always-on host, the flag-arms, and the audit HIGH/MED doctrine items (H6/H8 + the
+swing exit-parity HOLD batch #128).
+
 **Scalper engine → 100% (2026-06-28):** the S24 incorporation is closed (debloated operative doc + W3 drift
 tags + W4 gates + 2b infra, all BUILT/inert). Finishing the engine to "nothing-deferred" is now tracked in
 the consolidated roadmap [`docs/superpowers/plans/archive/2026-06-28-scalper-to-100-roadmap.md`](docs/superpowers/plans/archive/2026-06-28-scalper-to-100-roadmap.md)

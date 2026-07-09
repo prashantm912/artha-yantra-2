@@ -97,7 +97,7 @@ artha:
       # (audit + ntfy on a breach, no block); ON = a hot book blocks new entries. advised_lots + the
       # margin snapshot are always computed (advisory), independent of this flag.
       enabled: ${ARTHA_PAPER_RISK_ENABLED:false}
-      per-trade-risk-pct: ${ARTHA_PAPER_RISK_PER_TRADE_PCT:1.0}
+      per-trade-risk-pct: ${ARTHA_PAPER_RISK_PER_TRADE_RISK_PCT:1.0}
   margin:
     # §8 SPAN appliance capability flag (off by default → flat-pct fallback above).
     # When true, futures & short options price via margin-service /api/v1/margin/size;

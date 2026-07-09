@@ -361,3 +361,27 @@ Owner picked the two remaining clean-autonomous items off the "what next" fork (
   (F9 paper-risk arm / F7 promotion / Dow-factor), and the owner-call audit HIGH/MED doctrine items (H6/H8, the swing
   exit-parity HOLD batch, register accepted single-owner tradeoffs). Nothing further is clean-autonomous without opening
   one of those gates.
+
+### 8f. F9/F7 arm-effect audit + config fix (2026-07-10)
+Owner asked "what effect will F9/F7/audit-doctrine have on the live app" → verified against the live code (not memory):
+- **F9 (`ARTHA_PAPER_RISK_ENABLED`) arm = a narrow SCALPER circuit-breaker, no number moves.** The flag gates ONE thing —
+  the heat-cap BLOCK in `RiskService.entryAllowed` (`RiskService.java:146-156`): on the scalper book only (its `heat_cap_pct`
+  is the sole seed with `enabled=true`, V023; swing rows inert), when open SPAN margin ≥60% of book equity, NEW paper entries
+  stop being opened + a `risk_audit` TRIP row + 1 ntfy. Never resizes, never touches an open position, changes ZERO displayed
+  figures (`advised_lots`/`margin_snapshot` are already stamped, advisory, not even surfaced in the FE). Adds a synchronous
+  margin HTTP hop to the scalper entry path. The 10%→3% scalper daily-loss tighten is already live, flag-independent.
+- **F7 (`ARTHA_GRADUATION_PROMOTION_ENABLED`) arm = effectively NO live effect.** Armed, the 21:00-IST evaluator only writes a
+  `strategy_graduations` MARKER row + 1 push when a strategy clears ≥50 closed paper trades / expectancy>0 / Sharpe≥0.5 / DD≤25%.
+  It does NOT republish, NOT flip `published_version_id`/`status`, NOT swap any live config, NOT change what trades — the V024
+  migration header pins "NEVER arms … the owner decides any real live change", and no signal/paper code reads the marker table.
+  No FE consumes `/graduation/promotions`. Worst case of arming = a spurious marker + a phone alert. (Task title "shadow→champion"
+  is a misnomer — it promotes nothing.)
+- **Audit HIGH/MED doctrine = code changes, not flags; the only lever that moves owner numbers** → correctly held for review:
+  H6 (CA-unadjusted screener → candidate lists shift near corporate actions), H8 (cheat-3c mislabel → which setups fire), the
+  swing exit-parity batch #128 / M36–M40 (exit timing+price → swing paper P&L). M1 matters only once F9 armed; M17/M18/M28/M31
+  = no owner-facing behavior change.
+- **Config bug fixed in passing** ([`#653`](https://github.com/prashantm912/artha-yantra-2/pull/653)): `application.yml:100` read
+  env `ARTHA_PAPER_RISK_PER_TRADE_PCT` but compose/.env pass `ARTHA_PAPER_RISK_PER_TRADE_RISK_PCT` (with `RISK`) — so the
+  per-trade sizing knob was non-wireable from `.env` (silently fell back to the 1.0 default). Aligned the placeholder to the
+  code-bound property `artha.paper.risk.per-trade-risk-pct` (`PaperService.java:143`) + the compose/.env name. Advisory-only
+  (advised_lots), so no behaviour change at the default; the knob is now actually settable. Config-only, packages clean.

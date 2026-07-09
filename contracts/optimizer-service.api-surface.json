@@ -1,0 +1,90 @@
+{
+  "DELETE /api/v1/optimizations/jobs/{job_id}": {
+    "params": [
+      "job_id"
+    ],
+    "requestBody": false,
+    "responses": [
+      "202",
+      "422"
+    ]
+  },
+  "GET /api/v1/optimizations/jobs/{job_id}": {
+    "params": [
+      "job_id"
+    ],
+    "requestBody": false,
+    "responses": [
+      "200",
+      "422"
+    ]
+  },
+  "GET /api/v1/optimizations/{sweep_id}/best": {
+    "params": [
+      "sort",
+      "sweep_id",
+      "top"
+    ],
+    "requestBody": false,
+    "responses": [
+      "200",
+      "422"
+    ]
+  },
+  "GET /api/v1/optimizations/{sweep_id}/trials": {
+    "params": [
+      "limit",
+      "offset",
+      "state",
+      "sweep_id"
+    ],
+    "requestBody": false,
+    "responses": [
+      "200",
+      "422"
+    ]
+  },
+  "GET /api/v1/optimizations/{sweep_id}/trials/{trial_id}/folds": {
+    "params": [
+      "sweep_id",
+      "trial_id"
+    ],
+    "requestBody": false,
+    "responses": [
+      "200",
+      "422"
+    ]
+  },
+  "GET /health": {
+    "params": [],
+    "requestBody": false,
+    "responses": [
+      "200"
+    ]
+  },
+  "GET /metrics": {
+    "params": [],
+    "requestBody": false,
+    "responses": [
+      "200"
+    ]
+  },
+  "POST /api/v1/optimizations/run": {
+    "params": [],
+    "requestBody": true,
+    "responses": [
+      "202",
+      "422"
+    ]
+  },
+  "POST /api/v1/optimizations/{sweep_id}/promote": {
+    "params": [
+      "sweep_id"
+    ],
+    "requestBody": true,
+    "responses": [
+      "201",
+      "422"
+    ]
+  }
+}

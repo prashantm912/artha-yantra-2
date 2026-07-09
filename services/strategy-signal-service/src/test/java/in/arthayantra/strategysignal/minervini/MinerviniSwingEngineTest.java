@@ -1,9 +1,16 @@
 package in.arthayantra.strategysignal.minervini;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.strategyengine.config.StrategyCompiler;
 import in.arthayantra.strategyengine.config.StrategyDefinition;
 import in.arthayantra.strategyengine.eval.EntryEvaluator;
@@ -12,54 +19,67 @@ import in.arthayantra.strategyengine.eval.IndicatorBank;
 import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategyschema.StrategyDocuments;
 import in.arthayantra.strategysignal.registry.StrategyRepository;
+import in.arthayantra.strategysignal.signals.Books;
+import in.arthayantra.strategysignal.signals.EmissionGuard;
+import in.arthayantra.strategysignal.signals.MarketDataCandlesClient;
+import in.arthayantra.strategysignal.signals.SignalPublisher;
+import in.arthayantra.strategysignal.signals.SignalRepository;
+import in.arthayantra.strategysignal.swing.SwingBatchEngine;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * The Phase-9 swing engine's core: {@link MinerviniSwingEngine#buildBank} seeds the per-symbol VCP
- * pivot as a flat context series, and the FROZEN {@link EntryEvaluator}/{@link ExitEvaluator} then
- * decide entry/exit on the just-closed daily bar — the batch never re-implements scoring. Pins that a
- * pivot breakout ON THE LAST BAR with expanding volume fires an entry, a flat-volume breakout does
- * not, and an 8%-underwater position exits on the protective stop.
+ * The Minervini doctrine driving the shared {@link SwingBatchEngine}: {@code buildBank} seeds the VCP
+ * pivot context and the FROZEN {@link EntryEvaluator}/{@link ExitEvaluator} decide entry/exit on the
+ * just-closed daily bar (parity — the batch never re-implements scoring). Pins entry on a
+ * volume-expansion breakout, no entry on a flat-volume breakout, the 8% protective stop, the audit-H2
+ * superseded-version adoption (both halves), the P0-3 fetch-retry, and the H3 per-emit gate re-check.
  */
 class MinerviniSwingEngineTest {
 
   private static final ZoneOffset IST = ZoneOffset.ofHoursMinutes(5, 30);
   private static final BigDecimal PIVOT = new BigDecimal("150");
 
+  /** The Minervini candidate context seeds, matching the doctrine's unconditional 3-context form. */
+  private static Map<String, BigDecimal> seeds(BigDecimal pivot, BigDecimal cheat, boolean thrust) {
+    return Map.of(
+        "MINERVINI_PIVOT", pivot == null ? BigDecimal.ZERO : pivot,
+        "MINERVINI_CHEAT", cheat == null ? BigDecimal.ZERO : cheat,
+        "MINERVINI_THRUST", thrust ? BigDecimal.ONE : BigDecimal.ZERO);
+  }
+
   @Test
   void runDailyIsAnInertNoOpWhenDisabled() {
-    // The arming gate (audit P9): with artha.minervini.swing.enabled=false, runDaily() must never
-    // touch the registry / funnel / signals / publisher — so an on-demand POST /run cannot fire a
-    // signal or open a paper position before the owner arms the batch.
     StrategyRepository registry = mock(StrategyRepository.class);
     MinerviniFunnelClient funnel = mock(MinerviniFunnelClient.class);
-    in.arthayantra.strategysignal.signals.MarketDataCandlesClient candles =
-        mock(in.arthayantra.strategysignal.signals.MarketDataCandlesClient.class);
-    in.arthayantra.strategysignal.signals.SignalRepository signals =
-        mock(in.arthayantra.strategysignal.signals.SignalRepository.class);
-    in.arthayantra.strategysignal.signals.SignalPublisher publisher =
-        mock(in.arthayantra.strategysignal.signals.SignalPublisher.class);
-    org.springframework.context.ApplicationEventPublisher events =
-        mock(org.springframework.context.ApplicationEventPublisher.class);
-    org.springframework.transaction.support.TransactionTemplate tx =
-        mock(org.springframework.transaction.support.TransactionTemplate.class);
+    MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
+    SignalRepository signals = mock(SignalRepository.class);
+    SignalPublisher publisher = mock(SignalPublisher.class);
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    TransactionTemplate tx = mock(TransactionTemplate.class);
 
-    MinerviniSwingEngine engine =
-        new MinerviniSwingEngine(
-            registry, funnel, candles, signals, publisher, events, Optional.empty(), tx,
-            new com.fasterxml.jackson.databind.ObjectMapper(),
-            java.time.Clock.systemUTC(), false, 520, 60, 1440);
+    SwingBatchEngine engine =
+        new SwingBatchEngine(
+            registry, candles, signals, publisher, events, Optional.empty(), tx,
+            new ObjectMapper(), Clock.systemUTC());
+    MinerviniDoctrine doctrine =
+        new MinerviniDoctrine(funnel, signals, new ObjectMapper(), false, 520, 60, 1440);
 
-    MinerviniSwingEngine.SwingRun run = engine.runDaily();
+    SwingBatchEngine.SwingRun run = engine.runDaily(doctrine);
 
     assertThat(run.strategies()).isZero();
     assertThat(run.entries()).isZero();
@@ -67,401 +87,259 @@ class MinerviniSwingEngineTest {
     verifyNoInteractions(registry, funnel, candles, signals, publisher, events, tx);
   }
 
-  private static StrategyDefinition vcp() throws IOException {
-    try (InputStream in =
-        MinerviniSwingEngineTest.class.getResourceAsStream("/minervini-strategies/minervini-vcp.yaml")) {
-      assertThat(in).isNotNull();
-      String yaml = new String(in.readAllBytes(), StandardCharsets.UTF_8);
-      return StrategyCompiler.compile(StrategyDocuments.parse(yaml).config());
-    }
-  }
-
   @Test
   void entryFiresOnPivotBreakoutWithExpandingVolume() throws IOException {
-    List<EngineCandle> series = craft(3_000L); // 3x volume on the final (breakout) bar
+    List<EngineCandle> series = craft(3_000L);
     IndicatorBank bank =
-        MinerviniSwingEngine.buildBank(vcp(), "TESTCO", series, PIVOT, BigDecimal.ZERO, false);
-
-    Optional<EntryEvaluator.Evaluation> eval =
-        EntryEvaluator.evaluate(vcp(), bank, series.size() - 1);
-
+        SwingBatchEngine.buildBank(vcp(), "TESTCO", series, seeds(PIVOT, BigDecimal.ZERO, false));
+    Optional<EntryEvaluator.Evaluation> eval = EntryEvaluator.evaluate(vcp(), bank, series.size() - 1);
     assertThat(eval).isPresent();
     assertThat(eval.get().entry()).as("the last bar breaks out above the 150 pivot on 3x volume").isTrue();
   }
 
   @Test
   void entryBlockedWhenTheBreakoutLacksVolume() throws IOException {
-    List<EngineCandle> series = craft(1_000L); // flat volume on the breakout bar
+    List<EngineCandle> series = craft(1_000L);
     IndicatorBank bank =
-        MinerviniSwingEngine.buildBank(vcp(), "TESTCO", series, PIVOT, BigDecimal.ZERO, false);
-
-    Optional<EntryEvaluator.Evaluation> eval =
-        EntryEvaluator.evaluate(vcp(), bank, series.size() - 1);
-
+        SwingBatchEngine.buildBank(vcp(), "TESTCO", series, seeds(PIVOT, BigDecimal.ZERO, false));
+    Optional<EntryEvaluator.Evaluation> eval = EntryEvaluator.evaluate(vcp(), bank, series.size() - 1);
     assertThat(eval).isPresent();
     assertThat(eval.get().entry()).as("crossover fires but the vol>1.2 gate blocks it").isFalse();
   }
 
   @Test
   void protectiveStopExitsAnEightPercentUnderwaterPosition() throws IOException {
-    // A held position entered at 152; the series then closes at 135 (11% underwater, below the 8% stop).
     List<EngineCandle> series = craftDecline();
     IndicatorBank bank =
-        MinerviniSwingEngine.buildBank(vcp(), "TESTCO", series, BigDecimal.ZERO, BigDecimal.ZERO, false);
-
+        SwingBatchEngine.buildBank(
+            vcp(), "TESTCO", series, seeds(BigDecimal.ZERO, BigDecimal.ZERO, false));
     Optional<ExitEvaluator.ExitDecision> exit =
         ExitEvaluator.evaluate(
             vcp(), bank,
             new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, new BigDecimal("152"), 0),
             series.size() - 1);
-
     assertThat(exit).isPresent();
     assertThat(exit.get().type()).isEqualTo("stop_loss");
   }
 
   @Test
   void exitPassAdoptsAnchorsOfASupersededVersion() throws IOException {
-    // Audit H2 regression: an open anchor whose version is no longer the strategy's published one
-    // (routine after a seeder resync + republish) must still be exit-managed — with the anchor's
-    // OWN frozen config — and its EXIT must fire when the doctrine says so. On the old code the
-    // exit pass silently skipped it (byVersion keyed on the CURRENT published version only).
-    java.util.UUID strategyId = java.util.UUID.randomUUID();
-    java.util.UUID publishedVersion = java.util.UUID.randomUUID();
-    java.util.UUID supersededVersion = java.util.UUID.randomUUID();
-
-    com.fasterxml.jackson.databind.JsonNode config = vcpConfig();
+    UUID strategyId = UUID.randomUUID();
+    UUID publishedVersion = UUID.randomUUID();
+    UUID supersededVersion = UUID.randomUUID();
+    JsonNode config = vcpConfig();
     StrategyRepository registry = mock(StrategyRepository.class);
-    StrategyRepository.StrategyRow strategyRow =
-        new StrategyRepository.StrategyRow(
-            strategyId, "minervini-vcp", "Minervini VCP", null, null, List.of("minervini"), true,
-            publishedVersion, null, null, false, null);
-    org.mockito.Mockito.when(registry.listAll()).thenReturn(List.of(strategyRow));
-    org.mockito.Mockito.when(registry.findById(strategyId)).thenReturn(Optional.of(strategyRow));
-    org.mockito.Mockito.when(registry.findVersionById(publishedVersion))
+    StrategyRepository.StrategyRow strategyRow = strategyRow(strategyId, publishedVersion);
+    when(registry.listAll()).thenReturn(List.of(strategyRow));
+    when(registry.findById(strategyId)).thenReturn(Optional.of(strategyRow));
+    when(registry.findVersionById(publishedVersion))
         .thenReturn(Optional.of(version(publishedVersion, strategyId, "2", config)));
-    org.mockito.Mockito.when(registry.findVersionById(supersededVersion))
+    when(registry.findVersionById(supersededVersion))
         .thenReturn(Optional.of(version(supersededVersion, strategyId, "1", config)));
 
-    // An 11%-underwater anchor carried by the SUPERSEDED version: entry 152, last close 135.
     List<EngineCandle> series = craftDecline();
-    in.arthayantra.strategysignal.signals.SignalRepository signals =
-        mock(in.arthayantra.strategysignal.signals.SignalRepository.class);
-    org.mockito.Mockito.when(signals.activeEntries())
-        .thenReturn(
-            List.of(
-                new in.arthayantra.strategysignal.signals.SignalRepository.SignalRow(
-                    42L, supersededVersion, "NSE", "TESTCO", "1d", "ENTRY", "BUY",
-                    new BigDecimal("152"), null, null, BigDecimal.ONE,
-                    new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode(), "TAKEN",
-                    series.get(0).bucketStart(), series.get(0).bucketStart().plusDays(1), null,
-                    null, null, null, null, null)));
-    org.mockito.Mockito.when(signals.insert(
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any()))
-        .thenReturn(43L);
+    SignalRepository signals = mock(SignalRepository.class);
+    when(signals.activeEntries())
+        .thenReturn(List.of(anchor(42L, supersededVersion, new BigDecimal("152"), series)));
+    stubInsert(signals, 43L);
 
     MinerviniFunnelClient funnel = mock(MinerviniFunnelClient.class);
-    org.mockito.Mockito.when(funnel.buyableAndOnDeck()).thenReturn(List.of());
-    in.arthayantra.strategysignal.signals.MarketDataCandlesClient candles =
-        mock(in.arthayantra.strategysignal.signals.MarketDataCandlesClient.class);
-    org.mockito.Mockito.when(candles.fetch(
-            org.mockito.ArgumentMatchers.eq("NSE"), org.mockito.ArgumentMatchers.eq("TESTCO"),
-            org.mockito.ArgumentMatchers.eq("1d"), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any()))
-        .thenReturn(series);
-    org.springframework.transaction.support.TransactionTemplate tx =
-        mock(org.springframework.transaction.support.TransactionTemplate.class);
-    org.mockito.Mockito.when(tx.execute(org.mockito.ArgumentMatchers.any()))
-        .thenAnswer(inv ->
-            inv.<org.springframework.transaction.support.TransactionCallback<Long>>getArgument(0)
-                .doInTransaction(null));
+    when(funnel.buyableAndOnDeck()).thenReturn(List.of());
+    MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
+    when(candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(series);
 
-    MinerviniSwingEngine engine =
-        new MinerviniSwingEngine(
-            registry, funnel, candles, signals,
-            mock(in.arthayantra.strategysignal.signals.SignalPublisher.class),
-            mock(org.springframework.context.ApplicationEventPublisher.class), Optional.empty(),
-            tx, new com.fasterxml.jackson.databind.ObjectMapper(),
-            java.time.Clock.systemUTC(), true, 520, 60, 1440);
-
-    MinerviniSwingEngine.SwingRun run = engine.runDaily();
+    SwingBatchEngine.SwingRun run = engine(registry, candles, signals, funnel).runDaily(doctrine(funnel, signals, true, 60));
 
     assertThat(run.exits()).as("the superseded-version anchor is adopted and its stop fires").isEqualTo(1);
-    org.mockito.Mockito.verify(signals).transition(42L, "EXPIRED");
+    verify(signals).transition(42L, "EXPIRED");
   }
 
   @Test
   void heldSymbolsBlocksReEntryForSupersededVersionAnchors() throws IOException {
-    // The second half of audit H2 (double exposure): a symbol held by a SUPERSEDED version's anchor
-    // must still block a new-version entry. Pre-fix, heldSymbols counted only current published
-    // versions, so this breakout candidate would fire a fresh ENTRY on the already-held symbol.
-    java.util.UUID strategyId = java.util.UUID.randomUUID();
-    java.util.UUID publishedVersion = java.util.UUID.randomUUID();
-    java.util.UUID supersededVersion = java.util.UUID.randomUUID();
-
-    com.fasterxml.jackson.databind.JsonNode config = vcpConfig();
+    UUID strategyId = UUID.randomUUID();
+    UUID publishedVersion = UUID.randomUUID();
+    UUID supersededVersion = UUID.randomUUID();
+    JsonNode config = vcpConfig();
     StrategyRepository registry = mock(StrategyRepository.class);
-    StrategyRepository.StrategyRow strategyRow =
-        new StrategyRepository.StrategyRow(
-            strategyId, "minervini-vcp", "Minervini VCP", null, null, List.of("minervini"), true,
-            publishedVersion, null, null, false, null);
-    org.mockito.Mockito.when(registry.listAll()).thenReturn(List.of(strategyRow));
-    org.mockito.Mockito.when(registry.findById(strategyId)).thenReturn(Optional.of(strategyRow));
-    org.mockito.Mockito.when(registry.findVersionById(publishedVersion))
+    StrategyRepository.StrategyRow strategyRow = strategyRow(strategyId, publishedVersion);
+    when(registry.listAll()).thenReturn(List.of(strategyRow));
+    when(registry.findById(strategyId)).thenReturn(Optional.of(strategyRow));
+    when(registry.findVersionById(publishedVersion))
         .thenReturn(Optional.of(version(publishedVersion, strategyId, "2", config)));
-    org.mockito.Mockito.when(registry.findVersionById(supersededVersion))
+    when(registry.findVersionById(supersededVersion))
         .thenReturn(Optional.of(version(supersededVersion, strategyId, "1", config)));
 
-    // A breakout series that WOULD fire the entry gate (pivot crossover on 3x volume) — the only
-    // thing standing between the candidate and a duplicate position is the held-symbol block.
     List<EngineCandle> series = craft(3_000L);
-    in.arthayantra.strategysignal.signals.SignalRepository signals =
-        mock(in.arthayantra.strategysignal.signals.SignalRepository.class);
-    org.mockito.Mockito.when(signals.activeEntries())
-        .thenReturn(
-            List.of(
-                new in.arthayantra.strategysignal.signals.SignalRepository.SignalRow(
-                    42L, supersededVersion, "NSE", "TESTCO", "1d", "ENTRY", "BUY",
-                    new BigDecimal("100"), null, null, BigDecimal.ONE,
-                    new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode(), "TAKEN",
-                    series.get(0).bucketStart(), series.get(0).bucketStart().plusDays(1), null,
-                    null, null, null, null, null)));
+    SignalRepository signals = mock(SignalRepository.class);
+    when(signals.activeEntries())
+        .thenReturn(List.of(anchor(42L, supersededVersion, new BigDecimal("100"), series)));
 
     MinerviniFunnelClient funnel = mock(MinerviniFunnelClient.class);
-    org.mockito.Mockito.when(funnel.buyableAndOnDeck())
+    when(funnel.buyableAndOnDeck())
         .thenReturn(
-            List.of(
-                new MinerviniFunnelClient.Candidate(
-                    "TESTCO", new BigDecimal("152"), PIVOT, null, false, 2, "40W 31/3 4T")));
-    in.arthayantra.strategysignal.signals.MarketDataCandlesClient candles =
-        mock(in.arthayantra.strategysignal.signals.MarketDataCandlesClient.class);
-    org.mockito.Mockito.when(candles.fetch(
-            org.mockito.ArgumentMatchers.eq("NSE"), org.mockito.ArgumentMatchers.eq("TESTCO"),
-            org.mockito.ArgumentMatchers.eq("1d"), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any()))
-        .thenReturn(series);
-    org.springframework.transaction.support.TransactionTemplate tx =
-        mock(org.springframework.transaction.support.TransactionTemplate.class);
-    org.mockito.Mockito.when(tx.execute(org.mockito.ArgumentMatchers.any()))
-        .thenAnswer(inv ->
-            inv.<org.springframework.transaction.support.TransactionCallback<Long>>getArgument(0)
-                .doInTransaction(null));
+            List.of(new MinerviniFunnelClient.Candidate("TESTCO", new BigDecimal("152"), PIVOT, null, false, 2, "40W 31/3 4T")));
+    MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
+    when(candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(series);
 
-    MinerviniSwingEngine engine =
-        new MinerviniSwingEngine(
-            registry, funnel, candles, signals,
-            mock(in.arthayantra.strategysignal.signals.SignalPublisher.class),
-            mock(org.springframework.context.ApplicationEventPublisher.class), Optional.empty(),
-            tx, new com.fasterxml.jackson.databind.ObjectMapper(),
-            java.time.Clock.systemUTC(), true, 520, 60, 1440);
+    SwingBatchEngine.SwingRun run = engine(registry, candles, signals, funnel).runDaily(doctrine(funnel, signals, true, 60));
 
-    MinerviniSwingEngine.SwingRun run = engine.runDaily();
-
-    assertThat(run.entries())
-        .as("the superseded-version anchor's symbol blocks the new-version re-entry")
-        .isZero();
+    assertThat(run.entries()).as("the superseded-version anchor's symbol blocks re-entry").isZero();
   }
 
   @Test
   void exitPassRetriesAFailedFetchOnceThenEvaluatesTheStop() throws IOException {
-    // Audit P0-3: MarketDataCandlesClient fail-softs to an empty list and the per-run cache pins
-    // it — pre-fix the held anchor's ONLY daily stop evaluation was silently skipped. The fix
-    // retries once outside the cache; here the retry succeeds and the 8% stop fires.
     ExitHarness h = new ExitHarness();
-    org.mockito.Mockito.when(h.candles.fetch(
-            org.mockito.ArgumentMatchers.eq("NSE"), org.mockito.ArgumentMatchers.eq("TESTCO"),
-            org.mockito.ArgumentMatchers.eq("1d"), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any()))
+    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any()))
         .thenReturn(List.of())
         .thenReturn(h.series);
 
-    MinerviniSwingEngine.SwingRun run = h.engine().runDaily();
+    SwingBatchEngine.SwingRun run = h.engine().runDaily(h.doctrine());
 
     assertThat(run.exits()).as("the retry recovers the series and the stop fires").isEqualTo(1);
     assertThat(run.exitSkipped()).isZero();
-    org.mockito.Mockito.verify(h.candles, org.mockito.Mockito.times(2))
-        .fetch(org.mockito.ArgumentMatchers.eq("NSE"), org.mockito.ArgumentMatchers.eq("TESTCO"),
-            org.mockito.ArgumentMatchers.eq("1d"), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any());
+    verify(h.candles, times(2)).fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any());
   }
 
   @Test
   void exitPassCountsAndScreamsWhenTheSeriesIsUnavailableAfterRetry() throws IOException {
-    // Both fetches fail → the anchor's stop is NOT evaluated today; the run must say so loudly
-    // (exitSkipped > 0) instead of the pre-fix silent skip.
     ExitHarness h = new ExitHarness();
-    org.mockito.Mockito.when(h.candles.fetch(
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any()))
-        .thenReturn(List.of());
+    when(h.candles.fetch(any(), any(), any(), any(), any())).thenReturn(List.of());
 
-    MinerviniSwingEngine.SwingRun run = h.engine().runDaily();
+    SwingBatchEngine.SwingRun run = h.engine().runDaily(h.doctrine());
 
     assertThat(run.exits()).isZero();
     assertThat(run.exitSkipped()).as("the unevaluated stop is surfaced, not swallowed").isEqualTo(1);
   }
 
-  /** Shared wiring for the exit-pass fetch-failure tests: one published anchor, empty funnel. */
-  private final class ExitHarness {
-    final StrategyRepository registry = mock(StrategyRepository.class);
-    final in.arthayantra.strategysignal.signals.SignalRepository signals =
-        mock(in.arthayantra.strategysignal.signals.SignalRepository.class);
-    final MinerviniFunnelClient funnel = mock(MinerviniFunnelClient.class);
-    final in.arthayantra.strategysignal.signals.MarketDataCandlesClient candles =
-        mock(in.arthayantra.strategysignal.signals.MarketDataCandlesClient.class);
-    final List<EngineCandle> series = craftDecline();
-
-    ExitHarness() throws IOException {
-      java.util.UUID strategyId = java.util.UUID.randomUUID();
-      java.util.UUID publishedVersion = java.util.UUID.randomUUID();
-      com.fasterxml.jackson.databind.JsonNode config = vcpConfig();
-      StrategyRepository.StrategyRow strategyRow =
-          new StrategyRepository.StrategyRow(
-              strategyId, "minervini-vcp", "Minervini VCP", null, null, List.of("minervini"),
-              true, publishedVersion, null, null, false, null);
-      org.mockito.Mockito.when(registry.listAll()).thenReturn(List.of(strategyRow));
-      org.mockito.Mockito.when(registry.findVersionById(publishedVersion))
-          .thenReturn(Optional.of(version(publishedVersion, strategyId, "1", config)));
-      org.mockito.Mockito.when(signals.activeEntries())
-          .thenReturn(
-              List.of(
-                  new in.arthayantra.strategysignal.signals.SignalRepository.SignalRow(
-                      42L, publishedVersion, "NSE", "TESTCO", "1d", "ENTRY", "BUY",
-                      new BigDecimal("152"), null, null, BigDecimal.ONE,
-                      new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode(),
-                      "TAKEN", series.get(0).bucketStart(), series.get(0).bucketStart().plusDays(1),
-                      null, null, null, null, null, null)));
-      org.mockito.Mockito.when(signals.insert(
-              org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-              org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-              org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-              org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-              org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-              org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-              org.mockito.ArgumentMatchers.any()))
-          .thenReturn(43L);
-      org.mockito.Mockito.when(funnel.buyableAndOnDeck()).thenReturn(List.of());
-    }
-
-    MinerviniSwingEngine engine() {
-      org.springframework.transaction.support.TransactionTemplate tx =
-          mock(org.springframework.transaction.support.TransactionTemplate.class);
-      org.mockito.Mockito.when(tx.execute(org.mockito.ArgumentMatchers.any()))
-          .thenAnswer(inv ->
-              inv.<org.springframework.transaction.support.TransactionCallback<Long>>getArgument(0)
-                  .doInTransaction(null));
-      return new MinerviniSwingEngine(
-          registry, funnel, candles, signals,
-          mock(in.arthayantra.strategysignal.signals.SignalPublisher.class),
-          mock(org.springframework.context.ApplicationEventPublisher.class), Optional.empty(),
-          tx, new com.fasterxml.jackson.databind.ObjectMapper(),
-          java.time.Clock.systemUTC(), true, 520, 60, 1440);
-    }
-  }
-
   @Test
   void entryGateIsReCheckedPerEntryAndStopsTheRunWhenTheBookTrips() throws IOException {
-    // Audit H3: the per-book gate is consulted BEFORE EACH emit (not once per pass), so a mid-run
-    // max-open / daily-loss trip halts further entries. Here entryAllowed returns true for the
-    // early-out + the first candidate, then false — so only ONE of two firing candidates opens.
-    java.util.UUID strategyId = java.util.UUID.randomUUID();
-    java.util.UUID publishedVersion = java.util.UUID.randomUUID();
-    com.fasterxml.jackson.databind.JsonNode config = vcpConfig();
+    UUID strategyId = UUID.randomUUID();
+    UUID publishedVersion = UUID.randomUUID();
+    JsonNode config = vcpConfig();
     StrategyRepository registry = mock(StrategyRepository.class);
-    StrategyRepository.StrategyRow strategyRow =
-        new StrategyRepository.StrategyRow(
-            strategyId, "minervini-vcp", "Minervini VCP", null, null, List.of("minervini"), true,
-            publishedVersion, null, null, false, null);
-    org.mockito.Mockito.when(registry.listAll()).thenReturn(List.of(strategyRow));
-    org.mockito.Mockito.when(registry.findVersionById(publishedVersion))
+    when(registry.listAll()).thenReturn(List.of(strategyRow(strategyId, publishedVersion)));
+    when(registry.findVersionById(publishedVersion))
         .thenReturn(Optional.of(version(publishedVersion, strategyId, "1", config)));
 
-    List<EngineCandle> series = craft(3_000L); // both candidates would fire an entry
+    List<EngineCandle> series = craft(3_000L);
     MinerviniFunnelClient funnel = mock(MinerviniFunnelClient.class);
-    org.mockito.Mockito.when(funnel.buyableAndOnDeck())
+    when(funnel.buyableAndOnDeck())
         .thenReturn(
             List.of(
-                new MinerviniFunnelClient.Candidate(
-                    "AAA", new BigDecimal("152"), PIVOT, null, false, 2, "40W 31/3 4T"),
-                new MinerviniFunnelClient.Candidate(
-                    "BBB", new BigDecimal("152"), PIVOT, null, false, 2, "40W 31/3 4T")));
-    in.arthayantra.strategysignal.signals.MarketDataCandlesClient candles =
-        mock(in.arthayantra.strategysignal.signals.MarketDataCandlesClient.class);
-    org.mockito.Mockito.when(candles.fetch(
-            org.mockito.ArgumentMatchers.eq("NSE"), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.eq("1d"), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any()))
-        .thenReturn(series);
-    in.arthayantra.strategysignal.signals.SignalRepository signals =
-        mock(in.arthayantra.strategysignal.signals.SignalRepository.class);
-    org.mockito.Mockito.when(signals.activeEntries()).thenReturn(List.of());
-    org.mockito.Mockito.when(signals.insert(
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any()))
-        .thenReturn(1L);
+                new MinerviniFunnelClient.Candidate("AAA", new BigDecimal("152"), PIVOT, null, false, 2, "40W 31/3 4T"),
+                new MinerviniFunnelClient.Candidate("BBB", new BigDecimal("152"), PIVOT, null, false, 2, "40W 31/3 4T")));
+    MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
+    when(candles.fetch(eq("NSE"), any(), eq("1d"), any(), any())).thenReturn(series);
+    SignalRepository signals = mock(SignalRepository.class);
+    when(signals.activeEntries()).thenReturn(List.of());
+    stubInsert(signals, 1L);
 
-    in.arthayantra.strategysignal.signals.EmissionGuard guard =
-        mock(in.arthayantra.strategysignal.signals.EmissionGuard.class);
-    org.mockito.Mockito.when(
-            guard.entryAllowed(in.arthayantra.strategysignal.signals.Books.MINERVINI))
-        .thenReturn(true, true, false); // early-out, candidate-AAA, then TRIPPED before candidate-BBB
-    org.mockito.Mockito.when(
-            guard.suggestedQty(
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
-        .thenReturn(new BigDecimal("10"));
-    org.springframework.transaction.support.TransactionTemplate tx =
-        mock(org.springframework.transaction.support.TransactionTemplate.class);
-    org.mockito.Mockito.when(tx.execute(org.mockito.ArgumentMatchers.any()))
-        .thenAnswer(inv ->
-            inv.<org.springframework.transaction.support.TransactionCallback<Long>>getArgument(0)
-                .doInTransaction(null));
+    EmissionGuard guard = mock(EmissionGuard.class);
+    when(guard.entryAllowed(Books.MINERVINI)).thenReturn(true, true, false);
+    when(guard.suggestedQty(any(), any(), any(), any(), any(), any())).thenReturn(new BigDecimal("10"));
 
-    MinerviniSwingEngine engine =
-        new MinerviniSwingEngine(
-            registry, funnel, candles, signals,
-            mock(in.arthayantra.strategysignal.signals.SignalPublisher.class),
-            mock(org.springframework.context.ApplicationEventPublisher.class), Optional.of(guard),
-            tx, new com.fasterxml.jackson.databind.ObjectMapper(),
-            java.time.Clock.systemUTC(), true, 520, 10, 1440); // minBars=10 for the 25-bar fixture
+    SwingBatchEngine engine =
+        new SwingBatchEngine(
+            registry, candles, signals, mock(SignalPublisher.class),
+            mock(ApplicationEventPublisher.class), Optional.of(guard), passthroughTx(),
+            new ObjectMapper(), Clock.systemUTC());
 
-    MinerviniSwingEngine.SwingRun run = engine.runDaily();
+    SwingBatchEngine.SwingRun run = engine.runDaily(doctrine(funnel, signals, true, 10));
 
     assertThat(run.entries()).as("the mid-run book trip halts entries after the first").isEqualTo(1);
   }
 
-  private static com.fasterxml.jackson.databind.JsonNode vcpConfig() throws IOException {
+  // ---- harness --------------------------------------------------------------------------------
+
+  private final class ExitHarness {
+    final StrategyRepository registry = mock(StrategyRepository.class);
+    final SignalRepository signals = mock(SignalRepository.class);
+    final MinerviniFunnelClient funnel = mock(MinerviniFunnelClient.class);
+    final MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
+    final List<EngineCandle> series = craftDecline();
+
+    ExitHarness() throws IOException {
+      UUID strategyId = UUID.randomUUID();
+      UUID publishedVersion = UUID.randomUUID();
+      JsonNode config = vcpConfig();
+      when(registry.listAll()).thenReturn(List.of(strategyRow(strategyId, publishedVersion)));
+      when(registry.findVersionById(publishedVersion))
+          .thenReturn(Optional.of(version(publishedVersion, strategyId, "1", config)));
+      when(signals.activeEntries())
+          .thenReturn(List.of(anchor(42L, publishedVersion, new BigDecimal("152"), series)));
+      stubInsert(signals, 43L);
+      when(funnel.buyableAndOnDeck()).thenReturn(List.of());
+    }
+
+    SwingBatchEngine engine() {
+      return MinerviniSwingEngineTest.this.engine(registry, candles, signals, funnel);
+    }
+
+    MinerviniDoctrine doctrine() {
+      return MinerviniSwingEngineTest.this.doctrine(funnel, signals, true, 60);
+    }
+  }
+
+  private SwingBatchEngine engine(
+      StrategyRepository registry, MarketDataCandlesClient candles, SignalRepository signals,
+      MinerviniFunnelClient funnel) {
+    return new SwingBatchEngine(
+        registry, candles, signals, mock(SignalPublisher.class),
+        mock(ApplicationEventPublisher.class), Optional.empty(), passthroughTx(),
+        new ObjectMapper(), Clock.systemUTC());
+  }
+
+  private MinerviniDoctrine doctrine(
+      MinerviniFunnelClient funnel, SignalRepository signals, boolean enabled, int minBars) {
+    return new MinerviniDoctrine(funnel, signals, new ObjectMapper(), enabled, 520, minBars, 1440);
+  }
+
+  private static TransactionTemplate passthroughTx() {
+    TransactionTemplate tx = mock(TransactionTemplate.class);
+    when(tx.execute(any()))
+        .thenAnswer(inv -> inv.<TransactionCallback<Long>>getArgument(0).doInTransaction(null));
+    return tx;
+  }
+
+  private static void stubInsert(SignalRepository signals, long id) {
+    when(signals.insert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+        .thenReturn(id);
+  }
+
+  private static StrategyRepository.StrategyRow strategyRow(UUID strategyId, UUID publishedVersion) {
+    return new StrategyRepository.StrategyRow(
+        strategyId, "minervini-vcp", "Minervini VCP", null, null, List.of("minervini"), true,
+        publishedVersion, null, null, false, null);
+  }
+
+  private static SignalRepository.SignalRow anchor(
+      long id, UUID versionId, BigDecimal entryPrice, List<EngineCandle> series) {
+    return new SignalRepository.SignalRow(
+        id, versionId, "NSE", "TESTCO", "1d", "ENTRY", "BUY", entryPrice, null, null, BigDecimal.ONE,
+        new ObjectMapper().createObjectNode(), "TAKEN", series.get(0).bucketStart(),
+        series.get(0).bucketStart().plusDays(1), null, null, null, null, null, null);
+  }
+
+  private static StrategyDefinition vcp() throws IOException {
+    return StrategyCompiler.compile(vcpConfig());
+  }
+
+  private static JsonNode vcpConfig() throws IOException {
     try (InputStream in =
         MinerviniSwingEngineTest.class.getResourceAsStream("/minervini-strategies/minervini-vcp.yaml")) {
       assertThat(in).isNotNull();
-      String yaml = new String(in.readAllBytes(), StandardCharsets.UTF_8);
-      return StrategyDocuments.parse(yaml).config();
+      return StrategyDocuments.parse(new String(in.readAllBytes(), StandardCharsets.UTF_8)).config();
     }
   }
 
   private static StrategyRepository.VersionRow version(
-      java.util.UUID id, java.util.UUID strategyId, String version,
-      com.fasterxml.jackson.databind.JsonNode config) {
+      UUID id, UUID strategyId, String version, JsonNode config) {
     return new StrategyRepository.VersionRow(
-        id, strategyId, version, null, config, "1", "chk-" + version, "published", null, null,
-        null, null);
+        id, strategyId, version, null, config, "1", "chk-" + version, "published", null, null, null, null);
   }
 
-  /** 25 daily bars: a rise 100→149, a consolidation 146–148 below the 150 pivot, then a breakout to 152 on the LAST bar. */
   private static List<EngineCandle> craft(long breakoutVolume) {
-    double[] tail = {146, 148, 146, 148, 147}; // consolidation below the pivot
+    double[] tail = {146, 148, 146, 148, 147};
     List<EngineCandle> bars = new ArrayList<>();
     for (int d = 0; d <= 18; d++) {
       bars.add(bar(d, 100.0 + (149.0 - 100.0) * d / 18.0, 1_000L));
@@ -469,11 +347,10 @@ class MinerviniSwingEngineTest {
     for (int i = 0; i < tail.length; i++) {
       bars.add(bar(19 + i, tail[i], 1_000L));
     }
-    bars.add(bar(24, 152.0, breakoutVolume)); // the breakout bar (crossover above 150) — LAST bar
+    bars.add(bar(24, 152.0, breakoutVolume));
     return bars;
   }
 
-  /** 25 daily bars flat at ~150 then a slide to 135 on the last bar (an underwater held position). */
   private static List<EngineCandle> craftDecline() {
     List<EngineCandle> bars = new ArrayList<>();
     for (int d = 0; d <= 23; d++) {

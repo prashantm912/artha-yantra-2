@@ -1,0 +1,591 @@
+package in.arthayantra.strategysignal.swing;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import in.arthayantra.strategyengine.config.StrategyCompiler;
+import in.arthayantra.strategyengine.config.StrategyDefinition;
+import in.arthayantra.strategyengine.eval.EntryEvaluator;
+import in.arthayantra.strategyengine.eval.ExitEvaluator;
+import in.arthayantra.strategyengine.eval.IndicatorBank;
+import in.arthayantra.strategyengine.eval.ScoreBreakdownJson;
+import in.arthayantra.strategyengine.eval.SeriesProvider;
+import in.arthayantra.strategyengine.series.EngineCandle;
+import in.arthayantra.strategyengine.series.EngineSeries;
+import in.arthayantra.strategyengine.series.SeriesKey;
+import in.arthayantra.strategysignal.registry.StrategyRepository;
+import in.arthayantra.strategysignal.signals.EmissionGuard;
+import in.arthayantra.strategysignal.signals.MarketDataCandlesClient;
+import in.arthayantra.strategysignal.signals.SignalEmitted;
+import in.arthayantra.strategysignal.signals.SignalExited;
+import in.arthayantra.strategysignal.signals.SignalPublisher;
+import in.arthayantra.strategysignal.signals.SignalRepository;
+import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionTemplate;
+
+/**
+ * The one daily swing batch engine (audit M31 consolidation): a post-close batch that generates
+ * live-paper swing signals for a family's published {@code session.style=swing} strategies over its
+ * selection funnel, and evaluates exits on the open holdings. It exists because funnel equities do NOT
+ * tick (the live feed is index/options only), so the tick-driven {@code SignalEngine} never evaluates
+ * them; this batch drives them off the daily bar.
+ *
+ * <p>It is a pure function of a {@link SwingDoctrine} — the family (Minervini SEPA, Manas Arora)
+ * supplies the book, universe, funnel candidates, context-seeds, detail side-channel, setup routing
+ * and pyramid policy; the engine owns the run/entry-pass/exit-pass/emit/anchor-adoption/retry
+ * skeleton ONCE (the H2 anchor-adoption, H3 gate-recheck, P0-3 exit-retry). Stateless: every field is a
+ * shared collaborator; all run state is method-local, so a single singleton serves every family.
+ *
+ * <p><b>Parity:</b> it reuses the FROZEN {@link EntryEvaluator}/{@link ExitEvaluator}/{@link
+ * IndicatorBank} verbatim — no scoring/exit code — so goldens are untouched and each bar scores
+ * identically to the backtest. It speaks multi-lot natively (group by symbol, drive the exit off the
+ * oldest lot, close all lots); a single-lot family ({@link PyramidPolicy#NONE}) is the degenerate case
+ * where every group is a singleton and the passes reduce to the per-anchor loop.
+ */
+@Component
+public class SwingBatchEngine {
+
+  private static final Logger log = LoggerFactory.getLogger(SwingBatchEngine.class);
+  private static final ZoneOffset IST = ZoneOffset.ofHoursMinutes(5, 30);
+  private static final String EX = "NSE";
+  private static final String IV = "1d";
+
+  /** A loaded published swing strategy (identity + compiled definition + neutral setup token). */
+  public record SwingStrategy(
+      UUID versionId, String slug, String name, String version, String checksum, String setupToken,
+      StrategyDefinition definition) {}
+
+  /**
+   * Summary of one batch run (for logging / the manual-trigger endpoint). {@code exitSkipped} counts
+   * held anchors whose stop/trail could NOT be evaluated this run (no daily series even after a retry)
+   * — this batch is the position's ONLY exit evaluator, so a non-zero value is an ops signal.
+   */
+  public record SwingRun(int strategies, int candidates, int entries, int exits, int exitSkipped) {}
+
+  private record EntryResult(int candidates, int fired) {}
+
+  private record ExitResult(int closed, int skipped) {}
+
+  private final StrategyRepository registry;
+  private final MarketDataCandlesClient candles;
+  private final SignalRepository signals;
+  private final SignalPublisher publisher;
+  private final ApplicationEventPublisher events;
+  private final Optional<EmissionGuard> emissionGuard;
+  private final TransactionTemplate tx;
+  private final ObjectMapper objectMapper;
+  private final Clock clock;
+
+  /** Wires the shared collaborators (family-neutral); the family varies only via the doctrine arg. */
+  public SwingBatchEngine(
+      StrategyRepository registry,
+      MarketDataCandlesClient candles,
+      SignalRepository signals,
+      SignalPublisher publisher,
+      ApplicationEventPublisher events,
+      Optional<EmissionGuard> emissionGuard,
+      TransactionTemplate tx,
+      ObjectMapper objectMapper,
+      Clock clock) {
+    this.registry = registry;
+    this.candles = candles;
+    this.signals = signals;
+    this.publisher = publisher;
+    this.events = events;
+    this.emissionGuard = emissionGuard;
+    this.tx = tx;
+    this.objectMapper = objectMapper;
+    this.clock = clock;
+  }
+
+  /** Runs one full daily batch for a family: the entry pass over its funnel, then the exit pass. */
+  public SwingRun runDaily(SwingDoctrine doctrine) {
+    // The single arming gate for BOTH the scheduler AND the on-demand POST /run: with the family flag
+    // off the batch is a NO-OP whoever calls it (audit P9 — else a curious authenticated POST /run
+    // fires entries + auto-paper before the owner has armed the flag).
+    if (!doctrine.enabled()) {
+      log.debug("{} swing batch disabled — skipping", doctrine.batchName());
+      return new SwingRun(0, 0, 0, 0, 0);
+    }
+    List<SwingStrategy> swings = loadPublishedSwingStrategies(doctrine);
+    if (swings.isEmpty()) {
+      return new SwingRun(0, 0, 0, 0, 0);
+    }
+    Map<String, List<EngineCandle>> seriesCache = new HashMap<>();
+    AnchorResolution resolution = new AnchorResolution(doctrine, swings);
+    EntryResult entry = entryPass(doctrine, swings, resolution, seriesCache);
+    ExitResult exit = exitPass(doctrine, resolution, seriesCache);
+    log.info(
+        "{} swing batch: {} strategies, {} candidates, {} entries, {} exits, {} exit-skipped",
+        doctrine.batchName(), swings.size(), entry.candidates(), entry.fired(), exit.closed(),
+        exit.skipped());
+    return new SwingRun(
+        swings.size(), entry.candidates(), entry.fired(), exit.closed(), exit.skipped());
+  }
+
+  // ---- anchor resolution (audit H2) -----------------------------------------------------------
+
+  /**
+   * Per-run anchor→strategy resolution that ADOPTS anchors of superseded/unpublished versions. Keying
+   * the exit pass on the CURRENT published version id silently orphaned every open anchor whenever a
+   * strategy was republished (the boot seeder auto-publishes on any YAML change), disabled, or its
+   * config later failed to compile — the position's stop/trail was never evaluated again AND the
+   * symbol dropped out of the held set, so a new version could re-enter it (double exposure).
+   * Resolution order: currently-published strategy, else the anchor's OWN version row compiled on the
+   * fly. Empty = another family's anchor, or genuinely unmanageable (logged at ERROR).
+   */
+  private final class AnchorResolution {
+    private final SwingDoctrine doctrine;
+    private final Map<UUID, SwingStrategy> published = new HashMap<>();
+    private final Map<UUID, Optional<SwingStrategy>> adopted = new HashMap<>();
+
+    AnchorResolution(SwingDoctrine doctrine, List<SwingStrategy> swings) {
+      this.doctrine = doctrine;
+      swings.forEach(s -> published.put(s.versionId(), s));
+    }
+
+    Optional<SwingStrategy> resolve(UUID versionId) {
+      SwingStrategy current = published.get(versionId);
+      if (current != null) {
+        return Optional.of(current);
+      }
+      return adopted.computeIfAbsent(versionId, v -> adoptVersion(doctrine, v));
+    }
+  }
+
+  /**
+   * Adopts one superseded/unpublished version for exit management. The strategy's {@code enabled} flag
+   * is deliberately NOT checked — a disabled strategy no longer ENTERS (the published load skips it)
+   * but its open positions must still be exit-managed to their close.
+   */
+  private Optional<SwingStrategy> adoptVersion(SwingDoctrine doctrine, UUID versionId) {
+    Optional<StrategyRepository.VersionRow> versionRow = registry.findVersionById(versionId);
+    if (versionRow.isEmpty()) {
+      log.error(
+          "{} swing: anchor version {} has no version row — OPEN POSITION UNMANAGED",
+          doctrine.batchName(), versionId);
+      return Optional.empty();
+    }
+    JsonNode config = versionRow.get().config();
+    if (!doctrine.universeMode().equals(config.path("universe").path("mode").asText())) {
+      return Optional.empty(); // another family's anchor — its own engine manages it
+    }
+    try {
+      StrategyDefinition definition = StrategyCompiler.compile(config);
+      if (!"swing".equals(definition.session().style())) {
+        return Optional.empty();
+      }
+      StrategyRepository.StrategyRow strategy =
+          registry.findById(versionRow.get().strategyId()).orElse(null);
+      if (strategy == null) {
+        log.error(
+            "{} swing: strategy for anchor version {} not found — OPEN POSITION UNMANAGED",
+            doctrine.batchName(), versionId);
+        return Optional.empty();
+      }
+      log.warn(
+          "{} swing: adopting anchors of superseded version {} of {} — exit-managed with the"
+              + " version's own frozen config",
+          doctrine.batchName(), versionRow.get().version(), strategy.slug());
+      return Optional.of(
+          new SwingStrategy(
+              versionId, strategy.slug(), strategy.name(), versionRow.get().version(),
+              versionRow.get().checksum(), doctrine.setupToken(config, strategy.slug()), definition));
+    } catch (RuntimeException e) {
+      log.error(
+          "{} swing: anchor version {} failed to compile — OPEN POSITION UNMANAGED: {}",
+          doctrine.batchName(), versionId, e.getMessage());
+      return Optional.empty();
+    }
+  }
+
+  // ---- entry pass ---------------------------------------------------------------------------
+
+  private EntryResult entryPass(
+      SwingDoctrine doctrine, List<SwingStrategy> swings, AnchorResolution resolution,
+      Map<String, List<EngineCandle>> seriesCache) {
+    // Per-book risk governor early-out: a book already kill-switched / daily-loss-tripped at the START
+    // of the run takes no entries at all (cheap — skips the whole candidate scan).
+    if (entryBlocked(doctrine)) {
+      return new EntryResult(0, 0);
+    }
+    List<SwingCandidate> candidates = doctrine.candidates();
+    if (candidates.isEmpty()) {
+      return new EntryResult(0, 0);
+    }
+    // The open lots per symbol at the START of the run (a DB snapshot). A symbol with ≥1 lot is
+    // "held": with a NONE pyramid policy it is skipped (single-lot); with an add-capable policy it may
+    // take an ADD (§3.4) — a fresh lot averaged into the one paper position.
+    Map<String, List<SignalRepository.SignalRow>> openLots = openLotsBySymbol(resolution);
+    java.util.Set<String> firedThisRun = new java.util.HashSet<>();
+    PyramidPolicy pyramid = doctrine.pyramid();
+    int fired = 0;
+    for (SwingCandidate c : candidates) {
+      if (firedThisRun.contains(c.symbol())) {
+        continue; // already emitted an entry/add for this symbol earlier in the run
+      }
+      List<SignalRepository.SignalRow> lots = openLots.getOrDefault(c.symbol(), List.of());
+      boolean isAdd = !lots.isEmpty();
+      if (isAdd && !pyramid.hasRoom(lots)) {
+        continue; // held with no room → skip BEFORE any fetch (the single-lot held-skip)
+      }
+      List<EngineCandle> series = series(doctrine, c.symbol(), seriesCache);
+      if (series.size() < doctrine.minBars()) {
+        continue;
+      }
+      EngineCandle bar = series.get(series.size() - 1);
+      if (isAdd && !pyramid.qualifiesForAdd(lots, bar)) {
+        continue; // §3.4.1: an add needs a fresh +min-gain% move since the most-recent lot
+      }
+      for (SwingStrategy strat : swings) {
+        // Setup routing (as data): a candidate valid only for some setups fires only the matching
+        // strategy; eligibleSetups == null means no routing (all strategies eligible).
+        if (c.eligibleSetups() != null && !c.eligibleSetups().contains(strat.setupToken())) {
+          continue;
+        }
+        IndicatorBank bank = buildBank(strat.definition(), c.symbol(), series, c.contextSeeds());
+        Optional<EntryEvaluator.Evaluation> eval =
+            EntryEvaluator.evaluate(strat.definition(), bank, series.size() - 1);
+        if (eval.isPresent() && eval.get().entry()) {
+          // Audit H3: re-check the per-book gate BEFORE each emit (auto-paper is a synchronous
+          // @EventListener, so entries fired earlier this run are already counted) — so
+          // max_open / max_deployment_pct / daily_loss bound a single batch.
+          if (entryBlocked(doctrine)) {
+            log.info(
+                "{} swing: {} book gate tripped mid-run after {} entries — stopping",
+                doctrine.batchName(), doctrine.book(), fired);
+            return new EntryResult(candidates.size(), fired);
+          }
+          // §3.4.3: an ADD only goes on if the book's aggregate open risk stays within the portfolio
+          // cap. A fresh (first) entry is unbounded here — the ordinary book governor already bounds it.
+          if (isAdd
+              && pyramid.wouldBreachRiskCap(
+                  strat.definition(), EX, c.symbol(), bank, series.size() - 1, bar.close(),
+                  emissionGuard.orElse(null))) {
+            log.info(
+                "{} swing: pyramid add for {} would breach the open-risk cap — skipped",
+                doctrine.batchName(), c.symbol());
+            break; // no setup may add more risk for this symbol this run
+          }
+          emitEntry(doctrine, strat, c, bar, eval.get(), bank, series.size() - 1, lots.size() + 1);
+          firedThisRun.add(c.symbol()); // one entry/add per symbol per run
+          fired++;
+          break;
+        }
+      }
+    }
+    return new EntryResult(candidates.size(), fired);
+  }
+
+  /** True when the family book's per-book gate (kill-switch / caps / daily-loss) blocks entry. */
+  private boolean entryBlocked(SwingDoctrine doctrine) {
+    return emissionGuard.map(g -> !g.entryAllowed(doctrine.book())).orElse(false);
+  }
+
+  /**
+   * The open lots (active ENTRY anchors) grouped by tradingsymbol, resolved through {@link
+   * AnchorResolution} so a lot held by a SUPERSEDED version still counts (the audit-H2 double-exposure
+   * path). A symbol with ≥1 lot is "held"; the list size is its current lot count for the pyramid cap.
+   */
+  private Map<String, List<SignalRepository.SignalRow>> openLotsBySymbol(AnchorResolution resolution) {
+    Map<String, List<SignalRepository.SignalRow>> bySymbol = new HashMap<>();
+    for (SignalRepository.SignalRow anchor : signals.activeEntries()) {
+      if (resolution.resolve(anchor.strategyVersionId()).isPresent()) {
+        bySymbol.computeIfAbsent(anchor.tradingsymbol(), k -> new ArrayList<>()).add(anchor);
+      }
+    }
+    return bySymbol;
+  }
+
+  /** The oldest (earliest-generated) lot — the pyramid's governing exit driver (§3.5.D). */
+  private static SignalRepository.SignalRow oldestLot(List<SignalRepository.SignalRow> lots) {
+    return lots.stream()
+        .min(
+            java.util.Comparator.comparing(SignalRepository.SignalRow::generatedAt)
+                .thenComparing(SignalRepository.SignalRow::id))
+        .orElseThrow();
+  }
+
+  private void emitEntry(
+      SwingDoctrine doctrine, SwingStrategy strat, SwingCandidate c, EngineCandle bar,
+      EntryEvaluator.Evaluation eval, IndicatorBank bank, int index, int lotNumber) {
+    BigDecimal entryPrice = bar.close();
+    ExitEvaluator.EntryLevels levels =
+        ExitEvaluator.entryLevels(
+            strat.definition(), bank,
+            new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, entryPrice, index));
+    BigDecimal stopLoss = levels.stopLoss();
+    BigDecimal target = levels.takeProfit();
+    String breakdownJson = ScoreBreakdownJson.write(eval.breakdown());
+    OffsetDateTime generatedAt = bar.bucketStart().withOffsetSameInstant(IST);
+    OffsetDateTime expiresAt = generatedAt.plusMinutes(doctrine.ttlMinutes());
+    // The detail side-channel always leads with the emitting strategy's slug (known only here, at
+    // emit), then the candidate's baked fields (footprint/pivot/…), then the engine-owned lot number
+    // for a pyramid add (≥2) — so a first entry's detail is byte-identical to the single-lot path.
+    ObjectNode detail = objectMapper.createObjectNode();
+    detail.put("setup", strat.slug());
+    detail.setAll(c.detailBase());
+    if (lotNumber > 1) {
+      detail.put("pyramidLot", lotNumber);
+    }
+    String detailJson = detail.toString();
+    // The advisory (lot-rounded) size vs the BOOK's paper equity — REQUIRED for auto-paper (the
+    // listener skips any ENTRY whose suggested_qty is null). Computed before the tx (reads the
+    // instrument master / paper equity). Null when the emission guard is absent (mock/no-risk).
+    BigDecimal stopDistance = stopLoss == null ? null : entryPrice.subtract(stopLoss).abs();
+    BigDecimal suggestedQty =
+        emissionGuard
+            .map(
+                g ->
+                    g.suggestedQty(
+                        strat.definition().sizing(), EX, c.symbol(), entryPrice, stopDistance,
+                        doctrine.book()))
+            .orElse(null);
+    long id =
+        tx.execute(
+            status -> {
+              long newId =
+                  signals.insert(
+                      strat.versionId(), EX, c.symbol(), IV, "ENTRY", "BUY", entryPrice, stopLoss,
+                      target, eval.breakdown().composite(), breakdownJson, generatedAt, expiresAt);
+              if (suggestedQty != null) {
+                signals.stampSuggestedQty(newId, suggestedQty);
+              }
+              doctrine.stampDetail(newId, detailJson);
+              return newId;
+            });
+    JsonNode canonical;
+    try {
+      canonical = objectMapper.readTree(breakdownJson);
+    } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+      throw new IllegalStateException("canonical breakdown unparseable", e);
+    }
+    publisher.publish(
+        id, strat.versionId(), strat.name(), strat.slug(), strat.version(), strat.checksum(), EX,
+        c.symbol(), IV, "ENTRY", "BUY", entryPrice, stopLoss, target, eval.breakdown().composite(),
+        canonical, generatedAt);
+    events.publishEvent(
+        new SignalEmitted(
+            id, strat.versionId(), EX, c.symbol(), "BUY", entryPrice, stopLoss, target,
+            eval.breakdown().composite(), eval.breakdown().threshold(), null));
+    log.info(
+        "{} swing ENTRY #{} {} {} at {} (composite {})",
+        doctrine.batchName(), id, strat.slug(), c.symbol(), entryPrice,
+        eval.breakdown().composite());
+  }
+
+  // ---- exit pass ----------------------------------------------------------------------------
+
+  private ExitResult exitPass(
+      SwingDoctrine doctrine, AnchorResolution resolution,
+      Map<String, List<EngineCandle>> seriesCache) {
+    // Group the open lots by symbol. A pyramided symbol holds several lots sharing ONE averaged paper
+    // position (§3.4); the governing stop is the OLDEST lot's trailed stop — the tightest, first to
+    // hit (§3.5.D). So the exit is driven off that lot and, when it fires, closes the whole position
+    // and expires every sibling lot. A single-lot symbol is a singleton group — byte-behaviour-
+    // identical to the per-anchor loop; a pyramid (add-capable policy) is the only multi-lot source.
+    Map<String, List<SignalRepository.SignalRow>> bySymbol = openLotsBySymbol(resolution);
+    int closed = 0;
+    int skipped = 0;
+    for (Map.Entry<String, List<SignalRepository.SignalRow>> e : bySymbol.entrySet()) {
+      List<SignalRepository.SignalRow> lots = e.getValue();
+      SignalRepository.SignalRow primary = oldestLot(lots);
+      SwingStrategy strat = resolution.resolve(primary.strategyVersionId()).orElse(null);
+      if (strat == null) {
+        continue; // another family's anchor, or unmanageable (already logged at ERROR)
+      }
+      List<EngineCandle> series = series(doctrine, primary.tradingsymbol(), seriesCache);
+      if (series.isEmpty()) {
+        // One retry OUTSIDE the per-run cache: MarketDataCandlesClient fail-softs to an empty list on
+        // any REST hiccup and the cache pins it — silently skipping the position's ONLY daily
+        // stop/trail evaluation (audit P0-3). A held anchor's series is worth a second round-trip.
+        series = retryFetch(doctrine, primary.tradingsymbol(), seriesCache);
+      }
+      if (series.isEmpty()) {
+        log.error(
+            "{} swing exit: no daily series for held anchor #{} {} even after retry —"
+                + " STOP NOT EVALUATED TODAY",
+            doctrine.batchName(), primary.id(), primary.tradingsymbol());
+        skipped++;
+        continue;
+      }
+      // geometry is irrelevant to the exit rules (percent/ATR stop + trail), so the pivot contexts are
+      // seeded neutral (0) — the bank still builds every declared indicator, the exit eval never reads
+      // their value.
+      IndicatorBank bank =
+          buildBank(strat.definition(), primary.tradingsymbol(), series, doctrine.neutralContextSeeds());
+      int entryIndex = bank.primarySeries().indexAtOrBefore(primary.generatedAt().toInstant());
+      if (entryIndex < 0) {
+        // the entry bar fell outside the fetched window (held > warmupDays, or a dropped entry
+        // bucket) — an entry-relative exit distance would be unreliable, so skip rather than default to
+        // bar 0 (the entry-pinned ATR / peak-since-entry trail is entry-index-DEPENDENT).
+        log.error(
+            "{} swing exit: entry bar for #{} {} is outside the fetched window —"
+                + " STOP NOT EVALUATED TODAY",
+            doctrine.batchName(), primary.id(), primary.tradingsymbol());
+        skipped++;
+        continue;
+      }
+      Optional<ExitEvaluator.ExitDecision> exit =
+          ExitEvaluator.evaluate(
+              strat.definition(), bank,
+              new ExitEvaluator.Position(
+                  ExitEvaluator.Direction.LONG, primary.entryPrice(), entryIndex),
+              series.size() - 1);
+      if (exit.isPresent()) {
+        emitExit(doctrine, strat, primary, lots, series.get(series.size() - 1), exit.get());
+        closed++;
+      }
+    }
+    return new ExitResult(closed, skipped);
+  }
+
+  /**
+   * Re-fetches a held anchor's daily series once, bypassing (and on success repairing) the per-run
+   * cache — the fail-soft empty from a transient REST hiccup must not stand between an open position
+   * and its only daily stop evaluation.
+   */
+  private List<EngineCandle> retryFetch(
+      SwingDoctrine doctrine, String symbol, Map<String, List<EngineCandle>> cache) {
+    OffsetDateTime now = OffsetDateTime.now(clock).withOffsetSameInstant(IST);
+    List<EngineCandle> fresh = candles.fetch(EX, symbol, IV, now.minusDays(doctrine.warmupDays()), now);
+    if (!fresh.isEmpty()) {
+      cache.put(symbol, fresh);
+    }
+    return fresh;
+  }
+
+  private void emitExit(
+      SwingDoctrine doctrine, SwingStrategy strat, SignalRepository.SignalRow primary,
+      List<SignalRepository.SignalRow> lots, EngineCandle bar, ExitEvaluator.ExitDecision exit) {
+    OffsetDateTime generatedAt = bar.bucketStart().withOffsetSameInstant(IST);
+    // the paper close_reason taxonomy is UPPERCASE (STOP_LOSS / TRAILING_STOP / SIGNAL_EXIT / …)
+    String reason = exit.type().toUpperCase(Locale.ROOT);
+    long id =
+        tx.execute(
+            status -> {
+              long newId =
+                  signals.insert(
+                      strat.versionId(), EX, primary.tradingsymbol(), IV, "EXIT", "SELL", bar.close(),
+                      null, null, primary.compositeScore(), primary.scoreBreakdown().toString(),
+                      generatedAt, generatedAt.plusMinutes(doctrine.ttlMinutes()));
+              // A pyramided position closes ALL lots at once (§3.5.D): expire every lot of the symbol
+              // so no add lingers as a phantom active anchor once its shared position is gone. A
+              // single-lot symbol expires its one anchor (identical to the per-anchor path).
+              for (SignalRepository.SignalRow lot : lots) {
+                signals.transition(lot.id(), "EXPIRED");
+              }
+              return newId;
+            });
+    publisher.publish(
+        id, strat.versionId(), strat.name(), strat.slug(), strat.version(), strat.checksum(), EX,
+        primary.tradingsymbol(), IV, "EXIT", "SELL", bar.close(), null, null, primary.compositeScore(),
+        primary.scoreBreakdown(), generatedAt);
+    // Settle the paper position at the fresh DAILY-BAR close — the equities don't tick, so an LTP
+    // close would book breakeven. Fire a close for EACH lot's linked signal so the shared averaged
+    // position closes regardless of which lot's order opened it (closeForSignal is a CAS: first wins,
+    // the rest no-op). A single-lot symbol fires exactly one.
+    for (SignalRepository.SignalRow lot : lots) {
+      events.publishEvent(new SignalExited(lot.id(), id, reason, bar.close()));
+    }
+    log.info(
+        "{} swing EXIT #{} {} {} at {} ({}{})",
+        doctrine.batchName(), id, strat.slug(), primary.tradingsymbol(), bar.close(), reason,
+        lots.size() > 1 ? " — " + lots.size() + " lots" : "");
+  }
+
+  // ---- shared helpers -----------------------------------------------------------------------
+
+  /**
+   * Builds the indicator bank for one symbol over its daily {@code series} with the doctrine's
+   * per-symbol context seeds as flat context series — the same context-close mechanism the golden
+   * runner uses. One flat context bar per {@code contextSeeds} entry (name → value). Public so the
+   * sell-decision service + unit tests can build a bank the same way.
+   */
+  public static IndicatorBank buildBank(
+      StrategyDefinition definition, String symbol, List<EngineCandle> series,
+      Map<String, BigDecimal> contextSeeds) {
+    SeriesKey primaryKey = new SeriesKey(EX, symbol, definition.primaryTimeframe());
+    EngineSeries primary = new EngineSeries(primaryKey);
+    for (EngineCandle candle : series) {
+      primary.append(candle);
+    }
+    OffsetDateTime start = series.get(0).bucketStart();
+    Map<String, EngineSeries> ctx = new HashMap<>();
+    for (Map.Entry<String, BigDecimal> seed : contextSeeds.entrySet()) {
+      ctx.put(seed.getKey(), flat(seed.getKey(), start, seed.getValue()));
+    }
+    SeriesProvider provider =
+        key -> key.equals(primaryKey) ? primary : ctx.get(key.tradingsymbol());
+    return IndicatorBank.build(
+        definition, new StrategyDefinition.InstrumentRef(EX, symbol), provider);
+  }
+
+  /** A single flat context bar at {@code at} carrying {@code value} (null → 0) — read by contextLevel. */
+  private static EngineSeries flat(String symbol, OffsetDateTime at, BigDecimal value) {
+    EngineSeries s = new EngineSeries(new SeriesKey(EX, symbol, IV));
+    BigDecimal v = value == null ? BigDecimal.ZERO : value;
+    s.append(new EngineCandle(at, v, v, v, v, 0L, null));
+    return s;
+  }
+
+  private List<EngineCandle> series(
+      SwingDoctrine doctrine, String symbol, Map<String, List<EngineCandle>> cache) {
+    return cache.computeIfAbsent(
+        symbol,
+        s -> {
+          OffsetDateTime now = OffsetDateTime.now(clock).withOffsetSameInstant(IST);
+          return candles.fetch(EX, s, IV, now.minusDays(doctrine.warmupDays()), now);
+        });
+  }
+
+  private List<SwingStrategy> loadPublishedSwingStrategies(SwingDoctrine doctrine) {
+    List<SwingStrategy> out = new ArrayList<>();
+    for (StrategyRepository.StrategyRow strategy : registry.listAll()) {
+      if (!strategy.enabled() || strategy.publishedVersionId() == null) {
+        continue;
+      }
+      Optional<StrategyRepository.VersionRow> versionRow =
+          registry.findVersionById(strategy.publishedVersionId());
+      if (versionRow.isEmpty()) {
+        continue;
+      }
+      try {
+        StrategyDefinition definition = StrategyCompiler.compile(versionRow.get().config());
+        if (!"swing".equals(definition.session().style())) {
+          continue;
+        }
+        // Scope this engine to its OWN funnel universe: only strategies whose universe.mode matches
+        // are evaluated here, so the two swing families never evaluate each other's universe.
+        if (!doctrine.universeMode()
+            .equals(versionRow.get().config().path("universe").path("mode").asText())) {
+          continue;
+        }
+        out.add(
+            new SwingStrategy(
+                strategy.publishedVersionId(), strategy.slug(), strategy.name(),
+                versionRow.get().version(), versionRow.get().checksum(),
+                doctrine.setupToken(versionRow.get().config(), strategy.slug()), definition));
+      } catch (RuntimeException e) {
+        log.warn(
+            "{} swing strategy {} failed to compile — skipped: {}",
+            doctrine.batchName(), strategy.slug(), e.getMessage());
+      }
+    }
+    return out;
+  }
+}

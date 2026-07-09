@@ -18,6 +18,41 @@ _PROMOTABLE = "COMPLETE"
 _OOS_METRIC = "oos_fold_mean"
 _LOG = logging.getLogger(__name__)
 
+# An uncapped maxTrials is a runaway sweep (register §9-8): grid self-caps at GRID_CAP, but
+# random/tpe/nsga2 run EXACTLY maxTrials, so bound the request here.
+_MAX_TRIALS_CAP = 1000
+
+# The rankable metric keys the backtest TRIAL worker emits into each trial's `metrics` JSON
+# (source of truth: backtest-service MetricsCalculator.compute + the BacktestRunner augmentation
+# sites — keep in sync when a metric is added there). An objective naming anything outside this
+# set scores every trial NaN, so the sweep "completes" with an EMPTY leaderboard (register §9-9);
+# reject it at submit instead. `oos_fold_mean` is the walk-forward-only aggregate (a separate
+# stream field), allowed here too.
+_ALLOWED_OBJECTIVE_METRICS = frozenset(
+    {
+        "totalReturn",
+        "cagr",
+        "sharpe",
+        "sortino",
+        "maxDrawdown",
+        "maxDrawdownDurationBars",
+        "winRate",
+        "profitFactor",
+        "expectancy",
+        "averageTrade",
+        "exposure",
+        "tradeCount",
+        "foldsExcluded",
+        "alpha",
+        "beta",
+        "informationRatio",
+        "excessCagr",
+        "upCapture",
+        "downCapture",
+        _OOS_METRIC,
+    }
+)
+
 
 def resolve_parameters(config: dict[str, Any], override: list[dict] | None) -> list[dict]:
     """The sweep's tunable parameters: an explicit override, else the config's optimize block."""
@@ -71,6 +106,35 @@ def _fold_objective_guard(
     return overridden, warning
 
 
+def _coerce_int(value: Any, field: str) -> int:
+    """Coerce a request field to int, raising a 400 (not an opaque int()/KeyError 500) on a
+    non-numeric value (register §9-8)."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise ApiError(
+            400, "VALIDATION_FAILED", f"{field} must be an integer, got {value!r}"
+        ) from None
+
+
+def _validate_objective_metrics(method: str, objective: dict[str, Any]) -> None:
+    """Reject an objective naming a metric the backtest never emits — else every trial scores NaN
+    and the sweep 'completes' with an empty leaderboard (register §9-9). Mirrors the run_sweep
+    read: nsga2 ranks the multi-objective list, everything else the single scalar metric."""
+    if method == "nsga2":
+        names = [o.get("metric") for o in sweep.multi_objectives(objective)]
+    else:
+        names = [objective.get("metric", "sharpe")]
+    for name in names:
+        if name not in _ALLOWED_OBJECTIVE_METRICS:
+            raise ApiError(
+                400,
+                "VALIDATION_FAILED",
+                f"unknown objective metric {name!r}; expected one of "
+                f"{sorted(_ALLOWED_OBJECTIVE_METRICS)}",
+            )
+
+
 class SweepService:
     """Validates + launches sweeps and answers status/trial queries."""
 
@@ -109,6 +173,12 @@ class SweepService:
         if not parameters:
             raise ApiError(422, "VALIDATION_FAILED", "no tunable parameters in the optimize block")
         for parameter in parameters:
+            if not isinstance(parameter, dict) or "path" not in parameter:
+                raise ApiError(
+                    400,
+                    "VALIDATION_FAILED",
+                    f"each optimize parameter needs a 'path'; got {parameter!r}",
+                )
             path_grammar.validate(parameter["path"])  # raises InvalidParameterPath -> 400 handler
 
         # Surface any YAML optimize-block control field the request omits (else silently ignored).
@@ -121,9 +191,26 @@ class SweepService:
         # objective, not the as-submitted one.
         objective = request.get("objective", {"metric": "sharpe", "direction": "maximize"})
         walk_forward = request.get("walkForward")
+        if walk_forward is not None and not isinstance(walk_forward, dict):
+            raise ApiError(
+                400, "VALIDATION_FAILED", f"walkForward must be an object, got {walk_forward!r}"
+            )
         objective, fold_warning = _fold_objective_guard(objective, walk_forward)
         if fold_warning:
             _LOG.warning(fold_warning)
+        _validate_objective_metrics(method, objective)
+
+        # Coerce the numeric knobs up front so a non-numeric value is a 400 (not an opaque int()
+        # 500 raised deep in the thread-kwargs build) and maxTrials can't run away (register §9-8).
+        max_trials = _coerce_int(request.get("maxTrials", 100), "maxTrials")
+        if not 1 <= max_trials <= _MAX_TRIALS_CAP:
+            raise ApiError(
+                400,
+                "VALIDATION_FAILED",
+                f"maxTrials must be between 1 and {_MAX_TRIALS_CAP}, got {max_trials}",
+            )
+        seed = _coerce_int(request.get("seed", 0), "seed")
+        early_stopping = _early_stopping(request)
 
         jobs = self._jobs_factory()
         try:
@@ -147,12 +234,12 @@ class SweepService:
                 "sweep_id": sweep_id,
                 "parameters": parameters,
                 "method": method,
-                "max_trials": int(request.get("maxTrials", 100)),
+                "max_trials": max_trials,
                 "objective": objective,
-                "seed": int(request.get("seed", 0)),
+                "seed": seed,
                 "walk_forward": walk_forward,
                 "request_base": request_base,
-                "early_stopping": _early_stopping(request),
+                "early_stopping": early_stopping,
             },
             daemon=True,
             name=f"sweep-{sweep_id[:8]}",
@@ -365,4 +452,6 @@ def _early_stopping(request: dict[str, Any]) -> int | None:
     window = request.get("earlyStopping")
     if isinstance(window, bool):  # `earlyStopping: true` → a sensible default window
         return 20 if window else None
-    return int(window) if window else None
+    if not window:  # None / 0 / "" → disabled
+        return None
+    return _coerce_int(window, "earlyStopping")

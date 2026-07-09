@@ -47,10 +47,14 @@ public class EquityReturnsService {
 
   public Returns returns() {
     // One pass: rank each symbol's EQ closes by recency, then pluck the base closes for each window.
+    // The window bases stay recency-ranked (rn 2/6/22/… = N sessions back), but DROP any symbol whose
+    // latest row (rn=1, the LTP) isn't the max accrued session (audit D3/latestMapped): the HAVING
+    // excludes thin/delisted names so a stale close never shows as "current" under the asOf() = same-max
+    // badge. (The distinct rn-vs-calendar / 07-02-partial window-base finding is out of scope here.)
     List<Base> bases =
         jdbc.query(
             "WITH ranked AS ("
-                + "  SELECT symbol, close_price, "
+                + "  SELECT symbol, close_price, trade_date, "
                 + "    ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY trade_date DESC) AS rn "
                 + "  FROM nse_eod_bhavcopy WHERE series = 'EQ') "
                 + "SELECT symbol, "
@@ -61,7 +65,9 @@ public class EquityReturnsService {
                 + "  max(close_price) FILTER (WHERE rn = 127) AS c6m, "
                 + "  max(close_price) FILTER (WHERE rn = 253) AS c1y "
                 + "FROM ranked WHERE rn IN (1, 2, 6, 22, 127, 253) "
-                + "GROUP BY symbol",
+                + "GROUP BY symbol "
+                + "HAVING max(trade_date) FILTER (WHERE rn = 1) "
+                + "     = (SELECT max(trade_date) FROM nse_eod_bhavcopy WHERE series = 'EQ')",
             (rs, n) ->
                 new Base(
                     rs.getString("symbol"),

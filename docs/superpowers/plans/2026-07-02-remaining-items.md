@@ -288,7 +288,24 @@ error-swallowing (blanket except → "failed"), dual symbol-grammar candle reads
 radius, plaintext broker creds in `deploy/openalgo/.env`, etc. **VERIFY the cited lines before actioning** (frozen
 2026-07-02; several may be incidentally fixed since).
 
-### 8d. Autonomously-startable now (no owner/data gate) — BATCH STARTED 2026-07-09
-The LOW N+1 backtest-reads perf fix · **D1** participant-OI TOTAL · **D2** strategies 50-cap · `latestMapped` staleness
-SQL · re-fetch the 07-02 bhavcopy · the register Phase-1 verification pass. Everything HIGH/MED else = doctrine (owner
-call) or the HOLD-tier parity batch (owner review). PRs land below as they merge.
+### 8d. Autonomously-startable batch — OUTCOMES (2026-07-09)
+- **D2 strategies 50-cap — ALREADY FIXED** (verify-first win): `frontend-react/src/api/strategies.ts:74` already sets
+  `limit=200` with the exact D2 citation (intervening commit; audit doc just wasn't struck). No change needed.
+- **D1 participant-OI TOTAL — ALREADY FIXED**: `frontend-react/src/api/participantOiFold.ts:82` already excludes the
+  synthetic `TOTAL` client type (group list + %-denominator) with the exact D1 citation. No change needed.
+- **Register §9 Phase-1 leads — VERIFIED** (background agent): 24 still-open, **0 fixed-since**, 3 moot. Highest-value
+  unaddressed: #14 fee-drift canary · #1 optimizer/margin contracts never diff-gated · #22/#23 single-pane health +
+  contract-canary blind spots. Rest = accepted single-owner tradeoffs.
+- **Optimizer §9-6 + §9-7 — SHIPPED + DEPLOYED LIVE** ([#637](https://github.com/prashantm912/artha-yantra-2/pull/637),
+  `9402ce37`): log swallowed sweep failures (`_LOG.exception`) + warn on ignored YAML sweep config
+  (`_yaml_precedence_warnings`, pure/unit-tested). Log/validation-only, no behaviour change; 70 tests + ruff green;
+  optimizer-service rebuilt + redeployed healthy on `:8084`.
+- **`latestMapped` staleness — HOLD for owner** (not auto-shipped): genuinely open (`EquitySectorService.latestMapped`
+  ROW_NUMBER-per-symbol spans dates vs `asOf()`=max), but the fix (`WHERE trade_date=max`) **drops ~157 names** across
+  SectorStats/Heatmap/IndexContribution/EquityReturns — an owner-facing data change with a real drop-vs-label semantics
+  choice. Owner call needed.
+- **N+1 backtest reads — HOLD/next**: parity-adjacent (touches owner-facing CAGR via `ManasAroraBacktestService`); needs
+  a strict before/after equality re-run, done carefully.
+- **07-02 bhavcopy re-fetch — DEFERRED (needs a trigger)**: still partial (167/~2380 EQ), but the reconcile SKIPS partial
+  dates (anti-join on DISTINCT `trade_date` — 07-02 is present, just incomplete), so no clean single-date re-fetch path
+  exists. Needs a targeted re-fetch endpoint (small build) or a delete-then-reconcile (mutating). Flagged, not run.

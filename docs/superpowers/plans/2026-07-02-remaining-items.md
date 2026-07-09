@@ -19,6 +19,7 @@ the two 2026-07-02 audits (both fix queues fully closed) and the open-PR/issue l
 | `f9-app-layer` | **F9 paper risk APPLICATION layer** — advised_lots sizing + portfolio heat cap + governor ntfy, on top of the SPAN capability. **SHIPPED + DEPLOYED LIVE 2026-07-05 ([#576](https://github.com/prashantm912/artha-yantra-2/pull/576), `b266d151`).** Owner numbers: per-trade risk 1% / daily-loss 3% / heat cap 60%. V023: advised_lots/margin_snapshot/margin_pct columns + per-book heat_cap_pct (scalper 60% enabled, swing books inert) + scalper daily-loss 10%→3%. advised_lots = risk-based sizing stamped at open (advisory); margin_snapshot = PaperMarginAnnotator prices each open position's SPAN AFTER_COMMIT+async (fail-soft); heat-cap gate blocks new entries at ≥60% book SPAN **only when `artha.paper.risk.enabled` (ARTHA_PAPER_RISK_ENABLED) is ON** — default OFF (advisory-dormant, zero hot-path cost). 2-reviewer pass (adversarial + timescale-domain, both PASS) → gated heat pricing behind the flag + added a PaperMarginClient timeout. **Remaining = owner ACTIVATION only:** after a clean advisory week (watch `GET /paper/margin-heat` + per-position margin_snapshot), set `ARTHA_PAPER_RISK_ENABLED=true` in `.env` to arm the heat-cap enforcement. | roadmap F9 |
 | `upstox-margin-route` | **F9 SPAN source via Upstox margin API** — `UpstoxMarginClient` + `POST /api/v1/market/margin` (typed record, fail-soft, gated on the analytics token) compute broker-real SPAN server-side, NO `.spn` file. Live-verified 2026-07-04 (1-lot short → span 337004.85 / final 188604.45). `GET /v2/user/get-funds-and-margin` = live capital (down 00:00–05:30 IST → 423); `GET /v2/charges/brokerage` = pre-trade charges (cross-checks F8 `FeeConstants`). marginism appliance #126 = offline/backtest fallback. **Gotcha:** `quantity` must be a lot multiple (UDAPI1104 else) — scalper qty already lot-aligned; ≤20 legs/basket. | roadmap F9; ADR-0002 | **SPAN CAPABILITY SHIPPED [#510](https://github.com/prashantm912/artha-yantra-2/pull/510) + advisory heat read [#514](https://github.com/prashantm912/artha-yantra-2/pull/514) (`GET /api/v1/paper/margin-heat`), deployed 2026-07-04.** Remaining F9 app layer = paper `advised_lots` sizing + daily-loss governor + heat cap — needs owner risk numbers + an advisory week. Supersedes `span-real-spn-broker-parity` (§2). |
 | `signal-eval-redis-subscriber-watchdog` | **HIGH reliability — silent recurring Redis subscriber drop on the live signal engine.** RCA'd 2026-07-07 (`docs/signal-analysis/2026-07-07-session-findings.md` §8, correcting the automated report's "consumer hang" misdiagnosis): `SignalEngine`'s `RedisMessageListenerContainer` on `candles.1m.*` **silently drops its subscription intermittently** mid-session (two gaps on 2026-07-07: ~12:18–13:20 IST recovered, 14:22→close did not). The `signal-eval` executor is healthy (parked on `take()`, thread-dump confirmed) — it's STARVED, not hung; market-data feed is GREEN and NIFTY bars build fine (the FINNIFTY canary REDs are the illiquid-far-month false-positive). **No error/reconnect is logged and no canary covers consumer-side receipt** (market-data's `DataHealthCanary` watches bar CLOSES on the producer side only). A silent mid-session receive gap can miss a stop-loss **EXIT** eval, not just entries. **Fix:** (a) log `RedisMessageListenerContainer` drops/recoveries; (b) a subscriber-side receive-gap watchdog — when market-data is GREEN but no `candles.1m` bar has been received for N min during market hours, re-subscribe + ntfy (mirror `DataHealthCanary`, consumer-side). | §8 findings; `SignalEngine.java:64-131`, `DataHealthCanary` | **BUILT — [#634](https://github.com/prashantm912/artha-yantra-2/pull/634), HOLD for owner deploy sign-off.** `SubscriberHealthCanary` (per-minute in-session receive-gap check, feed-fresh cross-check via `ticks:last-at`, overlap-safe re-subscribe routed through the eval thread, ntfy) + `SignalEngine` receive-heartbeat + notifier listener. 2-reviewer adversarial pass: fixed the one HIGH (monitor-held-across-resubscribe-I/O → routed through `evalExecutor`); rebutted global-vs-per-channel with the single-connection all-or-nothing model + incident evidence (NIFTY+SENSEX eval both stopped at 14:22:45); 7 unit tests + ModularityTest green. **MERGED + DEPLOYED LIVE 2026-07-07 (#634, `064c259c`, owner "deploy 634").** CI caught a real context-load break first (the canary's `SignalEngine` dep failed the engine-disabled paper `*IntegrationTest` contexts → gated it on the same `@ConditionalOnProperty(artha.signals.engine-enabled)`; lesson: run a paper IT locally when adding a `@Component` to strategy-signal). Live-verified: running sha == HEAD, health UP, bean loaded (clean boot under matched condition), engine still subscribes + loads 39 strategies. Armed (default ON); first live opportunity = tomorrow's session. |
+| `external-batch-liveness-watchdog` | **NEW (2026-07-09) — a whole-stack/host outage silently skips the 20:05 swing batches, and the in-process P0-4 did-not-run canary CANNOT catch it.** Surfaced while verifying the first live H4 Chandelier batches: Docker Desktop was found DOWN on 2026-07-09 (the stack stopped sometime after the 07-08 20:05 run), so **07-09's Manas + Minervini swing batch MISSED** — a one-day gap in the forward-paper reliability record that the reliability sign-off depends on. The P0-4 `swing_batch_runs` did-not-run canary runs INSIDE strategy-signal, so a full-stack/host outage kills the watchman together with the batch → zero alert (an in-process canary is structurally blind to its own host being down). **Fix (owner call):** (a) the **always-on host** (thread 2 / F5) makes outages rare — the real fix; (b) an **EXTERNAL** liveness check — a cheap off-box uptime pinger, OR a post-batch heartbeat the stack emits (ntfy/healthchecks.io "dead-man's-switch") that an external service alerts on the ABSENCE of. Until one exists, the owner must keep the box + Docker up at 20:05 IST daily. | this session's verify; `swing_batch_runs`, P0-4 canary | **OPEN — surfaced 2026-07-09; gated on the always-on-host decision (thread 2). 07-09 batch missed (stack was down); stack restarted + healthy, no code change yet. 07-06/07/08 batches verified fired clean (exit_skipped=0; 07-08 first live exit = SBCL STOP_LOSS).** |
 
 ## 2. Owner-gated — needs owner input/time, not code
 
@@ -240,3 +241,54 @@ Owner batch ("implement autonomously while I sleep"), all merged + deployed to t
   an over-subscribed day / raise the cap."
 - **No buildable code left otherwise;** the one open perf follow-up is the audit LOW "serial/N+1 backtest
   reads" (`ManasAroraBacktestService.readSeries`).
+
+---
+
+## 8. Cross-doc remaining-items sweep (2026-07-09)
+
+Full sweep of every active planning + audit doc (4 parallel readers). ~150 raw open items deduped into **6 threads**:
+(1) **the live-paper data month** — Minervini + Manas §0.5-#12 reliability sign-off (30–50 fwd trades, +expectancy,
+~2:1, 45–55% hit) + E9 scalper exit-band tune + F1 acceptance + relative-vol-floor k=1.5 judge (all need ~1 month of
+UNBROKEN forward paper — see the §1 batch-liveness row); (2) **always-on host** (appears ×4: F5 / always-on-host-brief /
+master §18.3 / DEFERRED systematic-scalp prereq — ONE owner call ~₹35–50k); (3) **owner flag-flips** (F9
+`ARTHA_PAPER_RISK_ENABLED`, F7 `ARTHA_GRADUATION_PROMOTION_ENABLED`, Dow `ARTHA_OPENALGO_GLOBAL_QUOTES_ENABLED`,
+per-strategy notif toggles, Minervini/Manas low-cap gate arm); (4) **swing exit-parity HOLD batch** (task #128 —
+M2/M3/M4/M6/M7/M8/M9/M10/M11/M13/M14/M27, owner review); (5) **long-only / semi-auto boundary** (WON'T-DO until owner
+reverses — live-order arming, SPAN sell-legs, OpenAlgo gateway arm, full-auto exec, Upstox cutover); (6) **the new
+batch-liveness gap** (§1 row). Below = items NOT already enumerated elsewhere in this ledger.
+
+### 8a. Open 2026-07-05 full-audit findings (`docs/audits/2026-07-05-full-codebase-audit.md` §12; fix log §13)
+- **HIGH (2):** **H6** screener reads CA-UNADJUSTED bhavcopy (splits/bonuses poison SMA/52wk/RS/VCP ~1yr/event vs the
+  adjusted engine plane; data-fidelity, owner call) · **H8** cheat-3c is a synthetic proxy mislabelled as the doc's true
+  cheat setup (doctrine, owner call).
+- **MEDIUM (27 open of 40):** HELD-unmerged pending owner sign-off (#591, screener pass-set changes): **M12** RS-tie
+  determinism / **M35** liquidity depth 25×→50× / **M39** VCP base-depth+duration caps · setup-doctrine owner-call:
+  **M36** 50d-trail armed day-1 / **M37** PowerPlay depth-duration caps / **M38** PrimaryBase 52wk-breakout mislabel /
+  **M40** Manas open-risk cap · exit-parity HOLD batch (task #128): **M2 M3 M4 M6 M7 M8 M9 M10 M11 M13 M14 M27** · other:
+  **M1** margin-heat basket-blind / **M16** book default 'manual' fail-open / **M17 M18 M20** FE surfaces / **M28** zero
+  e2e for new pages / **M31** ~80% fork debt (10+ Minervini↔Manas file pairs).
+- **LOW (~28, none started):** cosmetic/test/long-tail; the only one with teeth = serial/N+1 backtest reads
+  (`ManasAroraBacktestService.readSeries`, ~1,800 round-trips, ~40 min under a concurrent pg_dump).
+
+### 8b. Open 2026-07-06 UI/data-correctness audit (`docs/audits/2026-07-06-ui-data-correctness/`, 21 items)
+- **MED:** **D1** participant-OI keeps the synthetic `TOTAL` row in the group list AND the %-denominator → every
+  Long%/Short% HALVED · **D2** `/strategies` sends no limit → server caps 50 of 73, hides a published+enabled name
+  (list 44 vs graduation 45) · **AC-1** dated futures (`NIFTY26JULFUT`) un-findable in broad instrument search (CONT +
+  options flood past the result limit).
+- **Cross-cutting root:** `latestMapped` cross-date staleness — `ROW_NUMBER … ORDER BY trade_date DESC` spans dates, so
+  357 EQ names resolve to a pre-07-03 "latest" under one "as of 07-03" badge (SectorStats/Heatmap/IndexContribution/
+  EquityReturns) — one `WHERE trade_date = max()` fix.
+- **Data action:** re-fetch the partial 2026-07-02 bhavcopy (181 EQ/BE vs ~2670; poisons Equity-Returns r1d + delivery).
+- Rest = cosmetic (D3 sector staleness, D4 signals-strategy-UUID, D5 mojibake, D6 CAGR-0.00%, D7 drawdown-downsample) +
+  LOW visual.
+
+### 8c. Register Phase-1 recon leads (`archive/2026-07-02-...-findings-register.md` §9, ~26)
+Main fix queue CLOSED (#500–507). Survivors = unverified recon citations — FeeConstants drift-detection, optimizer
+error-swallowing (blanket except → "failed"), dual symbol-grammar candle reads (#214 class), `ay reset-db -v` blast
+radius, plaintext broker creds in `deploy/openalgo/.env`, etc. **VERIFY the cited lines before actioning** (frozen
+2026-07-02; several may be incidentally fixed since).
+
+### 8d. Autonomously-startable now (no owner/data gate) — BATCH STARTED 2026-07-09
+The LOW N+1 backtest-reads perf fix · **D1** participant-OI TOTAL · **D2** strategies 50-cap · `latestMapped` staleness
+SQL · re-fetch the 07-02 bhavcopy · the register Phase-1 verification pass. Everything HIGH/MED else = doctrine (owner
+call) or the HOLD-tier parity batch (owner review). PRs land below as they merge.

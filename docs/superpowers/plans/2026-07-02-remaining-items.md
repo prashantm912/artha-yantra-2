@@ -399,3 +399,32 @@ Owner asked "what effect will F9/F7/audit-doctrine have on the live app" → ver
   per-trade sizing knob was non-wireable from `.env` (silently fell back to the 1.0 default). Aligned the placeholder to the
   code-bound property `artha.paper.risk.per-trade-risk-pct` (`PaperService.java:143`) + the compose/.env name. Advisory-only
   (advised_lots), so no behaviour change at the default; the knob is now actually settable. Config-only, packages clean.
+
+## 9. Architecture-deepening candidates — `/improve-codebase-architecture` 2026-07-10 (OPEN, take later)
+
+Today's architecture review (`/improve-codebase-architecture`, Ousterhout deep-module lens) surfaced 6 primary
+deepening candidates + 4 secondary. **Candidate 01 (SwingDoctrine port) SHIPPED** (§8g, [`#655`](https://github.com/prashantm912/artha-yantra-2/pull/655)).
+The rest are recorded here to take later. The report HTML was ephemeral (scratchpad `architecture-review-2026-07-10.html`);
+its substance is captured below. **Owner said "add them, take later"** — none is started; each row notes its gate.
+
+### 9a. Primary candidates (remaining 5)
+| # | deepening | badge | files (verify before actioning) | gate / how to take it |
+|---|---|---|---|---|
+| ~~01~~ | ~~SwingDoctrine port — one `SwingBatchEngine`~~ | ~~STRONG · top pick~~ | — | **DONE §8g [#655](https://github.com/prashantm912/artha-yantra-2/pull/655)** |
+| **02** | **Adjusted-equity price-plane reader** — screeners + geometry adapt ONE reader instead of each re-deriving the CA-(un)adjusted price plane | STRONG · **fixes H6** | market-data screener + geometry readers | **HOLD-tier, owner-facing** — this IS the audit H6 fix (CA-unadjusted screener poisons SMA/52wk/RS/VCP). Shifts candidate lists near corporate actions → build-and-**review**, not silent merge. Pairs with §8a H6. |
+| **03** | **Trial-metrics catalog** — a shared rankable-metric contract across the Java backtest ↔ Python optimizer string seam (no seam today; each side hardcodes metric names) | STRONG | backtest `MetricsCalculator`/`BacktestRunner` ↔ optimizer objective handling | **Parity-neutral, cheap, auto-mergeable.** Partly nicked in §9-8 (`_ALLOWED_OBJECTIVE_METRICS` frozenset added optimizer-side); the deepening = make it ONE catalog both languages consume, not two drifting copies. The clean next-under-hold. |
+| **04** | **Premium-exit doctrine** — the exit rule lives in ~4 copies pinned only by the 2-of-5 `exit-equivalence.json` fixture | WORTH EXPLORING | backtest PremiumExitEvaluator ↔ signals ↔ paper ↔ engine bracket chain | **HOLD-tier parity firewall.** Only after WIDENING the exit-equivalence fixture + owner go — this opens the pinned premium-exit semantics (CLAUDE.md #505). Do not touch under the hold. |
+| **05** | **Risk governor — 2 interface leaks** | WORTH EXPLORING | `RiskService`, `PaperService.settle()` re-poll | Partly absorbed by 01 (the swing re-poll loop already folded). Remainder = paper/RiskService cleanup; parity-neutral if done right, but M1 (margin-heat basket-blind) + F9-arm interplay → check §8a M1 first. |
+| **06** | **Session-rolled reader** — two 1m→N rollups on different grids collapsed into one | WORTH EXPLORING | market-data candle rollup readers | **Ride-along** whenever charts are next touched; not worth a standalone PR. |
+
+### 9b. Secondary friction (fold into the above or defer)
+- **`PaperService.settle()` leaky tx boundary** (worth exploring, `PaperService.java:311–345`) — `@Transactional`-only-because-one-caller-isn't + null-price-means-LTP + CAS-close-first leak onto callers. Let the close path own its tx + take an explicit settlement price.
+- **`ExitEvaluator` index-convention leak** (worth exploring, `ExitEvaluator.java:288–306`) — every caller reconstructs `entryIndex` (primary-series) + picks the right of two `evaluate` overloads (parity-safety as tribal knowledge). Have `IndicatorBank` vend `positionAt(timestamp)`. **Parity-adjacent — HOLD-tier.**
+- **Triplicated index-name canonicalization** (speculative) — same index identity in 3 drifting maps (`UnderlyingRef`/`OpenAlgoExchange`/`expiredUnderlying`), disagreeing coverage → one bidirectional `IndexRef`. (Leave the per-broker symbol/expiry mappers — ADR-0001/0002.)
+- **`SweepService` repo-factory dance ×8** (speculative) — the per-thread `jobs=factory(); try/finally close()` lifecycle inlined in 8 methods → a `with self._unit_of_work()` context manager. Plus the OI-reader 6× fallback copy + 3× scheduler alert wrapper (both fold into 01/02).
+
+### 9c. Genuinely deep — DO NOT re-flag (recorded so future reviews leave them alone)
+Frozen `EntryEvaluator`/`IndicatorBank` (parity-by-construction, reused by replay + 3 live engines) · `HistoricalOiReader` + `CandleDerivedChainReader` (real 2-adapter seam, ~500L behaviour) · `SignalEngine` reconcile (converges without looping) · `EmissionGuard` SPI + `Books` (the exact port template 01 copied) · `CandleQueryService.read()` interval switch + 3 gateway adapters · `run_sweep`/`optuna_runner` ask/tell loop.
+
+### 9d. Sequencing (report's own recommendation)
+**01** ✅ → **03** (metrics catalog — cheap, parity-neutral, clean-under-hold) → **02** (price-plane = the H6 fix — owner-facing, build+review) → **04** (premium doctrine — HOLD-tier, only after widening the exit-equivalence fixture). **06** rides along whenever charts are next touched; **05** remainder is small paper/RiskService cleanup. Against the standing "hold — watch the live-paper month": only **03** is clean-autonomous; **02/04** need owner go, **05/06** are low-priority.

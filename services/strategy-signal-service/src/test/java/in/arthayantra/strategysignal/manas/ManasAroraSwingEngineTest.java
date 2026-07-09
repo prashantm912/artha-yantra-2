@@ -110,9 +110,12 @@ class ManasAroraSwingEngineTest {
 
     assertThat(r.run().entries()).as("the add fires as a 2nd lot").isEqualTo(1);
     verify(r.events()).publishEvent(argThat((Object e) -> e instanceof SignalEmitted));
+    // Exact detail JSON (byte-identity of the manas_arora_detail side-channel): setup → setupType →
+    // pivot → pyramidLot, in that order — locks the field set + ORDER, not just a substring.
     ArgumentCaptor<String> detail = ArgumentCaptor.forClass(String.class);
     verify(r.signals()).stampManasAroraDetail(anyLong(), detail.capture());
-    assertThat(detail.getValue()).contains("\"pyramidLot\":2");
+    assertThat(detail.getValue())
+        .isEqualTo("{\"setup\":\"manas-arora-breakout\",\"setupType\":\"breakout\",\"pivot\":\"150\",\"pyramidLot\":2}");
   }
 
   @Test

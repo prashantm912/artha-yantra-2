@@ -38,6 +38,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -247,6 +248,13 @@ class MinerviniSwingEngineTest {
     SwingBatchEngine.SwingRun run = engine.runDaily(doctrine(funnel, signals, true, 10));
 
     assertThat(run.entries()).as("the mid-run book trip halts entries after the first").isEqualTo(1);
+    // Exact detail JSON (byte-identity of the minervini_detail side-channel): setup → stage →
+    // footprint → pivot → thrust, in that order — locks the field set + ORDER (cheatPivot omitted
+    // when null). AAA is the one candidate that fired before the mid-run trip.
+    ArgumentCaptor<String> detail = ArgumentCaptor.forClass(String.class);
+    verify(signals).stampMinerviniDetail(any(Long.class), detail.capture());
+    assertThat(detail.getValue())
+        .isEqualTo("{\"setup\":\"minervini-vcp\",\"stage\":2,\"footprint\":\"40W 31/3 4T\",\"pivot\":\"150\",\"thrust\":false}");
   }
 
   // ---- harness --------------------------------------------------------------------------------

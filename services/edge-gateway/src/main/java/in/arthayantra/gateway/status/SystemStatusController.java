@@ -30,6 +30,8 @@ public class SystemStatusController {
   private record Cached(Instant at, Map<String, Object> body) {}
 
   private static final Duration CACHE_TTL = Duration.ofSeconds(5);
+  // No fresh tick for 5 min DURING market hours ⇒ the feed/producer is likely dead (register §9-22).
+  private static final long STALE_TICK_MS = 300_000;
   private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
   private static final List<String> KEYS =
       List.of(
@@ -101,18 +103,19 @@ public class SystemStatusController {
       }
     }
     boolean kiteHealthy = "VALID".equals(session);
+    String phase = marketPhase();
     List<Map<String, Object>> services =
         List.of(
             mapOf("edge-gateway", "UP"),
-            // derived from the shared key market-data maintains — never a REST probe
-            mapOf("market-data-service", kiteRaw != null ? "UP" : "UNKNOWN"));
+            // derived from the shared keys market-data maintains — never a REST probe
+            mapOf("market-data-service", marketDataStatus(kiteRaw, tickAge, phase)));
 
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("overall", kiteHealthy ? "UP" : "DEGRADED");
     body.put("status", kiteHealthy ? "UP" : "DEGRADED"); // back-compat alias
     body.put("services", services);
     body.put("kite", kite);
-    body.put("market", Map.of("phase", marketPhase()));
+    body.put("market", Map.of("phase", phase));
     body.put("corporateActions", integrity == null ? "" : integrity);
     body.put("jobs", jobs);
     body.put("asOf", OffsetDateTime.now(IST).toString());
@@ -133,6 +136,24 @@ public class SystemStatusController {
     } catch (IllegalArgumentException uncoveredYear) {
       return "CLOSED";
     }
+  }
+
+  /**
+   * The market-data health for the rollup (register §9-22). It was UP forever from the mere PRESENCE
+   * of the {@code kite:session:status} key — a lingering key survives a market-data crash, so a dead
+   * feed still read UP with no freshness bound. During market hours (phase OPEN) require a FRESH tick
+   * heartbeat ({@code ticks:last-at} within {@link #STALE_TICK_MS}); a stale/absent heartbeat then ⇒
+   * DEGRADED. Off-hours there are no ticks, so the freshness check is skipped (no false DEGRADED). No
+   * key ⇒ UNKNOWN, as before. Still no REST probe — purely the shared keys market-data maintains.
+   */
+  static String marketDataStatus(String kiteRaw, Long tickAgeMs, String phase) {
+    if (kiteRaw == null) {
+      return "UNKNOWN";
+    }
+    if ("OPEN".equals(phase) && (tickAgeMs == null || tickAgeMs > STALE_TICK_MS)) {
+      return "DEGRADED";
+    }
+    return "UP";
   }
 
   private static Map<String, Object> mapOf(String name, String status) {

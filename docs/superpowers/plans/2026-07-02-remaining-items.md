@@ -344,13 +344,19 @@ Owner picked the two remaining clean-autonomous items off the "what next" fork (
   400 against the rankable-metric allowlist (source of truth: backtest `MetricsCalculator` + `BacktestRunner`, + `oos_fold_mean`)
   instead of NaN-ing every trial. No new route/param/response-code (400s are raised, not declared) → api-surface gate
   unchanged. +11 tests, 87 pass, ruff clean; ci-optimizer green; admin-merged past the two documented 2-core e2e flakes
-  (Python-only → cannot touch the FE WS/signals e2e).
+  (Python-only → cannot touch the FE WS/signals e2e). **Follow-up [`#651`](https://github.com/prashantm912/artha-yantra-2/pull/651)
+  (post-deploy live-verify caught it):** #648 ran the validation AFTER `resolve()`, whose `raise_for_status()` on a bad
+  `strategyId` leaked a **500** before the numeric checks — moved the request-only knobs (objective/walkForward/maxTrials/
+  seed/earlyStopping) ahead of the resolve round-trip so bad input is a fast 400 regardless of strategy validity (+1 test,
+  88 pass, all CI incl. e2e green). **DEPLOYED + LIVE-VERIFIED** in-container: `maxTrials:"lots"` → `400 "maxTrials must be
+  an integer"`; `objective.metric:"shrape"` → `400 "unknown objective metric 'shrape'; expected one of [...]"`.
 - **M20 swing sell-decision FE surface — SHIPPED** ([`#649`](https://github.com/prashantm912/artha-yantra-2/pull/649), CI in flight):
   the daily Minervini + Manas Arora sell-decision triad was curl-only. New `/strategies/swing-sell-decisions` page —
   `api/swing.ts` over the two read-only `/sell-decisions` endpoints (recompute on read), a book toggle + per-holding table
   (setup, entry/current, signed unrealized %, base stop, current trail, "buyable now?" chip, HOLD/SELL verdict badge),
   route + MegaMenu entry. Pure consumption of existing typed endpoints; no backend change. Verify trio green (lint/build
-  clean, 261 tests, coverage 51.09%).
+  clean, 261 tests, coverage 51.09%). **DEPLOYED + LIVE-VERIFIED**: frontend-react rebuilt + recreated healthy; the new
+  `/strategies/swing-sell-decisions` route is present in the served bundle.
 - **Remaining = owner/data-gated only** (option 3): the live-paper reliability month, an always-on host, the flag-flips
   (F9 paper-risk arm / F7 promotion / Dow-factor), and the owner-call audit HIGH/MED doctrine items (H6/H8, the swing
   exit-parity HOLD batch, register accepted single-owner tradeoffs). Nothing further is clean-autonomous without opening

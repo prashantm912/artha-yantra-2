@@ -431,6 +431,11 @@ services:
       ARTHA_MINERVINI_SWING_CRON: "${ARTHA_MINERVINI_SWING_CRON:-0 0 20 * * MON-FRI}"
       ARTHA_MANAS_ARORA_SWING_CRON: "${ARTHA_MANAS_ARORA_SWING_CRON:-0 5 20 * * MON-FRI}"
       ARTHA_SWING_CANARY_CRON: "${ARTHA_SWING_CANARY_CRON:-0 30 8 * * MON-FRI}"
+      # External dead-man's-switch for the swing batches (catches a whole-stack/host OUTAGE, which the
+      # in-stack P0-4 canary can't). Blank = dormant; paste a healthchecks.io/UptimeRobot heartbeat URL
+      # to arm, and set the external check to expect a ping on 15 20 * * 1-5 (TZ Asia/Kolkata).
+      ARTHA_HEARTBEAT_URL: "${ARTHA_HEARTBEAT_URL:-}"
+      ARTHA_HEARTBEAT_SWING_CRON: "${ARTHA_HEARTBEAT_SWING_CRON:-0 15 20 * * MON-FRI}"
       # Shadow book (signal-analysis §7.1/§7.2): open composite-passing REJECTED entries as virtual
       # 1-lot positions so the exit sweep labels them with a real PnL (entry-gate tuning evidence).
       # Code default is false; ON for the stack — separate shadow_positions table, never touches

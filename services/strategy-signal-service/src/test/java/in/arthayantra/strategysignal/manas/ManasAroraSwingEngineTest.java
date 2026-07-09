@@ -1,383 +1,258 @@
 package in.arthayantra.strategysignal.manas;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategyschema.StrategyDocuments;
 import in.arthayantra.strategysignal.registry.StrategyRepository;
+import in.arthayantra.strategysignal.signals.Books;
+import in.arthayantra.strategysignal.signals.EmissionGuard;
+import in.arthayantra.strategysignal.signals.MarketDataCandlesClient;
 import in.arthayantra.strategysignal.signals.SignalEmitted;
 import in.arthayantra.strategysignal.signals.SignalExited;
+import in.arthayantra.strategysignal.signals.SignalPublisher;
+import in.arthayantra.strategysignal.signals.SignalRepository;
+import in.arthayantra.strategysignal.swing.SwingBatchEngine;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * Pins the audit-P0-3 exit-pass fetch-failure handling on the MANAS clone (the Minervini twin has
- * the fuller suite; this clone is where the skip paths are MOST load-bearing — the #573 ATR exits
- * are entry-index-dependent, so an unevaluated exit here mis-manages a real live-paper stop), plus
- * the F2 §3.4 pyramiding logic (the +gain trigger, the ≤6% open-risk cap, and the exit grouping that
- * closes ALL lots of a pyramided symbol at once — §3.5.D).
+ * The Manas doctrine driving the shared {@link SwingBatchEngine}: the P0-3 exit-pass fetch-failure
+ * handling (the #573 ATR exits are entry-index-dependent, so an unevaluated exit mis-manages a live
+ * stop) plus the F2 §3.4 pyramiding — the +gain-triggered add, the ≤6% open-risk cap, and the exit
+ * grouping that closes ALL lots of a pyramided symbol at once (§3.5.D). (The pure §3.4 math lives in
+ * {@code ManasPyramidPolicyTest}.)
  */
 class ManasAroraSwingEngineTest {
 
   private static final ZoneOffset IST = ZoneOffset.ofHoursMinutes(5, 30);
 
-  // ---- §3.4.1 pyramid trigger (pure) ----------------------------------------------------------
-
-  @Test
-  void movedUpTriggersOnlyAtOrAboveTheGainThreshold() {
-    BigDecimal five = new BigDecimal("5.0");
-    assertThat(ManasAroraSwingEngine.movedUp(bd(105), bd(100), five)).as("exactly +5%").isTrue();
-    assertThat(ManasAroraSwingEngine.movedUp(new BigDecimal("104.99"), bd(100), five))
-        .as("just under +5%")
-        .isFalse();
-    assertThat(ManasAroraSwingEngine.movedUp(bd(110), bd(100), five)).as("+10%").isTrue();
-    // Guards: unknown/non-positive last-lot entry never triggers an add.
-    assertThat(ManasAroraSwingEngine.movedUp(bd(150), null, five)).isFalse();
-    assertThat(ManasAroraSwingEngine.movedUp(null, bd(100), five)).isFalse();
-    assertThat(ManasAroraSwingEngine.movedUp(bd(150), BigDecimal.ZERO, five)).isFalse();
-  }
-
-  // ---- §3.4.3 open-risk cap (pure) ------------------------------------------------------------
-
-  @Test
-  void breachesRiskCapAddsTheNewLotRiskToTheExistingBookRisk() {
-    BigDecimal equity = bd(1_000_000);
-    BigDecimal cap = new BigDecimal("6.0");
-    // existing 4% (₹40k) + new lot 1% (100 × ₹100 stop = ₹10k) = 5% ≤ 6% → allowed.
-    assertThat(
-            ManasAroraSwingEngine.breachesRiskCap(bd(40_000), bd(100), bd(100), equity, cap))
-        .as("5% total is within the 6% cap")
-        .isFalse();
-    // existing 5.5% (₹55k) + new lot 1% = 6.5% > 6% → blocked.
-    assertThat(
-            ManasAroraSwingEngine.breachesRiskCap(bd(55_000), bd(100), bd(100), equity, cap))
-        .as("6.5% total breaches the 6% cap")
-        .isTrue();
-    // Missing inputs never block (the add just is not auto-papered / cannot be risk-sized).
-    assertThat(ManasAroraSwingEngine.breachesRiskCap(bd(55_000), null, bd(100), equity, cap))
-        .isFalse();
-    assertThat(ManasAroraSwingEngine.breachesRiskCap(bd(55_000), bd(100), bd(100), null, cap))
-        .isFalse();
-    assertThat(
-            ManasAroraSwingEngine.breachesRiskCap(bd(55_000), bd(100), BigDecimal.ZERO, equity, cap))
-        .isFalse();
-  }
-
-  // ---- exit-pass fetch-failure handling (audit P0-3) ------------------------------------------
-
   @Test
   void exitPassRetriesAFailedFetchOnceThenEvaluates() throws IOException {
     ExitHarness h = new ExitHarness();
-    org.mockito.Mockito.when(h.candles.fetch(
-            org.mockito.ArgumentMatchers.eq("NSE"), org.mockito.ArgumentMatchers.eq("TESTCO"),
-            org.mockito.ArgumentMatchers.eq("1d"), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any()))
+    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any()))
         .thenReturn(List.of())
         .thenReturn(h.series);
 
-    ManasAroraSwingEngine.ManasSwingRun run = h.engine().runDaily();
+    SwingBatchEngine.SwingRun run = h.engine().runDaily(h.doctrine(false));
 
     assertThat(run.exitSkipped()).as("the retry recovers the series — nothing skipped").isZero();
-    org.mockito.Mockito.verify(h.candles, org.mockito.Mockito.times(2))
-        .fetch(org.mockito.ArgumentMatchers.eq("NSE"), org.mockito.ArgumentMatchers.eq("TESTCO"),
-            org.mockito.ArgumentMatchers.eq("1d"), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any());
+    verify(h.candles, org.mockito.Mockito.times(2)).fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any());
   }
 
   @Test
   void exitPassCountsAndScreamsWhenTheSeriesIsUnavailableAfterRetry() throws IOException {
     ExitHarness h = new ExitHarness();
-    org.mockito.Mockito.when(h.candles.fetch(
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any()))
-        .thenReturn(List.of());
+    when(h.candles.fetch(any(), any(), any(), any(), any())).thenReturn(List.of());
 
-    ManasAroraSwingEngine.ManasSwingRun run = h.engine().runDaily();
+    SwingBatchEngine.SwingRun run = h.engine().runDaily(h.doctrine(false));
 
     assertThat(run.exits()).isZero();
     assertThat(run.exitSkipped()).as("the unevaluated ATR stop is surfaced, not swallowed").isEqualTo(1);
   }
 
-  // ---- F2 pyramiding: exit grouping + the OFF-path skip ---------------------------------------
-
   @Test
   void aPyramidedSymbolExitsAllLotsAtOnceAndExpiresEverySibling() throws IOException {
     ExitHarness h = new ExitHarness();
-    // TWO open lots for the SAME symbol (the pyramid): lot 42 (older) + lot 43 (a later add). They
-    // share one averaged position; the decline trips the stop off the OLDEST lot (42). The anchors sit
-    // deep enough in the series for the entry-pinned ATR(20) initial stop to be computable.
     h.stubAnchors(
         h.anchor(42L, h.series.get(24).bucketStart()),
         h.anchor(43L, h.series.get(25).bucketStart()));
-    org.mockito.Mockito.when(h.candles.fetch(
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any()))
-        .thenReturn(h.series);
+    when(h.candles.fetch(any(), any(), any(), any(), any())).thenReturn(h.series);
 
-    ManasAroraSwingEngine.ManasSwingRun run = h.engine().runDaily();
+    SwingBatchEngine.SwingRun run = h.engine().runDaily(h.doctrine(false));
 
     assertThat(run.exits()).as("ONE symbol closed (not one-per-lot)").isEqualTo(1);
-    // Both lots' anchors are expired (§3.5.D closes all lots at once — no phantom active add lingers).
     verify(h.signals).transition(42L, "EXPIRED");
     verify(h.signals).transition(43L, "EXPIRED");
-    // A close fires for EACH lot's linked signal so the shared position closes regardless of which
-    // lot's order opened it (closeForSignal is a CAS — the first wins, the rest no-op).
-    verify(h.events)
-        .publishEvent(argThat((Object e) -> e instanceof SignalExited s && s.anchorSignalId() == 42L));
-    verify(h.events)
-        .publishEvent(argThat((Object e) -> e instanceof SignalExited s && s.anchorSignalId() == 43L));
+    verify(h.events).publishEvent(argThat((Object e) -> e instanceof SignalExited s && s.anchorSignalId() == 42L));
+    verify(h.events).publishEvent(argThat((Object e) -> e instanceof SignalExited s && s.anchorSignalId() == 43L));
   }
 
   @Test
   void withPyramidingOffAHeldSymbolInTheFunnelIsNeverReEntered() throws IOException {
     ExitHarness h = new ExitHarness();
-    // TESTCO is already held (the anchor) AND back in the funnel at a higher price — with pyramiding
-    // OFF this must NOT emit a second entry (the pre-F2 held-skip).
-    org.mockito.Mockito.when(h.funnel.buyableAndOnDeck())
+    when(h.funnel.buyableAndOnDeck())
         .thenReturn(
-            List.of(
-                new ManasFunnelClient.Candidate(
-                    "TESTCO", bd(200), bd(150), "breakout", null, bd(150), null)));
+            List.of(new ManasFunnelClient.Candidate("TESTCO", bd(200), bd(150), "breakout", null, bd(150), null)));
 
-    h.engine(false).runDaily();
+    h.engine().runDaily(h.doctrine(false));
 
     verify(h.events, never()).publishEvent(argThat((Object e) -> e instanceof SignalEmitted));
   }
 
   @Test
   void aHeldWinnerThatMakesAFreshPivotWithinTheRiskCapTakesAPyramidAdd() throws IOException {
-    AddResult r = runPyramidAdd(new BigDecimal("10000")); // existing book open risk 1% of a ₹10L equity
+    AddResult r = runPyramidAdd(new BigDecimal("10000")); // book open risk 1% of ₹10L equity
 
     assertThat(r.run().entries()).as("the add fires as a 2nd lot").isEqualTo(1);
-    // the add is emitted (auto-paper averages it into the one position downstream) …
     verify(r.events()).publishEvent(argThat((Object e) -> e instanceof SignalEmitted));
-    // … and the detail side-channel marks it lot 2 (§3.4).
-    org.mockito.ArgumentCaptor<String> detail = org.mockito.ArgumentCaptor.forClass(String.class);
-    verify(r.signals()).stampManasAroraDetail(org.mockito.ArgumentMatchers.anyLong(), detail.capture());
-    assertThat(detail.getValue()).contains("\"pyramidLot\":2");
+    // Exact detail JSON (byte-identity of the manas_arora_detail side-channel): setup → setupType →
+    // pivot → pyramidLot, in that order — locks the field set + ORDER, not just a substring.
+    ArgumentCaptor<String> detail = ArgumentCaptor.forClass(String.class);
+    verify(r.signals()).stampManasAroraDetail(anyLong(), detail.capture());
+    assertThat(detail.getValue())
+        .isEqualTo("{\"setup\":\"manas-arora-breakout\",\"setupType\":\"breakout\",\"pivot\":\"150\",\"pyramidLot\":2}");
   }
 
   @Test
   void aPyramidAddIsBlockedWhenItWouldBreachTheOpenRiskCap() throws IOException {
-    // Existing book open risk already at the 6% cap of a ₹10L equity — §3.4.3 blocks the add
-    // ("add without increasing risk exposure"), even though the gain trigger + fresh pivot both hold.
-    AddResult r = runPyramidAdd(new BigDecimal("60000"));
+    AddResult r = runPyramidAdd(new BigDecimal("60000")); // already at the 6% cap
 
     assertThat(r.run().entries()).as("the risk cap blocks the add").isZero();
     verify(r.events(), never()).publishEvent(argThat((Object e) -> e instanceof SignalEmitted));
   }
 
-  /** Result of a pyramid-add scenario: the run plus the signal/event mocks for verification. */
   private record AddResult(
-      ManasAroraSwingEngine.ManasSwingRun run,
-      in.arthayantra.strategysignal.signals.SignalRepository signals,
-      org.springframework.context.ApplicationEventPublisher events) {}
+      SwingBatchEngine.SwingRun run, SignalRepository signals, ApplicationEventPublisher events) {}
 
-  /**
-   * Wires a held TESTCO winner (entry 142) that is back in the funnel making a fresh 150-pivot breakout
-   * on 3× volume at 152 (a +7% move since the lot → over the +5% pyramid trigger), with pyramiding ON,
-   * and runs one batch. {@code existingOpenRiskInr} is what the book already has at risk (the §3.4.3
-   * gate input against a ₹10L equity). Returns the run + the mocks to assert on.
-   */
   private AddResult runPyramidAdd(BigDecimal existingOpenRiskInr) throws IOException {
-    java.util.UUID strategyId = java.util.UUID.randomUUID();
-    java.util.UUID publishedVersion = java.util.UUID.randomUUID();
-    com.fasterxml.jackson.databind.JsonNode config = breakoutConfig();
-
+    UUID strategyId = UUID.randomUUID();
+    UUID publishedVersion = UUID.randomUUID();
+    JsonNode config = breakoutConfig();
     StrategyRepository registry = mock(StrategyRepository.class);
-    StrategyRepository.StrategyRow strategyRow =
-        new StrategyRepository.StrategyRow(
-            strategyId, "manas-arora-breakout", "Manas Breakout", null, null,
-            List.of("manas-arora"), true, publishedVersion, null, null, false, null);
-    org.mockito.Mockito.when(registry.listAll()).thenReturn(List.of(strategyRow));
-    org.mockito.Mockito.when(registry.findVersionById(publishedVersion))
-        .thenReturn(
-            Optional.of(
-                new StrategyRepository.VersionRow(
-                    publishedVersion, strategyId, "1", null, config, "1", "chk", "published",
-                    null, null, null, null)));
+    when(registry.listAll()).thenReturn(List.of(strategyRow(strategyId, publishedVersion)));
+    when(registry.findVersionById(publishedVersion))
+        .thenReturn(Optional.of(version(publishedVersion, strategyId, config)));
 
-    List<EngineCandle> series = craft(3_000L); // pivot-150 breakout to 152 on 3× volume, LAST bar
-    in.arthayantra.strategysignal.signals.SignalRepository signals =
-        mock(in.arthayantra.strategysignal.signals.SignalRepository.class);
-    org.mockito.Mockito.when(signals.activeEntries())
-        .thenReturn(
-            List.of(
-                new in.arthayantra.strategysignal.signals.SignalRepository.SignalRow(
-                    42L, publishedVersion, "NSE", "TESTCO", "1d", "ENTRY", "BUY",
-                    new BigDecimal("142"), null, null, BigDecimal.ONE,
-                    new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode(),
-                    "TAKEN", series.get(19).bucketStart(), series.get(19).bucketStart().plusDays(1),
-                    null, null, null, null, null, null)));
-    org.mockito.Mockito.when(signals.insert(
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any()))
-        .thenReturn(55L);
+    List<EngineCandle> series = craft(3_000L);
+    SignalRepository signals = mock(SignalRepository.class);
+    when(signals.activeEntries())
+        .thenReturn(List.of(anchor(42L, publishedVersion, new BigDecimal("142"), series.get(19).bucketStart())));
+    stubInsert(signals, 55L);
 
     ManasFunnelClient funnel = mock(ManasFunnelClient.class);
-    org.mockito.Mockito.when(funnel.buyableAndOnDeck())
+    when(funnel.buyableAndOnDeck())
         .thenReturn(
-            List.of(
-                new ManasFunnelClient.Candidate(
-                    "TESTCO", new BigDecimal("152"), new BigDecimal("150"), "breakout", null,
-                    new BigDecimal("150"), null)));
-    in.arthayantra.strategysignal.signals.MarketDataCandlesClient candles =
-        mock(in.arthayantra.strategysignal.signals.MarketDataCandlesClient.class);
-    org.mockito.Mockito.when(candles.fetch(
-            org.mockito.ArgumentMatchers.eq("NSE"), org.mockito.ArgumentMatchers.eq("TESTCO"),
-            org.mockito.ArgumentMatchers.eq("1d"), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any()))
-        .thenReturn(series);
+            List.of(new ManasFunnelClient.Candidate("TESTCO", new BigDecimal("152"), new BigDecimal("150"), "breakout", null, new BigDecimal("150"), null)));
+    MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
+    when(candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(series);
 
-    in.arthayantra.strategysignal.signals.EmissionGuard guard =
-        mock(in.arthayantra.strategysignal.signals.EmissionGuard.class);
-    org.mockito.Mockito.when(
-            guard.entryAllowed(in.arthayantra.strategysignal.signals.Books.MANAS_ARORA))
-        .thenReturn(true);
-    org.mockito.Mockito.when(
-            guard.bookEquity(in.arthayantra.strategysignal.signals.Books.MANAS_ARORA))
-        .thenReturn(new BigDecimal("1000000"));
-    org.mockito.Mockito.when(
-            guard.openRiskInr(in.arthayantra.strategysignal.signals.Books.MANAS_ARORA))
-        .thenReturn(existingOpenRiskInr);
-    org.mockito.Mockito.when(
-            guard.suggestedQty(
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
-        .thenReturn(new BigDecimal("100"));
+    EmissionGuard guard = mock(EmissionGuard.class);
+    when(guard.entryAllowed(Books.MANAS_ARORA)).thenReturn(true);
+    when(guard.bookEquity(Books.MANAS_ARORA)).thenReturn(new BigDecimal("1000000"));
+    when(guard.openRiskInr(Books.MANAS_ARORA)).thenReturn(existingOpenRiskInr);
+    when(guard.suggestedQty(any(), any(), any(), any(), any(), any())).thenReturn(new BigDecimal("100"));
 
-    org.springframework.context.ApplicationEventPublisher events =
-        mock(org.springframework.context.ApplicationEventPublisher.class);
-    org.springframework.transaction.support.TransactionTemplate tx =
-        mock(org.springframework.transaction.support.TransactionTemplate.class);
-    org.mockito.Mockito.when(tx.execute(org.mockito.ArgumentMatchers.any()))
-        .thenAnswer(inv ->
-            inv.<org.springframework.transaction.support.TransactionCallback<Long>>getArgument(0)
-                .doInTransaction(null));
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    SwingBatchEngine engine =
+        new SwingBatchEngine(
+            registry, candles, signals, mock(SignalPublisher.class), events, Optional.of(guard),
+            passthroughTx(), new ObjectMapper(), Clock.systemUTC());
+    ManasDoctrine doctrine =
+        new ManasDoctrine(
+            funnel, signals, new ManasPyramidPolicy(true, new BigDecimal("5.0"), 3, new BigDecimal("6.0")),
+            new ObjectMapper(), true, 520, 10, 1440);
 
-    ManasAroraSwingEngine engine =
-        new ManasAroraSwingEngine(
-            registry, funnel, candles, signals,
-            mock(in.arthayantra.strategysignal.signals.SignalPublisher.class),
-            events, Optional.of(guard), tx, new com.fasterxml.jackson.databind.ObjectMapper(),
-            java.time.Clock.systemUTC(), true, 520, 10, 1440,
-            true, new BigDecimal("5.0"), 3, new BigDecimal("6.0")); // minBars=10 for the 25-bar fixture
-
-    return new AddResult(engine.runDaily(), signals, events);
+    return new AddResult(engine.runDaily(doctrine), signals, events);
   }
 
   // ---- harness --------------------------------------------------------------------------------
 
-  /** Shared wiring: one published Manas strategy (real breakout YAML) + a held anchor, empty funnel. */
   private final class ExitHarness {
     final StrategyRepository registry = mock(StrategyRepository.class);
-    final in.arthayantra.strategysignal.signals.SignalRepository signals =
-        mock(in.arthayantra.strategysignal.signals.SignalRepository.class);
+    final SignalRepository signals = mock(SignalRepository.class);
     final ManasFunnelClient funnel = mock(ManasFunnelClient.class);
-    final in.arthayantra.strategysignal.signals.MarketDataCandlesClient candles =
-        mock(in.arthayantra.strategysignal.signals.MarketDataCandlesClient.class);
-    final org.springframework.context.ApplicationEventPublisher events =
-        mock(org.springframework.context.ApplicationEventPublisher.class);
+    final MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
+    final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     final List<EngineCandle> series = craftDecline();
-    final java.util.UUID publishedVersion = java.util.UUID.randomUUID();
+    final UUID publishedVersion = UUID.randomUUID();
 
     ExitHarness() throws IOException {
-      java.util.UUID strategyId = java.util.UUID.randomUUID();
-      com.fasterxml.jackson.databind.JsonNode config = breakoutConfig();
-      StrategyRepository.StrategyRow strategyRow =
-          new StrategyRepository.StrategyRow(
-              strategyId, "manas-arora-breakout", "Manas Breakout", null, null,
-              List.of("manas-arora"), true, publishedVersion, null, null, false, null);
-      org.mockito.Mockito.when(registry.listAll()).thenReturn(List.of(strategyRow));
-      org.mockito.Mockito.when(registry.findVersionById(publishedVersion))
-          .thenReturn(
-              Optional.of(
-                  new StrategyRepository.VersionRow(
-                      publishedVersion, strategyId, "1", null, config, "1", "chk", "published",
-                      null, null, null, null)));
+      UUID strategyId = UUID.randomUUID();
+      JsonNode config = breakoutConfig();
+      when(registry.listAll()).thenReturn(List.of(strategyRow(strategyId, publishedVersion)));
+      when(registry.findVersionById(publishedVersion))
+          .thenReturn(Optional.of(version(publishedVersion, strategyId, config)));
       stubAnchors(anchor(42L, series.get(0).bucketStart()));
-      org.mockito.Mockito.when(signals.insert(
-              org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-              org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-              org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-              org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-              org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-              org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-              org.mockito.ArgumentMatchers.any()))
-          .thenReturn(43L);
-      org.mockito.Mockito.when(funnel.buyableAndOnDeck()).thenReturn(List.of());
+      stubInsert(signals, 43L);
+      when(funnel.buyableAndOnDeck()).thenReturn(List.of());
     }
 
-    /** Registers the given anchors as the active held entries (varargs so a pyramid has ≥2). */
-    void stubAnchors(in.arthayantra.strategysignal.signals.SignalRepository.SignalRow... anchors) {
-      org.mockito.Mockito.when(signals.activeEntries()).thenReturn(List.of(anchors));
+    void stubAnchors(SignalRepository.SignalRow... anchors) {
+      when(signals.activeEntries()).thenReturn(List.of(anchors));
     }
 
-    /** A held TESTCO anchor generated at {@code at} (entry 152, TAKEN). */
-    in.arthayantra.strategysignal.signals.SignalRepository.SignalRow anchor(long id, OffsetDateTime at) {
-      return new in.arthayantra.strategysignal.signals.SignalRepository.SignalRow(
-          id, publishedVersion, "NSE", "TESTCO", "1d", "ENTRY", "BUY", new BigDecimal("152"),
-          null, null, BigDecimal.ONE,
-          new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode(),
-          "TAKEN", at, at.plusDays(1), null, null, null, null, null, null);
+    SignalRepository.SignalRow anchor(long id, OffsetDateTime at) {
+      return ManasAroraSwingEngineTest.anchor(id, publishedVersion, new BigDecimal("152"), at);
     }
 
-    ManasAroraSwingEngine engine() {
-      return engine(false);
+    SwingBatchEngine engine() {
+      return new SwingBatchEngine(
+          registry, candles, signals, mock(SignalPublisher.class), events, Optional.empty(),
+          passthroughTx(), new ObjectMapper(), Clock.systemUTC());
     }
 
-    ManasAroraSwingEngine engine(boolean pyramidEnabled) {
-      org.springframework.transaction.support.TransactionTemplate tx =
-          mock(org.springframework.transaction.support.TransactionTemplate.class);
-      org.mockito.Mockito.when(tx.execute(org.mockito.ArgumentMatchers.any()))
-          .thenAnswer(inv ->
-              inv.<org.springframework.transaction.support.TransactionCallback<Long>>getArgument(0)
-                  .doInTransaction(null));
-      return new ManasAroraSwingEngine(
-          registry, funnel, candles, signals,
-          mock(in.arthayantra.strategysignal.signals.SignalPublisher.class),
-          events, Optional.empty(),
-          tx, new com.fasterxml.jackson.databind.ObjectMapper(),
-          java.time.Clock.systemUTC(), true, 520, 60, 1440,
-          pyramidEnabled, new BigDecimal("5.0"), 3, new BigDecimal("6.0"));
+    ManasDoctrine doctrine(boolean pyramidEnabled) {
+      return new ManasDoctrine(
+          funnel, signals,
+          new ManasPyramidPolicy(pyramidEnabled, new BigDecimal("5.0"), 3, new BigDecimal("6.0")),
+          new ObjectMapper(), true, 520, 60, 1440);
     }
   }
 
-  private static com.fasterxml.jackson.databind.JsonNode breakoutConfig() throws IOException {
+  private static TransactionTemplate passthroughTx() {
+    TransactionTemplate tx = mock(TransactionTemplate.class);
+    when(tx.execute(any()))
+        .thenAnswer(inv -> inv.<TransactionCallback<Long>>getArgument(0).doInTransaction(null));
+    return tx;
+  }
+
+  private static void stubInsert(SignalRepository signals, long id) {
+    when(signals.insert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+        .thenReturn(id);
+  }
+
+  private static StrategyRepository.StrategyRow strategyRow(UUID strategyId, UUID publishedVersion) {
+    return new StrategyRepository.StrategyRow(
+        strategyId, "manas-arora-breakout", "Manas Breakout", null, null, List.of("manas-arora"),
+        true, publishedVersion, null, null, false, null);
+  }
+
+  private static StrategyRepository.VersionRow version(UUID id, UUID strategyId, JsonNode config) {
+    return new StrategyRepository.VersionRow(
+        id, strategyId, "1", null, config, "1", "chk", "published", null, null, null, null);
+  }
+
+  private static SignalRepository.SignalRow anchor(
+      long id, UUID versionId, BigDecimal entryPrice, OffsetDateTime at) {
+    return new SignalRepository.SignalRow(
+        id, versionId, "NSE", "TESTCO", "1d", "ENTRY", "BUY", entryPrice, null, null, BigDecimal.ONE,
+        new ObjectMapper().createObjectNode(), "TAKEN", at, at.plusDays(1), null, null, null, null, null, null);
+  }
+
+  private static JsonNode breakoutConfig() throws IOException {
     try (InputStream in =
         ManasAroraSwingEngineTest.class.getResourceAsStream(
             "/manas-arora-strategies/manas-arora-breakout.yaml")) {
       assertThat(in).isNotNull();
-      String yaml = new String(in.readAllBytes(), StandardCharsets.UTF_8);
-      return StrategyDocuments.parse(yaml).config();
+      return StrategyDocuments.parse(new String(in.readAllBytes(), StandardCharsets.UTF_8)).config();
     }
   }
 
-  /**
-   * 28 daily bars around ~150 (a small ±1 range so the entry-pinned ATR(20) is a positive number, not
-   * a degenerate 0) then a slide to 120 on the last two bars — an underwater held position whose close
-   * is well below the ~10%-capped 2×ATR initial stop.
-   */
   private static List<EngineCandle> craftDecline() {
     List<EngineCandle> bars = new ArrayList<>();
     for (int d = 0; d <= 25; d++) {
@@ -391,19 +266,11 @@ class ManasAroraSwingEngineTest {
   private static EngineCandle bar(int day, double price) {
     OffsetDateTime bucket = OffsetDateTime.of(2026, 6, 1, 0, 0, 0, 0, IST).plusDays(day);
     BigDecimal c = BigDecimal.valueOf(price);
-    // a small high/low spread (±1) gives ATR(20) a positive value so the 2×ATR initial stop computes.
-    BigDecimal high = BigDecimal.valueOf(price + 1);
-    BigDecimal low = BigDecimal.valueOf(price - 1);
-    return new EngineCandle(bucket, c, high, low, c, 1_000L, null);
+    return new EngineCandle(bucket, c, BigDecimal.valueOf(price + 1), BigDecimal.valueOf(price - 1), c, 1_000L, null);
   }
 
-  /**
-   * 25 daily bars that FIRE the breakout gate on the LAST bar: a rise 100→149, a consolidation 146–148
-   * below the 150 pivot, then a breakout to 152 on {@code breakoutVolume} (the §3.2 crossover above the
-   * pivot + the vol>1.2 gate). Mirrors the Minervini engine test's firing fixture.
-   */
   private static List<EngineCandle> craft(long breakoutVolume) {
-    double[] tail = {146, 148, 146, 148, 147}; // consolidation below the pivot
+    double[] tail = {146, 148, 146, 148, 147};
     List<EngineCandle> bars = new ArrayList<>();
     for (int d = 0; d <= 18; d++) {
       bars.add(volBar(d, 100.0 + (149.0 - 100.0) * d / 18.0, 1_000L));
@@ -411,7 +278,7 @@ class ManasAroraSwingEngineTest {
     for (int i = 0; i < tail.length; i++) {
       bars.add(volBar(19 + i, tail[i], 1_000L));
     }
-    bars.add(volBar(24, 152.0, breakoutVolume)); // the breakout bar (crossover above 150) — LAST bar
+    bars.add(volBar(24, 152.0, breakoutVolume));
     return bars;
   }
 

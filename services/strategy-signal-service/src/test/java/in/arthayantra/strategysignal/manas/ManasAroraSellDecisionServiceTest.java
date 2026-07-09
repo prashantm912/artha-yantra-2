@@ -4,8 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -15,119 +13,88 @@ import in.arthayantra.strategyschema.StrategyDocuments;
 import in.arthayantra.strategysignal.registry.StrategyRepository;
 import in.arthayantra.strategysignal.signals.MarketDataCandlesClient;
 import in.arthayantra.strategysignal.signals.SignalRepository;
+import in.arthayantra.strategysignal.swing.SwingSellDecisionService;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
-import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 /**
- * Pins the audit-H11 gap on the Manas sell-decision triad's orchestration (the per-symbol evaluator
- * math is exercised by {@link ManasAroraSwingEngineTest}; this asserts the {@code report()}
- * branches): family scoping (a foreign anchor is never even fetched), superseded-version adoption
- * (the H2 mirror — an orphaned holding still shows), and per-symbol exception isolation (one bad
- * symbol never sinks the report). Uses an empty candle series so {@code decide()} throws early after
- * the fetch — enough to assert which anchors are scoped IN (fetched) vs OUT (never fetched).
+ * The shared {@link SwingSellDecisionService} driven by the Manas doctrine: for an open holding it
+ * re-scores today's daily bar off the persisted {@code manas_arora_detail} pivot and reports the
+ * HOLD / SELL verdict via the FROZEN {@link in.arthayantra.strategyengine.eval.ExitEvaluator}.
  */
 class ManasAroraSellDecisionServiceTest {
 
   private static final ZoneOffset IST = ZoneOffset.ofHoursMinutes(5, 30);
-  private static final Clock FIXED =
-      Clock.fixed(Instant.parse("2026-07-07T14:30:00Z"), ZoneOffset.UTC);
-  private static final OffsetDateTime AT = OffsetDateTime.of(2026, 6, 20, 9, 15, 0, 0, IST);
 
   @Test
-  void aForeignFamilyAnchorIsScopedOutAndNeverFetched() throws IOException {
-    StrategyRepository registry = mock(StrategyRepository.class);
-    MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
-    SignalRepository signals = mock(SignalRepository.class);
-    // No published manas swing strategy, and the anchor's version doesn't resolve to a manas swing
-    // config (adoptDef → empty) → this anchor belongs to some other family.
-    when(registry.listAll()).thenReturn(List.of());
-    UUID foreign = UUID.randomUUID();
-    when(registry.findVersionById(foreign)).thenReturn(Optional.empty());
-    when(signals.activeEntries()).thenReturn(List.of(anchor(1L, foreign, "OTHERCO")));
+  void reportsSellWhenTheAtrStopIsHitAndHoldWhenItIsNot() throws IOException {
+    // Declining series → the 2×ATR stop fires → SELL.
+    SwingSellDecisionService.SwingSellReport sell = report(craftDecline());
+    assertThat(sell.items()).hasSize(1);
+    SwingSellDecisionService.SwingSellDecision d = sell.items().get(0);
+    assertThat(d.symbol()).isEqualTo("TESTCO");
+    assertThat(d.setup()).isEqualTo("manas-arora-breakout");
+    assertThat(d.sellingNow()).as("the ATR stop fires on the declining series").isTrue();
+    assertThat(d.verdict()).startsWith("SELL");
 
-    var report = service(registry, candles, signals).report();
-
-    assertThat(report.items()).isEmpty();
-    verify(candles, never()).fetch(any(), any(), any(), any(), any());
+    // Flat series (no decline) → the stop does not fire → HOLD.
+    SwingSellDecisionService.SwingSellReport hold = report(craftFlat());
+    assertThat(hold.items()).hasSize(1);
+    assertThat(hold.items().get(0).sellingNow()).isFalse();
+    assertThat(hold.items().get(0).verdict()).isEqualTo("HOLD");
   }
 
-  @Test
-  void aScopedInAnchorIsFetchedAndAFetchFailureIsIsolatedNotFatal() throws IOException {
+  private SwingSellDecisionService.SwingSellReport report(List<EngineCandle> series) throws IOException {
     UUID strategyId = UUID.randomUUID();
     UUID publishedVersion = UUID.randomUUID();
+    JsonNode config = breakoutConfig();
+    ObjectMapper om = new ObjectMapper();
+
     StrategyRepository registry = mock(StrategyRepository.class);
-    MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
-    SignalRepository signals = mock(SignalRepository.class);
-    when(registry.listAll()).thenReturn(List.of(publishedManasStrategy(strategyId, publishedVersion)));
+    StrategyRepository.StrategyRow strategyRow =
+        new StrategyRepository.StrategyRow(
+            strategyId, "manas-arora-breakout", "Manas Breakout", null, null, List.of("manas-arora"),
+            true, publishedVersion, null, null, false, null);
+    when(registry.listAll()).thenReturn(List.of(strategyRow));
     when(registry.findVersionById(publishedVersion))
-        .thenReturn(Optional.of(manasVersion(publishedVersion, strategyId, "published")));
-    // Two held anchors, both scoped in; both get an empty series → decide() throws "no daily series"
-    // and is skipped per-symbol. The report is still produced (isolation), and BOTH were fetched.
-    when(signals.activeEntries())
-        .thenReturn(List.of(anchor(1L, publishedVersion, "AAA"), anchor(2L, publishedVersion, "BBB")));
-    when(candles.fetch(any(), any(), any(), any(), any())).thenReturn(List.<EngineCandle>of());
+        .thenReturn(
+            Optional.of(
+                new StrategyRepository.VersionRow(
+                    publishedVersion, strategyId, "1", null, config, "1", "chk", "published",
+                    null, null, null, null)));
 
-    var report = service(registry, candles, signals).report();
-
-    assertThat(report.items()).isEmpty(); // both skipped on the empty series
-    verify(candles).fetch(eq("NSE"), eq("AAA"), eq("1d"), any(), any());
-    verify(candles).fetch(eq("NSE"), eq("BBB"), eq("1d"), any(), any());
-  }
-
-  @Test
-  void aSupersededVersionAnchorIsAdoptedSoTheHoldingStillShows() throws IOException {
-    UUID supersededVersion = UUID.randomUUID();
-    UUID strategyId = UUID.randomUUID();
-    StrategyRepository registry = mock(StrategyRepository.class);
-    MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
+    JsonNode detail = om.readTree("{\"setup\":\"manas-arora-breakout\",\"pivot\":\"150\"}");
+    // Anchor deep enough for the entry-pinned ATR(20) to have warmup (bar 0 is degenerate → no stop).
+    OffsetDateTime entryAt = series.get(24).bucketStart();
     SignalRepository signals = mock(SignalRepository.class);
-    // The anchor's version is NOT a currently-published swing (listAll empty), but findVersionById
-    // resolves it to the manas swing config → adoptDef compiles it and the holding is still managed.
-    when(registry.listAll()).thenReturn(List.of());
-    when(registry.findVersionById(supersededVersion))
-        .thenReturn(Optional.of(manasVersion(supersededVersion, strategyId, "draft")));
-    when(signals.activeEntries()).thenReturn(List.of(anchor(9L, supersededVersion, "ORPHAN")));
-    when(candles.fetch(any(), any(), any(), any(), any())).thenReturn(List.<EngineCandle>of());
+    when(signals.activeEntries())
+        .thenReturn(
+            List.of(
+                new SignalRepository.SignalRow(
+                    42L, publishedVersion, "NSE", "TESTCO", "1d", "ENTRY", "BUY", new BigDecimal("152"),
+                    null, null, BigDecimal.ONE, om.createObjectNode(), "TAKEN", entryAt,
+                    entryAt.plusDays(1), null, null, null, null, null, detail)));
 
-    service(registry, candles, signals).report();
+    MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
+    when(candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(series);
 
-    verify(candles).fetch(eq("NSE"), eq("ORPHAN"), eq("1d"), any(), any());
-  }
+    ManasDoctrine doctrine =
+        new ManasDoctrine(
+            mock(ManasFunnelClient.class), signals,
+            new ManasPyramidPolicy(false, new BigDecimal("5.0"), 3, new BigDecimal("6.0")),
+            om, true, 520, 60, 1440);
 
-  // ---- fixtures -------------------------------------------------------------------------------
-
-  private static ManasAroraSellDecisionService service(
-      StrategyRepository registry, MarketDataCandlesClient candles, SignalRepository signals) {
-    return new ManasAroraSellDecisionService(registry, candles, signals, FIXED, 520);
-  }
-
-  private static StrategyRepository.StrategyRow publishedManasStrategy(UUID id, UUID version) {
-    return new StrategyRepository.StrategyRow(
-        id, "manas-arora-breakout", "Manas Breakout", null, null,
-        List.of("manas-arora"), true, version, null, null, false, null);
-  }
-
-  private static StrategyRepository.VersionRow manasVersion(UUID version, UUID strategyId, String status)
-      throws IOException {
-    return new StrategyRepository.VersionRow(
-        version, strategyId, "1", null, breakoutConfig(), "1", "chk", status, null, null, null, null);
-  }
-
-  private static SignalRepository.SignalRow anchor(long id, UUID versionId, String symbol) {
-    return new SignalRepository.SignalRow(
-        id, versionId, "NSE", symbol, "1d", "ENTRY", "BUY",
-        new BigDecimal("100"), null, null, BigDecimal.ONE, new ObjectMapper().createObjectNode(),
-        "TAKEN", AT, AT.plusDays(1), null, null, null, null, null, null);
+    return new SwingSellDecisionService(registry, candles, signals, Clock.systemUTC()).report(doctrine);
   }
 
   private static JsonNode breakoutConfig() throws IOException {
@@ -135,8 +102,33 @@ class ManasAroraSellDecisionServiceTest {
         ManasAroraSellDecisionServiceTest.class.getResourceAsStream(
             "/manas-arora-strategies/manas-arora-breakout.yaml")) {
       assertThat(in).isNotNull();
-      String yaml = new String(in.readAllBytes(), StandardCharsets.UTF_8);
-      return StrategyDocuments.parse(yaml).config();
+      return StrategyDocuments.parse(new String(in.readAllBytes(), StandardCharsets.UTF_8)).config();
     }
+  }
+
+  /** 28 bars ~150 then a slide to 120 — trips the entry-pinned 2×ATR stop. */
+  private static List<EngineCandle> craftDecline() {
+    List<EngineCandle> bars = new ArrayList<>();
+    for (int d = 0; d <= 25; d++) {
+      bars.add(bar(d, 150.0));
+    }
+    bars.add(bar(26, 140.0));
+    bars.add(bar(27, 120.0));
+    return bars;
+  }
+
+  /** 28 flat bars at ~150 — no stop breach → HOLD. */
+  private static List<EngineCandle> craftFlat() {
+    List<EngineCandle> bars = new ArrayList<>();
+    for (int d = 0; d <= 27; d++) {
+      bars.add(bar(d, 150.0));
+    }
+    return bars;
+  }
+
+  private static EngineCandle bar(int day, double price) {
+    OffsetDateTime bucket = OffsetDateTime.of(2026, 6, 1, 0, 0, 0, 0, IST).plusDays(day);
+    BigDecimal c = BigDecimal.valueOf(price);
+    return new EngineCandle(bucket, c, BigDecimal.valueOf(price + 1), BigDecimal.valueOf(price - 1), c, 1_000L, null);
   }
 }

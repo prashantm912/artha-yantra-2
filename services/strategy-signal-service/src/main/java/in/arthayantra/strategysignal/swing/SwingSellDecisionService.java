@@ -1,4 +1,4 @@
-package in.arthayantra.strategysignal.minervini;
+package in.arthayantra.strategysignal.swing;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import in.arthayantra.strategyengine.config.StrategyCompiler;
@@ -23,28 +23,32 @@ import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 /**
- * The Phase-9 (MV-9.3) daily sell-decision triad — for every open Minervini swing position, the
- * §2.10/§3.6.D "would I buy it now / why am I holding / where am I a seller" read. Reuses the engine's
- * per-symbol bank build ({@link MinerviniSwingEngine#buildBank}) + the FROZEN evaluators over each
- * held anchor's fresh daily series, with the persisted VCP geometry from its {@code minervini_detail}.
- * Read-only — it never emits a signal or moves the book; the owner reads it to manage the holdings.
+ * The one daily sell-decision triad for every swing family (audit M31 consolidation): for each open
+ * holding, the "would I buy it now / why am I holding / where am I a seller" read. Reuses the shared
+ * {@link SwingBatchEngine#buildBank} + the FROZEN evaluators over the held anchor's fresh daily series,
+ * seeded from the persisted {@code *_detail} via {@link SwingDoctrine#contextSeedsFromDetail}. Read-only
+ * — it never emits a signal or moves the book; the owner reads it to manage the holdings.
  */
 @Service
-public class MinerviniSellDecisionService {
+public class SwingSellDecisionService {
 
-  private static final Logger log = LoggerFactory.getLogger(MinerviniSellDecisionService.class);
+  private static final Logger log = LoggerFactory.getLogger(SwingSellDecisionService.class);
   private static final ZoneOffset IST = ZoneOffset.ofHoursMinutes(5, 30);
   private static final String EX = "NSE";
+  private static final String IV = "1d";
 
-  /** One holding's triad: the buy-now check, the hold status, and where the exits sit. */
-  public record SellDecision(
+  /**
+   * One holding's triad. Carries BOTH families' descriptors ({@code stage} for Minervini, {@code
+   * setupType} for Manas — the other is null), so the FE renders either book from one shape.
+   */
+  public record SwingSellDecision(
       String symbol,
       String setup,
       Integer stage,
+      String setupType,
       String footprint,
       BigDecimal entryPrice,
       BigDecimal currentPrice,
@@ -56,88 +60,64 @@ public class MinerviniSellDecisionService {
       String sellReason,
       String verdict) {}
 
-  /** The {items} envelope. */
-  public record Report(OffsetDateTime asOf, List<SellDecision> items) {}
+  /** The {asOf, items} envelope. */
+  public record SwingSellReport(OffsetDateTime asOf, List<SwingSellDecision> items) {}
 
   private final StrategyRepository registry;
   private final MarketDataCandlesClient candles;
   private final SignalRepository signals;
   private final Clock clock;
-  private final int warmupDays;
 
-  /** Wires the registry, candle client, and signal repo. */
-  public MinerviniSellDecisionService(
-      StrategyRepository registry,
-      MarketDataCandlesClient candles,
-      SignalRepository signals,
-      Clock clock,
-      @Value("${artha.minervini.swing.warmup-days:520}") int warmupDays) {
+  /** Wires the registry, candle client, and signal repo (family-neutral). */
+  public SwingSellDecisionService(
+      StrategyRepository registry, MarketDataCandlesClient candles, SignalRepository signals,
+      Clock clock) {
     this.registry = registry;
     this.candles = candles;
     this.signals = signals;
     this.clock = clock;
-    this.warmupDays = warmupDays;
   }
 
-  /** Builds the sell-decision triad for every open swing position. */
-  public Report report() {
-    Map<UUID, StrategyDefinition> swings = loadSwingDefs();
+  /** Builds the sell-decision triad for every open swing position of the given family. */
+  public SwingSellReport report(SwingDoctrine doctrine) {
+    Map<UUID, StrategyDefinition> swings = loadSwingDefs(doctrine);
     Map<UUID, Optional<StrategyDefinition>> adopted = new HashMap<>();
     OffsetDateTime now = OffsetDateTime.now(clock).withOffsetSameInstant(IST);
-    List<SellDecision> items = new ArrayList<>();
+    List<SwingSellDecision> items = new ArrayList<>();
     for (SignalRepository.SignalRow anchor : signals.activeEntries()) {
       StrategyDefinition def = swings.get(anchor.strategyVersionId());
       if (def == null) {
-        // Adopt a superseded/unpublished version's anchor (audit H2, mirror of the engine): the
-        // triad must keep showing holdings whose strategy was republished/disabled — the owner
-        // manages them off this report, so a vanishing row IS the failure.
-        def = adopted.computeIfAbsent(anchor.strategyVersionId(), this::adoptDef).orElse(null);
+        // Adopt a superseded/unpublished version's anchor (audit H2): the triad must keep showing
+        // holdings whose strategy was republished/disabled — a vanishing row IS the failure.
+        def = adopted.computeIfAbsent(anchor.strategyVersionId(), v -> adoptDef(doctrine, v)).orElse(null);
       }
       if (def == null) {
         continue; // another family's anchor, or unmanageable
       }
       try {
-        items.add(decide(def, anchor, now));
+        items.add(decide(doctrine, def, anchor, now));
       } catch (RuntimeException e) {
-        log.warn("sell-decision for {} skipped: {}", anchor.tradingsymbol(), e.getMessage());
+        log.warn(
+            "{} sell-decision for {} skipped: {}",
+            doctrine.batchName(), anchor.tradingsymbol(), e.getMessage());
       }
     }
-    return new Report(now, items);
+    return new SwingSellReport(now, items);
   }
 
-  /** Compiles a superseded/unpublished version's own frozen config (family-scoped). */
-  private Optional<StrategyDefinition> adoptDef(UUID versionId) {
-    return registry
-        .findVersionById(versionId)
-        .filter(
-            v -> "minervini_funnel".equals(v.config().path("universe").path("mode").asText()))
-        .flatMap(
-            v -> {
-              try {
-                StrategyDefinition def = StrategyCompiler.compile(v.config());
-                return "swing".equals(def.session().style()) ? Optional.of(def) : Optional.empty();
-              } catch (RuntimeException e) {
-                log.warn(
-                    "sell-decision: anchor version {} failed to compile — skipped: {}",
-                    versionId, e.getMessage());
-                return Optional.empty();
-              }
-            });
-  }
-
-  private SellDecision decide(
-      StrategyDefinition def, SignalRepository.SignalRow anchor, OffsetDateTime now) {
-    JsonNode detail = anchor.minerviniDetail();
-    BigDecimal pivot = decimal(detail, "pivot");
-    BigDecimal cheat = decimal(detail, "cheatPivot");
-    boolean thrust = detail != null && detail.path("thrust").asBoolean(false);
+  private SwingSellDecision decide(
+      SwingDoctrine doctrine, StrategyDefinition def, SignalRepository.SignalRow anchor,
+      OffsetDateTime now) {
+    JsonNode detail = doctrine.detailOf(anchor);
     List<EngineCandle> series =
-        candles.fetch(EX, anchor.tradingsymbol(), "1d", now.minusDays(warmupDays), now);
+        candles.fetch(EX, anchor.tradingsymbol(), IV, now.minusDays(doctrine.warmupDays()), now);
     if (series.isEmpty()) {
       throw new IllegalStateException("no daily series");
     }
     int last = series.size() - 1;
-    IndicatorBank bank = MinerviniSwingEngine.buildBank(def, anchor.tradingsymbol(), series, pivot, cheat, thrust);
+    IndicatorBank bank =
+        SwingBatchEngine.buildBank(
+            def, anchor.tradingsymbol(), series, doctrine.contextSeedsFromDetail(detail));
     BigDecimal entryPrice = anchor.entryPrice();
     BigDecimal currentPrice = series.get(last).close();
     BigDecimal unrealizedPct =
@@ -146,18 +126,15 @@ public class MinerviniSellDecisionService {
             : currentPrice.subtract(entryPrice).divide(entryPrice, 6, RoundingMode.HALF_UP)
                 .multiply(BigDecimal.valueOf(100))
                 .setScale(2, RoundingMode.HALF_UP);
-
     int entryIndex = bank.primarySeries().indexAtOrBefore(anchor.generatedAt().toInstant());
     // would I buy it now? — the entry gate re-evaluated on today's bar
     boolean stillBuyable =
         EntryEvaluator.evaluate(def, bank, last).map(EntryEvaluator.Evaluation::entry).orElse(false);
-    // where am I a seller? — the entry-time stop + the current 50-day-MA trail level
-    BigDecimal stopLevel =
-        ExitEvaluator.entryLevels(
-                def, bank, new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, entryPrice,
-                    Math.max(entryIndex, 0)))
-            .stopLoss();
-    BigDecimal trailLevel = bank.has("sma50") ? bank.valueAt("sma50", last) : null;
+    // where am I a seller? — the entry-time stop + the family's advisory trail
+    ExitEvaluator.Position pos =
+        new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, entryPrice, Math.max(entryIndex, 0));
+    BigDecimal stopLevel = ExitEvaluator.entryLevels(def, bank, pos).stopLoss();
+    BigDecimal trailLevel = doctrine.trailLevel(def, bank, pos, last, entryIndex);
     // am I a seller today? — the frozen exit doctrine on today's bar (skipped if the entry bar is gone)
     boolean sellingNow = false;
     String sellReason = null;
@@ -170,13 +147,13 @@ public class MinerviniSellDecisionService {
       sellReason = exit.map(ExitEvaluator.ExitDecision::type).orElse(null);
     }
     String verdict = sellingNow ? "SELL (" + sellReason + ")" : "HOLD";
-    return new SellDecision(
+    return new SwingSellDecision(
         anchor.tradingsymbol(), text(detail, "setup"), integer(detail, "stage"),
-        text(detail, "footprint"), entryPrice, currentPrice, unrealizedPct, stopLevel, trailLevel,
-        stillBuyable, sellingNow, sellReason, verdict);
+        text(detail, "setupType"), text(detail, "footprint"), entryPrice, currentPrice, unrealizedPct,
+        stopLevel, trailLevel, stillBuyable, sellingNow, sellReason, verdict);
   }
 
-  private Map<UUID, StrategyDefinition> loadSwingDefs() {
+  private Map<UUID, StrategyDefinition> loadSwingDefs(SwingDoctrine doctrine) {
     Map<UUID, StrategyDefinition> out = new HashMap<>();
     for (StrategyRepository.StrategyRow strategy : registry.listAll()) {
       if (!strategy.enabled() || strategy.publishedVersionId() == null) {
@@ -188,10 +165,8 @@ public class MinerviniSellDecisionService {
               v -> {
                 try {
                   StrategyDefinition def = StrategyCompiler.compile(v.config());
-                  // scoped to this family's own universe mode, so the triad never lists another
-                  // swing family's holdings (the mirror of the engine's + Manas sibling's scoping).
                   if ("swing".equals(def.session().style())
-                      && "minervini_funnel"
+                      && doctrine.universeMode()
                           .equals(v.config().path("universe").path("mode").asText())) {
                     out.put(strategy.publishedVersionId(), def);
                   }
@@ -203,8 +178,23 @@ public class MinerviniSellDecisionService {
     return out;
   }
 
-  private static BigDecimal decimal(JsonNode node, String field) {
-    return node != null && node.hasNonNull(field) ? new BigDecimal(node.path(field).asText()) : null;
+  /** Compiles a superseded/unpublished version's own frozen config (family-scoped). */
+  private Optional<StrategyDefinition> adoptDef(SwingDoctrine doctrine, UUID versionId) {
+    return registry
+        .findVersionById(versionId)
+        .filter(v -> doctrine.universeMode().equals(v.config().path("universe").path("mode").asText()))
+        .flatMap(
+            v -> {
+              try {
+                StrategyDefinition def = StrategyCompiler.compile(v.config());
+                return "swing".equals(def.session().style()) ? Optional.of(def) : Optional.empty();
+              } catch (RuntimeException e) {
+                log.warn(
+                    "{} sell-decision: anchor version {} failed to compile — skipped: {}",
+                    doctrine.batchName(), versionId, e.getMessage());
+                return Optional.empty();
+              }
+            });
   }
 
   private static String text(JsonNode node, String field) {

@@ -247,8 +247,8 @@ public class SignalEngine {
               strategy.slug());
           continue;
         }
-        // Phase-9: swing strategies (session.style=swing, 1d primary) are driven by the Minervini
-        // daily batch (MinerviniSwingEngine), NOT the tick loop — their equities do not tick. Skip
+        // Phase-9: swing strategies (session.style=swing, 1d primary) are driven by the daily
+        // SwingBatchEngine (per family), NOT the tick loop — their equities do not tick. Skip
         // them here cleanly (not an error) so the batch owns them and the ROLLABLE check below never
         // logs a spurious "not live-rollable" warning for a strategy that is working as designed.
         if ("swing".equals(definition.session().style())) {

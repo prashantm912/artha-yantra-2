@@ -801,18 +801,6 @@ export interface components {
             /** Format: int32 */
             exitSkipped?: number;
         };
-        ManasSwingRun: {
-            /** Format: int32 */
-            strategies?: number;
-            /** Format: int32 */
-            candidates?: number;
-            /** Format: int32 */
-            entries?: number;
-            /** Format: int32 */
-            exits?: number;
-            /** Format: int32 */
-            exitSkipped?: number;
-        };
         ResetBody: {
             confirm?: boolean;
             book?: string;
@@ -916,30 +904,11 @@ export interface components {
             sharpe?: number;
             maxDrawdownPct?: number;
         };
-        Report: {
-            /** Format: date-time */
-            asOf?: string;
-            items?: components["schemas"]["SellDecision"][];
-        };
-        SellDecision: {
+        SwingSellDecision: {
             symbol?: string;
             setup?: string;
             /** Format: int32 */
             stage?: number;
-            footprint?: string;
-            entryPrice?: number;
-            currentPrice?: number;
-            unrealizedPct?: number;
-            stopLevel?: number;
-            trailLevel?: number;
-            stillBuyable?: boolean;
-            sellingNow?: boolean;
-            sellReason?: string;
-            verdict?: string;
-        };
-        ManasSellDecision: {
-            symbol?: string;
-            setup?: string;
             setupType?: string;
             footprint?: string;
             entryPrice?: number;
@@ -952,10 +921,10 @@ export interface components {
             sellReason?: string;
             verdict?: string;
         };
-        ManasSellReport: {
+        SwingSellReport: {
             /** Format: date-time */
             asOf?: string;
-            items?: components["schemas"]["ManasSellDecision"][];
+            items?: components["schemas"]["SwingSellDecision"][];
         };
         ShadowSummaryResponse: {
             items?: components["schemas"]["VariantSummary"][];
@@ -1714,7 +1683,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ManasSwingRun"];
+                    "*/*": components["schemas"]["SwingRun"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -2253,7 +2222,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["Report"];
+                    "*/*": components["schemas"]["SwingSellReport"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -2282,7 +2251,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ManasSellReport"];
+                    "*/*": components["schemas"]["SwingSellReport"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

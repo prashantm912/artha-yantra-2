@@ -820,7 +820,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/ManasSwingRun"
+                  "$ref" : "#/components/schemas/SwingRun"
                 }
               }
             }
@@ -1555,7 +1555,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/Report"
+                  "$ref" : "#/components/schemas/SwingSellReport"
                 }
               }
             }
@@ -1583,7 +1583,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/ManasSellReport"
+                  "$ref" : "#/components/schemas/SwingSellReport"
                 }
               }
             }
@@ -2408,31 +2408,6 @@
           }
         }
       },
-      "ManasSwingRun" : {
-        "type" : "object",
-        "properties" : {
-          "strategies" : {
-            "type" : "integer",
-            "format" : "int32"
-          },
-          "candidates" : {
-            "type" : "integer",
-            "format" : "int32"
-          },
-          "entries" : {
-            "type" : "integer",
-            "format" : "int32"
-          },
-          "exits" : {
-            "type" : "integer",
-            "format" : "int32"
-          },
-          "exitSkipped" : {
-            "type" : "integer",
-            "format" : "int32"
-          }
-        }
-      },
       "ResetBody" : {
         "type" : "object",
         "properties" : {
@@ -2705,22 +2680,7 @@
           }
         }
       },
-      "Report" : {
-        "type" : "object",
-        "properties" : {
-          "asOf" : {
-            "type" : "string",
-            "format" : "date-time"
-          },
-          "items" : {
-            "type" : "array",
-            "items" : {
-              "$ref" : "#/components/schemas/SellDecision"
-            }
-          }
-        }
-      },
-      "SellDecision" : {
+      "SwingSellDecision" : {
         "type" : "object",
         "properties" : {
           "symbol" : {
@@ -2732,47 +2692,6 @@
           "stage" : {
             "type" : "integer",
             "format" : "int32"
-          },
-          "footprint" : {
-            "type" : "string"
-          },
-          "entryPrice" : {
-            "type" : "number"
-          },
-          "currentPrice" : {
-            "type" : "number"
-          },
-          "unrealizedPct" : {
-            "type" : "number"
-          },
-          "stopLevel" : {
-            "type" : "number"
-          },
-          "trailLevel" : {
-            "type" : "number"
-          },
-          "stillBuyable" : {
-            "type" : "boolean"
-          },
-          "sellingNow" : {
-            "type" : "boolean"
-          },
-          "sellReason" : {
-            "type" : "string"
-          },
-          "verdict" : {
-            "type" : "string"
-          }
-        }
-      },
-      "ManasSellDecision" : {
-        "type" : "object",
-        "properties" : {
-          "symbol" : {
-            "type" : "string"
-          },
-          "setup" : {
-            "type" : "string"
           },
           "setupType" : {
             "type" : "string"
@@ -2809,7 +2728,7 @@
           }
         }
       },
-      "ManasSellReport" : {
+      "SwingSellReport" : {
         "type" : "object",
         "properties" : {
           "asOf" : {
@@ -2819,7 +2738,7 @@
           "items" : {
             "type" : "array",
             "items" : {
-              "$ref" : "#/components/schemas/ManasSellDecision"
+              "$ref" : "#/components/schemas/SwingSellDecision"
             }
           }
         }

@@ -282,11 +282,26 @@ batch-liveness gap** (§1 row). Below = items NOT already enumerated elsewhere i
 - Rest = cosmetic (D3 sector staleness, D4 signals-strategy-UUID, D5 mojibake, D6 CAGR-0.00%, D7 drawdown-downsample) +
   LOW visual.
 
-### 8c. Register Phase-1 recon leads (`archive/2026-07-02-...-findings-register.md` §9, ~26)
-Main fix queue CLOSED (#500–507). Survivors = unverified recon citations — FeeConstants drift-detection, optimizer
-error-swallowing (blanket except → "failed"), dual symbol-grammar candle reads (#214 class), `ay reset-db -v` blast
-radius, plaintext broker creds in `deploy/openalgo/.env`, etc. **VERIFY the cited lines before actioning** (frozen
-2026-07-02; several may be incidentally fixed since).
+### 8c. Register Phase-1 recon leads (`archive/2026-07-02-...-findings-register.md` §9)
+Main fix queue CLOSED (#500–507). Verified 2026-07-09: **24 still-open, 0 fixed-since, 3 moot** (most are accepted
+single-owner tradeoffs). **Ops-hardening batch SHIPPED 2026-07-09/10** (owner "go with the ops-hardening batch"):
+- **§9-14 fee-drift canary** — [`#642`](https://github.com/prashantm912/artha-yantra-2/pull/642): `FeeConstantsDriftTest`
+  pins the 18 statutory-fee constants; a silent rate drift now fails loudly (test-only). MERGED.
+- **§9-6/§9-7 optimizer error-swallowing + YAML-precedence** — already SHIPPED 2026-07-09 ([`#637`](https://github.com/prashantm912/artha-yantra-2/pull/637)).
+- **§9-1 optimizer + margin OpenAPI contract diff-gate** — [`#643`](https://github.com/prashantm912/artha-yantra-2/pull/643):
+  gates the version-STABLE API surface (method/path, params, response codes) via `contracts/<svc>.api-surface.json` — NOT
+  the raw `app.openapi()` (its pydantic serialization churns across Python/fastapi versions → false-fails CI 3.12 vs dev
+  3.14). MERGED.
+- **§9-23 contract-canary no-token silent skip** — [`#644`](https://github.com/prashantm912/artha-yantra-2/pull/644),
+  `c0943239`: `maybeRunDaily` now checks the token BEFORE reserving the daily marker, so a pre-login trigger defers
+  (retries once the token exists) instead of burning the day's canary. MERGED + market-data redeployed.
+- **§9-22 SystemStatus market-data-UP-forever (no freshness bound)** — **flagged, not done**: the fix needs a `Clock`
+  injection into a reactive controller + touches wall-clock status semantics → not a clean quick win.
+
+Remaining survivors = accepted single-owner tradeoffs (`ay reset-db -v` blast radius, plaintext broker creds in
+`deploy/openalgo/.env`, host-published dev ports, PHC `$$`-escaping) + a few low robustness gaps (dual symbol-grammar
+candle reads #214-class, calendar coverage-from-presence, Black76 degenerate-input guards). **VERIFY the cited lines
+before actioning** (frozen 2026-07-02; the 3 moot ones no longer apply).
 
 ### 8d. Autonomously-startable batch — OUTCOMES (2026-07-09)
 - **D2 strategies 50-cap — ALREADY FIXED** (verify-first win): `frontend-react/src/api/strategies.ts:74` already sets

@@ -90,6 +90,14 @@ public class ContractCanary {
     if (!isTradingDaySafe(today)) {
       return;
     }
+    // Check the token BEFORE reserving the daily marker (register §9-23): if this fires before the
+    // morning login (no token yet), reserving the marker first would burn the day — runNow() then
+    // skips on the missing token, and the idempotency marker blocks any retry after the token arrives,
+    // so the day's contract canary is silently missed. Defer instead, so a later trigger runs it.
+    if (tokenProvider.currentToken().isEmpty()) {
+      log.info("contract canary deferred — no live token yet (will retry once the token is present)");
+      return;
+    }
     Boolean first =
         redis.opsForValue().setIfAbsent(MARKER_KEY_PREFIX + today, "RUNNING");
     if (!Boolean.TRUE.equals(first)) {

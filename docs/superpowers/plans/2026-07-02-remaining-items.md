@@ -295,8 +295,14 @@ single-owner tradeoffs). **Ops-hardening batch SHIPPED 2026-07-09/10** (owner "g
 - **§9-23 contract-canary no-token silent skip** — [`#644`](https://github.com/prashantm912/artha-yantra-2/pull/644),
   `c0943239`: `maybeRunDaily` now checks the token BEFORE reserving the daily marker, so a pre-login trigger defers
   (retries once the token exists) instead of burning the day's canary. MERGED + market-data redeployed.
-- **§9-22 SystemStatus market-data-UP-forever (no freshness bound)** — **flagged, not done**: the fix needs a `Clock`
-  injection into a reactive controller + touches wall-clock status semantics → not a clean quick win.
+- **§9-22 SystemStatus market-data-UP-forever (no freshness bound)** — SHIPPED + DEPLOYED
+  [`#646`](https://github.com/prashantm912/artha-yantra-2/pull/646), `8a0e72d8`: during market hours (phase OPEN) the
+  rollup now requires a fresh `ticks:last-at` heartbeat (≤5 min) or market-data reads DEGRADED (a lingering
+  `kite:session:status` key survived a crash → dead feed read UP forever); quiet off-hours; UNKNOWN when the key is
+  absent. Extracted a pure `marketDataStatus()` helper so it's unit-tested without the wall-clock (no Clock injection
+  after all). `overall` stays kite-driven; still Redis-key-only (no REST fan-out). The register's OTHER half —
+  enumerating backtest/strategy-signal/optimizer in `services[]` — is deferred (the rollup is Redis-key-only by design →
+  needs a per-service heartbeat-key protocol). **Ops-hardening batch now FULLY shipped (§9-1/§9-14/§9-22/§9-23 + §9-6/§9-7).**
 
 Remaining survivors = accepted single-owner tradeoffs (`ay reset-db -v` blast radius, plaintext broker creds in
 `deploy/openalgo/.env`, host-published dev ports, PHC `$$`-escaping) + a few low robustness gaps (dual symbol-grammar

@@ -141,3 +141,38 @@ def test_early_stopping_true_still_accepted():
     # Regression: the bool short-circuit must survive the coercion change (earlyStopping: true).
     resp = _post({"earlyStopping": True})
     assert resp.status_code == 202
+
+
+class _RaisingStrategy:
+    """A strategy client whose resolve() blows up (mirrors resolve() raise_for_status()-ing a bad
+    strategyId) — proves the request-only validation fires BEFORE the resolve round-trip."""
+
+    def resolve(self, strategy_id, version):
+        raise RuntimeError("resolve should not be reached for an invalid request")
+
+
+def _client_raising_resolve():
+    jobs, trials = FakeJobs(), FakeTrials()
+    service = SweepService(
+        strategy_client=_RaisingStrategy(),
+        jobs_factory=lambda: jobs,
+        trials_factory=lambda: trials,
+        dispatcher=FakeDispatcher(jobs),
+        runner=lambda **kwargs: None,
+    )
+    app = FastAPI()
+    app.add_exception_handler(ApiError, api_error_handler)
+    app.add_exception_handler(InvalidParameterPath, invalid_path_handler)
+    app.state.sweeps = service
+    app.include_router(api.router)
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def test_bad_input_is_400_before_resolve_never_500():
+    # A bad maxTrials must be a clean 400 even when the strategy would fail to resolve — the
+    # request-only knobs are validated before the (failable) resolve, so no opaque 500 leaks.
+    resp = _client_raising_resolve().post(
+        "/api/v1/optimizations/run", json={**RUN_BODY, "maxTrials": "lots"}
+    )
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "VALIDATION_FAILED"

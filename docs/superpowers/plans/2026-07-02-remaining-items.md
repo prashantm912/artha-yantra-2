@@ -265,8 +265,8 @@ batch-liveness gap** (§1 row). Below = items NOT already enumerated elsewhere i
   determinism / **M35** liquidity depth 25×→50× / **M39** VCP base-depth+duration caps · setup-doctrine owner-call:
   **M36** 50d-trail armed day-1 / **M37** PowerPlay depth-duration caps / **M38** PrimaryBase 52wk-breakout mislabel /
   **M40** Manas open-risk cap · exit-parity HOLD batch (task #128): **M2 M3 M4 M6 M7 M8 M9 M10 M11 M13 M14 M27** · other:
-  **M1** margin-heat basket-blind / **M16** book default 'manual' fail-open / **M17 M18 M20** FE surfaces / **M28** zero
-  e2e for new pages / **M31** ~80% fork debt (10+ Minervini↔Manas file pairs).
+  **M1** margin-heat basket-blind / **M16** book default 'manual' fail-open / **M17 M18** FE surfaces (~~M20 DONE #649~~,
+  §8e) / **M28** zero e2e for new pages / **M31** ~80% fork debt (10+ Minervini↔Manas file pairs).
 - **LOW (~28, none started):** cosmetic/test/long-tail; the only one with teeth = serial/N+1 backtest reads
   (`ManasAroraBacktestService.readSeries`, ~1,800 round-trips, ~40 min under a concurrent pg_dump).
 
@@ -333,3 +333,25 @@ before actioning** (frozen 2026-07-02; the 3 moot ones no longer apply).
 - **07-02 bhavcopy re-fetch — DEFERRED (needs a trigger)**: still partial (167/~2380 EQ), but the reconcile SKIPS partial
   dates (anti-join on DISTINCT `trade_date` — 07-02 is present, just incomplete), so no clean single-date re-fetch path
   exists. Needs a targeted re-fetch endpoint (small build) or a delete-then-reconcile (mutating). Flagged, not run.
+
+### 8e. "do 1 and 2" batch — OUTCOMES (2026-07-10)
+Owner picked the two remaining clean-autonomous items off the "what next" fork (option 3 = the gated levers below).
+- **§9-8/§9-9 optimizer `/optimizations/run` request-dict validation — SHIPPED + MERGED** ([`#648`](https://github.com/prashantm912/artha-yantra-2/pull/648)):
+  the sweep-submit path trusted the raw dict, so bad input was an opaque 500 or a silently-empty leaderboard. Now: a
+  non-numeric `maxTrials`/`seed`/`earlyStopping` → clean 400 (was int()-500 deep in the thread-kwargs build); `maxTrials`
+  bounded 1..1000 (random/tpe/nsga2 run EXACTLY maxTrials → uncapped = runaway); a parameter missing `path` → 400 (was
+  KeyError-500); a non-object `walkForward` → 400; and **§9-9** an objective naming a metric the backtest never emits →
+  400 against the rankable-metric allowlist (source of truth: backtest `MetricsCalculator` + `BacktestRunner`, + `oos_fold_mean`)
+  instead of NaN-ing every trial. No new route/param/response-code (400s are raised, not declared) → api-surface gate
+  unchanged. +11 tests, 87 pass, ruff clean; ci-optimizer green; admin-merged past the two documented 2-core e2e flakes
+  (Python-only → cannot touch the FE WS/signals e2e).
+- **M20 swing sell-decision FE surface — SHIPPED** ([`#649`](https://github.com/prashantm912/artha-yantra-2/pull/649), CI in flight):
+  the daily Minervini + Manas Arora sell-decision triad was curl-only. New `/strategies/swing-sell-decisions` page —
+  `api/swing.ts` over the two read-only `/sell-decisions` endpoints (recompute on read), a book toggle + per-holding table
+  (setup, entry/current, signed unrealized %, base stop, current trail, "buyable now?" chip, HOLD/SELL verdict badge),
+  route + MegaMenu entry. Pure consumption of existing typed endpoints; no backend change. Verify trio green (lint/build
+  clean, 261 tests, coverage 51.09%).
+- **Remaining = owner/data-gated only** (option 3): the live-paper reliability month, an always-on host, the flag-flips
+  (F9 paper-risk arm / F7 promotion / Dow-factor), and the owner-call audit HIGH/MED doctrine items (H6/H8, the swing
+  exit-parity HOLD batch, register accepted single-owner tradeoffs). Nothing further is clean-autonomous without opening
+  one of those gates.

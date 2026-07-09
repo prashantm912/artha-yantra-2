@@ -165,7 +165,10 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
   (backtest-service owns `/api/v1/backtests/*`). Tests: `(cd services/optimizer-service && python -m
   pytest tests/ -q)` + `python -m ruff check app tests` (Python 3.14 global, no venv). A sweep needs
   the strategy to carry a `backtest.optimize` block (`method`+`max_trials`+`objective`+`parameters`,
-  all required) else 422 "no tunable parameters in the optimize block".
+  all required) else 422 "no tunable parameters in the optimize block". **ci-optimizer / ci-margin are
+  SEPARATE path-filtered workflows** (`.github/workflows/ci-optimizer.yml`, trigger `paths:
+  services/optimizer-service/**`) — NOT in the default `gh pr checks` rollup; a Python PR's ruff+pytest
+  gate shows under `gh run list --workflow ci-optimizer.yml`, so don't read its absence as "skipped".
 - **Backtest/optimizer submission identity + precedence (2b):** `strategyId` is the registry **UUID**
   (NOT the slug); omit `strategyVersion` → the optimizer/runner pins the latest published, else latest
   draft. Terminal job status string is `completed`; results are keyed by `resultRef` (the run id), read
@@ -248,6 +251,9 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   it. Project-scoped compose only — **never `docker kill`**.
 - Mock vs live is `SPRING_PROFILES_ACTIVE` in `.env`, orthogonal to compose profiles;
   mock needs zero secrets. PHC password hashes in `.env` need every `$` escaped `$$`.
+- **An `application.yml` `${ENV_NAME}` placeholder must match the compose + `.env` passthrough name
+  EXACTLY** — a mismatch silently swallows the `.env` override (falls to the YAML default), with no error
+  (e.g. `ARTHA_PAPER_RISK_PER_TRADE_PCT` vs `..._PER_TRADE_RISK_PCT`, #653). Grep both sides when adding a knob.
 - **Mock and live use SEPARATE databases + Redis logical DBs** — live → `artha`/db0,
   mock → `artha_mock`/db1 — derived from the profile by `ay.ps1` (exports
   `ARTHA_DB_NAME`/`ARTHA_REDIS_DB` into compose env); the `db-create` one-shot makes both,
@@ -280,6 +286,9 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   fail several CI iterations (cold start, constrained cores). Gate e2e readiness on
   container healthchecks, not gateway HTTP (a 401 is the gateway auth filter, not
   upstream readiness).
+- **The `e2e` job has two known 2-core flakes** — `tests/signals.spec.ts` (live-signal breakdown) +
+  `tests/ws-reconnect.spec.ts` (WS pill on /signals). A change that can't touch signals/WS/app-shell may
+  be admin-merged past them once every OTHER gate is green — don't "fix" them, rerun or admin-merge.
 
 ## Where things live
 - `services/` services · `libs/` shared libs · `deploy/` compose + flyway · `e2e/`

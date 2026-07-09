@@ -110,6 +110,7 @@ const SECTIONS: MenuSection[] = [
     items: [
       { label: 'Strategies', to: '/strategies' }, // cockpit — registry list + versions/publish (E-11)
       { label: 'Graduation', to: '/strategies/graduation' }, // F7 — per-strategy paper-readiness board
+      { label: 'Swing Sell Decisions', to: '/strategies/swing-sell-decisions' }, // M20 — daily HOLD/SELL triad for the Minervini + Manas swing books
       { label: 'Strategy Builder', to: '/strategies/strategy-builder' }, // Wave 3 — payoff + greeks
     ],
   },

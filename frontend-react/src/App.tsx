@@ -29,6 +29,7 @@ import { StrategiesListPage } from './pages/strategies/StrategiesListPage.tsx';
 import { StrategyVersionsPage } from './pages/strategies/StrategyVersionsPage.tsx';
 import { StrategyEditorPage } from './pages/strategies/StrategyEditorPage.tsx';
 import { GraduationPage } from './pages/strategies/GraduationPage.tsx';
+import { SwingSellDecisionsPage } from './pages/strategies/SwingSellDecisionsPage.tsx';
 import { BacktestRunnerPage } from './pages/backtests/BacktestRunnerPage.tsx';
 import { JobsPage } from './pages/backtests/JobsPage.tsx';
 import { JournalPage } from './pages/journal/JournalPage.tsx';
@@ -268,6 +269,7 @@ export function App() {
           {/* Strategies */}
           <Route path="/strategies" element={<StrategiesListPage />} />
           <Route path="/strategies/graduation" element={<GraduationPage />} />
+          <Route path="/strategies/swing-sell-decisions" element={<SwingSellDecisionsPage />} />
           <Route path="/strategies/:id/edit" element={<StrategyEditorPage />} />
           <Route path="/strategies/:id/versions" element={<StrategyVersionsPage />} />
           <Route path="/strategies/strategy-builder" element={<Lazy><StrategyBuilderPage /></Lazy>} />

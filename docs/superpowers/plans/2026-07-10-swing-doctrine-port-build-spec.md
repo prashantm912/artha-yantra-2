@@ -4,16 +4,20 @@
 Deploy decision (Q5): **build → prove byte-identical → merge + deploy now** (owner overrode the
 "hold — watch the live-paper month" posture for this parity-neutral, characterization-proven change).
 
-**Progress (2026-07-10):** FOUNDATION BUILT + COMPILE-CLEAN (additive; nothing live touched, old
-engines still the live path) — `swing/SwingCandidate`, `swing/PyramidPolicy` (+`NONE`),
-`swing/SwingDoctrine`, `swing/SwingBatchEngine` (the stateless `runDaily(doctrine)` core, multi-lot,
-mirrors the Manas superset). `mvnw -pl strategy-signal -am compile` green. **Remaining (the
-parity-gated finish, resume here):** `MinerviniDoctrine`/`ManasDoctrine` + `ManasPyramidPolicy` +
-`SwingBatchRecorder` + `SwingSellDecisionService` → characterization test GREEN (byte-identical, the
-gate) → swap the 2 schedulers/controllers to thin shells + delete the 2 old engines / 2 sell-decisions
-/ 2 recorders → `-am verify` (H11/H12/Modularity/goldens) → adversarial review → merge + redeploy +
-live-verify the next 20:00/20:05 batch. Marker keys MUST stay `"minervini"`/`"manas-arora"` (P0-4
-canary contract); the SwingBatchAlert ntfy text is not a parity surface.
+**Status: SHIPPED + DEPLOYED + LIVE-VERIFIED 2026-07-10** — [`#655`](https://github.com/prashantm912/artha-yantra-2/pull/655),
+squash `9bae2161`. All built: `swing/{SwingCandidate,PyramidPolicy,SwingDoctrine,SwingBatchEngine,
+SwingBatchRecorder,SwingSellDecisionService}` + `MinerviniDoctrine`/`ManasDoctrine`/`ManasPyramidPolicy`
++ thin per-family scheduler/controller shells; the 2 old engines / 2 sell-decision services / 2 recorders
+DELETED. **24 unit tests green** (behaviors: entry/no-entry/stop, H2×2, P0-3×2, H3, pyramid
+add/block/exit-all-lots, sell HOLD/SELL) + **exact-string detail-JSON guards** locking the side-channel
+byte-identity. **Adversarial timescale-domain review: PASS** (line-by-line vs the deleted engines — no
+P&L or side-channel divergence; only the intended recaptured DTOs changed). CI green (strategy-gateway
+shard incl. ModularityTest + goldens + H12 ITs; contracts recaptured to `SwingSellReport`/`SwingRun`;
+only the two documented 2-core e2e flakes red). **DEPLOYED + LIVE-VERIFIED:** strategy-signal rebuilt
+from main + healthy; both `/sell-decisions` endpoints return the unified `SwingSellReport` on REAL
+holdings with the correct per-family trail (Minervini sma50, Manas ATR-null-until-armed) + stage/setupType.
+**Only inherent deferral:** the entry/exit BATCH firing identically is confirmed at the next 20:00/20:05
+IST batch (watched by the dead-man's-switch + P0-4 canary + `exit_skipped` counter).
 
 Collapses the ~65–70% duplicated batch-orchestration skeleton across the Minervini↔Manas swing fork
 (audit M31, 7 file-pairs) into one `SwingBatchEngine` driven by a `SwingDoctrine` port — so the

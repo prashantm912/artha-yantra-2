@@ -266,7 +266,21 @@ batch-liveness gap** (§1 row). Below = items NOT already enumerated elsewhere i
   **M36** 50d-trail armed day-1 / **M37** PowerPlay depth-duration caps / **M38** PrimaryBase 52wk-breakout mislabel /
   **M40** Manas open-risk cap · exit-parity HOLD batch (task #128): **M2 M3 M4 M6 M7 M8 M9 M10 M11 M13 M14 M27** · other:
   **M1** margin-heat basket-blind / **M16** book default 'manual' fail-open / **M17 M18** FE surfaces (~~M20 DONE #649~~,
-  §8e) / **M28** zero e2e for new pages / **M31** ~80% fork debt (10+ Minervini↔Manas file pairs).
+  §8e) / **M28** zero e2e for new pages / ~~**M31** ~80% fork debt~~ **DONE [#655](https://github.com/prashantm912/artha-yantra-2/pull/655)
+  §8g — SwingDoctrine port**.
+
+### 8g. M31 swing fork consolidation — SHIPPED + DEPLOYED + LIVE-VERIFIED (2026-07-10)
+The audit-M31 "~80% Minervini↔Manas fork" (7 duplicated file-pairs) collapsed into ONE `SwingBatchEngine` driven by a
+`SwingDoctrine` port — [`#655`](https://github.com/prashantm912/artha-yantra-2/pull/655), `9bae2161`. Grilled via
+`/improve-codebase-architecture` (Candidate 01, 5 decisions); design of record
+[`2026-07-10-swing-doctrine-port-build-spec.md`](2026-07-10-swing-doctrine-port-build-spec.md), domain glossary
+[`CONTEXT.md`](../../../CONTEXT.md) (new). Multi-lot-native engine; Minervini = the degenerate single-lot case
+(`PyramidPolicy.NONE`). Deleted 2 engines + 2 sell-decision services + 2 recorders. **Parity: byte-identical** — frozen
+evaluators untouched (goldens safe), 24 unit tests + exact-string detail-JSON guards, adversarial timescale-domain review
+PASS (no P&L/side-channel divergence). Contract recaptured (`SwingSellReport`/`SwingRun`). DEPLOYED + live-verified (both
+`/sell-decisions` return the unified shape on real holdings, correct per-family trail). The entry/exit batch-firing verify
+is inherently the next 20:00/20:05 IST batch (dead-man's-switch + P0-4 canary watch it). This was an owner-directed
+mid-reliability-month deploy (parity-neutral + characterization-proven) — overriding the "hold — watch" posture for this one.
 - **LOW (~28, none started):** cosmetic/test/long-tail; the only one with teeth = serial/N+1 backtest reads
   (`ManasAroraBacktestService.readSeries`, ~1,800 round-trips, ~40 min under a concurrent pg_dump).
 

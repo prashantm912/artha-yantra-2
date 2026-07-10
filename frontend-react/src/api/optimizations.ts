@@ -13,7 +13,7 @@ export type TrialState = 'RUNNING' | 'COMPLETE' | 'PRUNED' | 'FAILED';
 export interface GuardMetrics {
   dataHash?: string | null;
   foldsExcluded?: number | null;
-  /** Regimes that traded across folds, canonical order (BULL/RANGE/BEAR/CRASH). */
+  /** Regimes that traded across folds, canonical order (UP_QUIET/UP_TURBULENT/DOWN_QUIET/DOWN_TURBULENT). */
   regimesCovered: string[];
   /** Min / mean / max of the per-(fold, regime) OOS Sharpe (null when no regime traded). */
   regimeOosMin?: number | null;
@@ -56,8 +56,10 @@ export interface RegimeOosStat {
   tradeCount: number;
 }
 
-/** The four canonical regime labels, in display order (BULL/RANGE/BEAR/CRASH). */
-export const REGIME_LABELS = ['BULL', 'RANGE', 'BEAR', 'CRASH'] as const;
+// The four canonical regime labels, in backtest-service RegimeLabel enum order. These MUST match the
+// enum names the backtest fold serializer emits (regimeOos/regimeMix are keyed by RegimeLabel.name())
+// — a BULL/RANGE/BEAR/CRASH alias set never intersects the real keys, leaving every regime column empty.
+export const REGIME_LABELS = ['UP_QUIET', 'UP_TURBULENT', 'DOWN_QUIET', 'DOWN_TURBULENT'] as const;
 export type RegimeLabel = (typeof REGIME_LABELS)[number];
 
 /**

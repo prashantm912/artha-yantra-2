@@ -40,14 +40,15 @@ def test_guard_metrics_aggregates_per_regime_oos_sharpe():
         "dataHash": "abc",
         "foldsExcluded": 1,
         "regimeOos": [
-            {"BULL": {"sharpe": "1.0"}, "BEAR": {"sharpe": "0.4"}},
-            {"BULL": {"sharpe": "0.8"}, "RANGE": {"sharpe": None}},  # untraded RANGE skipped
+            {"UP_QUIET": {"sharpe": "1.0"}, "DOWN_QUIET": {"sharpe": "0.4"}},
+            {"UP_QUIET": {"sharpe": "0.8"}, "UP_TURBULENT": {"sharpe": None}},  # untraded skipped
         ],
     }
     out = leaderboard.guard_metrics(summary)
     assert out["dataHash"] == "abc"
     assert out["foldsExcluded"] == 1
-    assert out["regimesCovered"] == ["BULL", "BEAR"]  # canonical order, RANGE absent (no Sharpe)
+    # canonical RegimeLabel enum order; UP_TURBULENT absent (null Sharpe = untraded)
+    assert out["regimesCovered"] == ["UP_QUIET", "DOWN_QUIET"]
     assert out["regimeOosMin"] == 0.4
     assert out["regimeOosMax"] == 1.0
     assert out["regimeOosMean"] == (1.0 + 0.4 + 0.8) / 3
@@ -59,6 +60,29 @@ def test_guard_metrics_no_traded_regime_yields_null_aggregates():
     assert out["regimeOosMin"] is None
     assert out["regimeOosMean"] is None
     assert out["regimeOosMax"] is None
+
+
+def test_regimes_covered_populates_from_canonical_backtest_labels():
+    """B10 regression: backtest-service serializes each fold's regimeOos keyed by the RegimeLabel
+    enum name (UP_QUIET / UP_TURBULENT / DOWN_QUIET / DOWN_TURBULENT). The pre-fix leaderboard
+    compared against a BULL/RANGE/BEAR/CRASH alias set, so the intersection was ALWAYS empty and
+    ``regimesCovered`` never populated. It must now surface every traded canonical label, in enum
+    order, regardless of the fold order they arrive in."""
+    summary = {
+        "regimeOos": [
+            {"DOWN_TURBULENT": {"sharpe": "0.2"}, "UP_QUIET": {"sharpe": "1.1"}},
+            {"DOWN_QUIET": {"sharpe": "0.5"}, "UP_TURBULENT": {"sharpe": "0.9"}},
+        ],
+    }
+    out = leaderboard.guard_metrics(summary)
+    assert out["regimesCovered"] == ["UP_QUIET", "UP_TURBULENT", "DOWN_QUIET", "DOWN_TURBULENT"]
+
+
+def test_legacy_bull_range_aliases_do_not_populate_regimes_covered():
+    """Guards the root cause from returning: the retired BULL/RANGE/BEAR/CRASH aliases are NOT
+    canonical labels and never appear in a persisted fold_metrics row, so they must not resolve."""
+    summary = {"regimeOos": [{"BULL": {"sharpe": "1.0"}, "BEAR": {"sharpe": "0.4"}}]}
+    assert leaderboard.guard_metrics(summary)["regimesCovered"] == []
 
 
 def _service(jobs, trials, backtest=None):
@@ -104,13 +128,13 @@ def test_best_attaches_guard_metrics_for_fold_runs():
         guard={
             "dataHash": "abc",
             "foldsExcluded": 2,
-            "regimeOos": [{"BULL": {"sharpe": "1.0"}}, {"BEAR": {"sharpe": "0.5"}}],
+            "regimeOos": [{"UP_QUIET": {"sharpe": "1.0"}}, {"DOWN_QUIET": {"sharpe": "0.5"}}],
         },
     )
     out = _service(jobs, trials, backtest).best(sweep_id, top=10, sort="raw")
     assert backtest.guard_calls == ["r1"]
     guard = out["items"][0]["guardMetrics"]
-    assert guard["regimesCovered"] == ["BULL", "BEAR"]
+    assert guard["regimesCovered"] == ["UP_QUIET", "DOWN_QUIET"]
     assert guard["foldsExcluded"] == 2
     assert guard["regimeOosMin"] == 0.5
 

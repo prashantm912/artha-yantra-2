@@ -19,6 +19,7 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -111,6 +112,74 @@ class OiBackfillIntegrationTest extends MarketDataIntegrationTestBase {
                         + "\"}"))
         .andExpect(status().isAccepted())
         .andExpect(jsonPath("$.jobId").isString());
+  }
+
+  @Test
+  void migrationAddsUuidJobIdColumnToBackfillJobs() {
+    Long cols =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM information_schema.columns "
+                + "WHERE table_schema = 'marketdata' AND table_name = 'backfill_jobs' "
+                + "AND column_name = 'job_id' AND data_type = 'uuid'",
+            Long.class);
+    assertThat(cols).as("V041 adds the uuid job_id column").isEqualTo(1L);
+  }
+
+  @Test
+  void triggerAsyncWritesAnOiAuditRowCorrelatableByJobId() {
+    awaitNotRunning();
+    Map<String, String> handle = service.triggerAsync(UNDERLYING, expiry, SESSION);
+    String jobId = handle.get("jobId");
+    assertThat(jobId).isNotBlank();
+
+    OiBackfillService.Status done = awaitDone();
+    assertThat(done.state()).isEqualTo("OK");
+
+    // The OI-backfill path now writes its OWN backfill_jobs row (audit V12 — it wrote NONE before),
+    // kind='OI', carrying the same jobId the trigger + status quote, so a status poll can be joined
+    // back to its ledger row.
+    Map<String, Object> row =
+        jdbc.queryForMap(
+            "SELECT kind, job_id::text AS job_id, status, rows_written "
+                + "FROM backfill_jobs WHERE job_id = ?::uuid",
+            jobId);
+    assertThat(row.get("kind")).isEqualTo("OI");
+    assertThat(row.get("job_id")).isEqualTo(jobId);
+    assertThat(row.get("status")).isEqualTo("COMPLETED");
+    assertThat(((Number) row.get("rows_written")).longValue())
+        .isEqualTo((long) done.optionRows() + done.futuresRows());
+  }
+
+  /** Waits until no OI backfill holds the single-run lock (a prior async run may still be finishing). */
+  private void awaitNotRunning() {
+    for (int i = 0; i < 250; i++) {
+      if (!"RUNNING".equals(service.status().state())) {
+        return;
+      }
+      sleep();
+    }
+    throw new AssertionError("an OI backfill stayed RUNNING too long");
+  }
+
+  /** Blocks until the async run leaves RUNNING (OK/FAILED), or fails after ~5s. */
+  private OiBackfillService.Status awaitDone() {
+    for (int i = 0; i < 250; i++) {
+      OiBackfillService.Status s = service.status();
+      if ("OK".equals(s.state()) || "FAILED".equals(s.state())) {
+        return s;
+      }
+      sleep();
+    }
+    throw new AssertionError("OI backfill did not finish in time: " + service.status().state());
+  }
+
+  private static void sleep() {
+    try {
+      Thread.sleep(20);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException(e);
+    }
   }
 
   private long count(String sql) {

@@ -10,9 +10,9 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * Market-data admin surface — the backfill run-audit history (V030 {@code backfill_jobs}). Read-only:
- * the most recent EXPIRED / EQUITY_DAILY runs, newest first, with their status/rows/error/timings, so
- * the Data-Ops console can show a run history alongside the live Collection Status. Auto-proxied by the
- * edge-gateway {@code /api/v1/market/**} route.
+ * the most recent EXPIRED / EQUITY_DAILY / OI runs, newest first, with their status/rows/error/timings,
+ * so the Data-Ops console can show a run history alongside the live Collection Status. Auto-proxied by
+ * the edge-gateway {@code /api/v1/market/**} route.
  */
 @RestController
 @RequestMapping("/api/v1/market/admin")

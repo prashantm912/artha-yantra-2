@@ -215,7 +215,7 @@ public class EquityDailyBackfillService {
     RunProgress p = new RunProgress(jobId, started);
     progress = p;
     status.set(p.snapshot("RUNNING", null, 0, null));
-    long auditId = auditStart(universe, lookback);
+    long auditId = auditStart(jobId, universe, lookback);
     executor.submit(
         () -> {
           try {
@@ -334,13 +334,13 @@ public class EquityDailyBackfillService {
    * {@code jobRepo} in the test seam) returns -1 and is swallowed with a warn: the audit must never
    * break the backfill it records.
    */
-  private long auditStart(List<String> universe, int days) {
+  private long auditStart(String jobId, List<String> universe, int days) {
     if (jobRepo == null) {
       return -1;
     }
     try {
       String params = String.format("{\"symbols\":%d,\"days\":%d}", universe.size(), days);
-      return jobRepo.start("EQUITY_DAILY", params);
+      return jobRepo.start("EQUITY_DAILY", jobId, params);
     } catch (RuntimeException e) {
       log.warn("equity-daily-backfill: could not open audit row (non-fatal): {}", e.toString());
       return -1;

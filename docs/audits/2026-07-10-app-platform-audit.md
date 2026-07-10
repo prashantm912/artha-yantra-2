@@ -46,9 +46,10 @@ strategy editor/versions, login/redirects).
 
 1. **Live capture (market hours):** Kite WS ticks → `RedisTickPublisher` → 1m bars
    (`BarWriter`, pub `candles.1m.*`) · full options chain every **2 min** (cron
-   `0 */2 * * * *`, `MD/options/OptionsSnapshotService.java:97` — docs still say 3-min,
-   stale) → `options_chain_snapshots` · futures OI every 1 min (23 underlyings = indices +
-   17 banks, `MD/futures/FuturesOiSnapshotService.java:33`) → `futures_oi_snapshots` ·
+   `0 */2 * * * *`, `MD/options/OptionsSnapshotService.java:97` — the master plan still
+   says 3-min and the V006 header says 5-min; stale docs) → `options_chain_snapshots` ·
+   futures OI every 1 min (23 underlyings = indices + 17 banks,
+   `MD/futures/FuturesOiSnapshotService.java:73` + `application.yml:197`) → `futures_oi_snapshots` ·
    pre-open equity scan 09:09:30 → `preopen_equity_snapshots`.
 2. **EOD batch chain:** 19:00 NSE FII/DII + participant-OI + FII-derivative
    (`MD/nse/NseEodScheduler.java:50-65`) · 19:30 NSE+BSE bhavcopy → EOD tables + 1d candles
@@ -56,8 +57,9 @@ strategy editor/versions, login/redirects).
    Minervini + 19:55 Manas screeners (event-chained + fallback crons) · 20:00/20:05 swing
    batches · 21:00 graduation evaluator (flag-off).
 3. **Virtual history:** pre-capture OI derived read-time from per-contract candles
-   (`CandleDerivedChainReader`), provenance `derived`, iv/greeks null (fidelity audit owns
-   the fidelity implications).
+   (`CandleDerivedChainReader`), iv/greeks null; a `derived` flag is surfaced only on
+   Connecting Dots + backtest OI-attribution — StrikePoint endpoints expose no provenance
+   field (§3.2.3; fidelity audit owns the fidelity implications).
 4. **Static reference data (a hidden fourth plane):** 4 classpath JSONs — index
    constituents (3 indices), 502-symbol sector map, index weights, Upstox key map — hand
    -seeded, frozen since 2026-06-23, no maintenance surface (`MD/constituents/StaticIndexConstituents.java:27-43`).
@@ -68,8 +70,9 @@ strategy editor/versions, login/redirects).
 
 - **Redis pub-sub (fire-and-forget, 7 channels):** `ticks.{exch}.{sym}`, `candles.1m.*`,
   `options.chain`, `kite.status`, `signals`, `strategy.changed`, `jobs.progress`. The WS
-  bridge (`GW/.../ws/StompWebSocketHandler.java:274-292`) exposes exactly these to the SPA
-  as a closed allowlist.
+  bridge (`GW/.../ws/StompWebSocketHandler.java:274-292`) exposes six of these to the SPA
+  as a closed allowlist (`kite.status` rides `/topic/system`; `strategy.changed` is NOT
+  bridged — consumed in-service by the engine hot-swap only).
 - **Redis streams (transport; PG authoritative):** `jobs.backtest`, `jobs.backtest.trials`,
   `optimizations.results` with consumer groups; boot PEL hygiene is ACK-and-drop then
   re-dispatch from the `jobs` table.
@@ -85,16 +88,18 @@ strategy editor/versions, login/redirects).
 ### 1.4 Systemic properties that shape everything below
 
 - **Pull-dominant UI.** Only signals/ticks/jobs are WS-pushed. Every OI/analytics page is
-  Go-button + 30 s staleTime; no OI page auto-polls (cockpit's 45 s fan-out is the lone
-  exception, `FE/pages/scalper/CockpitPage.tsx:116-124`). The `options.chain` push is
-  bridged to STOMP but has **zero FE subscribers**.
+  Go-button + 30 s staleTime; no OI page auto-refetches its OI dataset — the exceptions are
+  the cockpit's 45 s fan-out (`FE/pages/scalper/CockpitPage.tsx:116-124`), the /scalper
+  ticket's 5 s chain + 3 s tick polls, and the chain page's 60 s VIX header quote. The
+  `options.chain` push is bridged to STOMP but has **zero FE subscribers**.
 - **Compute-on-read analytics.** PCR, max-pain, heatmap, trending, sentiment, sell-decisions
   are all folded per request; no caching on the OI read path; no materialized analytics.
   Correct-by-construction, cost paid per click.
 - **Three async-job models** (PG-backed backtest jobs vs in-memory backfills vs orphanable
   optimizer threads) with three status vocabularies — blocks any unified jobs surface (§5.6).
 - **Contract-gate blind spot:** 71 of ~203 REST handlers return `Map<String,Object>`
-  (ratchet-frozen ceilings; market-data at exactly 31/31 = zero headroom), invisible to
+  (ratchet-frozen ceilings; ALL FOUR services sit at exact capacity — GW 2/2, MD 31/31,
+  SS 28/28, BT 10/10 — zero headroom anywhere), invisible to
   springdoc + TS codegen; generated types are bound to the FE only for strategy-signal
   (`FE/api/contracts.bridge.ts:13`).
 - **Single-owner trust model.** One `ROLE_OWNER`, no RBAC, downstream services trust the
@@ -120,15 +125,17 @@ Gaps:
 - **No symbol search, no sort, no strategy filter** on /signals — backend supports
   `exchange`/`tradingsymbol`/`strategyVersionId` params the FE never sends
   (`SS/signals/SignalsController.java:43-45`).
-- **Signal status transitions are never re-published** — TAKEN/DISMISSED/EXPIRED mutate the
-  row only (`SS/signals/SignalsController.java:93-105`); a second tab/cockpit stays stale
-  until refetch. No `signals.status` frame exists.
+- **Signal status transitions are never re-published on the wire** — no Redis/WS frame
+  exists (`SS/signals/SignalsController.java:93-105`); a second tab/cockpit stays stale
+  until refetch. TAKEN does fire the in-process `SignalTaken` event (paper reacts);
+  DISMISSED/EXPIRED leave no trail beyond the row.
 - **Dot-health endpoint has no UI** (`SS/signals/SignalRejectionsController.java:42-45`;
   FE only type-asserts it). Rejections are poll-only (no WS push).
 - **No rejected-vs-fired comparison** view; no per-strategy rejection filter in the UI
   (backend supports both).
-- **Take from /signals is suggestedQty-only** — no qty/price override, no book selector;
-  the full ticket exists only on /scalper and /cockpit.
+- **Take from /signals is suggestedQty-only** — no qty/price override; the full ticket
+  exists only on /scalper and /cockpit, and no ticket UI exposes a book selector (the API
+  already accepts `book` on the body — the gap is UI-only).
 - Chart deep-link carries `signalId` that no chart page reads (`ChartsPage` overlays all
   signals for the symbol instead) — dead param.
 
@@ -151,7 +158,7 @@ Gaps (severity order):
    enum values dead, `FLY/strategy/V005:18-19`); `quote_bid`/`quote_ask` are `null, null`
    at both call sites (`PaperService.java:198-200,338-340`). No fill-event stream exists
    for anything downstream to consume.
-4. **F9 risk telemetry invisible**: advised_lots, margin_snapshot/margin_pct, margin-heat
+4. **#576 paper-risk telemetry invisible (fidelity F12)**: advised_lots, margin_snapshot/margin_pct, margin-heat
    endpoint (`SS/paper/PaperMarginController.java:48-67`), and the `risk_audit` tail
    (returned by `GET /risk/settings`, dropped by the FE type `FE/api/paper.ts:88-92`) all
    have zero UI. `heat_cap_pct` isn't even API-editable (`RiskController.java:28-35`).
@@ -159,9 +166,10 @@ Gaps (severity order):
    signal/trade); the PUT endpoint is FE-unused so auto-entries' discipline/emotion ratings
    are permanently null; positions don't expose `opening_signal_id` in `PositionDto`, so
    position→signal→reasoning navigation is impossible.
-6. Open-position SL/TP and closed-trade `close_reason` are in the payloads but not rendered
-   on /paper (`FE/pages/paper/PaperPage.tsx:293-301,341-349`); no bracket edit after open
-   (no PATCH position endpoint).
+6. Open-position SL/TP are in the positions payload but unrendered on /paper
+   (`FE/pages/paper/PaperPage.tsx:293-301`); closed-trade `close_reason` is persisted but
+   never mapped into `TradeDto` at all (`PaperService.java:110-119` — a BE mapping gap,
+   not just FE); no bracket edit after open (no PATCH position endpoint).
 7. Orders page is a permanent empty state without a broker (DisabledOrderGateway) — fine by
    design, but there is no paper-vs-broker reconciliation view for when OpenAlgo is armed.
 8. Watchlists: BE supports rename/reorder/delete; FE exposes none of them, and the "no tick
@@ -178,7 +186,9 @@ does NOT affect chart pages (`/market/candles` routes 1d to the dense base table
 
 Gaps: indicators are a fixed client-side set (VWAP/VWMA/VolMA/SuperTrend/RSI — no
 MACD/EMA/BB, not user-selectable, `FE/core/indicators.ts`); backtest-service's server
-indicator engine is unused by charts; no drawing tools (explicitly deferred); layout
+indicator engine is unused by charts (a full REST surface with zero consumers); no freehand
+drawing tools (trendline/fib/rectangle explicitly deferred — user-added horizontal price
+lines on AdvanceChart are the only primitive); layout
 persistence only for AdvanceChart via localStorage; Multiframe = fixed 2×2, no crosshair
 sync, no persistence, raw text symbol input; screener events not plottable; 3m is client
 -rolled from 1m (consistent for display; the runner's missing 3m option is §2.7).
@@ -191,46 +201,60 @@ sentiment/IV, straddle/calendar candle synthesis from real 1m leg candles); live
 via one `OiQuery` convention; ATM windows bound payloads.
 
 Gaps:
-1. **Freshness invisible on 11 of 19 pages** — only Options Chain has a true stale badge;
-   Trending OI / Interval-wise receive `asOf` and drop it. Combined with no auto-poll,
-   an open page silently ages.
+1. **Freshness invisible on 10 of 19 pages** — only Options Chain has a true stale badge
+   (8 more show a passive "Last updated"/"as of" only); Trending OI / Interval-wise receive
+   `asOf` and drop it. Combined with no auto-poll, an open page silently ages.
 2. **Unconsumed built backends:** `/premium-series` (ATM straddle decay), `/chain/history?at=`
    (chain time-travel), `/strike-session-stats` — all coded, zero FE consumers.
 3. **No strike drill-down** (chain/heatmap/spurt cell → that strike's premium chart);
    no IV smile/surface view (`/iv-history` backend exists, no options-section page);
    no cross-expiry or day-over-day comparison beyond Calendar Spread (premium-only).
-4. **No CSV export anywhere in options** (echarts PNG toolbox on 5 widgets only).
-5. Capture-cadence docs drift: code = 2-min cron; V006 header, application.yml comment,
-   master plan all say 3-min.
+4. **No CSV export anywhere in options** (echarts PNG save on 4 options-section widgets
+   only; 6 repo-wide).
+5. Capture-cadence docs drift: code = 2-min cron; the master plan says 3-min (×3), the
+   V006 header says 5-min, and the application.yml comment says ~2-min correctly but still
+   describes the retired fixedDelay mechanism.
 
 ### 2.5 Futures + Equity + FII/DII (context pages: real, but shallow + silently gappy)
 
-- Futures: universe = indices + 17 banks (oipulse scans all F&O; pages self-document the
-  reduction); **EOD OI Analyzer is a depth illusion** — it rolls intraday snapshots
-  (forward-only from ~2026-06), not an EOD F&O source, disclosed only in a code comment.
-  5 futures endpoints have no page (`/term-structure`, `/banks-grid`, `/movers-screen`…)
-  — consumed service-to-service.
+- Futures: universe = indices + 17 banks (oipulse scans all F&O; the reduction is noted in
+  page source comments only — invisible in the rendered UI); **EOD OI Analyzer is a depth
+  illusion** — it rolls intraday snapshots (forward-only from ~2026-06), not an EOD F&O
+  source, disclosed only in a code comment. 6 futures endpoints have no page:
+  `/term-structure`, `/movers-screen`, `/banks` are consumed service-to-service (universe
+  resolvers + the scalper OI client); `/banks-grid`, `/buzz`, `/oi-analysis` have zero
+  consumers anywhere.
 - Equity: breadth is single-date (no A/D history series despite bhavcopy depth being the
   ONE deep dataset); news is single-symbol manual input with zero persistence;
-  announcements = live NSE pass-through, 7-day default, no filters.
+  announcements = live NSE pass-through, 7-day default, filterable by date range + symbol
+  but with no category/keyword filters and no persistence. The remaining context pages are
+  sound EOD reads over bhavcopy — returns (5 fixed windows, sector-mapped names only),
+  delivery (per-symbol last-N), sector heatmap/stats (server folds; stats mixes live index
+  cards with the EOD stock table on one page), index contribution (live-or-EOD toggle,
+  static weights), open=high/low (live futures quotes, nothing persisted) — their shared
+  defects are the static reference JSONs (§3.2), CA-unadjusted closes, and absent
+  freshness badges, not page-local bugs.
 - **FII/DII: the weakest ingestion in the platform.** Cash flows = latest-only NSE JSON
   (no backfill possible — history only accrues forward); participant-OI = newest CSV only
-  (a missed 19:00 run is a permanent hole); **FII derivative stats are dead by default**
-  (fetcher bean requires `artha.upstox.analytics.enabled=true`, default false — page shows
-  an empty chart with no diagnostic, `MD/upstox/UpstoxFiiDerivativeFetcher.java` +
-  `application.yml:85`). All failures are `log.warn`-swallowed: no retry, no ntfy, no run
+  (a missed 19:00 run is a permanent hole unless a service restart re-pulls before the
+  next day's file supersedes it); **FII derivative stats are dead by default**
+  (fetcher bean requires `artha.upstox.analytics.enabled=true`, default false — the page
+  shows a generic empty state that cannot distinguish flag-disabled from no-data,
+  `MD/upstox/UpstoxFiiDerivativeFetcher.java` + `application.yml:85`). All failures are `log.warn`-swallowed: no retry, no ntfy, no run
   ledger (`MD/nse/NseEodScheduler.java:68-107`), in contrast to bhavcopy which alerts.
 
 ### 2.6 Screeners (Minervini/Manas — strong per-name forensics, no time dimension in UI)
 
-Works: event-chained EOD runs with watermark dedup; **every scanned name persisted with
-per-gate booleans** (fails are explainable); candidate drill-down pages with gate chips,
+Works: event-chained EOD runs with watermark dedup; **every gate-evaluated name persisted
+with per-gate booleans** (fails are explainable; names dropped by the price/liquidity/
+history pre-filter leave no row); candidate drill-down pages with gate chips,
 geometry reject reasons, daily chart; funnel buckets (immediatelyBuyable/onDeck/watch);
 RS-rank computed cross-sectionally and persisted.
 
 Gaps: **no date picker** — per-day history accrues in DB but the UI can only see the
 latest run; no day-over-day diff (entered/exited names); no funnel stage-attrition counts
-(funnel returns passers only); Manas RS-rank displayed nowhere; no watchlist-add / chart
+(funnel returns passers only); Manas RS-rank not even serialized in the screen API row
+(DB + funnel SQL only); no watchlist-add / chart
 deep-link from screener rows; `POST /run` recompute has no auth annotation beyond the
 gateway session; **Minervini backtest endpoints exist with no page** (Manas has one).
 The CA-adjustment (H6) and universe live-vs-backtest mismatches are fidelity-audit
@@ -240,10 +264,13 @@ territory — confirmed still unfixed (`MD/screener/minervini/TrendTemplateServi
 
 - Strategy registry: validated-at-write YAML (invalid can never persist), publish
   re-validation, checksum dedup, append-only `strategy_audit_log` — but **the audit log has
-  no read endpoint and no UI**; **`strategies.enabled` has no API and no UI toggle**
-  (grep: no `SET enabled` — DB-only), so the list cannot show which strategies the live
-  engine actually loads; no clone; diff = two raw `<pre>` panes + op list; schema endpoint
-  served but unconsumed; archive/delete hooks exported but no buttons.
+  no read endpoint and no UI** (and a draft hard-delete CASCADE-erases its audit rows,
+  `FLY/strategy/V002:50`); **`strategies.enabled` has no write endpoint** (grep: no
+  `SET enabled`), and while the read API serves `enabled`, the FE type drops it — so the
+  list cannot show which strategies the live engine actually loads (a render gap, not
+  data unavailability); no clone; diff = two raw `<pre>` panes + op list; schema endpoint
+  served but unconsumed; the archive hook is exported-but-unwired and no FE delete hook
+  exists at all (BE `DELETE /strategies/{id}` unconsumed).
 - Graduation: read-only board with correct V026 attribution; **GRADUATED stage invisible**
   (`GET /strategies/graduation/promotions` has zero FE consumers); no owner actions.
 - Swing sell decisions: recomputed-on-read verdicts (adoptions keep holdings visible);
@@ -251,8 +278,9 @@ territory — confirmed still unfixed (`MD/screener/minervini/TrendTemplateServi
   persisted (no `sell_decision` rows), so no history of what the page advised.
 - Backtest UI (pages only): Runner lacks `3m` in the interval list (engine supports it),
   lacks per-parameter overrides (`params_override` exists in the schema), and the sweep tab
-  cannot send a `walkForward` block — making the fold-aggregation select decorative and the
-  UI incapable of launching an OOS-fold sweep. Jobs page never shows `jobs.error` for failed
+  cannot send a `walkForward` block — the fold-aggregation select is doubly dead (the UI
+  cannot trigger folds AND the optimizer never reads the field at all) and the UI cannot
+  launch an OOS-fold sweep. Jobs page never shows `jobs.error` for failed
   runs. Compare guards only dataHash + universe checksum: different windows/intervals/
   seeds/capital compare silently, and no engine SHA exists in results (fidelity P0-2).
   No rerun/clone/export/saved-comparisons (fidelity F2/F3/F5 confirmed intact).
@@ -265,8 +293,9 @@ territory — confirmed still unfixed (`MD/screener/minervini/TrendTemplateServi
   Calculator is notional-only** — no tie-in to `POST /api/v1/market/margin` (F9 SPAN), so
   deployment% ignores real margin; Multiple Window persists layouts but panes are
   whitelisted to 8 context widgets (no signals/paper/jobs panes), single unnamed workspace.
-- Data Ops: wizard drives only expired-options backfill (OI + equity-daily kinds are
-  endpoints without wizard support); Coverage = expired-contracts only (no candle-interval,
+- Data Ops: wizard drives only the expired-contract backfill (options/futures/both via a
+  contract-type selector; the OI + equity-daily kinds are endpoints without wizard
+  support); Coverage = expired-contracts only (no candle-interval,
   chain-snapshot-day, or bhavcopy-day coverage); Query console has strong safety
   (READ ONLY txn + allowlist + timeout) but **zero audit of what was run**; Export is
   synchronous with **silent 100k-row truncation** (`MD/backfill/BackfillExportService.java:82-84`);
@@ -323,9 +352,11 @@ audit) are append-only with proper grants.
 ### 3.4 History-depth truths the UI must stop hiding
 
 Forward-only datasets (futures OI ~2026-06, chain snapshots 2026-06-15, FII/DII since
-capture start, preopen 60 sessions) vs deep datasets (bhavcopy ≥365 d, candles ~11 y 1d).
-Today only FuturesEodPage self-documents its shallowness. The freshness/source-quality
-contract (§11.17) must carry `historyStart` so every page can render its true depth.
+capture start, preopen forward-only with the UI date list capped at the last 60 sessions)
+vs deep datasets (bhavcopy ≥365 d, candles ~11 y 1d). No page surfaces its history depth
+in the rendered UI — several futures pages note the forward-only capture in source
+comments only. The freshness/source-quality contract (§11.17) must carry `historyStart`
+so every page can render its true depth.
 
 ---
 
@@ -342,7 +373,8 @@ to empty states; `BAD_CONTENT_TYPE` fail-loud SPA-fallback tripwire; universal O
 
 ### 4.2 Systemic gaps (ranked by trader impact)
 
-1. **Freshness is a per-page accident.** 1/19 options pages has a stale badge; 7/~25
+1. **Freshness is a per-page accident.** 1/19 options pages has a true stale badge (8 more
+   show only a passive timestamp); 7/~25
    futures/equity pages show `asOf`; several endpoints return `asOf` that the FE drops.
    No standard freshness component, no page-level "capture stalled" warning (DataHealth
    exists as an ops endpoint only).
@@ -355,15 +387,17 @@ to empty states; `BAD_CONTENT_TYPE` fail-loud SPA-fallback tripwire; universal O
    results/sweeps, dataops) — exactly the pages losing mobile card-mode and shared
    sort/filter (fidelity F9 overlap; full list in agent evidence).
 4. **No saved views/filters anywhere**; page filters are in-memory (lost on refresh); OI
-   control-bar state is localStorage-persisted but **not URL-shareable**; only /charts,
-   /compare, and advance-chart carry URL state.
+   control-bar state is localStorage-persisted but **not URL-shareable**; only four pages
+   read URL state (/charts, /compare, advance-chart, multiframe `?symbol=`) and none write
+   it back on change.
 5. **No command palette / global search** — cmdk is a dependency with `ui/command.tsx`
    scaffolded and imported by nothing. Navigation is menu-only across 80+ routes.
 6. **Drill-down dead-ends**: strike cells aren't links; screener rows don't reach
    watchlists/charts; positions don't reach signals; signals' chart deep-link param is
    dropped; sell-decision rows don't reach positions.
-7. **No keyboard shortcuts** beyond Esc; no bulk actions (dismiss-all, close-all/flatten
-   is Telegram-only).
+7. **No global keyboard shortcuts** (Esc, a lone Ctrl+Enter in the SQL console, and
+   Enter-to-submit inputs are it); no bulk actions (dismiss-all, close-all/flatten is
+   Telegram-only).
 8. Duplicated typeahead markup per page instead of one instrument-picker component;
    two symbol-picker patterns (FilterBar select vs search typeahead).
 
@@ -382,8 +416,8 @@ unused). Envelope: `{items:[...]}` respected, with 6 bare-array exceptions —
 
 ### 5.2 Contract visibility (the biggest API-quality lever)
 
-71/203 handlers return `Map<String,Object>` (ratchet ceilings: MD 31 — **at exact
-capacity**, SS 28, BT 10, GW 2). Contract-invisible surfaces include: all four FII/DII
+71/203 handlers return `Map<String,Object>` (ratchet ceilings — **every service at exact
+capacity**: MD 31/31, SS 28/28, BT 10/10, GW 2/2). Contract-invisible surfaces include: all four FII/DII
 range reads, announcements, futures oi-analysis/chart/eod, 8 options endpoints
 (oi-analysis, strike-series, multiple-oi, options-chart, oi-expiry, open-high, chain,
 iv-rollup), pre-open, world-indices. Consequence: FE types for these are hand-maintained;
@@ -396,9 +430,10 @@ compile-time FE binding.
 
 `/premium-series` · `/chain/history?at=` · `/strike-session-stats` · `/market/breadth/live`
 · `/signal-rejections/dot-health` · `/strategies/graduation/promotions` · `/paper/margin-heat`
-· `PUT /journal/{id}` · `POST /strategies/{id}/archive` + `DELETE` (hooks exported, no
-buttons) · 5 futures endpoints (`/term-structure`, `/banks-grid`, `/movers-screen`,
-`/banks`, `/buzz` FE-side) · Minervini swing-backtest family · `GET /strategies/schema/v1`.
+· `PUT /journal/{id}` · `POST /strategies/{id}/archive` (FE hook exported, unwired) +
+`DELETE /strategies/{id}` (no FE hook at all) · 6 FE-unconsumed futures endpoints
+(`/term-structure`, `/movers-screen`, `/banks` service-consumed; `/banks-grid`, `/buzz`,
+`/oi-analysis` consumed by nothing) · Minervini swing-backtest family · `GET /strategies/schema/v1`.
 Prompt 2 should treat these as free inputs — they exist and are tested.
 
 ### 5.4 Validation posture
@@ -421,9 +456,9 @@ timeout sized for inline auto-warm (fidelity A10).
 | Dimension | backtest/optimizer | expired/equity backfill | OI backfill / bhavcopy / export |
 |---|---|---|---|
 | Store | PG `jobs` + Redis stream | in-memory + fail-soft ledger | in-memory only / in-memory / none |
-| Status enum | queued/running/completed/failed/cancelled | NEVER_RUN/RUNNING/OK/FAILED (memory) vs RUNNING/COMPLETED/FAILED (ledger) | ad-hoc |
+| Status enum | queued/running/completed/failed/cancelled | NEVER_RUN/RUNNING/OK/FAILED (memory) vs RUNNING/COMPLETED/FAILED (ledger) | same NEVER_RUN/RUNNING/OK/FAILED machine (OI, bhavcopy, instrument-sync); export: none |
 | Progress | 0-100 + `jobs.progress` WS | counters, no denominator, poll-only | none |
-| Crash recovery | requeue + PEL hygiene (BACKTEST/TRIAL only — a died optimizer thread leaves `running` forever, fidelity P2-1) | hourly self-heal (expired only) | none |
+| Crash recovery | requeue + PEL hygiene (BACKTEST/TRIAL only; orphaned OPTIMIZATION rows are failed at the next optimizer boot with `error` NULL — they strand as `running` only between a hard kill and that boot; fidelity P2-1 = sweeps non-durable/non-resumable) | hourly self-heal (expired only) | bhavcopy: boot + watermark-walk self-heal; OI backfill + export: none |
 | Cancel | yes (checkpoint) | no | no |
 | Audit | jobs row | ledger row (uuid not stored); **OI backfill writes NO row** | none |
 
@@ -487,7 +522,7 @@ these are display/workflow surfaces over existing or newly-evented data.)
 | Signal generated | `signals` | `signals` → `/topic/signals` | — |
 | Signal rejected | `signal_rejections` | none | no push; forensics is poll-only |
 | Signal taken/dismissed/expired | status UPDATE only | **none** | no transition event at all — stale tabs, nothing downstream can react |
-| Paper ticket created (manual) | `paper_orders` (born FILLED) | none | no PENDING state, no book on ticket, no idempotency |
+| Paper ticket created (manual) | `paper_orders` (born FILLED) | none | no PENDING state; `book` accepted on the body but no ticket UI exposes a selector; no idempotency |
 | Paper fill/close | position row + exit order row | none | no `paper.events` channel; MTM is tick-derived client-side |
 | Broker order events | n/a (read-through) | n/a | fine until OpenAlgo arms; then an order-event ingest is required |
 | Journal CRUD | rows | none | no edit UI; no linkage events |
@@ -500,9 +535,9 @@ these are display/workflow surfaces over existing or newly-evented data.)
 | Equity/FII-DII refresh | data rows only | none | **no run ledger** — success/failure/row-count untracked (§8) |
 | Data-ops jobs | partial (`backfill_jobs`; OI backfill NONE) | none | no progress events; uuid↔ledger uncorrelated |
 | Exports / query-console | **nothing** | none | zero trace of operator SQL/exports |
-| Risk setting flips/trips | `risk_audit` (deduped 1/day/cap) | ntfy on trips | dedup means it is an alarm log, not a change history; heat-cap not settable via API |
+| Risk setting flips/trips | `risk_audit` (every settings UPDATE audited; trip rows deduped 1/day/cap except deployment-cap) | ntfy on trips | settings changes ARE a full history; trip dedup thins only the alarm rows; heat-cap not settable via API |
 | Paper reset / capital edit | **nothing** | none | destructive action with zero audit |
-| Kite session events | `kite_sessions` + `kite.status` | yes | — |
+| Kite session events | `kite_session` (singleton current-token row, no event history) + `kite.status` | yes | no durable connect/disconnect history |
 
 ### 7.2 Required additions (event model only — schemas in §11)
 
@@ -545,9 +580,10 @@ these are display/workflow surfaces over existing or newly-evented data.)
 | V10 | Screener/analytics engine-version stamps | absent | add `engine_version` (git SHA or semver) columns to screen/setup rows; join it in the UI date picker |
 | V11 | Reference-JSON staleness | frozen silently | once in tables (§9.4): `effective_date` + a 90-day staleness warning on the health board; until then, a startup log-warn with file ages |
 | V12 | Backfill uuid ↔ ledger row | uncorrelated | persist the jobId UUID into `backfill_jobs`; add OI kind + audit row |
-| V13 | Optimizer orphaned `running` rows | forever-running (fidelity P2-1) | reaper: `running` OPTIMIZATION older than N h with no live thread → `failed` (fidelity owns the durable-queue fix; the reaper is the stopgap) |
+| V13 | Optimizer orphaned `running` rows | failed at next optimizer boot with `error` NULL (`app/repos.py:66-77` + blanket thread handler); strand only while the process stays up with a wedged thread, or is never restarted | in-process watchdog for wedged-alive threads + populate `error` on orphan-fail so real failures are distinguishable (fidelity P2-1/F4 own the durable-queue fix) |
 | V14 | Export/query-console audit | zero trace | append-only `admin_audit` rows (sql-hash/params/rows/duration for queries; contract-set/row-counts for exports) |
 | V15 | Notifier delivery health | FAILED rows recorded, nothing alerts | daily failure-rate check over `notification_events` → ntfy (the irony is intentional: alert via the OTHER channel too — Telegram) |
+| V16 | TAKEN signal ↔ paper position reconciliation | none — an auto-paper failure after the CAS take leaves a TAKEN signal with no position, invisibly | nightly check: every TAKEN signal has ≥1 `paper_orders.signal_id` row (or a rejection trace); report to the ingest health board |
 
 ---
 
@@ -697,9 +733,10 @@ with offset (key cross-source maps by instant, never offset).
    `GET /signal-rejections` + `/rail-counts` + `/shadow-summary` + `/dot-health`.
    Richest decision substrate in the platform; no push (poll or Phase-2 events).
 3. **Paper ticket schema** — PARTIAL. Ticket == `POST /paper/orders` request
-   `{exchange, tradingsymbol, side, quantity, price?, stopLoss?, takeProfit?, signalId?}`;
-   Phase 2 adds `book`, Phase 1 adds `clientOrderId` idempotency + governor veto (422 with
-   rail). No draft/pending ticket state exists or is planned — tickets fill or reject.
+   `{exchange, tradingsymbol, side, qty, price?, stopLoss?, takeProfit?, signalId?, book?}`
+   (`book` already accepted — defaults signal-family → MANUAL; the missing piece is only a
+   selector UI, Phase 2); Phase 1 adds `clientOrderId` idempotency + governor veto (422
+   with rail). No draft/pending ticket state exists or is planned — tickets fill or reject.
 4. **Paper trade schema** — EXISTS. `paper_positions` (book, avg entry, brackets,
    advised_lots, margin_snapshot/margin_pct, opening_signal_id, close_reason, realized_pnl)
    + `paper_orders` legs (born FILLED; quote_bid/ask null — treat as absent);
@@ -716,8 +753,9 @@ with offset (key cross-source maps by instant, never offset).
 7. **Watchlist schema** — EXISTS. `marketdata.watchlists` + `watchlist_items`
    (PK list+exchange+symbol, instrument-validated); CRUD + rename/reorder endpoints;
    screener presets via `GET /market/screener?preset=`.
-8. **Strategy schema** — EXISTS. `strategies` (slug unique, tags[] — first tag = book,
-   enabled, published_version_id, notifications) + `strategy_versions` (immutable YAML +
+8. **Strategy schema** — EXISTS. `strategies` (slug unique, tags[] — book = the first
+   RECOGNIZED family tag by priority scalper→minervini→manas-arora anywhere in the array,
+   else `other`; enabled, published_version_id, notifications) + `strategy_versions` (immutable YAML +
    checksum, status draft/published/archived lowercase) + `strategy_audit_log`
    (append-only; Phase 2 adds read endpoint + enabled-toggle actions); `GET/POST/PUT
    /strategies`, `/validate`, `/{id}/versions`, `/{id}/diff`, `/publish`, `/rollback`,
@@ -727,22 +765,26 @@ with offset (key cross-source maps by instant, never offset).
    thresholds echoed) + `strategy_graduations` snapshots + `GET /graduation/promotions`
    (bare array today). V026 attribution guarantees per-strategy P&L identity.
 10. **Backtest job schema** — EXISTS (UI-scope). `backtest.jobs` (kind BACKTEST|
-    OPTIMIZATION|TRIAL, parent_job_id, status, progress, request JSONB, error, resultRef);
+    OPTIMIZATION|TRIAL, parent_job_id, status, progress, request JSONB, error; `resultRef`
+    is a status-payload field resolved from `backtest_runs`, not a column);
     `GET /backtests/jobs` (+status/strategy filters), WS `jobs.progress`. Fidelity §13
     owns run/trial/fold result contracts — do not duplicate.
 11. **Comparison schema** — PARTIAL. Client-side matrix over N× `GET /backtests/{id}/results`
     (cap 6), guards = dataHash + universe checksum only; URL `?ids=` is the persistence.
     Server-side compare endpoint + saved comparisons = fidelity A3/F5 ADDs; Prompt 2
     should target that shape, not the client fold.
-12. **Options analytics schema** — EXISTS. 21 endpoints under `/market/options/*`
+12. **Options analytics schema** — EXISTS. 21 analytics endpoints (OptionsAnalyticsController)
+    of 28 total under `/market/options/*`
     (chain-table typed; spurt/trending/heatmap/premium/active-strikes/oi-stats typed;
     oi-analysis/strike-series/multiple-oi/options-chart/oi-expiry/open-high Map-returning —
-    hand-typed in `FE/api/types.ts`); all accept `mode=live|history&date=`; StrikePoint =
+    hand-typed in `FE/api/types.ts`); 20 of the 21 accept `mode=live|history&date=`
+    (`/strike-session-stats` takes its own `session` date); StrikePoint =
     bucket/strike/type/ltp/oi/oiChange/iv/spot/volume. Gaps Prompt 2 must respect:
     **no provenance flag on derived rows** (infer from null iv/greeks until §3.2.3 lands);
     no auto-refresh — consumers must poll or trigger.
-13. **Futures analytics schema** — EXISTS. `/market/futures/{spurt,movers,oi-analysis-series,
-    oi-chart,banks-analysis,eod,oi-buzz-*,pre-open,term-structure,banks-grid,movers-screen}`;
+13. **Futures analytics schema** — EXISTS. `/market/futures/{spurt,movers,oi-analysis,
+    oi-analysis-series,oi-chart,banks,banks-analysis,banks-grid,buzz,eod,oi-buzz-*,
+    pre-open,term-structure,movers-screen}` (15 total);
     universe = indices + 17 banks ONLY; EOD endpoint = intraday rollup, `historyStart` ≈
     2026-06 (do not treat as long-horizon EOD).
 14. **Equity analytics schema** — EXISTS. `/market/equity/{returns,delivery,sector-heatmap,
@@ -751,10 +793,12 @@ with offset (key cross-source maps by instant, never offset).
     `/market/screener/{minervini,manas-arora}/*` (screen rows carry per-gate booleans +
     rs_rank; funnel returns passers only; attrition endpoint = Phase-3 ADD; engine-version
     stamp = Phase-3 ADD V10). CA-adjustment caveat: live screen rows are raw-price-based
-    until fidelity H6 lands — Prompt 2 must carry that flag per row-date.
+    until the CA defect lands a fix (fidelity D1/P0-4; prior-audit H6) — Prompt 2 must
+    carry that flag per row-date. Manas caveat: `rs_rank` is DB/funnel-only — the screen
+    API row does not serialize it.
 15. **FII/DII analytics schema** — EXISTS with trust caveats. `/market/fii-dii/{cash,
-    derivative-stats,participant-oi,long-short}` (all Map-returning, unbounded range
-    reads); history = forward-accrual only; derivative-stats empty unless Upstox analytics
+    derivative-stats,participant-oi,long-short}` (Map-returning, unbounded range reads) +
+    `/bias` (typed record, single-date — the scalper gate's read); history = forward-accrual only; derivative-stats empty unless Upstox analytics
     flag on; gap-days possible and today undetectable — **Prompt 2 must consume the
     `ingest_runs` ledger (#16) as the data-trust oracle for this family.**
 16. **Data-ops job schema** — PARTIAL→ADD. Today: `backfill_jobs` ledger (EXPIRED|
@@ -782,7 +826,8 @@ with offset (key cross-source maps by instant, never offset).
     must not assume infinite forward growth is safe; Phase-1 owner decision pending.
 20. **Permissions and audit schema** — EXISTS (thin, single-owner). Auth = one ROLE_OWNER
     session (12 h Redis, XSRF); no RBAC, no API tokens (fidelity A8 — any Prompt-2
-    automation principal needs that ADD). Audit tables: `strategy_audit_log`,
+    automation principal needs that ADD). Audit tables: `strategy_audit_log` (append-only
+    by grant but CASCADE-erased on draft hard-delete),
     `risk_audit`, `bot_commands`, `notification_events`, `strategy_graduations`,
     `backfill_jobs`, + Phase-1 `admin_audit` (query/export) and paper-admin audit.
     Prompt 2 must route any state-changing automation through endpoints that write these

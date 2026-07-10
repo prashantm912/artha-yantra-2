@@ -1,4 +1,5 @@
 import { useCallback, useMemo } from 'react';
+import { PlugZap } from 'lucide-react';
 import type { EChartsOption } from 'echarts';
 import { useFiiDerivativeStats } from '../../api/oiAnalytics.ts';
 import { foldFiiDerivativeStats, type FiiDerivativeStatsRow } from '../../api/fiiDerivativeStatsFold.ts';
@@ -102,7 +103,16 @@ export function FiiDerivativeStatsPage() {
       <QueryState
         query={q}
         isEmpty={() => rows.length === 0}
-        empty={{ title: 'No FII derivative stats for this window.' }}
+        empty={{
+          icon: PlugZap,
+          title: 'No FII derivative stats yet',
+          // These figures ride the Upstox analytics side-channel (UpstoxFiiDerivativeFetcher), whose
+          // fetcher bean only wires up when artha.upstox.analytics.enabled=true — so a fresh or mock
+          // stack renders this view empty with no rows to distinguish "flag off" from "no data". Spell
+          // out the flag cause here rather than showing a bare no-data state (audit §2.5).
+          hint:
+            'These figures come from the Upstox analytics side-channel, which is off by default. A fresh or mock stack shows nothing here until the analytics feed is enabled (artha.upstox.analytics.enabled=true on market-data-service); FII derivative history then accrues forward from that point.',
+        }}
         errorTitle="Couldn't load FII derivative stats"
         skeleton={
           <div className="space-y-4">

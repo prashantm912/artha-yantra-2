@@ -20,11 +20,16 @@ const data: FiiDerivativeRow[] = [
 
 // EChart pulls ResizeObserver (absent in jsdom); this spec asserts the table only.
 vi.mock('../../components/atoms/EChart.tsx', () => ({ EChart: () => null }));
-vi.mock('../../api/oiAnalytics.ts', () => ({
-  useFiiDerivativeStats: () => ({ data }),
-}));
+vi.mock('../../api/oiAnalytics.ts', () => ({ useFiiDerivativeStats: vi.fn() }));
 
 import { FiiDerivativeStatsPage } from './FiiDerivativeStatsPage.tsx';
+import { useFiiDerivativeStats } from '../../api/oiAnalytics.ts';
+
+// The page only reads `data` off the query; a `{ data }` stub drives the success/empty branch.
+const stub = (rows: FiiDerivativeRow[]) =>
+  vi.mocked(useFiiDerivativeStats).mockReturnValue({
+    data: rows,
+  } as unknown as ReturnType<typeof useFiiDerivativeStats>);
 
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -37,6 +42,7 @@ function renderPage() {
 
 describe('FiiDerivativeStatsPage', () => {
   it('renders the four F&O segment columns and the pivoted row', () => {
+    stub(data);
     renderPage();
     const table = screen.getByRole('table');
     for (const h of ['Date', 'Index Futures', 'Index Options', 'Stock Futures', 'Stock Options']) {
@@ -44,5 +50,14 @@ describe('FiiDerivativeStatsPage', () => {
     }
     // The four segment rows pivot into a single dated row.
     expect(within(table).getByText('2026-06-22')).toBeInTheDocument();
+  });
+
+  it('explains the Upstox analytics flag when there are no rows (flag disabled / mock stack)', () => {
+    stub([]);
+    renderPage();
+    // The empty branch must name the flag cause, not show a bare no-data state (audit §2.5).
+    expect(screen.getByTestId('qs-empty')).toBeInTheDocument();
+    expect(screen.getByText(/No FII derivative stats yet/)).toBeInTheDocument();
+    expect(screen.getByText(/artha\.upstox\.analytics\.enabled=true/)).toBeInTheDocument();
   });
 });

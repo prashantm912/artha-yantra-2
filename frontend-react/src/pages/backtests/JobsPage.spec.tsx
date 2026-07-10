@@ -12,6 +12,8 @@ vi.mock('../../api/strategies.ts', () => ({
 const JOBS = [
   { jobId: 'aaaa1111-bb', kind: 'BACKTEST', status: 'completed', progress: 100, createdAt: '2026-06-23T10:00:00', strategyId: 's1', strategyVersion: '1.0.1' },
   { jobId: 'cccc2222-dd', kind: 'OPTIMIZATION', status: 'running', progress: 40, createdAt: '2026-06-23T10:05:00', strategyId: 's1', strategyVersion: '1.0.0' },
+  // A failed run — the LIST carries no `error`; the failure dialog fetches it via useJobDetail.
+  { jobId: 'eeee3333-ff', kind: 'BACKTEST', status: 'failed', progress: 0, createdAt: '2026-06-23T10:10:00', strategyId: 's1', strategyVersion: '1.0.1' },
 ];
 vi.mock('../../api/backtests.ts', async (orig) => {
   const actual = await orig<typeof import('../../api/backtests.ts')>();
@@ -26,6 +28,8 @@ vi.mock('../../api/backtests.ts', async (orig) => {
     },
     useJobsLive: () => {},
     useCancelJob: () => ({ mutate: cancel }),
+    // The detail endpoint is the only source of jobs.error — the dialog reads it from here.
+    useJobDetail: () => ({ isPending: false, isError: false, data: { error: 'Kaboom: preflight DATA_GAP at 2026-06-23' } }),
   };
 });
 
@@ -70,5 +74,17 @@ describe('JobsPage', () => {
     fireEvent.click(screen.getByLabelText('Latest version only'));
     expect(screen.queryAllByText('v1.0.0')).toHaveLength(0); // old-version job dropped by the server filter
     expect(screen.getAllByText('v1.0.1').length).toBeGreaterThan(0); // latest-version job kept
+  });
+
+  it('opens an accessible failure dialog showing jobs.error for a failed run', () => {
+    renderPage();
+    // Row-level indicator: the failed badge is a button (rendered in the desktop table + mobile card).
+    const triggers = screen.getAllByLabelText(/Show why run eeee3333 failed/);
+    expect(triggers.length).toBeGreaterThan(0);
+    fireEvent.click(triggers[0]);
+
+    // The dialog surfaces the BE-served error text (fetched lazily from the detail endpoint).
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByText(/Kaboom: preflight DATA_GAP/)).toBeInTheDocument();
   });
 });

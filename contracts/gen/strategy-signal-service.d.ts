@@ -835,6 +835,7 @@ export interface components {
             stopLoss?: number;
             takeProfit?: number;
             book?: string;
+            clientOrderId?: string;
         };
         PositionDto: {
             /** Format: int64 */

@@ -22,7 +22,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/paper")
 public class PaperController {
 
-  /** Open-order body: from a signal (side derived) or a manual entry; optional SL/TP + book. */
+  /**
+   * Open-order body: from a signal (side derived) or a manual entry; optional SL/TP + book.
+   * {@code clientOrderId} is the OPTIONAL audit-V2 idempotency key — a duplicate submission carrying
+   * the same value returns the ORIGINAL position instead of a second fill.
+   */
   public record OrderBody(
       Long signalId,
       String exchange,
@@ -32,7 +36,8 @@ public class PaperController {
       BigDecimal price,
       BigDecimal stopLoss,
       BigDecimal takeProfit,
-      String book) {}
+      String book,
+      String clientOrderId) {}
 
   /** Close body: an explicit price overrides the last tick. */
   public record CloseBody(BigDecimal price) {}
@@ -45,11 +50,14 @@ public class PaperController {
 
   private final PaperService paper;
   private final PaperAccountService account;
+  private final InstrumentMetaClient instruments;
 
-  /** Wires the ledger + account services. */
-  public PaperController(PaperService paper, PaperAccountService account) {
+  /** Wires the ledger + account services + the instrument-meta lookup (audit V4 lot-size validation). */
+  public PaperController(
+      PaperService paper, PaperAccountService account, InstrumentMetaClient instruments) {
     this.paper = paper;
     this.account = account;
+    this.instruments = instruments;
   }
 
   /** The account header for a book ({@code book} absent → the aggregate across all books). */
@@ -103,18 +111,45 @@ public class PaperController {
   /**
    * Simulate an entry (from a signal or manual); the book is on the body or resolved from the signal.
    * Routes through {@code openManualOrder} so the per-book risk governor gates the fill (audit V1) — the
-   * signal-taken path stays on {@code openOrder} (already gated at emission).
+   * signal-taken path stays on {@code openOrder} (already gated at emission). Pure input validation
+   * (qty &gt; 0, audit-V4 lot-size multiple) runs HERE, BEFORE the service, so a malformed order 400s
+   * regardless of governor state — a since-tripped governor must not turn a bad input into a 422. A
+   * duplicate {@code clientOrderId} (audit V2) replays the ORIGINAL position with a 200.
    */
   @PostMapping("/orders")
   public ResponseEntity<PaperService.PositionDto> order(@RequestBody OrderBody body) {
     if (body.qty() == null || body.qty() <= 0) {
       throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "qty must be a positive integer");
     }
+    // Audit V4: a hand ticket for an F&O instrument whose qty is not a whole multiple of the contract
+    // lot would be broker-rejected live (Upstox UDAPI1104). Validate only when the instrument is given
+    // explicitly (a signal-derived symbol is resolved deeper in openOrder). Equity / unknown instruments
+    // resolve to lot 1 (RestInstrumentMetaClient's equity proxy), so qty % 1 == 0 always passes.
+    if (body.exchange() != null && body.tradingsymbol() != null) {
+      long lotSize = instruments.meta(body.exchange(), body.tradingsymbol()).lotSize();
+      if (lotSize > 1 && body.qty() % lotSize != 0) {
+        throw new ApiException(
+            400,
+            ErrorCodes.VALIDATION_FAILED,
+            "qty " + body.qty() + " is not a multiple of the lot size " + lotSize + " for "
+                + body.exchange() + ":" + body.tradingsymbol(),
+            Map.of("lotSize", lotSize, "qty", body.qty()));
+      }
+    }
     PaperService.OrderRequest request =
         new PaperService.OrderRequest(
             body.signalId(), body.exchange(), body.tradingsymbol(), body.side(), body.qty(),
-            body.price(), body.stopLoss(), body.takeProfit(), null, body.book());
-    return ResponseEntity.status(HttpStatus.CREATED).body(paper.openManualOrder(request));
+            body.price(), body.stopLoss(), body.takeProfit(), null, body.book(), body.clientOrderId());
+    try {
+      return ResponseEntity.status(HttpStatus.CREATED).body(paper.openManualOrder(request));
+    } catch (DuplicateOrderException duplicate) {
+      // Idempotent replay: 200 with the ORIGINAL position DTO. The audit's V2 sketch said 409, but the
+      // D8 design authority pins "every non-2xx body is exactly ErrorResponse" — a 409 carrying a
+      // PositionDto would break every client that parses non-2xx as the error envelope (and a retrying
+      // client wants success semantics for work that already succeeded). 201 stays reserved for a
+      // genuinely new fill, so callers can still distinguish create from replay by status.
+      return ResponseEntity.ok(duplicate.original());
+    }
   }
 
   /** Close a position at market (or a stated price). */

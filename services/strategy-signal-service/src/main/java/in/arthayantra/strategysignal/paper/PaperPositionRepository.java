@@ -84,6 +84,28 @@ public class PaperPositionRepository {
         .findFirst();
   }
 
+  /**
+   * The most recent position for a book+key regardless of status (newest opened first) — the V2
+   * idempotency read-back: a duplicate submission within the retry window resolves to the still-OPEN
+   * position it created; a late replay resolves to that position's row even after it closed. (A key
+   * traded, closed, and re-opened between the original and the replay would resolve to the newest
+   * position — outside the realistic network-retry window this idempotency guard targets.)
+   */
+  public Optional<PositionRow> findLatestForKey(
+      String book, String exchange, String tradingsymbol, String side) {
+    return jdbc
+        .query(
+            "SELECT " + COLUMNS + " FROM paper_positions WHERE book=? AND exchange=? AND tradingsymbol=?"
+                + " AND side=? ORDER BY opened_at DESC, id DESC LIMIT 1",
+            PaperPositionRepository::map,
+            book,
+            exchange,
+            tradingsymbol,
+            side)
+        .stream()
+        .findFirst();
+  }
+
   /** Opens a new position in a book (optional SL/TP bracket levels), unstamped sub-account. */
   public long insertOpen(
       String book,

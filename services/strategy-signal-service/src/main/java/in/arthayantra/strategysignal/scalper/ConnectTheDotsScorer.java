@@ -34,6 +34,10 @@ public final class ConnectTheDotsScorer {
   private static final double W_IV = 0.8;
   private static final double W = 1.0;
   private static final BigDecimal IV_RANK_LOW = new BigDecimal("50");
+  // T2.8 40/40 stand-aside gap: stays at the ORIGINAL 10-IV-pt calibration, decoupled from the
+  // ops-tunable iv-pair SUPPORT min-gap (recalibrated 0.10 -> 0.02, rollup §Proposals P1 #675) so
+  // activating the dead support dot cannot weaken the high-IV chop suppressor as a side effect.
+  private static final BigDecimal BOTH_HIGH_STAND_ASIDE_GAP = new BigDecimal("0.10");
 
   /** One confluence dot's contribution. */
   public record DotScore(String dot, double weight, boolean supports, String reason) {}
@@ -258,7 +262,10 @@ public final class ConnectTheDotsScorer {
 
   /**
    * T2.8 stand-aside: both the CE and PE 6-strike IVs are >= the both-high floor AND their gap is
-   * under the min gap (richly-priced chop with no directional IV edge) — suppress the whole signal.
+   * under {@link #BOTH_HIGH_STAND_ASIDE_GAP} (richly-priced chop with no directional IV edge) —
+   * suppress the whole signal. Deliberately DECOUPLED from the (recalibrated, rollup P1) iv-pair
+   * support min-gap: at 40+ IV levels a 2-pt spread is noise, not a directional edge, so narrowing
+   * the SUPPORT gap must not narrow this chop suppressor.
    */
   private static boolean ivBothHighStandAside(Macro m, ScalperOiProps props) {
     if (m.ceIvAvg6() == null || m.peIvAvg6() == null) {
@@ -268,7 +275,7 @@ public final class ConnectTheDotsScorer {
         m.ceIvAvg6().compareTo(props.ivBothHighFloor()) >= 0
             && m.peIvAvg6().compareTo(props.ivBothHighFloor()) >= 0;
     return bothHigh
-        && m.ceIvAvg6().subtract(m.peIvAvg6()).abs().compareTo(props.ivPairMinGap()) < 0;
+        && m.ceIvAvg6().subtract(m.peIvAvg6()).abs().compareTo(BOTH_HIGH_STAND_ASIDE_GAP) < 0;
   }
 
   /**

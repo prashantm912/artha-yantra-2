@@ -364,9 +364,11 @@ class ConnectTheDotsScorerTest {
 
   @Test
   void fortyFortyBothHighForcesStandAsideAndSuppressesTheSignal() {
-    // both IVs >= 0.40 and within the (recalibrated 0.02) gap -> stand aside: iv_pair withholds AND the
-    // signal is invalid. |0.45 - 0.44| = 0.01 < 0.02, so the both-high chop is suppressed.
-    Macro highChop = macroIv(bd("0.45"), bd("0.44"));
+    // both IVs >= 0.40 and within the stand-aside gap -> stand aside: iv_pair withholds AND the signal
+    // is invalid. |0.45 - 0.42| = 0.03 < the PINNED 0.10 stand-aside gap — and 0.03 >= the recalibrated
+    // 0.02 SUPPORT min-gap, so this fixture also PROVES the two gaps are decoupled (a shared 0.02 gap
+    // would have supported the richer side here instead of suppressing).
+    Macro highChop = macroIv(bd("0.45"), bd("0.42"));
     Confluence r = ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, highChop), CE, 1, T, P, true);
 
     assertThat(r.standAside()).isTrue();

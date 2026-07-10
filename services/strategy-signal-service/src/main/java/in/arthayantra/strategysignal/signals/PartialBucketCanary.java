@@ -1,0 +1,127 @@
+package in.arthayantra.strategysignal.signals;
+
+import in.arthayantra.strategyengine.series.EngineCandle;
+import in.arthayantra.strategyengine.series.EngineSeries;
+import in.arthayantra.strategyengine.series.SeriesKey;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+
+/**
+ * Live guard for the audit B1 / FID P0-1 done-check ("live 3m bar volume vs 1m-sum for the same
+ * bucket"): the {@link LiveSeriesStore} completeness filter now excludes in-progress buckets so a
+ * frozen first-minute partial can no longer accrue — this canary is the standing detector that the
+ * regression stays fixed. For every warmed 3m series it re-derives the LAST COMPLETED 3m bar's
+ * volume from the three 1m bars of the same bucket already held in the store's 1m series and
+ * compares. A frozen 3m partial carries only its first minute's volume (~1/3 of the true bucket),
+ * so a persistent volume shortfall is the fingerprint of the bug reappearing. Both series are in
+ * memory — no REST call, no DB read, no new endpoint.
+ *
+ * <p>Purely observational: on a mismatch it increments {@code ay_signal_partial_bucket_mismatch_total}
+ * and logs once per (series, bucket); it never blocks or mutates a series. It skips silently when the
+ * three 1m bars are not all present (a coverage gap, not a freeze — {@code volume-tolerance} does not
+ * apply to that case) or when the newest 3m bucket is still forming. The default tolerance is 0 (exact
+ * sum expected); {@code artha.signals.partial-bucket-canary.volume-tolerance} can loosen it live if a
+ * benign tick-agg-vs-persisted skew proves noisy.
+ *
+ * <p>Depends ONLY on {@link LiveSeriesStore} (never {@link SignalEngine}) and shares the engine's
+ * on/off gate ({@code artha.signals.engine-enabled}, default on): the 3m series only exist when the
+ * live engine warms them, so this is meaningless — and would just churn — when the engine is disabled
+ * (e.g. the paper integration tests). Gating on the same property keeps it out of that context.
+ */
+@Component
+@ConditionalOnProperty(
+    value = "artha.signals.engine-enabled",
+    havingValue = "true",
+    matchIfMissing = true)
+public class PartialBucketCanary {
+
+  private static final Logger log = LoggerFactory.getLogger(PartialBucketCanary.class);
+  private static final String THREE_MINUTE = "3m";
+  private static final String ONE_MINUTE = "1m";
+  private static final Duration BUCKET = Duration.ofMinutes(3);
+
+  private final LiveSeriesStore store;
+  private final Clock clock;
+  private final Counter mismatches;
+  private final long volumeTolerance;
+  // Once per (series, bucket): the last completed 3m bucket already flagged for each 3m series.
+  private final Map<SeriesKey, Instant> flagged = new ConcurrentHashMap<>();
+
+  /** Wires the shared series store, the clock, the meter and the (tunable) exact-sum tolerance. */
+  public PartialBucketCanary(
+      LiveSeriesStore store,
+      Clock clock,
+      MeterRegistry meterRegistry,
+      @Value("${artha.signals.partial-bucket-canary.volume-tolerance:0}") long volumeTolerance) {
+    this.store = store;
+    this.clock = clock;
+    this.mismatches = meterRegistry.counter("ay_signal_partial_bucket_mismatch_total");
+    this.volumeTolerance = volumeTolerance;
+  }
+
+  /** Sweeps every warmed 3m series, comparing its last completed bar to the 1m sum. */
+  @Scheduled(fixedDelay = 60_000, initialDelay = 90_000)
+  public void sweep() {
+    try {
+      Instant now = clock.instant();
+      for (SeriesKey key : store.keys()) {
+        if (THREE_MINUTE.equals(key.interval())) {
+          check(key, now);
+        }
+      }
+    } catch (RuntimeException e) {
+      log.warn("partial-bucket canary sweep failed: {}", e.toString());
+    }
+  }
+
+  private void check(SeriesKey threeMinKey, Instant now) {
+    EngineSeries threeMin = store.series(threeMinKey);
+    if (threeMin == null || threeMin.size() == 0) {
+      return;
+    }
+    EngineCandle last = threeMin.candle(threeMin.size() - 1);
+    Instant bucketStart = last.bucketStart().toInstant();
+    if (bucketStart.plus(BUCKET).isAfter(now)) {
+      return; // the newest 3m bar is still forming — nothing complete to check yet
+    }
+    EngineSeries oneMin =
+        store.series(new SeriesKey(threeMinKey.exchange(), threeMinKey.tradingsymbol(), ONE_MINUTE));
+    if (oneMin == null) {
+      return;
+    }
+    long expected = 0;
+    for (int minute = 0; minute < 3; minute++) {
+      Instant minuteStart = bucketStart.plus(Duration.ofMinutes(minute));
+      int index = oneMin.indexAtOrBefore(minuteStart);
+      if (index < 0 || !oneMin.candle(index).bucketStart().toInstant().equals(minuteStart)) {
+        return; // 1m coverage incomplete for this bucket — skip silently (not a freeze)
+      }
+      expected += oneMin.candle(index).volume();
+    }
+    long actual = last.volume();
+    if (Math.abs(actual - expected) <= volumeTolerance) {
+      flagged.remove(threeMinKey); // healthy for this series — allow the next bucket to re-flag
+      return;
+    }
+    if (bucketStart.equals(flagged.get(threeMinKey))) {
+      return; // already flagged this exact (series, bucket)
+    }
+    flagged.put(threeMinKey, bucketStart);
+    mismatches.increment();
+    log.warn(
+        "partial-bucket canary: {} last completed 3m bar volume {} != Σ(3×1m) {} for bucket {} "
+            + "(shortfall {}) — a frozen first-minute partial (audit B1 / FID P0-1) looks exactly like this",
+        threeMinKey.canonical(), actual, expected, bucketStart, expected - actual);
+  }
+}

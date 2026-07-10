@@ -53,19 +53,27 @@ function StatusBadge({ status }: { status: IngestStatus }) {
   );
 }
 
-/** A row of small squares, one per trading day (newest → oldest), coloured by that day's verdict. */
+/**
+ * A row of small squares, one per trading day (newest → oldest), coloured by that day's verdict.
+ * The squares are decorative (aria-hidden, title = hover sugar); the FULL per-day verdict list rides
+ * an sr-only sibling — aria-label on a role-less span is an axe serious violation
+ * (aria-prohibited-attr), and a container role="img" would strip the children from the a11y tree.
+ */
 function DayStrip({ days }: { days: SourceHealth['days'] }) {
   if (days.length === 0) return <span className="text-ay-muted">—</span>;
   return (
-    <span className="inline-flex gap-0.5" role="img" aria-label={`Last ${days.length} trading days`}>
+    <span className="inline-flex items-center gap-0.5">
       {days.map((d) => (
         <span
           key={d.day}
+          aria-hidden="true"
           title={`${d.day}: ${d.status}`}
-          aria-label={`${d.day}: ${d.status}`}
           className={cn('size-3 rounded-[2px]', dayTone(d.status))}
         />
       ))}
+      <span className="sr-only">
+        {`Last ${days.length} trading days: ${days.map((d) => `${d.day} ${d.status}`).join(', ')}`}
+      </span>
     </span>
   );
 }

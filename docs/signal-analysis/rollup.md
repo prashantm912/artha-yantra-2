@@ -81,6 +81,7 @@ Judge impact carefully: these help borderline 0.55–0.60 rows cross threshold, 
 already passing at 0.68–0.89.
 
 **P1 — `iv_pair` min-gap: `artha.scalper.oi.ivPairMinGap` 0.10 → 0.02.**
+- **LANDED #675** (2026-07-10, owner-approved) — env-wired (`ARTHA_SCALPER_OI_IV_PAIR_MIN_GAP`, application.yml + compose passthrough) + default retuned 0.10 → 0.02. NOT merged/deployed.
 - **Diff:** `application.yml` / env `ARTHA_SCALPER_OI_IV_PAIR_MIN_GAP: 0.02` (verify exact passthrough name
   in `ScalperOiProps.java` before landing — CLAUDE.md `${ENV_NAME}` mismatch trap).
 - **Evidence:** iv_pair dot support **0% on all 5 sessions** (2026-07-02/03/06/07/10). The rail asks for a
@@ -91,6 +92,7 @@ already passing at 0.68–0.89.
   never-firing dot); measure whether it then over-supports.
 
 **P2 — `oi_spurt` price floor: `artha.scalper.oi.spurtPricePct` 50 → 5–10.**
+- **LANDED #675** (2026-07-10, owner-approved) — env-wired (`ARTHA_SCALPER_OI_SPURT_PRICE_PCT`, application.yml + compose passthrough) + default retuned 50 → **8** (chosen from the 2,104-bar distribution: ≥8 on 17%). NOT merged/deployed.
 - **Diff:** env `ARTHA_SCALPER_OI_SPURT_PRICE_PCT: 8` (verify passthrough name in `ScalperOiProps.java`).
 - **Evidence:** oi_spurt dot support **0% on all 5 sessions**. The 50(%) price-move floor is unreachable on
   a 3m scalper bar (`macro.spurtPricePct` is populated non-zero but never near 50). 1.0-weight dead dot.
@@ -98,6 +100,7 @@ already passing at 0.68–0.89.
   Pick the value from the observed `spurtPricePct` distribution (a rollup ground-truth query) before landing.
 
 **P3 — `iv_rank` null semantics: null scores AGAINST → null = NEUTRAL/excluded (code).**
+- **LANDED #676** (2026-07-10, owner-approved) — a null-input dot is now `absent` (withheld from BOTH the numerator and the denominator) in `ConnectTheDotsScorer`; live-only, no golden/parity surface. NOT merged/deployed.
 - **Diff:** in `ConnectTheDotsScorer` (or the iv_rank dot evaluator) treat `ivRank == null` as
   withhold-from-denominator (exclude the 0.8 weight from Σw) rather than supports=false. Parity-safe (live
   gate only; no golden vectors). Ties into README §7 backlog item 6 (dot-null unification).

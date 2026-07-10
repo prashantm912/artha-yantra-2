@@ -39,8 +39,20 @@ public final class ConnectTheDotsScorer {
   // activating the dead support dot cannot weaken the high-IV chop suppressor as a side effect.
   private static final BigDecimal BOTH_HIGH_STAND_ASIDE_GAP = new BigDecimal("0.10");
 
-  /** One confluence dot's contribution. */
-  public record DotScore(String dot, double weight, boolean supports, String reason) {}
+  /**
+   * One confluence dot's contribution. {@code absent} (signal-analysis rollup §Proposals P3) marks a
+   * dot whose INPUT data is MISSING: it is WITHHELD from BOTH the numerator and the denominator (it
+   * neither supports nor opposes), so a data gap is never scored as evidence against the side. The
+   * recorded side-channel keeps serializing {@code dot}/{@code weight}/{@code supports} only, so the
+   * JSON shape is unchanged — the exclusion shows up only in the (correspondingly higher) aggregate.
+   */
+  public record DotScore(String dot, double weight, boolean supports, String reason, boolean absent) {
+
+    /** Present-dot form: {@code absent} defaults to false (keeps every existing call site intact). */
+    public DotScore(String dot, double weight, boolean supports, String reason) {
+      this(dot, weight, supports, reason, false);
+    }
+  }
 
   /**
    * The aggregate confluence verdict for a side. {@code standAside} is the T2.8 40/40 both-IV-high
@@ -135,7 +147,13 @@ public final class ConnectTheDotsScorer {
     add(dots, "breadth", W, ScalperGates.breadth(m, side).pass(), "advances/declines > 32");
     add(dots, "vix", W, ScalperGates.vix(m, side).pass(), "VIX direction");
     add(dots, "basis", W, ScalperGates.futuresBasis(oi, side).pass(), "futures basis");
-    add(dots, "iv_rank", W_IV, m.ivRank() != null && m.ivRank().compareTo(IV_RANK_LOW) < 0, "IV rank low (cheap premium)");
+    // P3 (signal-analysis rollup §Proposals): ivRank is honest-NULL on every live row (no IV-rank
+    // source yet). A null INPUT is WITHHELD from the denominator (absent) — it neither supports nor
+    // opposes — rather than silently scoring supports=false against every candidate; a present rank
+    // keeps the "IV rank low = cheap premium" grade.
+    boolean ivRankAbsent = m.ivRank() == null;
+    add(dots, "iv_rank", W_IV, !ivRankAbsent && m.ivRank().compareTo(IV_RANK_LOW) < 0,
+        ivRankAbsent ? "IV rank absent (no data — withheld)" : "IV rank low (cheap premium)", ivRankAbsent);
     // T2.8: the side's IV richer than the other by >= the gap; 40/40-both-high forces a stand-aside.
     // E4 iv-per-strike: a UNILATERAL buy-side IV>=40 ("buyer stays away", §4.6) also forces the
     // stand-aside when armed — the existing symmetric ivBothHighStandAside misses the one-sided case.
@@ -178,9 +196,17 @@ public final class ConnectTheDotsScorer {
           "Dow global cue " + (m.dowUp() == null ? "unknown" : m.dowUp() ? "up" : "down"));
     }
 
+    // P3: an ABSENT dot (null input, e.g. the honest-null iv_rank) is withheld from BOTH num and den —
+    // neither support nor opposition — so a data gap never dilutes the composite. In the degenerate case
+    // where EVERY dot is absent the denominator is 0 and the aggregate is ZERO → below any positive
+    // threshold → neither bullish nor bearish (fail-closed no-confluence-support), the same guard an
+    // empty dot list hits. In practice the decisive VWAP dot is never absent, so den > 0 on the live path.
     double num = 0;
     double den = 0;
     for (DotScore d : dots) {
+      if (d.absent()) {
+        continue;
+      }
       den += d.weight();
       if (d.supports()) {
         num += d.weight();
@@ -289,6 +315,12 @@ public final class ConnectTheDotsScorer {
 
   private static void add(List<DotScore> dots, String name, double weight, boolean supports, String reason) {
     dots.add(new DotScore(name, weight, supports, reason));
+  }
+
+  /** As {@link #add} but marks the dot {@code absent} (withheld from the aggregate) when its input is null. */
+  private static void add(
+      List<DotScore> dots, String name, double weight, boolean supports, String reason, boolean absent) {
+    dots.add(new DotScore(name, weight, supports, reason, absent));
   }
 
   /**

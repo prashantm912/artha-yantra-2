@@ -173,9 +173,11 @@ public class PaperService {
    * side-effects on a trip (the in-memory per-day dedup, the ntfy push, AND the {@code risk_audit} row),
    * so it must NOT be rolled back by the veto-throw — otherwise the dedup would be poisoned while the DB
    * audit row vanished. The taken/emission path decouples gate-from-fill the same way. Once the gate
-   * passes, the fill runs in its own tx (via {@code txTemplate}) so {@code openOrder}'s
-   * {@code @Transactional} semantics hold — the AFTER_COMMIT F9 margin annotation still fires — even
-   * though this in-class call would otherwise bypass the proxy.
+   * passes, the fill runs via {@code txTemplate} (REQUIRED/default attributes — equivalent to the
+   * bare {@code @Transactional} the proxy path supplies), which keeps the AFTER_COMMIT F9 margin
+   * annotation firing. NOTE: this in-class call BYPASSES the proxy, so {@code openOrder}'s annotation
+   * is inert on the manual path — attributes added to it later (isolation/rollbackFor/timeout) would
+   * apply to the taken path only; mirror them here (or extract the fill to a proxied bean).
    */
   public PositionDto openManualOrder(OrderRequest request) {
     String book = bookFor(request);

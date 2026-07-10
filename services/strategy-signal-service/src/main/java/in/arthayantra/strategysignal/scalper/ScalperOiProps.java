@@ -47,13 +47,20 @@ public record ScalperOiProps(
   // 50000 contracts is a deliberately cautious v1 placeholder — DB-tunable (and ideally per-index)
   // once the live dOI distribution is observed. Set high so a sleepy chain never trips this dot.
   private static final BigDecimal DEFAULT_DRASTIC_FLOOR = new BigDecimal("50000");
-  // T2.8: "10 IV points" on the 0..1 fraction scale = 0.10 (see class javadoc).
-  private static final BigDecimal DEFAULT_IV_PAIR_MIN_GAP = new BigDecimal("0.10");
+  // T2.8: the iv-pair min gap on the 0..1 fraction scale. Recalibrated 0.10 -> 0.02 (signal-analysis
+  // rollup §Proposals P1, owner-approved 2026-07-10): a >=0.10 (10-IV-pt) CE-vs-PE gap never occurs on
+  // NIFTY weeklies, so the 0.8-weight iv_pair dot was permanently dead; 0.02 (2 IV pts) makes it
+  // reachable. Ops-tunable via ARTHA_SCALPER_OI_IV_PAIR_MIN_GAP (application.yml default mirrors this).
+  private static final BigDecimal DEFAULT_IV_PAIR_MIN_GAP = new BigDecimal("0.02");
   // T2.8: the "40/40 both-high" stand-aside level on the 0..1 fraction scale = 0.40.
   private static final BigDecimal DEFAULT_IV_BOTH_HIGH_FLOOR = new BigDecimal("0.40");
-  // T2.7: the OI-spurt magnitudes (% change) the spurt dot needs on BOTH legs.
+  // T2.7: the OI-spurt magnitudes (% change) the spurt dot needs on BOTH legs. The OI floor stays 50;
+  // the PRICE floor was recalibrated 50 -> 8 (signal-analysis rollup §Proposals P2, owner-approved
+  // 2026-07-10): a 50% price move on a 3m scalper bar is unreachable (observed abs p90 ~10 over 2,104
+  // bars), so the 1.0-weight oi_spurt dot was permanently dead; 8 is selective-but-alive (>=8 on 17%).
+  // Ops-tunable via ARTHA_SCALPER_OI_SPURT_PRICE_PCT (application.yml default mirrors this).
   private static final BigDecimal DEFAULT_SPURT_OI_PCT = new BigDecimal("50");
-  private static final BigDecimal DEFAULT_SPURT_PRICE_PCT = new BigDecimal("50");
+  private static final BigDecimal DEFAULT_SPURT_PRICE_PCT = new BigDecimal("8");
   // #2 (section 3.2) Table-1: the per-side OH-strike count that makes the footprint a HIGH (>=3).
   private static final BigDecimal DEFAULT_OPEN_HIGH_MIN_STRIKES = new BigDecimal("3");
   // #2 Table-2: the declineVolume floor on the representative OH strike that downgrades a fall to LOW

@@ -27,11 +27,14 @@ class ScalperOiPropsTest {
           ScalperOiProps p = ctx.getBean(ScalperOiProps.class);
           assertThat(p.crossFilterPct()).isEqualByComparingTo("50");
           assertThat(p.drasticFloor()).isEqualByComparingTo("50000");
-          // IV levels on the 0..1 fraction scale: 10 IV points = 0.10, 40/40 both-high = 0.40.
-          assertThat(p.ivPairMinGap()).isEqualByComparingTo("0.10");
+          // IV levels on the 0..1 fraction scale: both-high = 0.40. iv-pair min-gap recalibrated to
+          // 0.02 (rollup §Proposals P1 — the dead 10-IV-pt gap never occurs on NIFTY weeklies).
+          assertThat(p.ivPairMinGap()).isEqualByComparingTo("0.02");
           assertThat(p.ivBothHighFloor()).isEqualByComparingTo("0.40");
+          // OI-spurt: OI floor stays 50; price floor recalibrated to 8 (rollup §Proposals P2 — the dead
+          // 50% 3m-bar move is unreachable).
           assertThat(p.spurtOiPct()).isEqualByComparingTo("50");
-          assertThat(p.spurtPricePct()).isEqualByComparingTo("50");
+          assertThat(p.spurtPricePct()).isEqualByComparingTo("8");
           // E4: the absolute ATM-IV "trend-play" band on the 0..1 fraction scale = 0.10-0.12.
           assertThat(p.ivAbsBandLow()).isEqualByComparingTo("0.10");
           assertThat(p.ivAbsBandHigh()).isEqualByComparingTo("0.12");
@@ -62,7 +65,7 @@ class ScalperOiPropsTest {
   void defaultsFactoryMatchesTheBoundDefaults() {
     ScalperOiProps p = ScalperOiProps.defaults();
     assertThat(p.crossFilterPct()).isEqualByComparingTo("50");
-    assertThat(p.ivPairMinGap()).isEqualByComparingTo("0.10");
+    assertThat(p.ivPairMinGap()).isEqualByComparingTo("0.02");
     assertThat(p.ivBothHighFloor()).isEqualByComparingTo("0.40");
   }
 }

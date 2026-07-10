@@ -436,6 +436,13 @@ services:
       # to arm, and set the external check to expect a ping on 15 20 * * 1-5 (TZ Asia/Kolkata).
       ARTHA_HEARTBEAT_URL: "${ARTHA_HEARTBEAT_URL:-}"
       ARTHA_HEARTBEAT_SWING_CRON: "${ARTHA_HEARTBEAT_SWING_CRON:-0 15 20 * * MON-FRI}"
+      # Connect-the-Dots dead-dot recalibration (signal-analysis rollup §Proposals P1/P2, owner-approved
+      # 2026-07-10): the iv_pair min-gap + oi_spurt price floor, ops-tunable via .env WITHOUT an image
+      # rebuild (like the scalper relative-volume knobs). The compose-side default MUST stay non-empty and
+      # MUST equal the code/application.yml default (an unset `${VAR:-}` empty string would override the
+      # Spring default; the name must match the application.yml ${ENV} placeholder exactly — #653 trap).
+      ARTHA_SCALPER_OI_IV_PAIR_MIN_GAP: ${ARTHA_SCALPER_OI_IV_PAIR_MIN_GAP:-0.02}
+      ARTHA_SCALPER_OI_SPURT_PRICE_PCT: ${ARTHA_SCALPER_OI_SPURT_PRICE_PCT:-8}
       # Shadow book (signal-analysis §7.1/§7.2): open composite-passing REJECTED entries as virtual
       # 1-lot positions so the exit sweep labels them with a real PnL (entry-gate tuning evidence).
       # Code default is false; ON for the stack — separate shadow_positions table, never touches

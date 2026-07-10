@@ -51,7 +51,7 @@ quarantined LIVE_FIRST evidence window).
 
 | # | id | what (1 line) | source | tier | status |
 |---|---|---|---|---|---|
-| B1 | `fid-p0-1-partial-buckets` | ⚠ RUN FIRST — live 3m/5m/15m/1h series evaluate FROZEN 1-min partial buckets; completed-bucket read contract (chip task_8972447b; thresholds tuned on poisoned bars re-tune after) | FID §3.1/§10 P0-1 | HOLD | TODO |
+| B1 | `fid-p0-1-partial-buckets` | ⚠ RUN FIRST — live 3m/5m/15m/1h series evaluate FROZEN 1-min partial buckets; completed-bucket read contract (chip task_8972447b; thresholds tuned on poisoned bars re-tune after) | FID §3.1/§10 P0-1 | HOLD | **BUILT — PR #683 OPEN (HOLD, owner call)**: LiveSeriesStore completeness filter + exit-anchor reconstruction fix + PartialBucketCanary; 4-lens adversarial review (1 HIGH fixed); E8 re-tune = arming prerequisite; deploy post-close |
 | B2 | `fid-p0-2-engine-sha` | Stamp engine git SHA onto backtest run rows (comparability gate) | FID §10 P0-2 | clean | TODO |
 | B3 | `fid-p0-3-swing-lineage` | Swing deep-sim lineage — job-pipeline route or full run-row lineage (report JSONB only today; FID's "biggest item") | FID §10 P0-3, §12 #16 | HOLD | TODO |
 | B4 | `fid-p0-4-screener-ca` | Live screener CA-adjusted prices (= prior-audit H6; backtest adjusted vs live raw; fix vehicle = §9 candidate 02 adjusted-price-plane) | FID §10 P0-4; 07-05 H6 | HOLD | TODO |

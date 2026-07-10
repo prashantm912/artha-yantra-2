@@ -73,15 +73,19 @@ public class PartialBucketCanary {
   /** Sweeps every warmed 3m series, comparing its last completed bar to the 1m sum. */
   @Scheduled(fixedDelay = 60_000, initialDelay = 90_000)
   public void sweep() {
-    try {
-      Instant now = clock.instant();
-      for (SeriesKey key : store.keys()) {
-        if (THREE_MINUTE.equals(key.interval())) {
-          check(key, now);
-        }
+    Instant now = clock.instant();
+    for (SeriesKey key : store.keys()) {
+      if (!THREE_MINUTE.equals(key.interval())) {
+        continue;
       }
-    } catch (RuntimeException e) {
-      log.warn("partial-bucket canary sweep failed: {}", e.toString());
+      try {
+        check(key, now);
+      } catch (RuntimeException e) {
+        // Contained PER KEY: this canary is the first cross-thread reader of EngineSeries (an
+        // unsynchronized ArrayList mutated on the eval thread), so a torn read on one series must
+        // skip only that series, never abort the whole sweep cycle.
+        log.warn("partial-bucket canary check failed for {}: {}", key.canonical(), e.toString());
+      }
     }
   }
 

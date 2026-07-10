@@ -110,6 +110,12 @@ class LiveSeriesStoreTest {
     EngineCandle last = series.candle(series.size() - 1);
     assertThat(last.bucketStart().toInstant()).isEqualTo(instant("2026-07-03T09:18:00+05:30"));
     assertThat(last.volume()).isEqualTo(300L); // FULL bucket, not the 100 the old code froze
+
+    // the boundary-2 fetch window is [lastBarTime, now): from = the series' last APPENDED bucket
+    // (09:15 — the dropped partial must NOT advance it, or the completed 09:18 is never re-read),
+    // to = the injected clock's now.
+    assertThat(client.lastFrom.toInstant()).isEqualTo(instant("2026-07-03T09:15:00+05:30"));
+    assertThat(client.lastTo.toInstant()).isEqualTo(instant("2026-07-03T09:22:00+05:30"));
   }
 
   @Test
@@ -134,6 +140,43 @@ class LiveSeriesStoreTest {
   }
 
   @Test
+  void truncatedFinalHourBucketIsDroppedPostCloseButRestoredNextSessionBeforeFirstEval() {
+    // ACCEPTED trade-off (adversarial review, B1 follow-up): candles_1h is IST :00-anchored (V029)
+    // and the session closes 15:30, so the final 15:00 bucket is FINAL at 15:30 yet the wall-clock
+    // filter treats it as in-progress until 16:00 — a post-close (15:30–16:00) warm-up/restart
+    // drops it. We deliberately add NO session-close calendar logic to the filter (simplicity):
+    // the bucket is restored by the NEXT session's first boundary refreshFromRest, whose window
+    // starts at lastBarTime (14:00 here, unadvanced by the drop) and so re-fetches 15:00 — landing
+    // it BEFORE the first evaluation ever reads the series. This test pins that restoration.
+    MutableClock clock = new MutableClock(instant("2026-07-03T15:45:00+05:30"));
+    FakeCandlesClient client = new FakeCandlesClient();
+    client.enqueue(
+        List.of(
+            barAt("2026-07-03T14:00:00+05:30", 800), // ends 15:00 — complete
+            barAt("2026-07-03T15:00:00+05:30", 400))); // FINAL at 15:30 but "in progress" til 16:00
+    LiveSeriesStore store = new LiveSeriesStore(client, clock);
+    SeriesKey hourlyKey = new SeriesKey("NFO", "NIFTY26JULFUT", "1h");
+
+    store.ensureWarm(hourlyKey);
+    assertThat(store.series(hourlyKey).size()).isEqualTo(1); // 15:00 dropped at the 15:45 warm
+
+    // Monday 09:18 IST — the first coarse-boundary refresh of the next session re-fetches
+    // [lastBarTime=14:00 Fri, now) and lands the completed 15:00 bucket before any eval.
+    clock.set(instant("2026-07-06T09:18:00+05:30"));
+    client.enqueue(
+        List.of(
+            barAt("2026-07-03T14:00:00+05:30", 800), // duplicate — dropped at append
+            barAt("2026-07-03T15:00:00+05:30", 400))); // long past its end — restored
+    store.refreshFromRest(hourlyKey);
+
+    EngineSeries series = store.series(hourlyKey);
+    assertThat(series.size()).isEqualTo(2);
+    assertThat(series.candle(1).bucketStart().toInstant())
+        .isEqualTo(instant("2026-07-03T15:00:00+05:30"));
+    assertThat(series.candle(1).volume()).isEqualTo(400L);
+  }
+
+  @Test
   void anUnfilteredIntervalFailsOpenAndKeepsTheInProgressBucket() {
     // 1w hits the filter's fail-open default (as any interval the store does not filter would): an
     // in-progress weekly bucket still appends — the old behaviour is preserved for unfiltered TFs.
@@ -153,9 +196,14 @@ class LiveSeriesStoreTest {
     return OffsetDateTime.parse(iso).toInstant();
   }
 
-  /** A {@link MarketDataCandlesClient} whose {@code fetch} replays enqueued responses in order. */
+  /**
+   * A {@link MarketDataCandlesClient} whose {@code fetch} replays enqueued responses in order and
+   * records the last requested window, so tests pin refreshFromRest's from/to computation.
+   */
   private static final class FakeCandlesClient extends MarketDataCandlesClient {
     private final Deque<List<EngineCandle>> responses = new ArrayDeque<>();
+    private OffsetDateTime lastFrom;
+    private OffsetDateTime lastTo;
 
     FakeCandlesClient() {
       super(RestClient.builder(), new ObjectMapper(), "http://market-data:8081");
@@ -169,6 +217,8 @@ class LiveSeriesStoreTest {
     public List<EngineCandle> fetch(
         String exchange, String tradingsymbol, String interval,
         OffsetDateTime from, OffsetDateTime to) {
+      this.lastFrom = from;
+      this.lastTo = to;
       return responses.isEmpty() ? List.of() : responses.removeFirst();
     }
   }

@@ -41,7 +41,8 @@ public class PaperService {
   /**
    * Open-order request (from a signal, or a manual entry); optional SL/TP bracket levels. {@code book}
    * is the paper book to charge; null → resolved from the signal's strategy family, or {@code MANUAL}
-   * for a hand order with no signal.
+   * for a hand order with no signal. {@code clientOrderId} is the OPTIONAL audit-V2 idempotency key,
+   * set ONLY on the manual {@code POST /orders} path — the engine/taken path leaves it null.
    */
   public record OrderRequest(
       Long signalId,
@@ -53,7 +54,23 @@ public class PaperService {
       BigDecimal stopLoss,
       BigDecimal takeProfit,
       Integer subaccountIdx,
-      String book) {
+      String book,
+      String clientOrderId) {
+
+    /** Pre-V2 10-arg form: book set, no idempotency key (the manual path before audit V2). */
+    public OrderRequest(
+        Long signalId,
+        String exchange,
+        String tradingsymbol,
+        String side,
+        long qty,
+        BigDecimal price,
+        BigDecimal stopLoss,
+        BigDecimal takeProfit,
+        Integer subaccountIdx,
+        String book) {
+      this(signalId, exchange, tradingsymbol, side, qty, price, stopLoss, takeProfit, subaccountIdx, book, null);
+    }
 
     /** E10 9-arg form: sub-account set, book resolved from the signal. */
     public OrderRequest(
@@ -66,7 +83,7 @@ public class PaperService {
         BigDecimal stopLoss,
         BigDecimal takeProfit,
         Integer subaccountIdx) {
-      this(signalId, exchange, tradingsymbol, side, qty, price, stopLoss, takeProfit, subaccountIdx, null);
+      this(signalId, exchange, tradingsymbol, side, qty, price, stopLoss, takeProfit, subaccountIdx, null, null);
     }
 
     /** Pre-E10 8-arg form: no sub-account (manual / non-scalper order leaves the ledger key NULL). */
@@ -79,7 +96,7 @@ public class PaperService {
         BigDecimal price,
         BigDecimal stopLoss,
         BigDecimal takeProfit) {
-      this(signalId, exchange, tradingsymbol, side, qty, price, stopLoss, takeProfit, null, null);
+      this(signalId, exchange, tradingsymbol, side, qty, price, stopLoss, takeProfit, null, null, null);
     }
   }
 
@@ -181,6 +198,18 @@ public class PaperService {
    */
   public PositionDto openManualOrder(OrderRequest request) {
     String book = bookFor(request);
+    // Audit V2 idempotency: a duplicate submission (network retry / double-click) carrying the SAME
+    // clientOrderId must return the ORIGINAL position, never a second fill. This check runs BEFORE the
+    // governor ON PURPOSE — the original submission already cleared the gate, so a replay must return
+    // the original even if a governor has TRIPPED since (a retry after a kill-switch flip must not 422
+    // an order that already filled).
+    if (request.clientOrderId() != null) {
+      replayFor(book, request.clientOrderId())
+          .ifPresent(
+              original -> {
+                throw new DuplicateOrderException(original);
+              });
+    }
     risk.entryVeto(book)
         .ifPresent(
             rail -> {
@@ -190,7 +219,32 @@ public class PaperService {
                   "entry blocked by risk governor (" + rail + ") on book " + book,
                   Map.of("book", book, "rail", rail));
             });
-    return txTemplate.execute(status -> openOrder(request));
+    try {
+      return txTemplate.execute(status -> openOrder(request));
+    } catch (org.springframework.dao.DuplicateKeyException race) {
+      // Concurrent duplicate: two submits with the same (book, clientOrderId) both passed the pre-check;
+      // the uq_paper_orders_client_order_id partial-unique index let exactly one INSERT win and rolled
+      // back the loser's whole fill txn. Return the winner's position (committed by the time the loser's
+      // blocked INSERT surfaced the 23505). A null clientOrderId means this 23505 came from some OTHER
+      // constraint (e.g. the open-position key) — not an idempotency collision — so re-throw untouched.
+      if (request.clientOrderId() == null) {
+        throw race;
+      }
+      PositionDto winner = replayFor(book, request.clientOrderId()).orElseThrow(() -> race);
+      throw new DuplicateOrderException(winner);
+    }
+  }
+
+  /**
+   * The position an idempotent replay must return: resolve the {@code clientOrderId} to its FILLED
+   * order's {@link PaperOrderRepository.OrderKey}, then that key's most-recent position (see {@link
+   * PaperPositionRepository#findLatestForKey}). Empty when the key was never filled.
+   */
+  private Optional<PositionDto> replayFor(String book, String clientOrderId) {
+    return orders
+        .keyForClientOrderId(book, clientOrderId)
+        .flatMap(k -> positions.findLatestForKey(book, k.exchange(), k.tradingsymbol(), k.side()))
+        .map(this::toPositionDto);
   }
 
   /**
@@ -242,7 +296,7 @@ public class PaperService {
     Fill fill = fills.fill(Side.valueOf(side), request.qty(), reference, meta);
     orders.insertFilled(
         book, request.signalId(), exchange, tradingsymbol, side, request.qty(), fill.fillPrice(),
-        fills.simulatorId(), fill.slippageApplied(), null, null);
+        fills.simulatorId(), fill.slippageApplied(), null, null, request.clientOrderId());
     Long advisedLots = advisedLots(book, fill.fillPrice(), request.stopLoss());
     upsertPosition(
         book, exchange, tradingsymbol, side, request.qty(), fill.fillPrice(),

@@ -2494,6 +2494,9 @@
           },
           "book" : {
             "type" : "string"
+          },
+          "clientOrderId" : {
+            "type" : "string"
           }
         }
       },

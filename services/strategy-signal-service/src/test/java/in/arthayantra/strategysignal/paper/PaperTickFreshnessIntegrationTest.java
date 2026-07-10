@@ -1,6 +1,7 @@
 package in.arthayantra.strategysignal.paper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -34,15 +35,19 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 /**
- * Audit V3 tick-freshness guards on the paper exit path (app-platform audit 2026-07-10 §8):
+ * Audit V3 tick-freshness guards on the paper exit path (app-platform audit 2026-07-10 §8, settle
+ * semantics per the adversarial-review redesign):
  *
  * <ul>
- *   <li><b>Stale-tick fill</b>: a paper fill that would price off a last tick older than
+ *   <li><b>Stale-tick fill</b>: a paper FILL that would price off a last tick older than
  *       {@code artha.paper.tick-max-age-seconds} is rejected 422 DATA_STALE — a fill against a
- *       stale LTP is fiction. A fresh tick fills normally.
- *   <li><b>No silent breakeven settle</b>: settling a position with no explicit price AND no live
- *       tick no longer fabricates a 0-P&amp;L exit at {@code avgEntryPrice} — it refuses (422),
- *       leaves the position OPEN, and bumps the {@code ay_paper_settle_refused_total} counter.
+ *       stale LTP is fiction; you can always NOT enter. A fresh tick fills normally.
+ *   <li><b>Settle takes the best available truth</b>: a settle with no explicit price falls to the
+ *       last REAL tick at ANY age (a weekend manual close flattens off Friday's tick) — stale
+ *       settles are VISIBLE ({@code ay_paper_stale_settle_total} + once-a-day ntfy) but never
+ *       refused. Only when NO tick has EVER been seen does the settle refuse (422 DATA_STALE,
+ *       position stays OPEN, {@code ay_paper_settle_refused_total}) — the fabricated breakeven
+ *       exit at {@code avgEntryPrice} is gone in both cases.
  * </ul>
  *
  * <p>A FIXED {@link Clock} is pinned so the seeded tick's age is exact. Dedicated book 'a3tick'
@@ -122,23 +127,17 @@ class PaperTickFreshnessIntegrationTest extends StrategySignalIntegrationTestBas
     clearTick(sym);
   }
 
-  // ─── no silent breakeven settle ──────────────────────────────────────────────────────────────────
+  // ─── settle: best available truth, no breakeven fabrication ─────────────────────────────────────
 
   @Test
-  void settleWithNoPriceRefusesInsteadOfSettlingAtBreakeven() throws Exception {
-    String sym = "EQ-" + UUID.randomUUID(); // never seeded → no tick in Redis
+  void settleWithNoTickEverRefusesInsteadOfSettlingAtBreakeven() throws Exception {
+    String sym = "EQ-" + UUID.randomUUID(); // never seeded → no ticks:last entry has EVER existed
     double refusedBefore = meters.counter("ay_paper_settle_refused_total").count();
 
-    // Open at an EXPLICIT price (no tick needed to fill).
-    MvcResult opened =
-        mockMvc
-            .perform(post("/api/v1/paper/orders").contentType(MediaType.APPLICATION_JSON).content(orderWithPrice(sym, "100.00")))
-            .andExpect(status().isCreated())
-            .andReturn();
-    long id = objectMapper.readTree(opened.getResponse().getContentAsString()).get("id").asLong();
+    long id = openAtExplicitPrice(sym, "100.00");
 
-    // Close with NO price and NO live tick → the old code booked a breakeven exit at avgEntryPrice.
-    // Now it must refuse: 422 DATA_STALE, and the position stays OPEN.
+    // Close with NO price and NO tick at all → the old code booked a breakeven exit at avgEntryPrice.
+    // Now it must refuse: 422 DATA_STALE, and the position stays OPEN for the next pass.
     mockMvc
         .perform(post("/api/v1/paper/positions/" + id + "/close").contentType(MediaType.APPLICATION_JSON).content("{}"))
         .andExpect(status().isUnprocessableEntity())
@@ -151,7 +150,56 @@ class PaperTickFreshnessIntegrationTest extends StrategySignalIntegrationTestBas
     assertThat(meters.counter("ay_paper_settle_refused_total").count()).isGreaterThan(refusedBefore);
   }
 
+  @Test
+  void settleWithOnlyAStaleTickSettlesAtThatPriceAndCountsIt() throws Exception {
+    String sym = "EQ-" + UUID.randomUUID();
+    double staleBefore = meters.counter("ay_paper_stale_settle_total").count();
+
+    long id = openAtExplicitPrice(sym, "100.00");
+    // The tick is REAL but 60s old (> the 15s fill max-age): a settle must still use it — a stale
+    // market price beats refusing to leave — while making the staleness visible via the counter.
+    seedTick(sym, "82.00", FIXED_NOW.minusSeconds(60));
+
+    mockMvc
+        .perform(post("/api/v1/paper/positions/" + id + "/close").contentType(MediaType.APPLICATION_JSON).content("{}"))
+        .andExpect(status().isOk());
+
+    assertThat(statusOf(id)).isEqualTo("CLOSED");
+    assertThat(exitPriceOf(sym)).isCloseTo(new BigDecimal("82.00"), within(new BigDecimal("2"))); // tick, not breakeven-100
+    assertThat(realizedOf(id)).isLessThan(new BigDecimal("-500")); // ~(82−100)×50 — a REAL loss, not 0
+    assertThat(meters.counter("ay_paper_stale_settle_total").count()).isGreaterThan(staleBefore);
+    clearTick(sym);
+  }
+
+  @Test
+  void weekendManualCloseFlattensOffAnHoursOldTick() throws Exception {
+    // The review's stranding case 3: ticks:last is not TTL'd, so after hours / on a weekend the UI
+    // close button (POST {} — no price) must flatten off Friday's last tick, however old.
+    String sym = "EQ-" + UUID.randomUUID();
+
+    long id = openAtExplicitPrice(sym, "100.00");
+    seedTick(sym, "82.00", FIXED_NOW.minus(40, java.time.temporal.ChronoUnit.HOURS)); // Friday's close tick
+
+    mockMvc
+        .perform(post("/api/v1/paper/positions/" + id + "/close").contentType(MediaType.APPLICATION_JSON).content("{}"))
+        .andExpect(status().isOk());
+
+    assertThat(statusOf(id)).isEqualTo("CLOSED"); // owner CAN flatten on a weekend
+    assertThat(exitPriceOf(sym)).isCloseTo(new BigDecimal("82.00"), within(new BigDecimal("2"))); // aged tick price
+    clearTick(sym);
+  }
+
   // ─── helpers ─────────────────────────────────────────────────────────────────────────────────────
+
+  /** Opens a BUY 50 at an EXPLICIT price (no tick needed to fill); returns the position id. */
+  private long openAtExplicitPrice(String sym, String price) throws Exception {
+    MvcResult opened =
+        mockMvc
+            .perform(post("/api/v1/paper/orders").contentType(MediaType.APPLICATION_JSON).content(orderWithPrice(sym, price)))
+            .andExpect(status().isCreated())
+            .andReturn();
+    return objectMapper.readTree(opened.getResponse().getContentAsString()).get("id").asLong();
+  }
 
   private void seedTick(String sym, String lastPrice, Instant at) {
     String iso = OffsetDateTime.ofInstant(at, IST).toString();
@@ -209,6 +257,13 @@ class PaperTickFreshnessIntegrationTest extends StrategySignalIntegrationTestBas
 
   private String statusOf(long id) {
     return jdbc.queryForObject("SELECT status FROM paper_positions WHERE id=?", String.class, id);
+  }
+
+  /** The SELL exit leg's fill price for a symbol (the close's booked price). */
+  private BigDecimal exitPriceOf(String sym) {
+    return jdbc.queryForObject(
+        "SELECT fill_price FROM paper_orders WHERE book=? AND tradingsymbol=? AND side='SELL'",
+        BigDecimal.class, BOOK, sym);
   }
 
   private BigDecimal realizedOf(long id) {

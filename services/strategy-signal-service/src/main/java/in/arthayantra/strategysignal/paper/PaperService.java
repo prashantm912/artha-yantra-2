@@ -446,25 +446,39 @@ public class PaperService {
     return doSettle(pos, reference, "EXPIRY_SETTLEMENT", exercise);
   }
 
+  /**
+   * Audit V3 / research-fidelity P1-6: NO breakeven fabrication. The exit reference is an explicit
+   * price (manual close, swing daily-close, expiry intrinsic/spot) or the last known REAL tick at
+   * ANY age — NEVER {@code avgEntryPrice}, which booked a fictional 0-P&amp;L exit for a leg that
+   * never ticked. The freshness asymmetry with {@code openOrder} is deliberate: <b>entries need
+   * fresh truth (you can always NOT enter), exits need the best available truth (you cannot refuse
+   * to leave forever)</b> — so an engine exit, the 15:45 sweep and a weekend manual close all
+   * flatten off the last real price even when it is stale (counted via
+   * {@code ay_paper_stale_settle_total} + a once-per-(position, IST day) alert — visible, never
+   * silent, never refused). Only when NO tick has EVER been seen for the symbol does the settle
+   * refuse: counter + ntfy + 422 DATA_STALE, leaving the position OPEN for the next pass (the
+   * automated callers catch + log; the manual close surfaces the 422).
+   */
   private BigDecimal doSettle(PositionRow pos, BigDecimal price, String closeReason, boolean exercise) {
     InstrumentMeta meta = instruments.meta(pos.exchange(), pos.tradingsymbol());
     Side exitSide = "BUY".equals(pos.side()) ? Side.SELL : Side.BUY;
-    // Audit V3 / research-fidelity P1-6: NO silent breakeven fabrication. The exit reference is an
-    // explicit price (manual close, swing daily-close, expiry intrinsic/spot) or the live last tick —
-    // NEVER avgEntryPrice, which would book a fictional 0-P&L exit for a leg that never actually
-    // ticked. When neither exists the position cannot be honestly marked, so refuse to settle: count
-    // it, alert once per (position, day), and throw — leaving the position OPEN for the next pass. The
-    // automated callers (mark-to-close / signal-exit) already catch + log; the manual close returns 422.
-    BigDecimal reference =
-        firstNonNull(price, lastTick.lastPrice(pos.exchange(), pos.tradingsymbol()).orElse(null));
+    BigDecimal reference = price;
     if (reference == null) {
-      staleTicks.settleRefused(pos, closeReason);
-      throw new ApiException(
-          422,
-          ErrorCodes.DATA_STALE,
-          "no price to settle " + pos.exchange() + ":" + pos.tradingsymbol()
-              + " — left OPEN, not settled at breakeven",
-          Map.of("positionId", pos.id(), "closeReason", closeReason));
+      Optional<LastTickReader.TickView> tick = lastTick.lastTick(pos.exchange(), pos.tradingsymbol());
+      if (tick.isEmpty()) {
+        staleTicks.settleRefused(pos, closeReason);
+        throw new ApiException(
+            422,
+            ErrorCodes.DATA_STALE,
+            "no tick has ever been seen for " + pos.exchange() + ":" + pos.tradingsymbol()
+                + " — left OPEN, not settled at breakeven",
+            Map.of("positionId", pos.id(), "closeReason", closeReason));
+      }
+      reference = tick.get().price();
+      Duration age = tick.get().age();
+      if (age != null && age.compareTo(tickMaxAge) > 0) {
+        staleTicks.staleSettleUsed(pos, closeReason, age);
+      }
     }
     Fill exit =
         exercise
@@ -610,14 +624,5 @@ public class PaperService {
     return new TradeDto(
         row.id(), row.exchange(), row.tradingsymbol(), row.side(), row.qty(), row.avgEntryPrice(),
         row.realizedPnl(), row.openedAt(), row.closedAt());
-  }
-
-  private static BigDecimal firstNonNull(BigDecimal... values) {
-    for (BigDecimal value : values) {
-      if (value != null) {
-        return value;
-      }
-    }
-    return null;
   }
 }

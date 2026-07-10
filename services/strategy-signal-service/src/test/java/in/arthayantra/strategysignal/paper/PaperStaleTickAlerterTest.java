@@ -156,4 +156,23 @@ class PaperStaleTickAlerterTest {
     assertThat(settleCount()).isEqualTo(1.0);
     verify(notifier, never()).send(Mockito.anyString(), Mockito.anyString(), Mockito.anyString());
   }
+
+  @Test
+  void staleSettleUsedCountsEveryTimeAndAlertsOncePerPositionPerDay() {
+    PositionRow p = pos(7L);
+
+    alerter.staleSettleUsed(p, "INTRADAY_MTM", Duration.ofMinutes(30));
+    assertThat(meters.counter("ay_paper_stale_settle_total").count()).isEqualTo(1.0);
+    verify(notifier, times(1)).send(Mockito.eq("NTFY"), Mockito.anyString(), Mockito.anyString());
+
+    // Same position, same day: counts again but the alert dedups.
+    alerter.staleSettleUsed(p, "MANUAL", Duration.ofHours(40));
+    assertThat(meters.counter("ay_paper_stale_settle_total").count()).isEqualTo(2.0);
+    verify(notifier, times(1)).send(Mockito.eq("NTFY"), Mockito.anyString(), Mockito.anyString());
+
+    // A DIFFERENT position alerts on its own; the refuse counter is untouched throughout.
+    alerter.staleSettleUsed(pos(8L), "STOP_LOSS", Duration.ofMinutes(5));
+    verify(notifier, times(2)).send(Mockito.eq("NTFY"), Mockito.anyString(), Mockito.anyString());
+    assertThat(settleCount()).isZero();
+  }
 }

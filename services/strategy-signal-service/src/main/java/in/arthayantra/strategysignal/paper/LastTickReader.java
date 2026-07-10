@@ -41,9 +41,12 @@ public class LastTickReader {
 
   /**
    * The last tick's price + wall-clock age (audit V3). {@code age} is the distance from the tick's
-   * own {@code timestamp} to now; it is {@code null} when the tick carries no parseable timestamp —
-   * a freshness guard treats an unknown age as "usable" so a malformed tick behaves exactly as it
-   * did before this change. Empty when no tick has arrived (or its price is unparseable/absent).
+   * own {@code timestamp} to now; it is {@code null} when the tick carries NO timestamp field at all
+   * (a freshness guard treats an unknown age as "usable"). A PRESENT-but-unparseable timestamp is
+   * different: {@code OffsetDateTime.parse} throws inside the try, so the WHOLE tick — price
+   * included — is dropped via the catch (same as any other malformed tick). Acceptable because
+   * production ({@code RedisTickPublisher}) always writes ISO offsets. Empty when no tick has
+   * arrived, its price is absent, or any part fails to parse.
    */
   public Optional<TickView> lastTick(String exchange, String tradingsymbol) {
     Object json = redis.opsForHash().get(LAST_TICK_HASH, exchange + ":" + tradingsymbol);

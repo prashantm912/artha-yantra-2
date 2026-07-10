@@ -23,7 +23,8 @@ import org.springframework.stereotype.Component;
  * tick silently defers stops all session"), and {@link PaperService#settle} used to book a fictional
  * breakeven exit when no price was available. This collaborator instruments BOTH — a Micrometer
  * counter every occurrence plus a once-per-(position, IST day) ntfy push — without changing what
- * either path DECIDES (the bracket still holds; the settle now refuses instead of fabricating).
+ * either path DECIDES (the bracket still holds; the settle takes the last REAL tick at any age,
+ * visibly when stale, and refuses only when no tick has ever been seen).
  *
  * <p>Follows the {@code RiskService} governor-trip idiom exactly: fail-soft ntfy (skipped silently
  * when unconfigured), a {@link Clock}-driven IST day, and a per-key {@link ConcurrentHashMap} dedup.
@@ -44,10 +45,17 @@ public class PaperStaleTickAlerter {
 
   /** Every bracket-eval pass that could not freshly evaluate a position's stop/target. */
   private final Counter bracketStarvedTotal;
-  /** Every settle attempt refused because no honest price (explicit or live tick) was available. */
+  /** Every settle attempt refused because no tick has EVER been seen (no explicit price either). */
   private final Counter settleRefusedTotal;
+  /** Every settle that priced off a REAL-but-stale tick (older than the fill max-age). */
+  private final Counter staleSettleTotal;
 
-  /** positionId -> the instant its (absent-tick) starvation window opened; cleared on a fresh tick. */
+  /**
+   * positionId -> the instant its (absent-tick) starvation window opened; cleared on a fresh tick or
+   * a bracket close. A position closed via a NON-bracket path (manual close, engine exit, the 15:45
+   * sweep) never reaches {@link #bracketRecovered}, so its entry lingers until restart — accepted:
+   * bounded at one small entry per position id ever starved, and a JVM restart clears the map.
+   */
   private final java.util.Map<Long, Instant> starvedSince = new ConcurrentHashMap<>();
   /** (kind + positionId) -> the IST day it last alerted, so each position pages at most once per day. */
   private final java.util.Map<String, LocalDate> alertedOn = new ConcurrentHashMap<>();
@@ -63,6 +71,7 @@ public class PaperStaleTickAlerter {
     this.bracketAlertThreshold = Duration.ofMinutes(bracketAlertMinutes);
     this.bracketStarvedTotal = meterRegistry.counter("ay_paper_bracket_starved_total");
     this.settleRefusedTotal = meterRegistry.counter("ay_paper_settle_refused_total");
+    this.staleSettleTotal = meterRegistry.counter("ay_paper_stale_settle_total");
   }
 
   /**
@@ -108,20 +117,41 @@ public class PaperStaleTickAlerter {
   }
 
   /**
-   * A settle attempt had no honest price — no explicit price and no live tick — so the caller refused
-   * to fabricate a breakeven exit and left the position OPEN. Counts it and alerts once per (position,
-   * IST day). log.error (not warn): a position that cannot be marked is a real operational hole.
+   * A settle attempt had no price AT ALL — no explicit price and no {@code ticks:last} entry has ever
+   * existed for the symbol — so the caller refused to fabricate a breakeven exit and left the position
+   * OPEN. Counts it and alerts once per (position, IST day). log.error (not warn): a position that
+   * cannot be marked is a real operational hole.
    */
   public void settleRefused(PositionRow pos, String closeReason) {
     settleRefusedTotal.increment();
     String detail =
         "position " + pos.id() + " (" + closeReason + ") " + pos.exchange() + ":"
-            + pos.tradingsymbol() + " has no price — left OPEN, NOT settled at breakeven";
+            + pos.tradingsymbol() + " has no tick at all — left OPEN, NOT settled at breakeven";
     log.error("paper settle refused: {}", detail);
     alertOncePerDay(
         "settle-refuse",
         pos.id(),
         "ArthaYantra Paper — settle refused (" + pos.exchange() + ":" + pos.tradingsymbol() + ")",
+        detail);
+  }
+
+  /**
+   * A settle priced off a REAL tick older than the fill max-age. Deliberate and allowed — exits take
+   * the best available truth (see {@code PaperService.doSettle}) — but never silent: counts every
+   * occurrence and warns + ntfy-pushes once per (position, IST day) with the tick's age, so a book
+   * that keeps flattening off dead prices is seen.
+   */
+  public void staleSettleUsed(PositionRow pos, String closeReason, Duration age) {
+    staleSettleTotal.increment();
+    String detail =
+        "position " + pos.id() + " (" + closeReason + ") " + pos.exchange() + ":"
+            + pos.tradingsymbol() + " settled off a tick " + age.toSeconds()
+            + "s old — the last REAL price, not a fresh one";
+    log.warn("paper stale settle: {}", detail);
+    alertOncePerDay(
+        "stale-settle",
+        pos.id(),
+        "ArthaYantra Paper — stale settle (" + pos.exchange() + ":" + pos.tradingsymbol() + ")",
         detail);
   }
 

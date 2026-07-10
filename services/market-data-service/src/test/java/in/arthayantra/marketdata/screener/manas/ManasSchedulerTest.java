@@ -22,6 +22,8 @@ class ManasSchedulerTest {
   private final ManasGeometryService geometry = mock(ManasGeometryService.class);
   private final in.arthayantra.marketdata.alerts.NtfyClient ntfy =
       mock(in.arthayantra.marketdata.alerts.NtfyClient.class);
+  private final in.arthayantra.marketdata.ingest.IngestRunLedger ledger =
+      mock(in.arthayantra.marketdata.ingest.IngestRunLedger.class);
 
   @Test
   void bhavcopyCompletedEventRunsAndPersistsTheScreen() {
@@ -29,7 +31,7 @@ class ManasSchedulerTest {
     when(screener.screen(null))
         .thenReturn(new ManasScreenService.ScreenResult(day, 0, List.of()));
 
-    new ManasScheduler(screener, repo, geometry, ntfy).onBhavcopyBackfillCompleted();
+    new ManasScheduler(screener, repo, geometry, ntfy, ledger).onBhavcopyBackfillCompleted();
 
     verify(repo).upsertAll(eq(day), any());
     verify(geometry).persistForPassers(eq(day), any());
@@ -41,7 +43,7 @@ class ManasSchedulerTest {
     when(repo.latestScreenDate()).thenReturn(day);
     when(screener.latestScreenDate()).thenReturn(day);
 
-    new ManasScheduler(screener, repo, geometry, ntfy).onBhavcopyBackfillCompleted();
+    new ManasScheduler(screener, repo, geometry, ntfy, ledger).onBhavcopyBackfillCompleted();
 
     org.mockito.Mockito.verify(screener, org.mockito.Mockito.never()).screen(any());
     org.mockito.Mockito.verify(repo, org.mockito.Mockito.never()).upsertAll(any(), any());
@@ -58,7 +60,7 @@ class ManasSchedulerTest {
         // the class-level @ConditionalOnProperty is evaluated even for withBean registrations —
         // without the flag the bean (and its listener) is silently skipped
         .withPropertyValues("artha.manas-arora.screen.enabled=true")
-        .withBean(ManasScheduler.class, () -> new ManasScheduler(screener, repo, geometry, ntfy))
+        .withBean(ManasScheduler.class, () -> new ManasScheduler(screener, repo, geometry, ntfy, ledger))
         .run(
             ctx -> {
               ctx.getSourceApplicationContext()

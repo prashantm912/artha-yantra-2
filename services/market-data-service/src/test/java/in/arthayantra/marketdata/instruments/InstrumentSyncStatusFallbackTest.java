@@ -20,7 +20,8 @@ class InstrumentSyncStatusFallbackTest {
             return lastSeen;
           }
         };
-    return new InstrumentSyncService(null, repo, null, null, null, null);
+    // ledger null: only status() is exercised here — it never runs a sync, so the ledger is untouched
+    return new InstrumentSyncService(null, repo, null, null, null, null, null);
   }
 
   @Test

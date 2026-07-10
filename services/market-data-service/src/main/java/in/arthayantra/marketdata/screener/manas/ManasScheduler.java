@@ -1,6 +1,7 @@
 package in.arthayantra.marketdata.screener.manas;
 
 import in.arthayantra.marketdata.bhavcopy.BhavcopyBackfillCompleted;
+import in.arthayantra.marketdata.ingest.IngestRunLedger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,17 +34,20 @@ public class ManasScheduler {
   private final ManasScreenRepository repo;
   private final ManasGeometryService geometry;
   private final in.arthayantra.marketdata.alerts.NtfyClient ntfy;
+  private final IngestRunLedger ledger;
 
-  /** Wires the screener + screen repository + geometry service + the ops ntfy client. */
+  /** Wires the screener + screen repository + geometry service + the ops ntfy client + ingest ledger. */
   public ManasScheduler(
       ManasScreenService screener,
       ManasScreenRepository repo,
       ManasGeometryService geometry,
-      in.arthayantra.marketdata.alerts.NtfyClient ntfy) {
+      in.arthayantra.marketdata.alerts.NtfyClient ntfy,
+      IngestRunLedger ledger) {
     this.screener = screener;
     this.repo = repo;
     this.geometry = geometry;
     this.ntfy = ntfy;
+    this.ledger = ledger;
   }
 
   /** Boot one-shot. */
@@ -65,6 +69,9 @@ public class ManasScheduler {
   }
 
   private void runQuietly(String trigger) {
+    // Ingest-run ledger (audit §7.2.3). Opened only after the dedup skip below, so a no-op run
+    // records nothing; the id survives into the catch so a screen failure is recorded, not vanished.
+    Long runId = null;
     try {
       // Already screened the current bhavcopy watermark? Skip (mirror of the Minervini scheduler):
       // the fallback cron / boot one-shot / holiday no-op event become cheap no-ops instead of a
@@ -74,20 +81,24 @@ public class ManasScheduler {
         log.debug("manas screen already current for {} — skipped ({})", persisted, trigger);
         return;
       }
+      runId = ledger.start(IngestRunLedger.SOURCE_MANAS_SCREEN);
       ManasScreenService.ScreenResult r = screener.screen(null);
       if (r.screenDate() == null) {
+        ledger.succeed(runId, 0);
         log.info("manas screen skipped ({}) — no daily equity data yet", trigger);
         return;
       }
       int written = repo.upsertAll(r.screenDate(), r.candidates());
       long passing = r.candidates().stream().filter(ManasCandidate::passesAll).count();
       int geo = computeGeometry(r);
+      ledger.succeed(runId, written);
       log.info(
           "manas screen upserted {} rows for {} ({} pass all gates, {} geometry rows) [{}]",
           written, r.screenDate(), passing, geo, trigger);
     } catch (Exception e) {
       // Audit P0-4/H10: a failed screen leaves the 20:05 swing batch on yesterday's funnel — the
       // owner must hear about it, not find it in a log next week. NtfyClient never throws.
+      ledger.fail(runId, e.getMessage());
       log.warn("manas screen failed ({}) — non-fatal", trigger, e);
       ntfy.send(
           "Manas screen FAILED", "high",

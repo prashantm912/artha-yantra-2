@@ -2,6 +2,7 @@ package in.arthayantra.marketdata.nse;
 
 import in.arthayantra.marketdata.feeds.FiiDerivativeFetcher;
 import in.arthayantra.marketdata.feeds.FiiDiiFetcher;
+import in.arthayantra.marketdata.ingest.IngestRunLedger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -30,6 +31,7 @@ public class NseEodScheduler {
   private final NseEodParticipantOiRepository participantOiRepo;
   private final ObjectProvider<FiiDerivativeFetcher> fiiDerivative;
   private final NseEodFiiDerivativeRepository fiiDerivativeRepo;
+  private final IngestRunLedger ledger;
 
   public NseEodScheduler(
       FiiDiiFetcher fiiDii,
@@ -37,13 +39,15 @@ public class NseEodScheduler {
       ParticipantOiFetcher participantOi,
       NseEodParticipantOiRepository participantOiRepo,
       ObjectProvider<FiiDerivativeFetcher> fiiDerivative,
-      NseEodFiiDerivativeRepository fiiDerivativeRepo) {
+      NseEodFiiDerivativeRepository fiiDerivativeRepo,
+      IngestRunLedger ledger) {
     this.fiiDii = fiiDii;
     this.fiiDiiRepo = fiiDiiRepo;
     this.participantOi = participantOi;
     this.participantOiRepo = participantOiRepo;
     this.fiiDerivative = fiiDerivative;
     this.fiiDerivativeRepo = fiiDerivativeRepo;
+    this.ledger = ledger;
   }
 
   /** Pull once on startup so data is present immediately and the NSE fetch path is exercised. */
@@ -66,9 +70,14 @@ public class NseEodScheduler {
 
   private void pullFiiDii() {
     try {
-      var rows = fiiDii.fetchLatest();
-      fiiDiiRepo.upsertAll(rows);
-      log.info("NSE FII/DII EOD upserted {} rows", rows.size());
+      ledger.record(
+          IngestRunLedger.SOURCE_NSE_FII_DII,
+          () -> {
+            var rows = fiiDii.fetchLatest();
+            fiiDiiRepo.upsertAll(rows);
+            log.info("NSE FII/DII EOD upserted {} rows", rows.size());
+            return rows.size();
+          });
     } catch (RuntimeException failed) {
       log.warn("NSE FII/DII EOD pull failed (will retry next schedule): {}", failed.getMessage());
     }
@@ -76,9 +85,14 @@ public class NseEodScheduler {
 
   private void pullParticipantOi() {
     try {
-      var rows = participantOi.fetchLatest();
-      participantOiRepo.upsertAll(rows);
-      log.info("NSE participant-OI EOD upserted {} rows", rows.size());
+      ledger.record(
+          IngestRunLedger.SOURCE_NSE_PARTICIPANT_OI,
+          () -> {
+            var rows = participantOi.fetchLatest();
+            participantOiRepo.upsertAll(rows);
+            log.info("NSE participant-OI EOD upserted {} rows", rows.size());
+            return rows.size();
+          });
     } catch (RuntimeException failed) {
       log.warn(
           "NSE participant-OI EOD pull failed (will retry next schedule): {}", failed.getMessage());
@@ -96,9 +110,14 @@ public class NseEodScheduler {
       return;
     }
     try {
-      var rows = fetcher.fetchLatest();
-      fiiDerivativeRepo.upsertAll(rows);
-      log.info("FII derivative-stats EOD upserted {} rows", rows.size());
+      ledger.record(
+          IngestRunLedger.SOURCE_NSE_FII_DERIVATIVE,
+          () -> {
+            var rows = fetcher.fetchLatest();
+            fiiDerivativeRepo.upsertAll(rows);
+            log.info("FII derivative-stats EOD upserted {} rows", rows.size());
+            return rows.size();
+          });
     } catch (RuntimeException failed) {
       log.warn(
           "FII derivative-stats EOD pull failed (will retry next schedule): {}",

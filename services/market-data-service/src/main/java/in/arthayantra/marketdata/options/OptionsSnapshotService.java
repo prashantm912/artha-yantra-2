@@ -1,7 +1,9 @@
 package in.arthayantra.marketdata.options;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketcalendar.MarketCalendar;
+import in.arthayantra.marketdata.ingest.IngestRunLedger;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -46,6 +48,7 @@ public class OptionsSnapshotService {
   private final int expiryHorizonDays;
   private final Timer snapshotTimer;
   private final Counter snapshotRows;
+  private final IngestRunLedger ledger;
   // previous-pass OI per leg — oi_change = oi − previous snapshot's oi (null on the first pass)
   private final Map<String, Long> previousOi = new java.util.concurrent.ConcurrentHashMap<>();
   private final ExecutorService executor =
@@ -66,7 +69,8 @@ public class OptionsSnapshotService {
       Clock clock,
       @Value("${artha.options.snapshot-underlyings:NIFTY 50}") List<String> snapshotUnderlyings,
       @Value("${artha.options.snapshot-expiry-horizon-days:90}") int expiryHorizonDays,
-      MeterRegistry meterRegistry) {
+      MeterRegistry meterRegistry,
+      IngestRunLedger ledger) {
     this.chainService = chainService;
     this.repository = repository;
     this.redis = redis;
@@ -77,6 +81,7 @@ public class OptionsSnapshotService {
     this.expiryHorizonDays = expiryHorizonDays;
     this.snapshotTimer = meterRegistry.timer("ay_options_snapshot_duration_seconds");
     this.snapshotRows = meterRegistry.counter("ay_options_snapshot_rows_total");
+    this.ledger = ledger;
   }
 
   /**
@@ -157,6 +162,12 @@ public class OptionsSnapshotService {
     }
     repository.insertAll(rows);
     snapshotRows.increment(rows.size());
+    // Ingest-run daily capture summary (audit §7.2.3, "1 row/day"): fold this pass's row count into
+    // the IST session-day row. Keyed by the session day, not the pass — the day accumulates across
+    // every 2-min pass + underlying + expiry. Fail-soft (must never break a capture pass).
+    ledger.recordCaptureSession(
+        ts.atZoneSameInstant(Ist.ZONE).toLocalDate().atStartOfDay(Ist.ZONE).toOffsetDateTime(),
+        rows.size());
     snapshotTimer.record(Duration.ofNanos(System.nanoTime() - started));
     publish(chain);
     return chain;

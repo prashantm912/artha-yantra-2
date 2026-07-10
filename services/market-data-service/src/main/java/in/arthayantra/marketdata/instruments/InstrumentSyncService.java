@@ -2,6 +2,7 @@ package in.arthayantra.marketdata.instruments;
 
 import in.arthayantra.common.web.error.ConflictException;
 import in.arthayantra.common.web.error.ErrorCodes;
+import in.arthayantra.marketdata.ingest.IngestRunLedger;
 import in.arthayantra.marketdata.kite.InstrumentDumpGateway;
 import in.arthayantra.marketdata.kite.InstrumentDumpGateway.InstrumentRecord;
 import java.time.Duration;
@@ -46,6 +47,7 @@ public class InstrumentSyncService {
   private final CacheManager cacheManager;
   private final ObjectProvider<SyncStep> syncSteps;
   private final org.springframework.context.ApplicationEventPublisher eventPublisher;
+  private final IngestRunLedger ledger;
   private final ExecutorService executor =
       Executors.newSingleThreadExecutor(
           r -> {
@@ -64,13 +66,15 @@ public class InstrumentSyncService {
       InstrumentRegistry registry,
       CacheManager cacheManager,
       ObjectProvider<SyncStep> syncSteps,
-      org.springframework.context.ApplicationEventPublisher eventPublisher) {
+      org.springframework.context.ApplicationEventPublisher eventPublisher,
+      IngestRunLedger ledger) {
     this.dumpGateway = dumpGateway;
     this.repository = repository;
     this.registry = registry;
     this.cacheManager = cacheManager;
     this.syncSteps = syncSteps;
     this.eventPublisher = eventPublisher;
+    this.ledger = ledger;
   }
 
   /** 202-style async trigger; 409 {@code CONFLICT_SYNC_RUNNING} when one is in flight. */
@@ -95,6 +99,8 @@ public class InstrumentSyncService {
 
   private SyncStatus runLocked(String jobId) {
     Instant started = Instant.now();
+    // Ingest-run ledger (audit §7.2.3): a full dump has no data window; rows_written = instruments synced.
+    Long runId = ledger.start(IngestRunLedger.SOURCE_INSTRUMENT_SYNC);
     try {
       List<InstrumentRecord> dump = dumpGateway.fetchDump();
       repository.stageDump(dump);
@@ -120,6 +126,7 @@ public class InstrumentSyncService {
               Duration.between(started, Instant.now()).toMillis(),
               null);
       status.set(ok);
+      ledger.succeed(runId, dump.size());
       log.info(
           "instrument sync ok: {} rows, {} tombstoned, {} ms",
           dump.size(),
@@ -136,6 +143,7 @@ public class InstrumentSyncService {
               Duration.between(started, Instant.now()).toMillis(),
               e.getMessage());
       status.set(failed);
+      ledger.fail(runId, e.getMessage());
       log.error("instrument sync failed", e);
       return failed;
     } finally {

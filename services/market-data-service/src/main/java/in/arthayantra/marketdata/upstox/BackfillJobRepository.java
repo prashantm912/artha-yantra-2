@@ -37,12 +37,18 @@ public class BackfillJobRepository {
     this.jdbc = jdbc;
   }
 
-  /** Inserts a RUNNING row for a starting backfill and returns its generated id. */
-  public long start(String kind, String paramsJson) {
+  /**
+   * Inserts a RUNNING row for a starting backfill and returns its generated id. {@code jobId} is the
+   * in-memory API job handle the trigger endpoint returns to the caller ({@code {"jobId": <uuid>}}) —
+   * persisting it (V041) lets a status poll be joined back to its ledger row (audit V12).
+   */
+  public long start(String kind, String jobId, String paramsJson) {
     return jdbc.queryForObject(
-        "INSERT INTO backfill_jobs (kind, params, status) VALUES (?, ?::jsonb, 'RUNNING') RETURNING id",
+        "INSERT INTO backfill_jobs (kind, job_id, params, status) "
+            + "VALUES (?, ?::uuid, ?::jsonb, 'RUNNING') RETURNING id",
         Long.class,
         kind,
+        jobId,
         paramsJson);
   }
 

@@ -300,7 +300,7 @@ public class ExpiredBackfillService {
     RunProgress p = new RunProgress(jobId, started);
     progress = p;
     status.set(p.snapshot("RUNNING", null, 0, null));
-    long auditId = auditStart(underlyings, from, to, force, type);
+    long auditId = auditStart(jobId, underlyings, from, to, force, type);
     executor.submit(
         () -> {
           try {
@@ -643,7 +643,12 @@ public class ExpiredBackfillService {
    * break the backfill it records.
    */
   private long auditStart(
-      List<String> underlyings, LocalDate from, LocalDate to, boolean force, ContractType type) {
+      String jobId,
+      List<String> underlyings,
+      LocalDate from,
+      LocalDate to,
+      boolean force,
+      ContractType type) {
     if (jobRepo == null) {
       return -1;
     }
@@ -652,7 +657,7 @@ public class ExpiredBackfillService {
           String.format(
               "{\"underlyings\":%s,\"from\":%s,\"to\":%s,\"force\":%s,\"contractType\":\"%s\"}",
               jsonArray(underlyings), jsonOrNull(from), jsonOrNull(to), force, type);
-      return jobRepo.start("EXPIRED", params);
+      return jobRepo.start("EXPIRED", jobId, params);
     } catch (RuntimeException e) {
       log.warn("expired-backfill: could not open audit row (non-fatal): {}", e.toString());
       return -1;

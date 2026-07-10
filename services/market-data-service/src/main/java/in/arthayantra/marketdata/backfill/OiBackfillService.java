@@ -11,6 +11,7 @@ import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.OiHistorySource;
 import in.arthayantra.marketdata.options.OptionsSnapshotRepository;
 import in.arthayantra.marketdata.options.OptionsSnapshotRepository.SnapshotRow;
+import in.arthayantra.marketdata.upstox.BackfillJobRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -99,6 +100,8 @@ public class OiBackfillService {
   private final OptionsSnapshotRepository optionsRepository;
   private final FuturesOiSnapshotRepository futuresRepository;
   private final FuturesContractSource futuresContracts;
+  /** Run-audit ledger (V030) — this path wrote NO row before audit V12; writes fail-soft here. */
+  private final BackfillJobRepository jobRepo;
   private final AtomicBoolean running = new AtomicBoolean(false);
   private final ExecutorService executor =
       Executors.newSingleThreadExecutor(
@@ -114,12 +117,14 @@ public class OiBackfillService {
       InstrumentRepository instruments,
       OptionsSnapshotRepository optionsRepository,
       FuturesOiSnapshotRepository futuresRepository,
-      FuturesContractSource futuresContracts) {
+      FuturesContractSource futuresContracts,
+      BackfillJobRepository jobRepo) {
     this.historySource = historySource;
     this.instruments = instruments;
     this.optionsRepository = optionsRepository;
     this.futuresRepository = futuresRepository;
     this.futuresContracts = futuresContracts;
+    this.jobRepo = jobRepo;
   }
 
   /**
@@ -138,6 +143,7 @@ public class OiBackfillService {
     status.set(
         new Status(
             jobId, "RUNNING", underlying, expiry, session, started, null, 0, 0, 0, null));
+    long auditId = auditStart(jobId, underlying, expiry, session);
     executor.submit(
         () -> {
           try {
@@ -145,6 +151,7 @@ public class OiBackfillService {
             log.info(
                 "oi-backfill {} done: {} {} {} → {} option rows, {} futures rows",
                 jobId, underlying, expiry, session, result.optionRows(), result.futuresRows());
+            auditComplete(auditId, (long) result.optionRows() + result.futuresRows());
             Instant ended = Instant.now();
             status.set(
                 new Status(
@@ -153,6 +160,7 @@ public class OiBackfillService {
                     result.optionRows(), result.futuresRows(), null));
           } catch (Exception e) {
             log.error("oi-backfill {} failed for {} {} {}", jobId, underlying, expiry, session, e);
+            auditFail(auditId, e.toString());
             Instant ended = Instant.now();
             status.set(
                 new Status(
@@ -280,5 +288,53 @@ public class OiBackfillService {
               + "(set artha.openalgo.oi-backfill-enabled=true on the live profile)");
     }
     return source;
+  }
+
+  /**
+   * Opens a {@code backfill_jobs} audit row for this run — kind {@code OI}, carrying the API job handle
+   * (audit V12: this path wrote NO ledger row before). Best-effort: a logging-DB failure returns -1 and
+   * is swallowed with a warn so the audit never breaks the backfill it records.
+   */
+  private long auditStart(String jobId, String underlying, LocalDate expiry, LocalDate session) {
+    try {
+      String params =
+          String.format(
+              "{\"underlying\":%s,\"expiry\":%s,\"session\":%s}",
+              jsonStr(underlying), jsonOrNull(expiry), jsonOrNull(session));
+      return jobRepo.start("OI", jobId, params);
+    } catch (RuntimeException e) {
+      log.warn("oi-backfill: could not open audit row (non-fatal): {}", e.toString());
+      return -1;
+    }
+  }
+
+  private void auditComplete(long auditId, long rows) {
+    if (auditId < 0) {
+      return;
+    }
+    try {
+      jobRepo.complete(auditId, rows);
+    } catch (RuntimeException e) {
+      log.warn("oi-backfill: could not close audit row (non-fatal): {}", e.toString());
+    }
+  }
+
+  private void auditFail(long auditId, String error) {
+    if (auditId < 0) {
+      return;
+    }
+    try {
+      jobRepo.fail(auditId, error);
+    } catch (RuntimeException e) {
+      log.warn("oi-backfill: could not mark audit row failed (non-fatal): {}", e.toString());
+    }
+  }
+
+  private static String jsonStr(String value) {
+    return value == null ? "null" : "\"" + value.replace("\"", "\\\"") + "\"";
+  }
+
+  private static String jsonOrNull(LocalDate date) {
+    return date == null ? "null" : "\"" + date + "\"";
   }
 }

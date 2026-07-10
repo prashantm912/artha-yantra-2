@@ -351,11 +351,11 @@ class ConnectTheDotsScorerTest {
 
   @Test
   void ivPairNeedsTheSideRicherByTheGapAndDegradesOnNull() {
-    // CE IV 0.20 vs PE 0.05 -> gap 0.15 >= 0.10 -> CE iv_pair supports
+    // CE IV 0.20 vs PE 0.05 -> gap 0.15 >= 0.02 (recalibrated min-gap, P1) -> CE iv_pair supports
     assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, macroIv(bd("0.20"), bd("0.05"))), CE, 1, T, P, true), "iv_pair"))
         .isTrue();
-    // gap too small -> no support
-    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, macroIv(bd("0.15"), bd("0.10"))), CE, 1, T, P, true), "iv_pair"))
+    // gap too small (0.01 < the 0.02 min-gap) -> no support
+    assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, macroIv(bd("0.11"), bd("0.10"))), CE, 1, T, P, true), "iv_pair"))
         .isFalse();
     // null averages -> degrade to false
     assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, macroIv(null, null)), CE, 1, T, P, true), "iv_pair"))
@@ -364,7 +364,10 @@ class ConnectTheDotsScorerTest {
 
   @Test
   void fortyFortyBothHighForcesStandAsideAndSuppressesTheSignal() {
-    // both IVs >= 0.40 and within the gap -> stand aside: iv_pair withholds AND the signal is invalid
+    // both IVs >= 0.40 and within the stand-aside gap -> stand aside: iv_pair withholds AND the signal
+    // is invalid. |0.45 - 0.42| = 0.03 < the PINNED 0.10 stand-aside gap — and 0.03 >= the recalibrated
+    // 0.02 SUPPORT min-gap, so this fixture also PROVES the two gaps are decoupled (a shared 0.02 gap
+    // would have supported the richer side here instead of suppressing).
     Macro highChop = macroIv(bd("0.45"), bd("0.42"));
     Confluence r = ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, highChop), CE, 1, T, P, true);
 

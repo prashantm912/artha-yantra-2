@@ -2,6 +2,7 @@ package in.arthayantra.strategysignal.paper;
 
 import in.arthayantra.strategysignal.paper.PaperPositionRepository.PositionRow;
 import java.math.BigDecimal;
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -13,6 +14,11 @@ import org.springframework.stereotype.Component;
  * path — {@code close_reason} STOP_LOSS / TAKE_PROFIT — when a level is breached. A position with no
  * bracket levels is untouched (the engine behaves exactly as before). Paper-only: live broker bracket
  * orders are a separate concern and never placed here.
+ *
+ * <p>Audit V3: a dead/absent option tick used to defer a stop SILENTLY (the position simply stayed
+ * open every pass). The close DECISION is unchanged — a stop still can't fire without a price — but
+ * every un-evaluated pass is now surfaced via {@link PaperStaleTickAlerter} (counter + a once-a-day
+ * ntfy once starvation persists past the threshold). Visibility only; nothing new is closed.
  */
 @Component
 public class PaperBracketEvaluator {
@@ -22,13 +28,18 @@ public class PaperBracketEvaluator {
   private final PaperPositionRepository positions;
   private final LastTickReader lastTick;
   private final PaperService paper;
+  private final PaperStaleTickAlerter staleTicks;
 
-  /** Wires the ledger collaborators. */
+  /** Wires the ledger collaborators + the stale-tick visibility instrument. */
   public PaperBracketEvaluator(
-      PaperPositionRepository positions, LastTickReader lastTick, PaperService paper) {
+      PaperPositionRepository positions,
+      LastTickReader lastTick,
+      PaperService paper,
+      PaperStaleTickAlerter staleTicks) {
     this.positions = positions;
     this.lastTick = lastTick;
     this.paper = paper;
+    this.staleTicks = staleTicks;
   }
 
   /** Closes every OPEN paper position whose live LTP has breached its stop-loss or take-profit. */
@@ -38,16 +49,19 @@ public class PaperBracketEvaluator {
       if (pos.stopLoss() == null && pos.takeProfit() == null) {
         continue;
       }
-      BigDecimal ltp = lastTick.lastPrice(pos.exchange(), pos.tradingsymbol()).orElse(null);
-      if (ltp == null) {
-        continue; // no live tick yet — leave the position open
-      }
-      String reason = breach(pos, ltp);
+      Optional<LastTickReader.TickView> tick = lastTick.lastTick(pos.exchange(), pos.tradingsymbol());
+      BigDecimal ltp = tick.map(LastTickReader.TickView::price).orElse(null);
+      String reason = ltp == null ? null : breach(pos, ltp);
       if (reason == null) {
+        // No level to act on this pass (tick absent, or price inside the band) — the SAME "leave the
+        // position open" outcome as before. Additive audit-V3 visibility: flag a bracket that is being
+        // starved of a fresh tick so a dead-tick-deferred stop no longer hides in silence.
+        staleTicks.observeBracket(pos, tick);
         continue;
       }
       try {
         paper.settle(pos, ltp, reason);
+        staleTicks.bracketRecovered(pos.id());
         closed++;
         log.info(
             "paper {} closed position {} {}:{} at {}",

@@ -89,6 +89,12 @@ artha:
       open-high-window: 3
       open-high-rsi-floor: 50
   paper:
+    # Audit V3 tick-freshness guards (paper exit path). A paper fill priced off a last tick older than
+    # tick-max-age-seconds is rejected DATA_STALE (a fill against a stale LTP is fiction); a SL/TP bracket
+    # that cannot get a fresh tick for bracket-starvation-alert-minutes pages ntfy once per (position, day)
+    # so a dead-tick-deferred stop no longer hides. Env-tunable; add the passthrough to compose to override.
+    tick-max-age-seconds: ${ARTHA_PAPER_TICK_MAX_AGE_SECONDS:15}
+    bracket-starvation-alert-minutes: ${ARTHA_PAPER_BRACKET_STARVATION_ALERT_MINUTES:2}
     # A12 per-class capital-usage margin approximations (no Kite margin API).
     # Equities use full notional; long options the premium; futures & short
     # options a margin-pct-of-notional approximation (real SPAN+exposure varies).

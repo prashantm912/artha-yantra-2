@@ -8,9 +8,11 @@ import in.arthayantra.strategysignal.registry.RegistryService;
 import in.arthayantra.strategysignal.registry.StrategyRepository;
 import in.arthayantra.strategysignal.signals.SignalEmitted;
 import in.arthayantra.strategysignal.signals.SignalRepository;
+import in.arthayantra.strategysignal.notifier.NotificationRepository.DeliveryStats;
 import in.arthayantra.strategysignal.testsupport.StrategySignalIntegrationTestBase;
 import java.math.BigDecimal;
 import java.time.Clock;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -93,6 +95,28 @@ class NotifierIntegrationTest extends StrategySignalIntegrationTestBase {
             "SELECT status FROM notification_events WHERE signal_id = ? ORDER BY id", String.class,
             signalId);
     assertThat(statuses).containsExactly("SENT", "SUPPRESSED");
+  }
+
+  /**
+   * V15 input: {@code deliveryStats} buckets rows by status over the window. On the shared singleton
+   * DB the count is global, so isolate this method's contribution via a before/after DELTA (surefire
+   * runs methods sequentially, so nothing else writes between the two synchronous reads).
+   */
+  @Test
+  void deliveryStatsBucketsByStatusOverTheWindow() {
+    UUID id = create("notifier-it-health", "Notifier IT Health");
+    Instant since = Instant.now().minusSeconds(3600);
+    DeliveryStats before = notificationRepo.deliveryStats(since);
+
+    notificationRepo.record(null, id, "NTFY", "SENT", 1, null);
+    notificationRepo.record(null, id, "NTFY", "FAILED", 3, "boom");
+    notificationRepo.record(null, id, "NTFY", "FAILED", 3, "boom");
+    notificationRepo.record(null, id, "NTFY", "SUPPRESSED", 1, "COOLDOWN");
+
+    DeliveryStats after = notificationRepo.deliveryStats(since);
+    assertThat(after.sent() - before.sent()).isEqualTo(1L);
+    assertThat(after.failed() - before.failed()).isEqualTo(2L);
+    assertThat(after.suppressed() - before.suppressed()).isEqualTo(1L);
   }
 
   /**

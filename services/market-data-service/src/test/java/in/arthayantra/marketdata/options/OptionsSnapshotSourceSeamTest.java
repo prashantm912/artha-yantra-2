@@ -88,7 +88,9 @@ class OptionsSnapshotSourceSeamTest {
         CLOCK,
         List.of("NIFTY 50"),
         90,
-        new SimpleMeterRegistry());
+        new SimpleMeterRegistry(),
+        // fail-soft ledger: the capture-session write no-ops on the null template (swallowed)
+        new in.arthayantra.marketdata.ingest.IngestRunLedger(null));
   }
 
   @Test

@@ -54,6 +54,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
   @Autowired BseEodBhavcopyRepository bseRepo;
   @Autowired EodCorporateActionRepository caRepo;
   @Autowired EquitySplitBonusAdjuster adjuster;
+  @Autowired in.arthayantra.marketdata.ingest.IngestRunLedger ledger;
   @Autowired JdbcTemplate jdbc;
 
   @Test
@@ -64,7 +65,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
     BhavcopyBackfillService svc =
         new BhavcopyBackfillService(
             nseStub(), nseRepo, bseStub(), bseRepo, caStub(), bseCaStub(), caRepo, candles, CLOCK,
-            event -> {}, noopNtfy(), "EQ,BE", 10, 90, 7, 420);
+            event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7, 420);
 
     // A Kite-owned 1d bar must survive the bhavcopy projection (DO NOTHING; source not in PK).
     candles.upsertAuthoritativeAll(
@@ -146,7 +147,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
     BhavcopyBackfillService svc =
         new BhavcopyBackfillService(
             flaky, nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo, candles, CLOCK,
-            event -> {}, noopNtfy(), "EQ,BE", 10, 90, 7, 420);
+            event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7, 420);
 
     // Run 1: trd2 missed; the watermark must NOT advance past it.
     svc.runNse();
@@ -171,7 +172,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
     BhavcopyBackfillService svc =
         new BhavcopyBackfillService(
             emptyNse(), nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo, candles,
-            CLOCK, published::add, noopNtfy(), "EQ,BE", 10, 90, 7, 420);
+            CLOCK, published::add, noopNtfy(), ledger, "EQ,BE", 10, 90, 7, 420);
 
     svc.runIfFree(); // the scheduler/startup entry — submits runLocked to the service's executor
 
@@ -182,6 +183,37 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
                 assertThat(published)
                     .filteredOn(e -> e instanceof BhavcopyBackfillCompleted)
                     .hasSize(1));
+  }
+
+  @Test
+  @Order(4)
+  void aBhavcopyRunIsRecordedInTheIngestLedger() {
+    // A4: the REAL bhavcopy job wired end-to-end — runLocked (via runIfFree) opens a BHAVCOPY row and
+    // stamps its terminal status. A deterministic no-fetch run (0 rows); exact-count semantics are
+    // pinned in IngestRunLedgerIntegrationTest — here we only prove the real backfill records a run.
+    jdbc.update("DELETE FROM ingest_runs WHERE source = 'BHAVCOPY'");
+
+    BhavcopyBackfillService svc =
+        new BhavcopyBackfillService(
+            emptyNse(), nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo, candles,
+            CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7, 420);
+
+    svc.runIfFree(); // scheduler/startup entry — submits runLocked to the service's executor
+
+    org.awaitility.Awaitility.await()
+        .atMost(java.time.Duration.ofSeconds(10))
+        .untilAsserted(
+            () -> {
+              List<java.util.Map<String, Object>> rows =
+                  jdbc.queryForList(
+                      "SELECT status, rows_written, finished_at FROM ingest_runs "
+                          + "WHERE source = 'BHAVCOPY' AND status IN ('SUCCESS', 'FAILURE') "
+                          + "ORDER BY started_at DESC LIMIT 1");
+              assertThat(rows).hasSize(1);
+              assertThat(rows.get(0).get("status")).isEqualTo("SUCCESS");
+              assertThat(rows.get(0).get("rows_written")).isNotNull();
+              assertThat(rows.get(0).get("finished_at")).isNotNull();
+            });
   }
 
   private static BhavcopyFetcher emptyNse() {

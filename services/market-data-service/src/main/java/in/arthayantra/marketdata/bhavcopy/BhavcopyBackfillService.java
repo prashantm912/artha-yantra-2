@@ -11,6 +11,7 @@ import in.arthayantra.marketdata.bse.BseEodBhavcopyRepository;
 import in.arthayantra.marketdata.candles.Candle;
 import in.arthayantra.marketdata.candles.CandleRepository;
 import in.arthayantra.marketdata.candles.EodCorporateActionRepository;
+import in.arthayantra.marketdata.ingest.IngestRunLedger;
 import in.arthayantra.marketdata.nse.BhavcopyFetcher;
 import in.arthayantra.marketdata.nse.BhavcopyFetcher.BhavcopyRow;
 import in.arthayantra.marketdata.nse.NseCorporateActionFetcher;
@@ -67,6 +68,7 @@ public class BhavcopyBackfillService {
   private final Clock clock;
   private final ApplicationEventPublisher events;
   private final in.arthayantra.marketdata.alerts.NtfyClient ntfy;
+  private final IngestRunLedger ledger;
 
   /** How far back to refresh corporate-action ratios each run (one cheap API call). */
   private final int caLookbackDays;
@@ -111,6 +113,7 @@ public class BhavcopyBackfillService {
       Clock clock,
       ApplicationEventPublisher events,
       in.arthayantra.marketdata.alerts.NtfyClient ntfy,
+      IngestRunLedger ledger,
       @Value("${artha.nse.bhavcopy.candle-series:EQ,BE}") String candleSeriesCsv,
       @Value("${artha.bhavcopy.catchup-floor-days:10}") int catchupFloorDays,
       @Value("${artha.bhavcopy.catchup-max-days:90}") int catchupMaxDays,
@@ -127,6 +130,7 @@ public class BhavcopyBackfillService {
     this.clock = clock;
     this.events = events;
     this.ntfy = ntfy;
+    this.ledger = ledger;
     this.reconcileLookbackDays = reconcileLookbackDays;
     this.caLookbackDays = caLookbackDays;
     this.candleSeries =
@@ -187,6 +191,10 @@ public class BhavcopyBackfillService {
   private void runLocked(String jobId) {
     Instant started = clock.instant();
     status.set(Status.running(jobId, started));
+    // Ingest-run ledger (audit §7.2.3): rows_written = raw bhavcopy rows upserted across both
+    // exchanges. Window is left null — the catch-up spans differ per exchange and are derived deep
+    // inside runNse/runBse; started_at/finished_at carry the run timing.
+    Long runId = ledger.start(IngestRunLedger.SOURCE_BHAVCOPY);
     try {
       // Each exchange is isolated — an NSE outage must not block the BSE catch-up (and vice versa).
       ExchangeResult nse = safe("NSE", this::runNse);
@@ -199,6 +207,7 @@ public class BhavcopyBackfillService {
       }
       Status ok = Status.ok(jobId, started, clock.instant(), nse, bse, ratios);
       status.set(ok);
+      ledger.succeed(runId, (long) nse.bhavRows() + bse.bhavRows());
       log.info(
           "EOD bhavcopy backfill {} ok: NSE {}d/{}r/{}c, BSE {}d/{}r/{}c in {} ms",
           jobId,
@@ -212,6 +221,7 @@ public class BhavcopyBackfillService {
       // never throws.
       log.error("EOD bhavcopy backfill {} failed", jobId, e);
       status.set(Status.failed(jobId, started, clock.instant(), e.getMessage()));
+      ledger.fail(runId, e.getMessage());
       ntfy.send(
           "EOD bhavcopy backfill FAILED", "high",
           "Job " + jobId + ": " + e.getMessage()

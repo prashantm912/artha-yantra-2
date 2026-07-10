@@ -548,14 +548,21 @@ public class PaperService {
     return Map.of("points", points, "summary", summary);
   }
 
-  /** Wipes a book's paper ledger ({@code book} null → all books; confirm-guarded). */
+  /** How many positions + orders a {@link #reset} wiped — carried to the paper-admin audit row (V14). */
+  public record ResetResult(int positionsDeleted, int ordersDeleted) {}
+
+  /**
+   * Wipes a book's paper ledger ({@code book} null → all books; confirm-guarded). Returns the deleted
+   * position/order counts so the caller can audit the destructive action (audit §7.1/§7.2.5).
+   */
   @Transactional
-  public void reset(String book, boolean confirm) {
+  public ResetResult reset(String book, boolean confirm) {
     if (!confirm) {
       throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "reset requires confirm=true");
     }
-    positions.deleteAll(book);
-    orders.deleteAll(book);
+    int positionsDeleted = positions.deleteAll(book);
+    int ordersDeleted = orders.deleteAll(book);
+    return new ResetResult(positionsDeleted, ordersDeleted);
   }
 
   /**

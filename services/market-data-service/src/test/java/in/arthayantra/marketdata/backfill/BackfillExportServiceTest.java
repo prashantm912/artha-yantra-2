@@ -9,12 +9,14 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.common.web.error.ApiException;
+import in.arthayantra.marketdata.candles.Candle;
 import in.arthayantra.marketdata.candles.CandleRepository;
 import in.arthayantra.marketdata.upstox.ExpiredBackfillRepository;
 import in.arthayantra.marketdata.upstox.ExpiredBackfillRepository.ExportContract;
 import java.io.ByteArrayInputStream;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -31,6 +33,13 @@ class BackfillExportServiceTest {
 
   private static ExportContract c(String symbol) {
     return new ExportContract("NFO", symbol, new BigDecimal("25000"), "CE");
+  }
+
+  private static Candle bar(String symbol) {
+    return new Candle(
+        "NFO", symbol, "1m", OffsetDateTime.parse("2026-07-15T09:15:00+05:30"),
+        new BigDecimal("100"), new BigDecimal("101"), new BigDecimal("99"), new BigDecimal("100.5"),
+        1000L, 5000L, "UPSTOX_1M");
   }
 
   @Test
@@ -54,6 +63,23 @@ class BackfillExportServiceTest {
       }
     }
     assertThat(entries).containsExactlyInAnyOrder("NIFTY26JUL25000CE.csv", "NIFTY26JUL25000PE.csv");
+  }
+
+  @Test
+  void exportReportsRowCountAndUntruncatedForASmallResult() {
+    // audit §7.2.5: the Export must carry the row count + a truncation flag so the controller can make a
+    // clipped export explicit. A small (< cap) result reports the true count and truncated=false.
+    CandleRepository candles = mock(CandleRepository.class);
+    ExpiredBackfillRepository repo = mock(ExpiredBackfillRepository.class);
+    when(candles.range(any(), any(), eq("1m"), any(), any()))
+        .thenReturn(List.of(bar("NIFTY26JUL25000CE"), bar("NIFTY26JUL25000CE")));
+    BackfillExportService svc = new BackfillExportService(candles, repo, new ObjectMapper());
+
+    BackfillExportService.Export export = svc.export("NFO", "NIFTY26JUL25000CE", FROM, TO, "csv");
+
+    assertThat(export.rowCount()).isEqualTo(2L);
+    assertThat(export.truncated()).isFalse();
+    assertThat(export.filename()).isEqualTo("NIFTY26JUL25000CE.csv");
   }
 
   @Test

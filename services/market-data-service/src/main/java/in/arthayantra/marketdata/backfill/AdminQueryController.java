@@ -41,7 +41,12 @@ public class AdminQueryController {
     return service.run(request.sql(), request.rowLimit());
   }
 
-  /** Runs a read-only query and returns the result as a CSV download. */
+  /**
+   * Runs a read-only query and returns the result as a CSV download. When the export row cap clips the
+   * result, the truncation is made EXPLICIT (audit §7.2.5 / §10 Phase-1: "truncated made explicit"): the
+   * response carries {@code X-Result-Truncated: true} + {@code X-Result-Rows} so the caller knows the CSV
+   * is partial rather than silently receiving a clipped file.
+   */
   @PostMapping("/query/export")
   public ResponseEntity<byte[]> export(@RequestBody ExportRequest request) {
     String format = request.format() == null ? "csv" : request.format().toLowerCase(java.util.Locale.ROOT);
@@ -52,6 +57,8 @@ public class AdminQueryController {
     byte[] body = toCsv(result).getBytes(StandardCharsets.UTF_8);
     return ResponseEntity.ok()
         .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"query.csv\"")
+        .header("X-Result-Truncated", Boolean.toString(result.truncated()))
+        .header("X-Result-Rows", Integer.toString(result.rowCount()))
         .contentType(MediaType.parseMediaType("text/csv"))
         .body(body);
   }

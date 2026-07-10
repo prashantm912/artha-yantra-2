@@ -37,8 +37,14 @@ public class BackfillExportService {
   private static final int MAX_CONTRACTS = 500;
   private static final String INTERVAL = "1m";
 
-  /** A built export artifact: bytes + a download filename + its content type. */
-  public record Export(byte[] body, String filename, String contentType) {}
+  /**
+   * A built export artifact: bytes + a download filename + its content type, plus the exported row count
+   * and whether the {@value #MAX_ROWS}-row cap TRUNCATED the result. The truncation flag makes the old
+   * SILENT clip explicit to the caller (audit §7.2.5 / §10 Phase-1) — the controller surfaces it as an
+   * {@code X-Result-Truncated} header + an {@code admin_audit} row.
+   */
+  public record Export(
+      byte[] body, String filename, String contentType, boolean truncated, long rowCount) {}
 
   private final CandleRepository candles;
   private final ExpiredBackfillRepository repo;
@@ -79,12 +85,15 @@ public class BackfillExportService {
     OffsetDateTime from = fromDate.atStartOfDay().atOffset(Ist.OFFSET);
     OffsetDateTime to = toDate.plusDays(1).atStartOfDay().atOffset(Ist.OFFSET);
     List<Candle> bars = candles.range(exchange, symbol, INTERVAL, from, to);
-    if (bars.size() > MAX_ROWS) {
+    boolean truncated = bars.size() > MAX_ROWS;
+    if (truncated) {
       bars = bars.subList(0, MAX_ROWS);
     }
+    long rowCount = bars.size();
     return switch (fmt) {
-      case "csv" -> new Export(csv(bars).getBytes(StandardCharsets.UTF_8), symbol + ".csv", "text/csv");
-      case "json" -> new Export(json(bars), symbol + ".json", "application/json");
+      case "csv" ->
+          new Export(csv(bars).getBytes(StandardCharsets.UTF_8), symbol + ".csv", "text/csv", truncated, rowCount);
+      case "json" -> new Export(json(bars), symbol + ".json", "application/json", truncated, rowCount);
       default -> throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "format must be csv or json");
     };
   }
@@ -110,9 +119,13 @@ public class BackfillExportService {
               + "-contract sync bulk cap — narrow the expiry or use the per-contract export");
     }
     ByteArrayOutputStream buf = new ByteArrayOutputStream();
+    boolean truncated = false;
+    long rowCount = 0;
     try (ZipOutputStream zip = new ZipOutputStream(buf)) {
       for (ExportContract c : chain) {
         Export one = export(c.exchange(), c.tradingsymbol(), fromDate, toDate, format);
+        truncated |= one.truncated(); // any contract clipped by the row cap flags the whole bundle
+        rowCount += one.rowCount();
         zip.putNextEntry(new ZipEntry(one.filename()));
         zip.write(one.body());
         zip.closeEntry();
@@ -121,7 +134,7 @@ public class BackfillExportService {
       throw new ApiException(500, ErrorCodes.INTERNAL_ERROR, "bulk export zip failed");
     }
     String name = require(underlying, "underlying").replace(' ', '_') + "_" + expiry + ".zip";
-    return new Export(buf.toByteArray(), name, "application/zip");
+    return new Export(buf.toByteArray(), name, "application/zip", truncated, rowCount);
   }
 
   private static String csv(List<Candle> bars) {

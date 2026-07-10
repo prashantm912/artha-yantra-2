@@ -17,10 +17,10 @@ const FOLD: TrialFold = {
   test: { from: '2026-04-01T00:00:00Z', to: '2026-04-30T00:00:00Z' },
   trainMetrics: { sharpe: '2.1' },
   oosMetrics: { sharpe: '1.4' },
-  regimeMix: { BULL: 12, RANGE: 5, BEAR: 0, CRASH: 0 },
+  regimeMix: { UP_QUIET: 12, UP_TURBULENT: 5, DOWN_QUIET: 0, DOWN_TURBULENT: 0 },
   regimeOos: {
-    BULL: { sharpe: '1.65', expectancy: '320', tradeCount: 8 },
-    RANGE: { sharpe: '0.40', expectancy: '90', tradeCount: 3 },
+    UP_QUIET: { sharpe: '1.65', expectancy: '320', tradeCount: 8 },
+    UP_TURBULENT: { sharpe: '0.40', expectancy: '90', tradeCount: 3 },
   },
 };
 
@@ -38,8 +38,8 @@ describe('FoldDrilldownModal', () => {
     expect(screen.getByText('2.10')).toBeInTheDocument(); // train Sharpe
     expect(screen.getByText('1.40')).toBeInTheDocument(); // OOS Sharpe headline
     // a regime that traded shows OOS Sharpe / ₹ expectancy / trades in one cell (text-node split)
-    const bullCell = screen.getByTitle(/BULL: OOS Sharpe/);
-    expect(bullCell.textContent?.replace(/\s+/g, ' ')).toContain('1.65 / 320 / 8');
+    const upQuietCell = screen.getByTitle(/UP_QUIET: OOS Sharpe/);
+    expect(upQuietCell.textContent?.replace(/\s+/g, ' ')).toContain('1.65 / 320 / 8');
   });
 
   it('does not render when no trial is selected (trialNumber null)', () => {

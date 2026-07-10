@@ -23,7 +23,7 @@ vi.mock('../../api/optimizations.ts', async (orig) => {
             guardMetrics: {
               dataHash: 'h1',
               foldsExcluded: 2,
-              regimesCovered: ['BULL', 'BEAR'],
+              regimesCovered: ['UP_QUIET', 'DOWN_QUIET'],
               regimeOosMin: 0.4,
               regimeOosMean: 0.7,
               regimeOosMax: 1.0,
@@ -77,8 +77,8 @@ describe('SweepDetailPage', () => {
   it('surfaces the fold guards (regimes / min-OOS / folds-excluded) and the no-guards badge', () => {
     renderPage();
     // trial 5 carries fold guards
-    expect(screen.getByText('BULL')).toBeInTheDocument();
-    expect(screen.getByText('BEAR')).toBeInTheDocument();
+    expect(screen.getByText('UP_QUIET')).toBeInTheDocument();
+    expect(screen.getByText('DOWN_QUIET')).toBeInTheDocument();
     expect(screen.getByText('OOS≥ 0.400')).toBeInTheDocument(); // min per-regime OOS Sharpe
     expect(screen.getByText('−2 folds')).toBeInTheDocument(); // min_trades exclusions
     // trial 8 is full-window → the badge, not a hollow guard cell

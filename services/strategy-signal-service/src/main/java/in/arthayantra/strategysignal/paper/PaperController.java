@@ -51,13 +51,18 @@ public class PaperController {
   private final PaperService paper;
   private final PaperAccountService account;
   private final InstrumentMetaClient instruments;
+  private final PaperAdminAuditLedger adminAudit;
 
-  /** Wires the ledger + account services + the instrument-meta lookup (audit V4 lot-size validation). */
+  /** Wires the ledger + account services + the instrument-meta lookup + the admin-audit trail (V14). */
   public PaperController(
-      PaperService paper, PaperAccountService account, InstrumentMetaClient instruments) {
+      PaperService paper,
+      PaperAccountService account,
+      InstrumentMetaClient instruments,
+      PaperAdminAuditLedger adminAudit) {
     this.paper = paper;
     this.account = account;
     this.instruments = instruments;
+    this.adminAudit = adminAudit;
   }
 
   /** The account header for a book ({@code book} absent → the aggregate across all books). */
@@ -66,7 +71,7 @@ public class PaperController {
     return account.account(book);
   }
 
-  /** Edit a book's starting capital. */
+  /** Edit a book's starting capital — the change is audited (V14: previous → new). */
   @PutMapping("/account")
   public PaperAccountService.AccountDto updateAccount(@RequestBody AccountBody body) {
     if (body.startingCapital() == null || body.startingCapital().signum() < 0) {
@@ -75,7 +80,9 @@ public class PaperController {
     if (body.book() == null || body.book().isBlank()) {
       throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "book is required to edit capital");
     }
+    BigDecimal previous = account.startingCapital(body.book());
     account.updateStartingCapital(body.book(), body.startingCapital());
+    adminAudit.recordCapitalChange(body.book(), previous, body.startingCapital());
     return account.account(body.book());
   }
 
@@ -158,10 +165,15 @@ public class PaperController {
     return paper.closePosition(id, body == null ? null : body.price());
   }
 
-  /** Wipe a book's paper ledger ({@code book} absent → all books) — guarded by {@code confirm=true}. */
+  /**
+   * Wipe a book's paper ledger ({@code book} absent → all books) — guarded by {@code confirm=true}. The
+   * destructive action is audited with the deleted position/order counts (audit §7.1/§7.2.5).
+   */
   @PostMapping("/reset")
   public ResponseEntity<Void> reset(@RequestBody(required = false) ResetBody body) {
-    paper.reset(body == null ? null : body.book(), body != null && body.confirm());
+    String book = body == null ? null : body.book();
+    PaperService.ResetResult result = paper.reset(book, body != null && body.confirm());
+    adminAudit.recordReset(book, result.positionsDeleted(), result.ordersDeleted());
     return ResponseEntity.noContent().build();
   }
 }

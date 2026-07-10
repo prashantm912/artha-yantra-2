@@ -504,11 +504,16 @@ public class BacktestRunner {
 
   // Package-visible for BacktestRunnerSignalInstrumentTest.
   static SeriesKey signalInstrument(JsonNode config, JsonNode request) {
-    // E1 §3.3: a futures_screener universe has NO instrument in the config — the daily picks are pinned
-    // into the request universe array at submission (JobsService). The runner is single-signal-instrument,
-    // so v1 signals on the TOP pick. GATED to futures_screener so every existing mode stays byte-identical:
-    // a global pinned-array-first would flip futures_of_underlying from the underlying spot to the contract.
-    if ("futures_screener".equals(config.path("universe").path("mode").asText())) {
+    // E1 §3.3 + B9 (EVO §13 row 19): futures_screener and the swing FUNNEL modes (manas_arora_funnel /
+    // minervini_funnel) carry NO instrument in the config — their picks are pinned into the request
+    // universe array at submission (JobsService). The runner is single-signal-instrument, so v1 signals
+    // on the TOP pinned pick. GATED to these dynamic-list modes so every explicit/underlying mode stays
+    // byte-identical: a global pinned-array-first would flip futures_of_underlying from the underlying
+    // spot to the contract.
+    String mode = config.path("universe").path("mode").asText();
+    if ("futures_screener".equals(mode)
+        || "manas_arora_funnel".equals(mode)
+        || "minervini_funnel".equals(mode)) {
       JsonNode pinned = request.path("universe");
       if (pinned.isArray() && !pinned.isEmpty()) {
         JsonNode first = pinned.get(0);
@@ -516,7 +521,7 @@ public class BacktestRunner {
             first.path("exchange").asText(), first.path("tradingsymbol").asText(), "1m");
       }
       throw new IllegalArgumentException(
-          "futures_screener backtest needs a pinned universe (submission produced no movers)");
+          mode + " backtest needs a pinned universe (submission produced no candidates)");
     }
     JsonNode instruments = config.path("universe").path("instruments");
     if (instruments.isArray() && !instruments.isEmpty()) {

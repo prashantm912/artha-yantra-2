@@ -116,6 +116,33 @@ class BacktestRunnerSignalInstrumentTest {
   }
 
   @Test
+  void funnelModeSignalsOnTheTopPinnedPick() {
+    // B9 (EVO §13 row 19): manas_arora_funnel / minervini_funnel have no instrument in the config —
+    // the funnel's resolved constituents are pinned into the REQUEST universe array at submission
+    // (JobsService), so the single-signal-instrument runner signals on the TOP pinned pick.
+    SeriesKey k =
+        BacktestRunner.signalInstrument(
+            cfg("{\"universe\":{\"mode\":\"manas_arora_funnel\"}}"),
+            cfg(
+                "{\"universe\":[{\"exchange\":\"NSE\",\"tradingsymbol\":\"RELIANCE\"},"
+                    + "{\"exchange\":\"NSE\",\"tradingsymbol\":\"TCS\"}]}"));
+    assertThat(k.exchange()).isEqualTo("NSE");
+    assertThat(k.tradingsymbol()).isEqualTo("RELIANCE");
+    assertThat(k.interval()).isEqualTo("1m");
+  }
+
+  @Test
+  void minerviniFunnelThrowsWhenSubmissionPinnedNoCandidates() {
+    assertThatThrownBy(
+            () ->
+                BacktestRunner.signalInstrument(
+                    cfg("{\"universe\":{\"mode\":\"minervini_funnel\"}}"),
+                    cfg("{\"universe\":[]}")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("pinned universe");
+  }
+
+  @Test
   void strikeReferencePrefersTheOverrideElseTheSignal() {
     // 2b-E2b: strike_reference decouples the ATM-strike spot from the signal (e.g. SENSEX-fut anchor).
     SeriesKey signal = new SeriesKey("NFO", "NIFTY-FUT-CONT", "1m");

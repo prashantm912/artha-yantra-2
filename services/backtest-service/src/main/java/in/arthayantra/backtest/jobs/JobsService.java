@@ -101,20 +101,45 @@ public class JobsService {
     }
     request.put("purpose", purpose);
 
-    // Phase 44 (S8): resolve index_constituents / futures_of_underlying universes ONCE, at
-    // submission, and PIN them by copy into the request JSONB — every sweep trial reuses this
+    // Phase 44 (S8): resolve index_constituents / futures_of_underlying / futures_screener universes
+    // ONCE, at submission, and PIN them by copy into the request JSONB — every sweep trial reuses this
     // embedded copy, so a mid-sweep constituent rebalance can never split a leaderboard.
+    // B9 (EVO §13 row 19): the swing FUNNEL modes (manas_arora_funnel / minervini_funnel) join the
+    // same pin-by-copy path so Manas/Minervini SIM_FIRST trials become runnable through the job
+    // pipeline (they were 0-runnable — the runner threw "needs an explicit single-instrument
+    // universe"). The strategy-signal resolver returns TODAY's screen (the live funnel endpoint is
+    // NOT point-in-time), so a windowed funnel backtest runs a STATIC universe pinned as-of
+    // submission — a documented divergence from the day-varying live funnel. The runner is
+    // single-signal-instrument, so replay signals on the funnel's TOP-ranked pick (per-name
+    // expectancy); portfolio/slot effects across the whole funnel are validated at the paper stage.
     String universeMode = v.config().path("universe").path("mode").asText("explicit");
+    boolean funnelMode =
+        "manas_arora_funnel".equals(universeMode) || "minervini_funnel".equals(universeMode);
     if ("index_constituents".equals(universeMode)
         || "futures_of_underlying".equals(universeMode)
-        || "futures_screener".equals(universeMode)) {
-      versions
-          .resolveUniverse(v.strategyId(), v.version())
-          .ifPresent(
-              universe -> {
-                request.set("universe", universe.path("items"));
-                request.put("universeChecksum", universe.path("checksum").asText());
-              });
+        || "futures_screener".equals(universeMode)
+        || funnelMode) {
+      JsonNode universe = versions.resolveUniverse(v.strategyId(), v.version()).orElse(null);
+      if (universe != null) {
+        request.set("universe", universe.path("items"));
+        request.put("universeChecksum", universe.path("checksum").asText());
+      }
+      // An empty funnel (off-hours / fresh screen / no passers this session) has nothing to signal
+      // on — fail CLEAN at submission with a 4xx rather than letting the worker throw mid-replay
+      // (which surfaces as a failed job, not a rejected submission). Scoped to funnel modes so
+      // futures_screener's "pin empty, worker decides" behaviour stays byte-identical.
+      if (funnelMode
+          && (universe == null
+              || !universe.path("items").isArray()
+              || universe.path("items").isEmpty())) {
+        throw new ApiException(
+            422,
+            ErrorCodes.STRATEGY_UNIVERSE_UNSUPPORTED,
+            "funnel universe '"
+                + universeMode
+                + "' resolved 0 candidates — the screener funnel is empty (off-hours or no passers"
+                + " this session); a funnel backtest needs a non-empty pinned universe");
+      }
     }
 
     // S1C stress guard (§D.6): a stress test's window must not overlap ANY prior lineage job

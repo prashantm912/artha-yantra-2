@@ -1,5 +1,7 @@
 package in.arthayantra.strategysignal.notifier;
 
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.dao.EmptyResultDataAccessException;
@@ -17,6 +19,9 @@ public class NotificationRepository {
 
   /** A strategy's notification opt-in. */
   public record Target(UUID strategyId, boolean enabled, String channel) {}
+
+  /** Delivery-outcome counts over a window (V15 notifier-health input; SUPPRESSED = flood control, not a failure). */
+  public record DeliveryStats(long sent, long failed, long suppressed) {}
 
   private final JdbcTemplate jdbc;
 
@@ -54,6 +59,24 @@ public class NotificationRepository {
     } catch (EmptyResultDataAccessException e) {
       return Optional.empty();
     }
+  }
+
+  /**
+   * Delivery-outcome counts for events created at or after {@code since} (V15 notifier-health
+   * check). An aggregate {@code queryForObject} always returns one row — zero events yields
+   * {@code (0, 0, 0)}, never an empty result.
+   */
+  public DeliveryStats deliveryStats(Instant since) {
+    return jdbc.queryForObject(
+        """
+        SELECT count(*) FILTER (WHERE status = 'SENT')      AS sent,
+               count(*) FILTER (WHERE status = 'FAILED')     AS failed,
+               count(*) FILTER (WHERE status = 'SUPPRESSED') AS suppressed
+        FROM notification_events
+        WHERE created_at >= ?
+        """,
+        (rs, n) -> new DeliveryStats(rs.getLong("sent"), rs.getLong("failed"), rs.getLong("suppressed")),
+        Timestamp.from(since));
   }
 
   /** Append one delivery-attempt audit row (signalId null for a manual test-send). */

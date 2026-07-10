@@ -111,9 +111,25 @@ public class CandleQueryService {
     return new CandleRead(items, stale, OffsetDateTime.now(clock));
   }
 
-  /** Coverage check + gap fetch for a base interval (1m or 1d). */
+  /** Coverage check + gap fetch for a base interval (1m or 1d), refreshing derived aggregates. */
   void ensureCoverage(
       String exchange, String tradingsymbol, String baseInterval, OffsetDateTime from, OffsetDateTime to) {
+    ensureCoverage(exchange, tradingsymbol, baseInterval, from, to, true);
+  }
+
+  /**
+   * Coverage check + gap fetch that can DEFER the derived-aggregate refresh to the caller. The
+   * corporate-action rebuild (A14) fetches the base 1m WITHOUT the bundled refresh so it can
+   * checkpoint the symbol at {@code BASE_REBUILT} before issuing the (chunked) refresh separately —
+   * a hard crash mid-refresh then RESUMES instead of re-purging ~12 years.
+   */
+  void ensureCoverage(
+      String exchange,
+      String tradingsymbol,
+      String baseInterval,
+      OffsetDateTime from,
+      OffsetDateTime to,
+      boolean refreshAggregates) {
     OffsetDateTime now = OffsetDateTime.now(clock);
     OffsetDateTime capped = to.isAfter(now) ? now : to;
     if (!from.isBefore(capped)) {
@@ -147,7 +163,7 @@ public class CandleQueryService {
         }
       }
     }
-    if (backfilled && baseInterval.equals("1m")) {
+    if (backfilled && baseInterval.equals("1m") && refreshAggregates) {
       // backfilled history behind a cagg watermark is invisible until explicitly refreshed
       repository.refreshDerivedAggregates(gaps.get(0).from(), gaps.get(gaps.size() - 1).to());
     }
@@ -191,7 +207,22 @@ public class CandleQueryService {
    */
   public void prefetch(
       String exchange, String tradingsymbol, String baseInterval, OffsetDateTime from, OffsetDateTime to) {
-    ensureCoverage(exchange, tradingsymbol, baseInterval, from, to);
+    prefetch(exchange, tradingsymbol, baseInterval, from, to, true);
+  }
+
+  /**
+   * {@link #prefetch(String, String, String, OffsetDateTime, OffsetDateTime)} that can DEFER the
+   * derived-aggregate refresh to the caller — the A14 corporate-action rebuild fetches the base 1m
+   * without the bundled refresh so it can checkpoint BASE_REBUILT before the (chunked) refresh.
+   */
+  public void prefetch(
+      String exchange,
+      String tradingsymbol,
+      String baseInterval,
+      OffsetDateTime from,
+      OffsetDateTime to,
+      boolean refreshAggregates) {
+    ensureCoverage(exchange, tradingsymbol, baseInterval, from, to, refreshAggregates);
   }
 
   /**

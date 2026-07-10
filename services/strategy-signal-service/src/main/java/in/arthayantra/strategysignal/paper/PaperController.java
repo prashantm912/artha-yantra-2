@@ -114,7 +114,7 @@ public class PaperController {
    * signal-taken path stays on {@code openOrder} (already gated at emission). Pure input validation
    * (qty &gt; 0, audit-V4 lot-size multiple) runs HERE, BEFORE the service, so a malformed order 400s
    * regardless of governor state — a since-tripped governor must not turn a bad input into a 422. A
-   * duplicate {@code clientOrderId} (audit V2) returns the ORIGINAL position with a 409.
+   * duplicate {@code clientOrderId} (audit V2) replays the ORIGINAL position with a 200.
    */
   @PostMapping("/orders")
   public ResponseEntity<PaperService.PositionDto> order(@RequestBody OrderBody body) {
@@ -143,11 +143,12 @@ public class PaperController {
     try {
       return ResponseEntity.status(HttpStatus.CREATED).body(paper.openManualOrder(request));
     } catch (DuplicateOrderException duplicate) {
-      // Audit §8 V2 names 409 for the replay ("409 replay returns the original order"): a 409 whose body
-      // is the ORIGINAL position DTO (not an error envelope), so an idempotent retry client recovers the
-      // position it already opened. (An idempotent-200 reading was the fallback the brief preferred; the
-      // audit's explicit code wins — flagged for the owner in the receipt.)
-      return ResponseEntity.status(HttpStatus.CONFLICT).body(duplicate.original());
+      // Idempotent replay: 200 with the ORIGINAL position DTO. The audit's V2 sketch said 409, but the
+      // D8 design authority pins "every non-2xx body is exactly ErrorResponse" — a 409 carrying a
+      // PositionDto would break every client that parses non-2xx as the error envelope (and a retrying
+      // client wants success semantics for work that already succeeded). 201 stays reserved for a
+      // genuinely new fill, so callers can still distinguish create from replay by status.
+      return ResponseEntity.ok(duplicate.original());
     }
   }
 

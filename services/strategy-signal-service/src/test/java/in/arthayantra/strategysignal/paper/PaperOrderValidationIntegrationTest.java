@@ -31,7 +31,7 @@ import org.springframework.test.web.servlet.MvcResult;
  *
  * <ul>
  *   <li><b>V2 idempotency</b>: an optional {@code clientOrderId} makes a duplicate submission (network
- *       retry / double-click) return the ORIGINAL position (409, original DTO) instead of a second fill.
+ *       retry / double-click) replay the ORIGINAL position (200, original DTO) instead of a second fill.
  *       The check runs BEFORE the risk governor, so a replay after a governor trips still returns the
  *       original (not a 422). Without a {@code clientOrderId} the prior double-fill behaviour stands.
  *   <li><b>V4 lot-size multiple</b>: a hand ticket for an F&amp;O instrument whose qty is not a whole
@@ -92,11 +92,11 @@ class PaperOrderValidationIntegrationTest extends StrategySignalIntegrationTestB
             .andReturn();
     long originalId = idOf(first);
 
-    // the SAME clientOrderId → 409 whose body is the ORIGINAL position (same id, still OPEN), not a re-fill.
+    // the SAME clientOrderId → 200 whose body is the ORIGINAL position (same id, still OPEN), not a re-fill.
     MvcResult replay =
         mockMvc
             .perform(post("/api/v1/paper/orders").contentType(MediaType.APPLICATION_JSON).content(order(sym, clientOrderId, 50)))
-            .andExpect(status().isConflict())
+            .andExpect(status().isOk())
             .andExpect(jsonPath("$.status").value("OPEN"))
             .andReturn();
     assertThat(idOf(replay)).isEqualTo(originalId);
@@ -131,7 +131,7 @@ class PaperOrderValidationIntegrationTest extends StrategySignalIntegrationTestB
     MvcResult replay =
         mockMvc
             .perform(post("/api/v1/paper/orders").contentType(MediaType.APPLICATION_JSON).content(order(sym, clientOrderId, 50)))
-            .andExpect(status().isConflict())
+            .andExpect(status().isOk())
             .andExpect(jsonPath("$.status").value("OPEN"))
             .andReturn();
     assertThat(idOf(replay)).isEqualTo(originalId);

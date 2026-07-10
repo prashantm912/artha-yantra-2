@@ -60,22 +60,44 @@ public class AdminQueryService {
       List<String> columns, List<List<String>> rows, int rowCount, boolean truncated) {}
 
   private final JdbcTemplate jdbc;
+  private final AdminAuditLedger audit;
 
-  public AdminQueryService(JdbcTemplate jdbc) {
+  public AdminQueryService(JdbcTemplate jdbc, AdminAuditLedger audit) {
     this.jdbc = jdbc;
+    this.audit = audit;
   }
 
   /** Runs a validated read-only SELECT, returning up to {@code rowLimit} rows (capped at {@value #MAX_ROWS}). */
   public QueryResult run(String sql, Integer rowLimit) {
     String cleaned = validate(sql);
     int limit = rowLimit == null ? MAX_ROWS : Math.min(Math.max(rowLimit, 1), MAX_ROWS);
-    return execute(cleaned, limit);
+    return audited(AdminAuditLedger.ACTION_QUERY, cleaned, limit);
   }
 
   /** Runs a validated read-only SELECT for export, returning up to {@value #EXPORT_MAX_ROWS} rows. */
   public QueryResult runForExport(String sql) {
     String cleaned = validate(sql);
-    return execute(cleaned, EXPORT_MAX_ROWS);
+    return audited(AdminAuditLedger.ACTION_QUERY_EXPORT, cleaned, EXPORT_MAX_ROWS);
+  }
+
+  /**
+   * Runs {@code cleaned} up to {@code limit} rows and writes an append-only {@code admin_audit} row
+   * (audit V14 — the console left zero trace before this): the SQL + its hash, the row count, the
+   * truncation flag, and the wall time. A runtime failure records an error row then RETHROWS (the
+   * caller's 400 is preserved); the audit write itself is fail-soft inside the ledger.
+   */
+  private QueryResult audited(String action, String cleaned, int limit) {
+    long start = System.nanoTime();
+    try {
+      QueryResult result = execute(cleaned, limit);
+      long durationMs = (System.nanoTime() - start) / 1_000_000L;
+      audit.recordQuery(action, cleaned, limit, result.rowCount(), result.truncated(), durationMs, null);
+      return result;
+    } catch (RuntimeException e) {
+      long durationMs = (System.nanoTime() - start) / 1_000_000L;
+      audit.recordQuery(action, cleaned, limit, 0, false, durationMs, e.getMessage());
+      throw e;
+    }
   }
 
   private QueryResult execute(String cleaned, int limit) {

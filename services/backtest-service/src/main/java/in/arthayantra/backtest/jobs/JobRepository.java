@@ -25,11 +25,13 @@ public class JobRepository {
 
   private final JdbcTemplate jdbc;
   private final ObjectMapper objectMapper;
+  private final EngineIdentity engineIdentity;
 
-  /** Wires JDBC + Jackson. */
-  public JobRepository(JdbcTemplate jdbc, ObjectMapper objectMapper) {
+  /** Wires JDBC + Jackson + the engine identity stamped onto each queued row (audit P0-2 / R1). */
+  public JobRepository(JdbcTemplate jdbc, ObjectMapper objectMapper, EngineIdentity engineIdentity) {
     this.jdbc = jdbc;
     this.objectMapper = objectMapper;
+    this.engineIdentity = engineIdentity;
   }
 
   private Job mapRow(ResultSet rs, int rowNum) throws SQLException {
@@ -79,8 +81,9 @@ public class JobRepository {
     }
     return jdbc.queryForObject(
         """
-        INSERT INTO jobs (kind, parent_job_id, strategy_version_id, request, correlation_id)
-        VALUES (?, ?, ?, ?::jsonb, ?)
+        INSERT INTO jobs (kind, parent_job_id, strategy_version_id, request, correlation_id,
+                          engine_sha, engine_image)
+        VALUES (?, ?, ?, ?::jsonb, ?, ?, ?)
         RETURNING *
         """,
         this::mapRow,
@@ -88,7 +91,9 @@ public class JobRepository {
         parentJobId,
         strategyVersionId,
         requestJson,
-        correlationId);
+        correlationId,
+        engineIdentity.sha(),
+        engineIdentity.image());
   }
 
   /** Conditional claim: {@code running} only if still {@code queued}. Returns true on win. */

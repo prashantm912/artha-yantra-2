@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import in.arthayantra.backtest.analytics.BenchmarkAnalytics;
+import in.arthayantra.backtest.jobs.EngineIdentity;
 import in.arthayantra.backtest.replay.MetricsCalculator.Metrics;
 import in.arthayantra.backtest.replay.folds.FoldPersistence;
 import in.arthayantra.backtest.replay.options.PremiumSource;
@@ -25,11 +26,13 @@ public class RunRepository {
 
   private final JdbcTemplate jdbc;
   private final ObjectMapper objectMapper;
+  private final EngineIdentity engineIdentity;
 
-  /** Wires JDBC + Jackson. */
-  public RunRepository(JdbcTemplate jdbc, ObjectMapper objectMapper) {
+  /** Wires JDBC + Jackson + the engine identity stamped onto each run row (audit P0-2 / R1). */
+  public RunRepository(JdbcTemplate jdbc, ObjectMapper objectMapper, EngineIdentity engineIdentity) {
     this.jdbc = jdbc;
     this.objectMapper = objectMapper;
+    this.engineIdentity = engineIdentity;
   }
 
   /**
@@ -80,9 +83,11 @@ public class RunRepository {
           total_return, sharpe, sortino, max_drawdown, win_rate, profit_factor, trade_count,
           metrics, equity_curve, drawdown_curve, engine_version, premium_source,
           fold_metrics, oos_fold_mean, oos_fold_std, sharpe_degradation,
-          alpha, beta, information_ratio, excess_cagr, benchmark_curve)
+          alpha, beta, information_ratio, excess_cagr, benchmark_curve,
+          engine_sha, engine_image)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?, ?,
-                ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
+                ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?::jsonb,
+                ?, ?)
         RETURNING id
         """,
         (rs, n) -> UUID.fromString(rs.getString("id")),
@@ -119,7 +124,9 @@ public class RunRepository {
         bench ? benchmark.beta() : null,
         bench ? benchmark.informationRatio() : null,
         bench ? benchmark.excessCagr() : null,
-        benchmarkCurve);
+        benchmarkCurve,
+        engineIdentity.sha(),
+        engineIdentity.image());
   }
 
   /**
@@ -184,7 +191,8 @@ public class RunRepository {
             // timestamp ("date when it was run").
             "SELECT br.metrics, br.equity_curve, br.drawdown_curve, br.benchmark_curve, br.data_hash, "
                 + "br.seed, br.premium_source, br.universe_checksum, br.exchange, br.tradingsymbol, "
-                + "br.completed_at, j.request->>'strategyId' AS strategy_id "
+                + "br.completed_at, br.engine_sha, br.engine_image, "
+                + "j.request->>'strategyId' AS strategy_id "
                 + "FROM backtest_runs br LEFT JOIN jobs j ON j.id = br.job_id WHERE br.id=?",
             (rs, n) -> {
               Map<String, Object> out = new LinkedHashMap<>();
@@ -208,6 +216,12 @@ public class RunRepository {
               // runs (differing universe_checksum) beside the dataHash mismatch. NULL for explicit
               // single-instrument / unpinned universes — the compare banner ignores NULLs.
               out.put("universeChecksum", rs.getString("universe_checksum"));
+              // Audit P0-2 / R1: the engine CODE identity this run executed under — the git SHA +
+              // build image baked into the worker jar. NULL on pre-V008 rows and on a jar built
+              // without git.properties (mock/test). Lets a longitudinal comparison tell a strategy
+              // effect apart from an engine change.
+              out.put("engineSha", rs.getString("engine_sha"));
+              out.put("engineImage", rs.getString("engine_image"));
               // §D.15: surface synthetic-premium caveats at the top level, never buried.
               out.put("caveats", caveats(metrics));
               return out;

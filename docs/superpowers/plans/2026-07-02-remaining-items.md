@@ -40,12 +40,12 @@ quarantined LIVE_FIRST evidence window).
 | A6 | `p1-fii-diagnostic` | FII-derivative empty-state explains the analytics flag (dead-by-default today) | APP §2.5 | clean | TODO |
 | A7 | `p1-backfill-identity` | Persist backfill jobId UUID into `backfill_jobs` + OI-backfill audit rows (V12) | APP §8 V12 | clean | TODO |
 | A8 | `p1-jobs-error-display` | Jobs page renders `jobs.error` for failed runs + a failed-job detail fetch (BE already returns it) | APP §2.7 | clean | TODO |
-| A9 | `p1-admin-audit` | Append-only audit for query-console SQL + exports; export truncation made explicit (V14) | APP §8 V14 | clean | TODO |
+| A9 | `p1-admin-audit` | Append-only audit for query-console SQL + exports + paper-reset/capital-change rows; export truncation made explicit (V14) | APP §8 V14, §7.2.5 | clean | TODO |
 | A10 | `p1-snapshot-retention` | Schedule `prune_options_snapshots` (horizon = owner pick) | APP §3.3 | owner | OWNER |
 | A11 | `p1-ingest-health-board` | EOD ingest health board page over `ingest_runs` (per-source last-run/rows/missing-days — the screen A4/A5 feed; in no APP phase list) | APP §6.3/§9.1 | clean | TODO |
 | A12 | `p1-v5-v16-reconcilers` | Nightly position↔order-leg (V5) + TAKEN-signal↔position (V16) reconciliation jobs → health board | APP §8 V5/V16 | clean | TODO |
 
-**B. Research-fidelity blockers. B1/B2 + B6–B10 = the seven EVO-E0 HARD gates; B3–B5 = FID P0s that are EVO-DEGRADED (BTST just runs SIM_BLOCKED, screener-CA defers funnel-knob tuning, lineage degrades portfolio scoring); B11–B14 = HOLD-tier sim-honesty (they change the numbers EVO ranks on); B15–B17 = optimizer-lane extras.**
+**B. Research-fidelity blockers. B1/B2 + B6–B10 = the seven EVO-E0 HARD gates; B3–B5 = FID P0s that are EVO-DEGRADED (BTST just runs SIM_BLOCKED, screener-CA defers funnel-knob tuning, lineage degrades portfolio scoring); B11–B14 + B18 = HOLD-tier sim-honesty (they change the numbers EVO ranks on); B15–B17 = optimizer-lane extras.**
 
 | # | id | what (1 line) | source | tier | status |
 |---|---|---|---|---|---|
@@ -66,8 +66,9 @@ quarantined LIVE_FIRST evidence window).
 | B15 | `evo-param-path-grammar` | 3-point path-grammar extension (gate constants, `risk.max_positions`, funnel props) — widens the tunable space | EVO §13 row 21 | clean | TODO |
 | B16 | `backtest-worker-pool-cap` | Queue cap/priority on the shared worker pool (campaign nights would starve interactive runs) | EVO §13 row 22; FID §8 A6 | clean | TODO |
 | B17 | `arch-03-trial-metrics-catalog` | Trial-metrics catalog (§9 candidate 03 — parity-neutral, cheap, "the clean next") | §9 candidate 03 | clean | TODO |
+| B18 | `fid-p1-2-costs-knob` | Wire the dead `costs` knob + instrument-class costing (candle path always EQUITY-class today — changes every net number) | FID §10 P1-2, §12 #11; EVO §13 row 10 | HOLD | TODO |
 
-**C. Design-program builds (owner sequences which goes first; EVO needs its seven B-gates, INT needs A4 and is sequenced after APP Phase 1)**
+**C. Design-program builds (owner sequences which goes first; EVO needs its seven B-gates, INT needs A4 and is sequenced after APP Phase 1; later increments E2–E6 / I2–I4 live in each design's §12 — C1/C2 are the first increments only)**
 
 | # | id | what (1 line) | source | tier | status |
 |---|---|---|---|---|---|
@@ -80,10 +81,10 @@ quarantined LIVE_FIRST evidence window).
 
 | # | id | what (1 line) | source | tier | status |
 |---|---|---|---|---|---|
-| D1 | `p1-phase2-workflow-chains` | Signal-status push, `paper.events`, position-detail+PATCH brackets, ticket book selector + qty override, trade-chain view, journal links/edit, `sell_decisions` persistence, strategy enabled-toggle + audit-log reader, promotions display, dot-health panel (notification center = superseded by INT I1 feed; PATCH-brackets/enabled-toggle/sell_decisions are the HOLD-tier sub-items) | APP §10 Phase 2 + §6.5 | mixed | TODO |
-| D2 | `p1-phase3-freshness-depth` | Freshness envelope + badge rollout, page auto-poll policy, chain time-travel, IV smile + `/premium-series` decay, strike drill-down, screener date/diff/attrition + V10 engine-version stamps, per-underlying DataHealth, breadth series, Minervini backtest page, CSV export standard, risk-calc margin tie-in, V6/V7/V8 data checks | APP §10 Phase 3 + §8 V10/§9.1 | clean | TODO |
+| D1 | `p1-phase2-workflow-chains` | Signal-status push, `paper.events`, position-detail+PATCH brackets, ticket book selector + qty override, trade-chain view, journal links/edit, `sell_decisions` persistence, strategy enabled-toggle + audit-log reader + clone action, promotions display, dot-health panel (notification center = superseded by INT I1 feed; PATCH-brackets + enabled-toggle are the HOLD-tier sub-items) | APP §10 Phase 2 + §6.5/§6.12 | mixed | TODO |
+| D2 | `p1-phase3-freshness-depth` | Freshness envelope + badge rollout, page auto-poll policy, chain time-travel, IV smile + surface (smile×expiries) + `/premium-series` decay, strike drill-down, screener date/diff/attrition + V10 engine-version stamps, per-underlying DataHealth, breadth series, Minervini backtest page, backtest-vs-paper parity view, CSV export standard, risk-calc margin tie-in, V6/V7/V8 data checks | APP §10 Phase 3 + §6.9/§6.16 + §8 V10/§9.1 | clean | TODO |
 | D3 | `p1-phase4-platform-planes` | Unified job envelope + jobs console, reference-data tables + admin CRUD (constituent SOURCE = owner pick), user_prefs + saved views + cmdk palette, DataTable adoption wave, Map-return burn-down, event registry, alert rules, multi-window panes | APP §10 Phase 4 | clean | TODO |
-| D4 | `fid-phase2-4-remainder` | FID roadmap remainder: paper order events + quote capture (P1-1/2), run tags/notes (P1-4/5), per-run export (P2-3), data-quality report (P2-4), latency stamps (P2-5), dividends (P2-6), margin feasibility (P2-7), backtest decision traces (P2-8), open-next-day variant (#15), confirm-before-run + rerun/clone FE (#26), order-timeline/mobile (#28), headless hardening A8/A9/A10 (#29) | FID §10 P1/P2 + §12 Ph2–4 | mixed | TODO |
+| D4 | `fid-phase2-4-remainder` | FID roadmap remainder: dataset comparability — content hash + `dataset_epochs` + re-run policy (P1-1/#30), exit-reason attribution on the candle path (P1-3), paper order events + quote capture (P1-4/5), flag-snapshot ledger (P1-7), `book` persisted on signals (T1), run tags/notes (P2-2), per-run export (P2-3), data-quality report (P2-4), latency stamps (P2-5), dividends (P2-6), margin feasibility (P2-7), backtest decision traces (P2-8), provenance block on jobs/runs (#22a), evidencePolicy tag + StressGuard-aware windows (#22b), open-next-day variant (#15), confirm-before-run + rerun/clone FE (#26), order-timeline/mobile (#28), headless hardening A8/A9/A10 (#29). FID #27 promotion-workflow = superseded by EVO §8 | FID §10 P1/P2 + §12 Ph2–4 | mixed | TODO |
 
 **E. Standing owner/data gates (detail in the source column)**
 
@@ -91,12 +92,13 @@ quarantined LIVE_FIRST evidence window).
 |---|---|---|---|---|
 | E1 | `forward-paper-reliability-month` | ~1 month live-paper accrual → runbook analysis (E9 band + per-scalper keep/cut/tune) + swing §0.5 #12 sign-off | §2 `live-forward-paper-analysis`; runbook | OWNER |
 | E2 | `always-on-host` | F5 hardware decision (brief: [`2026-07-03-always-on-host-brief.md`](2026-07-03-always-on-host-brief.md)) | 10x F5 | OWNER |
-| E3 | `flag-arms` | Arm when ready: F9 heat-cap, F7 graduation marker, heartbeat URL, Dow `ARTHA_OPENALGO_GLOBAL_QUOTES_ENABLED`, Minervini/Manas low-cap gate (all deployed-dormant) | §1 rows + §8(3) | OWNER |
-| E4 | `audit-doctrine-holds` | 07-05 audit H8 + swing exit-parity HOLD batch #128 + **#591 screener pass-set changes (green, unmerged — awaiting owner eyeball)** (H6 = B4) | 07-05 audit §12; §8a | OWNER / #591 BUILT-HOLD |
+| E3 | `flag-arms` | Arm when ready: F9 heat-cap, F7 graduation marker, heartbeat URL, Dow `ARTHA_OPENALGO_GLOBAL_QUOTES_ENABLED`, `source.optionanalytics` PCR flip (freshness check first, §6), per-strategy notification opt-ins, Minervini/Manas low-cap gate (code-property only — needs a compose passthrough, not a `.env` flip) | §1 rows + §8(3); §2/§6 | OWNER |
+| E4 | `audit-doctrine-holds` | 07-05 audit H8 + swing exit-parity HOLD batch #128 + setup-doctrine owner-calls M36/M37/M38/M40 + VcpDetector base-week mismeasure (latent — bites if a week-floor re-arms; m39 doc option 2). #591 is CLOSED — superseded by MERGED #607 (H6 = B4) | 07-05 audit §12; §8a; m39 doc §4 | OWNER |
 | E5 | `cd2-calendar-refresh` | 2027 NSE/BSE calendar CSV refresh before ~2026-11-16 (horizon canary reds ~45d prior) | §4 scheduled | OWNER |
 | E6 | `evo-owner-predecisions` | Stage-D regime-gate design amendment (regimes frozen "reported, not optimized") + author the Manas `backtest.optimize` block — both gate EVO streams | EVO §5.1.2/§9; §1 row | OWNER |
-| E7 | `f2-proposals-pass` | 10x F2 dot/gate proposals pass — self-triggers at ≥5 rollup sessions (**4 of ~5 logged; due imminently**); also: session-findings files stopped after 07-07 (07-08 unexplained) — verify the post-market task cadence | 10x F2; `docs/signal-analysis/rollup.md` | TODO (data-imminent) |
-| E8 | `f3-dot-fixes-evidence-gated` | F3.2–.5 dot fixes (iv_rank live semantics, iv_pair units, oi_spurt floor, volume floor k×median) — build on E7/E1 evidence | 10x roadmap F3 | OWNER |
+| E7 | `f2-proposals-pass` | 10x F2 dot/gate proposals pass — self-triggers at ≥5 rollup sessions (4 of ~5 logged, due imminently); plus: findings files stopped after 07-07 (07-08 unexplained) — verify post-market task cadence; carry the 07-07 rollup owner-Qs (straddle-path threshold, 0DTE-straddle book routing, SENSEX scalpers still fixed-125k) | 10x F2; `docs/signal-analysis/rollup.md` | TODO |
+| E8 | `f3-dot-fixes-evidence-gated` | F3.2–.4 dot fixes (iv_rank live semantics, iv_pair units, oi_spurt floor) — build on E7/E1 evidence. F3.5 volume-floor mechanism already shipped+armed #605; only the k verdict remains (E1/E7) | 10x roadmap F3 | OWNER |
+| E9 | `track3-long-term-investing` | Track-3 long-term investing placeholder (owner goal #3 — "parked, not silently dropped"): `long_term` screener preset + ADR-0004 fundamentals as first-class gate when started | master-plan §18.2 | OWNER |
 
 **F. Older-source startables (pre-2026-07-10 sources; all verified still open)**
 
@@ -104,10 +106,12 @@ quarantined LIVE_FIRST evidence window).
 |---|---|---|---|---|---|
 | F1 | `audit-startable-meds` | 07-05 audit startable Meds: M1 margin-heat one-basket + >20-leg truncation (matters when F9 arms), M16 book-default fail-open governors, M17 STOMP frames lack book field (pollutes filtered caches), M18 cockpit all-books framing, M28 e2e for new pages | 07-05 audit §12; §8a | clean | TODO |
 | F2 | `manas-n1-reads` | Serial/N+1 candle reads in Manas + Minervini backtest services (~1,800 round-trips; ~40 min under pg_dump) — batch, prove equality re-run | §8d | HOLD | TODO |
-| F3 | `fifo-slot-probe` | FIFO-vs-RS-priority slot admission probe: `portfolioFifoNet` accounting + live 7-slot-cap exceedance measure (owner "take later") | §1 Manas section | clean | TODO |
-| F4 | `shadow-net-anomaly` | Investigate shadow-book champion `pnlPoints` −423.50 vs `pnlNet` +5418.19 (2W/24L) + `composite-070` zero-rows-all-time — poisons E1 keep/cut evidence if aggregation is wrong | `docs/signal-analysis/2026-07-06-live-eyeball-findings.md` §5 | clean | TODO |
+| F3 | `fifo-slot-probe` | FIFO-vs-RS-priority slot admission probe: `portfolioFifoNet` accounting + live 7-slot-cap exceedance measure (owner "take later") | Manas Arora section (post-§7) | clean | TODO |
+| F4 | `shadow-net-anomaly` | Investigate shadow-book champion `pnlPoints` −423.50 vs `pnlNet` +5418.19 (2W/24L) + `composite-070` zero-rows-all-time — poisons E1 keep/cut evidence if aggregation is wrong | `docs/signal-analysis/2026-07-06-live-eyeball-findings.md` Task 2 | clean | TODO |
 | F5 | `signal-analysis-backlog` | README §7 rows 3–7: all-eval mode, data-health row flags, eval-denominator, **dot-null semantics unification** (dead dots mis-read as bearish), FE funnel view | `docs/signal-analysis/README.md` §7 | owner | OWNER |
-| F6 | `small-residue` | Partial-bhavcopy targeted re-fetch endpoint (§8d), AC-1 dated-futures instrument-search miss (§8b), Manas pyramiding IT-gap (chip task_67cf8715) | §8b/§8d; memory chip | clean | TODO |
+| F6 | `small-residue` | Partial-bhavcopy targeted re-fetch endpoint (§8d), AC-1 dated-futures instrument-search miss (§8b), Manas pyramiding IT-gap (chip task_67cf8715), `kite.rateBudget` null-stub producer (SystemStatusController:95) | §8b/§8d; memory chip; PHASE_GATES parking | clean | TODO |
+| F7 | `scalp-push-payload-extras` | Scalp alert push: add `suggested_qty` + an `/orders` pre-fill deep link (core shipped #152; "only the two payload extras remain") | master-plan §18.4 | clean | TODO |
+| F8 | `docs-currency-pass` | Strike stale rows: DEFERRED_BACKLOG (B6 export shipped #584, #140 deployed, Phase-5 live, value-verify PASSED, W-U4 WON'T, SPAN .spn superseded #510), PHASE_GATES §16.1 Phase-4/5 cells + parking hash-pinning, README W-U4 line, spec header "Implementing"→SHIPPED, ledger §8a #591→#607 | round-2 sweep | clean | TODO |
 
 ---
 
@@ -130,10 +134,10 @@ quarantined LIVE_FIRST evidence window).
 |---|---|---|
 | `live-forward-paper-analysis` | Auto-paper ON (#367); every gate block persisted to `signal_rejections` (#404); analysis procedure = [`2026-06-30-live-signal-analysis-runbook.md`](2026-06-30-live-signal-analysis-runbook.md) | **~1 month of live-paper scalper trades**, then run the runbook: E9 target/trail band number + per-scalper keep/cut/tune via counterfactual replay on real captured premium. The biggest open track. |
 | `span-real-spn-broker-parity` | ~~`.spn` loader + parity harness (#144)~~ **SUPERSEDED 2026-07-04** — the `.spn` file is no longer needed. See `upstox-margin-route` in §1: Upstox computes SPAN server-side (`POST /v2/charges/margin`) on the analytics token we already hold — no NSCCL file, no broker-number hunt. The marginism appliance (#126) stays the offline/backtest fallback; live sizing routes through Upstox. **No owner action** — moved to buildable. |
-| `telegram-scalp-alert-optin` | notifier path built (#152) | owner sets the bot token |
+| ~~`telegram-scalp-alert-optin`~~ **DONE (superseded)** | notifier path built (#152) | ~~owner sets the bot token~~ — satisfied: the F6 Telegram bot (#493) is LIVE and shares `ARTHA_NOTIFIER_TELEGRAM_BOT_TOKEN` (struck in the 2026-07-10 round-2 queue audit) |
 | `per-strategy-notifications` | ntfy verified end-to-end (direct + service path, 2026-07-02) | only `scalp-connect-the-dots-nifty` has notifications ON — owner toggles the other 11 published strategies per taste |
 | ~~`sensex-pe-publish`~~ **DONE 2026-07-05** | 18 SENSEX-PE drafts seeded (#382) | ~~owner publish decision~~ — owner said "publish"; all 18 PUT-side drafts published live via the internal registry endpoint (`docker exec … wget POST /strategies/{id}/publish`, bypasses gateway auth); engine reconciled 21→39 scalpers. (The publish also surfaced + fixed the reconcile-loop bug #579.) No PR (a live data action). |
-| `value-verify-ratify` | data-foundation value-verify **PASSED** live-vs-live 2026-07-01 (captured OI == oipulse exact share) | owner ratifies the close; residual low nits in §5 |
+| ~~`value-verify-ratify`~~ **STALE (collapse)** | data-foundation value-verify **PASSED** live-vs-live 2026-07-01 (captured OI == oipulse exact share) | ~~owner ratifies the close; residual low nits in §5~~ — §5 CLOSED 2026-07-04 (pointer dead); nothing left beyond a one-sentence ratification (struck in the 2026-07-10 round-2 queue audit) |
 | `soft-dot-arming` | FU2 dots + drasticFloor default built inert | arm only if live forward-paper data proves them (else stays a §7 WON'T) |
 
 ## 3. Verification only — next market session
@@ -364,8 +368,8 @@ batch-liveness gap** (§1 row). Below = items NOT already enumerated elsewhere i
 - **HIGH (2):** **H6** screener reads CA-UNADJUSTED bhavcopy (splits/bonuses poison SMA/52wk/RS/VCP ~1yr/event vs the
   adjusted engine plane; data-fidelity, owner call) · **H8** cheat-3c is a synthetic proxy mislabelled as the doc's true
   cheat setup (doctrine, owner call).
-- **MEDIUM (27 open of 40):** HELD-unmerged pending owner sign-off (#591, screener pass-set changes): **M12** RS-tie
-  determinism / **M35** liquidity depth 25×→50× / **M39** VCP base-depth+duration caps · setup-doctrine owner-call:
+- **MEDIUM (27 open of 40):** ~~HELD-unmerged pending owner sign-off (#591)~~ **#591 CLOSED unmerged 2026-07-06, superseded by MERGED #607** — **M12** RS-tie
+  determinism / **M35** liquidity depth 25×→50× / **M39** VCP depth+ceiling (with `min-base-weeks=0`) all LANDED via #607 (correction: 2026-07-10 round-2 queue audit) · setup-doctrine owner-call:
   **M36** 50d-trail armed day-1 / **M37** PowerPlay depth-duration caps / **M38** PrimaryBase 52wk-breakout mislabel /
   **M40** Manas open-risk cap · exit-parity HOLD batch (task #128): **M2 M3 M4 M6 M7 M8 M9 M10 M11 M13 M14 M27** · other:
   **M1** margin-heat basket-blind / **M16** book default 'manual' fail-open / **M17 M18** FE surfaces (~~M20 DONE #649~~,

@@ -22,7 +22,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * The paper-trading ledger (Q1). Orders fill through the shared {@link PaperFillService} (engine
@@ -126,8 +128,10 @@ public class PaperService {
   private final SignalRepository signals;
   private final PaperAccountService accountService;
   private final BookResolver books;
+  private final RiskService risk;
   private final ApplicationEventPublisher events;
   private final BigDecimal perTradeRiskPct;
+  private final TransactionTemplate txTemplate;
 
   /** Wires the ledger collaborators. */
   public PaperService(
@@ -139,7 +143,9 @@ public class PaperService {
       SignalRepository signals,
       PaperAccountService accountService,
       BookResolver books,
+      RiskService risk,
       ApplicationEventPublisher events,
+      PlatformTransactionManager transactionManager,
       @org.springframework.beans.factory.annotation.Value("${artha.paper.risk.per-trade-risk-pct:1.0}")
           BigDecimal perTradeRiskPct) {
     this.orders = orders;
@@ -150,8 +156,50 @@ public class PaperService {
     this.signals = signals;
     this.accountService = accountService;
     this.books = books;
+    this.risk = risk;
     this.events = events;
     this.perTradeRiskPct = perTradeRiskPct;
+    this.txTemplate = new TransactionTemplate(transactionManager);
+  }
+
+  /**
+   * The MANUAL open path (audit V1): a hand ticket (`POST /api/v1/paper/orders`) must pass the SAME
+   * per-book risk governor the engine-emitted entry already clears at emission ({@code
+   * PaperEmissionGuard.entryAllowed} → {@code SignalEngine.emitEntry}) — kill switch / max-open /
+   * daily-loss / profit-target / deployment / heat. Before this, a manual ticket filled with the kill
+   * switch ON. A veto is a 422 naming the blocking rail; NEW exposure only — exits are never gated.
+   *
+   * <p>The gate runs OUTSIDE the fill transaction on purpose: {@code entryVeto} has non-transactional
+   * side-effects on a trip (the in-memory per-day dedup, the ntfy push, AND the {@code risk_audit} row),
+   * so it must NOT be rolled back by the veto-throw — otherwise the dedup would be poisoned while the DB
+   * audit row vanished. The taken/emission path decouples gate-from-fill the same way. Once the gate
+   * passes, the fill runs in its own tx (via {@code txTemplate}) so {@code openOrder}'s
+   * {@code @Transactional} semantics hold — the AFTER_COMMIT F9 margin annotation still fires — even
+   * though this in-class call would otherwise bypass the proxy.
+   */
+  public PositionDto openManualOrder(OrderRequest request) {
+    String book = bookFor(request);
+    risk.entryVeto(book)
+        .ifPresent(
+            rail -> {
+              throw new ApiException(
+                  422,
+                  ErrorCodes.RISK_ENTRY_BLOCKED,
+                  "entry blocked by risk governor (" + rail + ") on book " + book,
+                  Map.of("book", book, "rail", rail));
+            });
+    return txTemplate.execute(status -> openOrder(request));
+  }
+
+  /**
+   * The book to charge: explicit on the request, else the signal's strategy family, else {@code MANUAL}
+   * (§F.6 first-recognised-family-tag convention). Shared by the manual gate + the fill so both resolve
+   * the identical book.
+   */
+  private String bookFor(OrderRequest request) {
+    return request.book() != null
+        ? request.book()
+        : request.signalId() != null ? books.bookForSignal(request.signalId()) : BookResolver.MANUAL;
   }
 
   /** Simulates an entry; fills via {@code ltp_slippage/v1} against the next-tick LTP + cost model. */
@@ -187,12 +235,7 @@ public class PaperService {
       throw new ApiException(422, ErrorCodes.DATA_STALE, "no price available to fill " + exchange + ":" + tradingsymbol);
     }
     // The book to charge: explicit on the request, else the signal's strategy family, else MANUAL.
-    String book =
-        request.book() != null
-            ? request.book()
-            : request.signalId() != null
-                ? books.bookForSignal(request.signalId())
-                : BookResolver.MANUAL;
+    String book = bookFor(request);
     InstrumentMeta meta = instruments.meta(exchange, tradingsymbol);
     Fill fill = fills.fill(Side.valueOf(side), request.qty(), reference, meta);
     orders.insertFilled(

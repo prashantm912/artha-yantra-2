@@ -8,6 +8,7 @@ package in.arthayantra.common.web.error;
  * VALIDATION_*  400      AUTH_*      401/403   KITE_*    401/429/502/503
  * NOT_FOUND_*   404      CONFLICT_*  409       STRATEGY_* 400/422
  * DATA_*        422/503  INTERNAL_*  500       WINDOW_*  422
+ * RISK_*        422
  * </pre>
  *
  * <p>Canonical-spelling pins (COMMON §3): {@code KITE_TOKEN_EXPIRED} wins over the plan's
@@ -71,6 +72,10 @@ public final class ErrorCodes {
 
   // ---- stress-test holdout contamination (422) — S1C / §D.6 stress runs ----
   public static final String WINDOW_CONTAMINATED = "WINDOW_CONTAMINATED";
+
+  // ---- RISK_* (422) — a paper risk-governor veto blocks a NEW entry (kill switch / max-open /
+  // daily-loss / profit-target / deployment / heat); the details carry the blocking {@code rail} ----
+  public static final String RISK_ENTRY_BLOCKED = "RISK_ENTRY_BLOCKED";
 
   // ---- service NOT_CONFIGURED (503) — live-port stubs in mock-built phases (A.7) ----
   public static final String NOT_CONFIGURED = "NOT_CONFIGURED";

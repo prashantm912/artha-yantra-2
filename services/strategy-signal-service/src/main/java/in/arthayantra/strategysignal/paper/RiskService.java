@@ -95,13 +95,26 @@ public class RiskService {
 
   /** Whether a new ENTRY may be emitted right now for a book (the per-book {@code emitEntry} gate). */
   public boolean entryAllowed(String book) {
+    return entryVeto(book).isEmpty();
+  }
+
+  /**
+   * The governor rail (a limit-key constant, e.g. {@link #KILL_SWITCH}) blocking a new ENTRY on a book
+   * right now, or {@link Optional#empty()} when entry is allowed. This is the single source of truth for
+   * the per-book gate: {@link #entryAllowed(String)} is a thin {@code isEmpty()} view, so both callers
+   * apply IDENTICAL semantics AND identical audit side-effects (a daily-loss/profit/deployment/heat trip
+   * writes its {@code risk_audit} row + ntfy here regardless of which caller triggered it; the kill-switch
+   * and max-open rails write no audit, matching the emission path). Used by the manual paper-order path
+   * ({@code PaperService.openManualOrder}) to surface the blocking rail in a 422 body.
+   */
+  public Optional<String> entryVeto(String book) {
     if (boolFlag(book, KILL_SWITCH)) {
-      return false;
+      return Optional.of(KILL_SWITCH);
     }
     Optional<Setting> maxOpen = settings.get(book, MAX_OPEN);
     if (enabled(maxOpen)
         && positions.openCount(book) >= maxOpen.get().value().path("value").asInt(Integer.MAX_VALUE)) {
-      return false;
+      return Optional.of(MAX_OPEN);
     }
     Optional<Setting> dailyLoss = settings.get(book, DAILY_LOSS);
     if (enabled(dailyLoss)) {
@@ -109,7 +122,7 @@ public class RiskService {
       BigDecimal dayPnl = account.dayPnl(book);
       if (dayPnl.compareTo(limit.negate()) <= 0) {
         recordTrip(book, DAILY_LOSS, dayPnl, limit);
-        return false;
+        return Optional.of(DAILY_LOSS);
       }
     }
     Optional<Setting> profitTarget = settings.get(book, DAILY_PROFIT_TARGET);
@@ -118,7 +131,7 @@ public class RiskService {
       BigDecimal dayPnl = account.dayPnl(book);
       if (dayPnl.compareTo(target) >= 0) {
         recordTrip(book, DAILY_PROFIT_TARGET, dayPnl, target);
-        return false;
+        return Optional.of(DAILY_PROFIT_TARGET);
       }
     }
     Optional<Setting> deployment = settings.get(book, MAX_DEPLOYMENT_PCT);
@@ -134,7 +147,7 @@ public class RiskService {
             MAX_DEPLOYMENT_PCT,
             "TRIP",
             "open deployment " + used.toPlainString() + " ≥ cap " + cap.toPlainString());
-        return false;
+        return Optional.of(MAX_DEPLOYMENT_PCT);
       }
     }
     // F9 portfolio heat cap — the open book's total SPAN margin as % of equity, blocks a new entry
@@ -150,11 +163,11 @@ public class RiskService {
         BigDecimal heatPct = currentHeatPct(book);
         if (heatPct != null && heatPct.compareTo(capPct) >= 0) {
           recordHeatTrip(book, heatPct, capPct);
-          return false;
+          return Optional.of(HEAT_CAP_PCT);
         }
       }
     }
-    return true;
+    return Optional.empty();
   }
 
   /**

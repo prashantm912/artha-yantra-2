@@ -100,7 +100,11 @@ public class PaperController {
     return paper.pnl(book);
   }
 
-  /** Simulate an entry (from a signal or manual); the book is on the body or resolved from the signal. */
+  /**
+   * Simulate an entry (from a signal or manual); the book is on the body or resolved from the signal.
+   * Routes through {@code openManualOrder} so the per-book risk governor gates the fill (audit V1) — the
+   * signal-taken path stays on {@code openOrder} (already gated at emission).
+   */
   @PostMapping("/orders")
   public ResponseEntity<PaperService.PositionDto> order(@RequestBody OrderBody body) {
     if (body.qty() == null || body.qty() <= 0) {
@@ -110,7 +114,7 @@ public class PaperController {
         new PaperService.OrderRequest(
             body.signalId(), body.exchange(), body.tradingsymbol(), body.side(), body.qty(),
             body.price(), body.stopLoss(), body.takeProfit(), null, body.book());
-    return ResponseEntity.status(HttpStatus.CREATED).body(paper.openOrder(request));
+    return ResponseEntity.status(HttpStatus.CREATED).body(paper.openManualOrder(request));
   }
 
   /** Close a position at market (or a stated price). */

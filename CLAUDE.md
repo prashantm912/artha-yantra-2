@@ -24,6 +24,24 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
    that reproduces it, then make it pass") and loop until they pass. For multi-step work, state
    a brief plan with a verify check per step.
 
+## Delegation model (owner standing rule 2026-07-10, until Fable 5 is generally available)
+Applies to the MAIN session loop only — if you were spawned as a subagent, ignore this section
+and just execute your brief. The main loop delegates ALL substantive execution (builds,
+investigations, audits) to **Opus 4.8 subagents** (Agent tool, `model: "opus"`; parallel code work
+gets `isolation: "worktree"` + rebase-before-push) and itself only orchestrates, audits, fixes,
+merges, deploys, and talks to the owner. Rules proven over the first runs (#675–#680):
+- The brief must be self-contained: goal, constraints, **relevant memory-trap content pasted in**
+  (subagents get this file but never the memory files), and a required receipt shape — diff, test
+  output, claims WITH evidence (file:line / SQL+result / log line), and a mandatory **open-doubts**
+  section (builders' self-flagged doubts have caught real regressions).
+- Audit the RECEIPT against the real artifact (read the actual diff, spot-rerun tests, verify
+  citations); depth tiered by risk — docs/mechanical = diff read, engine/money/parity =
+  verify-ladder rerun. Small audit fixes land directly; big ones go back to the same agent via
+  SendMessage.
+- The main loop keeps: merge decisions, live deploys + anything touching secrets/.env, ledger and
+  memory writes, owner communication, and tiny fixes where delegation overhead exceeds the work.
+Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
+
 ## Build & test
 - **Integration tests must be named `*IntegrationTest` or `*Test`** — there is **no
   failsafe** plugin configured; `*IT` classes are silently skipped (never run).

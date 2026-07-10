@@ -21,7 +21,7 @@ def test_folds_returns_the_fold_array():
 def test_guard_summary_assembles_from_folds_and_results():
     respx.get("http://bt/api/v1/backtests/run-9/folds").mock(
         return_value=httpx.Response(
-            200, json=[{"fold": 0, "regimeOos": {"BULL": {"sharpe": "0.7", "tradeCount": 4}}}]
+            200, json=[{"fold": 0, "regimeOos": {"UP_QUIET": {"sharpe": "0.7", "tradeCount": 4}}}]
         )
     )
     respx.get("http://bt/api/v1/backtests/run-9/results").mock(
@@ -31,7 +31,7 @@ def test_guard_summary_assembles_from_folds_and_results():
     assert summary == {
         "dataHash": "abc",
         "foldsExcluded": 2,
-        "regimeOos": [{"BULL": {"sharpe": "0.7", "tradeCount": 4}}],
+        "regimeOos": [{"UP_QUIET": {"sharpe": "0.7", "tradeCount": 4}}],
     }
 
 

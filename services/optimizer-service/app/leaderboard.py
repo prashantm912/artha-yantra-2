@@ -53,8 +53,9 @@ def best(
     return scored[:top]
 
 
-# The four §D.4 regime labels, in the canonical order the fold attributor / React chip render.
-_REGIME_LABELS = ("BULL", "RANGE", "BEAR", "CRASH")
+# The four §D.4 regime labels, in the canonical RegimeLabel enum order (backtest-service
+# serializes each fold's regimeOos keyed by RegimeLabel.name(), never a BULL/RANGE alias).
+_REGIME_LABELS = ("UP_QUIET", "UP_TURBULENT", "DOWN_QUIET", "DOWN_TURBULENT")
 
 
 def guard_metrics(summary: dict[str, Any]) -> dict[str, Any]:

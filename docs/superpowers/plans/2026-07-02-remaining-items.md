@@ -32,10 +32,10 @@ quarantined LIVE_FIRST evidence window).
 
 | # | id | what (1 line) | source | tier | status |
 |---|---|---|---|---|---|
-| A1 | `p1-v1-manual-order-governor` | Call `RiskService.entryAllowed` inside `PaperService.openOrder` — manual tickets currently bypass kill-switch/max-open/daily-loss/heat | APP §8 V1 | HOLD | TODO |
+| A1 | `p1-v1-manual-order-governor` | Call `RiskService.entryAllowed` inside `PaperService.openOrder` — manual tickets currently bypass kill-switch/max-open/daily-loss/heat | APP §8 V1 | HOLD | **DONE — PR #687 @ a3210700, MERGED+DEPLOYED LIVE 2026-07-10 (owner pre-authorized autonomous run)**: openManualOrder gate via RiskService.entryVeto (emission path byte-identical, 2-lens review clean); residual = stale-signal manual take still ungated (chip task_94f40cf6) |
 | A2 | `p1-v2-v4-order-validation` | `clientOrderId` idempotency on `POST /paper/orders` + lot-size-multiple validation | APP §8 V2/V4 | clean | TODO |
 | A3 | `p1-v3-tick-freshness` | Max-age guard on fills/MTM, bracket-starvation counter + ntfy, forbid silent breakeven settle | APP §8 V3 | HOLD | TODO |
-| A4 | `p1-ingest-runs` | `marketdata.ingest_runs` ledger + writers (NseEod ×3, bhavcopy, screeners, capture summary, instrument sync) — the batch-source trust oracle | APP §7.2.3/§9.1 | clean | TODO |
+| A4 | `p1-ingest-runs` | `marketdata.ingest_runs` ledger + writers (NseEod ×3, bhavcopy, screeners, capture summary, instrument sync) — the batch-source trust oracle | APP §7.2.3/§9.1 | clean | **DONE — PR #686 @ e112ca9e, MERGED+DEPLOYED LIVE 2026-07-10** (V040; 8/8 writers; timescale review PASS incl. empirical ON-CONFLICT check; live-verified — boot NseEod×3 SUCCESS rows + bhavcopy RUNNING within seconds); A5/A11 notes: aged RUNNING=crashed, NseEod 2 rows/day, screener SUCCESS/0=yellow |
 | A5 | `p1-ingest-canaries` | T+1 expected-source×trading-day canary (V9) + notifier delivery-health check (V15) | APP §8 V9/V15 | clean | TODO |
 | A6 | `p1-fii-diagnostic` | FII-derivative empty-state explains the analytics flag (dead-by-default today) | APP §2.5 | clean | TODO |
 | A7 | `p1-backfill-identity` | Persist backfill jobId UUID into `backfill_jobs` + OI-backfill audit rows (V12) | APP §8 V12 | clean | TODO |

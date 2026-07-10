@@ -1,6 +1,6 @@
 # Minervini partial-close executor — build-spec (MV-7.3 / MV-7.4)
 
-**Status:** ✅ IMPLEMENTED (PR-P, 2026-07-04) — built to this spec, `GoldenDeterminism`+`BacktestParity`
+**Status:** ✅ IMPLEMENTED — ARCHIVED 2026-07-10 (PR-P, 2026-07-04) — built to this spec, `GoldenDeterminism`+`BacktestParity`
 byte-identical; the paper-ledger partial close (§7) remains the one deferred, separately-gated follow-up.
 · **Owner:** solo · **Companion:** the
 [implementation plan](2026-07-04-minervini-sepa-implementation-plan.md) + [build log](2026-07-04-minervini-build-log.md).

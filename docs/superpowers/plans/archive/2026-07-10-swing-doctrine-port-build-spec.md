@@ -4,7 +4,7 @@
 Deploy decision (Q5): **build → prove byte-identical → merge + deploy now** (owner overrode the
 "hold — watch the live-paper month" posture for this parity-neutral, characterization-proven change).
 
-**Status: SHIPPED + DEPLOYED + LIVE-VERIFIED 2026-07-10** — [`#655`](https://github.com/prashantm912/artha-yantra-2/pull/655),
+**Status: SHIPPED + DEPLOYED + LIVE-VERIFIED 2026-07-10 — ARCHIVED 2026-07-10** — [`#655`](https://github.com/prashantm912/artha-yantra-2/pull/655),
 squash `9bae2161`. All built: `swing/{SwingCandidate,PyramidPolicy,SwingDoctrine,SwingBatchEngine,
 SwingBatchRecorder,SwingSellDecisionService}` + `MinerviniDoctrine`/`ManasDoctrine`/`ManasPyramidPolicy`
 + thin per-family scheduler/controller shells; the 2 old engines / 2 sell-decision services / 2 recorders

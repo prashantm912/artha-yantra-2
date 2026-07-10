@@ -1,6 +1,6 @@
 # Minervini SEPA — autonomous build log
 
-**Status:** ACTIVE (overnight autonomous build, 2026-07-04). Companion to the
+**Status:** COMPLETE — ARCHIVED 2026-07-10 (build finished; per-PR record preserved). Companion to the
 [implementation plan](2026-07-04-minervini-sepa-implementation-plan.md) — this log is the
 per-PR record; the plan's item Status/Evidence cells are the canonical tracker.
 
@@ -554,7 +554,7 @@ event-driven backtest over the dense native `candles`@1d (~1,789 EQ names, ~40k 
 (`MinerviniSwingBacktest` / `SwingPortfolio` / `SwingRotationPortfolio` / `MinerviniBacktestService`,
 `V035__minervini_backtest_runs`), all outside the parity firewall (a market-data analytics read; the
 live engine reuses the FROZEN evaluators unchanged). Full write-up + every grid:
-[`docs/strategies/minervini-swing-backtest-results.md`](../../strategies/minervini-swing-backtest-results.md).
+[`docs/strategies/minervini-swing-backtest-results.md`](../../../strategies/minervini-swing-backtest-results.md).
 
 | ver | PR | question | finding |
 |---|---|---|---|

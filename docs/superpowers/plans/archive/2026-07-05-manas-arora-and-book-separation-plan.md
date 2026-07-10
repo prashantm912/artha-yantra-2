@@ -1,6 +1,6 @@
 # Manas Arora strategy + per-strategy paper/signals books — implementation plan
 
-**Date:** 2026-07-05 · **Owner-approved, autonomous overnight build.** · Source strategy doc:
+**Status:** ARCHIVED 2026-07-10 (fully shipped + deployed live). · **Date:** 2026-07-05 · **Owner-approved, autonomous overnight build.** · Source strategy doc:
 `strategy-documents/manas-arora-operative/MomentumTradingManasArora_Consolidated_Strategy.md` (merged #565).
 
 > **STATUS 2026-07-05 — FULLY SHIPPED + DEPLOYED LIVE.** All PRs merged: books (#566/#568), Manas

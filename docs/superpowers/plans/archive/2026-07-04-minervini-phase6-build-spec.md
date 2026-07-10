@@ -1,6 +1,6 @@
 # Minervini Phase 6 — engine build-spec (from the 2026-07-04 recon)
 
-**Status:** SPEC (recon complete, not yet built) · **Companion to:** the
+**Status:** SHIPPED (#530-#537) — ARCHIVED 2026-07-10 · **Companion to:** the
 [implementation plan](2026-07-04-minervini-sepa-implementation-plan.md) (§Phase 6) + the
 [build-log](2026-07-04-minervini-build-log.md). Phase 5 (VCP/base geometry + `/candidate`) is SHIPPED+LIVE
 (PR-D / #528). This doc turns a 4-subsystem parity-critical recon into an exact, file:line, parity-safe

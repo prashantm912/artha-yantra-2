@@ -9,6 +9,17 @@
       "422"
     ]
   },
+  "GET /api/v1/optimizations/jobs": {
+    "params": [
+      "limit",
+      "offset"
+    ],
+    "requestBody": false,
+    "responses": [
+      "200",
+      "422"
+    ]
+  },
   "GET /api/v1/optimizations/jobs/{job_id}": {
     "params": [
       "job_id"

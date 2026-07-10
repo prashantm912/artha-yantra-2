@@ -14,6 +14,16 @@ from typing import Any
 
 import psycopg
 
+# Boot-recovery marker (audit P2-1 / F4): an OPTIMIZATION sweep runs on an in-process daemon
+# thread holding an in-memory Optuna study — a service restart abandons it with no thread to
+# resume. fail_orphaned_sweeps() stamps THIS text into jobs.error so a restart-killed sweep is
+# loudly distinguishable from a genuine failure (previously error was left NULL — the two were
+# indistinguishable in the UI/API).
+ORPHAN_SWEEP_ERROR = (
+    "sweep interrupted by an optimizer restart — in-process sweep threads do not survive a "
+    "restart and cannot resume; resubmit the sweep to re-run"
+)
+
 
 class JobsRepo:
     """The shared ``jobs`` table (backtest-service is the BACKTEST/TRIAL writer; the optimizer
@@ -64,17 +74,45 @@ class JobsRepo:
         self._conn.commit()
 
     def fail_orphaned_sweeps(self) -> int:
-        """Boot recovery (audit P1-10b): sweeps run as in-memory daemon threads, so a restart
+        """Boot recovery (audit P2-1 / F4): sweeps run as in-memory daemon threads, so a restart
         strands their OPTIMIZATION rows at queued/running forever (no thread can resume an
-        in-memory Optuna study). Marks them failed so the UI/API reflect reality."""
+        in-memory Optuna study). Marks them failed AND populates ``error`` with a real reason so a
+        restart-killed sweep is loudly distinguishable from a genuine failure — the error was
+        previously left NULL, making the two indistinguishable in the UI/API. COALESCE guards a
+        pre-existing error (a queued/running row never has one, but the write stays idempotent)."""
         with self._conn.cursor() as cur:
             cur.execute(
-                "UPDATE jobs SET status='failed'"
-                " WHERE kind='OPTIMIZATION' AND status IN ('queued','running')"
+                "UPDATE jobs SET status='failed', error=COALESCE(error, %s)"
+                " WHERE kind='OPTIMIZATION' AND status IN ('queued','running')",
+                (ORPHAN_SWEEP_ERROR,),
             )
             count = cur.rowcount
         self._conn.commit()
         return count
+
+    def list_sweeps(self, limit: int, offset: int) -> list[dict[str, Any]]:
+        """Native sweep listing (audit P2-1): OPTIMIZATION rows newest-first for the sweep-scoped
+        list surface (``GET /optimizations/jobs``). Sweeps were only discoverable via the shared
+        backtest jobs table before. Returns the shared fields plus ``error`` + ``created_at`` so a
+        restart-interrupted sweep shows its reason in the list."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, status, progress, request, error, created_at FROM jobs "
+                "WHERE kind='OPTIMIZATION' ORDER BY created_at DESC LIMIT %s OFFSET %s",
+                (limit, offset),
+            )
+            rows = cur.fetchall()
+        return [
+            {
+                "id": str(r[0]),
+                "status": r[1],
+                "progress": r[2],
+                "request": r[3],
+                "error": r[4],
+                "createdAt": r[5].isoformat() if r[5] else None,
+            }
+            for r in rows
+        ]
 
     def get(self, job_id: str) -> dict[str, Any] | None:
         with self._conn.cursor() as cur:

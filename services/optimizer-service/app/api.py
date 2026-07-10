@@ -20,6 +20,14 @@ def run(body: dict[str, Any], request: Request) -> dict[str, Any]:
     return {"jobId": job_id, "status": "queued"}
 
 
+@router.get("/jobs")
+def jobs(request: Request, limit: int = 50, offset: int = 0) -> dict[str, Any]:
+    """List optimizer sweeps (OPTIMIZATION jobs), newest first — the sweep-native listing surface
+    (previously sweeps were only discoverable via the shared backtest jobs table)."""
+    bounded_limit = min(max(limit, 1), 200)
+    return _service(request).list_sweeps(bounded_limit, max(offset, 0))
+
+
 @router.get("/jobs/{job_id}")
 def job(job_id: str, request: Request) -> dict[str, Any]:
     """Sweep status / progress / trials completed."""

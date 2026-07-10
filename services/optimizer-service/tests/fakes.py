@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.repos import ORPHAN_SWEEP_ERROR
+
 
 class FakeJobs:
     """In-memory ``jobs`` table."""
@@ -17,7 +19,7 @@ class FakeJobs:
         self._seq += 1
         job_id = f"sweep-{self._seq}"
         self.rows[job_id] = {"kind": "OPTIMIZATION", "status": "queued", "progress": 0,
-                             "request": request}
+                             "request": request, "error": None, "created": self._seq}
         return job_id
 
     def insert_trial(self, sweep_id: str, version_id: str | None, request: dict[str, Any]) -> str:
@@ -35,6 +37,29 @@ class FakeJobs:
         row["status"] = status
         if progress is not None:
             row["progress"] = progress
+
+    def fail_orphaned_sweeps(self) -> int:
+        """Mirrors JobsRepo.fail_orphaned_sweeps (repos.py): OPTIMIZATION rows stranded at
+        queued/running on a restart are marked failed with a populated ``error`` (a real reason,
+        not NULL); terminal rows and TRIAL rows are untouched."""
+        count = 0
+        for row in self.rows.values():
+            if row.get("kind") == "OPTIMIZATION" and row.get("status") in ("queued", "running"):
+                row["status"] = "failed"
+                row["error"] = row.get("error") or ORPHAN_SWEEP_ERROR
+                count += 1
+        return count
+
+    def list_sweeps(self, limit: int, offset: int) -> list[dict[str, Any]]:
+        """Mirrors JobsRepo.list_sweeps: OPTIMIZATION rows newest-first (by insertion order)."""
+        sweeps = [(jid, r) for jid, r in self.rows.items() if r.get("kind") == "OPTIMIZATION"]
+        sweeps.sort(key=lambda item: item[1]["created"], reverse=True)
+        projected = [
+            {"id": jid, "status": r["status"], "progress": r["progress"],
+             "request": r["request"], "error": r.get("error"), "createdAt": None}
+            for jid, r in sweeps
+        ]
+        return projected[offset:offset + limit]
 
     def get(self, job_id: str) -> dict[str, Any] | None:
         row = self.rows.get(job_id)

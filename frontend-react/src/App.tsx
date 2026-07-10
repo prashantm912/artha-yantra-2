@@ -43,6 +43,7 @@ import { CoveragePage } from './pages/dataops/CoveragePage.tsx';
 import { CollectionWizardPage } from './pages/dataops/CollectionWizardPage.tsx';
 import { QueryConsolePage } from './pages/dataops/QueryConsolePage.tsx';
 import { ExportWizardPage } from './pages/dataops/ExportWizardPage.tsx';
+import { IngestHealthPage } from './pages/dataops/IngestHealthPage.tsx';
 
 // The ECharts-bearing pages are lazy-loaded so the ~1 MB ECharts bundle is a separate chunk fetched
 // only when the route is visited, keeping the main payload lean (§20.1).
@@ -293,6 +294,7 @@ export function App() {
           <Route path="/data-ops/collection" element={<CollectionWizardPage />} />
           <Route path="/data-ops/query" element={<QueryConsolePage />} />
           <Route path="/data-ops/export" element={<ExportWizardPage />} />
+          <Route path="/data-ops/ingest-health" element={<IngestHealthPage />} />
         </Route>
       </Route>
       </Routes>

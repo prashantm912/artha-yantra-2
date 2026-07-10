@@ -1,0 +1,182 @@
+package in.arthayantra.marketdata.canary;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+
+import in.arthayantra.common.web.time.Ist;
+import in.arthayantra.marketcalendar.MarketCalendar;
+import in.arthayantra.marketdata.alerts.NtfyClient;
+import in.arthayantra.marketdata.canary.IngestHealthBoard.BoardReport;
+import in.arthayantra.marketdata.canary.IngestHealthBoard.SourceHealth;
+import in.arthayantra.marketdata.ingest.IngestRunLedger;
+import in.arthayantra.marketdata.testsupport.MarketDataIntegrationTestBase;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.time.Clock;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.env.MockEnvironment;
+
+/**
+ * A11 ingest-health-board IT (app-platform audit §6.3 / §9.1). Runs the REAL board SQL + the reused
+ * A5 {@link IngestCoverageCanary#evaluate} against the Timescale container + the deploy/flyway
+ * marketdata lineage (V040 {@code ingest_runs}), with a FIXED clock.
+ *
+ * <p>Isolation on the shared singleton DB (NO per-method cleanup): the per-day verdicts are scoped
+ * by clearing+seeding each synthetic trading day's window. The last-run projection queries the WHOLE
+ * table (newest row per source), so the synthetic days sit in the FUTURE (Sept 2026, still inside
+ * the bundled 2024–2026 calendar) — later than any real mock-boot row (stamped ~today) or a sibling
+ * test's Feb/Mar rows — making this test's rows the global newest per source. The two methods'
+ * windows are a week apart so they never overlap.
+ */
+@SpringBootTest(
+    properties = {
+      "spring.profiles.active=mock",
+      "artha.feed.autostart=false",
+      "artha.instruments.bootstrap-sync=false"
+    })
+class IngestHealthBoardIntegrationTest extends MarketDataIntegrationTestBase {
+
+  private static final MarketCalendar CAL = MarketCalendar.nse();
+
+  @Autowired JdbcTemplate jdbc;
+
+  @Test
+  void boardPivotsWindowVerdictsCountsMissingDaysAndJoinsLastRun() {
+    LocalDate today = LocalDate.of(2026, 9, 16);
+    LocalDate d1 = CAL.previousTradingDay(today); // newest settled day
+    LocalDate d2 = CAL.previousTradingDay(d1);
+    LocalDate d3 = CAL.previousTradingDay(d2); // oldest
+    for (LocalDate d : List.of(d1, d2, d3)) {
+      clearWindow(d);
+      seedBatchesHealthy(d);
+      seedCapture(d, 5200L);
+    }
+    // FII/DII silently missed the middle day; the screener wrote 0 rows on the newest day.
+    deleteSource(d2, IngestRunLedger.SOURCE_NSE_FII_DII);
+    deleteSource(d1, IngestRunLedger.SOURCE_MINERVINI_SCREEN);
+    seedBatch(d1, IngestRunLedger.SOURCE_MINERVINI_SCREEN, "SUCCESS", 0L, true);
+
+    BoardReport report = board(fixedMorning(today)).board(3);
+
+    assertThat(report.tradingDays()).isEqualTo(3);
+    assertThat(report.toDay()).isEqualTo(d1);
+    assertThat(report.fromDay()).isEqualTo(d3);
+    assertThat(report.sources()).hasSize(8);
+
+    SourceHealth fii = find(report, IngestRunLedger.SOURCE_NSE_FII_DII);
+    assertThat(fii.status()).isEqualTo("GREEN"); // newest day is healthy
+    assertThat(fii.missingDays()).isEqualTo(1); // the middle day
+    assertThat(fii.days()).hasSize(3);
+    assertThat(fii.days().get(0).day()).isEqualTo(d1); // newest first
+    assertThat(fii.days().get(1).status()).isEqualTo("RED"); // d2 hole
+    assertThat(fii.lastRun()).isNotNull();
+    assertThat(fii.lastRun().status()).isEqualTo("SUCCESS");
+    assertThat(fii.lastRun().stale()).isFalse();
+
+    SourceHealth screener = find(report, IngestRunLedger.SOURCE_MINERVINI_SCREEN);
+    assertThat(screener.policy()).isEqualTo("SCREENER");
+    assertThat(screener.status()).isEqualTo("YELLOW"); // reused canary policy: 0-row success is starved
+    assertThat(screener.detail()).contains("data-starved");
+  }
+
+  @Test
+  void lastRunMarksAnAgedRunningRowStale() {
+    LocalDate today = LocalDate.of(2026, 9, 23);
+    LocalDate d1 = CAL.previousTradingDay(today);
+    clearWindow(d1);
+    seedBatchesHealthy(d1);
+    seedCapture(d1, 5200L);
+    // bhavcopy crashed mid-flight the prior evening: only a RUNNING row, never finished.
+    deleteSource(d1, IngestRunLedger.SOURCE_BHAVCOPY);
+    seedBatch(d1, IngestRunLedger.SOURCE_BHAVCOPY, "RUNNING", null, false);
+
+    BoardReport report = board(fixedMorning(today)).board(1);
+
+    SourceHealth bhav = find(report, IngestRunLedger.SOURCE_BHAVCOPY);
+    assertThat(bhav.status()).isEqualTo("RED"); // reused canary policy: aged RUNNING = crashed
+    assertThat(bhav.detail()).contains("crashed mid-flight");
+    assertThat(bhav.lastRun()).isNotNull();
+    assertThat(bhav.lastRun().status()).isEqualTo("RUNNING");
+    assertThat(bhav.lastRun().stale()).isTrue();
+    assertThat(bhav.lastRun().finishedAt()).isNull();
+  }
+
+  // ---- fixtures (mirror the A5 canary IT seeding) --------------------------------------------
+
+  private IngestHealthBoard board(Clock clock) {
+    MockEnvironment env = new MockEnvironment();
+    IngestCoverageCanary canary =
+        new IngestCoverageCanary(jdbc, mock(NtfyClient.class), CAL, clock, new SimpleMeterRegistry(), env, true, 120);
+    return new IngestHealthBoard(jdbc, canary, CAL, clock, 120);
+  }
+
+  /** A fixed clock at 08:45 IST on {@code day}. */
+  private static Clock fixedMorning(LocalDate day) {
+    return Clock.fixed(day.atTime(8, 45).atZone(Ist.ZONE).toInstant(), ZoneOffset.UTC);
+  }
+
+  private void seedBatchesHealthy(LocalDate day) {
+    seedBatch(day, IngestRunLedger.SOURCE_NSE_FII_DII, "SUCCESS", 30L, true);
+    seedBatch(day, IngestRunLedger.SOURCE_NSE_PARTICIPANT_OI, "SUCCESS", 40L, true);
+    seedBatch(day, IngestRunLedger.SOURCE_NSE_FII_DERIVATIVE, "SUCCESS", 12L, true);
+    seedBatch(day, IngestRunLedger.SOURCE_BHAVCOPY, "SUCCESS", 4000L, true);
+    seedBatch(day, IngestRunLedger.SOURCE_INSTRUMENT_SYNC, "SUCCESS", 90000L, true);
+    seedBatch(day, IngestRunLedger.SOURCE_MINERVINI_SCREEN, "SUCCESS", 96L, true);
+    seedBatch(day, IngestRunLedger.SOURCE_MANAS_SCREEN, "SUCCESS", 40L, true);
+  }
+
+  private void seedBatch(LocalDate day, String source, String status, Long rows, boolean finished) {
+    OffsetDateTime started = day.atTime(19, 0).atZone(Ist.ZONE).toOffsetDateTime();
+    OffsetDateTime finishedAt = finished ? day.atTime(19, 1).atZone(Ist.ZONE).toOffsetDateTime() : null;
+    jdbc.update(
+        "INSERT INTO ingest_runs (source, status, rows_written, started_at, finished_at) VALUES (?,?,?,?,?)",
+        source,
+        status,
+        rows,
+        started,
+        finishedAt);
+  }
+
+  private void seedCapture(LocalDate day, Long rows) {
+    OffsetDateTime windowStart = day.atStartOfDay(Ist.ZONE).toOffsetDateTime();
+    jdbc.update(
+        "INSERT INTO ingest_runs (source, window_start, status, rows_written, started_at, finished_at) "
+            + "VALUES ('OPTIONS_SNAPSHOT_CAPTURE', ?, 'SUCCESS', ?, ?, ?)",
+        windowStart,
+        rows,
+        windowStart,
+        windowStart);
+  }
+
+  private void clearWindow(LocalDate day) {
+    OffsetDateTime start = day.atStartOfDay(Ist.ZONE).toOffsetDateTime();
+    OffsetDateTime end = day.plusDays(1).atStartOfDay(Ist.ZONE).toOffsetDateTime();
+    jdbc.update(
+        "DELETE FROM ingest_runs WHERE (source <> 'OPTIONS_SNAPSHOT_CAPTURE' AND started_at >= ? AND started_at < ?) "
+            + "OR (source = 'OPTIONS_SNAPSHOT_CAPTURE' AND window_start >= ? AND window_start < ?)",
+        start,
+        end,
+        start,
+        end);
+  }
+
+  private void deleteSource(LocalDate day, String source) {
+    OffsetDateTime start = day.atStartOfDay(Ist.ZONE).toOffsetDateTime();
+    OffsetDateTime end = day.plusDays(1).atStartOfDay(Ist.ZONE).toOffsetDateTime();
+    jdbc.update(
+        "DELETE FROM ingest_runs WHERE source = ? AND started_at >= ? AND started_at < ?", source, start, end);
+  }
+
+  private static SourceHealth find(BoardReport report, String source) {
+    return report.sources().stream()
+        .filter(s -> s.source().equals(source))
+        .findFirst()
+        .orElseThrow(() -> new AssertionError("no board row for " + source));
+  }
+}

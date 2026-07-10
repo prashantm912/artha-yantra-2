@@ -3733,6 +3733,44 @@
         }
       }
     },
+    "/api/v1/market/health/ingest" : {
+      "get" : {
+        "tags" : [ "ingest-health-controller" ],
+        "operationId" : "ingest",
+        "parameters" : [ {
+          "name" : "days",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 10
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BoardReport"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/health/data" : {
       "get" : {
         "tags" : [ "data-health-controller" ],
@@ -8400,6 +8438,101 @@
           "peOi" : {
             "type" : "integer",
             "format" : "int64"
+          }
+        }
+      },
+      "BoardReport" : {
+        "type" : "object",
+        "properties" : {
+          "generatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "fromDay" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "toDay" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "tradingDays" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "sources" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SourceHealth"
+            }
+          }
+        }
+      },
+      "DayVerdict" : {
+        "type" : "object",
+        "properties" : {
+          "day" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "status" : {
+            "type" : "string"
+          }
+        }
+      },
+      "LastRun" : {
+        "type" : "object",
+        "properties" : {
+          "status" : {
+            "type" : "string"
+          },
+          "rowsWritten" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "startedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "finishedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "error" : {
+            "type" : "string"
+          },
+          "stale" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "SourceHealth" : {
+        "type" : "object",
+        "properties" : {
+          "source" : {
+            "type" : "string"
+          },
+          "policy" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "detail" : {
+            "type" : "string"
+          },
+          "missingDays" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "days" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/DayVerdict"
+            }
+          },
+          "lastRun" : {
+            "$ref" : "#/components/schemas/LastRun"
           }
         }
       },

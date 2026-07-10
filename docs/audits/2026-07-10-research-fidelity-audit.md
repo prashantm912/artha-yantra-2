@@ -6,6 +6,10 @@ workflow/APIs — plus the target architecture and roadmap needed so a follow-up
 autonomous-optimization build (referred to throughout as **Prompt 2**) stands on sound
 data. Produced by 6 parallel read-only audit agents + hand verification of the one
 suspected live defect (§3.1, code-confirmed). Every claim carries a `file:line` or PR#.
+A post-draft **2-pass verification** (5 adversarial accuracy agents re-checking every
+claim against source + 1 completeness agent vs the commissioning requirements) found
+**0 refuted claims**; its ~35 precision corrections and completeness additions are
+incorporated in this revision.
 Prior audits are incorporated, not re-derived: the 2026-07-05 full audit
 (`docs/audits/2026-07-05-full-codebase-audit.md`) already fixed most of its HIGHs; its
 open items (H6, H8, M-series parity rows) are folded in below where relevant.
@@ -47,11 +51,12 @@ Path abbreviations: **SSS** = `services/strategy-signal-service/src/main/java/in
 
 | Layer | Technology | Notes |
 |---|---|---|
-| Services | 4 × Java 21 / Spring Boot (Modulith): `edge-gateway`, `market-data-service`, `strategy-signal-service`, `backtest-service` | Multi-module Maven reactor; JaCoCo ≥60 %, Modulith `verify` in CI |
-| Optimizer | Python 3.14 FastAPI + Optuna (`services/optimizer-service`) | Trials fan out onto the Java backtest worker pool via Redis Streams |
+| Services | 4 × Java 21 / Spring Boot: `edge-gateway`, `market-data-service`, `strategy-signal-service`, `backtest-service` (Modulith on market-data + strategy-signal only; backtest-service deliberately plain Boot) | Multi-module Maven reactor; JaCoCo ≥60 %, Modulith `verify` in CI |
+| Optimizer | Python 3.12 FastAPI + Optuna (`services/optimizer-service`; 3.12 in the image + CI, 3.14 only on the dev host) | Trials fan out onto the Java backtest worker pool via Redis Streams |
+| Margin appliance | Python FastAPI `services/margin-service` (`ay-margin-service`, internal :8086; deploy/docker-compose.yml:552-568) | Dormant `.spn`-file SPAN calculator (#126) — the designated offline/backtest margin fallback; live SPAN routes through Upstox (#510) |
 | Shared libs | `strategy-engine` (the parity core), `strategy-schema`, `black76-math`, `market-calendar`, `common-web` | One engine JAR linked by live + backtest |
 | Data | TimescaleDB (pg17) — 4 Flyway lineages (admin / marketdata / strategy / backtest), Redis (streams, pub/sub, sessions) | Hypertables + continuous aggregates; mock/live DB + Redis isolation |
-| Frontend | React 19 + Vite 6 + Tailwind v4 + shadcn, Zustand, TanStack Query v5, ECharts + lightweight-charts, STOMP WS | ~60 pages; single-owner auth |
+| Frontend | React 19 + Vite 6 + Tailwind v4 + shadcn, Zustand, TanStack Query v5, ECharts + lightweight-charts, STOMP WS | ~80 pages (88 routes); single-owner auth |
 | Deploy | Docker Compose, loopback-only gateway, `ay.ps1` CLI | CI: sharded per-service Maven matrix + separate path-filtered optimizer/margin workflows |
 
 **Execution surfaces (who simulates/executes what):**
@@ -63,8 +68,9 @@ Path abbreviations: **SSS** = `services/strategy-signal-service/src/main/java/in
 - **Daily swing batch** — `SwingBatchEngine` + `SwingDoctrine` (SSS/swing/, post-#655):
   Minervini 20:00 / Manas 20:05 IST, entry+exit passes on daily bars, paper entries at
   daily close.
-- **Paper execution** — `PaperService`/`PaperBracketEvaluator` (SSS/paper/): 3 family
-  books (₹1.5 L each) + manual; fills via the same `LtpSlippageV1` the backtest uses;
+- **Paper execution** — `PaperService`/`PaperBracketEvaluator` (SSS/paper/): 5 seeded
+  books — scalper / minervini / manas-arora / manual / other, ₹1.5 L each (V021:30-35);
+  fills via the same `LtpSlippageV1` the backtest uses;
   brackets polled every 15 s against Redis last-tick.
 - **Shadow book** — `ShadowBookService` (SSS/signals/): every *rejected* scalper entry
   trades virtually (champion + knob-variant challengers) — a gate-tuning counterfactual.
@@ -72,7 +78,7 @@ Path abbreviations: **SSS** = `services/strategy-signal-service/src/main/java/in
   `OptionsPremiumReplay` (premium-as-primary), Redis-Streams worker pool, walk-forward
   folds, Monte Carlo (BT/replay/, BT/jobs/).
 - **Swing deep sims** — `MinerviniSwingBacktest` / `ManasAroraSwingBacktest` +
-  `SwingPortfolio` (MDS/minervini/, MDS/manas/): ~11-year array-based daily sims,
+  `SwingPortfolio` (MDS/screener/minervini/, MDS/screener/manas/): ~11-year array-based daily sims,
   *outside* the job pipeline and outside the parity firewall.
 - **Dormant real execution** — `LiveOrderService` → OpenAlgo `placeorder`
   (SSS/execution/), off by default (`artha.scalper.execution=paper`); acks log-only.
@@ -81,7 +87,9 @@ Path abbreviations: **SSS** = `services/strategy-signal-service/src/main/java/in
 `TickwiseGoldenRunner`/`EntryEvaluator`/`ExitEvaluator`/`FillSimulator`/`PositionSizer`
 (LIB), golden vectors (`GoldenDeterminismTest`, byte-identical), `BacktestParityTest`
 (replay == frozen live vectors), `contracts/fixtures/exit-equivalence.json` pinned by 3
-suites across both services.
+suites across both services. The shared runner also rolls a **1d primary**
+(TickwiseGoldenRunner.java:411, MV-6.2) — the live daily swing engine runs *inside* the
+parity engine; only the MDS deep sims sit outside the firewall.
 
 **Data spine:** Kite WS ticks → 1m candles (provenance-preserving dual upserts) → caggs
 (5m/15m/1h/1d/1w) + read-time 3m rollup; bhavcopy EOD projection; Upstox expired
@@ -104,7 +112,10 @@ contracts (per-minute option OHLCV+OI); live options-chain snapshots every 2 min
   side-aware in `LtpSlippageV1.costs` (LIB/fills/LtpSlippageV1.java:74-152).
 - **Options replay uses real premiums**: the traded contract's own backfilled 1m candles
   (BT/replay/options/CandlePremiumReader.java:38-47), provenance persisted per run;
-  missing premium = loud 422 DATA_GAP, not silent skip.
+  missing premium = loud 422 DATA_GAP, not silent skip. Theta decay, IV moves, and
+  greeks are thereby *embedded* rather than modeled — the honest choice given real
+  premium data (the unwired `SyntheticPremium` flat-IV Black-76 reconstructor exists
+  for gaps but is deliberately not a default).
 - **Lookahead protections**: coarse bucket completes only when the next bucket's first
   bar arrives (LIB/golden/TickwiseGoldenRunner.java:156-190); regime labels strictly
   T−1 (BT/regime/RegimeLabeler.java:82-87); warmup enforced; `.toInstant()` map keys
@@ -116,20 +127,20 @@ contracts (per-minute option OHLCV+OI); live options-chain snapshots every 2 min
 
 | # | Finding | Evidence | Why it matters |
 |---|---|---|---|
-| B1 | **BTST exit is not simulated.** The btst branch evaluates pre-close entries but never opens a tracked position; exit rules never run; replay force-closes at end-of-data. | TickwiseGoldenRunner.java:210-227; ReplayEngine.java:330-344; golden fixture has entry events only | Any BTST backtest P&L is meaningless; overnight-gap capture — the whole point of BTST — is untested. Must be fixed before Prompt 2 can optimize BTST variants. |
-| B2 | **Swing deep sims are frictionless and close-filled**: entry *and* exit at the signal bar's own close, zero slippage, zero trade-level costs (only a coarse portfolio-level % netting). | MDS/manas/ManasAoraSwingBacktest.java:266-272, 295-306, 361-370; MDS/minervini/SwingPortfolio.java:87-94 | The 11-year CAGR/DD/Sharpe headlines driving swing doctrine carry the loosest execution model on the platform. (Partially disclosed in report notes; still the top calibration risk.) |
+| B1 | **BTST exit is not simulated.** The btst branch evaluates pre-close entries but never opens a tracked position; exit rules never run; replay force-closes at end-of-data. Worse: `legs()` ignores new entries while one is open, so a multi-day BTST run degenerates to exactly **one** trade (first entry → end_of_data). | TickwiseGoldenRunner.java:210-227; ReplayEngine.java:318, :330-344; the btst golden fixture holds 3 consecutive-day entries → 1 leg | Any BTST backtest P&L is meaningless; overnight-gap capture — the whole point of BTST — is untested. Must be fixed before Prompt 2 can optimize BTST variants. |
+| B2 | **Swing deep sims are frictionless and close-filled**: entry *and* exit at the signal bar's own close, zero slippage, zero trade-level costs (only a coarse portfolio-level % netting). | MDS/screener/manas/ManasAroraSwingBacktest.java:266-272, 295-306, 361-370; MDS/screener/minervini/SwingPortfolio.java:87-94 | The 11-year CAGR/DD/Sharpe headlines driving swing doctrine carry the loosest execution model on the platform. (Partially disclosed in report notes; still the top calibration risk.) |
 | B3 | **No intrabar H/L touch anywhere wired.** All stops/targets/trails evaluate on bar closes (1m floor). `IntrabarExitResolver` (worst-of touch + gap-through-open) is dead code; `BAR_HL_WORSTOF` unreachable (`oneMinuteCovered` hardcoded `true`). | LIB/fills/IntrabarExitResolver.java:24-61 (no prod callers); BacktestRunner.java:203; LIB/eval/ExitEvaluator.java:196-231 | Spikes through a stop that mean-revert within the bar are invisible; systematically flatters tight-stop scalpers. |
 | B4 | **`costs` knob is dead + wrong instrument class on the candle path.** Request/schema accept a `costs` block; nothing reads it. Every candle-path run costs as EQUITY DELIVERY even when the signal series is an index future. | BT/jobs/JobsService.java:96-97 vs BacktestRunner.java:202, 241; BT/replay/CostConfig.java:23-31 | Cost mis-specification skews net returns per strategy class; futures CTT/₹20-cap brokerage never exercised by the job pipeline. |
-| B5 | **Option-leg liquidity/spread realism missing.** `quotedSpread` is hardwired `null` in both engine paths → option slippage always 1 tick (₹0.05); premiums carry forward stale last-trades for non-traded minutes; no participation cap. | ReplayEngine.java:357; OptionsPremiumReplay.java:802; LtpSlippageV1.java:52-68 | Deep-OTM/illiquid strikes report fills the market would not have given. Optimizers *seek out* exactly these unrealistic corners. |
+| B5 | **Option-leg liquidity/spread realism missing.** `quotedSpread` is hardwired `null` in both engine paths → option slippage always 1 tick (₹0.05); premiums carry forward stale last-trades for non-traded minutes; no volume-participation cap (the ₹1 `min_premium_inr` floor and `max_lots` are budget guards, not liquidity bounds). | ReplayEngine.java:357; OptionsPremiumReplay.java:804, :724-742; LtpSlippageV1.java:52-68 | Deep-OTM/illiquid strikes report fills the market would not have given. Optimizers *seek out* exactly these unrealistic corners. |
 | B6 | **No option expiry settlement.** A leg held past expiry carries the last traded premium until signal exit/end-of-data; no intrinsic settlement, no exercise STT in backtest. | OptionsPremiumReplay (no settlement branch); FeeConstants.java:40 (paper-only constant) | Multi-day option holds crossing expiry mis-report. |
 | B7 | **Daily-context lookahead**: 1d context bars are visible with the *full day's* OHLC from that day's first 1m bar (cagg bar stamped at day start; `advanceContexts` appends any bar with `bucketStart ≤` current). | TickwiseGoldenRunner.java:259-274 | A coarse-primary strategy with a 1d context indicator can read up to one future close at decision time — classic leak, currently reachable. |
-| B8 | **Swing-sim same-bar signal+fill and inclusive geometry window**: weekly geometry recompute includes the current bar; entry fires and fills on that same close. Live batch mirrors it (also fills at that close), so *paper matches the sim* — but both assume a fill a real order can't get. | ManasAoraSwingBacktest.java:210-214, 266-272; SSS/swing/SwingBatchEngine.java:326 | Consistent-but-optimistic; must be priced (open-next-day variant) before real-money graduation. |
-| B9 | **No margin model in backtest.** Long-premium cash budget is the only constraint; SPAN exists only as a live analytics call. | grep clean in backtest-service; MDS margin path #510 | Capital feasibility/leverage of portfolios unvalidated; Prompt 2 needs a margin-feasibility term or it will "discover" un-fundable variants. |
+| B8 | **Swing-sim same-bar signal+fill and inclusive geometry window**: weekly geometry recompute includes the current bar; entry fires and fills on that same close. Live batch mirrors it (also fills at that close), so *paper matches the sim* — but both assume a fill a real order can't get. | ManasAroraSwingBacktest.java:210-214, 266-272; SSS/swing/SwingBatchEngine.java:326 | Consistent-but-optimistic; must be priced (open-next-day variant) before real-money graduation. |
+| B9 | **No margin model in backtest.** Long-premium cash budget is the only constraint; the platform's two SPAN capabilities — the live Upstox call (#510) and the dormant `services/margin-service` `.spn` appliance (#126, the designated offline/backtest fallback) — are consumed by neither backtest path. | grep clean in backtest-service; deploy/docker-compose.yml:552-568 | Capital feasibility/leverage of portfolios unvalidated; Prompt 2 needs a margin-feasibility term or it will "discover" un-fundable variants — the appliance is the ready substrate. |
 | B10 | **Idealized order layer**: market-at-reference fills only; no limit/SL-M simulation, no partial fills, no rejections, no latency (NEXT_OPEN's one-bar delay is the only proxy). | LIB/fills/FillSimulator.java:9-12; FillTiming.java:8-11 | Acceptable *if disclosed per run*; must be a recorded run property (see §11 provenance block). |
 | B11 | **Candle-path exit attribution lost**: `backtest_trades.exit_reason` is only ever `signal_exit`/`end_of_data`; the actual stop/trail/TP/square-off reason never reaches persistence (options path and swing sims *do* attribute). | ReplayEngine.java:303, 338; LIB/golden/GoldenSignalsJson.java:27-35 (frozen writer) | Blocks exit-doctrine forensics and Prompt 2's per-exit-type metrics on candle-path runs. Fix parity-safely via the non-serialized side-channel pattern. |
 | B12 | **No decision-trace/rejected-entry persistence for backtests** — nothing like live `signal_rejections` exists for a run; only closed-trade `contributions` survive. | ReplayResult.signals unpersisted | "Why did the backtest not trade on date X" is unanswerable from stored data; optimizers need rejection counterfactuals. |
 | B13 | **Swing results keep no trade rows** — one aggregate report JSONB per run. | deploy/flyway/marketdata/V037:1-17 | Per-trade re-analysis requires a re-run; no mechanical diffing of doctrine changes. (Also a §6 lineage hole.) |
-| B14 | Survivorship-biased swing universe (disclosed in the report string). | ManasAoraBacktestService.java:386-389 | See §4.1 — data-layer root cause. |
+| B14 | Survivorship-biased swing universe (disclosed in the report string). | ManasAroraBacktestService.java:386-389 | See §4.1 — data-layer root cause. |
 | B15 | `seed` recorded but decorative for replay (replay has no RNG). Harmless; a reader may over-trust it. | deploy/flyway/backtest/V003:21 | Documentation nit; keep recording it (Monte Carlo uses `mcSeed`). |
 
 ### Flags/knobs that fork backtest vs live (must be run-recorded, see §11)
@@ -144,7 +155,7 @@ contracts (per-minute option OHLCV+OI); live options-chain snapshots every 2 min
   floor env knobs, `artha.manas-arora.pyramid.enabled`, `ARTHA_PAPER_RISK_*`.
 - `session.fill_timing` defaults (btst→AT_CLOSE else NEXT_OPEN, StrategyCompiler.java:176-180).
 - Backtest-side tunables mirroring live doctrine constants by hand
-  (`artha.manas-arora.backtest.*`, ManasAoraBacktestService.java:177-197) — a
+  (`artha.manas-arora.backtest.*`, ManasAroraBacktestService.java:177-197) — a
   manual-sync drift risk.
 
 ---
@@ -163,7 +174,7 @@ contracts (per-minute option OHLCV+OI); live options-chain snapshots every 2 min
    rollup has no completeness filter (MDS/candles/CandleRepository.java:221-244,
    `bucket >= ? AND bucket < ?` over 1m rows), and the 5m/15m/1h caggs are real-time
    (`materialized_only=false` — in-progress buckets compute live,
-   deploy/flyway/marketdata/V004, V019).
+   deploy/flyway/marketdata/V004; the V029 1h recreate keeps `materialized_only=false`).
 4. `EngineSeries.append` is strictly increasing; the *completed* version of a
    previously-appended bucket throws and `appendQuietly` swallows it —
    LIB/series/EngineSeries.java:55-61, LiveSeriesStore.java:83-91. **The partial is
@@ -175,11 +186,16 @@ one minute into each bucket — while the backtest's `TickwiseGoldenRunner` roll
 buckets. Every live 3m scalper evaluation and every 5m/15m/1h gate series is affected;
 higher-TF refreshes go through the same path (SignalEngine.java:645-649).
 
-**Corroboration:** the 2026-07-02 session forensics found the 125k volume floor
-*unpassable* live (`docs/signal-analysis/` first-pass findings) — exactly what a 3m
-floor tuned on true 3m bars reads against ~1-minute volumes. The relative volume floor
-(#605) partially masks the defect (partials compared against a partial-derived
-average).
+**Corroboration:** the 2026-07-02 session forensics measured live-evaluated bar volumes
+(rejection operand avg ≈ 5.1k) far below the same session's full 1m→3m rolled
+distribution (p50 ≈ 12,350) — consistent with ~1-minute slices
+(`docs/signal-analysis/2026-07-02-session-findings.md` §2.1). Note the 125k floor
+itself was unpassable even on *full* 3m bars (session max ≈ 116.9k) — a separate
+calibration defect. The relative volume floor (#605) partially masks this one
+(partials compared against a partial-derived average). Evaluation happens on the
+series' **last** bar (`evaluateAtBarClose` reads `primary.size()-1`,
+SignalEngine.java:541-542) — i.e. the just-opened bucket's partial itself, not even
+the previous frozen partial.
 
 **Fix direction (Phase 0, §12):** clamp coarse reads to completed buckets (server-side
 `to = bucketFloor(now)` for rolled/cagg intervals or a `complete=true` filter), or make
@@ -203,14 +219,18 @@ rejection forensics on volume/H-L-derived rails are suspect.
   `PremiumBracketRules`/`PaperBracketEvaluator` semantics (5 scenarios, 3 suites).
 - **Risk control plane**: per-book kill switch / max-open / daily-loss / deployment caps
   DB-backed and audited (`risk_audit`); scalper 5-sub-account discipline; §0B hard-stop
-  refusal at load (SignalEngine.java:244-249).
+  refusal at load (SignalEngine.java:244-249). A **Telegram bot** is a second mutating
+  control surface — `/pause` `/resume` `/flatten` with two-phase `/confirm`-within-60s
+  and per-command audit rows (SSS/telegram/TelegramCommandBot.java:131-177; V019) — a
+  non-UI actor can flip the kill switch or flatten books, with better confirm
+  ergonomics than the UI (prior-audit H7 was the reverse).
 
 ### Findings (ranked; L1 = §3.1 above)
 
 | # | Finding | Evidence | Why it matters |
 |---|---|---|---|
-| L2 | **No order-event model.** `paper_orders` inserts directly as `FILLED` (`placed_at = filled_at = now()`); NEW/ACK/PARTIAL/REJECT/CANCEL unrepresented. Real OpenAlgo acks (when armed) are **logged only, never persisted**; no cancel/modify path, no fill-confirmation loop. | SSS/paper/PaperOrderRepository.java:42-76; V005:18-19; SSS/execution/LiveOrderService.java:72-75 | Execution friction can't be modeled, audited, or reconciled. Prerequisite for any real-money path and for Prompt 2's fill-realism calibration. |
-| L3 | **No decision-time wall clock, no latency instrumentation.** `signals.generated_at` = bar bucket instant by design; signal-emit wall time recorded nowhere; tick→signal→fill latency unrecoverable from persisted data. The master-plan §17.3 latency gate is plan-only. | SignalEngine.java:846-851; metrics are durations only | Live-arm decisions and slippage models need measured latency; currently unmeasurable. |
+| L2 | **No order-event model.** `paper_orders` inserts directly as `FILLED` (`placed_at = filled_at = now()`); NEW/ACK/PARTIAL/REJECT unrepresented (CANCELLED is in the schema enum but unreachable — no cancel path exists). Real OpenAlgo acks (when armed) are **logged only, never persisted**; no cancel/modify path, no fill-confirmation loop. | SSS/paper/PaperOrderRepository.java:42-76; V005:18-19; SSS/execution/LiveOrderService.java:72-75 | Execution friction can't be modeled, audited, or reconciled. Prerequisite for any real-money path and for Prompt 2's fill-realism calibration. |
+| L3 | **No decision-time wall clock, no latency instrumentation.** `signals.generated_at` = bar bucket instant by design; signal-emit wall time recorded nowhere on the signal record (`notification_events.created_at` incidentally proxies it for alerted signals only); tick→signal→fill latency unrecoverable from persisted data. The master-plan §17.3 latency gate is plan-only. | SignalEngine.java:846-851; metrics are durations only | Live-arm decisions and slippage models need measured latency; currently unmeasurable. |
 | L4 | **No fill-achievability evidence.** `quote_bid`/`quote_ask` columns exist but every insert passes null; quotedSpread never feeds the fill model (option slippage pinned 1 tick); no MAE/MFE; paper fills never compared to subsequent market. | SSS/paper/PaperService.java:198-200, 338-340; V005:23-27 | Paper P&L on illiquid strikes is systematically optimistic and *unverifiable*. Cheapest high-value fix: stamp bid/ask at open+close from the chain/quote at fill time. |
 | L5 | **Stale-tick blindness in the paper exit path.** Brackets/MTM read Redis `ticks:last` with no age check; a dead option tick silently defers stops all session; `doSettle` fallback chain ends at `avgEntryPrice` (books a breakeven close for a tickless leg). | SSS/paper/PaperBracketEvaluator.java:35-87; PaperService.java:324-325 | A stop that never fires is the worst kind of silent risk drift; breakeven-fallback pollutes P&L records. |
 | L6 | **Accepted-signal context asymmetry.** Rejections persist full chart/OI/macro context; accepted entries persist only the distilled leg + dots. | SignalEngine.java:891-914 vs 1049-1152 | Post-hoc forensics on *fired* trades can't reconstruct decision inputs; Prompt 2's decision-snapshot input is half-missing. |
@@ -243,8 +263,9 @@ Kite WS ticks ─→ CandleBuilder (1m; pre-open/future/late-tick guards)
               ─→ BarWriter → candles hypertable  [B-6 merge: GREATEST/LEAST, source='TICK_AGG']
                             → Redis candles.1m.*  (live engine)
 Kite/OpenAlgo REST ─→ upsertAuthoritativeAll  [full REPLACE, source=KITE/OPENALGO/BACKFILL]
-NSE/BSE bhavcopy ─→ nse_eod_bhavcopy (write-once-ish) ─→ candles@1d [DO-NOTHING, source='BHAVCOPY']
-                                                       └→ screeners + RegimeService read RAW here
+NSE/BSE bhavcopy ─→ nse_eod_bhavcopy / bse_eod_bhavcopy (raw; ON CONFLICT DO UPDATE = last-writer replace)
+                 ─→ candles@1d projection [DO-NOTHING = effectively write-once, source='BHAVCOPY']
+                 └→ screeners + RegimeService read the RAW tables directly
 caggs: candles_5m/15m/1h(IST re-anchor V029)/1d/1w  (real-time; NO source column)
 3m = read-time 1m rollup (no cagg — V027 dropped it)
 CA feeds ─→ eod_corporate_actions (splits+bonuses ONLY) ─→ read-time back-adjust,
@@ -271,17 +292,20 @@ HistoricalOiReader ─→ CandleDerivedChainReader (virtual OI; iv/greeks null; 
 
 | # | Finding | Evidence | Failure scenario for research |
 |---|---|---|---|
-| D1 | **Live screener plane reads CA-unadjusted bhavcopy while backtests read broker-adjusted candles** (prior-audit H6, confirmed + broader). Screener SQL never joins `eod_corporate_actions` though ratios exist in-DB; same raw reads feed `RegimeService` breadth and Manas geometry. | MDS/screener/minervini/TrendTemplateService.java:100-111; ManasScreenService.java:109-114; RegimeService.java:23-31 | A split/bonus inside the 420-day window craters c63–c252 returns and strands the 52wk-high pre-split → momentum leaders (where bonuses cluster) silently fail RS/proximity gates for up to a year. The *live funnel excludes names the backtest happily trades* — a hidden live-vs-sim divergence no canary watches. |
-| D2 | **Survivorship bias is structural.** Swing backtests/hit-rate scan today's `instruments` EQ ∩ deep-candle symbols; the master accrues only since ~2026-06; delisted names absent; RS percentile computed over survivors. | MDS/minervini/MinerviniBacktestService.java:717-724, :405; MinerviniHitRateService.java:250 | 43 %/23 % CAGR headlines exclude the delisted-midcap cohort; live forward CAGR structurally undershoots sim. Mitigated by disclosure + "judge on forward paper" — but Prompt 2 must carry universe metadata per run and never rank across universes. |
+| D1 | **Live screener plane reads CA-unadjusted bhavcopy while backtests read broker-adjusted candles** (prior-audit H6, confirmed + broader). Screener SQL never joins `eod_corporate_actions` though ratios exist in-DB; the same raw reads feed Manas geometry (`DailyBarReader`). `RegimeService` breadth also reads raw but is largely insulated (same-row `close_price > prev_close` against the exchange-published ex-adjusted prev close). | MDS/screener/minervini/TrendTemplateService.java:100-111; ManasScreenService.java:109-114; RegimeService.java:23-31 | A split/bonus inside the 420-day window craters c63–c252 returns and strands the 52wk-high pre-split → momentum leaders (where bonuses cluster) silently fail RS/proximity gates for up to a year. The *live funnel excludes names the backtest happily trades* — a hidden live-vs-sim divergence no canary watches. |
+| D2 | **Survivorship bias is structural.** Swing backtests/hit-rate scan today's `instruments` EQ ∩ deep-candle symbols; the master accrues only since ~2026-06; delisted names absent; RS percentile computed over survivors. | MDS/screener/minervini/MinerviniBacktestService.java:717-724, :405; MinerviniHitRateService.java:250 | 43 %/23 % CAGR headlines exclude the delisted-midcap cohort; live forward CAGR structurally undershoots sim. Mitigated by disclosure + "judge on forward paper" — but Prompt 2 must carry universe metadata per run and never rank across universes. Also undefined: an open swing hold through a suspension/delisting — no delisting event source exists, and the live exit pass silently skips a symbol with no fresh bar (prior-audit M5 class). |
 | D3 | **Point-in-time correctness is convention + tripwire, not storage.** Broker history is back-adjusted in place (price *levels* embed future split knowledge — ₹-level gates and turnover floors read post-hoc scales; volume never adjusted so `close×volume` is off by the ratio pre-split). Re-fetch REPLACES; CA job purges+rewrites whole symbols. `data_hash` detects drift, cannot restore. | CandleRepository.java:62-113; CorporateActionJob.java:233-263; BT/replay/DataHash.java:10-31 | Two runs weeks apart are not comparable after any CA/backfill event; the optimizer's memory decays invisibly except for a hash flag. |
 | D4 | **Mixed-provenance 1d series in direct-SQL reads.** `candles`@1d interleaves broker-adjusted (KITE/BACKFILL) and raw (BHAVCOPY) bars; the source-aware adjuster exists only on the REST path; backtest/hit-rate read raw SQL. | CandleRepository (per-bar source); EquitySplitBonusAdjuster.java:18-44; MinerviniBacktestService.java:735-766 | Around any CA, adjacent bars sit at different scales → phantom gaps/spikes through ATR stops, SMA slopes, pivots. |
 | D5 | **Dividend blindness.** CA parser explicitly discards dividends; no cash-flow table anywhere; returns are price-only. | MDS/bhavcopy/CorporateActionSubjectParser.java:10-19 | Multi-month swing holds understate total return; ex-dividend drops read as adverse moves to 2×ATR/Chandelier exits — a real (small) doctrine distortion. |
 | D6 | **Point-in-time index membership missing.** `index_constituents` (V008) is an append-only PIT design but the live fetcher is a placeholder returning empty; Futures OI Buzz uses a static factsheet JSON. | MDS/constituents/PendingLiveIndexConstituentsFetcher.java:10-29; StaticIndexConstituents.java:14-20 | RS-rank/backtests have no membership history to bound the universe; static list silently ages. |
-| D7 | **Backtest 1d read path serves the sparse cagg, not native 1d.** `CandleReader.read(interval='1d')` → `candles_1d` cagg (1m-derived, sparse on fresh boot) while warmup reads native. | BT/replay/CandleReader.java:36 vs :96-127 | A 1d-primary job backtest on a fresh stack sees a thinner series than the chart/screener shows — confusing, occasionally wrong. |
+| D7 | **Backtest 1d context/benchmark reads serve the sparse cagg, not native 1d.** `CandleReader.read('1d')` → `candles_1d` cagg (1m-derived, sparse on a fresh boot) while warmup/regime read native. A 1d *primary* is unaffected by this split (it reads 1m and rolls up — TickwiseGoldenRunner.java:411) but is equally thin on a fresh stack via the 1m base. | BT/replay/CandleReader.java:36 vs :96-127; BacktestRunner.java:491-500 (1d contexts); BenchmarkAnalyzer.java:69 | 1d context indicators and benchmark analytics can read a thinner series than the chart/screener shows — confusing, occasionally wrong. |
 | D8 | **No automated daily data-quality artifact.** Pieces exist (canaries, 15:45 gap-audit pass, coverage summary, backfill ledger) but no scheduled per-symbol completeness/row-count report; nothing audits per-symbol bhavcopy presence day-over-day. | MDS canary/backfill packages | A symbol silently missing from one day's bhavcopy file is invisible; screener/regime inputs quietly thin. |
 | D9 | **No per-bar completeness flag on `candles`** (`complete` exists only on `expired_contracts`); in-progress-bar staleness is a read-time rule invisible to direct-SQL consumers. | V026 vs candles DDL | Root enabler of §3.1; also lets backtests ingest a partial current-day bar if run intraday. |
 | D10 | **Options capture outage healing is manual** (`OiBackfillService` flag-gated); a multi-hour capture outage leaves a permanent snapshot hole (2026-07-09 outage class). | MDS/backfill/OiBackfillService.java:33-53 | Forward-paper OI evidence (the designated discriminator) develops silent holes. |
 | D11 | Depth/coverage bounds (accepted, must stay disclosed): bhavcopy ~1y broad; Upstox equity ~200-session; ~11y only for the subscribed subset; calendar bundle 2024–2026 (horizon canary, CD-2 refresh due before ~2026-11-16); BSE holiday list = NSE approximation; Muhurat unmodeled. | libs/market-calendar resources; MEMORY | Windows outside coverage 500 loudly (good); BSE expiry edge is a small standing risk. |
+| D12 | **The hit-rate validation panel runs on a different price basis than the screen it validates**: `MinerviniHitRateService` reads `candles`@1d (mostly Kite-adjusted) while the live TrendTemplate screen reads raw bhavcopy. | MinerviniHitRateService.java:24, :109-113 | The forward-return evidence backing the screener gates was measured on prices the live screen never sees — the screener's own validation loop inherits the D1 asymmetry. |
+| D13 | **Time fuse on D2/D4**: the deep-sim membership floor is `MIN_SERIES=260` bars while bhavcopy-only names now carry ~250 sessions and accruing. | MinerviniBacktestService.java:55 | Within weeks ~2k RAW-priced BHAVCOPY-only names cross the floor and enter the RS cross-section alongside Kite-adjusted names — D4 escalates from a per-symbol CA edge case to a universe-wide ranking distortion. Fix D4/D1 before the fuse burns. |
+| D14 | **Bhavcopy restatements silently diverge from their candle projection** (raw table DO-UPDATEs; projection DO-NOTHINGs; the CA job skips BHAVCOPY-only symbols), and **BSE-only listings never get CA ratios** (ratio sync is NSE-keyed, ISIN cross-applied). | NseEodBhavcopyRepository.java:45-53 vs CandleRepository.java:115-121; CorporateActionJob.java:162; BhavcopyBackfillService.java:376-445 | Exchange corrections never reach research reads; a BSE-only name's "adjusted" reads are silently raw. |
 
 ---
 
@@ -307,11 +331,12 @@ HistoricalOiReader ─→ CandleDerivedChainReader (virtual OI; iv/greeks null; 
 | # | Finding | Evidence | Impact |
 |---|---|---|---|
 | T1 | **No unified event spine.** Lineage is per-feature tables joined by convention; "everything that happened to strategy X" = ~8 hand-written joins. The signal→book attribution is a *read-time join on mutable `strategies.tags`* — history silently rewrites if tags change. | SSS/signals/SignalRepository.java:105-110 (book join) | Prompt 2 needs one queryable event/experiment graph; today it would re-derive joins per question and inherit the tags-drift hazard. |
-| T2 | **Un-audited mutations on lineage-bearing rows**: `strategies.enabled`, tag edits, notification toggles, `signals.status` transitions (ACTIVE→TAKEN/DISMISSED/EXPIRED) are in-place UPDATEs with no audit action. | SSS/registry/RegistryService.java:374-412; V003:20-21 | Evidence base mutates without trail; graduation/forward-paper conclusions can't be defended after the fact. `strategy_audit_log` already exists — cheap to extend. |
-| T3 | **No UI-action or login audit.** Session cookie + Redis only; `loginTime` is a session attribute; no login-event row; no record of who triggered runs/resets from the UI (single-owner today, but autonomous-writes future needs an actor trail; `created_by`/`actor` are hardcoded `'owner'`). | edge-gateway AuthController.java:37,110-142; V002:36 | Required before any autonomous promotion writes (Prompt 2's approval workflow). |
+| T2 | **Un-audited mutations on lineage-bearing rows**: tag edits, notification toggles, and `signals.status` transitions (ACTIVE→TAKEN/DISMISSED/EXPIRED) are in-place UPDATEs with no audit action — the 15:45 `expireAllActive()` sweep is the highest-volume un-audited mutator (one bulk subquery UPDATE, only a row count returned). `strategies.enabled` is stranger: **no application mutation path exists at all** (raw SQL only — no repo UPDATE, no endpoint, no FE toggle; Telegram `/pause` flips the risk kill_switch, not enabled). | SSS/registry/RegistryService.java:374-412; SignalRepository.java:179-188, :219-225; V003:20-21 | Evidence base mutates without trail; graduation/forward-paper conclusions can't be defended after the fact. TAKEN is partially reconstructable via `paper_orders.signal_id`; DISMISSED/EXPIRED leave zero trail — prioritize those. `strategy_audit_log` already exists — cheap to extend. |
+| T3 | **No UI-action or login audit.** Session cookie + Redis only; `loginTime` is a session attribute; no login-event row; no record of who triggered runs/resets from the UI (single-owner today, but autonomous-writes future needs an actor trail; `created_by`/`actor` are hardcoded `'owner'`). V002:36's own contract (`created_by = optimizer:{jobId}`) is already violated — optimizer promotion provenance lands in free-text `notes` while `created_by` stays `'owner'` (OPT/service.py:407-409; RegistryService.java:66, :98). | edge-gateway AuthController.java:37,110-142; V002:36 | Required before any autonomous promotion writes (Prompt 2's approval workflow). |
 | T4 | **Env-flag state not snapshotted at decision time.** Live knobs (`ARTHA_*`, relative-vol floor) leave no per-signal record; only rejections record the effective threshold tested. No flag-change ledger (the #653 name-mismatch class is invisible too). | V015:19-21 vs signals writes | Forward-paper evidence can't be stratified by flag regime after the fact — a direct blocker for tune-on-live workflows. |
 | T5 | **Wall-clock emission time missing** on signals (see L3) and batch per-candidate decisions are log-only. | SignalEngine.java:846-851; SwingBatchRecorder | Latency + batch forensics gaps. |
 | T6 | Marker-write failure on the swing batch path is WARN-only (batch ran, marker missing ⇒ next-morning canary false-alarms/blind spots). | SSS/swing/SwingBatchRecorder.java:59-61 | Minor; make marker write fail loud or retry. |
+| T7 | **Engine lifecycle events uninventoried**: publish→hot-reload, feed re-arm, boot/warm-up, canary latch resets are log-only (no engine-events row). The daily 09:42 live-health + 15:47 post-market analyses are Claude-side scheduled agents whose outputs land as dated docs, not DB rows. | SignalEngine.java:390-398, :1195-1234; `.claude/skills/daily-ops` | An optimizer stratifying live evidence by "engine restarted / reloaded mid-session?" has nothing to join on. |
 
 ---
 
@@ -324,7 +349,7 @@ HistoricalOiReader ─→ CandleDerivedChainReader (virtual OI; iv/greeks null; 
 | Backtest run (job pipeline) | **PARTIAL** | Config fully pinned (version UUID + SHA-256 checksum into `jobs.request`, re-verified on read — BT/jobs/JobsService.java:84-86; SSS/registry/RegistryService.java:580-588); universe pinned by copy + checksum (JobsService.java:104-118); seed recorded; replay deterministic. Holes: engine **code** version absent (`engine_version` = strategy semver — BacktestRunner.java:578-580); data store mutable (detect-only `data_hash`); calendar unversioned. |
 | Live signal | **PARTIAL** | Exact published config pinned (FK + checksum) + frozen breakdown. Not replayable-from-DB: input candles mutable, 3m is read-time, env knobs unsnapshotted, REST dot inputs not raw-persisted outside chain snapshots. |
 | Paper trade | **PARTIAL** | Fill audit columns exist (`fill_simulator`, `slippage_applied`); close reasons; signal attribution (V026, H5 fix). Breaching tick not durable; bid/ask null. |
-| Optimizer trial | **REPLAYABLE** (modulo data-store caveat) | Params + foldContext pinned per trial job; seeded sampler → reproducible trial sequence (OPT/optuna_runner.py:60-78); version resolved once at submit (OPT/service.py:196-227); trial→run linkage; resumable (V004 study replay). |
+| Optimizer trial | **REPLAYABLE** (modulo data-store caveat) | Params + foldContext pinned per trial job; seeded sampler → reproducible trial sequence (OPT/optuna_runner.py:60-78); version resolved once at submit (OPT/service.py:196-227); trial→run linkage. Caveat: the V004 trial ledger is resume-*designed* but study replay is **not implemented** — a restart marks orphaned sweeps failed (OPT/repos.py:66-77); REPLAYABLE rests on deterministic seeded re-submission, not resume. |
 | Swing deep backtest (marketdata pipeline) | **NOT reproducible** | `minervini/manas_arora_backtest_runs` = `from_date` + report JSONB only — no params, no seed, no data hash, no code version, no trades (V035/V037). **This is the pipeline the swing doctrine decisions (#556/#557, pyramiding verdicts) were made on.** |
 
 ### Findings
@@ -338,6 +363,7 @@ HistoricalOiReader ─→ CandleDerivedChainReader (virtual OI; iv/greeks null; 
 | R5 | Optimizer sweeps run on an **in-process daemon thread with an in-memory cancel set** — a restart abandons running sweeps silently (backtest jobs recover via Redis PEL; sweeps do not). Boot recovery marks orphans failed (OPT/repos.py:66-77) — but mid-sweep state is lost. | Durability gap for long autonomous sweeps — exactly Prompt 2's workload. |
 | R6 | Calendar/timezone inputs unversioned (bundled CSV rides the jar; horizon canary guards the cliff only). | Low urgency; record a calendar version string per run. |
 | R7 | Versioning that works well (keep): immutable `strategy_versions` with byte-preserved YAML + canonical JSONB + checksum; publish demotes previous; rollback = copy-forward; server-side diff; optimizer promotion → **draft only**, never auto-publish (OPT/service.py:381-414). | This is the exact strategy/parameter versioning substrate Prompt 2 needs — reuse as-is. |
+| R8 | Also working (keep + integrate): **StressGuard holdout protection** — `purpose: stress_test` submissions are validated against the strategy's full run lineage → hard 422 `WINDOW_CONTAMINATED`, plus a Redis holdout-reuse counter and a clean-window suggester `GET /api/v1/backtests/stress-window` (BT/jobs/StressGuard.java:17-30; StressWindowController.java:14-24). | A first-class research-honesty mechanism. Prompt 2's automated sweeps MUST integrate with it (pick windows via the suggester or expect 422s) — and should route final-validation runs through it deliberately. |
 
 ---
 
@@ -370,17 +396,18 @@ map in the agent inventory; research-relevant capability matrix:
 | # | Finding | Evidence |
 |---|---|---|
 | F1 | **No backtest-vs-paper comparison view** — the single most important research↔live surface is absent. Graduation scores paper vs *thresholds*; shadow league compares live variants vs each other; neither overlays a strategy's backtest expectation against its live paper record. | GraduationPage.tsx:16; RejectionsPage.tsx:122 |
-| F2 | **No clone, no rerun.** No strategy clone/duplicate anywhere; JobsPage has cancel only — no "rerun this job" / "duplicate with params". `useArchive` is defined but wired into no page (dead code). | grep-confirmed; FE/api/strategies.ts:187 |
+| F2 | **No clone, no rerun.** No strategy clone/duplicate anywhere; JobsPage has cancel only — no "rerun this job" / "duplicate with params". The archive lifecycle has **no UI entry point at all** (backend + audit exist; `useArchive` defined but wired into no page). The jobs compare picker also excludes sweep TRIAL runs (`kind === 'BACKTEST'` only — JobsPage.tsx:169), so trials can't be cross-compared with plain runs. | grep-confirmed; FE/api/strategies.ts:187 |
 | F3 | **No export anywhere in research surfaces.** CSV/JSON download exists only in Data-Ops (SQL console + contract exports). Backtest results/trades/folds/MC/compare/signals/rejections/graduation: none. | FE/api/dataops.ts:242 (only `createObjectURL` hits) |
-| F4 | **Failed-job diagnosis is thin.** `JobDto.error` typed but never rendered; a failed backtest is a red badge with no "why"; no backtest engine log surface (Data-Ops has a LogFeed; backtests don't). | FE/api/backtests.ts:33; JobsPage.tsx |
-| F5 | **No saved views / no run tags.** Filters exist but no persistence of filter sets; jobs have no tag/name/notes (backend gap too, §8). | localStorage grep: theme/chart prefs only |
+| F4 | **Failed-job diagnosis is thin.** `JobDto.error` typed but never rendered; a failed backtest is a red badge with no "why"; no backtest engine log surface (Data-Ops has a LogFeed; backtests don't). Restart-killed sweeps compound it: orphans are marked `failed` with `error` left NULL — indistinguishable from real failures even after rendering. | FE/api/backtests.ts:32; JobsPage.tsx; OPT/repos.py:66-77 |
+| F5 | **No saved views / no run tags.** Filters exist but no persistence of filter sets; jobs have no tag/name/notes (backend gap too, §8). | localStorage persists theme/chart prefs/density/symbol-context/window layout — no research filter sets |
 | F6 | **No guided research→live promotion workflow.** Publish dialog, graduation board, risk arming, and paper books are disconnected pages; no checkpointed flow (graduate → publish → arm → watch). | StrategyVersionsPage.tsx:181; GraduationPage.tsx |
-| F7 | **Two parallel backtest UX systems**: job-based `/backtests/*` vs bespoke `/equity/manas-arora/backtest` swing runner with its own Run/status semantics. | ManasAoraBacktestPage.tsx | 
+| F7 | **Two parallel backtest UX systems**: job-based `/backtests/*` vs the bespoke `/equity/manas-arora/backtest` swing runner (drives `POST /market/screener/manas-arora/swing-backtest` + `/compare` with its own background-thread status — not the jobs pipeline). | FE/pages/equity/ManasAroraBacktestPage.tsx; FE/api/manasArora.ts:269-279 | 
 | F8 | **No confirm-before-submit** on backtest/sweep launch (fires on click, navigates away). | BacktestRunnerPage.tsx |
 | F9 | **Mobile (≈480 px) partially met**: shells/cockpits reflow, but dense research tables (trades 9-col, sweep leaderboard, versions diff, rejections 10-col) are raw tables with horizontal scroll; DataTable's card mode not applied to them. | e.g. BacktestResultsPage.tsx tables |
-| F10 | Inconsistent live-data patterns: WS push for signals+jobs; polling for sweeps/paper/orders/scalper at varied intervals; cockpit hand-rolls `setInterval`. Sweep progress notably lags (poll) despite sharing the jobs pipeline. | FE/api/optimizations.ts:97 |
+| F10 | Inconsistent live-data patterns: WS push for signals+jobs; polling for sweeps/paper/orders/scalper/dashboard-jobs at varied intervals; cockpit hand-rolls `setInterval`. Sweep progress notably lags (poll) despite sharing the jobs pipeline. | FE/api/optimizations.ts:97; FE/api/dashboard.ts:44 |
 | F11 | Editor is a plain YAML textarea (Monaco deferred); no unsaved-changes route block (only `beforeunload`). | StrategyEditorPage.tsx:19-59 |
-| F12 | No margin/exposure-heat *view* for paper books (`GET /paper/margin-heat` exists; no page renders it beyond cockpit chips). | agent route sweep |
+| F12 | No FE surface renders margin-heat **at all** — zero `margin-heat` consumers in FE src (the cockpit "heat" panel is the OI heatmap, a different thing); the endpoint has no consumer. | grep frontend-react/src; SSS/paper/PaperMarginController.java:48 |
+| F13 | **No strategy-level pause/disable UI and no in-app notification center.** The kill switch is per-book on /paper; global pause is a Telegram command; `strategies.enabled` is unreachable (T2); alerts land on ntfy/Telegram with no in-app inbox/ack surface. | FE/pages/paper/PaperPage.tsx:166-169; §5 T2 |
 
 ---
 
@@ -406,13 +433,13 @@ map in the agent inventory; research-relevant capability matrix:
 
 | # | Finding | Evidence |
 |---|---|---|
-| A1 | **Optimizer durability + discoverability**: sweeps run on an in-process daemon thread, in-memory cancel set, **no `GET /optimizations/jobs` list** — running sweeps die silently on restart and are unlistable after submission. | OPT/service.py (threading), api.py |
-| A2 | **No run tagging/naming/notes on jobs**; `purpose` is a fixed enum. Strategies have tags; runs don't. | BT/jobs schema |
+| A1 | **Optimizer durability + discoverability**: sweeps run on an in-process daemon thread with an in-memory cancel set — a restart kills them (orphans marked `failed` with `error` left NULL, indistinguishable from real failures). No optimizer-**native** list endpoint (`GET /optimizations/jobs` 404s); sweeps ARE visible via the shared `jobs` table (`GET /backtests/jobs` + the JobsPage "Sweep" link), but there is no sweep-scoped listing/progress surface. | OPT/service.py:157, :232-245; OPT/repos.py:20-42, :66-77; OPT/api.py |
+| A2 | **No run tagging/naming/notes on jobs**; `purpose` is a free-form string defaulting `"backtest"` with only `"stress_test"` special-cased (no validation; the FE runner never sends it). Strategies have tags; runs don't. | BT/jobs/JobsService.java:81, :123; V002:16 |
 | A3 | **No compare endpoint** — closest are `GET /backtests/summary?strategyVersionIds` (latest-per-version) and sweep `/best`; no compare of N arbitrary runs (FE compare page assembles client-side from per-run fetches). | BT/replay/ResultsController.java |
 | A4 | **No artifact/file export API** for backtests/optimizer (JSON payloads only); CSV export exists solely in market-data admin. | ExportController (MDS only) |
 | A5 | **No job-completion webhooks/SSE** (STOMP progress only; ntfy/Telegram cover signals/ops, not job terminal states). | notifier wiring |
 | A6 | **No auto-retry** for failed jobs; no submission concurrency/queue-depth cap beyond pool size + `maxTrials≤1000` (a runaway sweep floods the shared pool that also serves interactive backtests). | WorkerPool.java |
-| A7 | **No general mutation audit** (risk settings audited; strategy publishes audited; backfills/resets/paper mutations carry `correlationId` in logs only). | RiskService.audit vs rest |
+| A7 | **No general mutation audit** — risk settings + strategy lifecycle + Telegram commands audited; backfills have the V030 `backfill_jobs` ledger; but paper reset and ad-hoc candle re-fetches leave only `correlationId` log trails. | RiskService.audit; V030; SSS/paper/PaperService.reset:396 |
 | A8 | **No API tokens / non-interactive principal** — session-cookie auth only. Fine for a single owner, but Prompt 2's orchestrator (and any external scheduler) needs a first-class programmatic credential rather than replaying login+XSRF. | SecurityConfig.java |
 | A9 | Single global rate-limit bucket (50 rps/100 burst) — an aggressive orchestrator can starve the UI. Per-principal buckets once A8 lands. | gateway application.yml |
 | A10 | Inline preflight+auto-warm on `POST /backtests/run` can hold the request up to the 300 s gateway timeout — submission should enqueue the warm too (async), returning immediately. | JobsService.submit |
@@ -421,7 +448,8 @@ map in the agent inventory; research-relevant capability matrix:
 
 ## 9. Missing screens, controls, and decision-support views
 
-Concrete build list (each names its data dependency; ⚑ = depends on a §10 gap fix):
+Concrete build list (each names its data dependency; ⚑ = depends on the referenced
+finding's fix — a §10 gap row or §12 roadmap item):
 
 1. **Backtest-vs-Paper parity view** (per strategy/version): overlay backtest equity
    & trade markers against the paper book's record for the same period; per-trade
@@ -476,17 +504,25 @@ inputs; P1 = required for trustworthy comparisons; P2 = required for scale/ergon
 | **P1-7** | T4 flag/config snapshot at decision time | Stamp effective env knobs (relative-vol params, pyramid flag, risk toggles) into `scalper_detail`/side-channels on FIRING signals + a tiny append-only `flag_state` ledger on change | Any signal row reconstructs its knob regime |
 | **P1-8** | L6 accepted-signal context symmetry | Persist the same diagnostic context block on accepted entries as rejections (or a sampled/compressed variant) | Fired-trade forensics reconstruct decision inputs without logs |
 | **P1-9** | B7 daily-context lookahead | Gate context advancement on bucket END ≤ current bar time for context intervals coarser than the primary | Golden added; a 1d-context strategy no longer sees today's close intraday |
-| **P2-1** | A1 optimizer durability + listing | Persist sweep loop state (DB-backed ask/tell checkpoints or move orchestration onto the jobs table); add `GET /optimizations/jobs` | Kill the optimizer mid-sweep → restart resumes or fails loudly; sweeps listable |
+| **P1-10** | B3 intrabar touch realism | Wire the already-built `IntrabarExitResolver` as an opt-in `touch_basis: bar_hl_worstof` for stops/targets; record the basis per run (provenance) | A tight-stop backtest shows earlier/worse stop fills under the opt-in; `oneMinuteCovered` no longer a hardcoded literal |
+| **P1-11** | B6 option expiry settlement | Settle a leg held past its expiry at intrinsic (settlement spot − strike, floored 0) + exercise STT; emit `exit_reason='expiry_settlement'` | A golden holding through expiry settles at intrinsic, not stale carried premium |
+| **P2-1** | A1 optimizer durability + listing | Persist sweep loop state (DB-backed ask/tell checkpoints or move orchestration onto the jobs table); add `GET /optimizations/jobs` | Kill the optimizer mid-sweep → restart resumes or fails loudly **with `jobs.error` populated**; sweeps listable natively |
 | **P2-2** | A2/F5 run tags/notes/saved views | `jobs.tags[]`, `jobs.note`; saved-view table keyed to owner | FE filter sets persist; runs taggable at submit + after |
 | **P2-3** | A4/F3 export | Per-run CSV/JSON export endpoints (trades, folds, equity, compare matrix) + FE buttons | Download works for the 4 core artifacts |
 | **P2-4** | D8 data-quality artifact | Nightly per-symbol completeness report (1m gaps, 1d/bhavcopy presence, chain-capture holes) persisted + dashboard (§9.6) | A seeded gap appears in the next report |
 | **P2-5** | L3 latency instrumentation | Wall-clock stamps: bar-publish→eval-start→emit→paper-fill; persist emit wall time on signals; Prometheus histograms | p50/p95 tick→signal→fill visible; §17.3 gate implementable |
 | **P2-6** | D5/D6 dividends + PIT constituents | Ingest dividend cash flows (bhavcopy CA feed carries them; parser currently discards) as a separate table (do NOT mutate prices); implement the constituents fetcher (V008 design already PIT) | Total-return metric available as an overlay; membership history accrues |
+| **P2-7** | B9 margin feasibility in backtest | Feed portfolio SPAN from the dormant margin-service appliance (#126) or Upstox (#510) as a per-run feasibility metric (advisory first) | Runs report peak margin vs capital; un-fundable variants flagged, not ranked |
+| **P2-8** | B12 backtest decision traces | Persist sampled per-bar gate/composite breakdowns (or all rejected-entry evaluations) per run — the backtest twin of `signal_rejections` | "Why no trade on date X" answerable from stored rows |
 
 Explicitly **not** blocking Prompt 2 (accepted, must stay disclosed as run metadata):
 survivorship depth limits (D2 — disclose per run), derived-OI mutedness, no partial
 fills/limit orders (B10), swing same-close fill convention (B8 — but add an
-open-next-day sensitivity variant so the optimizer can price it).
+open-next-day sensitivity variant so the optimizer can price it). B2's frictionless
+swing sims are *resolved* by Phase 2 #15 (sensitivity variant) + #16 (port into the
+job pipeline) rather than patched in place. Market impact stays portfolio-layer-only
+(equity swing clips ≤ ~6.5 % of a ₹1.5 L book are far below ADV-impact scales;
+revisit at real capital).
 
 ---
 
@@ -502,6 +538,7 @@ Additive columns/JSONB on `jobs` + `backtest_runs` (and the swing run tables):
 provenance {
   engineGitSha, imageTag,              // from build-info (exists at runtime, #617)
   engineLibVersion,                    // strategy-engine artifact version
+  profile,                             // live | mock — mock runs are never ranked
   calendarVersion,                     // bundled CSV identifier
   fillModel {timing, slippageSource},  // NEXT_OPEN/AT_CLOSE, tick|spread
   costModel {class, source},           // equity|futures|options, defaults|request
@@ -558,7 +595,8 @@ required evidence per transition (graduation thresholds, backtest-vs-paper parit
 within band, stress-window pass), explicit owner approval rows (T3 actor trail), and
 flag-arming as an audited action instead of a raw `.env` edit where feasible. The F7
 graduation machinery (V024, measurement-only) is the seed; this formalizes it without
-auto-arming anything.
+auto-arming anything. The Telegram bot's two-phase `/confirm`-within-60s (V019) is the
+in-house approval pattern to reuse for transition confirmations.
 
 ### 11.7 Async + automation hardening
 Optimizer orchestration durability (P2-1); job-completion notifications (reuse ntfy
@@ -590,8 +628,8 @@ verify check. Phases are dependency-ordered; within a phase, items parallelize.
    numbers). (P0-4)
 6. Content-stable series hash + `dataset_epochs` ledger — clean. (P1-1b)
 7. Nightly data-quality report + dashboard page — clean. (P2-4, §9.6)
-8. Backtest 1d read → native daily (align with warmup path) — **HOLD** (changes
-   backtest inputs; goldens/parity rerun). (D7)
+8. Backtest 1d context/benchmark reads → native daily (align with the warmup path) —
+   **HOLD** (changes backtest inputs; goldens/parity rerun). (D7)
 9. Dividend cash-flow ingestion (separate table; no price mutation) + PIT constituents
    fetcher — clean, additive. (P2-6)
 
@@ -618,16 +656,25 @@ verify check. Phases are dependency-ordered; within a phase, items parallelize.
 20. Experiment views + `GET /experiments` + server-side compare endpoint — clean. (§11.4)
 21. Latency wall-clock stamps + histograms — clean. (P2-5)
 22. Optimizer durability + `GET /optimizations/jobs` — clean. (P2-1)
+22a. Run-row provenance completion — `forks[]`, `fillModel`, `costModel`,
+    `flagsSnapshot`, `profile` onto jobs/runs (completes §11.1; P1-7's flag ledger
+    feeds it) — clean.
+22b. `evidencePolicy` strategy tag (forward-only vs backtestable) + StressGuard-aware
+    window selection in the optimizer client (§6 R8) — clean.
 
 **Phase 4 — research UX & workflow [~2-3 weeks]**
 23. Run tags/notes + saved views (API + FE) — clean. (P2-2)
 24. Backtest-vs-paper parity view — clean (v1 on existing data, caveats banner). (§9.1)
 25. Export endpoints + FE buttons — clean. (P2-3)
-26. Rerun/clone controls; sweep list page; confirm-before-run — clean. (F2/A1-FE/F8)
+26. Rerun/clone controls; sweep list page; confirm-before-run — clean. (F2/A1/F8)
 27. Promotion workflow screen + stage state machine + approval audit — **HOLD**
     (owner-facing process change). (§11.6)
 28. Order-event timeline + data-quality dashboard polish; mobile card-mode for the 4
     dense research tables — clean. (§9.7, F9)
+29. Headless-automation hardening: API-token principal + per-principal rate buckets +
+    async submission warm + job-completion notifications — clean. (§11.7; A8/A9/A10/A5)
+30. Re-run/ranking policy enforcement inside the experiment layer (refuse cross-hash /
+    cross-SHA rankings; auto-queue re-runs) — clean. (P1-1c; §13 preamble rule)
 
 Sequencing rationale: Phases 0-1 make the *inputs* true; Phase 2 makes the *simulations*
 honest; Phase 3 makes everything *queryable and attributable*; Phase 4 makes it
@@ -642,7 +689,8 @@ Phase 0 + items 5-6, and should not *rank or promote* anything until Phase 2 ite
 Exact artifacts the optimization build must consume. **EXISTS** = usable today (cite);
 **ADD** = created by this plan (phase item ref). Prompt 2 must refuse to rank across
 runs whose provenance blocks differ (engine SHA, content hash, universe, cost model)
-unless it re-runs the stale side.
+unless it re-runs the stale side — and must only consume **live-profile** runs (mock
+candles are synthetic boot-accrual; the stacks are DB-isolated).
 
 1. **Strategy definition format** — EXISTS. YAML, frozen schema v1
    (`GET /api/v1/strategies/schema/v1`; `libs/strategy-schema/…/strategy-schema-v1.json`).
@@ -655,14 +703,21 @@ unless it re-runs the stale side.
 2. **Parameter set format** — EXISTS. `optimize.parameters` (name→range/choices) in
    YAML; per-trial `params_override` JSONB on `backtest_runs` (V003:20) and trial
    `params` on `optimization_trials` (V004); request-side `walkForward`/`objective`/
-   `maxTrials` override YAML (OPT/service.py). Promotion contract: trial →
+   `maxTrials` override YAML (OPT/service.py). Methods supported: `grid | random |
+   tpe | nsga2` (nsga2 = multi-objective with its own validation); objectives gated by
+   the frozen `_ALLOWED_OBJECTIVE_METRICS` set (unknown metric → 400 at submit);
+   `maxTrials` capped at 1000; a walk-forward sweep **auto-overrides an in-sample
+   objective to `oos_fold_mean`** (anti-curve-fit guard) — OPT/service.py:16-31,
+   :87-103; OPT/optuna_runner.py:52-78. Promotion contract: trial →
    `POST /optimizations/{sweepId}/promote` → **draft** version.
 
 3. **Run metadata** — EXISTS (partial): `jobs.request` (full pinned submission incl.
    strategyId/Version/checksum, window, pinned universe copy, seed), `backtest_runs`
    (seed, `data_hash`, `universe_checksum`, `premium_source`, fold columns, metrics
-   JSONB with `caveats[]` + `oiGateCoverage`). **ADD**: provenance block §11.1
-   (engine SHA, flags, cost/fill model, forks) — Phase 0-2; run tags/notes — Phase 4.
+   JSONB with `caveats[]` + `oiGateCoverage`). **ADD**: provenance block §11.1 —
+   engine SHA Phase 0 #2, the rest (forks, fill/cost model, flags snapshot, profile)
+   Phase 3 #22a; run tags/notes — Phase 4 #23. Note: `purpose: stress_test` runs are
+   holdout-guarded (§6 R8) — automated submitters must respect the contract.
 
 4. **Trade event schema** — EXISTS: `backtest_trades` (side, qty, entry/exit ts+price,
    pnl, pnl_pct, `exit_reason`, `bars_held`, `touch_basis`, `contributions` JSONB,
@@ -686,7 +741,9 @@ unless it re-runs the stale side.
    `sharpe_degradation`, `fold_metrics`), `montecarlo_summary` (+`mcSeed`),
    `SwingReportCard` grade (`GET /{id}/report-card`). Optimizer guard metrics on
    `/best` (plateau/raw, regime/OOS/fold guards). Prompt 2's objective must consume
-   the **guarded** shapes, never raw single-window returns.
+   the **guarded** shapes, never raw single-window returns — and must route
+   final-validation runs through the StressGuard holdout contract (§6 R8: pick
+   windows via `GET /backtests/stress-window` or expect 422 `WINDOW_CONTAMINATED`).
 
 7. **Regime tagging schema** — EXISTS: `RegimeLabeler` strictly-T−1 labels
    (BT/regime/), per-fold regime attribution inside `fold_metrics`, fold drill-down API
@@ -727,7 +784,8 @@ unless it re-runs the stale side.
     graduation endpoints) — with the standing caveat that **gate-armed scalpers are
     forward-only optimizable** (live gate absent from backtests) and OI edges are muted
     on derived history; both facts must be machine-readable run/strategy metadata
-    (provenance `forks[]` + a strategy-level `evidencePolicy` tag — ADD, Phase 3).
+    (provenance `forks[]` + a strategy-level `evidencePolicy` tag — ADD, Phase 3
+    #22a/#22b).
 
 ---
 
@@ -735,4 +793,9 @@ unless it re-runs the stale side.
 fidelity, data quality, telemetry/reproducibility, frontend, backend APIs) over the
 2026-07-10 working tree at `main`@d477c3f7, cross-checked against the 2026-07-05 full
 audit and the forward ledger; the §3.1 defect chain was re-verified by hand in source
-before inclusion. No code was changed by this audit.*
+before inclusion. No code was changed by this audit. Second stage: a 2-pass
+verification — 5 adversarial accuracy agents re-checking every §1–§9 claim against
+source (~150 claim-units; **0 refuted**, ~20 imprecise corrected) + 1 completeness
+agent against the commissioning requirements — produced this revision's corrections
+and additions (margin-service appliance, StressGuard contract, optimizer
+method/objective contract, D12–D14, T7, R8, F13, P1-10/11, P2-7/8, §12 #22a/b/29/30).*

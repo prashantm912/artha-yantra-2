@@ -28,7 +28,7 @@ order.
 >   the 7-item `ScalperManualChecks`), **32** kept-manual (`KEEP_MANUAL_NEW`), **36** accepted by
 >   design (`ACCEPT_BY_DESIGN`), **17** owner-decision (`UNCERTAIN_OWNER`).
 >
-> Master coverage map: [`docs/strategy-audit/GAP-DISPOSITION.md`](../../../strategy-audit/GAP-DISPOSITION.md).
+> Master coverage map: [`docs/strategy-audit/GAP-DISPOSITION.md`](../../../../strategy-audit/GAP-DISPOSITION.md).
 
 **Load-bearing convention (read first).** Every stream copies the **FU2 parity-safe-additive
 default-OFF tag-gate** template: a new behaviour = a `ScalperConfig` `requireXxx` flag + a

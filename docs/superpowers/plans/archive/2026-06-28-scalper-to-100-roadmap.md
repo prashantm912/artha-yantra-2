@@ -6,7 +6,7 @@
 
 **Status:** ACTIVE — the single forward authority for finishing the options-scalper engine.
 **Owner:** single-owner. **Date:** 2026-06-28. **Anchor (source of truth):**
-[`strategy-documents/options-scalper-siva-operative/Options_Scalper_Siva_Operative_Strategy.md`](../../../strategy-documents/options-scalper-siva-operative/Options_Scalper_Siva_Operative_Strategy.md)
+[`strategy-documents/options-scalper-siva-operative/Options_Scalper_Siva_Operative_Strategy.md`](../../../../strategy-documents/options-scalper-siva-operative/Options_Scalper_Siva_Operative_Strategy.md)
 — the **debloated** Session-24 operative doc.
 
 > **What this supersedes.** This doc replaces the bloated-audit framing. The strategy-audit chain
@@ -51,7 +51,7 @@ Verified against HEAD `ef2650b` (2026-06-28):
   three-way decoupling (ADR-0003), 36 instrument-agnostic variants seeded + 36/36 functional backtests.
 - **Operator surface:** `ScalperManualChecks` 7-item card.
 
-These were ratified in [RATIFICATION-PACK](../../strategy-audit/RATIFICATION-PACK.md) and built per the
+These were ratified in [RATIFICATION-PACK](../../../strategy-audit/RATIFICATION-PACK.md) and built per the
 (now archived) W3/oip-ai plans. **Everything below is what remains.**
 
 ## 1b. Built + armed this session (2026-06-28, owner directive: arm-on-where-they-belong)
@@ -214,7 +214,7 @@ OWNER number, or MANUAL — nothing remains deferred.**
 ## 7. References
 - **Authority:** the operative doc (anchor, top).
 - **Design:** the 12 stream files in [`2026-06-27-backlog/`](2026-06-27-backlog/) + FU1/FU2.
-- **History (CLOSED):** [`docs/strategy-audit/`](../../strategy-audit/) (the bloated-consolidated audit),
+- **History (CLOSED):** [`docs/strategy-audit/`](../../../strategy-audit/) (the bloated-consolidated audit),
   and `plans/archive/` (2b scalper-tunable-infra, w3-engine-drift-impl, oip-ai-probability-spec).
-- **Decisions:** [RATIFICATION-PACK](../../strategy-audit/RATIFICATION-PACK.md) (Part 1 drops, Part 2/3
-  drift rulings), [ADR-0003](../../adr/0003-scalper-signal-strike-option-decoupling.md).
+- **Decisions:** [RATIFICATION-PACK](../../../strategy-audit/RATIFICATION-PACK.md) (Part 1 drops, Part 2/3
+  drift rulings), [ADR-0003](../../../adr/0003-scalper-signal-strike-option-decoupling.md).

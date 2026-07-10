@@ -79,7 +79,7 @@ Original design notes:
   absent in all existing configs → no behaviour change → parity holds).
 - Verify: a config with signal=NIFTY-FUT-CONT, options=SENSEX backtests + trades SENSEX legs off NIFTY signal.
 
-## GRILLED DECISIONS (2026-06-26) — see [ADR-0003](../../adr/0003-scalper-signal-strike-option-decoupling.md)
+## GRILLED DECISIONS (2026-06-26) — see [ADR-0003](../../../adr/0003-scalper-signal-strike-option-decoupling.md)
 Owner /grill resolved the SENSEX design. Five locked decisions:
 1. **SENSEX strike = SENSEX-fut spot ref** — each index anchors strikes on its OWN front future (the rule
    NIFTY already uses). Build `SENSEX-FUT-CONT` (2b-E1 backfill is generic on underlying). Rejected

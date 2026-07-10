@@ -4,7 +4,7 @@
 
 
 **Branch:** `feat/scalper-track2` · **Started:** 2026-06-20 · **Authority:** master plan
-[§12](2026-06-19-openalgo-react-integration-master-plan.md) (+ §8 SPAN, §17.3 OrderGateway,
+[§12](../2026-06-19-openalgo-react-integration-master-plan.md) (+ §8 SPAN, §17.3 OrderGateway,
 §18.4 push). This file is the *execution* layer — the staged build order, scope decisions, and the
 adversarially-verified spec deltas that are **not** in the master plan. On any conflict the master
 plan §17 (Errata) / §18 (Gap Addendum) win.

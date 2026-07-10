@@ -10,6 +10,78 @@ the two 2026-07-02 audits (both fix queues fully closed) and the open-PR/issue l
 
 ---
 
+## 0. Work queue (consolidated, 2026-07-10)
+
+The flat, ordered index of every actionable open item across the four 2026-07-10 docs
+(fidelity audit `docs/audits/2026-07-10-research-fidelity-audit.md` = **FID**; app-platform audit
+`docs/audits/2026-07-10-app-platform-audit.md` = **APP**; evolution design
+[`2026-07-10-strategy-evolution-engine-design.md`](2026-07-10-strategy-evolution-engine-design.md) = **EVO**;
+intelligence design [`2026-07-10-intelligence-layer-design.md`](2026-07-10-intelligence-layer-design.md) = **INT**)
+plus the standing owner/data gates. **Rules:** detail lives in the source doc's § — a row here is
+1 line + a pointer, never the spec. When an item ships: flip Status to `DONE` + PR# in THIS table
+(and keep the old §1/§2 program rows as the prose history). Status values: `TODO` · `IN-PROGRESS` ·
+`BUILT-HOLD` (built, owner merge/arm pending) · `OWNER` (decision/data-gated) · `DONE PR#`.
+Order = dependency order: Group A unblocks both design programs; B unblocks EVO; C = program starts.
+
+**A. Platform foundations (APP §10 Phase 1 — the shared prerequisite for EVO-E0 and INT-I1)**
+
+| # | id | what (1 line) | source | tier | status |
+|---|---|---|---|---|---|
+| A1 | `p1-v1-manual-order-governor` | Call `RiskService.entryAllowed` inside `PaperService.openOrder` — manual tickets currently bypass kill-switch/max-open/daily-loss/heat | APP §8 V1 | HOLD | TODO |
+| A2 | `p1-v2-v4-order-validation` | `clientOrderId` idempotency on `POST /paper/orders` + lot-size-multiple validation | APP §8 V2/V4 | clean | TODO |
+| A3 | `p1-v3-tick-freshness` | Max-age guard on fills/MTM, bracket-starvation counter + ntfy, forbid silent breakeven settle | APP §8 V3 | HOLD | TODO |
+| A4 | `p1-ingest-runs` | `marketdata.ingest_runs` ledger + writers (NseEod ×3, bhavcopy, screeners, capture summary, instrument sync) — the batch-source trust oracle | APP §7.2.3/§9.1 | clean | TODO |
+| A5 | `p1-ingest-canaries` | T+1 expected-source×trading-day canary (V9) + notifier delivery-health check (V15) | APP §8 V9/V15 | clean | TODO |
+| A6 | `p1-fii-diagnostic` | FII-derivative empty-state explains the analytics flag (dead-by-default today) | APP §2.5 | clean | TODO |
+| A7 | `p1-backfill-identity` | Persist backfill jobId UUID into `backfill_jobs` + OI-backfill audit rows (V12) | APP §8 V12 | clean | TODO |
+| A8 | `p1-jobs-error-display` | Jobs page renders `jobs.error` for failed runs (BE already returns it) | APP §2.7 | clean | TODO |
+| A9 | `p1-admin-audit` | Append-only audit for query-console SQL + exports; export truncation made explicit (V14) | APP §8 V14 | clean | TODO |
+| A10 | `p1-snapshot-retention` | Schedule `prune_options_snapshots` (horizon = owner pick) | APP §3.3 | owner | OWNER |
+
+**B. Research-fidelity blockers (FID §10 + EVO §13 — gate EVO-E0; B1 also quarantines LIVE_FIRST evidence)**
+
+| # | id | what (1 line) | source | tier | status |
+|---|---|---|---|---|---|
+| B1 | `fid-p0-1-partial-buckets` | Live 3m/5m/15m/1h series evaluate FROZEN 1-min partial buckets — completed-bucket read contract (chip task_8972447b; thresholds tuned on poisoned bars re-tune after) | FID §3.1/§10 P0-1 | HOLD | TODO |
+| B2 | `fid-p0-2-engine-sha` | Stamp engine git SHA onto backtest run rows (comparability gate) | FID §10 P0-2 | clean | TODO |
+| B3 | `fid-p0-3-swing-lineage` | Swing deep-sim pipeline lineage (report JSONB only today — doctrine decisions untraceable) | FID §10 P0-3 | clean | TODO |
+| B4 | `fid-p0-4-screener-ca` | Live screener CA-adjusted prices (= prior-audit H6; backtest adjusted vs live raw) | FID §10 P0-4; 07-05 audit H6 | HOLD | TODO |
+| B5 | `fid-p0-5-btst-exits` | BTST exits never simulated (backtest branch never opens a position) — EVO SIM_BLOCKED until fixed | FID §10 P0-5 | HOLD | TODO |
+| B6 | `fid-p2-1-optimizer-durability` | Durable sweep queue (in-process threads die on restart; orphans failed-with-NULL-error) | FID §10 P2-1 | clean | TODO |
+| B7 | `fid-t3-actor-plumb` | `created_by` actor plumbed through job/run/version writes | FID §10 T3 | clean | TODO |
+| B8 | `fid-experiment-views` | Experiment browser views + server-side compare endpoint | FID §11.4/§13 #8/#11 | clean | TODO |
+| B9 | `evo-funnel-universe-resolver` | Resolve `universe.mode: *_funnel` in the job pipeline (Manas/Minervini trials 0-runnable today; `futures_screener` pinning precedent) | EVO §13 row 19 | clean | TODO |
+| B10 | `evo-regime-label-fix` | Optimizer/FE use BULL/RANGE/BEAR/CRASH vs canonical UP_QUIET/… → `regimesCovered` always empty (chip task_d6872aa3) | EVO §13 row 20 | clean | TODO |
+
+**C. Design-program builds (owner sequences which goes first; both need Group A)**
+
+| # | id | what (1 line) | source | tier | status |
+|---|---|---|---|---|---|
+| C1 | `evo-e1-experiment-model` | EVO first increment: evo_* tables + retro-scoring of existing sweeps (needs B-group E0 gates) | EVO §12 E1 | clean | TODO |
+| C2 | `int-i1-foundations` | INT first increment: insights module + day-context/options digests + `market_context_days` + feed/Focus in shadow mode + notification_events migration (needs A4) | INT §12 I1 | clean | TODO |
+| C3 | `int-manas-rsrank-api` | Serialize `rs_rank` in the Manas screen API row (DB-only today; gates INT context component) | INT §13 row 12 | clean | TODO |
+| C4 | `int-fired-rail-sidechannel` | Fired-side per-rail operand side-channel (parity-safe additive; gates fired-vs-rejected Stage 2) | INT §13 row 19 | HOLD | TODO |
+
+**D. App-platform later phases (summary rows — full item lists in APP §10)**
+
+| # | id | what (1 line) | source | tier | status |
+|---|---|---|---|---|---|
+| D1 | `p1-phase2-workflow-chains` | Signal-status push, `paper.events`, position-detail+PATCH brackets, ticket book selector, journal links/edit, `sell_decisions` persistence, strategy enabled-toggle + audit-log reader, promotions display, dot-health panel (notification center = superseded by INT I1 feed) | APP §10 Phase 2 | mixed | TODO |
+| D2 | `p1-phase3-freshness-depth` | Freshness envelope + badge rollout, page auto-poll policy, chain time-travel, IV smile, strike drill-down, screener date/diff/attrition, breadth series, Minervini backtest page, CSV export standard, risk-calc margin tie-in, V6/V7/V8 data checks | APP §10 Phase 3 | clean | TODO |
+| D3 | `p1-phase4-platform-planes` | Unified job envelope + jobs console, reference-data tables + admin CRUD, user_prefs + saved views + cmdk palette, DataTable adoption wave, Map-return burn-down, event registry, alert rules, multi-window panes | APP §10 Phase 4 | clean | TODO |
+
+**E. Standing owner/data gates (unchanged — detail in §2 below)**
+
+| # | id | what (1 line) | source | status |
+|---|---|---|---|---|
+| E1 | `forward-paper-reliability-month` | ~1 month live-paper accrual → runbook analysis (E9 band + per-scalper keep/cut/tune) + swing §0.5 #12 sign-off | §2 `live-forward-paper-analysis`; runbook | OWNER |
+| E2 | `always-on-host` | F5 hardware decision (brief: [`2026-07-03-always-on-host-brief.md`](2026-07-03-always-on-host-brief.md)) | 10x F5 | OWNER |
+| E3 | `flag-arms` | Arm F9 heat-cap / F7 graduation marker / heartbeat URL when owner ready (all deployed-dormant) | §2 rows | OWNER |
+| E4 | `audit-doctrine-holds` | 07-05 audit H8 + swing exit-parity HOLD batch #128 (H6 = B4) | 07-05 audit §12 | OWNER |
+| E5 | `cd2-calendar-refresh` | 2027 NSE/BSE calendar CSV refresh before ~2026-11-16 (horizon canary reds ~45d prior) | §3 scheduled | OWNER |
+
+---
+
 ## 1. Net-new code
 
 | id | item | authority | state |

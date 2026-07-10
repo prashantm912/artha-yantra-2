@@ -24,8 +24,18 @@ authority is the OpenAlgo/React master plan; the design authority is `docs/desig
 - `2026-06-30-live-signal-analysis-runbook.md` — the standing procedure for analysing ~1 month of
   live-paper scalper trades into the E9 band + per-scalper keep/cut/tune (counterfactual replay on real
   captured premium). Runs when the owner has gathered the data.
+- `2026-07-03-10x-value-roadmap.md` — the 10x-value roadmap; remaining sub-items are data/owner-gated
+  (F2 rollup, F3.2–.5 dots, F5 host).
+- `2026-07-03-always-on-host-brief.md` — the F5 hardware decision brief (owner decision pending).
+- `2026-07-10-strategy-evolution-engine-design.md` + `2026-07-10-intelligence-layer-design.md` — the
+  two merged-but-unbuilt design authorities (slow research loop / fast decision loop); build gating in
+  each doc's §13 + the ledger rows `evolution-engine` / `intelligence-layer`.
 - `superpowers/plans/archive/` — everything completed / decided / superseded, each with an ARCHIVED
-  status banner. 2026-07-02 sweep added: the **scalper-to-100 roadmap + `2026-06-27-backlog/` design
+  status banner. **2026-07-10 sweep added:** the full **Minervini SEPA set** (implementation plan +
+  build-log + phase6/partial-close build-specs — all phases shipped+live #524–#563; only the
+  forward-paper watch remains, tracked in the ledger), **manas-arora-and-book-separation-plan**
+  (fully shipped #566–#575), **swing-doctrine-port-build-spec** (M31 shipped #655).
+  2026-07-02 sweep added: the **scalper-to-100 roadmap + `2026-06-27-backlog/` design
   streams** (build complete, #274–#404 arc), **remaining-build-inventory** (superseded), the two
   **2026-07-02 audits + findings register** (fix queues fully closed — UI #440–#475, codebase
   #407–#434), **data-foundation-milestone** (value-verify PASSED), **data-ops-console** (deployed),

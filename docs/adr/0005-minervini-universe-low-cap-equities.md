@@ -5,7 +5,7 @@ Status: accepted (2026-07-04)
 ## Context
 
 The Minervini SEPA screener
-([plan](../superpowers/plans/2026-07-04-minervini-sepa-implementation-plan.md)) ranks a universe of Indian cash
+([plan](../superpowers/plans/archive/2026-07-04-minervini-sepa-implementation-plan.md)) ranks a universe of Indian cash
 equities and computes a **cross-sectional RS-rank** (percentile across that universe). The choice of universe is
 load-bearing: it sets the RS-rank denominator, the backtest survivorship surface, and which names can ever surface.
 

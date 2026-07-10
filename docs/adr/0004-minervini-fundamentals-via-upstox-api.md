@@ -5,7 +5,7 @@ Status: accepted (2026-07-04)
 ## Context
 
 The Minervini SEPA implementation plan
-([`docs/superpowers/plans/2026-07-04-minervini-sepa-implementation-plan.md`](../superpowers/plans/2026-07-04-minervini-sepa-implementation-plan.md))
+([`docs/superpowers/plans/archive/2026-07-04-minervini-sepa-implementation-plan.md`](../superpowers/plans/archive/2026-07-04-minervini-sepa-implementation-plan.md))
 needs per-stock fundamentals (quarterly EPS / sales / margins for "Code 33", ROE, P/E) **and** market-cap /
 free-float data (for the owner's low-cap universe gate, [ADR-0005](0005-minervini-universe-low-cap-equities.md)).
 

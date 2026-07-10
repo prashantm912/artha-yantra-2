@@ -130,6 +130,18 @@ public class SignalEngine {
             t.setDaemon(true);
             return t;
           });
+  // A watchdog-forced re-subscribe runs OFF the eval thread (audit A13, RC-1). Routing recovery
+  // through evalExecutor (the #634 design) meant a receive-drop's recovery queued BEHIND a blocked
+  // eval task — so a stalled eval loop could never re-subscribe itself out of a starvation. This
+  // dedicated single-thread daemon executor decouples the two; the lock analysis in forceResubscribe
+  // shows both #634 invariants (sweep thread never blocks on Redis I/O; no monitor deadlock) survive.
+  private final ExecutorService recoveryExecutor =
+      Executors.newSingleThreadExecutor(
+          r -> {
+            Thread t = new Thread(r, "subscriber-recovery");
+            t.setDaemon(true);
+            return t;
+          });
 
   private volatile List<Loaded> loaded = List.of();
 
@@ -139,6 +151,13 @@ public class SignalEngine {
   // 2026-07-07 eval-starvation signature. Stamped on receipt in onCandleMessage; sole writer is the
   // receive path (a forced re-subscribe does NOT stamp it, so the latch clears only on a real bar).
   private volatile long lastBarReceivedAtMs;
+  // Eval-side heartbeat: wall-clock millis of the last COMPLETED drain() batch, stamped ON the
+  // signal-eval thread (audit A13, RC-1). lastBarReceivedAtMs only proves bars are ARRIVING (it is
+  // stamped on the Redis dispatch thread); a stall in evaluation keeps it fresh, so the canary read
+  // "receiving normally" all through the 2026-07-10 14:52 eval stall. SubscriberHealthCanary compares
+  // received−evaluated (NOT wall-clock, so a quiet market that freezes both does not false-alarm) to
+  // catch bars-arriving-but-not-processed. Sole writer is the eval thread (single-threaded → no race).
+  private volatile long lastBarEvaluatedAtMs;
   /**
    * The registry's published+enabled version-id set AS OF the last {@link #reload()} — the reconcile
    * baseline. Comparing the CURRENT published set against this (not against the LOADED subset) is what
@@ -186,6 +205,7 @@ public class SignalEngine {
     this.objectMapper = objectMapper;
     this.clock = clock;
     this.lastBarReceivedAtMs = clock.millis(); // boot grace — no false stall before the first bar
+    this.lastBarEvaluatedAtMs = clock.millis(); // boot grace — received−evaluated starts at ~0
     this.signalTtlMinutes = signalTtlMinutes;
     this.emissionGuard = emissionGuard;
     this.scalperGate = scalperGate;
@@ -207,6 +227,7 @@ public class SignalEngine {
       container.stop();
     }
     evalExecutor.shutdownNow();
+    recoveryExecutor.shutdownNow();
   }
 
   /** (Re)loads published+enabled strategies and rebuilds subscriptions. */
@@ -411,6 +432,11 @@ public class SignalEngine {
     return lastBarReceivedAtMs;
   }
 
+  /** Wall-clock millis of the last completed {@code drain()} batch — the eval-side heartbeat. */
+  long lastBarEvaluatedAtMs() {
+    return lastBarEvaluatedAtMs;
+  }
+
   /**
    * True iff any loaded strategy subscribes a 1m channel, so {@link SubscriberHealthCanary} stays
    * quiet when there is nothing to receive (no intraday strategy loaded / all-empty-universe session).
@@ -428,16 +454,34 @@ public class SignalEngine {
 
   /**
    * Watchdog recovery: request a candle re-subscription (overlap-safe — see {@link #resubscribe()}).
-   * Runs the rebuild ON the single eval thread (the same hot-swap route {@code strategy.changed} uses
-   * via {@link #drainReloadOnly()}), NOT on the caller's thread — so the watchdog never holds the
-   * SignalEngine monitor across the container's blocking Redis I/O and can never freeze the eval loop
-   * from outside; the (already-starved) eval thread simply does its own recovery. Does NOT stamp the
-   * receive heartbeat — the stall latch clears only when a REAL bar arrives, so a re-subscribe that
-   * fails to restore delivery keeps being retried (and stays visibly stalled).
+   * Runs the rebuild on the dedicated {@code subscriber-recovery} thread, NOT the caller's thread and
+   * NOT the eval thread. The original #634 design routed this through {@code evalExecutor} so the
+   * SCHEDULED sweep thread would never hold the SignalEngine monitor across the container's blocking
+   * Redis I/O — but that also made recovery for a receive-drop queue BEHIND a blocked eval task, so a
+   * stalled eval loop could never re-subscribe itself out (audit A13, RC-1). A dedicated executor keeps
+   * both #634 invariants while removing that coupling:
+   *
+   * <ul>
+   *   <li><b>Sweep never blocks on Redis I/O:</b> the sweep thread only does a non-blocking
+   *       {@code recoveryExecutor.execute(...)} (an unbounded-queue enqueue) and returns — it never
+   *       acquires the SignalEngine monitor and never touches the container.
+   *   <li><b>No monitor deadlock:</b> {@code resubscribe()} is {@code synchronized} on
+   *       {@code SignalEngine.this} (monitor M). M is acquired by the recovery thread (here), the eval
+   *       thread (reload→resubscribe), and the boot thread (start). The container's Redis lifecycle
+   *       ({@code afterPropertiesSet}/{@code start}/{@code stop}) never acquires M — the listener
+   *       callback {@link #onCandleMessage} does not — so no thread ever holds a container-internal lock
+   *       while waiting for M. The only shared lock is M, always released after a bounded Redis op, so
+   *       a thread waiting on M cannot be blocked by a thread that is itself waiting on M ⇒ no cycle.
+   *       Recovery holding M during its Redis I/O only DELAYS a concurrent eval-thread reload (bounded),
+   *       never deadlocks it.
+   * </ul>
+   *
+   * <p>Does NOT stamp the receive heartbeat — the stall latch clears only when a REAL bar arrives, so a
+   * re-subscribe that fails to restore delivery keeps being retried (and stays visibly stalled).
    */
   void forceResubscribe(String reason) {
     log.warn("subscriber watchdog: requesting candle re-subscription — {}", reason);
-    evalExecutor.execute(
+    recoveryExecutor.execute(
         () -> {
           try {
             resubscribe();
@@ -482,6 +526,10 @@ public class SignalEngine {
       EngineCandle bar = head.getValue();
       evalTimer.record(() -> onClosedBar(parts[0], parts[1], bar));
     }
+    // Eval-side heartbeat (audit A13): stamped on THIS (signal-eval) thread only when the batch has
+    // fully drained, so a stall INSIDE onClosedBar freezes it while bars keep being received — the
+    // signature SubscriberHealthCanary alarms on. See lastBarEvaluatedAtMs.
+    lastBarEvaluatedAtMs = clock.millis();
   }
 
   private void onClosedBar(String exchange, String tradingsymbol, EngineCandle bar) {

@@ -5,6 +5,7 @@ import in.arthayantra.marketcalendar.MarketCalendar;
 import java.time.Clock;
 import java.time.LocalTime;
 import java.time.ZonedDateTime;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,7 +34,19 @@ import org.springframework.stereotype.Component;
  * so this stays silent then (no false page, no pointless re-subscribe churn). Reading
  * {@code ticks:last-at} on the shared Redis keeps it HTTP-free. Safety net, default ON — a
  * default-OFF net that nobody arms is exactly how the original stall stayed silent; disable via
- * {@code artha.signal.subscriber-watchdog.enabled=false}.
+ * {@code artha.signals.subscriber-watchdog.enabled=false}.
+ *
+ * <p><b>Eval-side blind spot (audit A13, RC-1, confirmed 2026-07-10):</b> the receive heartbeat
+ * ({@code lastBarReceivedAtMs}) is stamped on the Redis DISPATCH thread as the first line of
+ * {@code onCandleMessage}, but evaluation runs on a SEPARATE single-thread {@code signal-eval}
+ * executor. So a stall INSIDE evaluation keeps the receive heartbeat fresh — the 14:52-IST stall
+ * that day paged nobody because the canary read "receiving normally" the whole time. This sweep also
+ * compares {@code lastBarReceivedAtMs − lastBarEvaluatedAtMs}: an EVAL stall is bars ARRIVING but not
+ * processed for a full {@code bar-gap-ms}. It is compared receipt-to-eval (NOT to wall-clock) so a
+ * quiet market that freezes both heartbeats never false-alarms. A blocked eval thread cannot be fixed
+ * by re-subscribing (the rebuild would queue behind the block), so on an eval stall this does NOT
+ * re-subscribe — it logs a distinct ERROR, captures the {@code signal-eval} stack trace (the forensic
+ * evidence the wiped 15:57 logs cost us), pages with a distinct title, and latches once per episode.
  *
  * <p><b>Why one global heartbeat is sufficient (not per-channel):</b> {@link SignalEngine} subscribes
  * every candle channel through a SINGLE {@code RedisMessageListenerContainer} on one connection
@@ -64,6 +77,7 @@ public class SubscriberHealthCanary {
   private final SignalEngine engine;
   private final StringRedisTemplate redis;
   private final ApplicationEventPublisher events;
+  private final SubscriberHealthTelemetry telemetry;
   private final Clock clock;
   private final MarketCalendar calendar = MarketCalendar.nse();
   private final boolean enabled;
@@ -71,28 +85,31 @@ public class SubscriberHealthCanary {
   private final long feedFreshMs;
 
   // Single-writer (the @Scheduled thread never overlaps under fixedDelay); volatile for test/read.
-  private volatile boolean stalled;
+  private volatile boolean stalled; // receive-side latch (subscription drop)
+  private volatile boolean evalStalled; // eval-side latch (bars arriving, not processed)
   private long lastResubscribeAtMs;
 
-  /** Wires the engine, the shared Redis, the event bus, and the (tunable) gap/freshness thresholds. */
+  /** Wires the engine, the shared Redis, the event bus, telemetry, and the (tunable) thresholds. */
   public SubscriberHealthCanary(
       SignalEngine engine,
       StringRedisTemplate redis,
       ApplicationEventPublisher events,
+      SubscriberHealthTelemetry telemetry,
       Clock clock,
-      @Value("${artha.signal.subscriber-watchdog.enabled:true}") boolean enabled,
-      @Value("${artha.signal.subscriber-watchdog.bar-gap-ms:180000}") long barGapMs,
-      @Value("${artha.signal.subscriber-watchdog.feed-fresh-ms:90000}") long feedFreshMs) {
+      @Value("${artha.signals.subscriber-watchdog.enabled:true}") boolean enabled,
+      @Value("${artha.signals.subscriber-watchdog.bar-gap-ms:180000}") long barGapMs,
+      @Value("${artha.signals.subscriber-watchdog.feed-fresh-ms:90000}") long feedFreshMs) {
     this.engine = engine;
     this.redis = redis;
     this.events = events;
+    this.telemetry = telemetry;
     this.clock = clock;
     this.enabled = enabled;
     this.barGapMs = barGapMs;
     this.feedFreshMs = feedFreshMs;
   }
 
-  /** The per-minute in-session receive-gap check. */
+  /** The per-minute in-session receive-gap + eval-gap check. */
   @Scheduled(fixedDelay = 60_000, initialDelay = 120_000)
   public void sweep() {
     try {
@@ -104,11 +121,45 @@ public class SubscriberHealthCanary {
         return; // out of session, or nothing to receive — no false alarm
       }
       long nowMs = clock.millis();
-      long barGap = nowMs - engine.lastBarReceivedAtMs();
-      if (barGap < barGapMs) {
+      long received = engine.lastBarReceivedAtMs();
+      long evaluated = engine.lastBarEvaluatedAtMs();
+      long receiveGap = nowMs - received; // wall-clock since the last bar RECEIVED
+      long evalLag = received - evaluated; // receipt-vs-eval (NOT wall-clock: quiet market freezes both)
+
+      // (1) EVAL STALL — bars ARRIVING but the signal-eval thread is not processing them. Checked
+      // FIRST and independently of the receive path: during an eval block receipt is FRESH, so the
+      // "receiving normally" early-return below would otherwise mask it entirely. A pure receive-drop
+      // can't trip this (evaluated tracks received to ~0 once the last drain completes), and both-frozen
+      // quiet markets give evalLag ~0 — so this only fires on the real bars-arriving-not-processed
+      // signature. A blocked eval thread cannot be fixed by re-subscribing, so NO re-subscribe here.
+      if (evalLag >= barGapMs) {
+        if (!evalStalled) {
+          evalStalled = true;
+          String detail =
+              "signal-eval STALLED — bars arriving but not evaluated for " + (evalLag / 1000)
+                  + "s (receipt " + (receiveGap / 1000) + "s old)";
+          log.error("subscriber watchdog: {}", detail);
+          logEvalThreadStack(); // forensic evidence the wiped 15:57 logs cost us (audit A13)
+          telemetry.record("eval-stall", detail);
+          publish(
+              "ArthaYantra subscriber watchdog: signal-eval STALLED",
+              detail + " — NOT re-subscribing (a blocked eval thread cannot be fixed by re-subscribe).");
+        }
+        return; // pure eval stall: no re-subscribe attempt
+      }
+      if (evalStalled) {
+        evalStalled = false;
+        log.info("subscriber watchdog: signal-eval RECOVERED (eval lag {}s)", evalLag / 1000);
+        telemetry.record("recovery", "signal-eval caught up (lag " + (evalLag / 1000) + "s)");
+      }
+
+      // (2) RECEIVE GAP (the 2026-07-07 path) — the container silently dropped its subscription.
+      if (receiveGap < barGapMs) {
         if (stalled) {
           stalled = false;
-          log.info("subscriber watchdog: candle receipt RECOVERED (last bar {}s ago)", barGap / 1000);
+          log.info(
+              "subscriber watchdog: candle receipt RECOVERED (last bar {}s ago)", receiveGap / 1000);
+          telemetry.record("recovery", "candle receipt recovered (" + (receiveGap / 1000) + "s)");
         }
         return; // receiving normally
       }
@@ -116,36 +167,63 @@ public class SubscriberHealthCanary {
       if (feedAge > feedFreshMs) {
         return; // the FEED itself is stale/down/unreadable — market-data's canary owns that
       }
-      // Feed provably fresh but this consumer received no bar for barGap ⇒ the subscription dropped.
+      // Feed provably fresh but this consumer received no bar for receiveGap ⇒ the subscription dropped.
       String detail =
-          "no candle received for " + (barGap / 1000) + "s while the feed is live (ticks "
+          "no candle received for " + (receiveGap / 1000) + "s while the feed is live (ticks "
               + (feedAge / 1000) + "s old) — Redis candles.1m subscription dropped; re-subscribing";
       if (!stalled) {
         // First detection: latch, re-subscribe, and page ONCE.
         stalled = true;
         lastResubscribeAtMs = nowMs;
         log.error("subscriber watchdog: signal engine STARVED — {}", detail);
+        telemetry.record("receive-stall", detail);
         engine.forceResubscribe(detail);
-        publish(detail);
+        telemetry.record("resubscribe", detail);
+        publish(
+            "ArthaYantra subscriber watchdog: signal engine STARVED",
+            detail + " (live scalper eval was silently stalled).");
       } else if (nowMs - lastResubscribeAtMs >= barGapMs) {
         // Still starved after a full window: retry the re-subscribe (throttled), no repeat page.
         lastResubscribeAtMs = nowMs;
         log.error("subscriber watchdog: still STARVED — retrying re-subscription ({})", detail);
         engine.forceResubscribe(detail);
+        telemetry.record("resubscribe", detail);
       }
     } catch (RuntimeException e) {
       log.warn("subscriber watchdog sweep failed: {}", e.toString());
     }
   }
 
-  private void publish(String detail) {
+  private void publish(String title, String message) {
     try {
-      events.publishEvent(
-          new SubscriberStallAlert(
-              "ArthaYantra subscriber watchdog: signal engine STARVED",
-              detail + " (live scalper eval was silently stalled)."));
+      events.publishEvent(new SubscriberStallAlert(title, message));
     } catch (RuntimeException e) {
       log.warn("subscriber watchdog alert failed: {}", e.getMessage());
+    }
+  }
+
+  /**
+   * Dumps the {@code signal-eval} thread's stack at ERROR — the forensic evidence a container
+   * re-create would otherwise erase (audit A13). Best-effort: never throws into the sweep.
+   */
+  private void logEvalThreadStack() {
+    try {
+      for (Map.Entry<Thread, StackTraceElement[]> entry : Thread.getAllStackTraces().entrySet()) {
+        if ("signal-eval".equals(entry.getKey().getName())) {
+          StringBuilder sb =
+              new StringBuilder("signal-eval thread stack (state=")
+                  .append(entry.getKey().getState())
+                  .append("):");
+          for (StackTraceElement frame : entry.getValue()) {
+            sb.append("\n\tat ").append(frame);
+          }
+          log.error(sb.toString());
+          return;
+        }
+      }
+      log.error("subscriber watchdog: signal-eval thread not found in the live thread set");
+    } catch (RuntimeException dumpFailed) {
+      log.warn("subscriber watchdog: signal-eval stack capture failed: {}", dumpFailed.toString());
     }
   }
 

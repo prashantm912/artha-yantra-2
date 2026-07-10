@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, Tags } from 'lucide-react';
 import { cn } from '../../lib/cn.ts';
@@ -61,7 +61,15 @@ const cancellable = (s: JobStatus) => s === 'queued' || s === 'running';
 // Failed-job detail dialog: the jobs LIST omits `jobs.error`, so a failed row's message is fetched
 // lazily from the detail endpoint (audit §2.7 — the BE already serves it). Accessible modal (Radix
 // titled + described) so the failure text is readable at any length, not a truncated title attr.
-function JobErrorDialog({ jobId, onClose }: { jobId: string; onClose: () => void }) {
+function JobErrorDialog({
+  jobId,
+  onClose,
+  returnFocusTo,
+}: {
+  jobId: string;
+  onClose: () => void;
+  returnFocusTo: HTMLElement | null;
+}) {
   const detail = useJobDetail(jobId);
   return (
     <Dialog
@@ -70,7 +78,14 @@ function JobErrorDialog({ jobId, onClose }: { jobId: string; onClose: () => void
         if (!o) onClose();
       }}
     >
-      <DialogContent className="max-w-lg">
+      {/* No DialogTrigger exists (the badge is a plain button), so Radix's default close handler
+          would drop focus to <body> (WCAG 2.4.3) — restore it to the invoking badge ourselves. */}
+      <DialogContent
+        onCloseAutoFocus={(e) => {
+          e.preventDefault();
+          returnFocusTo?.focus();
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Job failed</DialogTitle>
           <DialogDescription>
@@ -86,7 +101,14 @@ function JobErrorDialog({ jobId, onClose }: { jobId: string; onClose: () => void
             Couldn't load the failure detail.
           </p>
         ) : detail.data?.error ? (
-          <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded border border-bear/40 bg-surface-1 p-3 text-caption text-bear">
+          // Focusable scroll region (axe scrollable-region-focusable — the DataTable idiom): long
+          // errors overflow the max-height and keyboard users must be able to scroll them.
+          <pre
+            tabIndex={0}
+            role="region"
+            aria-label="Failure message"
+            className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded border border-bear/40 bg-surface-1 p-3 text-caption text-bear"
+          >
             {detail.data.error}
           </pre>
         ) : (
@@ -115,6 +137,7 @@ export function JobsPage() {
   const [tags, setTags] = useState<string[]>([]);
   // The failed job whose error dialog is open (null = closed). The list omits `error` → fetched lazily.
   const [errorJobId, setErrorJobId] = useState<string | null>(null);
+  const errorTriggerRef = useRef<HTMLElement | null>(null);
   // Server-side filter: keep only jobs whose pinned version is its strategy's NEWEST version. Sends the
   // set of current-version ids so the filter spans EVERY page, not just the loaded one.
   const [latestOnly, setLatestOnly] = useState(false);
@@ -314,7 +337,10 @@ export function JobsPage() {
             // Row-level failure indicator: the failed badge is a button that opens the error dialog.
             <button
               type="button"
-              onClick={() => setErrorJobId(job.jobId)}
+              onClick={(e) => {
+                errorTriggerRef.current = e.currentTarget; // focus returns here on dialog close
+                setErrorJobId(job.jobId);
+              }}
               aria-label={`Show why run ${job.jobId.slice(0, 8)} failed`}
               className={cn(
                 'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-semibold ring-1 hover:ring-2 focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent',
@@ -559,7 +585,13 @@ export function JobsPage() {
         </button>
       </div>
 
-      {errorJobId && <JobErrorDialog jobId={errorJobId} onClose={() => setErrorJobId(null)} />}
+      {errorJobId && (
+        <JobErrorDialog
+          jobId={errorJobId}
+          onClose={() => setErrorJobId(null)}
+          returnFocusTo={errorTriggerRef.current}
+        />
+      )}
     </LoadBeat>
   );
 }

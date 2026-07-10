@@ -10,6 +10,7 @@ import in.arthayantra.strategysignal.paper.PaperPositionRepository.PositionRow;
 import in.arthayantra.strategysignal.signals.SignalRepository;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
@@ -147,7 +148,10 @@ public class PaperService {
   private final BookResolver books;
   private final RiskService risk;
   private final ApplicationEventPublisher events;
+  private final PaperStaleTickAlerter staleTicks;
   private final BigDecimal perTradeRiskPct;
+  /** Audit V3: a fill priced off a last tick older than this is fiction — rejected DATA_STALE. */
+  private final Duration tickMaxAge;
   private final TransactionTemplate txTemplate;
 
   /** Wires the ledger collaborators. */
@@ -162,9 +166,12 @@ public class PaperService {
       BookResolver books,
       RiskService risk,
       ApplicationEventPublisher events,
+      PaperStaleTickAlerter staleTicks,
       PlatformTransactionManager transactionManager,
       @org.springframework.beans.factory.annotation.Value("${artha.paper.risk.per-trade-risk-pct:1.0}")
-          BigDecimal perTradeRiskPct) {
+          BigDecimal perTradeRiskPct,
+      @org.springframework.beans.factory.annotation.Value("${artha.paper.tick-max-age-seconds:15}")
+          long tickMaxAgeSeconds) {
     this.orders = orders;
     this.positions = positions;
     this.fills = fills;
@@ -175,7 +182,9 @@ public class PaperService {
     this.books = books;
     this.risk = risk;
     this.events = events;
+    this.staleTicks = staleTicks;
     this.perTradeRiskPct = perTradeRiskPct;
+    this.tickMaxAge = Duration.ofSeconds(tickMaxAgeSeconds);
     this.txTemplate = new TransactionTemplate(transactionManager);
   }
 
@@ -284,9 +293,29 @@ public class PaperService {
     if (request.qty() <= 0) {
       throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "qty must be positive");
     }
-    BigDecimal reference =
-        firstNonNull(
-            request.price(), lastTick.lastPrice(exchange, tradingsymbol).orElse(null), signalEntry);
+    // Audit V3 tick freshness: an explicit request price always wins (the caller supplied it). Otherwise
+    // fall to the live last tick — but ONLY when it is fresh: a fill priced off a stale LTP is fiction, so
+    // a tick older than tickMaxAge is rejected DATA_STALE, never silently substituted. With no tick at all
+    // a signal take still fills at its own entry price; nothing available stays the existing DATA_STALE.
+    BigDecimal reference = request.price();
+    if (reference == null) {
+      Optional<LastTickReader.TickView> tick = lastTick.lastTick(exchange, tradingsymbol);
+      if (tick.isPresent()) {
+        Duration age = tick.get().age();
+        if (age != null && age.compareTo(tickMaxAge) > 0) {
+          throw new ApiException(
+              422,
+              ErrorCodes.DATA_STALE,
+              "last tick for " + exchange + ":" + tradingsymbol + " is " + age.toSeconds()
+                  + "s old (max " + tickMaxAge.toSeconds() + "s) — refusing to fill at a stale price",
+              Map.of(
+                  "exchange", exchange, "tradingsymbol", tradingsymbol, "tickAgeSeconds", age.toSeconds()));
+        }
+        reference = tick.get().price();
+      } else {
+        reference = signalEntry;
+      }
+    }
     if (reference == null) {
       throw new ApiException(422, ErrorCodes.DATA_STALE, "no price available to fill " + exchange + ":" + tradingsymbol);
     }
@@ -417,11 +446,40 @@ public class PaperService {
     return doSettle(pos, reference, "EXPIRY_SETTLEMENT", exercise);
   }
 
+  /**
+   * Audit V3 / research-fidelity P1-6: NO breakeven fabrication. The exit reference is an explicit
+   * price (manual close, swing daily-close, expiry intrinsic/spot) or the last known REAL tick at
+   * ANY age — NEVER {@code avgEntryPrice}, which booked a fictional 0-P&amp;L exit for a leg that
+   * never ticked. The freshness asymmetry with {@code openOrder} is deliberate: <b>entries need
+   * fresh truth (you can always NOT enter), exits need the best available truth (you cannot refuse
+   * to leave forever)</b> — so an engine exit, the 15:45 sweep and a weekend manual close all
+   * flatten off the last real price even when it is stale (counted via
+   * {@code ay_paper_stale_settle_total} + a once-per-(position, IST day) alert — visible, never
+   * silent, never refused). Only when NO tick has EVER been seen for the symbol does the settle
+   * refuse: counter + ntfy + 422 DATA_STALE, leaving the position OPEN for the next pass (the
+   * automated callers catch + log; the manual close surfaces the 422).
+   */
   private BigDecimal doSettle(PositionRow pos, BigDecimal price, String closeReason, boolean exercise) {
     InstrumentMeta meta = instruments.meta(pos.exchange(), pos.tradingsymbol());
     Side exitSide = "BUY".equals(pos.side()) ? Side.SELL : Side.BUY;
-    BigDecimal reference =
-        firstNonNull(price, lastTick.lastPrice(pos.exchange(), pos.tradingsymbol()).orElse(null), pos.avgEntryPrice());
+    BigDecimal reference = price;
+    if (reference == null) {
+      Optional<LastTickReader.TickView> tick = lastTick.lastTick(pos.exchange(), pos.tradingsymbol());
+      if (tick.isEmpty()) {
+        staleTicks.settleRefused(pos, closeReason);
+        throw new ApiException(
+            422,
+            ErrorCodes.DATA_STALE,
+            "no tick has ever been seen for " + pos.exchange() + ":" + pos.tradingsymbol()
+                + " — left OPEN, not settled at breakeven",
+            Map.of("positionId", pos.id(), "closeReason", closeReason));
+      }
+      reference = tick.get().price();
+      Duration age = tick.get().age();
+      if (age != null && age.compareTo(tickMaxAge) > 0) {
+        staleTicks.staleSettleUsed(pos, closeReason, age);
+      }
+    }
     Fill exit =
         exercise
             ? fills.settlementFill(exitSide, pos.qty(), reference, meta)
@@ -566,14 +624,5 @@ public class PaperService {
     return new TradeDto(
         row.id(), row.exchange(), row.tradingsymbol(), row.side(), row.qty(), row.avgEntryPrice(),
         row.realizedPnl(), row.openedAt(), row.closedAt());
-  }
-
-  private static BigDecimal firstNonNull(BigDecimal... values) {
-    for (BigDecimal value : values) {
-      if (value != null) {
-        return value;
-      }
-    }
-    return null;
   }
 }

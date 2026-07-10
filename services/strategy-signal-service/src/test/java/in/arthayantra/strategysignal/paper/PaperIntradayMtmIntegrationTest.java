@@ -18,6 +18,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
+import org.springframework.data.redis.core.StringRedisTemplate;
 
 /**
  * The 15:45 mark-to-close sweep (mock profile): an OPEN position whose originating signal belongs to
@@ -61,6 +62,7 @@ class PaperIntradayMtmIntegrationTest extends StrategySignalIntegrationTestBase 
   @Autowired private RegistryService registry;
   @Autowired private StrategyRepository strategyRepo;
   @Autowired private SignalRepository signalRepo;
+  @Autowired private StringRedisTemplate redis;
 
   @Test
   void sweepClosesSignalLinkedIntradayPositionWithIntradayMtmReason() {
@@ -86,6 +88,13 @@ class PaperIntradayMtmIntegrationTest extends StrategySignalIntegrationTestBase 
         new PaperService.OrderRequest(
             signalId, "NFO", sym, "BUY", 50, new BigDecimal("80.00"), null, null));
     assertThat(positions.findOpen("other", "NFO", sym, "BUY")).isPresent();
+
+    // Audit V3: the 15:45 sweep settles at the live LTP (null price). A live intraday option ticks, so
+    // seed a fresh last tick — the sweep prices off it honestly instead of the removed breakeven
+    // fallback (a truly-tickless intraday close now refuses + alerts rather than fabricating 0 P&L).
+    redis.opsForHash().put(
+        "ticks:last", "NFO:" + sym,
+        "{\"lastPrice\":\"82.00\",\"timestamp\":\"" + OffsetDateTime.now() + "\"}");
 
     // >= 1: the shared DB may carry other tests' intraday leftovers; ours MUST be among the closed.
     assertThat(paper.markToCloseIntraday()).isGreaterThanOrEqualTo(1);

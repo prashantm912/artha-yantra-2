@@ -23,6 +23,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
+import org.springframework.data.redis.core.StringRedisTemplate;
 
 /**
  * The TAKEN-entry exit lifecycle (audit P0-2, mock profile): (1) {@code activeEntry} keeps a TAKEN
@@ -67,6 +68,7 @@ class TakenSignalExitIntegrationTest extends StrategySignalIntegrationTestBase {
   @Autowired private StrategyRepository strategyRepo;
   @Autowired private SignalRepository signals;
   @Autowired private ApplicationEventPublisher events;
+  @Autowired private StringRedisTemplate redis;
 
   @Test
   void activeEntryAnchorsTakenEntries() {
@@ -145,6 +147,12 @@ class TakenSignalExitIntegrationTest extends StrategySignalIntegrationTestBase {
     // The PaperSignalListener path (SignalTaken → openSingle) opens the primary leg + brackets.
     events.publishEvent(new SignalTaken(signalId, 50, new BigDecimal("80.00")));
     assertThat(positions.findOpen("other", "NFO", sym, "BUY")).isPresent();
+    // Audit V3: the engine-exit / 15:45 sweep settle at the live LTP (null-price tick-engine default).
+    // A live intraday option ticks, so seed a fresh last tick — the close now prices off it honestly
+    // rather than the removed breakeven fallback (an LTP-less intraday close refuses + alerts instead).
+    redis.opsForHash().put(
+        "ticks:last", "NFO:" + sym,
+        "{\"lastPrice\":\"82.00\",\"timestamp\":\"" + OffsetDateTime.now() + "\"}");
     return new Seed(versionId, signalId, sym);
   }
 }

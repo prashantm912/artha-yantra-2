@@ -285,6 +285,14 @@ export function BacktestResultsPage() {
           </BeatBlock>
           <p className="mt-2 text-xs tabular-nums text-ay-muted">
             dataHash {r.dataHash ?? '—'} · seed {r.seed ?? '—'}
+            {r.engineSha && (
+              <>
+                {' · '}engine{' '}
+                <span title={r.engineImage ? `${r.engineSha} (${r.engineImage})` : r.engineSha}>
+                  {r.engineSha.slice(0, 12)}
+                </span>
+              </>
+            )}
           </p>
         </>
       )}

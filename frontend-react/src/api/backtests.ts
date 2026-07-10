@@ -225,6 +225,10 @@ export interface BacktestResults {
   strategyId?: string | null;
   /** When the run completed (ISO) — the "date when it was run". */
   ranAt?: string | null;
+  /** Engine CODE identity this run ran under: git SHA + build image (audit P0-2 / R1). Null on
+   *  pre-V008 rows and on a jar built without git.properties. */
+  engineSha?: string | null;
+  engineImage?: string | null;
 }
 
 export interface TradeRow {

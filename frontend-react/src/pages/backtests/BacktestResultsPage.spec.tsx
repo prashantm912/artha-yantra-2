@@ -11,6 +11,8 @@ vi.mock('../../api/backtests.ts', () => ({
       equityCurve: [{ ts: '2026-06-01T00:00:00Z', value: '100000' }, { ts: '2026-06-02T00:00:00Z', value: '101000' }],
       dataHash: 'deadbeef',
       seed: 42,
+      engineSha: 'cafebabe1234567890',
+      engineImage: 'backtest-service:9.9.9',
     },
     isLoading: false,
   }),
@@ -91,6 +93,8 @@ describe('BacktestResultsPage', () => {
     expect(screen.getByText('Sharpe')).toBeInTheDocument();
     expect(screen.getByText('1.85')).toBeInTheDocument();
     expect(screen.getByText(/dataHash deadbeef/)).toBeInTheDocument();
+    // Audit P0-2 / R1: the engine SHA renders (truncated to 12) when the run carries one.
+    expect(screen.getByText('cafebabe1234')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: 'Trades' }));
     // Exit-reason breakdown summarises the loaded trades above the table (one TARGET bucket here).

@@ -18,13 +18,16 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 class JobRepositoryIntegrationTest extends BacktestIntegrationTestBase {
 
   private static JobRepository repo;
+  private static JdbcTemplate jdbc;
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
   @BeforeAll
   static void wire() {
     DriverManagerDataSource ds =
         new DriverManagerDataSource(jdbcUrl("backtest"), dbUser(), dbPassword());
-    repo = new JobRepository(new JdbcTemplate(ds), MAPPER);
+    jdbc = new JdbcTemplate(ds);
+    // The lifecycle tests don't care about the identity; a fixed one keeps them deterministic.
+    repo = new JobRepository(jdbc, MAPPER, EngineIdentity.of("shared-sha", "backtest-service:it"));
   }
 
   private Job newQueuedBacktest() {
@@ -114,5 +117,42 @@ class JobRepositoryIntegrationTest extends BacktestIntegrationTestBase {
     Job running = newQueuedBacktest();
     repo.claim(running.id(), "w");
     assertThat(repo.cancelIfQueued(running.id())).as("running job cannot be queue-cancelled").isFalse();
+  }
+
+  // Audit P0-2 / R1: a queued job row carries the creating service's engine identity.
+  @Test
+  void insertStampsEngineIdentityWhenPresent() {
+    JobRepository stamped =
+        new JobRepository(jdbc, MAPPER, EngineIdentity.of("abc123def456", "backtest-service:9.9.9"));
+    Job job =
+        stamped.insertQueued(
+            JobKind.BACKTEST,
+            null,
+            UUID.randomUUID(),
+            MAPPER.createObjectNode().put("strategyId", "sha-present"),
+            UUID.randomUUID().toString());
+
+    assertThat(engineColumn(job.id(), "engine_sha")).isEqualTo("abc123def456");
+    assertThat(engineColumn(job.id(), "engine_image")).isEqualTo("backtest-service:9.9.9");
+  }
+
+  // Fail-soft: a jar built without git.properties (mock/test) leaves the columns NULL, not an error.
+  @Test
+  void insertLeavesEngineIdentityNullWhenAbsent() {
+    JobRepository unstamped = new JobRepository(jdbc, MAPPER, EngineIdentity.of(null, null));
+    Job job =
+        unstamped.insertQueued(
+            JobKind.BACKTEST,
+            null,
+            UUID.randomUUID(),
+            MAPPER.createObjectNode().put("strategyId", "sha-absent"),
+            UUID.randomUUID().toString());
+
+    assertThat(engineColumn(job.id(), "engine_sha")).isNull();
+    assertThat(engineColumn(job.id(), "engine_image")).isNull();
+  }
+
+  private static String engineColumn(UUID jobId, String column) {
+    return jdbc.queryForObject("SELECT " + column + " FROM jobs WHERE id=?", String.class, jobId);
   }
 }

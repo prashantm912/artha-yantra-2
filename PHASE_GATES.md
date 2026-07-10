@@ -57,6 +57,22 @@ scalper entries + a TRIP audit + ntfy; ZERO displayed-number change; swing books
 the forward-paper reliability month, an always-on host, the flag-arms, and the audit HIGH/MED doctrine items (H6/H8 + the
 swing exit-parity HOLD batch #128).
 
+**2026-07-10 (later) — two design programs closed; the NEXT net-new build frontier is defined.** Two 2-prompt
+programs each produced an audit + a 2-pass-adversarially-verified design, all four MERGED same day:
+**Program 1 (backtest/live research fidelity):** the 4th audit `docs/audits/2026-07-10-research-fidelity-audit.md`
+(#658 — headline P0: live 3m/5m/15m/1h series evaluate FROZEN 1-min partial buckets, fix chip filed) → the
+**strategy evolution engine design** `docs/superpowers/plans/2026-07-10-strategy-evolution-engine-design.md` (#659,
+ledger row `evolution-engine` #660). **Program 2 (everything else — all 77 app pages):** the 5th audit
+`docs/audits/2026-07-10-app-platform-audit.md` (#661 — headlines: manual paper orders bypass the risk governors,
+signal status transitions never re-published, FII/DII silent ingest holes, no ingest ledger, 71/203 Map-returning
+handlers at ratchet capacity) → the **intelligence/decision-support layer design**
+`docs/superpowers/plans/2026-07-10-intelligence-layer-design.md` (#662, ledger row `intelligence-layer` #663).
+Housekeeping: 6 shipped plan docs archived + README refreshed (#664), older archive links repaired (#665); the live
+stack was redeployed to HEAD pre-open (all services SHA-verified). **The net-new build frontier is now: the
+app-platform audit's Phase-1 foundations (`ingest_runs` ledger + paper-order guards V1–V3 + silent-failure kills) —
+the shared prerequisite BOTH merged designs gate on (evolution E0 / intelligence I1); owner sequences which program
+builds first.** Neither design self-arms anything; both builds are NOT started.
+
 **Scalper engine → 100% (2026-06-28):** the S24 incorporation is closed (debloated operative doc + W3 drift
 tags + W4 gates + 2b infra, all BUILT/inert). Finishing the engine to "nothing-deferred" is now tracked in
 the consolidated roadmap [`docs/superpowers/plans/archive/2026-06-28-scalper-to-100-roadmap.md`](docs/superpowers/plans/archive/2026-06-28-scalper-to-100-roadmap.md)

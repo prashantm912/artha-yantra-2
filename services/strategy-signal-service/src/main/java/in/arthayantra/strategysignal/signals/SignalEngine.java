@@ -33,6 +33,7 @@ import io.micrometer.core.instrument.Timer;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
@@ -619,14 +620,14 @@ public class SignalEngine {
         return;
       }
       int entryIndex =
-          primary.indexAtOrBefore(activeEntry.get().generatedAt().toInstant());
+          entryAnchorIndex(primary, interval, activeEntry.get().generatedAt().toInstant());
       Optional<ExitEvaluator.ExitDecision> exit =
           ExitEvaluator.evaluate(
               strategy.definition(), bank,
               new ExitEvaluator.Position(
                   scalperPositionDirection(strategy, activeEntry.get()),
                   activeEntry.get().entryPrice(),
-                  Math.max(entryIndex, 0)),
+                  entryIndex),
               index);
       if (exit.isPresent()) {
         emit(strategy, exchange, tradingsymbol, interval, "EXIT", bar, activeEntry.get(),
@@ -709,7 +710,9 @@ public class SignalEngine {
           return;
         }
         int entryPrimaryIndex =
-            Math.max(primary.indexAtOrBefore(activeEntry.get().generatedAt().toInstant()), 0);
+            entryAnchorIndex(primary, primaryInterval, activeEntry.get().generatedAt().toInstant());
+        // the 1m anchor stays generatedAt itself: the 1m TRIGGER bar exists in the 1m series and
+        // is the correct 1m-scan start (no coarse off-by-one applies on the 1m axis)
         int entryOneMinuteIndex =
             Math.max(oneMinute.indexAtOrBefore(activeEntry.get().generatedAt().toInstant()), 0);
         Optional<ExitEvaluator.ExitDecision> exit =
@@ -891,10 +894,12 @@ public class SignalEngine {
     String side =
         strategy.definition().direction() == StrategyDefinition.Direction.SHORT ? "SELL" : "BUY";
     String breakdownJson = ScoreBreakdownJson.write(evaluation.breakdown());
-    // generated_at is the entry BAR's bucket instant, not wall-clock now(): it is persisted
-    // explicitly (so the row and the channel payload carry the IDENTICAL instant), and it makes
-    // the exit-side entry-index reconstruction (indexAtOrBefore) land exactly on the entry bar —
-    // deterministic and identical to the replay harness.
+    // generated_at is the TRIGGER bar's bucket instant, not wall-clock now(): it is persisted
+    // explicitly (so the row and the channel payload carry the IDENTICAL instant). For a 1m
+    // primary the trigger IS the evaluated bar; for a coarse primary it is the boundary 1m bar
+    // that OPENS the bucket AFTER the one evaluated, so the exit-side anchor reconstruction
+    // (entryAnchorIndex) subtracts one primary duration first to land on the EVALUATED bucket —
+    // deterministic and matching the replay harness, which carries the evaluated index directly.
     OffsetDateTime generatedAt = bar.bucketStart().withOffsetSameInstant(Ist.OFFSET);
     OffsetDateTime expiresAt = generatedAt.plusMinutes(signalTtlMinutes);
     // A12 suggested qty (lot-rounded sizing vs paper equity), stamped OUTSIDE the score breakdown.
@@ -1413,6 +1418,31 @@ public class SignalEngine {
 
   /** The coarse primaries the live engine can roll off the 1m stream (reload() enforces this). */
   static final Set<String> ROLLABLE_PRIMARIES = Set.of("1m", "3m", "5m", "15m", "1h");
+
+  /**
+   * Reconstructs the PRIMARY-series index of the bar an active entry was EVALUATED on — the exit
+   * anchor every exit rule measures from (atrAtEntry, the favorable-extreme trail window start,
+   * time-stop bar counting, initial risk). {@code generatedAt} is the persisted 1m TRIGGER bar
+   * instant. For a 1m primary that trigger IS the evaluated bar, so the anchor is
+   * {@code indexAtOrBefore(generatedAt)} unchanged. For a COARSE primary the trigger is the
+   * boundary 1m bar that OPENS bucket k+1 while evaluation ran on the just-COMPLETED bucket k (the
+   * series' last bar under the B1 in-progress filter) — anchoring at {@code generatedAt} directly
+   * would resolve to k+1 once that bucket completes and appends: one bucket AFTER the evaluated
+   * bar, diverging from the replay harness (which carries the evaluated index itself) and
+   * flip-flopping on the intrabar path across the next boundary refresh. So the coarse anchor is
+   * the bucket at or before {@code generatedAt − primaryDuration}: exactly k when buckets are
+   * adjacent, and the nearest EARLIER bucket across session/holiday gaps ({@code indexAtOrBefore}
+   * is a floor lookup by construction — the evaluated bar was the last bar at entry time, so its
+   * bucket start is always ≤ that instant). A -1 miss (an entry older than the warmed window)
+   * clamps to 0, matching the previous behavior.
+   */
+  static int entryAnchorIndex(EngineSeries primary, String primaryInterval, Instant generatedAt) {
+    Instant evaluatedAt =
+        "1m".equals(primaryInterval)
+            ? generatedAt
+            : generatedAt.minus(intervalDuration(primaryInterval));
+    return Math.max(primary.indexAtOrBefore(evaluatedAt), 0);
+  }
 
   static Duration intervalDuration(String interval) {
     return switch (interval) {

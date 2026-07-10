@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -96,5 +97,15 @@ public class CorporateActionRepository {
                 rs.getObject("resolved_at", OffsetDateTime.class)),
         exchange,
         tradingsymbol);
+  }
+
+  /**
+   * The MOST-RECENT event for a symbol, or empty. The A14 resume checkpoint reads its status: a
+   * {@code BASE_REBUILT} latest event means a prior remediation re-fetched the base but crashed
+   * before the cagg refresh finished → resume the refresh only, never re-purge.
+   */
+  public Optional<EventRow> latestEvent(String exchange, String tradingsymbol) {
+    List<EventRow> rows = eventsFor(exchange, tradingsymbol);
+    return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
   }
 }

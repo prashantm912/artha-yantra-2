@@ -27,6 +27,7 @@ import java.util.concurrent.Executors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -38,8 +39,16 @@ import org.springframework.stereotype.Service;
  * rate-limited re-backfill → cagg refresh (rewritten rows carry fresh {@code fetched_at}, so the
  * Stage-D dataHash flags pre-event runs not-like-for-like) → RESOLVED. Single-anchor noise only
  * counts {@code ay_corporate_action_anchor_noise_total}. Kite-diff is the SOLE detection input.
+ *
+ * <p>Kill switch (A14, 2026-07-10): {@code artha.corporate-actions.enabled=false} un-registers this
+ * bean entirely (default-armed via {@code matchIfMissing}) — the remediation OOM-crashed live
+ * Postgres 3× and the operator needs a one-line .env disarm without a code change.
  */
 @Service
+@ConditionalOnProperty(
+    name = "artha.corporate-actions.enabled",
+    havingValue = "true",
+    matchIfMissing = true)
 public class CorporateActionJob {
 
   private static final Logger log = LoggerFactory.getLogger(CorporateActionJob.class);
@@ -155,6 +164,17 @@ public class CorporateActionJob {
 
   private java.util.Optional<UUID> sweepSymbol(Instrument equity, LocalDate today) throws Exception {
     InstrumentKey key = new InstrumentKey(equity.exchange(), equity.tradingsymbol());
+    // A14 resume: a symbol whose MOST-RECENT event is BASE_REBUILT crashed AFTER its base was
+    // re-fetched (committed) but BEFORE the chunked cagg refresh finished — resume the refresh only,
+    // never re-purge ~12 years. Detection would NOT re-fire this (post-rebuild the cache == Kite ⇒
+    // no divergence, so no fresh DETECTED row + no double-remediation), so this checkpoint scan is
+    // the SOLE resume trigger. Reuses the existing event row.
+    java.util.Optional<CorporateActionRepository.EventRow> latest =
+        events.latestEvent(equity.exchange(), equity.tradingsymbol());
+    if (latest.isPresent() && "BASE_REBUILT".equals(latest.get().status())) {
+      submitRefreshOnly(latest.get().id(), equity, today);
+      return java.util.Optional.empty(); // a resume, not a fresh detection
+    }
     // Skip BHAVCOPY-only equities (Phase C): the bulk universe is split/bonus-adjusted on read by
     // EquitySplitBonusAdjuster, not by this purge+Kite-refetch path. Without this gate, projecting
     // bhavcopy 1d candles for the whole ~22k equity universe would fire one Kite fetch per symbol
@@ -236,9 +256,12 @@ public class CorporateActionJob {
         () -> {
           try {
             events.updateStatus(id, "REBACKFILL_RUNNING");
-            // purge → full re-backfill THROUGH the rate-limited gateway (prefetch = ensureCoverage
-            // = limiter path); rewritten rows carry fresh fetched_at (the dataHash bump);
-            // ensureCoverage's 1m pass also refreshes the 5m/15m/1h/1d/1w caggs (B-21)
+            // purge (compressed-safe WINDOWED delete) → full re-backfill THROUGH the rate-limited
+            // gateway (prefetch = ensureCoverage = limiter path); rewritten rows carry fresh
+            // fetched_at (the dataHash bump). The 1m prefetch DEFERS its cagg refresh
+            // (refreshAggregates=false) so we can checkpoint BASE_REBUILT once the base commits but
+            // BEFORE the (chunked) refresh — a hard crash mid-refresh then RESUMES on the next sweep
+            // instead of re-purging ~12 years for nothing (A14, 2026-07-10 3× live-Postgres OOM).
             candles.purgeSymbol(equity.exchange(), equity.tradingsymbol());
             OffsetDateTime now = OffsetDateTime.now(clock);
             queryService.prefetch(
@@ -246,7 +269,9 @@ public class CorporateActionJob {
                 today.minusDays(rebackfillDays1d).atStartOfDay().atOffset(Ist.OFFSET), now);
             queryService.prefetch(
                 equity.exchange(), equity.tradingsymbol(), "1m",
-                today.minusDays(rebackfillDays1m).atStartOfDay().atOffset(Ist.OFFSET), now);
+                today.minusDays(rebackfillDays1m).atStartOfDay().atOffset(Ist.OFFSET), now, false);
+            events.updateStatus(id, "BASE_REBUILT");
+            refreshRebuiltAggregates(today, now);
             events.updateStatus(id, "RESOLVED");
             ntfy.send(
                 "Corporate action rebuilt",
@@ -261,6 +286,41 @@ public class CorporateActionJob {
                 equity.exchange() + ":" + equity.tradingsymbol() + " — " + e.getMessage());
           }
         });
+  }
+
+  /**
+   * Resume path (A14): the base was already re-fetched (committed) in a prior remediation that
+   * crashed mid-refresh — redo the CHUNKED cagg refresh ONLY, then RESOLVED. Skips purge + prefetch
+   * entirely. Status is LEFT at BASE_REBUILT during the refresh (not downgraded to
+   * REBACKFILL_RUNNING) so a hard crash here re-resumes on the next sweep instead of stranding a
+   * REBACKFILL_RUNNING row; a soft (catchable) failure is a real error → FAILED + urgent alert.
+   */
+  @SuppressWarnings("FutureReturnValueIgnored")
+  private void submitRefreshOnly(UUID id, Instrument equity, LocalDate today) {
+    executor.submit(
+        () -> {
+          try {
+            refreshRebuiltAggregates(today, OffsetDateTime.now(clock));
+            events.updateStatus(id, "RESOLVED");
+            ntfy.send(
+                "Corporate action rebuilt",
+                "default",
+                equity.exchange() + ":" + equity.tradingsymbol() + " cagg refresh resumed");
+          } catch (Exception e) {
+            log.error("corporate-action refresh resume failed for {}", equity.tradingsymbol(), e);
+            events.updateStatus(id, "FAILED");
+            ntfy.send(
+                "Corporate action rebuild FAILED",
+                "urgent",
+                equity.exchange() + ":" + equity.tradingsymbol() + " — resume: " + e.getMessage());
+          }
+        });
+  }
+
+  /** The chunked cagg refresh over the rebuilt 1m window (CandleRepository slices it ≤92-day). */
+  private void refreshRebuiltAggregates(LocalDate today, OffsetDateTime now) {
+    candles.refreshDerivedAggregates(
+        today.minusDays(rebackfillDays1m).atStartOfDay().atOffset(Ist.OFFSET), now);
   }
 
   private LocalDate snapToTradingDay(LocalDate date) {

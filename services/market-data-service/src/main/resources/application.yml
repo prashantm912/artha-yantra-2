@@ -47,6 +47,13 @@ artha:
     scenario: ${MOCK_SCENARIO:trend-up}
     seed: ${MOCK_SEED:42}
     instrument-count: ${MOCK_INSTRUMENT_COUNT:10}
+  corporate-actions:
+    # A14 kill switch (2026-07-10): the 16:30-IST anchor-close CA sweep. Default-armed
+    # (matchIfMissing=true on CorporateActionJob's @ConditionalOnProperty); flip false via
+    # ARTHA_CORPORATE_ACTIONS_ENABLED to disarm the scheduled job entirely — after the OOM incident
+    # the operator needs a one-line .env disarm without a code change. Name MUST byte-match the
+    # docker-compose passthrough key ARTHA_CORPORATE_ACTIONS_ENABLED (#653).
+    enabled: ${ARTHA_CORPORATE_ACTIONS_ENABLED:true}
   # OpenAlgo broker-swap spine (plan §3/§4). Per-capability source selector — DEFAULT kite, so
   # Phase 0 changes NO routing (the live OpenAlgo gateways bind only when a capability is flipped to
   # openalgo). The production cutover + OI-coverage canary is Phase 1 (§4).

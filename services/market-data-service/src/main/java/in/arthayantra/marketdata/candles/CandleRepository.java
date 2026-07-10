@@ -3,7 +3,11 @@ package in.arthayantra.marketdata.candles;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.OffsetDateTime;
+import java.time.Period;
+import java.util.ArrayList;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -16,6 +20,40 @@ import org.springframework.stereotype.Repository;
  */
 @Repository
 public class CandleRepository {
+
+  private static final Logger log = LoggerFactory.getLogger(CandleRepository.class);
+
+  /**
+   * Max span (days) for ONE {@code refresh_continuous_aggregate} CALL. A full ~12-year corporate-
+   * action re-backfill ({@code rebackfill-days-1m=4400}) issued as a SINGLE
+   * {@code CALL('candles_5m', 2014→2026)} SIGKILLed the 4GB live TimescaleDB backend 3× on
+   * 2026-07-10 (crash-recovery each). Slicing the range into ≤92-day (~3-month) windows bounds the
+   * decompression + materialization each CALL performs.
+   */
+  static final int MAX_REFRESH_WINDOW_DAYS = 92;
+
+  /**
+   * Adjacent refresh windows OVERLAP by this many days. {@code refresh_continuous_aggregate}
+   * EXCLUDES any bucket that does not COMPLETELY fit the window (TimescaleDB docs), so contiguous
+   * cuts would silently drop every bucket that straddles an interior cut. The overlap must exceed
+   * the coarsest bucket (candles_1w = 7 days) so a straddling bucket is fully contained in the
+   * earlier window; a bucket re-refreshed inside the overlap is idempotent.
+   */
+  static final int REFRESH_WINDOW_OVERLAP_DAYS = 8;
+
+  /**
+   * Purge DELETE window span. A naive {@code DELETE FROM candles WHERE exchange=? AND
+   * tradingsymbol=?} on a fully-COMPRESSED liquid equity decompresses the whole symbol in one DML —
+   * INFY hit 1,058,355 tuples &gt; the 100k {@code max_tuples_decompressed_per_dml_transaction}
+   * limit and aborted every sweep (2026-07-10). Deleting in 6-month windows keeps each DML at ~47k
+   * 1m rows (candles is segmentby {@code (exchange,tradingsymbol,interval)}, so only this symbol's
+   * segments in the touched 7-day chunks decompress) — comfortably under the limit, and WITHOUT
+   * unbounding {@code max_tuples_decompressed_per_dml_transaction} (its own memory spike).
+   */
+  static final int PURGE_WINDOW_MONTHS = 6;
+
+  /** A half-open time window {@code [from, to)} — the unit of a chunked refresh / windowed purge. */
+  record Window(OffsetDateTime from, OffsetDateTime to) {}
 
   private static final String UPSERT =
       """
@@ -267,18 +305,72 @@ public class CandleRepository {
    * refuses transactions.
    */
   public void refreshDerivedAggregates(OffsetDateTime from, OffsetDateTime to) {
-    String start = Timestamp.from(from.minusDays(8).toInstant()).toInstant().toString();
-    String end = Timestamp.from(to.plusDays(8).toInstant()).toInstant().toString();
+    OffsetDateTime start = from.minusDays(8);
+    OffsetDateTime end = to.plusDays(8);
+    List<Window> windows =
+        refreshWindows(start, end, MAX_REFRESH_WINDOW_DAYS, REFRESH_WINDOW_OVERLAP_DAYS);
     for (String view : List.of("candles_5m", "candles_15m", "candles_1h", "candles_1d", "candles_1w")) {
-      jdbc.execute(
-          "CALL public.refresh_continuous_aggregate('"
-              + view
-              + "', '"
-              + start
-              + "'::timestamptz, '"
-              + end
-              + "'::timestamptz)");
+      for (Window w : windows) {
+        jdbc.execute(
+            "CALL public.refresh_continuous_aggregate('"
+                + view
+                + "', '"
+                + w.from().toInstant()
+                + "'::timestamptz, '"
+                + w.to().toInstant()
+                + "'::timestamptz)");
+      }
+      // one line per view, not per window: a 12-yr rebuild is ~48 windows × 5 views (2026-07-10 OOM)
+      log.info(
+          "refreshed derived aggregate {} over {} window(s) [{} .. {}]",
+          view, windows.size(), start.toInstant(), end.toInstant());
     }
+  }
+
+  /**
+   * OVERLAPPING refresh windows over {@code [start, end)}: {@code stepDays}-day cuts, each window
+   * extended {@code overlapDays} past its cut so a bucket straddling an interior cut is fully
+   * contained in the earlier window (see {@link #REFRESH_WINDOW_OVERLAP_DAYS}). The union covers
+   * {@code [start, end)}; the last window is clamped at {@code end}.
+   */
+  static List<Window> refreshWindows(
+      OffsetDateTime start, OffsetDateTime end, int stepDays, int overlapDays) {
+    List<Window> windows = new ArrayList<>();
+    OffsetDateTime cursor = start;
+    while (cursor.isBefore(end)) {
+      OffsetDateTime windowEnd = cursor.plusDays((long) stepDays + overlapDays);
+      if (windowEnd.isAfter(end)) {
+        windowEnd = end;
+      }
+      windows.add(new Window(cursor, windowEnd));
+      cursor = cursor.plusDays(stepDays);
+    }
+    if (windows.isEmpty()) {
+      windows.add(new Window(start, end)); // start >= end (degenerate) — one window
+    }
+    return windows;
+  }
+
+  /**
+   * CONTIGUOUS non-overlapping windows over {@code [start, end)} of ≤{@code step} each (the last is
+   * the remainder). The windowed purge uses this — a {@code DELETE ... AND bucket >= ? AND bucket
+   * < ?} is exact per row, so overlap is neither needed nor wanted (it would re-scan rows).
+   */
+  static List<Window> purgeWindows(OffsetDateTime start, OffsetDateTime end, Period step) {
+    List<Window> windows = new ArrayList<>();
+    OffsetDateTime cursor = start;
+    while (cursor.isBefore(end)) {
+      OffsetDateTime next = cursor.plus(step);
+      if (next.isAfter(end)) {
+        next = end;
+      }
+      windows.add(new Window(cursor, next));
+      cursor = next;
+    }
+    if (windows.isEmpty()) {
+      windows.add(new Window(start, end)); // start >= end (degenerate) — one window
+    }
+    return windows;
   }
 
   /**
@@ -307,8 +399,38 @@ public class CandleRepository {
    * call this (amendment A8, the single sanctioned exception to closed-bars-immutable).
    */
   public int purgeSymbol(String exchange, String tradingsymbol) {
-    return jdbc.update(
-        "DELETE FROM candles WHERE exchange = ? AND tradingsymbol = ?", exchange, tradingsymbol);
+    // bucket span for this symbol; +1 day on the high side so the DELETE's exclusive upper bound
+    // still catches the last bucket. Clock-free (min/max from the data), so a windowed purge is
+    // provably complete regardless of the caller's clock.
+    Window bounds =
+        jdbc.query(
+            "SELECT min(bucket) AS lo, max(bucket) AS hi FROM candles"
+                + " WHERE exchange = ? AND tradingsymbol = ?",
+            rs -> {
+              if (!rs.next()) {
+                return null;
+              }
+              OffsetDateTime lo = rs.getObject("lo", OffsetDateTime.class);
+              OffsetDateTime hi = rs.getObject("hi", OffsetDateTime.class);
+              return lo == null ? null : new Window(lo, hi.plusDays(1));
+            },
+            exchange,
+            tradingsymbol);
+    if (bounds == null) {
+      return 0; // nothing cached for this symbol
+    }
+    int deleted = 0;
+    for (Window w : purgeWindows(bounds.from(), bounds.to(), Period.ofMonths(PURGE_WINDOW_MONTHS))) {
+      deleted +=
+          jdbc.update(
+              "DELETE FROM candles WHERE exchange = ? AND tradingsymbol = ?"
+                  + " AND bucket >= ? AND bucket < ?",
+              exchange,
+              tradingsymbol,
+              Timestamp.from(w.from().toInstant()),
+              Timestamp.from(w.to().toInstant()));
+    }
+    return deleted;
   }
 
   /** Hypertable size in bytes (the ay_hypertable_bytes gauge). */

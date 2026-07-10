@@ -210,6 +210,38 @@ class CorporateActionIntegrationTest extends MarketDataIntegrationTestBase {
   }
 
   @Test
+  void baseRebuiltEventIsResumedRefreshOnlyWithoutRePurging() {
+    // A14 resume: a crash-mid-refresh checkpoint. The base is already re-fetched (@BeforeEach seeded
+    // TCS 1d) and the event is stuck at BASE_REBUILT. The sweep must RESUME the cagg refresh only —
+    // it can NOT re-detect (cache == "Kite" with the CA scenario inactive) and must NOT re-purge.
+    OffsetDateTime from = OffsetDateTime.parse("2025-06-01T00:00:00+05:30");
+    OffsetDateTime to = OffsetDateTime.parse("2026-06-15T00:00:00+05:30");
+    int barsBefore = candles.range("NSE", "TCS", "1d", from, to).size();
+    assertThat(barsBefore).isGreaterThan(0);
+
+    UUID id =
+        events.insertDetected(
+            "NSE", "TCS", java.time.LocalDate.parse("2026-06-01"),
+            new BigDecimal("2.0"), 4, 3, "[]");
+    events.updateStatus(id, "BASE_REBUILT"); // V039 admits the new state
+
+    mockGateway().setCorporateActionActive(false); // no fresh divergence — resume is the ONLY path
+
+    job.sweepNow();
+
+    await()
+        .atMost(Duration.ofSeconds(60))
+        .untilAsserted(
+            () -> assertThat(events.eventsFor("NSE", "TCS").get(0).status()).isEqualTo("RESOLVED"));
+
+    // reused the existing row (no NEW detection): with CA inactive the only BASE_REBUILT→RESOLVED
+    // path is submitRefreshOnly, which skips purge + prefetch
+    assertThat(events.eventsFor("NSE", "TCS")).hasSize(1);
+    // purge was skipped: the pre-existing base bars survive
+    assertThat(candles.range("NSE", "TCS", "1d", from, to)).hasSize(barsBefore);
+  }
+
+  @Test
   void backtestRoleCanSelectEventsButNeverInsert() throws Exception {
     try (Connection connection = DriverManager.getConnection(jdbcUrl(), dbUser(), dbPassword());
         Statement statement = connection.createStatement()) {

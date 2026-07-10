@@ -6,7 +6,7 @@
 
 Status: DESIGN LOCKED (grilled with owner 2026-06-21). Sequenced **after PR-W1, before Wave 2/3**
 (master-plan §20.3). Authority: this doc + master-plan §18 (OpenAlgo gap addendum) + §21 (Kite-vs-Upstox
-verdict) + [ADR-0001](../../adr/0001-broker-coupling-openalgo-live-upstox-historical.md). Backlog source:
+verdict) + [ADR-0001](../../../adr/0001-broker-coupling-openalgo-live-upstox-historical.md). Backlog source:
 `docs/manual-tests/phase-4-wave1-deferred-ledger.md` (Bucket 5).
 
 > **UPDATE 2026-06-24.** The **Deferred (B) expired-contract archive** (below) is now **BUILT +
@@ -138,7 +138,7 @@ Upstox launched **Market Information** + **Company Fundamentals** REST APIs (11 
 directly and authoritatively, several things we currently scrape from NSE or do not have. OpenAlgo does
 **not** normalize them (verified: not in the 2.0.1.4 `restx_api` namespaces) → a second Upstox-specific
 side-channel behind ports, NSE kept as fallback. Full rationale + scope table in
-[ADR-0002](../../adr/0002-upstox-market-information-analytics-side-channel.md).
+[ADR-0002](../../../adr/0002-upstox-market-information-analytics-side-channel.md).
 
 **Owner decision (2026-06-22): plan now, build still waits for Upstox activation** (same gate as §"Token-
 gated sequencing"). All new flags land dormant default-off, no behaviour change until a live `200` confirms

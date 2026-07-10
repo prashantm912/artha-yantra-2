@@ -420,6 +420,70 @@ class ConnectTheDotsScorerTest {
     assertThat(on.bullish()).isFalse(); // suppressed regardless of the otherwise-strong aggregate
   }
 
+  // --------------------------------------------------- P3: null-input dots withheld from the denominator
+
+  /** BULL_MACRO with a custom ivRank (null exercises the P3 absent/withheld path). */
+  private static Macro bullMacroWithIvRank(BigDecimal ivRank) {
+    return new Macro(bd("14"), ivRank, bd("12"), Boolean.FALSE, 40, 10, bd("50"), bd("0.20"), bd("0.05"));
+  }
+
+  @Test
+  void nullIvRankInputIsWithheldFromDenominatorNotScoredAgainst() {
+    // Every dot aligns for a CE except iv_rank, whose INPUT is null. P3: the null dot is WITHHELD from
+    // num AND den (absent), so the all-else-aligned aggregate stays 1.0. Were it (wrongly) scored
+    // supports=false while still counted in the denominator, the aggregate would fall to 18.8/19.6.
+    Confluence r =
+        ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, bullMacroWithIvRank(null)), CE, 1, T, P, true);
+
+    DotScore ivRank =
+        r.dots().stream().filter(d -> d.dot().equals("iv_rank")).findFirst().orElseThrow();
+    assertThat(ivRank.absent()).isTrue();
+    assertThat(ivRank.supports()).isFalse(); // withheld => neither supports nor opposes
+    assertThat(r.aggregate()).isEqualByComparingTo("1.0"); // excluded, NOT 0.9592 (scored-against)
+    assertThat(r.bullish()).isTrue();
+  }
+
+  @Test
+  void presentIvRankStillCountsInTheDenominator() {
+    // ivRank 80 (>= the 50 "low" cut) is PRESENT, so it stays in the denominator scoring supports=false
+    // (not absent). The all-else-aligned aggregate is 18.8/19.6 = 0.9592 — the contrast that proves a
+    // PRESENT rank is still counted, only a NULL one is withheld.
+    Confluence r =
+        ConnectTheDotsScorer.score(
+            ctx(BULL_CHART, BULL_OI, bullMacroWithIvRank(bd("80"))), CE, 1, T, P, true);
+
+    DotScore ivRank =
+        r.dots().stream().filter(d -> d.dot().equals("iv_rank")).findFirst().orElseThrow();
+    assertThat(ivRank.absent()).isFalse();
+    assertThat(ivRank.supports()).isFalse();
+    assertThat(r.aggregate()).isEqualByComparingTo("0.9592");
+  }
+
+  @Test
+  void absentInputWithAWeakRestDegradesToNoConfluenceSupport() {
+    // Edge: an absent dot is withheld even when the rest is weak. Here iv_rank is null (absent) and the
+    // OI/macro dots oppose, so the aggregate stays below threshold — the confluence is fail-closed
+    // (neither bullish nor bearish). The degenerate all-absent case (den == 0) hits the SAME ZERO
+    // aggregate → below-any-threshold guard (see ConnectTheDotsScorer#score), so a confluence never
+    // fires on inputs that are entirely missing.
+    Oi oppose =
+        new Oi(
+            OiQuadrant.SHORT_BUILDUP, OiQuadrant.SHORT_BUILDUP, bd("-10"), bd("-5"), bd("-5"),
+            null, null, null, false, false, null, null, null);
+    Macro nullRankBearish =
+        new Macro(bd("14"), null, bd("12"), Boolean.TRUE, 10, 40, bd("50"), null, null);
+
+    Confluence r =
+        ConnectTheDotsScorer.score(ctx(BULL_CHART, oppose, nullRankBearish), CE, 1, T, P, true);
+
+    DotScore ivRank =
+        r.dots().stream().filter(d -> d.dot().equals("iv_rank")).findFirst().orElseThrow();
+    assertThat(ivRank.absent()).isTrue();
+    assertThat(r.aggregate()).isLessThan(T);
+    assertThat(r.bullish()).isFalse();
+    assertThat(r.bearish()).isFalse();
+  }
+
   /** Armed CE score over BULL_OI with the given CE/PE strike-IV slopes (atmIv in-band, avg6 benign). */
   private static Confluence armedIv(BigDecimal ceSlope, BigDecimal peSlope) {
     Macro m = macroFull(bd("0.11"), bd("0.20"), bd("0.05"), ceSlope, peSlope);

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Tags } from 'lucide-react';
+import { AlertTriangle, Tags } from 'lucide-react';
 import { cn } from '../../lib/cn.ts';
 import { formatDecimal, isNegative } from '../../lib/decimal.ts';
 import { Select } from '../../components/atoms/Select.tsx';
@@ -13,6 +13,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../../components/ui/dropdown-menu.tsx';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '../../components/ui/dialog.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { FIELD_HELP } from '../../core/fieldHelp.ts';
@@ -22,6 +29,7 @@ import {
   JOBS_PAGE_SIZE,
   fetchResultRef,
   useCancelJob,
+  useJobDetail,
   useJobs,
   useJobsLive,
   type JobDto,
@@ -50,6 +58,45 @@ function statusTone(status: JobStatus): string {
 
 const cancellable = (s: JobStatus) => s === 'queued' || s === 'running';
 
+// Failed-job detail dialog: the jobs LIST omits `jobs.error`, so a failed row's message is fetched
+// lazily from the detail endpoint (audit §2.7 — the BE already serves it). Accessible modal (Radix
+// titled + described) so the failure text is readable at any length, not a truncated title attr.
+function JobErrorDialog({ jobId, onClose }: { jobId: string; onClose: () => void }) {
+  const detail = useJobDetail(jobId);
+  return (
+    <Dialog
+      open
+      onOpenChange={(o) => {
+        if (!o) onClose();
+      }}
+    >
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Job failed</DialogTitle>
+          <DialogDescription>
+            Run {jobId.slice(0, 8)} — why the backtest or sweep did not complete.
+          </DialogDescription>
+        </DialogHeader>
+        {detail.isPending ? (
+          <p role="status" className="text-caption text-ay-muted">
+            Loading the failure detail…
+          </p>
+        ) : detail.isError ? (
+          <p role="alert" className="text-caption text-bear">
+            Couldn't load the failure detail.
+          </p>
+        ) : detail.data?.error ? (
+          <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded border border-bear/40 bg-surface-1 p-3 text-caption text-bear">
+            {detail.data.error}
+          </pre>
+        ) : (
+          <p className="text-caption text-ay-muted">No error message was recorded for this failure.</p>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // DataTable column id → backend sort key (server-side sort so a header click sorts EVERY page, not
 // just the loaded one). Columns without an entry (Test Window, Actions) aren't server-sortable.
 const SORT_API: Record<string, string> = {
@@ -66,6 +113,8 @@ export function JobsPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [strategyId, setStrategyId] = useState<string | null>(null);
   const [tags, setTags] = useState<string[]>([]);
+  // The failed job whose error dialog is open (null = closed). The list omits `error` → fetched lazily.
+  const [errorJobId, setErrorJobId] = useState<string | null>(null);
   // Server-side filter: keep only jobs whose pinned version is its strategy's NEWEST version. Sends the
   // set of current-version ids so the filter spans EVERY page, not just the loaded one.
   const [latestOnly, setLatestOnly] = useState(false);
@@ -257,14 +306,29 @@ export function JobsPage() {
         id: 'status',
         header: 'Status',
         align: 'left',
-        help: 'Current state of the job — queued, running, completed, cancelling, or failed.',
+        help: 'Current state of the job — queued, running, completed, cancelling, or failed. Click a failed badge to see why it failed.',
         sortValue: (job) => job.status,
         sortType: 'text',
-        render: (job) => (
-          <span className={cn('rounded px-1.5 py-0.5 text-xs font-semibold ring-1', statusTone(job.status))}>
-            {job.status}
-          </span>
-        ),
+        render: (job) =>
+          job.status === 'failed' ? (
+            // Row-level failure indicator: the failed badge is a button that opens the error dialog.
+            <button
+              type="button"
+              onClick={() => setErrorJobId(job.jobId)}
+              aria-label={`Show why run ${job.jobId.slice(0, 8)} failed`}
+              className={cn(
+                'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-semibold ring-1 hover:ring-2 focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent',
+                statusTone(job.status),
+              )}
+            >
+              {job.status}
+              <AlertTriangle aria-hidden="true" className="size-3" />
+            </button>
+          ) : (
+            <span className={cn('rounded px-1.5 py-0.5 text-xs font-semibold ring-1', statusTone(job.status))}>
+              {job.status}
+            </span>
+          ),
         mobileLabel: 'Status',
         mono: false,
       },
@@ -494,6 +558,8 @@ export function JobsPage() {
           Next ›
         </button>
       </div>
+
+      {errorJobId && <JobErrorDialog jobId={errorJobId} onClose={() => setErrorJobId(null)} />}
     </LoadBeat>
   );
 }

@@ -183,6 +183,24 @@ export async function fetchResultRef(jobId: string): Promise<string | null> {
   return job.resultRef ?? null;
 }
 
+/** Single job detail — the LIST also omits `error` (only this endpoint serves it), so a failed row's
+ *  failure message is fetched lazily on demand (JobsPage's failure dialog). */
+export interface JobDetail {
+  jobId: string;
+  status: JobStatus;
+  error?: string | null;
+  resultRef?: string | null;
+}
+
+/** Lazily fetch one job's detail for the failure dialog. Disabled until a jobId is supplied. */
+export function useJobDetail(jobId: string | null) {
+  return useQuery({
+    queryKey: ['job', jobId, 'detail'],
+    queryFn: () => apiFetch<JobDetail>(`/backtests/jobs/${jobId}`),
+    enabled: !!jobId,
+  });
+}
+
 // --- results page slice (PR-C7) — results are keyed by the RUN id (resultRef), not the jobId ---
 
 /** One downsampled curve point (`ts` ISO, `value` decimal string). */

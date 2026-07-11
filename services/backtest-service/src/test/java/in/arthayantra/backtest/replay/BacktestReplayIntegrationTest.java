@@ -84,7 +84,8 @@ class BacktestReplayIntegrationTest extends BacktestIntegrationTestBase {
                 .put("strategyId", STRATEGY_ID.toString())
                 .put("from", "2026-01-05")
                 .put("to", "2026-01-10"),
-            "corr-e2e");
+            "corr-e2e",
+            "owner");
 
     runner.run(job, pct -> {}, () -> false);
 
@@ -111,7 +112,8 @@ class BacktestReplayIntegrationTest extends BacktestIntegrationTestBase {
             JobKind.BACKTEST, null, STRATEGY_ID,
             objectMapper.createObjectNode().put("strategyId", STRATEGY_ID.toString())
                 .put("from", "2026-01-05").put("to", "2026-01-10"),
-            "corr-e2e-2");
+            "corr-e2e-2",
+            "owner");
     runner.run(job2, pct -> {}, () -> false);
     UUID runId2 = runs.findRunIdByJobId(job2.id()).orElseThrow();
     assertThat(dataHash(runId2)).isEqualTo(dataHash(runId));
@@ -129,7 +131,8 @@ class BacktestReplayIntegrationTest extends BacktestIntegrationTestBase {
                 .put("strategyId", STRATEGY_ID.toString())
                 .put("from", "2026-01-05")
                 .put("to", "2026-01-10"),
-            "corr-symbol");
+            "corr-symbol",
+            "owner");
     runner.run(job, pct -> {}, () -> false);
     UUID runId = runs.findRunIdByJobId(job.id()).orElseThrow();
 
@@ -194,7 +197,8 @@ class BacktestReplayIntegrationTest extends BacktestIntegrationTestBase {
                 .put("strategyId", STRATEGY_ID.toString())
                 .put("from", "2026-01-05")
                 .put("to", "2026-01-10"),
-            "corr-premium");
+            "corr-premium",
+            "owner");
     runner.run(job, pct -> {}, () -> false);
     UUID runId = runs.findRunIdByJobId(job.id()).orElseThrow();
 

@@ -59,20 +59,26 @@ public class JobRepository {
         rs.getString("correlation_id"),
         offset(rs.getTimestamp("created_at")),
         offset(rs.getTimestamp("started_at")),
-        offset(rs.getTimestamp("finished_at")));
+        offset(rs.getTimestamp("finished_at")),
+        rs.getString("created_by"));
   }
 
   private static OffsetDateTime offset(Timestamp ts) {
     return ts == null ? null : ts.toInstant().atOffset(ZoneOffset.UTC);
   }
 
-  /** Inserts a {@code queued} row and returns the materialized job (with generated id + ts). */
+  /**
+   * Inserts a {@code queued} row and returns the materialized job (with generated id + ts).
+   * {@code createdBy} is the submitting actor (audit T3 / EVO §13 row 4) — {@code 'owner'} on the
+   * API path; the optimizer's own OPTIMIZATION/TRIAL rows are written by the Python writer, not here.
+   */
   public Job insertQueued(
       JobKind kind,
       UUID parentJobId,
       UUID strategyVersionId,
       JsonNode request,
-      String correlationId) {
+      String correlationId,
+      String createdBy) {
     String requestJson;
     try {
       requestJson = objectMapper.writeValueAsString(request);
@@ -82,8 +88,8 @@ public class JobRepository {
     return jdbc.queryForObject(
         """
         INSERT INTO jobs (kind, parent_job_id, strategy_version_id, request, correlation_id,
-                          engine_sha, engine_image)
-        VALUES (?, ?, ?, ?::jsonb, ?, ?, ?)
+                          engine_sha, engine_image, created_by)
+        VALUES (?, ?, ?, ?::jsonb, ?, ?, ?, ?)
         RETURNING *
         """,
         this::mapRow,
@@ -93,7 +99,8 @@ public class JobRepository {
         requestJson,
         correlationId,
         engineIdentity.sha(),
-        engineIdentity.image());
+        engineIdentity.image(),
+        createdBy);
   }
 
   /** Conditional claim: {@code running} only if still {@code queued}. Returns true on win. */

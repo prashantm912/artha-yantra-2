@@ -36,7 +36,8 @@ class JobRepositoryIntegrationTest extends BacktestIntegrationTestBase {
         null,
         UUID.randomUUID(),
         MAPPER.createObjectNode().put("strategyId", "demo").put("from", "2026-01-05"),
-        UUID.randomUUID().toString());
+        UUID.randomUUID().toString(),
+        "owner");
   }
 
   @Test
@@ -130,7 +131,8 @@ class JobRepositoryIntegrationTest extends BacktestIntegrationTestBase {
             null,
             UUID.randomUUID(),
             MAPPER.createObjectNode().put("strategyId", "sha-present"),
-            UUID.randomUUID().toString());
+            UUID.randomUUID().toString(),
+            "owner");
 
     assertThat(engineColumn(job.id(), "engine_sha")).isEqualTo("abc123def456");
     assertThat(engineColumn(job.id(), "engine_image")).isEqualTo("backtest-service:9.9.9");
@@ -146,10 +148,39 @@ class JobRepositoryIntegrationTest extends BacktestIntegrationTestBase {
             null,
             UUID.randomUUID(),
             MAPPER.createObjectNode().put("strategyId", "sha-absent"),
-            UUID.randomUUID().toString());
+            UUID.randomUUID().toString(),
+            "owner");
 
     assertThat(engineColumn(job.id(), "engine_sha")).isNull();
     assertThat(engineColumn(job.id(), "engine_image")).isNull();
+  }
+
+  // Audit T3 / EVO §13 row 4: a queued job row carries + maps back its submitting actor.
+  @Test
+  void insertStampsAndMapsTheCreatedByActor() {
+    Job owner =
+        repo.insertQueued(
+            JobKind.BACKTEST,
+            null,
+            UUID.randomUUID(),
+            MAPPER.createObjectNode().put("strategyId", "actor-owner"),
+            UUID.randomUUID().toString(),
+            "owner");
+    assertThat(owner.createdBy()).isEqualTo("owner");
+    assertThat(engineColumn(owner.id(), "created_by")).isEqualTo("owner");
+    assertThat(repo.find(owner.id()).orElseThrow().createdBy()).isEqualTo("owner");
+
+    // a machine actor (the optimizer's prefix vocabulary) round-trips just the same (null parent —
+    // parent_job_id is a self-FK, so a synthetic id would violate it; the actor is what's under test)
+    Job trial =
+        repo.insertQueued(
+            JobKind.TRIAL,
+            null,
+            UUID.randomUUID(),
+            MAPPER.createObjectNode().put("strategyId", "actor-optimizer"),
+            UUID.randomUUID().toString(),
+            "optimizer:sweep-42");
+    assertThat(engineColumn(trial.id(), "created_by")).isEqualTo("optimizer:sweep-42");
   }
 
   private static String engineColumn(UUID jobId, String column) {

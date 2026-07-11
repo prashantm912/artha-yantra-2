@@ -153,8 +153,11 @@ public class JobsService {
       request.put("holdoutReuseCount", reuse);
     }
 
+    // Audit T3 / EVO §13 row 4: the /api/v1/backtests submission path is always the single owner
+    // (one PHC login); the actor is derived from the write-site context, not an auth claim.
     Job job =
-        repository.insertQueued(JobKind.BACKTEST, null, v.versionId(), request, correlationId);
+        repository.insertQueued(
+            JobKind.BACKTEST, null, v.versionId(), request, correlationId, "owner");
     dispatcher.dispatchBacktest(job.id());
     progress.refreshSummary();
     return job;

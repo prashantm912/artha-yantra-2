@@ -174,7 +174,8 @@ class FoldsIntegrationTest extends BacktestIntegrationTestBase {
                 .put("strategyId", STRATEGY_ID.toString())
                 .put("from", "2026-01-05")
                 .put("to", "2026-01-10"),
-            "corr-plain");
+            "corr-plain",
+            "owner");
     runner.run(job, pct -> {}, () -> false);
     UUID runId = runs.findRunIdByJobId(job.id()).orElseThrow();
 
@@ -219,7 +220,8 @@ class FoldsIntegrationTest extends BacktestIntegrationTestBase {
                 .put("from", from)
                 .put("to", to)
                 .put("foldContext", true),
-            "corr-fold");
+            "corr-fold",
+            "owner");
     runner.run(job, pct -> {}, () -> false);
     return runs.findRunIdByJobId(job.id()).orElseThrow();
   }

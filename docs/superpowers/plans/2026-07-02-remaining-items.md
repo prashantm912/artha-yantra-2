@@ -48,9 +48,10 @@ round awaits the first ≥3-regime campaign — unit-covered end-to-end). Follow
 funnel single-pick diagnosis gated; live-smoked: 202 → re-sim → honest INSUFFICIENT row, both caveats stamped).
 Item 9 counterfactual-replay DONE #732 @ ab9ee0d7 (V013 COUNTERFACTUAL job kind, frozen PremiumExitEvaluator
 reused, captured-data-only guard; live-smoked BOTH directions: DATA_GAP 422 on an uncaptured leg + a real
-2-variant replay to completion). Item 8 shadow-variant runtime API = **PR #733 OPEN, HOLD — owner merge decision**
-(3-lens review: live path SAFE, §3.3.3 per-bar clamp added, per-strategy league filter; owner checklist in the
-PR body). NOT started (owner paused before wave 2): item 10 live-gap gate in scoring + the request-level
+2-variant replay to completion). Item 8 shadow-variant runtime API = **OWNER-APPROVED → MERGED #733 @ 971dff7a + DEPLOYED LIVE 2026-07-12**
+(V031 probed; live round-trip: register 201 → hot-reload active set 3→4 without restart → retire 204 → back
+to 3, soft-disabled row with campaign ref; 3-lens review: live path SAFE, §3.3.3 per-bar clamp, per-strategy
+league filter). E3 = FULLY SHIPPED except wave 2. NOT started (owner paused before wave 2): item 10 live-gap gate in scoring + the request-level
 fill-timing override (the §7.1.2 at_close pin has NO landing mechanism today — real design gap found by the
 builder; without it swing reconciliations carry bar-noise and ALIGNED verdicts are unreachable; build it with
 the stressOverrides pattern). Known data note: NFO per-contract option 1m capture is sparse after 07-06

@@ -1,0 +1,14 @@
+-- INT §13 row 19 / FID P1-8: the fired-side per-rail operand side-channel. When the §12.3
+-- confluence gate PASSES and a scalper ENTRY fires, the full condition matrix it evaluated
+-- (every rail's operand + threshold + margin, the Connect-the-Dots confluence, and the raw
+-- OI/macro/chart context) is discarded today — only the picked leg + aggregate ride
+-- scalper_detail. This column persists that matrix for the FIRED row, mirroring the SHAPE of
+-- signal_rejections.diagnostic (blockingRail=null; checks[], confluence{dots[]}, context{oi,
+-- macro,chart}, firedLeg{}) so the INT §4.2 Stage-2 fired-vs-rejected contrast joins cleanly.
+--
+-- Parity-safe additive (golden side-channel rules): NOT inside the frozen C-2.6 score_breakdown
+-- (a non-breakdown key there is a parity FAIL, same rule as scalper_detail/suggested_qty), and
+-- stamped ONLY on the LIVE scalper emit path — the deterministic golden replay injects no
+-- ScalperConfluenceGate, so replay never produces one (no new rows on backtest, goldens
+-- byte-identical). NULL for every non-scalper signal (never stamped).
+ALTER TABLE signals ADD COLUMN fired_diagnostic JSONB;

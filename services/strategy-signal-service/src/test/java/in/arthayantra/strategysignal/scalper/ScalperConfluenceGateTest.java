@@ -7,6 +7,8 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.strategyengine.eval.BarValues;
 import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategyengine.series.EngineSeries;
@@ -487,6 +489,104 @@ class ScalperConfluenceGateTest {
     assertThat(r.blocked()).isFalse();
     assertThat(r.decision()).isPresent();
     assertThat(r.rejection()).isNull();
+  }
+
+  @Test
+  void firedDiagnosticOnAPassingEntryCarriesTheFullPerRailMatrix() {
+    // INT §13 row 19: a PASSING entry now carries a fired-side diagnostic mirroring the rejection's
+    // per-rail matrix — every rail evaluated (all pass), the confluence dots + composite, and the raw
+    // OI/macro/chart context — built from the SAME evaluation the decision came from (no re-eval).
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    ScalperConfluenceGate.Result r =
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+            .evaluateWithDiagnostic(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD);
+    assertThat(r.blocked()).isFalse();
+    ScalperConfluenceGate.FiredDiagnostic fired = r.fired();
+    assertThat(fired).isNotNull();
+    assertThat(fired.side()).isEqualTo(CE);
+    // the volume-floor rail carries its operand (bar volume) vs the resolved 125000 floor — a real
+    // per-rail operand the rejection side already persists; the fired side now mirrors it.
+    ScalperConfluenceGate.RailCheck volFloor =
+        fired.checks().stream().filter(c -> c.rail().equals("volume-floor")).findFirst().orElseThrow();
+    assertThat(volFloor.pass()).isTrue();
+    assertThat(volFloor.operand()).isEqualByComparingTo(bd("130000"));
+    assertThat(volFloor.threshold()).isEqualByComparingTo(bd("125000"));
+    // every recorded rail passed (a fired entry cleared them all); the composite + context are captured.
+    assertThat(fired.checks()).allMatch(ScalperConfluenceGate.RailCheck::pass);
+    assertThat(fired.checks())
+        .extracting(ScalperConfluenceGate.RailCheck::rail)
+        .contains("volume-floor", "rsi-band", "confluence-composite");
+    assertThat(fired.confluence()).isNotNull();
+    assertThat(fired.confluence().bullish()).isTrue();
+    assertThat(fired.compositeScore()).isEqualByComparingTo(fired.confluence().aggregate());
+    assertThat(fired.context()).isNotNull();
+    assertThat(fired.pick()).isNotNull(); // the actually-traded leg
+  }
+
+  @Test
+  void firedDiagnosticIsDeterministicAcrossIdenticalEvaluations() {
+    // Parity-firewall determinism: two identical evaluations of the same bar produce byte-identical
+    // fired operands (the diagnostic is a pure function of already-computed rail state — never re-fetched
+    // or re-randomised). This is the side-channel-determinism guarantee the golden firewall rests on.
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults());
+    ScalperConfluenceGate.FiredDiagnostic a =
+        gate.evaluateWithDiagnostic(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD).fired();
+    ScalperConfluenceGate.FiredDiagnostic b =
+        gate.evaluateWithDiagnostic(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD).fired();
+    assertThat(a.checks()).isEqualTo(b.checks()); // RailCheck is a record → deep value equality
+    ObjectMapper om = new ObjectMapper();
+    assertThat(FiredDiagnosticJson.write(om, a)).isEqualTo(FiredDiagnosticJson.write(om, b));
+  }
+
+  @Test
+  void firedDiagnosticJsonMirrorsTheRejectionShapeFieldForField() {
+    // The persisted fired JSONB must mirror signal_rejections.diagnostic's SHAPE so the §4.2 Stage-2
+    // fired-vs-rejected contrast joins cleanly: same checks[]/confluence{dots[]}/context{oi,macro,chart}
+    // keys, block-summary scalars null (nothing blocked), and the traded firedLeg (mirror of wouldBeLeg).
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    ScalperConfluenceGate.FiredDiagnostic fired =
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+            .evaluateWithDiagnostic(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD)
+            .fired();
+    JsonNode json;
+    try {
+      json = new ObjectMapper().readTree(FiredDiagnosticJson.write(new ObjectMapper(), fired));
+    } catch (Exception e) {
+      throw new AssertionError(e);
+    }
+    // block-summary scalars present but null (shape-parallel to a rejection with no block)
+    assertThat(json.has("blockingRail")).isTrue();
+    assertThat(json.get("blockingRail").isNull()).isTrue();
+    assertThat(json.get("operand").isNull()).isTrue();
+    assertThat(json.get("side").asText()).isEqualTo("CE");
+    // the per-rail matrix — the join axis — with the same field names the rejection checks[] uses
+    JsonNode checks = json.get("checks");
+    assertThat(checks.isArray()).isTrue();
+    JsonNode volFloor = null;
+    for (JsonNode c : checks) {
+      if ("volume-floor".equals(c.get("rail").asText())) {
+        volFloor = c;
+      }
+    }
+    assertThat(volFloor).isNotNull();
+    assertThat(volFloor.get("pass").asBoolean()).isTrue();
+    assertThat(volFloor.get("operand").decimalValue()).isEqualByComparingTo(bd("130000"));
+    assertThat(volFloor.get("threshold").decimalValue()).isEqualByComparingTo(bd("125000"));
+    assertThat(volFloor.has("margin")).isTrue();
+    assertThat(volFloor.has("failPolicy")).isTrue();
+    // confluence{dots[]} + context{oi,macro,chart} + the traded firedLeg
+    assertThat(json.get("confluence").get("dots").isArray()).isTrue();
+    assertThat(json.get("context").has("oi")).isTrue();
+    assertThat(json.get("context").has("macro")).isTrue();
+    assertThat(json.get("context").has("chart")).isTrue();
+    assertThat(json.get("firedLeg").get("tradingsymbol").asText()).isEqualTo("NIFTY19850CE");
   }
 
   @Test

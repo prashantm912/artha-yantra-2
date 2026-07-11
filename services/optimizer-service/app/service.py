@@ -289,6 +289,18 @@ class SweepService:
                         "trialsCompleted": done, "trialsTotal": total, "bestSoFar": best}),
         )
 
+    def list_sweeps(self, limit: int, offset: int) -> dict[str, Any]:
+        """Native sweep list (audit P2-1): OPTIMIZATION jobs newest-first, each projected to a
+        compact summary. A restart-interrupted sweep surfaces its ``error`` here (marked failed
+        with a real reason on boot by fail_orphaned_sweeps), so the list distinguishes it from a
+        genuine failure. Envelope mirrors ``trials`` — {items, limit, offset}."""
+        jobs = self._jobs_factory()
+        try:
+            rows = jobs.list_sweeps(limit, offset)
+        finally:
+            jobs.close()
+        return {"items": [_sweep_summary(r) for r in rows], "limit": limit, "offset": offset}
+
     def job_status(self, job_id: str) -> dict[str, Any]:
         jobs = self._jobs_factory()
         trials = self._trials_factory()
@@ -436,6 +448,25 @@ def _sweep_echo(
     if objective is not None:
         echo["objective"] = objective
     return echo
+
+
+def _sweep_summary(row: dict[str, Any]) -> dict[str, Any]:
+    """Projects a JobsRepo.list_sweeps row to the stable listing shape — the raw ``request`` echo
+    is projected down to its identifying fields (strategyId/method/objective/window), never dumped
+    whole. ``error`` carries the restart-interruption reason for a boot-reaped sweep."""
+    request = row.get("request") or {}
+    return {
+        "jobId": row["id"],
+        "status": row["status"],
+        "progress": row["progress"],
+        "error": row.get("error"),
+        "createdAt": row.get("createdAt"),
+        "strategyId": request.get("strategyId"),
+        "method": request.get("method"),
+        "objective": request.get("objective"),
+        "from": request.get("from"),
+        "to": request.get("to"),
+    }
 
 
 def _primary_objective(objective: dict[str, Any]) -> tuple[str, str]:

@@ -305,7 +305,10 @@ def _deflated_sharpe_gate(
         returns (Lo 2002; the Bailey-LdP DSR form with skew=0, excess-kurtosis=0). T = the OOS trade
         count (each trade is one return observation — the only observation count the retro metric
         bag carries). Higher-moment terms (skew/kurtosis) are unavailable retroactively → omitted;
-        self-flagged in the receipt.
+        self-flagged in the receipt. On folded runs S is the MEAN of per-fold OOS Sharpes while T
+        pools trades ACROSS folds — a conscious, slightly lenient approximation (the pooled T
+        overstates the observations behind the averaged S, shrinking se), accepted until per-fold
+        return series are carried.
 
     Because S₀(N) = se·√(2·ln N), the ratio reduces to ``S/se − √(2·ln N)`` — a Sharpe t-statistic
     measured against the best-of-N-noise bar; the gate direction depends only on the numerator sign,

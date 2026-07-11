@@ -286,6 +286,15 @@ def test_deflated_sharpe_negative_sharpe_fails_any_N():
     assert _dsr_gate([card])["status"] == "FAIL"
 
 
+def test_deflated_sharpe_exactly_zero_fails_strict_boundary():
+    # Equality-boundary pin: S=0, N=1 ⇒ S₀=0 ⇒ deflated = (0−0)/se = exactly 0.0 — the gate is
+    # STRICT > 0, so 0.0 FAILs (a zero-edge candidate is never waved through on the boundary).
+    card = scoring.score_cohort([_dsr_cand(1, sharpe=0.0, oosTradeCount=10)], [], n_trials=1)[0]
+    gate = _dsr_gate([card])
+    assert gate["value"] == 0.0
+    assert gate["status"] == "FAIL"
+
+
 # --- DOF penalties (§6.2, E2) ------------------------------------------------------------------
 # dof = 0.03 per tuned param over 4 + 0.06 per structure gate; activeParams = len(parameters).
 

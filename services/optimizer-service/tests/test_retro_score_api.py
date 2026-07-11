@@ -9,8 +9,8 @@ from fastapi.testclient import TestClient
 
 from app import evolution
 from app.errors import ApiError, api_error_handler
-from app.evolution import RetroScoreService
-from tests.fakes import FakeBacktest, FakeJobs, FakeTrials
+from app.evolution import EvoRecorderService, RetroScoreService
+from tests.fakes import FakeBacktest, FakeEvoRepo, FakeJobs, FakeTrials
 
 # Three OOS folds spanning three regimes so the regime-floor gate can pass (≥ 3 of 4 covered).
 _FOLDS = [
@@ -60,8 +60,10 @@ def test_retro_score_returns_items_envelope_and_context():
     assert body["policy"] == "SIM_FIRST"
     assert body["caveats"] == []  # 2 trials — nowhere near the cohort cap
     assert len(body["items"]) == 2
-    # every retro scorecard carries the standing descriptive-only caveat
+    # every retro scorecard carries the standing descriptive-only caveat + the per-sweep-N caveat
+    # (the standalone read has no campaign context — cumulative N applies only when recorded)
     assert any("retro-score is descriptive" in c for c in body["items"][0]["caveats"])
+    assert any("multiplicity N = this sweep only" in c for c in body["items"][0]["caveats"])
 
 
 def test_retro_score_assembles_oos_fold_metrics_into_gates():
@@ -176,3 +178,67 @@ def test_retro_score_deflated_sharpe_uses_full_trial_count():
     gate = next(g for g in body["items"][0]["gates"] if g["id"] == "deflated_sharpe")
     assert gate["status"] == "PASS"        # Sharpe 2.0 over 115 trades clears the N=5 bar
     assert "N=5 trials" in gate["note"]    # full count (2 complete + 3 failed), not the 2 scored
+
+
+def test_recorder_charges_campaign_cumulative_multiplicity():
+    # Design §4: "the campaign records total trials-to-date N". The RECORDER charges the campaign-
+    # CUMULATIVE look count — prior generations' sweep trials + the current sweep's own — while the
+    # standalone retro read (no campaign context) stays per-sweep. Same marginal candidate (mean
+    # OOS-fold Sharpe 0.4, pooled T=70): S/se = 0.4/√(1.08/69) = 3.1972. Per-sweep N=100 → bar
+    # √(2·ln 100) = 3.0349 ⇒ deflated +0.1624 PASS; campaign N=300 → bar √(2·ln 300) = 3.3775 ⇒
+    # deflated −0.1803 FAIL — the snooping haircut visibly flips the verdict.
+    jobs, trials = FakeJobs(), FakeTrials()
+    request = {"parameters": [], "objective": {"metric": "oos_fold_mean", "direction": "maximize"}}
+    sweep_id = jobs.insert_sweep(None, request)
+    for i in range(100):
+        trials.complete(trials.insert(sweep_id, i, {"period": i}), {"oos_fold_mean": 1.0}, "run-x")
+    jobs.set_status(sweep_id, "completed")  # only a completed sweep is recordable
+    # Two PRIOR generations' sweeps, 100 trials each — every state counts as a "look" (failed here).
+    for prior in ("prior-A", "prior-B"):
+        for i in range(100):
+            trials.fail(trials.insert(prior, i, {"period": i}))
+    repo = FakeEvoRepo(
+        campaigns=[{"id": "camp-1", "evidencePolicy": "SIM_FIRST"}],
+        generations={"camp-1": [
+            {"id": "gen-a", "campaignId": "camp-1", "n": 1, "stressTouches": 0,
+             "proposal": {"sweepJobId": "prior-A"}},
+            {"id": "gen-b", "campaignId": "camp-1", "n": 2, "stressTouches": 0,
+             "proposal": {"sweepJobId": "prior-B"}},
+        ]},
+    )
+    folds = [
+        {"fold": 0, "regimeOos": {"UP_QUIET": {"sharpe": "1.0"}},
+         "oosMetrics": {"totalReturn": "5.0", "sharpe": "0.4", "tradeCount": 35}},
+        {"fold": 1, "regimeOos": {"DOWN_QUIET": {"sharpe": "0.6"}},
+         "oosMetrics": {"totalReturn": "7.0", "sharpe": "0.4", "tradeCount": 35}},
+    ]
+    app = FastAPI()
+    app.add_exception_handler(ApiError, api_error_handler)
+    scorer = RetroScoreService(lambda: jobs, lambda: trials,
+                               FakeBacktest(folds=folds, results=_RESULTS))
+    app.state.retro = scorer
+    app.state.evo_writer = EvoRecorderService(repo_factory=lambda: repo, scorer=scorer)
+    app.include_router(evolution.router)
+    client = TestClient(app)
+
+    # Standalone retro read: per-sweep N=100 → PASS (+0.1624), flagged as per-sweep-only.
+    retro = client.get(f"/api/v1/evolution/retro-score/{sweep_id}").json()
+    gate = next(g for g in retro["items"][0]["gates"] if g["id"] == "deflated_sharpe")
+    assert gate["status"] == "PASS"
+    assert gate["value"] == 0.1624
+    assert "N=100 trials" in gate["note"]
+    assert any("multiplicity N = this sweep only" in c for c in retro["items"][0]["caveats"])
+
+    # Recorded into the campaign: N = 100 + 100 + 100 = 300 → the SAME candidate FAILS (−0.1803).
+    resp = client.post(
+        "/api/v1/evolution/campaigns/camp-1/generations", json={"sweepJobId": sweep_id}
+    )
+    assert resp.status_code == 201
+    card = repo.candidates["camp-1"][0]["scorecard"]
+    rec_gate = next(g for g in card["gates"] if g["id"] == "deflated_sharpe")
+    assert rec_gate["status"] == "FAIL"
+    assert rec_gate["value"] == -0.1803
+    assert "N=300 trials" in rec_gate["note"]
+    assert card["rankable"] is False
+    # the per-sweep-N caveat is a STANDALONE-read stamp — recorder cards never carry it
+    assert not any("multiplicity N = this sweep only" in c for c in card["caveats"])

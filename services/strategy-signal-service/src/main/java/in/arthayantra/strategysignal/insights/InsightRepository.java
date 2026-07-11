@@ -1,0 +1,251 @@
+package in.arthayantra.strategysignal.insights;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Repository;
+
+/**
+ * JDBC access to the {@code insights} store (INT design §2.1). The service connects as {@code artha}
+ * (D10 single-writer). Writes are idempotent UPSERTs on {@code dedupe_key} while OPEN (§2.5.1:
+ * regeneration refreshes the row, never duplicates). Reads power the feed / Focus / summary surfaces.
+ */
+@Repository
+public class InsightRepository {
+
+  private final JdbcTemplate jdbc;
+  private final ObjectMapper objectMapper;
+
+  public InsightRepository(JdbcTemplate jdbc, ObjectMapper objectMapper) {
+    this.jdbc = jdbc;
+    this.objectMapper = objectMapper;
+  }
+
+  /**
+   * UPSERTs an insight on its OPEN {@code dedupe_key} (§2.5.1). A regenerated insight refreshes the
+   * existing OPEN row's payload in place; a first sighting inserts.
+   */
+  public void insertOrRefresh(Insight in) {
+    String[] reasons =
+        in.trustReasons() == null ? new String[0] : in.trustReasons().toArray(new String[0]);
+    jdbc.update(
+        con -> {
+          var ps =
+              con.prepareStatement(
+                  """
+                  INSERT INTO insights
+                    (id, generated_at, type, severity, scope, title, explanation, evidence, priority,
+                     priority_detail, data_trust, trust_reasons, dedupe_key, cooldown_until, suppressed,
+                     status, expires_at, engine_version, config_hash)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  ON CONFLICT (dedupe_key) WHERE status = 'OPEN'
+                  DO UPDATE SET
+                    generated_at = EXCLUDED.generated_at, severity = EXCLUDED.severity,
+                    title = EXCLUDED.title, explanation = EXCLUDED.explanation, evidence = EXCLUDED.evidence,
+                    priority = EXCLUDED.priority, priority_detail = EXCLUDED.priority_detail,
+                    data_trust = EXCLUDED.data_trust, trust_reasons = EXCLUDED.trust_reasons,
+                    cooldown_until = EXCLUDED.cooldown_until, suppressed = EXCLUDED.suppressed,
+                    expires_at = EXCLUDED.expires_at, engine_version = EXCLUDED.engine_version,
+                    config_hash = EXCLUDED.config_hash
+                  """);
+          ps.setObject(1, in.id());
+          ps.setObject(2, in.generatedAt());
+          ps.setString(3, in.type());
+          ps.setString(4, in.severity());
+          ps.setString(5, in.scope());
+          ps.setString(6, in.title());
+          ps.setString(7, in.explanation());
+          ps.setString(8, in.evidence() == null ? "[]" : in.evidence().toString());
+          if (in.priority() == null) {
+            ps.setNull(9, java.sql.Types.NUMERIC);
+          } else {
+            ps.setBigDecimal(9, in.priority());
+          }
+          ps.setString(10, in.priorityDetail() == null ? null : in.priorityDetail().toString());
+          ps.setString(11, in.dataTrust());
+          ps.setArray(12, con.createArrayOf("text", reasons));
+          ps.setString(13, in.dedupeKey());
+          ps.setObject(14, in.cooldownUntil());
+          ps.setBoolean(15, in.suppressed());
+          ps.setString(16, in.status());
+          ps.setObject(17, in.expiresAt());
+          ps.setString(18, in.engineVersion());
+          ps.setString(19, in.configHash());
+          return ps;
+        });
+  }
+
+  /** Paged/filtered feed, newest first (INT §9.1). */
+  public List<Insight> list(
+      String type, String severity, String status, String scope,
+      OffsetDateTime from, OffsetDateTime to, boolean includeSuppressed, int limit, int offset) {
+    StringBuilder sql = new StringBuilder("SELECT * FROM insights WHERE 1=1");
+    List<Object> args = new ArrayList<>();
+    if (type != null) {
+      sql.append(" AND type = ?");
+      args.add(type);
+    }
+    if (severity != null) {
+      sql.append(" AND severity = ?");
+      args.add(severity);
+    }
+    if (status != null) {
+      sql.append(" AND status = ?");
+      args.add(status);
+    }
+    if (scope != null) {
+      sql.append(" AND scope = ?");
+      args.add(scope);
+    }
+    if (from != null) {
+      sql.append(" AND generated_at >= ?");
+      args.add(from);
+    }
+    if (to != null) {
+      sql.append(" AND generated_at < ?");
+      args.add(to);
+    }
+    if (!includeSuppressed) {
+      sql.append(" AND suppressed = FALSE");
+    }
+    sql.append(" ORDER BY generated_at DESC, id DESC LIMIT ? OFFSET ?");
+    args.add(limit);
+    args.add(offset);
+    return jdbc.query(sql.toString(), this::map, args.toArray());
+  }
+
+  /** One insight by id. */
+  public Optional<Insight> get(UUID id) {
+    return jdbc.query("SELECT * FROM insights WHERE id = ?", this::map, id).stream().findFirst();
+  }
+
+  /** The ranked signal queue: OPEN SIGNAL_PRIORITY insights, priority desc (Focus, §3.1). */
+  public List<Insight> focusSignals(int limit) {
+    return jdbc.query(
+        """
+        SELECT * FROM insights
+        WHERE status = 'OPEN' AND type = 'SIGNAL_PRIORITY' AND suppressed = FALSE
+        ORDER BY priority DESC NULLS LAST, generated_at DESC
+        LIMIT ?
+        """,
+        this::map,
+        limit);
+  }
+
+  /** The attention queue: OPEN non-signal insights ordered by severity, then age (§3.1). */
+  public List<Insight> focusAttention(int limit) {
+    return jdbc.query(
+        """
+        SELECT * FROM insights
+        WHERE status = 'OPEN' AND type <> 'SIGNAL_PRIORITY' AND suppressed = FALSE
+        ORDER BY CASE severity
+                   WHEN 'CRITICAL' THEN 0 WHEN 'WARN' THEN 1 WHEN 'NOTICE' THEN 2 ELSE 3 END,
+                 generated_at DESC
+        LIMIT ?
+        """,
+        this::map,
+        limit);
+  }
+
+  /** Badge counts by severity and status (Focus header, §9.1). */
+  public Map<String, Long> countsBy(String column) {
+    Map<String, Long> out = new LinkedHashMap<>();
+    jdbc.query(
+        "SELECT " + column + " AS k, count(*) AS n FROM insights WHERE status = 'OPEN' GROUP BY " + column,
+        rs -> {
+          out.put(rs.getString("k"), rs.getLong("n"));
+        });
+    return out;
+  }
+
+  /** Count of suppressed OPEN insights (the "N muted" empty-state, §8.1). */
+  public long suppressedOpenCount() {
+    Long n =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM insights WHERE status = 'OPEN' AND suppressed = TRUE", Long.class);
+    return n == null ? 0 : n;
+  }
+
+  /** Transition an insight's status (ack/dismiss); returns rows affected. */
+  public int updateStatus(UUID id, String status) {
+    return jdbc.update("UPDATE insights SET status = ? WHERE id = ?", status, id);
+  }
+
+  /** Records a one-click action on an insight (§2.4). */
+  public void insertAction(UUID insightId, String action, String targetRefJson, String actor) {
+    jdbc.update(
+        "INSERT INTO insight_actions (insight_id, action, target_ref, actor) VALUES (?, ?, ?::jsonb, ?)",
+        insightId,
+        action,
+        targetRefJson,
+        actor == null ? "owner" : actor);
+  }
+
+  /** UPSERTs owner feedback on an insight (§2.4 / §10.2). */
+  public void upsertFeedback(UUID insightId, String verdict, String note) {
+    jdbc.update(
+        """
+        INSERT INTO insight_feedback (insight_id, verdict, note) VALUES (?, ?, ?)
+        ON CONFLICT (insight_id) DO UPDATE SET verdict = EXCLUDED.verdict, note = EXCLUDED.note, given_at = now()
+        """,
+        insightId,
+        verdict,
+        note);
+  }
+
+  private Insight map(ResultSet rs, int rowNum) throws SQLException {
+    return new Insight(
+        rs.getObject("id", UUID.class),
+        rs.getObject("generated_at", OffsetDateTime.class),
+        rs.getString("type"),
+        rs.getString("severity"),
+        rs.getString("scope"),
+        rs.getString("title"),
+        rs.getString("explanation"),
+        readTree(rs.getString("evidence")),
+        rs.getBigDecimal("priority"),
+        readTree(rs.getString("priority_detail")),
+        rs.getString("data_trust"),
+        reasons(rs),
+        rs.getString("dedupe_key"),
+        rs.getObject("cooldown_until", OffsetDateTime.class),
+        rs.getBoolean("suppressed"),
+        rs.getString("status"),
+        rs.getObject("expires_at", OffsetDateTime.class),
+        rs.getString("engine_version"),
+        rs.getString("config_hash"));
+  }
+
+  private static List<String> reasons(ResultSet rs) throws SQLException {
+    java.sql.Array arr = rs.getArray("trust_reasons");
+    if (arr == null) {
+      return List.of();
+    }
+    Object[] raw = (Object[]) arr.getArray();
+    List<String> out = new ArrayList<>(raw.length);
+    for (Object o : raw) {
+      out.add(o == null ? null : o.toString());
+    }
+    return out;
+  }
+
+  private JsonNode readTree(String json) {
+    if (json == null) {
+      return null;
+    }
+    try {
+      return objectMapper.readTree(json);
+    } catch (Exception e) {
+      throw new IllegalStateException("stored insight JSON is invalid", e);
+    }
+  }
+}

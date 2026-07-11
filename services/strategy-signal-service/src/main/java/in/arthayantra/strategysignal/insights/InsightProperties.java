@@ -1,0 +1,117 @@
+package in.arthayantra.strategysignal.insights;
+
+import java.math.BigDecimal;
+import java.util.Map;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.DefaultValue;
+
+/**
+ * The resolved {@code artha.insights.*} config subtree (INT design §2.5 / §3.2). All priority
+ * weights, bands, trust cap, per-family bands/half-lives, and suppression/risk thresholds live here
+ * and are hashed into every insight row's {@code config_hash} — changing a weight is visible in every
+ * row it produced (§3.2 last line). Constructor-bound record with in-place defaults so a stack that
+ * sets none still runs.
+ *
+ * <p>These are YAML-only knobs in I1 (no compose passthrough) — shadow mode arms nothing, so there is
+ * no {@code .env} override to wire yet (the #653 placeholder trap does not apply until I4 delivery
+ * flags land with their passthroughs).
+ */
+@ConfigurationProperties("artha.insights")
+public record InsightProperties(Priority priority, Risk risk, Retention retention) {
+
+  /** Fills the whole tree with defaults when a section (or the root) is absent. */
+  public InsightProperties {
+    priority = priority == null ? Priority.defaults() : priority;
+    risk = risk == null ? Risk.defaults() : risk;
+    retention = retention == null ? Retention.defaults() : retention;
+  }
+
+  /** Signal-priority weights, bands, trust cap, and per-family band/half-life/TTL (§3.2). */
+  public record Priority(
+      Weights weights,
+      Bands bands,
+      @DefaultValue("0.79") BigDecimal degradedTrustCap,
+      @DefaultValue("20") int closedTradesFloor,
+      Map<String, BigDecimal> edgeBand,
+      Map<String, Long> halfLifeSeconds,
+      Map<String, Long> signalTtlMinutes) {
+
+    public Priority {
+      weights = weights == null ? Weights.defaults() : weights;
+      bands = bands == null ? Bands.defaults() : bands;
+      degradedTrustCap = degradedTrustCap == null ? new BigDecimal("0.79") : degradedTrustCap;
+      edgeBand = edgeBand == null || edgeBand.isEmpty() ? DEFAULT_EDGE_BAND : edgeBand;
+      halfLifeSeconds =
+          halfLifeSeconds == null || halfLifeSeconds.isEmpty() ? DEFAULT_HALF_LIFE : halfLifeSeconds;
+      signalTtlMinutes =
+          signalTtlMinutes == null || signalTtlMinutes.isEmpty() ? DEFAULT_TTL : signalTtlMinutes;
+    }
+
+    private static final Map<String, BigDecimal> DEFAULT_EDGE_BAND =
+        Map.of("scalper", new BigDecimal("0.10"), "swing", new BigDecimal("0.10"));
+    private static final Map<String, Long> DEFAULT_HALF_LIFE =
+        Map.of("scalper", 600L, "swing", 172_800L); // 10 min / 2 sessions
+    private static final Map<String, Long> DEFAULT_TTL =
+        Map.of("scalper", 30L, "swing", 2_880L); // 30 min / 2 days
+
+    static Priority defaults() {
+      return new Priority(Weights.defaults(), Bands.defaults(), new BigDecimal("0.79"), 20, null, null, null);
+    }
+
+    /** The edge-normalization band width for a family (§3.2 edge row); default 0.10. */
+    public BigDecimal edgeBandFor(String family) {
+      return edgeBand.getOrDefault(family, new BigDecimal("0.10"));
+    }
+
+    /** The freshness half-life (seconds) for a family (§3.2 freshness row). */
+    public long halfLifeFor(String family) {
+      return halfLifeSeconds.getOrDefault(family, 600L);
+    }
+
+    /** The signal-scoped insight TTL (minutes) for a family. */
+    public long ttlMinutesFor(String family) {
+      return signalTtlMinutes.getOrDefault(family, 30L);
+    }
+  }
+
+  /** The five component weights (sum 1.00, §3.2). */
+  public record Weights(
+      @DefaultValue("0.30") BigDecimal edge,
+      @DefaultValue("0.20") BigDecimal context,
+      @DefaultValue("0.20") BigDecimal track,
+      @DefaultValue("0.15") BigDecimal risk,
+      @DefaultValue("0.15") BigDecimal freshness) {
+    static Weights defaults() {
+      return new Weights(
+          new BigDecimal("0.30"), new BigDecimal("0.20"), new BigDecimal("0.20"),
+          new BigDecimal("0.15"), new BigDecimal("0.15"));
+    }
+  }
+
+  /** Band thresholds A≥a, B≥b, C≥c, else D (§3.2). */
+  public record Bands(
+      @DefaultValue("80") int a, @DefaultValue("60") int b, @DefaultValue("40") int c) {
+    static Bands defaults() {
+      return new Bands(80, 60, 40);
+    }
+  }
+
+  /** RISK_HEAT thresholds (§3.2 risk row / §2.5 cooldown). */
+  public record Risk(
+      @DefaultValue("70") BigDecimal warnPct,
+      @DefaultValue("90") BigDecimal criticalPct,
+      @DefaultValue("0.80") BigDecimal capWarnFraction,
+      @DefaultValue("2") int concentrationMin,
+      @DefaultValue("15") int cooldownMinutes) {
+    static Risk defaults() {
+      return new Risk(new BigDecimal("70"), new BigDecimal("90"), new BigDecimal("0.80"), 2, 15);
+    }
+  }
+
+  /** Suppressed-INFO prune horizon (§2.5 hygiene); the prune job itself lands in a later wave. */
+  public record Retention(@DefaultValue("90") int pruneDays) {
+    static Retention defaults() {
+      return new Retention(90);
+    }
+  }
+}

@@ -125,6 +125,42 @@ artha:
     promotion-min-sharpe: ${ARTHA_GRADUATION_PROMOTION_MIN_SHARPE:0.5}
     promotion-min-expectancy: ${ARTHA_GRADUATION_PROMOTION_MIN_EXPECTANCY:0}
     promotion-max-drawdown-pct: ${ARTHA_GRADUATION_PROMOTION_MAX_DRAWDOWN_PCT:25}
+  insights:
+    # Intelligence layer I1 (INT design §2.5/§3.2): the decision-support insight engine. SHADOW mode —
+    # rows + read APIs only, no ntfy/Telegram/WS delivery (that arms in I3/I4). These are YAML-only
+    # knobs: shadow mode arms nothing, so there is no .env override to wire yet (the #653 placeholder
+    # trap applies only when the I4 delivery flags land with their compose passthroughs). Every value
+    # here is hashed into each insight row's config_hash — a weight change is visible in every row.
+    priority:
+      degraded-trust-cap: 0.79          # DEGRADED trust multiplier — mechanically caps the ceiling at B-band
+      closed-trades-floor: 20           # < N closed paper trades → track-record neutral 0.5 prior
+      weights:                          # the five component weights (sum 1.00)
+        edge: 0.30
+        context: 0.20
+        track: 0.20
+        risk: 0.15
+        freshness: 0.15
+      bands:                            # A >= a, B >= b, C >= c, else D
+        a: 80
+        b: 60
+        c: 40
+      edge-band:                        # (composite - threshold) normalization band width, per family
+        scalper: 0.10
+        swing: 0.10
+      half-life-seconds:                # freshness half-life, per family (scalper 10 min / swing 2 sessions)
+        scalper: 600
+        swing: 172800
+      signal-ttl-minutes:               # signal-scoped insight expiry, per family
+        scalper: 30
+        swing: 2880
+    risk:
+      warn-pct: 70                      # book heat % (of equity/cap) → NOTICE
+      critical-pct: 90                  # book heat % → WARN
+      cap-warn-fraction: 0.80           # heat >= cap x fraction (when a cap is set) → NOTICE
+      concentration-min: 2              # >= N open positions in one underlying+side → concentration insight
+      cooldown-minutes: 15              # RISK_HEAT re-fire cooldown (recorded now; delivery-gates in I3/I4)
+    retention:
+      prune-days: 90                    # suppressed-INFO prune horizon (the prune job itself lands later)
 
 management:
   endpoints:

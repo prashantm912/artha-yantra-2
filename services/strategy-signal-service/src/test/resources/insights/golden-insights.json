@@ -1,0 +1,169 @@
+[ {
+  "type" : "SIGNAL_PRIORITY",
+  "severity" : "WARN",
+  "scope" : "signal:42",
+  "title" : "NIFTY25JUL25200CE CE — priority 86 (A)",
+  "explanation" : "Priority 86.69 (band A): edge 27 pts, context 15 pts, track 20 pts, risk 9.9 pts, freshness 14.79 pts.",
+  "evidence" : [ {
+    "label" : "composite vs threshold",
+    "value" : "0.81 vs 0.72",
+    "source" : {
+      "endpoint" : "/api/v1/signals/42",
+      "asOf" : "2026-07-12T09:47:12+05:30"
+    }
+  }, {
+    "label" : "confluence agreement",
+    "value" : "75%"
+  }, {
+    "label" : "PF / trades",
+    "value" : "1.9 over 34 trades (TAKE_ELIGIBLE)"
+  }, {
+    "label" : "book heat",
+    "value" : "34% (no cap)",
+    "source" : {
+      "endpoint" : "/api/v1/paper/margin-heat",
+      "asOf" : "2026-07-12T09:47:12+05:30"
+    }
+  }, {
+    "label" : "age",
+    "value" : "12s vs 600s half-life"
+  } ],
+  "priority" : 86.69,
+  "priorityDetail" : {
+    "score" : 86.69,
+    "band" : "A",
+    "trustCap" : 1,
+    "components" : [ {
+      "key" : "edge",
+      "weight" : 0.30,
+      "c" : 0.9000,
+      "points" : 27.00,
+      "evidence" : [ {
+        "label" : "composite vs threshold",
+        "value" : "0.81 vs 0.72",
+        "source" : {
+          "endpoint" : "/api/v1/signals/42",
+          "asOf" : "2026-07-12T09:47:12+05:30"
+        }
+      } ]
+    }, {
+      "key" : "context",
+      "weight" : 0.20,
+      "c" : 0.7500,
+      "points" : 15.00,
+      "evidence" : [ {
+        "label" : "confluence agreement",
+        "value" : "75%"
+      } ]
+    }, {
+      "key" : "track",
+      "weight" : 0.20,
+      "c" : 1.0000,
+      "points" : 20.00,
+      "evidence" : [ {
+        "label" : "PF / trades",
+        "value" : "1.9 over 34 trades (TAKE_ELIGIBLE)"
+      } ]
+    }, {
+      "key" : "risk",
+      "weight" : 0.15,
+      "c" : 0.6600,
+      "points" : 9.90,
+      "evidence" : [ {
+        "label" : "book heat",
+        "value" : "34% (no cap)",
+        "source" : {
+          "endpoint" : "/api/v1/paper/margin-heat",
+          "asOf" : "2026-07-12T09:47:12+05:30"
+        }
+      } ]
+    }, {
+      "key" : "freshness",
+      "weight" : 0.15,
+      "c" : 0.9862,
+      "points" : 14.79,
+      "evidence" : [ {
+        "label" : "age",
+        "value" : "12s vs 600s half-life"
+      } ]
+    } ]
+  },
+  "dataTrust" : "OK",
+  "trustReasons" : [ ],
+  "dedupeKey" : "SIGNAL_PRIORITY:signal:42",
+  "cooldownMinutes" : null,
+  "expiresAt" : "2026-07-12T10:17:12+05:30",
+  "suppressed" : false
+}, {
+  "type" : "DATA_TRUST",
+  "severity" : "WARN",
+  "scope" : "dataops",
+  "title" : "participant-oi data degraded",
+  "explanation" : "The participant-oi data family is DEGRADED: participant-OI missing for 2026-07-11. Advice depending on it is caveated until it recovers.",
+  "evidence" : [ {
+    "label" : "participant-oi trust",
+    "value" : "DEGRADED — participant-OI missing for 2026-07-11",
+    "source" : {
+      "endpoint" : "/api/v1/market/health/ingest",
+      "asOf" : "2026-07-12T09:47:12+05:30"
+    }
+  } ],
+  "priority" : null,
+  "priorityDetail" : null,
+  "dataTrust" : "DEGRADED",
+  "trustReasons" : [ "participant-OI missing for 2026-07-11" ],
+  "dedupeKey" : "DATA_TRUST:participant-oi:2026-07-12",
+  "cooldownMinutes" : null,
+  "expiresAt" : null,
+  "suppressed" : false
+}, {
+  "type" : "DATA_TRUST",
+  "severity" : "CRITICAL",
+  "scope" : "dataops",
+  "title" : "screener data blocked",
+  "explanation" : "The screener data family is BLOCKED: screener ingest FAILED with no subsequent success. Advice depending on it is withheld until it recovers.",
+  "evidence" : [ {
+    "label" : "screener trust",
+    "value" : "BLOCKED — screener ingest FAILED with no subsequent success",
+    "source" : {
+      "endpoint" : "/api/v1/market/health/ingest",
+      "asOf" : "2026-07-12T09:47:12+05:30"
+    }
+  } ],
+  "priority" : null,
+  "priorityDetail" : null,
+  "dataTrust" : "BLOCKED",
+  "trustReasons" : [ "screener ingest FAILED with no subsequent success" ],
+  "dedupeKey" : "DATA_TRUST:screener:2026-07-12",
+  "cooldownMinutes" : null,
+  "expiresAt" : null,
+  "suppressed" : false
+}, {
+  "type" : "RISK_HEAT",
+  "severity" : "NOTICE",
+  "scope" : "book:scalper",
+  "title" : "scalper book heat 78% of 100% cap",
+  "explanation" : "The scalper book holds 3 open position(s) at 78% of 100% cap margin heat; 2 share NIFTY25JUL25200CE CE. Display-only — no entry is blocked (risk enforcement is separate).",
+  "evidence" : [ {
+    "label" : "book heat",
+    "value" : "78% of 100% cap",
+    "source" : {
+      "endpoint" : "/api/v1/paper/margin-heat",
+      "asOf" : "2026-07-12T09:47:12+05:30"
+    }
+  }, {
+    "label" : "concentration",
+    "value" : "2× NIFTY25JUL25200CE CE"
+  }, {
+    "label" : "open positions",
+    "value" : "3"
+  } ],
+  "priority" : null,
+  "priorityDetail" : null,
+  "dataTrust" : "OK",
+  "trustReasons" : [ ],
+  "dedupeKey" : "RISK_HEAT:scalper",
+  "cooldownMinutes" : 15,
+  "expiresAt" : null,
+  "suppressed" : false
+} ]

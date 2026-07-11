@@ -1138,6 +1138,127 @@
         }
       }
     },
+    "/api/v1/insights/{id}/feedback" : {
+      "post" : {
+        "tags" : [ "insight-controller" ],
+        "operationId" : "feedback",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/FeedbackRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TriageResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/insights/{id}/dismiss" : {
+      "post" : {
+        "tags" : [ "insight-controller" ],
+        "operationId" : "dismiss_1",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TriageResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/insights/{id}/ack" : {
+      "post" : {
+        "tags" : [ "insight-controller" ],
+        "operationId" : "ack",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TriageResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/strategies/{id}/notifications" : {
       "patch" : {
         "tags" : [ "registry-controller" ],
@@ -2224,6 +2345,266 @@
         }
       }
     },
+    "/api/v1/insights" : {
+      "get" : {
+        "tags" : [ "insight-controller" ],
+        "operationId" : "list_5",
+        "parameters" : [ {
+          "name" : "type",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "severity",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "status",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "scope",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "day",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        }, {
+          "name" : "includeSuppressed",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "boolean",
+            "default" : false
+          }
+        }, {
+          "name" : "limit",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 100
+          }
+        }, {
+          "name" : "offset",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 0
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/InsightListResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/insights/{id}" : {
+      "get" : {
+        "tags" : [ "insight-controller" ],
+        "operationId" : "get_2",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Insight"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/insights/trust-summary" : {
+      "get" : {
+        "tags" : [ "insight-controller" ],
+        "operationId" : "trustSummary",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TrustSummaryResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/insights/summary" : {
+      "get" : {
+        "tags" : [ "insight-controller" ],
+        "operationId" : "summary",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/InsightSummaryResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/insights/notification-events" : {
+      "get" : {
+        "tags" : [ "insight-controller" ],
+        "operationId" : "notificationEvents",
+        "parameters" : [ {
+          "name" : "limit",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 100
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/NotificationEventsResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/insights/focus" : {
+      "get" : {
+        "tags" : [ "insight-controller" ],
+        "operationId" : "focus",
+        "parameters" : [ {
+          "name" : "limit",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 20
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/FocusResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/shadow-variants/{name}" : {
       "delete" : {
         "tags" : [ "shadow-variants-controller" ],
@@ -2746,6 +3127,29 @@
           }
         }
       },
+      "FeedbackRequest" : {
+        "type" : "object",
+        "properties" : {
+          "verdict" : {
+            "type" : "string"
+          },
+          "note" : {
+            "type" : "string"
+          }
+        }
+      },
+      "TriageResponse" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "status" : {
+            "type" : "string"
+          }
+        }
+      },
       "NotificationRequest" : {
         "type" : "object",
         "properties" : {
@@ -3094,6 +3498,232 @@
           },
           "utilisedDebits" : {
             "type" : "number"
+          }
+        }
+      },
+      "Insight" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "generatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "type" : {
+            "type" : "string"
+          },
+          "severity" : {
+            "type" : "string"
+          },
+          "scope" : {
+            "type" : "string"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "explanation" : {
+            "type" : "string"
+          },
+          "evidence" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "priority" : {
+            "type" : "number"
+          },
+          "priorityDetail" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "dataTrust" : {
+            "type" : "string"
+          },
+          "trustReasons" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "dedupeKey" : {
+            "type" : "string"
+          },
+          "cooldownUntil" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "suppressed" : {
+            "type" : "boolean"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "expiresAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "engineVersion" : {
+            "type" : "string"
+          },
+          "configHash" : {
+            "type" : "string"
+          }
+        }
+      },
+      "InsightListResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Insight"
+            }
+          },
+          "limit" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "offset" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "FamilyTrust" : {
+        "type" : "object",
+        "properties" : {
+          "family" : {
+            "type" : "string"
+          },
+          "state" : {
+            "type" : "string",
+            "enum" : [ "OK", "DEGRADED", "BLOCKED" ]
+          },
+          "reasons" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "asOf" : {
+            "type" : "string"
+          }
+        }
+      },
+      "TrustSummaryResponse" : {
+        "type" : "object",
+        "properties" : {
+          "asOf" : {
+            "type" : "string"
+          },
+          "families" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/FamilyTrust"
+            }
+          }
+        }
+      },
+      "Count" : {
+        "type" : "object",
+        "properties" : {
+          "key" : {
+            "type" : "string"
+          },
+          "count" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "InsightSummaryResponse" : {
+        "type" : "object",
+        "properties" : {
+          "bySeverity" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Count"
+            }
+          },
+          "byStatus" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Count"
+            }
+          },
+          "suppressed" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "NotificationEventRow" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "signalId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "strategyId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "insightId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "channel" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "attempts" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "detail" : {
+            "type" : "string"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "NotificationEventsResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/NotificationEventRow"
+            }
+          }
+        }
+      },
+      "FocusResponse" : {
+        "type" : "object",
+        "properties" : {
+          "signalQueue" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Insight"
+            }
+          },
+          "attentionQueue" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Insight"
+            }
+          },
+          "suppressed" : {
+            "type" : "integer",
+            "format" : "int64"
           }
         }
       },

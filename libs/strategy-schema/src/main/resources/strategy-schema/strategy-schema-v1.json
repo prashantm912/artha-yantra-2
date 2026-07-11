@@ -846,8 +846,8 @@
       "properties": {
         "path": {
           "type": "string",
-          "pattern": "^(indicators\\[(alias=[a-z][a-z0-9_]*|type=[a-z][a-z0-9_]*|[0-9]+)\\]\\.params\\.[a-z][a-z0-9_]*|exit_rules\\[(alias=[a-z][a-z0-9_]*|type=[a-z][a-z0-9_]*|[0-9]+)\\]\\.params\\.[a-z][a-z0-9_]*|entry_rules\\.scoring\\.[a-z][a-z0-9_]*|risk\\.position_sizing\\.[a-z][a-z0-9_]*)$",
-          "description": "Closed whitelist grammar (COMMON 12.5): alias/type selectors preferred; bare positional indices accepted but linted"
+          "pattern": "^(indicators\\[(alias=[a-z][a-z0-9_]*|type=[a-z][a-z0-9_]*|[0-9]+)\\]\\.params\\.[a-z][a-z0-9_]*|exit_rules\\[(alias=[a-z][a-z0-9_]*|type=[a-z][a-z0-9_]*|[0-9]+)\\]\\.params\\.[a-z][a-z0-9_]*|entry_rules\\.scoring\\.[a-z][a-z0-9_]*|risk\\.position_sizing\\.[a-z][a-z0-9_]*|entry_rules\\.gate\\.[a-z][a-z0-9_]*|risk\\.(max_positions_per_underlying|max_positions))$",
+          "description": "Closed whitelist grammar (COMMON 12.5, EVO row 21): alias/type selectors preferred; bare positional indices accepted but linted. entry_rules.gate.<lhs> tunes a gate comparison's numeric literal; risk.max_positions[_per_underlying] tunes a position cap"
         },
         "range": {
           "type": "array",

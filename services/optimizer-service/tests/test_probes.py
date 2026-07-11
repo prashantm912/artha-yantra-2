@@ -7,7 +7,9 @@ Four layers, each deterministic (the drain thread is exercised through in-memory
 * planning  — ``service._plan_probes`` ranks the plateau top-K, dedups, and caps;
 * drain     — ``sweep.run_probes`` completes/fails probe rows and reconciles dead jobs;
 * end-to-end— ``SweepService.probe`` lifts a trial's MEASURED ``neighborCount`` (the whole point),
-              plus the 404 / 409 / actor-stamping / numbering contract and the REST surface.
+              plus the 404 / 409 / actor-stamping / numbering contract and the REST surface;
+* durability— the boot reaper for RUNNING rows stranded under a terminal sweep, the
+              partial-dispatch rescue drain, and 23505 numbering-race degradation.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from app import api, leaderboard
 from app.errors import ApiError, api_error_handler, invalid_path_handler
 from app.leaderboard import _is_neighbor
 from app.path_grammar import InvalidParameterPath
+from app.repos import TrialNumberConflict
 from app.service import SweepService, _param_key, _plan_probes
 from app.sweep import run_probes
 from tests.fakes import FakeJobs, FakeTrials
@@ -103,7 +106,7 @@ def test_plan_probes_fills_the_top_trial_missing_neighbors():
     assert skipped == 1  # the one already-present neighbor
 
 
-def test_plan_probes_dedups_against_pruned_and_failed_trials():
+def test_plan_probes_dedups_pruned_but_retries_failed():
     rows = [
         _row(1, 1, sharpe=1.0, number=0),
         _row(2, 1, state="PRUNED", number=1),
@@ -111,7 +114,9 @@ def test_plan_probes_dedups_against_pruned_and_failed_trials():
     ]
     to_submit, _ = _plan_probes(rows, GRID, "sharpe", "maximize", top_k=1, max_probes=40)
     got = {(c["a"], c["b"]) for c in to_submit}
-    assert got == {(0, 1), (1, 2)}  # (2,1) pruned + (1,0) failed both skipped
+    # PRUNED was JUDGED (the pruner saw its folds) -> stays deduped. FAILED was LOST (transient
+    # worker error / NaN metric) -> retryable, else one flaky failure blackholes the cell forever.
+    assert got == {(0, 1), (1, 2), (1, 0)}
 
 
 def test_plan_probes_caps_at_max_probes():
@@ -374,3 +379,127 @@ def test_probes_endpoint_unknown_is_404():
     )
     assert resp.status_code == 404
     assert resp.json()["code"] == "NOT_FOUND_JOB"
+
+
+# --------------------------------------------------------------------------------------------------
+# durability: boot reaper for stranded RUNNING rows, partial-dispatch drain, numbering races
+# --------------------------------------------------------------------------------------------------
+
+
+class ExplodingDispatcher(EchoDispatcher):
+    """Raises on the Nth dispatch (1-based) — the partial-dispatch failure fixture; earlier
+    dispatches still echo results so the rescue drain can finish."""
+
+    def __init__(self, explode_at: int) -> None:
+        super().__init__()
+        self._explode_at = explode_at
+
+    def dispatch(self, trial_job_id: str) -> None:
+        if len(self.dispatched) + 1 == self._explode_at:
+            raise RuntimeError("dispatch exploded")
+        super().dispatch(trial_job_id)
+
+
+class RacingTrials(FakeTrials):
+    """Simulates the 23505 race ONCE (after ``armed``): the first probe insert finds its number
+    just taken by a concurrent POST — a foreign row is recorded at that number, then the conflict
+    raised, so the retry's max_trial_number re-read sees the racer's row."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.armed = False
+        self._raced = False
+
+    def insert(self, sweep_id: str, trial_number: int, params: dict[str, Any]) -> int:
+        if self.armed and not self._raced:
+            self._raced = True
+            super().insert(sweep_id, trial_number, {"a": -1, "b": -1})  # the racing POST's row
+            raise TrialNumberConflict("simulated 23505")
+        return super().insert(sweep_id, trial_number, params)
+
+
+class AlwaysConflictTrials(FakeTrials):
+    """Every insert after ``armed`` conflicts — the persistent-collision fixture."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.armed = False
+
+    def insert(self, sweep_id: str, trial_number: int, params: dict[str, Any]) -> int:
+        if self.armed:
+            raise TrialNumberConflict("simulated persistent 23505")
+        return super().insert(sweep_id, trial_number, params)
+
+
+def test_delete_stranded_running_reaps_only_terminal_sweep_rows():
+    jobs = FakeJobs()
+    trials = FakeTrials(jobs)
+    done = jobs.insert_sweep(None, {})
+    jobs.rows[done]["status"] = "completed"
+    live = jobs.insert_sweep(None, {})
+    jobs.rows[live]["status"] = "running"
+    stranded = trials.insert(done, 0, {"a": 1, "b": 1})  # RUNNING under terminal -> reaped
+    in_flight = trials.insert(live, 0, {"a": 1, "b": 1})  # RUNNING under live -> kept
+    finished = trials.insert(done, 1, {"a": 2, "b": 1})
+    trials.complete(finished, {"sharpe": 1.0}, None)  # COMPLETE -> kept
+    assert trials.delete_stranded_running() == 1
+    assert stranded not in trials.rows
+    assert in_flight in trials.rows
+    assert finished in trials.rows
+
+
+def test_boot_reap_frees_a_zombie_cell_for_reprobe():
+    jobs = FakeJobs()
+    trials = FakeTrials(jobs)
+    # every axis neighbor of the (deterministic, stable-sort) top trial (1,1) is COMPLETE except
+    # (2,1), which a mid-drain restart left stranded at RUNNING.
+    sweep_id = _seed(jobs, trials, [((1, 1), 1.0), ((0, 1), 0.5), ((1, 0), 0.5), ((1, 2), 0.5)])
+    trials.insert(sweep_id, 50, {"a": 2, "b": 1})
+    svc = _service(jobs, trials, EchoDispatcher())
+
+    receipt = svc.probe(sweep_id, top_k=1, max_probes=40)
+    assert receipt["submitted"] == 0  # the zombie RUNNING row blackholes its cell...
+    assert receipt["skipped"] == 4
+
+    assert trials.delete_stranded_running() == 1  # ...until the boot reaper deletes it
+
+    receipt2 = svc.probe(sweep_id, top_k=1, max_probes=40)
+    assert [t["params"] for t in receipt2["trials"]] == [{"a": 2, "b": 1}]
+    _wait(lambda: len(trials.list_for_sweep(sweep_id, "COMPLETE", 1000, 0)) == 5)
+
+
+def test_probe_mid_loop_exception_still_drains_dispatched():
+    jobs, trials = FakeJobs(), FakeTrials()
+    dispatcher = ExplodingDispatcher(explode_at=2)
+    sweep_id = _seed(jobs, trials, [((1, 1), 1.0), ((0, 1), 0.5)])
+    with pytest.raises(RuntimeError):
+        _service(jobs, trials, dispatcher).probe(sweep_id, top_k=1, max_probes=40)
+    # the probe dispatched BEFORE the explosion is still drained to COMPLETE (2 seed + 1 probe) —
+    # without the rescue drain its row would sit RUNNING forever with the result destroyed unread.
+    _wait(lambda: len(trials.list_for_sweep(sweep_id, "COMPLETE", 1000, 0)) == 3)
+    # the exploding cell's ledger row is stranded RUNNING — exactly what the boot reaper heals.
+    running = [r for r in trials.rows.values() if r["state"] == "RUNNING"]
+    assert len(running) == 1
+
+
+def test_probe_numbering_race_degrades_to_retry_not_500():
+    jobs = FakeJobs()
+    trials = RacingTrials()
+    dispatcher = EchoDispatcher()
+    sweep_id = _seed(jobs, trials, [((1, 1), 1.0), ((0, 1), 0.5)])
+    trials.armed = True
+    receipt = _service(jobs, trials, dispatcher).probe(sweep_id, top_k=1, max_probes=40)
+    assert receipt["submitted"] == 3  # the race cost one number slot, never a cell or a 500
+    assert sorted(t["trialNumber"] for t in receipt["trials"]) == [3, 4, 5]  # racer took slot 2
+    _wait(lambda: len(trials.list_for_sweep(sweep_id, "COMPLETE", 1000, 0)) == 5)
+
+
+def test_probe_persistent_collision_skips_cells_not_500():
+    jobs = FakeJobs()
+    trials = AlwaysConflictTrials()
+    sweep_id = _seed(jobs, trials, [((1, 1), 1.0), ((0, 1), 0.5)])
+    trials.armed = True
+    receipt = _service(jobs, trials, EchoDispatcher()).probe(sweep_id, top_k=1, max_probes=40)
+    assert receipt["submitted"] == 0
+    assert receipt["skipped"] == 4  # 1 deduped + 3 collision-skipped
+    assert receipt["trials"] == []

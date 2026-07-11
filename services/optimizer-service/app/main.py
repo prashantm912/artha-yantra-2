@@ -56,6 +56,22 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     except Exception as exc:  # noqa: BLE001 - postgres may be down at boot in some envs
         log.warning("orphaned-sweep recovery skipped: %s", exc)
 
+    # Boot reaper (EVO E2 neighbor probes): a restart mid-probe-drain strands optimization_trials
+    # rows at RUNNING under an already-terminal sweep — nothing can ever resolve them, and a
+    # stranded row dedupes its cell away from every future probe POST. DELETE frees the cell +
+    # trial_number so a re-POST re-probes it. Runs AFTER fail_orphaned_sweeps so a restart-killed
+    # sweep's own RUNNING rows (its parent just flipped to failed) are swept in the same boot.
+    try:
+        trials_repo = TrialsRepo(open_conn())
+        try:
+            stranded = trials_repo.delete_stranded_running()
+            if stranded:
+                log.warning("deleted %d stranded RUNNING trial row(s) at boot", stranded)
+        finally:
+            trials_repo.close()
+    except Exception as exc:  # noqa: BLE001 - postgres may be down at boot in some envs
+        log.warning("stranded-trial cleanup skipped: %s", exc)
+
     app.state.sweeps = SweepService(
         strategy_client=StrategyClient(settings.strategy_signal_base),
         backtest_client=backtest_client,

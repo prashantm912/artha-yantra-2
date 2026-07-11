@@ -12,6 +12,7 @@ from typing import Any
 
 from app import config_patch, leaderboard, metrics_catalog, path_grammar, sweep
 from app.errors import ApiError
+from app.repos import TrialNumberConflict
 
 _METHODS = {"grid", "random", "tpe", "nsga2"}
 _PROMOTABLE = "COMPLETE"
@@ -419,8 +420,8 @@ class SweepService:
         """Submit the plateau top-K's MISSING ±1-step neighbors as ordinary trials of THIS completed
         sweep (design §3.2.3 / §11), so a later ``/best`` read MEASURES ``neighborCount`` instead of
         inheriting it accidentally. Manual, no autonomy. 404 for an unknown or non-OPTIMIZATION job;
-        409 unless the sweep is completed. Candidate cells are deduped against every existing trial
-        (a re-run of an evaluated vector is wasted) and against each other, then ceiling-capped.
+        409 unless the sweep is completed. Candidate cells are deduped against existing trials
+        (all states except FAILED, which is retryable — see ``_plan_probes``), then ceiling-capped.
         Each probe is dispatched through the SAME queue the sweep used (never a direct backtest
         submission), so it rides the B16 worker-pool cap; a background thread drains their results
         (the sweep's own thread is long gone). Returns ``{submitted, skipped, trials}``."""
@@ -456,28 +457,47 @@ class SweepService:
             number = trials.max_trial_number(sweep_id) + 1
             pending: dict[str, int] = {}
             descriptors: list[dict[str, Any]] = []
-            for cell in to_submit:
-                trial_job_id = jobs.insert_trial(
-                    sweep_id, None, _probe_request(template, cell),
-                    created_by=f"optimizer:{sweep_id}:probe",
-                )
-                row_id = trials.insert(sweep_id, number, cell)
-                self._dispatcher.dispatch(trial_job_id)
-                pending[str(trial_job_id)] = row_id
-                descriptors.append(
-                    {"trialNumber": number, "params": cell, "trialJobId": str(trial_job_id)}
-                )
-                number += 1
+            try:
+                for cell in to_submit:
+                    # Ledger row FIRST (a numbering race then skips the cell before any jobs row
+                    # exists; a later failure strands only a RUNNING ledger row, which the boot
+                    # reaper deletes — a queued jobs row would have no reaper).
+                    row_id, number = _insert_with_retry(trials, sweep_id, number, cell)
+                    if row_id is None:  # persistent numbering collision — degrade to a skip
+                        skipped += 1
+                        continue
+                    trial_job_id = jobs.insert_trial(
+                        sweep_id, None, _probe_request(template, cell),
+                        created_by=f"optimizer:{sweep_id}:probe",
+                    )
+                    self._dispatcher.dispatch(trial_job_id)
+                    pending[str(trial_job_id)] = row_id
+                    descriptors.append(
+                        {"trialNumber": number, "params": cell, "trialJobId": str(trial_job_id)}
+                    )
+                    number += 1
+            except Exception:
+                # Partial-dispatch safety: anything ALREADY dispatched must still be drained (else
+                # its ledger row sits RUNNING forever while the worker's result is destroyed
+                # unread); start the drain, then surface the error. The failing cell's own
+                # dispatched-nothing remnants (a RUNNING row without a dispatch) are boot-reaped.
+                if pending:
+                    self._start_drain(sweep_id, pending, metric)
+                raise
         finally:
             jobs.close()
             trials.close()
+        if pending:
+            self._start_drain(sweep_id, pending, metric)
+        return {"submitted": len(descriptors), "skipped": skipped, "trials": descriptors}
+
+    def _start_drain(self, sweep_id: str, pending: dict[str, int], metric: str) -> None:
         threading.Thread(
             target=self._drain_probes,
             kwargs={"sweep_id": sweep_id, "pending": pending, "metric": metric},
             daemon=True,
             name=f"probe-{sweep_id[:8]}",
         ).start()
-        return {"submitted": len(descriptors), "skipped": skipped, "trials": descriptors}
 
     def _drain_probes(self, *, sweep_id: str, pending: dict[str, int], metric: str) -> None:
         """The probe result-drain thread (fresh per-thread repos, like ``_run``): resolves each
@@ -560,10 +580,15 @@ def _plan_probes(
 ) -> tuple[list[dict[str, Any]], int]:
     """Plan the neighbor-probe batch: rank the COMPLETE trials by plateau objective, take the
     top-K, expand each into its axis neighbours (``leaderboard.axis_neighbors`` — the ONE geometry),
-    drop cells that already exist as a trial (any state) or repeat across the top-K, and cap at
-    ``max_probes``. The best trial's neighbours are expanded first, so the cap favours filling the
-    top plateau. Returns ``(cells to submit, skipped)``, skipped = already-present + over-cap."""
-    existing = {_param_key(r["params"]) for r in rows}
+    drop cells that already exist as a trial or repeat across the top-K, and cap at ``max_probes``.
+    The best trial's neighbours are expanded first, so the cap favours filling the top plateau.
+    Returns ``(cells to submit, skipped)``, skipped = already-present + over-cap.
+
+    Dedup excludes FAILED rows: a FAILED cell was LOST (transient worker error / NaN metric), not
+    judged — deduping it would blackhole that neighbour forever after one flaky failure; a re-POST
+    retries it. COMPLETE, PRUNED, and RUNNING (in flight) stay deduped; a RUNNING row STRANDED by a
+    restart is DELETED at boot (TrialsRepo.delete_stranded_running), so it cannot dedupe forever."""
+    existing = {_param_key(r["params"]) for r in rows if r.get("state") != "FAILED"}
     complete = [
         {"params": r["params"], "objective": float((r.get("objectiveValues") or {})[metric])}
         for r in rows
@@ -591,6 +616,22 @@ def _param_key(params: dict[str, Any]) -> tuple:
     """An order-independent, hashable identity for a parameter vector (``1`` and ``1.0`` collapse —
     Python hashes them equal), for deduping probe cells against existing trials."""
     return tuple(sorted(params.items()))
+
+
+def _insert_with_retry(
+    trials: Any, sweep_id: str, number: int, cell: dict[str, Any]
+) -> tuple[int | None, int]:
+    """Insert a probe's ledger row, absorbing a numbering collision (23505 on the sweep's
+    (sweep_job_id, trial_number) unique index — a concurrent second POST read the same
+    ``max_trial_number``): re-read max+1 and retry once; a second collision skips the cell, so a
+    race degrades to a skip, never a 500. Returns ``(row_id, number_used)``; ``row_id`` is ``None``
+    when the cell was skipped."""
+    for _ in range(2):
+        try:
+            return trials.insert(sweep_id, number, cell), number
+        except TrialNumberConflict:
+            number = trials.max_trial_number(sweep_id) + 1
+    return None, number
 
 
 def _probe_request(template: dict[str, Any], cell: dict[str, Any]) -> dict[str, Any]:

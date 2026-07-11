@@ -10,7 +10,7 @@ import redis
 from fastapi import FastAPI
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from app import api, evolution
+from app import api, evolution, insights
 from app.backtest_client import BacktestClient
 from app.errors import ApiError, api_error_handler, invalid_path_handler
 from app.path_grammar import InvalidParameterPath
@@ -83,12 +83,20 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         scorer=app.state.retro,
     )
 
+    # Parameter-effect insights (§12 E2 item 6): importance/brittleness/slices over an existing
+    # sweep's trials, read-only. Reuses the jobs/trials factories; needs no backtest client.
+    app.state.insights = insights.InsightsService(
+        jobs_factory=lambda: JobsRepo(open_conn()),
+        trials_factory=lambda: TrialsRepo(open_conn()),
+    )
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "UP"}
 
     app.include_router(api.router)
     app.include_router(evolution.router)
+    app.include_router(insights.router)
     Instrumentator().instrument(app).expose(app, endpoint="/metrics")
     return app
 

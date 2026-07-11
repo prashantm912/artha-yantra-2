@@ -40,6 +40,16 @@
       "422"
     ]
   },
+  "GET /api/v1/evolution/insights/{sweep_job_id}": {
+    "params": [
+      "sweep_job_id"
+    ],
+    "requestBody": false,
+    "responses": [
+      "200",
+      "422"
+    ]
+  },
   "GET /api/v1/evolution/retro-score/{sweep_job_id}": {
     "params": [
       "sweep_job_id"

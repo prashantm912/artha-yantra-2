@@ -135,16 +135,35 @@ public class ScalperConfluenceGate {
       BigDecimal structuralStop) {}
 
   /**
-   * The gate verdict: a {@link Decision} to fire OR a {@link RejectionDiagnostic} explaining the block.
-   * Exactly one is present. Replaces the old bare {@code Optional<Decision>} so the live engine can
-   * persist WHY an entry was rejected without re-deriving it.
+   * INT §13 row 19 / FID P1-8: the fired-side counterpart of {@link RejectionDiagnostic}. When the gate
+   * PASSES, this carries the SAME per-rail condition matrix ({@code checks} — every rail's operand vs
+   * threshold + margin), the Connect-the-Dots confluence, and the raw OI/macro/chart context that the
+   * entry cleared — everything the block path records MINUS the blocking-rail summary (nothing blocked).
+   * Built from the SAME {@link Diag} state the {@link Decision} came from (never a re-evaluation), so it
+   * is a deterministic function of the bar. Persisted to {@code signals.fired_diagnostic} (mirroring
+   * {@code signal_rejections.diagnostic}'s shape) so the §4.2 Stage-2 fired-vs-rejected contrast joins
+   * cleanly. LIVE-only — the golden replay never reaches the gate ⇒ never built on backtest → parity-safe.
    */
-  public record Result(Optional<Decision> decision, RejectionDiagnostic rejection) {
+  public record FiredDiagnostic(
+      OptionType side,
+      BigDecimal compositeScore,
+      BigDecimal compositeThreshold,
+      List<RailCheck> checks,
+      Confluence confluence,
+      ScalperGateContext context,
+      String underlying,
+      LocalDate expiry,
+      StrikePicker.Pick pick,
+      BigDecimal structuralStop) {}
 
-    /** A firing decision. */
-    static Result of(Decision d) {
-      return new Result(Optional.of(d), null);
-    }
+  /**
+   * The gate verdict: a firing {@link Decision} (with its fired-side {@link FiredDiagnostic}) OR a
+   * {@link RejectionDiagnostic} explaining the block. Exactly one of {@code fired}/{@code rejection} is
+   * present. Replaces the old bare {@code Optional<Decision>} so the live engine can persist WHY an entry
+   * was rejected — and, symmetrically, the full condition matrix behind a FIRED entry (§13 row 19).
+   */
+  public record Result(
+      Optional<Decision> decision, RejectionDiagnostic rejection, FiredDiagnostic fired) {
 
     /** True when the gate blocked the entry (a rejection diagnostic is present). */
     public boolean blocked() {
@@ -221,7 +240,31 @@ public class ScalperConfluenceGate {
           new RejectionDiagnostic(
               b.rail(), side, b.operand(), b.threshold(), b.margin(), b.reason(),
               confluence == null ? null : confluence.aggregate(), confluenceThreshold,
-              List.copyOf(checks), confluence, context, underlying, expiry, pick, structuralStop));
+              List.copyOf(checks), confluence, context, underlying, expiry, pick, structuralStop),
+          null);
+    }
+
+    /**
+     * Builds a firing {@link Result} carrying {@code decision} AND its fired-side {@link FiredDiagnostic}
+     * — the full condition matrix every recorded rail cleared, plus the confluence + context. Uses the
+     * SAME accumulated state {@link #block()} would have serialized (§13 row 19), so the fired diagnostic
+     * is a deterministic function of the bar (no re-evaluation, no re-fetch).
+     */
+    Result fire(Decision decision) {
+      return new Result(
+          Optional.of(decision),
+          null,
+          new FiredDiagnostic(
+              side,
+              confluence == null ? null : confluence.aggregate(),
+              confluenceThreshold,
+              List.copyOf(checks),
+              confluence,
+              context,
+              underlying,
+              expiry,
+              pick,
+              structuralStop));
     }
   }
 
@@ -402,7 +445,7 @@ public class ScalperConfluenceGate {
       }
       var s = pair.get();
       // #11 straddle is direction-neutral — no Open=High tier / no graded sizing
-      return Result.of(
+      return diag.fire(
           new Decision(
               null,
               List.of(new Leg(OptionType.CE, s.call()), new Leg(OptionType.PE, s.put())),
@@ -930,7 +973,7 @@ public class ScalperConfluenceGate {
     }
     OptionType decided = side;
     OpenHighLow.Tier decidedTier = ohTier;
-    return Result.of(
+    return diag.fire(
         new Decision(
             decided, List.of(new Leg(decided, pick.get())), conf, chain.expiry(), stop, decidedTier,
             ctx.oi().callPutDeltaImbalancePct(), ctx.macro().vixLevel()));

@@ -641,7 +641,7 @@ public class SignalEngine {
         if (strategy.scalper() != null) {
           scalperEntry(strategy, exchange, tradingsymbol, interval, bar, evaluation.get(), bank, primary, index);
         } else {
-          emitEntry(strategy, exchange, tradingsymbol, interval, bar, evaluation.get(), null);
+          emitEntry(strategy, exchange, tradingsymbol, interval, bar, evaluation.get(), null, null);
         }
       }
     }
@@ -675,7 +675,9 @@ public class SignalEngine {
       recordRejection(strategy, exchange, tradingsymbol, interval, istBar, result.rejection());
       return;
     }
-    emitEntry(strategy, exchange, tradingsymbol, interval, bar, evaluation, result.decision().get());
+    emitEntry(
+        strategy, exchange, tradingsymbol, interval, bar, evaluation, result.decision().get(),
+        result.fired());
   }
 
   private void evaluateCoarsePrimary(
@@ -831,12 +833,12 @@ public class SignalEngine {
         }
         emitEntry(
             strategy, instrument.exchange(), instrument.tradingsymbol(), "1d", lastOneMinute,
-            evaluation.get(), result.decision().get());
+            evaluation.get(), result.decision().get(), result.fired());
         return;
       }
       emitEntry(
           strategy, instrument.exchange(), instrument.tradingsymbol(), "1d", lastOneMinute,
-          evaluation.get(), null);
+          evaluation.get(), null, null);
     }
   }
 
@@ -862,7 +864,8 @@ public class SignalEngine {
 
   private void emitEntry(
       Loaded strategy, String exchange, String tradingsymbol, String interval, EngineCandle bar,
-      EntryEvaluator.Evaluation evaluation, ScalperConfluenceGate.Decision decision) {
+      EntryEvaluator.Evaluation evaluation, ScalperConfluenceGate.Decision decision,
+      ScalperConfluenceGate.FiredDiagnostic firedDiagnostic) {
     // Per-book risk gate: a daily-loss trip / kill switch / max-open cap pauses ENTRY emission for
     // this strategy's book for the rest of the IST day — exit/stop evaluation (emit()) is NOT gated.
     if (emissionGuard.isPresent() && !emissionGuard.get().entryAllowed(strategy.book())) {
@@ -943,6 +946,16 @@ public class SignalEngine {
     // frozen score breakdown. Options trade on the same derivatives exchange as the index future.
     String scalperDetail =
         decision == null ? null : scalperDetailJson(decision, strategy.scalper(), exchange);
+    // INT §13 row 19 / FID P1-8 fired-side rail-operand side-channel: serialize the confluence gate's full
+    // condition matrix (built from the SAME evaluation the Decision came from — never re-evaluated, so it
+    // is deterministic) mirroring signal_rejections.diagnostic's shape. Built HERE (not inside the tx) so a
+    // serialization/persistence hiccup can never roll back the real ENTRY; stamped best-effort AFTER commit
+    // below (a diagnostic must never break the live signal path — same doctrine as recordRejection).
+    String firedDiagnosticJson =
+        firedDiagnostic == null
+            ? null
+            : in.arthayantra.strategysignal.scalper.FiredDiagnosticJson.write(
+                objectMapper, firedDiagnostic);
     // One transaction: the ENTRY row, its suggested qty and its option leg are all-or-nothing. A
     // partial commit left an ACTIVE entry with no tradeable leg — the exit side then read a null
     // scalper_detail and silently fell back to the definition direction (wrong side for a PE scalp).
@@ -966,6 +979,16 @@ public class SignalEngine {
               return newId;
             });
     emitted.increment();
+    // Best-effort post-commit stamp of the fired-side diagnostic (§13 row 19): NOT inside the tx above —
+    // a scalper contrast diagnostic must never roll back / break the real ENTRY (mirrors recordRejection's
+    // swallow-and-warn). No correctness path reads it back, so a rare miss is harmless.
+    if (firedDiagnosticJson != null) {
+      try {
+        signals.stampFiredDiagnostic(id, firedDiagnosticJson);
+      } catch (RuntimeException e) {
+        log.warn("failed to stamp fired diagnostic for signal #{}: {}", id, e.toString());
+      }
+    }
     // the channel carries EXACTLY the persisted canonical bytes (divergence = FAIL criterion)
     JsonNode canonicalBreakdown;
     try {

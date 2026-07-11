@@ -267,6 +267,18 @@ public class SignalRepository {
   }
 
   /**
+   * Stamps the INT §13 row 19 / FID P1-8 fired-side rail-operand side-channel (V035): the full condition
+   * matrix a scalper ENTRY cleared (every rail's operand + threshold + margin, the Connect-the-Dots
+   * confluence, the raw OI/macro/chart context), mirroring {@code signal_rejections.diagnostic} so the
+   * §4.2 Stage-2 fired-vs-rejected contrast joins cleanly — outside the frozen score breakdown, the same
+   * rule as {@link #stampScalperDetail}. Best-effort (the caller swallows failures — a diagnostic must
+   * never break the live signal path); NULL for every non-scalper signal (never stamped).
+   */
+  public void stampFiredDiagnostic(long id, String diagnosticJson) {
+    jdbc.update("UPDATE signals SET fired_diagnostic = ?::jsonb WHERE id = ?", diagnosticJson, id);
+  }
+
+  /**
    * Stamps the MV-6.8 minervini side-channel: the fired swing setup's detail (setup type, stage, VCP
    * footprint, pivot, gate booleans) as JSON — outside the frozen score breakdown, the same rule as
    * {@link #stampScalperDetail}. NULL for every non-minervini signal (never stamped).

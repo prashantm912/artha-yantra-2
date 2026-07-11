@@ -37,7 +37,9 @@ import org.springframework.stereotype.Component;
 public class ReplayEngine {
 
   private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
-  private final FillSimulator fills = new LtpSlippageV1();
+  // Concrete type (not the FillSimulator port) so the fill call can pass the cost-stress
+  // slippageMultiplier — a backtest-only knob kept off the shared paper/live fill port.
+  private final LtpSlippageV1 fills = new LtpSlippageV1();
   private final ObjectMapper objectMapper;
 
   /** Wires Jackson (per-trade contributions JSONB). */
@@ -357,7 +359,8 @@ public class ReplayEngine {
             null,
             costs.slippage(),
             costs.brokerage(),
-            costs.fees()));
+            costs.fees()),
+        costs.slippageMultiplier());
   }
 
   private static long size(

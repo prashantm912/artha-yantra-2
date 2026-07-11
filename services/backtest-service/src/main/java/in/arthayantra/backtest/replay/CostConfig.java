@@ -10,6 +10,12 @@ import java.math.BigDecimal;
  * The fill/cost configuration a replay applies via the shared {@code FillSimulator} — the {@code
  * costs} block resolved against an instrument class, tick and lot size. Defaults give a credit-free
  * equity proxy (5 bps slippage fallback, statutory fees from {@link FeeConstants}).
+ *
+ * <p>{@code slippageMultiplier} is the request-level cost-stress knob (EVO §3.2.5): the effective
+ * slippage the {@code FillSimulator} computes is scaled by it at fill construction. It defaults to
+ * {@code 1} (both factories), which is byte-identical to the pre-stress behaviour — an absent
+ * {@code stressOverrides} request field never widens a fill. Only stressed re-runs (a fresh run id,
+ * never a golden input) carry a multiplier &gt; 1.
  */
 public record CostConfig(
     InstrumentClass instrumentClass,
@@ -17,7 +23,8 @@ public record CostConfig(
     long lotSize,
     Slippage slippage,
     Brokerage brokerage,
-    Fees fees) {
+    Fees fees,
+    BigDecimal slippageMultiplier) {
 
   /** A plain equity proxy with the per-class slippage fallback and default statutory fees. */
   public static CostConfig defaults() {
@@ -27,7 +34,8 @@ public record CostConfig(
         1,
         Slippage.NONE,
         new Brokerage(null, new BigDecimal("0.03")),
-        Fees.DEFAULTS);
+        Fees.DEFAULTS,
+        BigDecimal.ONE);
   }
 
   /**
@@ -44,6 +52,16 @@ public record CostConfig(
         lotSize,
         Slippage.NONE,
         new Brokerage(new BigDecimal("20"), null),
-        Fees.DEFAULTS);
+        Fees.DEFAULTS,
+        BigDecimal.ONE);
+  }
+
+  /**
+   * A copy with the cost-stress {@code slippageMultiplier} applied (EVO §3.2.5). A {@code null} or
+   * {@code 1} multiplier returns an unstressed config — the parity path stays byte-identical.
+   */
+  public CostConfig withSlippageMultiplier(BigDecimal multiplier) {
+    BigDecimal m = multiplier == null ? BigDecimal.ONE : multiplier;
+    return new CostConfig(instrumentClass, tickSize, lotSize, slippage, brokerage, fees, m);
   }
 }

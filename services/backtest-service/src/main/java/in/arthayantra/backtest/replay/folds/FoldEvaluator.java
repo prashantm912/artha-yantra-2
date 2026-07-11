@@ -110,8 +110,12 @@ public class FoldEvaluator {
       CostConfig costs,
       boolean oneMinuteCovered) {
     return options
+        // The cost-stress slippageMultiplier rides on `costs` (candle path threads it directly); the
+        // options path builds its own per-leg CostConfig, so pass the multiplier through explicitly so
+        // a stressed trial's OOS option folds degrade in lockstep with its full-window run (EVO §3.2.5).
         ? optionsPremiumReplay.replay(
-            definition, config, exchange, tradingsymbol, primary, strikeRef, contexts, initialEquity)
+            definition, config, exchange, tradingsymbol, primary, strikeRef, contexts, initialEquity,
+            new OptionsPremiumReplay.GateCoverage(), costs.slippageMultiplier())
         : replayEngine.replay(
             definition, exchange, tradingsymbol, primary, contexts, initialEquity, costs,
             oneMinuteCovered);

@@ -869,10 +869,21 @@
           },
           "purpose" : {
             "type" : "string"
+          },
+          "stressOverrides" : {
+            "$ref" : "#/components/schemas/StressOverrides"
           }
         }
       },
       "JsonNode" : { },
+      "StressOverrides" : {
+        "type" : "object",
+        "properties" : {
+          "slippageMultiplier" : {
+            "type" : "number"
+          }
+        }
+      },
       "SwingReportCard" : {
         "type" : "object",
         "properties" : {

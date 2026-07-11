@@ -17,6 +17,7 @@ import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ConflictException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.error.NotFoundException;
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
@@ -31,6 +32,12 @@ public class JobsService {
   // Calendar-day lookback for warming the benchmark daily series — generously covers the
   // WARMUP_SESSIONS trading sessions the regime pre-flight needs strictly before `from`.
   private static final int BENCHMARK_WARMUP_LOOKBACK_DAYS = RegimeLabeler.WARMUP_SESSIONS * 2;
+
+  // EVO §3.2.5 cost-stress bounds: a multiplier < 1 would model NEGATIVE slippage (a fill BETTER than
+  // the reference — never a valid stress) and an absurd upper value is a fat-finger guard; the design
+  // only ever exercises 2× and 4×.
+  private static final BigDecimal MIN_SLIPPAGE_MULTIPLIER = BigDecimal.ONE;
+  private static final BigDecimal MAX_SLIPPAGE_MULTIPLIER = new BigDecimal("100");
 
   private final JobRepository repository;
   private final JobStreamDispatcher dispatcher;
@@ -120,6 +127,17 @@ public class JobsService {
     }
     if (req.seed() != null) {
       request.put("seed", req.seed());
+    }
+    // EVO §3.2.5 cost-stress: validate the multiplier (422 on out-of-range) and pin it into the
+    // request JSONB — this is the run's provenance record of the stress it was executed under, which
+    // BacktestRunner reads back to scale the fill slippage. An explicit 1 IS unstressed, so it is
+    // NOT written — job provenance stays symmetric with the run metrics (which also only carry the
+    // multiplier when actually stressed).
+    if (req.stressOverrides() != null) {
+      BigDecimal multiplier = validatedSlippageMultiplier(req.stressOverrides());
+      if (multiplier.compareTo(BigDecimal.ONE) != 0) {
+        request.putObject("stressOverrides").put("slippageMultiplier", multiplier);
+      }
     }
     request.put("purpose", purpose);
 
@@ -276,6 +294,31 @@ public class JobsService {
     if (value != null && !value.isBlank()) {
       node.put(field, value);
     }
+  }
+
+  /**
+   * Validates a cost-stress {@code stressOverrides} block (EVO §3.2.5) and returns its
+   * {@code slippageMultiplier}. The multiplier is required (a present block with no multiplier is a
+   * malformed request) and must lie in {@code [1, 100]}. Package-visible so the bounds are unit-tested
+   * without the submission integration harness.
+   */
+  static BigDecimal validatedSlippageMultiplier(BacktestRunRequest.StressOverrides overrides) {
+    BigDecimal multiplier = overrides.slippageMultiplier();
+    if (multiplier == null) {
+      throw new ApiException(
+          422,
+          ErrorCodes.VALIDATION_FAILED,
+          "stressOverrides.slippageMultiplier is required when stressOverrides is present");
+    }
+    if (multiplier.compareTo(MIN_SLIPPAGE_MULTIPLIER) < 0
+        || multiplier.compareTo(MAX_SLIPPAGE_MULTIPLIER) > 0) {
+      throw new ApiException(
+          422,
+          ErrorCodes.VALIDATION_FAILED,
+          "stressOverrides.slippageMultiplier must be in [1, 100]; got "
+              + multiplier.toPlainString());
+    }
+    return multiplier;
   }
 
   private static JobStatus parseStatus(String status) {

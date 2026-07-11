@@ -216,6 +216,49 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
             });
   }
 
+  @Test
+  @Order(5)
+  void refetchFillsAPartiallyCapturedDayTheCatchupWouldSkip() {
+    jdbc.update("DELETE FROM nse_eod_bhavcopy WHERE symbol LIKE 'RFT%'");
+    jdbc.update("DELETE FROM candles WHERE tradingsymbol LIKE 'RFT%'");
+    LocalDate day = LocalDate.of(2026, 6, 16); // a past trading day (Tue), < the fixed 06-18 clock
+
+    // A PARTIAL capture: only RFTA is stored, so the day is 'present' and the self-healing catch-up
+    // anti-joins it away — RFTB is never back-filled by an ordinary run (§8d, the gap this closes).
+    nseRepo.upsertAll(List.of(nseRow(day, "RFTA", "EQ", "10", "11", "9", "10", 100L)));
+    assertThat(rawNseCount("RFTB")).isZero();
+
+    // The publisher now serves the FULL day (both symbols).
+    BhavcopyFetcher full =
+        new BhavcopyFetcher() {
+          @Override
+          public List<BhavcopyRow> fetchLatest() {
+            return List.of();
+          }
+
+          @Override
+          public List<BhavcopyRow> fetchForDate(LocalDate d) {
+            return d.equals(day)
+                ? List.of(
+                    nseRow(day, "RFTA", "EQ", "10", "11", "9", "10", 100L),
+                    nseRow(day, "RFTB", "EQ", "20", "21", "19", "20", 200L))
+                : List.of();
+          }
+        };
+    BhavcopyBackfillService svc =
+        new BhavcopyBackfillService(
+            full, nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo, candles, CLOCK,
+            event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7, 420);
+
+    BhavcopyBackfillService.RefetchResult result = svc.refetchDate(day);
+
+    // The targeted re-fetch re-pulls the whole day, filling the missing symbol + projecting its candle.
+    assertThat(result.nse().bhavRows()).isEqualTo(2);
+    assertThat(rawNseCount("RFTB")).isEqualTo(1);
+    assertThat(close("NSE", "RFTB", day)).isEqualByComparingTo("20");
+    assertThat(close("NSE", "RFTA", day)).isEqualByComparingTo("10"); // existing row untouched
+  }
+
   private static BhavcopyFetcher emptyNse() {
     return new BhavcopyFetcher() {
       @Override

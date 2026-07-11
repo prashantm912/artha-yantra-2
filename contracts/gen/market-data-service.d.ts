@@ -260,6 +260,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/eod-backfill/refetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["refetch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/candles/refresh": {
         parameters: {
             query?: never;
@@ -2233,6 +2249,19 @@ export interface components {
             /** Format: int32 */
             captured?: number;
         };
+        ExchangeResult: {
+            /** Format: int32 */
+            days?: number;
+            /** Format: int32 */
+            bhavRows?: number;
+            /** Format: int32 */
+            candleRows?: number;
+        };
+        RefetchResult: {
+            date?: string;
+            nse?: components["schemas"]["ExchangeResult"];
+            bse?: components["schemas"]["ExchangeResult"];
+        };
         RefreshRequest: {
             exchange?: string;
             tradingsymbol?: string;
@@ -2301,12 +2330,6 @@ export interface components {
         };
         SessionRequest: {
             requestToken?: string;
-        };
-        ExchangeResult: {
-            connected?: boolean;
-            kiteUserId?: string;
-            /** Format: date-time */
-            tokenValidUntil?: string;
         };
         VixQuote: {
             ltp?: number;
@@ -4220,6 +4243,37 @@ export interface operations {
                     "*/*": {
                         [key: string]: string;
                     };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    refetch: {
+        parameters: {
+            query: {
+                date: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["RefetchResult"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

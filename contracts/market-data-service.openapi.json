@@ -993,6 +993,43 @@
         }
       }
     },
+    "/api/v1/market/eod-backfill/refetch" : {
+      "post" : {
+        "tags" : [ "eod-backfill-controller" ],
+        "operationId" : "refetch",
+        "parameters" : [ {
+          "name" : "date",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RefetchResult"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/candles/refresh" : {
       "post" : {
         "tags" : [ "candles-controller" ],
@@ -6780,6 +6817,37 @@
           }
         }
       },
+      "ExchangeResult" : {
+        "type" : "object",
+        "properties" : {
+          "days" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "bhavRows" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "candleRows" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "RefetchResult" : {
+        "type" : "object",
+        "properties" : {
+          "date" : {
+            "type" : "string"
+          },
+          "nse" : {
+            "$ref" : "#/components/schemas/ExchangeResult"
+          },
+          "bse" : {
+            "$ref" : "#/components/schemas/ExchangeResult"
+          }
+        }
+      },
       "RefreshRequest" : {
         "type" : "object",
         "properties" : {
@@ -6961,21 +7029,6 @@
         "properties" : {
           "requestToken" : {
             "type" : "string"
-          }
-        }
-      },
-      "ExchangeResult" : {
-        "type" : "object",
-        "properties" : {
-          "connected" : {
-            "type" : "boolean"
-          },
-          "kiteUserId" : {
-            "type" : "string"
-          },
-          "tokenValidUntil" : {
-            "type" : "string",
-            "format" : "date-time"
           }
         }
       },

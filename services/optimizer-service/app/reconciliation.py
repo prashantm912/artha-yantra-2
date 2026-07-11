@@ -901,7 +901,12 @@ def _dispatch_caveats(mode: str) -> list[str]:
     real plane, so a scalper reconciliation reads as a data-fidelity artifact, not a strategy
     verdict."""
     if mode == "swing":
-        return []
+        return [
+            "residual exit-TRIGGER axis: the sim honors exit_intrabar (default true on a 1d "
+            "primary) and may exit at the first intraday 1m close through a stop, while live "
+            "SwingBatchEngine evaluates exits only at the daily close — moot on daily-only "
+            "equity data, real for sub-daily-covered single-picks (fill-timing pin review F1)"
+        ]
     return [
         "scalper raw backtest-vs-live is a §7.2 STRUCTURAL divergence (gate-armed intraday: "
         "OI/Dow/IV muted on derived history → ~0 armed trades); judge on shadow-vs-paper not raw"

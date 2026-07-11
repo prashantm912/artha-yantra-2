@@ -281,8 +281,12 @@ def test_pair_trades_scalper_uses_option_ltp_proxy():
 
 def test_dispatch_caveats_swing_has_no_fill_timing_degradation():
     # §7.1.2: swing now PINS fill_timing at_close via sessionOverrides, so there is no dispatch-time
-    # fill-timing caveat any more (the pin is real, not a degradation). Scalper stays STRUCTURAL.
-    assert _dispatch_caveats("swing") == []
+    # FILL-TIMING caveat any more (the pin is real, not a degradation). One honest residual remains:
+    # the exit-TRIGGER axis (sim exit_intrabar vs live daily-close eval — review F1). Scalper stays
+    # STRUCTURAL.
+    swing = _dispatch_caveats("swing")
+    assert len(swing) == 1 and "exit-TRIGGER" in swing[0]
+    assert not any("NEXT_OPEN" in c or "could NOT be pinned" in c for c in swing)
     assert any("STRUCTURAL" in c for c in _dispatch_caveats("scalper"))
 
 

@@ -1636,6 +1636,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/context/options-digest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["optionsDigest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/context/day-context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["dayContext"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/connecting-dots": {
         parameters: {
             query?: never;
@@ -3212,6 +3244,123 @@ export interface components {
             /** Format: int32 */
             ratiosDetected?: number;
             error?: string;
+        };
+        ActiveStrikeMigration: {
+            nowTop?: string[];
+            openTop?: string[];
+            entered?: string[];
+            exited?: string[];
+            /** Format: int32 */
+            changedCount?: number;
+        };
+        AtmIv: {
+            iv?: number;
+            rank?: number;
+            /** Format: int32 */
+            percentile?: number;
+            /** Format: int32 */
+            windowSessions?: number;
+            insufficientHistory?: boolean;
+        };
+        MaxPain: {
+            now?: number;
+            atOpen?: number;
+            drift?: number;
+        };
+        OiStructure: {
+            /** @enum {string} */
+            verdict?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+            spotDelta?: number;
+            /** Format: int64 */
+            oiChange?: number;
+        };
+        OptionsDigest: {
+            underlying?: string;
+            /** Format: date */
+            expiry?: string;
+            pcr?: components["schemas"]["Pcr"];
+            maxPain?: components["schemas"]["MaxPain"];
+            oiGainers?: components["schemas"]["StrikeMove"][];
+            oiLosers?: components["schemas"]["StrikeMove"][];
+            activeStrikes?: components["schemas"]["ActiveStrikeMigration"];
+            atmStraddle?: components["schemas"]["Straddle"];
+            atmIv?: components["schemas"]["AtmIv"];
+            oiStructure?: components["schemas"]["OiStructure"];
+            /** Format: date-time */
+            asOf?: string;
+            dataTrust?: string;
+            trustReasons?: string[];
+        };
+        Pcr: {
+            now?: number;
+            atOpen?: number;
+            priorEod?: number;
+            deltaVsOpen?: number;
+            deltaVsPriorEod?: number;
+        };
+        Straddle: {
+            atmStrike?: number;
+            now?: number;
+            atOpen?: number;
+            deltaPct?: number;
+        };
+        DayContext: {
+            /** Format: date */
+            tradeDate?: string;
+            sessionPhase?: string;
+            holiday?: components["schemas"]["HolidayProximity"];
+            options?: components["schemas"]["OptionsDigest"];
+            vix?: components["schemas"]["Vix"];
+            overnightCues?: components["schemas"]["GlobalCue"][];
+            indexPriceAction?: components["schemas"]["IndexPriceAction"];
+            ingestTrust?: components["schemas"]["IngestTrust"];
+            /** Format: date-time */
+            asOf?: string;
+            notes?: string[];
+        };
+        GlobalCue: {
+            name?: string;
+            ltp?: number;
+            changePct?: number;
+        };
+        HolidayProximity: {
+            holidayToday?: boolean;
+            /** Format: date */
+            nextHoliday?: string;
+            nextHolidayName?: string;
+            /** Format: int32 */
+            daysToNextHoliday?: number;
+        };
+        IndexPriceAction: {
+            symbol?: string;
+            gapOpenPct?: number;
+            dayRange?: number;
+            avgRange20?: number;
+            rangeVsAvg?: number;
+            direction?: string;
+            rangeState?: string;
+            /** Format: date */
+            asOfDate?: string;
+        };
+        IngestTrust: {
+            overall?: string;
+            sources?: components["schemas"]["SourceTrust"][];
+        };
+        SourceTrust: {
+            source?: string;
+            status?: string;
+            lastRunStatus?: string;
+            /** Format: date-time */
+            lastRunAt?: string;
+            stale?: boolean;
+        };
+        Vix: {
+            level?: number;
+            change?: number;
+            changePct?: number;
+            band?: string;
+            /** Format: date-time */
+            asOf?: string;
         };
         ConnectingDots: {
             underlying?: string;
@@ -7159,6 +7308,69 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["Status"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    optionsDigest: {
+        parameters: {
+            query: {
+                mode?: string;
+                name: string;
+                date?: string;
+                expiry?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["OptionsDigest"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    dayContext: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["DayContext"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

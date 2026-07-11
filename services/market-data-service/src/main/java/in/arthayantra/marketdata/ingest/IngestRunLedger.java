@@ -35,6 +35,8 @@ public class IngestRunLedger {
   public static final String SOURCE_MANAS_SCREEN = "MANAS_SCREEN";
   public static final String SOURCE_INSTRUMENT_SYNC = "INSTRUMENT_SYNC";
   public static final String SOURCE_OPTIONS_SNAPSHOT_CAPTURE = "OPTIONS_SNAPSHOT_CAPTURE";
+  // Intelligence-layer INT I1 (design §6.6): the daily EOD day-context persistence (market_context_days).
+  public static final String SOURCE_MARKET_CONTEXT_DAY = "MARKET_CONTEXT_DAY";
 
   private static final Logger log = LoggerFactory.getLogger(IngestRunLedger.class);
 

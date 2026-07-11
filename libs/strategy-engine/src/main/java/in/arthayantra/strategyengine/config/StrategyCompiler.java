@@ -182,6 +182,14 @@ public final class StrategyCompiler {
         node.has("exit_intrabar")
             ? node.get("exit_intrabar").asBoolean()
             : !"1m".equals(primary);
+    // B3 / P1-10 opt-in exit-touch model (candle-path backtest only). Absent → null → the
+    // byte-identical close-basis default. Only "bar_hl_worstof" is recognized; any other value is a
+    // typo — reject it at compile (the closed-grammar philosophy) rather than silently ignore it.
+    String touchBasis = node.has("touch_basis") ? node.get("touch_basis").asText() : null;
+    if (touchBasis != null && !"bar_hl_worstof".equals(touchBasis)) {
+      throw new IllegalArgumentException(
+          "session.touch_basis must be 'bar_hl_worstof' when present; got " + touchBasis);
+    }
     JsonNode expiry = node.path("expiry_day");
     Boolean expiryAllowed = expiry.has("allowed") ? expiry.path("allowed").asBoolean() : null;
     return new StrategyDefinition.Session(
@@ -194,7 +202,8 @@ public final class StrategyCompiler {
         exitIntrabar,
         expiryAllowed,
         expiry.path("window").path("from").asText(null),
-        expiry.path("window").path("to").asText(null));
+        expiry.path("window").path("to").asText(null),
+        touchBasis);
   }
 
   private static Map<String, Object> paramsMap(JsonNode params) {

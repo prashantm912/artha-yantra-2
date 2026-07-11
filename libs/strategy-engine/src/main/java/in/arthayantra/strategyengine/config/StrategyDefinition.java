@@ -63,7 +63,12 @@ public record StrategyDefinition(
   /**
    * The session knobs the engine reads (A7 [FP-5]/[FP-6]). {@code expiryDayAllowed} is null when no
    * {@code expiry_day} block is declared (no special handling); the optional {@code expiryWindow*}
-   * tightens the entry window on index-expiry days.
+   * tightens the entry window on index-expiry days. {@code touchBasis} (B3 / P1-10) is the opt-in
+   * backtest exit-touch model: {@code "bar_hl_worstof"} makes the candle replay treat a protective
+   * stop/target as TOUCHED on the bar's HIGH/LOW (worst-of fill) rather than its close — the
+   * conservative model that catches intrabar spikes a close-basis exit misses. Null (absent) keeps
+   * the byte-identical close-basis behavior; it is a candle-path-only knob (the premium path ignores
+   * it).
    */
   public record Session(
       String style,
@@ -75,5 +80,6 @@ public record StrategyDefinition(
       boolean exitIntrabar,
       Boolean expiryDayAllowed,
       String expiryWindowFrom,
-      String expiryWindowTo) {}
+      String expiryWindowTo,
+      String touchBasis) {}
 }

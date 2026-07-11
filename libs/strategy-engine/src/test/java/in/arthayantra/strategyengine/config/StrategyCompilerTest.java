@@ -1,6 +1,7 @@
 package in.arthayantra.strategyengine.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import in.arthayantra.strategyschema.StrategyDocuments;
 import org.junit.jupiter.api.Test;
@@ -96,6 +97,33 @@ class StrategyCompilerTest {
     GateNode.Expression e = (GateNode.Expression) expr;
     assertThat(e.rightLiteral()).isEqualByComparingTo("40.5");
     assertThat(e.rightOperand()).isNull();
+  }
+
+  @Test
+  void touchBasisDefaultsAbsentAndParsesTheOptIn() {
+    // absent → null (the byte-identical close-basis default)
+    StrategyDefinition plain =
+        StrategyCompiler.compile(StrategyDocuments.parse(BTST_YAML).config());
+    assertThat(plain.session().touchBasis()).isNull();
+
+    // opt-in → carried verbatim on the compiled session (P1-10)
+    String optIn =
+        BTST_YAML.replace(
+            "session: { style: btst }",
+            "session: { style: btst, touch_basis: bar_hl_worstof }");
+    StrategyDefinition worstOf =
+        StrategyCompiler.compile(StrategyDocuments.parse(optIn).config());
+    assertThat(worstOf.session().touchBasis()).isEqualTo("bar_hl_worstof");
+  }
+
+  @Test
+  void touchBasisRejectsAnUnknownValueAtCompile() {
+    String bad =
+        BTST_YAML.replace(
+            "session: { style: btst }", "session: { style: btst, touch_basis: bar_close }");
+    assertThatThrownBy(() -> StrategyCompiler.compile(StrategyDocuments.parse(bad).config()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("touch_basis");
   }
 
   @Test

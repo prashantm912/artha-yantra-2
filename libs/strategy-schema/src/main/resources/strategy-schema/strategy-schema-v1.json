@@ -683,6 +683,10 @@
             "exit_intrabar": {
               "type": "boolean",
               "description": "A7 [FP-5]: evaluate SL/TP/trailing on each closed 1m bar in live AND replay (default true when primary > 1m); entry stays primary-bar-close"
+            },
+            "touch_basis": {
+              "enum": ["bar_hl_worstof"],
+              "description": "B3 / P1-10: opt-in CANDLE-path backtest exit-touch model. 'bar_hl_worstof' treats a protective stop/target as TOUCHED on the bar's HIGH/LOW (worst-of fill), catching intrabar spikes a close-basis exit misses. Absent = the byte-identical close-basis default; the premium replay path ignores it."
             }
           }
         }

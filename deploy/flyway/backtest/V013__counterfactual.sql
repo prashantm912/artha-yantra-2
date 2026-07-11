@@ -4,6 +4,10 @@
 -- This is the offline evidence plane for LIVE_FIRST exit-knob candidates the shadow book cannot express
 -- (premium exit-band changes) — captured (real) candle premium only, never derived history.
 --
+-- Version note: V012 is NOT skipped — it is `reconciliations` (EVO E3 item 7), built in a parallel
+-- branch; the two PRs merge in V012-then-V013 order and deploy in one flyway run, so the lineage
+-- applies in sequence. If you are reading this with no V012 file present, that PR has not merged yet.
+--
 -- Two changes, both additive/non-destructive:
 --   1. Widen the jobs.kind CHECK to admit 'COUNTERFACTUAL' (the smallest honest identity — a
 --      counterfactual job carries no strategy replay / no single instrument, so kind='BACKTEST' with a

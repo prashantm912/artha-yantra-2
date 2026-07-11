@@ -33,6 +33,14 @@ public record CounterfactualResult(
    * brokerage + the statutory stack) — the decision metric; {@code grossPremiumPoints} is the scale-free
    * per-unit premium move summed across trades (the runbook's points comparison). {@code maxDrawdownInr}
    * is peak-to-trough over the cumulative-PnL trade sequence (entries ordered by entry time).
+   *
+   * <p>Unit notes (deliberate divergences from the run-metrics catalog): {@code winRate} is a
+   * FRACTION in [0,1] (the catalog's winRate is a percentage — a cross-surface compare misreads
+   * by 100x without this note); {@code maxDrawdownInr} is absolute rupees anchored at 0 (no
+   * notional base exists here), not the catalog's percentage. {@code netPnlInr} re-costs the
+   * entry leg through the shared fill simulator even though {@code entryPremium} is an
+   * already-executed real fill — a small constant conservative double-count (~1 tick of
+   * slippage), identical across variants, so ranking is unaffected.</p>
    */
   public record VariantResult(
       String name,

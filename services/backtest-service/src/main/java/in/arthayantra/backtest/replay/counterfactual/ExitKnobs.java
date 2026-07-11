@@ -16,6 +16,10 @@ import java.math.BigDecimal;
  * scope — it is not a function of the captured premium path and would require a full underlying replay,
  * not a premium counterfactual. Every field is optional (null = that rule absent); a variant with no
  * knobs holds each entry to the session-close square-off (END_OF_DATA), a valid baseline.
+ *
+ * <p>Percent convention: WHOLE-NUMBER percent of the entry premium — {@code takeProfitPct: 35}
+ * means +35% (the pinned evaluator does {@code movePointLeft(2)}; the exit-equivalence fixture's
+ * grammar). Passing {@code 0.35} intending 35% silently yields a 0.35% band.</p>
  */
 public record ExitKnobs(
     BigDecimal takeProfitPct,

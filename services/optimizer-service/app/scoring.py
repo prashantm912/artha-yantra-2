@@ -9,7 +9,10 @@ out.
 
 E1 scope (design §12 item 2): the SIM_FIRST hard gates + RobustScore + the recovery/turnover/
 frequency metric semantics, applied retroactively. E2 (design §12 item 6) adds the deflated-Sharpe
-multiplicity gate and the DOF penalties (both below). Everything still deferred is marked IN-BAND,
+multiplicity gate and the DOF penalties (both below). E3 (§12 item 10) wires the §7.2 live-gap gate
++ the ``live_alignment`` component + the DIVERGENT diagnosis checklist off a candidate's attached
+``reconciliation`` row (the caller resolves the latest applicable (version, window) row per §7.1.4;
+scoring stays pure — it only reads the dict). Everything still deferred is marked IN-BAND,
 never silently dropped:
   * cost-stress re-runs → ``cost_resilience`` z=0 with a "no stress runs (E2)" caveat;
   * importance/brittleness insights → out of scope.
@@ -70,6 +73,16 @@ _DOF_FREE_PARAMS = 4
 _DOF_PARAM_PENALTY = 0.03      # per active (tuned) param over the free 4
 _DOF_STRUCTURE_PENALTY = 0.06  # per structure gate (0 until structure mutations exist — E5)
 
+# §7.2 live-gap thresholds (E3, design §12 item 10). ``gapZ = returnGap / σ(fold returns)`` is the
+# reconciliation computer's √t-normalized divergence z (V012 ``reconciliations.gap_z``). The
+# ``live_alignment`` COMPONENT reads gapZ for its proportional signal; the ``live_gap`` GATE reads
+# the persisted ``verdict`` string — the reconciliation computer's authoritative §7.2 classification
+# (single source of truth: scoring NEVER re-derives the −1.5 / evidence-floor thresholds).
+_LIVE_ALIGNED_MIN = -0.5  # gapZ ≥ −0.5 → aligned; §4 line 477 "−live-gap magnitude"
+# Verdicts that COUNT into scoring. INSUFFICIENT (no live / no fold-return σ / floor unmet) never
+# counts (z=0 + the standing "no live evidence yet" note — unchanged pre-item-10 behaviour).
+_COUNTED_VERDICTS = frozenset({"ALIGNED", "PENALIZED", "DIVERGENT"})
+
 
 def score_cohort(
     candidates: list[dict[str, Any]],
@@ -97,6 +110,10 @@ def score_cohort(
     # switches the not-yet-stressed candidates from the uniform "no stress runs" caveat to a
     # per-candidate "not stress-tested this round" note (below).
     cohort_has_stress = any(_num(c.get("costResilience")) is not None for c in candidates)
+    # A reconciliation row (attached by the caller, keyed (version, window) per §7.1.4) on ANY
+    # candidate flips live_alignment from the retro z=0 stub to a live z-column (E3, §12 item 10);
+    # candidates without a countable row then carry a per-candidate note (below), mirroring stress.
+    cohort_has_live = any(_counts_toward_live(c.get("reconciliation")) for c in candidates)
     stab = _stability_inputs(candidates, _plateau(candidates, parameters), direction)
 
     # Per-component z's (cohort-normalized) + the raw constituents + any structural caveat.
@@ -136,12 +153,13 @@ def score_cohort(
             "components": components,
             "penalties": penalties,
             "flags": _flags(cand),
-            "caveats": _caveats(cand, comp_caveats, cohort_has_stress),
+            "caveats": _caveats(cand, comp_caveats, cohort_has_stress, cohort_has_live),
             "evidence": {
                 "simRuns": [cand["runId"]] if cand.get("runId") else [],
                 "holdoutRun": cand.get("holdoutRunId"),
-                "liveWindow": None,
+                "liveWindow": _live_window(cand.get("reconciliation")),
             },
+            "liveGap": _live_gap_card(cand.get("reconciliation")),
             "comparator": None,  # retro has no campaign champion to compare against (§6.3)
         })
 
@@ -187,8 +205,10 @@ def _component_subsignals(
 ) -> dict[str, list[tuple[str, list[float | None]]]]:
     """Each RobustScore component is built from one or more raw sub-signals; the component z is the
     mean of its present sub-signals' cohort z-scores (a missing sub-signal drops out of the mean, a
-    fully-absent component → z=0). ``live_alignment`` carries NO sub-signals in retro (no live
-    evidence) → z=0 by construction (§6.2). ``cost_resilience`` reads the stress-orchestrator's
+    fully-absent component → z=0). ``live_alignment`` reads each candidate's attached reconciliation
+    row (E3, §12 item 10) for §7.2's −live-gap signal — absent / INSUFFICIENT / scalper-whitelisted
+    it drops out to z=0 with the standing caveat (retro, or a sim-only cohort). ``cost_resilience``
+    reads the stress-orchestrator's
     per-candidate ``costResilience`` slope (E2, §3.2.5) when a stress round has run — absent (retro,
     or a not-yet-stressed candidate) it drops out to z=0 with the standing caveat.
     ``risk_adjusted`` reads Sortino ONLY — no Sharpe fallback (mixing the two metrics in one cohort
@@ -211,7 +231,7 @@ def _component_subsignals(
             ("coveredCount", [float(len(c.get("regimesCovered") or [])) for c in candidates]),
         ],
         "cost_resilience": _cost_resilience_subsignals(candidates),
-        "live_alignment": [],
+        "live_alignment": _live_alignment_subsignals(candidates),
         "explainability": [
             ("explainability", [_explainability(c, n_params) for c in candidates])
         ],
@@ -232,6 +252,62 @@ def _cost_resilience_subsignals(
     (0) and is caveated per-candidate in ``_caveats``."""
     values = [_num(c.get("costResilience")) for c in candidates]
     return [("costResilience", values)] if any(v is not None for v in values) else []
+
+
+# --- live_alignment / live_gap (§7.2, E3 §12 item 10) -----------------------------------------
+# A candidate may carry a ``reconciliation`` row (the repo read-envelope shape — verdict / gapZ /
+# gap.mode / evidenceFloorMet / diagnosis), attached by the caller as the latest applicable
+# (version, window) row per §7.1.4 (mirroring how the stress orchestrator attaches costResilience).
+# scoring stays PURE — it only READS the attached dict, never the DB.
+
+
+def _live_alignment_subsignals(
+    candidates: list[dict[str, Any]],
+) -> list[tuple[str, list[float | None]]]:
+    """The ``live_alignment`` sub-signal column (§4 line 477 "−live-gap magnitude"; §7.2). The
+    countable signal is the below-aligned SHORTFALL, negated: ``min(0, gapZ − (−0.5))`` — 0 at/above
+    the −0.5 aligned line (an aligned candidate is thereby REWARDED relative to diverging cohort
+    peers), negative-proportional below it (§7.2 "penalized proportionally"), and MONOTONIC in
+    gapZ. A row absent, INSUFFICIENT (no live / no fold-return σ / floor unmet),
+    or a whitelisted scalper raw backtest-vs-live (§7.2 final para) is NOT counted → None (drops out
+    → z=0). When the WHOLE column is empty (a sim-only cohort) the component drops to z=0 with the
+    standing "no live evidence yet" caveat — byte-identical to the pre-item-10 behaviour."""
+    values = [_live_alignment_value(c.get("reconciliation")) for c in candidates]
+    return [("liveAlignment", values)] if any(v is not None for v in values) else []
+
+
+def _live_alignment_value(recon: Any) -> float | None:
+    """One candidate's raw ``live_alignment`` signal: ``min(0, gapZ + 0.5)`` — the negated
+    below-aligned shortfall (§4 "−live-gap magnitude"). None when the row does not count (absent /
+    whitelisted scalper / INSUFFICIENT / gapZ NULL)."""
+    if not _counts_toward_live(recon):
+        return None
+    gap_z = _num(recon.get("gapZ"))
+    if gap_z is None:
+        return None
+    return min(0.0, gap_z - _LIVE_ALIGNED_MIN)
+
+
+def _counts_toward_live(recon: Any) -> bool:
+    """A reconciliation row feeds the live_alignment component AND the live_gap gate iff it is a
+    NON-whitelisted plane carrying a COUNTED verdict. §7.2 final para: a scalper backtest-vs-live
+    reconciliation is a KNOWN structural divergence — whitelisted, stamped, never counted. An
+    INSUFFICIENT verdict (no live evidence / no fold-return σ / evidence floor unmet) never counts
+    either (z=0 + the standing note — unchanged behaviour)."""
+    return (
+        isinstance(recon, dict)
+        and not _is_scalper_whitelisted(recon)
+        and recon.get("verdict") in _COUNTED_VERDICTS
+    )
+
+
+def _is_scalper_whitelisted(recon: dict[str, Any]) -> bool:
+    """§7.2 LIVE_FIRST whitelist: a reconciliation whose pairing ``gap.mode`` is ``scalper``
+    (intraday / btst / expiry_day option legs) is a STRUCTURAL divergence BY DESIGN — the sim trade
+    set ≠ live trade set (OI/Dow/IV muted on derived history → ~0 armed trades). It is stamped on
+    the card and NEVER counted; only shadow-vs-paper reconciliations may gate a scalper."""
+    gap = recon.get("gap")
+    return isinstance(gap, dict) and gap.get("mode") == "scalper"
 
 
 def _component_z(
@@ -281,8 +357,9 @@ def _zscores(values: list[float | None]) -> list[float | None]:
 
 def _gates(cand: dict[str, Any], stab: dict[str, Any], n_trials: int) -> list[dict[str, Any]]:
     """The §6.1 SIM_FIRST hard gates as {id, status, value[, note]}. Retro degradations: no holdout
-    run → holdout SKIPPED; NULL engine SHA → comparability UNKNOWN; no live evidence → live_gap
-    SKIPPED; no sharpe / trade count → the deflated-Sharpe multiplicity gate SKIPPED."""
+    run → holdout SKIPPED; NULL engine SHA → comparability UNKNOWN; no reconciliation / INSUFFICIENT
+    / whitelisted-scalper → live_gap SKIPPED (§7.2, item 10); no sharpe / trade count → the
+    deflated-Sharpe multiplicity gate SKIPPED."""
     oos_return = cand.get("oosReturn")
     fold_returns = cand.get("foldReturns")
     trades = cand.get("oosTradeCount")
@@ -306,8 +383,7 @@ def _gates(cand: dict[str, Any], stab: dict[str, Any], n_trials: int) -> list[di
         {"id": "holdout", "status": SKIPPED, "value": None,
          "note": "no holdout run linked to a historical sweep trial (retro)"},
         _comparability_gate(cand.get("engineSha")),
-        {"id": "live_gap", "status": SKIPPED, "value": None,
-         "note": "no live evidence on a sim sweep (§7 applies only once a candidate is live)"},
+        _live_gap_gate(cand.get("reconciliation")),
     ]
 
 
@@ -361,6 +437,41 @@ def _comparability_gate(engine_sha: str | None) -> dict[str, Any]:
         return {"id": "comparability", "status": UNKNOWN, "value": None,
                 "note": "NULL engine SHA (run predates #703 stamping) — not establishable"}
     return {"id": "comparability", "status": PASS, "value": engine_sha}
+
+
+def _live_gap_gate(recon: Any) -> dict[str, Any]:
+    """§7.2 live-gap hard gate (E3, §12 item 10), from the candidate's attached reconciliation row.
+    The GATE keys off the persisted ``verdict`` — the reconciliation computer's authoritative §7.2
+    classification (single source of truth; scoring never re-derives the −1.5 / evidence-floor
+    thresholds — the COMPONENT ``_live_alignment_value`` carries the proportional gapZ signal):
+      * no row / verdict INSUFFICIENT (no live, no fold-return σ, or floor unmet) → SKIPPED (the
+        pre-item-10 degradation is preserved);
+      * whitelisted scalper backtest-vs-live (§7.2 final para)                → SKIPPED (stamped);
+      * verdict DIVERGENT (gapZ ≤ −1.5 AND ≥20 paired trades or ≥4 weeks)         → FAIL (promotion
+        blocked; the §7.2.1-5 diagnosis rides the card's ``liveGap.diagnosis``);
+      * verdict ALIGNED / PENALIZED                                              → PASS (not
+        divergent — a PENALIZED gapZ is still penalized proportionally in the component)."""
+    if not isinstance(recon, dict):
+        return {"id": "live_gap", "status": SKIPPED, "value": None,
+                "note": "no live evidence on a sim sweep (§7 applies once a candidate is live)"}
+    gap_z = _round(_num(recon.get("gapZ")))
+    if _is_scalper_whitelisted(recon):
+        return {"id": "live_gap", "status": SKIPPED, "value": gap_z,
+                "note": "§7.2 whitelist — scalper raw backtest-vs-live is a STRUCTURAL divergence "
+                        "(judge on shadow-vs-paper); stamped, not gated"}
+    verdict = recon.get("verdict")
+    if verdict == "DIVERGENT":
+        return {"id": "live_gap", "status": FAIL, "value": gap_z,
+                "note": f"§7.2 DIVERGENT — gapZ={gap_z} ≤ −1.5 with the evidence floor met "
+                        f"({recon.get('pairedTrades')} paired trades); promotion blocked — "
+                        "see liveGap.diagnosis"}
+    if verdict in ("ALIGNED", "PENALIZED"):
+        return {"id": "live_gap", "status": PASS, "value": gap_z,
+                "note": f"§7.2 {verdict} — gapZ={gap_z} > −1.5 (not divergent)"}
+    # INSUFFICIENT (or, defensively, a verdict outside the V012 CHECK set): not gate-eligible.
+    return {"id": "live_gap", "status": SKIPPED, "value": gap_z,
+            "note": "§7.2 INSUFFICIENT — no live evidence, no fold-return σ, or the evidence floor "
+                    "is unmet (<20 paired trades AND <4 weeks); not gate-eligible"}
 
 
 def _gate(
@@ -454,11 +565,12 @@ def _flags(cand: dict[str, Any]) -> list[str]:
 
 
 def _caveats(
-    cand: dict[str, Any], comp_caveats: dict[str, str | None], cohort_has_stress: bool = False
+    cand: dict[str, Any], comp_caveats: dict[str, str | None], cohort_has_stress: bool = False,
+    cohort_has_live: bool = False,
 ) -> list[str]:
     """Scorecard-level caveats = the run's data caveats (metrics.caveats[]) + the structural E2
-    component caveats + the standing retro degradations, de-duplicated in a stable order so the FE
-    card can render "what to distrust" honestly."""
+    component caveats + the §7.2 per-candidate live-gap notes + the standing retro degradations,
+    de-duplicated in a stable order so the FE card can render "what to distrust" honestly."""
     out: list[str] = []
     for c in cand.get("caveats") or []:
         out.append(c)
@@ -473,6 +585,7 @@ def _caveats(
             out.append("cost_resilience: stress incomplete — < 2 usable points, z drops out (0)")
         else:
             out.append("cost_resilience: not stress-tested this round — z drops out (0)")
+    out.extend(_live_caveats(cand, cohort_has_live))
     for comp, note in comp_caveats.items():
         if note:
             out.append(f"{comp}: {note}")
@@ -482,6 +595,75 @@ def _caveats(
     if cand.get("foldless"):
         out.append("full-window run (no OOS fold structure) — components read on run-level metrics")
     return _dedupe(out)
+
+
+def _live_caveats(cand: dict[str, Any], cohort_has_live: bool) -> list[str]:
+    """Per-candidate live_alignment / live_gap caveats (§7.2, item 10), mirroring cost_resilience's
+    per-candidate pattern. A whitelisted scalper or a PENALIZED / DIVERGENT verdict is stamped
+    explicitly. A candidate with NO countable reconciliation gets the "z drops out" note ONLY when
+    OTHERS in the cohort ARE live (``cohort_has_live``) — otherwise the standing "no live evidence
+    yet" component caveat already covers the whole sim-only cohort, and adding a per-candidate note
+    would be redundant noise."""
+    recon = cand.get("reconciliation")
+    if isinstance(recon, dict) and _is_scalper_whitelisted(recon):
+        return [
+            "live_alignment: scalper raw backtest-vs-live is §7.2-whitelisted (structural "
+            "divergence) — not counted; judge on shadow-vs-paper"
+        ]
+    if _counts_toward_live(recon):
+        verdict, gap_z = recon.get("verdict"), _round(_num(recon.get("gapZ")))
+        if verdict == "PENALIZED":
+            return [f"live_alignment: §7.2 PENALIZED (gapZ={gap_z}) — live-gap penalty applied "
+                    "proportionally to the component"]
+        if verdict == "DIVERGENT":
+            return [f"live_gap: §7.2 DIVERGENT (gapZ={gap_z}) — hard-gate FAIL, promotion blocked; "
+                    "see liveGap.diagnosis"]
+        return []  # ALIGNED — no caveat (rewarded, nothing to distrust)
+    # No countable reconciliation for THIS candidate — noted only when the cohort is elsewhere live.
+    if cohort_has_live:
+        if isinstance(recon, dict):
+            return ["live_alignment: reconciliation INSUFFICIENT (no live / no fold σ / floor "
+                    "unmet) — z drops out (0)"]
+        return ["live_alignment: no live reconciliation for this candidate — z drops out (0)"]
+    return []
+
+
+def _live_gap_card(recon: Any) -> dict[str, Any] | None:
+    """The §6.3 card's live-gap panel (design §7.2 / §10 "live-gap tile"): the reconciliation
+    verdict + gapZ + lived window + evidence-floor state, whether it was COUNTED into the score
+    (False for a whitelisted scalper or an INSUFFICIENT verdict), and — ONLY for a DIVERGENT verdict
+    — the §7.2.1-5 diagnosis checklist the reconciliation computer already assembled (reused
+    verbatim, never re-fabricated). None when the candidate carries no reconciliation (a sim-only
+    cohort — the card omits the panel)."""
+    if not isinstance(recon, dict):
+        return None
+    gap = recon.get("gap") if isinstance(recon.get("gap"), dict) else {}
+    card: dict[str, Any] = {
+        "verdict": recon.get("verdict"),
+        "gapZ": _round(_num(recon.get("gapZ"))),
+        "windowFrom": recon.get("windowFrom"),
+        "windowTo": recon.get("windowTo"),
+        "pairedTrades": recon.get("pairedTrades"),
+        "evidenceFloorMet": recon.get("evidenceFloorMet"),
+        "counted": _counts_toward_live(recon),
+        "whitelisted": _is_scalper_whitelisted(recon),
+        "mode": gap.get("mode"),
+        "reconciliationId": recon.get("id"),
+    }
+    # The §7.2.1-5 checklist attaches only when the DIVERGENT actually hard-gates (a whitelisted
+    # scalper is SKIPPED, not failed — its structural divergence is not promotion-blocking).
+    if (recon.get("verdict") == "DIVERGENT" and not _is_scalper_whitelisted(recon)
+            and recon.get("diagnosis") is not None):
+        card["diagnosis"] = recon.get("diagnosis")  # the checklist, verbatim
+    return card
+
+
+def _live_window(recon: Any) -> dict[str, Any] | None:
+    """The reconciliation's lived window ``{from, to}`` for the §6.3 evidence chain — None on a
+    sim-only candidate (no reconciliation attached)."""
+    if not isinstance(recon, dict):
+        return None
+    return {"from": recon.get("windowFrom"), "to": recon.get("windowTo")}
 
 
 # --- ranking + small numeric helpers ----------------------------------------------------------

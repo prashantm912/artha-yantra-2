@@ -211,6 +211,9 @@ class Scorecard(BaseModel):
     flags: list[str] = []
     caveats: list[str] = []
     evidence: Evidence
+    # §7.2 live-gap panel (E3, §12 item 10): verdict / gapZ / window / evidence-floor + whether
+    # counted, and the §7.2.1-5 diagnosis checklist when DIVERGENT. None on a sim-only candidate.
+    liveGap: dict[str, Any] | None = None
     comparator: dict[str, Any] | None = None
 
 

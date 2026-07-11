@@ -367,3 +367,167 @@ def test_weights_are_echoed_and_overridable():
         [{"trialNumber": 1, "rawObjective": 1.0, "oosReturn": 5.0}], [], weights=override
     )[0]
     assert card["weights"]["oos_return"] == 0.5
+
+
+# --- live-gap gate + live_alignment component + DIVERGENT checklist (§7.2, E3 §12 item 10) -----
+# A candidate may carry a ``reconciliation`` row (the repo read-envelope shape — verdict / gapZ /
+# gap.mode / pairedTrades / evidenceFloorMet / diagnosis / window), attached by the caller. scoring
+# reads it PURELY: the live_alignment component (raw = min(0, gapZ + 0.5) = −live-gap magnitude),
+# the live_gap hard gate (off the persisted verdict), and the DIVERGENT diagnosis checklist.
+
+_WINDOW_FROM = "2026-06-01T00:00:00+05:30"
+_WINDOW_TO = "2026-06-29T00:00:00+05:30"
+
+
+def _recon(gap_z, verdict, *, mode="swing", floor=True, paired=25, diagnosis=None) -> dict:
+    """A reconciliation row in the repo read-envelope shape — only the fields scoring reads."""
+    return {
+        "id": f"recon-{verdict}",
+        "verdict": verdict,
+        "gapZ": gap_z,
+        "pairedTrades": paired,
+        "evidenceFloorMet": floor,
+        "windowFrom": _WINDOW_FROM,
+        "windowTo": _WINDOW_TO,
+        "gap": {"mode": mode},
+        "diagnosis": diagnosis,
+    }
+
+
+def _live_gap(card) -> dict:
+    return next(g for g in card["gates"] if g["id"] == "live_gap")
+
+
+def _live_align(card) -> dict:
+    return next(c for c in card["components"] if c["id"] == "live_alignment")
+
+
+def test_live_alignment_direction_is_monotonic_and_gate_fails_divergent():
+    # THE §12 item 10 SIGN test (guards the E1 plateau division/multiplication inversion class):
+    # raw = min(0, gapZ + 0.5), so a HIGHER gapZ ⇒ HIGHER live_alignment ⇒ MORE reward. Over one
+    # cohort at gapZ 0.0 / −1.0 / −2.0:  raw min(0,0.5)=0.0 ; min(0,−0.5)=−0.5 ; min(0,−1.5)=−1.5.
+    aligned = _healthy(1) | {"reconciliation": _recon(0.0, "ALIGNED")}
+    penalized = _healthy(2) | {"reconciliation": _recon(-1.0, "PENALIZED")}
+    divergent = _healthy(3) | {"reconciliation": _recon(-2.0, "DIVERGENT")}
+    cards = {c["trialNumber"]: c
+             for c in scoring.score_cohort([aligned, penalized, divergent], [])}
+    la = {t: _live_align(c) for t, c in cards.items()}
+    # raw pinned EXACTLY (no float division) — the direction is unambiguous
+    assert la[1]["raw"] == {"liveAlignment": 0.0}
+    assert la[2]["raw"] == {"liveAlignment": -0.5}
+    assert la[3]["raw"] == {"liveAlignment": -1.5}
+    # z of the [0.0, −0.5, −1.5] column: mean −2/3, pstdev √(7/18) = 0.623610
+    assert la[1]["z"] == 1.069     # aligned rewarded (POSITIVE z)
+    assert la[2]["z"] == 0.2673
+    assert la[3]["z"] == -1.3363   # divergent penalized (NEGATIVE z)
+    assert la[1]["z"] > la[2]["z"] > la[3]["z"]   # MONOTONIC in gapZ — the inversion guard
+    # +0.08·z(live_alignment) is the SOLE differentiator (every other component constant ⇒ z=0)
+    assert cards[1]["robustScore"] == 0.0855      # 0.08 · 1.0690450
+    # gate: not-divergent PASSES; DIVERGENT (floor met) hard-FAILS ⇒ unrankable
+    assert _live_gap(cards[1])["status"] == "PASS"
+    assert _live_gap(cards[2])["status"] == "PASS"
+    assert _live_gap(cards[3])["status"] == "FAIL"
+    assert cards[3]["rankable"] is False
+    assert cards[1]["rankable"] is True and cards[2]["rankable"] is True
+
+
+def test_champion_vs_itself_reads_aligned_gapz_near_zero():
+    # §12 item 10 VERIFY: a champion reconciled against ITSELF over a clean window reads ALIGNED,
+    # gapZ ≈ 0 → live_gap PASS, rankable. A single-candidate cohort ⇒ live_alignment z=0 (nothing to
+    # normalize). Unit fixture: real known-clean live windows are scarce (design §12 item 10 note).
+    card = scoring.score_cohort([_healthy(1) | {"reconciliation": _recon(0.0, "ALIGNED")}], [])[0]
+    assert _live_gap(card)["status"] == "PASS"
+    assert _live_gap(card)["value"] == 0.0
+    assert card["rankable"] is True
+    assert _live_align(card)["z"] == 0.0            # singleton cohort — nothing to normalize
+    assert card["liveGap"]["verdict"] == "ALIGNED"
+    assert card["liveGap"]["counted"] is True
+    assert card["liveGap"]["gapZ"] == 0.0
+    assert card["evidence"]["liveWindow"] == {"from": _WINDOW_FROM, "to": _WINDOW_TO}
+
+
+def test_divergent_hard_gate_attaches_diagnosis_checklist():
+    diag = {"checklist": [{"id": "trade_set_overlap", "status": "auto", "value": 0.3}]}
+    card = scoring.score_cohort(
+        [_healthy(1) | {"reconciliation": _recon(-2.0, "DIVERGENT", diagnosis=diag)}], []
+    )[0]
+    gate = _live_gap(card)
+    assert gate["status"] == "FAIL"
+    assert "DIVERGENT" in gate["note"]
+    assert card["rankable"] is False
+    assert card["rank"] is None
+    assert card["liveGap"]["verdict"] == "DIVERGENT"
+    assert card["liveGap"]["diagnosis"] == diag    # the §7.2.1-5 checklist, verbatim
+    assert any("DIVERGENT" in c and "liveGap.diagnosis" in c for c in card["caveats"])
+
+
+def test_penalized_verdict_passes_gate_but_penalizes_component():
+    # −1.5 < gapZ < −0.5 ⇒ PENALIZED: the live_gap gate PASSES (not divergent) but the component
+    # carries the proportional penalty raw = min(0, −1.0 + 0.5) = −0.5.
+    cards = {c["trialNumber"]: c for c in scoring.score_cohort([
+        _healthy(1) | {"reconciliation": _recon(-1.0, "PENALIZED")},
+        _healthy(2) | {"reconciliation": _recon(0.0, "ALIGNED")},
+    ], [])}
+    assert _live_gap(cards[1])["status"] == "PASS"
+    assert _live_align(cards[1])["raw"] == {"liveAlignment": -0.5}
+    assert any("PENALIZED" in c for c in cards[1]["caveats"])
+
+
+def test_insufficient_verdict_does_not_count_or_gate():
+    # INSUFFICIENT (no live / no fold σ / floor unmet) → z=0 + live_gap SKIPPED (unchanged).
+    card = scoring.score_cohort(
+        [_healthy(1) | {"reconciliation": _recon(None, "INSUFFICIENT", floor=False)}], []
+    )[0]
+    assert _live_gap(card)["status"] == "SKIPPED"
+    assert _live_align(card)["z"] == 0.0
+    assert _live_align(card)["raw"] == {}
+    assert card["rankable"] is True
+    assert card["liveGap"]["verdict"] == "INSUFFICIENT"
+    assert card["liveGap"]["counted"] is False
+    assert "diagnosis" not in card["liveGap"]
+
+
+def test_scalper_raw_reconciliation_is_whitelisted_never_gated():
+    # §7.2 final para: a scalper raw backtest-vs-live divergence is STRUCTURAL by design — stamped,
+    # NEVER counted or gated (only shadow-vs-paper may gate scalpers). Even a −2.0 DIVERGENT row
+    # leaves the gate SKIPPED (not FAIL) and the candidate rankable.
+    diag = {"checklist": [{"id": "trade_set_overlap", "status": "auto"}]}
+    card = scoring.score_cohort([
+        _healthy(1) | {"reconciliation": _recon(-2.0, "DIVERGENT", mode="scalper", diagnosis=diag)}
+    ], [])[0]
+    gate = _live_gap(card)
+    assert gate["status"] == "SKIPPED"
+    assert "whitelist" in gate["note"]
+    assert card["rankable"] is True                # NOT hard-failed — whitelisted
+    assert _live_align(card)["z"] == 0.0           # not counted into the component
+    assert card["liveGap"]["whitelisted"] is True
+    assert card["liveGap"]["counted"] is False
+    assert "diagnosis" not in card["liveGap"]      # not a promotion-blocking finding
+    assert any("whitelisted" in c for c in card["caveats"])
+
+
+def test_no_reconciliation_is_byte_identical_pre_item10():
+    # A candidate with NO reconciliation: live_gap SKIPPED with the ORIGINAL note, live_align z=0
+    # with the standing caveat, liveGap None, evidence.liveWindow None — pre-item-10 behaviour.
+    card = scoring.score_cohort([_healthy(1)], [])[0]
+    gate = _live_gap(card)
+    assert gate["status"] == "SKIPPED"
+    assert gate["value"] is None
+    assert "no live evidence on a sim sweep" in gate["note"]
+    assert card["liveGap"] is None
+    assert card["evidence"]["liveWindow"] is None
+    assert _live_align(card)["z"] == 0.0
+    assert any("live_alignment: no live evidence yet" in c for c in card["caveats"])
+
+
+def test_mixed_cohort_notes_the_candidate_without_a_reconciliation():
+    # Some candidates live, some sim-only: the standing "no live evidence yet" caveat fires for
+    # NEITHER (the column is non-empty), and the sim-only candidate gets a per-candidate drop-out
+    # note instead (mirrors the cost_resilience per-candidate pattern).
+    cards = {c["trialNumber"]: c for c in scoring.score_cohort([
+        _healthy(1) | {"reconciliation": _recon(0.0, "ALIGNED")},
+        _healthy(2),  # no reconciliation
+    ], [])}
+    assert not any("no live evidence yet" in c for c in cards[1]["caveats"])
+    assert not any("no live evidence yet" in c for c in cards[2]["caveats"])
+    assert any("no live reconciliation for this candidate" in c for c in cards[2]["caveats"])

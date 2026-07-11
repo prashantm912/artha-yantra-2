@@ -51,8 +51,14 @@ public class PaperBookGovernorInitializer {
   @EventListener(ApplicationReadyEvent.class)
   public void seedMissingGovernors() {
     for (String book : Books.all()) {
-      seedIfMissing(book, RiskService.KILL_SWITCH, KILL_SWITCH_DEFAULT);
-      seedIfMissing(book, RiskService.AUTO_PAPER_TRADE, AUTO_PAPER_DEFAULT);
+      try {
+        seedIfMissing(book, RiskService.KILL_SWITCH, KILL_SWITCH_DEFAULT);
+        seedIfMissing(book, RiskService.AUTO_PAPER_TRADE, AUTO_PAPER_DEFAULT);
+      } catch (RuntimeException e) {
+        // A ready-listener throwable fails the WHOLE boot — a seed hiccup must never take the
+        // live engine (signals, exits, notifier) down with it (the class contract above).
+        log.error("governor seed failed for book '{}' — continuing boot", book, e);
+      }
     }
   }
 
@@ -66,6 +72,6 @@ public class PaperBookGovernorInitializer {
         book,
         key,
         defaultJson);
-    settings.upsert(book, key, defaultJson);
+    settings.insertIfMissing(book, key, defaultJson);
   }
 }

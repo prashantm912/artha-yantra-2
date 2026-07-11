@@ -38,9 +38,11 @@ class PaperBookGovernorInitializerTest {
 
     new PaperBookGovernorInitializer(settings).seedMissingGovernors();
 
-    verify(settings).upsert(eq(Books.OTHER), eq(RiskService.KILL_SWITCH), eq("{\"enabled\": false}"));
-    // the present rows are never rewritten
-    verify(settings, never()).upsert(eq(Books.SCALPER), any(), any());
+    verify(settings)
+        .insertIfMissing(eq(Books.OTHER), eq(RiskService.KILL_SWITCH), eq("{\"enabled\": false}"));
+    // the present rows are never rewritten (and the seed path never uses the clobbering upsert)
+    verify(settings, never()).insertIfMissing(eq(Books.SCALPER), any(), any());
+    verify(settings, never()).upsert(any(), any(), any());
   }
 
   @Test
@@ -50,6 +52,7 @@ class PaperBookGovernorInitializerTest {
 
     new PaperBookGovernorInitializer(settings).seedMissingGovernors();
 
+    verify(settings, never()).insertIfMissing(any(), any(), any());
     verify(settings, never()).upsert(any(), any(), any());
   }
 

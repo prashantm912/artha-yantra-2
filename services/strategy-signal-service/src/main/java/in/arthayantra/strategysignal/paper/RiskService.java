@@ -161,7 +161,13 @@ public class RiskService {
       if (enabled(heatCap)) {
         BigDecimal capPct = heatCap.get().value().path("value").decimalValue();
         BigDecimal heatPct = currentHeatPct(book);
-        if (heatPct != null && heatPct.compareTo(capPct) >= 0) {
+        if (heatPct == null) {
+          // Enforcement is ON but heat is unassessable (unpriced basket / >20 legs / analytics
+          // down). Fail-soft still holds (never block on blindness) — but make the blind gate
+          // VISIBLE, else the owner cannot tell "under cap" from "cannot see" (M1 review).
+          log.warn("book '{}' heat-cap enforcement ON but heat unassessable — gate inert this entry", book);
+          settings.audit(book, HEAT_CAP_PCT, "UNPRICED", "enforcement on, heat unassessable — entry allowed");
+        } else if (heatPct.compareTo(capPct) >= 0) {
           recordHeatTrip(book, heatPct, capPct);
           return Optional.of(HEAT_CAP_PCT);
         }

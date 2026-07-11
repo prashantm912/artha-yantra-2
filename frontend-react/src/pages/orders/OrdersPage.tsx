@@ -5,6 +5,7 @@ import { cn } from '../../lib/cn.ts';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { FIELD_HELP } from '../../core/fieldHelp.ts';
 import { BeatStrip, BeatItem, LoadBeat } from '../../components/LoadBeat.tsx';
+import { OrderPrefillTicket } from './OrderPrefillTicket.tsx';
 import {
   useFunds,
   useOrderbook,
@@ -216,6 +217,10 @@ export function OrdersPage() {
   return (
     <LoadBeat>
       <PageHeader title="Orders" subtitle="Live broker read surface — Orderbook · Positions · Tradebook · Funds" help="A read-only view of your live broker account: pending/filled orders, open positions, executed trades and available funds." />
+
+      {/* §18.4 deep-link target: a scalp-alert push pre-fills a paper ticket here. Renders only when the
+          URL carries prefill params, so the plain read surface is unchanged when reached from the nav. */}
+      <OrderPrefillTicket />
 
       <PnlStrip positions={positions.data ?? []} funds={funds.data} />
 

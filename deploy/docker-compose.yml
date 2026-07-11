@@ -386,6 +386,9 @@ services:
       # mock profile, live values come from .env.
       ARTHA_NOTIFIER_NTFY_URL: ${ARTHA_NOTIFIER_NTFY_URL:-}
       ARTHA_NOTIFIER_NTFY_TOPIC: ${ARTHA_NOTIFIER_NTFY_TOPIC:-}
+      # §18.4: app origin for the scalp alert's /orders deep link. Blank = no link (default); set to the
+      # reachable app host (e.g. Tailscale) to arm it. Arm-able via .env without an image rebuild.
+      ARTHA_NOTIFIER_APP_BASE_URL: ${ARTHA_NOTIFIER_APP_BASE_URL:-}
       # 2b: opt-in scalper-strategy seeder. Default off so test/CI Spring contexts + a fresh stack stay
       # clean; the live/mock .env flips it true to seed the 36 scalper drafts on boot (idempotent,
       # 409-skips existing). Drafts NEVER auto-emit — the owner publishes each from the UI.

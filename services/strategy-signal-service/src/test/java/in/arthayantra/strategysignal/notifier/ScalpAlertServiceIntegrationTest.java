@@ -79,6 +79,13 @@ class ScalpAlertServiceIntegrationTest extends StrategySignalIntegrationTestBase
     // the option leg, entry/SL/target levels + confluence in the body
     assertThat(body.getValue())
         .contains("NIFTY24500CE", "entry 100", "SL 95", "target 110", "confluence 0.82");
+    // §18.4 payload extras: the stamped advisory qty + the /orders deep link (sig + url-encoded
+    // option-leg symbol NSE%3ANIFTY24500CE + side + qty), keyed off the configured app origin.
+    assertThat(body.getValue())
+        .contains(
+            "qty 50",
+            "take https://ay.test/orders?sig=" + signalId
+                + "&symbol=NSE%3ANIFTY24500CE&side=BUY&qty=50");
 
     List<String> rows =
         jdbc.queryForList(
@@ -162,16 +169,46 @@ class ScalpAlertServiceIntegrationTest extends StrategySignalIntegrationTestBase
     verify(client, never()).send(anyString(), anyString(), anyString());
   }
 
+  @Test
+  void blankAppOriginOmitsTheLinkAndUnsizedLegOmitsTheQty() {
+    UUID id = create("scalp-alert-it-omit", "Scalp Alert IT Omit");
+    registry.publish(id, null, null);
+    registry.updateNotifications(id, true, "NTFY");
+    UUID versionId = strategyRepo.latestVersion(id).orElseThrow().id();
+    long signalId = insertSignal(versionId);
+
+    NotifierClient client = Mockito.mock(NotifierClient.class);
+    // app-base-url blank → no deep link; ScalpDetail suggestedQty null → no qty segment
+    ScalpAlertService service = service(client, /* enabled= */ true, "");
+
+    service.onScalpSignal(scalpEvent(signalId, versionId, new BigDecimal("22500"), null));
+
+    ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+    verify(client, times(1)).send(eq("NTFY"), anyString(), body.capture());
+    assertThat(body.getValue()).contains("NIFTY24500CE", "confluence 0.82");
+    assertThat(body.getValue()).doesNotContain("qty ", "/orders?sig=", "take ");
+  }
+
   private ScalpAlertService service(NotifierClient client, boolean enabled) {
+    return service(client, enabled, "https://ay.test");
+  }
+
+  private ScalpAlertService service(NotifierClient client, boolean enabled, String appBaseUrl) {
     ScalpAlertDedupe dedupe = new ScalpAlertDedupe(300, Clock.systemUTC());
-    return new ScalpAlertService(notificationRepo, client, dedupe, enabled, 3);
+    return new ScalpAlertService(notificationRepo, client, dedupe, enabled, 3, appBaseUrl);
   }
 
   private static SignalEmitted scalpEvent(long signalId, UUID versionId, BigDecimal strike) {
+    return scalpEvent(signalId, versionId, strike, new BigDecimal("50"));
+  }
+
+  private static SignalEmitted scalpEvent(
+      long signalId, UUID versionId, BigDecimal strike, BigDecimal suggestedQty) {
     ScalpDetail scalp =
         new ScalpDetail(
             "NIFTY", "CE", strike, "NIFTY24500CE", new BigDecimal("120.00"), new BigDecimal("0.82"),
-            null, null); // not an open-high-low strategy -> no OIP-AI tier on this alert
+            null, null, // not an open-high-low strategy -> no OIP-AI tier on this alert
+            suggestedQty);
     return new SignalEmitted(
         signalId, versionId, "NSE", "RELIANCE", "BUY",
         new BigDecimal("100.00"), new BigDecimal("95.00"), new BigDecimal("110.00"),

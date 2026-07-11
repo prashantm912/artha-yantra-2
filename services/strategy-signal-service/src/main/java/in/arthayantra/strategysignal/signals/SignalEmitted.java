@@ -31,7 +31,9 @@ public record SignalEmitted(
   /**
    * The scalper option leg + confluence captured at entry (the V009 side-channel, distilled to the
    * fields a scalp alert renders). {@code optionSide} is CE/PE; the BUY/SELL on the index future is
-   * the enclosing event's {@link #side()}.
+   * the enclosing event's {@link #side()}. {@code suggestedQty} is the A12 lot-rounded advisory size
+   * already stamped on the {@code signals} row (reused verbatim — never recomputed), {@code null} when
+   * no {@code EmissionGuard} sized it; the scalp alert renders it and the {@code /orders} deep link.
    */
   public record ScalpDetail(
       String underlying,
@@ -41,7 +43,8 @@ public record SignalEmitted(
       BigDecimal optionLtp,
       BigDecimal confluence,
       String ohTier,
-      Integer ohProbPct) {}
+      Integer ohProbPct,
+      BigDecimal suggestedQty) {}
 
   /** Back-compat constructor for non-scalper emits (no scalp side-channel). */
   public SignalEmitted(

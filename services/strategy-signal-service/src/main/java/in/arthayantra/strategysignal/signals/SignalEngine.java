@@ -998,7 +998,10 @@ public class SignalEngine {
                 decision.pick().candidate().ltp(),
                 decision.confluence().aggregate(),
                 decision.ohTier() == null ? null : decision.ohTier().name(),
-                decision.ohTier() == null ? null : OpenHighLow.probabilityPct(decision.ohTier()));
+                decision.ohTier() == null ? null : OpenHighLow.probabilityPct(decision.ohTier()),
+                // the A12 lot-rounded advisory qty stamped on this row above — reused verbatim (never
+                // recomputed) so the alert's qty matches /signals and the paper ticket exactly.
+                suggestedQty);
     events.publishEvent(
         new SignalEmitted(
             id, strategy.versionId(), exchange, tradingsymbol, side, entryPrice, stopLoss, target,

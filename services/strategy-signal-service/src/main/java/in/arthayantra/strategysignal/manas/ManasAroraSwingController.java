@@ -1,20 +1,23 @@
 package in.arthayantra.strategysignal.manas;
 
+import in.arthayantra.strategysignal.signals.SwingBatchRunRepository;
 import in.arthayantra.strategysignal.swing.SwingBatchEngine;
 import in.arthayantra.strategysignal.swing.SwingBatchRecorder;
 import in.arthayantra.strategysignal.swing.SwingSellDecisionService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
  * Ops/verify + sell-decision surface for the Manas Arora swing batch — a thin per-family shell over
  * the shared {@link SwingBatchRecorder}/{@link SwingSellDecisionService}, bound to the {@link
  * ManasDoctrine}. {@code POST /run} fires the daily batch on demand (the scheduler runs it at 20:05
- * IST); {@code GET /sell-decisions} is the read-only triad over the open holdings. Under
- * {@code /api/v1/signals/**} so the edge-gateway allowlist already covers it; both return TYPED
- * records (never a Map — the strategy ratchet). The direct sibling of {@code MinerviniSwingController}.
+ * IST); {@code GET /sell-decisions} is the read-only triad over the open holdings; {@code
+ * GET /admission-probe} is the ledger-F3 slot-cap exceedance history. Under {@code /api/v1/signals/**}
+ * so the edge-gateway allowlist already covers it; all return TYPED records (never a Map — the strategy
+ * ratchet). The direct sibling of {@code MinerviniSwingController}.
  */
 @RestController
 @RequestMapping("/api/v1/signals/manas-arora-swing")
@@ -22,13 +25,18 @@ public class ManasAroraSwingController {
 
   private final SwingBatchRecorder recorder;
   private final SwingSellDecisionService sellDecisions;
+  private final SwingBatchRunRepository batchRuns;
   private final ManasDoctrine doctrine;
 
-  /** Wires the shared recorder + sell-decision service and the Manas doctrine. */
+  /** Wires the shared recorder + sell-decision service + batch-run repo and the Manas doctrine. */
   public ManasAroraSwingController(
-      SwingBatchRecorder recorder, SwingSellDecisionService sellDecisions, ManasDoctrine doctrine) {
+      SwingBatchRecorder recorder,
+      SwingSellDecisionService sellDecisions,
+      SwingBatchRunRepository batchRuns,
+      ManasDoctrine doctrine) {
     this.recorder = recorder;
     this.sellDecisions = sellDecisions;
+    this.batchRuns = batchRuns;
     this.doctrine = doctrine;
   }
 
@@ -46,5 +54,17 @@ public class ManasAroraSwingController {
   @GetMapping("/sell-decisions")
   public SwingSellDecisionService.SwingSellReport sellDecisions() {
     return sellDecisions.report(doctrine);
+  }
+
+  /**
+   * The ledger-F3 slot-cap admission probe history (measurement-only), newest first: per batch run, how
+   * many funnel candidates would have entered vs how many the cap admitted, and the RS-ordered names it
+   * dropped. {@code limit} is clamped to 1..200.
+   */
+  @GetMapping("/admission-probe")
+  public SwingBatchRunRepository.AdmissionProbes admissionProbe(
+      @RequestParam(defaultValue = "30") int limit) {
+    return new SwingBatchRunRepository.AdmissionProbes(
+        batchRuns.recentProbes(doctrine.batchName(), Math.min(Math.max(limit, 1), 200)));
   }
 }

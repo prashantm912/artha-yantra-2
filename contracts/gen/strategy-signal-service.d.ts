@@ -532,6 +532,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/signals/minervini-swing/admission-probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["admissionProbe"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/signals/manas-arora-swing/sell-decisions": {
         parameters: {
             query?: never;
@@ -540,6 +556,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["sellDecisions_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/signals/manas-arora-swing/admission-probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["admissionProbe_1"];
         put?: never;
         post?: never;
         delete?: never;
@@ -967,6 +999,23 @@ export interface components {
             qty?: number;
             note?: string;
         };
+        AdmissionProbe: {
+            /** Format: int32 */
+            openAtStart?: number;
+            /** Format: int32 */
+            wouldEnter?: number;
+            /** Format: int32 */
+            admitted?: number;
+            /** Format: int32 */
+            capExceedance?: number;
+            capBound?: boolean;
+            droppedByCap?: components["schemas"]["DroppedCandidate"][];
+        };
+        DroppedCandidate: {
+            symbol?: string;
+            /** Format: int32 */
+            admissionRank?: number;
+        };
         SwingRun: {
             /** Format: int32 */
             strategies?: number;
@@ -978,6 +1027,7 @@ export interface components {
             exits?: number;
             /** Format: int32 */
             exitSkipped?: number;
+            admission?: components["schemas"]["AdmissionProbe"];
         };
         RegisterRequest: {
             name?: string;
@@ -1144,6 +1194,30 @@ export interface components {
             /** Format: date-time */
             asOf?: string;
             items?: components["schemas"]["SwingSellDecision"][];
+        };
+        AdmissionProbes: {
+            items?: components["schemas"]["ProbeRow"][];
+        };
+        ProbeRow: {
+            batch?: string;
+            /** Format: date */
+            runDate?: string;
+            /** Format: date-time */
+            ranAt?: string;
+            /** Format: int32 */
+            candidates?: number;
+            /** Format: int32 */
+            entries?: number;
+            /** Format: int32 */
+            openAtStart?: number;
+            /** Format: int32 */
+            wouldEnter?: number;
+            /** Format: int32 */
+            admitted?: number;
+            /** Format: int32 */
+            capExceedance?: number;
+            capBound?: boolean;
+            droppedByCap?: components["schemas"]["DroppedCandidate"][];
         };
         ShadowSummaryResponse: {
             items?: components["schemas"]["VariantSummary"][];
@@ -2697,6 +2771,37 @@ export interface operations {
             };
         };
     };
+    admissionProbe: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["AdmissionProbes"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     sellDecisions_1: {
         parameters: {
             query?: never;
@@ -2713,6 +2818,37 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["SwingSellReport"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    admissionProbe_1: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["AdmissionProbes"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

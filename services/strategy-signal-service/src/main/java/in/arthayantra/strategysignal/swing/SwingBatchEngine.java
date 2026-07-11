@@ -14,6 +14,7 @@ import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategyengine.series.EngineSeries;
 import in.arthayantra.strategyengine.series.SeriesKey;
 import in.arthayantra.strategysignal.registry.StrategyRepository;
+import in.arthayantra.strategysignal.signals.DroppedCandidate;
 import in.arthayantra.strategysignal.signals.EmissionGuard;
 import in.arthayantra.strategysignal.signals.MarketDataCandlesClient;
 import in.arthayantra.strategysignal.signals.SignalEmitted;
@@ -72,9 +73,33 @@ public class SwingBatchEngine {
   /**
    * Summary of one batch run (for logging / the manual-trigger endpoint). {@code exitSkipped} counts
    * held anchors whose stop/trail could NOT be evaluated this run (no daily series even after a retry)
-   * — this batch is the position's ONLY exit evaluator, so a non-zero value is an ops signal.
+   * — this batch is the position's ONLY exit evaluator, so a non-zero value is an ops signal. {@code
+   * admission} is the ledger-F3 slot-cap probe (measurement-only; see {@link AdmissionProbe}).
    */
-  public record SwingRun(int strategies, int candidates, int entries, int exits, int exitSkipped) {}
+  public record SwingRun(
+      int strategies, int candidates, int entries, int exits, int exitSkipped,
+      AdmissionProbe admission) {}
+
+  /**
+   * The ledger-F3 admission probe: a MEASUREMENT-ONLY read of how hard the book's slot cap bound this
+   * run — it never changes admission. {@code wouldEnter} is how many non-held funnel candidates fired a
+   * fresh entry IGNORING the cap; {@code admitted} is how many the governor actually let in; {@code
+   * capExceedance = wouldEnter - admitted} is the count the cap (or a mid-run kill-switch / daily-loss
+   * trip) dropped. The funnel is walked in RS-priority order (buyable RS-desc, then on-deck RS-desc), so
+   * {@code droppedByCap} carries each dropped name with its 1-based admission-order rank — the raw
+   * material for the offline FIFO-vs-RS net-vs-net read ({@code portfolioFifoNet}, which the source spec
+   * could only INFER). Computed AFTER the emission passes and fail-soft, so a probe bug can never touch
+   * the entries the batch fires.
+   */
+  public record AdmissionProbe(
+      int openAtStart, int wouldEnter, int admitted, int capExceedance, boolean capBound,
+      List<DroppedCandidate> droppedByCap) {
+
+    /** The degenerate probe for a flag-off / errored run (nothing measured). */
+    public static AdmissionProbe empty() {
+      return new AdmissionProbe(0, 0, 0, 0, false, List.of());
+    }
+  }
 
   private record EntryResult(int candidates, int fired) {}
 
@@ -119,22 +144,32 @@ public class SwingBatchEngine {
     // fires entries + auto-paper before the owner has armed the flag).
     if (!doctrine.enabled()) {
       log.debug("{} swing batch disabled — skipping", doctrine.batchName());
-      return new SwingRun(0, 0, 0, 0, 0);
+      return new SwingRun(0, 0, 0, 0, 0, AdmissionProbe.empty());
     }
     List<SwingStrategy> swings = loadPublishedSwingStrategies(doctrine);
     if (swings.isEmpty()) {
-      return new SwingRun(0, 0, 0, 0, 0);
+      return new SwingRun(0, 0, 0, 0, 0, AdmissionProbe.empty());
     }
     Map<String, List<EngineCandle>> seriesCache = new HashMap<>();
     AnchorResolution resolution = new AnchorResolution(doctrine, swings);
-    EntryResult entry = entryPass(doctrine, swings, resolution, seriesCache);
+    // Fetch the funnel ONCE and share it with both the entry pass and the F3 probe — a second
+    // doctrine.candidates() call is a fresh (time-sensitive) network read that could diverge from what
+    // the entry pass actually admitted. Snapshot the held set BEFORE the entry pass mutates it (the
+    // probe partitions would-be entrants into admitted/dropped by diffing against the held-AFTER set).
+    List<SwingCandidate> candidates = doctrine.candidates();
+    java.util.Set<String> heldBefore =
+        new java.util.HashSet<>(openLotsBySymbol(resolution).keySet());
+    EntryResult entry = entryPass(doctrine, swings, resolution, seriesCache, candidates);
     ExitResult exit = exitPass(doctrine, resolution, seriesCache);
+    AdmissionProbe probe =
+        admissionProbe(doctrine, swings, resolution, seriesCache, candidates, heldBefore);
     log.info(
-        "{} swing batch: {} strategies, {} candidates, {} entries, {} exits, {} exit-skipped",
+        "{} swing batch: {} strategies, {} candidates, {} entries, {} exits, {} exit-skipped"
+            + " (would-enter {}, admitted {}, cap-exceedance {})",
         doctrine.batchName(), swings.size(), entry.candidates(), entry.fired(), exit.closed(),
-        exit.skipped());
+        exit.skipped(), probe.wouldEnter(), probe.admitted(), probe.capExceedance());
     return new SwingRun(
-        swings.size(), entry.candidates(), entry.fired(), exit.closed(), exit.skipped());
+        swings.size(), entry.candidates(), entry.fired(), exit.closed(), exit.skipped(), probe);
   }
 
   // ---- anchor resolution (audit H2) -----------------------------------------------------------
@@ -217,13 +252,12 @@ public class SwingBatchEngine {
 
   private EntryResult entryPass(
       SwingDoctrine doctrine, List<SwingStrategy> swings, AnchorResolution resolution,
-      Map<String, List<EngineCandle>> seriesCache) {
+      Map<String, List<EngineCandle>> seriesCache, List<SwingCandidate> candidates) {
     // Per-book risk governor early-out: a book already kill-switched / daily-loss-tripped at the START
     // of the run takes no entries at all (cheap — skips the whole candidate scan).
     if (entryBlocked(doctrine)) {
       return new EntryResult(0, 0);
     }
-    List<SwingCandidate> candidates = doctrine.candidates();
     if (candidates.isEmpty()) {
       return new EntryResult(0, 0);
     }
@@ -309,6 +343,89 @@ public class SwingBatchEngine {
       }
     }
     return bySymbol;
+  }
+
+  // ---- admission probe (ledger F3) ----------------------------------------------------------
+
+  /**
+   * The measurement-only FIFO-vs-RS slot-admission probe (ledger F3). MEASURES how hard the slot cap
+   * bound this run — it NEVER changes admission and runs AFTER both emission passes, wrapped fail-soft so
+   * a probe defect can never break the batch (this batch is the swing positions' only exit evaluator).
+   */
+  private AdmissionProbe admissionProbe(
+      SwingDoctrine doctrine, List<SwingStrategy> swings, AnchorResolution resolution,
+      Map<String, List<EngineCandle>> seriesCache, List<SwingCandidate> candidates,
+      java.util.Set<String> heldBefore) {
+    try {
+      return computeAdmissionProbe(
+          doctrine, swings, resolution, seriesCache, candidates, heldBefore);
+    } catch (RuntimeException e) {
+      log.warn(
+          "{} swing admission probe failed (measurement-only, ignored): {}",
+          doctrine.batchName(), e.getMessage());
+      return AdmissionProbe.empty();
+    }
+  }
+
+  /**
+   * Walks the RS-priority funnel and partitions the FRESH would-be entrants (non-held candidates whose
+   * entry fires, IGNORING the cap) into {@code admitted} (held AFTER the entry pass — the governor gave
+   * them a slot) vs dropped-by-cap (still not held — the cap or a mid-run kill-switch / daily-loss trip
+   * shed them). {@code EntryEvaluator} is a pure function of (definition, bank, index), so re-evaluating
+   * here yields the SAME decision the entry pass made — the only difference is the emission side effects,
+   * which the evaluator never reads. A held-before candidate is skipped (an add does not consume a fresh
+   * slot). The dropped names' 1-based funnel rank is their RS-priority position.
+   */
+  private AdmissionProbe computeAdmissionProbe(
+      SwingDoctrine doctrine, List<SwingStrategy> swings, AnchorResolution resolution,
+      Map<String, List<EngineCandle>> seriesCache, List<SwingCandidate> candidates,
+      java.util.Set<String> heldBefore) {
+    java.util.Set<String> heldAfter = openLotsBySymbol(resolution).keySet();
+    int wouldEnter = 0;
+    int admitted = 0;
+    List<DroppedCandidate> dropped = new ArrayList<>();
+    int rank = 0;
+    for (SwingCandidate c : candidates) {
+      rank++; // 1-based position in the funnel's RS-priority admission order (the walk order)
+      if (heldBefore.contains(c.symbol())) {
+        continue; // already held at start — an add does not compete for a fresh slot
+      }
+      List<EngineCandle> series = series(doctrine, c.symbol(), seriesCache);
+      if (series.size() < doctrine.minBars() || !firesEntry(swings, c, series)) {
+        continue;
+      }
+      wouldEnter++;
+      if (heldAfter.contains(c.symbol())) {
+        admitted++; // the batch admitted a fresh position for this name
+      } else {
+        dropped.add(new DroppedCandidate(c.symbol(), rank)); // the governor (cap) dropped it
+      }
+    }
+    int capExceedance = wouldEnter - admitted;
+    return new AdmissionProbe(
+        heldBefore.size(), wouldEnter, admitted, capExceedance, capExceedance > 0, dropped);
+  }
+
+  /**
+   * True iff at least one setup-eligible strategy's frozen {@link EntryEvaluator} fires a fresh entry on
+   * {@code series}' last bar — the cap-free "would this name have opened" predicate the F3 probe counts.
+   * Mirrors the entry pass's per-candidate eval exactly (eligible-setup routing + {@link #buildBank}).
+   */
+  private boolean firesEntry(
+      List<SwingStrategy> swings, SwingCandidate c, List<EngineCandle> series) {
+    int index = series.size() - 1;
+    for (SwingStrategy strat : swings) {
+      if (c.eligibleSetups() != null && !c.eligibleSetups().contains(strat.setupToken())) {
+        continue;
+      }
+      IndicatorBank bank = buildBank(strat.definition(), c.symbol(), series, c.contextSeeds());
+      Optional<EntryEvaluator.Evaluation> eval =
+          EntryEvaluator.evaluate(strat.definition(), bank, index);
+      if (eval.isPresent() && eval.get().entry()) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /** The oldest (earliest-generated) lot — the pyramid's governing exit driver (§3.5.D). */

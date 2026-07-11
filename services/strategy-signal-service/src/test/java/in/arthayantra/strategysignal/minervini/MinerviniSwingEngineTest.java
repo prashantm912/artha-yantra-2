@@ -257,6 +257,82 @@ class MinerviniSwingEngineTest {
         .isEqualTo("{\"setup\":\"minervini-vcp\",\"stage\":2,\"footprint\":\"40W 31/3 4T\",\"pivot\":\"150\",\"thrust\":false}");
   }
 
+  @Test
+  void admissionProbeMeasuresWouldEnterAdmittedAndTheCapDroppedTail() throws IOException {
+    // Ledger F3: three RS-ordered funnel names — HELD (already held, must be skipped), ADMIT (fresh,
+    // gets a slot), DROP (fresh, would enter but the book trips before it). The probe must read
+    // wouldEnter=2 (ADMIT+DROP; HELD skipped), admitted=1, capExceedance=1, and drop DROP at its rank.
+    UUID strategyId = UUID.randomUUID();
+    UUID publishedVersion = UUID.randomUUID();
+    JsonNode config = vcpConfig();
+    StrategyRepository registry = mock(StrategyRepository.class);
+    when(registry.listAll()).thenReturn(List.of(strategyRow(strategyId, publishedVersion)));
+    when(registry.findVersionById(publishedVersion))
+        .thenReturn(Optional.of(version(publishedVersion, strategyId, "1", config)));
+
+    List<EngineCandle> series = craft(3_000L); // a breakout that fires the entry for every symbol
+    MinerviniFunnelClient funnel = mock(MinerviniFunnelClient.class);
+    when(funnel.buyableAndOnDeck())
+        .thenReturn(
+            List.of(
+                candidate("HELD"), // rank 1 — held at start, skipped by the probe
+                candidate("ADMIT"), // rank 2 — fresh, admitted
+                candidate("DROP"))); // rank 3 — fresh, dropped by the mid-run book trip
+    MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
+    when(candles.fetch(eq("NSE"), any(), eq("1d"), any(), any())).thenReturn(series);
+
+    SignalRepository signals = mock(SignalRepository.class);
+    // openLotsBySymbol -> activeEntries() is read 4×: heldBefore, entry pass, exit pass, then the
+    // probe's heldAfter. The first three see HELD only; the last also sees the freshly-admitted ADMIT.
+    SignalRepository.SignalRow heldAnchor =
+        anchorFor("HELD", 42L, publishedVersion, new BigDecimal("100"), series);
+    SignalRepository.SignalRow admitAnchor =
+        anchorFor("ADMIT", 43L, publishedVersion, new BigDecimal("152"), series);
+    when(signals.activeEntries())
+        .thenReturn(List.of(heldAnchor))
+        .thenReturn(List.of(heldAnchor))
+        .thenReturn(List.of(heldAnchor))
+        .thenReturn(List.of(heldAnchor, admitAnchor));
+    stubInsert(signals, 43L);
+
+    EmissionGuard guard = mock(EmissionGuard.class);
+    when(guard.entryAllowed(Books.MINERVINI)).thenReturn(true, true, false); // trips before DROP
+    when(guard.suggestedQty(any(), any(), any(), any(), any(), any())).thenReturn(new BigDecimal("10"));
+
+    SwingBatchEngine engine =
+        new SwingBatchEngine(
+            registry, candles, signals, mock(SignalPublisher.class),
+            mock(ApplicationEventPublisher.class), Optional.of(guard), passthroughTx(),
+            new ObjectMapper(), Clock.systemUTC());
+
+    SwingBatchEngine.SwingRun run = engine.runDaily(doctrine(funnel, signals, true, 10));
+
+    assertThat(run.entries()).as("only ADMIT emitted before the trip").isEqualTo(1);
+    SwingBatchEngine.AdmissionProbe probe = run.admission();
+    assertThat(probe.openAtStart()).isEqualTo(1);
+    assertThat(probe.wouldEnter()).as("ADMIT + DROP fire; HELD is skipped").isEqualTo(2);
+    assertThat(probe.admitted()).isEqualTo(1);
+    assertThat(probe.capExceedance()).isEqualTo(1);
+    assertThat(probe.capBound()).isTrue();
+    assertThat(probe.droppedByCap()).singleElement().satisfies(d -> {
+      assertThat(d.symbol()).isEqualTo("DROP");
+      assertThat(d.admissionRank()).as("DROP is the 3rd funnel name").isEqualTo(3);
+    });
+  }
+
+  private static MinerviniFunnelClient.Candidate candidate(String symbol) {
+    return new MinerviniFunnelClient.Candidate(
+        symbol, new BigDecimal("152"), PIVOT, null, false, 2, "40W 31/3 4T");
+  }
+
+  private static SignalRepository.SignalRow anchorFor(
+      String symbol, long id, UUID versionId, BigDecimal entryPrice, List<EngineCandle> series) {
+    return new SignalRepository.SignalRow(
+        id, versionId, "NSE", symbol, "1d", "ENTRY", "BUY", entryPrice, null, null, BigDecimal.ONE,
+        new ObjectMapper().createObjectNode(), "TAKEN", series.get(0).bucketStart(),
+        series.get(0).bucketStart().plusDays(1), null, null, null, null, null, null);
+  }
+
   // ---- harness --------------------------------------------------------------------------------
 
   private final class ExitHarness {

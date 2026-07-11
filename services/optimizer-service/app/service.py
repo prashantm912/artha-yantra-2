@@ -10,7 +10,7 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
-from app import config_patch, leaderboard, path_grammar, sweep
+from app import config_patch, leaderboard, metrics_catalog, path_grammar, sweep
 from app.errors import ApiError
 
 _METHODS = {"grid", "random", "tpe", "nsga2"}
@@ -22,36 +22,14 @@ _LOG = logging.getLogger(__name__)
 # random/tpe/nsga2 run EXACTLY maxTrials, so bound the request here.
 _MAX_TRIALS_CAP = 1000
 
-# The rankable metric keys the backtest TRIAL worker emits into each trial's `metrics` JSON
-# (source of truth: backtest-service MetricsCalculator.compute + the BacktestRunner augmentation
-# sites — keep in sync when a metric is added there). An objective naming anything outside this
-# set scores every trial NaN, so the sweep "completes" with an EMPTY leaderboard (register §9-9);
-# reject it at submit instead. `oos_fold_mean` is the walk-forward-only aggregate (a separate
-# stream field), allowed here too.
-_ALLOWED_OBJECTIVE_METRICS = frozenset(
-    {
-        "totalReturn",
-        "cagr",
-        "sharpe",
-        "sortino",
-        "maxDrawdown",
-        "maxDrawdownDurationBars",
-        "winRate",
-        "profitFactor",
-        "expectancy",
-        "averageTrade",
-        "exposure",
-        "tradeCount",
-        "foldsExcluded",
-        "alpha",
-        "beta",
-        "informationRatio",
-        "excessCagr",
-        "upCapture",
-        "downCapture",
-        _OOS_METRIC,
-    }
-)
+# The rankable metric keys the backtest TRIAL worker emits into each trial's `metrics` JSON —
+# DERIVED from the shared catalog (contracts/metrics/trial-metrics-catalog.json), the ONE source of
+# truth both languages consume so the optimizer's allow-list and the Java emitter never drift (a
+# metric added on either side without the other used to slip through). An objective naming anything
+# outside this set scores every trial NaN, so the sweep "completes" with an EMPTY leaderboard
+# (register §9-9); reject it at submit instead. `oos_fold_mean` (the walk-forward-only aggregate) is
+# a catalog entry too.
+_ALLOWED_OBJECTIVE_METRICS = metrics_catalog.objective_metric_names()
 
 
 def resolve_parameters(config: dict[str, Any], override: list[dict] | None) -> list[dict]:

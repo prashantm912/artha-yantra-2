@@ -1,0 +1,32 @@
+{
+  "description": "Single source of truth for the rankable per-trial/run metrics the backtest TRIAL worker emits onto each trial's metrics JSON. Both languages consume THIS file so the two never drift: the Python optimizer derives its objective-metric allow-list from it (services/optimizer-service/app/metrics_catalog.py), and the Java backtest side pins it with a consistency test (TrialMetricsCatalogConsistencyTest) that fails if MetricsCalculator / BenchmarkMetrics emit a key the catalog does not carry (or vice versa). Add a metric HERE + at its emit site in the same PR.",
+  "reference": "docs/superpowers/plans/2026-07-02-remaining-items.md §9 candidate 03 (arch-03-trial-metrics-catalog)",
+  "version": 1,
+  "enums": {
+    "unit": ["percent", "ratio", "currency", "count", "bars"],
+    "direction": ["higher_is_better", "lower_is_better", "neutral"],
+    "source": ["core", "benchmark", "fold", "fold_aggregate"]
+  },
+  "metrics": [
+    { "key": "totalReturn", "label": "Total Return", "unit": "percent", "direction": "higher_is_better", "source": "core" },
+    { "key": "cagr", "label": "CAGR", "unit": "percent", "direction": "higher_is_better", "source": "core" },
+    { "key": "sharpe", "label": "Sharpe", "unit": "ratio", "direction": "higher_is_better", "source": "core" },
+    { "key": "sortino", "label": "Sortino", "unit": "ratio", "direction": "higher_is_better", "source": "core" },
+    { "key": "maxDrawdown", "label": "Max Drawdown", "unit": "percent", "direction": "lower_is_better", "source": "core" },
+    { "key": "maxDrawdownDurationBars", "label": "Max Drawdown Duration", "unit": "bars", "direction": "lower_is_better", "source": "core" },
+    { "key": "winRate", "label": "Win Rate", "unit": "percent", "direction": "higher_is_better", "source": "core" },
+    { "key": "profitFactor", "label": "Profit Factor", "unit": "ratio", "direction": "higher_is_better", "source": "core" },
+    { "key": "expectancy", "label": "Expectancy", "unit": "currency", "direction": "higher_is_better", "source": "core" },
+    { "key": "averageTrade", "label": "Average Trade", "unit": "currency", "direction": "higher_is_better", "source": "core" },
+    { "key": "exposure", "label": "Exposure", "unit": "percent", "direction": "neutral", "source": "core" },
+    { "key": "tradeCount", "label": "Trade Count", "unit": "count", "direction": "neutral", "source": "core" },
+    { "key": "alpha", "label": "Alpha", "unit": "ratio", "direction": "higher_is_better", "source": "benchmark" },
+    { "key": "beta", "label": "Beta", "unit": "ratio", "direction": "neutral", "source": "benchmark" },
+    { "key": "informationRatio", "label": "Information Ratio", "unit": "ratio", "direction": "higher_is_better", "source": "benchmark" },
+    { "key": "excessCagr", "label": "Excess CAGR", "unit": "percent", "direction": "higher_is_better", "source": "benchmark" },
+    { "key": "upCapture", "label": "Up Capture", "unit": "percent", "direction": "higher_is_better", "source": "benchmark" },
+    { "key": "downCapture", "label": "Down Capture", "unit": "percent", "direction": "lower_is_better", "source": "benchmark" },
+    { "key": "foldsExcluded", "label": "Folds Excluded", "unit": "count", "direction": "lower_is_better", "source": "fold" },
+    { "key": "oos_fold_mean", "label": "OOS Fold Mean", "unit": "ratio", "direction": "higher_is_better", "source": "fold_aggregate" }
+  ]
+}

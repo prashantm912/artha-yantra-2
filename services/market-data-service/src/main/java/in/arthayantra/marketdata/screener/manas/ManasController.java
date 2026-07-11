@@ -24,7 +24,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/market/screener/manas-arora")
 public class ManasController {
 
-  /** One screener row (the 6 selection gates + universe/liquidity/float flags). */
+  /**
+   * One screener row (the 6 selection gates + universe/liquidity/float flags). {@code rsRank} is the
+   * §4.1/§4.10 cross-sectional RS-rank percentile (0..100) as persisted; {@code null} when a row has
+   * no rank (pre-rank rows / edge) — never fabricated.
+   */
   public record Row(
       String symbol,
       String exchange,
@@ -47,7 +51,8 @@ public class ManasController {
       BigDecimal freeFloatPct,
       boolean[] gates,
       int gatesPassed,
-      boolean passesAll) {}
+      boolean passesAll,
+      BigDecimal rsRank) {}
 
   /** The {items} envelope + as-of + coverage. */
   public record ScreenResponse(
@@ -279,6 +284,6 @@ public class ManasController {
         c.symbol(), c.exchange(), c.close(), c.sma50(), c.sma200(), c.high52w(), c.low52w(),
         c.avgVol20(), c.avgVol50(), c.turnover50(), c.withinHighPct(), c.aboveLowPct(),
         c.withinHigh(), c.aboveSma50(), c.liquidVolume(), c.liquidDepth(), c.lowCap(),
-        c.freeFloatMcapCr(), c.freeFloatPct(), c.gates(), c.gatesPassed(), c.passesAll());
+        c.freeFloatMcapCr(), c.freeFloatPct(), c.gates(), c.gatesPassed(), c.passesAll(), c.rsRank());
   }
 }

@@ -22,6 +22,7 @@ import { useDataHealth } from '../../api/health.ts';
 import { PageHeader, LiveDot } from '../../components/PageHeader.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
+import { FocusPanel } from '../../components/insights/FocusPanel.tsx';
 
 // /dashboard cockpit page (master plan §20 parity, E-2): the at-a-glance grid — system/market/kite
 // status strip, the newest live signals, the paper-P&L tile and the in-flight jobs. Reuses the
@@ -197,6 +198,13 @@ export function DashboardPage() {
       ) : (
         <Skeleton variant="metric-strip" cols={4} className="mb-4" />
       )}
+
+      {/* D. Focus panel (INT-I1, shadow mode) — an additive preview of the priority-ranked decision
+          surface that will replace the passive "Active Signals" card below once the layer is trusted
+          (§10.3 Stage 0). Both render for now. */}
+      <div className="mb-4">
+        <FocusPanel />
+      </div>
 
       {/* E. Section cards */}
       <BeatBlock className="grid grid-cols-1 gap-4 lg:grid-cols-3">

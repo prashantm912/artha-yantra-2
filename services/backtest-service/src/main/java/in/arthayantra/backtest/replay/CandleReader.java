@@ -126,6 +126,29 @@ public class CandleReader {
     return all;
   }
 
+  /**
+   * Reads the NATIVE daily ({@code 1d}) series over {@code [from, to)} in bucket order — the SAME
+   * dense {@code marketdata.candles}@{@code 1d} source {@link #readDailyWithWarmup} and the regime
+   * pre-flight ({@link #count1dBucketsBefore}) read (Kite's daily API + bhavcopy projection), NOT the
+   * 1m-rolled {@code candles_1d} cagg that {@link #read} serves (sparse until 1m history accrues on a
+   * fresh boot; D7). No warm-up prefix (unlike {@link #readDailyWithWarmup}): exactly the {@code
+   * [from, to)} bars, so it is a drop-in source-swap for {@code read(..,"1d",..)} with byte-identical
+   * range semantics. Backtest 1d context + benchmark reads use this so they land on the same daily
+   * bars the warm-up/regime plane and the chart draw.
+   */
+  public List<EngineCandle> readDaily(
+      String exchange, String tradingsymbol, OffsetDateTime from, OffsetDateTime to) {
+    return jdbc.query(
+        "SELECT bucket, open, high, low, close, volume, oi FROM marketdata.candles "
+            + "WHERE exchange=? AND tradingsymbol=? AND \"interval\"='1d' AND bucket >= ? AND bucket < ? "
+            + "ORDER BY bucket",
+        (rs, rowNum) -> mapDaily(rs),
+        exchange,
+        tradingsymbol,
+        from,
+        to);
+  }
+
   private static EngineCandle mapDaily(java.sql.ResultSet rs) throws java.sql.SQLException {
     return new EngineCandle(
         rs.getTimestamp("bucket").toInstant().atOffset(EngineSeries.IST),

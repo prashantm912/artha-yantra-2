@@ -65,8 +65,11 @@ public class BenchmarkAnalyzer {
       return BenchmarkAnalytics.absent();
     }
     BenchmarkSeries benchmark = BenchmarkSeries.resolve(config);
+    // D7: read the NATIVE daily source (candles@1d — the same series guard 6 pre-flights), not the
+    // 1m-rolled candles_1d cagg, so benchmark analytics use the dense daily bars the regime plane
+    // and chart draw rather than a series that is thin on a fresh boot.
     List<EngineCandle> daily =
-        candleReader.read(benchmark.exchange(), benchmark.tradingsymbol(), "1d", from, to);
+        candleReader.readDaily(benchmark.exchange(), benchmark.tradingsymbol(), from, to);
     if (daily.isEmpty()) {
       return BenchmarkAnalytics.absent();
     }

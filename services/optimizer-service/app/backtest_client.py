@@ -23,6 +23,15 @@ class BacktestClient:
         resp.raise_for_status()
         return resp.json()
 
+    def results(self, run_id: str) -> dict[str, Any]:
+        """The run-level results payload (§D.5 ``/results``): the ``metrics`` JSONB (totalReturn,
+        maxDrawdown, sortino, expectancy, …), ``dataHash``, ``engineSha`` (P0-2 / #703), and the
+        run's ``caveats``. Read by retro-scoring to compute the RobustScore components that live at
+        the run level (drawdown, recovery, caveats) — a read-only §D.5 surface, no recompute."""
+        resp = self._client.get(f"{self._base}/api/v1/backtests/{run_id}/results")
+        resp.raise_for_status()
+        return resp.json()
+
     def guard_summary(self, run_id: str) -> dict[str, Any] | None:
         """The persisted §D.4 guard outputs for one run — ``dataHash`` + ``foldsExcluded`` off the
         run's results payload and each fold's ``regimeOos`` off ``/folds``. Returns ``None`` for a

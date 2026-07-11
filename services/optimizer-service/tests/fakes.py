@@ -171,21 +171,38 @@ class FakeStrategy:
 
 
 class FakeBacktest:
-    """Returns a fixed fold array (and optional guard summary) for any run id."""
+    """A fixed fold array (+ optional guard summary / results) per run id. ``folds`` / ``results``
+    may be a dict keyed by run id (per-run retro-scoring fixtures) or a single value returned for
+    every run id (the simpler leaderboard-test shape)."""
 
-    def __init__(self, folds: Any, guard: Any = None) -> None:
+    def __init__(self, folds: Any, guard: Any = None, results: Any = None) -> None:
         self._folds = folds
         self._guard = guard
+        self._results = results
         self.calls: list[str] = []
         self.guard_calls: list[str] = []
+        self.results_calls: list[str] = []
 
     def folds(self, run_id: str) -> Any:
         self.calls.append(run_id)
-        return self._folds
+        return self._per_run(self._folds, run_id, default=[])
 
     def guard_summary(self, run_id: str) -> Any:
         self.guard_calls.append(run_id)
         return self._guard
+
+    def results(self, run_id: str) -> Any:
+        self.results_calls.append(run_id)
+        return self._per_run(self._results, run_id, default={})
+
+    @staticmethod
+    def _per_run(value: Any, run_id: str, default: Any) -> Any:
+        """A per-run dict returns its run_id entry; anything else is returned verbatim per run."""
+        if isinstance(value, dict) and run_id in value:
+            return value[run_id]
+        if value is None:
+            return default
+        return value
 
 
 class FakeEvoRepo:

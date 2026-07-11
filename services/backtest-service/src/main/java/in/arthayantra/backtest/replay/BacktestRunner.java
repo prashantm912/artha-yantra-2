@@ -252,12 +252,12 @@ public class BacktestRunner {
             result.totalBars(),
             result.barsInPosition());
     m.full().put("strategyChecksum", resolved.checksum());
-    // P1-2 / audit B4 provenance: the statutory class this run was priced under (EQUITY delivery /
-    // FUTURE / OPTION). Stamped on EVERY run (like the engine SHA), so a stored run is self-describing
-    // about which cost stack produced its net numbers — a futures run now reads FUTURE, no longer the
-    // old blanket EQUITY. Reflects any `costs.instrumentClass` override. Mirrors the slippageMultiplier
-    // / fillTimingOverride provenance stamps below; runner-stamped, so not a trial-metrics-catalog key.
-    m.full().put("costClass", costConfig.instrumentClass().name());
+    // P1-2 / audit B4 provenance: the statutory class this run's NET NUMBERS were actually priced
+    // under. Stamped on EVERY run (like the engine SHA), so a stored run is self-describing about
+    // which cost stack produced its net — a futures run now reads FUTURE, no longer the old blanket
+    // EQUITY. Reflects any `costs.instrumentClass` override. Mirrors the slippageMultiplier /
+    // fillTimingOverride provenance stamps below; runner-stamped, so not a trial-metrics-catalog key.
+    m.full().put("costClass", costClass(optionsStrategy, costConfig));
     if (oiGateCoverage.armed()) {
       m.full().put("oiGateCoverage", oiGateCoverage.label()); // e.g. "42/45" fetched-vs-total
     }
@@ -648,6 +648,13 @@ public class BacktestRunner {
    * strategy routes to {@code OptionsPremiumReplay}, which builds its own OPTION {@code CostConfig});
    * the OPTION branch is defensive completeness. Segment-gated (not a bare {@code contains("FUT")}) so
    * a cash-equity symbol can never be mis-classified as a future.
+   *
+   * <p><b>Decided (money-lens review, non-change):</b> a {@code futures_of_underlying} strategy
+   * classifies EQUITY, not FUTURE — its signal series resolves to the underlying SPOT (NSE/BSE index,
+   * {@link #signalInstrument}) and the candle path fills on that spot series, so the run prices what
+   * it actually fills. Costing it FUTURE would require first resolving and replaying the real
+   * futures-contract series (a separate modeling gap). {@code futures_screener}, which pins an actual
+   * NFO {@code *FUT} contract as the series, correctly classifies FUTURE.
    */
   static InstrumentClass signalInstrumentClass(SeriesKey signal) {
     String exchange = signal.exchange().toUpperCase(Locale.ROOT);
@@ -660,6 +667,19 @@ public class BacktestRunner {
       return InstrumentClass.OPTION;
     }
     return InstrumentClass.FUTURE;
+  }
+
+  /**
+   * The provenance cost-class label for the run's metrics JSONB (P1-2, money-lens review fix 1). The
+   * options/premium path prices every leg under {@code OptionsPremiumReplay}'s own per-leg OPTION
+   * {@code CostConfig} — the runner-level {@code costConfig} classified only the SIGNAL series (e.g.
+   * the NIFTY future the strategy signals on) and priced NOTHING on that path — so an options run
+   * stamps OPTION. A candle-path run stamps the class its fills were actually priced under.
+   */
+  static String costClass(boolean optionsStrategy, CostConfig costConfig) {
+    return optionsStrategy
+        ? InstrumentClass.OPTION.name()
+        : costConfig.instrumentClass().name();
   }
 
   /**

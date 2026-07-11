@@ -186,8 +186,9 @@ class BacktestRunnerSignalInstrumentTest {
 
   @Test
   void classifiesFoSegmentOptionsAsOption() {
-    // Options never actually reach the candle path (they route to the premium replay); classified
-    // for defensive completeness / a request-forced class.
+    // Options never actually reach the candle path for real strategies (options_of_underlying routes
+    // to the premium replay); this covers only an explicit NFO/BFO option-series universe instrument.
+    // costs.instrumentClass REFUSES forcing OPTION (CostConfigTest.forcedOptionClassIsRefused).
     assertThat(BacktestRunner.signalInstrumentClass(new SeriesKey("NFO", "NIFTY26JUL24000CE", "1m")))
         .isEqualTo(InstrumentClass.OPTION);
     assertThat(BacktestRunner.signalInstrumentClass(new SeriesKey("BFO", "SENSEX26JUL80000PE", "1m")))
@@ -204,5 +205,19 @@ class BacktestRunnerSignalInstrumentTest {
         .isEqualTo(InstrumentClass.EQUITY);
     assertThat(BacktestRunner.signalInstrumentClass(new SeriesKey("BSE", "SENSEX", "1m")))
         .isEqualTo(InstrumentClass.EQUITY);
+  }
+
+  /**
+   * Review fix 1: an options_of_underlying run's net came from OptionsPremiumReplay's own OPTION
+   * stack — the runner-level costConfig only classified the SIGNAL series (e.g. the NIFTY future the
+   * strategy signals on) and priced NOTHING on that path. The provenance stamp must say OPTION, not
+   * the signal-series class.
+   */
+  @Test
+  void costClassStampsOptionOnThePremiumPath() {
+    CostConfig signalSeriesConfig = CostConfig.forClass(InstrumentClass.FUTURE);
+    assertThat(BacktestRunner.costClass(true, signalSeriesConfig)).isEqualTo("OPTION");
+    assertThat(BacktestRunner.costClass(false, signalSeriesConfig)).isEqualTo("FUTURE");
+    assertThat(BacktestRunner.costClass(false, CostConfig.defaults())).isEqualTo("EQUITY");
   }
 }

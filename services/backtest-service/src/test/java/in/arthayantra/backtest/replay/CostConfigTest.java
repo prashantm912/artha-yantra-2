@@ -81,14 +81,18 @@ class CostConfigTest {
     assertThat(CostConfig.forClass(InstrumentClass.EQUITY)).isEqualTo(CostConfig.defaults());
   }
 
-  /** An absent / empty / non-object costs block leaves the derived config byte-identical (parity). */
+  /** An absent or empty costs block leaves the derived config byte-identical (parity holds). */
   @Test
   void absentCostsBlockIsUnchanged() {
     CostConfig base = CostConfig.forClass(InstrumentClass.FUTURE);
     assertThat(base.withOverrides(null)).isEqualTo(base);
     assertThat(base.withOverrides(MAPPER.createObjectNode())).isEqualTo(base); // empty object
-    assertThat(base.withOverrides(MAPPER.getNodeFactory().textNode("x"))).isEqualTo(base); // non-object
     assertThat(base.withOverrides(MAPPER.missingNode())).isEqualTo(base); // request.path("costs") miss
+    assertThat(base.withOverrides(MAPPER.nullNode())).isEqualTo(base); // JSON null
+    // a PRESENT non-object costs is malformed — fail loud, never silently ignore (review fix 2)
+    assertThatThrownBy(() -> base.withOverrides(MAPPER.getNodeFactory().textNode("x")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("JSON object");
   }
 
   /** A costs.instrumentClass re-bases the whole statutory stack (not a relabelled equity stack). */
@@ -139,6 +143,98 @@ class CostConfigTest {
             () -> base.withOverrides(node("{\"slippage\":{\"ticks\":1,\"bps\":2}}")))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("at most one");
+  }
+
+  /**
+   * Review fix 2 (the money-critical one): a QUOTED-STRING number must throw, never read as 0. A
+   * lenient {@code "bps":"8"} would become an EXPLICIT {@code Slippage.bps(0)} — bypassing the
+   * per-class fallback with ZERO slippage that a cost-stress multiplier then scales to zero, feeding
+   * false robustness into the deflated-Sharpe/plateau gates.
+   */
+  @Test
+  void quotedStringNumbersAreRejectedNotReadAsZero() {
+    CostConfig base = CostConfig.defaults();
+    assertThatThrownBy(() -> base.withOverrides(node("{\"slippage\":{\"bps\":\"8\"}}")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("JSON number");
+    assertThatThrownBy(() -> base.withOverrides(node("{\"slippage\":{\"ticks\":\"2\"}}")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("integral");
+    assertThatThrownBy(() -> base.withOverrides(node("{\"brokerage\":{\"perLotInr\":\"20\"}}")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("JSON number");
+    assertThatThrownBy(() -> base.withOverrides(node("{\"brokerage\":{\"pctPerSide\":\"0.02\"}}")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("JSON number");
+  }
+
+  @Test
+  void nonIntegralTicksAndNegativesAreRejected() {
+    CostConfig base = CostConfig.defaults();
+    assertThatThrownBy(() -> base.withOverrides(node("{\"slippage\":{\"ticks\":2.5}}")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("integral");
+    // a negative override would produce a BETTER-than-reference fill — refused (cost model only)
+    assertThatThrownBy(() -> base.withOverrides(node("{\"slippage\":{\"ticks\":-1}}")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining(">= 0");
+    assertThatThrownBy(() -> base.withOverrides(node("{\"slippage\":{\"bps\":-5}}")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining(">= 0");
+    assertThatThrownBy(() -> base.withOverrides(node("{\"brokerage\":{\"perLotInr\":-20}}")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining(">= 0");
+  }
+
+  /** Unknown keys anywhere in the block are typos waiting to silently no-op — rejected loud. */
+  @Test
+  void unknownKeysAreRejected() {
+    CostConfig base = CostConfig.defaults();
+    assertThatThrownBy(() -> base.withOverrides(node("{\"slipage\":{\"ticks\":2}}")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("unknown key 'slipage'");
+    assertThatThrownBy(() -> base.withOverrides(node("{\"slippage\":{\"tick\":2}}")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("unknown key 'tick'");
+    assertThatThrownBy(() -> base.withOverrides(node("{\"brokerage\":{\"perLot\":20}}")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("unknown key 'perLot'");
+  }
+
+  /** A non-object slippage/brokerage is malformed — fail loud, never silently keep the default. */
+  @Test
+  void nonObjectSubBlocksAreRejected() {
+    CostConfig base = CostConfig.defaults();
+    assertThatThrownBy(() -> base.withOverrides(node("{\"slippage\":\"3 ticks\"}")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("costs.slippage must be a JSON object");
+    assertThatThrownBy(() -> base.withOverrides(node("{\"brokerage\":20}")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("costs.brokerage must be a JSON object");
+  }
+
+  /**
+   * Review fix 6: forcing OPTION on the candle path is refused — the candle path has no contract
+   * catalog to resolve a real lot size, so optionDefaults(1) would charge ₹20 per UNIT.
+   */
+  @Test
+  void forcedOptionClassIsRefused() {
+    assertThatThrownBy(
+            () -> CostConfig.defaults().withOverrides(node("{\"instrumentClass\":\"OPTION\"}")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("premium replay");
+  }
+
+  /**
+   * Review fix 5: a class re-base must PRESERVE an already-applied cost-stress multiplier — forClass
+   * resets it to 1, and dropping it would silently un-stress a stressed re-run.
+   */
+  @Test
+  void rebasePreservesTheSlippageMultiplier() {
+    CostConfig stressed = CostConfig.defaults().withSlippageMultiplier(new BigDecimal("2"));
+    CostConfig rebased = stressed.withOverrides(node("{\"instrumentClass\":\"FUTURE\"}"));
+    assertThat(rebased.instrumentClass()).isEqualTo(InstrumentClass.FUTURE);
+    assertThat(rebased.slippageMultiplier()).isEqualByComparingTo("2");
   }
 
   // ---- helpers ----

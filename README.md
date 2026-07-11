@@ -10,7 +10,11 @@ on one Windows 11 machine under Docker Desktop, behind a single loopback-bound g
 > **Current state.** See [`PHASE_GATES.md`](PHASE_GATES.md) for the live phase marker and
 > [`docs/DEFERRED_BACKLOG.md`](docs/DEFERRED_BACKLOG.md) for what's pending. As of 2026-06-26 the
 > scalper tunable-infra (12 Siva scalpers → 36 instrument-agnostic NIFTY/SENSEX variants, functionally
-> backtested) is complete; the remaining frontier is the W-U4 Upstox cutover (live-session gated).
+> backtested) is complete; ~~the remaining frontier is the W-U4 Upstox cutover (live-session gated).~~
+> **(Updated 2026-07-12: the W-U4 Upstox cutover is a settled owner NO — stay Kite, split-by-capability, per
+> [`PHASE_GATES.md`](PHASE_GATES.md). Since 2026-06-26 the Phase-5 Minervini + Manas swing families shipped
+> live and both design programs (evolution + intelligence) are in build — see `PHASE_GATES.md` for the current
+> frontier.)**
 
 > **Design authority.** The frozen design set under [`docs/design/`](docs/design/) —
 > `ARTHAYANTRA_2_COMMON_REFERENCE.md` plus the seven stage files (Stage A–G) — is the original-design

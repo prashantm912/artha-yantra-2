@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Date** | 2026-06-25 |
-| **Status** | Approved (owner picked "Startup + hourly self-heal"). Implementing. |
+| **Status** | ~~Implementing~~ **SHIPPED + LIVE (#178, struck 2026-07-12)** — auto-resume on boot + hourly self-heal; the expired backfill is COMPLETE/idle (self-resume skips all 32,543 legs). Approved (owner picked "Startup + hourly self-heal"). |
 | **Scope** | `market-data-service` — make the expired-instruments backfill survive restarts + stalls WITHOUT a manual re-POST. Backend-only; no frontend, no migration, no new endpoint. |
 
 ## Problem

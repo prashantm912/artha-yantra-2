@@ -223,8 +223,10 @@ export function CockpitPage() {
           <SignalsFeedPanel status="ACTIVE" takeable />
         </Panel>
 
-        {/* Paper book — live positions / P&L / exposure + the risk-limit guard (full width). The
-            per-signal "Take (paper)" action above opens a defined-risk paper trade into THIS book. */}
+        {/* Paper book — live positions / P&L / exposure + the per-book risk-limit guard (full width).
+            The per-signal "Take (paper)" action above opens a defined-risk paper trade into that
+            signal's OWN book (book = the signal's first tag); the panel's book selector picks which
+            book (or the all-books aggregate) to watch here. */}
         <div className="xl:col-span-2">
           <Panel title="Paper book" to="/paper" linkLabel="Full ledger">
             <PaperBookPanel />

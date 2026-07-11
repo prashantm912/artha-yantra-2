@@ -108,4 +108,25 @@ describe('PaperBookPanel', () => {
     // With no risk settings, every chip reads off.
     expect(screen.getByText('Kill switch: off')).toBeInTheDocument();
   });
+
+  it('defaults to the scalper book and swaps the risk chips for a per-book note on "All books" (M18)', () => {
+    usePaperPositions.mockReturnValue({ data: { items: [position] } });
+    usePaperAccount.mockReturnValue({ data: account });
+    useRiskSettings.mockReturnValue({
+      data: { items: [{ key: 'kill_switch', value: { enabled: true }, updatedAt: '' }] },
+    });
+    renderPanel();
+
+    // Default scoping: the scalper book is named, and the per-book risk chip row is shown.
+    expect(screen.getByText('Scalper book')).toBeInTheDocument();
+    expect(screen.getByText('Kill switch: on')).toBeInTheDocument();
+
+    // Switch to the all-books aggregate → the (un-aggregatable) risk chips give way to the note.
+    fireEvent.change(screen.getByRole('combobox', { name: 'Paper book' }), {
+      target: { value: 'all' },
+    });
+    expect(screen.getByText('All books (aggregate)')).toBeInTheDocument();
+    expect(screen.queryByText('Kill switch: on')).not.toBeInTheDocument();
+    expect(screen.getByText(/Risk limits are per-book/)).toBeInTheDocument();
+  });
 });

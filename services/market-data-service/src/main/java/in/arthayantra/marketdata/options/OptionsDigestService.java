@@ -10,6 +10,7 @@ import in.arthayantra.marketdata.options.analytics.OiSpurtService;
 import in.arthayantra.marketdata.options.analytics.OptionsSnapshotReader.StrikePoint;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -115,6 +116,7 @@ public class OptionsDigestService {
   private final IvAnalyticsService ivAnalytics;
   private final OptionsChainService chainService;
   private final MarketCalendar calendar;
+  private final Clock clock;
   private final OiInterval interval;
   private final int topStrikes;
 
@@ -127,6 +129,7 @@ public class OptionsDigestService {
       IvAnalyticsService ivAnalytics,
       OptionsChainService chainService,
       MarketCalendar calendar,
+      Clock clock,
       @Value("${artha.context.oi-interval:15m}") String oiInterval,
       @Value("${artha.context.top-strikes:3}") int topStrikes) {
     this.reader = reader;
@@ -136,6 +139,7 @@ public class OptionsDigestService {
     this.ivAnalytics = ivAnalytics;
     this.chainService = chainService;
     this.calendar = calendar;
+    this.clock = clock;
     this.interval = OiInterval.parse(oiInterval);
     this.topStrikes = topStrikes;
   }
@@ -206,6 +210,15 @@ public class OptionsDigestService {
             iv.currentIv(), iv.rank(), iv.percentile(), iv.windowDays(), iv.insufficientHistory());
 
     List<String> reasons = new ArrayList<>();
+    // Stale-anchor honesty (§6.5, the 2026-07-08 outage class): a LIVE read (date == null) with NO
+    // capture today anchors reader.latest on the newest bucket OVERALL — i.e. a PRIOR session. Those
+    // values are yesterday's truth, never today's; name it and degrade rather than serve them as OK.
+    if (date == null) {
+      LocalDate todayIst = LocalDate.ofInstant(clock.instant(), Ist.ZONE);
+      if (!sessionDay.equals(todayIst)) {
+        reasons.add("stale snapshot - newest bucket is " + sessionDay + ", not today");
+      }
+    }
     if (open == null) {
       reasons.add("no session-open snapshot baseline");
     }

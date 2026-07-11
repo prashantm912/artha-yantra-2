@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.context;
 
+import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketdata.context.DayContextService.DayContext;
 import in.arthayantra.marketdata.ingest.IngestRunLedger;
 import in.arthayantra.marketdata.options.OptionsDigestService.OptionsDigest;
@@ -15,11 +16,19 @@ import org.springframework.stereotype.Component;
  * market_context_days} row per IST session day — the day-context JSON plus the EOD baseline scalars a
  * next-day "vs prior day" read can consult, the queryable context history, and the §10 replay fixture.
  *
- * <p>Registered in the {@code ingest_runs} batch-source ledger under {@code MARKET_CONTEXT_DAY} (the
- * trust oracle): a {@code RUNNING} → {@code SUCCESS}(1)/{@code FAILURE} lifecycle via {@link
- * IngestRunLedger#record}, so the ingest-health board and the T+1 coverage canary can see whether the
- * day's context was captured — same fail-soft contract as every other EOD source (a crash leaves a
- * RUNNING row behind, never a silent hole).
+ * <p>Registered in the {@code ingest_runs} batch-source ledger under {@code MARKET_CONTEXT_DAY}: a
+ * {@code RUNNING} → {@code SUCCESS}(rows)/{@code FAILURE} lifecycle via {@link IngestRunLedger#record}
+ * (a crash leaves a RUNNING row behind, never a silent hole). The row is visible on the ingest-health
+ * board's last-run join today; registration in {@code IngestCoverageCanary.EXPECTED} (per-trading-day
+ * verdicts + the T+1 alert) is DELIBERATELY DEFERRED until the job's first successful live run —
+ * adding an unproven source to the REQUIRE matrix would false-RED the 08:45 canary before the first
+ * 19:45 execution.
+ *
+ * <p><b>Stale-anchor guard (§6.5).</b> On a trading day with NO snapshot capture (the 2026-07-08
+ * outage class) the options digest anchors on the PRIOR session's newest bucket — its values are
+ * yesterday's truth. The EOD scalar baseline columns are written ONLY when the digest's {@code asOf}
+ * falls on the row's {@code trade_date}; otherwise they are NULL (an honest hole) while the full
+ * digest stays in the JSONB for diagnosis.
  */
 @Component
 public class MarketContextEodJob {
@@ -66,16 +75,36 @@ public class MarketContextEodJob {
       log.info("day-context EOD skipped — {} is not a trading day", dc.tradeDate());
       return 0L;
     }
+    return persistRow(dc);
+  }
+
+  /**
+   * Upsert the day's row. The options scalar baselines land ONLY when the digest is anchored ON the
+   * trade date (see the class javadoc's stale-anchor guard); a stale digest yields NULL scalars + the
+   * full digest in the JSONB. Package-private for the stale-anchor IT.
+   */
+  long persistRow(DayContext dc) {
     OptionsDigest o = dc.options();
+    boolean anchoredOnTradeDate =
+        o != null
+            && o.asOf() != null
+            && o.asOf().atZoneSameInstant(Ist.ZONE).toLocalDate().equals(dc.tradeDate());
+    if (o != null && !anchoredOnTradeDate) {
+      log.warn(
+          "day-context EOD: options digest for {} anchors on {} (not the trade date) — writing NULL"
+              + " scalar baselines, full digest kept in day_context",
+          dc.tradeDate(),
+          o.asOf());
+    }
     int rows =
         repository.upsert(
             dc.tradeDate(),
             optionsName,
             o == null ? null : o.expiry(),
-            o == null || o.pcr() == null ? null : o.pcr().now(),
-            o == null || o.maxPain() == null ? null : o.maxPain().now(),
-            o == null || o.atmStraddle() == null ? null : o.atmStraddle().now(),
-            o == null || o.atmIv() == null ? null : o.atmIv().iv(),
+            anchoredOnTradeDate && o.pcr() != null ? o.pcr().now() : null,
+            anchoredOnTradeDate && o.maxPain() != null ? o.maxPain().now() : null,
+            anchoredOnTradeDate && o.atmStraddle() != null ? o.atmStraddle().now() : null,
+            anchoredOnTradeDate && o.atmIv() != null ? o.atmIv().iv() : null,
             dc);
     log.info("day-context EOD persisted market_context_days for {} ({} row)", dc.tradeDate(), rows);
     return rows;

@@ -44,11 +44,12 @@ public class MarketContextDayRepository {
             + " (trade_date, options_name, expiry, pcr_eod, max_pain_eod, atm_straddle_eod,"
             + "  atm_iv_eod, day_context)"
             + " VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb)"
+            // created_at is deliberately NOT in the update set — it keeps first-write semantics.
             + " ON CONFLICT (trade_date) DO UPDATE SET"
             + "  options_name = EXCLUDED.options_name, expiry = EXCLUDED.expiry,"
             + "  pcr_eod = EXCLUDED.pcr_eod, max_pain_eod = EXCLUDED.max_pain_eod,"
             + "  atm_straddle_eod = EXCLUDED.atm_straddle_eod, atm_iv_eod = EXCLUDED.atm_iv_eod,"
-            + "  day_context = EXCLUDED.day_context, created_at = now()",
+            + "  day_context = EXCLUDED.day_context",
         java.sql.Date.valueOf(tradeDate),
         optionsName,
         expiry == null ? null : java.sql.Date.valueOf(expiry),
@@ -63,7 +64,10 @@ public class MarketContextDayRepository {
     try {
       return mapper.writeValueAsString(value);
     } catch (JsonProcessingException e) {
-      return "{}"; // never break the persistence over a serialization edge; baselines still land
+      // day_context is the §10 replay fixture — silently persisting "{}" would corrupt it while the
+      // ingest ledger records SUCCESS. Fail loudly instead: the EOD job's FAILURE path records the
+      // error in ingest_runs and rethrows, so the hole is visible, never fabricated.
+      throw new IllegalStateException("day_context serialization failed", e);
     }
   }
 }

@@ -17,10 +17,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BiFunction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.stereotype.Service;
 
 /**
@@ -54,6 +56,11 @@ public class MinerviniBacktestService {
   private static final int RS_LOOKBACK = 252; // longest RS lag; also the 52-week gate warmup
   private static final int MIN_SERIES = 260; // min bars to be rankable AND tradable — ONE threshold
   private static final int MIN_DIST = 20; // don't trust a percentile from a degenerate thin cross-section
+
+  // F2 N+1 fix: read the daily universe in fixed-size symbol PAGES (one query per page, grouped by
+  // symbol) instead of one query per symbol. 50 bounds each page's result set to ~50×lifespan bars
+  // (a few MB on the -Xmx448m heap) while cutting the ~2×N sequential round-trips to ~2×⌈N/50⌉.
+  private static final int READ_CHUNK = 50;
 
   // v6 turnover-floor sweep grids (₹): book sizes × candidate turnover floors.
   private static final long[] SWEEP_CAPITALS = {150_000, 1_000_000, 5_000_000, 10_000_000, 50_000_000};
@@ -321,6 +328,24 @@ public class MinerviniBacktestService {
 
   /** Runs all four variants over {@code [from, now]} in one pass. Package-visible for tests. */
   BacktestResult run(LocalDate from) {
+    // Production reads the candle universe in CHUNK-batched pages (the F2 N+1 fix): one query per
+    // READ_CHUNK symbols instead of one per symbol, cutting ~2×N sequential round-trips to ~2×⌈N/50⌉.
+    return run(from, this::readClosesBatched, this::readSeriesBatched);
+  }
+
+  /**
+   * The equality-harness seam (F2). {@code closesReader}/{@code barsReader} each map a symbol chunk
+   * + {@code from} to that chunk's per-symbol series; production supplies the CHUNK-batched readers,
+   * while a same-package IT supplies the per-symbol serial readers ({@link #readCloses}/{@link
+   * #readSeries}) to PROVE both strategies yield a decimal-identical {@link BacktestResult}. The
+   * compute below is byte-identical across strategies — symbols are iterated in {@code eqSymbols()}
+   * order and each symbol's bars are unchanged — so equality reduces to the readers returning the
+   * same bars in the same order (verified directly by the IT's read-level assertions too).
+   */
+  BacktestResult run(
+      LocalDate from,
+      BiFunction<List<String>, LocalDate, Map<String, Series>> closesReader,
+      BiFunction<List<String>, LocalDate, Map<String, List<DailyBar>>> barsReader) {
     LocalDate warmStart = from.minusDays(600); // ≥252 sessions + VCP-lookback warmup before `from`
     List<String> symbols = eqSymbols();
 
@@ -330,25 +355,29 @@ public class MinerviniBacktestService {
     for (LocalDate d : rankDates) {
       bags.put(d, new DoubleBag());
     }
-    for (String symbol : symbols) {
-      Series s = readCloses(symbol, warmStart);
-      // ONE membership threshold with the Pass-2 ranked set (else a name pollutes the distribution
-      // it is never itself ranked against — the "cross-section" would not be its own population).
-      if (s.close().length < MIN_SERIES) {
-        continue;
-      }
-      // Contribute at each rank date within this symbol's lifespan, measured at its AS-OF bar (its
-      // last bar ≤ the rank date) — a true cross-section, not "only names that printed on that exact
-      // session". The early warm rank dates stay thin (few names have 252 bars yet) but sit entirely
-      // before `from`, so no trade is ranked against them (a floor in perBarRsRank guards the rest).
-      for (LocalDate rd : rankDates) {
-        int idx = asOfIndex(s.dates(), rd);
-        if (idx < RS_LOOKBACK) {
+    for (int i = 0; i < symbols.size(); i += READ_CHUNK) {
+      List<String> chunk = symbols.subList(i, Math.min(i + READ_CHUNK, symbols.size()));
+      Map<String, Series> byCloses = closesReader.apply(chunk, warmStart);
+      for (String symbol : chunk) {
+        Series s = byCloses.get(symbol);
+        // ONE membership threshold with the Pass-2 ranked set (else a name pollutes the distribution
+        // it is never itself ranked against — the "cross-section" would not be its own population).
+        if (s == null || s.close().length < MIN_SERIES) {
           continue;
         }
-        double rs = weightedRs(s.close(), idx);
-        if (!Double.isNaN(rs)) {
-          bags.get(rd).add(rs);
+        // Contribute at each rank date within this symbol's lifespan, measured at its AS-OF bar (its
+        // last bar ≤ the rank date) — a true cross-section, not "only names that printed on that exact
+        // session". The early warm rank dates stay thin (few names have 252 bars yet) but sit entirely
+        // before `from`, so no trade is ranked against them (a floor in perBarRsRank guards the rest).
+        for (LocalDate rd : rankDates) {
+          int idx = asOfIndex(s.dates(), rd);
+          if (idx < RS_LOOKBACK) {
+            continue;
+          }
+          double rs = weightedRs(s.close(), idx);
+          if (!Double.isNaN(rs)) {
+            bags.get(rd).add(rs);
+          }
         }
       }
     }
@@ -369,18 +398,22 @@ public class MinerviniBacktestService {
     // for symbols that produce rs-only signals (bounds the memory on the small heap).
     Map<String, SwingRotationPortfolio.WeeklySeries> weekly = new HashMap<>();
     int scanned = 0;
-    for (String symbol : symbols) {
-      List<DailyBar> bars = readSeries(symbol, warmStart);
-      if (bars.size() < MIN_SERIES) {
-        continue;
-      }
-      scanned++;
-      double[] rsRank = perBarRsRank(bars, rankDates, dist);
-      List<BtTrade> got =
-          MinerviniSwingBacktest.simulate(symbol, bars, detector, from, rsRank, variants);
-      all.addAll(got);
-      if (got.stream().anyMatch(t -> t.variant().equals("rs-only"))) {
-        weekly.put(symbol, downsampleWeekly(bars, rsRank));
+    for (int i = 0; i < symbols.size(); i += READ_CHUNK) {
+      List<String> chunk = symbols.subList(i, Math.min(i + READ_CHUNK, symbols.size()));
+      Map<String, List<DailyBar>> byBars = barsReader.apply(chunk, warmStart);
+      for (String symbol : chunk) {
+        List<DailyBar> bars = byBars.get(symbol);
+        if (bars == null || bars.size() < MIN_SERIES) {
+          continue;
+        }
+        scanned++;
+        double[] rsRank = perBarRsRank(bars, rankDates, dist);
+        List<BtTrade> got =
+            MinerviniSwingBacktest.simulate(symbol, bars, detector, from, rsRank, variants);
+        all.addAll(got);
+        if (got.stream().anyMatch(t -> t.variant().equals("rs-only"))) {
+          weekly.put(symbol, downsampleWeekly(bars, rsRank));
+        }
       }
     }
 
@@ -724,15 +757,18 @@ public class MinerviniBacktestService {
   }
 
   /** A symbol's aligned (date, close) series. */
-  private record Series(LocalDate[] dates, double[] close) {}
+  record Series(LocalDate[] dates, double[] close) {}
 
   /**
    * The (date, close) series for {@code symbol} from {@code from}. {@code bucket::date} carries the
    * documented IST→UTC shift (a 1d bucket is IST midnight), but EVERY query in this service applies the
    * same shift, so all dates share one calendar and relative ordering / cross-symbol alignment are
    * exact (only the reported calendar day is one early — cosmetic). Do not "fix" one query in isolation.
+   *
+   * <p>Retained as the F2 equality REFERENCE reader (the per-symbol serial path the batched readers
+   * must reproduce to the decimal); production goes through {@link #readClosesBatched}.
    */
-  private Series readCloses(String symbol, LocalDate from) {
+  Series readCloses(String symbol, LocalDate from) {
     List<Object[]> rows =
         jdbc.query(
             "SELECT bucket::date AS d, close FROM candles"
@@ -743,16 +779,11 @@ public class MinerviniBacktestService {
                   rs.getObject("d", LocalDate.class), rs.getBigDecimal("close").doubleValue()
                 },
             symbol, java.sql.Date.valueOf(from));
-    LocalDate[] dates = new LocalDate[rows.size()];
-    double[] close = new double[rows.size()];
-    for (int i = 0; i < rows.size(); i++) {
-      dates[i] = (LocalDate) rows.get(i)[0];
-      close[i] = (double) rows.get(i)[1];
-    }
-    return new Series(dates, close);
+    return toSeries(rows);
   }
 
-  private List<DailyBar> readSeries(String symbol, LocalDate from) {
+  /** Reference per-symbol series reader (see {@link #readCloses}); production uses {@link #readSeriesBatched}. */
+  List<DailyBar> readSeries(String symbol, LocalDate from) {
     return jdbc.query(
         "SELECT bucket::date AS d, open, high, low, close, volume FROM candles"
             + " WHERE exchange='NSE' AND tradingsymbol=? AND interval='1d' AND bucket >= ?"
@@ -763,6 +794,86 @@ public class MinerviniBacktestService {
                 rs.getBigDecimal("high").doubleValue(), rs.getBigDecimal("low").doubleValue(),
                 rs.getBigDecimal("close").doubleValue(), rs.getLong("volume")),
         symbol, java.sql.Date.valueOf(from));
+  }
+
+  /** Builds a {@link Series} from bucket-ascending {@code (date, close)} rows (shared by both readers). */
+  private static Series toSeries(List<Object[]> rows) {
+    LocalDate[] dates = new LocalDate[rows.size()];
+    double[] close = new double[rows.size()];
+    for (int i = 0; i < rows.size(); i++) {
+      dates[i] = (LocalDate) rows.get(i)[0];
+      close[i] = (double) rows.get(i)[1];
+    }
+    return new Series(dates, close);
+  }
+
+  /**
+   * The F2 batched counterpart of {@link #readCloses}: ONE query for a whole symbol {@code chunk},
+   * returned as a {@code symbol -> Series} map. Same filter/casts/ordering as the per-symbol reader,
+   * widened to {@code tradingsymbol IN (chunk)} and {@code ORDER BY tradingsymbol, bucket ASC} — so
+   * within each symbol the rows stay bucket-ascending and every symbol's series is byte-identical to
+   * the serial read. Symbols with no bars in-window are simply absent (the caller treats absent as an
+   * empty series, exactly as the serial length gate does).
+   */
+  Map<String, Series> readClosesBatched(List<String> chunk, LocalDate from) {
+    Map<String, List<Object[]>> acc = new LinkedHashMap<>();
+    jdbc.query(
+        "SELECT tradingsymbol, bucket::date AS d, close FROM candles"
+            + " WHERE exchange='NSE' AND interval='1d' AND bucket >= ?"
+            + " AND tradingsymbol IN ("
+            + inClause(chunk.size())
+            + ") ORDER BY tradingsymbol, bucket ASC",
+        (RowCallbackHandler)
+            rs ->
+                acc.computeIfAbsent(rs.getString("tradingsymbol"), k -> new ArrayList<>())
+                    .add(
+                        new Object[] {
+                          rs.getObject("d", LocalDate.class),
+                          rs.getBigDecimal("close").doubleValue()
+                        }),
+        chunkArgs(from, chunk));
+    Map<String, Series> out = new LinkedHashMap<>();
+    acc.forEach((symbol, rows) -> out.put(symbol, toSeries(rows)));
+    return out;
+  }
+
+  /** The F2 batched counterpart of {@link #readSeries} (see {@link #readClosesBatched} for the contract). */
+  Map<String, List<DailyBar>> readSeriesBatched(List<String> chunk, LocalDate from) {
+    Map<String, List<DailyBar>> out = new LinkedHashMap<>();
+    jdbc.query(
+        "SELECT tradingsymbol, bucket::date AS d, open, high, low, close, volume FROM candles"
+            + " WHERE exchange='NSE' AND interval='1d' AND bucket >= ?"
+            + " AND tradingsymbol IN ("
+            + inClause(chunk.size())
+            + ") ORDER BY tradingsymbol, bucket ASC",
+        (RowCallbackHandler)
+            rs ->
+                out.computeIfAbsent(rs.getString("tradingsymbol"), k -> new ArrayList<>())
+                    .add(
+                        new DailyBar(
+                            rs.getObject("d", LocalDate.class),
+                            rs.getBigDecimal("open").doubleValue(),
+                            rs.getBigDecimal("high").doubleValue(),
+                            rs.getBigDecimal("low").doubleValue(),
+                            rs.getBigDecimal("close").doubleValue(),
+                            rs.getLong("volume"))),
+        chunkArgs(from, chunk));
+    return out;
+  }
+
+  /** {@code "?,?,…"} of {@code n} placeholders for an {@code IN (…)} list. */
+  private static String inClause(int n) {
+    return String.join(",", java.util.Collections.nCopies(n, "?"));
+  }
+
+  /** The positional args for a batched read: {@code from} then the chunk's symbols, in order. */
+  private static Object[] chunkArgs(LocalDate from, List<String> chunk) {
+    Object[] args = new Object[chunk.size() + 1];
+    args[0] = java.sql.Date.valueOf(from);
+    for (int i = 0; i < chunk.size(); i++) {
+      args[i + 1] = chunk.get(i);
+    }
+    return args;
   }
 
   private void persist(Report report) {

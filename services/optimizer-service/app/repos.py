@@ -149,6 +149,20 @@ class JobsRepo:
         return {"id": str(row[0]), "kind": row[1], "status": row[2], "progress": row[3],
                 "request": row[4], "startedAt": _ts(row[5]), "finishedAt": _ts(row[6])}
 
+    def child_trial_request(self, sweep_id: str) -> dict[str, Any] | None:
+        """One of a sweep's child TRIAL job requests (the earliest), reused VERBATIM as the
+        neighbor-probe template (§3.2.3) so a probe runs the EXACT resolved version + window + fold
+        context the sweep's own trials ran — only ``paramsOverride`` is swapped. ``None`` when the
+        sweep has no trial job (a re-resolve here could drift to a newer published version)."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT request FROM jobs WHERE parent_job_id=%s AND kind='TRIAL' "
+                "ORDER BY created_at LIMIT 1",
+                (sweep_id,),
+            )
+            row = cur.fetchone()
+        return row[0] if row is not None else None
+
 
 class TrialsRepo:
     """The optimizer-owned ``optimization_trials`` ledger (resumable via study.add_trial replay)."""
@@ -170,6 +184,17 @@ class TrialsRepo:
             row_id = cur.fetchone()[0]
         self._conn.commit()
         return int(row_id)
+
+    def max_trial_number(self, sweep_id: str) -> int:
+        """The highest ``trial_number`` recorded for a sweep, or -1 when it has none — so a
+        neighbor-probe batch continues the numbering (``max + 1``) instead of colliding."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT COALESCE(MAX(trial_number), -1) FROM optimization_trials "
+                "WHERE sweep_job_id=%s",
+                (sweep_id,),
+            )
+            return int(cur.fetchone()[0])
 
     def complete(
         self, trial_id: int, objective_values: dict[str, Any], backtest_run_id: str | None

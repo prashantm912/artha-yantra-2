@@ -53,6 +53,30 @@ def best(
     return scored[:top]
 
 
+def axis_neighbors(
+    params: dict[str, Any], parameters: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Every axis-adjacent cell of ``params``: for each tuned parameter, ``params`` with THAT one
+    parameter moved a single step (±1 grid step, an adjacent choice, or ±ε·span for a stepless
+    continuous range) and all others held — the "adjacent cell" a neighbor probe (§3.2.3) fills.
+
+    Each cell differs from ``params`` in exactly one parameter, and only cells the CANONICAL
+    ``_is_neighbor`` relation actually admits are returned (the same gate ``plateau_scores`` reads),
+    so a probe submitted at one of these cells is guaranteed to be counted as a neighbor — one
+    geometry, never a second definition. Range candidates outside ``[lo, hi]`` are dropped, not
+    clamped (a clamped point sits less than a step away and would misrepresent the grid)."""
+    specs = {p["path"]: p for p in parameters}
+    cells: list[dict[str, Any]] = []
+    for path, spec in specs.items():
+        if path not in params:
+            continue
+        for value in _adjacent_values(spec, params[path]):
+            cell = {**params, path: value}
+            if _is_neighbor(params, cell, specs):
+                cells.append(cell)
+    return cells
+
+
 # The four §D.4 regime labels, in the canonical RegimeLabel enum order (backtest-service
 # serializes each fold's regimeOos keyed by RegimeLabel.name(), never a BULL/RANGE alias).
 _REGIME_LABELS = ("UP_QUIET", "UP_TURBULENT", "DOWN_QUIET", "DOWN_TURBULENT")
@@ -109,3 +133,27 @@ def _within(spec: dict[str, Any], a: Any, b: Any) -> bool:
         return abs(a - b) <= step + 1e-9
     span = (hi - lo) or 1
     return abs(a - b) / span <= EPS
+
+
+def _adjacent_values(spec: dict[str, Any], value: Any) -> list[Any]:
+    """The one-step neighbours of a SINGLE parameter value, mirroring ``_within``'s geometry: the
+    adjacent ``choices`` entries, ``value ± step``, or ``value ± ε·span`` for a stepless range.
+    Range candidates outside ``[lo, hi]`` are dropped. Stepless cells land just inside the ε-ball
+    (the ``1 - 1e-9`` factor keeps the ratio strictly ≤ EPS under float rounding, so the caller's
+    ``_is_neighbor`` gate admits them)."""
+    if "choices" in spec:
+        choices = list(spec["choices"])
+        try:
+            i = choices.index(value)
+        except ValueError:
+            return []
+        return [choices[j] for j in (i - 1, i + 1) if 0 <= j < len(choices)]
+    lo, hi = spec["range"]
+    step = spec.get("step")
+    delta = step if step else EPS * ((hi - lo) or 1) * (1 - 1e-9)
+    return [_snap(c) for c in (value - delta, value + delta) if lo <= c <= hi]
+
+
+def _snap(value: Any) -> Any:
+    """Integer-snap an on-grid value (mirrors optuna_runner.grid_values), else round float drift."""
+    return int(value) if float(value).is_integer() else round(value, 10)

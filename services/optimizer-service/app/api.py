@@ -5,8 +5,31 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Request
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/v1/optimizations")
+
+
+class ProbeRequest(BaseModel):
+    """Neighbor-probe options: how many plateau leaders to fill around, and the batch ceiling."""
+
+    topK: int = 5
+    maxProbes: int = 40
+
+
+class ProbeTrial(BaseModel):
+    trialNumber: int
+    params: dict[str, Any]
+    trialJobId: str
+
+
+class ProbeReceipt(BaseModel):
+    """Receipt for a neighbor-probe submission (§3.2.3): probe trials dispatched as ordinary trials
+    of the sweep, plus how many candidate cells were skipped (already evaluated or over the cap)."""
+
+    submitted: int
+    skipped: int
+    trials: list[ProbeTrial]
 
 
 def _service(request: Request) -> Any:
@@ -75,3 +98,13 @@ def trial_folds(sweep_id: str, trial_id: int, request: Request) -> Any:
 def promote(sweep_id: str, body: dict[str, Any], request: Request) -> dict[str, Any]:
     """Promote a COMPLETE trial's params to a new draft version (§D.9); 409 if not promotable."""
     return _service(request).promote(sweep_id, int(body["trialId"]), body.get("notes"))
+
+
+@router.post("/{sweep_id}/probes", response_model=ProbeReceipt)
+def probes(sweep_id: str, request: Request, body: ProbeRequest | None = None) -> dict[str, Any]:
+    """Submit the plateau top-K's missing ±1-step neighbours as ordinary trials of this COMPLETED
+    sweep, so a later ``/best`` read MEASURES ``neighborCount`` (§3.2.3 / §11). Body is optional
+    (``topK`` default 5, ``maxProbes`` default 40). 404 unknown or non-sweep job; 409 unless the
+    sweep is completed."""
+    opts = body or ProbeRequest()
+    return _service(request).probe(sweep_id, opts.topK, opts.maxProbes)

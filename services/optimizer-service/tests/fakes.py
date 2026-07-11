@@ -75,6 +75,13 @@ class FakeJobs:
         row = self.rows.get(job_id)
         return {"id": job_id, **row} if row else None
 
+    def child_trial_request(self, sweep_id: str) -> dict[str, Any] | None:
+        """Mirrors JobsRepo.child_trial_request: the earliest child TRIAL job's request."""
+        for _jid, row in self.rows.items():
+            if row.get("kind") == "TRIAL" and row.get("parent") == sweep_id:
+                return row["request"]
+        return None
+
     def close(self) -> None:
         pass
 
@@ -91,6 +98,11 @@ class FakeTrials:
         self.rows[self._seq] = {"sweep": sweep_id, "trialNumber": trial_number, "params": params,
                                 "state": "RUNNING", "objectiveValues": None, "backtestRunId": None}
         return self._seq
+
+    def max_trial_number(self, sweep_id: str) -> int:
+        """Mirrors TrialsRepo.max_trial_number: highest trial_number for a sweep, or -1 if none."""
+        numbers = [r["trialNumber"] for r in self.rows.values() if r["sweep"] == sweep_id]
+        return max(numbers, default=-1)
 
     def complete(self, trial_id: int, objective_values: dict[str, Any], run_id: str | None) -> None:
         self.rows[trial_id].update(state="COMPLETE", objectiveValues=objective_values,

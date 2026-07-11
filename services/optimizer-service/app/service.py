@@ -22,6 +22,13 @@ _LOG = logging.getLogger(__name__)
 # random/tpe/nsga2 run EXACTLY maxTrials, so bound the request here.
 _MAX_TRIALS_CAP = 1000
 
+# Neighbor-probe batch ceiling (§3.2.3): probes ride the SAME trial queue as a sweep, so an
+# uncapped batch is a runaway ask — bound it, as maxTrials is bounded. The default (40) is the
+# request default; this is the hard ceiling.
+_MAX_PROBES_CEILING = 200
+# A completed sweep holds ≤ maxTrials (1000) trials; this LIMIT fetches every one for dedup.
+_TRIAL_SCAN_LIMIT = 100_000
+
 # The rankable metric keys the backtest TRIAL worker emits into each trial's `metrics` JSON —
 # DERIVED from the shared catalog (contracts/metrics/trial-metrics-catalog.json), the ONE source of
 # truth both languages consume so the optimizer's allow-list and the Java emitter never drift (a
@@ -408,6 +415,87 @@ class SweepService:
             "status": result.get("status", "draft"),
         }
 
+    def probe(self, sweep_id: str, top_k: int, max_probes: int) -> dict[str, Any]:
+        """Submit the plateau top-K's MISSING ±1-step neighbors as ordinary trials of THIS completed
+        sweep (design §3.2.3 / §11), so a later ``/best`` read MEASURES ``neighborCount`` instead of
+        inheriting it accidentally. Manual, no autonomy. 404 for an unknown or non-OPTIMIZATION job;
+        409 unless the sweep is completed. Candidate cells are deduped against every existing trial
+        (a re-run of an evaluated vector is wasted) and against each other, then ceiling-capped.
+        Each probe is dispatched through the SAME queue the sweep used (never a direct backtest
+        submission), so it rides the B16 worker-pool cap; a background thread drains their results
+        (the sweep's own thread is long gone). Returns ``{submitted, skipped, trials}``."""
+        top_k = min(max(top_k, 1), 100)
+        max_probes = min(max(max_probes, 0), _MAX_PROBES_CEILING)
+        jobs = self._jobs_factory()
+        trials = self._trials_factory()
+        try:
+            job = jobs.get(sweep_id)
+            if job is None or job.get("kind") != "OPTIMIZATION":
+                raise ApiError(404, "NOT_FOUND_JOB", f"no such sweep: {sweep_id}")
+            if job.get("status") != "completed":
+                raise ApiError(
+                    409,
+                    "CONFLICT_JOB_TERMINAL",
+                    f"sweep is {job.get('status')!r}, not completed; probes run only on a "
+                    "completed sweep",
+                )
+            request = job.get("request") or {}
+            parameters = request.get("parameters", [])
+            metric, direction = _primary_objective(request.get("objective", {}))
+            rows = trials.list_for_sweep(sweep_id, None, _TRIAL_SCAN_LIMIT, 0)
+            to_submit, skipped = _plan_probes(
+                rows, parameters, metric, direction, top_k, max_probes
+            )
+            if not to_submit:
+                return {"submitted": 0, "skipped": skipped, "trials": []}
+            template = jobs.child_trial_request(sweep_id)
+            if template is None:  # a completed sweep with COMPLETE trials always has a trial job
+                raise ApiError(
+                    409, "CONFLICT_JOB_TERMINAL", "sweep has no trial job to template a probe from"
+                )
+            number = trials.max_trial_number(sweep_id) + 1
+            pending: dict[str, int] = {}
+            descriptors: list[dict[str, Any]] = []
+            for cell in to_submit:
+                trial_job_id = jobs.insert_trial(
+                    sweep_id, None, _probe_request(template, cell),
+                    created_by=f"optimizer:{sweep_id}:probe",
+                )
+                row_id = trials.insert(sweep_id, number, cell)
+                self._dispatcher.dispatch(trial_job_id)
+                pending[str(trial_job_id)] = row_id
+                descriptors.append(
+                    {"trialNumber": number, "params": cell, "trialJobId": str(trial_job_id)}
+                )
+                number += 1
+        finally:
+            jobs.close()
+            trials.close()
+        threading.Thread(
+            target=self._drain_probes,
+            kwargs={"sweep_id": sweep_id, "pending": pending, "metric": metric},
+            daemon=True,
+            name=f"probe-{sweep_id[:8]}",
+        ).start()
+        return {"submitted": len(descriptors), "skipped": skipped, "trials": descriptors}
+
+    def _drain_probes(self, *, sweep_id: str, pending: dict[str, int], metric: str) -> None:
+        """The probe result-drain thread (fresh per-thread repos, like ``_run``): resolves each
+        dispatched probe row to COMPLETE/FAILED. The sweep's own loop has exited, so without this
+        the probe rows would sit unresolved and never lift ``neighborCount``."""
+        jobs = self._jobs_factory()
+        trials = self._trials_factory()
+        try:
+            sweep.run_probes(
+                sweep_id=sweep_id, pending=pending, metric=metric,
+                jobs=jobs, trials=trials, dispatcher=self._dispatcher,
+            )
+        except Exception:  # noqa: BLE001 - never crash the daemon thread
+            _LOG.exception("probe drain for sweep %s failed", sweep_id)
+        finally:
+            jobs.close()
+            trials.close()
+
     def cancel(self, job_id: str) -> None:
         jobs = self._jobs_factory()
         try:
@@ -460,6 +548,59 @@ def _primary_objective(objective: dict[str, Any]) -> tuple[str, str]:
         first = objectives[0]
         return first["metric"], first.get("direction", "maximize")
     return objective.get("metric", "sharpe"), objective.get("direction", "maximize")
+
+
+def _plan_probes(
+    rows: list[dict[str, Any]],
+    parameters: list[dict[str, Any]],
+    metric: str,
+    direction: str,
+    top_k: int,
+    max_probes: int,
+) -> tuple[list[dict[str, Any]], int]:
+    """Plan the neighbor-probe batch: rank the COMPLETE trials by plateau objective, take the
+    top-K, expand each into its axis neighbours (``leaderboard.axis_neighbors`` — the ONE geometry),
+    drop cells that already exist as a trial (any state) or repeat across the top-K, and cap at
+    ``max_probes``. The best trial's neighbours are expanded first, so the cap favours filling the
+    top plateau. Returns ``(cells to submit, skipped)``, skipped = already-present + over-cap."""
+    existing = {_param_key(r["params"]) for r in rows}
+    complete = [
+        {"params": r["params"], "objective": float((r.get("objectiveValues") or {})[metric])}
+        for r in rows
+        if r.get("state") == _PROMOTABLE and metric in (r.get("objectiveValues") or {})
+    ]
+    top = leaderboard.best(complete, parameters, top_k, direction, "plateau")
+    seen: set[tuple] = set()
+    new_cells: list[dict[str, Any]] = []
+    already = 0
+    for trial in top:
+        for cell in leaderboard.axis_neighbors(trial["params"], parameters):
+            key = _param_key(cell)
+            if key in seen:
+                continue
+            seen.add(key)
+            if key in existing:
+                already += 1
+            else:
+                new_cells.append(cell)
+    to_submit = new_cells[:max_probes]
+    return to_submit, already + (len(new_cells) - len(to_submit))
+
+
+def _param_key(params: dict[str, Any]) -> tuple:
+    """An order-independent, hashable identity for a parameter vector (``1`` and ``1.0`` collapse —
+    Python hashes them equal), for deduping probe cells against existing trials."""
+    return tuple(sorted(params.items()))
+
+
+def _probe_request(template: dict[str, Any], cell: dict[str, Any]) -> dict[str, Any]:
+    """A probe's TRIAL request = the sweep's own trial template with only ``paramsOverride`` swapped
+    to the neighbour cell — same resolved version, window, and fold context, so the probe is an
+    honest neighbour, not a differently-configured run. No extra field is added to the request the
+    backtest worker parses; probe provenance rides the trial job's ``created_by`` actor."""
+    request = dict(template)
+    request["paramsOverride"] = cell
+    return request
 
 
 def _early_stopping(request: dict[str, Any]) -> int | None:

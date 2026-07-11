@@ -261,17 +261,56 @@ public final class TickwiseGoldenRunner {
       Map<SeriesKey, Integer> cursors,
       Map<SeriesKey, List<EngineCandle>> contextCandles,
       EngineCandle bar) {
+    // P1-9 (audit B7): a context bar is visible only once its bucket END has passed the current 1m
+    // bar's CLOSE — the completed-bucket contract the live engine adopted for coarse buckets (#683/B1).
+    // A 1d context bar is stamped at the session's 00:00 IST START, so under the old start-gate it went
+    // visible from that day's FIRST bar and a coarse/1m primary could read TODAY's still-forming daily
+    // close intraday (the look-ahead). End-gating makes it visible only from the NEXT session. The 1m
+    // bar's close is bucketStart+1m (the tick-wise stream is always 1m); for a 1m context this reduces
+    // EXACTLY to the old `start <= barStart` rule, so same-timeframe/1m contexts (every committed golden)
+    // stay byte-identical. Instant-keyed per #214 (never OffsetDateTime equality across +05:30 / +00).
+    Instant barClose = bar.bucketStart().toInstant().plus(Duration.ofMinutes(1));
     for (Map.Entry<SeriesKey, EngineSeries> e : contexts.entrySet()) {
       List<EngineCandle> source = contextCandles.get(e.getKey());
+      String interval = e.getKey().interval();
       int cursor = cursors.get(e.getKey());
       while (cursor < source.size()
-          && !source.get(cursor).bucketStart().toInstant()
-              .isAfter(bar.bucketStart().toInstant())) {
+          && contextBarComplete(source.get(cursor).bucketStart().toInstant(), interval, barClose)) {
         e.getValue().append(source.get(cursor));
         cursor++;
       }
       cursors.put(e.getKey(), cursor);
     }
+  }
+
+  /**
+   * Completed-bucket visibility (P1-9): a context bar {@code [start, start+interval)} is readable only
+   * once its END has passed the current 1m bar's close — so an in-progress bucket (a still-forming 1d
+   * bar) is invisible until the session that closes it. For a 1m context this is identical to the old
+   * {@code start <= barStart} rule (end = start+1m, close = barStart+1m), keeping same-timeframe/1m
+   * contexts byte-identical. Package-visible so the predicate is unit-tested directly.
+   */
+  static boolean contextBarComplete(Instant ctxBarStart, String interval, Instant currentBarClose) {
+    return !ctxBarStart.plus(contextBucketDuration(interval)).isAfter(currentBarClose);
+  }
+
+  /**
+   * Context bucket width for {@link #contextBarComplete}. Covers every interval a context series can
+   * carry — a CROSS-INSTRUMENT context may be 1m (and 1w exists), unlike a rolled-up primary. Kept
+   * SEPARATE from {@link #intervalDuration}, which validates the roll-up PRIMARY and deliberately
+   * rejects 1m/1w (a 1w roll-up would mis-align to a Thursday epoch week; 1m is the non-coarse path).
+   */
+  private static Duration contextBucketDuration(String interval) {
+    return switch (interval) {
+      case "1m" -> Duration.ofMinutes(1);
+      case "3m" -> Duration.ofMinutes(3);
+      case "5m" -> Duration.ofMinutes(5);
+      case "15m" -> Duration.ofMinutes(15);
+      case "1h" -> Duration.ofHours(1);
+      case "1d" -> Duration.ofDays(1);
+      case "1w" -> Duration.ofDays(7);
+      default -> throw new IllegalArgumentException("unsupported context interval " + interval);
+    };
   }
 
   private IndicatorBank bank(SeriesProvider provider) {

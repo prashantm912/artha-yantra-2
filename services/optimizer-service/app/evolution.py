@@ -9,13 +9,17 @@ mutates. Empty tables (the state at deploy) return clean empty envelopes.
 
 from __future__ import annotations
 
+import statistics
 from collections.abc import Callable
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
+from app import leaderboard, scoring
 from app.errors import ApiError
+from app.service import _PROMOTABLE, _primary_objective
 
 router = APIRouter(prefix="/api/v1/evolution")
 
@@ -145,3 +149,289 @@ def campaign(campaign_id: str, request: Request) -> CampaignDetail:
 def candidates(campaign_id: str, request: Request) -> CandidateListResponse:
     """The campaign's candidates (incl. the scorecard JSONB); 404 if the campaign is unknown."""
     return _service(request).campaign_candidates(campaign_id)
+
+
+# --- Retro-scoring (§12 E1 item 2): the §6 scoring lib applied to an EXISTING sweep --------------
+# Read-only. Scores a historical sweep's trials as a cohort — no evo_* writes (the campaign recorder
+# is a later PR). The scorecard shape is scoring.score_cohort's output (design §6.3), served typed.
+
+
+class GateResult(BaseModel):
+    """One §6.1 hard gate: PASS / FAIL / SKIPPED / UNKNOWN / NOT_IMPLEMENTED + assessed value."""
+
+    id: str
+    status: str
+    value: Any | None = None
+    note: str | None = None
+
+
+class ComponentScore(BaseModel):
+    """One §6.2 RobustScore component: its cohort z-score + the raw constituents that fed it."""
+
+    id: str
+    z: float
+    raw: dict[str, Any] = {}
+    caveat: str | None = None
+
+
+class Penalties(BaseModel):
+    """§6.2 subtractive penalties. ``dof`` is 0.0 in E1 (deferred to E2, design §12 item 6)."""
+
+    dof: float
+    caveats: float
+
+
+class Evidence(BaseModel):
+    """The evidence chain behind a scorecard (§6.3). Retro has sim runs only — no holdout/live."""
+
+    simRuns: list[str] = []
+    holdoutRun: str | None = None
+    liveWindow: dict[str, Any] | None = None
+
+
+class Scorecard(BaseModel):
+    """A §6.3 scorecard for one sweep trial, cohort-normalized. Extends the ``/best`` leaderboard
+    identity (trialNumber/runId/params) with the gates + RobustScore + penalties, rather than
+    replacing it (audit §13.11)."""
+
+    trialNumber: int | None = None
+    runId: str | None = None
+    params: dict[str, Any] | None = None
+    policy: str
+    direction: str
+    robustScore: float
+    rank: int | None = None
+    rankable: bool
+    weights: dict[str, float]
+    gates: list[GateResult]
+    components: list[ComponentScore]
+    penalties: Penalties
+    flags: list[str] = []
+    caveats: list[str] = []
+    evidence: Evidence
+    comparator: dict[str, Any] | None = None
+
+
+class RetroScoreResponse(BaseModel):
+    """The scored cohort for one sweep — the ``{items: [...]}`` envelope plus the objective/policy
+    context the FE leaderboard needs to render the ranking. ``caveats`` carries response-level
+    warnings (e.g. a cohort truncated at the trial cap — its z-scores are over a partial cohort)."""
+
+    sweepJobId: str
+    metric: str
+    direction: str
+    policy: str
+    caveats: list[str] = []
+    items: list[Scorecard]
+
+
+# The cohort read cap (mirrors the /best leaderboard's bound). At the cap the cohort MAY be
+# truncated — flagged as a response caveat, never silent (z-scores over a partial cohort).
+_COHORT_CAP = 1000
+
+# Every retro scorecard carries this standing caveat (auditor resolution of the LIVE_FIRST doubt):
+# retro-scoring is a descriptive read over sim evidence; it never routes or ranks by evidence
+# policy — that arrives with the campaign recorder.
+_RETRO_CAVEAT = (
+    "retro-score is descriptive (sim evidence); for LIVE_FIRST families this never ranks — "
+    "evidence-policy routing lands with campaigns"
+)
+
+
+class RetroScoreService:
+    """Applies the §6 scoring library to an EXISTING sweep. Assembles each COMPLETE trial's
+    normalized metric bag from its ``optimization_trials`` row + its backtest run's OOS fold array
+    and run-level results (via BacktestClient — read-only §D.5 surfaces, never a recompute), then
+    scores the whole cohort with ``scoring.score_cohort``. No ``evo_*`` writes (the recorder is a
+    later PR). Collaborators injected (jobs/trials factories + backtest client), so tests drive it
+    with the in-memory fakes.
+
+    Per-run reads are a SEQUENTIAL N+1 fan-out (folds + results per trial) — accepted for E1's
+    read-only retro surface (bounded by ``_COHORT_CAP``, backtest-service is loopback-local);
+    campaign-scale orchestration (E3+) is where concurrency would land if ever needed."""
+
+    def __init__(
+        self,
+        jobs_factory: Callable[[], Any],
+        trials_factory: Callable[[], Any],
+        backtest_client: Any,
+    ) -> None:
+        self._jobs_factory = jobs_factory
+        self._trials_factory = trials_factory
+        self._backtest = backtest_client
+
+    def retro_score(self, sweep_id: str) -> RetroScoreResponse:
+        jobs = self._jobs_factory()
+        trials = self._trials_factory()
+        try:
+            job = jobs.get(sweep_id)
+            if job is None or job.get("kind") != "OPTIMIZATION":
+                raise ApiError(404, "NOT_FOUND_JOB", f"no such sweep: {sweep_id}")
+            request = job.get("request") or {}
+            parameters = request.get("parameters", [])
+            metric, direction = _primary_objective(request.get("objective", {}))
+            rows = trials.list_for_sweep(sweep_id, _PROMOTABLE, _COHORT_CAP, 0)
+        finally:
+            jobs.close()
+            trials.close()
+        candidates = [self._assemble(row, metric) for row in rows]
+        cards = scoring.score_cohort(candidates, parameters, direction=direction)
+        for card in cards:
+            card["caveats"].append(_RETRO_CAVEAT)
+        response_caveats = []
+        if len(rows) >= _COHORT_CAP:
+            response_caveats.append(
+                f"cohort read capped at {_COHORT_CAP} COMPLETE trials — z-scores may be "
+                "normalized over a partial cohort"
+            )
+        return RetroScoreResponse(
+            sweepJobId=sweep_id,
+            metric=metric,
+            direction=direction,
+            policy="SIM_FIRST",
+            caveats=response_caveats,
+            items=[Scorecard(**card) for card in cards],
+        )
+
+    def _assemble(self, row: dict[str, Any], metric: str) -> dict[str, Any]:
+        """Normalize one COMPLETE trial into the scoring lib's candidate shape. OOS-first (design
+        §6.2 — "computed on OOS/live evidence only"): per-fold OOS metrics aggregate the cohort's
+        return/risk signals; a foldless (full-window) run falls back to run-level metrics with a
+        caveat. recoveryFactor is derived in Python — its numerator is the OOS-fold mean return
+        when folds exist (run-level ``totalReturn`` on a walk-forward run is FULL-WINDOW train+test
+        and would inflate exactly the overfit profile the OOS doctrine targets); run-level
+        totalReturn feeds it only on the foldless path. turnover/tradeFrequency stay absent (not
+        fabricated). A run whose evidence fetch fails (purged/404/timeout) degrades to a
+        low-evidence candidate with a ``run fetch failed`` caveat — one dead run must never 500
+        the whole retro-score."""
+        run_id = row.get("backtestRunId")
+        folds: list[dict[str, Any]] = []
+        results: dict[str, Any] = {}
+        fetch_caveat = None
+        if run_id:
+            try:
+                folds = self._backtest.folds(run_id) or []
+                results = self._backtest.results(run_id) or {}
+            except httpx.HTTPError as exc:
+                folds, results = [], {}
+                fetch_caveat = f"run fetch failed: {exc}"
+        metrics = results.get("metrics") or {}
+        foldless = not folds
+        fold_returns = _fold_series(folds, "totalReturn")
+        obj_values = row.get("objectiveValues") or {}
+        max_dd = _fold_worst(folds, "maxDrawdown") if folds else _num(metrics.get("maxDrawdown"))
+        total_return = _num(metrics.get("totalReturn"))
+        oos_return = _mean(fold_returns) if folds else total_return
+        caveats = list(results.get("caveats") or [])
+        if fetch_caveat:
+            caveats.append(fetch_caveat)
+        guard = leaderboard.guard_metrics(
+            {"regimeOos": [f.get("regimeOos") or {} for f in folds]}
+        )
+        params = row.get("params") or {}
+        return {
+            "trialNumber": row.get("trialNumber"),
+            "runId": run_id,
+            "params": params,
+            "rawObjective": _num(obj_values.get(metric)),
+            "oosReturn": oos_return,
+            "oosFoldStd": _pstdev(fold_returns),
+            "foldReturns": fold_returns or None,
+            "oosTradeCount": (
+                _fold_sum_int(folds, "tradeCount") if folds else _int(metrics.get("tradeCount"))
+            ),
+            "sortino": _fold_mean(folds, "sortino") if folds else _num(metrics.get("sortino")),
+            "sharpe": _fold_mean(folds, "sharpe") if folds else _num(metrics.get("sharpe")),
+            "maxDrawdown": max_dd,
+            "ddDurationBars": (
+                _fold_worst(folds, "maxDrawdownDurationBars")
+                if folds
+                else _num(metrics.get("maxDrawdownDurationBars"))
+            ),
+            "totalReturn": total_return,
+            "recoveryFactor": _recovery(oos_return, max_dd),
+            "regimeOosMin": guard.get("regimeOosMin"),
+            "regimeOosMean": guard.get("regimeOosMean"),
+            "regimesCovered": guard.get("regimesCovered") or [],
+            "expectancy": (
+                _fold_mean(folds, "expectancy") if folds else _num(metrics.get("expectancy"))
+            ),
+            "turnover": None,
+            "tradeFrequency": None,
+            "engineSha": results.get("engineSha"),
+            "dataHash": results.get("dataHash"),
+            "caveats": caveats,
+            "oiGateCoverage": metrics.get("oiGateCoverage"),
+            "activeParamCount": len(params),
+            "structureGateCount": 0,
+            "holdoutRunId": None,
+            "foldless": foldless,
+        }
+
+
+def _retro(request: Request) -> RetroScoreService:
+    return request.app.state.retro
+
+
+@router.get("/retro-score/{sweep_job_id}", response_model=RetroScoreResponse)
+def retro_score(sweep_job_id: str, request: Request) -> RetroScoreResponse:
+    """Score an existing sweep's trials as a cohort (§6 gates + RobustScore); 404 if unknown."""
+    return _retro(request).retro_score(sweep_job_id)
+
+
+# --- fold/run metric-bag helpers (assembly only; the scoring math lives in scoring.py) ----------
+
+def _fold_series(folds: list[dict[str, Any]], key: str) -> list[float]:
+    """The present per-fold OOS values for ``key`` (skips folds missing it), in fold order."""
+    out: list[float] = []
+    for fold in folds:
+        val = _num((fold.get("oosMetrics") or {}).get(key))
+        if val is not None:
+            out.append(val)
+    return out
+
+
+def _fold_mean(folds: list[dict[str, Any]], key: str) -> float | None:
+    series = _fold_series(folds, key)
+    return statistics.fmean(series) if series else None
+
+
+def _fold_worst(folds: list[dict[str, Any]], key: str) -> float | None:
+    """The worst (max) per-fold OOS value — used for drawdown magnitude / duration (bigger = worse),
+    a conservative OOS proxy for the run's p95(maxDD) until Monte Carlo lands in E2."""
+    series = _fold_series(folds, key)
+    return max(series) if series else None
+
+
+def _fold_sum_int(folds: list[dict[str, Any]], key: str) -> int | None:
+    series = _fold_series(folds, key)
+    return int(sum(series)) if series else None
+
+
+def _mean(values: list[float]) -> float | None:
+    return statistics.fmean(values) if values else None
+
+
+def _pstdev(values: list[float]) -> float | None:
+    return statistics.pstdev(values) if len(values) >= 2 else None
+
+
+def _recovery(total_return: float | None, max_dd: float | None) -> float | None:
+    """recoveryFactor = totalReturn ÷ maxDrawdown (design §6.2), guarding a zero/None drawdown."""
+    if total_return is None or max_dd is None or max_dd == 0:
+        return None
+    return total_return / max_dd
+
+
+def _num(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _int(value: Any) -> int | None:
+    num = _num(value)
+    return int(num) if num is not None else None

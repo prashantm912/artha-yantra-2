@@ -41,6 +41,8 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     def open_conn() -> psycopg.Connection:
         return psycopg.connect(settings.conninfo)
 
+    backtest_client = BacktestClient(settings.backtest_base)
+
     # Boot recovery (P1-10b): sweeps are in-memory daemon threads — a restart strands their
     # rows at running forever unless marked failed here (Postgres may be down at boot: warn only).
     try:
@@ -56,7 +58,7 @@ def build_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.sweeps = SweepService(
         strategy_client=StrategyClient(settings.strategy_signal_base),
-        backtest_client=BacktestClient(settings.backtest_base),
+        backtest_client=backtest_client,
         jobs_factory=lambda: JobsRepo(open_conn()),
         trials_factory=lambda: TrialsRepo(open_conn()),
         dispatcher=dispatcher,
@@ -64,6 +66,14 @@ def build_app(settings: Settings | None = None) -> FastAPI:
 
     # Evolution-engine read surface (§12 E1): its own repo factory, read-only.
     app.state.evo = evolution.EvoReadService(repo_factory=lambda: EvoRepo(open_conn()))
+
+    # Retro-scoring (§12 E1 item 2): the §6 scoring lib over an existing sweep's trials, read-only.
+    # Reuses the same jobs/trials factories + backtest client as the sweep service.
+    app.state.retro = evolution.RetroScoreService(
+        jobs_factory=lambda: JobsRepo(open_conn()),
+        trials_factory=lambda: TrialsRepo(open_conn()),
+        backtest_client=backtest_client,
+    )
 
     @app.get("/health")
     def health() -> dict[str, str]:

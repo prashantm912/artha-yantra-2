@@ -51,22 +51,43 @@ public class EquityReturnsService {
     // latest row (rn=1, the LTP) isn't the max accrued session (audit D3/latestMapped): the HAVING
     // excludes thin/delisted names so a stale close never shows as "current" under the asOf() = same-max
     // badge. (The distinct rn-vs-calendar / 07-02-partial window-base finding is out of scope here.)
+    //
+    // CA-adjusted price plane (FID P0-4 / audit H6): each base close is multiplied by the cumulative
+    // product of every eod_corporate_actions ratio whose ex_date falls AFTER that bar — the SAME
+    // multiplicative rule the shared AdjustedEquityDailySql plane applies (exp(sum(ln(ratio))) LEFT
+    // JOIN LATERAL, COALESCE 1 no-op for the ~99.9% non-CA universe), rounded to 4dp to match the
+    // NUMERIC(18,4) close scale. WITHOUT it a split/bonus inside a window opened a false price cliff
+    // that cratered the multi-day return (the raw pre-split close sits on a different price scale than
+    // the post-split LTP). The lateral runs only on the ≤6 picked rows per symbol. Unlike the
+    // single-day BreadthService/EquitySectorService reads (close_price vs the exchange-published,
+    // already ex-adjusted prev_close — adjusting one side would double-count), this fold reconstructs
+    // returns from actual historical closes, so it MUST ride the adjusted plane. round(close_price,4)
+    // is a no-op for a non-CA name (factor 1 on NUMERIC(18,4)) → its output stays byte-identical.
     List<Base> bases =
         jdbc.query(
             "WITH ranked AS ("
                 + "  SELECT symbol, close_price, trade_date, "
                 + "    ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY trade_date DESC) AS rn "
-                + "  FROM nse_eod_bhavcopy WHERE series = 'EQ') "
-                + "SELECT symbol, "
-                + "  max(close_price) FILTER (WHERE rn = 1)   AS c0, "
-                + "  max(close_price) FILTER (WHERE rn = 2)   AS c1d, "
-                + "  max(close_price) FILTER (WHERE rn = 6)   AS c1w, "
-                + "  max(close_price) FILTER (WHERE rn = 22)  AS c1m, "
-                + "  max(close_price) FILTER (WHERE rn = 127) AS c6m, "
-                + "  max(close_price) FILTER (WHERE rn = 253) AS c1y "
-                + "FROM ranked WHERE rn IN (1, 2, 6, 22, 127, 253) "
-                + "GROUP BY symbol "
-                + "HAVING max(trade_date) FILTER (WHERE rn = 1) "
+                + "  FROM nse_eod_bhavcopy WHERE series = 'EQ'), "
+                + "picked AS ("
+                + "  SELECT symbol, close_price, trade_date, rn "
+                + "  FROM ranked WHERE rn IN (1, 2, 6, 22, 127, 253)) "
+                + "SELECT p.symbol, "
+                + "  max(round(p.close_price * caf.factor, 4)) FILTER (WHERE rn = 1)   AS c0, "
+                + "  max(round(p.close_price * caf.factor, 4)) FILTER (WHERE rn = 2)   AS c1d, "
+                + "  max(round(p.close_price * caf.factor, 4)) FILTER (WHERE rn = 6)   AS c1w, "
+                + "  max(round(p.close_price * caf.factor, 4)) FILTER (WHERE rn = 22)  AS c1m, "
+                + "  max(round(p.close_price * caf.factor, 4)) FILTER (WHERE rn = 127) AS c6m, "
+                + "  max(round(p.close_price * caf.factor, 4)) FILTER (WHERE rn = 253) AS c1y "
+                + "FROM picked p "
+                + "LEFT JOIN LATERAL ("
+                + "  SELECT COALESCE(exp(sum(ln(ca.ratio))), 1) AS factor "
+                + "  FROM eod_corporate_actions ca "
+                + "  WHERE ca.exchange = 'NSE' AND ca.tradingsymbol = p.symbol "
+                + "    AND ca.ex_date > p.trade_date"
+                + ") caf ON true "
+                + "GROUP BY p.symbol "
+                + "HAVING max(p.trade_date) FILTER (WHERE rn = 1) "
                 + "     = (SELECT max(trade_date) FROM nse_eod_bhavcopy WHERE series = 'EQ')",
             (rs, n) ->
                 new Base(

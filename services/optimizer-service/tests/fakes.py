@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from app.repos import ORPHAN_SWEEP_ERROR
+from app.repos import ORPHAN_SWEEP_ERROR, TrialNumberConflict
 
 
 class FakeJobs:
@@ -75,22 +75,57 @@ class FakeJobs:
         row = self.rows.get(job_id)
         return {"id": job_id, **row} if row else None
 
+    def child_trial_request(self, sweep_id: str) -> dict[str, Any] | None:
+        """Mirrors JobsRepo.child_trial_request: the earliest child TRIAL job's request."""
+        for _jid, row in self.rows.items():
+            if row.get("kind") == "TRIAL" and row.get("parent") == sweep_id:
+                return row["request"]
+        return None
+
     def close(self) -> None:
         pass
 
 
 class FakeTrials:
-    """In-memory ``optimization_trials`` ledger."""
+    """In-memory ``optimization_trials`` ledger. ``jobs`` (optional) backs the boot-reaper
+    mirror, whose real SQL joins the parent sweep's status."""
 
-    def __init__(self) -> None:
+    def __init__(self, jobs: FakeJobs | None = None) -> None:
         self.rows: dict[int, dict[str, Any]] = {}
         self._seq = 0
+        self._jobs = jobs
 
     def insert(self, sweep_id: str, trial_number: int, params: dict[str, Any]) -> int:
+        # Mirrors the DB's (sweep_job_id, trial_number) unique index — the 23505 the probe
+        # path must absorb (TrialNumberConflict), never a silent duplicate.
+        if any(r["sweep"] == sweep_id and r["trialNumber"] == trial_number
+               for r in self.rows.values()):
+            raise TrialNumberConflict(f"duplicate trial number {trial_number} for {sweep_id}")
         self._seq += 1
         self.rows[self._seq] = {"sweep": sweep_id, "trialNumber": trial_number, "params": params,
                                 "state": "RUNNING", "objectiveValues": None, "backtestRunId": None}
         return self._seq
+
+    def max_trial_number(self, sweep_id: str) -> int:
+        """Mirrors TrialsRepo.max_trial_number: highest trial_number for a sweep, or -1 if none."""
+        numbers = [r["trialNumber"] for r in self.rows.values() if r["sweep"] == sweep_id]
+        return max(numbers, default=-1)
+
+    def delete_stranded_running(self) -> int:
+        """Mirrors TrialsRepo.delete_stranded_running: RUNNING rows whose parent OPTIMIZATION job
+        is terminal are DELETED (freeing the cell + number for a re-probe)."""
+        if self._jobs is None:
+            return 0
+        terminal = ("completed", "failed", "cancelled")
+        doomed = [
+            tid for tid, r in self.rows.items()
+            if r["state"] == "RUNNING"
+            and (self._jobs.rows.get(r["sweep"]) or {}).get("kind") == "OPTIMIZATION"
+            and (self._jobs.rows.get(r["sweep"]) or {}).get("status") in terminal
+        ]
+        for tid in doomed:
+            del self.rows[tid]
+        return len(doomed)
 
     def complete(self, trial_id: int, objective_values: dict[str, Any], run_id: str | None) -> None:
         self.rows[trial_id].update(state="COMPLETE", objectiveValues=objective_values,

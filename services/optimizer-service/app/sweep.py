@@ -239,6 +239,47 @@ def _tell(
             raise
 
 
+def run_probes(
+    *,
+    sweep_id: str,
+    pending: dict[str, int],
+    metric: str,
+    jobs: Any,
+    trials: Any,
+    dispatcher: Any,
+) -> None:
+    """Drains results for ALREADY-dispatched neighbor-probe trials and completes/fails their ledger
+    rows (§3.2.3, §11 — probes are ordinary trial jobs). A probe is a FIXED-parameter neighbourhood
+    fill: there is no Optuna study, no sampling, and no pruning — it must complete (its objective
+    feeds the plateau median) or fail. Mirrors run_sweep's drain/resolve; a probe whose job dies
+    without a result is reconciled so the drain never hangs on a row that will never arrive.
+
+    ``pending`` maps each dispatched TRIAL job id → its ``optimization_trials`` row id."""
+    while pending:
+        results = dispatcher.read_results(max_count=max(len(pending), 1), sweep_id=sweep_id)
+        for result in results:
+            key = result.get("trialId")
+            if key not in pending:
+                continue
+            row_id = pending.pop(key)
+            value = objective_value(result, metric)
+            if math.isnan(value):
+                trials.fail(row_id)
+            else:
+                trials.complete(row_id, {metric: value}, result.get("runId"))
+        if not results and pending:
+            _reconcile_dead_probes(pending, jobs, trials)
+
+
+def _reconcile_dead_probes(pending: dict[str, int], jobs: Any, trials: Any) -> None:
+    """Fails probe rows whose trial job went terminal-without-result (failed/cancelled), so a dead
+    worker never hangs the drain on a row that will never arrive (mirrors ``_reconcile_dead``)."""
+    for key in list(pending):
+        job = jobs.get(key)
+        if job and job.get("status") in _TERMINAL_NO_RESULT:
+            trials.fail(pending.pop(key))
+
+
 def _reconcile_dead(
     pending: dict[str, tuple[optuna.Trial, int]], jobs: Any, trials: Any, study: optuna.Study
 ) -> int:

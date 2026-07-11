@@ -25,6 +25,12 @@ ORPHAN_SWEEP_ERROR = (
 )
 
 
+class TrialNumberConflict(Exception):
+    """A concurrent writer took this (sweep_job_id, trial_number) slot (unique-index 23505 —
+    e.g. two probe POSTs on one sweep reading the same max_trial_number). Probe submission
+    absorbs it: re-read max_trial_number and retry, else skip the cell — never a 500."""
+
+
 class JobsRepo:
     """The shared ``jobs`` table (backtest-service is the BACKTEST/TRIAL writer; the optimizer
     writes OPTIMIZATION parent rows + the queued TRIAL child rows it dispatches)."""
@@ -149,6 +155,20 @@ class JobsRepo:
         return {"id": str(row[0]), "kind": row[1], "status": row[2], "progress": row[3],
                 "request": row[4], "startedAt": _ts(row[5]), "finishedAt": _ts(row[6])}
 
+    def child_trial_request(self, sweep_id: str) -> dict[str, Any] | None:
+        """One of a sweep's child TRIAL job requests (the earliest), reused VERBATIM as the
+        neighbor-probe template (§3.2.3) so a probe runs the EXACT resolved version + window + fold
+        context the sweep's own trials ran — only ``paramsOverride`` is swapped. ``None`` when the
+        sweep has no trial job (a re-resolve here could drift to a newer published version)."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT request FROM jobs WHERE parent_job_id=%s AND kind='TRIAL' "
+                "ORDER BY created_at LIMIT 1",
+                (sweep_id,),
+            )
+            row = cur.fetchone()
+        return row[0] if row is not None else None
+
 
 class TrialsRepo:
     """The optimizer-owned ``optimization_trials`` ledger (resumable via study.add_trial replay)."""
@@ -161,15 +181,50 @@ class TrialsRepo:
         self._conn.close()
 
     def insert(self, sweep_id: str, trial_number: int, params: dict[str, Any]) -> int:
-        with self._conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO optimization_trials (sweep_job_id, trial_number, params) "
-                "VALUES (%s, %s, %s::jsonb) RETURNING id",
-                (sweep_id, trial_number, json.dumps(params)),
-            )
-            row_id = cur.fetchone()[0]
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO optimization_trials (sweep_job_id, trial_number, params) "
+                    "VALUES (%s, %s, %s::jsonb) RETURNING id",
+                    (sweep_id, trial_number, json.dumps(params)),
+                )
+                row_id = cur.fetchone()[0]
+        except psycopg.errors.UniqueViolation as exc:
+            # A concurrent writer took the (sweep, trial_number) slot. Roll the aborted
+            # transaction back so THIS connection stays usable for the caller's re-read + retry.
+            self._conn.rollback()
+            raise TrialNumberConflict(str(exc)) from exc
         self._conn.commit()
         return int(row_id)
+
+    def max_trial_number(self, sweep_id: str) -> int:
+        """The highest ``trial_number`` recorded for a sweep, or -1 when it has none — so a
+        neighbor-probe batch continues the numbering (``max + 1``) instead of colliding."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT COALESCE(MAX(trial_number), -1) FROM optimization_trials "
+                "WHERE sweep_job_id=%s",
+                (sweep_id,),
+            )
+            return int(cur.fetchone()[0])
+
+    def delete_stranded_running(self) -> int:
+        """Boot reaper (EVO E2 probes): DELETEs rows stranded at RUNNING whose parent sweep job is
+        already terminal — an optimizer restart mid-probe-drain leaves them unresolvable (the drain
+        thread died; nothing will ever complete them), and a stranded RUNNING row dedupes its cell
+        away from every future probe POST while never lifting ``neighborCount`` — the probe feature
+        would silently defeat itself. DELETE (not flip-to-FAILED) deliberately frees the cell + its
+        ``trial_number`` so a re-POST re-probes it. A RUNNING row under a LIVE (queued/running)
+        sweep is genuinely in flight and untouched."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM optimization_trials t USING jobs j "
+                "WHERE t.sweep_job_id=j.id AND t.state='RUNNING' AND j.kind='OPTIMIZATION' "
+                "AND j.status IN ('completed','failed','cancelled')"
+            )
+            count = cur.rowcount
+        self._conn.commit()
+        return count
 
     def complete(
         self, trial_id: int, objective_values: dict[str, Any], backtest_run_id: str | None

@@ -157,6 +157,16 @@
       "422"
     ]
   },
+  "POST /api/v1/optimizations/{sweep_id}/probes": {
+    "params": [
+      "sweep_id"
+    ],
+    "requestBody": true,
+    "responses": [
+      "200",
+      "422"
+    ]
+  },
   "POST /api/v1/optimizations/{sweep_id}/promote": {
     "params": [
       "sweep_id"

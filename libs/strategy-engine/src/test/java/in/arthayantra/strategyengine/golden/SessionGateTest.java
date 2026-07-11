@@ -19,7 +19,8 @@ class SessionGateTest {
   private static Session session(
       String from, String to, String squareOff, Boolean expiryAllowed, String expFrom, String expTo) {
     return new Session(
-        "intraday", from, to, squareOff, "15:20", "next_open", false, expiryAllowed, expFrom, expTo);
+        "intraday", from, to, squareOff, "15:20", "next_open", false, expiryAllowed, expFrom, expTo,
+        null);
   }
 
   /** A weekday that is NOT a weekly index expiry (so the normal window applies). */

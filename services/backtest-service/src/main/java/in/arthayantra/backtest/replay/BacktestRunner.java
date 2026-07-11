@@ -170,6 +170,11 @@ public class BacktestRunner {
         CostConfig.forClass(signalInstrumentClass(signal))
             .withOverrides(request.path("costs"))
             .withSlippageMultiplier(slippageMultiplier);
+    // B3 / P1-10: session.touch_basis:bar_hl_worstof flips the candle replay to bar-H/L worst-of exit
+    // resolution — oneMinuteCovered=false makes the TouchBasisClassifier stamp BAR_HL_WORSTOF and
+    // ReplayEngine run the conservative touch overlay on the entry-time stops/targets. Absent ⇒ true ⇒
+    // the byte-identical close-basis default (this is a candle-path knob; the premium path ignores it).
+    boolean oneMinuteCovered = !"bar_hl_worstof".equals(definition.session().touchBasis());
 
     // Auto-warm every series this run reads (primary 1m + each context (instrument, timeframe) +
     // the benchmark daily) into the shared store via market-data's cache-first GET BEFORE the reads
@@ -236,7 +241,7 @@ public class BacktestRunner {
                 contexts,
                 initialEquity,
                 costConfig,
-                true,
+                oneMinuteCovered,
                 // D17b: smooth intra-replay progress over the 40→80 band so the bar no longer sits at 40
                 // for the whole replay. Pure progress side-channel — replay numerics are unchanged.
                 pct -> progress.accept(40 + pct * 40 / 100));
@@ -274,6 +279,13 @@ public class BacktestRunner {
     if (fillTimingOverride != null) {
       m.full().put("fillTimingOverride", fillTimingOverride);
     }
+    // P1-10: surface the opt-in bar-H/L-worst-of exit basis on the run's result metrics (provenance) so
+    // a reader can SEE the sim resolved exits conservatively. Only when opted in AND the candle path
+    // actually ran — the premium path ignores the knob, so stamping an options run would be FALSE
+    // provenance. A default run's metrics stay byte-identical (no new key).
+    if (!oneMinuteCovered && !optionsStrategy) {
+      m.full().put("touchBasis", "bar_hl_worstof");
+    }
 
     // §D.4 fold-mode trigger (Phase 31): a plain /backtests/run job is FULL-WINDOW (folds == null,
     // the four fold columns stay NULL). Fold-mode activates ONLY when the future optimizer/stress
@@ -294,7 +306,7 @@ public class BacktestRunner {
                 contexts,
                 initialEquity,
                 costConfig,
-                true,
+                oneMinuteCovered,
                 from,
                 to,
                 regimeLabels(config, from, to))
@@ -773,7 +785,8 @@ public class BacktestRunner {
             s.exitIntrabar(),
             s.expiryDayAllowed(),
             s.expiryWindowFrom(),
-            s.expiryWindowTo());
+            s.expiryWindowTo(),
+            s.touchBasis());
     return new StrategyDefinition(
         definition.id(),
         definition.version(),

@@ -8,6 +8,7 @@ import in.arthayantra.strategyengine.fills.FillSimulator;
 import in.arthayantra.strategyengine.fills.FillSimulator.Fill;
 import in.arthayantra.strategyengine.fills.FillSimulator.FillRequest;
 import in.arthayantra.strategyengine.fills.FillTiming;
+import in.arthayantra.strategyengine.fills.IntrabarExitResolver;
 import in.arthayantra.strategyengine.fills.LtpSlippageV1;
 import in.arthayantra.strategyengine.fills.ReferencePriceSelector;
 import in.arthayantra.strategyengine.fills.Side;
@@ -32,6 +33,12 @@ import org.springframework.stereotype.Component;
  * shared {@link FillSimulator} (next-bar open / at-close), marks the open position to market each
  * primary bar for the equity curve, and records {@code touch_basis} by detection. Stateless and
  * single-threaded per call for determinism — safe as a shared singleton across the worker pool.
+ *
+ * <p>B3 / P1-10 opt-in: when {@code oneMinuteCovered} is false (the {@code session.touch_basis:
+ * bar_hl_worstof} knob), a protective stop/target is resolved on each bar's HIGH/LOW worst-of via
+ * {@link IntrabarExitResolver} — the conservative model that catches intrabar spikes a close-basis
+ * exit misses. It applies only to the entry-time fixed stop/target levels; every other exit stays on
+ * the runner's close-basis event stream. Inert when covered, so a default run is byte-identical.
  */
 @Component
 public class ReplayEngine {
@@ -231,6 +238,54 @@ public class ReplayEngine {
         }
       }
 
+      // P1-10 bar_hl_worstof overlay: a protective stop/target is TOUCHED on this bar's HIGH/LOW
+      // (worst-of fill), catching the intrabar spikes a close-basis exit misses — the conservative
+      // model, opt-in via session.touch_basis (oneMinuteCovered=false). Only the entry-time fixed
+      // stop/target carried on the leg; trailing/signal/time exits stay on the runner's close-basis
+      // event stream. Fires strictly AFTER the entry fill bar so it never books a same-bar entry+exit.
+      // Inert when covered, so a default run is byte-identical.
+      if (!oneMinuteCovered && posSign != 0 && openLeg != null && i > entryFillBar) {
+        TouchExit touch = touchExit(openLeg, posSign, bar);
+        if (touch != null) {
+          long closeQty = remainingQty;
+          Side side = posSign > 0 ? Side.SELL : Side.BUY;
+          Fill fill = fill(costs, side, closeQty, touch.price());
+          cash = cash.add(fill.netValue());
+          BigDecimal sliceEntryNet =
+              entryNet
+                  .multiply(BigDecimal.valueOf(closeQty))
+                  .divide(BigDecimal.valueOf(originalQty), 10, RoundingMode.HALF_UP);
+          BigDecimal pnl = sliceEntryNet.add(fill.netValue()).setScale(2, RoundingMode.HALF_UP);
+          BigDecimal notional = entryPrice.multiply(BigDecimal.valueOf(closeQty)).abs();
+          BigDecimal pnlPct =
+              notional.signum() == 0
+                  ? BigDecimal.ZERO
+                  : pnl.multiply(HUNDRED).divide(notional, 6, RoundingMode.HALF_UP);
+          trades.add(
+              new Trade(
+                  ++seq,
+                  posSign > 0 ? Side.BUY : Side.SELL,
+                  closeQty,
+                  entryTs,
+                  entryPrice,
+                  bar.bucketStart(),
+                  fill.fillPrice(),
+                  pnl,
+                  pnlPct,
+                  touch.reason(),
+                  i - entryFillBar,
+                  touchBasis,
+                  contributions(openLeg.entryBreakdown()),
+                  exchange,
+                  tradingsymbol,
+                  openLeg.stopLoss(),
+                  openLeg.takeProfit()));
+          posSign = 0;
+          posQty = 0;
+          remainingQty = 0;
+        }
+      }
+
       if (posSign != 0) {
         barsInPosition++;
       }
@@ -380,6 +435,36 @@ public class ReplayEngine {
   private static int fillBar(int signalIndex, FillTiming timing, int bars) {
     return timing == FillTiming.AT_CLOSE ? signalIndex : Math.min(signalIndex + 1, bars - 1);
   }
+
+  /**
+   * P1-10 bar_hl_worstof detection over one bar for the open position's entry-time protective levels
+   * — the stop first (protective stops win the tie, matching {@code ExitEvaluator} precedence), then
+   * the take-profit. Each level is resolved via {@link IntrabarExitResolver} with no 1m drill (the
+   * bar's own H/L worst-of, gap-through at open). {@code null} = neither level touched on this bar.
+   * The breach direction follows the resolver contract: a long stop / short take-profit is a downward
+   * breach ({@code upward=false}); a long take-profit / short stop is upward.
+   */
+  private static TouchExit touchExit(Leg leg, int posSign, EngineCandle bar) {
+    boolean isLong = posSign > 0;
+    if (leg.stopLoss() != null) {
+      IntrabarExitResolver.Resolution r =
+          IntrabarExitResolver.resolve(!isLong, leg.stopLoss(), bar, null, true);
+      if (r.touched()) {
+        return new TouchExit(r.exitPrice(), "stop_loss");
+      }
+    }
+    if (leg.takeProfit() != null) {
+      IntrabarExitResolver.Resolution r =
+          IntrabarExitResolver.resolve(isLong, leg.takeProfit(), bar, null, true);
+      if (r.touched()) {
+        return new TouchExit(r.exitPrice(), "take_profit");
+      }
+    }
+    return null;
+  }
+
+  /** A resolved bar_hl_worstof touch: the worst-of fill price and which level fired. */
+  private record TouchExit(BigDecimal price, String reason) {}
 
   private ObjectNode contributions(in.arthayantra.strategyengine.eval.ScoreBreakdown breakdown) {
     ObjectNode node = objectMapper.createObjectNode();

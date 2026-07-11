@@ -58,6 +58,7 @@ class SessionOverridesReplayTest {
     assertThat(pinned.session().expiryDayAllowed()).isEqualTo(def.session().expiryDayAllowed());
     assertThat(pinned.session().expiryWindowFrom()).isEqualTo(def.session().expiryWindowFrom());
     assertThat(pinned.session().expiryWindowTo()).isEqualTo(def.session().expiryWindowTo());
+    assertThat(pinned.session().touchBasis()).isEqualTo(def.session().touchBasis());
     assertThat(pinned.id()).isEqualTo(def.id());
     assertThat(pinned.version()).isEqualTo(def.version());
     assertThat(pinned.primaryTimeframe()).isEqualTo(def.primaryTimeframe());

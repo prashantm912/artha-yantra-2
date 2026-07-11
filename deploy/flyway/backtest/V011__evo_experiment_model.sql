@@ -20,7 +20,9 @@
 --
 -- Grants mirror the lineage (V002:30 / V003:78 / V004:22): table-level DML to the
 -- read-only-by-convention per-schema role `ay_backtest`. No sequence grant — every PK is
--- a uuid gen_random_uuid() default, so no sequence is created (as in V004).
+-- a uuid gen_random_uuid() default, so no sequence exists to grant (V004's identity PK
+-- creates one but likewise grants nothing on it). evo_proposals gets no DELETE: the
+-- design declares it append-only (decisions are UPDATEs of status, never row removal).
 
 CREATE TABLE evo_campaigns (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -48,6 +50,9 @@ CREATE TABLE evo_generations (
   data_epoch        JSONB,
   stress_touches    INT NOT NULL DEFAULT 0,
   status            TEXT,                             -- generation lifecycle (no closed enum in the design)
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now(), -- immutable registration stamp: the §3.1
+                                                        -- pre-registration (anti-snooping) ledger needs
+                                                        -- a provable "registered before evaluated" time
   started_at        TIMESTAMPTZ,
   finished_at       TIMESTAMPTZ
 );
@@ -66,6 +71,8 @@ CREATE TABLE evo_candidates (
   state               TEXT NOT NULL DEFAULT 'PROPOSED'
                         CHECK (state IN ('PROPOSED', 'EVALUATING', 'SCORED', 'SURVIVOR', 'RETIRED',
                                          'PAPER', 'TAKE_ELIGIBLE', 'PROMOTED', 'ROLLED_BACK')),
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(), -- immutable (same §3.1 trail as generations);
+                                                          -- updated_at is app-maintained on state change
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -97,4 +104,4 @@ CREATE INDEX idx_evo_proposals_candidate ON evo_proposals (candidate_id);
 GRANT SELECT, INSERT, UPDATE, DELETE ON evo_campaigns   TO ay_backtest;
 GRANT SELECT, INSERT, UPDATE, DELETE ON evo_generations TO ay_backtest;
 GRANT SELECT, INSERT, UPDATE, DELETE ON evo_candidates  TO ay_backtest;
-GRANT SELECT, INSERT, UPDATE, DELETE ON evo_proposals   TO ay_backtest;
+GRANT SELECT, INSERT, UPDATE ON evo_proposals TO ay_backtest;  -- append-only: no DELETE

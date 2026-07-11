@@ -32,6 +32,8 @@ DB-probed, and live-verified the same night. **All seven EVO-E0 HARD gates are C
 increment C1 is now buildable) and APP Phase 1 is complete (INT-I1's A4 hard-dependency satisfied;
 C2 buildable). What remains: OWNER rows (A10, group E), the HOLD-tier design forks B3/B4/B5/B11–B14/
 B18 (each wants an owner read before build), groups C/D (next program phases), and group F residue.
+**UPDATE 2026-07-11 (day session): C1 EVO-E1 DONE (#720–#723, live-verified — see the C1 row);
+EVO next = E2 (design §12 items 4–6), still-startable clean rows = C2/C3 + F residue.**
 Live behavioural notes a new session must know: B1 makes Monday 2026-07-13 a CALIBRATION session
 (entries UP + wider stops expected — judge on `ay_signal_partial_bucket_mismatch_total`, not entry
 count; E8 re-tune consumes the clean sessions); A3 changed exit semantics (settle = last REAL tick
@@ -84,7 +86,7 @@ run Monday 08:30/08:45/21:15 IST.
 
 | # | id | what (1 line) | source | tier | status |
 |---|---|---|---|---|---|
-| C1 | `evo-e1-experiment-model` | EVO first increment: evo_* tables + retro-scoring of existing sweeps (needs B1/B2 + B6–B10) | EVO §12 E1 | clean | TODO |
+| C1 | `evo-e1-experiment-model` | EVO first increment: evo_* tables + retro-scoring of existing sweeps (needs B1/B2 + B6–B10) | EVO §12 E1 | clean | **DONE — 4 PRs MERGED+DEPLOYED LIVE 2026-07-11: #720 @ 8c398ef3 (V011 evo_* tables + read APIs + gateway allowlist), #721 @ f81d744e (recoveryFactor/tradeFrequency/turnover metrics, goldens/parity byte-identical; 3m tradeFrequency absolute-value caveat chipped task_547656bf), #722 @ f4154722 (§6 scoring lib + GET /evolution/retro-score — 2-lens review caught 1 HIGH plateau division-vs-multiplication inversion + 2 MED, all fixed), #723 @ ece5dd84 (campaign/generation recorder, SIM_BLOCKED refusal, SWEEP_NOT_COMPLETED gate).** Live-verified end-to-end: V011 DB-probed; historical scalper sweep retro-scored (6 cards, sensible ranking, honest degradations — regime "1 of 4 covered" proves the B10 retroactive fix working); first real campaign+generation recorded (LIVE_FIRST caveat stamped in DB). E2 next increment = §12 items 4–6 |
 | C2 | `int-i1-foundations` | INT first increment: insights module + day-context/options digests + `market_context_days` + feed/Focus in shadow mode + notification_events migration + the `/api/v1/insights/**` gateway-allowlist entry & spec recapture in the same PR (hard-needs A4; INT §12 sequences I1 after all of APP Phase 1) | INT §12 I1; §13 rows 18/20 | clean | TODO |
 | C3 | `int-manas-rsrank-api` | Serialize `rs_rank` in the Manas screen API row (DB-only today; gates INT context component) | INT §13 row 12 | clean | TODO |
 | C4 | `int-fired-rail-sidechannel` | Fired-side per-rail operand side-channel (parity-safe additive; gates fired-vs-rejected Stage 2; when built, also add FID P1-8's full diagnostic context block) | INT §13 row 19; FID §10 P1-8 | HOLD | TODO |

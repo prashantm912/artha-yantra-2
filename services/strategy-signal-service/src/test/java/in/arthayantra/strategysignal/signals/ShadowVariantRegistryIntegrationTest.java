@@ -38,6 +38,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
       "artha.signals.engine-enabled=false",
       "artha.scalper.shadow-book.enabled=true",
       "artha.scalper.shadow-book.poll-ms=3600000",
+      "artha.scalper.shadow-book.registry-reconcile-ms=3600000",
       "artha.scalper.shadow-book.max-variants=4",
       "artha.scalper.shadow-book.champion-composite-threshold=0.60"
     })
@@ -47,9 +48,12 @@ class ShadowVariantRegistryIntegrationTest extends StrategySignalIntegrationTest
   @Autowired private ShadowVariantRegistryRepository repo;
   @Autowired private ShadowVariantsController controller;
   @Autowired private ShadowBookService shadowBook;
+  @Autowired private ShadowExitMonitor monitor;
+  @Autowired private ShadowPositionRepository shadows;
   @Autowired private SignalRejectionRepository rejections;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private ObjectMapper mapper;
+  @Autowired private org.springframework.data.redis.core.StringRedisTemplate redis;
 
   @BeforeEach
   @AfterEach
@@ -228,5 +232,81 @@ class ShadowVariantRegistryIntegrationTest extends StrategySignalIntegrationTest
               assertThat(e.httpStatus()).isEqualTo(422);
               assertThat(e.code()).isEqualTo("CONFLICT_SHADOW_VARIANT_CAP");
             });
+  }
+
+  @Test
+  void retiredVariantsOpenPositionStillSettles() {
+    // Retire must never orphan an OPEN book row: the exit monitor sweeps by status, not variant.
+    String name = uniqueName("vreg-settle");
+    registry.register(name, null, spec("{\"rails\":[{\"rail\":\"volume-floor\",\"disable\":true}]}"), null);
+    UUID v = versionId();
+    String slug = "svr-settle-" + UUID.randomUUID();
+    String optSym = "SVRSTL" + UUID.randomUUID().toString().substring(0, 8);
+    long id =
+        shadows.insert(
+            rejection(v, slug), v, slug, "CE", "NIFTY 50", "NFO", optSym,
+            new BigDecimal("24250"), LocalDate.now().plusDays(5), new BigDecimal("100.00"),
+            new BigDecimal("65.00"), new BigDecimal("135.00"), null, "NFO", "SVRFUT",
+            "volume-floor", new BigDecimal("0.70"), OffsetDateTime.now(), name);
+
+    registry.disable(name); // retire while the position is OPEN
+
+    seedTick("NFO", optSym, "140.00"); // above take-profit
+    monitor.evaluate(java.time.LocalTime.of(11, 0), LocalDate.now(in.arthayantra.common.web.time.Ist.ZONE));
+
+    var closed =
+        shadows.variantSummary(null, null, slug).stream()
+            .filter(s -> s.variant().equals(name))
+            .findFirst()
+            .orElseThrow();
+    assertThat(closed.closed()).isEqualTo(1);
+    assertThat(closed.wins()).isEqualTo(1);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT close_reason FROM shadow_positions WHERE id = ?", String.class, id))
+        .isEqualTo("TAKE_PROFIT");
+  }
+
+  @Test
+  void shadowSummaryFiltersByStrategySlug() {
+    // Variants are GLOBAL — the per-strategy read is the campaign-analysis lens (§11 scope note)
+    String name = uniqueName("vreg-league");
+    UUID v = versionId();
+    String slugA = "svr-league-a-" + UUID.randomUUID();
+    String slugB = "svr-league-b-" + UUID.randomUUID();
+    for (String slug : List.of(slugA, slugB)) {
+      long id =
+          shadows.insert(
+              rejection(v, slug), v, slug, "CE", "NIFTY 50", "NFO",
+              "SVRLG" + UUID.randomUUID().toString().substring(0, 8), new BigDecimal("24250"),
+              LocalDate.now().plusDays(5), new BigDecimal("100.00"), null, null, null, "NFO",
+              "SVRFUT", "volume-floor", new BigDecimal("0.70"), OffsetDateTime.now(), name);
+      shadows.close(id, "TAKE_PROFIT", new BigDecimal("120.00"), new BigDecimal("20.00"),
+          new BigDecimal("20.00"), null, null);
+    }
+
+    var filtered =
+        shadows.variantSummary(null, null, slugA).stream()
+            .filter(s -> s.variant().equals(name))
+            .findFirst()
+            .orElseThrow();
+    assertThat(filtered.closed()).isEqualTo(1); // slug A's book only
+    var global =
+        shadows.variantSummary(null, null, null).stream()
+            .filter(s -> s.variant().equals(name))
+            .findFirst()
+            .orElseThrow();
+    assertThat(global.closed()).isEqualTo(2); // unfiltered aggregates across strategies
+  }
+
+  private void seedTick(String exchange, String sym, String ltp) {
+    try {
+      redis.opsForHash().put(
+          "ticks:last", exchange + ":" + sym,
+          mapper.writeValueAsString(
+              java.util.Map.of("exchange", exchange, "tradingsymbol", sym, "lastPrice", ltp)));
+    } catch (Exception e) {
+      throw new IllegalStateException(e);
+    }
   }
 }

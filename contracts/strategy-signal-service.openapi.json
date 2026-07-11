@@ -1807,6 +1807,13 @@
             "type" : "string",
             "format" : "date-time"
           }
+        }, {
+          "name" : "strategySlug",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
         } ],
         "responses" : {
           "200" : {

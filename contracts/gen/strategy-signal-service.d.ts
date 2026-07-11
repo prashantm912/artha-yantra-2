@@ -2472,6 +2472,7 @@ export interface operations {
             query?: {
                 from?: string;
                 to?: string;
+                strategySlug?: string;
             };
             header?: never;
             path?: never;

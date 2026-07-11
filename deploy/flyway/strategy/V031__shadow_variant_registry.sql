@@ -20,6 +20,11 @@
 -- is a SOFT-disable (enabled=false + disabled_at) that keeps the historical book rows interpretable;
 -- the UNIQUE(name) forbids ever reusing a name for a different spec. Plain OLTP table (a handful of
 -- rows, cap-bounded), NOT a hypertable.
+--
+-- SCOPE: a registered variant applies GLOBALLY — it re-scores EVERY scalper's rejection stream, not
+-- one campaign's strategy. campaign_id is PROVENANCE (which campaign registered it), never an
+-- application filter. Campaign isolation = distinct variant names + the per-strategy league read
+-- (GET /api/v1/signal-rejections/shadow-summary?strategySlug=...).
 CREATE TABLE shadow_variant_registry (
     id           UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
     name         TEXT         UNIQUE NOT NULL,             -- the variant tag written to shadow_positions.variant

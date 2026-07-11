@@ -15,6 +15,7 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
@@ -32,10 +33,18 @@ import org.springframework.stereotype.Component;
  * <p><b>Relaxing-or-neutral gate (§3.3.3).</b> Today's shadow writer fires on the REJECTION path only
  * — champion-<i>accepted</i> entries never reach variant scoring — so a knob-set that <i>tightens</i>
  * relative to the champion has no paired evidence plane (the entries it would additionally block are
- * the champion's fired signals, invisible to the shadow book). Registration therefore restricts
- * candidates to relaxing-or-neutral knob-sets, enforced per knob kind (see {@link
- * #enforceRelaxingOrNeutral}). The accepted-entry shadow extension that would lift this is an explicit
- * follow-up (§11, HOLD), NOT this change.
+ * the champion's fired signals, invisible to the shadow book). Enforcement is two-layer: registration
+ * rejects a tightening composite floor ({@link #enforceRelaxingOrNeutral}), and rail-threshold
+ * overrides are CLAMPED per bar at evaluation against the champion's own recorded threshold
+ * ({@code ShadowVariants.accepts}) so they can only relax — a mixed relax+tighten spec degrades to
+ * "the tightened rail behaves as champion". The accepted-entry shadow extension that would lift the
+ * restriction entirely is an explicit follow-up (§11, HOLD), NOT this change.
+ *
+ * <p><b>Scope note (variants are GLOBAL).</b> A registered variant applies to every scalper's
+ * rejection stream — {@code campaign_id} is provenance, not an application filter. Campaign isolation
+ * = distinct variant names + the per-strategy league read
+ * ({@code GET /api/v1/signal-rejections/shadow-summary?strategySlug=...}). Scoping application by
+ * campaign inside the live writer is deliberately out of v1.
  */
 @Component
 public class ShadowVariantRegistry {
@@ -47,18 +56,21 @@ public class ShadowVariantRegistry {
   private final ObjectMapper mapper;
 
   /**
-   * Safety ceiling on the TOTAL active set (env fallback ∪ enabled DB rows). A global guard bounding
-   * the per-bar re-scoring + DB-write cost; the evo orchestrator enforces the tighter §3.1 per-family
-   * / per-strategy budget on top of this.
+   * Safety ceiling on the TOTAL active set (env fallback ∪ enabled DB rows). A global guard (default
+   * 16) bounding the per-bar re-scoring + DB-write cost — it is NOT the design's §3.1 "≤ 6 concurrent
+   * challenger variants per strategy" budget, which is enforced ORCHESTRATOR-side (optimizer-service)
+   * when the evo loop lands; this ceiling only stops a runaway registrant.
    */
   private final int maxVariants;
 
   /**
    * The champion composite-threshold reference for the relaxing-or-neutral gate. A variant composite
-   * FLOOR strictly above this is presumed tightening (§3.3.3). Default {@code 0.60} = the documented
-   * MIN scalper champion threshold, which makes "floor ≤ ref" a relaxing-or-neutral guarantee for
-   * EVERY scalper (variants are global, not per-strategy); raise it only if the min champion threshold
-   * across active scalpers rises.
+   * FLOOR strictly above this is tightening (§3.3.3). Default {@code 0.60} MIRRORS
+   * {@code ScalperConfig.THRESHOLD} ("0.6", the hardcoded UNIVERSAL v1 confluence threshold every
+   * scalper gate runs — not per-strategy YAML), so "floor ≤ ref" is an exact relaxing-or-neutral
+   * guarantee for every scalper. If {@code ScalperConfig.THRESHOLD} ever changes or goes
+   * per-strategy, change BOTH sites together (a comment there points back here); the env override is
+   * {@code artha.scalper.shadow-book.champion-composite-threshold}.
    */
   private final BigDecimal championCompositeRef;
 
@@ -88,27 +100,63 @@ public class ShadowVariantRegistry {
 
   /**
    * Rebuilds the immutable active set from the env fallback + enabled DB rows and swaps it in with a
-   * single volatile write. Fail-soft: a DB hiccup or an unparsable row degrades to the env fallback
-   * (a broken experiment config must never break the live signal path). Synchronized so concurrent
-   * register/retire calls rebuild serially; the hot eval path is lock-free (it only reads the field).
+   * single volatile write. Fail-soft, never destructive: an unparsable row is skipped; a DB READ
+   * failure keeps the PRIOR active set (a transient hiccup must not silently evict every registered
+   * challenger mid-session), except at boot — no prior set exists, so it degrades to the env fallback
+   * and the periodic {@link #reconcile()} heals it once the DB answers. Synchronized so concurrent
+   * register/retire/reconcile calls rebuild serially; the hot eval path is lock-free (one volatile
+   * read).
    */
   public final synchronized void reload() {
     LinkedHashMap<String, ShadowVariants.Variant> byName = new LinkedHashMap<>();
     for (ShadowVariants.Variant v : envFallback.all()) {
       byName.put(v.name(), v);
     }
+    List<RegistryRow> rows;
     try {
-      for (RegistryRow row : repo.findEnabled()) {
-        try {
-          byName.put(row.name(), ShadowVariants.validatedFromSpec(mapper, row.name(), row.spec()));
-        } catch (RuntimeException e) {
-          log.warn("shadow-variant registry: skipping unparsable row '{}': {}", row.name(), e.toString());
-        }
-      }
+      rows = repo.findEnabled();
     } catch (RuntimeException e) {
-      log.error("shadow-variant registry DB read failed — using env fallback only: {}", e.toString());
+      if (active.isEmpty()) {
+        this.active = List.copyOf(byName.values());
+        log.error(
+            "shadow-variant registry DB read failed at boot — env fallback only until the"
+                + " reconcile heals it: {}",
+            e.toString());
+      } else {
+        log.error(
+            "shadow-variant registry DB read failed — keeping the prior active set: {}",
+            e.toString());
+      }
+      return;
     }
-    this.active = List.copyOf(byName.values());
+    for (RegistryRow row : rows) {
+      try {
+        byName.put(row.name(), ShadowVariants.validatedFromSpec(mapper, row.name(), row.spec()));
+      } catch (RuntimeException e) {
+        log.warn("shadow-variant registry: skipping unparsable row '{}': {}", row.name(), e.toString());
+      }
+    }
+    List<ShadowVariants.Variant> next = List.copyOf(byName.values());
+    if (!names(next).equals(names(active))) {
+      log.info("shadow-variant active set now: {}", names(next));
+    }
+    this.active = next;
+  }
+
+  /**
+   * Periodic self-heal (default 5 min, {@code artha.scalper.shadow-book.registry-reconcile-ms}): a
+   * reload lost to a crash between the DB commit and the in-process swap — or a boot-time DB outage —
+   * must not let a retired variant keep trading (or a registered one stay dark) indefinitely. Quiet
+   * on no-change ({@link #reload()} only logs when the name set differs). Engine-independent — safe
+   * in engine-disabled paper contexts (#634).
+   */
+  @Scheduled(fixedDelayString = "${artha.scalper.shadow-book.registry-reconcile-ms:300000}")
+  public void reconcile() {
+    reload();
+  }
+
+  private static List<String> names(List<ShadowVariants.Variant> variants) {
+    return variants.stream().map(ShadowVariants.Variant::name).toList();
   }
 
   /**
@@ -116,8 +164,8 @@ public class ShadowVariantRegistry {
    * validate → uniqueness → cap → insert sequence is atomic within the process (no two concurrent
    * registrations can both slip past the cap). Rejects, in order: an unknown knob kind / bad name /
    * bad rail shape (422 {@code VALIDATION_FAILED}); a tightening knob-set (422 {@code
-   * EVIDENCE_PLANE_UNSUPPORTED}); a name already used (409 — names are immutable); a full active set
-   * (422 {@code CONFLICT_SHADOW_VARIANT_CAP}).
+   * EVIDENCE_PLANE_UNSUPPORTED}); a name already used in the MERGED namespace — env fallback OR any
+   * DB row (409 — names are immutable); a full active set (422 {@code CONFLICT_SHADOW_VARIANT_CAP}).
    */
   public synchronized RegistryRow register(
       String name, UUID campaignId, JsonNode spec, String createdBy) {
@@ -132,6 +180,17 @@ public class ShadowVariantRegistry {
 
     enforceRelaxingOrNeutral(variant);
 
+    // Uniqueness spans the MERGED namespace: an env-fallback name would be silently shadowed by the
+    // DB row (DB wins on collision) — reject instead so the env definition stays authoritative.
+    if (envFallback.all().stream().anyMatch(v -> v.name().equals(variant.name()))) {
+      throw new ApiException(
+          409,
+          "CONFLICT_SHADOW_VARIANT_EXISTS",
+          "'"
+              + variant.name()
+              + "' is defined by the boot-time env fallback"
+              + " (artha.scalper.shadow-book.variants-json) — pick a different name");
+    }
     if (repo.existsByName(variant.name())) {
       throw new ApiException(
           409,
@@ -163,10 +222,11 @@ public class ShadowVariantRegistry {
           Map.of("cap", maxVariants, "active", existing));
     }
 
-    repo.insert(variant.name(), campaignId, spec, createdBy);
+    // The insert's RETURNING row IS the result — no re-read (a transient hiccup on a re-read would
+    // 500 a fully-committed, already-live registration, and the confused retry then 409s).
+    RegistryRow row = repo.insert(variant.name(), campaignId, spec, createdBy);
     reload();
-    return repo.findByName(variant.name())
-        .orElseThrow(() -> new IllegalStateException("registered variant vanished: " + variant.name()));
+    return row;
   }
 
   /**
@@ -178,16 +238,15 @@ public class ShadowVariantRegistry {
    *       FAIL into a variant pass, never the reverse. Allowed unconditionally.
    *   <li><b>composite floor</b> — tightening iff strictly ABOVE {@link #championCompositeRef} (the
    *       design's canonical example: "a composite floor above the strategy's current threshold").
-   *       Enforced here.
-   *   <li><b>rail threshold override</b> — whether it relaxes or tightens depends on the champion's
-   *       per-strategy, per-bar LIVE threshold for that rail, which is NOT resolvable at registration
-   *       (variants are global; the champion thresholds live in each strategy's YAML). v1 therefore
-   *       validates the override STRUCTURALLY (rail + threshold + a GTE|LTE polarity, via {@link
-   *       ShadowVariants#validatedFromSpec}) but does NOT statically enforce the relaxing DIRECTION —
-   *       that guarantee is the registrant's contract (the evo orchestrator only submits loosening
-   *       thresholds) plus the runtime rejection-only plane, which bounds a tightening override to
-   *       re-scoring the already-rejected stream. This is a deliberate v1 limitation (open-doubt),
-   *       lifted by the accepted-entry shadow extension (§11, HOLD).
+   *       Enforced statically here — the champion composite threshold IS resolvable at registration
+   *       ({@code ScalperConfig.THRESHOLD} is universal).
+   *   <li><b>rail threshold override</b> — the champion's per-strategy, per-bar threshold is NOT
+   *       resolvable at registration, so the direction is enforced at EVALUATION instead: {@code
+   *       ShadowVariants.accepts} clamps every override against the champion's recorded per-bar
+   *       threshold (floors may only lower, caps may only raise) — a tightening override degrades to
+   *       champion behaviour on that rail, per strategy and per bar. Registration validates the
+   *       override structurally (rail + threshold + GTE|LTE, via {@link
+   *       ShadowVariants#validatedFromSpec}).
    * </ul>
    */
   private void enforceRelaxingOrNeutral(ShadowVariants.Variant variant) {

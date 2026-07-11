@@ -67,7 +67,12 @@ public class ShadowVariantsController {
     this.mapper = mapper;
   }
 
-  /** Registers a challenger variant and hot-reloads the live set (201 with the created row). */
+  /**
+   * Registers a challenger variant and hot-reloads the live set (201 with the created row). The
+   * variant applies GLOBALLY — it re-scores every scalper's rejection stream; {@code campaignId} is
+   * provenance, not an application filter. Campaign isolation = a distinct name per campaign + the
+   * per-strategy league read ({@code GET /api/v1/signal-rejections/shadow-summary?strategySlug=...}).
+   */
   @PostMapping
   public ResponseEntity<ShadowVariantView> register(@RequestBody RegisterRequest request) {
     RegistryRow row =
@@ -84,7 +89,13 @@ public class ShadowVariantsController {
   /**
    * Retires (soft-disables) a variant by name and hot-reloads the live set. 204 whether it was
    * enabled (retired now) or already retired (idempotent); 404 when the name was never registered.
-   * History stays — the row and its book are preserved.
+   * History stays — the row and its book are preserved; an OPEN position tagged with a retired
+   * variant still settles normally ({@code ShadowExitMonitor} sweeps by status, not variant).
+   *
+   * <p><b>Retire is TERMINAL, not pause:</b> the name can never be re-enabled or re-registered
+   * (names are immutable — the book references them). "DELETE then re-register under a new name" is
+   * LOSSY by design: the new name starts a NEW book with zero history. Don't retire to pause an
+   * experiment.
    */
   @DeleteMapping("/{name}")
   public ResponseEntity<Void> retire(@PathVariable String name) {

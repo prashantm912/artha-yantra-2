@@ -163,6 +163,18 @@ public class ShadowVariants {
    * and the composite clears the variant floor (default: the champion threshold). The composite
    * rail itself is floor-ruled, not pass/fail-ruled, mirroring the champion book's
    * {@code min-composite} precedent.
+   *
+   * <p><b>§3.3.3 relaxing-or-neutral clamp.</b> A threshold override is clamped per bar against the
+   * champion's OWN recorded threshold for that rail ({@code RailCheck.threshold()}, populated for
+   * every evaluated rail by the all-eval gate): {@code GTE} (floor) rails re-score against
+   * {@code min(override, champion)}, {@code LTE} (cap) rails against {@code max(override,
+   * champion)} — so an override can only RELAX, never tighten. The shadow writer fires on the
+   * REJECTION path only, so a tightening override would cherry-pick the rejected stream (the extra
+   * entries it blocks are champion-ACCEPTED — invisible here) and bias the book upward; the clamp
+   * realizes the §3.3.3 rule exactly, per strategy and per bar — a mixed relax+tighten spec
+   * degrades to "the tightened rail behaves as champion". A rail whose champion threshold was not
+   * recorded (null) uses the override as-is (nothing to clamp against). Consequence: a variant can
+   * never flip a champion-passing rail to fail on the rails it overrides.
    */
   public static boolean accepts(ScalperConfluenceGate.RejectionDiagnostic d, Variant v) {
     if (d.checks() == null) {
@@ -188,7 +200,7 @@ public class ShadowVariants {
         }
         continue;
       }
-      int cmp = c.operand().compareTo(o.threshold());
+      int cmp = c.operand().compareTo(clampedThreshold(o, c.threshold()));
       boolean pass = "GTE".equals(o.passWhen()) ? cmp >= 0 : cmp <= 0;
       if (!pass) {
         return false;
@@ -197,6 +209,16 @@ public class ShadowVariants {
     BigDecimal floor =
         v.compositeThreshold() != null ? v.compositeThreshold() : d.compositeThreshold();
     return d.compositeScore() != null && floor != null && d.compositeScore().compareTo(floor) >= 0;
+  }
+
+  /** The §3.3.3 clamp: floor overrides may only lower, cap overrides may only raise. */
+  private static BigDecimal clampedThreshold(RailOverride o, BigDecimal champion) {
+    if (champion == null) {
+      return o.threshold();
+    }
+    return "GTE".equals(o.passWhen())
+        ? o.threshold().min(champion)
+        : o.threshold().max(champion);
   }
 
   /** Jackson shape of one configured variant. */

@@ -20,6 +20,7 @@ import in.arthayantra.common.web.error.NotFoundException;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -41,6 +42,7 @@ public class JobsService {
   private final StringRedisTemplate redis;
   private final ObjectMapper objectMapper;
   private final MarketDataClient marketData;
+  private final int maxQueued;
 
   /** Wires the collaborators. */
   public JobsService(
@@ -53,7 +55,8 @@ public class JobsService {
       StressGuard stressGuard,
       StringRedisTemplate redis,
       ObjectMapper objectMapper,
-      MarketDataClient marketData) {
+      MarketDataClient marketData,
+      @Value("${artha.backtest.max-queued:500}") int maxQueued) {
     this.repository = repository;
     this.dispatcher = dispatcher;
     this.versions = versions;
@@ -64,6 +67,7 @@ public class JobsService {
     this.redis = redis;
     this.objectMapper = objectMapper;
     this.marketData = marketData;
+    this.maxQueued = maxQueued;
   }
 
   /** The outcome of a cancel request — 204 (was queued) vs 202 (running, observed at checkpoint). */
@@ -74,6 +78,24 @@ public class JobsService {
 
   /** Validates the version, pins it into the request JSONB, inserts queued + dispatches (§D.14). */
   public Job submit(BacktestRunRequest req, String correlationId) {
+    // B16 / audit A6: reject a NEW interactive submission when the BACKTEST queue backlog is already
+    // at the configured cap — a submission-time backpressure guard so a runaway caller cannot drown
+    // the shared worker pool. Checked BEFORE version-resolve / auto-warm so it fails fast and cheap.
+    // Trials (the optimizer fan-out) are counted separately (countQueued(BACKTEST)), so a legitimate
+    // campaign sweep never trips the owner's interactive admission cap. A solo owner's handful of
+    // runs never approaches the default (500).
+    long queuedBacktests = repository.countQueued(JobKind.BACKTEST);
+    if (queuedBacktests >= maxQueued) {
+      throw new ApiException(
+          429,
+          ErrorCodes.RATE_LIMIT_QUEUE,
+          "backtest queue is saturated ("
+              + queuedBacktests
+              + " queued, cap "
+              + maxQueued
+              + "); wait for running jobs to drain before submitting more");
+    }
+
     StrategyVersionClient.ResolvedVersion v =
         versions.resolve(req.strategyId(), req.strategyVersion());
     runPreflight(v.config(), req);

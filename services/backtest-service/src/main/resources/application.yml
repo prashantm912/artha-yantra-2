@@ -47,6 +47,14 @@ artha:
   backtest:
     # 0 => max(1, availableProcessors - 2) platform workers (D12); override for tests.
     workers: ${ARTHA_BACKTEST_WORKERS:0}
+    # B16 / audit A6 — worker slots the pool keeps free for interactive (owner-submitted) backtests:
+    # TRIAL (optimizer fan-out) jobs are capped at max(1, workers - interactive-reserved), so an EVO
+    # campaign trial storm can never occupy every worker. 0 => pre-B16 full-pool trial behaviour.
+    interactive-reserved: ${ARTHA_BACKTEST_INTERACTIVE_RESERVED:1}
+    # B16 / audit A6 — submission-time queue-depth cap: reject a new interactive backtest with 429
+    # RATE_LIMIT_QUEUE once this many BACKTEST jobs are already queued (backpressure). Trials are
+    # counted separately; a solo owner never approaches this.
+    max-queued: ${ARTHA_BACKTEST_MAX_QUEUED:500}
 
 management:
   endpoints:

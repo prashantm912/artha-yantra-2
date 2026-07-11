@@ -517,6 +517,9 @@ services:
       # Profile isolation: per-profile database + Redis logical DB (live → artha/0, mock → artha_mock/1)
       SPRING_DATASOURCE_URL: jdbc:postgresql://timescaledb:5432/${ARTHA_DB_NAME:?unset - run via the ay CLI (derives mock->artha_mock, live->artha); raw compose must export it}?currentSchema=backtest
       SPRING_DATA_REDIS_DATABASE: ${ARTHA_REDIS_DB:?unset - run via the ay CLI (derives mock->1, live->0); raw compose must export it}
+      # B16 / audit A6 worker-pool fairness knobs (defaults match application.yml; .env-overridable).
+      ARTHA_BACKTEST_INTERACTIVE_RESERVED: ${ARTHA_BACKTEST_INTERACTIVE_RESERVED:-1}
+      ARTHA_BACKTEST_MAX_QUEUED: ${ARTHA_BACKTEST_MAX_QUEUED:-500}
     secrets: [postgres_password]
     depends_on:
       flyway-init:

@@ -62,6 +62,11 @@ artha:
     scalp-alerts:
       enabled: ${ARTHA_NOTIFIER_SCALP_ALERTS_ENABLED:false}
       window-seconds: ${ARTHA_NOTIFIER_SCALP_ALERTS_WINDOW_SECONDS:300}
+    # §18.4: the deployed app origin used to build the /orders pre-fill deep link in a scalp alert.
+    # Blank (default) → the alert carries no link (a relative path can't be tapped from a phone push);
+    # set it to the reachable origin (e.g. the Tailscale host) to arm the deep link. The ${ENV} name
+    # MUST match the compose passthrough exactly (#653 placeholder trap).
+    app-base-url: ${ARTHA_NOTIFIER_APP_BASE_URL:}
   scalper:
     # Tier-1 OI-analytics thresholds (Phase-3.5 T2.1/T2.6/T2.7/T2.8) read by the confluence scorer
     # and the #5 trending-OI pre-gate. ivPairMinGap/ivBothHighFloor are on the 0..1 IV FRACTION scale

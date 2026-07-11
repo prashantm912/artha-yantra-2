@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { Funds, OrderbookEntry, PositionEntry, TradebookEntry } from '../../api/orders.ts';
 
@@ -25,7 +26,9 @@ function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <OrdersPage />
+      <MemoryRouter>
+        <OrdersPage />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }

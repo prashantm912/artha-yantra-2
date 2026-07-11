@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.screener.manas;
 
+import in.arthayantra.marketdata.screener.AdjustedEquityDailySql;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -102,20 +103,14 @@ public class ManasScreenService {
 
   // The new-high frame offset (§4.1 gate 6) is a config INT inlined as a SQL literal (Postgres frame
   // bounds take a constant, and the sibling screens keep every ROWS-BETWEEN bound a literal) — only
-  // per-value data is bound with '?'. {@code %d} is substituted with newHighLookbackSessions-1.
-  private static final String SQL_TEMPLATE =
+  // per-value data is bound with '?'. {@code %d} is substituted with newHighLookbackSessions-1. The
+  // base CTE (prepended at build time) is the CA-adjusted shared price plane (AdjustedEquityDailySql,
+  // audit H6 / FID P0-4): close/high/low back-adjusted for splits/bonuses so an action inside the
+  // window no longer opens a false cliff under the MA/52w/RS gates; raw_close carries the unadjusted
+  // close for the split-invariant rupee-turnover gate (turnover_50). The CALC/SELECT part carries the
+  // {@code %d} literal, so the raw base CTE (which has no {@code %}) is concatenated OUTSIDE the format.
+  private static final String CALC_AND_SELECT =
       """
-      WITH base AS (
-        -- The BROAD equity universe = the daily bhavcopy (nse_eod_bhavcopy, ~2.2k EQ/BE names with a
-        -- full year), NOT native candles@1d (whose dense recent-year history only covers the ~100
-        -- subscribed/backfilled names). trade_date is already an IST calendar date (no tz cast).
-        SELECT symbol, trade_date AS bucket, close_price AS close, high_price AS high,
-               low_price AS low, ttl_trd_qnty AS volume
-        FROM nse_eod_bhavcopy
-        WHERE series IN ('EQ','BE')
-          AND trade_date <= ?::date
-          AND trade_date >  (?::date - 420)
-      ),
       calc AS (
         SELECT symbol, bucket, close, volume,
           avg(close) OVER w50  AS sma50,
@@ -125,7 +120,7 @@ public class ManasScreenService {
           max(high)  OVER wnh  AS recent_high,
           avg(volume)         OVER w20 AS avg_vol_20,
           avg(volume)         OVER w50 AS avg_vol_50,
-          avg(close * volume) OVER w50 AS turnover_50,
+          avg(raw_close * volume) OVER w50 AS turnover_50,
           count(*) OVER (PARTITION BY symbol) AS sessions
         FROM base
         WINDOW
@@ -169,7 +164,12 @@ public class ManasScreenService {
     java.sql.Date d = java.sql.Date.valueOf(date);
     // The new-high window is inclusive of the current row, so N-1 preceding rows cover N sessions.
     int newHighPreceding = Math.max(0, newHighLookbackSessions - 1);
-    String sql = String.format(SQL_TEMPLATE, newHighPreceding);
+    // The CA-adjusted base CTE (no '%' → safe to concatenate around the %d-bearing calc/select).
+    String sql =
+        "WITH base AS (\n"
+            + AdjustedEquityDailySql.SCREENER_BASE_CTE
+            + "\n),\n"
+            + String.format(CALC_AND_SELECT, newHighPreceding);
     List<Raw> raws =
         jdbc.query(
             sql,

@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.screener.minervini.geometry;
 
+import in.arthayantra.marketdata.screener.AdjustedEquityDailySql;
 import java.sql.Date;
 import java.time.LocalDate;
 import java.util.List;
@@ -8,23 +9,16 @@ import org.springframework.stereotype.Repository;
 
 /**
  * Reads a single equity's recent daily OHLCV series from {@code nse_eod_bhavcopy} (the same broad
- * EQ/BE universe the {@code TrendTemplateService} screen runs over — NOT the sparse candle store).
+ * EQ/BE universe the {@code TrendTemplateService} screen runs over — NOT the sparse candle store),
+ * through the CA-adjusted shared price plane ({@link AdjustedEquityDailySql}, audit H6 / FID P0-4) so
+ * a split/bonus inside the base window no longer opens a false price cliff under the VCP geometry.
  * Feeds {@link VcpDetector}. Ordered oldest→newest; windowed to a calendar-day lookback so a
  * ~40-week base plus the 50-session volume tail is always covered.
  */
 @Repository
 public class DailyBarReader {
 
-  private static final String SQL =
-      """
-      SELECT trade_date, open_price, high_price, low_price, close_price, ttl_trd_qnty
-      FROM nse_eod_bhavcopy
-      WHERE symbol = ?
-        AND series IN ('EQ','BE')
-        AND trade_date <= ?::date
-        AND trade_date >  (?::date - ?)
-      ORDER BY trade_date ASC
-      """;
+  private static final String SQL = AdjustedEquityDailySql.GEOMETRY_SYMBOL_SQL;
 
   private final JdbcTemplate jdbc;
 

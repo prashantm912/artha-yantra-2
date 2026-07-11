@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.screener.minervini;
 
+import in.arthayantra.marketdata.screener.AdjustedEquityDailySql;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -95,20 +96,19 @@ public class TrendTemplateService {
       BigDecimal ffMcap,
       BigDecimal ffPct) {}
 
+  // The BROAD equity universe = the daily bhavcopy (nse_eod_bhavcopy, ~2.2k EQ/BE names with a full
+  // year), NOT native candles@1d (whose dense recent-year history only covers the ~100
+  // subscribed/backfilled names — bhavcopy is DO-NOTHING on the candle PK, so it never fills the year
+  // there). trade_date is already an IST calendar date (no tz cast). Master-plan §13.2. The base CTE
+  // is the CA-adjusted shared price plane (AdjustedEquityDailySql, audit H6 / FID P0-4): close/high/low
+  // are split/bonus back-adjusted so a corporate action inside the window no longer opens a false
+  // cliff under the MA/52w/RS gates; raw_close carries the unadjusted close for the rupee-turnover
+  // liquidity gate (avg_turnover_50), which must stay split-invariant.
   private static final String SQL =
-      """
-      WITH base AS (
-        -- The BROAD equity universe = the daily bhavcopy (nse_eod_bhavcopy, ~2.2k EQ/BE names with a
-        -- full year), NOT native candles@1d (whose dense recent-year history only covers the ~100
-        -- subscribed/backfilled names — bhavcopy is DO-NOTHING on the candle PK, so it never fills
-        -- the year there). trade_date is already an IST calendar date (no tz cast). Master-plan §13.2.
-        SELECT symbol, trade_date AS bucket, close_price AS close, high_price AS high,
-               low_price AS low, ttl_trd_qnty AS volume
-        FROM nse_eod_bhavcopy
-        WHERE series IN ('EQ','BE')
-          AND trade_date <= ?::date
-          AND trade_date >  (?::date - 420)
-      ),
+      "WITH base AS (\n"
+          + AdjustedEquityDailySql.SCREENER_BASE_CTE
+          + "\n),\n"
+          + """
       calc AS (
         SELECT symbol, bucket, close, volume,
           avg(close) OVER w50  AS sma50,
@@ -116,7 +116,7 @@ public class TrendTemplateService {
           avg(close) OVER w200 AS sma200,
           max(high)  OVER w252 AS high_52w,
           min(low)   OVER w252 AS low_52w,
-          avg(close * volume) OVER w50 AS avg_turnover_50,
+          avg(raw_close * volume) OVER w50 AS avg_turnover_50,
           lag(close, 63)  OVER pw AS c63,
           lag(close, 126) OVER pw AS c126,
           lag(close, 189) OVER pw AS c189,

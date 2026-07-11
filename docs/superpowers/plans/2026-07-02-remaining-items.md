@@ -32,8 +32,17 @@ DB-probed, and live-verified the same night. **All seven EVO-E0 HARD gates are C
 increment C1 is now buildable) and APP Phase 1 is complete (INT-I1's A4 hard-dependency satisfied;
 C2 buildable). What remains: OWNER rows (A10, group E), the HOLD-tier design forks B3/B4/B5/B11–B14/
 B18 (each wants an owner read before build), groups C/D (next program phases), and group F residue.
-**UPDATE 2026-07-11 (day session): C1 EVO-E1 DONE (#720–#723, live-verified — see the C1 row);
-EVO next = E2 (design §12 items 4–6), still-startable clean rows = C2/C3 + F residue.**
+**UPDATE 2026-07-11 (day session): C1 EVO-E1 DONE (#720–#723, live-verified — see the C1 row).
+EVO-E2 ALSO DONE same day (owner-directed continuation; first 4-way-parallel builder wave): #725 insights
+(signed-Spearman tornado/brittleness/slices), #726 deflated-Sharpe gate + DOF penalties (campaign-cumulative N),
+#727 backtest `stressOverrides{slippageMultiplier}` (goldens/parity byte-identical; zero-floored stressed SELLs),
+#728 neighbor probes (boot reaper — deleted 1 REAL stranded row on first live boot), #729 stress orchestration
+(2×/4× + degradation slope, durable STRESSING lifecycle, evidence-drift guard). Deployed + live-verified:
+probe round on sweep 46706aa4 lifted trial-4 neighborCount 0→6 (plateau MEASURED), insights + deflated gate live
+(N counts probes, DOF penalty exact), stress endpoint honestly skips un-rankable candidates (the full live 2×/4×
+round awaits the first ≥3-regime campaign — unit-covered end-to-end). Follow-up chips: task_8c3964cc
+(stress-vs-interactive worker reservation), task_547656bf (3m tradeFrequency). EVO next = E3 (design §12 items
+7–10, incl. ONE HOLD: runtime shadow-variant registration API); still-startable clean rows = C2/C3 + F residue.**
 Live behavioural notes a new session must know: B1 makes Monday 2026-07-13 a CALIBRATION session
 (entries UP + wider stops expected — judge on `ay_signal_partial_bucket_mismatch_total`, not entry
 count; E8 re-tune consumes the clean sessions); A3 changed exit semantics (settle = last REAL tick

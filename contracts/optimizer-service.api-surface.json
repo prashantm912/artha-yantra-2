@@ -149,6 +149,16 @@
       "422"
     ]
   },
+  "POST /api/v1/evolution/generations/{generation_id}/stress": {
+    "params": [
+      "generation_id"
+    ],
+    "requestBody": true,
+    "responses": [
+      "202",
+      "422"
+    ]
+  },
   "POST /api/v1/optimizations/run": {
     "params": [],
     "requestBody": true,

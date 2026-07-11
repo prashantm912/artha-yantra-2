@@ -92,6 +92,11 @@ def score_cohort(
     weights = weights or SIM_FIRST_WEIGHTS
     n = len(candidates) if n_trials is None else n_trials
     n_params = len(parameters)
+    # A stress round (E2, §3.2.5) writes ``costResilience`` on the stressed candidates; its presence
+    # ANYWHERE in the cohort flips cost_resilience from the retro z=0 stub to a live z-column, and
+    # switches the not-yet-stressed candidates from the uniform "no stress runs" caveat to a
+    # per-candidate "not stress-tested this round" note (below).
+    cohort_has_stress = any(_num(c.get("costResilience")) is not None for c in candidates)
     stab = _stability_inputs(candidates, _plateau(candidates, parameters), direction)
 
     # Per-component z's (cohort-normalized) + the raw constituents + any structural caveat.
@@ -131,7 +136,7 @@ def score_cohort(
             "components": components,
             "penalties": penalties,
             "flags": _flags(cand),
-            "caveats": _caveats(cand, comp_caveats),
+            "caveats": _caveats(cand, comp_caveats, cohort_has_stress),
             "evidence": {
                 "simRuns": [cand["runId"]] if cand.get("runId") else [],
                 "holdoutRun": cand.get("holdoutRunId"),
@@ -182,8 +187,10 @@ def _component_subsignals(
 ) -> dict[str, list[tuple[str, list[float | None]]]]:
     """Each RobustScore component is built from one or more raw sub-signals; the component z is the
     mean of its present sub-signals' cohort z-scores (a missing sub-signal drops out of the mean, a
-    fully-absent component → z=0). ``cost_resilience`` + ``live_alignment`` carry NO sub-signals in
-    retro (no stress runs, no live evidence) → they resolve to z=0 by construction (§6.2).
+    fully-absent component → z=0). ``live_alignment`` carries NO sub-signals in retro (no live
+    evidence) → z=0 by construction (§6.2). ``cost_resilience`` reads the stress-orchestrator's
+    per-candidate ``costResilience`` slope (E2, §3.2.5) when a stress round has run — absent (retro,
+    or a not-yet-stressed candidate) it drops out to z=0 with the standing caveat.
     ``risk_adjusted`` reads Sortino ONLY — no Sharpe fallback (mixing the two metrics in one cohort
     z-column would bias fallback candidates; an absent Sortino simply drops out)."""
     return {
@@ -203,13 +210,28 @@ def _component_subsignals(
             ("regimeOosMean", [c.get("regimeOosMean") for c in candidates]),
             ("coveredCount", [float(len(c.get("regimesCovered") or [])) for c in candidates]),
         ],
-        "cost_resilience": [],
+        "cost_resilience": _cost_resilience_subsignals(candidates),
         "live_alignment": [],
         "explainability": [
             ("explainability", [_explainability(c, n_params) for c in candidates])
         ],
         "efficiency": [("expectancy", [c.get("expectancy") for c in candidates])],
     }
+
+
+def _cost_resilience_subsignals(
+    candidates: list[dict[str, Any]],
+) -> list[tuple[str, list[float | None]]]:
+    """The ``cost_resilience`` sub-signal column (E2, design §3.2.5 / §6.2): the stress
+    orchestrator writes a per-candidate ``costResilience`` = the least-squares slope of the primary
+    objective across 1×/2×/4× slippage, normalized by |base| and oriented so a SMALLER
+    worse-direction drop scores HIGHER (design z(−degradation slope)). When NO candidate carries it
+    (retro, or a cohort with no stress round yet) the column is EMPTY → the component drops to z=0
+    with the standing caveat, byte-identical to the pre-E2 behaviour. A candidate that was NOT
+    stress-tested in a round that DID stress others carries None here → it drops out of the cohort z
+    (0) and is caveated per-candidate in ``_caveats``."""
+    values = [_num(c.get("costResilience")) for c in candidates]
+    return [("costResilience", values)] if any(v is not None for v in values) else []
 
 
 def _component_z(
@@ -431,7 +453,9 @@ def _flags(cand: dict[str, Any]) -> list[str]:
     return []
 
 
-def _caveats(cand: dict[str, Any], comp_caveats: dict[str, str | None]) -> list[str]:
+def _caveats(
+    cand: dict[str, Any], comp_caveats: dict[str, str | None], cohort_has_stress: bool = False
+) -> list[str]:
     """Scorecard-level caveats = the run's data caveats (metrics.caveats[]) + the structural E2
     component caveats + the standing retro degradations, de-duplicated in a stable order so the FE
     card can render "what to distrust" honestly."""
@@ -440,6 +464,15 @@ def _caveats(cand: dict[str, Any], comp_caveats: dict[str, str | None]) -> list[
         out.append(c)
     if _oi_below_floor(cand.get("oiGateCoverage")):
         out.append(f"oiGateCoverage {cand['oiGateCoverage']} below 80%")
+    # A stress round ran on the cohort but THIS candidate has no cost_resilience — its z drops out
+    # (0), so say why per-candidate: it was either not in the top-K, or stressed but < 2 runs came
+    # back ("stress incomplete", set by the orchestrator). The uniform "no stress runs (E2)" note
+    # fires only when NO candidate was stressed (comp_caveats), so the two are mutually exclusive.
+    if cohort_has_stress and _num(cand.get("costResilience")) is None:
+        if cand.get("stressIncomplete"):
+            out.append("cost_resilience: stress incomplete — < 2 usable points, z drops out (0)")
+        else:
+            out.append("cost_resilience: not stress-tested this round — z drops out (0)")
     for comp, note in comp_caveats.items():
         if note:
             out.append(f"{comp}: {note}")

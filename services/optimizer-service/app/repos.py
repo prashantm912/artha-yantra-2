@@ -64,6 +64,18 @@ class JobsRepo:
         actor = created_by if created_by is not None else f"optimizer:{sweep_id}"
         return self._insert("TRIAL", sweep_id, strategy_version_id, request, actor)
 
+    def insert_backtest(
+        self, sweep_id: str, request: dict[str, Any], created_by: str
+    ) -> str:
+        """Insert a queued BACKTEST job for the E2 cost-stress orchestrator (design §3.2.5). A
+        stress re-run is an ordinary BACKTEST job (kind=BACKTEST) — NOT a TRIAL — so it never enters
+        the ``optimization_trials`` cohort/plateau/z-cohorts and never emits onto
+        ``optimizations.results`` (only a TRIAL does, BacktestRunner §D.7). ``parent_job_id`` = the
+        source sweep and the ``optimizer:{sweepId}:stress`` actor tie it back to its generation for
+        EVO provenance; BacktestRunner reads ``paramsOverride`` + ``stressOverrides`` off the
+        request JSONB regardless of kind, so the candidate's params replay at wider slippage."""
+        return self._insert("BACKTEST", sweep_id, None, request, created_by)
+
     def _insert(
         self,
         kind: str,
@@ -435,6 +447,28 @@ class EvoRepo:
             rows = cur.fetchall()
         return [_candidate_row(r) for r in rows]
 
+    def get_generation(self, generation_id: str) -> dict[str, Any] | None:
+        """One generation by id (E2 cost-stress orchestrator) — its campaign, ``n``, and frozen
+        ``proposal`` (carrying the source ``sweepJobId`` the stress round re-runs)."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_GENERATION_COLS} FROM evo_generations WHERE id=%s", (generation_id,)
+            )
+            row = cur.fetchone()
+        return _generation_row(row) if row is not None else None
+
+    def list_candidates_for_generation(self, generation_id: str) -> list[dict[str, Any]]:
+        """The candidate rows of ONE generation (E2 cost-stress) — the stress round selects its
+        top-K from here and re-scores every row of this set as the cohort."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_CANDIDATE_COLS} FROM evo_candidates "
+                "WHERE generation_id=%s ORDER BY updated_at",
+                (generation_id,),
+            )
+            rows = cur.fetchall()
+        return [_candidate_row(r) for r in rows]
+
     # --- E1 recorder writes (§12 item 3) --------------------------------------------------------
 
     def create_campaign(
@@ -510,3 +544,24 @@ class EvoRepo:
                 )
         self._conn.commit()
         return _generation_row(gen_row)
+
+    def apply_stress_round(
+        self, generation_id: str, updates: list[dict[str, Any]]
+    ) -> None:
+        """Persist ONE cost-stress round ATOMICALLY (design §3.2.5 / §12 E2 item 5): overwrite each
+        candidate's re-scored ``scorecard`` (with the cost_resilience component now filled) and
+        increment the generation's ``stress_touches`` ONCE — all in one transaction/commit, so a
+        scoring crash mid-round can never half-write a cohort. ``updated_at`` is set to ``now()``
+        explicitly (the DDL default fires on INSERT only — an UPDATE must maintain it, V011:74-76).
+        A no-op ``updates`` still bumps the touch counter (an honest 'a round ran' record)."""
+        with self._conn.cursor() as cur:
+            for update in updates:
+                cur.execute(
+                    "UPDATE evo_candidates SET scorecard=%s::jsonb, updated_at=now() WHERE id=%s",
+                    (json.dumps(update["scorecard"]), update["candidateId"]),
+                )
+            cur.execute(
+                "UPDATE evo_generations SET stress_touches = stress_touches + 1 WHERE id=%s",
+                (generation_id,),
+            )
+        self._conn.commit()

@@ -39,6 +39,17 @@ class FakeJobs:
                              "created_by": created_by or f"optimizer:{sweep_id}"}
         return job_id
 
+    def insert_backtest(
+        self, sweep_id: str, request: dict[str, Any], created_by: str
+    ) -> str:
+        """Mirrors JobsRepo.insert_backtest: a queued BACKTEST job (NOT a trial) for the E2
+        cost-stress orchestrator — kind=BACKTEST, parented on the sweep, stress actor."""
+        self._seq += 1
+        job_id = f"bt-{self._seq}"
+        self.rows[job_id] = {"kind": "BACKTEST", "status": "queued", "progress": 0,
+                             "request": request, "parent": sweep_id, "created_by": created_by}
+        return job_id
+
     def set_status(self, job_id: str, status: str, progress: int | None = None) -> None:
         # Mirrors the real repo's terminal guard (P1-10b): terminal rows are never overwritten.
         row = self.rows.setdefault(job_id, {})
@@ -270,6 +281,37 @@ class FakeEvoRepo:
 
     def list_candidates_for_campaign(self, campaign_id: str) -> list[dict[str, Any]]:
         return self.candidates.get(campaign_id, [])
+
+    def get_generation(self, generation_id: str) -> dict[str, Any] | None:
+        """Mirrors EvoRepo.get_generation: one generation by id across all campaigns."""
+        for gens in self.generations.values():
+            for gen in gens:
+                if gen["id"] == generation_id:
+                    return gen
+        return None
+
+    def list_candidates_for_generation(self, generation_id: str) -> list[dict[str, Any]]:
+        """Mirrors EvoRepo.list_candidates_for_generation: the candidate rows of ONE generation."""
+        out: list[dict[str, Any]] = []
+        for cands in self.candidates.values():
+            out.extend(c for c in cands if c.get("generationId") == generation_id)
+        return out
+
+    def apply_stress_round(
+        self, generation_id: str, updates: list[dict[str, Any]]
+    ) -> None:
+        """Mirrors EvoRepo.apply_stress_round: overwrite each candidate's scorecard + touch
+        updated_at, and increment the generation's stress_touches ONCE (atomic in prod)."""
+        by_id = {u["candidateId"]: u["scorecard"] for u in updates}
+        for cands in self.candidates.values():
+            for cand in cands:
+                if cand["id"] in by_id:
+                    cand["scorecard"] = by_id[cand["id"]]
+                    cand["updatedAt"] = "2026-07-11T01:00:00+00:00"
+        for gens in self.generations.values():
+            for gen in gens:
+                if gen["id"] == generation_id:
+                    gen["stressTouches"] = (gen.get("stressTouches") or 0) + 1
 
     def create_campaign(
         self,

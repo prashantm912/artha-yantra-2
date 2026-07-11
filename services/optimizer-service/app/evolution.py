@@ -248,6 +248,25 @@ _RETRO_N_CAVEAT = (
 
 
 @dataclass(frozen=True)
+class AssembledCohort:
+    """A sweep's cohort ASSEMBLED but not yet scored — the shared pre-scoring stage of
+    ``score_sweep``, extracted so the E2 stress orchestrator can attach its per-candidate
+    ``costResilience`` slope to the evidence bags BEFORE ``scoring.score_cohort`` runs (the retro
+    read + recorder score straight through). ``n_trials`` is the §4 multiplicity N
+    (this sweep's full trial count + any ``prior_trials``) the score MUST be computed with — carried
+    here so a re-score reproduces the recorded card's deflated-Sharpe gate exactly."""
+
+    job: dict[str, Any]
+    objective: dict[str, Any]
+    metric: str
+    direction: str
+    parameters: list[dict[str, Any]]
+    candidates: list[dict[str, Any]]
+    n_trials: int
+    truncated: bool
+
+
+@dataclass(frozen=True)
 class ScoredSweep:
     """The shared output of scoring one existing sweep's cohort — consumed by BOTH the retro-score
     READ (``retro_score``) and the campaign RECORDER (``EvoRecorderService.record_generation``), so
@@ -299,16 +318,13 @@ class RetroScoreService:
         finally:
             trials.close()
 
-    def score_sweep(self, sweep_id: str, prior_trials: int = 0) -> ScoredSweep:
-        """Assemble + score an existing sweep's COMPLETE trials as a cohort — the shared core reused
-        by the retro-score read AND the campaign recorder (do NOT duplicate this assembly). Reads
-        the sweep job + its trials + each trial's backtest evidence, then scores the whole cohort
-        via ``scoring.score_cohort``. ``prior_trials`` is the campaign's trials-to-date from PRIOR
-        generations, added to this sweep's own full trial count to form the deflated-Sharpe
-        multiplicity N (§4) — the recorder passes it; the standalone retro read has no campaign
-        context so it stays 0 (per-sweep N, flagged by ``_RETRO_N_CAVEAT``). Returns the raw cards
-        (no retro caveat appended — the caller stamps it) plus the frozen job/objective/parameters
-        context. Raises 404 for an unknown / non-OPTIMIZATION job (the shared idiom)."""
+    def assemble_cohort(self, sweep_id: str, prior_trials: int = 0) -> AssembledCohort:
+        """Assemble a sweep's COMPLETE trials into the scoring lib's candidate bags, UNscored — the
+        shared pre-scoring stage reused by ``score_sweep`` (the retro read + recorder) AND the E2
+        stress orchestrator (which attaches ``costResilience`` before scoring). Reads the sweep job
+        + its trials + each trial's backtest evidence. ``prior_trials`` is the campaign's
+        trials-to-date from PRIOR generations, added to this sweep's own full trial count to form
+        the deflated-Sharpe multiplicity N (§4). Raises 404 for an unknown/non-OPTIMIZATION job."""
         jobs = self._jobs_factory()
         trials = self._trials_factory()
         try:
@@ -330,18 +346,41 @@ class RetroScoreService:
             jobs.close()
             trials.close()
         candidates = [self._assemble(row, metric) for row in rows]
-        cards = scoring.score_cohort(
-            candidates, parameters, direction=direction, n_trials=n_trials
-        )
-        return ScoredSweep(
+        return AssembledCohort(
             job=job,
             objective=objective,
             metric=metric,
             direction=direction,
             parameters=parameters,
             candidates=candidates,
-            cards=cards,
+            n_trials=n_trials,
             truncated=len(rows) >= _COHORT_CAP,
+        )
+
+    def score_sweep(self, sweep_id: str, prior_trials: int = 0) -> ScoredSweep:
+        """Assemble + score an existing sweep's COMPLETE trials as a cohort — the shared core reused
+        by the retro-score read AND the campaign recorder (do NOT duplicate this assembly). Reads
+        the sweep job + its trials + each trial's backtest evidence, then scores the whole cohort
+        via ``scoring.score_cohort``. ``prior_trials`` is the campaign's trials-to-date from PRIOR
+        generations, added to this sweep's own full trial count to form the deflated-Sharpe
+        multiplicity N (§4) — the recorder passes it; the standalone retro read has no campaign
+        context so it stays 0 (per-sweep N, flagged by ``_RETRO_N_CAVEAT``). Returns the raw cards
+        (no retro caveat appended — the caller stamps it) plus the frozen job/objective/parameters
+        context. Raises 404 for an unknown / non-OPTIMIZATION job (the shared idiom)."""
+        cohort = self.assemble_cohort(sweep_id, prior_trials)
+        cards = scoring.score_cohort(
+            cohort.candidates, cohort.parameters,
+            direction=cohort.direction, n_trials=cohort.n_trials,
+        )
+        return ScoredSweep(
+            job=cohort.job,
+            objective=cohort.objective,
+            metric=cohort.metric,
+            direction=cohort.direction,
+            parameters=cohort.parameters,
+            candidates=cohort.candidates,
+            cards=cards,
+            truncated=cohort.truncated,
         )
 
     def retro_score(self, sweep_id: str) -> RetroScoreResponse:

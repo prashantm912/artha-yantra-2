@@ -31,8 +31,9 @@ CREATE TABLE reconciliations (
   sim_job_id         UUID,                           -- the reconcile re-sim's jobs row (soft link, no FK)
   sim_run_id         UUID,                           -- its backtest_runs row (soft link, no FK)
   gap                JSONB NOT NULL,                 -- the §7.1.3 gap vector (returnGap/tradeSetOverlap/…)
-  gap_z              NUMERIC(18,6),                  -- returnGap / σ(fold returns); NULL when no fold history
-  paired_trades      INT NOT NULL DEFAULT 0,         -- count of live↔sim paired trades (the §7.2 evidence floor input)
+  gap_z              NUMERIC(18,6),                  -- √t-normalized returnGap / σ(fold returns); NULL when no fold history
+  paired_trades      INT NOT NULL DEFAULT 0,         -- UNIQUE paired live↔sim keys (first fill per (symbol, IST entry
+                                                     -- date), not per-fill multiplicity) — the §7.2 evidence-floor input
   evidence_floor_met BOOLEAN NOT NULL DEFAULT FALSE, -- ≥ 20 paired trades OR ≥ 4 weeks lived (§7.2)
   verdict            TEXT NOT NULL
                        CHECK (verdict IN ('ALIGNED', 'PENALIZED', 'DIVERGENT', 'INSUFFICIENT')),

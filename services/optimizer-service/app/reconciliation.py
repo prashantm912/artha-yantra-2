@@ -32,6 +32,7 @@ P1-4/5. Every degradation is stamped, never silently zeroed.
 from __future__ import annotations
 
 import logging
+import math
 import statistics
 import threading
 import time
@@ -126,13 +127,48 @@ def _fold_return_sigma(fold_returns: list[float] | None) -> float | None:
     return statistics.pstdev(fold_returns)
 
 
-def _gap_z(return_gap_raw: float | None, sigma: float | None) -> float | None:
-    """gapZ = returnGap / σ(fold returns) (design §7.2). ``None`` when either input is absent, or
-    σ is
-    zero (a degenerate, all-identical fold history carries no dispersion to z-score against)."""
+def _time_scale(recon_days: float | None, fold_days: float | None) -> float:
+    """The √t time-normalization factor applied to the raw gap before z-scoring: √(T_fold/T_recon).
+    Falls back to 1 (no scaling) when either duration is unknown or non-positive — the caller stamps
+    a caveat so the un-normalized z is never silent."""
+    if recon_days and fold_days and recon_days > 0 and fold_days > 0:
+        return math.sqrt(fold_days / recon_days)
+    return 1.0
+
+
+def _gap_z(
+    return_gap_raw: float | None,
+    sigma: float | None,
+    recon_days: float | None = None,
+    fold_days: float | None = None,
+) -> float | None:
+    """gapZ = time-normalized returnGap / σ(fold returns) (design §7.2).
+
+    Time normalization (the √t noise model): σ is the dispersion of FOLD-TEST-window returns (mean
+    duration T_fold), while the raw gap accrued over the RECONCILE window (T_recon) — two unrelated
+    durations. Under the diffusive model return noise scales ~ √t, so the raw gap is rescaled to the
+    fold time-base by √(T_fold/T_recon) before dividing by σ. Without this a 90-day live window over
+    30-day folds inflates |gapZ| by √3 (a true −0.9 PENALIZED reads −1.56 DIVERGENT) and the reverse
+    deflates toward a false ALIGNED. T_recon == T_fold ⇒ factor 1 (identical to the unscaled z);
+    either duration unknown ⇒ factor 1 + a caller-stamped caveat. ``None`` when the gap or σ is
+    absent, or σ is zero (a degenerate all-identical fold history has no dispersion to z on)."""
     if return_gap_raw is None or sigma in (None, 0):
         return None
-    return return_gap_raw / sigma
+    return return_gap_raw * _time_scale(recon_days, fold_days) / sigma
+
+
+def _mean_fold_test_days(folds: list[dict[str, Any]]) -> float | None:
+    """The mean fold TEST-window duration in days — the T_fold of the §7.2 √t normalization. Each
+    fold of the ``/folds`` payload carries its test bounds (``test: {from, to}`` —
+    WalkForwardRunner.java:179 + window() at :246-251); folds missing/unparseable bounds are
+    skipped. ``None`` when no fold carries usable bounds (→ scale 1 + caveat)."""
+    days: list[float] = []
+    for fold in folds:
+        test = fold.get("test") or {}
+        start, end = _parse_dt(test.get("from")), _parse_dt(test.get("to"))
+        if start is not None and end is not None and end > start:
+            days.append((end - start).total_seconds() / 86400.0)
+    return statistics.fmean(days) if days else None
 
 
 def _evidence_floor_met(paired_trades: int, window_days: float) -> bool:
@@ -158,15 +194,38 @@ def _verdict(gap_z: float | None, evidence_floor_met: bool, has_live_evidence: b
     return "DIVERGENT" if evidence_floor_met else "INSUFFICIENT"
 
 
-def _diagnosis(trade_set_overlap: float | None, slippage_realized: float | None) -> dict[str, Any]:
+def _overlap_note(trade_set_overlap: float | None, single_pick: bool) -> str:
+    """The §7.2.5 trade-set-overlap note. For a DYNAMIC-LIST (funnel/screener) universe the re-sim
+    signals on the TOP pinned pick only (BacktestRunner.signalInstrument) while live papers the
+    whole portfolio, so overlap ≈ 0 STRUCTURALLY — the low-overlap ⇒ UPSTREAM inference would be a
+    false diagnosis and is suppressed. For explicit universes low overlap (< 0.5) stays the
+    strongest automated signal that the divergence is upstream (screener/data), not execution."""
+    if single_pick:
+        return (
+            "§7.2.5 trade-set overlap — STRUCTURAL for a dynamic-list (funnel/screener) universe: "
+            "single-pick sim vs multi-name live portfolio; low overlap does NOT imply upstream "
+            "divergence"
+        )
+    if trade_set_overlap is not None and trade_set_overlap < 0.5:
+        return (
+            "§7.2.5 trade-set overlap — LOW overlap ⇒ the divergence is UPSTREAM "
+            "(screener/data planes, audit D1/D12), not execution"
+        )
+    return "§7.2.5 trade-set overlap adequate — divergence is not obviously upstream"
+
+
+def _diagnosis(
+    trade_set_overlap: float | None,
+    slippage_realized: float | None,
+    single_pick: bool = False,
+) -> dict[str, Any]:
     """The §7.2.1-5 DIVERGENT diagnosis checklist. Each item declares whether it is ``auto``
     (computed
     from this reconciliation), ``pending`` (blocked on an un-landed Prompt-1 audit input), or
     ``manual`` (a human check — no automated source wired in this PR). Only ``tradeSetOverlap`` (#5)
-    is auto today; the rest degrade honest (self-flagged in the receipt). ``low`` overlap (< 0.5) is
-    the strongest automated signal that the divergence is UPSTREAM (screener/data planes), not
-    execution."""
-    overlap_low = trade_set_overlap is not None and trade_set_overlap < 0.5
+    is auto today; the rest degrade honest (self-flagged in the receipt). The overlap note is
+    universe-mode-aware (``_overlap_note``) — a funnel/screener single-pick sim must never read as
+    an upstream-divergence finding."""
     return {
         "checklist": [
             {
@@ -199,10 +258,7 @@ def _diagnosis(trade_set_overlap: float | None, slippage_realized: float | None)
             {
                 "id": "trade_set_overlap",
                 "status": "auto",
-                "note": "§7.2.5 trade-set overlap — LOW overlap ⇒ the divergence is UPSTREAM "
-                "(screener/data planes, audit D1/D12), not execution"
-                if overlap_low
-                else "§7.2.5 trade-set overlap adequate — divergence is not obviously upstream",
+                "note": _overlap_note(trade_set_overlap, single_pick),
                 "value": trade_set_overlap,
             },
         ],
@@ -290,13 +346,48 @@ def _norm_symbol(symbol: Any) -> str:
     return str(symbol).strip().upper() if symbol is not None else ""
 
 
-def _is_swing(config: dict[str, Any]) -> bool:
-    """SWING iff ``config.risk.session.style == 'swing'`` (strategy-schema-v1 risk.session.style
-    enum).
-    Drives the pairing mode (swing = by (symbol, entry date) on the equity; scalper = by the
-    tradeable
-    option leg) and whether the design's ``session.fill_timing: at_close`` pin applies (§7.1.2)."""
-    return ((config.get("risk") or {}).get("session") or {}).get("style") == "swing"
+# Pairing mode per risk.session.style (the strategy-schema-v1 enum, made EXPLICIT — a binary
+# is-swing split silently sent btst/positional/expiry_day to scalper pairing). swing/positional
+# hold multi-day and pair like daily equity entries (symbol, IST entry date, avg_entry_price);
+# intraday/btst/expiry_day are the option-leg families (scalper_detail carries the leg).
+_STYLE_MODES = {
+    "swing": "swing",
+    "positional": "swing",
+    "intraday": "scalper",
+    "btst": "scalper",
+    "expiry_day": "scalper",
+}
+
+# Dynamic-list universe modes whose backtest signals on the TOP pinned pick only
+# (BacktestRunner.signalInstrument) while live papers the whole funnel/screen — the single-pick
+# structural distortion (§13 row 8).
+_SINGLE_PICK_MODES = {"manas_arora_funnel", "minervini_funnel", "futures_screener"}
+
+_SINGLE_PICK_CAVEAT = (
+    "single-pick sim vs multi-name live portfolio (dynamic-list universe): the re-sim signals on "
+    "the TOP pinned pick only, so tradeSetOverlap and returnGap are structurally distorted; low "
+    "overlap does NOT imply upstream divergence"
+)
+
+
+def _mode_for_style(config: dict[str, Any]) -> tuple[str, str | None]:
+    """The pairing mode for the version's ``risk.session.style`` (schema enum, ``_STYLE_MODES``) +
+    an honesty caveat when the style is unrecognized/absent — such a config degrades to scalper
+    (option-leg) pairing WITH the caveat, never a silent guess."""
+    style = ((config.get("risk") or {}).get("session") or {}).get("style")
+    mode = _STYLE_MODES.get(style)
+    if mode is not None:
+        return mode, None
+    return "scalper", (
+        f"session style {style!r} is not recognized by the pairing model "
+        f"(known: {sorted(_STYLE_MODES)}) — degrading to scalper (option-leg) pairing"
+    )
+
+
+def _is_single_pick(config: dict[str, Any]) -> bool:
+    """True for a dynamic-list universe (``universe.mode`` in ``_SINGLE_PICK_MODES``) — the re-sim
+    is a single-pick replay, so overlap/returnGap are structurally distorted vs the live book."""
+    return ((config.get("universe") or {}).get("mode")) in _SINGLE_PICK_MODES
 
 
 def _scalper_entry_ltp(scalper_detail: dict[str, Any] | None) -> float | None:
@@ -354,7 +445,7 @@ def _sim_key_price(trade: dict[str, Any], mode: str) -> tuple[Any, float | None]
 @dataclass
 class _GapInputs:
     """The paired-trade products the gap vector consumes: the live/sim key SETS (Jaccard overlap),
-    the count of PAIRED keys (the §7.2 evidence-floor input), and the (live, sim) entry-price pairs
+    the count of PAIRED KEYS (the §7.2 evidence-floor input), and the (live, sim) entry-price pairs
     for the entryPriceDelta."""
 
     live_keys: set[Any] = field(default_factory=set)
@@ -363,6 +454,9 @@ class _GapInputs:
 
     @property
     def paired_count(self) -> int:
+        """UNIQUE paired keys — first fill per (symbol, IST entry date), NOT per-fill multiplicity
+        (a key with several fills counts once). Persisted as ``paired_trades`` and stamped as the
+        gap's ``pairedBasis`` so the column's meaning is on the record."""
         return len(self.live_keys & self.sim_keys)
 
 
@@ -451,7 +545,9 @@ class ReconciliationReceipt(BaseModel):
 
 @dataclass(frozen=True)
 class _ReconContext:
-    """The frozen context a dispatched reconciliation's drain needs to compute + persist the row."""
+    """The frozen context a dispatched reconciliation's drain needs to compute + persist the row.
+    ``single_pick`` marks a dynamic-list (funnel/screener) universe whose re-sim replays the TOP
+    pinned pick only — it steers the diagnosis note away from the false UPSTREAM inference."""
 
     version_id: str
     strategy_id: str | None
@@ -459,6 +555,7 @@ class _ReconContext:
     window_to: str
     sim_job_id: str | None
     mode: str
+    single_pick: bool
     live_trades: list[dict[str, Any]]
     dispatch_caveats: list[str]
 
@@ -518,7 +615,8 @@ class ReconciliationService:
         strategy_id = resolved.get("strategyId")
         semver = resolved.get("version")
         config = resolved.get("config") or {}
-        mode = "swing" if _is_swing(config) else "scalper"
+        mode, style_caveat = _mode_for_style(config)
+        single_pick = _is_single_pick(config)
 
         repo = self._repo_factory()
         try:
@@ -547,6 +645,10 @@ class ReconciliationService:
                 live.close()
 
             caveats = _dispatch_caveats(mode)
+            if style_caveat:
+                caveats.append(style_caveat)
+            if single_pick:
+                caveats.append(_SINGLE_PICK_CAVEAT)
             request = {
                 "strategyId": strategy_id,
                 "strategyVersion": semver,
@@ -565,6 +667,7 @@ class ReconciliationService:
                 window_to=window_to,
                 sim_job_id=sim_job_id,
                 mode=mode,
+                single_pick=single_pick,
                 live_trades=live_trades,
                 dispatch_caveats=caveats,
             )
@@ -676,21 +779,27 @@ class ReconciliationService:
         return_gap_raw = _return_gap_raw(live_return if has_live else None, sim_return)
         return_gap_ann = _annualize(return_gap_raw, window_days)
 
-        sigma = self._fold_return_sigma(context.version_id)
+        sigma, fold_days = self._fold_evidence(context.version_id)
         if sigma is None:
             caveats.append(
                 "no walk-forward fold history for this version — σ(fold returns) is undefined, so "
                 "gapZ is NULL and the verdict is INSUFFICIENT (§7.2)"
             )
-        gap_z = _gap_z(return_gap_raw, sigma)
+        elif fold_days is None:
+            caveats.append(
+                "fold test-window bounds unavailable — gapZ is NOT time-normalized (scale 1); "
+                "reconcile-window vs fold-window durations may differ (√t model, see _gap_z)"
+            )
+        gap_z = _gap_z(return_gap_raw, sigma, window_days, fold_days)
 
         paired_trades = inputs.paired_count
         evidence_floor_met = _evidence_floor_met(paired_trades, window_days)
         verdict = _verdict(gap_z, evidence_floor_met, has_live and not sim_failed)
 
         # gap vector (§7.1.3): returnGap is annualized (the §10 presentation value); returnGapRaw is
-        # the gapZ numerator (raw window %, matches σ scale). exitReasonDivergence needs P1-3
-        # (candle exit reasons); slippageRealized needs P1-5 (quote capture) — both null + caveat.
+        # the gapZ numerator before √t rescaling (gapZTimeScale records the durations + factor).
+        # exitReasonDivergence needs P1-3 (candle exit reasons); slippageRealized needs P1-5 (quote
+        # capture) — both null + caveat. pairedBasis pins what paired_trades counts.
         gap = {
             "returnGap": return_gap_ann,
             "returnGapRaw": return_gap_raw,
@@ -701,9 +810,19 @@ class ReconciliationService:
             "exitReasonDivergence": None,
             "slippageRealized": None,
             "mode": context.mode,
+            "pairedBasis": "unique paired keys (first fill per (symbol, IST entry date))",
+            "gapZTimeScale": {
+                "reconDays": window_days or None,
+                "foldTestDays": fold_days,
+                "factor": _time_scale(window_days, fold_days),
+            },
             "caveats": caveats,
         }
-        diagnosis = _diagnosis(overlap, slippage_realized=None) if verdict == "DIVERGENT" else None
+        diagnosis = (
+            _diagnosis(overlap, slippage_realized=None, single_pick=context.single_pick)
+            if verdict == "DIVERGENT"
+            else None
+        )
 
         repo = self._repo_factory()
         try:
@@ -724,30 +843,30 @@ class ReconciliationService:
         finally:
             repo.close()
 
-    def _fold_return_sigma(self, version_id: str) -> float | None:
-        """σ of the version's walk-forward OOS fold RETURNS (§7.2 σ source). Finds the version's
-        most
-        recent fold run (own schema), reads its per-fold OOS ``totalReturn`` via the proven REST
-        fold
-        shape, and takes the population stdev over ≥ 2 folds. ``None`` (→ gapZ NULL) when the
-        version
-        has no fold history or the fetch fails."""
+    def _fold_evidence(self, version_id: str) -> tuple[float | None, float | None]:
+        """The version's fold-history evidence for the §7.2 z-score: ``(σ, T_fold)`` — σ of the
+        per-fold OOS ``totalReturn`` (population stdev over ≥ 2 folds) and the mean fold TEST-window
+        duration in days (each fold's ``test: {from, to}`` bounds — the √t normalization base).
+        Finds the version's most recent fold run (own schema), reads the fold array via the proven
+        REST shape. ``(None, None)`` (→ gapZ NULL → INSUFFICIENT) when the version has no fold
+        history or the fetch fails; ``(σ, None)`` when folds carry returns but no usable bounds
+        (→ unscaled gapZ + caveat)."""
         repo = self._repo_factory()
         try:
             run_id = repo.latest_walkforward_run_id(version_id)
         finally:
             repo.close()
         if run_id is None:
-            return None
+            return None, None
         try:
             folds = self._backtest.folds(run_id) or []
         except httpx.HTTPError:
-            return None
+            return None, None
         returns = [
             v for v in (_num((f.get("oosMetrics") or {}).get("totalReturn")) for f in folds)
             if v is not None
         ]
-        return _fold_return_sigma(returns)
+        return _fold_return_sigma(returns), _mean_fold_test_days(folds)
 
     # --- in-flight guard ------------------------------------------------------------------------
 

@@ -3,19 +3,21 @@
 Layers, each deterministic (the drain thread runs against a fake whose ``job_status`` resolves the
 re-sim on the first poll, so it always terminates):
 
-* gap math   — annualize / returnGap / Jaccard overlap / entryPriceDelta / σ(fold returns) / gapZ,
-               hand-computed and pinned;
+* gap math   — annualize / returnGap / Jaccard overlap / entryPriceDelta / σ(fold returns) / gapZ
+               (incl. the √t time normalization), hand-computed and pinned;
 * verdict    — the §7.2 thresholds (ALIGNED / PENALIZED / DIVERGENT / INSUFFICIENT) + evidence
 floor;
 * pairing    — swing (symbol, IST entry DATE) + scalper (option leg) keys, incl. the #214 instant
 trap;
 * orchestrate— end-to-end create → drain → persist: ALIGNED / DIVERGENT+diagnosis / INSUFFICIENT
-               (no fold history, floor unmet, re-sim failed); the 400 / 404 / 409 guards;
+               (no fold history, floor unmet, re-sim failed); time-normalized gapZ; the funnel
+               single-pick structural note; the 400 / 404 / 409 guards;
 * REST       — POST 202 receipt + GET ?versionId= envelope.
 """
 
 from __future__ import annotations
 
+import math
 import statistics
 import time
 from typing import Any
@@ -34,13 +36,16 @@ from app.reconciliation import (
     _evidence_floor_met,
     _fold_return_sigma,
     _gap_z,
-    _is_swing,
+    _is_single_pick,
     _ist_date,
     _jaccard,
+    _mean_fold_test_days,
+    _mode_for_style,
     _norm_symbol,
     _pair_trades,
     _return_gap_raw,
     _scalper_entry_ltp,
+    _time_scale,
     _to_ist_iso,
     _verdict,
     _window_days,
@@ -93,6 +98,42 @@ def test_gap_z():
     assert _gap_z(-2.0, 0.0) is None                # degenerate σ → no z
 
 
+def test_gap_z_time_normalization_90d_window_30d_folds():
+    # The §7.2 √t model: σ is 30-day fold dispersion; a gap accrued over 90 days carries √3 more
+    # noise. UNSCALED −2.5/1.6330 ≈ −1.5309 would read DIVERGENT; the corrected z rescales the gap
+    # by √(30/90) → −2.5×0.57735/1.6330 ≈ −0.8839 — a true PENALIZED, not a false DIVERGENT.
+    sigma = 1.6329931618554518
+    unscaled = _gap_z(-2.5, sigma)
+    corrected = _gap_z(-2.5, sigma, recon_days=90.0, fold_days=30.0)
+    assert unscaled == pytest.approx(-1.5309, abs=1e-4)             # would cross the −1.5 gate
+    assert corrected == pytest.approx(-2.5 * math.sqrt(30.0 / 90.0) / sigma)
+    assert corrected == pytest.approx(-0.8839, abs=1e-4)            # stays PENALIZED
+    assert corrected == pytest.approx(unscaled / math.sqrt(3.0))    # the exact √3 deflation
+
+
+def test_gap_z_equal_durations_is_unchanged():
+    sigma = 1.6329931618554518
+    assert _gap_z(-2.5, sigma, recon_days=30.0, fold_days=30.0) == pytest.approx(-2.5 / sigma)
+
+
+def test_gap_z_missing_duration_falls_back_to_scale_one():
+    sigma = 1.6329931618554518
+    assert _gap_z(-2.5, sigma, recon_days=90.0, fold_days=None) == pytest.approx(-2.5 / sigma)
+    assert _gap_z(-2.5, sigma, recon_days=None, fold_days=30.0) == pytest.approx(-2.5 / sigma)
+    assert _time_scale(0.0, 30.0) == 1.0            # a degenerate window never scales
+
+
+def test_mean_fold_test_days():
+    folds = [
+        {"test": {"from": "2026-01-01T00:00:00+05:30", "to": "2026-01-31T00:00:00+05:30"}},  # 30 d
+        {"test": {"from": "2026-02-01T00:00:00+05:30", "to": "2026-02-11T00:00:00+05:30"}},  # 10 d
+        {"oosMetrics": {}},                         # no bounds — skipped
+    ]
+    assert _mean_fold_test_days(folds) == pytest.approx(20.0)
+    assert _mean_fold_test_days([{"oosMetrics": {}}]) is None
+    assert _mean_fold_test_days([]) is None
+
+
 # ================================================================================================
 # verdict + evidence floor (§7.2)
 # ================================================================================================
@@ -126,6 +167,16 @@ def test_diagnosis_flags_low_overlap_and_status():
     assert checklist["data_health_incidents"]["status"] == "manual"
 
 
+def test_diagnosis_single_pick_suppresses_upstream_inference():
+    # A funnel/screener single-pick sim vs the multi-name live book: overlap ≈ 0 STRUCTURALLY —
+    # the UPSTREAM inference would be a false diagnosis and must be replaced by the structural note.
+    div = reconciliation._diagnosis(trade_set_overlap=0.0, slippage_realized=None, single_pick=True)
+    note = next(i for i in div["checklist"] if i["id"] == "trade_set_overlap")["note"]
+    assert "UPSTREAM" not in note
+    assert "STRUCTURAL" in note
+    assert "does NOT imply upstream" in note
+
+
 # ================================================================================================
 # IST / window helpers (the #214 timestamp-key trap)
 # ================================================================================================
@@ -151,10 +202,31 @@ def test_window_days():
     assert _window_days("bad", "worse") == 0.0
 
 
-def test_is_swing():
-    assert _is_swing({"risk": {"session": {"style": "swing"}}}) is True
-    assert _is_swing({"risk": {"session": {"style": "intraday"}}}) is False
-    assert _is_swing({}) is False
+def test_mode_for_style_explicit_map():
+    # every schema style maps EXPLICITLY (the binary is-swing split silently sent btst/positional/
+    # expiry_day to scalper pairing): swing/positional → swing; intraday/btst/expiry_day → scalper.
+    for style, expected in (("swing", "swing"), ("positional", "swing"),
+                            ("intraday", "scalper"), ("btst", "scalper"),
+                            ("expiry_day", "scalper")):
+        mode, caveat = _mode_for_style({"risk": {"session": {"style": style}}})
+        assert (mode, caveat) == (expected, None), style
+
+
+def test_mode_for_style_unrecognized_degrades_with_caveat():
+    mode, caveat = _mode_for_style({"risk": {"session": {"style": "weird_new_style"}}})
+    assert mode == "scalper"
+    assert caveat is not None and "not recognized" in caveat
+    mode, caveat = _mode_for_style({})              # absent style — same guard
+    assert mode == "scalper"
+    assert caveat is not None
+
+
+def test_is_single_pick_detects_dynamic_list_modes():
+    assert _is_single_pick({"universe": {"mode": "manas_arora_funnel"}}) is True
+    assert _is_single_pick({"universe": {"mode": "minervini_funnel"}}) is True
+    assert _is_single_pick({"universe": {"mode": "futures_screener"}}) is True
+    assert _is_single_pick({"universe": {"mode": "explicit"}}) is False
+    assert _is_single_pick({}) is False
 
 
 def test_scalper_entry_ltp_directional_and_straddle():
@@ -219,9 +291,17 @@ def test_dispatch_caveats_swing_flags_fill_timing():
 _VERSION = "11111111-1111-1111-1111-111111111111"
 _STRATEGY = "22222222-2222-2222-2222-222222222222"
 _SWING_CONFIG = {"risk": {"session": {"style": "swing"}}}
-_WF_FOLDS = [{"oosMetrics": {"totalReturn": 10.0}},
-             {"oosMetrics": {"totalReturn": 12.0}},
-             {"oosMetrics": {"totalReturn": 8.0}}]
+_FUNNEL_CONFIG = {"risk": {"session": {"style": "swing"}},
+                  "universe": {"mode": "manas_arora_funnel"}}
+# Each fold's test window is 30 days (the √t normalization base T_fold); σ ≈ 1.633.
+_FOLD_TEST_30D = {"from": "2026-01-01T00:00:00+05:30", "to": "2026-01-31T00:00:00+05:30"}
+_WF_FOLDS = [{"oosMetrics": {"totalReturn": 10.0}, "test": dict(_FOLD_TEST_30D)},
+             {"oosMetrics": {"totalReturn": 12.0}, "test": dict(_FOLD_TEST_30D)},
+             {"oosMetrics": {"totalReturn": 8.0}, "test": dict(_FOLD_TEST_30D)}]
+# Same returns, NO test bounds — the unscaled-gapZ + caveat path.
+_WF_FOLDS_NO_BOUNDS = [{"oosMetrics": {"totalReturn": 10.0}},
+                       {"oosMetrics": {"totalReturn": 12.0}},
+                       {"oosMetrics": {"totalReturn": 8.0}}]
 _SIGMA = statistics.pstdev([10.0, 12.0, 8.0])   # ≈ 1.633
 
 
@@ -283,9 +363,11 @@ def _wait(cond, timeout: float = 3.0) -> None:
     raise AssertionError("reconciliation drain did not resolve in time")
 
 
-def _swing_live_version(trades: list[dict[str, Any]]) -> FakeLiveRepo:
+def _swing_live_version(
+    trades: list[dict[str, Any]], config: dict[str, Any] = _SWING_CONFIG
+) -> FakeLiveRepo:
     return FakeLiveRepo(
-        versions={_VERSION: {"strategyId": _STRATEGY, "version": "1.0.1", "config": _SWING_CONFIG}},
+        versions={_VERSION: {"strategyId": _STRATEGY, "version": "1.0.1", "config": config}},
         trades={_VERSION: trades},
     )
 
@@ -318,15 +400,19 @@ def test_reconcile_champion_vs_itself_is_aligned():
     assert row["pairedTrades"] == 2
     assert row["diagnosis"] is None                             # only DIVERGENT carries one
     assert row["simRunId"] == "sim-run-1"
+    # meaning-of-paired_trades + the √t normalization record are on the row itself
+    assert "first fill per (symbol, IST entry date)" in row["gap"]["pairedBasis"]
+    assert row["gap"]["gapZTimeScale"]["factor"] == pytest.approx(1.0)  # 30d window == 30d folds
     # the re-sim was submitted with purpose:reconcile + the pinned semver + the common capital
     assert backtest.runs_submitted[0]["purpose"] == "reconcile"
     assert backtest.runs_submitted[0]["strategyVersion"] == "1.0.1"
     assert backtest.runs_submitted[0]["initialCapital"] == 1_000_000.0
 
 
-def test_reconcile_divergent_populates_diagnosis():
-    # live 0% vs sim 10% over 30 days → returnGap −10 → gapZ ≈ −6.1 ≤ −1.5; window ≥ 4 weeks → floor
-    # met → DIVERGENT. Live symbols differ from sim → LOW overlap → the upstream-divergence signal.
+def test_reconcile_divergent_explicit_universe_keeps_upstream_note():
+    # EXPLICIT universe: live 0% vs sim 10% over 30 days (== the 30d fold base → scale 1) →
+    # gapZ = −10/σ ≈ −6.1 ≤ −1.5; window ≥ 4 weeks → floor met → DIVERGENT. Disjoint trade sets →
+    # LOW overlap → the legit upstream-divergence signal (screener/CA/feed) stays on the checklist.
     live_trades = [_live("ALPHA", "2026-06-01T15:20:00+05:30", 100.0, pnl=0.0),
                    _live("BETA", "2026-06-02T15:20:00+05:30", 100.0, pnl=0.0)]
     sim_trades = [_sim("GAMMA", "2026-06-10T09:15:00+05:30", 100.0)]
@@ -349,6 +435,31 @@ def test_reconcile_divergent_populates_diagnosis():
     assert "UPSTREAM" in overlap_item["note"]
 
 
+def test_reconcile_divergent_funnel_mode_replaces_upstream_with_structural_note():
+    # FUNNEL universe (manas_arora_funnel): the re-sim signals on the TOP pinned pick only while
+    # live papers the whole funnel → overlap ≈ 0 STRUCTURALLY. The diagnosis must NOT claim the
+    # divergence is upstream, and the gap caveats must carry the single-pick distortion note.
+    live_trades = [_live("ALPHA", "2026-06-01T15:20:00+05:30", 100.0, pnl=0.0),
+                   _live("BETA", "2026-06-02T15:20:00+05:30", 100.0, pnl=0.0)]
+    sim_trades = [_sim("GAMMA", "2026-06-10T09:15:00+05:30", 100.0)]
+    repo = FakeReconRepo(walkforward_run_ids={_VERSION: "wf-1"})
+    live = _swing_live_version(live_trades, config=_FUNNEL_CONFIG)
+    backtest = FakeReconBacktest(sim_total_return=10.0, sim_trades=sim_trades, folds=_WF_FOLDS)
+    svc = _svc(repo, live, backtest)
+
+    receipt = svc.create({"versionId": _VERSION, "from": "2026-06-01", "to": "2026-07-01"})
+    assert any("single-pick sim vs multi-name live" in c for c in receipt["caveats"])
+    _wait(lambda: len(repo.rows) == 1)
+    row = repo.rows[0]
+    assert row["verdict"] == "DIVERGENT"
+    overlap_item = next(
+        i for i in row["diagnosis"]["checklist"] if i["id"] == "trade_set_overlap"
+    )
+    assert "UPSTREAM" not in overlap_item["note"]              # the false inference is suppressed
+    assert "STRUCTURAL" in overlap_item["note"]
+    assert any("single-pick sim vs multi-name live" in c for c in row["gap"]["caveats"])
+
+
 def test_reconcile_no_fold_history_is_insufficient():
     # no walk-forward run for the version → σ undefined → gapZ NULL → INSUFFICIENT.
     live_trades = [_live("ALPHA", "2026-06-01T15:20:00+05:30", 100.0, pnl=0.0)]
@@ -368,7 +479,8 @@ def test_reconcile_no_fold_history_is_insufficient():
 
 def test_reconcile_floor_unmet_is_insufficient():
     # gapZ ≤ −1.5 but a 9-day window + < 20 paired trades → floor UNMET → INSUFFICIENT, not
-    # DIVERGENT.
+    # DIVERGENT. The 9-day window over 30-day folds also exercises the √t UPSCALE direction:
+    # gapZ = −10 × √(30/9) / σ ≈ −11.18 (a short window's gap carries LESS noise than the folds).
     live_trades = [_live("ALPHA", "2026-06-01T15:20:00+05:30", 100.0, pnl=0.0)]
     sim_trades = [_sim("ALPHA", "2026-06-01T09:15:00+05:30", 100.0)]
     repo = FakeReconRepo(walkforward_run_ids={_VERSION: "wf-1"})
@@ -379,9 +491,53 @@ def test_reconcile_floor_unmet_is_insufficient():
     svc.create({"versionId": _VERSION, "from": "2026-06-01", "to": "2026-06-10"})  # 9 days
     _wait(lambda: len(repo.rows) == 1)
     row = repo.rows[0]
-    assert row["gapZ"] == pytest.approx(-10.0 / _SIGMA)         # ≤ −1.5
+    assert row["gapZ"] == pytest.approx(-10.0 * math.sqrt(30.0 / 9.0) / _SIGMA)  # ≤ −1.5
     assert row["evidenceFloorMet"] is False
     assert row["verdict"] == "INSUFFICIENT"
+
+
+def test_reconcile_gap_z_time_normalized_90d_window_30d_folds():
+    # End-to-end √t normalization (the coordinator's concrete case): a 90-day live window over
+    # 30-day folds. live 0% vs sim 10% → raw gap −10; corrected gapZ = −10×√(30/90)/σ ≈ −3.54
+    # (UNSCALED would read −10/σ ≈ −6.12 — a √3 inflation). The scale record lands on the gap.
+    live_trades = [_live("ALPHA", "2026-06-01T15:20:00+05:30", 100.0, pnl=0.0)]
+    sim_trades = [_sim("ALPHA", "2026-06-01T09:15:00+05:30", 100.0)]
+    repo = FakeReconRepo(walkforward_run_ids={_VERSION: "wf-1"})
+    live = _swing_live_version(live_trades)
+    backtest = FakeReconBacktest(sim_total_return=10.0, sim_trades=sim_trades, folds=_WF_FOLDS)
+    svc = _svc(repo, live, backtest)
+
+    svc.create({"versionId": _VERSION, "from": "2026-06-01", "to": "2026-08-30"})  # 90 days
+    _wait(lambda: len(repo.rows) == 1)
+    row = repo.rows[0]
+    expected = -10.0 * math.sqrt(30.0 / 90.0) / _SIGMA
+    assert row["gapZ"] == pytest.approx(expected)
+    assert row["gapZ"] != pytest.approx(-10.0 / _SIGMA)         # NOT the unscaled √3-inflated z
+    scale = row["gap"]["gapZTimeScale"]
+    assert scale["reconDays"] == pytest.approx(90.0)
+    assert scale["foldTestDays"] == pytest.approx(30.0)
+    assert scale["factor"] == pytest.approx(math.sqrt(30.0 / 90.0))
+
+
+def test_reconcile_fold_bounds_missing_is_unscaled_with_caveat():
+    # Folds carrying returns but NO test bounds → σ exists but T_fold is unknown → gapZ stays
+    # UNSCALED (factor 1) and the row says so — never a silent un-normalized z.
+    live_trades = [_live("ALPHA", "2026-06-01T15:20:00+05:30", 100.0, pnl=0.0)]
+    sim_trades = [_sim("ALPHA", "2026-06-01T09:15:00+05:30", 100.0)]
+    repo = FakeReconRepo(walkforward_run_ids={_VERSION: "wf-1"})
+    live = _swing_live_version(live_trades)
+    backtest = FakeReconBacktest(
+        sim_total_return=10.0, sim_trades=sim_trades, folds=_WF_FOLDS_NO_BOUNDS
+    )
+    svc = _svc(repo, live, backtest)
+
+    svc.create({"versionId": _VERSION, "from": "2026-06-01", "to": "2026-08-30"})  # 90 days
+    _wait(lambda: len(repo.rows) == 1)
+    row = repo.rows[0]
+    assert row["gapZ"] == pytest.approx(-10.0 / _SIGMA)         # scale 1 fallback
+    assert row["gap"]["gapZTimeScale"]["foldTestDays"] is None
+    assert row["gap"]["gapZTimeScale"]["factor"] == 1.0
+    assert any("NOT time-normalized" in c for c in row["gap"]["caveats"])
 
 
 def test_reconcile_failed_resim_persists_insufficient_row():

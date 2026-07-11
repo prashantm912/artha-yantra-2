@@ -155,7 +155,7 @@ cutover) is now the ONLY remaining pending wave** — prepped, gated on a live m
 | Strategy **#7 Hero-Zero** | **DONE (paper, #130)** | — | **CORRECTION:** #7 is BUY-side (long premium, defined risk) per the Siva cheat sheet ("buy side only"), NOT short-premium — so it needs NEITHER SPAN NOR live orders. Wired as a paper scalper via `HeroZeroGate` + `scalp-hero-zero-nifty.yaml` (expiry-day, 14:30–15:20, >50% OI+price sync, one-away strike via side+delta band). Golden/parity byte-identical. Live-order routing is the only remaining gate for trading it LIVE (shared with the cluster below). |
 | Strategy **#11 Straddle** | **PARTIAL — long-straddle built (#155)** | short legs: SPAN + live orders | A NEW two-leg/neutral engine primitive + a LONG (defined-risk, BUY-both-ATM) paper draft seeded (#155, `scalp-straddle-nifty.yaml`). The SHORT straddle (SELL legs, unlimited risk) stays gated on SPAN sizing + live orders. |
 | Strategy **#8 BTST/STBT** | **PARTIAL — long-carry built (#148)** | short legs: SPAN | A `style:btst` overnight long-premium paper draft seeded (#148, `scalp-btst-stbt-nifty.yaml`, pre-close A9 clock). The short-premium SELL legs stay SPAN-deferred. |
-| **#47 SPAN appliance** (§8 marginism) | **BUILT (dormant) + .spn harness (#144)** | real-broker-parity (owner-gated) | margin-service (#126, marginism 0.1.1, FastAPI :8086, default-off) + a `.spn` XML ingest path + a golden-parity harness vs a synthetic fixture (#144) — confirmed marginism parses the real NSCCL `.spn` directly. VERIFY-pending (OWNER-GATED, the only gap): a real `nsccl.<YYYYMMDD>.s.spn` + a known broker margin number for the same basket/date; the NSE download URL is documented (member FAOFTP tree, confirm public-vs-login before scheduling). |
+| **#47 SPAN appliance** (§8 marginism) | **BUILT (dormant) + .spn harness (#144); .spn path SUPERSEDED by #510** | offline/backtest fallback | margin-service (#126, marginism 0.1.1, FastAPI :8086, default-off) + a `.spn` XML ingest path + a golden-parity harness vs a synthetic fixture (#144) — confirmed marginism parses the real NSCCL `.spn` directly. ~~VERIFY-pending (OWNER-GATED, the only gap): a real `nsccl.<YYYYMMDD>.s.spn` + a known broker margin number for the same basket/date; the NSE download URL is documented (member FAOFTP tree, confirm public-vs-login before scheduling).~~ **SUPERSEDED 2026-07-04 (#510): no `.spn` file needed — Upstox computes broker-real SPAN server-side (`POST /v2/charges/margin`) on the analytics token (live-verified 1-lot short → span 337004.85 / final 188604.45). marginism stays the offline/backtest fallback.** |
 | **OpenAlgoOrderGateway** (live broker order impl) | **BUILT (dormant, #154)** | owner arms after the latency gate | `RestOpenAlgoOrderGateway` → OpenAlgo `POST /api/v1/placeorder` (verified vs checkout), WireMock-tested, gateway-failure-never-propagates; bound **only** when `artha.scalper.execution=live` (default `paper` ⇒ `DisabledOrderGateway` places nothing). Owner arms it after the §17.3 place-ack latency gate; never auto-fires. |
 | **§18.1 order read endpoints** (orderbook/positions/tradebook/funds) + React `/orders` page | **BUILT (dormant, #131)** | live-verify | OpenAlgo `openalgo/wire/` anti-corruption DTOs + gated `RestOpenAlgoOrderReadGateway` + `GET /api/v1/orders/*` + read-only `/orders` page, WireMock-tested, ships off (`artha.openalgo.order-read-enabled=false`). Live-broker verify deferred. |
 | **Full-auto execution** (no human "Take") | DEFERRED | a later flag | Semi-auto (human "Take") is the v1 safety boundary. |
@@ -192,7 +192,7 @@ mega-dropdown split into a per-section menu bar** (#177). Authority for the reva
 
 | Item | Status | Target | Reason |
 |---|---|---|---|
-| **Data-foundation value-verify** — render every OI/data page in History mode on a REAL session + compare value-for-value vs oipulse | GATED | the expired/OI backfill data (NOW loading, #112–#116) | The big open Phase-4 item: pages are structure-QA'd, not value-verified. Authority: `superpowers/plans/2026-06-21-data-foundation-milestone.md` + [[oipulse-live-qa-method]]. |
+| **Data-foundation value-verify** — render every OI/data page in History mode on a REAL session + compare value-for-value vs oipulse | ~~GATED~~ **PASSED (2026-07-01)** | — | **PASSED live-vs-live 2026-07-01** — captured OI == oipulse exact share (no PR; a live data-verification action). See the forward ledger `2026-07-02-remaining-items.md` §2 `value-verify-ratify`. Authority: `superpowers/plans/2026-06-21-data-foundation-milestone.md` + [[oipulse-live-qa-method]]. |
 | **Data Ops Console deploy** (B1–B6 merged #121) | **DONE — DEPLOYED + live** | — | Deployed once the backfill idled; backend (`coverage-summary`/`upstox-quota-status`/`expired-backfill/status`/`query`/`export`) + the `/data-ops` route both serve 200 (#219 fixed the bare `/data-ops` → `/data-ops/status` redirect). See [[data-ops-console]]. |
 | **`/orders` page** + §18.1 order read endpoints (orderbook/positions/tradebook/funds) | **BUILT (dormant, #131)** | live-verify | See the Phase-4 table — scaffolded + WireMock-tested; live-broker verify deferred. |
 | **Manual-verification checklist UI** (verify + confirm panel) | **DONE** (#125) | — | Built (see the Phase-4 table); the `2026-06-20-scalper-manual-verification-checklist.md` contract is fulfilled. |
@@ -202,7 +202,7 @@ mega-dropdown split into a per-section menu bar** (#177). Authority for the reva
 
 | Phase | Status | Needs | Notes |
 |---|---|---|---|
-| 5 — Minervini Track-1 screener (§13) | **NOT STARTED — UNBLOCKED** | — (200-day history seeded #389) | Daily 8-gate Trend Template + RS rank; VCP/pivot/Cheat/Power-Play deferred (owner accepts manual chart-reading of entries). The 200-day MA history is now on disk (#389) → this is the lone remaining net-new build. |
+| 5 — Minervini Track-1 screener (§13) | ~~**NOT STARTED — UNBLOCKED**~~ **SHIPPED + LIVE (#524–#553)** | — | **SHIPPED 2026-07-04/05:** Track A screener (#524/#525/#526 + #527) then the full Phase-5→Phase-9 swing workflow (geometry/setups/regime/backtest/exit doctrine/live daily engine, #528–#553). Remaining = supervised forward-paper watch + §0.5 #12 reliability sign-off (owner-gated, not code). |
 | 6 — Backtest + forward wiring (§14) | **PARTIAL** | Phases 3 + 5 (+ the §5 OI data now loading) | **Part 2 premium-as-primary replay LANDED** (#114–#119): an options backtest now trades the option's own 1m premium series (`CANDLE_1M`), not the index close — golden-pinned. The v1 simplifications are now CLOSED (#123): per-bar mark-to-market, FillSimulator slippage+costs on the premium leg, and a 422 DATA_GAP coverage pre-flight. **2026-06-25/26:** session/square-off/expiry enforced in replay (#206), an opt-in **OI-confluence entry gate** drops legs entering against the historical Connecting-Dots trend (#208/#209), a sweepable optimize block (#207), and a post-hoc **OI-attribution** surface (#201) all landed — all parity-safe. Remaining: the value-verify on real backfilled premium (gated on the backfill), forward-test wiring. Scalp historical-backtest fidelity is directional, not P&L-exact (R4) — **and OI-led strategies read MUTED on backtests because derived history forces Dow+IV NEUTRAL; judge them on FORWARD paper with real captured OI, not a weak historical backtest** (#214 lesson). raptorbt cross-check oracle DEFERRED. |
 
 ## Data Ops Console — parked decisions (from #121, B1–B6)
@@ -210,7 +210,7 @@ mega-dropdown split into a per-section menu bar** (#177). Authority for the reva
 | Item | Status | Target | Reason |
 |---|---|---|---|
 | `backfill_jobs` audit table (run history surviving a restart) | **DONE (#517)** | — | V030 `backfill_jobs` run-audit table (kind/params/status/rows_written/error/timings) + `GET /api/v1/market/admin/backfill-jobs` (typed) + Status-page history — survives restart. |
-| B6 per-expiry bulk export + ZIP/Parquet (async streaming) | DEFERRED | when bulk export is needed | v1 is per-contract CSV/JSON (≤100k rows, sync); per-expiry is ~1.3M rows. B5 query console covers arbitrary slices meanwhile. |
+| ~~B6 per-expiry bulk export + ZIP/Parquet (async streaming)~~ | **DONE (#584)** | — | **SHIPPED 2026-07-06 (#584) — per-expiry BULK export zips the whole option chain in one download (§6).** (Was: v1 per-contract CSV/JSON ≤100k rows sync; B5 query console covered arbitrary slices meanwhile.) |
 | Contract-type selector in the collection wizard | **DONE (#517)** | — | BOTH/OPTIONS/FUTURES selector on the Collection wizard (default BOTH → byte-identical to the old options+futures pull). |
 | B1 live updates via STOMP (vs the 2s poll) | DEFERRED | consistency polish | A small poll is simpler; the jobs WS topic is backtest-scoped. |
 
@@ -239,8 +239,10 @@ mega-dropdown split into a per-section menu bar** (#177). Authority for the reva
   folds-excluded, dataHash now surface as a compact `guardMetrics` on `/best` + the React sweep leaderboard
   (read from the persisted fold/results data, no recompute; legacy full-window trials show "no fold guards").
 - **e2e coverage** for the Data Ops console + scalper checklist — ADDED (#128, Playwright + axe, desktop + 480px).
-- **Upstox login-free live migration** (W-U1…U4) — BUILT flag-gated default-Kite (#137/#139/#141/#145/#149);
-  REMAINING = deploy off-hours + the live latency A/B + flip the `source.*` flags (see W-U4 row + the runbook
+- **Upstox login-free live migration** (W-U1…U4) — BUILT flag-gated default-Kite (#137/#139/#141/#145/#149).
+  ~~REMAINING = deploy off-hours + the live latency A/B + flip the `source.*` flags~~ **W-U4 CUTOVER = a settled
+  owner NO (struck 2026-07-12; per `PHASE_GATES.md`: "settled owner NO — stay Kite, split-by-capability") — the
+  W-U1..U3 capabilities stay BUILT flag-gated as hot-standby, no full flip.** (see W-U4 row + the runbook
   `docs/manual-tests/wave-u4-upstox-cutover.md`). **Target end-state routing (recommendation, 2026-06-26):**
   keep BOTH brokers, split by strength — Kite = live WS ticker only (+ auth/instruments) + hot-standby; Upstox
   = all REST/analytics/history (quotes/candles/optionchain/fiidii/analytics); OpenAlgo = orders-only (NOT a
@@ -251,6 +253,8 @@ mega-dropdown split into a per-section menu bar** (#177). Authority for the reva
   as paper drafts; SHORT-premium SELL legs of #8/#11 remain the only strategy gap (SPAN + live orders).
 - **`OpenAlgoOrderGateway`** (#154) + **higher-order greeks** (#156) + **SPAN `.spn` harness** (#144) — DONE
   (order path + SPAN parity stay owner-gated to enable).
-- **`nse↔upstox` Modulith cycle** (#138) + **backfill transient-resilience** (#140) — fixed; #140 is
+- **`nse↔upstox` Modulith cycle** (#138) + **backfill transient-resilience** (#140) — fixed. ~~#140 is
   merged-not-deployed (the running market-data image still aborts on a transient blip; the bash watchdog
-  re-triggers it meanwhile).
+  re-triggers it meanwhile).~~ **DEPLOYED SINCE (stale caveat, struck 2026-07-12):** market-data has been
+  rebuilt + deployed live many times after #140 (e.g. #510/#514/#524/#525/#686/#699), so #140's per-expiry
+  transient-error isolation ships in every current image.

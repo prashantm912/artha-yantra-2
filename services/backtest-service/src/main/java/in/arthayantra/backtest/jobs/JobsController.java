@@ -1,6 +1,7 @@
 package in.arthayantra.backtest.jobs;
 
 import in.arthayantra.backtest.replay.RunRepository;
+import in.arthayantra.backtest.replay.counterfactual.CounterfactualRunRepository;
 import in.arthayantra.common.web.http.ArthaHeaders;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -24,11 +25,14 @@ public class JobsController {
 
   private final JobsService service;
   private final RunRepository runs;
+  private final CounterfactualRunRepository counterfactualRuns;
 
-  /** Wires the service + run repository (for the resultRef). */
-  public JobsController(JobsService service, RunRepository runs) {
+  /** Wires the service + run repositories (for the resultRef). */
+  public JobsController(
+      JobsService service, RunRepository runs, CounterfactualRunRepository counterfactualRuns) {
     this.service = service;
     this.runs = runs;
+    this.counterfactualRuns = counterfactualRuns;
   }
 
   /** Submit a backtest → 202 with the jobId (§D.5). */
@@ -69,7 +73,20 @@ public class JobsController {
   @GetMapping("/jobs/{jobId}")
   public Map<String, Object> job(@PathVariable UUID jobId) {
     Job job = service.get(jobId);
-    return detail(job, runs.findRunIdByJobId(jobId).map(UUID::toString).orElse(null));
+    return detail(job, resultRef(job));
+  }
+
+  /**
+   * The resultRef (run id) for a job's status payload: a COUNTERFACTUAL job's run lives in
+   * {@code counterfactual_runs} (EVO E3 item 9), every other kind in {@code backtest_runs} — so the
+   * poller reads the right result store from the same status shape.
+   */
+  private String resultRef(Job job) {
+    java.util.Optional<UUID> runId =
+        job.kind() == JobKind.COUNTERFACTUAL
+            ? counterfactualRuns.findRunIdByJobId(job.id())
+            : runs.findRunIdByJobId(job.id());
+    return runId.map(UUID::toString).orElse(null);
   }
 
   /** Cancel: 204 if still queued, 202 {@code cancelling} if running (observed at a checkpoint). */

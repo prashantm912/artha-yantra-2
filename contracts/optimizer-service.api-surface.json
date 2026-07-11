@@ -121,6 +121,24 @@
       "200"
     ]
   },
+  "POST /api/v1/evolution/campaigns": {
+    "params": [],
+    "requestBody": true,
+    "responses": [
+      "201",
+      "422"
+    ]
+  },
+  "POST /api/v1/evolution/campaigns/{campaign_id}/generations": {
+    "params": [
+      "campaign_id"
+    ],
+    "requestBody": true,
+    "responses": [
+      "201",
+      "422"
+    ]
+  },
   "POST /api/v1/optimizations/run": {
     "params": [],
     "requestBody": true,

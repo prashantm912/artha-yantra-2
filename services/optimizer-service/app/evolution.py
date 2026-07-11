@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import statistics
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -238,6 +239,26 @@ _RETRO_CAVEAT = (
 )
 
 
+@dataclass(frozen=True)
+class ScoredSweep:
+    """The shared output of scoring one existing sweep's cohort — consumed by BOTH the retro-score
+    READ (``retro_score``) and the campaign RECORDER (``EvoRecorderService.record_generation``), so
+    the assembly + scoring lives in exactly ONE place. ``cards`` are the §6.3 scorecards WITHOUT the
+    standing retro caveat appended — each caller decides whether to stamp it (the read always does;
+    the recorder only for LIVE_FIRST). ``job`` / ``objective`` / ``parameters`` are the sweep's
+    frozen context the recorder pre-registers into a generation's ``proposal`` (§3.1 snooping
+    ledger); ``candidates`` are the assembled metric bags (carry engineSha / dataHash)."""
+
+    job: dict[str, Any]
+    objective: dict[str, Any]
+    metric: str
+    direction: str
+    parameters: list[dict[str, Any]]
+    candidates: list[dict[str, Any]]
+    cards: list[dict[str, Any]]
+    truncated: bool
+
+
 class RetroScoreService:
     """Applies the §6 scoring library to an EXISTING sweep. Assembles each COMPLETE trial's
     normalized metric bag from its ``optimization_trials`` row + its backtest run's OOS fold array
@@ -260,7 +281,13 @@ class RetroScoreService:
         self._trials_factory = trials_factory
         self._backtest = backtest_client
 
-    def retro_score(self, sweep_id: str) -> RetroScoreResponse:
+    def score_sweep(self, sweep_id: str) -> ScoredSweep:
+        """Assemble + score an existing sweep's COMPLETE trials as a cohort — the shared core reused
+        by the retro-score read AND the campaign recorder (do NOT duplicate this assembly). Reads
+        the sweep job + its trials + each trial's backtest evidence, then scores the whole cohort
+        via ``scoring.score_cohort``. Returns the raw cards (no retro caveat appended — the caller
+        stamps it) plus the frozen job/objective/parameters context. Raises 404 for an unknown /
+        non-OPTIMIZATION job (the shared idiom)."""
         jobs = self._jobs_factory()
         trials = self._trials_factory()
         try:
@@ -269,28 +296,42 @@ class RetroScoreService:
                 raise ApiError(404, "NOT_FOUND_JOB", f"no such sweep: {sweep_id}")
             request = job.get("request") or {}
             parameters = request.get("parameters", [])
-            metric, direction = _primary_objective(request.get("objective", {}))
+            objective = request.get("objective", {})
+            metric, direction = _primary_objective(objective)
             rows = trials.list_for_sweep(sweep_id, _PROMOTABLE, _COHORT_CAP, 0)
         finally:
             jobs.close()
             trials.close()
         candidates = [self._assemble(row, metric) for row in rows]
         cards = scoring.score_cohort(candidates, parameters, direction=direction)
-        for card in cards:
+        return ScoredSweep(
+            job=job,
+            objective=objective,
+            metric=metric,
+            direction=direction,
+            parameters=parameters,
+            candidates=candidates,
+            cards=cards,
+            truncated=len(rows) >= _COHORT_CAP,
+        )
+
+    def retro_score(self, sweep_id: str) -> RetroScoreResponse:
+        scored = self.score_sweep(sweep_id)
+        for card in scored.cards:
             card["caveats"].append(_RETRO_CAVEAT)
         response_caveats = []
-        if len(rows) >= _COHORT_CAP:
+        if scored.truncated:
             response_caveats.append(
                 f"cohort read capped at {_COHORT_CAP} COMPLETE trials — z-scores may be "
                 "normalized over a partial cohort"
             )
         return RetroScoreResponse(
             sweepJobId=sweep_id,
-            metric=metric,
-            direction=direction,
+            metric=scored.metric,
+            direction=scored.direction,
             policy="SIM_FIRST",
             caveats=response_caveats,
-            items=[Scorecard(**card) for card in cards],
+            items=[Scorecard(**card) for card in scored.cards],
         )
 
     def _assemble(self, row: dict[str, Any], metric: str) -> dict[str, Any]:
@@ -377,6 +418,183 @@ def _retro(request: Request) -> RetroScoreService:
 def retro_score(sweep_job_id: str, request: Request) -> RetroScoreResponse:
     """Score an existing sweep's trials as a cohort (§6 gates + RobustScore); 404 if unknown."""
     return _retro(request).retro_score(sweep_job_id)
+
+
+# --- Campaign / generation recorder (§12 E1 item 3) ----------------------------------------------
+# The WRITE surface: create a campaign, and record a manually-triggered, already-completed sweep as
+# a campaign generation (scoring its cohort into evo_candidates rows). No autonomy — no scheduler,
+# no proposals, no registry materialization (version_id stays NULL until E2). optimizer-service is
+# the evo schema's writer (§2.2). The design keystone (§1.2): the engine REFUSES to score a
+# candidate on an evidence plane its policy forbids — a SIM_BLOCKED campaign 422s before it scores.
+
+# The evidence-policy enum, mirrored from the evo_campaigns CHECK constraint (V011). An unknown
+# value is a 422 at the API rather than a psycopg CHECK violation (a clean, typed rejection).
+_EVIDENCE_POLICIES = {"SIM_FIRST", "LIVE_FIRST", "SIM_BLOCKED"}
+
+
+class GenerationRecorded(GenerationModel):
+    """The recorder's response: the persisted generation (``evo_generations`` shape) plus the count
+    of scorecards it wrote — the candidates themselves surface through GET
+    /campaigns/{id}/candidates (this PR adds no new read shape)."""
+
+    candidatesRecorded: int
+
+
+class EvoRecorderService:
+    """Records a manually-triggered sweep as a campaign generation. Two writes: ``create_campaign``
+    (a new ACTIVE campaign) and ``record_generation`` (score an existing sweep's cohort → one
+    generation + one SCORED candidate per trial). REUSES ``RetroScoreService.score_sweep`` for all
+    assembly + scoring — this service adds only the campaign gating (policy refusal, idempotency)
+    and the atomic persistence. Collaborators injected (the EvoRepo factory + the retro scorer) so
+    tests drive it with the in-memory fakes."""
+
+    def __init__(self, repo_factory: Callable[[], Any], scorer: RetroScoreService) -> None:
+        self._repo_factory = repo_factory
+        self._scorer = scorer
+
+    def create_campaign(self, body: dict[str, Any]) -> CampaignModel:
+        strategy_id = body.get("strategyId")
+        family = body.get("family")
+        policy = body.get("evidencePolicy")
+        for field, value in (
+            ("strategyId", strategy_id), ("family", family), ("evidencePolicy", policy)
+        ):
+            if not value:
+                raise ApiError(400, "VALIDATION_FAILED", f"missing required field: {field}")
+        if policy not in _EVIDENCE_POLICIES:
+            raise ApiError(
+                422,
+                "VALIDATION_FAILED",
+                f"unknown evidencePolicy {policy!r}; expected one of {sorted(_EVIDENCE_POLICIES)}",
+            )
+        repo = self._repo_factory()
+        try:
+            row = repo.create_campaign(
+                strategy_id, family, policy,
+                body.get("objectiveSpec"), body.get("searchSpace"), body.get("budget"),
+            )
+        finally:
+            repo.close()
+        return CampaignModel(**row)
+
+    def record_generation(self, campaign_id: str, body: dict[str, Any]) -> GenerationRecorded:
+        sweep_id = body.get("sweepJobId")
+        if not sweep_id:
+            raise ApiError(400, "VALIDATION_FAILED", "missing required field: sweepJobId")
+
+        # Gate BEFORE scoring (both to honor the evidence-policy refusal and to never waste a
+        # scoring pass on a duplicate): the campaign must exist, its policy must permit sim scoring,
+        # and this sweep must not already be recorded.
+        repo = self._repo_factory()
+        try:
+            campaign = repo.get_campaign(campaign_id)
+            if campaign is None:
+                raise ApiError(404, "NOT_FOUND_CAMPAIGN", f"no campaign {campaign_id}")
+            policy = campaign["evidencePolicy"]
+            if policy == "SIM_BLOCKED":
+                raise ApiError(
+                    422,
+                    "EVIDENCE_POLICY_BLOCKED",
+                    f"campaign {campaign_id} is SIM_BLOCKED — a sim sweep is not scorable evidence "
+                    "for this family (design §1.2); record live/paper evidence instead",
+                )
+            for gen in repo.list_generations(campaign_id):
+                if (gen.get("proposal") or {}).get("sweepJobId") == sweep_id:
+                    raise ApiError(
+                        409,
+                        "CONFLICT_SWEEP_RECORDED",
+                        f"sweep {sweep_id} is already recorded as generation {gen['n']} of "
+                        f"campaign {campaign_id}",
+                    )
+        finally:
+            repo.close()
+
+        # Score the cohort (reuses the retro assembly + score_cohort); 404 for an unknown sweep.
+        scored = self._scorer.score_sweep(sweep_id)
+
+        # A generation freezes its cohort at registration: recording a still-running sweep would
+        # persist a PARTIAL cohort, and the 409 idempotency above would then lock out the full one.
+        if scored.job.get("status") != "completed":
+            raise ApiError(
+                422,
+                "SWEEP_NOT_COMPLETED",
+                f"sweep {sweep_id} is {scored.job.get('status')!r} — only a completed sweep is "
+                "recordable as a generation (a partial cohort must never freeze)",
+            )
+
+        # LIVE_FIRST: sim evidence is functional-smoke only, never a ranking plane (§1.2) — stamp
+        # every persisted scorecard with the standing descriptive caveat so the record is honest.
+        if policy == "LIVE_FIRST":
+            for card in scored.cards:
+                card["caveats"].append(_RETRO_CAVEAT)
+
+        # The generation's proposal IS the §3.1 pre-registration ledger — sampler/objective/search
+        # space frozen from the sweep at registration time (created_at proves "registered when").
+        proposal = {
+            "source": "manual",
+            "sweepJobId": sweep_id,
+            "objective": scored.objective,
+            "direction": scored.direction,
+            "parameters": scored.parameters,
+        }
+        # engine_sha / data_epoch lifted from the sweep's run evidence when present (all a sweep's
+        # trials share one engine SHA / data epoch — the first assembled candidate that carries them
+        # is representative; NULL on runs predating #703 SHA-stamping — recorded, never fabricated).
+        engine_sha = next((c["engineSha"] for c in scored.candidates if c.get("engineSha")), None)
+        data_hash = next((c["dataHash"] for c in scored.candidates if c.get("dataHash")), None)
+        data_epoch = {"dataHash": data_hash} if data_hash else None
+        candidate_rows = [
+            {
+                "mutationKind": "PARAMS",
+                "params": card.get("params") or {},
+                "sweepJobId": sweep_id,
+                "scorecard": card,
+                "state": "SCORED",
+            }
+            for card in scored.cards
+        ]
+
+        # Persist the generation + all its candidates in ONE transaction (EvoRepo.record_generation)
+        # — the scoring above already succeeded, so a generation is never left half-recorded.
+        repo = self._repo_factory()
+        try:
+            gen = repo.record_generation(
+                campaign_id=campaign_id,
+                proposal=proposal,
+                engine_sha=engine_sha,
+                data_epoch=data_epoch,
+                status="DONE",
+                started_at=scored.job.get("startedAt"),
+                finished_at=scored.job.get("finishedAt"),
+                candidates=candidate_rows,
+            )
+        finally:
+            repo.close()
+        return GenerationRecorded(**gen, candidatesRecorded=len(candidate_rows))
+
+
+def _writer(request: Request) -> EvoRecorderService:
+    return request.app.state.evo_writer
+
+
+@router.post("/campaigns", response_model=CampaignModel, status_code=201)
+def create_campaign(body: dict[str, Any], request: Request) -> CampaignModel:
+    """Create an evolution campaign (status ACTIVE); 422 on an unknown evidencePolicy."""
+    return _writer(request).create_campaign(body)
+
+
+@router.post(
+    "/campaigns/{campaign_id}/generations",
+    response_model=GenerationRecorded,
+    status_code=201,
+)
+def record_generation(
+    campaign_id: str, body: dict[str, Any], request: Request
+) -> GenerationRecorded:
+    """Record a completed sweep as this campaign's next generation, scoring its cohort into
+    candidate scorecards. 404 unknown campaign / sweep; 409 if the sweep is already recorded; 422 if
+    the campaign's evidence policy forbids sim scoring (SIM_BLOCKED)."""
+    return _writer(request).record_generation(campaign_id, body)
 
 
 # --- fold/run metric-bag helpers (assembly only; the scoring math lives in scoring.py) ----------

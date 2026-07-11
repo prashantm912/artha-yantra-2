@@ -222,6 +222,7 @@ class FakeEvoRepo:
         self.campaigns = campaigns or []
         self.generations = generations or {}
         self.candidates = candidates or {}
+        self._seq = 0
 
     def list_campaigns(self, limit: int, offset: int) -> list[dict[str, Any]]:
         return self.campaigns[offset:offset + limit]
@@ -234,6 +235,67 @@ class FakeEvoRepo:
 
     def list_candidates_for_campaign(self, campaign_id: str) -> list[dict[str, Any]]:
         return self.candidates.get(campaign_id, [])
+
+    def create_campaign(
+        self,
+        strategy_id: str,
+        family: str,
+        evidence_policy: str,
+        objective_spec: dict[str, Any] | None,
+        search_space: dict[str, Any] | None,
+        budget: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Mirrors EvoRepo.create_campaign: appends an ACTIVE campaign and returns the read
+        envelope (status + timestamps synthesized, as the DDL defaults would)."""
+        self._seq += 1
+        row = {
+            "id": f"camp-{self._seq}", "strategyId": strategy_id, "family": family,
+            "evidencePolicy": evidence_policy, "objectiveSpec": objective_spec,
+            "searchSpace": search_space, "budget": budget, "status": "ACTIVE",
+            "championVersionId": None, "createdAt": "2026-07-11T00:00:00+00:00",
+            "updatedAt": "2026-07-11T00:00:00+00:00",
+        }
+        self.campaigns.append(row)
+        return row
+
+    def record_generation(
+        self,
+        *,
+        campaign_id: str,
+        proposal: dict[str, Any],
+        engine_sha: str | None,
+        data_epoch: dict[str, Any] | None,
+        status: str,
+        started_at: str | None,
+        finished_at: str | None,
+        candidates: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Mirrors EvoRepo.record_generation: assigns n=MAX(n)+1 for the campaign, appends the
+        generation, and appends one candidate row per scored trial (SCORED, version_id NULL)."""
+        self._seq += 1
+        existing = self.generations.get(campaign_id, [])
+        n = max((g["n"] for g in existing), default=0) + 1
+        gen_id = f"gen-{self._seq}"
+        gen_row = {
+            "id": gen_id, "campaignId": campaign_id, "n": n, "proposal": proposal,
+            "searchSpaceHash": None, "engineSha": engine_sha, "dataEpoch": data_epoch,
+            "stressTouches": 0, "status": status, "startedAt": started_at,
+            "finishedAt": finished_at,
+        }
+        self.generations.setdefault(campaign_id, []).append(gen_row)
+        cand_rows = [
+            {
+                "id": f"{gen_id}-cand-{i}", "generationId": gen_id, "versionId": None,
+                "parentCandidateId": None, "mutationKind": cand["mutationKind"],
+                "params": cand["params"], "structureDiff": None,
+                "sweepJobId": cand["sweepJobId"], "holdoutRunId": None,
+                "scorecard": cand["scorecard"], "state": cand["state"],
+                "updatedAt": "2026-07-11T00:00:00+00:00",
+            }
+            for i, cand in enumerate(candidates)
+        ]
+        self.candidates.setdefault(campaign_id, []).extend(cand_rows)
+        return gen_row
 
     def close(self) -> None:
         pass

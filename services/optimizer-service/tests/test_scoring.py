@@ -22,7 +22,7 @@ def test_zscores_missing_stays_none_constant_and_singleton_are_zero():
 # --- RobustScore composition ------------------------------------------------------------------
 
 def test_robustscore_isolates_oos_return_component():
-    # rawObjective constant ⇒ plateauRatio ≡ 1 (stability z=0); every other component absent ⇒ z=0.
+    # rawObjective constant ⇒ plateauMargin constant (stability z=0); other components absent ⇒ z=0.
     # So robustScore = 0.22 · z(oosReturn). z(30)= +1.224745 ⇒ 0.22·1.224745 = 0.269444 → 0.2694.
     cands = [
         {"trialNumber": 1, "rawObjective": 1.0, "oosReturn": 10.0},
@@ -35,7 +35,7 @@ def test_robustscore_isolates_oos_return_component():
     assert cards[1]["robustScore"] == -0.2694
     comp = {x["id"]: x["z"] for x in cards[3]["components"]}
     assert comp["oos_return"] == 1.2247
-    assert comp["stability"] == 0.0  # plateauRatio constant, oosFoldStd absent
+    assert comp["stability"] == 0.0  # plateauMargin constant, oosFoldStd absent
     assert comp["risk_adjusted"] == 0.0
     assert comp["cost_resilience"] == 0.0  # no stress runs (E2)
     assert comp["live_alignment"] == 0.0  # no live evidence
@@ -134,6 +134,92 @@ def test_regime_floor_fails_when_min_too_negative():
     gates = scoring.score_cohort([cand], [])[0]["gates"]
     gate = next(g for g in gates if g["id"] == "regime_floor")
     assert gate["status"] == "FAIL"
+
+
+def test_regime_floor_negative_mean_fails_design_literal():
+    # Design-literal §6.1: threshold = −0.5 × mean. A NEGATIVE mean flips the threshold positive
+    # (here −0.5·(−0.1) = +0.05) and min ≤ mean by construction, so a negative-mean candidate can
+    # never pass — faithful to the formula as written (documented behavior, not a bug).
+    cand = _healthy(1) | {"regimeOosMin": -0.2, "regimeOosMean": -0.1}
+    gates = scoring.score_cohort([cand], [])[0]["gates"]
+    assert next(g for g in gates if g["id"] == "regime_floor")["status"] == "FAIL"
+
+
+# --- boundary pins (≥ / ≤ directions) ---------------------------------------------------------
+
+def test_fold_consistency_exact_boundary_passes():
+    # exactly 3/5 = 0.60 positive folds → PASS (the gate is ≥, not >)
+    cand = _healthy(1) | {"foldReturns": [0.1, 0.2, 0.3, -0.1, -0.2]}
+    gates = scoring.score_cohort([cand], [])[0]["gates"]
+    gate = next(g for g in gates if g["id"] == "fold_consistency")
+    assert gate["value"] == 0.6
+    assert gate["status"] == "PASS"
+
+
+def test_drawdown_cap_exact_boundary_passes():
+    # exactly 40.0 == the swing cap → PASS (the gate is ≤, not <)
+    cand = _healthy(1) | {"maxDrawdown": 40.0}
+    gates = scoring.score_cohort([cand], [])[0]["gates"]
+    assert next(g for g in gates if g["id"] == "drawdown_cap")["status"] == "PASS"
+
+
+# --- stability floor: multiplication form, sign- and direction-safe ---------------------------
+# parameters=[] ⇒ every trial neighbors every other ⇒ 5 candidates give neighborCount 4 (gate
+# assessable); plateauObjective = median of the whole cohort's rawObjectives.
+
+def _stability_gate(cards, trial_number):
+    card = next(c for c in cards if c["trialNumber"] == trial_number)
+    return next(g for g in card["gates"] if g["id"] == "stability_floor")
+
+
+def test_stability_negative_raw_plateau_better_but_below_bar_fails():
+    # raw −1.0, cohort median −0.9: the plateau is BETTER than raw (−0.9 > −1.0) but does not clear
+    # 0.8×raw = −0.8 (for raw < 0 the 0.8 multiple is a HIGHER bar) ⇒ FAIL. The old DIVISION form
+    # inverted here: −0.9/−1.0 = 0.9 ≥ 0.8 would have (wrongly) PASSed.
+    raws = [-1.0, -0.9, -0.9, -0.9, -0.9]
+    cands = [{"trialNumber": i, "rawObjective": r} for i, r in enumerate(raws)]
+    gate = _stability_gate(scoring.score_cohort(cands, []), 0)
+    assert gate["status"] == "FAIL"
+    assert "margin" in gate["note"]  # ratio undefined at raw ≤ 0 — the margin form is shown
+
+
+def test_stability_negative_raw_positive_plateau_passes():
+    # raw −1.0 but the neighborhood median is +0.2: 0.2 ≥ 0.8×(−1.0) = −0.8 ⇒ PASS. The old
+    # DIVISION form inverted here too: 0.2/−1.0 = −0.2 < 0.8 would have (wrongly) FAILed.
+    raws = [-1.0, 0.3, 0.3, 0.1, 0.2]
+    cands = [{"trialNumber": i, "rawObjective": r} for i, r in enumerate(raws)]
+    assert _stability_gate(scoring.score_cohort(cands, []), 0)["status"] == "PASS"
+
+
+def test_stability_minimize_direction_normalizes_to_maximize_space():
+    # A minimize sweep (e.g. maxDrawdown): values are negated ONCE into maximize space.
+    # Cohort DDs [10, 5, 6, 7, 7.5], median 7.
+    #  - candidate dd=10: −7 ≥ 0.8×(−10) = −8 ⇒ PASS (its neighborhood is better than itself).
+    #  - candidate dd=5 (the lone best): −7 ≥ 0.8×(−5) = −4 ⇒ FAIL (a spike in minimize space —
+    #    plateau doctrine: a lone winner surrounded by worse sinks).
+    raws = [10.0, 5.0, 6.0, 7.0, 7.5]
+    cands = [{"trialNumber": i, "rawObjective": r} for i, r in enumerate(raws)]
+    cards = scoring.score_cohort(cands, [], direction="minimize")
+    assert _stability_gate(cards, 0)["status"] == "PASS"
+    assert _stability_gate(cards, 1)["status"] == "FAIL"
+
+
+def test_risk_adjusted_reads_sortino_only_never_sharpe():
+    # One candidate carries ONLY sharpe: it must NOT leak into the sortino z-column (mixing metrics
+    # biases fallback candidates) — its risk_adjusted degrades to z=0 with an empty raw.
+    cands = [
+        {"trialNumber": 1, "rawObjective": 1.0, "sortino": 1.0},
+        {"trialNumber": 2, "rawObjective": 1.0, "sortino": 2.0},
+        {"trialNumber": 3, "rawObjective": 1.0, "sharpe": 9.9},  # no sortino
+    ]
+    cards = {c["trialNumber"]: c for c in scoring.score_cohort(cands, [])}
+    risk = {t: next(x for x in c["components"] if x["id"] == "risk_adjusted")
+            for t, c in cards.items()}
+    assert risk[3]["z"] == 0.0
+    assert risk[3]["raw"] == {}
+    # sortino z over [1.0, 2.0] only: mean 1.5, pstdev 0.5 → ±1.0 (9.9 never entered the column)
+    assert risk[1]["z"] == -1.0
+    assert risk[2]["z"] == 1.0
 
 
 # --- penalties, flags, caveats ----------------------------------------------------------------

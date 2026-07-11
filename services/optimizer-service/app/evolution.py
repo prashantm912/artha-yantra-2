@@ -13,12 +13,13 @@ import statistics
 from collections.abc import Callable
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from app import leaderboard, scoring
 from app.errors import ApiError
-from app.service import _primary_objective
+from app.service import _PROMOTABLE, _primary_objective
 
 router = APIRouter(prefix="/api/v1/evolution")
 
@@ -213,13 +214,28 @@ class Scorecard(BaseModel):
 
 class RetroScoreResponse(BaseModel):
     """The scored cohort for one sweep — the ``{items: [...]}`` envelope plus the objective/policy
-    context the FE leaderboard needs to render the ranking."""
+    context the FE leaderboard needs to render the ranking. ``caveats`` carries response-level
+    warnings (e.g. a cohort truncated at the trial cap — its z-scores are over a partial cohort)."""
 
     sweepJobId: str
     metric: str
     direction: str
     policy: str
+    caveats: list[str] = []
     items: list[Scorecard]
+
+
+# The cohort read cap (mirrors the /best leaderboard's bound). At the cap the cohort MAY be
+# truncated — flagged as a response caveat, never silent (z-scores over a partial cohort).
+_COHORT_CAP = 1000
+
+# Every retro scorecard carries this standing caveat (auditor resolution of the LIVE_FIRST doubt):
+# retro-scoring is a descriptive read over sim evidence; it never routes or ranks by evidence
+# policy — that arrives with the campaign recorder.
+_RETRO_CAVEAT = (
+    "retro-score is descriptive (sim evidence); for LIVE_FIRST families this never ranks — "
+    "evidence-policy routing lands with campaigns"
+)
 
 
 class RetroScoreService:
@@ -228,7 +244,11 @@ class RetroScoreService:
     and run-level results (via BacktestClient — read-only §D.5 surfaces, never a recompute), then
     scores the whole cohort with ``scoring.score_cohort``. No ``evo_*`` writes (the recorder is a
     later PR). Collaborators injected (jobs/trials factories + backtest client), so tests drive it
-    with the in-memory fakes."""
+    with the in-memory fakes.
+
+    Per-run reads are a SEQUENTIAL N+1 fan-out (folds + results per trial) — accepted for E1's
+    read-only retro surface (bounded by ``_COHORT_CAP``, backtest-service is loopback-local);
+    campaign-scale orchestration (E3+) is where concurrency would land if ever needed."""
 
     def __init__(
         self,
@@ -250,17 +270,26 @@ class RetroScoreService:
             request = job.get("request") or {}
             parameters = request.get("parameters", [])
             metric, direction = _primary_objective(request.get("objective", {}))
-            rows = trials.list_for_sweep(sweep_id, "COMPLETE", 1000, 0)
+            rows = trials.list_for_sweep(sweep_id, _PROMOTABLE, _COHORT_CAP, 0)
         finally:
             jobs.close()
             trials.close()
         candidates = [self._assemble(row, metric) for row in rows]
         cards = scoring.score_cohort(candidates, parameters, direction=direction)
+        for card in cards:
+            card["caveats"].append(_RETRO_CAVEAT)
+        response_caveats = []
+        if len(rows) >= _COHORT_CAP:
+            response_caveats.append(
+                f"cohort read capped at {_COHORT_CAP} COMPLETE trials — z-scores may be "
+                "normalized over a partial cohort"
+            )
         return RetroScoreResponse(
             sweepJobId=sweep_id,
             metric=metric,
             direction=direction,
             policy="SIM_FIRST",
+            caveats=response_caveats,
             items=[Scorecard(**card) for card in cards],
         )
 
@@ -268,21 +297,34 @@ class RetroScoreService:
         """Normalize one COMPLETE trial into the scoring lib's candidate shape. OOS-first (design
         §6.2 — "computed on OOS/live evidence only"): per-fold OOS metrics aggregate the cohort's
         return/risk signals; a foldless (full-window) run falls back to run-level metrics with a
-        caveat. recoveryFactor is derived in Python (totalReturn ÷ maxDD) — old runs don't persist
-        it (design §6.2, MetricsCalculator add lands separately); turnover/tradeFrequency stay
-        absent (not fabricated)."""
+        caveat. recoveryFactor is derived in Python — its numerator is the OOS-fold mean return
+        when folds exist (run-level ``totalReturn`` on a walk-forward run is FULL-WINDOW train+test
+        and would inflate exactly the overfit profile the OOS doctrine targets); run-level
+        totalReturn feeds it only on the foldless path. turnover/tradeFrequency stay absent (not
+        fabricated). A run whose evidence fetch fails (purged/404/timeout) degrades to a
+        low-evidence candidate with a ``run fetch failed`` caveat — one dead run must never 500
+        the whole retro-score."""
         run_id = row.get("backtestRunId")
         folds: list[dict[str, Any]] = []
         results: dict[str, Any] = {}
+        fetch_caveat = None
         if run_id:
-            folds = self._backtest.folds(run_id) or []
-            results = self._backtest.results(run_id) or {}
+            try:
+                folds = self._backtest.folds(run_id) or []
+                results = self._backtest.results(run_id) or {}
+            except httpx.HTTPError as exc:
+                folds, results = [], {}
+                fetch_caveat = f"run fetch failed: {exc}"
         metrics = results.get("metrics") or {}
         foldless = not folds
         fold_returns = _fold_series(folds, "totalReturn")
         obj_values = row.get("objectiveValues") or {}
         max_dd = _fold_worst(folds, "maxDrawdown") if folds else _num(metrics.get("maxDrawdown"))
         total_return = _num(metrics.get("totalReturn"))
+        oos_return = _mean(fold_returns) if folds else total_return
+        caveats = list(results.get("caveats") or [])
+        if fetch_caveat:
+            caveats.append(fetch_caveat)
         guard = leaderboard.guard_metrics(
             {"regimeOos": [f.get("regimeOos") or {} for f in folds]}
         )
@@ -292,7 +334,7 @@ class RetroScoreService:
             "runId": run_id,
             "params": params,
             "rawObjective": _num(obj_values.get(metric)),
-            "oosReturn": _mean(fold_returns) if folds else total_return,
+            "oosReturn": oos_return,
             "oosFoldStd": _pstdev(fold_returns),
             "foldReturns": fold_returns or None,
             "oosTradeCount": (
@@ -307,7 +349,7 @@ class RetroScoreService:
                 else _num(metrics.get("maxDrawdownDurationBars"))
             ),
             "totalReturn": total_return,
-            "recoveryFactor": _recovery(total_return, max_dd),
+            "recoveryFactor": _recovery(oos_return, max_dd),
             "regimeOosMin": guard.get("regimeOosMin"),
             "regimeOosMean": guard.get("regimeOosMean"),
             "regimesCovered": guard.get("regimesCovered") or [],
@@ -318,7 +360,7 @@ class RetroScoreService:
             "tradeFrequency": None,
             "engineSha": results.get("engineSha"),
             "dataHash": results.get("dataHash"),
-            "caveats": results.get("caveats") or [],
+            "caveats": caveats,
             "oiGateCoverage": metrics.get("oiGateCoverage"),
             "activeParamCount": len(params),
             "structureGateCount": 0,

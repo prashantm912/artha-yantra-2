@@ -73,17 +73,18 @@ def score_cohort(
 ) -> list[dict[str, Any]]:
     """Score a whole cohort (a sweep's trials) → one §6.3 scorecard dict per candidate, in the
     input order. ``parameters`` are the sweep's tunable specs (drive the plateau/neighbor stability
-    signal via ``leaderboard.plateau_scores``). ``direction`` is echoed for provenance. z-scoring is
-    within THIS cohort, so a single-candidate cohort yields all-zero z's (nothing to normalize
+    signal via ``leaderboard.plateau_scores``). ``direction`` is echoed for provenance AND drives
+    the single maximize-space normalization of the plateau math (``_stability_inputs``). z-scoring
+    is within THIS cohort, so a single-candidate cohort yields all-zero z's (nothing to normalize
     against) — expected, and flagged by the empty spread rather than invented."""
     weights = weights or SIM_FIRST_WEIGHTS
-    plateau = _plateau(candidates, parameters)
+    stab = _stability_inputs(candidates, _plateau(candidates, parameters), direction)
 
     # Per-component z's (cohort-normalized) + the raw constituents + any structural caveat.
     comp_zs: dict[str, list[float]] = {}
     comp_raws: list[dict[str, dict[str, Any]]] = [dict() for _ in candidates]
     comp_caveats: dict[str, str | None] = {}
-    for comp, subsignals in _component_subsignals(candidates, plateau).items():
+    for comp, subsignals in _component_subsignals(candidates, stab).items():
         zs, raws = _component_z(subsignals, len(candidates))
         comp_zs[comp] = zs
         comp_caveats[comp] = None if subsignals else _EMPTY_COMPONENT_CAVEATS.get(comp)
@@ -100,7 +101,7 @@ def score_cohort(
         weighted = sum(weights[comp] * comp_zs[comp][i] for comp in weights)
         penalties = _penalties(cand)
         robust = _round(weighted - penalties["dof"] - penalties["caveats"])
-        gates = _gates(cand, plateau[i])
+        gates = _gates(cand, stab[i])
         rankable = all(g["status"] != FAIL for g in gates)
         scorecards.append({
             "trialNumber": cand.get("trialNumber"),
@@ -131,22 +132,53 @@ def score_cohort(
 
 # --- RobustScore components (§6.2) ------------------------------------------------------------
 
+def _stability_inputs(
+    candidates: list[dict[str, Any]], plateau: list[dict[str, Any]], direction: str
+) -> list[dict[str, Any]]:
+    """The ONE maximize-space normalization for all plateau math: a minimize-direction sweep's
+    ``plateauObjective``/``rawObjective`` are negated here, so the §3.2.3/§6.1 multiplication form
+    (``plateau ≥ 0.8 × raw``) reads correctly downstream — the division form (ratio ≥ 0.8) INVERTS
+    for raw ≤ 0 and for minimize sweeps. Negating after ``plateau_scores`` is sound: the median is
+    an order statistic, so median(−x) = −median(x). Per candidate: ``plat``/``raw`` (maximize
+    space), the signed ``margin`` = plat − 0.8·raw (sign-safe stability signal), the display
+    ``ratio`` (only when raw > 0 — it is meaningless at raw ≤ 0), and ``neighbors``."""
+    sign = -1.0 if direction == "minimize" else 1.0
+    out: list[dict[str, Any]] = []
+    for cand, p in zip(candidates, plateau, strict=True):
+        raw = _num(cand.get("rawObjective"))
+        plat = _num(p.get("plateauObjective"))
+        raw_m = None if raw is None else sign * raw
+        plat_m = None if plat is None else sign * plat
+        margin = (
+            None if raw_m is None or plat_m is None
+            else plat_m - _STABILITY_PLATEAU_RATIO * raw_m
+        )
+        out.append({
+            "plat": plat_m,
+            "raw": raw_m,
+            "margin": margin,
+            "ratio": _ratio(plat_m, raw_m) if raw_m is not None and raw_m > 0 else None,
+            "neighbors": p.get("neighborCount", 0),
+        })
+    return out
+
+
 def _component_subsignals(
-    candidates: list[dict[str, Any]], plateau: list[dict[str, Any]]
+    candidates: list[dict[str, Any]], stab: list[dict[str, Any]]
 ) -> dict[str, list[tuple[str, list[float | None]]]]:
     """Each RobustScore component is built from one or more raw sub-signals; the component z is the
     mean of its present sub-signals' cohort z-scores (a missing sub-signal drops out of the mean, a
     fully-absent component → z=0). ``cost_resilience`` + ``live_alignment`` carry NO sub-signals in
-    retro (no stress runs, no live evidence) → they resolve to z=0 by construction (§6.2)."""
-    plateau_ratio = [_ratio(p.get("plateauObjective"), c.get("rawObjective")) for c, p
-                     in zip(candidates, plateau, strict=True)]
+    retro (no stress runs, no live evidence) → they resolve to z=0 by construction (§6.2).
+    ``risk_adjusted`` reads Sortino ONLY — no Sharpe fallback (mixing the two metrics in one cohort
+    z-column would bias fallback candidates; an absent Sortino simply drops out)."""
     return {
         "oos_return": [("oosReturn", [c.get("oosReturn") for c in candidates])],
         "stability": [
             ("negOosFoldStd", [_neg(c.get("oosFoldStd")) for c in candidates]),
-            ("plateauRatio", plateau_ratio),
+            ("plateauMargin", [s["margin"] for s in stab]),
         ],
-        "risk_adjusted": [("sortino", [_sortino(c) for c in candidates])],
+        "risk_adjusted": [("sortino", [c.get("sortino") for c in candidates])],
         "drawdown_quality": [
             ("negMaxDrawdown", [_neg(c.get("maxDrawdown")) for c in candidates]),
             ("negDdDurationBars", [_neg(c.get("ddDurationBars")) for c in candidates]),
@@ -209,7 +241,7 @@ def _zscores(values: list[float | None]) -> list[float | None]:
 
 # --- Hard gates (§6.1, SIM_FIRST column) ------------------------------------------------------
 
-def _gates(cand: dict[str, Any], plateau: dict[str, Any]) -> list[dict[str, Any]]:
+def _gates(cand: dict[str, Any], stab: dict[str, Any]) -> list[dict[str, Any]]:
     """The §6.1 SIM_FIRST hard gates as {id, status, value[, note]}. Retro degradations: no holdout
     run → holdout SKIPPED; NULL engine SHA → comparability UNKNOWN; no live evidence → live_gap
     SKIPPED; the deflated-Sharpe multiplicity term is E2 → its own NOT_IMPLEMENTED entry."""
@@ -220,8 +252,6 @@ def _gates(cand: dict[str, Any], plateau: dict[str, Any]) -> list[dict[str, Any]
     regime_min = cand.get("regimeOosMin")
     regime_mean = cand.get("regimeOosMean")
     covered = len(cand.get("regimesCovered") or [])
-    plateau_ratio = _ratio(plateau.get("plateauObjective"), cand.get("rawObjective"))
-    neighbors = plateau.get("neighborCount", 0)
 
     return [
         _gate("evidence_floor", None if trades is None else trades >= _EVIDENCE_FLOOR_TRADES,
@@ -235,7 +265,7 @@ def _gates(cand: dict[str, Any], plateau: dict[str, Any]) -> list[dict[str, Any]
               unknown=max_dd is None,
               note="p95(maxDD) needs Monte Carlo (E2); value is the worst OOS-fold drawdown proxy"),
         _regime_floor_gate(regime_min, regime_mean, covered),
-        _stability_floor_gate(plateau_ratio, neighbors),
+        _stability_floor_gate(stab),
         {"id": "holdout", "status": SKIPPED, "value": None,
          "note": "no holdout run linked to a historical sweep trial (retro)"},
         _comparability_gate(cand.get("engineSha")),
@@ -285,14 +315,21 @@ def _regime_floor_gate(
             "note": f"{covered} of 4 regimes covered"}
 
 
-def _stability_floor_gate(plateau_ratio: float | None, neighbors: int) -> dict[str, Any]:
+def _stability_floor_gate(stab: dict[str, Any]) -> dict[str, Any]:
+    """§6.1 stability floor via the MULTIPLICATION form ``plateau ≥ 0.8 × raw`` in maximize space
+    (never the ratio — ratio ≥ 0.8 inverts for raw ≤ 0 / minimize sweeps; see _stability_inputs).
+    ``value`` shows the familiar ratio when raw > 0, else the signed margin (named in the note)."""
+    neighbors = stab["neighbors"]
+    value = stab["ratio"] if stab["ratio"] is not None else stab["margin"]
+    form = "ratio" if stab["ratio"] is not None else "margin (raw ≤ 0 — ratio undefined)"
     if neighbors < _STABILITY_MIN_NEIGHBORS:
-        return {"id": "stability_floor", "status": SKIPPED, "value": _round(plateau_ratio),
+        return {"id": "stability_floor", "status": SKIPPED, "value": _round(value),
                 "note": f"only {neighbors} neighbors (<{_STABILITY_MIN_NEIGHBORS}) — plateau "
                         "under-determined, not assessable"}
-    passed = plateau_ratio is not None and plateau_ratio >= _STABILITY_PLATEAU_RATIO
+    plat, raw = stab["plat"], stab["raw"]
+    passed = plat is not None and raw is not None and plat >= _STABILITY_PLATEAU_RATIO * raw
     return {"id": "stability_floor", "status": PASS if passed else FAIL,
-            "value": _round(plateau_ratio), "note": f"{neighbors} neighbors"}
+            "value": _round(value), "note": f"{neighbors} neighbors; value={form}"}
 
 
 # --- Penalties, flags, caveats (§6.2 / §6.3) --------------------------------------------------
@@ -360,13 +397,6 @@ def _plateau(
         for c in candidates
     ]
     return leaderboard.plateau_scores(trials, parameters)
-
-
-def _sortino(cand: dict[str, Any]) -> float | None:
-    """OOS Sortino drives risk_adjusted; Sharpe is the documented fallback when Sortino is absent
-    (§6.2 "Sharpe shown alongside")."""
-    val = cand.get("sortino")
-    return val if val is not None else cand.get("sharpe")
 
 
 def _explainability(cand: dict[str, Any]) -> float:

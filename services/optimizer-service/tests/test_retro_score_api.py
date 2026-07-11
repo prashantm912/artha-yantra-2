@@ -1,8 +1,9 @@
 """The §12 E1 retro-scoring endpoint — GET /api/v1/evolution/retro-score/{sweepJobId} — driven
 through a TestClient over RetroScoreService + the in-memory fakes (no Postgres, no backtest svc).
 Covers the {items} envelope, the OOS fold-metric assembly (returns/trades/regime/drawdown), the 404
-idiom, and an empty sweep."""
+idiom, an empty sweep, the dead-run degradation, and the cohort-cap truncation caveat."""
 
+import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -57,7 +58,10 @@ def test_retro_score_returns_items_envelope_and_context():
     assert body["metric"] == "oos_fold_mean"
     assert body["direction"] == "maximize"
     assert body["policy"] == "SIM_FIRST"
+    assert body["caveats"] == []  # 2 trials — nowhere near the cohort cap
     assert len(body["items"]) == 2
+    # every retro scorecard carries the standing descriptive-only caveat
+    assert any("retro-score is descriptive" in c for c in body["items"][0]["caveats"])
 
 
 def test_retro_score_assembles_oos_fold_metrics_into_gates():
@@ -90,8 +94,10 @@ def test_retro_score_recovery_and_regime_components_from_run_evidence():
         f"/api/v1/evolution/retro-score/{sweep_id}"
     ).json()
     comps = {c["id"]: c for c in body["items"][0]["components"]}
-    # recoveryFactor = totalReturn 12.0 ÷ worst OOS fold DD 12.0 = 1.0 (derived in Python)
-    assert comps["drawdown_quality"]["raw"]["recoveryFactor"] == 1.0
+    # recoveryFactor numerator is the OOS-fold mean return (5+7+3)/3 = 5.0 — NEVER the run-level
+    # totalReturn (12.0), which on a walk-forward run is full-window train+test and would inflate.
+    # Denominator = worst OOS fold DD 12.0 ⇒ 5/12 = 0.4167.
+    assert comps["drawdown_quality"]["raw"]["recoveryFactor"] == 0.4167
     # regime aggregates read via leaderboard.guard_metrics over the per-fold regimeOos
     assert comps["regime_consistency"]["raw"]["regimeOosMin"] == 0.5
 
@@ -113,3 +119,37 @@ def test_retro_score_sweep_with_no_complete_trials_is_empty():
     )
     assert resp.status_code == 200
     assert resp.json()["items"] == []
+
+
+def test_retro_score_survives_a_dead_run():
+    # ONE purged/404 run must never 500 the whole retro-score: the dead trial degrades to a
+    # low-evidence card with a "run fetch failed" caveat; the other trials score normally.
+    jobs, trials = FakeJobs(), FakeTrials()
+    sweep_id = _seed_sweep(jobs, trials, n=3)
+    backtest = FakeBacktest(
+        folds={"run-0": _FOLDS, "run-1": httpx.HTTPError("404 Not Found"), "run-2": _FOLDS},
+        results={"run-0": _RESULTS, "run-2": _RESULTS},
+    )
+    resp = _client(jobs, trials, backtest).get(f"/api/v1/evolution/retro-score/{sweep_id}")
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert len(items) == 3
+    dead = next(i for i in items if i["runId"] == "run-1")
+    assert any("run fetch failed: 404 Not Found" in c for c in dead["caveats"])
+    live = next(i for i in items if i["runId"] == "run-0")
+    assert not any("run fetch failed" in c for c in live["caveats"])
+    # the degraded card has no evidence to FAIL a gate on — it degrades, it is not disqualified
+    assert {g["status"] for g in dead["gates"]} <= {"UNKNOWN", "SKIPPED", "NOT_IMPLEMENTED", "PASS"}
+
+
+def test_retro_score_flags_a_capped_cohort(monkeypatch):
+    # At the cohort read cap the trial list MAY be truncated — the response must say so (z-scores
+    # normalized over a partial cohort are never silent). Cap shrunk to 2 to exercise the branch.
+    monkeypatch.setattr(evolution, "_COHORT_CAP", 2)
+    jobs, trials = FakeJobs(), FakeTrials()
+    sweep_id = _seed_sweep(jobs, trials, n=3)
+    body = _client(jobs, trials, FakeBacktest(folds=_FOLDS, results=_RESULTS)).get(
+        f"/api/v1/evolution/retro-score/{sweep_id}"
+    ).json()
+    assert len(body["items"]) == 2
+    assert any("capped" in c for c in body["caveats"])

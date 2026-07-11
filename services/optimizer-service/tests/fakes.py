@@ -173,7 +173,8 @@ class FakeStrategy:
 class FakeBacktest:
     """A fixed fold array (+ optional guard summary / results) per run id. ``folds`` / ``results``
     may be a dict keyed by run id (per-run retro-scoring fixtures) or a single value returned for
-    every run id (the simpler leaderboard-test shape)."""
+    every run id (the simpler leaderboard-test shape). An Exception fixture (per-run or single) is
+    RAISED instead of returned — simulates a purged/404/timed-out run."""
 
     def __init__(self, folds: Any, guard: Any = None, results: Any = None) -> None:
         self._folds = folds
@@ -197,11 +198,14 @@ class FakeBacktest:
 
     @staticmethod
     def _per_run(value: Any, run_id: str, default: Any) -> Any:
-        """A per-run dict returns its run_id entry; anything else is returned verbatim per run."""
+        """A per-run dict returns its run_id entry; anything else is returned verbatim per run.
+        An Exception fixture is raised (a dead/purged run)."""
         if isinstance(value, dict) and run_id in value:
-            return value[run_id]
-        if value is None:
-            return default
+            value = value[run_id]
+        elif value is None:
+            value = default
+        if isinstance(value, Exception):
+            raise value
         return value
 
 

@@ -11,6 +11,18 @@ non-backtest/livetest surfaces (signals, rejections, paper, orders, journal, str
 graduation, sell decisions, charts, options/futures/equity/FII-DII analytics, feature
 pages, data-ops trust). No architecture redesign; no invented data; nothing self-arms.
 
+**Status (2026-07-11).** The **I1 hard dependency** — the `ingest_runs` ledger (§13 row 5,
+HARD) — was **satisfied** by the 2026-07-10/11 overnight run: `marketdata.ingest_runs` (V040)
++ 8 writers → **#686**, with the T+1 coverage + notifier-health canaries → **#689**. The
+**app-platform (P1) Phase-1 foundations** I1 builds on top of also landed — manual-order
+risk-governor (§13 row 6 / V1) → **#687**, idempotency (V2) → **#690**, tick-freshness (V3) →
+**#694** — all merged + deployed + live-verified. **I1** (foundations: `insights` module +
+generators + `/insights` feed in shadow mode) is therefore **buildable**, pending the owner's
+program-sequencing call (this layer vs. the evolution engine). Still-in-flight deps stay as
+listed in §13 — the P1-Phase-2 push frames (rows 7–8) and `sell_decisions` persistence are
+NOT yet shipped, so the I1 display-only parts are unblocked but I3 actions/SELL_DECISION wait.
+Nothing here self-arms; the build is NOT started. Design content below is unchanged.
+
 ---
 
 ## 0. Reading guide + hard boundaries

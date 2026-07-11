@@ -832,3 +832,42 @@ with offset (key cross-source maps by instant, never offset).
     `backfill_jobs`, + Phase-1 `admin_audit` (query/export) and paper-admin audit.
     Prompt 2 must route any state-changing automation through endpoints that write these
     trails — never direct DB writes.
+
+---
+
+## 12. Fix log (2026-07-11 overnight implementation pass)
+
+The 2026-07-10/11 overnight run (Opus builders, Fable audit/merge per the delegation
+standing rule) shipped the audit's **Phase-1 safety + silent-failure-kill** block plus two
+cross-program items (V13, worker-pool cap). PRs #683–#717, all merged + deployed + live-verified;
+migrations `strategy V028/V029/V030`, `marketdata V040/V041/V042` applied + probed live. This
+is an append-only log — the findings above are unchanged.
+
+### Addressed this pass
+
+| Finding (§/V) | Item · PR | Outcome | Residual |
+|---|---|---|---|
+| **V1** manual orders bypass the risk governor (§2.2#1, §7.2, §8) | A1 · #687 | `RiskService.entryVeto` now gates manual `POST /paper/orders`; 422 on veto with the blocking rail name | stale-take chip `task_94f40cf6` |
+| **V2** no idempotency on `POST /paper/orders` (§8) | A2 · #690 | `clientOrderId` unique per book (V028); a 200-replay returns the original order (D8-envelope override of the audit's 409 sketch) | — |
+| **V4** lot-size multiple on paper qty (§8) | A2 · #690 | qty validated against the instrument lot at submit | — |
+| **V3** tick freshness on fills/MTM/brackets (§7.1, §8) | A3 · #694 | 15 s fill max-age → DATA_STALE; bracket-starvation alerter; the breakeven-settle fabrication was **KILLED** — review redesigned settle to last-real-tick-any-age after finding 3 state-stranding paths | — |
+| **§7.2.3 / §9.1** `ingest_runs` ledger + writers | A4 · #686 | `marketdata.ingest_runs` (V040) + 8 writers | — |
+| **V9** EOD missed-day detection (§8) | A5 · #689 | `IngestCoverageCanary` 08:45 IST | — |
+| **V15** notifier delivery health (§8) | A5 · #689 | `NotifierHealthCheck` 08:30 IST, dual-channel | — |
+| **§2.5** FII-derivative "disabled" empty-state | A6 · #696 | FII analytics-flag empty-state now distinguishes flag-disabled from no-data | — |
+| **§2.7** Jobs page never shows `jobs.error` | A8 · #696 | failed-job error dialog + 3 a11y fixes | — |
+| **V12** backfill uuid ↔ ledger + OI-backfill audit (§3.2.5) | A7 · #692 | `job_id` persisted (V041); OI backfill now writes audit rows | — |
+| **V14** export / query-console audit (§7.2.5, §8) | A9 · #698 | `marketdata.admin_audit` (V042) + `strategy.paper_admin_audit` (V029); export truncation now explicit via `X-Result-Truncated` headers | FE banner chip `task_f12c165f` |
+| **§6.3 / §9.1** EOD ingest health board | A11 · #699 | `GET /api/v1/market/health/ingest` + `/data-ops/ingest-health` (policy delegates to the A5 canary) | — |
+| **V5** position ↔ order-leg reconciliation (§8) | A12 · #701 | `paper_reconciliation_runs` (V030); V5 recon at 21:15 IST | — |
+| **V16** TAKEN ↔ position reconciliation (§8) | A12 · #701 | V16 recon at 21:15 IST (same job) | — |
+| **V13** optimizer orphaned `running` rows (§5.6, §8) | B6 · #708 | orphan reaper populates `jobs.error` + native `GET /optimizations/jobs` (the durable-queue half is fidelity P2-1, closed the same pass) | — |
+
+Shipped alongside from the sibling fidelity/evolution program (not app-platform V-rows, noted for cross-reference): the worker-pool concurrency/queue cap the audit flagged via `fidelity A9`/§5.5 landed as **B16 · #717** (interactive-reserved CAS budget + `429 RATE_LIMIT_QUEUE`), so a runaway sweep can no longer starve interactive backtests.
+
+### Still OPEN (not touched this pass)
+
+- **Validation rows** — **V6** OI outlier guard, **V7** snapshot-OI vs candle-OI cross-source, **V8** bhavcopy-close vs Kite-1d, **V10** screener/analytics engine-version stamps (also fidelity), **V11** reference-JSON staleness (needs the §9.4 reference tables first). All are §10 **Phase 3** items except V11 (Phase 4).
+- **Phase-1 remainder** — schedule `prune_options_snapshots` (owner-gated; owner picks the horizon).
+- **Phase 2** (workflow chains) — signal-status push frames, `paper.events`, position-detail pane, journal link pickers, strategy `enabled` endpoint + audit-log read, graduation-promotions display, `sell_decisions` persistence, dot-health panel. Note the **notification center** (§6.1) is superseded by the intelligence-layer design's `/insights` feed (I1), not a standalone build.
+- **Phase 3** (analytics depth + freshness) and **Phase 4** (platform planes: unified jobs console, reference-data tables + CRUD, `user_prefs`/saved views/cmdk, DataTable adoption wave, Map-return burn-down, event-schema registry, alert-rules page, multi-window pane extension) — all OPEN.

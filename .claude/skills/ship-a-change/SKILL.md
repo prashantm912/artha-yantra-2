@@ -43,10 +43,16 @@ Non-negotiables:
 gh pr checks <n> --watch    # 3-shard ci-java + ci-contracts + ci-e2e
 ```
 - **clean tier**: on green, `gh pr merge <n> --squash --admin` (solo-owner repo,
-  enforce_admins off by design). Delete the branch.
+  enforce_admins off by design). Delete the branch. **Then verify `git log origin/main -1`
+  equals the PR's mergeCommit before building/deploying** — `merge && pull` races the
+  remote (a stale pull once deployed a migration-less "healthy" service).
 - **HOLD tier**: leave the PR OPEN with a "HOLD for owner review" note; move on.
-- Known-flaky: ci-e2e signals/ws-reconnect intermittently fails on the 2-core runner —
-  not a blocker for non-signals changes (re-run once to confirm).
+- e2e fail? DISCRIMINATE before acting: `gh run view <id> --log-failed | grep -oE
+  "✘ +[0-9]+ tests/[a-z-]+\.spec\.ts:[0-9]+" | sort -u`. Known flake pair =
+  signals.spec.ts:38 + ws-reconnect.spec.ts:23. Reachability test: can THIS diff touch
+  the failing spec's surface? Unreachable → admin-merge once every other gate is green;
+  signals/WS-adjacent → rerun-to-green. A <60s e2e death = infra, read the log first.
+  (~15 identical flake signatures in one night, 2026-07-10/11 — the procedure held.)
 - New service? It needs its own CI matrix shard or its tests never run.
 - Contract drift: new endpoints/params re-capture via `-Dcontracts.capture=true` then
   `npx openapi-typescript@7`; every endpoint returns a **typed record, never Map** —
@@ -63,6 +69,10 @@ docker compose -f deploy\docker-compose.yml --env-file .env up -d <svc>
 ```
 - Never bare `docker compose` without `--env-file .env` + the two env vars — unset vars
   drift sibling services onto the wrong DB.
+- **Migration in the change?** `up -d --force-recreate flyway-init` FIRST (`up -d <svc>`
+  treats the exited one-shot as satisfied), then DB-probe the new object
+  (`to_regclass`/information_schema) — a healthy container + "up to date" flyway log do
+  NOT prove the migration applied.
 - Frontend after deploy: hard-reload (Ctrl+Shift+R) — cached chunks render the old UI.
 - Deploy from the **merged main checkout**, not the feature branch.
 

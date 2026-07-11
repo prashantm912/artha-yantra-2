@@ -26,6 +26,20 @@ those parts, plus a small set of new tables and endpoints in `optimizer-service`
 
 Path abbreviations as in Prompt 1 (SSS/BT/MDS/LIB/OPT/FE).
 
+**Status (2026-07-11).** All **7 E0 HARD prerequisites** (§12 E0 / §13 rows 1–5 + 19–20)
+were **closed** by the 2026-07-10/11 overnight run — the platform gate this design waits on
+is lifted: P0-1 partial buckets → **#683**, P0-2 engine SHA → **#703**, P2-1 optimizer
+durability + sweep list → **#708**, T3 actor plumb → **#710**, §11.4 experiment views +
+compare → **#714**, row 19 swing funnel-universe resolution → **#706**, row 20 regime-label
+vocabulary reconciliation → **#705** (all merged + deployed + live-verified). §13 **row 21**
+(param path-grammar, DEGRADED) shipped **2-of-3** as **#716** — gate-expression constants +
+`risk.max_positions`; the screener/funnel props were refused (no config leaf; chip
+`task_2560273c`). §13 **row 22** (worker-pool cap, DEGRADED) shipped as **#717**. **E1**
+(experiment model + scoring on existing data) is therefore **buildable**; the build itself
+awaits the owner's program-sequencing call (evolution vs. the intelligence layer) and the
+E6-autonomy pre-decisions this design flags. Nothing here self-arms; the evo engine build is
+NOT started. Design content below is unchanged.
+
 ---
 
 ## 1. Optimization engine design

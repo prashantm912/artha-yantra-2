@@ -33,6 +33,12 @@ ask you to confirm if you try to edit an existing `V*.sql`.)
 4. Add a header comment: phase/ticket + one-line intent.
 5. Apply locally: `./ay.ps1 reset-db` rebuilds all lineages from empty, or the running
    flyway-init picks it up on the next `ay up`.
+6. **Deploying it live:** `up -d <svc>` treats the exited flyway-init one-shot as
+   satisfied and may NOT re-run it — `docker compose … up -d --force-recreate flyway-init`
+   first, then ALWAYS DB-probe the new object (`SELECT to_regclass('schema.obj')` /
+   information_schema). A healthy container + an "up to date" flyway log do NOT prove
+   the migration applied (a stale checkout once deployed "healthy" without its
+   migration, 2026-07-11 — only the probe caught it).
 
 ## Before a risky migration on the LIVE stack (audit M30)
 

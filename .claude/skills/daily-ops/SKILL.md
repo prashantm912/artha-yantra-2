@@ -13,16 +13,24 @@ The operational clock and the watch routine. All times IST; the DB stores UTC
 | IST | What | Where it runs |
 |---|---|---|
 | ~06:00 | Kite token expires → ticker DISCONNECTED until owner re-logins | Kite |
+| 08:30 | NotifierHealthCheck — trailing-24h delivery failure-rate, alarms BOTH channels (#689) | strategy-signal |
 | ~08:40 | Futures roll re-resolve (dated front contract for live signals) | strategy-signal |
+| 08:45 | IngestCoverageCanary — previous trading day per-source `ingest_runs` coverage (#689, live-only) | market-data |
 | 09:15 | Market open — tick feed, 1m bars, live scalper engine | market-data / strategy-signal |
 | 09:42 | **live-data-health-check** (scheduled Claude task, read-only) | scheduled task |
-| all session | 3-min full OI chain capture (NIFTY+SENSEX); rejections accrue | market-data / strategy-signal |
+| all session | 3-min full OI chain capture (NIFTY+SENSEX); rejections accrue; PartialBucketCanary sweeps 60s (#683) | market-data / strategy-signal |
 | 15:30 | Market close |  |
-| 15:45 | Intraday paper square-off (swing books excluded) | strategy-signal |
+| 15:45 | Intraday paper square-off (swing books excluded) — settles on last REAL tick, never breakeven (#694); expect a daily `ay_paper_stale_settle_total` baseline (post-close ticks), alert on the REFUSE counter | strategy-signal |
 | 15:47 | **post-market-session-analysis** (scheduled Claude task → [session-analysis]) | scheduled task |
+| 19:00 | NseEod pulls (FII/DII cash, participant-OI, FII-derivative) → `ingest_runs` rows (also ~2/day incl. boot pull) | market-data |
 | 20:00 | Minervini swing EOD batch (`MinerviniSwingEngine`) | strategy-signal |
 | 20:05 | Manas Arora swing EOD batch | strategy-signal |
+| 21:00 | Graduation promotion scheduler (flag-gated) | strategy-signal |
+| 21:15 | PaperReconciliationScheduler — V5 position↔order-leg + V16 TAKEN↔position → `paper_reconciliation_runs` + ntfy (#701) | strategy-signal |
 | night | pg_dump backup (db-backup container) — **contends with long backtests** | deploy |
+
+Morning board: `/data-ops/ingest-health` (per-source last-run/verdicts/missing-days, #699)
+before hand-digging any "batch missed" report.
 
 Daily-bar swing batches can legitimately run on non-trading days too (they analyse the
 last close); "batch fired Saturday" is by owner doctrine, not a bug.

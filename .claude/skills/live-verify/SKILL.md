@@ -24,9 +24,19 @@ GETs, `docker logs`. Anything mutating goes through [ship-a-change]/[arm-flag].
 
 ```bash
 curl -s http://127.0.0.1:8081/api/v1/market/health/data          # per-token tick/bar divergence + capture freshness
+curl -s http://127.0.0.1:8081/api/v1/market/health/ingest        # per-source EOD ingest coverage (A4/A5/A11, #699) — also /data-ops/ingest-health page
 curl -s http://127.0.0.1:8082/api/v1/signal-rejections/dot-health # per-dot gate-input liveness
 docker ps --format "table {{.Names}}\t{{.Status}}" | grep ay-     # container health
 ```
+
+New-code counters (registration proves the deploy took): `docker exec ay-<svc> sh -c
+'wget -qO- http://localhost:<port>/actuator/prometheus' | grep ay_` — e.g.
+`ay_signal_partial_bucket_mismatch_total` (#683), `ay_paper_{bracket_starved,settle_refused,
+stale_settle}_total` (#694), `ay_paper_recon_*` (#701), `ay_ingest_coverage_gap_total` (#689).
+Slim images lack curl; optimizer smoke via `docker exec ay-optimizer-service python -c
+"import urllib.request; ..."` — find the internal port via `docker inspect --format
+'{{json .Config.Cmd}}'`, not by guessing. **After ANY migration deploy: DB-probe the new
+object (`to_regclass`) — healthy + flyway "up to date" prove nothing.**
 
 ## Live DB
 

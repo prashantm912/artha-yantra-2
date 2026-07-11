@@ -73,6 +73,23 @@ app-platform audit's Phase-1 foundations (`ingest_runs` ledger + paper-order gua
 the shared prerequisite BOTH merged designs gate on (evolution E0 / intelligence I1); owner sequences which program
 builds first.** Neither design self-arms anything; both builds are NOT started.
 
+**2026-07-11 — the shared build frontier is CLEARED; both engines are now buildable.** The
+2026-07-10/11 overnight run shipped **21 queue items (#683–#717, all merged + deployed +
+live-verified)** — the app-platform Phase-1 foundations PLUS every prerequisite BOTH merged
+designs gate on. **Evolution E0 (all 7 HARD gates) closed:** B1 partial-buckets #683, B2
+engine-SHA #703, B6 optimizer durability #708, B7 `created_by` actor #710, B8 experiment
+views+compare #714, B9 swing funnel-universe resolution #706, B10 regime-label reconciliation
+#705 (row 21 param-grammar shipped 2-of-3 #716, row 22 pool cap #717). **Intelligence I1
+hard-dep satisfied:** the `ingest_runs` ledger #686 + canaries #689, plus the manual-order
+governor #687 / idempotency #690 / tick-freshness #694 safety block (audit V1–V16 largely
+closed; V5/V16 reconcilers #701, admin audit #698, ingest health board #699). Migrations
+`strategy V028/V029/V030`, `marketdata V040/V041/V042`, `backtest V008/V009/V010` applied +
+probed live. **The B1 partial-bucket fix (#683) is a live behavior change** — coarse-primary
+scalper entries go UP with wider stops from Mon 2026-07-13 (an E8 re-tune prerequisite,
+pre-announced). Fix-logs appended to both 2026-07-10 audits. **Net-new frontier now: the
+owner sequences which engine builds first — evolution E1 and intelligence I1 are both
+buildable; neither is started, neither self-arms.** Detail: `docs/superpowers/plans/2026-07-02-remaining-items.md`.
+
 **Scalper engine → 100% (2026-06-28):** the S24 incorporation is closed (debloated operative doc + W3 drift
 tags + W4 gates + 2b infra, all BUILT/inert). Finishing the engine to "nothing-deferred" is now tracked in
 the consolidated roadmap [`docs/superpowers/plans/archive/2026-06-28-scalper-to-100-roadmap.md`](docs/superpowers/plans/archive/2026-06-28-scalper-to-100-roadmap.md)

@@ -72,7 +72,12 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   GoldenDeterminismTest + BacktestParityTest. **Premium-exit semantics are pinned by a shared
   fixture** (`contracts/fixtures/exit-equivalence.json`, #505): backtest's PremiumExitEvaluator
   and the live bracket chain (PremiumBracketRules + PaperBracketEvaluator) both test against it —
-  change exit semantics only by updating the fixture + BOTH suites in one PR.
+  change exit semantics only by updating the fixture + BOTH suites in one PR. **Paper tick-freshness
+  doctrine (#694):** fills reject a stale live tick (>15s, `artha.paper.tick-max-age-seconds`) with
+  422 DATA_STALE; settles use the last REAL tick at ANY age (stale = counted+alerted, never refused)
+  and refuse only when NO tick was ever seen — "entries need fresh truth (you can always NOT enter),
+  exits need the best available truth (you cannot refuse to leave forever)". Never reintroduce an
+  `avgEntryPrice` breakeven fallback on a close path.
 - **Contract spec drift (springdoc):** `ContractCaptureTest` snapshots `/v3/api-docs`;
   re-capture with `-Dcontracts.capture=true`, regen TS via `npx openapi-typescript@7` →
   `contracts/gen/*.d.ts`. Generic `Map<String,Object>` returns are NOT enumerated, so adding
@@ -110,9 +115,12 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   (`BarWriter`), bhavcopy stays DO-NOTHING; BOTH keep the original `source` on a value-identical
   write (provenance stays diagnosable), and the fetch `source` label comes from
   `HistoricalCandleGateway.sourceLabel()`, never the Spring profile. Live watchers:
-  `GET /api/v1/market/health/data` (per-token tick/bar divergence + capture freshness) and
-  `GET /api/v1/signal-rejections/dot-health` (per-dot gate-input liveness) — check these BEFORE
-  hand-digging a "feed looks dead" report.
+  `GET /api/v1/market/health/data` (per-token tick/bar divergence + capture freshness),
+  `GET /api/v1/signal-rejections/dot-health` (per-dot gate-input liveness),
+  `GET /api/v1/market/health/ingest` + the `/data-ops/ingest-health` page (per-source EOD ingest
+  coverage over `marketdata.ingest_runs`, #686/#699), and the scheduled canaries (ingest-coverage
+  08:45, notifier-health 08:30, paper reconcilers 21:15, PartialBucketCanary every 60s — all IST)
+  — check these BEFORE hand-digging a "feed looks dead" / "batch missed" report.
 - **3m reads are a read-time 1m→3m rollup** (`CandleRepository.rangeRolledFromOneMinute`, #365): the
   live SignalEngine 3m-primary depends on this rollup. The unused `candles_3m` cagg + its refresh
   policy were DROPPED (V027, #427) — 3m has no materialized view; only the 1m base feeds it.
@@ -229,6 +237,11 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   npm run build)` or the service JAR), set `$env:ARTHA_DB_NAME`/`$env:ARTHA_REDIS_DB` to the LIVE
   values (`artha`/`0`, mock `artha_mock`/`1`), then `docker compose -f deploy/docker-compose.yml
   --env-file .env build <svc> && up -d <svc>` — recreates only `<svc>`; unset vars drift the others.
+- **A deploy carrying a NEW migration needs flyway-init FORCED:** `up -d <svc>` treats the exited
+  `flyway-init` one-shot as satisfied and may NOT re-run it — `up -d --force-recreate flyway-init`
+  first, then ALWAYS DB-probe the new object (`to_regclass`/information_schema). A healthy container
+  + an "up to date" flyway log do NOT prove the migration applied (a stale checkout deployed
+  "healthy" without its migration once, 2026-07-11; only the probe caught it).
 - **Thread-dump a stalled JVM service:** `docker exec ay-<svc> sh -c 'kill -3 1'` → dump lands in
   `docker logs` (jstack/jcmd absent in the slim image).
 
@@ -294,6 +307,11 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   one branch, one commit per phase, single final PR.
 - **`git reset --hard origin/main` wipes uncommitted TRACKED edits** (untracked new files survive) —
   commit/stash a DIFFERENT in-flight feature BEFORE resetting to land another (lost the #2 edits once).
+- **`gh pr merge && git pull` RACES the remote** — the pull can complete before the squash-merge
+  lands, silently leaving main one commit stale; verify `git log origin/main -1` equals the PR's
+  mergeCommit BEFORE building/deploying. And **never pipe a git command whose failure must stop a
+  chain** (`git rebase 2>&1 | tail` exits with tail's 0 — a conflicted rebase then push ships a
+  mid-rebase branch); check `git status -sb` for `## HEAD (no branch)` after any scripted rebase.
 - The **Bash tool is bash, not PowerShell** — PS here-strings (`@'…'@`) are taken
   literally and corrupt commit subjects; pass multi-line commit messages via
   `git commit -F -` with a heredoc.
@@ -317,6 +335,8 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   read §17 (Errata) + §18 (Gap Addendum) FIRST; they override §1–§16 on conflict.
 - `.claude/skills/` = executable runbooks. **Start every non-trivial task with
   `fable-method`** (decompose / verify / decide-next), then the matching routine skill —
-  `ship-a-change`, `build-service`, `adversarial-review`, `swing-backtest`,
-  `scalper-backtest`, `live-verify`, `arm-flag`, `daily-ops`, `session-analysis`,
-  `run-artha-yantra`, `mock-walk`, `new-migration` — instead of improvising inline.
+  `ship-a-change` (single-session), `delegated-ship` (Opus-builder pipeline for queue
+  items / autonomous runs — the delegation model's executable form), `build-service`,
+  `adversarial-review`, `swing-backtest`, `scalper-backtest`, `live-verify`, `arm-flag`,
+  `daily-ops`, `session-analysis`, `run-artha-yantra`, `mock-walk`, `new-migration` —
+  instead of improvising inline.

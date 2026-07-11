@@ -789,6 +789,49 @@ candles are synthetic boot-accrual; the stacks are DB-isolated).
 
 ---
 
+## 14. Fix log (2026-07-11 overnight implementation pass)
+
+The 2026-07-10/11 overnight run (Opus builders, Fable audit/merge per the delegation
+standing rule) closed the P0 live defect plus the run-provenance and durability holes
+this audit ranked highest. PRs #683–#717, all merged + deployed + live-verified;
+migrations `backtest V008/V009/V010` (+ `strategy V028/V029/V030`, `marketdata V040/V041/V042`
+on the sibling app-platform track) applied + probed live. Append-only log — §1–§13 above
+are unchanged.
+
+### Addressed this pass
+
+| Finding | Item · PR | Outcome |
+|---|---|---|
+| **P0-1 / §3.1** partial coarse-bucket poisoning | B1 · #683 | `LiveSeriesStore` completed-bucket read filter + `SignalEngine.entryAnchorIndex` exit-anchor fix + `PartialBucketCanary`. The 4-lens adversarial review **found + fixed a HIGH exit-anchor off-by-one**; the 1h post-close truncated-bucket drop was accepted + test-pinned. **Live behavior shifts from Mon 2026-07-13: entries UP + wider stops — an E8 re-tune prerequisite** (pre-announced to owner). |
+| **P0-2 / R1** engine identity on run rows | B2 · #703 | `engine_sha` + `engine_image` stamped on `jobs` + `backtest_runs` (V008); surfaced in the results API + FE run-detail panel. Two runs across a deploy are now distinguishable. |
+| **P2-1 / A1 / F4** optimizer durability + listing | B6 · #708 | orphan reaper populates `jobs.error` (real failures now distinguishable from restart-orphans); native `GET /optimizations/jobs` listing. |
+| **T3** actor plumb (`created_by`) | B7 · #710 | actor threaded through job/run/version writes (V009); vocabulary `owner \| optimizer \| optimizer:{sweepId}`, `scheduler:*`/`evo:*` reserved. Honors the V002:36 contract. |
+| **§11.4 / §13 #8 + #11** experiment read layer + server compare | B8 · #714 | `experiment_runs` view (V010); `GET /backtests/experiments` list + `/compare` returning the LikeForLike matrix (dataHash/universe/engine-SHA match). `costModelMatch` **deferred to the P1-2 costs work** (no cost model on runs yet). |
+| **F4** failed-job diagnosis | A8 · #696 (+ B6 · #708) | `JobDto.error` now rendered in a failed-job dialog; B6 ensures the field is populated for orphaned sweeps. |
+| **A6** no submission concurrency / queue cap | B16 · #717 | interactive-reserved CAS budget on the shared pool + `429 RATE_LIMIT_QUEUE`; a runaway sweep no longer starves interactive backtests. |
+| **L5 / P1-6 (partial)** stale-tick blindness in the paper exit path | A3 · #694 | 15 s fill max-age → DATA_STALE; bracket-starvation alerter; the breakeven `avgEntryPrice` settle fabrication was **KILLED** — review redesigned settle to last-real-tick-any-age after finding 3 state-stranding paths. Closes the L5 silent-hold + breakeven-pollution risks; the standalone `STALE_TICK`/`UNSETTLED` position marking of P1-6 is the residual. |
+
+Shipped extras (not on the §10 gap list; widen the tunable/contract surface Prompt 2 consumes):
+- **B15 · #716** — parameter path-grammar extension (gate-expression constants + `risk.max_positions`) across the 5 sync points (schema / OPT path_grammar+config_patch / LIB ParameterPaths+TrialOverrides). Screener/funnel props were **refused — no config leaf exists** (chip `task_2560273c`).
+- **B17 · #712** — `contracts/metrics/trial-metrics-catalog.json`: one 20-metric contract both the Java and Python sides consume (kills the hand-synced metric drift between the backtest and optimizer seams).
+- (B16 above also = §8 A6.)
+
+### NEW finding (surfaced during B1's review)
+
+- **Backtest 1h rollup is UTC-anchored while the live cagg re-anchors to IST `:00`** — a
+  30-minute phase gap between the backtest 1h coarse-primary buckets and the live 1h series
+  (the same class as the §3.1 anchoring family, but a *between-worlds* offset rather than a
+  partial-bucket poison). A backtest-vs-live comparison for a 1h-primary strategy is
+  phase-shifted by 30 min. Fix chip `task_1b85c64f` filed; not yet addressed.
+
+### Still OPEN (not touched this pass)
+
+- **P0:** P0-3 swing-pipeline lineage · P0-4 screener CA adjustment (prior-audit H6) · P0-5 BTST exit simulation.
+- **P1:** P1-1 dataset comparability (content hash + `dataset_epochs`) · P1-2 costs knob + instrument class · P1-3 candle-path exit-reason attribution · P1-4 order-event model · P1-5 quote capture at fill · **P1-6** (only the L5 exit-path half landed via A3 — the standalone stale-tick position mark is open) · P1-7 flag/config snapshot at decision time · P1-8 accepted-signal context symmetry · P1-9 daily-context lookahead · P1-10 intrabar touch realism · P1-11 option expiry settlement. *(§10 runs P1-1..P1-11; there is no P1-12 row.)*
+- **P2:** P2-2 run tags/notes/saved views · P2-3 export · P2-4 data-quality artifact · P2-5 latency instrumentation · P2-6 dividends + PIT constituents · P2-7 margin feasibility · P2-8 backtest decision traces. *(P2-1 closed above.)*
+
+---
+
 *Method note: 6 parallel read-only audit agents (backtest fidelity, live/paper
 fidelity, data quality, telemetry/reproducibility, frontend, backend APIs) over the
 2026-07-10 working tree at `main`@d477c3f7, cross-checked against the 2026-07-05 full

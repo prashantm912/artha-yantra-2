@@ -24,9 +24,19 @@ doc's § — a row here is 1 line + a pointer, never the spec. When an item ship
 `TODO` · `IN-PROGRESS` · `BUILT-HOLD` (built, owner merge/arm pending) · `OWNER` (decision/
 data-gated) · `DONE PR#`. **Dependency truth:** Group A (APP Phase 1) is the prerequisite for
 INT-I1 (A4 hard; A1/A3 gate the later INT-I3 actions); **EVO-E0's seven gates are B1/B2 +
-B6–B10** — A and B are independent tracks. **B1 outranks the whole queue** (live-correctness P0:
-frozen partial buckets can miss stop-loss exits, and every pre-fix session extends the
-quarantined LIVE_FIRST evidence window).
+B6–B10** — A and B are independent tracks.
+
+**STATE 2026-07-11 (overnight autonomous run, PRs #683–#718):** every startable clean/HOLD row in
+groups A and B is **DONE** — B1 + A1–A9/A11/A12 + B2/B6–B10/B15–B17/B8, all merged, deployed live,
+DB-probed, and live-verified the same night. **All seven EVO-E0 HARD gates are CLOSED** (EVO first
+increment C1 is now buildable) and APP Phase 1 is complete (INT-I1's A4 hard-dependency satisfied;
+C2 buildable). What remains: OWNER rows (A10, group E), the HOLD-tier design forks B3/B4/B5/B11–B14/
+B18 (each wants an owner read before build), groups C/D (next program phases), and group F residue.
+Live behavioural notes a new session must know: B1 makes Monday 2026-07-13 a CALIBRATION session
+(entries UP + wider stops expected — judge on `ay_signal_partial_bucket_mismatch_total`, not entry
+count; E8 re-tune consumes the clean sessions); A3 changed exit semantics (settle = last REAL tick
+at any age, never fabricated breakeven; fills reject ticks >15s); first canary sweeps + reconciler
+run Monday 08:30/08:45/21:15 IST.
 
 **A. Platform foundations (APP §10 Phase 1 + its §6/§8 orphans — prerequisite for INT-I1; A1/A3 also gate INT-I3)**
 

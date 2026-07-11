@@ -951,11 +951,18 @@ public class SignalEngine {
     // is deterministic) mirroring signal_rejections.diagnostic's shape. Built HERE (not inside the tx) so a
     // serialization/persistence hiccup can never roll back the real ENTRY; stamped best-effort AFTER commit
     // below (a diagnostic must never break the live signal path — same doctrine as recordRejection).
-    String firedDiagnosticJson =
-        firedDiagnostic == null
-            ? null
-            : in.arthayantra.strategysignal.scalper.FiredDiagnosticJson.write(
+    String firedDiagnosticJson = null;
+    if (firedDiagnostic != null) {
+      try {
+        firedDiagnosticJson =
+            in.arthayantra.strategysignal.scalper.FiredDiagnosticJson.write(
                 objectMapper, firedDiagnostic);
+      } catch (RuntimeException e) {
+        // Symmetric with the post-commit stamp: a diagnostic-build failure degrades to a null
+        // side-channel — it must never prevent the REAL entry (review LOW, 2026-07-12).
+        log.warn("fired-diagnostic build failed — emitting entry without it", e);
+      }
+    }
     // One transaction: the ENTRY row, its suggested qty and its option leg are all-or-nothing. A
     // partial commit left an ACTIVE entry with no tradeable leg — the exit side then read a null
     // scalper_detail and silently fell back to the definition direction (wrong side for a PE scalp).

@@ -268,6 +268,7 @@ class FakeEvoRepo:
         self.campaigns = campaigns or []
         self.generations = generations or {}
         self.candidates = candidates or {}
+        self.proposals: list[dict[str, Any]] = []
         self._seq = 0
 
     def list_campaigns(self, limit: int, offset: int) -> list[dict[str, Any]]:
@@ -392,8 +393,90 @@ class FakeEvoRepo:
         self.candidates.setdefault(campaign_id, []).extend(cand_rows)
         return gen_row
 
+    # --- E4 proposals inbox (mirrors EvoRepo's proposal methods) --------------------------------
+
+    def list_proposals(
+        self,
+        status: str | None,
+        kind: str | None,
+        campaign_id: str | None,
+        limit: int,
+        offset: int,
+    ) -> list[dict[str, Any]]:
+        rows = [
+            r for r in self.proposals
+            if (status is None or r["status"] == status)
+            and (kind is None or r["kind"] == kind)
+            and (campaign_id is None or r["campaignId"] == campaign_id)
+        ]
+        rows.sort(key=lambda r: r["_seq"], reverse=True)  # created_at DESC
+        return [_strip_seq(r) for r in rows[offset:offset + limit]]
+
+    def get_proposal(self, proposal_id: str) -> dict[str, Any] | None:
+        return next((_strip_seq(r) for r in self.proposals if r["id"] == proposal_id), None)
+
+    def find_open_proposal(self, candidate_id: str, kind: str) -> dict[str, Any] | None:
+        matches = [
+            r for r in self.proposals
+            if r["candidateId"] == candidate_id and r["kind"] == kind and r["status"] == "PENDING"
+        ]
+        matches.sort(key=lambda r: r["_seq"], reverse=True)
+        return _strip_seq(matches[0]) if matches else None
+
+    def insert_proposal(
+        self,
+        campaign_id: str,
+        candidate_id: str | None,
+        kind: str,
+        evidence: dict[str, Any] | None,
+        expiry_days: int = 7,
+    ) -> dict[str, Any]:
+        self._seq += 1
+        row = {
+            "_seq": self._seq, "id": f"prop-{self._seq}", "campaignId": campaign_id,
+            "candidateId": candidate_id, "kind": kind, "evidence": evidence, "status": "PENDING",
+            "actor": None, "decidedAt": None,
+            "expiresAt": "2026-07-18T00:00:00+00:00",  # DB computes now()+7d; fixed here
+            "createdAt": "2026-07-11T00:00:00+00:00",
+        }
+        self.proposals.append(row)
+        return _strip_seq(row)
+
+    def refresh_proposal_evidence(
+        self, proposal_id: str, evidence: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        for r in self.proposals:
+            if r["id"] == proposal_id and r["status"] == "PENDING":
+                r["evidence"] = evidence
+                return _strip_seq(r)
+        return self.get_proposal(proposal_id)
+
+    def decide_proposal(
+        self, proposal_id: str, status: str, actor: str | None
+    ) -> dict[str, Any] | None:
+        for r in self.proposals:
+            if r["id"] == proposal_id and r["status"] == "PENDING":
+                r.update(status=status, actor=actor, decidedAt="2026-07-11T02:00:00+00:00")
+                return _strip_seq(r)
+        return None  # unknown or already-decided → the service maps to 404/409
+
     def close(self) -> None:
         pass
+
+
+def _strip_seq(row: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy without the internal ``_seq`` ordering key (the real repo has no such key)."""
+    return {k: v for k, v in row.items() if k != "_seq"}
+
+
+class FakeNtfy:
+    """Captures every ntfy push so a test can assert one-per-new-proposal without a network call."""
+
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, str, str]] = []
+
+    def send(self, title: str, message: str, priority: str = "default") -> None:
+        self.sent.append((title, message, priority))
 
 
 class FakeReconRepo:

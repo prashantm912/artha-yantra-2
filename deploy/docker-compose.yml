@@ -564,6 +564,10 @@ services:
       REDIS_URL: redis://redis:6379/${ARTHA_REDIS_DB:?unset - run via the ay CLI (derives mock->1, live->0); raw compose must export it}
       STRATEGY_SIGNAL_BASE: http://strategy-signal-service:8082
       BACKTEST_BASE: http://backtest-service:8083
+      # ntfy passthrough (EVO E4 item 11): a new PUBLISH_PAPER proposal pushes one fail-soft alert.
+      # Blank ARTHA_NTFY_TOPIC → the client no-ops (mock needs no ntfy config).
+      ARTHA_NTFY_TOPIC: ${ARTHA_NTFY_TOPIC:-}
+      ARTHA_NTFY_URL: ${ARTHA_NTFY_URL:-https://ntfy.sh}
     secrets: [postgres_password]
     depends_on:
       flyway-init:

@@ -26,6 +26,8 @@ class Settings:
     redis_url: str
     strategy_signal_base: str
     backtest_base: str
+    ntfy_url: str
+    ntfy_topic: str
 
     @property
     def conninfo(self) -> str:
@@ -48,4 +50,8 @@ class Settings:
                 "STRATEGY_SIGNAL_BASE", "http://strategy-signal-service:8082"
             ),
             backtest_base=os.environ.get("BACKTEST_BASE", "http://backtest-service:8083"),
+            # First-party ntfy (EVO E4 item 11): the SAME env names the Java services read
+            # (ARTHA_NTFY_URL / ARTHA_NTFY_TOPIC). Blank topic → client no-ops (mock needs none).
+            ntfy_url=os.environ.get("ARTHA_NTFY_URL", "https://ntfy.sh"),
+            ntfy_topic=os.environ.get("ARTHA_NTFY_TOPIC", ""),
         )

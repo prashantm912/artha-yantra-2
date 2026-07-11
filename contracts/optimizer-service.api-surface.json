@@ -50,6 +50,20 @@
       "422"
     ]
   },
+  "GET /api/v1/evolution/proposals": {
+    "params": [
+      "campaignId",
+      "kind",
+      "limit",
+      "offset",
+      "status"
+    ],
+    "requestBody": false,
+    "responses": [
+      "200",
+      "422"
+    ]
+  },
   "GET /api/v1/evolution/reconciliations": {
     "params": [
       "limit",
@@ -161,6 +175,16 @@
       "422"
     ]
   },
+  "POST /api/v1/evolution/campaigns/{campaign_id}/proposals": {
+    "params": [
+      "campaign_id"
+    ],
+    "requestBody": false,
+    "responses": [
+      "200",
+      "422"
+    ]
+  },
   "POST /api/v1/evolution/generations/{generation_id}/stress": {
     "params": [
       "generation_id"
@@ -168,6 +192,26 @@
     "requestBody": true,
     "responses": [
       "202",
+      "422"
+    ]
+  },
+  "POST /api/v1/evolution/proposals/{proposal_id}/approve": {
+    "params": [
+      "proposal_id"
+    ],
+    "requestBody": true,
+    "responses": [
+      "200",
+      "422"
+    ]
+  },
+  "POST /api/v1/evolution/proposals/{proposal_id}/reject": {
+    "params": [
+      "proposal_id"
+    ],
+    "requestBody": true,
+    "responses": [
+      "200",
       "422"
     ]
   },

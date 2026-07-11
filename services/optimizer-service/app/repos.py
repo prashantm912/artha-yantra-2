@@ -394,6 +394,27 @@ _CANDIDATE_COLS = (
 )
 
 
+def _proposal_row(r: tuple) -> dict[str, Any]:
+    return {
+        "id": str(r[0]),
+        "campaignId": str(r[1]),
+        "candidateId": _uuid(r[2]),
+        "kind": r[3],
+        "evidence": r[4],
+        "status": r[5],
+        "actor": r[6],
+        "decidedAt": _ts(r[7]),
+        "expiresAt": _ts(r[8]),
+        "createdAt": _ts(r[9]),
+    }
+
+
+_PROPOSAL_COLS = (
+    "id, campaign_id, candidate_id, kind, evidence, status, actor, decided_at, expires_at, "
+    "created_at"
+)
+
+
 class EvoRepo:
     """Read-only access to the evolution experiment model (``evo_*`` tables, backtest
     schema). Only the E1 read surface is implemented — campaigns, their generations, and
@@ -590,6 +611,114 @@ class EvoRepo:
             count = cur.rowcount
         self._conn.commit()
         return count
+
+    # --- E4 proposals inbox (§12 item 11) -------------------------------------------------------
+
+    def list_proposals(
+        self,
+        status: str | None,
+        kind: str | None,
+        campaign_id: str | None,
+        limit: int,
+        offset: int,
+    ) -> list[dict[str, Any]]:
+        """The inbox read (GET /proposals) — proposals newest-first, filterable by status / kind /
+        campaign. Filters are ANDed and each optional (an absent filter widens the read)."""
+        sql = f"SELECT {_PROPOSAL_COLS} FROM evo_proposals WHERE TRUE"
+        args: list[Any] = []
+        if status:
+            sql += " AND status=%s"
+            args.append(status)
+        if kind:
+            sql += " AND kind=%s"
+            args.append(kind)
+        if campaign_id:
+            sql += " AND campaign_id=%s"
+            args.append(campaign_id)
+        sql += " ORDER BY created_at DESC LIMIT %s OFFSET %s"
+        args.extend([limit, offset])
+        with self._conn.cursor() as cur:
+            cur.execute(sql, tuple(args))
+            rows = cur.fetchall()
+        return [_proposal_row(r) for r in rows]
+
+    def get_proposal(self, proposal_id: str) -> dict[str, Any] | None:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_PROPOSAL_COLS} FROM evo_proposals WHERE id=%s", (proposal_id,)
+            )
+            row = cur.fetchone()
+        return _proposal_row(row) if row is not None else None
+
+    def find_open_proposal(self, candidate_id: str, kind: str) -> dict[str, Any] | None:
+        """The single OPEN (PENDING) proposal for a (candidate, kind), or None — the generation
+        idempotency key ("one OPEN proposal per (candidate, kind); regeneration refreshes"). The
+        optimizer is the sole evo writer + single-process, so this read-then-write has no competing
+        writer; a terminal (APPROVED/REJECTED/EXPIRED) row never blocks a fresh proposal."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_PROPOSAL_COLS} FROM evo_proposals "
+                "WHERE candidate_id=%s AND kind=%s AND status='PENDING' "
+                "ORDER BY created_at DESC LIMIT 1",
+                (candidate_id, kind),
+            )
+            row = cur.fetchone()
+        return _proposal_row(row) if row is not None else None
+
+    def insert_proposal(
+        self,
+        campaign_id: str,
+        candidate_id: str | None,
+        kind: str,
+        evidence: dict[str, Any] | None,
+        expiry_days: int = 7,
+    ) -> dict[str, Any]:
+        """Insert a PENDING proposal with a 7-day expiry (§8.2). ``expires_at`` is computed in SQL
+        (``now() + interval``) so the expiry is DB-clock-anchored, never a Python wall-clock the
+        tests would have to freeze; ``status`` defaults PENDING from the DDL."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO evo_proposals (campaign_id, candidate_id, kind, evidence, expires_at) "
+                "VALUES (%s, %s, %s, %s::jsonb, now() + (%s * interval '1 day')) "
+                f"RETURNING {_PROPOSAL_COLS}",
+                (campaign_id, candidate_id, kind, _jsonb(evidence), expiry_days),
+            )
+            row = cur.fetchone()
+        self._conn.commit()
+        return _proposal_row(row)
+
+    def refresh_proposal_evidence(
+        self, proposal_id: str, evidence: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        """Refresh an OPEN proposal's evidence card in place (regeneration re-freezes the current
+        scorecard/champion gap without minting a duplicate row). Guarded to PENDING so a decision
+        that landed concurrently is never silently overwritten."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "UPDATE evo_proposals SET evidence=%s::jsonb "
+                f"WHERE id=%s AND status='PENDING' RETURNING {_PROPOSAL_COLS}",
+                (_jsonb(evidence), proposal_id),
+            )
+            row = cur.fetchone()
+        self._conn.commit()
+        return _proposal_row(row) if row is not None else self.get_proposal(proposal_id)
+
+    def decide_proposal(
+        self, proposal_id: str, status: str, actor: str | None
+    ) -> dict[str, Any] | None:
+        """Mark a PENDING proposal APPROVED/REJECTED (audit: actor + decided_at=now()). Guarded to
+        PENDING — a second decision (or a decision on an EXPIRED row) matches nothing and returns
+        None, so the service maps it to a 409 rather than silently re-deciding (append-only table:
+        the row is UPDATE-decided, never removed)."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "UPDATE evo_proposals SET status=%s, actor=%s, decided_at=now() "
+                f"WHERE id=%s AND status='PENDING' RETURNING {_PROPOSAL_COLS}",
+                (status, actor, proposal_id),
+            )
+            row = cur.fetchone()
+        self._conn.commit()
+        return _proposal_row(row) if row is not None else None
 
 
 def _reconciliation_row(r: tuple) -> dict[str, Any]:

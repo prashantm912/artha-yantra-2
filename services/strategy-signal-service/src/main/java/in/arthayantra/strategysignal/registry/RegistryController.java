@@ -23,11 +23,21 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/strategies")
 public class RegistryController {
 
-  /** POST body. */
-  public record CreateRequest(String name, String description, List<String> tags, String config) {}
+  /**
+   * POST body. {@code createdBy} (audit T3 / EVO §13 row 4) is the OPTIONAL machine-writer actor —
+   * omitted on the single-owner API path (defaults to {@code 'owner'}), set to a prefixed identity
+   * (e.g. {@code 'evo:{campaignId}'}) by an internal service-to-service caller.
+   */
+  public record CreateRequest(
+      String name, String description, List<String> tags, String config, String createdBy) {}
 
-  /** PUT body. */
-  public record UpdateRequest(String config, String versionBump, String notes) {}
+  /**
+   * PUT body. {@code createdBy} (audit T3 / EVO §13 row 4) is OPTIONAL — the optimizer promote path
+   * sends {@code 'optimizer:{sweepId}'} (V002:36's stated contract) so provenance is a first-class
+   * column, not a free-text note; omitted → {@code 'owner'}.
+   */
+  public record UpdateRequest(
+      String config, String versionBump, String notes, String createdBy) {}
 
   /** Publish body. */
   public record PublishRequest(String targetVersion, String notes) {}
@@ -68,7 +78,8 @@ public class RegistryController {
     return ResponseEntity.status(HttpStatus.CREATED)
         .body(
             service.create(
-                request.name(), request.description(), request.tags(), request.config()));
+                request.name(), request.description(), request.tags(), request.config(),
+                request.createdBy()));
   }
 
   /** Full detail (latest or explicit version). */
@@ -81,7 +92,8 @@ public class RegistryController {
   /** New draft version (auto patch-bump; checksum dedupe). */
   @PutMapping("/{id}")
   public Map<String, Object> update(@PathVariable UUID id, @RequestBody UpdateRequest request) {
-    return service.update(id, request.config(), request.versionBump(), request.notes());
+    return service.update(
+        id, request.config(), request.versionBump(), request.notes(), request.createdBy());
   }
 
   /** Hard-delete drafts-only; archives otherwise (409 with archived flag). */

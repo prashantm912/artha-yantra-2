@@ -700,6 +700,7 @@ export interface components {
             config?: string;
             versionBump?: string;
             notes?: string;
+            createdBy?: string;
         };
         JsonNode: unknown;
         UpdateBody: {
@@ -771,6 +772,7 @@ export interface components {
             description?: string;
             tags?: string[];
             config?: string;
+            createdBy?: string;
         };
         RollbackRequest: {
             version?: string;

@@ -11,9 +11,9 @@ Mechanics (design §7.1, reusing the neighbor-probe / cost-stress drain idiom):
      the version's LIVE paper trades over the window, then submits a matched-window re-sim of the
      EXACT version through the job pipeline (``purpose: "reconcile"`` — free-form,
      StressGuard-exempt;
-     for a SWING version the design pins ``session.fill_timing: at_close``, see the open doubt in
-     the
-     receipt / ``_swing`` handling below).
+     for a SWING version the re-sim PINS ``session.fill_timing: at_close`` via the request's
+     ``sessionOverrides`` block (§7.1.2) so the sim fills where live paper enters (the daily
+     close), not the pipeline's NEXT_OPEN default; see ``create`` + ``_dispatch_caveats`` below).
   2. A background daemon POLLS the re-sim job to a terminal state (bounded — one dead run degrades
      to INSUFFICIENT, never a hang), reads the sim run's trades + return, PAIRS them against the
      live trades, computes the §7.1.3 gap vector + gapZ, derives the §7.2 verdict, and INSERTs ONE
@@ -530,8 +530,8 @@ class ReconciliationListResponse(BaseModel):
 class ReconciliationReceipt(BaseModel):
     """The 202 receipt for a dispatched reconciliation (design §7.1): the matched-window re-sim was
     submitted (``simJobId``); the gap row lands on the async drain's completion and is read back via
-    GET ?versionId=. ``caveats`` surfaces the honest degradations known at dispatch (the un-pinnable
-    swing fill_timing, the funnel portfolio-effect)."""
+    GET ?versionId=. ``caveats`` surfaces the honest degradations known at dispatch (the scalper
+    §7.2 structural divergence, the funnel single-pick portfolio-effect)."""
 
     versionId: str
     windowFrom: str
@@ -657,6 +657,14 @@ class ReconciliationService:
                 "purpose": "reconcile",
                 "initialCapital": self._capital,
             }
+            # EVO §7.1.2: a swing re-sim PINS session.fill_timing to at_close (BacktestRunRequest's
+            # sessionOverrides, validated strict server-side) so the sim fills where live paper
+            # enters — the daily close (SwingBatchEngine) — not the job-pipeline swing default
+            # (next_open); without the pin, entry deltas would carry fill-timing noise, not
+            # evidence. Scalper re-sims are NOT pinned: their reconciliation runs shadow-vs-paper
+            # (§7.2), so the raw-candle fill-timing knob does not apply.
+            if mode == "swing":
+                request["sessionOverrides"] = {"fillTiming": "at_close"}
             job = self._backtest.run(request)
             sim_job_id = (job or {}).get("jobId")
 
@@ -883,23 +891,17 @@ class ReconciliationService:
 
 
 def _dispatch_caveats(mode: str) -> list[str]:
-    """The honest degradations known at dispatch (design "degrade honest"). SWING: the re-sim CANNOT
-    pin ``session.fill_timing: at_close`` (design §7.1.2) — the pipeline reads fill_timing only from
-    the compiled config (StrategyCompiler), it is NOT in the closed parameter-path grammar
-    (ParameterPaths), and BacktestRunRequest has no session override; so a swing re-sim fills at the
-    version's default (NEXT_OPEN for swing), and entry deltas may carry one bar of noise until a
-    backtest-service request-level fill-timing override lands (flagged for the deployer). SCALPER:
-    the
-    §7.2 whitelist — raw backtest-vs-live is a STRUCTURAL divergence for gate-armed intraday options
+    """The honest degradations known at dispatch (design "degrade honest"). SWING: NO fill-timing
+    degradation — the re-sim now PINS ``session.fill_timing: at_close`` via the request's
+    ``sessionOverrides`` (§7.1.2), so a swing re-sim fills at the daily close matching live paper
+    (SwingBatchEngine) rather than the pipeline's NEXT_OPEN default; the run is provenance-stamped
+    (``fillTimingOverride`` on the run metrics) so a reader can see it was pinned. SCALPER: the §7.2
+    whitelist — raw backtest-vs-live is a STRUCTURAL divergence for gate-armed intraday options
     (OI/Dow/IV muted on derived history → a scalper backtest arms ~0 trades); shadow-vs-paper is the
     real plane, so a scalper reconciliation reads as a data-fidelity artifact, not a strategy
     verdict."""
     if mode == "swing":
-        return [
-            "swing fill_timing could NOT be pinned to at_close (§7.1.2): the pipeline reads "
-            "fill_timing only from the config and has no request-level override; so the re-sim "
-            "fills at the version default (NEXT_OPEN) and swing entry deltas may carry bar-noise"
-        ]
+        return []
     return [
         "scalper raw backtest-vs-live is a §7.2 STRUCTURAL divergence (gate-armed intraday: "
         "OI/Dow/IV muted on derived history → ~0 armed trades); judge on shadow-vs-paper not raw"

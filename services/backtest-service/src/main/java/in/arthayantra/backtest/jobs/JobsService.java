@@ -20,6 +20,7 @@ import in.arthayantra.common.web.error.NotFoundException;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -138,6 +139,15 @@ public class JobsService {
       if (multiplier.compareTo(BigDecimal.ONE) != 0) {
         request.putObject("stressOverrides").put("slippageMultiplier", multiplier);
       }
+    }
+    // EVO §7.1.2 reconcile pin: validate the fill-timing override (422 on an unknown value — STRICT,
+    // unlike the cost-stress clamp) and pin it into the request JSONB. This is the run's provenance
+    // record of the fill timing it was executed under, which BacktestRunner reads back to override the
+    // effective FillTiming. Always written when present (there is no "identity" value to omit): the
+    // whole point is that the reconcile re-sim is identifiably pinned.
+    if (req.sessionOverrides() != null) {
+      String fillTiming = validatedFillTiming(req.sessionOverrides());
+      request.putObject("sessionOverrides").put("fillTiming", fillTiming);
     }
     request.put("purpose", purpose);
 
@@ -319,6 +329,32 @@ public class JobsService {
               + multiplier.toPlainString());
     }
     return multiplier;
+  }
+
+  /**
+   * Validates a session-override fill-timing pin (EVO §7.1.2 reconcile {@code at_close}) and returns
+   * its canonical value ({@code "at_close"} or {@code "next_open"}). Validation is STRICT — unlike the
+   * cost-stress clamp, an unknown value is a 422 (never a silent default): a silently-ignored pin
+   * would run the reconcile re-sim at the version default and manufacture a fake divergence, the exact
+   * failure this pin exists to preclude. A present block with a null/blank value is malformed (422).
+   * Package-visible so the validation is unit-tested without the submission integration harness.
+   */
+  static String validatedFillTiming(BacktestRunRequest.SessionOverrides overrides) {
+    String timing = overrides.fillTiming();
+    if (timing == null || timing.isBlank()) {
+      throw new ApiException(
+          422,
+          ErrorCodes.VALIDATION_FAILED,
+          "sessionOverrides.fillTiming is required when sessionOverrides is present");
+    }
+    String canonical = timing.trim().toLowerCase(Locale.ROOT);
+    if (!"at_close".equals(canonical) && !"next_open".equals(canonical)) {
+      throw new ApiException(
+          422,
+          ErrorCodes.VALIDATION_FAILED,
+          "sessionOverrides.fillTiming must be 'at_close' or 'next_open'; got " + timing);
+    }
+    return canonical;
   }
 
   private static JobStatus parseStatus(String status) {

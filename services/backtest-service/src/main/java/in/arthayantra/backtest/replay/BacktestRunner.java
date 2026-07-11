@@ -34,6 +34,7 @@ import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.UUID;
@@ -136,7 +137,14 @@ public class BacktestRunner {
     if (overrides.isObject() && !overrides.isEmpty()) {
       config = TrialOverrides.apply(config, overrides);
     }
-    StrategyDefinition definition = StrategyCompiler.compile(config);
+    // EVO §7.1.2 reconcile pin: a request-level sessionOverrides.fillTiming (validated + pinned into
+    // the request JSONB at submission) overrides the effective fill timing by rebuilding the compiled
+    // definition's session with the pinned value — ReplayEngine resolves timing from
+    // definition.session().fillTiming(), so the pin flows into the candle replay (and the fold path)
+    // with no engine signature change. Absent ⇒ null ⇒ the definition is unchanged (byte-identical).
+    String fillTimingOverride = sessionFillTimingOverride(request);
+    StrategyDefinition definition =
+        withFillTiming(StrategyCompiler.compile(config), fillTimingOverride);
     SeriesKey signal = signalInstrument(config, request);
     OffsetDateTime from = OffsetDateTime.parse(dateTime(request.path("from").asText()));
     OffsetDateTime to = OffsetDateTime.parse(dateTime(request.path("to").asText()));
@@ -242,6 +250,12 @@ public class BacktestRunner {
     // byte-identical (no new key).
     if (slippageMultiplier.compareTo(BigDecimal.ONE) != 0) {
       m.full().put("slippageMultiplier", slippageMultiplier.toPlainString());
+    }
+    // EVO §7.1.2: surface the reconcile fill-timing pin on the run's result metrics (provenance) so a
+    // reconciliation reader can SEE the sim was pinned (design §7.1 step 2). Only when pinned → an
+    // un-pinned run's metrics stay byte-identical (no new key).
+    if (fillTimingOverride != null) {
+      m.full().put("fillTimingOverride", fillTimingOverride);
     }
 
     // §D.4 fold-mode trigger (Phase 31): a plain /backtests/run job is FULL-WINDOW (folds == null,
@@ -630,6 +644,68 @@ public class BacktestRunner {
       return BigDecimal.ONE;
     }
     return multiplier;
+  }
+
+  /**
+   * The EVO §7.1.2 reconcile fill-timing pin from the request JSONB
+   * ({@code sessionOverrides.fillTiming}), already validated at submission. Absent ⇒ {@code null} ⇒
+   * the default path (the version's own timing), byte-identical to a normal run. Read-back is STRICT
+   * (unlike {@link #stressSlippageMultiplier}'s fail-soft clamp): an unknown value — reachable only by
+   * hand-editing the job row, since submission 422s it — THROWS rather than silently defaulting,
+   * because a silently-ignored pin would run the sim at the version default (NEXT_OPEN for swing) and
+   * manufacture a fake divergence, the one failure this pin exists to preclude; the failed job then
+   * yields an honest INSUFFICIENT reconciliation, never fake evidence. Package-visible for the
+   * read-back guard test.
+   */
+  static String sessionFillTimingOverride(JsonNode request) {
+    JsonNode node = request.path("sessionOverrides").path("fillTiming");
+    if (!node.isTextual()) {
+      return null;
+    }
+    String value = node.asText().trim().toLowerCase(Locale.ROOT);
+    if (!"at_close".equals(value) && !"next_open".equals(value)) {
+      throw new IllegalArgumentException(
+          "sessionOverrides.fillTiming must be 'at_close' or 'next_open'; got " + node.asText());
+    }
+    return value;
+  }
+
+  /**
+   * Rebuilds a compiled {@link StrategyDefinition} with its {@code session.fillTiming} pinned to
+   * {@code fillTiming} (EVO §7.1.2). {@code ReferencePriceSelector.defaultFor} gives an explicit
+   * timing precedence over the style default, so the rebuilt session forces the effective fill timing
+   * ReplayEngine resolves. A {@code null} override returns the SAME instance (the byte-identical
+   * default path). Package-visible for the rebuild test.
+   */
+  static StrategyDefinition withFillTiming(StrategyDefinition definition, String fillTiming) {
+    if (fillTiming == null) {
+      return definition;
+    }
+    StrategyDefinition.Session s = definition.session();
+    StrategyDefinition.Session pinned =
+        new StrategyDefinition.Session(
+            s.style(),
+            s.windowFrom(),
+            s.windowTo(),
+            s.squareOff(),
+            s.preCloseAt(),
+            fillTiming,
+            s.exitIntrabar(),
+            s.expiryDayAllowed(),
+            s.expiryWindowFrom(),
+            s.expiryWindowTo());
+    return new StrategyDefinition(
+        definition.id(),
+        definition.version(),
+        definition.primaryTimeframe(),
+        definition.additionalTimeframes(),
+        definition.indicators(),
+        definition.direction(),
+        definition.gate(),
+        definition.scoring(),
+        definition.exitRules(),
+        definition.sizing(),
+        pinned);
   }
 
   private static String engineVersion(ResolvedVersion resolved) {

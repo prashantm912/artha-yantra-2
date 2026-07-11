@@ -309,8 +309,12 @@ export interface components {
             seed?: number;
             purpose?: string;
             stressOverrides?: components["schemas"]["StressOverrides"];
+            sessionOverrides?: components["schemas"]["SessionOverrides"];
         };
         JsonNode: unknown;
+        SessionOverrides: {
+            fillTiming?: string;
+        };
         StressOverrides: {
             slippageMultiplier?: number;
         };

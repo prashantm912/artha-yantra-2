@@ -184,6 +184,11 @@ const MultiframeChartPage = lazy(() =>
 const CockpitPage = lazy(() =>
   import('./pages/scalper/CockpitPage.tsx').then((m) => ({ default: m.CockpitPage })),
 );
+// The insights feed (INT-I1) — a table + explain drawer (shadcn Sheet); route-lazy to keep it off the
+// main chunk until visited.
+const InsightsPage = lazy(() =>
+  import('./pages/insights/InsightsPage.tsx').then((m) => ({ default: m.InsightsPage })),
+);
 
 function Lazy({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<p className="text-sm text-ay-muted">Loading chart…</p>}>{children}</Suspense>;
@@ -208,6 +213,7 @@ export function App() {
           <Route path="/signals" element={<SignalsPage />} />
           <Route path="/signals/:book" element={<SignalsPage />} />
           <Route path="/signal-rejections" element={<RejectionsPage />} />
+          <Route path="/insights" element={<Lazy><InsightsPage /></Lazy>} />
           <Route path="/paper" element={<Lazy><PaperPage /></Lazy>} />
           <Route path="/paper/:book" element={<Lazy><PaperPage /></Lazy>} />
           <Route path="/orders" element={<OrdersPage />} />

@@ -76,6 +76,33 @@ type _VariantSummary = AssertKeys<
 type _DotHealth = AssertKeys<Schemas['DotHealth'], 'asOf' | 'session' | 'rowsInspected' | 'dots'>;
 type _DotState = AssertKeys<Schemas['DotState'], 'dot' | 'alive' | 'required' | 'detail'>;
 
+// --- insights decision-support (INT-I1 feed / Focus / explain drawer) --------------------------
+type _Insight = AssertKeys<
+  Schemas['Insight'],
+  | 'id'
+  | 'generatedAt'
+  | 'type'
+  | 'severity'
+  | 'scope'
+  | 'title'
+  | 'explanation'
+  | 'evidence'
+  | 'priority'
+  | 'priorityDetail'
+  | 'dataTrust'
+  | 'trustReasons'
+  | 'suppressed'
+  | 'status'
+>;
+type _InsightListResponse = AssertKeys<Schemas['InsightListResponse'], 'items' | 'limit' | 'offset'>;
+type _FocusResponse = AssertKeys<Schemas['FocusResponse'], 'signalQueue' | 'attentionQueue' | 'suppressed'>;
+type _InsightSummaryResponse = AssertKeys<
+  Schemas['InsightSummaryResponse'],
+  'bySeverity' | 'byStatus' | 'suppressed'
+>;
+type _InsightCount = AssertKeys<Schemas['Count'], 'key' | 'count'>;
+type _TriageResponse = AssertKeys<Schemas['TriageResponse'], 'id' | 'status'>;
+
 // keep the checked aliases "used" for lint without emitting anything
 export type ContractBridges = [
   _PositionDto,
@@ -85,4 +112,10 @@ export type ContractBridges = [
   _VariantSummary,
   _DotHealth,
   _DotState,
+  _Insight,
+  _InsightListResponse,
+  _FocusResponse,
+  _InsightSummaryResponse,
+  _InsightCount,
+  _TriageResponse,
 ];

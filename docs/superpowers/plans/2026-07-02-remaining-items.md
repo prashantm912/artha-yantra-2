@@ -237,6 +237,31 @@ The whole 2026-07-02 audit is now fully closed: 90 findings → 54 fixed same-da
 |---|---|
 | **before ~2026-11-16** | **CD-2 yearly calendar CSV refresh** — add 2027 NSE/BSE holiday CSVs to `libs/market-calendar`. `CalendarHorizonCanaryTest` goes red ~45 days before year-end; unrefreshed, the monthly-expiry look-ahead cliff starts 2026-12-29 and OI capture silently halts 2027-01-01. |
 
+## 4b. Chip register (out-of-scope findings parked as one-click background tasks)
+
+**Rule (owner ask 2026-07-12): every chip ALSO gets a row here at filing time** — the popup cards are
+ephemeral; this table is the durable record. Each row is self-contained enough to rebuild the task if
+the chip is gone. Status: OPEN · DONE (how) · STALE.
+
+| chip id | filed | what (self-contained) | status |
+|---|---|---|---|
+| task_03b9f52d | 2026-07-12 | Funnel-universe resolver (backtest JobsService, #706) pins TODAY's screen date — weekend/holiday submissions get zero candidates ("needs a pinned universe"); fall back to the latest screen date ≤ today, stamp it in provenance. Repro: sweep f803dee6 (Sat). | OPEN |
+| task_b57c7fbe | 2026-07-12 | V010's manual `marketdata.prune_options_snapshots()` SQL wrapper errors on EVERY call (regclass re-resolution of dropped chunks — empirically reproduced on 2.17.2); the documented manual usage never worked. Fix = plpgsql PERFORM variant in a NEW migration. A10's job calls drop_chunks directly, so nothing depends on it. | OPEN |
+| task_132a71ba | 2026-07-12 | `CounterfactualRunRepository.findRunIdByJobId` has no ORDER BY + findFirst() → arbitrary row under multi-row shared-DB state; flaked an IT once. Add ORDER BY created_at DESC (or key by job uniquely). | OPEN |
+| task_4f575c72 | 2026-07-12 | Quick verify: does `LiveSeriesStore`'s context-series bookkeeping need the same bucket-END gating the backtest append site got in #755? Likely already covered by #683's completeness filter + IndicatorBank.mappedIndex — confirm and close, or mirror the 5-line hardening. | OPEN |
+| task_3e95fade | 2026-07-12 | Live BTST exit sweep: the sim now simulates BTST exits (P0-5 fix) but the live SignalEngine emits NO btst exit (preCloseEvaluate is entry-only, onClosedBar skips btst). Port the identical ExitEvaluator sweep to the pre-close clock; paper IT with max_holding_days:1. | OPEN |
+| task_8c3964cc | 2026-07-11 | Stress rounds (#729) can occupy all backtest workers — reserve a slot for interactive runs (B16 shipped the per-kind queue cap; this is the stress-orchestration-side reservation). | OPEN |
+| task_547656bf | 2026-07-11 | 3m-primary `tradeFrequency` metric (#721) counts bars-per-session with a hardcoded session length — absolute value skewed for 3m; ranking within a same-interval sweep unaffected. Fix the bars-per-session divisor per interval. | OPEN |
+| task_2560273c | 2026-07-11 | Funnel-knob tunability (EVO §13 row 21 third family): funnel props (rs-min etc.) are service-global config, no per-strategy YAML leaf exists — needs a config leaf + resolver plumb before EVO can tune them (the design's "funnel knobs wait"). | OPEN |
+| task_1b85c64f | 2026-07-10 | Backtest 1h bars anchor on the hour; live 1h candles anchor 09:15+n·60m → a 30-min phase gap between sim and live 1h series (FID finding). Decide + align one side. | OPEN |
+| task_94f40cf6 | 2026-07-10 | Manual take of a STALE signal bypasses freshness gating (A1 residual): PaperService.openManualOrder now governor-gated, but a signal taken hours later still fills at current tick without a staleness check on the SIGNAL itself. | OPEN |
+| task_f12c165f | 2026-07-11 | FE banner for export truncation (A9 residual): the API sends X-Truncated headers on the 3 export paths; the FE doesn't surface them. | OPEN |
+| task_acf03155 | 2026-07-12 | Analytics folds (nse/analytics EquityReturnsService + siblings) still read RAW bhavcopy across splits — adopt B4's shared `AdjustedEquityDailySql` plane where price continuity matters (keep raw where NSE publishes ex-adjusted, per the RegimeService reasoning). | OPEN |
+| task_67cf8715 | 2026-07-06 | Manas pyramiding IT gap | **DONE #744** (F6 item d) |
+| task_d6872aa3 | 2026-07-10 | Regime-label vocabulary mismatch | **DONE #705** (B10) |
+| task_8972447b | 2026-07-10 | Partial coarse-bucket poisoning | **DONE #683** (B1) |
+| task_fc239b57 | 2026-07-05 | Registry reconcile-loop bug | **DONE #579** |
+
 ## 5. Small optional nits — **CLOSED 2026-07-04** (with the fix-queue batch)
 
 - Value-verify residuals: F3 heatmap UTC labels were already fixed (#402, stale entry); F5

@@ -9,12 +9,16 @@ run on the first poll, so it always terminates — never a spinning daemon):
 * collect      — ``_collect`` polls runs to terminal, degrades a failed/dead run to a missing point;
 * rescore      — ``_rescore`` attaches slopes, re-scores, persists every card + bumps stress_touches
                  atomically; a failed multiplier → slope over the survivors (or "incomplete");
+                 evidence drift keeps the stored card; an unstressed candidate's gates stay pinned;
+* lifecycle    — the durable STRESSING→DONE round marker: set at dispatch, restored atomically,
+                 orphans healed by the boot reaper, 409 across the marker;
 * end-to-end   — ``StressService.stress`` dispatches BACKTEST re-runs (NEVER trials — the point),
                  plus the 404 / 422 / 409 guards, validation, and the REST surface.
 """
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any
 
@@ -86,6 +90,16 @@ def test_cost_resilience_needs_two_points():
 def test_cost_resilience_survives_one_failed_multiplier():
     # 4× failed; the slope is taken over (1×, base) + (2×, stressed) — never wedged by the dead run.
     assert _cost_resilience(1.0, {2.0: 0.5, 4.0: None}, "maximize") is not None
+
+
+def test_cost_resilience_positive_improvement_clamps_to_zero():
+    # A stress run that IMPROVES the objective is noise (wider fills cannot genuinely help) —
+    # clamped to 0 in maximize space, so it ranks EQUAL to flat-resilient, never above it.
+    assert _cost_resilience(1.0, {2.0: 1.1, 4.0: 1.3}, "maximize") == 0.0
+    # minimize form: a drawdown that SHRINKS under stress is the same noise — also clamps.
+    assert _cost_resilience(10.0, {2.0: 9.0, 4.0: 8.0}, "minimize") == 0.0
+    # flat-resilient is exactly 0 too — the improver gains nothing over it.
+    assert _cost_resilience(1.0, {2.0: 1.0, 4.0: 1.0}, "maximize") == 0.0
 
 
 def test_mult_key_integral_vs_fractional():
@@ -213,11 +227,14 @@ class FakeStressBacktest:
         return {"status": "completed", "resultRef": run_id}
 
 
-def _seed_sweep(jobs: FakeJobs, trials: FakeTrials, n: int) -> str:
-    """A completed sweep + one child TRIAL template + ``n`` COMPLETE trials (run-i, sharpe 1.0)."""
+def _seed_sweep(
+    jobs: FakeJobs, trials: FakeTrials, n: int,
+    metric: str = _METRIC, direction: str = "maximize", value: float = 1.0,
+) -> str:
+    """A completed sweep + one child TRIAL template + ``n`` COMPLETE trials (run-i)."""
     request = {
         "strategyId": "s1", "strategyVersion": "1.0.0", "from": "2026-01-01", "to": "2026-01-10",
-        "parameters": [], "objective": {"metric": _METRIC, "direction": "maximize"},
+        "parameters": [], "objective": {"metric": metric, "direction": direction},
     }
     sweep_id = jobs.insert_sweep(None, request)
     jobs.insert_trial(sweep_id, None, {
@@ -226,7 +243,7 @@ def _seed_sweep(jobs: FakeJobs, trials: FakeTrials, n: int) -> str:
     })
     for i in range(n):
         row_id = trials.insert(sweep_id, i, {"period": 10 + i})
-        trials.complete(row_id, {_METRIC: 1.0}, f"run-{i}")
+        trials.complete(row_id, {metric: value}, f"run-{i}")
     jobs.set_status(sweep_id, "completed", 100)
     return sweep_id
 
@@ -284,10 +301,13 @@ def _wait(cond, timeout: float = 3.0) -> None:
     raise AssertionError("stress drain did not resolve in time")
 
 
-def _ctx(sweep_id: str, candidates: list[dict[str, Any]], policy: str = "SIM_FIRST"):
+def _ctx(
+    sweep_id: str, candidates: list[dict[str, Any]],
+    policy: str = "SIM_FIRST", metric: str = _METRIC,
+):
     return stress._RoundContext(
         sweep_id=sweep_id, generation_id=_GEN_ID, campaign_id=_CAMPAIGN_ID, generation_n=1,
-        policy=policy, metric=_METRIC, direction="maximize", candidate_rows=candidates,
+        policy=policy, metric=metric, data_epoch=None, candidate_rows=candidates,
     )
 
 
@@ -383,6 +403,178 @@ def test_rescore_all_runs_failed_marks_stress_incomplete():
     assert cr0["z"] == 0.0
     assert any("stress incomplete" in c for c in persisted[0]["caveats"])
     assert repo.get_generation(_GEN_ID)["stressTouches"] == 1     # a round still ran
+
+
+def test_rescore_minimize_objective_ranks_smaller_rise_higher():
+    # End-to-end minimize (maxDrawdown): the objective WORSENS by RISING under stress; the
+    # candidate whose drawdown rises LESS must land the higher cost_resilience z after the cohort
+    # re-score (the helper-level inversion carried all the way through score_cohort).
+    repo, jobs, trials = FakeEvoRepo(), FakeJobs(), FakeTrials()
+    sweep_id = _seed_sweep(jobs, trials, 2, metric="maxDrawdown", direction="minimize", value=10.0)
+    cands = [_candidate(0), _candidate(1)]
+    _seed_generation(repo, sweep_id, cands)
+    backtest = FakeStressBacktest(
+        run_metrics={"run-0": {"maxDrawdown": 10.0}, "run-1": {"maxDrawdown": 10.0}}
+    )
+    svc = _service(repo, jobs, trials, backtest)
+    outcomes = {
+        "cand-0": {2.0: (10.5, "sr-a2"), 4.0: (11.0, "sr-a4")},   # barely rises — resilient
+        "cand-1": {2.0: (15.0, "sr-b2"), 4.0: (25.0, "sr-b4")},   # blows up — degrader
+    }
+    svc._rescore(_ctx(sweep_id, cands, metric="maxDrawdown"), outcomes)
+    persisted = {c["scorecard"]["trialNumber"]: c["scorecard"]
+                 for c in repo.list_candidates_for_generation(_GEN_ID)}
+    cr0 = next(x for x in persisted[0]["components"] if x["id"] == "cost_resilience")
+    cr1 = next(x for x in persisted[1]["components"] if x["id"] == "cost_resilience")
+    assert cr0["z"] > cr1["z"]
+    assert cr0["raw"]["costResilience"] > cr1["raw"]["costResilience"]
+
+
+class ShaStampedBacktest(FakeStressBacktest):
+    """``results()`` stamps engineSha ``sha-NEW`` on every run — the evidence-drift fixture."""
+
+    def results(self, run_id: str) -> dict[str, Any]:
+        payload = super().results(run_id)
+        payload["engineSha"] = "sha-NEW"
+        return payload
+
+
+def test_rescore_drifted_candidate_keeps_stored_card_with_skip_caveat():
+    # Drift guard: a candidate whose live evidence no longer matches its RECORDED card (engineSha
+    # changed under it) keeps the stored card verbatim + a skip caveat — a stress round must never
+    # silently rewrite gates/components from different evidence. The matching candidate rescores.
+    repo, jobs, trials = FakeEvoRepo(), FakeJobs(), FakeTrials()
+    sweep_id = _seed_sweep(jobs, trials, 2)
+    match = _candidate(0)
+    match["scorecard"]["gates"] = [{"id": "comparability", "status": "PASS", "value": "sha-NEW"}]
+    drift = _candidate(1)
+    drift["scorecard"]["gates"] = [{"id": "comparability", "status": "PASS", "value": "sha-OLD"}]
+    drift["scorecard"]["robustScore"] = 0.777                     # sentinel — must survive verbatim
+    original_gates = [dict(g) for g in drift["scorecard"]["gates"]]  # pre-round copy to pin against
+    _seed_generation(repo, sweep_id, [match, drift])
+    backtest = ShaStampedBacktest(
+        run_metrics={"run-0": {_METRIC: 1.0}, "run-1": {_METRIC: 1.0}}
+    )
+    svc = _service(repo, jobs, trials, backtest)
+    outcomes = {
+        "cand-0": {2.0: (0.9, "sr-a2"), 4.0: (0.8, "sr-a4")},
+        "cand-1": {2.0: (0.9, "sr-b2"), 4.0: (0.8, "sr-b4")},
+    }
+    svc._rescore(_ctx(sweep_id, [match, drift]), outcomes)
+    persisted = {c["id"]: c["scorecard"] for c in repo.list_candidates_for_generation(_GEN_ID)}
+    kept = persisted["cand-1"]
+    assert kept["robustScore"] == 0.777                           # stored card kept verbatim
+    assert kept["gates"] == original_gates
+    assert any("stress rescore skipped" in c for c in kept["caveats"])
+    assert "components" not in kept                               # never rewritten from new bags
+    rescored = persisted["cand-0"]
+    assert any(x["id"] == "cost_resilience" for x in rescored["components"])
+    assert repo.get_generation(_GEN_ID)["stressTouches"] == 1     # the round still applied
+
+
+def test_rescore_unstressed_candidate_gates_pinned_byte_equal():
+    # The reviewer's regression: after a stress round, an UNSTRESSED candidate's persisted card may
+    # move only in cohort-relative values/caveats — its GATES (incl. the real deflated-Sharpe
+    # value) are byte-equal to the recorded card (same evidence, same campaign-cumulative N).
+    repo, jobs, trials = FakeEvoRepo(), FakeJobs(), FakeTrials()
+    sweep_id = _seed_sweep(jobs, trials, 2)
+    metrics = {"sharpe": 1.0, "tradeCount": 60, "totalReturn": 12.0}
+    backtest = FakeStressBacktest(
+        run_metrics={"run-0": dict(metrics), "run-1": dict(metrics)}, jobs=jobs
+    )
+    scorer = RetroScoreService(lambda: jobs, lambda: trials, backtest)
+    stored_cards = scorer.score_sweep(sweep_id).cards             # the RECORDED cards
+    cands = [
+        {"id": f"cand-{i}", "generationId": _GEN_ID, "params": card["params"],
+         "sweepJobId": sweep_id, "state": "SCORED", "scorecard": card}
+        for i, card in enumerate(stored_cards)
+    ]
+    _seed_generation(repo, sweep_id, cands)
+    svc = _service(repo, jobs, trials, backtest)
+
+    receipt = svc.stress(_GEN_ID, top_k=1, multipliers=[2, 4])    # stresses trial 0 only
+    assert receipt["dispatched"] == 2
+    _wait(lambda: repo.get_generation(_GEN_ID)["stressTouches"] == 1)
+
+    persisted = {c["scorecard"]["trialNumber"]: c["scorecard"]
+                 for c in repo.list_candidates_for_generation(_GEN_ID)}
+    stored_1 = next(c for c in stored_cards if c["trialNumber"] == 1)
+    unstressed = persisted[1]
+    assert unstressed["gates"] == stored_1["gates"]               # byte-equal, incl. deflated value
+    assert unstressed["params"] == stored_1["params"]
+    assert unstressed["evidence"] == stored_1["evidence"]         # no stressRuns on the unstressed
+    assert any("not stress-tested this round" in c for c in unstressed["caveats"])
+    # the stressed candidate carries the new signal + run evidence
+    assert set(persisted[0]["evidence"]["stressRuns"]) == {"2", "4"}
+    cr0 = next(x for x in persisted[0]["components"] if x["id"] == "cost_resilience")
+    assert cr0["raw"].get("costResilience") is not None
+
+
+# ================================================================================================
+# lifecycle: the durable STRESSING→DONE round marker + boot reaper
+# ================================================================================================
+
+
+class GatedStressBacktest(FakeStressBacktest):
+    """``job_status`` blocks until the gate opens — freezes the drain mid-round deterministically
+    so the test can observe the committed STRESSING marker and the mid-round 409."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.gate = threading.Event()
+
+    def job_status(self, job_id: str) -> dict[str, Any]:
+        self.gate.wait(5)
+        return super().job_status(job_id)
+
+
+def test_stress_lifecycle_stressing_then_done_then_repostable():
+    repo, jobs, trials = FakeEvoRepo(), FakeJobs(), FakeTrials()
+    sweep_id = _seed_sweep(jobs, trials, 2)
+    _seed_generation(repo, sweep_id, [_candidate(0), _candidate(1)])
+    backtest = GatedStressBacktest(
+        run_metrics={"run-0": {_METRIC: 1.0}, "run-1": {_METRIC: 1.0}}, jobs=jobs
+    )
+    svc = _service(repo, jobs, trials, backtest)
+
+    svc.stress(_GEN_ID, top_k=1, multipliers=[2, 4])
+    # the durable marker is committed at dispatch, while the drain is still blocked mid-round
+    assert repo.get_generation(_GEN_ID)["status"] == "STRESSING"
+    with pytest.raises(ApiError) as exc:                          # a second POST 409s mid-round
+        svc.stress(_GEN_ID, top_k=1, multipliers=[2, 4])
+    assert exc.value.status == 409
+
+    backtest.gate.set()                                           # let the round finish
+    _wait(lambda: repo.get_generation(_GEN_ID)["status"] == "DONE")
+    assert repo.get_generation(_GEN_ID)["stressTouches"] == 1
+
+    # a COMPLETED round is re-POST-able (the guard is per-flight, never permanent)
+    svc.stress(_GEN_ID, top_k=1, multipliers=[2, 4])
+    _wait(lambda: repo.get_generation(_GEN_ID)["stressTouches"] == 2)
+    assert repo.get_generation(_GEN_ID)["status"] == "DONE"
+
+
+def test_stress_409_on_orphaned_stressing_until_boot_reaper_heals():
+    repo, jobs, trials = FakeEvoRepo(), FakeJobs(), FakeTrials()
+    sweep_id = _seed_sweep(jobs, trials, 2)
+    _seed_generation(repo, sweep_id, [_candidate(0), _candidate(1)])
+    repo.get_generation(_GEN_ID)["status"] = "STRESSING"          # orphan of a crashed process
+    backtest = FakeStressBacktest(
+        run_metrics={"run-0": {_METRIC: 1.0}, "run-1": {_METRIC: 1.0}}, jobs=jobs
+    )
+    svc = _service(repo, jobs, trials, backtest)
+
+    with pytest.raises(ApiError) as exc:                          # durable guard crosses restarts
+        svc.stress(_GEN_ID, 5, [2, 4])
+    assert exc.value.status == 409
+    assert exc.value.code == "CONFLICT_STRESS_IN_FLIGHT"
+
+    assert repo.reap_stressing_generations() == 1                 # the boot reaper heals the orphan
+    assert repo.get_generation(_GEN_ID)["status"] == "DONE"
+
+    receipt = svc.stress(_GEN_ID, top_k=1, multipliers=[2, 4])    # a re-POST reruns the round
+    assert receipt["dispatched"] == 2
+    _wait(lambda: repo.get_generation(_GEN_ID)["stressTouches"] == 1)
 
 
 # ================================================================================================

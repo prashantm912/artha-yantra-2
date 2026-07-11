@@ -20,14 +20,21 @@ Mechanics, deliberately mirroring the neighbor-probe orchestrator (#728) where t
   * The re-score REASSEMBLES the generation's cohort (``RetroScoreService.assemble_cohort`` — the
     same assembly the recorder used, at the same campaign-cumulative N), attaches each stressed
     candidate's slope, calls ``scoring.score_cohort``, and UPDATEs every candidate's scorecard +
-    bumps ``stress_touches`` ONCE, atomically.
+    bumps ``stress_touches`` ONCE, atomically. A candidate whose re-assembled evidence DRIFTED
+    since recording (purged run / engineSha / dataHash mismatch) keeps its stored card + a skip
+    caveat — a stress round must never silently rewrite gates from different evidence.
+  * Round lifecycle is DURABLE: ``evo_generations.status`` flips to ``STRESSING`` (committed) at
+    dispatch and back to ``DONE`` inside the same atomic txn that applies the round; a restart
+    mid-round leaves a STRESSING orphan the boot reaper flips to DONE (re-POST to rerun) — the
+    409 in-flight guard consults BOTH the in-memory registry and the status marker.
 
 Degradation-slope formula (self-flagged in the receipt): the least-squares slope of the primary
 objective over the slippage multipliers ``[(1, base), (m, stressed_m) …]`` — a fair per-step rate —
-normalized by ``|base|`` (relative degradation) when ``base != 0``, and direction-oriented so a
+normalized by ``|base|`` (relative degradation) when ``base != 0``, direction-oriented so a
 SMALLER worse-direction drop scores HIGHER (this IS the design's ``z(−degradation slope)``: for a
 maximize objective the raw slope is ≤ 0 and a resilient candidate's slope is closest to 0, hence
-highest; a minimize objective negates). Needs ≥ 2 points (the 1× base + ≥ 1 stressed), else the
+highest; a minimize objective negates), and clamped to ≤ 0 (an "improvement" under stress is
+noise, ranked equal to flat-resilient). Needs ≥ 2 points (the 1× base + ≥ 1 stressed), else the
 candidate is left un-stressed (z drops out + a per-candidate caveat).
 """
 
@@ -66,6 +73,10 @@ _POLL_INTERVAL_SECONDS = 3.0
 _POLL_TIMEOUT_SECONDS = 1800.0  # 30 min — a stress round is small; a slow run degrades, never hangs
 
 _TERMINAL_NO_RESULT = {"failed", "cancelled"}
+
+# Appended to a candidate's STORED card when the round's re-assembly saw different evidence than the
+# recording did (purged run / engineSha / dataHash drift) — the card is kept, never rewritten.
+_DRIFT_CAVEAT = "stress rescore skipped: evidence drift/unavailable"
 
 
 # --- request / response models ------------------------------------------------------------------
@@ -121,8 +132,15 @@ def _cost_resilience(
 ) -> float | None:
     """The §6.2 ``cost_resilience`` sub-signal for one candidate: the least-squares slope of the
     objective over the slippage multipliers, normalized by ``|base|`` when base ≠ 0, oriented so a
-    smaller worse-direction drop scores higher (see the module docstring). ``None`` when < 2 points
-    survive (the 1× base + ≥ 1 completed stressed run) — "stress incomplete"."""
+    smaller worse-direction drop scores higher (see the module docstring), and CLAMPED to ≤ 0 in
+    maximize space — a stress run that IMPROVES the objective is noise (wider fills cannot
+    genuinely help) and must rank equal to flat-resilient, never above it. ``None`` when < 2 points
+    survive (the 1× base + ≥ 1 completed stressed run) — "stress incomplete".
+
+    On the ``|base|`` normalization (spec-faithful, kept deliberately): a NEAR-ZERO base amplifies
+    the relative slope — a candidate whose base objective is ~0 reads extremely fragile from a
+    small absolute drop. Arguably honest (no edge ⇒ no cost buffer), but worth knowing when
+    reading z-outliers."""
     points: list[tuple[float, float]] = []
     if base is not None:
         points.append((1.0, base))
@@ -137,7 +155,8 @@ def _cost_resilience(
         return None
     if base is not None and base != 0:
         slope = slope / abs(base)
-    return -slope if direction == "minimize" else slope
+    oriented = -slope if direction == "minimize" else slope
+    return min(oriented, 0.0)
 
 
 def _mult_key(multiplier: float) -> str:
@@ -189,8 +208,9 @@ def _num(value: Any) -> float | None:
 class _RoundContext:
     """The frozen context a dispatched round's async drain needs to re-score: the source sweep, the
     generation being re-scored (+ its campaign / n / evidence policy for N reproduction and the
-    LIVE_FIRST caveat), the ranked objective, and EVERY SCORED candidate row (the whole cohort is
-    re-scored, not just the stressed top-K)."""
+    LIVE_FIRST caveat, + its recorded ``data_epoch`` for the evidence-drift guard), the ranked
+    metric, and EVERY SCORED candidate row (the whole cohort is re-scored, not just the stressed
+    top-K). Direction is NOT carried — ``assemble_cohort``'s ``direction`` is authoritative."""
 
     sweep_id: str
     generation_id: str
@@ -198,7 +218,7 @@ class _RoundContext:
     generation_n: int
     policy: str | None
     metric: str
-    direction: str
+    data_epoch: dict[str, Any] | None
     candidate_rows: list[dict[str, Any]]
 
 
@@ -238,7 +258,9 @@ class StressService:
         """Dispatch a cost-stress round for a generation's plateau top-K, then re-score in the
         background (design §3.2.5). 404 unknown generation; 422 when the campaign is SIM_BLOCKED, or
         the generation has no SCORED candidates, or has no source sweep; 409 when a round is already
-        in flight for this generation. Returns a 202 ``StressReceipt``."""
+        in flight for this generation (in-memory registry AND the durable ``status='STRESSING'``
+        marker, so the guard survives a restart as a re-POST-able state — the boot reaper flips an
+        orphaned STRESSING back to DONE). Returns a 202 ``StressReceipt``."""
         top_k = min(max(top_k, 1), _MAX_TOPK)
         multipliers = _validate_multipliers(multipliers)
 
@@ -259,6 +281,18 @@ class StressService:
             candidates = repo.list_candidates_for_generation(generation_id)
         finally:
             repo.close()
+
+        # Durable in-flight guard (crosses restarts): a generation stuck at STRESSING either has a
+        # live round (this process) or was orphaned by a crash — the boot reaper flips orphans to
+        # DONE at startup, so a persistent STRESSING while the process lives means genuinely in
+        # flight.
+        if generation.get("status") == "STRESSING":
+            raise ApiError(
+                409,
+                "CONFLICT_STRESS_IN_FLIGHT",
+                f"a cost-stress round is already in flight for generation {generation_id} "
+                "(status STRESSING)",
+            )
 
         scored = [c for c in candidates if c.get("state") == "SCORED"]
         if not scored:
@@ -287,11 +321,19 @@ class StressService:
                 "CONFLICT_STRESS_IN_FLIGHT",
                 f"a cost-stress round is already in flight for generation {generation_id}",
             )
+        prior_status = generation.get("status")
+        marked = False
         try:
+            # Committed BEFORE dispatch — the durable marker a mid-round restart leaves behind for
+            # the boot reaper (evo_generations.status is free TEXT, no CHECK enum — V011).
+            self._set_status(generation_id, "STRESSING")
+            marked = True
             return self._dispatch_round(
                 generation, policy, sweep_id, top, scored, multipliers
             )
         except Exception:
+            if marked:  # a dispatch failure must not leave a permanent in-process 409
+                self._try_set_status(generation_id, prior_status)
             self._release(generation_id)
             raise
 
@@ -317,7 +359,7 @@ class StressService:
                 )
             sweep_job = jobs.get(sweep_id) or {}
             objective = (sweep_job.get("request") or {}).get("objective", {})
-            metric, direction = _primary_objective(objective)
+            metric = _primary_objective(objective)[0]
             pending: dict[str, tuple[str, float]] = {}
             descriptors: list[dict[str, Any]] = []
             for cand in top:
@@ -347,7 +389,7 @@ class StressService:
             generation_n=generation.get("n") or 0,
             policy=policy,
             metric=metric,
-            direction=direction,
+            data_epoch=generation.get("dataEpoch"),
             candidate_rows=scored,
         )
         self._start_drain(context, pending)
@@ -370,12 +412,15 @@ class StressService:
     ) -> None:
         """The background drain (fresh per-thread repos, like the sweep/probe drains): poll every
         dispatched stress run to a terminal state, then re-score the cohort. The in-flight guard is
-        released here in a finally so a crash never wedges the generation permanently."""
+        released here in a finally so a crash never wedges the generation permanently; a drain
+        crash also restores ``status='DONE'`` (best-effort) so a re-POST can rerun the round —
+        if that write fails too (DB down), the boot reaper heals the STRESSING orphan at restart."""
         try:
             outcomes = self._collect(context, pending)
             self._rescore(context, outcomes)
         except Exception:  # noqa: BLE001 - never crash the daemon thread; the guard still releases
             _LOG.exception("stress drain for generation %s failed", context.generation_id)
+            self._try_set_status(context.generation_id, "DONE")
         finally:
             self._release(context.generation_id)
 
@@ -423,17 +468,30 @@ class StressService:
     ) -> None:
         """Re-assemble the generation's cohort (at the recorder's campaign-cumulative N), attach
         each stressed candidate's ``costResilience`` slope, re-score, and persist every candidate's
-        scorecard + bump ``stress_touches`` atomically."""
+        scorecard + bump ``stress_touches`` atomically.
+
+        Evidence-drift guard: the re-assembly reads LIVE backtest evidence — if a candidate's run
+        was purged or its engineSha/dataHash drifted since recording, blindly overwriting would
+        silently change its gates/components beyond cost_resilience. Such a candidate KEEPS its
+        stored card (plus a skip caveat), and its bag contributes no stress slope."""
         prior_trials = self._prior_trials(context.campaign_id, context.generation_n)
         cohort = self._scorer.assemble_cohort(context.sweep_id, prior_trials=prior_trials)
         by_trial = {c.get("trialNumber"): c for c in cohort.candidates}
+
+        # Drift detection FIRST, so a drifted candidate's untrustworthy base never feeds a slope.
+        drifted: set[str] = set()
+        for cand in context.candidate_rows:
+            stored = cand.get("scorecard") or {}
+            bag = by_trial.get(stored.get("trialNumber"))
+            if bag is None or _evidence_drifted(stored, bag, context.data_epoch):
+                drifted.add(cand["id"])
 
         stress_runs: dict[str, dict[str, str]] = {}
         for cand in context.candidate_rows:
             card = cand.get("scorecard") or {}
             bag = by_trial.get(card.get("trialNumber"))
             outcome = outcomes.get(cand["id"])
-            if bag is None or not outcome:
+            if bag is None or not outcome or cand["id"] in drifted:
                 continue
             # Base (1×) objective = the candidate's OWN recorded run, read via the SAME extractor as
             # the stressed runs — so the slope is apples-to-apples (never the stored rawObjective,
@@ -464,9 +522,19 @@ class StressService:
 
         updates: list[dict[str, Any]] = []
         for cand in context.candidate_rows:
-            trial_number = (cand.get("scorecard") or {}).get("trialNumber")
-            new_card = cards_by_trial.get(trial_number)
-            if new_card is None:  # a trial purged since recording — leave its stale card untouched
+            stored = cand.get("scorecard") or {}
+            if cand["id"] in drifted:
+                # Keep the recorded card verbatim (evidence changed under us — a rescore here would
+                # silently rewrite gates/z's from different evidence); append the skip note once.
+                kept = dict(stored)
+                caveats = list(kept.get("caveats") or [])
+                if _DRIFT_CAVEAT not in caveats:
+                    caveats.append(_DRIFT_CAVEAT)
+                kept["caveats"] = caveats
+                updates.append({"candidateId": cand["id"], "scorecard": kept})
+                continue
+            new_card = cards_by_trial.get(stored.get("trialNumber"))
+            if new_card is None:  # unreachable (drift covers a missing bag) — belt and braces
                 continue
             runs = stress_runs.get(cand["id"])
             if runs:
@@ -532,6 +600,25 @@ class StressService:
         with self._lock:
             self._in_flight.discard(generation_id)
 
+    def _set_status(self, generation_id: str, status: str | None) -> None:
+        """Write the generation's lifecycle status (the durable STRESSING/DONE round marker)."""
+        repo = self._repo_factory()
+        try:
+            repo.set_generation_status(generation_id, status)
+        finally:
+            repo.close()
+
+    def _try_set_status(self, generation_id: str, status: str | None) -> None:
+        """Best-effort status restore on a failure path — a second failure (DB down) is logged and
+        left for the boot reaper, never raised over the original error."""
+        try:
+            self._set_status(generation_id, status)
+        except Exception:  # noqa: BLE001 - the original failure is the one that matters
+            _LOG.exception(
+                "could not restore status %r on generation %s (boot reaper will heal it)",
+                status, generation_id,
+            )
+
 
 # --- helpers ------------------------------------------------------------------------------------
 
@@ -556,6 +643,28 @@ def _select_top_k(scored: list[dict[str, Any]], top_k: int) -> list[dict[str, An
 
 def _sort_key(trial_number: Any) -> tuple[int, Any]:
     return (0, trial_number) if isinstance(trial_number, int) else (1, str(trial_number))
+
+
+def _evidence_drifted(
+    stored: dict[str, Any], bag: dict[str, Any], data_epoch: dict[str, Any] | None
+) -> bool:
+    """True when the re-assembled bag's evidence no longer matches what the candidate was RECORDED
+    on: the bag carries a ``run fetch failed`` caveat (purged/unreachable run), its ``engineSha``
+    differs from the stored card's comparability-gate value, or its ``dataHash`` differs from the
+    generation's recorded ``data_epoch``. A side missing (pre-#703 NULL SHA, UNKNOWN gate, no
+    epoch) can't ESTABLISH drift — only a present-and-different pair does (degrade, don't block)."""
+    if any(str(c).startswith("run fetch failed") for c in bag.get("caveats") or []):
+        return True
+    stored_sha = next(
+        (g.get("value") for g in stored.get("gates") or [] if g.get("id") == "comparability"),
+        None,
+    )
+    bag_sha = bag.get("engineSha")
+    if stored_sha is not None and bag_sha is not None and stored_sha != bag_sha:
+        return True
+    epoch_hash = (data_epoch or {}).get("dataHash")
+    bag_hash = bag.get("dataHash")
+    return epoch_hash is not None and bag_hash is not None and epoch_hash != bag_hash
 
 
 def _stress_request(

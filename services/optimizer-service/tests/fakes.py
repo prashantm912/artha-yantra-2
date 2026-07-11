@@ -301,7 +301,8 @@ class FakeEvoRepo:
         self, generation_id: str, updates: list[dict[str, Any]]
     ) -> None:
         """Mirrors EvoRepo.apply_stress_round: overwrite each candidate's scorecard + touch
-        updated_at, and increment the generation's stress_touches ONCE (atomic in prod)."""
+        updated_at, increment the generation's stress_touches ONCE, and restore the lifecycle
+        marker (status STRESSING → DONE) — atomic in prod."""
         by_id = {u["candidateId"]: u["scorecard"] for u in updates}
         for cands in self.candidates.values():
             for cand in cands:
@@ -312,6 +313,23 @@ class FakeEvoRepo:
             for gen in gens:
                 if gen["id"] == generation_id:
                     gen["stressTouches"] = (gen.get("stressTouches") or 0) + 1
+                    gen["status"] = "DONE"
+
+    def set_generation_status(self, generation_id: str, status: str | None) -> None:
+        """Mirrors EvoRepo.set_generation_status: the durable STRESSING/DONE round marker."""
+        gen = self.get_generation(generation_id)
+        if gen is not None:
+            gen["status"] = status
+
+    def reap_stressing_generations(self) -> int:
+        """Mirrors EvoRepo.reap_stressing_generations: flip STRESSING orphans back to DONE."""
+        count = 0
+        for gens in self.generations.values():
+            for gen in gens:
+                if gen.get("status") == "STRESSING":
+                    gen["status"] = "DONE"
+                    count += 1
+        return count
 
     def create_campaign(
         self,

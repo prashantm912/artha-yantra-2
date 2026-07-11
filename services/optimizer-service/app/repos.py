@@ -549,11 +549,13 @@ class EvoRepo:
         self, generation_id: str, updates: list[dict[str, Any]]
     ) -> None:
         """Persist ONE cost-stress round ATOMICALLY (design §3.2.5 / §12 E2 item 5): overwrite each
-        candidate's re-scored ``scorecard`` (with the cost_resilience component now filled) and
-        increment the generation's ``stress_touches`` ONCE — all in one transaction/commit, so a
-        scoring crash mid-round can never half-write a cohort. ``updated_at`` is set to ``now()``
-        explicitly (the DDL default fires on INSERT only — an UPDATE must maintain it, V011:74-76).
-        A no-op ``updates`` still bumps the touch counter (an honest 'a round ran' record)."""
+        candidate's re-scored ``scorecard`` (with the cost_resilience component now filled),
+        increment the generation's ``stress_touches`` ONCE, and restore the lifecycle marker
+        (``status`` STRESSING → DONE) — all in one transaction/commit, so a scoring crash mid-round
+        can never half-write a cohort or leave a committed round marked in-flight. ``updated_at``
+        is set to ``now()`` explicitly (the DDL default fires on INSERT only — an UPDATE must
+        maintain it, V011:74-76). A no-op ``updates`` still bumps the touch counter (an honest
+        'a round ran' record)."""
         with self._conn.cursor() as cur:
             for update in updates:
                 cur.execute(
@@ -561,7 +563,30 @@ class EvoRepo:
                     (json.dumps(update["scorecard"]), update["candidateId"]),
                 )
             cur.execute(
-                "UPDATE evo_generations SET stress_touches = stress_touches + 1 WHERE id=%s",
+                "UPDATE evo_generations SET stress_touches = stress_touches + 1, status = 'DONE' "
+                "WHERE id=%s",
                 (generation_id,),
             )
         self._conn.commit()
+
+    def set_generation_status(self, generation_id: str, status: str | None) -> None:
+        """Write a generation's lifecycle ``status`` (free TEXT, no CHECK enum — V011:52). The E2
+        stress orchestrator commits ``STRESSING`` at round dispatch as the DURABLE in-flight
+        marker; ``apply_stress_round`` restores ``DONE`` atomically with the round's writes."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "UPDATE evo_generations SET status=%s WHERE id=%s", (status, generation_id)
+            )
+        self._conn.commit()
+
+    def reap_stressing_generations(self) -> int:
+        """Boot reaper (E2 cost-stress): a restart mid-stress-round kills the in-memory drain, so
+        its generation is stranded at ``STRESSING`` forever — nothing can complete the round, and
+        the durable 409 guard would refuse every future POST. Flip orphans back to ``DONE`` (their
+        recorded state — the round's dispatched BACKTEST jobs may still complete but nothing reads
+        them; a re-POST simply reruns the round). Returns the count for the boot warn-log."""
+        with self._conn.cursor() as cur:
+            cur.execute("UPDATE evo_generations SET status='DONE' WHERE status='STRESSING'")
+            count = cur.rowcount
+        self._conn.commit()
+        return count

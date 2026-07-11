@@ -72,6 +72,22 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     except Exception as exc:  # noqa: BLE001 - postgres may be down at boot in some envs
         log.warning("stranded-trial cleanup skipped: %s", exc)
 
+    # Boot reaper (EVO E2 cost-stress): a restart mid-stress-round kills the in-memory drain,
+    # stranding its generation at STRESSING — the durable 409 guard would then refuse every future
+    # stress POST. Flip orphans back to DONE so a re-POST reruns the round.
+    try:
+        evo_repo = EvoRepo(open_conn())
+        try:
+            orphaned_rounds = evo_repo.reap_stressing_generations()
+            if orphaned_rounds:
+                log.warning(
+                    "flipped %d orphaned STRESSING generation(s) to DONE at boot "
+                    "(restart mid-stress-round; re-POST /stress to rerun)", orphaned_rounds)
+        finally:
+            evo_repo.close()
+    except Exception as exc:  # noqa: BLE001 - postgres may be down at boot in some envs
+        log.warning("stress-round reaper skipped: %s", exc)
+
     app.state.sweeps = SweepService(
         strategy_client=StrategyClient(settings.strategy_signal_base),
         backtest_client=backtest_client,

@@ -33,6 +33,12 @@ import java.util.function.IntConsumer;
  * at the pre-close clock against the deterministic pre-close DAILY view; exit_intrabar
  * strategies evaluate LEVEL exits on every closed 1m bar. The Stage D replay engine must
  * reproduce the emitted events byte-identically through the same serialization.
+ *
+ * <p>BTST exit caveat (P0-5, 2026-07-12): this runner IS the reference for btst exit semantics
+ * (exit_rules evaluated at each subsequent pre-close daily bar, close→close fills) — the live
+ * SignalEngine does not yet emit btst exits (its pre-close clock is entry-only); the live port is
+ * a tracked follow-up (chip task_3e95fade). Until it lands, btst exits are sim-ahead-of-live by
+ * design, not a parity break.
  */
 public final class TickwiseGoldenRunner {
 

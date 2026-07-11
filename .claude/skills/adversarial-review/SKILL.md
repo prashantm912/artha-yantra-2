@@ -24,6 +24,12 @@ signal-JSON but never pins the trade list); the #528 VCP keystone review found 6
 
 1. **Scale to risk**: 2 reviewers for a typical Medium; 4–6 for parity-touching; 8–12
    lens-diverse for keystones (new engine, new executor, new migration on live data).
+   Proven 2026-07-10/11 (21-item run): 4 lenses for parity-adjacent live-eval changes,
+   2 for scoped HOLD money paths, 1 domain reviewer for a plain migration, 0 extra for
+   alert-only ops code. **HOLD reviews must trace OPERATIONAL LOOPS** — who retries,
+   what state is already committed before the changed code runs, which cron fires
+   once — line-diff review missed 3 state-stranding paths (the A3 settle refusal,
+   #694) that loop-tracing found.
 2. **Spawn in ONE message** (parallel `Agent` calls). Give each: the diff or branch, the
    doctrine/design doc it must be faithful to, and ONE lens:
    - parity/golden byte-identity (does any serialized shape change?)

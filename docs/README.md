@@ -28,8 +28,13 @@ authority is the OpenAlgo/React master plan; the design authority is `docs/desig
   (F2 rollup, F3.2–.5 dots, F5 host).
 - `2026-07-03-always-on-host-brief.md` — the F5 hardware decision brief (owner decision pending).
 - `2026-07-10-strategy-evolution-engine-design.md` + `2026-07-10-intelligence-layer-design.md` — the
-  two merged-but-unbuilt design authorities (slow research loop / fast decision loop); build gating in
-  each doc's §13 + the ledger rows `evolution-engine` / `intelligence-layer`.
+  two design authorities (slow research loop / fast decision loop), each consuming one 2026-07-10 audit
+  as its fixed input: `docs/audits/2026-07-10-research-fidelity-audit.md` (evolution) and
+  `docs/audits/2026-07-10-app-platform-audit.md` (intelligence). The **shared E0/I1 build prerequisites
+  shipped 2026-07-11 (#683–#717** — both audits carry a §-appended fix-log; the designs each carry a
+  dated Status block), so both engines are now **buildable but still unbuilt** — owner sequences which
+  goes first. Build gating: each doc's §13 + Status block + the ledger rows
+  `evolution-engine` / `intelligence-layer`.
 - `superpowers/plans/archive/` — everything completed / decided / superseded, each with an ARCHIVED
   status banner. **2026-07-10 sweep added:** the full **Minervini SEPA set** (implementation plan +
   build-log + phase6/partial-close build-specs — all phases shipped+live #524–#563; only the

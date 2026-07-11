@@ -447,7 +447,7 @@ def _num(value: Any) -> float | None:
 
 
 def _round(value: Any) -> Any:
-    return round(value, 4) if isinstance(value, (int, float)) else value
+    return round(value, 4) if isinstance(value, int | float) else value
 
 
 def _sort_key(trial_number: Any) -> tuple[int, Any]:

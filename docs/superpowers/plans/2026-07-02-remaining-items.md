@@ -67,7 +67,7 @@ quarantined LIVE_FIRST evidence window).
 | B14 | `fid-d7-native-daily-context` | Backtest 1d context/benchmark reads → native daily (goldens/parity rerun) | FID §12 #8 (D7) | HOLD | TODO |
 | B15 | `evo-param-path-grammar` | 3-point path-grammar extension (gate constants, `risk.max_positions`, funnel props) — widens the tunable space | EVO §13 row 21 | clean | TODO |
 | B16 | `backtest-worker-pool-cap` | Queue cap/priority on the shared worker pool (campaign nights would starve interactive runs) | EVO §13 row 22; FID §8 A6 | clean | TODO |
-| B17 | `arch-03-trial-metrics-catalog` | Trial-metrics catalog (§9 candidate 03 — parity-neutral, cheap, "the clean next") | §9 candidate 03 | clean | TODO |
+| B17 | `arch-03-trial-metrics-catalog` | Trial-metrics catalog (§9 candidate 03 — parity-neutral, cheap, "the clean next") | §9 candidate 03 | clean | **DONE — PR #712 @ 8e5793bc, MERGED+DEPLOYED LIVE 2026-07-11** (contracts/metrics/trial-metrics-catalog.json = one 20-metric contract; optimizer derives its allow-list from it, Java consistency test pins emit↔catalog; in-container smoke: 20 metrics load) |
 | B18 | `fid-p1-2-costs-knob` | Wire the dead `costs` knob + instrument-class costing (candle path always EQUITY-class today — changes every net number) | FID §10 P1-2, §12 #11; EVO §13 row 10 | HOLD | TODO |
 
 **C. Design-program builds (owner sequences which goes first; EVO needs its seven B-gates, INT needs A4 and is sequenced after APP Phase 1; later increments E2–E6 / I2–I4 live in each design's §12 — C1/C2 are the first increments only)**

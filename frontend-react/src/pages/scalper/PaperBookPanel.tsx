@@ -71,11 +71,16 @@ function RiskChip({
   );
 }
 
-export function PaperBookPanel() {
+export function PaperBookPanel({ onBookChange }: { onBookChange?: (book: string) => void }) {
   // Which book to show. Default the scalper book (this IS the scalper cockpit); 'all' = the honest
   // all-books aggregate. `scoped` (undefined for 'all') feeds every read so the query key + `?book=`
-  // track the selection, exactly like the /paper page.
-  const [book, setBook] = useState<string>('scalper');
+  // track the selection, exactly like the /paper page. `onBookChange` lets the host keep its
+  // "Full ledger" deep link on the SAME book (a book-blind /paper link lands on scalper regardless).
+  const [book, setBookState] = useState<string>('scalper');
+  const setBook = (b: string) => {
+    setBookState(b);
+    onBookChange?.(b);
+  };
   const scoped = book === 'all' ? undefined : book;
 
   const positions = usePaperPositions(scoped);

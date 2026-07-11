@@ -75,6 +75,9 @@ function matrixSentiment(trend: number | undefined): { label: string; tone: Sent
 }
 
 export function CockpitPage() {
+  // The paper panel's selected book — mirrored here so the "Full ledger" deep link lands on the SAME
+  // book ('all' has no /paper counterpart, so the aggregate keeps the bare /paper landing).
+  const [paperBook, setPaperBook] = useState<string>('scalper');
   // (a) live option chain — also the source of the ATM strike the straddle panel defaults to.
   const chainQ = useChainTable();
   const chain = chainQ.data ?? null;
@@ -228,8 +231,12 @@ export function CockpitPage() {
             signal's OWN book (book = the signal's first tag); the panel's book selector picks which
             book (or the all-books aggregate) to watch here. */}
         <div className="xl:col-span-2">
-          <Panel title="Paper book" to="/paper" linkLabel="Full ledger">
-            <PaperBookPanel />
+          <Panel
+            title="Paper book"
+            to={paperBook === 'all' ? '/paper' : `/paper/${paperBook}`}
+            linkLabel="Full ledger"
+          >
+            <PaperBookPanel onBookChange={setPaperBook} />
           </Panel>
         </div>
 

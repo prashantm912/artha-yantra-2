@@ -40,7 +40,7 @@ public class ShadowBookService {
 
   private final ShadowPositionRepository shadows;
   private final SignalRepository signals;
-  private final ShadowVariants variants;
+  private final ShadowVariantRegistry variants;
   private final boolean enabled;
   private final BigDecimal minComposite;
   private final long maxOpen;
@@ -49,7 +49,7 @@ public class ShadowBookService {
   public ShadowBookService(
       ShadowPositionRepository shadows,
       SignalRepository signals,
-      ShadowVariants variants,
+      ShadowVariantRegistry variants,
       @Value("${artha.scalper.shadow-book.enabled:false}") boolean enabled,
       @Value("${artha.scalper.shadow-book.min-composite:#{null}}") BigDecimal minComposite,
       @Value("${artha.scalper.shadow-book.max-open:50}") long maxOpen) {
@@ -93,7 +93,7 @@ public class ShadowBookService {
                 ShadowVariants.CHAMPION, rejectionId, strategyVersionId, strategySlug,
                 signalExchange, signalTradingsymbol, barTime, d, leg, entryLtp);
       }
-      for (ShadowVariants.Variant v : variants.all()) {
+      for (ShadowVariants.Variant v : variants.active()) {
         if (ShadowVariants.accepts(d, v)) {
           openBook(
               v.name(), rejectionId, strategyVersionId, strategySlug,

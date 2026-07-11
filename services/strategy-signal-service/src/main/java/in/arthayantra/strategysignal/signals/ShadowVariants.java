@@ -1,5 +1,7 @@
 package in.arthayantra.strategysignal.signals;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.strategysignal.scalper.ScalperConfluenceGate;
 import java.math.BigDecimal;
@@ -101,9 +103,57 @@ public class ShadowVariants {
     return new Variant(name, rails, raw.compositeThreshold);
   }
 
-  /** The active challenger variants (possibly empty). */
+  /**
+   * The boot-time env-JSON fallback variants (possibly empty). The LIVE active challenger set is the
+   * MERGE of these with the runtime-registered {@link ShadowVariantRegistry} rows — read from there
+   * on the live path, not here.
+   */
   public List<Variant> all() {
     return variants;
+  }
+
+  /**
+   * Validates + builds ONE variant from a runtime registration (EVO E3 §11). {@code specNode} is the
+   * vocabulary BODY ({@code {rails, compositeThreshold}}, the {@code name} is separate); it is
+   * STRICT-parsed so an unknown knob kind (e.g. an ENV-plane relative-vol field, §2.3) is rejected,
+   * then run through the SAME name-regex + rail-shape rules as the env JSON. Throws {@link
+   * IllegalArgumentException} on any violation — the registry surfaces it as a 422. The strictness
+   * rides a per-call {@code ObjectReader}, never the shared mapper (the live Kite mapper must stay
+   * lenient). Pure — never touches the live active set.
+   */
+  public static Variant validatedFromSpec(ObjectMapper mapper, String name, JsonNode specNode) {
+    RawSpec spec;
+    try {
+      String json = specNode == null ? "{}" : mapper.writeValueAsString(specNode);
+      spec =
+          mapper
+              .readerFor(RawSpec.class)
+              .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+              .readValue(json);
+    } catch (Exception e) {
+      throw new IllegalArgumentException(
+          "unrecognized shadow-variant spec (unknown knob kind — the vocabulary is rail"
+              + " disable / rail threshold+passWhen / compositeThreshold): "
+              + rootMessage(e));
+    }
+    RawVariant raw = new RawVariant();
+    raw.name = name;
+    raw.rails = spec == null ? null : spec.rails;
+    raw.compositeThreshold = spec == null ? null : spec.compositeThreshold;
+    return validated(raw);
+  }
+
+  private static String rootMessage(Throwable e) {
+    Throwable t = e;
+    while (t.getCause() != null && t.getCause() != t) {
+      t = t.getCause();
+    }
+    String m = t.getMessage();
+    if (m == null) {
+      return t.getClass().getSimpleName();
+    }
+    int nl = m.indexOf('\n');
+    return nl < 0 ? m : m.substring(0, nl);
   }
 
   /**
@@ -152,6 +202,12 @@ public class ShadowVariants {
   /** Jackson shape of one configured variant. */
   static final class RawVariant {
     public String name;
+    public List<RawRail> rails;
+    public BigDecimal compositeThreshold;
+  }
+
+  /** Jackson shape of a runtime-registration spec BODY (the variant minus its name). */
+  static final class RawSpec {
     public List<RawRail> rails;
     public BigDecimal compositeThreshold;
   }

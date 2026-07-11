@@ -838,6 +838,70 @@
         }
       }
     },
+    "/api/v1/shadow-variants" : {
+      "get" : {
+        "tags" : [ "shadow-variants-controller" ],
+        "operationId" : "list_1",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ShadowVariantListResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post" : {
+        "tags" : [ "shadow-variants-controller" ],
+        "operationId" : "register",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RegisterRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ShadowVariantView"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/paper/reset" : {
       "post" : {
         "tags" : [ "paper-controller" ],
@@ -955,7 +1019,7 @@
     "/api/v1/journal" : {
       "get" : {
         "tags" : [ "journal-controller" ],
-        "operationId" : "list_1",
+        "operationId" : "list_2",
         "parameters" : [ {
           "name" : "tag",
           "in" : "query",
@@ -1410,7 +1474,7 @@
     "/api/v1/signals" : {
       "get" : {
         "tags" : [ "signals-controller" ],
-        "operationId" : "list_2",
+        "operationId" : "list_3",
         "parameters" : [ {
           "name" : "status",
           "in" : "query",
@@ -1633,7 +1697,7 @@
     "/api/v1/signal-rejections" : {
       "get" : {
         "tags" : [ "signal-rejections-controller" ],
-        "operationId" : "list_3",
+        "operationId" : "list_4",
         "parameters" : [ {
           "name" : "strategyVersionId",
           "in" : "query",
@@ -2144,6 +2208,35 @@
           }
         }
       }
+    },
+    "/api/v1/shadow-variants/{name}" : {
+      "delete" : {
+        "tags" : [ "shadow-variants-controller" ],
+        "operationId" : "retire",
+        "parameters" : [ {
+          "name" : "name",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK"
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components" : {
@@ -2411,6 +2504,88 @@
           "exitSkipped" : {
             "type" : "integer",
             "format" : "int32"
+          }
+        }
+      },
+      "RegisterRequest" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "campaignId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "spec" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "createdBy" : {
+            "type" : "string"
+          }
+        }
+      },
+      "RailOverrideView" : {
+        "type" : "object",
+        "properties" : {
+          "rail" : {
+            "type" : "string"
+          },
+          "disable" : {
+            "type" : "boolean"
+          },
+          "threshold" : {
+            "type" : "number"
+          },
+          "passWhen" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ShadowVariantView" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "campaignId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "spec" : {
+            "$ref" : "#/components/schemas/VariantSpecView"
+          },
+          "enabled" : {
+            "type" : "boolean"
+          },
+          "createdBy" : {
+            "type" : "string"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "disabledAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "VariantSpecView" : {
+        "type" : "object",
+        "properties" : {
+          "rails" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/RailOverrideView"
+            }
+          },
+          "compositeThreshold" : {
+            "type" : "number"
           }
         }
       },
@@ -2832,6 +3007,17 @@
           },
           "detail" : {
             "type" : "string"
+          }
+        }
+      },
+      "ShadowVariantListResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ShadowVariantView"
+            }
           }
         }
       },

@@ -51,7 +51,7 @@ spring:
             - id: strategy-signal
               uri: ${ARTHA_ROUTE_STRATEGY:http://strategy-signal-service:8082}
               predicates:
-                - Path=/api/v1/strategies/**,/api/v1/signals/**,/api/v1/signal-rejections/**,/api/v1/paper/**,/api/v1/risk/**,/api/v1/journal/**,/api/v1/orders/**
+                - Path=/api/v1/strategies/**,/api/v1/signals/**,/api/v1/signal-rejections/**,/api/v1/shadow-variants/**,/api/v1/paper/**,/api/v1/risk/**,/api/v1/journal/**,/api/v1/orders/**
             - id: backtest
               uri: ${ARTHA_ROUTE_BACKTEST:http://backtest-service:8083}
               predicates:

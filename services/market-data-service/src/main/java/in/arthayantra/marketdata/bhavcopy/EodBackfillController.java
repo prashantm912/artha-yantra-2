@@ -1,11 +1,14 @@
 package in.arthayantra.marketdata.bhavcopy;
 
+import java.time.LocalDate;
 import java.util.Map;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -29,6 +32,18 @@ public class EodBackfillController {
   @PostMapping
   public ResponseEntity<Map<String, String>> trigger() {
     return ResponseEntity.status(HttpStatus.ACCEPTED).body(Map.of("jobId", service.triggerAsync()));
+  }
+
+  /**
+   * Targeted re-fetch of ONE trading day (§8d) — the correction path for a partially-captured
+   * bhavcopy the self-healing catch-up cannot reach (it anti-joins against dates already present, so
+   * an incomplete day is skipped forever). Runs synchronously and returns the per-exchange tally; 409
+   * {@code CONFLICT_BACKFILL_RUNNING} when a catch-up is in flight, 400 for a future date.
+   */
+  @PostMapping("/refetch")
+  public BhavcopyBackfillService.RefetchResult refetch(
+      @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+    return service.refetchDate(date);
   }
 
   /** Last-run audit (state + per-exchange day/row/candle tallies). */

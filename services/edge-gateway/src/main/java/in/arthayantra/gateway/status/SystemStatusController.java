@@ -22,7 +22,9 @@ import reactor.core.publisher.Mono;
  * derived from the shared keys those services maintain, not probed). Cached 5 s; `/topic/system`
  * deltas ride the {@code kite.status} channel through the existing WS bridge. {@code jobs} reads
  * {@code jobs:summary} (zeros until backtest-service ships it, Phase 28); {@code kite.rateBudget}
- * stays null until a producer publishes it (limiter metrics live in market-data-service).
+ * is the fraction of the Kite REST historical-limiter budget currently available in {@code [0,1]},
+ * published to {@code kite:rate-budget} by market-data ({@code KiteRateBudgetPublisher}) — null only
+ * when that key is absent/unparseable (no producer has run yet).
  */
 @RestController
 public class SystemStatusController {
@@ -39,7 +41,8 @@ public class SystemStatusController {
           "kite:ticker:status",
           "marketdata:integrity:corporate-actions",
           "jobs:summary",
-          "ticks:last-at");
+          "ticks:last-at",
+          "kite:rate-budget");
 
   private final ReactiveStringRedisTemplate redis;
   private final ObjectMapper objectMapper;
@@ -62,12 +65,17 @@ public class SystemStatusController {
     return redis
         .opsForValue()
         .multiGet(KEYS)
-        .map(v -> assemble(v.get(0), v.get(1), v.get(2), v.get(3), v.get(4)))
+        .map(v -> assemble(v.get(0), v.get(1), v.get(2), v.get(3), v.get(4), v.get(5)))
         .doOnNext(body -> cache.set(new Cached(Instant.now(), body)));
   }
 
   private Map<String, Object> assemble(
-      String kiteRaw, String tickerRaw, String integrity, String jobsSummary, String lastTickAt) {
+      String kiteRaw,
+      String tickerRaw,
+      String integrity,
+      String jobsSummary,
+      String lastTickAt,
+      String rateBudget) {
     String session =
         switch (kiteRaw == null ? "" : kiteRaw) {
           case "MOCK", "CONNECTED", "LIVE" -> "VALID";
@@ -92,7 +100,9 @@ public class SystemStatusController {
     kite.put("raw", kiteRaw);
     kite.put("ticker", ticker);
     kite.put("lastTickAgeMs", tickAge);
-    kite.put("rateBudget", null); // producer pending — limiter metrics live in market-data
+    // The Kite REST limiter headroom in [0,1], published to kite:rate-budget by market-data; null when
+    // absent/unparseable (no producer has run yet). Map return ⇒ this key never drifts the contract.
+    kite.put("rateBudget", parseRateBudget(rateBudget));
 
     Object jobs = Map.of("queued", 0, "running", 0);
     if (jobsSummary != null) {
@@ -154,6 +164,18 @@ public class SystemStatusController {
       return "DEGRADED";
     }
     return "UP";
+  }
+
+  /** The published {@code kite:rate-budget} as a Double, or null when absent/unparseable. */
+  static Double parseRateBudget(String raw) {
+    if (raw == null) {
+      return null;
+    }
+    try {
+      return Double.parseDouble(raw);
+    } catch (NumberFormatException notANumber) {
+      return null;
+    }
   }
 
   private static Map<String, Object> mapOf(String name, String status) {

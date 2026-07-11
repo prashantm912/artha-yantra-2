@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.bhavcopy;
 
+import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ConflictException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.time.Ist;
@@ -188,6 +189,44 @@ public class BhavcopyBackfillService {
     return status.get();
   }
 
+  /**
+   * Targeted re-fetch of ONE explicit trading day (§8d) — the correction path the self-healing
+   * catch-up cannot reach. The catch-up anti-joins against the dates already stored, so a day that
+   * was PARTIALLY captured (e.g. a truncated 2026-07-02 NSE bhavcopy: ~167 of ~2380 EQ rows) is
+   * {@code present} and therefore skipped forever, even inside the reconcile window. This bypasses the
+   * present-check and re-pulls the day outright: the raw upsert fills the missing rows (existing rows
+   * are re-written identically) and the DO-NOTHING candle projection back-fills the newly-seen symbols
+   * (a Kite-owned bar is never clobbered — the same write path the catch-up uses). Runs synchronously
+   * under the one-run-at-a-time gate (409 when a catch-up is in flight) and returns the per-exchange
+   * tally. A non-trading / not-yet-published date simply fetches empty (0 rows), never an error.
+   */
+  public RefetchResult refetchDate(LocalDate date) {
+    LocalDate today = LocalDate.now(clock.withZone(Ist.ZONE));
+    if (date == null || date.isAfter(today)) {
+      throw new ApiException(
+          400, ErrorCodes.VALIDATION_FAILED, "date must be a past or current trading day");
+    }
+    if (!running.compareAndSet(false, true)) {
+      throw new ConflictException(
+          ErrorCodes.CONFLICT_BACKFILL_RUNNING, "EOD bhavcopy backfill already running");
+    }
+    Long runId = ledger.start(IngestRunLedger.SOURCE_BHAVCOPY);
+    try {
+      ExchangeResult nse = safe("NSE refetch " + date, () -> runNseDay(date));
+      ExchangeResult bse = safe("BSE refetch " + date, () -> runBseDay(date));
+      ledger.succeed(runId, (long) nse.bhavRows() + bse.bhavRows());
+      log.info(
+          "EOD bhavcopy targeted re-fetch {} ok: NSE {}r/{}c, BSE {}r/{}c",
+          date, nse.bhavRows(), nse.candleRows(), bse.bhavRows(), bse.candleRows());
+      return new RefetchResult(date.toString(), nse, bse);
+    } catch (RuntimeException e) {
+      ledger.fail(runId, e.getMessage());
+      throw e;
+    } finally {
+      running.set(false);
+    }
+  }
+
   private void runLocked(String jobId) {
     Instant started = clock.instant();
     status.set(Status.running(jobId, started));
@@ -315,6 +354,23 @@ public class BhavcopyBackfillService {
     return new ExchangeResult(days, bhavRows, candleRows);
   }
 
+  /**
+   * Re-pulls ONE explicit NSE trading day unconditionally (the §8d partial-day correction) — the
+   * catch-up's per-day body without the present-check anti-join, so a partially-stored day is filled.
+   * Same write path as {@link #runNse}: raw upsert (re-writes existing rows identically, inserts the
+   * missing ones) + DO-NOTHING candle projection (never clobbers a Kite-owned bar).
+   */
+  ExchangeResult runNseDay(LocalDate date) {
+    List<BhavcopyRow> rows = nseFetcher.fetchForDate(date);
+    if (rows.isEmpty()) {
+      return ExchangeResult.none();
+    }
+    nseRepo.upsertAll(rows);
+    int candleRows = candles.insertIgnoreAll(projectNse(rows));
+    log.info("NSE bhavcopy re-fetch {}: {} rows, {} candles", date, rows.size(), candleRows);
+    return new ExchangeResult(1, rows.size(), candleRows);
+  }
+
   private List<Candle> projectNse(List<BhavcopyRow> rows) {
     List<Candle> out = new ArrayList<>(rows.size());
     for (BhavcopyRow r : rows) {
@@ -358,6 +414,18 @@ public class BhavcopyBackfillService {
     }
     log.info("BSE bhavcopy catch-up {}..{}: {} days, {} rows, {} candles", start, today, days, bhavRows, candleRows);
     return new ExchangeResult(days, bhavRows, candleRows);
+  }
+
+  /** Re-pulls ONE explicit BSE trading day unconditionally — the BSE twin of {@link #runNseDay}. */
+  ExchangeResult runBseDay(LocalDate date) {
+    List<BseBhavRow> rows = bseFetcher.fetchForDate(date);
+    if (rows.isEmpty()) {
+      return ExchangeResult.none();
+    }
+    bseRepo.upsertAll(rows);
+    int candleRows = candles.insertIgnoreAll(projectBse(rows));
+    log.info("BSE bhavcopy re-fetch {}: {} rows, {} candles", date, rows.size(), candleRows);
+    return new ExchangeResult(1, rows.size(), candleRows);
   }
 
   private List<Candle> projectBse(List<BseBhavRow> rows) {
@@ -455,6 +523,9 @@ public class BhavcopyBackfillService {
   }
 
   // ---- status/result types -----------------------------------------------------------------
+
+  /** The targeted single-day re-fetch tally, returned by {@code POST .../eod-backfill/refetch}. */
+  public record RefetchResult(String date, ExchangeResult nse, ExchangeResult bse) {}
 
   /** Per-exchange catch-up tally (raw rows upserted + candles newly inserted across the span). */
   public record ExchangeResult(int days, int bhavRows, int candleRows) {

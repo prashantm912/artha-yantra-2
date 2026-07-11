@@ -276,8 +276,12 @@ export interface components {
             /** Format: int64 */
             seed?: number;
             purpose?: string;
+            stressOverrides?: components["schemas"]["StressOverrides"];
         };
         JsonNode: unknown;
+        StressOverrides: {
+            slippageMultiplier?: number;
+        };
         SwingReportCard: {
             /** Format: int32 */
             trades?: number;

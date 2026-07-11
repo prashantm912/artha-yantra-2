@@ -57,7 +57,9 @@ public class OptionsPremiumReplay {
   private final CandlePremiumReader premiumReader;
   private final MarketDataClient marketData; // null in the golden/unit path (gate never runs there)
   /** Shared fill model — the SAME one the candle path + paper ledger use (paisa-parity, §D.11). */
-  private final FillSimulator fills = new LtpSlippageV1();
+  // Concrete type (not the FillSimulator port) so premium-leg fills can carry the cost-stress
+  // slippageMultiplier — a backtest-only knob kept off the shared paper/live fill port.
+  private final LtpSlippageV1 fills = new LtpSlippageV1();
 
   @org.springframework.beans.factory.annotation.Autowired
   public OptionsPremiumReplay(
@@ -112,6 +114,36 @@ public class OptionsPremiumReplay {
       Map<SeriesKey, List<EngineCandle>> contextCandles,
       BigDecimal initialEquity,
       GateCoverage gateCoverage) {
+    return replay(
+        definition,
+        config,
+        underlyingExchange,
+        underlyingTradingsymbol,
+        underlyingOneMinute,
+        strikeReferenceOneMinute,
+        contextCandles,
+        initialEquity,
+        gateCoverage,
+        BigDecimal.ONE);
+  }
+
+  /**
+   * As above, with the request-level cost-stress {@code slippageMultiplier} (EVO §3.2.5) scaling
+   * every premium-leg fill's effective slippage. A multiplier of {@code 1} is byte-identical to the
+   * unstressed path — the premium goldens (which drive {@code replayLegs} with an implicit {@code 1})
+   * hold; a stressed re-run is a NEW run id, never a golden input.
+   */
+  public ReplayResult replay(
+      StrategyDefinition definition,
+      JsonNode config,
+      String underlyingExchange,
+      String underlyingTradingsymbol,
+      List<EngineCandle> underlyingOneMinute,
+      List<EngineCandle> strikeReferenceOneMinute,
+      Map<SeriesKey, List<EngineCandle>> contextCandles,
+      BigDecimal initialEquity,
+      GateCoverage gateCoverage,
+      BigDecimal slippageMultiplier) {
     // NEW: backtest.relax_session (opt-in, default false) disables the intraday clock rail so an
     // armed scalper fires its signal-driven entries across the FULL session for functional evaluation
     // (the live confluence gates are firewalled out of replay anyway). It does NOT relax the signal
@@ -145,7 +177,8 @@ public class OptionsPremiumReplay {
         maxLots(config),
         premiumBand(config),
         initialEquity,
-        strikeReferenceOneMinute);
+        strikeReferenceOneMinute,
+        slippageMultiplier);
   }
 
   /** Pairs the signal stream into directed legs (entry→exit bar indices), mirroring the candle path. */
@@ -512,6 +545,31 @@ public class OptionsPremiumReplay {
       PremiumBand band,
       BigDecimal initialEquity,
       List<EngineCandle> strikeReferenceOneMinute) {
+    return replayLegs(
+        signals, underlying, legs, underlyingSymbol, spec, rules, budgetInr, minPremiumInr, maxLots,
+        band, initialEquity, strikeReferenceOneMinute, BigDecimal.ONE);
+  }
+
+  /**
+   * The cost-stress-aware core: {@code slippageMultiplier} scales every priced leg's fill slippage
+   * (EVO §3.2.5). The public {@code replayLegs} overloads delegate here with an implicit {@code 1} so
+   * the premium goldens stay byte-identical; a stressed re-run passes a multiplier &gt; 1 and lands on
+   * a NEW run id, never a golden input.
+   */
+  private ReplayResult replayLegs(
+      List<in.arthayantra.strategyengine.golden.GoldenSignalsJson.SignalEvent> signals,
+      List<EngineCandle> underlying,
+      List<PairedLeg> legs,
+      String underlyingSymbol,
+      UniverseSpec spec,
+      PremiumExitEvaluator.Rules rules,
+      long budgetInr,
+      BigDecimal minPremiumInr,
+      int maxLots,
+      PremiumBand band,
+      BigDecimal initialEquity,
+      List<EngineCandle> strikeReferenceOneMinute,
+      BigDecimal slippageMultiplier) {
     // 2b-E2b: anchor the ATM strike on the strike-reference series' price at the entry instant (e.g.
     // SENSEX-fut for a SENSEX-options strategy), not the signal bar's close. When the strike reference
     // IS the signal series, the lookup returns the entry bar's own close → byte-identical to before.
@@ -523,7 +581,7 @@ public class OptionsPremiumReplay {
       Optional<LegResult> r =
           priceLeg(
               seq + 1, underlying, underlyingSymbol, leg, spec, rules, budgetInr, minPremiumInr,
-              maxLots, band, strikeRef);
+              maxLots, band, strikeRef, slippageMultiplier);
       if (r.isEmpty()) {
         continue;
       }
@@ -610,9 +668,10 @@ public class OptionsPremiumReplay {
       long budgetInr) {
     // Single-leg test seam: permissive (no floor / no cap) so the fixture trades exactly as specified.
     // The strike reference is the signal series itself → the strike is anchored on the entry bar's close.
+    // Unstressed (multiplier 1) — the cost-stress path is exercised through the run-facing replay.
     return priceLeg(
             seq, underlying, underlyingSymbol, leg, spec, rules, budgetInr, BigDecimal.ZERO, 0,
-            PremiumBand.DISABLED, strikeReferenceByInstant(underlying))
+            PremiumBand.DISABLED, strikeReferenceByInstant(underlying), BigDecimal.ONE)
         .map(LegResult::trade);
   }
 
@@ -663,7 +722,8 @@ public class OptionsPremiumReplay {
       BigDecimal minPremiumInr,
       int maxLots,
       PremiumBand band,
-      NavigableMap<java.time.Instant, BigDecimal> strikeRef) {
+      NavigableMap<java.time.Instant, BigDecimal> strikeRef,
+      BigDecimal slippageMultiplier) {
     EngineCandle entryBar = underlying.get(leg.entryIndex());
     // 2b-E2b: anchor the ATM strike on the strike-reference price (e.g. SENSEX-fut for SENSEX options),
     // not the signal bar's close. Reference == signal series → identical (the entry bar's own close).
@@ -753,7 +813,8 @@ public class OptionsPremiumReplay {
 
     // Cost-inclusive fills via the shared FillSimulator: BUY at entry (cash out), SELL at exit (cash
     // in); net P&L = the two signed netValues summed (slippage + brokerage + statutory legs included).
-    CostConfig cost = CostConfig.optionDefaults(lot);
+    // The cost-stress slippageMultiplier (EVO §3.2.5) rides the CostConfig into the fill (1 = unstressed).
+    CostConfig cost = CostConfig.optionDefaults(lot).withSlippageMultiplier(slippageMultiplier);
     Fill entryFill = fill(cost, Side.BUY, qty, entryPremium);
     Fill exitFill = fill(cost, Side.SELL, qty, exit.premium());
     BigDecimal pnl =
@@ -804,7 +865,8 @@ public class OptionsPremiumReplay {
             null,
             cost.slippage(),
             cost.brokerage(),
-            cost.fees()));
+            cost.fees()),
+        cost.slippageMultiplier());
   }
 
   private static BigDecimal level(BigDecimal entry, BigDecimal pct, boolean up) {

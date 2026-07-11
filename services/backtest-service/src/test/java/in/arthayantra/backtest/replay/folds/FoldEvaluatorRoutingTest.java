@@ -78,7 +78,10 @@ class FoldEvaluatorRoutingTest {
 
   @Test
   void optionsStrategyFoldRoutesThroughPremiumReplay() {
-    when(premium.replay(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(empty());
+    // 10-arg core: the 8 replay inputs + a per-fold GateCoverage + the cost-stress slippageMultiplier.
+    when(premium.replay(
+            any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+        .thenReturn(empty());
     when(metrics.compute(any(), any(), any(), any(), any(), anyLong(), anyLong()))
         .thenReturn(FoldTestFixtures.metricsWithSharpe(1.0));
 
@@ -96,7 +99,8 @@ class FoldEvaluatorRoutingTest {
         true);
 
     // train + OOS = two premium replays per fold; the bare candle-close engine is never touched.
-    verify(premium, times(2)).replay(any(), any(), any(), any(), any(), any(), any(), any());
+    verify(premium, times(2))
+        .replay(any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     verifyNoInteractions(plain);
   }
 

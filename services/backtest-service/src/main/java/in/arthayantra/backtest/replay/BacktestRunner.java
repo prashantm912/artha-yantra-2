@@ -135,6 +135,12 @@ public class BacktestRunner {
             ? request.get("initialCapital").decimalValue()
             : DEFAULT_CAPITAL;
     long seed = request.path("seed").asLong(0);
+    // EVO §3.2.5 cost-stress: the request-level slippage multiplier (validated + pinned into the
+    // request JSONB at submission), read back here and carried on the CostConfig into every fill.
+    // Absent ⇒ 1 ⇒ byte-identical to an unstressed run. One CostConfig instance, reused across the
+    // candle replay and the fold path so a stressed run degrades consistently.
+    BigDecimal slippageMultiplier = stressSlippageMultiplier(request);
+    CostConfig costConfig = CostConfig.defaults().withSlippageMultiplier(slippageMultiplier);
 
     // Auto-warm every series this run reads (primary 1m + each context (instrument, timeframe) +
     // the benchmark daily) into the shared store via market-data's cache-first GET BEFORE the reads
@@ -191,7 +197,8 @@ public class BacktestRunner {
                 strikeRef1m,
                 contexts,
                 initialEquity,
-                oiGateCoverage)
+                oiGateCoverage,
+                slippageMultiplier)
             : replayEngine.replay(
                 definition,
                 signal.exchange(),
@@ -199,7 +206,7 @@ public class BacktestRunner {
                 primary1m,
                 contexts,
                 initialEquity,
-                CostConfig.defaults(),
+                costConfig,
                 true,
                 // D17b: smooth intra-replay progress over the 40→80 band so the bar no longer sits at 40
                 // for the whole replay. Pure progress side-channel — replay numerics are unchanged.
@@ -218,6 +225,13 @@ public class BacktestRunner {
     m.full().put("strategyChecksum", resolved.checksum());
     if (oiGateCoverage.armed()) {
       m.full().put("oiGateCoverage", oiGateCoverage.label()); // e.g. "42/45" fetched-vs-total
+    }
+    // EVO §3.2.5: surface the cost-stress multiplier on the run's result metrics (in ADDITION to the
+    // job-request JSONB provenance) so the optimizer can label a stressed run's degradation without
+    // re-reading the job request. Only when actually stressed → an unstressed run's metrics stay
+    // byte-identical (no new key).
+    if (slippageMultiplier.compareTo(BigDecimal.ONE) != 0) {
+      m.full().put("slippageMultiplier", slippageMultiplier.toPlainString());
     }
 
     // §D.4 fold-mode trigger (Phase 31): a plain /backtests/run job is FULL-WINDOW (folds == null,
@@ -238,7 +252,7 @@ public class BacktestRunner {
                 strikeRef1m,
                 contexts,
                 initialEquity,
-                CostConfig.defaults(),
+                costConfig,
                 true,
                 from,
                 to,
@@ -581,6 +595,16 @@ public class BacktestRunner {
   private static String dateTime(String value) {
     // accept a plain date (00:00 IST) or a full offset date-time
     return value.length() == 10 ? value + "T00:00:00+05:30" : value;
+  }
+
+  /**
+   * The EVO §3.2.5 cost-stress slippage multiplier pinned into the request JSONB at submission
+   * ({@code stressOverrides.slippageMultiplier}), already range-validated there. Absent (an unstressed
+   * run) ⇒ {@code 1}, which the {@code FillSimulator} treats as byte-identical to no stress.
+   */
+  private static BigDecimal stressSlippageMultiplier(JsonNode request) {
+    JsonNode node = request.path("stressOverrides").path("slippageMultiplier");
+    return node.isNumber() ? node.decimalValue() : BigDecimal.ONE;
   }
 
   private static String engineVersion(ResolvedVersion resolved) {

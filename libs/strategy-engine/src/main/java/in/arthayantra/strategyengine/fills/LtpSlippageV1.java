@@ -28,7 +28,24 @@ public final class LtpSlippageV1 implements FillSimulator {
 
   @Override
   public Fill simulate(FillRequest request) {
-    BigDecimal slippage = money(slippageAmount(request));
+    return simulate(request, BigDecimal.ONE);
+  }
+
+  /**
+   * Prices one order, scaling the <em>effective</em> slippage (explicit {@code ticks}/{@code bps} OR
+   * the per-instrument-class fallback) by {@code slippageMultiplier} — the cost-stress mechanism for
+   * the evolution engine's backtest re-runs (EVO §3.2.5): the parameter-path grammar deliberately has
+   * no costs/fills production, so cost-stress rides this request-level multiplier applied at the ONE
+   * fill-construction point instead. A multiplier of {@code 1} (or {@code null}) is byte-identical to
+   * {@link #simulate(FillRequest)} — the no-arg form delegates here with {@link BigDecimal#ONE} and
+   * the golden fill vectors pin that equivalence. Only the slippage leg scales; brokerage + the
+   * statutory fee stack derive from the (now stressed) fill price/turnover exactly as they would for a
+   * strategy quoting that wider slippage natively, so a stressed SELL fills worse and a stressed BUY
+   * pays more — the intended degradation signal.
+   */
+  public Fill simulate(FillRequest request, BigDecimal slippageMultiplier) {
+    BigDecimal multiplier = slippageMultiplier == null ? BigDecimal.ONE : slippageMultiplier;
+    BigDecimal slippage = money(slippageAmount(request).multiply(multiplier, EngineMath.MC));
     BigDecimal reference = request.referencePrice();
     BigDecimal fillPrice =
         money(

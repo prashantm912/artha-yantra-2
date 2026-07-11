@@ -2,6 +2,8 @@ package in.arthayantra.marketdata.screener.manas;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import in.arthayantra.marketdata.screener.DeepSwingRunResult;
+import in.arthayantra.marketdata.screener.DeepSwingTrade;
 import in.arthayantra.marketdata.screener.manas.ManasAroraSwingBacktest.BtTrade;
 import in.arthayantra.marketdata.screener.manas.ManasAroraSwingBacktest.Variant;
 import in.arthayantra.marketdata.screener.minervini.SwingPortfolio;
@@ -341,6 +343,60 @@ public class ManasAroraBacktestService {
       LocalDate from,
       BiFunction<List<String>, LocalDate, Map<String, Series>> closesReader,
       BiFunction<List<String>, LocalDate, Map<String, List<DailyBar>>> barsReader) {
+    Computed c = computeAll(from, closesReader, barsReader);
+    List<BtTrade> all = c.all();
+    int scanned = c.scanned();
+    String runAt = nowIso();
+    List<Report> reports = new ArrayList<>();
+    for (Variant v : jobVariants()) {
+      reports.add(report(v.name(), from, runAt, scanned, all));
+    }
+    List<SlotCell> slotSweep = slotSweep(all);
+    log.info(
+        "manas-arora swing backtest: {} symbols, {}, from {}",
+        scanned,
+        reports.stream()
+            .map(r -> r.variant() + " " + r.totalTrades())
+            .reduce((a, b) -> a + ", " + b)
+            .orElse(""),
+        from);
+    return new BacktestResult(
+        "completed", from, runAt, reports, slotSweep,
+        "candles@1d ~11y over " + slots + " concurrent slots; variants isolate a weekly cross-sectional"
+            + " RS-rank≥" + fmt(rsMin) + " gate, a ₹" + fmt(turnoverFloor) + "/day turnover floor, and"
+            + " pyramiding on/off; open-at-end lots dropped; portfolio net-of-cost; survivorship-biased."
+            + " The §4.4 float gate degrades to the turnover variant (no point-in-time float history).");
+  }
+
+  /**
+   * The phased variant grid (v1..v5B). Hoisted so ONE definition feeds BOTH {@link #computeAll} (the
+   * sim) and the DEEP_SWING job-variant validation — the job path and the direct /compare path score
+   * the exact same variant set.
+   */
+  private List<Variant> jobVariants() {
+    return List.of(
+        new Variant("technical", false, 0, 0, false), // v1: neither filter, single-lot
+        new Variant("rs", true, rsMin, 0, false), // v2: RS-rank gate alone
+        new Variant("turnover", false, 0, turnoverFloor, false), // v3: liquidity floor alone
+        new Variant("rs-turnover", true, rsMin, turnoverFloor, false), // v4: both (float degrades)
+        new Variant("rs-turnover-nopyramid", true, rsMin, turnoverFloor, false), // v5 A: no adds
+        new Variant("rs-turnover-pyramid", true, rsMin, turnoverFloor, true)); // v5 B: add-to-winner
+  }
+
+  /** The deep-sim compute output shared by {@link #run} and {@link #runForJob} (audit P0-3). */
+  private record Computed(List<BtTrade> all, int scanned) {}
+
+  /**
+   * The deep-sim compute — pass 1 (weekly cross-sectional RS distribution) + pass 2 (variant-grid
+   * replay over the SAME bars) — extracted so {@link #run} (the direct multi-variant result) and
+   * {@link #runForJob} (the DEEP_SWING job path) share ONE compute path with ZERO hand-mirrored drift.
+   * Returns every closed lot across all variants + the scanned-symbol count; behaviourally identical
+   * to the pre-extraction inline body (the F2 equality IT pins it byte-for-byte).
+   */
+  private Computed computeAll(
+      LocalDate from,
+      BiFunction<List<String>, LocalDate, Map<String, Series>> closesReader,
+      BiFunction<List<String>, LocalDate, Map<String, List<DailyBar>>> barsReader) {
     LocalDate warmStart = from.minusDays(600); // ≥252 sessions + geometry-lookback warmup before `from`
     List<String> symbols = eqSymbols();
 
@@ -376,14 +432,7 @@ public class ManasAroraBacktestService {
 
     // Pass 2 — replay the phased variant grid over the SAME bars, so the variants are a clean
     // apples-to-apples isolation (identical geometry / MAs / setup triggers; only the filter differs).
-    List<Variant> variants =
-        List.of(
-            new Variant("technical", false, 0, 0, false), // v1: neither filter, single-lot
-            new Variant("rs", true, rsMin, 0, false), // v2: RS-rank gate alone
-            new Variant("turnover", false, 0, turnoverFloor, false), // v3: liquidity floor alone
-            new Variant("rs-turnover", true, rsMin, turnoverFloor, false), // v4: both (float degrades)
-            new Variant("rs-turnover-nopyramid", true, rsMin, turnoverFloor, false), // v5 A: no adds
-            new Variant("rs-turnover-pyramid", true, rsMin, turnoverFloor, true)); // v5 B: add-to-winner
+    List<Variant> variants = jobVariants();
     List<BtTrade> all = new ArrayList<>();
     int scanned = 0;
     for (int i = 0; i < symbols.size(); i += READ_CHUNK) {
@@ -400,27 +449,69 @@ public class ManasAroraBacktestService {
             sim.simulate(symbol, bars, vcpDetector, breakoutDetector, from, rsRank, variants));
       }
     }
+    return new Computed(all, scanned);
+  }
 
-    String runAt = nowIso();
-    List<Report> reports = new ArrayList<>();
-    for (Variant v : variants) {
-      reports.add(report(v.name(), from, runAt, scanned, all));
+  /**
+   * The DEEP_SWING job path (research-fidelity audit P0-3): runs the SAME deep-sim compute as {@link
+   * #run} (production CHUNK-batched readers) and returns ONE variant's per-trade rows + portfolio
+   * report as the shared {@link DeepSwingRunResult} wire shape, so the backtest-service worker persists
+   * it into the backtest lineage (a {@code backtest_runs} row + {@code backtest_trades}). Reuses {@link
+   * #computeAll} + {@link #report}, so the job numbers ARE the numbers the direct
+   * {@code /swing-backtest/compare} endpoint reports for the same variant. Headline metrics map from
+   * the RS-priority NET portfolio (the realistic-live estimate). {@code variant} defaults to the
+   * primary full-filter variant; an unknown variant throws (422 at the endpoint).
+   */
+  public DeepSwingRunResult runForJob(LocalDate from, String variant) {
+    String v = (variant == null || variant.isBlank()) ? PRIMARY_VARIANT : variant;
+    List<String> names = jobVariants().stream().map(Variant::name).toList();
+    if (!names.contains(v)) {
+      throw new IllegalArgumentException(
+          "unknown Manas Arora deep-swing variant '" + v + "'; valid: " + names);
     }
-    List<SlotCell> slotSweep = slotSweep(all);
-    log.info(
-        "manas-arora swing backtest: {} symbols, {}, from {}",
-        scanned,
-        reports.stream()
-            .map(r -> r.variant() + " " + r.totalTrades())
-            .reduce((a, b) -> a + ", " + b)
-            .orElse(""),
-        from);
-    return new BacktestResult(
-        "completed", from, runAt, reports, slotSweep,
-        "candles@1d ~11y over " + slots + " concurrent slots; variants isolate a weekly cross-sectional"
-            + " RS-rank≥" + fmt(rsMin) + " gate, a ₹" + fmt(turnoverFloor) + "/day turnover floor, and"
-            + " pyramiding on/off; open-at-end lots dropped; portfolio net-of-cost; survivorship-biased."
-            + " The §4.4 float gate degrades to the turnover variant (no point-in-time float history).");
+    Computed c = computeAll(from, this::readClosesBatched, this::readSeriesBatched);
+    String runAt = nowIso();
+    Report rep = report(v, from, runAt, c.scanned(), c.all());
+    List<DeepSwingTrade> trades =
+        c.all().stream()
+            .filter(t -> t.variant().equals(v))
+            .map(ManasAroraBacktestService::toDeepSwingTrade)
+            .toList();
+    PortfolioStat net = rep.portfolioRsPriorityNet();
+    SetupStat allSetup =
+        rep.setups().stream().filter(s -> "ALL".equals(s.setup())).findFirst().orElse(null);
+    return new DeepSwingRunResult(
+        "manas",
+        v,
+        from,
+        runAt,
+        c.scanned(),
+        BigDecimal.valueOf(costs.capital()),
+        net.totalReturnPct(),
+        net.cagrPct(),
+        net.maxDrawdownPct(),
+        net.sharpe(),
+        net.tradesTaken(),
+        net.tradesSkipped(),
+        allSetup == null ? z() : allSetup.winRatePct(),
+        allSetup == null ? z() : allSetup.profitFactor(),
+        objectMapper.valueToTree(rep),
+        trades);
+  }
+
+  /** Maps one Manas lot to the shared DEEP_SWING wire trade (a NaN RS-rank rides as {@code null}). */
+  private static DeepSwingTrade toDeepSwingTrade(BtTrade t) {
+    return new DeepSwingTrade(
+        t.symbol(),
+        t.setup(),
+        t.entryDate(),
+        BigDecimal.valueOf(t.entryPrice()),
+        t.exitDate(),
+        BigDecimal.valueOf(t.exitPrice()),
+        BigDecimal.valueOf(t.pnlPct()),
+        t.barsHeld(),
+        t.exitReason(),
+        Double.isNaN(t.rsRankAtEntry()) ? null : BigDecimal.valueOf(t.rsRankAtEntry()));
   }
 
   /** v6 slot sweep: the RS-priority portfolio at 8/12/16/20 slots, gross + net (over the pyramid variant). */

@@ -16,7 +16,39 @@ class WorkerPoolAdmissionTest {
 
   /** Collaborators are unused by the admission math, so a null-wired pool is enough. */
   private static WorkerPool pool(int workers, int reserved) {
-    return new WorkerPool(null, null, null, null, workers, true, reserved);
+    return new WorkerPool(null, null, null, null, null, workers, true, reserved);
+  }
+
+  @Test
+  void deepSwingBudgetIsSingleFlightAndConsumesATrialSlot() {
+    // Audit P0-3: the deep-swing budget = ONE in-flight deep-swing AND one slot of the trial (batch)
+    // budget, so a minutes-long deep-sim never occupies the interactive-reserved slots and a second
+    // deep-swing queues instead of failing on market-data's busy 409.
+    WorkerPool pool = pool(4, 1); // trial budget 3
+    assertThat(pool.tryReserveDeepSwingBudget()).isTrue();
+    assertThat(pool.deepSwingInFlight()).isTrue();
+    assertThat(pool.trialsInFlightCount()).isEqualTo(1); // counts against the batch budget
+    // single-flight: a second deep-swing is refused while the first runs
+    assertThat(pool.tryReserveDeepSwingBudget()).isFalse();
+    // trials still fit in the REMAINING batch budget (3 - 1 deep-swing = 2)
+    assertThat(pool.tryReserveTrialSlot()).isTrue();
+    assertThat(pool.tryReserveTrialSlot()).isTrue();
+    assertThat(pool.tryReserveTrialSlot()).isFalse(); // batch budget exhausted; reserved slot intact
+    // release restores both the flag and the batch slot
+    pool.releaseDeepSwingBudget();
+    assertThat(pool.deepSwingInFlight()).isFalse();
+    assertThat(pool.trialsInFlightCount()).isEqualTo(2);
+    assertThat(pool.tryReserveTrialSlot()).isTrue();
+  }
+
+  @Test
+  void deepSwingBudgetRefusedWhenTrialBudgetIsFullAndLeavesNoDanglingFlag() {
+    WorkerPool pool = pool(2, 1); // trial budget 1
+    assertThat(pool.tryReserveTrialSlot()).isTrue(); // a trial holds the whole batch budget
+    assertThat(pool.tryReserveDeepSwingBudget()).isFalse(); // no batch room -> refused
+    assertThat(pool.deepSwingInFlight()).isFalse(); // the flag was rolled back, not stranded
+    pool.releaseTrialSlot();
+    assertThat(pool.tryReserveDeepSwingBudget()).isTrue(); // and it recovers once budget frees
   }
 
   @Test

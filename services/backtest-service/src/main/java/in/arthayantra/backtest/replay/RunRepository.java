@@ -132,6 +132,77 @@ public class RunRepository {
   }
 
   /**
+   * Inserts one completed DEEP_SWING run (research-fidelity audit P0-3) into the SHARED backtest
+   * lineage so EVO / the compare + experiment surfaces consume it like any other run. A swing deep-sim
+   * is a PORTFOLIO over the NSE-EQ universe, so {@code exchange}/{@code tradingsymbol} carry a portfolio
+   * label ("SWING" / "&lt;family&gt;:&lt;variant&gt;") while each per-trade {@code backtest_trades} row
+   * keeps its real stock symbol; the headline metrics are the RS-priority NET portfolio's and the FULL
+   * deep-sim report is kept INTACT in the {@code metrics} JSONB (nothing existing breaks). Fixed shape:
+   * interval {@code 1d}; {@code seed=0} (no RNG — deterministic); {@code sortino=0} (the deep-sim does
+   * not compute it — noted in the metrics caveats); {@code premium_source='NA'} (equity, no option
+   * premium); {@code equity_curve}/{@code drawdown_curve} empty {@code []} (the deep-sim exposes annual/
+   * monthly AGGREGATES in the report, not a point curve). {@code dataHash} is a {@code family:variant}
+   * marker (there is no candle-series freshness hash for a whole-universe sim). {@code engineSha}/
+   * {@code engineImage} are MARKET-DATA's — the jar that actually computed the numbers (the JOB row
+   * keeps this service's SHA via {@code JobRepository.insertQueued}, the V008 submit-vs-execute split).
+   * Replace-on-rerun mirrors {@link #insert} (trades cascade via ON DELETE; {@code uq_runs_job} backs it).
+   */
+  public UUID insertDeepSwing(
+      UUID jobId,
+      String exchange,
+      String tradingsymbol,
+      OffsetDateTime startTs,
+      OffsetDateTime endTs,
+      BigDecimal initialEquity,
+      BigDecimal finalEquity,
+      BigDecimal totalReturn,
+      BigDecimal sharpe,
+      BigDecimal maxDrawdown,
+      BigDecimal winRate,
+      BigDecimal profitFactor,
+      int tradeCount,
+      JsonNode metrics,
+      String dataHash,
+      String engineVersion,
+      String engineSha,
+      String engineImage,
+      String createdBy) {
+    jdbc.update("DELETE FROM backtest_runs WHERE job_id = ?", jobId);
+    return jdbc.queryForObject(
+        """
+        INSERT INTO backtest_runs (
+          job_id, exchange, tradingsymbol, "interval", start_ts, end_ts,
+          initial_equity, final_equity, seed, data_hash,
+          total_return, sharpe, sortino, max_drawdown, win_rate, profit_factor, trade_count,
+          metrics, equity_curve, drawdown_curve, engine_version, premium_source,
+          engine_sha, engine_image, created_by)
+        VALUES (?, ?, ?, '1d', ?, ?, ?, ?, 0, ?, ?, ?, 0, ?, ?, ?, ?, ?::jsonb,
+                '[]'::jsonb, '[]'::jsonb, ?, 'NA', ?, ?, ?)
+        RETURNING id
+        """,
+        (rs, n) -> UUID.fromString(rs.getString("id")),
+        jobId,
+        exchange,
+        tradingsymbol,
+        startTs,
+        endTs,
+        initialEquity,
+        finalEquity,
+        dataHash,
+        totalReturn,
+        sharpe,
+        maxDrawdown,
+        winRate,
+        profitFactor,
+        tradeCount,
+        json(metrics),
+        engineVersion,
+        engineSha,
+        engineImage,
+        createdBy);
+  }
+
+  /**
    * The persisted {@code fold_metrics} array for a run, or {@code null} when the run id is unknown.
    * An empty array is returned as {@code []} (a fold run where every fold failed {@code min_trades});
    * a plain full-window run (NULL column) is also returned as {@code []} — the §D.5 "empty when the

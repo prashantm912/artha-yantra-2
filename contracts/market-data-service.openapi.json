@@ -683,6 +683,44 @@
         }
       }
     },
+    "/api/v1/market/screener/deep-swing/run" : {
+      "post" : {
+        "tags" : [ "deep-swing-backtest-controller" ],
+        "operationId" : "run_2",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/DeepSwingRunRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DeepSwingRunResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/options/stock-chain/warm" : {
       "get" : {
         "tags" : [ "stock-chain-warm-controller" ],
@@ -6730,6 +6768,134 @@
           }
         }
       },
+      "DeepSwingRunRequest" : {
+        "type" : "object",
+        "properties" : {
+          "family" : {
+            "type" : "string"
+          },
+          "from" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "variant" : {
+            "type" : "string"
+          }
+        }
+      },
+      "DeepSwingRunResponse" : {
+        "type" : "object",
+        "properties" : {
+          "engineSha" : {
+            "type" : "string"
+          },
+          "engineImage" : {
+            "type" : "string"
+          },
+          "result" : {
+            "$ref" : "#/components/schemas/DeepSwingRunResult"
+          }
+        }
+      },
+      "DeepSwingRunResult" : {
+        "type" : "object",
+        "properties" : {
+          "family" : {
+            "type" : "string"
+          },
+          "variant" : {
+            "type" : "string"
+          },
+          "fromDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "runAt" : {
+            "type" : "string"
+          },
+          "symbolsScanned" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "capital" : {
+            "type" : "number"
+          },
+          "totalReturnPct" : {
+            "type" : "number"
+          },
+          "cagrPct" : {
+            "type" : "number"
+          },
+          "maxDrawdownPct" : {
+            "type" : "number"
+          },
+          "sharpe" : {
+            "type" : "number"
+          },
+          "tradesTaken" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "tradesSkipped" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "winRatePct" : {
+            "type" : "number"
+          },
+          "profitFactor" : {
+            "type" : "number"
+          },
+          "report" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "trades" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/DeepSwingTrade"
+            }
+          }
+        }
+      },
+      "DeepSwingTrade" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "setup" : {
+            "type" : "string"
+          },
+          "entryDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "entryPrice" : {
+            "type" : "number"
+          },
+          "exitDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "exitPrice" : {
+            "type" : "number"
+          },
+          "pnlPct" : {
+            "type" : "number"
+          },
+          "barsHeld" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "exitReason" : {
+            "type" : "string"
+          },
+          "rsRankAtEntry" : {
+            "type" : "number"
+          }
+        }
+      },
+      "JsonNode" : { },
       "WarmStatus" : {
         "type" : "object",
         "properties" : {

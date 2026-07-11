@@ -181,9 +181,15 @@ public class RiskService {
     if (open.isEmpty()) {
       return BigDecimal.ZERO;
     }
+    if (open.size() > MAX_LEGS) {
+      // Over the 20-leg Upstox basket limit: a truncated basket under-counts SPAN margin, and an
+      // under-counted heat could FAIL to block when it should. Treat it as "cannot assess" (null →
+      // never blocks — the fail-soft contract of this method) rather than silently pricing a partial
+      // basket (audit M1: the same silent-truncation the margin-heat endpoint refuses loud).
+      return null;
+    }
     List<PaperMarginClient.Leg> legs =
         open.stream()
-            .limit(MAX_LEGS)
             .map(
                 p ->
                     new PaperMarginClient.Leg(

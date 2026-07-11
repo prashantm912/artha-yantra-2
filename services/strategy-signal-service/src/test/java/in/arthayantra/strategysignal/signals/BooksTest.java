@@ -39,4 +39,13 @@ class BooksTest {
     // 'manual' is not a family tag a strategy carries — a tagless/hand strategy is OTHER, not MANUAL.
     assertThat(Books.fromTags(List.of("manual"))).isEqualTo(Books.OTHER);
   }
+
+  @Test
+  void allEnumeratesEveryGovernedBookIncludingTheManualDefault() {
+    // The M16 startup governor assertion iterates all() — it must cover every fromTags target PLUS the
+    // 'manual' schema-default book (which fromTags never produces but positions default to).
+    assertThat(Books.all())
+        .containsExactlyInAnyOrder(
+            Books.SCALPER, Books.MINERVINI, Books.MANAS_ARORA, Books.MANUAL, Books.OTHER);
+  }
 }

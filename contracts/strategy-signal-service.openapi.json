@@ -2077,6 +2077,14 @@
       "get" : {
         "tags" : [ "paper-margin-controller" ],
         "operationId" : "marginHeat",
+        "parameters" : [ {
+          "name" : "book",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
         "responses" : {
           "200" : {
             "description" : "OK",

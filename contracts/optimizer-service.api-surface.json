@@ -50,6 +50,18 @@
       "422"
     ]
   },
+  "GET /api/v1/evolution/reconciliations": {
+    "params": [
+      "limit",
+      "offset",
+      "versionId"
+    ],
+    "requestBody": false,
+    "responses": [
+      "200",
+      "422"
+    ]
+  },
   "GET /api/v1/evolution/retro-score/{sweep_job_id}": {
     "params": [
       "sweep_job_id"
@@ -153,6 +165,14 @@
     "params": [
       "generation_id"
     ],
+    "requestBody": true,
+    "responses": [
+      "202",
+      "422"
+    ]
+  },
+  "POST /api/v1/evolution/reconciliations": {
+    "params": [],
     "requestBody": true,
     "responses": [
       "202",

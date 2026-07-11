@@ -23,6 +23,31 @@ class BacktestClient:
         resp.raise_for_status()
         return resp.json()
 
+    def run(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Submit a backtest through the FULL job pipeline (``POST /api/v1/backtests/run``) — EVO
+        E3's reconciliation re-sim of the EXACT version over the EXACT lived window (``purpose
+        reconcile``, §7.1). The HTTP endpoint (not a jobs INSERT like the cost-stress re-runs) is
+        deliberate: JobsService.submit resolves + pins the version, runs the coverage/regime
+        pre-flight, and — critically — PINS the swing FUNNEL universe (manas_arora_funnel /
+        minervini_funnel resolve ONLY there, JobsService.java:155-183), without which a SIM_FIRST
+        swing re-sim throws "needs a pinned universe". Returns ``{jobId, status}``
+        (JobsController.java:38-39)."""
+        resp = self._client.post(f"{self._base}/api/v1/backtests/run", json=request)
+        resp.raise_for_status()
+        return resp.json()
+
+    def trades(self, run_id: str, limit: int = 1000, offset: int = 0) -> list[dict[str, Any]]:
+        """The paged trades of one completed run (``GET /{id}/trades`` → ``{items,…}``), returned as
+        the bare ``items`` list. Each trade carries ``tradingsymbol`` / ``entryTs`` / ``entryPrice``
+        (ResultsController + TradeRepository.findByRun) — the sim side the reconciliation computer
+        pairs against the live paper trades. Read-only §D.5 surface."""
+        resp = self._client.get(
+            f"{self._base}/api/v1/backtests/{run_id}/trades",
+            params={"limit": limit, "offset": offset},
+        )
+        resp.raise_for_status()
+        return resp.json().get("items", [])
+
     def job_status(self, job_id: str) -> dict[str, Any]:
         """One backtest job's status payload (``GET /jobs/{id}``): ``{status, resultRef, ...}``.
         The E2 cost-stress drain polls this for a dispatched BACKTEST stress run — a completed run's

@@ -394,3 +394,90 @@ class FakeEvoRepo:
 
     def close(self) -> None:
         pass
+
+
+class FakeReconRepo:
+    """In-memory ``reconciliations`` store (V012) + the version→walk-forward-run lookup — the same
+    camelCase envelope shape ReconciliationRepo emits, so the service maps it identically."""
+
+    def __init__(self, walkforward_run_ids: dict[str, str] | None = None) -> None:
+        self.rows: list[dict[str, Any]] = []
+        self._walkforward = walkforward_run_ids or {}
+        self._seq = 0
+
+    def get_by_version_window(
+        self, version_id: str, window_from: str, window_to: str
+    ) -> dict[str, Any] | None:
+        return next(
+            (
+                r for r in self.rows
+                if r["versionId"] == version_id
+                and r["windowFrom"] == window_from
+                and r["windowTo"] == window_to
+            ),
+            None,
+        )
+
+    def list_by_version(self, version_id: str, limit: int, offset: int) -> list[dict[str, Any]]:
+        matches = [r for r in self.rows if r["versionId"] == version_id]
+        matches.sort(key=lambda r: r["_seq"], reverse=True)  # newest-first (created_at DESC)
+        return matches[offset:offset + limit]
+
+    def latest_walkforward_run_id(self, version_id: str) -> str | None:
+        return self._walkforward.get(version_id)
+
+    def insert(
+        self,
+        *,
+        version_id: str,
+        strategy_id: str | None,
+        window_from: str,
+        window_to: str,
+        sim_job_id: str | None,
+        sim_run_id: str | None,
+        gap: dict[str, Any],
+        gap_z: float | None,
+        paired_trades: int,
+        evidence_floor_met: bool,
+        verdict: str,
+        diagnosis: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        self._seq += 1
+        row = {
+            "_seq": self._seq,
+            "id": f"recon-{self._seq}", "versionId": version_id, "strategyId": strategy_id,
+            "windowFrom": window_from, "windowTo": window_to, "simJobId": sim_job_id,
+            "simRunId": sim_run_id, "gap": gap, "gapZ": gap_z, "pairedTrades": paired_trades,
+            "evidenceFloorMet": evidence_floor_met, "verdict": verdict, "diagnosis": diagnosis,
+            "createdAt": "2026-07-11T00:00:00+00:00",
+        }
+        self.rows.append(row)
+        return row
+
+    def close(self) -> None:
+        pass
+
+
+class FakeLiveRepo:
+    """In-memory STRATEGY-schema read model — mirrors LiveEvidenceRepo: resolve a version UUID to
+    ``{strategyId, version, config}`` and return its live paper trades (the window is ignored — the
+    fixture pre-scopes the trades to the window under test)."""
+
+    def __init__(
+        self,
+        versions: dict[str, dict[str, Any]] | None = None,
+        trades: dict[str, list[dict[str, Any]]] | None = None,
+    ) -> None:
+        self.versions = versions or {}
+        self.trades = trades or {}
+
+    def resolve_version(self, version_id: str) -> dict[str, Any] | None:
+        return self.versions.get(version_id)
+
+    def paper_trades_for_version(
+        self, version_id: str, window_from: str, window_to: str
+    ) -> list[dict[str, Any]]:
+        return self.trades.get(version_id, [])
+
+    def close(self) -> None:
+        pass

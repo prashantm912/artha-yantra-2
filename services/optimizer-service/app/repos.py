@@ -590,3 +590,190 @@ class EvoRepo:
             count = cur.rowcount
         self._conn.commit()
         return count
+
+
+def _reconciliation_row(r: tuple) -> dict[str, Any]:
+    return {
+        "id": str(r[0]),
+        "versionId": _uuid(r[1]),
+        "strategyId": _uuid(r[2]),
+        "windowFrom": _ts(r[3]),
+        "windowTo": _ts(r[4]),
+        "simJobId": _uuid(r[5]),
+        "simRunId": _uuid(r[6]),
+        "gap": r[7],
+        "gapZ": float(r[8]) if r[8] is not None else None,
+        "pairedTrades": r[9],
+        "evidenceFloorMet": r[10],
+        "verdict": r[11],
+        "diagnosis": r[12],
+        "createdAt": _ts(r[13]),
+    }
+
+
+_RECONCILIATION_COLS = (
+    "id, version_id, strategy_id, window_from, window_to, sim_job_id, sim_run_id, gap, gap_z, "
+    "paired_trades, evidence_floor_met, verdict, diagnosis, created_at"
+)
+
+
+class ReconciliationRepo:
+    """The E3 backtest-vs-live reconciliation store (``reconciliations`` table, backtest schema —
+    V012). Writes the computed gap row and reads them back by version; also resolves the version's
+    latest walk-forward run (for the §7.2 σ(fold returns)) off ``backtest_runs``. Thin psycopg
+    wrapper, duck-typed like the other repos so tests substitute an in-memory fake."""
+
+    def __init__(self, conn: psycopg.Connection) -> None:
+        self._conn = conn
+
+    def close(self) -> None:
+        """Closes the underlying connection (the factory opens one per use)."""
+        self._conn.close()
+
+    def get_by_version_window(
+        self, version_id: str, window_from: str, window_to: str
+    ) -> dict[str, Any] | None:
+        """The reconciliation for a (version, window), or ``None`` — the POST's 409 idempotency
+        check (the UNIQUE(version_id, window_from, window_to) index is the hard backstop)."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_RECONCILIATION_COLS} FROM reconciliations "
+                "WHERE version_id=%s AND window_from=%s::timestamptz AND window_to=%s::timestamptz",
+                (version_id, window_from, window_to),
+            )
+            row = cur.fetchone()
+        return _reconciliation_row(row) if row is not None else None
+
+    def list_by_version(
+        self, version_id: str, limit: int, offset: int
+    ) -> list[dict[str, Any]]:
+        """A version's reconciliations, newest-first — the GET ?versionId= read."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_RECONCILIATION_COLS} FROM reconciliations "
+                "WHERE version_id=%s ORDER BY created_at DESC LIMIT %s OFFSET %s",
+                (version_id, limit, offset),
+            )
+            rows = cur.fetchall()
+        return [_reconciliation_row(r) for r in rows]
+
+    def latest_walkforward_run_id(self, version_id: str) -> str | None:
+        """The version's most recent WALK-FORWARD backtest run id (``fold_metrics`` present) — the
+        §7.2 σ(fold returns) source (the version's existing walk-forward fold returns, its sweep/run
+        history). ``None`` when the version has no fold history → gap_z NULL → verdict INSUFFICIENT.
+        A direct read of ``backtest_runs`` (backtest-service's rows in the optimizer's own schema);
+        the fold RETURNS are then read via BacktestClient.folds (the proven REST fold shape)."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM backtest_runs "
+                "WHERE strategy_version_id=%s AND fold_metrics IS NOT NULL "
+                "ORDER BY completed_at DESC LIMIT 1",
+                (version_id,),
+            )
+            row = cur.fetchone()
+        return str(row[0]) if row is not None else None
+
+    def insert(
+        self,
+        *,
+        version_id: str,
+        strategy_id: str | None,
+        window_from: str,
+        window_to: str,
+        sim_job_id: str | None,
+        sim_run_id: str | None,
+        gap: dict[str, Any],
+        gap_z: float | None,
+        paired_trades: int,
+        evidence_floor_met: bool,
+        verdict: str,
+        diagnosis: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Persist ONE reconciliation row (atomic single INSERT — never a half-row) and return it in
+        the read-envelope shape. window_from/window_to are cast ::timestamptz (explicit IST bounds).
+        A UNIQUE(version, window) collision surfaces as psycopg UniqueViolation — the drain logs it
+        (the idempotency check + in-flight guard make it near-impossible; the constraint is the hard
+        backstop against a concurrent double-submit)."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO reconciliations "
+                "(version_id, strategy_id, window_from, window_to, sim_job_id, sim_run_id, gap, "
+                "gap_z, paired_trades, evidence_floor_met, verdict, diagnosis) "
+                "VALUES (%s, %s, %s::timestamptz, %s::timestamptz, %s, %s, %s::jsonb, %s, %s, %s, "
+                f"%s, %s::jsonb) RETURNING {_RECONCILIATION_COLS}",
+                (
+                    version_id, strategy_id, window_from, window_to, sim_job_id, sim_run_id,
+                    json.dumps(gap), gap_z, paired_trades, evidence_floor_met, verdict,
+                    _jsonb(diagnosis),
+                ),
+            )
+            row = cur.fetchone()
+        self._conn.commit()
+        return _reconciliation_row(row)
+
+
+class LiveEvidenceRepo:
+    """Read-only access to the STRATEGY schema for the E3 reconciliation computer (§7.1 live plane).
+    The optimizer connects as ``artha`` (D10 single-writer), so cross-schema READS are fine — writes
+    stay confined to the backtest schema. Two reads: resolve a version UUID to its owning strategy +
+    semver + config (there is NO version-by-UUID REST endpoint — RegistryController scopes every
+    version route by strategyId), and the version's live paper trades over a window (the H5
+    single-attribution join: paper_positions → opening signal → strategy_version, V026)."""
+
+    def __init__(self, conn: psycopg.Connection) -> None:
+        self._conn = conn
+
+    def close(self) -> None:
+        """Closes the underlying connection (the factory opens one per use)."""
+        self._conn.close()
+
+    def resolve_version(self, version_id: str) -> dict[str, Any] | None:
+        """Resolve a ``strategy_versions`` UUID to ``{strategyId, version (semver), config}`` — the
+        reconcile re-sim needs the strategyId + SEMVER string to submit through
+        POST /api/v1/backtests/run (strategyVersion is the semver, StrategyVersionClient.java:55).
+        The config detects the SWING session style. ``None`` for an unknown version (→ 404)."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT strategy_id, version, config FROM strategy.strategy_versions WHERE id=%s",
+                (version_id,),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        return {"strategyId": str(row[0]), "version": row[1], "config": row[2]}
+
+    def paper_trades_for_version(
+        self, version_id: str, window_from: str, window_to: str
+    ) -> list[dict[str, Any]]:
+        """The version's live paper positions ENTERED in the window (``opened_at`` ∈ [from, to)),
+        joined to their opening signal (for the scalper_detail option leg). Window bounds are cast
+        ::timestamptz and passed as explicit IST (+05:30) ISO strings — never a UTC ``::date``
+        (off-by-one across IST midnight, the in-container-UTC trap). The entry price is
+        ``avg_entry_price`` (the FillSimulator-stamped live fill, not the signal-time LTP); realized
+        P&L + close_reason are authoritative on the position (there is no exit-price column)."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT p.tradingsymbol, p.side, p.avg_entry_price, p.opened_at, p.closed_at, "
+                "p.realized_pnl, p.close_reason, p.status, s.scalper_detail "
+                "FROM strategy.paper_positions p "
+                "JOIN strategy.signals s ON s.id = p.opening_signal_id "
+                "WHERE s.strategy_version_id=%s "
+                "AND p.opened_at >= %s::timestamptz AND p.opened_at < %s::timestamptz "
+                "ORDER BY p.opened_at",
+                (version_id, window_from, window_to),
+            )
+            rows = cur.fetchall()
+        return [
+            {
+                "tradingsymbol": r[0],
+                "side": r[1],
+                "avgEntryPrice": float(r[2]) if r[2] is not None else None,
+                "openedAt": _ts(r[3]),
+                "closedAt": _ts(r[4]),
+                "realizedPnl": float(r[5]) if r[5] is not None else None,
+                "closeReason": r[6],
+                "status": r[7],
+                "scalperDetail": r[8],
+            }
+            for r in rows
+        ]

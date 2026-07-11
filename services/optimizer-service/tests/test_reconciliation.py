@@ -279,8 +279,14 @@ def test_pair_trades_scalper_uses_option_ltp_proxy():
     assert inputs.entry_pairs == [(50.0, 48.0)]      # option_ltp proxy, NOT the 55.0 fill
 
 
-def test_dispatch_caveats_swing_flags_fill_timing():
-    assert any("at_close" in c for c in _dispatch_caveats("swing"))
+def test_dispatch_caveats_swing_has_no_fill_timing_degradation():
+    # §7.1.2: swing now PINS fill_timing at_close via sessionOverrides, so there is no dispatch-time
+    # FILL-TIMING caveat any more (the pin is real, not a degradation). One honest residual remains:
+    # the exit-TRIGGER axis (sim exit_intrabar vs live daily-close eval — review F1). Scalper stays
+    # STRUCTURAL.
+    swing = _dispatch_caveats("swing")
+    assert len(swing) == 1 and "exit-TRIGGER" in swing[0]
+    assert not any("NEXT_OPEN" in c or "could NOT be pinned" in c for c in swing)
     assert any("STRUCTURAL" in c for c in _dispatch_caveats("scalper"))
 
 
@@ -556,7 +562,9 @@ def test_reconcile_failed_resim_persists_insufficient_row():
     assert any("did not yield a completed run" in c for c in row["gap"]["caveats"])
 
 
-def test_reconcile_swing_carries_fill_timing_caveat():
+def test_reconcile_swing_pins_fill_timing_at_close():
+    # §7.1.2: a swing re-sim submission carries sessionOverrides.fillTiming = at_close so the sim
+    # fills where live paper enters (daily close), not the pipeline's NEXT_OPEN default.
     live_trades = [_live("ALPHA", "2026-06-01T15:20:00+05:30", 100.0, pnl=50_000.0)]
     sim_trades = [_sim("ALPHA", "2026-06-01T09:15:00+05:30", 100.0)]
     repo = FakeReconRepo(walkforward_run_ids={_VERSION: "wf-1"})
@@ -564,8 +572,20 @@ def test_reconcile_swing_carries_fill_timing_caveat():
     backtest = FakeReconBacktest(sim_total_return=5.0, sim_trades=sim_trades, folds=_WF_FOLDS)
     svc = _svc(repo, live, backtest)
     svc.create({"versionId": _VERSION, "from": "2026-06-01", "to": "2026-07-01"})
-    _wait(lambda: len(repo.rows) == 1)
-    assert any("at_close" in c for c in repo.rows[0]["gap"]["caveats"])
+    assert backtest.runs_submitted[0]["sessionOverrides"] == {"fillTiming": "at_close"}
+
+
+def test_reconcile_scalper_does_not_pin_fill_timing():
+    # §7.2: a scalper reconciliation runs shadow-vs-paper (not the raw candle path), so the re-sim
+    # is NOT fill-timing-pinned — the override is swing-only.
+    scalper_config = {"risk": {"session": {"style": "intraday"}}}
+    repo = FakeReconRepo(walkforward_run_ids={_VERSION: "wf-1"})
+    live = _swing_live_version([], config=scalper_config)
+    backtest = FakeReconBacktest(sim_total_return=5.0, sim_trades=[], folds=_WF_FOLDS)
+    svc = _svc(repo, live, backtest)
+    receipt = svc.create({"versionId": _VERSION, "from": "2026-06-01", "to": "2026-07-01"})
+    assert receipt["mode"] == "scalper"
+    assert "sessionOverrides" not in backtest.runs_submitted[0]
 
 
 # ================================================================================================

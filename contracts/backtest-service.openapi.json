@@ -947,10 +947,21 @@
           },
           "stressOverrides" : {
             "$ref" : "#/components/schemas/StressOverrides"
+          },
+          "sessionOverrides" : {
+            "$ref" : "#/components/schemas/SessionOverrides"
           }
         }
       },
       "JsonNode" : { },
+      "SessionOverrides" : {
+        "type" : "object",
+        "properties" : {
+          "fillTiming" : {
+            "type" : "string"
+          }
+        }
+      },
       "StressOverrides" : {
         "type" : "object",
         "properties" : {

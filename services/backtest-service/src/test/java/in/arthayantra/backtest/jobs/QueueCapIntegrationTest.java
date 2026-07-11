@@ -57,7 +57,8 @@ class QueueCapIntegrationTest extends BacktestIntegrationTestBase {
       // the cap is checked BEFORE version-resolve / auto-warm, so a null window never gets that far
       BacktestRunRequest req =
           new BacktestRunRequest(
-              UUID.randomUUID().toString(), null, null, null, null, null, null, null, null, null, null);
+              UUID.randomUUID().toString(), null, null, null, null, null, null, null, null, null, null,
+              null);
       assertThatThrownBy(() -> service.submit(req, "corr-cap"))
           .isInstanceOfSatisfying(
               ApiException.class,

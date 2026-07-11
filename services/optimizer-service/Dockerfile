@@ -21,6 +21,10 @@ RUN set -e; \
     rm -rf /tmp/dev-certs /tmp/devca.pem
 
 COPY services/optimizer-service/app ./app
+# The shared trial-metrics catalog (remaining-items §9 candidate 03) — the single source of truth for
+# the rankable metric names the backtest emits; app/metrics_catalog.py resolves it by walking up to
+# the nearest ancestor holding contracts/ (here the image WORKDIR /app, the repo root in dev/CI).
+COPY contracts/metrics/trial-metrics-catalog.json ./contracts/metrics/trial-metrics-catalog.json
 
 RUN useradd --create-home --uid 10001 artha
 USER artha

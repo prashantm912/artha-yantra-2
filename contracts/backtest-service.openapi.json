@@ -723,6 +723,115 @@
           }
         }
       }
+    },
+    "/api/v1/backtests/experiments" : {
+      "get" : {
+        "tags" : [ "experiment-controller" ],
+        "operationId" : "experiments",
+        "parameters" : [ {
+          "name" : "strategyId",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "strategyVersionId",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "kind",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "limit",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 50
+          }
+        }, {
+          "name" : "offset",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 0
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ExperimentListResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backtests/experiments/compare" : {
+      "get" : {
+        "tags" : [ "experiment-controller" ],
+        "operationId" : "compare",
+        "parameters" : [ {
+          "name" : "runIds",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string",
+              "format" : "uuid"
+            }
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ExperimentCompareResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components" : {
@@ -802,6 +911,208 @@
           },
           "grade" : {
             "type" : "string"
+          }
+        }
+      },
+      "ExperimentListResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ExperimentSummary"
+            }
+          },
+          "limit" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "offset" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "ExperimentSummary" : {
+        "type" : "object",
+        "properties" : {
+          "runId" : {
+            "type" : "string"
+          },
+          "jobId" : {
+            "type" : "string"
+          },
+          "kind" : {
+            "type" : "string"
+          },
+          "parentJobId" : {
+            "type" : "string"
+          },
+          "strategyVersionId" : {
+            "type" : "string"
+          },
+          "strategyId" : {
+            "type" : "string"
+          },
+          "strategyVersion" : {
+            "type" : "string"
+          },
+          "purpose" : {
+            "type" : "string"
+          },
+          "exchange" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "interval" : {
+            "type" : "string"
+          },
+          "startTs" : {
+            "type" : "string"
+          },
+          "endTs" : {
+            "type" : "string"
+          },
+          "totalReturn" : {
+            "type" : "string"
+          },
+          "sharpe" : {
+            "type" : "string"
+          },
+          "maxDrawdown" : {
+            "type" : "string"
+          },
+          "tradeCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "dataHash" : {
+            "type" : "string"
+          },
+          "universeChecksum" : {
+            "type" : "string"
+          },
+          "engineSha" : {
+            "type" : "string"
+          },
+          "premiumSource" : {
+            "type" : "string"
+          },
+          "createdBy" : {
+            "type" : "string"
+          },
+          "completedAt" : {
+            "type" : "string"
+          }
+        }
+      },
+      "CompareMetrics" : {
+        "type" : "object",
+        "properties" : {
+          "totalReturn" : {
+            "type" : "string"
+          },
+          "cagr" : {
+            "type" : "string"
+          },
+          "sharpe" : {
+            "type" : "string"
+          },
+          "sortino" : {
+            "type" : "string"
+          },
+          "maxDrawdown" : {
+            "type" : "string"
+          },
+          "winRate" : {
+            "type" : "string"
+          },
+          "profitFactor" : {
+            "type" : "string"
+          },
+          "alpha" : {
+            "type" : "string"
+          },
+          "beta" : {
+            "type" : "string"
+          },
+          "informationRatio" : {
+            "type" : "string"
+          },
+          "tradeCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "ExperimentCompareResponse" : {
+        "type" : "object",
+        "properties" : {
+          "runs" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ExperimentCompareRun"
+            }
+          },
+          "likeForLike" : {
+            "$ref" : "#/components/schemas/LikeForLike"
+          }
+        }
+      },
+      "ExperimentCompareRun" : {
+        "type" : "object",
+        "properties" : {
+          "runId" : {
+            "type" : "string"
+          },
+          "strategyVersionId" : {
+            "type" : "string"
+          },
+          "strategyId" : {
+            "type" : "string"
+          },
+          "strategyVersion" : {
+            "type" : "string"
+          },
+          "dataHash" : {
+            "type" : "string"
+          },
+          "universeChecksum" : {
+            "type" : "string"
+          },
+          "engineSha" : {
+            "type" : "string"
+          },
+          "premiumSource" : {
+            "type" : "string"
+          },
+          "createdBy" : {
+            "type" : "string"
+          },
+          "completedAt" : {
+            "type" : "string"
+          },
+          "metrics" : {
+            "$ref" : "#/components/schemas/CompareMetrics"
+          }
+        }
+      },
+      "LikeForLike" : {
+        "type" : "object",
+        "properties" : {
+          "dataHashMatch" : {
+            "type" : "boolean"
+          },
+          "universeMatch" : {
+            "type" : "boolean"
+          },
+          "engineShaMatch" : {
+            "type" : "boolean"
+          },
+          "premiumSourceMatch" : {
+            "type" : "boolean"
           }
         }
       },

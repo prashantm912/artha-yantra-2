@@ -9,6 +9,37 @@
       "422"
     ]
   },
+  "GET /api/v1/evolution/campaigns": {
+    "params": [
+      "limit",
+      "offset"
+    ],
+    "requestBody": false,
+    "responses": [
+      "200",
+      "422"
+    ]
+  },
+  "GET /api/v1/evolution/campaigns/{campaign_id}": {
+    "params": [
+      "campaign_id"
+    ],
+    "requestBody": false,
+    "responses": [
+      "200",
+      "422"
+    ]
+  },
+  "GET /api/v1/evolution/campaigns/{campaign_id}/candidates": {
+    "params": [
+      "campaign_id"
+    ],
+    "requestBody": false,
+    "responses": [
+      "200",
+      "422"
+    ]
+  },
   "GET /api/v1/optimizations/jobs": {
     "params": [
       "limit",

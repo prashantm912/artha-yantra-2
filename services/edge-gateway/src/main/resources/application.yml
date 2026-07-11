@@ -61,7 +61,7 @@ spring:
             - id: optimizer
               uri: ${ARTHA_ROUTE_OPTIMIZER:http://optimizer-service:8084}
               predicates:
-                - Path=/api/v1/optimizations/**
+                - Path=/api/v1/optimizations/**,/api/v1/evolution/**
             - id: margin
               uri: ${ARTHA_ROUTE_MARGIN:http://margin-service:8086}
               predicates:

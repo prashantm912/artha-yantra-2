@@ -186,3 +186,33 @@ class FakeBacktest:
     def guard_summary(self, run_id: str) -> Any:
         self.guard_calls.append(run_id)
         return self._guard
+
+
+class FakeEvoRepo:
+    """In-memory ``evo_*`` read model — returns the same camelCase envelope shape EvoRepo
+    emits, so EvoReadService maps it to the response models identically to production."""
+
+    def __init__(
+        self,
+        campaigns: list[dict[str, Any]] | None = None,
+        generations: dict[str, list[dict[str, Any]]] | None = None,
+        candidates: dict[str, list[dict[str, Any]]] | None = None,
+    ) -> None:
+        self.campaigns = campaigns or []
+        self.generations = generations or {}
+        self.candidates = candidates or {}
+
+    def list_campaigns(self, limit: int, offset: int) -> list[dict[str, Any]]:
+        return self.campaigns[offset:offset + limit]
+
+    def get_campaign(self, campaign_id: str) -> dict[str, Any] | None:
+        return next((c for c in self.campaigns if c["id"] == campaign_id), None)
+
+    def list_generations(self, campaign_id: str) -> list[dict[str, Any]]:
+        return self.generations.get(campaign_id, [])
+
+    def list_candidates_for_campaign(self, campaign_id: str) -> list[dict[str, Any]]:
+        return self.candidates.get(campaign_id, [])
+
+    def close(self) -> None:
+        pass

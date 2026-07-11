@@ -10,11 +10,11 @@ import redis
 from fastapi import FastAPI
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from app import api
+from app import api, evolution
 from app.backtest_client import BacktestClient
 from app.errors import ApiError, api_error_handler, invalid_path_handler
 from app.path_grammar import InvalidParameterPath
-from app.repos import JobsRepo, TrialsRepo
+from app.repos import EvoRepo, JobsRepo, TrialsRepo
 from app.service import SweepService
 from app.settings import Settings
 from app.strategy_client import StrategyClient
@@ -62,11 +62,15 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         dispatcher=dispatcher,
     )
 
+    # Evolution-engine read surface (§12 E1): its own repo factory, read-only.
+    app.state.evo = evolution.EvoReadService(repo_factory=lambda: EvoRepo(open_conn()))
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "UP"}
 
     app.include_router(api.router)
+    app.include_router(evolution.router)
     Instrumentator().instrument(app).expose(app, endpoint="/metrics")
     return app
 

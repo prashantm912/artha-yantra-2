@@ -176,7 +176,8 @@ class ComponentScore(BaseModel):
 
 
 class Penalties(BaseModel):
-    """§6.2 subtractive penalties. ``dof`` is 0.0 in E1 (deferred to E2, design §12 item 6)."""
+    """§6.2 subtractive penalties: ``dof`` = 0.03 per tuned param over 4 + 0.06 per structure gate
+    (E2, design §12 item 6); ``caveats`` = 0.05 per unresolved data caveat / sub-80% oiCoverage."""
 
     dof: float
     caveats: float
@@ -238,6 +239,13 @@ _RETRO_CAVEAT = (
     "evidence-policy routing lands with campaigns"
 )
 
+# The standalone retro read has no campaign context, so its deflated-Sharpe multiplicity N is the
+# sweep's own trial count only — design §4 charges "total trials-to-date", which the RECORDER
+# computes (campaign-cumulative). Stamped on standalone retro cards only, never recorder cards.
+_RETRO_N_CAVEAT = (
+    "multiplicity N = this sweep only; campaign-cumulative N applies when recorded into a campaign"
+)
+
 
 @dataclass(frozen=True)
 class ScoredSweep:
@@ -281,13 +289,26 @@ class RetroScoreService:
         self._trials_factory = trials_factory
         self._backtest = backtest_client
 
-    def score_sweep(self, sweep_id: str) -> ScoredSweep:
+    def count_trials(self, sweep_id: str) -> int:
+        """One sweep's FULL trial count (every state — failed/pruned trials are still "looks" the
+        search took at the data), capped at ``_COHORT_CAP``: the per-sweep contribution to the §4
+        campaign-cumulative multiplicity N ("the campaign records total trials-to-date N")."""
+        trials = self._trials_factory()
+        try:
+            return len(trials.list_for_sweep(sweep_id, None, _COHORT_CAP, 0))
+        finally:
+            trials.close()
+
+    def score_sweep(self, sweep_id: str, prior_trials: int = 0) -> ScoredSweep:
         """Assemble + score an existing sweep's COMPLETE trials as a cohort — the shared core reused
         by the retro-score read AND the campaign recorder (do NOT duplicate this assembly). Reads
         the sweep job + its trials + each trial's backtest evidence, then scores the whole cohort
-        via ``scoring.score_cohort``. Returns the raw cards (no retro caveat appended — the caller
-        stamps it) plus the frozen job/objective/parameters context. Raises 404 for an unknown /
-        non-OPTIMIZATION job (the shared idiom)."""
+        via ``scoring.score_cohort``. ``prior_trials`` is the campaign's trials-to-date from PRIOR
+        generations, added to this sweep's own full trial count to form the deflated-Sharpe
+        multiplicity N (§4) — the recorder passes it; the standalone retro read has no campaign
+        context so it stays 0 (per-sweep N, flagged by ``_RETRO_N_CAVEAT``). Returns the raw cards
+        (no retro caveat appended — the caller stamps it) plus the frozen job/objective/parameters
+        context. Raises 404 for an unknown / non-OPTIMIZATION job (the shared idiom)."""
         jobs = self._jobs_factory()
         trials = self._trials_factory()
         try:
@@ -299,11 +320,19 @@ class RetroScoreService:
             objective = request.get("objective", {})
             metric, direction = _primary_objective(objective)
             rows = trials.list_for_sweep(sweep_id, _PROMOTABLE, _COHORT_CAP, 0)
+            # Multiplicity N for the §4 deflated-Sharpe gate = the sweep's FULL trial count (every
+            # state — failed/pruned trials are still "looks" the search took at the data), NOT just
+            # the COMPLETE cohort scored below, PLUS the campaign's prior-generation trials when the
+            # recorder supplies them. A dedicated count keeps the complete-cohort read (and its
+            # truncation caveat) byte-identical; capped at _COHORT_CAP like the cohort.
+            n_trials = len(trials.list_for_sweep(sweep_id, None, _COHORT_CAP, 0)) + prior_trials
         finally:
             jobs.close()
             trials.close()
         candidates = [self._assemble(row, metric) for row in rows]
-        cards = scoring.score_cohort(candidates, parameters, direction=direction)
+        cards = scoring.score_cohort(
+            candidates, parameters, direction=direction, n_trials=n_trials
+        )
         return ScoredSweep(
             job=job,
             objective=objective,
@@ -319,6 +348,7 @@ class RetroScoreService:
         scored = self.score_sweep(sweep_id)
         for card in scored.cards:
             card["caveats"].append(_RETRO_CAVEAT)
+            card["caveats"].append(_RETRO_N_CAVEAT)
         response_caveats = []
         if scored.truncated:
             response_caveats.append(
@@ -403,7 +433,11 @@ class RetroScoreService:
             "dataHash": results.get("dataHash"),
             "caveats": caveats,
             "oiGateCoverage": metrics.get("oiGateCoverage"),
-            "activeParamCount": len(params),
+            # activeDOF for the DOF penalty + explainability comes from the sweep's tuned-param
+            # count (len(parameters), the authoritative search dimensionality) — unified in
+            # scoring.score_cohort, so a per-trial realized-param count is intentionally NOT carried
+            # here (it would be a second, driftable source of the same quantity). structureGates
+            # stay 0 until structure mutations exist (E5).
             "structureGateCount": 0,
             "holdoutRunId": None,
             "foldless": foldless,
@@ -498,19 +532,29 @@ class EvoRecorderService:
                     f"campaign {campaign_id} is SIM_BLOCKED — a sim sweep is not scorable evidence "
                     "for this family (design §1.2); record live/paper evidence instead",
                 )
+            prior_sweep_ids: list[str] = []
             for gen in repo.list_generations(campaign_id):
-                if (gen.get("proposal") or {}).get("sweepJobId") == sweep_id:
+                prior_id = (gen.get("proposal") or {}).get("sweepJobId")
+                if prior_id == sweep_id:
                     raise ApiError(
                         409,
                         "CONFLICT_SWEEP_RECORDED",
                         f"sweep {sweep_id} is already recorded as generation {gen['n']} of "
                         f"campaign {campaign_id}",
                     )
+                if prior_id:
+                    prior_sweep_ids.append(prior_id)
         finally:
             repo.close()
 
+        # §4: "the campaign records total trials-to-date N" — the multiplicity charged to this
+        # generation's deflated-Sharpe gate is campaign-CUMULATIVE: every prior generation's sweep
+        # trials (all states, each generation's proposal carries its sweepJobId) + the current
+        # sweep's own count (added inside score_sweep). The standalone retro read stays per-sweep.
+        prior_trials = sum(self._scorer.count_trials(sid) for sid in prior_sweep_ids)
+
         # Score the cohort (reuses the retro assembly + score_cohort); 404 for an unknown sweep.
-        scored = self._scorer.score_sweep(sweep_id)
+        scored = self._scorer.score_sweep(sweep_id, prior_trials=prior_trials)
 
         # A generation freezes its cohort at registration: recording a still-running sweep would
         # persist a PARTIAL cohort, and the 409 idempotency above would then lock out the full one.

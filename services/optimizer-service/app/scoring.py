@@ -8,16 +8,16 @@ the campaign", §6.2 — a sweep's trials ARE the cohort). Same cohort in ⇒ by
 out.
 
 E1 scope (design §12 item 2): the SIM_FIRST hard gates + RobustScore + the recovery/turnover/
-frequency metric semantics, applied retroactively. Everything §12 E2 explicitly defers is marked
-IN-BAND, never silently dropped:
-  * deflated-Sharpe multiplicity gate → a gate entry with status NOT_IMPLEMENTED;
-  * DOF penalties → ``penalties.dof = 0.0`` carrying an E2 note;
+frequency metric semantics, applied retroactively. E2 (design §12 item 6) adds the deflated-Sharpe
+multiplicity gate and the DOF penalties (both below). Everything still deferred is marked IN-BAND,
+never silently dropped:
   * cost-stress re-runs → ``cost_resilience`` z=0 with a "no stress runs (E2)" caveat;
-  * importance/brittleness → out of scope.
-Missing evidence degrades, never fabricates: no live evidence ⇒ ``live_alignment`` z=0 (§6.2
-comment); NULL engine SHA (runs predating #703) ⇒ comparability gate UNKNOWN (not FAIL); no
-holdout run linked ⇒ holdout gate SKIPPED. A candidate is "rankable" iff no gate is FAIL —
-SKIPPED / UNKNOWN / NOT_IMPLEMENTED never block ranking.
+  * importance/brittleness insights → out of scope.
+Missing evidence degrades, never fabricates: no sharpe or trade count ⇒ the deflated-Sharpe gate is
+SKIPPED (never fabricated); no live evidence ⇒ ``live_alignment`` z=0 (§6.2 comment); NULL engine
+SHA (runs predating #703) ⇒ comparability gate UNKNOWN (not FAIL); no holdout run linked ⇒ holdout
+gate SKIPPED. A candidate is "rankable" iff no gate is FAIL — SKIPPED / UNKNOWN / NOT_IMPLEMENTED
+never block ranking.
 
 This EXTENDS the ``/best`` guard-aware leaderboard shape (leaderboard.plateau_scores is reused for
 the plateau/neighbor stability signal), it does not replace it (design §6.3 / audit §13.11).
@@ -25,6 +25,7 @@ the plateau/neighbor stability signal), it does not replace it (design §6.3 / a
 
 from __future__ import annotations
 
+import math
 import statistics
 from typing import Any
 
@@ -63,6 +64,12 @@ _STABILITY_MIN_NEIGHBORS = 4
 _CAVEAT_UNIT_PENALTY = 0.05  # §6.2: 0.05 per unresolved data caveat / oiGateCoverage < 80%
 _OI_COVERAGE_FLOOR = 0.80
 
+# §6.2 DOF (degrees-of-freedom) penalty: charge the candidate for every knob it spends. The first
+# 4 tuned params are "free"; beyond that each costs 0.03, and each structure gate costs 0.06.
+_DOF_FREE_PARAMS = 4
+_DOF_PARAM_PENALTY = 0.03      # per active (tuned) param over the free 4
+_DOF_STRUCTURE_PENALTY = 0.06  # per structure gate (0 until structure mutations exist — E5)
+
 
 def score_cohort(
     candidates: list[dict[str, Any]],
@@ -70,21 +77,28 @@ def score_cohort(
     direction: str = "maximize",
     policy: str = "SIM_FIRST",
     weights: dict[str, float] | None = None,
+    n_trials: int | None = None,
 ) -> list[dict[str, Any]]:
     """Score a whole cohort (a sweep's trials) → one §6.3 scorecard dict per candidate, in the
     input order. ``parameters`` are the sweep's tunable specs (drive the plateau/neighbor stability
-    signal via ``leaderboard.plateau_scores``). ``direction`` is echoed for provenance AND drives
-    the single maximize-space normalization of the plateau math (``_stability_inputs``). z-scoring
-    is within THIS cohort, so a single-candidate cohort yields all-zero z's (nothing to normalize
-    against) — expected, and flagged by the empty spread rather than invented."""
+    signal via ``leaderboard.plateau_scores`` AND are the ONE source of the tuned-param count for
+    both the DOF penalty and the explainability activeDOF term). ``direction`` is echoed for
+    provenance AND drives the single maximize-space normalization of the plateau math
+    (``_stability_inputs``). ``n_trials`` is the multiplicity N for the §4 deflated-Sharpe gate —
+    the total trials the search ran (retro: the sweep's full trial count, all states) — defaulting
+    to the scored cohort size when the caller does not pass a fuller count. z-scoring is within THIS
+    cohort, so a single-candidate cohort yields all-zero z's (nothing to normalize against) —
+    expected, and flagged by the empty spread rather than invented."""
     weights = weights or SIM_FIRST_WEIGHTS
+    n = len(candidates) if n_trials is None else n_trials
+    n_params = len(parameters)
     stab = _stability_inputs(candidates, _plateau(candidates, parameters), direction)
 
     # Per-component z's (cohort-normalized) + the raw constituents + any structural caveat.
     comp_zs: dict[str, list[float]] = {}
     comp_raws: list[dict[str, dict[str, Any]]] = [dict() for _ in candidates]
     comp_caveats: dict[str, str | None] = {}
-    for comp, subsignals in _component_subsignals(candidates, stab).items():
+    for comp, subsignals in _component_subsignals(candidates, stab, n_params).items():
         zs, raws = _component_z(subsignals, len(candidates))
         comp_zs[comp] = zs
         comp_caveats[comp] = None if subsignals else _EMPTY_COMPONENT_CAVEATS.get(comp)
@@ -99,9 +113,9 @@ def score_cohort(
             for comp in weights
         ]
         weighted = sum(weights[comp] * comp_zs[comp][i] for comp in weights)
-        penalties = _penalties(cand)
+        penalties = _penalties(cand, n_params)
         robust = _round(weighted - penalties["dof"] - penalties["caveats"])
-        gates = _gates(cand, stab[i])
+        gates = _gates(cand, stab[i], n)
         rankable = all(g["status"] != FAIL for g in gates)
         scorecards.append({
             "trialNumber": cand.get("trialNumber"),
@@ -164,7 +178,7 @@ def _stability_inputs(
 
 
 def _component_subsignals(
-    candidates: list[dict[str, Any]], stab: list[dict[str, Any]]
+    candidates: list[dict[str, Any]], stab: list[dict[str, Any]], n_params: int
 ) -> dict[str, list[tuple[str, list[float | None]]]]:
     """Each RobustScore component is built from one or more raw sub-signals; the component z is the
     mean of its present sub-signals' cohort z-scores (a missing sub-signal drops out of the mean, a
@@ -191,7 +205,9 @@ def _component_subsignals(
         ],
         "cost_resilience": [],
         "live_alignment": [],
-        "explainability": [("explainability", [_explainability(c) for c in candidates])],
+        "explainability": [
+            ("explainability", [_explainability(c, n_params) for c in candidates])
+        ],
         "efficiency": [("expectancy", [c.get("expectancy") for c in candidates])],
     }
 
@@ -241,10 +257,10 @@ def _zscores(values: list[float | None]) -> list[float | None]:
 
 # --- Hard gates (§6.1, SIM_FIRST column) ------------------------------------------------------
 
-def _gates(cand: dict[str, Any], stab: dict[str, Any]) -> list[dict[str, Any]]:
+def _gates(cand: dict[str, Any], stab: dict[str, Any], n_trials: int) -> list[dict[str, Any]]:
     """The §6.1 SIM_FIRST hard gates as {id, status, value[, note]}. Retro degradations: no holdout
     run → holdout SKIPPED; NULL engine SHA → comparability UNKNOWN; no live evidence → live_gap
-    SKIPPED; the deflated-Sharpe multiplicity term is E2 → its own NOT_IMPLEMENTED entry."""
+    SKIPPED; no sharpe / trade count → the deflated-Sharpe multiplicity gate SKIPPED."""
     oos_return = cand.get("oosReturn")
     fold_returns = cand.get("foldReturns")
     trades = cand.get("oosTradeCount")
@@ -258,8 +274,7 @@ def _gates(cand: dict[str, Any], stab: dict[str, Any]) -> list[dict[str, Any]]:
               trades, unknown=trades is None),
         _gate("oos_sign", None if oos_return is None else oos_return > 0, oos_return,
               unknown=oos_return is None),
-        {"id": "deflated_sharpe", "status": NOT_IMPLEMENTED, "value": None,
-         "note": "DSR multiplicity gate deferred to E2 (design §12 item 6)"},
+        _deflated_sharpe_gate(cand.get("sharpe"), trades, n_trials),
         _fold_consistency_gate(fold_returns),
         _gate("drawdown_cap", None if max_dd is None else max_dd <= _DRAWDOWN_CAP_PCT, max_dd,
               unknown=max_dd is None,
@@ -272,6 +287,48 @@ def _gates(cand: dict[str, Any], stab: dict[str, Any]) -> list[dict[str, Any]]:
         {"id": "live_gap", "status": SKIPPED, "value": None,
          "note": "no live evidence on a sim sweep (§7 applies only once a candidate is live)"},
     ]
+
+
+def _deflated_sharpe_gate(
+    sharpe: Any, trades: Any, n_trials: int
+) -> dict[str, Any]:
+    """§4 deflated-Sharpe multiplicity gate — the formal data-snooping correction: the engine
+    charges itself for every trial it ran. ``deflatedSharpe = (S_oos − S₀(N)) / se(S_oos)``, gate
+    ``> 0``, where:
+
+      * S₀(N) = se(S_oos) · √(2·ln N) — the multiplicity haircut. √(2·ln N) is the leading term of
+        E[max of N i.i.d. standard-normal draws] (the expected best-of-N under pure noise); scaling
+        it by the Sharpe standard error puts the haircut into Sharpe units (design §4: "expected-max
+        -of-N adjustment … scaled appropriately"). This is the DSR of Bailey & López de Prado (2014)
+        with the standard-normal expected-max in place of their exact percentile form.
+      * se(S_oos) = √((1 + 0.5·S²) / (T − 1)) — the Sharpe-ratio standard error under IID-normal
+        returns (Lo 2002; the Bailey-LdP DSR form with skew=0, excess-kurtosis=0). T = the OOS trade
+        count (each trade is one return observation — the only observation count the retro metric
+        bag carries). Higher-moment terms (skew/kurtosis) are unavailable retroactively → omitted;
+        self-flagged in the receipt. On folded runs S is the MEAN of per-fold OOS Sharpes while T
+        pools trades ACROSS folds — a conscious, slightly lenient approximation (the pooled T
+        overstates the observations behind the averaged S, shrinking se), accepted until per-fold
+        return series are carried.
+
+    Because S₀(N) = se·√(2·ln N), the ratio reduces to ``S/se − √(2·ln N)`` — a Sharpe t-statistic
+    measured against the best-of-N-noise bar; the gate direction depends only on the numerator sign,
+    but the value is reported as the full standardized statistic. N is clamped to ≥ 1 (N=1 ⇒ ln 1=0
+    ⇒ no multiplicity haircut, so a lone untried candidate is gated on S > 0 alone). Sharpe is
+    direction-agnostic (higher is always better), so no maximize/minimize handling. Degrades, never
+    fabricates: absent sharpe or < 2 trade observations ⇒ SKIPPED (a Sharpe SE needs T ≥ 2)."""
+    s = _num(sharpe)
+    t = _num(trades)
+    if s is None or t is None or t < 2:
+        return {"id": "deflated_sharpe", "status": SKIPPED, "value": None,
+                "note": "no sharpe or < 2 trade observations — Sharpe standard error unassessable"}
+    n = max(int(n_trials), 1)
+    se = math.sqrt((1 + 0.5 * s * s) / (t - 1))
+    s0 = se * math.sqrt(2 * math.log(n))
+    deflated = (s - s0) / se
+    return {"id": "deflated_sharpe", "status": PASS if deflated > 0 else FAIL,
+            "value": _round(deflated),
+            "note": f"N={n} trials; S={_round(s)}, se={_round(se)}, S0={_round(s0)} "
+                    f"(deflatedSharpe=(S-S0)/se, gate >0)"}
 
 
 def _comparability_gate(engine_sha: str | None) -> dict[str, Any]:
@@ -334,15 +391,35 @@ def _stability_floor_gate(stab: dict[str, Any]) -> dict[str, Any]:
 
 # --- Penalties, flags, caveats (§6.2 / §6.3) --------------------------------------------------
 
-def _penalties(cand: dict[str, Any]) -> dict[str, float]:
-    """DOF penalty is E2 (design §12 item 6) → 0.0 with a note carried in the scorecard caveats.
-    The caveat penalty (§6.2) IS in E1: 0.05 per unresolved DATA caveat on the run
-    (``metrics.caveats[]``) + 0.05 if oiGateCoverage < 80% (parsed from its "42/45" label). The
-    structural E2 component caveats (no-stress-runs etc.) are NOT charged here — they are the same
-    for every candidate, so charging them would be a meaningless constant offset."""
+def _penalties(cand: dict[str, Any], n_params: int) -> dict[str, float]:
+    """The §6.2 subtractive penalties. DOF penalty (E2, design §12 item 6): 0.03 per tuned param
+    over 4 + 0.06 per structure gate — charges the candidate for every knob it spends. The caveat
+    penalty: 0.05 per unresolved DATA caveat on the run (``metrics.caveats[]``) + 0.05 if
+    oiGateCoverage < 80% (parsed from its "42/45" label). The structural E2 component caveats
+    (no-stress-runs etc.) are NOT charged here — they are the same for every candidate, so charging
+    them would be a meaningless constant offset."""
     data_caveats = len(cand.get("caveats") or [])
     oi = 1 if _oi_below_floor(cand.get("oiGateCoverage")) else 0
-    return {"dof": 0.0, "caveats": _round(_CAVEAT_UNIT_PENALTY * (data_caveats + oi))}
+    return {
+        "dof": _round(_dof_penalty(n_params, cand)),
+        "caveats": _round(_CAVEAT_UNIT_PENALTY * (data_caveats + oi)),
+    }
+
+
+def _dof_penalty(n_params: int, cand: dict[str, Any]) -> float:
+    """§6.2 DOF penalty: 0.03 per active (tuned) param beyond the free 4 + 0.06 per structure gate.
+    activeParams = the sweep's tuned-parameter count (``len(parameters)``, the authoritative search
+    dimensionality — SAME source as _explainability's activeDOF term, so the two can never drift);
+    structureGates = 0 until structure mutations exist (E5)."""
+    over = max(0, n_params - _DOF_FREE_PARAMS)
+    return _DOF_PARAM_PENALTY * over + _DOF_STRUCTURE_PENALTY * _structure_gates(cand)
+
+
+def _structure_gates(cand: dict[str, Any]) -> int:
+    """A candidate's structure-gate count (``structureGateCount``): 0 for a PARAMS candidate, > 0
+    only once structure mutations exist (E5). The ONE reader of the field — shared by the DOF
+    penalty (0.06 each) and the explainability activeDOF term — so they cannot drift."""
+    return int(cand.get("structureGateCount") or 0)
 
 
 def _flags(cand: dict[str, Any]) -> list[str]:
@@ -368,7 +445,7 @@ def _caveats(cand: dict[str, Any], comp_caveats: dict[str, str | None]) -> list[
             out.append(f"{comp}: {note}")
     out.append("efficiency: turnover/tradeFrequency absent — MetricsCalculator adds land in E1/E2")
     out.append("explainability: entry-side only — exit-reason attribution needs audit P1-3")
-    out.append("penalties.dof=0.0 — DOF penalty deferred to E2 (design §12 item 6)")
+    out.append("penalties.dof charges tuned params over 4; structure-gate DOF is 0 until E5")
     if cand.get("foldless"):
         out.append("full-window run (no OOS fold structure) — components read on run-level metrics")
     return _dedupe(out)
@@ -399,11 +476,13 @@ def _plateau(
     return leaderboard.plateau_scores(trials, parameters)
 
 
-def _explainability(cand: dict[str, Any]) -> float:
-    """The only §6.2 explainability term computable on retro data: 0.3·(1 − activeDOF/12). The
+def _explainability(cand: dict[str, Any], n_params: int) -> float:
+    """The only §6.2 explainability term computable on retro data: 0.3·(1 − activeDOF/12). activeDOF
+    = the sweep's tuned-param count (``n_params`` = len(parameters)) + structure gates — the SAME
+    two inputs the DOF penalty spends, so the penalty and this term can never drift. The
     entry/exit-trace and gate-operand terms need per-trade completeness (audit P1-3) not available
     here — they are noted as a caveat, not fabricated."""
-    active_dof = int(cand.get("activeParamCount") or 0) + int(cand.get("structureGateCount") or 0)
+    active_dof = n_params + _structure_gates(cand)
     return 0.3 * (1 - min(active_dof, 12) / 12)
 
 

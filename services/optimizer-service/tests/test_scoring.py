@@ -100,7 +100,7 @@ def test_gate_degradations_on_a_bare_candidate():
     assert gates["holdout"] == "SKIPPED"  # no holdout run linked in retro
     assert gates["comparability"] == "UNKNOWN"  # NULL engine SHA (pre-#703)
     assert gates["live_gap"] == "SKIPPED"  # no live evidence
-    assert gates["deflated_sharpe"] == "NOT_IMPLEMENTED"  # DSR multiplicity gate is E2
+    assert gates["deflated_sharpe"] == "SKIPPED"  # no sharpe/trade count on a bare candidate
     assert cards[0]["rankable"] is True  # no FAIL among the statuses
 
 
@@ -222,6 +222,117 @@ def test_risk_adjusted_reads_sortino_only_never_sharpe():
     assert risk[2]["z"] == 1.0
 
 
+# --- deflated-Sharpe multiplicity gate (§4, E2) -----------------------------------------------
+# deflatedSharpe = (S − S₀(N)) / se, gate > 0; se = √((1+0.5·S²)/(T−1)) (Lo/Bailey-LdP, IID-normal);
+# S₀(N) = se·√(2·ln N), so the value reduces to S/se − √(2·ln N). Every number below is computed by
+# hand from those two closed forms (T = OOS trade count, N = cohort/trial count).
+
+def _dsr_cand(n: int, **over) -> dict:
+    # A candidate that PASSES every OTHER hard gate, so rankability flips solely on deflated_sharpe.
+    return {"trialNumber": n, "rawObjective": 1.0, "oosReturn": 12.0, "sharpe": 0.4,
+            "oosTradeCount": 60, "maxDrawdown": 20.0, "regimeOosMin": 0.4, "regimeOosMean": 0.8,
+            "regimesCovered": ["UP_QUIET", "DOWN_QUIET", "UP_TURBULENT"], "engineSha": "sha",
+            "foldReturns": [0.1, 0.2, 0.3]} | over
+
+
+def _dsr_gate(cards, trial_number=1):
+    card = next(c for c in cards if c["trialNumber"] == trial_number)
+    return next(g for g in card["gates"] if g["id"] == "deflated_sharpe")
+
+
+def test_deflated_sharpe_skipped_without_sharpe_or_trades():
+    # No sharpe → SKIPPED (never fabricated); the candidate stays rankable (SKIPPED never blocks).
+    no_sharpe = scoring.score_cohort([_dsr_cand(1, sharpe=None)], [], n_trials=1000)[0]
+    assert _dsr_gate([no_sharpe])["status"] == "SKIPPED"
+    assert no_sharpe["rankable"] is True
+    # A Sharpe SE needs T ≥ 2; a single-observation trade count is unassessable → SKIPPED.
+    one_trade = scoring.score_cohort([_dsr_cand(1, oosTradeCount=1)], [], n_trials=1000)[0]
+    assert _dsr_gate([one_trade])["status"] == "SKIPPED"
+
+
+def test_deflated_sharpe_overfit_toy_sweep_rejected_at_large_N_passes_at_small_N():
+    # THE §12 E2 verify: the SAME marginal candidate (Sharpe 0.4 over T=60 trades) is REJECTED when
+    # the campaign ran 1000 trials but PASSES when it ran only 2 — the engine charges itself for
+    # every look at the data. se = √((1+0.5·0.16)/59) = √0.0183051 = 0.1353.  S/se = 0.4/0.1353 =
+    # 2.9565.  Bar √(2·ln N): N=1000 → 3.7169 ⇒ deflated 2.9565−3.7169 = −0.7604 (FAIL);
+    # N=2 → 1.1774 ⇒ deflated 2.9565−1.1774 = 1.7791 (PASS).
+    overfit = scoring.score_cohort([_dsr_cand(1)], [], n_trials=1000)[0]
+    gate_hi = _dsr_gate([overfit])
+    assert gate_hi["status"] == "FAIL"
+    assert gate_hi["value"] == -0.7604
+    assert "N=1000 trials" in gate_hi["note"]
+    assert overfit["rankable"] is False   # the deflated-Sharpe FAIL is the SOLE disqualifier
+    assert overfit["rank"] is None
+
+    honest = scoring.score_cohort([_dsr_cand(1)], [], n_trials=2)[0]
+    gate_lo = _dsr_gate([honest])
+    assert gate_lo["status"] == "PASS"
+    assert gate_lo["value"] == 1.7791
+    assert honest["rankable"] is True
+    assert honest["rank"] == 1
+
+
+def test_deflated_sharpe_single_trial_has_no_multiplicity_haircut():
+    # N clamps to ≥ 1; N=1 ⇒ ln 1 = 0 ⇒ S₀ = 0 ⇒ deflated = S/se = 2.9565 (> 0, PASS): one untried
+    # candidate is gated on Sharpe sign alone (there is no multiplicity to correct for a lone look).
+    card = scoring.score_cohort([_dsr_cand(1)], [], n_trials=1)[0]
+    assert _dsr_gate([card])["value"] == 2.9565
+    assert _dsr_gate([card])["status"] == "PASS"
+
+
+def test_deflated_sharpe_negative_sharpe_fails_any_N():
+    # A negative Sharpe can never clear a non-negative bar → FAIL regardless of N.
+    card = scoring.score_cohort([_dsr_cand(1, sharpe=-0.3, oosTradeCount=100)], [], n_trials=10)[0]
+    assert _dsr_gate([card])["status"] == "FAIL"
+
+
+def test_deflated_sharpe_exactly_zero_fails_strict_boundary():
+    # Equality-boundary pin: S=0, N=1 ⇒ S₀=0 ⇒ deflated = (0−0)/se = exactly 0.0 — the gate is
+    # STRICT > 0, so 0.0 FAILs (a zero-edge candidate is never waved through on the boundary).
+    card = scoring.score_cohort([_dsr_cand(1, sharpe=0.0, oosTradeCount=10)], [], n_trials=1)[0]
+    gate = _dsr_gate([card])
+    assert gate["value"] == 0.0
+    assert gate["status"] == "FAIL"
+
+
+# --- DOF penalties (§6.2, E2) ------------------------------------------------------------------
+# dof = 0.03 per tuned param over 4 + 0.06 per structure gate; activeParams = len(parameters).
+
+def _params(k: int) -> list[dict]:
+    return [{"path": f"p{i}"} for i in range(k)]
+
+
+def test_dof_penalty_charges_tuned_params_over_four():
+    cand = {"trialNumber": 1, "rawObjective": 1.0, "oosReturn": 10.0}
+    # 4 tuned params → free (0.03·max(0,4−4)=0); 5 → 0.03; 7 → 0.03·3 = 0.09.
+    assert scoring.score_cohort([cand], _params(4))[0]["penalties"]["dof"] == 0.0
+    assert scoring.score_cohort([cand], _params(5))[0]["penalties"]["dof"] == 0.03
+    assert scoring.score_cohort([cand], _params(7))[0]["penalties"]["dof"] == 0.09
+
+
+def test_dof_penalty_charges_structure_gates():
+    # 4 params (no param charge) + 2 structure gates → 0.06·2 = 0.12.
+    cand = {"trialNumber": 1, "rawObjective": 1.0, "oosReturn": 10.0, "structureGateCount": 2}
+    assert scoring.score_cohort([cand], _params(4))[0]["penalties"]["dof"] == 0.12
+
+
+def test_dof_penalty_subtracts_from_robustscore():
+    # Single candidate ⇒ every component z = 0 ⇒ robustScore = 0 − dof − caveats.  7 params → −0.09.
+    cand = {"trialNumber": 1, "rawObjective": 1.0, "oosReturn": 10.0}
+    assert scoring.score_cohort([cand], _params(7))[0]["robustScore"] == -0.09
+
+
+def test_dof_source_is_unified_with_explainability_activedof():
+    # DOF penalty and the explainability activeDOF/12 term MUST read the same tuned-param count
+    # (len(parameters)) so they can't drift. 12 params ⇒ explainability 0.3·(1−12/12) = 0.0 (raw),
+    # and DOF penalty 0.03·(12−4) = 0.24 — both driven by the identical param count.
+    cand = {"trialNumber": 1, "rawObjective": 1.0, "oosReturn": 10.0}
+    card = scoring.score_cohort([cand], _params(12))[0]
+    assert card["penalties"]["dof"] == 0.24
+    explain = next(c for c in card["components"] if c["id"] == "explainability")
+    assert explain["raw"]["explainability"] == 0.0  # activeDOF 12 zeroes the E1 explainability term
+
+
 # --- penalties, flags, caveats ----------------------------------------------------------------
 
 def test_caveat_penalty_and_regime_dependent_flag():
@@ -244,7 +355,7 @@ def test_standing_e1_caveats_are_present():
     caveats = scoring.score_cohort(
         [{"trialNumber": 1, "rawObjective": 1.0, "oosReturn": 5.0, "foldless": True}], []
     )[0]["caveats"]
-    assert any("penalties.dof=0.0" in c for c in caveats)  # DOF deferred to E2
+    assert any("penalties.dof charges tuned params over 4" in c for c in caveats)  # DOF is E2-live
     assert any("cost_resilience: no stress runs" in c for c in caveats)  # cost_resilience
     assert any("live_alignment: no live evidence yet" in c for c in caveats)  # live_alignment
     assert any("full-window run" in c for c in caveats)  # foldless fallback flagged

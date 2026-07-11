@@ -43,6 +43,19 @@ probe round on sweep 46706aa4 lifted trial-4 neighborCount 0→6 (plateau MEASUR
 round awaits the first ≥3-regime campaign — unit-covered end-to-end). Follow-up chips: task_8c3964cc
 (stress-vs-interactive worker reservation), task_547656bf (3m tradeFrequency). EVO next = E3 (design §12 items
 7–10, incl. ONE HOLD: runtime shadow-variant registration API); still-startable clean rows = C2/C3 + F residue.**
+**UPDATE 2026-07-12 (E3 wave 1, 3-way-parallel): item 7 reconciliation computer DONE #731 @ bbc9abdd (V012
+`reconciliations`, gapZ √t-TIME-NORMALIZED per review — the raw design formula manufactured false DIVERGENTs;
+funnel single-pick diagnosis gated; live-smoked: 202 → re-sim → honest INSUFFICIENT row, both caveats stamped).
+Item 9 counterfactual-replay DONE #732 @ ab9ee0d7 (V013 COUNTERFACTUAL job kind, frozen PremiumExitEvaluator
+reused, captured-data-only guard; live-smoked BOTH directions: DATA_GAP 422 on an uncaptured leg + a real
+2-variant replay to completion). Item 8 shadow-variant runtime API = **PR #733 OPEN, HOLD — owner merge decision**
+(3-lens review: live path SAFE, §3.3.3 per-bar clamp added, per-strategy league filter; owner checklist in the
+PR body). NOT started (owner paused before wave 2): item 10 live-gap gate in scoring + the request-level
+fill-timing override (the §7.1.2 at_close pin has NO landing mechanism today — real design gap found by the
+builder; without it swing reconciliations carry bar-noise and ALIGNED verdicts are unreachable; build it with
+the stressOverrides pattern). Known data note: NFO per-contract option 1m capture is sparse after 07-06
+(outage 07-08/09 + subscription-scoped legs) — counterfactuals on recent option legs will 422 DATA_GAP until
+capture is verified Monday.**
 Live behavioural notes a new session must know: B1 makes Monday 2026-07-13 a CALIBRATION session
 (entries UP + wider stops expected — judge on `ay_signal_partial_bucket_mismatch_total`, not entry
 count; E8 re-tune consumes the clean sessions); A3 changed exit semantics (settle = last REAL tick

@@ -100,6 +100,30 @@ class SystemStatusIntegrationTest {
   }
 
   @Test
+  void statusSurfacesTheProducedKiteRateBudget() {
+    ResponseCookie session = login();
+    redis.opsForValue().set("kite:session:status", "MOCK").block();
+    redis.opsForValue().set("kite:rate-budget", "0.42").block();
+
+    // The rollup caches 5 s, so a prior method's cached body may lack the key — await one window.
+    await()
+        .atMost(Duration.ofSeconds(7))
+        .untilAsserted(
+            () ->
+                assertThat(
+                        client
+                            .get()
+                            .uri("/api/v1/system/status")
+                            .cookie(session.getName(), session.getValue())
+                            .exchange()
+                            .expectStatus().isOk()
+                            .expectBody(String.class)
+                            .returnResult()
+                            .getResponseBody())
+                    .contains("\"rateBudget\":0.42"));
+  }
+
+  @Test
   void statusRequiresASession() {
     client.get().uri("/api/v1/system/status").exchange().expectStatus().isUnauthorized();
   }

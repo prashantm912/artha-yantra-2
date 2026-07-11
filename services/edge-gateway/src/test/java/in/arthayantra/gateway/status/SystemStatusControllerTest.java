@@ -42,4 +42,14 @@ class SystemStatusControllerTest {
     assertThat(SystemStatusController.marketDataStatus("CONNECTED", STALE, "CLOSED")).isEqualTo("UP");
     assertThat(SystemStatusController.marketDataStatus("MOCK", null, "PRE_OPEN")).isEqualTo("UP");
   }
+
+  @Test
+  void rateBudgetParsesTheProducerValueAndToleratesAbsentOrGarbage() {
+    // F6: kite.rateBudget is now produced (market-data KiteRateBudgetPublisher → kite:rate-budget).
+    assertThat(SystemStatusController.parseRateBudget("0.42")).isEqualTo(0.42);
+    assertThat(SystemStatusController.parseRateBudget("1.0")).isEqualTo(1.0);
+    assertThat(SystemStatusController.parseRateBudget(null)).isNull(); // no producer has run yet
+    assertThat(SystemStatusController.parseRateBudget("")).isNull();
+    assertThat(SystemStatusController.parseRateBudget("n/a")).isNull();
+  }
 }

@@ -538,9 +538,29 @@ public class BacktestRunner {
         continue;
       }
       SeriesKey key = new SeriesKey(exch, sym, tf);
-      contexts.computeIfAbsent(key, k -> candleReader.read(exch, sym, tf, from, to));
+      contexts.computeIfAbsent(key, k -> readContext(candleReader, exch, sym, tf, from, to));
     }
     return contexts;
+  }
+
+  /**
+   * Reads one context series over {@code [from, to)}: a {@code 1d} context comes from the NATIVE
+   * daily source ({@link CandleReader#readDaily} — dense {@code candles}@{@code 1d}), every other
+   * interval from its continuous aggregate ({@link CandleReader#read}). The 1m-rolled {@code
+   * candles_1d} cagg is sparse on a fresh boot and diverges from the warm-up/regime plane, so a 1d
+   * context indicator must read the same native daily bars they do (D7). Package-visible for
+   * BacktestRunnerContextDailySourceTest.
+   */
+  static List<EngineCandle> readContext(
+      CandleReader reader,
+      String exchange,
+      String tradingsymbol,
+      String timeframe,
+      OffsetDateTime from,
+      OffsetDateTime to) {
+    return "1d".equals(timeframe)
+        ? reader.readDaily(exchange, tradingsymbol, from, to)
+        : reader.read(exchange, tradingsymbol, timeframe, from, to);
   }
 
   // Package-visible for BacktestRunnerSignalInstrumentTest.

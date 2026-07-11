@@ -72,6 +72,17 @@ public final class MetricsCalculator {
     BigDecimal cagr = cagr(initialEquity, finalEquity, equity);
     BigDecimal exposure = totalBars == 0 ? BigDecimal.ZERO : pct(BigDecimal.valueOf(barsInPosition), BigDecimal.valueOf(totalBars));
 
+    // §6.2 evolution-engine metric adds (E1). All three are derived deterministically from the same
+    // replay inputs already in hand (no wall-clock, no random) and are NOT golden-serialized
+    // (GoldenSignalsJson.write emits signal vectors only), so replay parity is unaffected.
+    // recoveryFactor = totalReturn / maxDD; both are percentages, so the ratio is dimensionless.
+    // It is UNDEFINED when there is no drawdown (maxDD == 0) — persisted as JSON null (never a
+    // sentinel number), and the key is still always present so the metrics catalog stays consistent.
+    BigDecimal recoveryFactor =
+        maxDd.signum() == 0 ? null : totalReturn.divide(maxDd, SCALE, RoundingMode.HALF_UP);
+    BigDecimal tradeFrequency = tradeFrequency(tradeCount, totalBars, interval);
+    BigDecimal turnover = turnover(trades, initialEquity);
+
     ObjectNode full = objectMapper.createObjectNode();
     full.put("totalReturn", totalReturn.toPlainString());
     full.put("cagr", cagr.toPlainString());
@@ -85,6 +96,13 @@ public final class MetricsCalculator {
     full.put("averageTrade", expectancy.toPlainString());
     full.put("exposure", exposure.toPlainString());
     full.put("tradeCount", tradeCount);
+    if (recoveryFactor == null) {
+      full.putNull("recoveryFactor"); // undefined when there is no drawdown (maxDD == 0)
+    } else {
+      full.put("recoveryFactor", recoveryFactor.toPlainString());
+    }
+    full.put("tradeFrequency", tradeFrequency.toPlainString());
+    full.put("turnover", turnover.toPlainString());
 
     return new Metrics(
         totalReturn,
@@ -211,6 +229,47 @@ public final class MetricsCalculator {
       return BigDecimal.ZERO;
     }
     return numerator.multiply(HUNDRED, MC).divide(denominator, SCALE, RoundingMode.HALF_UP);
+  }
+
+  /**
+   * Trade frequency in trades per trading SESSION: {@code tradeCount / sessions}, where {@code
+   * sessions = totalBars / barsPerSession} and {@code barsPerSession = periodsPerYear(interval) /
+   * 252} (the same per-interval constant Sharpe scaling uses — bars exist only within sessions, so
+   * the primary-bar count divided by bars-per-session is the session count). A {@code 1d} run reads
+   * trades/day (barsPerSession == 1); a {@code 1m} run reads trades/session (375 1m bars == one
+   * session). Deterministic (pure function of tradeCount, totalBars, interval); {@code 0} on an
+   * empty window (no bars).
+   */
+  private static BigDecimal tradeFrequency(int tradeCount, long totalBars, String interval) {
+    if (totalBars == 0) {
+      return BigDecimal.ZERO.setScale(SCALE);
+    }
+    double sessions = totalBars / (periodsPerYear(interval) / 252.0);
+    if (sessions <= 0) {
+      return BigDecimal.ZERO.setScale(SCALE);
+    }
+    return bd(tradeCount / sessions);
+  }
+
+  /**
+   * Turnover as a multiple of the starting account: {@code Σ|fill value| / initialEquity}, fill
+   * value = {@code price × qty} summed across every entry fill and every exit fill (an open-at-end
+   * trade, exitPrice == null, contributes its entry leg only). A plain ratio, NOT a percentage.
+   * Deterministic (pure function of the trade fills + initial equity); {@code 0} when equity is 0.
+   */
+  private static BigDecimal turnover(List<Trade> trades, BigDecimal initialEquity) {
+    if (initialEquity.signum() == 0) {
+      return BigDecimal.ZERO.setScale(SCALE);
+    }
+    BigDecimal fills = BigDecimal.ZERO;
+    for (Trade t : trades) {
+      BigDecimal qty = BigDecimal.valueOf(t.qty());
+      fills = fills.add(t.entryPrice().multiply(qty).abs());
+      if (t.exitPrice() != null) {
+        fills = fills.add(t.exitPrice().multiply(qty).abs());
+      }
+    }
+    return fills.divide(initialEquity, SCALE, RoundingMode.HALF_UP);
   }
 
   private static double periodsPerYear(String interval) {

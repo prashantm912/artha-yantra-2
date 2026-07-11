@@ -180,7 +180,10 @@ public class ObjectiveAggregator {
       case "profitFactor" -> m.profitFactor();
       default -> {
         JsonNode node = full.get(metric);
-        yield node == null || !node.isValueNode()
+        // A JSON null is a value node (isValueNode() == true) but not numeric — recoveryFactor is
+        // null when a fold has no drawdown (maxDD == 0). Fall back to Sharpe rather than let
+        // new BigDecimal("null") throw when such a metric is named as the fold objective.
+        yield node == null || !node.isValueNode() || node.isNull()
             ? m.sharpe()
             : new BigDecimal(node.asText());
       }

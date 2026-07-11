@@ -241,3 +241,130 @@ class TrialsRepo:
             }
             for r in rows
         ]
+
+
+def _uuid(value: Any) -> str | None:
+    """Stringify a psycopg uuid.UUID (or None) for the JSON envelope."""
+    return str(value) if value is not None else None
+
+
+def _ts(value: Any) -> str | None:
+    """ISO-8601 a timestamptz (or None) — mirrors JobsRepo.list_sweeps' createdAt."""
+    return value.isoformat() if value is not None else None
+
+
+def _campaign_row(r: tuple) -> dict[str, Any]:
+    return {
+        "id": str(r[0]),
+        "strategyId": _uuid(r[1]),
+        "family": r[2],
+        "evidencePolicy": r[3],
+        "objectiveSpec": r[4],
+        "searchSpace": r[5],
+        "budget": r[6],
+        "status": r[7],
+        "championVersionId": _uuid(r[8]),
+        "createdAt": _ts(r[9]),
+        "updatedAt": _ts(r[10]),
+    }
+
+
+def _generation_row(r: tuple) -> dict[str, Any]:
+    return {
+        "id": str(r[0]),
+        "campaignId": str(r[1]),
+        "n": r[2],
+        "proposal": r[3],
+        "searchSpaceHash": r[4],
+        "engineSha": r[5],
+        "dataEpoch": r[6],
+        "stressTouches": r[7],
+        "status": r[8],
+        "startedAt": _ts(r[9]),
+        "finishedAt": _ts(r[10]),
+    }
+
+
+def _candidate_row(r: tuple) -> dict[str, Any]:
+    return {
+        "id": str(r[0]),
+        "generationId": str(r[1]),
+        "versionId": _uuid(r[2]),
+        "parentCandidateId": _uuid(r[3]),
+        "mutationKind": r[4],
+        "params": r[5],
+        "structureDiff": r[6],
+        "sweepJobId": _uuid(r[7]),
+        "holdoutRunId": _uuid(r[8]),
+        "scorecard": r[9],
+        "state": r[10],
+        "updatedAt": _ts(r[11]),
+    }
+
+
+_CAMPAIGN_COLS = (
+    "id, strategy_id, family, evidence_policy, objective_spec, search_space, budget, "
+    "status, champion_version_id, created_at, updated_at"
+)
+_GENERATION_COLS = (
+    "id, campaign_id, n, proposal, search_space_hash, engine_sha, data_epoch, "
+    "stress_touches, status, started_at, finished_at"
+)
+_CANDIDATE_COLS = (
+    "id, generation_id, version_id, parent_candidate_id, mutation_kind, params, "
+    "structure_diff, sweep_job_id, holdout_run_id, scorecard, state, updated_at"
+)
+
+
+class EvoRepo:
+    """Read-only access to the evolution experiment model (``evo_*`` tables, backtest
+    schema). Only the E1 read surface is implemented — campaigns, their generations, and
+    their candidates; the write/scoring/recorder path lands in later PRs. Thin psycopg
+    wrapper, duck-typed like JobsRepo/TrialsRepo so tests substitute an in-memory fake."""
+
+    def __init__(self, conn: psycopg.Connection) -> None:
+        self._conn = conn
+
+    def close(self) -> None:
+        """Closes the underlying connection (the factory opens one per use)."""
+        self._conn.close()
+
+    def list_campaigns(self, limit: int, offset: int) -> list[dict[str, Any]]:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_CAMPAIGN_COLS} FROM evo_campaigns "
+                "ORDER BY created_at DESC LIMIT %s OFFSET %s",
+                (limit, offset),
+            )
+            rows = cur.fetchall()
+        return [_campaign_row(r) for r in rows]
+
+    def get_campaign(self, campaign_id: str) -> dict[str, Any] | None:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_CAMPAIGN_COLS} FROM evo_campaigns WHERE id=%s", (campaign_id,)
+            )
+            row = cur.fetchone()
+        return _campaign_row(row) if row is not None else None
+
+    def list_generations(self, campaign_id: str) -> list[dict[str, Any]]:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_GENERATION_COLS} FROM evo_generations "
+                "WHERE campaign_id=%s ORDER BY n",
+                (campaign_id,),
+            )
+            rows = cur.fetchall()
+        return [_generation_row(r) for r in rows]
+
+    def list_candidates_for_campaign(self, campaign_id: str) -> list[dict[str, Any]]:
+        cols = ", ".join(f"c.{c.strip()}" for c in _CANDIDATE_COLS.split(","))
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {cols} FROM evo_candidates c "
+                "JOIN evo_generations g ON g.id = c.generation_id "
+                "WHERE g.campaign_id=%s ORDER BY g.n, c.updated_at",
+                (campaign_id,),
+            )
+            rows = cur.fetchall()
+        return [_candidate_row(r) for r in rows]

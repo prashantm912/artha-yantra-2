@@ -16,6 +16,12 @@ export interface SignalDto {
   strategyId?: string;
   version?: string;
   checksum?: string;
+  /**
+   * The paper BOOK (strategy family: `scalper` / `minervini` / `manas-arora` / `other`). Carried by
+   * the live STOMP frame only (the REST snapshot is already server-filtered by `?book=`), so the live
+   * merge can drop a frame for another book instead of polluting a book-filtered view (audit M17).
+   */
+  book?: string;
   exchange: string;
   tradingsymbol: string;
   interval: string;
@@ -184,6 +190,12 @@ export function useSignalsLive(
         sig = JSON.parse(body) as SignalDto;
       } catch {
         return; // unparseable frame — the REST snapshot heals
+      }
+      // Book dimension: the `/topic/signals` channel is broadcast for ALL books, so a book-filtered
+      // view must drop a frame for another book (audit M17). A signal's book is immutable, so a
+      // mismatch can never correspond to a row already shown here. `book == null` = all books = keep.
+      if (book && sig.book !== book) {
+        return;
       }
       qc.setQueryData<SignalPage>([SIGNALS_KEY, status, from, to, 0, book], (prev) => {
         const items = prev?.items ?? [];

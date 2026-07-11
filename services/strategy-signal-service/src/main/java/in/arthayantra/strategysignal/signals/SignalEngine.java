@@ -975,8 +975,9 @@ public class SignalEngine {
     }
     publisher.publish(
         id, strategy.versionId(), strategy.name(), strategy.slug(), strategy.version(),
-        strategy.checksum(), exchange, tradingsymbol, interval, "ENTRY", side, entryPrice,
-        stopLoss, target, evaluation.breakdown().composite(), canonicalBreakdown, generatedAt);
+        strategy.checksum(), strategy.book(), exchange, tradingsymbol, interval, "ENTRY", side,
+        entryPrice, stopLoss, target, evaluation.breakdown().composite(), canonicalBreakdown,
+        generatedAt);
     log.info(
         "ENTRY signal #{} {} {}:{} at {} (composite {})",
         id, strategy.slug(), exchange, tradingsymbol, entryPrice,
@@ -1226,8 +1227,8 @@ public class SignalEngine {
     emitted.increment();
     publisher.publish(
         id, strategy.versionId(), strategy.name(), strategy.slug(), strategy.version(),
-        strategy.checksum(), exchange, tradingsymbol, interval, type, side, bar.close(),
-        null, null, anchor.compositeScore(), anchor.scoreBreakdown(), generatedAt);
+        strategy.checksum(), strategy.book(), exchange, tradingsymbol, interval, type, side,
+        bar.close(), null, null, anchor.compositeScore(), anchor.scoreBreakdown(), generatedAt);
     // Close the anchor's paper position (a TAKEN entry has one open). The paper module listens
     // synchronously; a paper failure is logged there, never propagated into the eval loop.
     events.publishEvent(new SignalExited(anchor.id(), id, exitReason));

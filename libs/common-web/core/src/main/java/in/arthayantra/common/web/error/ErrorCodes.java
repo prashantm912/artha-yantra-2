@@ -86,6 +86,11 @@ public final class ErrorCodes {
   // ---- local Resilience4j limiter saturation (429) — distinct from Kite's own 429 (B-3) ----
   public static final String RATE_LIMIT_LOCAL = "RATE_LIMIT_LOCAL";
 
+  // ---- backtest job-queue backpressure (429) — the interactive submit backlog is at the
+  // configured cap (B16 / audit A6): a submission-time guard so a runaway caller cannot drown the
+  // shared worker pool that also serves the owner's interactive backtests (RATE_ family). ----
+  public static final String RATE_LIMIT_QUEUE = "RATE_LIMIT_QUEUE";
+
   // ---- INTERNAL_* (500) ----
   public static final String INTERNAL_ERROR = "INTERNAL_ERROR";
 

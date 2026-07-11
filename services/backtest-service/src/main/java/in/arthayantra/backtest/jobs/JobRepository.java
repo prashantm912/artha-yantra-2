@@ -281,6 +281,20 @@ public class JobRepository {
   }
 
   /**
+   * Queued-job backlog for one kind — the interactive submission queue-depth guard (B16 / audit A6).
+   * Counting per-kind keeps a legitimate optimizer trial storm ({@code TRIAL} rows) from tripping the
+   * owner's interactive {@code BACKTEST} admission cap.
+   */
+  public long countQueued(JobKind kind) {
+    Long c =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM jobs WHERE status='queued' AND kind=?",
+            Long.class,
+            kind.name());
+    return c == null ? 0L : c;
+  }
+
+  /**
    * One prior lineage job's tested window, for the S1C stress guard (§D.6): the job id plus its raw
    * {@code request->>'from'} / {@code request->>'to'} strings (a plain date or a full offset
    * date-time — normalized to IST in Java by the caller, the same {@code toDateTime} convention the

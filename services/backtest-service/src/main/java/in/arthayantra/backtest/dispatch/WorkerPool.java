@@ -26,10 +26,17 @@ import org.springframework.stereotype.Component;
 
 /**
  * The bounded pool of {@code max(1, cores-2)} PLATFORM worker threads (D12 — virtual threads are for
- * IO only) that consume {@code jobs.backtest} via the {@code cg-backtest} consumer group. Each
- * record is reconciled against the authoritative table: a conditional claim wins or loses; losing
- * (duplicate / already-terminal) drops the record. XACK happens on a terminal state OR when dropping
- * a duplicate (§D.2). Started by {@link StreamBootstrap} after crash recovery; stopped on shutdown.
+ * IO only) that consume {@code jobs.backtest} (interactive runs) and {@code jobs.backtest.trials}
+ * (optimizer fan-out) via their consumer groups. Each record is reconciled against the authoritative
+ * table: a conditional claim wins or loses; losing (duplicate / already-terminal) drops the record.
+ * XACK happens on a terminal state OR when dropping a duplicate (§D.2). Started by {@link
+ * StreamBootstrap} after crash recovery; stopped on shutdown.
+ *
+ * <p><b>Interactive-reservation (B16 / audit A6):</b> at most {@link #maxTrialWorkers()} workers may
+ * be processing TRIAL jobs at once, so {@code interactive-reserved} slots always stay free to serve
+ * the owner's interactive backtests during an EVO campaign trial storm. A worker reserves its trial
+ * slot BEFORE reading the trials stream; when the trial budget is full it serves only the
+ * interactive stream that iteration.
  */
 @Component
 public class WorkerPool {
@@ -42,8 +49,10 @@ public class WorkerPool {
   private final ProgressPublisher progress;
   private final int configuredWorkers;
   private final boolean enabled;
+  private final int reservedInteractive;
   private final String consumer;
   private final AtomicInteger busy = new AtomicInteger();
+  private final AtomicInteger trials = new AtomicInteger();
 
   private volatile boolean running;
   private ExecutorService pool;
@@ -55,13 +64,15 @@ public class WorkerPool {
       BacktestRunner runner,
       ProgressPublisher progress,
       @Value("${artha.backtest.workers:0}") int configuredWorkers,
-      @Value("${artha.backtest.worker-pool-enabled:true}") boolean enabled) {
+      @Value("${artha.backtest.worker-pool-enabled:true}") boolean enabled,
+      @Value("${artha.backtest.interactive-reserved:1}") int reservedInteractive) {
     this.redis = redis;
     this.repository = repository;
     this.runner = runner;
     this.progress = progress;
     this.configuredWorkers = configuredWorkers;
     this.enabled = enabled;
+    this.reservedInteractive = Math.max(0, reservedInteractive);
     this.consumer = resolveConsumerName();
   }
 
@@ -80,6 +91,41 @@ public class WorkerPool {
   /** Worker threads currently inside a replay (gauge source). */
   public int busyCount() {
     return busy.get();
+  }
+
+  /**
+   * The most workers that may run TRIAL (optimizer fan-out) jobs at once — {@code max(1,
+   * workerCount - interactive-reserved)} (B16 / audit A6). The remaining {@code interactive-reserved}
+   * slots are never occupied by trials, so an owner-submitted interactive backtest always finds a
+   * free worker during a campaign trial storm. {@code interactive-reserved=0} restores the pre-B16
+   * full-pool trial behaviour; a single-worker pool cannot reserve, so trials still get their one
+   * slot.
+   */
+  public int maxTrialWorkers() {
+    return Math.max(1, workerCount() - reservedInteractive);
+  }
+
+  /** Workers currently holding a trial slot (gauge / the interactive-reservation invariant). */
+  public int trialsInFlightCount() {
+    return trials.get();
+  }
+
+  /** Atomically reserves a trial slot iff the trial budget ({@link #maxTrialWorkers()}) has room. */
+  boolean tryReserveTrialSlot() {
+    int cap = maxTrialWorkers();
+    int cur;
+    do {
+      cur = trials.get();
+      if (cur >= cap) {
+        return false;
+      }
+    } while (!trials.compareAndSet(cur, cur + 1));
+    return true;
+  }
+
+  /** Releases a trial slot reserved by {@link #tryReserveTrialSlot()}. */
+  void releaseTrialSlot() {
+    trials.decrementAndGet();
   }
 
   /** Starts the platform-thread pool reading the backtest stream. */
@@ -114,25 +160,45 @@ public class WorkerPool {
         if (!running) {
           break;
         }
-        try {
-          List<MapRecord<String, Object, Object>> records =
-              redis
-                  .opsForStream()
-                  .read(
-                      Consumer.from(source.group(), consumer),
-                      options,
-                      StreamOffset.create(source.stream(), ReadOffset.lastConsumed()));
-          if (records != null) {
-            for (MapRecord<String, Object, Object> record : records) {
-              process(record, source);
-            }
+        // B16 / audit A6: cap concurrent TRIAL processing at maxTrialWorkers() so the
+        // interactive-reserved slots stay free for the owner's backtests. Reserve BEFORE the
+        // (blocking) read — when the trial budget is full this worker short-circuits and serves only
+        // the interactive stream this iteration instead of parking on trials.
+        if (Streams.TRIALS.equals(source.stream())) {
+          if (!tryReserveTrialSlot()) {
+            continue;
           }
-        } catch (Exception e) {
-          if (running) {
-            log.warn("worker read error on {}: {}", source.stream(), e.getMessage());
-            sleepQuiet();
+          try {
+            pump(source, options);
+          } finally {
+            releaseTrialSlot();
           }
+        } else {
+          pump(source, options);
         }
+      }
+    }
+  }
+
+  /** Reads at most one record off {@code source} and processes it, isolating stream read errors. */
+  private void pump(StreamSource source, StreamReadOptions options) {
+    try {
+      List<MapRecord<String, Object, Object>> records =
+          redis
+              .opsForStream()
+              .read(
+                  Consumer.from(source.group(), consumer),
+                  options,
+                  StreamOffset.create(source.stream(), ReadOffset.lastConsumed()));
+      if (records != null) {
+        for (MapRecord<String, Object, Object> record : records) {
+          process(record, source);
+        }
+      }
+    } catch (Exception e) {
+      if (running) {
+        log.warn("worker read error on {}: {}", source.stream(), e.getMessage());
+        sleepQuiet();
       }
     }
   }

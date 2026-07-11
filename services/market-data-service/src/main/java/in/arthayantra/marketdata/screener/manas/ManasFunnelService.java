@@ -43,7 +43,8 @@ public class ManasFunnelService {
       String footprint,
       BigDecimal pctToPivot, // (close - pivot) / pivot, null when no pivot
       BigDecimal breakoutPivot, // §3.2 consolidation-breakout pivot, null when that setup is invalid
-      BigDecimal vcpPivot) {} // §3.3 VCP-contraction pivot, null when that setup is invalid
+      BigDecimal vcpPivot, // §3.3 VCP-contraction pivot, null when that setup is invalid
+      BigDecimal rsRank) {} // §4.1/§4.10 cross-sectional RS-rank (the admission sort key), null pre-rank
 
   /** The three-list for a screen date + the market regime (§4.9) the owner should buy WITH. */
   public record Funnel(
@@ -59,7 +60,7 @@ public class ManasFunnelService {
   // to the §3.3 pivot. Each join is null when that setup is invalid/absent for the symbol.
   private static final String SQL =
       """
-      SELECT r.symbol, r.close_price, r.above_low_pct,
+      SELECT r.symbol, r.close_price, r.above_low_pct, r.rs_rank,
              v.setup_type, v.pivot, v.footprint,
              b.pivot AS breakout_pivot, vc.pivot AS vcp_pivot
       FROM manas_arora_screen_results r
@@ -129,7 +130,8 @@ public class ManasFunnelService {
               return new FunnelRow(
                   rs.getString("symbol"), close, rs.getBigDecimal("above_low_pct"),
                   rs.getString("setup_type"), pivot, rs.getString("footprint"), pct,
-                  rs.getBigDecimal("breakout_pivot"), rs.getBigDecimal("vcp_pivot"));
+                  rs.getBigDecimal("breakout_pivot"), rs.getBigDecimal("vcp_pivot"),
+                  rs.getBigDecimal("rs_rank"));
             },
             java.sql.Date.valueOf(screenDate), funnelRsMin);
 

@@ -9,9 +9,14 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import in.arthayantra.strategysignal.signals.DroppedCandidate;
 import in.arthayantra.strategysignal.signals.SwingBatchAlert;
 import in.arthayantra.strategysignal.signals.SwingBatchRunRepository;
 import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
@@ -71,7 +76,9 @@ class SwingBatchRecorderTest {
     SwingBatchEngine engine = mock(SwingBatchEngine.class);
     ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     SwingDoctrine doctrine = manasDoctrine();
-    when(engine.runDaily(doctrine)).thenReturn(new SwingBatchEngine.SwingRun(3, 12, 2, 1, 0));
+    when(engine.runDaily(doctrine))
+        .thenReturn(
+            new SwingBatchEngine.SwingRun(3, 12, 2, 1, 0, SwingBatchEngine.AdmissionProbe.empty()));
 
     SwingBatchRecorder recorder =
         new SwingBatchRecorder(engine, mock(SwingBatchRunRepository.class), events, Clock.systemUTC());
@@ -82,5 +89,26 @@ class SwingBatchRecorderTest {
         .publishEvent(
             org.mockito.ArgumentMatchers.argThat(
                 (Object e) -> e instanceof SwingBatchAlert s && s.title().contains("FAILED")));
+  }
+
+  @Test
+  void runAndRecordForwardsTheAdmissionProbeToTheMarker() {
+    SwingBatchEngine engine = mock(SwingBatchEngine.class);
+    SwingBatchRunRepository runs = mock(SwingBatchRunRepository.class);
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    SwingDoctrine doctrine = manasDoctrine();
+    // A fixed clock (04:00Z = 09:30 IST) pins the run date the recorder stamps.
+    Clock clock = Clock.fixed(Instant.parse("2026-07-12T04:00:00Z"), ZoneOffset.UTC);
+    List<DroppedCandidate> dropped = List.of(new DroppedCandidate("ZEEL", 9));
+    SwingBatchEngine.AdmissionProbe probe =
+        new SwingBatchEngine.AdmissionProbe(5, 8, 6, 2, true, dropped);
+    when(engine.runDaily(doctrine))
+        .thenReturn(new SwingBatchEngine.SwingRun(3, 12, 6, 1, 0, probe));
+
+    new SwingBatchRecorder(engine, runs, events, clock).runAndRecord(doctrine);
+
+    verify(runs)
+        .record(
+            "manas-arora", LocalDate.of(2026, 7, 12), 3, 12, 6, 1, 0, 5, 8, 6, 2, true, dropped);
   }
 }

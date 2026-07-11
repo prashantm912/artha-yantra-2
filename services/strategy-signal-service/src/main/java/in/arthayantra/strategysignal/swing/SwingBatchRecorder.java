@@ -53,9 +53,11 @@ public class SwingBatchRecorder {
       return result; // disarmed no-op — nothing ran, nothing to record or announce
     }
     try {
+      SwingBatchEngine.AdmissionProbe probe = result.admission();
       runs.record(
           doctrine.batchName(), runDate, result.strategies(), result.candidates(), result.entries(),
-          result.exits(), result.exitSkipped());
+          result.exits(), result.exitSkipped(), probe.openAtStart(), probe.wouldEnter(),
+          probe.admitted(), probe.capExceedance(), probe.capBound(), probe.droppedByCap());
     } catch (RuntimeException e) {
       log.warn("{} swing run-marker record failed: {}", doctrine.batchName(), e.getMessage());
     }
@@ -97,7 +99,7 @@ public class SwingBatchRecorder {
               "The scheduled batch threw: " + e.getMessage()
                   + " — open positions' stops were NOT evaluated. Re-run via POST"
                   + " /api/v1/signals/" + doctrine.batchName() + "-swing/run."));
-      return new SwingBatchEngine.SwingRun(0, 0, 0, 0, 0);
+      return new SwingBatchEngine.SwingRun(0, 0, 0, 0, 0, SwingBatchEngine.AdmissionProbe.empty());
     }
   }
 

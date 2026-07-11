@@ -1758,6 +1758,44 @@
         }
       }
     },
+    "/api/v1/signals/minervini-swing/admission-probe" : {
+      "get" : {
+        "tags" : [ "minervini-swing-controller" ],
+        "operationId" : "admissionProbe",
+        "parameters" : [ {
+          "name" : "limit",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 30
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AdmissionProbes"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/signals/manas-arora-swing/sell-decisions" : {
       "get" : {
         "tags" : [ "manas-arora-swing-controller" ],
@@ -1769,6 +1807,44 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/SwingSellReport"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/signals/manas-arora-swing/admission-probe" : {
+      "get" : {
+        "tags" : [ "manas-arora-swing-controller" ],
+        "operationId" : "admissionProbe_1",
+        "parameters" : [ {
+          "name" : "limit",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 30
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AdmissionProbes"
                 }
               }
             }
@@ -2878,6 +2954,48 @@
           }
         }
       },
+      "AdmissionProbe" : {
+        "type" : "object",
+        "properties" : {
+          "openAtStart" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "wouldEnter" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "admitted" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "capExceedance" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "capBound" : {
+            "type" : "boolean"
+          },
+          "droppedByCap" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/DroppedCandidate"
+            }
+          }
+        }
+      },
+      "DroppedCandidate" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "admissionRank" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
       "SwingRun" : {
         "type" : "object",
         "properties" : {
@@ -2900,6 +3018,9 @@
           "exitSkipped" : {
             "type" : "integer",
             "format" : "int32"
+          },
+          "admission" : {
+            "$ref" : "#/components/schemas/AdmissionProbe"
           }
         }
       },
@@ -3342,6 +3463,66 @@
             "type" : "array",
             "items" : {
               "$ref" : "#/components/schemas/SwingSellDecision"
+            }
+          }
+        }
+      },
+      "AdmissionProbes" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ProbeRow"
+            }
+          }
+        }
+      },
+      "ProbeRow" : {
+        "type" : "object",
+        "properties" : {
+          "batch" : {
+            "type" : "string"
+          },
+          "runDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "ranAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "candidates" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "entries" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "openAtStart" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "wouldEnter" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "admitted" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "capExceedance" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "capBound" : {
+            "type" : "boolean"
+          },
+          "droppedByCap" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/DroppedCandidate"
             }
           }
         }

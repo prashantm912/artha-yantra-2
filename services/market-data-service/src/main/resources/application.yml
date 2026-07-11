@@ -54,6 +54,15 @@ artha:
     # the operator needs a one-line .env disarm without a code change. Name MUST byte-match the
     # docker-compose passthrough key ARTHA_CORPORATE_ACTIONS_ENABLED (#653).
     enabled: ${ARTHA_CORPORATE_ACTIONS_ENABLED:true}
+  market:
+    # A10 (owner decision 2026-07-12): retention horizon (days) for the compressed
+    # options_chain_snapshots hypertable. OptionsSnapshotPruneJob drops whole 1-day chunks older
+    # than this at 03:30 IST via drop_chunks (compression-safe; NEVER a row-wise DELETE). Overrides
+    # the V006/V010 A2 ">= 5y floor, default no-drop". No-op until ~2027-06 (capture began 2026-06-15).
+    # The property key (artha.market.snapshot-retention-days) does NOT relaxed-bind from the desired
+    # env name, so the ${...} placeholder MUST byte-match the compose passthrough
+    # ARTHA_SNAPSHOT_RETENTION_DAYS (#653) for a .env override to reach the container.
+    snapshot-retention-days: ${ARTHA_SNAPSHOT_RETENTION_DAYS:365}
   # OpenAlgo broker-swap spine (plan §3/§4). Per-capability source selector — DEFAULT kite, so
   # Phase 0 changes NO routing (the live OpenAlgo gateways bind only when a capability is flipped to
   # openalgo). The production cutover + OI-coverage canary is Phase 1 (§4).

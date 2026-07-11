@@ -276,6 +276,10 @@ services:
       # on rollup evidence (signal-analysis findings item #5) — never below ~15 (rank over a
       # handful of days is noise). Config-only revive: no rebuild.
       ARTHA_IV_RANK_HISTORY_FLOOR_DAYS: ${ARTHA_IV_RANK_HISTORY_FLOOR_DAYS:-60}
+      # A10 (owner decision 2026-07-12): options_chain_snapshots retention horizon (days). Feeds
+      # OptionsSnapshotPruneJob's 03:30-IST drop_chunks prune. Default 365; no-op until ~2027-06.
+      # Name MUST byte-match application.yml's artha.market.snapshot-retention-days placeholder (#653).
+      ARTHA_SNAPSHOT_RETENTION_DAYS: ${ARTHA_SNAPSHOT_RETENTION_DAYS:-365}
     # kite_* + master key + the OpenAlgo API key mount into THIS service only (B-2: the token
     # and the credentials never reach any other container). The openalgo key is read only when
     # capture routes through OpenAlgo (Phase 1); an empty placeholder is harmless otherwise.

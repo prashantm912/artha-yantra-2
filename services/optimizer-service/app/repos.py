@@ -136,13 +136,18 @@ class JobsRepo:
     def get(self, job_id: str) -> dict[str, Any] | None:
         with self._conn.cursor() as cur:
             cur.execute(
-                "SELECT id, kind, status, progress, request FROM jobs WHERE id=%s", (job_id,)
+                "SELECT id, kind, status, progress, request, started_at, finished_at "
+                "FROM jobs WHERE id=%s",
+                (job_id,),
             )
             row = cur.fetchone()
         if row is None:
             return None
+        # started_at/finished_at added for the evo recorder (§12 E1 item 3): a recorded generation
+        # lifts its started/finished timestamps off the source sweep job. Additive — every existing
+        # caller reads by key and is unaffected.
         return {"id": str(row[0]), "kind": row[1], "status": row[2], "progress": row[3],
-                "request": row[4]}
+                "request": row[4], "startedAt": _ts(row[5]), "finishedAt": _ts(row[6])}
 
 
 class TrialsRepo:
@@ -251,6 +256,12 @@ def _uuid(value: Any) -> str | None:
 def _ts(value: Any) -> str | None:
     """ISO-8601 a timestamptz (or None) — mirrors JobsRepo.list_sweeps' createdAt."""
     return value.isoformat() if value is not None else None
+
+
+def _jsonb(value: Any) -> str | None:
+    """json.dumps a JSONB payload for an INSERT, or None → SQL NULL (never the JSON literal
+    ``'null'``, which a ``None`` passed through json.dumps would produce)."""
+    return json.dumps(value) if value is not None else None
 
 
 def _campaign_row(r: tuple) -> dict[str, Any]:
@@ -368,3 +379,79 @@ class EvoRepo:
             )
             rows = cur.fetchall()
         return [_candidate_row(r) for r in rows]
+
+    # --- E1 recorder writes (§12 item 3) --------------------------------------------------------
+
+    def create_campaign(
+        self,
+        strategy_id: str,
+        family: str,
+        evidence_policy: str,
+        objective_spec: dict[str, Any] | None,
+        search_space: dict[str, Any] | None,
+        budget: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Insert a new campaign and return it in the read-envelope shape. ``status`` (ACTIVE) and
+        ``created_at``/``updated_at`` (now()) come from the DDL defaults — a fresh row needs no
+        explicit updated_at (that rule binds UPDATEs, of which this writer performs none)."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO evo_campaigns "
+                "(strategy_id, family, evidence_policy, objective_spec, search_space, budget) "
+                "VALUES (%s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb) "
+                f"RETURNING {_CAMPAIGN_COLS}",
+                (strategy_id, family, evidence_policy,
+                 _jsonb(objective_spec), _jsonb(search_space), _jsonb(budget)),
+            )
+            row = cur.fetchone()
+        self._conn.commit()
+        return _campaign_row(row)
+
+    def record_generation(
+        self,
+        *,
+        campaign_id: str,
+        proposal: dict[str, Any],
+        engine_sha: str | None,
+        data_epoch: dict[str, Any] | None,
+        status: str,
+        started_at: str | None,
+        finished_at: str | None,
+        candidates: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Record a generation + one candidate row per scored trial ATOMICALLY — the generation and
+        all its candidates share one connection/transaction and one commit, so a crash mid-loop
+        rolls back the whole generation (never a half-recorded one).
+
+        ``n`` = MAX(n)+1 for the campaign, read INSIDE the transaction. optimizer-service is the
+        SOLE evo writer, so this read-modify-write on ``n`` has no competing writer; the theoretical
+        race (two concurrent recorders on one campaign) is out of scope — the UNIQUE(campaign_id, n)
+        index (V011) is the hard backstop if that ever breaks (a racing writer 23505s, it cannot
+        silently duplicate a number)."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT COALESCE(MAX(n), 0) + 1 FROM evo_generations WHERE campaign_id=%s",
+                (campaign_id,),
+            )
+            n = cur.fetchone()[0]
+            cur.execute(
+                "INSERT INTO evo_generations "
+                "(campaign_id, n, proposal, engine_sha, data_epoch, status, "
+                "started_at, finished_at) "
+                "VALUES (%s, %s, %s::jsonb, %s, %s::jsonb, %s, %s::timestamptz, %s::timestamptz) "
+                f"RETURNING {_GENERATION_COLS}",
+                (campaign_id, n, json.dumps(proposal), engine_sha, _jsonb(data_epoch),
+                 status, started_at, finished_at),
+            )
+            gen_row = cur.fetchone()
+            generation_id = gen_row[0]
+            for cand in candidates:
+                cur.execute(
+                    "INSERT INTO evo_candidates "
+                    "(generation_id, mutation_kind, params, sweep_job_id, scorecard, state) "
+                    "VALUES (%s, %s, %s::jsonb, %s, %s::jsonb, %s)",
+                    (generation_id, cand["mutationKind"], json.dumps(cand["params"]),
+                     cand["sweepJobId"], json.dumps(cand["scorecard"]), cand["state"]),
+                )
+        self._conn.commit()
+        return _generation_row(gen_row)

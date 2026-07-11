@@ -75,6 +75,14 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         backtest_client=backtest_client,
     )
 
+    # Campaign/generation recorder (§12 E1 item 3): the evo WRITE surface — create a campaign, and
+    # record a manually-triggered sweep as a generation. Reuses the retro scorer for all assembly +
+    # scoring; its own EvoRepo factory for the writes. No autonomy (no scheduler/proposals).
+    app.state.evo_writer = evolution.EvoRecorderService(
+        repo_factory=lambda: EvoRepo(open_conn()),
+        scorer=app.state.retro,
+    )
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "UP"}

@@ -512,6 +512,16 @@ class EvoRecorderService:
         # Score the cohort (reuses the retro assembly + score_cohort); 404 for an unknown sweep.
         scored = self._scorer.score_sweep(sweep_id)
 
+        # A generation freezes its cohort at registration: recording a still-running sweep would
+        # persist a PARTIAL cohort, and the 409 idempotency above would then lock out the full one.
+        if scored.job.get("status") != "completed":
+            raise ApiError(
+                422,
+                "SWEEP_NOT_COMPLETED",
+                f"sweep {sweep_id} is {scored.job.get('status')!r} — only a completed sweep is "
+                "recordable as a generation (a partial cohort must never freeze)",
+            )
+
         # LIVE_FIRST: sim evidence is functional-smoke only, never a ranking plane (§1.2) — stamp
         # every persisted scorecard with the standing descriptive caveat so the record is honest.
         if policy == "LIVE_FIRST":

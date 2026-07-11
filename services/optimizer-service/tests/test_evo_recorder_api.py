@@ -53,6 +53,7 @@ def _seed_sweep(jobs: FakeJobs, trials: FakeTrials, n: int = 2) -> str:
     for i in range(n):
         row_id = trials.insert(sweep_id, i, {"period": 10 + i})
         trials.complete(row_id, {"oos_fold_mean": 1.0}, f"run-{i}")
+    jobs.set_status(sweep_id, "completed", 100)  # only a completed sweep is recordable
     return sweep_id
 
 
@@ -197,10 +198,28 @@ def test_record_generation_empty_sweep_records_zero_candidates():
     campaign_id = _create_campaign(client)
     request = {"parameters": [], "objective": {"metric": "sharpe"}}
     sweep_id = jobs.insert_sweep(None, request)  # zero trials
+    jobs.set_status(sweep_id, "completed", 100)
     resp = client.post(f"/api/v1/evolution/campaigns/{campaign_id}/generations",
                       json={"sweepJobId": sweep_id})
     assert resp.status_code == 201
     assert resp.json()["candidatesRecorded"] == 0
+
+
+def test_record_generation_running_sweep_is_422():
+    # A still-running sweep must NOT freeze a partial cohort as a generation — the 409 idempotency
+    # would then permanently lock out the completed cohort.
+    repo, jobs, trials = FakeEvoRepo(), FakeJobs(), FakeTrials()
+    client = _client(repo, jobs, trials, FakeBacktest(folds=_FOLDS, results=_RESULTS))
+    campaign_id = _create_campaign(client)
+    request = {"parameters": [], "objective": {"metric": "oos_fold_mean", "direction": "maximize"}}
+    sweep_id = jobs.insert_sweep(None, request)  # status stays "queued"
+    row_id = trials.insert(sweep_id, 0, {"period": 10})
+    trials.complete(row_id, {"oos_fold_mean": 1.0}, "run-0")
+    resp = client.post(f"/api/v1/evolution/campaigns/{campaign_id}/generations",
+                      json={"sweepJobId": sweep_id})
+    assert resp.status_code == 422
+    assert resp.json()["code"] == "SWEEP_NOT_COMPLETED"
+    assert repo.generations == {} or all(not g for g in repo.generations.values())
 
 
 # --- the evidence-policy keystone + idempotency + 404s -------------------------------------------

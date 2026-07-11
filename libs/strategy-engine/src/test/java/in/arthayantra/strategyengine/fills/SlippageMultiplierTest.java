@@ -84,4 +84,33 @@ class SlippageMultiplierTest {
     assertThat(SIM.simulate(ticks, new BigDecimal("3")).slippageApplied().toPlainString())
         .isEqualTo("0.30");
   }
+
+  @Test
+  void stressedSellFloorsAtZeroNeverNegative() {
+    // An expiry-day 0.10 premium SELL at 4× the 1-tick option fallback: slippage 0.20 exceeds the
+    // reference. Without the floor the fill would be -0.10 → negative turnover → NEGATIVE statutory
+    // fees (wrong-signed money that distorts the 4× degradation curves EVO scores).
+    Fill fill = SIM.simulate(optionSell(new BigDecimal("0.10")), new BigDecimal("4"));
+
+    assertThat(fill.fillPrice().toPlainString()).isEqualTo("0.00"); // floored at ZERO
+    assertThat(fill.turnover().toPlainString()).isEqualTo("0.00");
+    // Every fee leg is computed on the zero turnover — none may go negative.
+    assertThat(fill.costs().stt()).isGreaterThanOrEqualTo(BigDecimal.ZERO);
+    assertThat(fill.costs().exchangeTxn()).isGreaterThanOrEqualTo(BigDecimal.ZERO);
+    assertThat(fill.costs().gst()).isGreaterThanOrEqualTo(BigDecimal.ZERO);
+    assertThat(fill.costs().stamp()).isGreaterThanOrEqualTo(BigDecimal.ZERO);
+    assertThat(fill.costs().sebi()).isGreaterThanOrEqualTo(BigDecimal.ZERO);
+    assertThat(fill.costs().brokerage()).isGreaterThanOrEqualTo(BigDecimal.ZERO);
+    assertThat(fill.costs().total()).isGreaterThanOrEqualTo(BigDecimal.ZERO);
+  }
+
+  @Test
+  void unstressedPremiumEqualToOneTickStillFillsAtExactlyZero() {
+    // Golden-safety pin for the ZERO floor: a premium == 1 tick already fills at exactly 0.00 on the
+    // UNSTRESSED path (0.05 − 0.05), so max(ZERO) is a no-op there — a 1-tick clamp would have
+    // CHANGED this existing fill, which is why the floor is zero.
+    Fill fill = SIM.simulate(optionSell(new BigDecimal("0.05")));
+    assertThat(fill.fillPrice().toPlainString()).isEqualTo("0.00");
+    assertThat(fill.turnover().toPlainString()).isEqualTo("0.00");
+  }
 }

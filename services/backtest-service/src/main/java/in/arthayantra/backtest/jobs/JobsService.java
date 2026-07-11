@@ -130,10 +130,14 @@ public class JobsService {
     }
     // EVO §3.2.5 cost-stress: validate the multiplier (422 on out-of-range) and pin it into the
     // request JSONB — this is the run's provenance record of the stress it was executed under, which
-    // BacktestRunner reads back to scale the fill slippage.
+    // BacktestRunner reads back to scale the fill slippage. An explicit 1 IS unstressed, so it is
+    // NOT written — job provenance stays symmetric with the run metrics (which also only carry the
+    // multiplier when actually stressed).
     if (req.stressOverrides() != null) {
       BigDecimal multiplier = validatedSlippageMultiplier(req.stressOverrides());
-      request.putObject("stressOverrides").put("slippageMultiplier", multiplier);
+      if (multiplier.compareTo(BigDecimal.ONE) != 0) {
+        request.putObject("stressOverrides").put("slippageMultiplier", multiplier);
+      }
     }
     request.put("purpose", purpose);
 

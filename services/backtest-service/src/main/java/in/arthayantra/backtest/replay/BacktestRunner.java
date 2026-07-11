@@ -601,10 +601,25 @@ public class BacktestRunner {
    * The EVO §3.2.5 cost-stress slippage multiplier pinned into the request JSONB at submission
    * ({@code stressOverrides.slippageMultiplier}), already range-validated there. Absent (an unstressed
    * run) ⇒ {@code 1}, which the {@code FillSimulator} treats as byte-identical to no stress.
+   * Defense-in-depth on the read-back: a sub-1 value (only reachable by hand-editing the job row —
+   * submission 422s it) would FLIP slippage direction and make every fill IMPROVE, the one failure
+   * class this feature exists to preclude — treat it as {@code 1} and warn. Package-visible for the
+   * read-back guard test.
    */
-  private static BigDecimal stressSlippageMultiplier(JsonNode request) {
+  static BigDecimal stressSlippageMultiplier(JsonNode request) {
     JsonNode node = request.path("stressOverrides").path("slippageMultiplier");
-    return node.isNumber() ? node.decimalValue() : BigDecimal.ONE;
+    if (!node.isNumber()) {
+      return BigDecimal.ONE;
+    }
+    BigDecimal multiplier = node.decimalValue();
+    if (multiplier.compareTo(BigDecimal.ONE) < 0) {
+      log.warn(
+          "stressOverrides.slippageMultiplier {} < 1 on the job request — treating as 1 (unstressed);"
+              + " a sub-1 multiplier would model negative slippage",
+          multiplier.toPlainString());
+      return BigDecimal.ONE;
+    }
+    return multiplier;
   }
 
   private static String engineVersion(ResolvedVersion resolved) {

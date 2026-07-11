@@ -47,9 +47,17 @@ public final class LtpSlippageV1 implements FillSimulator {
     BigDecimal multiplier = slippageMultiplier == null ? BigDecimal.ONE : slippageMultiplier;
     BigDecimal slippage = money(slippageAmount(request).multiply(multiplier, EngineMath.MC));
     BigDecimal reference = request.referencePrice();
+    // A SELL fill floors at ZERO: a stressed multiplier can push slippage past a tiny reference
+    // (an expiry-day 0.10 premium at 4× the 1-tick option fallback = 0.20 slippage), and a NEGATIVE
+    // fill would flip turnover and every turnover-derived statutory fee to wrong-signed money —
+    // distorting the very degradation curves the stress exists to measure. The floor is ZERO, not
+    // 1 tick: zero is already reachable unstressed (premium == 1 tick fills at exactly 0.00), so
+    // this changes NOTHING the golden fill vectors pin.
     BigDecimal fillPrice =
         money(
-            request.side() == Side.BUY ? reference.add(slippage) : reference.subtract(slippage));
+            request.side() == Side.BUY
+                ? reference.add(slippage)
+                : reference.subtract(slippage).max(BigDecimal.ZERO));
     BigDecimal turnover = money(fillPrice.multiply(BigDecimal.valueOf(request.qty()), EngineMath.MC));
 
     CostBreakdown costs = costs(request, turnover);

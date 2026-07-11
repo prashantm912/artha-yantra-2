@@ -153,3 +153,26 @@ def test_retro_score_flags_a_capped_cohort(monkeypatch):
     ).json()
     assert len(body["items"]) == 2
     assert any("capped" in c for c in body["caveats"])
+
+
+def test_retro_score_deflated_sharpe_uses_full_trial_count():
+    # The §4 multiplicity N is the sweep's FULL trial count (every state), NOT just the scored
+    # COMPLETE cohort: 2 completed + 3 failed trials ⇒ N = 5, even though only 2 are ranked. The
+    # gate note echoes the N the retro caller threaded through, proving the wiring.
+    jobs, trials = FakeJobs(), FakeTrials()
+    request = {"parameters": [], "objective": {"metric": "oos_fold_mean", "direction": "maximize"}}
+    sweep_id = jobs.insert_sweep(None, request)
+    for i in range(2):
+        trials.complete(trials.insert(sweep_id, i, {"period": 10 + i}), {"oos_fold_mean": 1.0},
+                        f"run-{i}")
+    for i in range(2, 5):
+        trials.fail(trials.insert(sweep_id, i, {"period": 10 + i}))
+    # Give the OOS folds a Sharpe so the gate is assessable (the base _FOLDS carry none → SKIPPED).
+    folds = [dict(f, oosMetrics=dict(f["oosMetrics"], sharpe="2.0")) for f in _FOLDS]
+    body = _client(jobs, trials, FakeBacktest(folds=folds, results=_RESULTS)).get(
+        f"/api/v1/evolution/retro-score/{sweep_id}"
+    ).json()
+    assert len(body["items"]) == 2  # only the COMPLETE trials are scored
+    gate = next(g for g in body["items"][0]["gates"] if g["id"] == "deflated_sharpe")
+    assert gate["status"] == "PASS"        # Sharpe 2.0 over 115 trades clears the N=5 bar
+    assert "N=5 trials" in gate["note"]    # full count (2 complete + 3 failed), not the 2 scored

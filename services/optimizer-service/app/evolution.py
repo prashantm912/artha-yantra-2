@@ -176,7 +176,8 @@ class ComponentScore(BaseModel):
 
 
 class Penalties(BaseModel):
-    """§6.2 subtractive penalties. ``dof`` is 0.0 in E1 (deferred to E2, design §12 item 6)."""
+    """§6.2 subtractive penalties: ``dof`` = 0.03 per tuned param over 4 + 0.06 per structure gate
+    (E2, design §12 item 6); ``caveats`` = 0.05 per unresolved data caveat / sub-80% oiCoverage."""
 
     dof: float
     caveats: float
@@ -299,11 +300,18 @@ class RetroScoreService:
             objective = request.get("objective", {})
             metric, direction = _primary_objective(objective)
             rows = trials.list_for_sweep(sweep_id, _PROMOTABLE, _COHORT_CAP, 0)
+            # Multiplicity N for the §4 deflated-Sharpe gate = the sweep's FULL trial count (every
+            # state — failed/pruned trials are still "looks" the search took at the data), NOT just
+            # the COMPLETE cohort scored below. A dedicated count keeps the complete-cohort read
+            # (and its truncation caveat) byte-identical; capped at _COHORT_CAP like the cohort.
+            n_trials = len(trials.list_for_sweep(sweep_id, None, _COHORT_CAP, 0))
         finally:
             jobs.close()
             trials.close()
         candidates = [self._assemble(row, metric) for row in rows]
-        cards = scoring.score_cohort(candidates, parameters, direction=direction)
+        cards = scoring.score_cohort(
+            candidates, parameters, direction=direction, n_trials=n_trials
+        )
         return ScoredSweep(
             job=job,
             objective=objective,
@@ -403,7 +411,11 @@ class RetroScoreService:
             "dataHash": results.get("dataHash"),
             "caveats": caveats,
             "oiGateCoverage": metrics.get("oiGateCoverage"),
-            "activeParamCount": len(params),
+            # activeDOF for the DOF penalty + explainability comes from the sweep's tuned-param
+            # count (len(parameters), the authoritative search dimensionality) — unified in
+            # scoring.score_cohort, so a per-trial realized-param count is intentionally NOT carried
+            # here (it would be a second, driftable source of the same quantity). structureGates
+            # stay 0 until structure mutations exist (E5).
             "structureGateCount": 0,
             "holdoutRunId": None,
             "foldless": foldless,

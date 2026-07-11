@@ -166,4 +166,329 @@
   "cooldownMinutes" : 15,
   "expiresAt" : null,
   "suppressed" : false
+}, {
+  "type" : "RISK_STALE_TICK",
+  "severity" : "WARN",
+  "scope" : "book:scalper",
+  "title" : "SL/TP evaluation degraded on NFO:NIFTY25JUL25200CE — feed stalled",
+  "explanation" : "The scalper book holds a bracketed BUY position on NFO:NIFTY25JUL25200CE but the live feed is stalled (ticks flowing but no 1m bar closed for 240s), so its SL/TP cannot be evaluated on fresh bars.",
+  "evidence" : [ {
+    "label" : "feed health",
+    "value" : "ticks flowing but no 1m bar closed for 240s",
+    "source" : {
+      "endpoint" : "/api/v1/market/health/data",
+      "asOf" : "2026-07-12T09:47:12+05:30"
+    }
+  }, {
+    "label" : "bracket",
+    "value" : "SL/TP on BUY NIFTY25JUL25200CE"
+  } ],
+  "priority" : null,
+  "priorityDetail" : null,
+  "dataTrust" : "BLOCKED",
+  "trustReasons" : [ "live-capture stalled on NFO:NIFTY25JUL25200CE" ],
+  "dedupeKey" : "RISK_STALE_TICK:NFO:NIFTY25JUL25200CE:2026-07-12",
+  "cooldownMinutes" : 15,
+  "expiresAt" : null,
+  "suppressed" : false
+}, {
+  "type" : "CONTEXT_SHIFT",
+  "severity" : "NOTICE",
+  "scope" : "underlying:NSE:NIFTY",
+  "title" : "NIFTY PCR rose 0.2 since open",
+  "explanation" : "PCR rose 0.2 since session-open (now 1.14), past the 0.15 threshold.",
+  "evidence" : [ {
+    "label" : "PCR Δ vs open",
+    "value" : "0.2",
+    "source" : {
+      "endpoint" : "/api/v1/market/context/options-digest",
+      "params" : {
+        "expiry" : "2026-07-15",
+        "name" : "NIFTY"
+      },
+      "asOf" : "2026-07-12T14:47:12+05:30"
+    }
+  }, {
+    "label" : "PCR now",
+    "value" : "1.14"
+  } ],
+  "priority" : null,
+  "priorityDetail" : null,
+  "dataTrust" : "OK",
+  "trustReasons" : [ ],
+  "dedupeKey" : "CONTEXT_SHIFT:underlying:NSE:NIFTY:PCR",
+  "cooldownMinutes" : 45,
+  "expiresAt" : null,
+  "suppressed" : false
+}, {
+  "type" : "CONTEXT_SHIFT",
+  "severity" : "NOTICE",
+  "scope" : "underlying:NSE:NIFTY",
+  "title" : "NIFTY max-pain drifted 75 since open",
+  "explanation" : "Max-pain drifted 75 index points since session-open, past the 50-point threshold.",
+  "evidence" : [ {
+    "label" : "max-pain drift",
+    "value" : "75",
+    "source" : {
+      "endpoint" : "/api/v1/market/context/options-digest",
+      "params" : {
+        "expiry" : "2026-07-15",
+        "name" : "NIFTY"
+      },
+      "asOf" : "2026-07-12T14:47:12+05:30"
+    }
+  } ],
+  "priority" : null,
+  "priorityDetail" : null,
+  "dataTrust" : "OK",
+  "trustReasons" : [ ],
+  "dedupeKey" : "CONTEXT_SHIFT:underlying:NSE:NIFTY:MAXPAIN",
+  "cooldownMinutes" : 45,
+  "expiresAt" : null,
+  "suppressed" : false
+}, {
+  "type" : "CONTEXT_SHIFT",
+  "severity" : "NOTICE",
+  "scope" : "underlying:NSE:NIFTY",
+  "title" : "NIFTY ATM straddle expanded 25%",
+  "explanation" : "The ATM straddle expanded 25% vs session-open, past the 20% threshold.",
+  "evidence" : [ {
+    "label" : "straddle Δ% vs open",
+    "value" : "25",
+    "source" : {
+      "endpoint" : "/api/v1/market/context/options-digest",
+      "params" : {
+        "expiry" : "2026-07-15",
+        "name" : "NIFTY"
+      },
+      "asOf" : "2026-07-12T14:47:12+05:30"
+    }
+  } ],
+  "priority" : null,
+  "priorityDetail" : null,
+  "dataTrust" : "OK",
+  "trustReasons" : [ ],
+  "dedupeKey" : "CONTEXT_SHIFT:underlying:NSE:NIFTY:STRADDLE",
+  "cooldownMinutes" : 45,
+  "expiresAt" : null,
+  "suppressed" : false
+}, {
+  "type" : "CONTEXT_SHIFT",
+  "severity" : "NOTICE",
+  "scope" : "underlying:NSE:NIFTY",
+  "title" : "NIFTY active-strike set changed 3 strikes",
+  "explanation" : "3 of the top peak-OI strikes changed vs session-open, past the 2-strike threshold.",
+  "evidence" : [ {
+    "label" : "active-strike changes",
+    "value" : "3",
+    "source" : {
+      "endpoint" : "/api/v1/market/context/options-digest",
+      "params" : {
+        "expiry" : "2026-07-15",
+        "name" : "NIFTY"
+      },
+      "asOf" : "2026-07-12T14:47:12+05:30"
+    }
+  } ],
+  "priority" : null,
+  "priorityDetail" : null,
+  "dataTrust" : "OK",
+  "trustReasons" : [ ],
+  "dedupeKey" : "CONTEXT_SHIFT:underlying:NSE:NIFTY:ACTIVE_STRIKES",
+  "cooldownMinutes" : 45,
+  "expiresAt" : null,
+  "suppressed" : false
+}, {
+  "type" : "CONTEXT_SHIFT",
+  "severity" : "NOTICE",
+  "scope" : "market",
+  "title" : "NIFTY 50 gapped up 0.8% at open",
+  "explanation" : "NIFTY 50 gapped up 0.8% vs prior close, past the 0.5% gap threshold.",
+  "evidence" : [ {
+    "label" : "gap-open %",
+    "value" : "0.8",
+    "source" : {
+      "endpoint" : "/api/v1/market/context/day-context",
+      "asOf" : "2026-07-12T14:47:12+05:30"
+    }
+  } ],
+  "priority" : null,
+  "priorityDetail" : null,
+  "dataTrust" : "OK",
+  "trustReasons" : [ ],
+  "dedupeKey" : "CONTEXT_SHIFT:market:GAP_OPEN",
+  "cooldownMinutes" : 45,
+  "expiresAt" : null,
+  "suppressed" : false
+}, {
+  "type" : "MARKET_STRUCTURE",
+  "severity" : "NOTICE",
+  "scope" : "market",
+  "title" : "Volatility regime: VIX ELEVATED (18.5), NIFTY 50 range WIDE (1.5× 20-session avg)",
+  "explanation" : "Market structure: VIX ELEVATED (18.5), NIFTY 50 range WIDE (1.5× 20-session avg).",
+  "evidence" : [ {
+    "label" : "INDIA VIX",
+    "value" : "ELEVATED 18.5",
+    "source" : {
+      "endpoint" : "/api/v1/market/context/day-context",
+      "asOf" : "2026-07-12T14:47:12+05:30"
+    }
+  }, {
+    "label" : "day range vs avg",
+    "value" : "1.5×",
+    "source" : {
+      "endpoint" : "/api/v1/market/context/day-context",
+      "asOf" : "2026-07-12T14:47:12+05:30"
+    }
+  } ],
+  "priority" : null,
+  "priorityDetail" : null,
+  "dataTrust" : "OK",
+  "trustReasons" : [ ],
+  "dedupeKey" : "MARKET_STRUCTURE:market:REGIME",
+  "cooldownMinutes" : 60,
+  "expiresAt" : null,
+  "suppressed" : false
+}, {
+  "type" : "REJECTION_NEARMISS",
+  "severity" : "NOTICE",
+  "scope" : "market",
+  "title" : "2 rejections within 5% of firing (closest NIFTY25JUL25200CE on volume_floor)",
+  "explanation" : "2 rejections came within 5% of firing today; the closest was NIFTY25JUL25200CE blocked by volume_floor (4% short). These are the cheapest gate-tuning candidates.",
+  "evidence" : [ {
+    "label" : "NIFTY25JUL25200CE (volume_floor)",
+    "value" : "within 4% of firing — operand 120000 vs threshold 125000",
+    "source" : {
+      "endpoint" : "/api/v1/signal-rejections",
+      "params" : {
+        "tradingsymbol" : "NIFTY25JUL25200CE"
+      },
+      "asOf" : "2026-07-12T09:47:12+05:30"
+    }
+  }, {
+    "label" : "NIFTY25JUL25100PE (adx_floor)",
+    "value" : "within 5% of firing — operand 19 vs threshold 20",
+    "source" : {
+      "endpoint" : "/api/v1/signal-rejections",
+      "params" : {
+        "tradingsymbol" : "NIFTY25JUL25100PE"
+      },
+      "asOf" : "2026-07-12T09:47:12+05:30"
+    }
+  } ],
+  "priority" : null,
+  "priorityDetail" : null,
+  "dataTrust" : "OK",
+  "trustReasons" : [ ],
+  "dedupeKey" : "REJECTION_NEARMISS:2026-07-12",
+  "cooldownMinutes" : 45,
+  "expiresAt" : null,
+  "suppressed" : false
+}, {
+  "type" : "REJECTION_RAIL_TREND",
+  "severity" : "NOTICE",
+  "scope" : "market",
+  "title" : "volume_floor blocked 40% today vs 15% 5-day avg",
+  "explanation" : "volume_floor accounted for 40% of today's 30 rejections (12 rows) vs a 5-session mean of 15% — a 2.67× spike. Check the rail for gate drift or a data defect.",
+  "evidence" : [ {
+    "label" : "today share",
+    "value" : "40% (12/30)",
+    "source" : {
+      "endpoint" : "/api/v1/signal-rejections/rail-counts",
+      "asOf" : "2026-07-12T09:47:12+05:30"
+    }
+  }, {
+    "label" : "5-day mean share",
+    "value" : "15%"
+  }, {
+    "label" : "spike ratio",
+    "value" : "2.67×"
+  } ],
+  "priority" : null,
+  "priorityDetail" : null,
+  "dataTrust" : "OK",
+  "trustReasons" : [ ],
+  "dedupeKey" : "REJECTION_RAIL_TREND:volume_floor:2026-07-12",
+  "cooldownMinutes" : null,
+  "expiresAt" : null,
+  "suppressed" : false
+}, {
+  "type" : "HYGIENE",
+  "severity" : "INFO",
+  "scope" : "dataops",
+  "title" : "Journal hygiene: 4 unrated journal entries, 2 closed positions with no journal in the last 7 days",
+  "explanation" : "Over the last 7 days: 4 unrated journal entries, 2 closed positions with no journal. Rate them to keep the discipline signal usable.",
+  "evidence" : [ {
+    "label" : "unrated entries",
+    "value" : "4",
+    "source" : {
+      "endpoint" : "/api/v1/journal",
+      "params" : {
+        "minRating" : 1
+      },
+      "asOf" : "2026-07-12T09:47:12+05:30"
+    }
+  }, {
+    "label" : "closed w/o journal",
+    "value" : "2"
+  } ],
+  "priority" : null,
+  "priorityDetail" : null,
+  "dataTrust" : "OK",
+  "trustReasons" : [ ],
+  "dedupeKey" : "HYGIENE:2026-07-12",
+  "cooldownMinutes" : null,
+  "expiresAt" : null,
+  "suppressed" : false
+}, {
+  "type" : "EXPIRY_EVENT",
+  "severity" : "WARN",
+  "scope" : "market",
+  "title" : "1 open paper leg expires soon",
+  "explanation" : "1 open derivative paper position expires within 1 day — roll or close before settlement. Note: Test Holiday on 2026-07-14 (in 2 days) shifts the trading week.",
+  "evidence" : [ {
+    "label" : "NFO:NIFTY25JUL25200CE",
+    "value" : "BUY 75 — expires 2026-07-13 (in 1 day)"
+  }, {
+    "label" : "next holiday",
+    "value" : "Test Holiday 2026-07-14"
+  } ],
+  "priority" : null,
+  "priorityDetail" : null,
+  "dataTrust" : "OK",
+  "trustReasons" : [ ],
+  "dedupeKey" : "EXPIRY_EVENT:2026-07-12",
+  "cooldownMinutes" : null,
+  "expiresAt" : "2026-07-14T00:00:00+05:30",
+  "suppressed" : false
+}, {
+  "type" : "QUALITY_REPORT",
+  "severity" : "WARN",
+  "scope" : "dataops",
+  "title" : "Insight quality report — week of 2026-07-06 (10 A-band, 4 suppressed)",
+  "explanation" : "Over the last 7 days: A-band act rate 50% (target 60%), 4 insight(s) suppressed by caution. Retirement candidates (dismiss-rate > 40%): REJECTION_NEARMISS. The report proposes — it never self-tunes.",
+  "evidence" : [ {
+    "label" : "A-band act rate",
+    "value" : "50% of 10 (target 60%)"
+  }, {
+    "label" : "suppressed insights",
+    "value" : "4"
+  }, {
+    "label" : "suppressed: CONTEXT_SHIFT:underlying:NSE:NIFTY:PCR",
+    "value" : "3×"
+  }, {
+    "label" : "SIGNAL_PRIORITY",
+    "value" : "40 generated, 5👍/1👎, dismiss 16.7%"
+  }, {
+    "label" : "REJECTION_NEARMISS",
+    "value" : "8 generated, 1👍/3👎, dismiss 75% — DISMISS-RATE HIGH (retirement candidate)"
+  } ],
+  "priority" : null,
+  "priorityDetail" : null,
+  "dataTrust" : "OK",
+  "trustReasons" : [ ],
+  "dedupeKey" : "QUALITY_REPORT:2026-07-06",
+  "cooldownMinutes" : null,
+  "expiresAt" : null,
+  "suppressed" : false
 } ]

@@ -166,6 +166,40 @@ artha:
       cooldown-minutes: 15              # RISK_HEAT re-fire cooldown (recorded now; delivery-gates in I3/I4)
     retention:
       prune-days: 90                    # suppressed-INFO prune horizon (the prune job itself lands later)
+    # I2 — context breadth + rejection intelligence (INT §6.2/§4.2/§2.2/§10.2). YAML-only knobs (still
+    # shadow mode); every value is hashed into config_hash, so a threshold change is visible in each row.
+    context:
+      underlyings: [NIFTY, SENSEX]      # options-digest underlyings scanned per 15-min context sweep
+      pcr-delta: 0.15                   # |ΔPCR since open| crossing → CONTEXT_SHIFT
+      max-pain-drift: 50                # |max-pain drift| (index points) since open → CONTEXT_SHIFT
+      straddle-pct: 20                  # |ATM straddle Δ%| vs open → CONTEXT_SHIFT
+      active-strike-change: 2           # active (top-N peak-OI) strikes changed vs open → CONTEXT_SHIFT
+      gap-open-pct: 0.5                 # |index gap-open %| vs prior close → CONTEXT_SHIFT
+      shift-cooldown-minutes: 45        # per-(underlying, metric) CONTEXT_SHIFT re-fire cooldown
+      structure-cooldown-minutes: 60    # MARKET_STRUCTURE regime re-fire cooldown
+    rejection:
+      near-miss-window-minutes: 120     # REJECTION_NEARMISS look-back window
+      near-miss-top-n: 5                # top-N closest-to-firing rejections listed
+      near-miss-max-closeness: 0.05     # only rejections within 5% (|margin|/|threshold|) of firing
+      near-miss-cooldown-minutes: 45    # REJECTION_NEARMISS re-fire cooldown
+      rail-trend-sessions: 5            # trailing sessions for the rail-share mean
+      rail-trend-ratio: 2.0             # today-share / mean-share ratio → REJECTION_RAIL_TREND
+      rail-trend-min-count: 5           # min rejections on a rail today (noise floor)
+    hygiene:
+      window-days: 7                    # trailing window for the HYGIENE nudge counts
+      min-unrated: 1                    # >= N unrated journal entries in-window → HYGIENE
+    expiry:
+      days-ahead: 1                     # T-1: positions expiring within N days → EXPIRY_EVENT
+    quality:
+      window-days: 7                    # QUALITY_REPORT trailing window
+      act-rate-target: 0.60             # A-band act-rate target (report escalates to WARN below it)
+      dismiss-rate-threshold: 0.40      # per-type NOT_USEFUL share above which a type is a retirement candidate
+      top-suppressed-keys: 5            # suppression-audit: top-N most-suppressed dedupe keys
+    # I2 sweep crons (IST). Market-hours context sweep + the calendar-driven EOD/T-1/weekly jobs.
+    context-cron: ${ARTHA_INSIGHTS_CONTEXT_CRON:0 */15 9-15 * * MON-FRI}
+    eod-cron: ${ARTHA_INSIGHTS_EOD_CRON:0 5 16 * * MON-FRI}
+    expiry-cron: ${ARTHA_INSIGHTS_EXPIRY_CRON:0 30 15 * * MON-FRI}
+    quality-cron: ${ARTHA_INSIGHTS_QUALITY_CRON:0 0 8 * * SAT}
 
 management:
   endpoints:

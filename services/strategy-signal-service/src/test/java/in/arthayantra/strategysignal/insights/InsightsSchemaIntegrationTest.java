@@ -198,6 +198,32 @@ class InsightsSchemaIntegrationTest extends StrategySignalIntegrationTestBase {
     assertThat(dismissed.status()).isEqualTo("DISMISSED");
   }
 
+  @Test
+  void i2SweepsRunFailSoftAndTheQualityReportWritesAnInsight() {
+    // Every I2 sweep must be fail-soft with market-data unreachable (digests → empty) and a possibly
+    // empty book/rejection set — exercises the context/EOD/expiry engine paths + their readers.
+    engine.runContextSweep();
+    engine.runEodSweep();
+    engine.runExpirySweep();
+    engine.runRiskSweep(); // now also fans out staleFeedKeys + the stale-tick reader
+
+    // The weekly quality report always writes ONE insight (its evidence IS the report, §10.2).
+    engine.runQualityReport();
+    assertThat(repository.list("QUALITY_REPORT", null, "OPEN", "dataops", null, null, false, 10, 0))
+        .isNotEmpty();
+  }
+
+  @Test
+  void firedVsRejectedEndpointReturnsTheTypedStage1Contrast() {
+    // Wiring smoke: an unseeded (version, today) returns the empty typed contrast envelope, never a 5xx.
+    InsightController.FiredVsRejectedResponse resp =
+        controller.firedVsRejected(UUID.randomUUID(), java.time.LocalDate.now());
+    assertThat(resp.fired()).isEmpty();
+    assertThat(resp.rejected()).isEmpty();
+    assertThat(resp.contrast().firedCount()).isZero();
+    assertThat(resp.contrast().rejectedCount()).isZero();
+  }
+
   private Insight insight(String dedupe, String title, BigDecimal priority) {
     var evidence = objectMapper.valueToTree(List.of(Evidence.of("label", "value")));
     return new Insight(

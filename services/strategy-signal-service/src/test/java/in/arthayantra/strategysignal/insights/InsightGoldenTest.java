@@ -58,18 +58,113 @@ class InsightGoldenTest {
     assertThat(first.replace("\r\n", "\n")).isEqualTo(committed.replace("\r\n", "\n"));
   }
 
-  /** Runs the three I1 generators over their fixture contexts and concatenates the candidates. */
+  /** Runs every generator over its fixture context and concatenates the candidates in a fixed order. */
   private List<InsightCandidate> generate() {
-    InsightProperties props = new InsightProperties(null, null, null); // all defaults
+    InsightProperties props =
+        new InsightProperties(null, null, null, null, null, null, null, null); // all defaults
     SignalPriorityGenerator priority = new SignalPriorityGenerator(props);
     DataTrustGenerator trust = new DataTrustGenerator();
     RiskHeatGenerator risk = new RiskHeatGenerator(props);
+    StaleTickGenerator staleTick = new StaleTickGenerator();
+    ContextShiftGenerator contextShift = new ContextShiftGenerator(props);
+    MarketStructureGenerator structure = new MarketStructureGenerator(props);
+    RejectionNearMissGenerator nearMiss = new RejectionNearMissGenerator(props);
+    RailTrendGenerator railTrend = new RailTrendGenerator(props);
+    HygieneGenerator hygiene = new HygieneGenerator(props);
+    ExpiryEventGenerator expiry = new ExpiryEventGenerator();
+    QualityReportGenerator quality = new QualityReportGenerator(props);
 
     List<InsightCandidate> out = new ArrayList<>();
+    // I1 generators.
     out.addAll(priority.generate(GenerationContext.forSignal(fixtureSignal(), NOW)));
     out.addAll(trust.generate(GenerationContext.forTrust(fixtureTrust(), NOW)));
-    out.addAll(risk.generate(GenerationContext.forRisk(fixtureHeats(), NOW)));
+    GenerationContext riskCtx = GenerationContext.forRisk(fixtureHeats(), fixtureStaleTick(), NOW);
+    out.addAll(risk.generate(riskCtx));
+    out.addAll(staleTick.generate(riskCtx));
+    // I2 — 15-min context sweep (market digests + near-miss).
+    GenerationContext ctxSweep =
+        GenerationContext.forContext(fixtureMarket(), fixtureNearMiss(), NOW);
+    out.addAll(contextShift.generate(ctxSweep));
+    out.addAll(structure.generate(ctxSweep));
+    out.addAll(nearMiss.generate(ctxSweep));
+    // I2 — EOD sweep (rail trend + hygiene).
+    GenerationContext eodCtx = GenerationContext.forEod(fixtureRailTrend(), fixtureHygiene(), NOW);
+    out.addAll(railTrend.generate(eodCtx));
+    out.addAll(hygiene.generate(eodCtx));
+    // I2 — T-1 expiry + weekly quality report.
+    out.addAll(expiry.generate(GenerationContext.forExpiry(fixtureExpiry(), NOW)));
+    out.addAll(quality.generate(GenerationContext.forQuality(fixtureQuality(), NOW)));
     return out;
+  }
+
+  /** A market context: one options shift crossing all four thresholds + an ELEVATED/WIDE regime. */
+  private MarketContext fixtureMarket() {
+    MarketContext.OptionsShift os =
+        new MarketContext.OptionsShift(
+            "NSE", "NIFTY", "2026-07-15",
+            new BigDecimal("1.14"), new BigDecimal("0.20"), new BigDecimal("75"),
+            new BigDecimal("25"), 3, "SHORT_COVERING", "OK", List.of(),
+            "2026-07-12T14:47:12+05:30");
+    MarketContext.MarketStructureView s =
+        new MarketContext.MarketStructureView(
+            "NIFTY 50", new BigDecimal("18.5"), "ELEVATED", new BigDecimal("0.8"), "WIDE",
+            new BigDecimal("1.5"), "UP", "OK", "2026-07-12T14:47:12+05:30");
+    return new MarketContext(List.of(os), s);
+  }
+
+  /** A near-miss scan: two rejections within 5% of firing (closeness precomputed by the reader). */
+  private RejectionScan fixtureNearMiss() {
+    return new RejectionScan(
+        List.of(
+            new RejectionScan.NearMiss(1001L, "siva-vwap-breakout", "NIFTY25JUL25200CE", "CE",
+                "volume_floor", new BigDecimal("120000"), new BigDecimal("125000"),
+                new BigDecimal("-5000"), new BigDecimal("0.0400")),
+            new RejectionScan.NearMiss(1002L, "siva-vwap-breakout", "NIFTY25JUL25100PE", "PE",
+                "adx_floor", new BigDecimal("19"), new BigDecimal("20"), new BigDecimal("-1"),
+                new BigDecimal("0.0500"))),
+        List.of());
+  }
+
+  /** A rail-trend scan: one rail spiked to a 2.67× share vs its 5-day mean. */
+  private RejectionScan fixtureRailTrend() {
+    return new RejectionScan(
+        List.of(),
+        List.of(
+            new RejectionScan.RailShare("volume_floor", 12, 30, new BigDecimal("0.40"),
+                new BigDecimal("0.15"), new BigDecimal("2.67"), 5)));
+  }
+
+  /** A hygiene snapshot: unrated entries + un-journaled closes. */
+  private HygieneInputs fixtureHygiene() {
+    return new HygieneInputs(7, 4, 2);
+  }
+
+  /** An expiry snapshot: one leg expiring tomorrow, a holiday two days out. */
+  private ExpirySnapshot fixtureExpiry() {
+    return new ExpirySnapshot(
+        java.time.LocalDate.parse("2026-07-12"),
+        List.of(
+            new ExpirySnapshot.ExpiringPosition(2001L, "scalper", "NFO", "NIFTY25JUL25200CE", "BUY",
+                75, java.time.LocalDate.parse("2026-07-13"), 1)),
+        java.time.LocalDate.parse("2026-07-14"), "Test Holiday");
+  }
+
+  /** A stale-tick snapshot: one bracketed position over a stalled instrument. */
+  private StaleTickSnapshot fixtureStaleTick() {
+    return new StaleTickSnapshot(
+        List.of(
+            new StaleTickSnapshot.StaleBracket(3001L, "scalper", "NFO", "NIFTY25JUL25200CE", "BUY",
+                true, true, "NFO:NIFTY25JUL25200CE", "ticks flowing but no 1m bar closed for 240s")));
+  }
+
+  /** A quality-stats fixture: below-target act rate + a high-dismiss retirement candidate. */
+  private QualityStats fixtureQuality() {
+    return new QualityStats(
+        7, new BigDecimal("0.5000"), 10, 4,
+        List.of(new QualityStats.KeyCount("CONTEXT_SHIFT:underlying:NSE:NIFTY:PCR", 3)),
+        List.of(
+            new QualityStats.TypeStat("SIGNAL_PRIORITY", 40, 5, 1, new BigDecimal("0.1667")),
+            new QualityStats.TypeStat("REJECTION_NEARMISS", 8, 1, 3, new BigDecimal("0.7500"))));
   }
 
   /** A full-input scalper signal (all five components live, trust OK). */

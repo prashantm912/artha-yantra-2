@@ -190,6 +190,75 @@ public class InsightRepository {
         actor == null ? "owner" : actor);
   }
 
+  /**
+   * Aggregates the trailing-window insight-quality statistics for the QUALITY_REPORT job (§10.2) —
+   * A-band act rate, suppression audit, and per-type feedback tallies, all from the {@code insights}
+   * + {@code insight_feedback} tables (no outcome join; the priority-calibration outcome-delta is a
+   * small-N §6.5-caveated metric deferred to a later wave).
+   */
+  public QualityStats qualityStats(InsightProperties props) {
+    InsightProperties.Quality cfg = props.quality();
+    int aBand = props.priority().bands().a();
+    java.time.OffsetDateTime from = OffsetDateTime.now().minusDays(cfg.windowDays());
+
+    Long aBandGenerated =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM insights WHERE type = 'SIGNAL_PRIORITY' AND generated_at >= ?"
+                + " AND priority >= ?",
+            Long.class, from, aBand);
+    Long aBandActed =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM insights WHERE type = 'SIGNAL_PRIORITY' AND generated_at >= ?"
+                + " AND priority >= ? AND status IN ('ACKED','ACTED','DISMISSED')",
+            Long.class, from, aBand);
+    long generated = aBandGenerated == null ? 0 : aBandGenerated;
+    java.math.BigDecimal actRate =
+        generated == 0
+            ? java.math.BigDecimal.ZERO
+            : java.math.BigDecimal.valueOf(aBandActed == null ? 0 : aBandActed)
+                .divide(java.math.BigDecimal.valueOf(generated), 4, java.math.RoundingMode.HALF_UP);
+
+    Long suppressed =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM insights WHERE suppressed = TRUE AND generated_at >= ?",
+            Long.class, from);
+
+    List<QualityStats.KeyCount> topKeys =
+        jdbc.query(
+            "SELECT dedupe_key, count(*) AS n FROM insights WHERE suppressed = TRUE AND generated_at >= ?"
+                + " GROUP BY dedupe_key ORDER BY n DESC LIMIT ?",
+            (rs, i) -> new QualityStats.KeyCount(rs.getString("dedupe_key"), rs.getLong("n")),
+            from, cfg.topSuppressedKeys());
+
+    List<QualityStats.TypeStat> perType =
+        jdbc.query(
+            """
+            SELECT i.type AS type, count(*) AS generated,
+                   count(*) FILTER (WHERE f.verdict = 'USEFUL') AS useful,
+                   count(*) FILTER (WHERE f.verdict = 'NOT_USEFUL') AS not_useful
+            FROM insights i
+            LEFT JOIN insight_feedback f ON f.insight_id = i.id
+            WHERE i.generated_at >= ?
+            GROUP BY i.type ORDER BY generated DESC
+            """,
+            (rs, i) -> {
+              long useful = rs.getLong("useful");
+              long notUseful = rs.getLong("not_useful");
+              long votes = useful + notUseful;
+              java.math.BigDecimal dismissRate =
+                  votes == 0
+                      ? null
+                      : java.math.BigDecimal.valueOf(notUseful)
+                          .divide(java.math.BigDecimal.valueOf(votes), 4, java.math.RoundingMode.HALF_UP);
+              return new QualityStats.TypeStat(
+                  rs.getString("type"), rs.getLong("generated"), useful, notUseful, dismissRate);
+            },
+            from);
+
+    return new QualityStats(
+        cfg.windowDays(), actRate, generated, suppressed == null ? 0 : suppressed, topKeys, perType);
+  }
+
   /** UPSERTs owner feedback on an insight (§2.4 / §10.2). */
   public void upsertFeedback(UUID insightId, String verdict, String note) {
     jdbc.update(

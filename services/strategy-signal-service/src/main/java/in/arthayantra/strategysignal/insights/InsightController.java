@@ -34,16 +34,19 @@ public class InsightController {
   private final InsightRepository repository;
   private final TrustService trustService;
   private final NotificationEventsRepository notifications;
+  private final RejectionReader rejectionReader;
   private final ObjectMapper objectMapper;
 
   public InsightController(
       InsightRepository repository,
       TrustService trustService,
       NotificationEventsRepository notifications,
+      RejectionReader rejectionReader,
       ObjectMapper objectMapper) {
     this.repository = repository;
     this.trustService = trustService;
     this.notifications = notifications;
+    this.rejectionReader = rejectionReader;
     this.objectMapper = objectMapper;
   }
 
@@ -64,6 +67,18 @@ public class InsightController {
 
   /** The notifier delivery-audit read envelope (§13 row 15). */
   public record NotificationEventsResponse(List<NotificationEventRow> items) {}
+
+  /**
+   * The fired-vs-rejected Stage-1 contrast for a (version, IST-day) — composite score + dot-supports
+   * only (§4.2 Stage 1; the full per-rail contrast is Stage 2, gated on §13 row 19's fired-side
+   * rail-operand side-channel).
+   */
+  public record FiredVsRejectedResponse(
+      UUID strategyVersionId,
+      LocalDate day,
+      List<RejectionReader.FiredRow> fired,
+      List<RejectionReader.RejectedRow> rejected,
+      RejectionReader.Contrast contrast) {}
 
   /** Owner feedback body (§2.4). */
   public record FeedbackRequest(String verdict, String note) {}
@@ -130,6 +145,21 @@ public class InsightController {
   @GetMapping("/notification-events")
   public NotificationEventsResponse notificationEvents(@RequestParam(defaultValue = "100") int limit) {
     return new NotificationEventsResponse(notifications.recent(Math.min(Math.max(limit, 1), 500)));
+  }
+
+  /**
+   * The fired-vs-rejected Stage-1 contrast for a strategy version over an IST day (§4.2) — composite
+   * score + dot-supports for the fired signals vs the rejected rows, so "what almost fired" is
+   * legible next to what did. {@code day} defaults to today (IST).
+   */
+  @GetMapping("/fired-vs-rejected")
+  public FiredVsRejectedResponse firedVsRejected(
+      @RequestParam UUID strategyVersionId,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate day) {
+    LocalDate istDay = day != null ? day : LocalDate.now(Ist.ZONE);
+    RejectionReader.FiredVsRejected fvr = rejectionReader.firedVsRejected(strategyVersionId, istDay);
+    return new FiredVsRejectedResponse(
+        strategyVersionId, istDay, fvr.fired(), fvr.rejected(), fvr.contrast());
   }
 
   /** Acknowledge an insight (status → ACKED + an insight_actions row). */

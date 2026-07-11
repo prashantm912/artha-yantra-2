@@ -884,6 +884,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/insights/fired-vs-rejected": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["firedVsRejected"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/shadow-variants/{name}": {
         parameters: {
             query?: never;
@@ -1355,6 +1371,53 @@ export interface components {
             attentionQueue?: components["schemas"]["Insight"][];
             /** Format: int64 */
             suppressed?: number;
+        };
+        Contrast: {
+            /** Format: int32 */
+            firedCount?: number;
+            /** Format: int32 */
+            rejectedCount?: number;
+            meanCompositeFired?: number;
+            meanCompositeRejected?: number;
+            meanSupportRatioFired?: number;
+            meanSupportRatioRejected?: number;
+        };
+        FiredRow: {
+            /** Format: int64 */
+            signalId?: number;
+            tradingsymbol?: string;
+            side?: string;
+            composite?: number;
+            /** Format: int32 */
+            dotSupports?: number;
+            /** Format: int32 */
+            dotTotal?: number;
+            /** Format: date-time */
+            generatedAt?: string;
+        };
+        FiredVsRejectedResponse: {
+            /** Format: uuid */
+            strategyVersionId?: string;
+            /** Format: date */
+            day?: string;
+            fired?: components["schemas"]["FiredRow"][];
+            rejected?: components["schemas"]["RejectedRow"][];
+            contrast?: components["schemas"]["Contrast"];
+        };
+        RejectedRow: {
+            /** Format: int64 */
+            rejectionId?: number;
+            tradingsymbol?: string;
+            side?: string;
+            composite?: number;
+            threshold?: number;
+            blockingRail?: string;
+            /** Format: int32 */
+            dotSupports?: number;
+            /** Format: int32 */
+            dotTotal?: number;
+            /** Format: date-time */
+            generatedAt?: string;
         };
         ErrorResponse: {
             code?: string;
@@ -3463,6 +3526,38 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["FocusResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    firedVsRejected: {
+        parameters: {
+            query: {
+                strategyVersionId: string;
+                day?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["FiredVsRejectedResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

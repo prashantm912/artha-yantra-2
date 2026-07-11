@@ -1,6 +1,7 @@
 package in.arthayantra.strategysignal.signals;
 
 import java.util.Collection;
+import java.util.List;
 
 /**
  * The paper BOOK a strategy family belongs to ('scalper' · 'minervini' · 'manas-arora' · 'manual' ·
@@ -17,6 +18,16 @@ public final class Books {
   public static final String OTHER = "other";
 
   private Books() {}
+
+  /**
+   * Every paper book the system routes to — the governor-seeding + reset domain. A book here MUST
+   * carry its governor rows (kill_switch + auto_paper_trade) or it trades ungoverned and cannot be
+   * killed; the paper module asserts this at boot (audit M16). Includes {@link #MANUAL} (the schema
+   * default book, never produced by {@link #fromTags}) so hand-order books are governed too.
+   */
+  public static List<String> all() {
+    return List.of(SCALPER, MINERVINI, MANAS_ARORA, MANUAL, OTHER);
+  }
 
   /** The book for a family tag set — the first recognised family tag, else {@code OTHER}. */
   public static String fromTags(Collection<String> tags) {

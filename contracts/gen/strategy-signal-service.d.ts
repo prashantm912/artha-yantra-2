@@ -2670,7 +2670,9 @@ export interface operations {
     };
     marginHeat: {
         parameters: {
-            query?: never;
+            query?: {
+                book?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;

@@ -109,11 +109,14 @@ class RiskServiceHeatCapTest {
   }
 
   @Test
-  void unpricedNeverBlocks() {
+  void unpricedNeverBlocksButIsAudited() {
+    // Fail-soft holds (blindness never blocks) — but with enforcement ON an unassessable heat is no
+    // longer SILENT: an UNPRICED audit row makes the inert gate visible (M1 review, armed 2026-07-12).
     Harness h = harness(true, "{\"enabled\": true, \"value\": 60.0}");
     when(h.margin().margin(anyList())).thenReturn(PaperMarginClient.Quote.unpriced("analytics off"));
     assertThat(h.risk().entryAllowed(BOOK)).isTrue();
-    verify(h.settings(), never()).audit(any(), any(), any(), any());
+    verify(h.settings()).audit(eq(BOOK), eq(RiskService.HEAT_CAP_PCT), eq("UNPRICED"), any());
+    verify(h.settings(), never()).audit(any(), any(), eq("TRIP"), any());
   }
 
   @Test

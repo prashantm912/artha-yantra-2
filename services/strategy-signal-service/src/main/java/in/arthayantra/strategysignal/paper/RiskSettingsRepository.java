@@ -54,6 +54,22 @@ public class RiskSettingsRepository {
         valueJson);
   }
 
+  /**
+   * Inserts a limit row ONLY when absent — never clobbers a concurrent owner write. The boot
+   * seeder's atomic insert-if-missing primitive (a check-then-{@link #upsert} would DO UPDATE on
+   * conflict and silently revert an owner value written in the race window).
+   */
+  public void insertIfMissing(String book, String key, String valueJson) {
+    jdbc.update(
+        """
+        INSERT INTO risk_settings (book, key, value, updated_at) VALUES (?, ?, ?::jsonb, now())
+        ON CONFLICT (book, key) DO NOTHING
+        """,
+        book,
+        key,
+        valueJson);
+  }
+
   /** Appends a risk trip / flip audit row for a book. */
   public void audit(String book, String key, String action, String detail) {
     jdbc.update(

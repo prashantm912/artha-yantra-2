@@ -7,12 +7,18 @@ validated config tree — no reflection, no expression evaluation, no wildcards 
 so a path can never reach an arbitrary object graph.
 
     path           := indicator-path | exit-path | scoring-path | risk-path
+                    | gate-path | risk-cap-path
     indicator-path := "indicators[" selector "].params." ident
     exit-path      := "exit_rules[" selector "].params." ident
     scoring-path   := "entry_rules.scoring." ident
     risk-path      := "risk.position_sizing." ident
+    gate-path      := "entry_rules.gate." ident    # ident = LHS operand of a literal-RHS comparison
+    risk-cap-path  := "risk." ("max_positions" | "max_positions_per_underlying")
     selector       := "alias=" ident | "type=" ident | int
     ident          := [a-z][a-z0-9_]*        int := [0-9]+
+
+The gate-path and risk-cap-path productions widen the tunable surface to gate-expression
+constants and the position caps (EVO §13 row 21).
 """
 
 from __future__ import annotations
@@ -27,6 +33,8 @@ _PATTERNS = (
     re.compile(rf"^exit_rules\[{_SELECTOR}\]\.params\.{_IDENT}$"),
     re.compile(rf"^entry_rules\.scoring\.{_IDENT}$"),
     re.compile(rf"^risk\.position_sizing\.{_IDENT}$"),
+    re.compile(rf"^entry_rules\.gate\.{_IDENT}$"),
+    re.compile(r"^risk\.(max_positions|max_positions_per_underlying)$"),
 )
 
 

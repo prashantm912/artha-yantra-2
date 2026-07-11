@@ -14,6 +14,10 @@ from app.path_grammar import InvalidParameterPath, is_valid, validate
         "exit_rules[1].params.atr_mult",
         "entry_rules.scoring.threshold",
         "risk.position_sizing.capital_pct",
+        # EVO row 21: gate-expression constant + the two position caps.
+        "entry_rules.gate.vol",
+        "risk.max_positions",
+        "risk.max_positions_per_underlying",
     ],
 )
 def test_accepts_grammatical_paths(path):
@@ -30,6 +34,9 @@ def test_accepts_grammatical_paths(path):
         "indicators[0].params.Period",  # uppercase ident
         "risk.position_sizing",  # no leaf
         "entry_rules.scoring",  # no leaf
+        "entry_rules.gate",  # no leaf
+        "risk.max_positions.extra",  # trailing segment
+        "risk.max_daily_loss_pct",  # not an enumerated position cap
         "",
     ],
 )

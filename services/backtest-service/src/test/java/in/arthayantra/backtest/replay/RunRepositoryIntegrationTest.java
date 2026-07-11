@@ -45,11 +45,16 @@ class RunRepositoryIntegrationTest extends BacktestIntegrationTestBase {
             null,
             UUID.randomUUID(),
             MAPPER.createObjectNode().put("strategyId", "run-it"),
-            UUID.randomUUID().toString())
+            UUID.randomUUID().toString(),
+            "owner")
         .id();
   }
 
   private static UUID insertRun(EngineIdentity identity) {
+    return insertRun(identity, "owner");
+  }
+
+  private static UUID insertRun(EngineIdentity identity, String createdBy) {
     RunRepository runs = new RunRepository(jdbc, MAPPER, identity);
     ReplayResult result =
         new ReplayResult(
@@ -76,7 +81,8 @@ class RunRepositoryIntegrationTest extends BacktestIntegrationTestBase {
         "strategy-engine/test",
         PremiumSource.NA,
         null,
-        null);
+        null,
+        createdBy);
   }
 
   @Test
@@ -92,6 +98,14 @@ class RunRepositoryIntegrationTest extends BacktestIntegrationTestBase {
         new RunRepository(jdbc, MAPPER, EngineIdentity.of(null, null)).findResult(runId).orElseThrow();
     assertThat(results.get("engineSha")).isEqualTo("cafebabe1234");
     assertThat(results.get("engineImage")).isEqualTo("backtest-service:9.9.9");
+  }
+
+  // Audit T3 / EVO §13 row 4: a run row carries its actor (inherited from the job by the worker).
+  @Test
+  void runRowCarriesTheCreatedByActor() {
+    UUID runId = insertRun(EngineIdentity.of(null, null), "optimizer:sweep-7");
+    assertThat(jdbc.queryForObject("SELECT created_by FROM backtest_runs WHERE id=?", String.class, runId))
+        .isEqualTo("optimizer:sweep-7");
   }
 
   @Test

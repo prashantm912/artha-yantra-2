@@ -56,7 +56,8 @@ class CrashRecoveryIntegrationTest extends BacktestIntegrationTestBase {
             null,
             UUID.randomUUID(),
             objectMapper.createObjectNode().put("strategyId", "orphan"),
-            "corr-crash");
+            "corr-crash",
+            "owner");
     // a worker grabbed it then the container was killed: running, no terminal write, no XACK
     assertThat(repository.claim(job.id(), "dead-worker")).isTrue();
     assertThat(repository.find(job.id()).orElseThrow().status()).isEqualTo(JobStatus.RUNNING);

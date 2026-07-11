@@ -126,6 +126,28 @@ class RegistryLifecycleIntegrationTest extends StrategySignalIntegrationTestBase
   }
 
   @Test
+  @Order(21)
+  void createStampsOwnerAndAnExplicitActorPlumbsThrough() {
+    // Audit T3 / EVO §13 row 4: the single-owner API/service path (no actor) stamps 'owner' on the
+    // version row's created_by (V002:36's default), proving the write site derives the actor from
+    // context rather than guessing globally.
+    String base =
+        BASE_YAML
+            .replace("lifecycle-walk", "actor-plumb-walk")
+            .replace("Lifecycle Walk", "Actor Plumb Walk");
+    UUID id = (UUID) service.create("Actor Plumb Walk", null, List.of("test"), base).get("id");
+    assertThat(repository.findVersion(id, "1.0.0").orElseThrow().createdBy()).isEqualTo("owner");
+
+    // A machine writer (the optimizer promote path / future EVO) passes a prefixed actor explicitly →
+    // it lands on the NEW version's created_by column, not a free-text note.
+    String tuned = base.replace("period: 9", "period: 12");
+    Map<String, Object> promoted =
+        service.update(id, tuned, null, "promoted trial 3", "optimizer:sweep-xyz");
+    assertThat(repository.findVersion(id, (String) promoted.get("version")).orElseThrow().createdBy())
+        .isEqualTo("optimizer:sweep-xyz");
+  }
+
+  @Test
   @Order(1)
   void fullLifecycleWithAuditTrail() {
     // CREATE -> draft 1.0.0

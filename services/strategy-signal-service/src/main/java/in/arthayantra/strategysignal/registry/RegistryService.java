@@ -44,10 +44,27 @@ public class RegistryService {
     this.changedPublisher = changedPublisher;
   }
 
-  /** POST /strategies — create as draft v1.0.0. */
+  /**
+   * POST /strategies — create as draft v1.0.0 (owner-authored: API path, boot seeders).
+   * {@code @Transactional} here (not only on the actor overload) because the delegation is a
+   * self-invocation — Spring's proxy is bypassed, so the tx must start at THIS entry point.
+   */
   @Transactional
   public Map<String, Object> create(
       String name, String description, List<String> tags, String configYaml) {
+    return create(name, description, tags, configYaml, null);
+  }
+
+  /**
+   * POST /strategies — create as draft v1.0.0, stamping the submitting actor (audit T3 / EVO §13
+   * row 4). {@code createdBy} lands on both the version row's {@code created_by} and the audit row's
+   * {@code actor}; blank/null resolves to {@code 'owner'} (the single-owner API + seeder default).
+   * A machine writer (e.g. {@code 'evo:{campaignId}'}) passes its identity explicitly.
+   */
+  @Transactional
+  public Map<String, Object> create(
+      String name, String description, List<String> tags, String configYaml, String createdBy) {
+    String actor = actorOrOwner(createdBy);
     StrategyDocuments.Parsed parsed = parseOrThrow(configYaml);
     requireValid(parsed);
     String slug = parsed.config().path("id").asText();
@@ -63,8 +80,8 @@ public class RegistryService {
             tags == null ? List.of() : tags);
     repository.insertVersion(
         strategyId, "1.0.0", configYaml, parsed.canonicalJson(),
-        StrategySchemaV1.SCHEMA_VERSION, parsed.checksum(), "draft", null, "owner");
-    repository.audit(strategyId, "CREATE", null, "1.0.0", "created as draft 1.0.0", "owner");
+        StrategySchemaV1.SCHEMA_VERSION, parsed.checksum(), "draft", null, actor);
+    repository.audit(strategyId, "CREATE", null, "1.0.0", "created as draft 1.0.0", actor);
     Map<String, Object> response = new LinkedHashMap<>();
     response.put("id", strategyId);
     response.put("version", "1.0.0");
@@ -73,9 +90,25 @@ public class RegistryService {
     return response;
   }
 
-  /** PUT /strategies/{id} — new draft version with auto bump + checksum dedupe. */
+  /**
+   * PUT /strategies/{id} — new draft version with auto bump + checksum dedupe (owner path).
+   * {@code @Transactional} here too — the delegation is a self-invocation past the proxy.
+   */
   @Transactional
   public Map<String, Object> update(UUID id, String configYaml, String versionBump, String notes) {
+    return update(id, configYaml, versionBump, notes, null);
+  }
+
+  /**
+   * PUT /strategies/{id} — new draft version, stamping the submitting actor (audit T3 / EVO §13
+   * row 4). {@code createdBy} is the machine-readable provenance the optimizer promote path now
+   * writes as {@code 'optimizer:{sweepId}'} (V002:36's stated contract) instead of a free-text note;
+   * blank/null resolves to {@code 'owner'}.
+   */
+  @Transactional
+  public Map<String, Object> update(
+      UUID id, String configYaml, String versionBump, String notes, String createdBy) {
+    String actor = actorOrOwner(createdBy);
     StrategyRepository.StrategyRow strategy = strategyOrThrow(id);
     StrategyDocuments.Parsed parsed = parseOrThrow(configYaml);
     requireValid(parsed);
@@ -95,7 +128,7 @@ public class RegistryService {
     String next = SemVer.parse(latest.version()).bump(SemVer.Bump.of(versionBump)).toString();
     repository.insertVersion(
         id, next, configYaml, parsed.canonicalJson(), StrategySchemaV1.SCHEMA_VERSION,
-        parsed.checksum(), "draft", notes, "owner");
+        parsed.checksum(), "draft", notes, actor);
     repository.touch(id);
     // (b) keep the identity-row tags (which drive the list/filters) in lockstep with the config tags —
     // the config is the source of truth the engine arms from, so an edited YAML re-syncs the row and the
@@ -110,7 +143,7 @@ public class RegistryService {
     }
     List<ConfigDiff.Op> ops = ConfigDiff.diff(latest.config(), parsed.config());
     repository.audit(
-        id, "UPDATE_DRAFT", latest.version(), next, ConfigDiff.summary(ops), "owner");
+        id, "UPDATE_DRAFT", latest.version(), next, ConfigDiff.summary(ops), actor);
     Map<String, Object> response = new LinkedHashMap<>();
     response.put("id", id);
     response.put("version", next);
@@ -462,6 +495,13 @@ public class RegistryService {
 
   private static NotFoundException versionNotFound(String version) {
     return new NotFoundException(ErrorCodes.NOT_FOUND_VERSION, "no such version: " + version);
+  }
+
+  // Audit T3 / EVO §13 row 4: the single-owner API path (and boot seeders) leave the actor blank —
+  // it defaults to 'owner'. Only a machine writer (optimizer promote, future EVO) passes an explicit
+  // prefixed identity ('optimizer:{sweepId}', 'evo:{campaignId}').
+  private static String actorOrOwner(String createdBy) {
+    return createdBy == null || createdBy.isBlank() ? "owner" : createdBy;
   }
 
   private StrategyDocuments.Parsed parseOrThrow(String configYaml) {

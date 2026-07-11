@@ -75,7 +75,8 @@ class TrialDispatchIntegrationTest extends BacktestIntegrationTestBase {
         jobs.insertQueued(
             JobKind.OPTIMIZATION, null, STRATEGY_ID,
             objectMapper.createObjectNode().put("strategyId", STRATEGY_ID.toString()),
-            "corr-sweep");
+            "corr-sweep",
+            "optimizer");
     Job trial =
         jobs.insertQueued(
             JobKind.TRIAL,
@@ -86,7 +87,8 @@ class TrialDispatchIntegrationTest extends BacktestIntegrationTestBase {
                 .put("strategyId", STRATEGY_ID.toString())
                 .put("from", "2026-01-05")
                 .put("to", "2026-01-10"),
-            "corr-trial");
+            "corr-trial",
+            "optimizer:" + sweep.id());
 
     runner.run(trial, pct -> {}, () -> false);
 

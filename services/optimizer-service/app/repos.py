@@ -36,22 +36,41 @@ class JobsRepo:
         """Closes the underlying connection (the factory opens one per use)."""
         self._conn.close()
 
-    def insert_sweep(self, strategy_version_id: str | None, request: dict[str, Any]) -> str:
-        return self._insert("OPTIMIZATION", None, strategy_version_id, request)
+    def insert_sweep(
+        self,
+        strategy_version_id: str | None,
+        request: dict[str, Any],
+        created_by: str = "optimizer",
+    ) -> str:
+        # Audit T3 / EVO §13 row 4: the sweep parent is engine-created — its own id IS the sweep
+        # id, so the bare 'optimizer' actor marks it (trials carry 'optimizer:{sweepId}').
+        return self._insert("OPTIMIZATION", None, strategy_version_id, request, created_by)
 
     def insert_trial(
-        self, sweep_id: str, strategy_version_id: str | None, request: dict[str, Any]
+        self,
+        sweep_id: str,
+        strategy_version_id: str | None,
+        request: dict[str, Any],
+        created_by: str | None = None,
     ) -> str:
-        return self._insert("TRIAL", sweep_id, strategy_version_id, request)
+        # A trial belongs to its sweep — 'optimizer:{sweepId}' ties every child (and its run) back
+        # to the parent OPTIMIZATION job for EVO's prefix-filterable provenance.
+        actor = created_by if created_by is not None else f"optimizer:{sweep_id}"
+        return self._insert("TRIAL", sweep_id, strategy_version_id, request, actor)
 
     def _insert(
-        self, kind: str, parent: str | None, version_id: str | None, request: dict[str, Any]
+        self,
+        kind: str,
+        parent: str | None,
+        version_id: str | None,
+        request: dict[str, Any],
+        created_by: str,
     ) -> str:
         with self._conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO jobs (kind, parent_job_id, strategy_version_id, request) "
-                "VALUES (%s, %s, %s, %s::jsonb) RETURNING id",
-                (kind, parent, version_id, json.dumps(request)),
+                "INSERT INTO jobs (kind, parent_job_id, strategy_version_id, request, created_by) "
+                "VALUES (%s, %s, %s, %s::jsonb, %s) RETURNING id",
+                (kind, parent, version_id, json.dumps(request), created_by),
             )
             row_id = cur.fetchone()[0]
         self._conn.commit()

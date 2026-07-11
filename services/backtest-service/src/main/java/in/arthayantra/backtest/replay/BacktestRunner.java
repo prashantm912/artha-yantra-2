@@ -294,7 +294,10 @@ public class BacktestRunner {
             engineVersion(resolved),
             premiumSource,
             folds,
-            benchmark);
+            benchmark,
+            // Audit T3 / EVO §13 row 4: the run inherits its job's actor — a run exists on behalf of
+            // whoever submitted the job (owner backtest, or optimizer:{sweepId} for a TRIAL).
+            job.createdBy());
     trades.insertAll(runId, result.trades());
 
     // §D.7 ask/tell back-half: a TRIAL emits its metrics onto optimizations.results so the

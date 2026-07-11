@@ -148,7 +148,8 @@ class BenchmarkMonteCarloIntegrationTest extends BacktestIntegrationTestBase {
                 .put("strategyId", STRATEGY_ID.toString())
                 .put("from", "2026-01-05")
                 .put("to", "2026-01-10"),
-            corr);
+            corr,
+            "owner");
     runner.run(job, pct -> {}, () -> false);
     return runs.findRunIdByJobId(job.id()).orElseThrow();
   }
@@ -161,7 +162,8 @@ class BenchmarkMonteCarloIntegrationTest extends BacktestIntegrationTestBase {
             null,
             STRATEGY_ID,
             objectMapper.createObjectNode().put("strategyId", STRATEGY_ID.toString()),
-            "corr-mc-" + UUID.randomUUID());
+            "corr-mc-" + UUID.randomUUID(),
+            "owner");
     UUID runId =
         jdbc.queryForObject(
             """

@@ -1,6 +1,6 @@
 """§D.9 promote + folds route: a COMPLETE trial's params materialize onto the source version as a
-new DRAFT (provenance in the notes; exactly the trial's deltas); invalid/failed → 409; folds
-resolve via the trial's backtest_run_id."""
+new DRAFT (provenance in the `created_by` column — audit T3; exactly the trial's deltas);
+invalid/failed → 409; folds resolve via the trial's backtest_run_id."""
 
 import pytest
 
@@ -50,7 +50,9 @@ def test_promote_creates_draft_with_trial_params():
     assert out == {"strategyId": "s1", "newVersion": "1.1.0", "status": "draft"}
     draft = strat.drafts[0]
     assert draft["config"]["indicators"][0]["params"]["period"] == 12  # the trial delta
-    assert "created_by=optimizer:" in draft["notes"] and "great ridge" in draft["notes"]
+    # Audit T3: provenance is the machine-readable `created_by` column, not embedded in the note.
+    assert draft["createdBy"] == f"optimizer:{sweep_id}"
+    assert "great ridge" in draft["notes"] and "created_by=" not in draft["notes"]
     assert CONFIG["indicators"][0]["params"]["period"] == 10  # source untouched
 
 

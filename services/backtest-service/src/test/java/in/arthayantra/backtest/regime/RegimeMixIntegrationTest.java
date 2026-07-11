@@ -122,7 +122,8 @@ class RegimeMixIntegrationTest extends BacktestIntegrationTestBase {
                 .put("from", "2026-01-05")
                 .put("to", "2026-01-10")
                 .put("foldContext", true),
-            "corr-nobench");
+            "corr-nobench",
+            "owner");
 
     ApiException ex =
         org.junit.jupiter.api.Assertions.assertThrows(
@@ -151,7 +152,8 @@ class RegimeMixIntegrationTest extends BacktestIntegrationTestBase {
                 .put("from", from)
                 .put("to", to)
                 .put("foldContext", true),
-            "corr-regime");
+            "corr-regime",
+            "owner");
     runner.run(job, pct -> {}, () -> false);
     return runs.findRunIdByJobId(job.id()).orElseThrow();
   }

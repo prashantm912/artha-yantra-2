@@ -62,7 +62,8 @@ public class RunRepository {
       String engineVersion,
       PremiumSource premiumSource,
       FoldPersistence folds,
-      BenchmarkAnalytics benchmark) {
+      BenchmarkAnalytics benchmark,
+      String createdBy) {
     ArrayNode foldMetrics = folds == null ? null : folds.foldMetrics();
     BigDecimal oosFoldMean = folds == null ? null : folds.oosFoldMean();
     BigDecimal oosFoldStd = folds == null ? null : folds.oosFoldStd();
@@ -84,10 +85,10 @@ public class RunRepository {
           metrics, equity_curve, drawdown_curve, engine_version, premium_source,
           fold_metrics, oos_fold_mean, oos_fold_std, sharpe_degradation,
           alpha, beta, information_ratio, excess_cagr, benchmark_curve,
-          engine_sha, engine_image)
+          engine_sha, engine_image, created_by)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?, ?,
                 ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?::jsonb,
-                ?, ?)
+                ?, ?, ?)
         RETURNING id
         """,
         (rs, n) -> UUID.fromString(rs.getString("id")),
@@ -126,7 +127,8 @@ public class RunRepository {
         bench ? benchmark.excessCagr() : null,
         benchmarkCurve,
         engineIdentity.sha(),
-        engineIdentity.image());
+        engineIdentity.image(),
+        createdBy);
   }
 
   /**

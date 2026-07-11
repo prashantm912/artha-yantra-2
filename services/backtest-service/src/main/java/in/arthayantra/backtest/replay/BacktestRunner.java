@@ -70,6 +70,7 @@ public class BacktestRunner {
   private final BenchmarkAnalyzer benchmarkAnalyzer;
   private final TrialResultPublisher trialResults;
   private final MarketDataClient marketData;
+  private final in.arthayantra.backtest.replay.counterfactual.CounterfactualService counterfactual;
 
   /** Wires the replay collaborators. */
   public BacktestRunner(
@@ -87,7 +88,8 @@ public class BacktestRunner {
       RegimePreflight regimePreflight,
       BenchmarkAnalyzer benchmarkAnalyzer,
       TrialResultPublisher trialResults,
-      MarketDataClient marketData) {
+      MarketDataClient marketData,
+      in.arthayantra.backtest.replay.counterfactual.CounterfactualService counterfactual) {
     this.versions = versions;
     this.candleReader = candleReader;
     this.replayEngine = replayEngine;
@@ -103,10 +105,18 @@ public class BacktestRunner {
     this.benchmarkAnalyzer = benchmarkAnalyzer;
     this.trialResults = trialResults;
     this.marketData = marketData;
+    this.counterfactual = counterfactual;
   }
 
   /** Runs the job; throws {@link JobCancelledException} on cancel and other exceptions on failure. */
   public void run(Job job, IntConsumer progress, BooleanSupplier cancelled) {
+    // EVO E3 item 9: a COUNTERFACTUAL job carries no strategy replay — route it to the premium
+    // counterfactual service and return before any strategy resolve/compile. Rides the same worker
+    // pool + queue as a BACKTEST; never reaches the TRIAL result-publish branch below.
+    if (job.kind() == JobKind.COUNTERFACTUAL) {
+      counterfactual.run(job, progress, cancelled);
+      return;
+    }
     JsonNode request = job.request();
     String strategyId = request.path("strategyId").asText(null);
     String version = request.path("strategyVersion").asText(null);

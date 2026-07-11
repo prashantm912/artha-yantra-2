@@ -45,6 +45,44 @@
         }
       }
     },
+    "/api/v1/backtests/counterfactual" : {
+      "post" : {
+        "tags" : [ "counterfactual-controller" ],
+        "operationId" : "submit",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CounterfactualRunRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CounterfactualSubmitResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/indicators" : {
       "get" : {
         "tags" : [ "indicators-controller" ],
@@ -832,6 +870,43 @@
           }
         }
       }
+    },
+    "/api/v1/backtests/counterfactual/{runId}" : {
+      "get" : {
+        "tags" : [ "counterfactual-controller" ],
+        "operationId" : "result",
+        "parameters" : [ {
+          "name" : "runId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CounterfactualResult"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components" : {
@@ -881,6 +956,96 @@
         "properties" : {
           "slippageMultiplier" : {
             "type" : "number"
+          }
+        }
+      },
+      "CounterfactualRunRequest" : {
+        "type" : "object",
+        "properties" : {
+          "from" : {
+            "type" : "string"
+          },
+          "to" : {
+            "type" : "string"
+          },
+          "entries" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Entry"
+            }
+          },
+          "variants" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Variant"
+            }
+          }
+        }
+      },
+      "Entry" : {
+        "type" : "object",
+        "properties" : {
+          "signalId" : {
+            "type" : "string"
+          },
+          "exchange" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "entryTime" : {
+            "type" : "string"
+          },
+          "entryPremium" : {
+            "type" : "number"
+          },
+          "qty" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "ExitKnobs" : {
+        "type" : "object",
+        "properties" : {
+          "takeProfitPct" : {
+            "type" : "number"
+          },
+          "stopLossPct" : {
+            "type" : "number"
+          },
+          "trailActivatePct" : {
+            "type" : "number"
+          },
+          "trailByPct" : {
+            "type" : "number"
+          },
+          "timeStopBars" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "Variant" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "exitKnobs" : {
+            "$ref" : "#/components/schemas/ExitKnobs"
+          }
+        }
+      },
+      "CounterfactualSubmitResponse" : {
+        "type" : "object",
+        "properties" : {
+          "jobId" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
           }
         }
       },
@@ -1124,6 +1289,74 @@
           },
           "premiumSourceMatch" : {
             "type" : "boolean"
+          }
+        }
+      },
+      "CounterfactualResult" : {
+        "type" : "object",
+        "properties" : {
+          "runId" : {
+            "type" : "string"
+          },
+          "jobId" : {
+            "type" : "string"
+          },
+          "windowFrom" : {
+            "type" : "string"
+          },
+          "windowTo" : {
+            "type" : "string"
+          },
+          "entryCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "variantCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "variants" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/VariantResult"
+            }
+          },
+          "ranAt" : {
+            "type" : "string"
+          }
+        }
+      },
+      "VariantResult" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "tradeCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "netPnlInr" : {
+            "type" : "number"
+          },
+          "grossPremiumPoints" : {
+            "type" : "number"
+          },
+          "winRate" : {
+            "type" : "number"
+          },
+          "expectancyInr" : {
+            "type" : "number"
+          },
+          "maxDrawdownInr" : {
+            "type" : "number"
+          },
+          "exitReasonCounts" : {
+            "type" : "object",
+            "additionalProperties" : {
+              "type" : "integer",
+              "format" : "int32"
+            }
           }
         }
       },

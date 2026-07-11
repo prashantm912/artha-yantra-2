@@ -173,7 +173,7 @@ class InsightsSchemaIntegrationTest extends StrategySignalIntegrationTestBase {
     SignalEmitted.ScalpDetail scalp =
         new SignalEmitted.ScalpDetail(
             "NIFTY 50", "CE", new BigDecimal("25200"), "NIFTY25JUL25200CE",
-            new BigDecimal("120.5"), new BigDecimal("0.75"), "T2", 62);
+            new BigDecimal("120.5"), new BigDecimal("0.75"), "T2", 62, new BigDecimal("50"));
     publisher.publishEvent(
         new SignalEmitted(
             signalId, UUID.randomUUID(), "NFO", "NIFTY25JULFUT", "BUY",

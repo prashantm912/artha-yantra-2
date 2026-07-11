@@ -26,6 +26,7 @@ import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.strategyengine.config.StrategyCompiler;
 import in.arthayantra.strategyengine.config.StrategyDefinition;
+import in.arthayantra.strategyengine.fills.InstrumentClass;
 import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategyengine.series.SeriesKey;
 import java.math.BigDecimal;
@@ -158,7 +159,17 @@ public class BacktestRunner {
     // Absent ⇒ 1 ⇒ byte-identical to an unstressed run. One CostConfig instance, reused across the
     // candle replay and the fold path so a stressed run degrades consistently.
     BigDecimal slippageMultiplier = stressSlippageMultiplier(request);
-    CostConfig costConfig = CostConfig.defaults().withSlippageMultiplier(slippageMultiplier);
+    // P1-2 / audit B4: pre-P1-2 the candle path pinned CostConfig.defaults() (EQUITY DELIVERY) for
+    // EVERY run, so an index-future signal series was costed with the both-sided 0.10% equity STT
+    // instead of the sell-side 0.02% futures CTT + ₹20-cap brokerage. Derive the statutory class from
+    // the resolved signal series, let the request-level `costs` block override the model (class /
+    // brokerage / slippage), THEN layer the cost-stress multiplier LAST — the stressOverrides zero-
+    // floor + "never widens a fill" doctrine (#727) stays independent. An EQUITY-class run with no
+    // `costs` block is byte-identical to the old CostConfig.defaults() path (goldens/parity hold).
+    CostConfig costConfig =
+        CostConfig.forClass(signalInstrumentClass(signal))
+            .withOverrides(request.path("costs"))
+            .withSlippageMultiplier(slippageMultiplier);
 
     // Auto-warm every series this run reads (primary 1m + each context (instrument, timeframe) +
     // the benchmark daily) into the shared store via market-data's cache-first GET BEFORE the reads
@@ -241,6 +252,12 @@ public class BacktestRunner {
             result.totalBars(),
             result.barsInPosition());
     m.full().put("strategyChecksum", resolved.checksum());
+    // P1-2 / audit B4 provenance: the statutory class this run's NET NUMBERS were actually priced
+    // under. Stamped on EVERY run (like the engine SHA), so a stored run is self-describing about
+    // which cost stack produced its net — a futures run now reads FUTURE, no longer the old blanket
+    // EQUITY. Reflects any `costs.instrumentClass` override. Mirrors the slippageMultiplier /
+    // fillTimingOverride provenance stamps below; runner-stamped, so not a trial-metrics-catalog key.
+    m.full().put("costClass", costClass(optionsStrategy, costConfig));
     if (oiGateCoverage.armed()) {
       m.full().put("oiGateCoverage", oiGateCoverage.label()); // e.g. "42/45" fetched-vs-total
     }
@@ -620,6 +637,49 @@ public class BacktestRunner {
       return new SeriesKey(parts[0], parts[1], "1m");
     }
     throw new IllegalArgumentException("backtest needs an explicit single-instrument universe (v1)");
+  }
+
+  /**
+   * The statutory instrument class the candle path prices the run's signal series under (P1-2 / audit
+   * B4). Only the F&amp;O segments (NFO / BFO) carry derivatives: a {@code CE}/{@code PE} suffix is an
+   * OPTION, any other F&amp;O-segment symbol (dated or continuous futures, e.g. {@code NIFTY26JULFUT}
+   * or {@code NIFTY-FUT-CONT}) is a FUTURE. Everything else — cash equities and index spots on NSE/BSE
+   * — is EQUITY. Options never actually reach the candle path (an {@code options_of_underlying}
+   * strategy routes to {@code OptionsPremiumReplay}, which builds its own OPTION {@code CostConfig});
+   * the OPTION branch is defensive completeness. Segment-gated (not a bare {@code contains("FUT")}) so
+   * a cash-equity symbol can never be mis-classified as a future.
+   *
+   * <p><b>Decided (money-lens review, non-change):</b> a {@code futures_of_underlying} strategy
+   * classifies EQUITY, not FUTURE — its signal series resolves to the underlying SPOT (NSE/BSE index,
+   * {@link #signalInstrument}) and the candle path fills on that spot series, so the run prices what
+   * it actually fills. Costing it FUTURE would require first resolving and replaying the real
+   * futures-contract series (a separate modeling gap). {@code futures_screener}, which pins an actual
+   * NFO {@code *FUT} contract as the series, correctly classifies FUTURE.
+   */
+  static InstrumentClass signalInstrumentClass(SeriesKey signal) {
+    String exchange = signal.exchange().toUpperCase(Locale.ROOT);
+    boolean derivativeSegment = exchange.equals("NFO") || exchange.equals("BFO");
+    if (!derivativeSegment) {
+      return InstrumentClass.EQUITY;
+    }
+    String symbol = signal.tradingsymbol().toUpperCase(Locale.ROOT);
+    if (symbol.endsWith("CE") || symbol.endsWith("PE")) {
+      return InstrumentClass.OPTION;
+    }
+    return InstrumentClass.FUTURE;
+  }
+
+  /**
+   * The provenance cost-class label for the run's metrics JSONB (P1-2, money-lens review fix 1). The
+   * options/premium path prices every leg under {@code OptionsPremiumReplay}'s own per-leg OPTION
+   * {@code CostConfig} — the runner-level {@code costConfig} classified only the SIGNAL series (e.g.
+   * the NIFTY future the strategy signals on) and priced NOTHING on that path — so an options run
+   * stamps OPTION. A candle-path run stamps the class its fills were actually priced under.
+   */
+  static String costClass(boolean optionsStrategy, CostConfig costConfig) {
+    return optionsStrategy
+        ? InstrumentClass.OPTION.name()
+        : costConfig.instrumentClass().name();
   }
 
   /**

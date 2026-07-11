@@ -11,7 +11,9 @@ import in.arthayantra.backtest.dispatch.Streams;
 import in.arthayantra.backtest.regime.BenchmarkSeries;
 import in.arthayantra.backtest.regime.RegimeLabeler;
 import in.arthayantra.backtest.regime.RegimePreflight;
+import in.arthayantra.backtest.replay.CostConfig;
 import in.arthayantra.backtest.replay.PreflightCoverage;
+import in.arthayantra.backtest.replay.options.PremiumProvenance;
 import java.time.OffsetDateTime;
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ConflictException;
@@ -124,6 +126,12 @@ public class JobsService {
       request.put("initialCapital", req.initialCapital());
     }
     if (req.costs() != null) {
+      // P1-2 / audit B4 (money-lens review fixes 3+4): validate the costs block at the API boundary
+      // BEFORE pinning it — options-mode strategies reject it outright (the premium replay never
+      // reads it; pinning would create a silently-inert knob), and the strict withOverrides grammar
+      // 422s a typo or wrong-typed value instead of pinning a block that fails (or worse,
+      // mis-prices) at run time. Same submission-time strictness as sessionOverrides below.
+      validatedCosts(req.costs(), v.config());
       request.set("costs", req.costs());
     }
     if (req.seed() != null) {
@@ -329,6 +337,32 @@ public class JobsService {
               + multiplier.toPlainString());
     }
     return multiplier;
+  }
+
+  /**
+   * Validates a request-level {@code costs} block (P1-2 / audit B4) at submission — two gates, both
+   * 422 {@code VALIDATION_FAILED}. (1) An {@code options_of_underlying} strategy rejects the block
+   * outright: the premium replay builds its own per-leg OPTION {@code CostConfig} and never reads
+   * {@code costs}, so accepting it would pin a silently-inert knob (the caller believes the run was
+   * re-costed; the numbers say otherwise). (2) The block must parse under the STRICT
+   * {@link CostConfig#withOverrides} grammar (unknown keys, quoted-string numbers, non-integral
+   * ticks, negatives, forced OPTION → {@link IllegalArgumentException}), surfacing the fail-loud
+   * doctrine at the API boundary. Package-visible so both gates are unit-tested without the
+   * submission integration harness.
+   */
+  static void validatedCosts(JsonNode costs, JsonNode config) {
+    if (PremiumProvenance.OPTIONS_MODE.equals(config.path("universe").path("mode").asText(null))) {
+      throw new ApiException(
+          422,
+          ErrorCodes.VALIDATION_FAILED,
+          "costs overrides apply to the candle path only; this strategy replays options premium"
+              + " (universe.mode: options_of_underlying), which prices its own OPTION cost stack");
+    }
+    try {
+      CostConfig.defaults().withOverrides(costs);
+    } catch (IllegalArgumentException e) {
+      throw new ApiException(422, ErrorCodes.VALIDATION_FAILED, e.getMessage());
+    }
   }
 
   /**

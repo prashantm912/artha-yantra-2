@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import in.arthayantra.strategyengine.fills.InstrumentClass;
 import in.arthayantra.strategyengine.series.SeriesKey;
 import org.junit.jupiter.api.Test;
 
@@ -168,5 +169,55 @@ class BacktestRunnerSignalInstrumentTest {
                 BacktestRunner.signalInstrument(cfg("{\"universe\":{\"mode\":\"index\"}}"), noRequest))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("single-instrument universe");
+  }
+
+  // ---- P1-2 / audit B4: statutory instrument-class detection on the candle path ----
+
+  @Test
+  void classifiesFoSegmentFuturesAsFuture() {
+    // A dated or continuous future on an F&O segment (NFO/BFO) is priced under the FUTURE stack.
+    assertThat(BacktestRunner.signalInstrumentClass(new SeriesKey("NFO", "NIFTY-FUT-CONT", "1m")))
+        .isEqualTo(InstrumentClass.FUTURE);
+    assertThat(BacktestRunner.signalInstrumentClass(new SeriesKey("NFO", "HDFCBANK26JULFUT", "1m")))
+        .isEqualTo(InstrumentClass.FUTURE);
+    assertThat(BacktestRunner.signalInstrumentClass(new SeriesKey("bfo", "SENSEX-FUT-CONT", "1m")))
+        .isEqualTo(InstrumentClass.FUTURE); // exchange match is case-insensitive
+  }
+
+  @Test
+  void classifiesFoSegmentOptionsAsOption() {
+    // Options never actually reach the candle path for real strategies (options_of_underlying routes
+    // to the premium replay); this covers only an explicit NFO/BFO option-series universe instrument.
+    // costs.instrumentClass REFUSES forcing OPTION (CostConfigTest.forcedOptionClassIsRefused).
+    assertThat(BacktestRunner.signalInstrumentClass(new SeriesKey("NFO", "NIFTY26JUL24000CE", "1m")))
+        .isEqualTo(InstrumentClass.OPTION);
+    assertThat(BacktestRunner.signalInstrumentClass(new SeriesKey("BFO", "SENSEX26JUL80000PE", "1m")))
+        .isEqualTo(InstrumentClass.OPTION);
+  }
+
+  @Test
+  void classifiesCashAndIndexAsEquity() {
+    // Cash equities and index spots on NSE/BSE keep the EQUITY-delivery stack — byte-identical to the
+    // pre-P1-2 blanket default. Segment-gated: a cash symbol is never mis-read as a future.
+    assertThat(BacktestRunner.signalInstrumentClass(new SeriesKey("NSE", "NIFTY 50", "1m")))
+        .isEqualTo(InstrumentClass.EQUITY);
+    assertThat(BacktestRunner.signalInstrumentClass(new SeriesKey("NSE", "RELIANCE", "1m")))
+        .isEqualTo(InstrumentClass.EQUITY);
+    assertThat(BacktestRunner.signalInstrumentClass(new SeriesKey("BSE", "SENSEX", "1m")))
+        .isEqualTo(InstrumentClass.EQUITY);
+  }
+
+  /**
+   * Review fix 1: an options_of_underlying run's net came from OptionsPremiumReplay's own OPTION
+   * stack — the runner-level costConfig only classified the SIGNAL series (e.g. the NIFTY future the
+   * strategy signals on) and priced NOTHING on that path. The provenance stamp must say OPTION, not
+   * the signal-series class.
+   */
+  @Test
+  void costClassStampsOptionOnThePremiumPath() {
+    CostConfig signalSeriesConfig = CostConfig.forClass(InstrumentClass.FUTURE);
+    assertThat(BacktestRunner.costClass(true, signalSeriesConfig)).isEqualTo("OPTION");
+    assertThat(BacktestRunner.costClass(false, signalSeriesConfig)).isEqualTo("FUTURE");
+    assertThat(BacktestRunner.costClass(false, CostConfig.defaults())).isEqualTo("EQUITY");
   }
 }

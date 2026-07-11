@@ -218,11 +218,11 @@ def test_approve_marks_row_and_returns_next_steps():
     assert body["proposal"]["status"] == "APPROVED"
     assert body["proposal"]["actor"] == "prashant"
     assert body["proposal"]["decidedAt"] is not None
-    # nextSteps names the slice-2 action, honestly not-yet-wired
+    # nextSteps names the executable action + points at the explicit owner-clicked /execute endpoint
     assert body["nextSteps"]["action"] == "PUBLISH_PAPER"
-    assert body["nextSteps"]["status"] == "PENDING_SLICE_2"
+    assert body["nextSteps"]["status"] == "READY_TO_EXECUTE"
     note = body["nextSteps"]["note"]
-    assert "NOT yet wired" in note or "not yet wired" in note
+    assert "/execute" in note and "nothing is armed" in note
 
 
 def test_approve_defaults_actor_to_owner():

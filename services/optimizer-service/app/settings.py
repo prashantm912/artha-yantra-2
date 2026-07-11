@@ -28,6 +28,7 @@ class Settings:
     backtest_base: str
     ntfy_url: str
     ntfy_topic: str
+    evo_paper_cap: int
 
     @property
     def conninfo(self) -> str:
@@ -54,4 +55,6 @@ class Settings:
             # (ARTHA_NTFY_URL / ARTHA_NTFY_TOPIC). Blank topic → client no-ops (mock needs none).
             ntfy_url=os.environ.get("ARTHA_NTFY_URL", "https://ntfy.sh"),
             ntfy_topic=os.environ.get("ARTHA_NTFY_TOPIC", ""),
+            # §1.4.3 safety invariant: <= 2 concurrent evo paper strategies per family book.
+            evo_paper_cap=int(os.environ.get("ARTHA_EVO_PAPER_CAP", "2")),
         )

@@ -59,3 +59,72 @@ class StrategyClient:
         resp = self._client.put(f"{self._base}/api/v1/strategies/{strategy_id}", json=body)
         resp.raise_for_status()
         return resp.json()
+
+    # --- EVO E4 slice 2: sibling-clone materialization (§8.2) ------------------------------------
+    # The optimizer calls strategy-signal DIRECTLY (service-to-service inside the compose network —
+    # no gateway/XSRF: these are internal calls on the same base as the version reads above).
+
+    def create(
+        self,
+        name: str,
+        description: str | None,
+        tags: list[str],
+        config: dict[str, Any],
+        created_by: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/strategies — create a NEW strategy as draft 1.0.0 (RegistryController
+        ``CreateRequest``). The registry derives the SLUG from ``config.id`` and 409s on a duplicate
+        slug OR name (``CONFLICT_SLUG_EXISTS``) — the caller absorbs that. ``config`` is serialized
+        to the JSON string the registry parser accepts (YAML is a JSON superset, as the promote path
+        already relies on). Returns ``{id, version, status, checksum}``."""
+        import json
+
+        body: dict[str, Any] = {
+            "name": name,
+            "description": description,
+            "tags": tags,
+            "config": json.dumps(config),
+        }
+        if created_by is not None:
+            body["createdBy"] = created_by
+        resp = self._client.post(f"{self._base}/api/v1/strategies", json=body)
+        resp.raise_for_status()
+        return resp.json()
+
+    def publish(
+        self, strategy_id: str, target_version: str | None = None, notes: str | None = None
+    ) -> dict[str, Any]:
+        """POST /api/v1/strategies/{id}/publish — publish a draft (RegistryController
+        ``PublishRequest``, body optional). Returns ``{id, version, status}``."""
+        body: dict[str, Any] = {}
+        if target_version is not None:
+            body["targetVersion"] = target_version
+        if notes is not None:
+            body["notes"] = notes
+        resp = self._client.post(
+            f"{self._base}/api/v1/strategies/{strategy_id}/publish", json=body
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def detail(self, strategy_id: str) -> dict[str, Any]:
+        """GET /api/v1/strategies/{id} — the full detail (latest version), incl. the version-row
+        ``versionId`` UUID the PUBLISH_PAPER execute stamps onto ``evo_candidates.version_id``."""
+        resp = self._client.get(f"{self._base}/api/v1/strategies/{strategy_id}")
+        resp.raise_for_status()
+        return resp.json()
+
+    def list_strategies(
+        self, tag: str | None = None, status: str | None = None, limit: int = 500
+    ) -> list[dict[str, Any]]:
+        """GET /api/v1/strategies?tag=&status= — the registry list (``{items:[...]}`` envelope).
+        The PUBLISH_PAPER cap check (§1.4.3) filters ``tag=evo`` + ``status=published`` and counts
+        the family members client-side."""
+        params: dict[str, Any] = {"limit": limit}
+        if tag is not None:
+            params["tag"] = tag
+        if status is not None:
+            params["status"] = status
+        resp = self._client.get(f"{self._base}/api/v1/strategies", params=params)
+        resp.raise_for_status()
+        return resp.json().get("items", [])

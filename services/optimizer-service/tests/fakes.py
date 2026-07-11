@@ -5,7 +5,17 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import httpx
+
 from app.repos import ORPHAN_SWEEP_ERROR, TrialNumberConflict
+
+
+def _http_conflict(message: str) -> httpx.HTTPStatusError:
+    """A 409 httpx.HTTPStatusError shaped like ``resp.raise_for_status()`` would raise — the
+    registry duplicate-slug/name conflict the execute path must absorb."""
+    request = httpx.Request("POST", "http://strategy-signal/api/v1/strategies")
+    response = httpx.Response(409, json={"message": message}, request=request)
+    return httpx.HTTPStatusError(message, request=request, response=response)
 
 
 class FakeJobs:
@@ -195,11 +205,27 @@ class FakeDispatcher:
 
 
 class FakeStrategy:
-    """Returns a fixed version config (with an optimize block) and records promote drafts."""
+    """Returns a fixed version config (with an optimize block) and records promote drafts. The E4
+    slice-2 registry surface (create / publish / detail / list) is modelled with an in-memory
+    registry so the PUBLISH_PAPER execute round-trips end-to-end: ``existing`` pre-seeds published
+    strategies (the per-family cap fixture); ``create_conflict`` forces the duplicate-slug 409."""
 
-    def __init__(self, config: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        config: dict[str, Any],
+        existing: list[dict[str, Any]] | None = None,
+        create_conflict: bool = False,
+    ) -> None:
         self._config = config
         self.drafts: list[dict[str, Any]] = []
+        # in-memory registry keyed by strategy id; pre-seeded rows model already-live strategies.
+        self._registry: dict[str, dict[str, Any]] = {}
+        for row in existing or []:
+            self._registry[row["id"]] = dict(row)
+        self._create_conflict = create_conflict
+        self.created: list[dict[str, Any]] = []
+        self.published: list[str] = []
+        self._seq = 0
 
     def version_config(self, strategy_id: str, version: str) -> dict[str, Any]:
         return self._config
@@ -214,6 +240,59 @@ class FakeStrategy:
             {"strategyId": strategy_id, "config": config, "notes": notes, "createdBy": created_by}
         )
         return {"version": "1.1.0", "status": "draft"}
+
+    def create(
+        self,
+        name: str,
+        description: str | None,
+        tags: list[str],
+        config: dict[str, Any],
+        created_by: str | None = None,
+    ) -> dict[str, Any]:
+        slug = config.get("id")
+        # mirror RegistryService.create: 409 on a duplicate slug OR name (CONFLICT_SLUG_EXISTS).
+        collides = self._create_conflict or any(
+            r.get("slug") == slug or r.get("name") == name for r in self._registry.values()
+        )
+        if collides:
+            raise _http_conflict("a strategy with this id or name already exists")
+        self._seq += 1
+        strategy_id = f"clone-{self._seq}"
+        self.created.append(
+            {"id": strategy_id, "name": name, "description": description, "tags": tags,
+             "config": config, "createdBy": created_by}
+        )
+        self._registry[strategy_id] = {
+            "id": strategy_id, "slug": slug, "name": name, "tags": tags,
+            "status": "draft", "versionId": None, "version": "1.0.0",
+        }
+        return {"id": strategy_id, "version": "1.0.0", "status": "draft", "checksum": "chk"}
+
+    def publish(
+        self, strategy_id: str, target_version: str | None = None, notes: str | None = None
+    ) -> dict[str, Any]:
+        row = self._registry[strategy_id]
+        row["status"] = "published"
+        row["versionId"] = f"ver-{strategy_id}"
+        self.published.append(strategy_id)
+        return {"id": strategy_id, "version": row["version"], "status": "published"}
+
+    def detail(self, strategy_id: str) -> dict[str, Any]:
+        row = self._registry[strategy_id]
+        return {
+            "id": strategy_id, "versionId": row["versionId"], "version": row["version"],
+            "status": row["status"], "slug": row["slug"], "name": row["name"],
+            "tags": row["tags"],
+        }
+
+    def list_strategies(
+        self, tag: str | None = None, status: str | None = None, limit: int = 500
+    ) -> list[dict[str, Any]]:
+        return [
+            dict(r) for r in self._registry.values()
+            if (tag is None or tag in (r.get("tags") or []))
+            and (status is None or r.get("status") == status)
+        ]
 
 
 class FakeBacktest:
@@ -459,6 +538,58 @@ class FakeEvoRepo:
                 r.update(status=status, actor=actor, decidedAt="2026-07-11T02:00:00+00:00")
                 return _strip_seq(r)
         return None  # unknown or already-decided → the service maps to 404/409
+
+    # --- E4 slice 2: selection + PUBLISH_PAPER execute (mirrors EvoRepo's slice-2 methods) -------
+
+    def get_generation_by_n(self, campaign_id: str, n: int) -> dict[str, Any] | None:
+        """Mirrors EvoRepo.get_generation_by_n: the (campaign_id, n) generation."""
+        for gen in self.generations.get(campaign_id, []):
+            if gen["n"] == n:
+                return gen
+        return None
+
+    def _find_candidate(self, candidate_id: str) -> dict[str, Any] | None:
+        for cands in self.candidates.values():
+            for cand in cands:
+                if cand["id"] == candidate_id:
+                    return cand
+        return None
+
+    def get_candidate(self, candidate_id: str) -> dict[str, Any] | None:
+        """Mirrors EvoRepo.get_candidate: one candidate by id across all campaigns."""
+        found = self._find_candidate(candidate_id)
+        return dict(found) if found is not None else None
+
+    def update_candidate_selection(
+        self, candidate_id: str, state: str, scorecard: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        """Mirrors EvoRepo.update_candidate_selection: set state + scorecard, touch updated_at."""
+        cand = self._find_candidate(candidate_id)
+        if cand is None:
+            return None
+        cand.update(state=state, scorecard=scorecard, updatedAt="2026-07-12T00:00:00+00:00")
+        return dict(cand)
+
+    def update_candidate_publish(
+        self, candidate_id: str, version_id: str | None, state: str
+    ) -> dict[str, Any] | None:
+        """Mirrors EvoRepo.update_candidate_publish: link the clone version + advance state."""
+        cand = self._find_candidate(candidate_id)
+        if cand is None:
+            return None
+        cand.update(versionId=version_id, state=state, updatedAt="2026-07-12T00:00:00+00:00")
+        return dict(cand)
+
+    def record_proposal_execution(
+        self, proposal_id: str, evidence: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        """Mirrors EvoRepo.record_proposal_execution: stamp the execution evidence on an APPROVED
+        proposal."""
+        for r in self.proposals:
+            if r["id"] == proposal_id and r["status"] == "APPROVED":
+                r["evidence"] = evidence
+                return _strip_seq(r)
+        return None
 
     def close(self) -> None:
         pass

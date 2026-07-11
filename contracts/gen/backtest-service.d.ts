@@ -228,6 +228,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/backtests/experiments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["experiments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backtests/experiments/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["compare"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -261,6 +293,76 @@ export interface components {
             avgBarsHeld?: number;
             meetsReliabilityBar?: boolean;
             grade?: string;
+        };
+        ExperimentListResponse: {
+            items?: components["schemas"]["ExperimentSummary"][];
+            /** Format: int32 */
+            limit?: number;
+            /** Format: int32 */
+            offset?: number;
+        };
+        ExperimentSummary: {
+            runId?: string;
+            jobId?: string;
+            kind?: string;
+            parentJobId?: string;
+            strategyVersionId?: string;
+            strategyId?: string;
+            strategyVersion?: string;
+            purpose?: string;
+            exchange?: string;
+            tradingsymbol?: string;
+            interval?: string;
+            startTs?: string;
+            endTs?: string;
+            totalReturn?: string;
+            sharpe?: string;
+            maxDrawdown?: string;
+            /** Format: int32 */
+            tradeCount?: number;
+            dataHash?: string;
+            universeChecksum?: string;
+            engineSha?: string;
+            premiumSource?: string;
+            createdBy?: string;
+            completedAt?: string;
+        };
+        CompareMetrics: {
+            totalReturn?: string;
+            cagr?: string;
+            sharpe?: string;
+            sortino?: string;
+            maxDrawdown?: string;
+            winRate?: string;
+            profitFactor?: string;
+            alpha?: string;
+            beta?: string;
+            informationRatio?: string;
+            /** Format: int32 */
+            tradeCount?: number;
+        };
+        ExperimentCompareResponse: {
+            runs?: components["schemas"]["ExperimentCompareRun"][];
+            likeForLike?: components["schemas"]["LikeForLike"];
+        };
+        ExperimentCompareRun: {
+            runId?: string;
+            strategyVersionId?: string;
+            strategyId?: string;
+            strategyVersion?: string;
+            dataHash?: string;
+            universeChecksum?: string;
+            engineSha?: string;
+            premiumSource?: string;
+            createdBy?: string;
+            completedAt?: string;
+            metrics?: components["schemas"]["CompareMetrics"];
+        };
+        LikeForLike: {
+            dataHashMatch?: boolean;
+            universeMatch?: boolean;
+            engineShaMatch?: boolean;
+            premiumSourceMatch?: boolean;
         };
         ErrorResponse: {
             code?: string;
@@ -777,6 +879,72 @@ export interface operations {
                     "*/*": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    experiments: {
+        parameters: {
+            query?: {
+                strategyId?: string;
+                strategyVersionId?: string;
+                kind?: string;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ExperimentListResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    compare: {
+        parameters: {
+            query?: {
+                runIds?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ExperimentCompareResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

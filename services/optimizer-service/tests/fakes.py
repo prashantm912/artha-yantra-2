@@ -15,18 +15,28 @@ class FakeJobs:
         self.rows: dict[str, dict[str, Any]] = {}
         self._seq = 0
 
-    def insert_sweep(self, version_id: str | None, request: dict[str, Any]) -> str:
+    def insert_sweep(
+        self, version_id: str | None, request: dict[str, Any], created_by: str = "optimizer"
+    ) -> str:
         self._seq += 1
         job_id = f"sweep-{self._seq}"
         self.rows[job_id] = {"kind": "OPTIMIZATION", "status": "queued", "progress": 0,
-                             "request": request, "error": None, "created": self._seq}
+                             "request": request, "error": None, "created": self._seq,
+                             "created_by": created_by}
         return job_id
 
-    def insert_trial(self, sweep_id: str, version_id: str | None, request: dict[str, Any]) -> str:
+    def insert_trial(
+        self,
+        sweep_id: str,
+        version_id: str | None,
+        request: dict[str, Any],
+        created_by: str | None = None,
+    ) -> str:
         self._seq += 1
         job_id = f"trial-{self._seq}"
         self.rows[job_id] = {"kind": "TRIAL", "status": "queued", "progress": 0,
-                             "request": request, "parent": sweep_id}
+                             "request": request, "parent": sweep_id,
+                             "created_by": created_by or f"optimizer:{sweep_id}"}
         return job_id
 
     def set_status(self, job_id: str, status: str, progress: int | None = None) -> None:
@@ -151,8 +161,12 @@ class FakeStrategy:
     def resolve(self, strategy_id: str, version: str | None) -> tuple[str, dict[str, Any]]:
         return (version or "1.0.0"), self._config
 
-    def create_draft(self, strategy_id: str, config: dict[str, Any], notes: str) -> dict[str, Any]:
-        self.drafts.append({"strategyId": strategy_id, "config": config, "notes": notes})
+    def create_draft(
+        self, strategy_id: str, config: dict[str, Any], notes: str, created_by: str | None = None
+    ) -> dict[str, Any]:
+        self.drafts.append(
+            {"strategyId": strategy_id, "config": config, "notes": notes, "createdBy": created_by}
+        )
         return {"version": "1.1.0", "status": "draft"}
 
 

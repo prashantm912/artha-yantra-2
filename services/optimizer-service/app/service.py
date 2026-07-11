@@ -392,8 +392,9 @@ class SweepService:
 
     def promote(self, sweep_id: str, trial_number: int, notes: str | None) -> dict[str, Any]:
         """Materializes a COMPLETE trial's params onto the source version and POSTs a new draft
-        (§D.9) — never published, provenance recorded in the notes. 409 for an invalid/failed
-        trial."""
+        (§D.9) — never published. Provenance is the version's `created_by` column, stamped
+        `optimizer:{sweepId}` (V002:36's stated contract / audit T3), NOT a free-text note. 409 for
+        an invalid/failed trial."""
         jobs = self._jobs_factory()
         trials = self._trials_factory()
         try:
@@ -416,9 +417,13 @@ class SweepService:
         strategy_id = request["strategyId"]
         config = self._strategy.version_config(strategy_id, request["strategyVersion"])
         patched = config_patch.apply_overrides(config, row["params"])
-        provenance = f"created_by=optimizer:{sweep_id}"
-        note = f"{provenance}; {notes}" if notes else provenance
-        result = self._strategy.create_draft(strategy_id, patched, note)
+        # Audit T3: the machine-readable provenance is now the `created_by` COLUMN (a first-class,
+        # EVO-filterable actor), not embedded in the free-text `notes`. The note keeps the
+        # human-readable lineage.
+        created_by = f"optimizer:{sweep_id}"
+        lineage = f"promoted trial {trial_number} of sweep {sweep_id}"
+        note = f"{lineage}; {notes}" if notes else lineage
+        result = self._strategy.create_draft(strategy_id, patched, note, created_by=created_by)
         return {
             "strategyId": strategy_id,
             "newVersion": result.get("version") or result.get("currentVersion"),

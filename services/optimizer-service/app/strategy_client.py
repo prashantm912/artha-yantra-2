@@ -41,14 +41,21 @@ class StrategyClient:
         return body["version"], body.get("config", {})
 
     def create_draft(
-        self, strategy_id: str, config: dict[str, Any], notes: str
+        self, strategy_id: str, config: dict[str, Any], notes: str, created_by: str | None = None
     ) -> dict[str, Any]:
-        """Promotes a winner: PUT a new draft version (Phase 34). Returns the new version row."""
+        """Promotes a winner: PUT a new draft version (Phase 34). Returns the new version row.
+        ``created_by`` (audit T3) stamps the machine-readable actor on the version's ``created_by``
+        column — ``optimizer:{sweepId}`` for a promote — so provenance is a first-class column, not
+        a note; omitted → the registry defaults to ``'owner'``."""
         import json
 
-        resp = self._client.put(
-            f"{self._base}/api/v1/strategies/{strategy_id}",
-            json={"config": json.dumps(config), "versionBump": "minor", "notes": notes},
-        )
+        body: dict[str, Any] = {
+            "config": json.dumps(config),
+            "versionBump": "minor",
+            "notes": notes,
+        }
+        if created_by is not None:
+            body["createdBy"] = created_by
+        resp = self._client.put(f"{self._base}/api/v1/strategies/{strategy_id}", json=body)
         resp.raise_for_status()
         return resp.json()

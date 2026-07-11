@@ -205,11 +205,20 @@ public class InstrumentRepository {
     return total == null ? 0 : total;
   }
 
-  /** Trigram-ranked typeahead (B-7 GIN index). */
+  /**
+   * Trigram-ranked typeahead (B-7 GIN index) with an option-chain de-flood tie-break (audit AC-1).
+   * For a broad underlying query ("NIFTY") the dated future ({@code NIFTY26JULFUT}) was un-findable:
+   * the CONT synthetic + thousands of CE/PE strikes tie its trigram similarity and win the
+   * {@code tradingsymbol} alphabetical tie-break, so the future landed past the result limit. A small
+   * fixed boost lifts every NON-option instrument (index/equity/future) above the tied option flood
+   * WITHOUT overriding a genuinely better match — a full option symbol still scores ~1.0 and wins, so
+   * option typeahead is unchanged. The boost is additive on the similarity, never a hard type tier.
+   */
   public List<Instrument> searchRanked(String q, int limit) {
     return jdbc.query(
         """
-        SELECT *, GREATEST(public.similarity(tradingsymbol, ?), public.similarity(coalesce(name,''), ?)) AS rank
+        SELECT *, GREATEST(public.similarity(tradingsymbol, ?), public.similarity(coalesce(name,''), ?))
+                  + CASE WHEN instrument_type IN ('CE','PE') THEN 0 ELSE 0.15 END AS rank
         FROM instruments
         WHERE is_active AND (tradingsymbol OPERATOR(public.%) ?
                              OR coalesce(name,'') OPERATOR(public.%) ?

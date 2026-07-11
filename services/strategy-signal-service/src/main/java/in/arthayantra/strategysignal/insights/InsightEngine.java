@@ -38,6 +38,10 @@ public class InsightEngine {
   private final InsightRepository repository;
   private final TrustService trustService;
   private final BookHeatReader bookHeatReader;
+  private final ContextClient contextClient;
+  private final RejectionReader rejectionReader;
+  private final PortfolioReader portfolioReader;
+  private final InsightProperties props;
   private final EngineStamp stamp;
   private final ObjectMapper objectMapper;
   private final java.time.Clock clock;
@@ -49,6 +53,10 @@ public class InsightEngine {
       InsightRepository repository,
       TrustService trustService,
       BookHeatReader bookHeatReader,
+      ContextClient contextClient,
+      RejectionReader rejectionReader,
+      PortfolioReader portfolioReader,
+      InsightProperties props,
       EngineStamp stamp,
       ObjectMapper objectMapper,
       java.time.Clock clock,
@@ -57,6 +65,10 @@ public class InsightEngine {
     this.repository = repository;
     this.trustService = trustService;
     this.bookHeatReader = bookHeatReader;
+    this.contextClient = contextClient;
+    this.rejectionReader = rejectionReader;
+    this.portfolioReader = portfolioReader;
+    this.props = props;
     this.stamp = stamp;
     this.objectMapper = objectMapper;
     this.clock = clock;
@@ -89,10 +101,56 @@ public class InsightEngine {
     run(GenerationContext.forTrust(trustService.snapshot(), now), now);
   }
 
-  /** The risk-heat sweep (called by {@link InsightSweeper}). Fail-soft. */
+  /**
+   * The risk sweep (called by {@link InsightSweeper}): RISK_HEAT (book-heat read) + RISK_STALE_TICK
+   * (open bracketed positions over stalled feed instruments, the §12 interim health/data trigger).
+   * Fail-soft.
+   */
   public void runRiskSweep() {
     OffsetDateTime now = OffsetDateTime.now(clock);
-    run(GenerationContext.forRisk(bookHeatReader.read(), now), now);
+    StaleTickSnapshot staleTick = portfolioReader.staleTickScan(contextClient.staleFeedKeys());
+    run(GenerationContext.forRisk(bookHeatReader.read(), staleTick, now), now);
+  }
+
+  /**
+   * The 15-min context sweep (called by {@link InsightSweeper}): CONTEXT_SHIFT + MARKET_STRUCTURE
+   * (digest crossings, per configured underlying + the day-context one-call) + REJECTION_NEARMISS
+   * (the session's rejections closest to firing). Every digest read is fail-soft — an absent digest
+   * simply yields no crossing for that underlying (§6.5 honest degrade). Fail-soft overall.
+   */
+  public void runContextSweep() {
+    OffsetDateTime now = OffsetDateTime.now(clock);
+    List<MarketContext.OptionsShift> shifts = new java.util.ArrayList<>();
+    for (String underlying : props.context().underlyings()) {
+      contextClient.optionsShift(exchangeFor(underlying), underlying).ifPresent(shifts::add);
+    }
+    MarketContext market = new MarketContext(shifts, contextClient.marketStructure().orElse(null));
+    run(GenerationContext.forContext(market, rejectionReader.nearMissScan(), now), now);
+  }
+
+  /** The EOD sweep (called by {@link InsightSweeper}): REJECTION_RAIL_TREND + HYGIENE. Fail-soft. */
+  public void runEodSweep() {
+    OffsetDateTime now = OffsetDateTime.now(clock);
+    run(GenerationContext.forEod(rejectionReader.railTrendScan(), portfolioReader.hygieneScan(), now), now);
+  }
+
+  /** The T-1 expiry sweep (called by {@link InsightSweeper}): EXPIRY_EVENT. Fail-soft. */
+  public void runExpirySweep() {
+    OffsetDateTime now = OffsetDateTime.now(clock);
+    run(GenerationContext.forExpiry(portfolioReader.expiryScan(), now), now);
+  }
+
+  /** The weekly quality-report job (called by {@link InsightSweeper}): QUALITY_REPORT. Fail-soft. */
+  public void runQualityReport() {
+    OffsetDateTime now = OffsetDateTime.now(clock);
+    run(GenerationContext.forQuality(repository.qualityStats(props), now), now);
+  }
+
+  /** The index exchange for an underlying's insight scope (SENSEX → BSE, else NSE). */
+  private static String exchangeFor(String underlying) {
+    return underlying != null && underlying.toUpperCase(java.util.Locale.ROOT).contains("SENSEX")
+        ? "BSE"
+        : "NSE";
   }
 
   /** Run every generator over the context and persist each candidate (idempotent upsert). */

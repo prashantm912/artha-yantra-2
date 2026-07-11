@@ -2681,6 +2681,51 @@
         }
       }
     },
+    "/api/v1/insights/fired-vs-rejected" : {
+      "get" : {
+        "tags" : [ "insight-controller" ],
+        "operationId" : "firedVsRejected",
+        "parameters" : [ {
+          "name" : "strategyVersionId",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "day",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/FiredVsRejectedResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/shadow-variants/{name}" : {
       "delete" : {
         "tags" : [ "shadow-variants-controller" ],
@@ -3905,6 +3950,125 @@
           "suppressed" : {
             "type" : "integer",
             "format" : "int64"
+          }
+        }
+      },
+      "Contrast" : {
+        "type" : "object",
+        "properties" : {
+          "firedCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "rejectedCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "meanCompositeFired" : {
+            "type" : "number"
+          },
+          "meanCompositeRejected" : {
+            "type" : "number"
+          },
+          "meanSupportRatioFired" : {
+            "type" : "number"
+          },
+          "meanSupportRatioRejected" : {
+            "type" : "number"
+          }
+        }
+      },
+      "FiredRow" : {
+        "type" : "object",
+        "properties" : {
+          "signalId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "side" : {
+            "type" : "string"
+          },
+          "composite" : {
+            "type" : "number"
+          },
+          "dotSupports" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "dotTotal" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "generatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "FiredVsRejectedResponse" : {
+        "type" : "object",
+        "properties" : {
+          "strategyVersionId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "day" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "fired" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/FiredRow"
+            }
+          },
+          "rejected" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/RejectedRow"
+            }
+          },
+          "contrast" : {
+            "$ref" : "#/components/schemas/Contrast"
+          }
+        }
+      },
+      "RejectedRow" : {
+        "type" : "object",
+        "properties" : {
+          "rejectionId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "side" : {
+            "type" : "string"
+          },
+          "composite" : {
+            "type" : "number"
+          },
+          "threshold" : {
+            "type" : "number"
+          },
+          "blockingRail" : {
+            "type" : "string"
+          },
+          "dotSupports" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "dotTotal" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "generatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
           }
         }
       },

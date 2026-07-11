@@ -1,6 +1,7 @@
 package in.arthayantra.strategysignal.insights;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Map;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
@@ -17,13 +18,26 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * flags land with their passthroughs).
  */
 @ConfigurationProperties("artha.insights")
-public record InsightProperties(Priority priority, Risk risk, Retention retention) {
+public record InsightProperties(
+    Priority priority,
+    Risk risk,
+    Retention retention,
+    Context context,
+    Rejection rejection,
+    Hygiene hygiene,
+    Expiry expiry,
+    Quality quality) {
 
   /** Fills the whole tree with defaults when a section (or the root) is absent. */
   public InsightProperties {
     priority = priority == null ? Priority.defaults() : priority;
     risk = risk == null ? Risk.defaults() : risk;
     retention = retention == null ? Retention.defaults() : retention;
+    context = context == null ? Context.defaults() : context;
+    rejection = rejection == null ? Rejection.defaults() : rejection;
+    hygiene = hygiene == null ? Hygiene.defaults() : hygiene;
+    expiry = expiry == null ? Expiry.defaults() : expiry;
+    quality = quality == null ? Quality.defaults() : quality;
   }
 
   /** Signal-priority weights, bands, trust cap, and per-family band/half-life/TTL (§3.2). */
@@ -112,6 +126,89 @@ public record InsightProperties(Priority priority, Risk risk, Retention retentio
   public record Retention(@DefaultValue("90") int pruneDays) {
     static Retention defaults() {
       return new Retention(90);
+    }
+  }
+
+  /**
+   * CONTEXT_SHIFT + MARKET_STRUCTURE thresholds (§6.2). Each crossing reads the digest's own
+   * baseline-relative delta ("since open" / "vs prior") — the layer never persists its own baseline.
+   */
+  public record Context(
+      List<String> underlyings,
+      @DefaultValue("0.15") BigDecimal pcrDelta,
+      @DefaultValue("50") BigDecimal maxPainDrift,
+      @DefaultValue("20") BigDecimal straddlePct,
+      @DefaultValue("2") int activeStrikeChange,
+      @DefaultValue("0.5") BigDecimal gapOpenPct,
+      @DefaultValue("45") int shiftCooldownMinutes,
+      @DefaultValue("60") int structureCooldownMinutes) {
+
+    private static final List<String> DEFAULT_UNDERLYINGS = List.of("NIFTY", "SENSEX");
+
+    public Context {
+      underlyings = underlyings == null || underlyings.isEmpty() ? DEFAULT_UNDERLYINGS : underlyings;
+      pcrDelta = pcrDelta == null ? new BigDecimal("0.15") : pcrDelta;
+      maxPainDrift = maxPainDrift == null ? new BigDecimal("50") : maxPainDrift;
+      straddlePct = straddlePct == null ? new BigDecimal("20") : straddlePct;
+      gapOpenPct = gapOpenPct == null ? new BigDecimal("0.5") : gapOpenPct;
+    }
+
+    static Context defaults() {
+      return new Context(DEFAULT_UNDERLYINGS, new BigDecimal("0.15"), new BigDecimal("50"),
+          new BigDecimal("20"), 2, new BigDecimal("0.5"), 45, 60);
+    }
+  }
+
+  /** REJECTION_NEARMISS + REJECTION_RAIL_TREND thresholds (§4.2). */
+  public record Rejection(
+      @DefaultValue("120") int nearMissWindowMinutes,
+      @DefaultValue("5") int nearMissTopN,
+      @DefaultValue("0.05") BigDecimal nearMissMaxCloseness,
+      @DefaultValue("45") int nearMissCooldownMinutes,
+      @DefaultValue("5") int railTrendSessions,
+      @DefaultValue("2.0") BigDecimal railTrendRatio,
+      @DefaultValue("5") int railTrendMinCount) {
+
+    public Rejection {
+      nearMissMaxCloseness =
+          nearMissMaxCloseness == null ? new BigDecimal("0.05") : nearMissMaxCloseness;
+      railTrendRatio = railTrendRatio == null ? new BigDecimal("2.0") : railTrendRatio;
+    }
+
+    static Rejection defaults() {
+      return new Rejection(120, 5, new BigDecimal("0.05"), 45, 5, new BigDecimal("2.0"), 5);
+    }
+  }
+
+  /** HYGIENE nudge thresholds (§2.2). */
+  public record Hygiene(@DefaultValue("7") int windowDays, @DefaultValue("1") int minUnrated) {
+    static Hygiene defaults() {
+      return new Hygiene(7, 1);
+    }
+  }
+
+  /** EXPIRY_EVENT window (§2.2) — T-1 = 1 day ahead. */
+  public record Expiry(@DefaultValue("1") int daysAhead) {
+    static Expiry defaults() {
+      return new Expiry(1);
+    }
+  }
+
+  /** QUALITY_REPORT window + targets (§10.2). */
+  public record Quality(
+      @DefaultValue("7") int windowDays,
+      @DefaultValue("0.60") BigDecimal actRateTarget,
+      @DefaultValue("0.40") BigDecimal dismissRateThreshold,
+      @DefaultValue("5") int topSuppressedKeys) {
+
+    public Quality {
+      actRateTarget = actRateTarget == null ? new BigDecimal("0.60") : actRateTarget;
+      dismissRateThreshold =
+          dismissRateThreshold == null ? new BigDecimal("0.40") : dismissRateThreshold;
+    }
+
+    static Quality defaults() {
+      return new Quality(7, new BigDecimal("0.60"), new BigDecimal("0.40"), 5);
     }
   }
 }

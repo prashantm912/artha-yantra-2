@@ -1668,6 +1668,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/context/futures-digest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["futuresDigest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/context/fii-digest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["fiiDigest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/context/expiry-compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["expiryCompare"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/context/equity-digest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["equityDigest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/context/day-context": {
         parameters: {
             query?: never;
@@ -3368,6 +3432,223 @@ export interface components {
             now?: number;
             atOpen?: number;
             deltaPct?: number;
+        };
+        BanksSummary: {
+            /** Format: int32 */
+            total?: number;
+            /** Format: int32 */
+            longBuildup?: number;
+            /** Format: int32 */
+            shortBuildup?: number;
+            /** Format: int32 */
+            shortCovering?: number;
+            /** Format: int32 */
+            longUnwinding?: number;
+            /** Format: int64 */
+            netOiChange?: number;
+        };
+        FuturesDigest: {
+            underlyings?: components["schemas"]["UnderlyingQuadrant"][];
+            banks?: components["schemas"]["BanksSummary"];
+            termStructure?: components["schemas"]["TermStructureState"];
+            /** Format: date-time */
+            asOf?: string;
+            dataTrust?: string;
+            trustReasons?: string[];
+        };
+        TermStructureState: {
+            underlying?: string;
+            spot?: number;
+            state?: string;
+            calendarSpread?: number;
+            nearBasis?: number;
+            stale?: boolean;
+            /** Format: date-time */
+            asOf?: string;
+        };
+        UnderlyingQuadrant: {
+            underlying?: string;
+            tradingsymbol?: string;
+            /** Format: date */
+            expiry?: string;
+            ltp?: number;
+            pricePct?: number;
+            /** Format: int64 */
+            oi?: number;
+            /** Format: int64 */
+            oiChange?: number;
+            oiPct?: number;
+            interpretation?: string;
+        };
+        DiiDivergence: {
+            fiiNet?: number;
+            diiNet?: number;
+            divergent?: boolean;
+        };
+        FiiCash: {
+            /** Format: date */
+            tradeDate?: string;
+            net?: number;
+            /** Format: int32 */
+            streakDays?: number;
+            streakSide?: string;
+            flip?: boolean;
+        };
+        FiiDerivativeAvailability: {
+            available?: boolean;
+            /** Format: date */
+            tradeDate?: string;
+            indexFuturesNet?: number;
+            reason?: string;
+        };
+        FiiDigest: {
+            cash?: components["schemas"]["FiiCash"];
+            dii?: components["schemas"]["DiiDivergence"];
+            futuresLongShort?: components["schemas"]["FiiFuturesLongShort"];
+            participant?: components["schemas"]["ParticipantPositioning"];
+            derivative?: components["schemas"]["FiiDerivativeAvailability"];
+            /** Format: date-time */
+            asOf?: string;
+            dataTrust?: string;
+            trustReasons?: string[];
+        };
+        FiiFuturesLongShort: {
+            /** Format: date */
+            tradeDate?: string;
+            /** Format: int64 */
+            indexLong?: number;
+            /** Format: int64 */
+            indexShort?: number;
+            ratio?: number;
+            ratioDelta?: number;
+            /** Format: int32 */
+            percentile?: number;
+            /** Format: int32 */
+            windowSessions?: number;
+            lowConfidence?: boolean;
+        };
+        ParticipantPositioning: {
+            /** Format: date */
+            tradeDate?: string;
+            /** Format: int64 */
+            netContracts?: number;
+            /** Format: int64 */
+            netContractsPrior?: number;
+            /** Format: int64 */
+            netChange?: number;
+        };
+        AlignedPoint: {
+            /** Format: date-time */
+            bucket?: string;
+            /** Format: int64 */
+            aTotalOi?: number;
+            /** Format: int64 */
+            bTotalOi?: number;
+            aPcr?: number;
+            bPcr?: number;
+            aSpot?: number;
+            bSpot?: number;
+        };
+        ExpiryCompare: {
+            underlying?: string;
+            a?: components["schemas"]["ExpirySide"];
+            b?: components["schemas"]["ExpirySide"];
+            aligned?: components["schemas"]["AlignedPoint"][];
+            /** Format: date-time */
+            asOf?: string;
+            dataTrust?: string;
+            trustReasons?: string[];
+        };
+        ExpirySide: {
+            /** Format: date */
+            expiry?: string;
+            series?: components["schemas"]["TrendPoint"][];
+            /** Format: date-time */
+            asOf?: string;
+            dataTrust?: string;
+            trustReasons?: string[];
+        };
+        AboveMa: {
+            /** Format: int32 */
+            universe20?: number;
+            /** Format: int32 */
+            above20?: number;
+            pctAbove20?: number;
+            /** Format: int32 */
+            universe50?: number;
+            /** Format: int32 */
+            above50?: number;
+            pctAbove50?: number;
+        };
+        AdvanceDecline: {
+            /** Format: date */
+            tradeDate?: string;
+            /** Format: int32 */
+            advances?: number;
+            /** Format: int32 */
+            declines?: number;
+            /** Format: int32 */
+            unchanged?: number;
+            /** Format: int32 */
+            total?: number;
+            adRatio?: number;
+            adRatioPrior?: number;
+            adRatioDelta?: number;
+        };
+        BreadthThrust: {
+            /** Format: int32 */
+            windowSessions?: number;
+            advRatioMa?: number;
+            threshold?: number;
+            thrust?: boolean;
+        };
+        DeliveryOutlier: {
+            symbol?: string;
+            deliveryPct?: number;
+            mean20?: number;
+            z?: number;
+        };
+        EquityDigest: {
+            /** Format: date */
+            tradeDate?: string;
+            advanceDecline?: components["schemas"]["AdvanceDecline"];
+            aboveMa?: components["schemas"]["AboveMa"];
+            breadthThrust?: components["schemas"]["BreadthThrust"];
+            topSectors?: components["schemas"]["SectorRotation"][];
+            bottomSectors?: components["schemas"]["SectorRotation"][];
+            deliveryOutliers?: components["schemas"]["DeliveryOutlier"][];
+            returnsWindow?: string;
+            returnWinners?: components["schemas"]["ReturnLeader"][];
+            returnLosers?: components["schemas"]["ReturnLeader"][];
+            indexConcentration?: components["schemas"]["IndexConcentration"];
+            /** Format: date-time */
+            asOf?: string;
+            dataTrust?: string;
+            trustReasons?: string[];
+        };
+        IndexConcentration: {
+            index?: string;
+            indexChangePct?: number;
+            /** Format: int32 */
+            topN?: number;
+            topShare?: number;
+        };
+        ReturnLeader: {
+            symbol?: string;
+            sector?: string;
+            returnPct?: number;
+        };
+        SectorRotation: {
+            sector?: string;
+            avgChangePct?: number;
+            /** Format: int32 */
+            stocks?: number;
+            /** Format: int32 */
+            rankToday?: number;
+            /** Format: int32 */
+            rankPrior?: number;
+            /** Format: int32 */
+            rankDelta?: number;
         };
         DayContext: {
             /** Format: date */
@@ -7440,6 +7721,135 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["OptionsDigest"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    futuresDigest: {
+        parameters: {
+            query?: {
+                date?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["FuturesDigest"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    fiiDigest: {
+        parameters: {
+            query?: {
+                date?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["FiiDigest"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    expiryCompare: {
+        parameters: {
+            query: {
+                mode?: string;
+                name: string;
+                date?: string;
+                interval?: string;
+                expiryA: string;
+                expiryB: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ExpiryCompare"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    equityDigest: {
+        parameters: {
+            query?: {
+                date?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["EquityDigest"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

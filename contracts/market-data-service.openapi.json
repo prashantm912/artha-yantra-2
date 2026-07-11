@@ -5375,6 +5375,185 @@
         }
       }
     },
+    "/api/v1/market/context/futures-digest" : {
+      "get" : {
+        "tags" : [ "market-context-controller" ],
+        "operationId" : "futuresDigest",
+        "parameters" : [ {
+          "name" : "date",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/FuturesDigest"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/context/fii-digest" : {
+      "get" : {
+        "tags" : [ "market-context-controller" ],
+        "operationId" : "fiiDigest",
+        "parameters" : [ {
+          "name" : "date",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/FiiDigest"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/context/expiry-compare" : {
+      "get" : {
+        "tags" : [ "market-context-controller" ],
+        "operationId" : "expiryCompare",
+        "parameters" : [ {
+          "name" : "mode",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "name",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "date",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "interval",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "expiryA",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "expiryB",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ExpiryCompare"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/context/equity-digest" : {
+      "get" : {
+        "tags" : [ "market-context-controller" ],
+        "operationId" : "equityDigest",
+        "parameters" : [ {
+          "name" : "date",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/EquityDigest"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/context/day-context" : {
       "get" : {
         "tags" : [ "market-context-controller" ],
@@ -9891,6 +10070,581 @@
           },
           "deltaPct" : {
             "type" : "number"
+          }
+        }
+      },
+      "BanksSummary" : {
+        "type" : "object",
+        "properties" : {
+          "total" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "longBuildup" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "shortBuildup" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "shortCovering" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "longUnwinding" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "netOiChange" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "FuturesDigest" : {
+        "type" : "object",
+        "properties" : {
+          "underlyings" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/UnderlyingQuadrant"
+            }
+          },
+          "banks" : {
+            "$ref" : "#/components/schemas/BanksSummary"
+          },
+          "termStructure" : {
+            "$ref" : "#/components/schemas/TermStructureState"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "dataTrust" : {
+            "type" : "string"
+          },
+          "trustReasons" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "TermStructureState" : {
+        "type" : "object",
+        "properties" : {
+          "underlying" : {
+            "type" : "string"
+          },
+          "spot" : {
+            "type" : "number"
+          },
+          "state" : {
+            "type" : "string"
+          },
+          "calendarSpread" : {
+            "type" : "number"
+          },
+          "nearBasis" : {
+            "type" : "number"
+          },
+          "stale" : {
+            "type" : "boolean"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "UnderlyingQuadrant" : {
+        "type" : "object",
+        "properties" : {
+          "underlying" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "ltp" : {
+            "type" : "number"
+          },
+          "pricePct" : {
+            "type" : "number"
+          },
+          "oi" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "oiChange" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "oiPct" : {
+            "type" : "number"
+          },
+          "interpretation" : {
+            "type" : "string"
+          }
+        }
+      },
+      "DiiDivergence" : {
+        "type" : "object",
+        "properties" : {
+          "fiiNet" : {
+            "type" : "number"
+          },
+          "diiNet" : {
+            "type" : "number"
+          },
+          "divergent" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "FiiCash" : {
+        "type" : "object",
+        "properties" : {
+          "tradeDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "net" : {
+            "type" : "number"
+          },
+          "streakDays" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "streakSide" : {
+            "type" : "string"
+          },
+          "flip" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "FiiDerivativeAvailability" : {
+        "type" : "object",
+        "properties" : {
+          "available" : {
+            "type" : "boolean"
+          },
+          "tradeDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "indexFuturesNet" : {
+            "type" : "number"
+          },
+          "reason" : {
+            "type" : "string"
+          }
+        }
+      },
+      "FiiDigest" : {
+        "type" : "object",
+        "properties" : {
+          "cash" : {
+            "$ref" : "#/components/schemas/FiiCash"
+          },
+          "dii" : {
+            "$ref" : "#/components/schemas/DiiDivergence"
+          },
+          "futuresLongShort" : {
+            "$ref" : "#/components/schemas/FiiFuturesLongShort"
+          },
+          "participant" : {
+            "$ref" : "#/components/schemas/ParticipantPositioning"
+          },
+          "derivative" : {
+            "$ref" : "#/components/schemas/FiiDerivativeAvailability"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "dataTrust" : {
+            "type" : "string"
+          },
+          "trustReasons" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "FiiFuturesLongShort" : {
+        "type" : "object",
+        "properties" : {
+          "tradeDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "indexLong" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "indexShort" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "ratio" : {
+            "type" : "number"
+          },
+          "ratioDelta" : {
+            "type" : "number"
+          },
+          "percentile" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "windowSessions" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "lowConfidence" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "ParticipantPositioning" : {
+        "type" : "object",
+        "properties" : {
+          "tradeDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "netContracts" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "netContractsPrior" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "netChange" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "AlignedPoint" : {
+        "type" : "object",
+        "properties" : {
+          "bucket" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "aTotalOi" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "bTotalOi" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "aPcr" : {
+            "type" : "number"
+          },
+          "bPcr" : {
+            "type" : "number"
+          },
+          "aSpot" : {
+            "type" : "number"
+          },
+          "bSpot" : {
+            "type" : "number"
+          }
+        }
+      },
+      "ExpiryCompare" : {
+        "type" : "object",
+        "properties" : {
+          "underlying" : {
+            "type" : "string"
+          },
+          "a" : {
+            "$ref" : "#/components/schemas/ExpirySide"
+          },
+          "b" : {
+            "$ref" : "#/components/schemas/ExpirySide"
+          },
+          "aligned" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/AlignedPoint"
+            }
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "dataTrust" : {
+            "type" : "string"
+          },
+          "trustReasons" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "ExpirySide" : {
+        "type" : "object",
+        "properties" : {
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "series" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/TrendPoint"
+            }
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "dataTrust" : {
+            "type" : "string"
+          },
+          "trustReasons" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "AboveMa" : {
+        "type" : "object",
+        "properties" : {
+          "universe20" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "above20" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "pctAbove20" : {
+            "type" : "number"
+          },
+          "universe50" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "above50" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "pctAbove50" : {
+            "type" : "number"
+          }
+        }
+      },
+      "AdvanceDecline" : {
+        "type" : "object",
+        "properties" : {
+          "tradeDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "advances" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "declines" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "unchanged" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "total" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "adRatio" : {
+            "type" : "number"
+          },
+          "adRatioPrior" : {
+            "type" : "number"
+          },
+          "adRatioDelta" : {
+            "type" : "number"
+          }
+        }
+      },
+      "BreadthThrust" : {
+        "type" : "object",
+        "properties" : {
+          "windowSessions" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "advRatioMa" : {
+            "type" : "number"
+          },
+          "threshold" : {
+            "type" : "number"
+          },
+          "thrust" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "DeliveryOutlier" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "deliveryPct" : {
+            "type" : "number"
+          },
+          "mean20" : {
+            "type" : "number"
+          },
+          "z" : {
+            "type" : "number"
+          }
+        }
+      },
+      "EquityDigest" : {
+        "type" : "object",
+        "properties" : {
+          "tradeDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "advanceDecline" : {
+            "$ref" : "#/components/schemas/AdvanceDecline"
+          },
+          "aboveMa" : {
+            "$ref" : "#/components/schemas/AboveMa"
+          },
+          "breadthThrust" : {
+            "$ref" : "#/components/schemas/BreadthThrust"
+          },
+          "topSectors" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SectorRotation"
+            }
+          },
+          "bottomSectors" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SectorRotation"
+            }
+          },
+          "deliveryOutliers" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/DeliveryOutlier"
+            }
+          },
+          "returnsWindow" : {
+            "type" : "string"
+          },
+          "returnWinners" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ReturnLeader"
+            }
+          },
+          "returnLosers" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ReturnLeader"
+            }
+          },
+          "indexConcentration" : {
+            "$ref" : "#/components/schemas/IndexConcentration"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "dataTrust" : {
+            "type" : "string"
+          },
+          "trustReasons" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "IndexConcentration" : {
+        "type" : "object",
+        "properties" : {
+          "index" : {
+            "type" : "string"
+          },
+          "indexChangePct" : {
+            "type" : "number"
+          },
+          "topN" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "topShare" : {
+            "type" : "number"
+          }
+        }
+      },
+      "ReturnLeader" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "sector" : {
+            "type" : "string"
+          },
+          "returnPct" : {
+            "type" : "number"
+          }
+        }
+      },
+      "SectorRotation" : {
+        "type" : "object",
+        "properties" : {
+          "sector" : {
+            "type" : "string"
+          },
+          "avgChangePct" : {
+            "type" : "number"
+          },
+          "stocks" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "rankToday" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "rankPrior" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "rankDelta" : {
+            "type" : "integer",
+            "format" : "int32"
           }
         }
       },

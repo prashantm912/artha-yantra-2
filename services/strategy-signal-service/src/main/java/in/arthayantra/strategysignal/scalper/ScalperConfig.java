@@ -177,6 +177,9 @@ public record ScalperConfig(
   // value is immaterial to strike selection.
   private static final double RATE = 0.065;
   // v1 confluence aggregate a valid signal must reach (≥ ~60% of the weighted dots).
+  // COUPLING: ShadowVariantRegistry.championCompositeRef (default of
+  // artha.scalper.shadow-book.champion-composite-threshold) mirrors this value for the §3.3.3
+  // relaxing-or-neutral gate — change BOTH together if this ever moves or goes per-strategy.
   private static final BigDecimal THRESHOLD = new BigDecimal("0.6");
   // §0B premium bands (VERIFIED: NIFTY 100–250, BANKNIFTY 250–400; SENSEX 300–800, the 2b grill-locked
   // band for the higher-priced SENSEX premium — live StrikePicker only, the backtest selector ignores

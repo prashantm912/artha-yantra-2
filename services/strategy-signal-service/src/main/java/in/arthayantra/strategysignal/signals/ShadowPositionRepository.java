@@ -133,8 +133,14 @@ public class ShadowPositionRepository {
     return n == null ? 0 : n;
   }
 
-  /** Per-variant league rollup over an optional opened-at window (nulls = all history). */
-  public List<VariantSummary> variantSummary(OffsetDateTime from, OffsetDateTime to) {
+  /**
+   * Per-variant league rollup over an optional opened-at window (nulls = all history). Variants are
+   * GLOBAL (one name trades every scalper's rejection stream), so the unfiltered rollup aggregates
+   * cross-strategy PnL under one name — {@code strategySlug} (nullable) narrows the league to one
+   * strategy's book, the per-strategy read campaign analysis pairs with.
+   */
+  public List<VariantSummary> variantSummary(
+      OffsetDateTime from, OffsetDateTime to, String strategySlug) {
     return jdbc.query(
         """
         SELECT variant,
@@ -147,6 +153,7 @@ public class ShadowPositionRepository {
                count(*) FILTER (WHERE status = 'CLOSED' AND pnl_net IS NULL) AS unpriced
         FROM shadow_positions
         WHERE (?::timestamptz IS NULL OR opened_at >= ?) AND (?::timestamptz IS NULL OR opened_at < ?)
+          AND (?::text IS NULL OR strategy_slug = ?)
         GROUP BY variant ORDER BY variant
         """,
         (rs, i) ->
@@ -154,7 +161,7 @@ public class ShadowPositionRepository {
                 rs.getString("variant"), rs.getLong("open"), rs.getLong("closed"),
                 rs.getLong("wins"), rs.getLong("losses"), rs.getBigDecimal("pnl_points"),
                 rs.getBigDecimal("pnl_net"), rs.getLong("unpriced")),
-        from, from, to, to);
+        from, from, to, to, strategySlug, strategySlug);
   }
 
   /**

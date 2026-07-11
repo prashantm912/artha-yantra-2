@@ -1,5 +1,7 @@
 package in.arthayantra.strategysignal.signals;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.strategysignal.scalper.ScalperConfluenceGate;
 import java.math.BigDecimal;
@@ -101,9 +103,57 @@ public class ShadowVariants {
     return new Variant(name, rails, raw.compositeThreshold);
   }
 
-  /** The active challenger variants (possibly empty). */
+  /**
+   * The boot-time env-JSON fallback variants (possibly empty). The LIVE active challenger set is the
+   * MERGE of these with the runtime-registered {@link ShadowVariantRegistry} rows — read from there
+   * on the live path, not here.
+   */
   public List<Variant> all() {
     return variants;
+  }
+
+  /**
+   * Validates + builds ONE variant from a runtime registration (EVO E3 §11). {@code specNode} is the
+   * vocabulary BODY ({@code {rails, compositeThreshold}}, the {@code name} is separate); it is
+   * STRICT-parsed so an unknown knob kind (e.g. an ENV-plane relative-vol field, §2.3) is rejected,
+   * then run through the SAME name-regex + rail-shape rules as the env JSON. Throws {@link
+   * IllegalArgumentException} on any violation — the registry surfaces it as a 422. The strictness
+   * rides a per-call {@code ObjectReader}, never the shared mapper (the live Kite mapper must stay
+   * lenient). Pure — never touches the live active set.
+   */
+  public static Variant validatedFromSpec(ObjectMapper mapper, String name, JsonNode specNode) {
+    RawSpec spec;
+    try {
+      String json = specNode == null ? "{}" : mapper.writeValueAsString(specNode);
+      spec =
+          mapper
+              .readerFor(RawSpec.class)
+              .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+              .readValue(json);
+    } catch (Exception e) {
+      throw new IllegalArgumentException(
+          "unrecognized shadow-variant spec (unknown knob kind — the vocabulary is rail"
+              + " disable / rail threshold+passWhen / compositeThreshold): "
+              + rootMessage(e));
+    }
+    RawVariant raw = new RawVariant();
+    raw.name = name;
+    raw.rails = spec == null ? null : spec.rails;
+    raw.compositeThreshold = spec == null ? null : spec.compositeThreshold;
+    return validated(raw);
+  }
+
+  private static String rootMessage(Throwable e) {
+    Throwable t = e;
+    while (t.getCause() != null && t.getCause() != t) {
+      t = t.getCause();
+    }
+    String m = t.getMessage();
+    if (m == null) {
+      return t.getClass().getSimpleName();
+    }
+    int nl = m.indexOf('\n');
+    return nl < 0 ? m : m.substring(0, nl);
   }
 
   /**
@@ -113,6 +163,18 @@ public class ShadowVariants {
    * and the composite clears the variant floor (default: the champion threshold). The composite
    * rail itself is floor-ruled, not pass/fail-ruled, mirroring the champion book's
    * {@code min-composite} precedent.
+   *
+   * <p><b>§3.3.3 relaxing-or-neutral clamp.</b> A threshold override is clamped per bar against the
+   * champion's OWN recorded threshold for that rail ({@code RailCheck.threshold()}, populated for
+   * every evaluated rail by the all-eval gate): {@code GTE} (floor) rails re-score against
+   * {@code min(override, champion)}, {@code LTE} (cap) rails against {@code max(override,
+   * champion)} — so an override can only RELAX, never tighten. The shadow writer fires on the
+   * REJECTION path only, so a tightening override would cherry-pick the rejected stream (the extra
+   * entries it blocks are champion-ACCEPTED — invisible here) and bias the book upward; the clamp
+   * realizes the §3.3.3 rule exactly, per strategy and per bar — a mixed relax+tighten spec
+   * degrades to "the tightened rail behaves as champion". A rail whose champion threshold was not
+   * recorded (null) uses the override as-is (nothing to clamp against). Consequence: a variant can
+   * never flip a champion-passing rail to fail on the rails it overrides.
    */
   public static boolean accepts(ScalperConfluenceGate.RejectionDiagnostic d, Variant v) {
     if (d.checks() == null) {
@@ -138,7 +200,7 @@ public class ShadowVariants {
         }
         continue;
       }
-      int cmp = c.operand().compareTo(o.threshold());
+      int cmp = c.operand().compareTo(clampedThreshold(o, c.threshold()));
       boolean pass = "GTE".equals(o.passWhen()) ? cmp >= 0 : cmp <= 0;
       if (!pass) {
         return false;
@@ -149,9 +211,25 @@ public class ShadowVariants {
     return d.compositeScore() != null && floor != null && d.compositeScore().compareTo(floor) >= 0;
   }
 
+  /** The §3.3.3 clamp: floor overrides may only lower, cap overrides may only raise. */
+  private static BigDecimal clampedThreshold(RailOverride o, BigDecimal champion) {
+    if (champion == null) {
+      return o.threshold();
+    }
+    return "GTE".equals(o.passWhen())
+        ? o.threshold().min(champion)
+        : o.threshold().max(champion);
+  }
+
   /** Jackson shape of one configured variant. */
   static final class RawVariant {
     public String name;
+    public List<RawRail> rails;
+    public BigDecimal compositeThreshold;
+  }
+
+  /** Jackson shape of a runtime-registration spec BODY (the variant minus its name). */
+  static final class RawSpec {
     public List<RawRail> rails;
     public BigDecimal compositeThreshold;
   }

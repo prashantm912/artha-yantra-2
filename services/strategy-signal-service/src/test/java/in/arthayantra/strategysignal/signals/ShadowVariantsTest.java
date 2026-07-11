@@ -125,4 +125,47 @@ class ShadowVariantsTest {
         .isEmpty();
     assertThat(variants("[]").all()).isEmpty();
   }
+
+  @Test
+  void mixedRelaxTightenSpecClampsTheTightenedRailToChampion() {
+    // §3.3.3 clamp: volume-floor disable RELAXES; rsi-band 70 GTE TIGHTENS vs the champion 60.
+    // The tightened rail must behave as champion — never veto an entry the champion's rsi passed.
+    ShadowVariants.Variant v =
+        variants(
+                "[{\"name\":\"mixed\",\"rails\":[{\"rail\":\"volume-floor\",\"disable\":true},"
+                    + "{\"rail\":\"rsi-band\",\"threshold\":70,\"passWhen\":\"GTE\"}]}]")
+            .all().get(0);
+    // rsi 62 passes champion 60 but would fail the 70 override — the clamp keeps 60, so ACCEPT
+    RejectionDiagnostic d =
+        diag(List.of(rail("volume-floor", false, "9000", "125000"), rail("rsi-band", true, "62", "60")),
+            "0.70", "0.60");
+    assertThat(ShadowVariants.accepts(d, v)).isTrue();
+    // rsi 55 fails champion 60 too — the clamp does not LOOSEN either (still a veto)
+    RejectionDiagnostic worse =
+        diag(List.of(rail("volume-floor", false, "9000", "125000"), rail("rsi-band", false, "55", "60")),
+            "0.70", "0.60");
+    assertThat(ShadowVariants.accepts(worse, v)).isFalse();
+  }
+
+  @Test
+  void lteClampNeverTightensACapRail() {
+    // cap rail: champion 70; override 60 LTE is TIGHTER → clamped to max(60,70)=70: operand 65 passes
+    ShadowVariants.Variant v =
+        variants("[{\"name\":\"cap-60\",\"rails\":[{\"rail\":\"rsi-5m-cap\",\"threshold\":60,\"passWhen\":\"LTE\"}]}]")
+            .all().get(0);
+    RejectionDiagnostic d =
+        diag(List.of(rail("rsi-5m-cap", true, "65", "70")), "0.70", "0.60");
+    assertThat(ShadowVariants.accepts(d, v)).isTrue();
+  }
+
+  @Test
+  void pureLooseningOverrideIsUnaffectedByTheClamp() {
+    // champion floor 125000, override 12500 (looser): min(12500,125000)=12500 — loosening intact
+    ShadowVariants.Variant v =
+        variants("[{\"name\":\"vol-12k5b\",\"rails\":[{\"rail\":\"volume-floor\",\"threshold\":12500}]}]")
+            .all().get(0);
+    RejectionDiagnostic d =
+        diag(List.of(rail("volume-floor", false, "14000", "125000")), "0.70", "0.60");
+    assertThat(ShadowVariants.accepts(d, v)).isTrue();
+  }
 }

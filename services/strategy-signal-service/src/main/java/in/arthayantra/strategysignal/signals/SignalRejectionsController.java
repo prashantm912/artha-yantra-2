@@ -98,14 +98,18 @@ public class SignalRejectionsController {
   /**
    * The shadow-book league table (roadmap F1): per-variant open/closed/wins/losses + realized
    * points over an optional opened-at window — champion vs challenger configs on identical data.
+   * Variants are GLOBAL (EVO E3 §11) so the unfiltered league aggregates cross-strategy PnL under
+   * one variant name; {@code strategySlug} narrows it to one strategy's book — the per-strategy
+   * read campaign analysis pairs with.
    */
   @GetMapping("/shadow-summary")
   public ShadowSummaryResponse shadowSummary(
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
           OffsetDateTime from,
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
-          OffsetDateTime to) {
-    return new ShadowSummaryResponse(shadows.variantSummary(from, to));
+          OffsetDateTime to,
+      @RequestParam(required = false) String strategySlug) {
+    return new ShadowSummaryResponse(shadows.variantSummary(from, to, strategySlug));
   }
 
   private static Map<String, Object> dto(SignalRejectionRepository.RejectionRow row) {

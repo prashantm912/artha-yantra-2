@@ -10,8 +10,9 @@ from app import metrics_catalog
 from app.errors import ApiError
 from app.service import _ALLOWED_OBJECTIVE_METRICS, _validate_objective_metrics
 
-# The exact set the frozenset held before it was derived from the catalog — the refactor must not
-# change which objective metrics the optimizer accepts.
+# The set the frozenset held before it was derived from the catalog, PLUS the E1 evolution-engine
+# metric adds (recoveryFactor / tradeFrequency / turnover — design §6.2, emitted by
+# MetricsCalculator). Deriving from the catalog must accept EXACTLY the metrics the catalog carries.
 _LEGACY_ALLOWED = frozenset(
     {
         "totalReturn",
@@ -26,6 +27,9 @@ _LEGACY_ALLOWED = frozenset(
         "averageTrade",
         "exposure",
         "tradeCount",
+        "recoveryFactor",
+        "tradeFrequency",
+        "turnover",
         "foldsExcluded",
         "alpha",
         "beta",

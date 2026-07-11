@@ -45,10 +45,48 @@
         }
       }
     },
+    "/api/v1/backtests/deep-swing" : {
+      "post" : {
+        "tags" : [ "deep-swing-controller" ],
+        "operationId" : "submit",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/DeepSwingRunRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DeepSwingSubmitResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/backtests/counterfactual" : {
       "post" : {
         "tags" : [ "counterfactual-controller" ],
-        "operationId" : "submit",
+        "operationId" : "submit_1",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -967,6 +1005,31 @@
         "properties" : {
           "slippageMultiplier" : {
             "type" : "number"
+          }
+        }
+      },
+      "DeepSwingRunRequest" : {
+        "type" : "object",
+        "properties" : {
+          "family" : {
+            "type" : "string"
+          },
+          "from" : {
+            "type" : "string"
+          },
+          "variant" : {
+            "type" : "string"
+          }
+        }
+      },
+      "DeepSwingSubmitResponse" : {
+        "type" : "object",
+        "properties" : {
+          "jobId" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
           }
         }
       },

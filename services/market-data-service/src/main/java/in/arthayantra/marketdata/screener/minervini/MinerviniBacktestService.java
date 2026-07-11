@@ -2,6 +2,8 @@ package in.arthayantra.marketdata.screener.minervini;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import in.arthayantra.marketdata.screener.DeepSwingRunResult;
+import in.arthayantra.marketdata.screener.DeepSwingTrade;
 import in.arthayantra.marketdata.screener.minervini.MinerviniSwingBacktest.BtTrade;
 import in.arthayantra.marketdata.screener.minervini.MinerviniSwingBacktest.Variant;
 import in.arthayantra.marketdata.screener.minervini.geometry.DailyBar;
@@ -346,6 +348,59 @@ public class MinerviniBacktestService {
       LocalDate from,
       BiFunction<List<String>, LocalDate, Map<String, Series>> closesReader,
       BiFunction<List<String>, LocalDate, Map<String, List<DailyBar>>> barsReader) {
+    Computed c = computeAll(from, closesReader, barsReader);
+    List<BtTrade> all = c.all();
+    int scanned = c.scanned();
+    String runAt = nowIso();
+    List<Report> reports = new ArrayList<>();
+    for (Variant v : jobVariants()) {
+      reports.add(report(v.name(), from, runAt, scanned, all));
+    }
+    List<SweepCell> sweep = turnoverSweep(all);
+    List<SlotCell> slotSweep = slotSweep(all);
+    RotationResult rotation = rotation(all, c.weekly());
+    log.info(
+        "minervini swing backtest: {} symbols, {}, rotations {}, from {}",
+        scanned,
+        reports.stream().map(r -> r.variant() + " " + r.totalTrades()).reduce((a, b) -> a + ", " + b).orElse(""),
+        rotation.rotations(),
+        from);
+    return new BacktestResult(
+        "completed", from, runAt, reports, sweep, slotSweep, rotation,
+        "candles@1d ~11y over " + slots + " concurrent slots; variants isolate a weekly cross-sectional"
+            + " RS-rank≥" + fmt(rsMin) + " gate and a ₹" + fmt(turnoverFloor) + "/day turnover floor;"
+            + " open-at-end positions dropped; portfolio is net-of-cost; survivorship-biased.");
+  }
+
+  /**
+   * The 2×2 variant grid ({RS gate off/on} × {turnover floor off/on}). Hoisted so ONE definition feeds
+   * BOTH {@link #computeAll} (the sim) and the DEEP_SWING job-variant validation — the job path and the
+   * direct /compare path score the exact same variant set.
+   */
+  private List<Variant> jobVariants() {
+    return List.of(
+        new Variant("technical", false, 0, 0), // v1: neither filter
+        new Variant("rs-only", true, rsMin, 0), // RS-rank gate alone
+        new Variant("turnover-only", false, 0, turnoverFloor), // liquidity floor alone
+        new Variant("rs-turnover", true, rsMin, turnoverFloor)); // both (the live-funnel analogue)
+  }
+
+  /** The deep-sim compute output shared by {@link #run} and {@link #runForJob} (audit P0-3). */
+  private record Computed(
+      List<BtTrade> all, int scanned, Map<String, SwingRotationPortfolio.WeeklySeries> weekly) {}
+
+  /**
+   * The deep-sim compute — pass 1 (weekly cross-sectional RS distribution) + pass 2 (variant-grid
+   * replay over the SAME bars) — extracted so {@link #run} (the direct multi-variant result) and
+   * {@link #runForJob} (the DEEP_SWING job path) share ONE compute path with ZERO hand-mirrored drift.
+   * Returns every closed trade across all variants, the scanned-symbol count, and the per-symbol weekly
+   * (RS, close) series the rotation sim consumes; behaviourally identical to the pre-extraction inline
+   * body (the F2 equality IT pins it byte-for-byte).
+   */
+  private Computed computeAll(
+      LocalDate from,
+      BiFunction<List<String>, LocalDate, Map<String, Series>> closesReader,
+      BiFunction<List<String>, LocalDate, Map<String, List<DailyBar>>> barsReader) {
     LocalDate warmStart = from.minusDays(600); // ≥252 sessions + VCP-lookback warmup before `from`
     List<String> symbols = eqSymbols();
 
@@ -387,12 +442,7 @@ public class MinerviniBacktestService {
 
     // Pass 2 — replay the 2×2 of {RS gate off/on} × {turnover floor off/on} over the SAME bars, so the
     // four variants are a clean apples-to-apples isolation (identical geometry/MAs/triggers).
-    List<Variant> variants =
-        List.of(
-            new Variant("technical", false, 0, 0), // v1: neither filter
-            new Variant("rs-only", true, rsMin, 0), // RS-rank gate alone
-            new Variant("turnover-only", false, 0, turnoverFloor), // liquidity floor alone
-            new Variant("rs-turnover", true, rsMin, turnoverFloor)); // both (the live-funnel analogue)
+    List<Variant> variants = jobVariants();
     List<BtTrade> all = new ArrayList<>();
     // per-symbol weekly (RS, close) series for the rotation sim's held-position lookups — captured only
     // for symbols that produce rs-only signals (bounds the memory on the small heap).
@@ -416,26 +466,69 @@ public class MinerviniBacktestService {
         }
       }
     }
+    return new Computed(all, scanned, weekly);
+  }
 
-    String runAt = nowIso();
-    List<Report> reports = new ArrayList<>();
-    for (Variant v : variants) {
-      reports.add(report(v.name(), from, runAt, scanned, all));
+  /**
+   * The DEEP_SWING job path (research-fidelity audit P0-3): runs the SAME deep-sim compute as {@link
+   * #run} (production CHUNK-batched readers) and returns ONE variant's per-trade rows + portfolio
+   * report as the shared {@link DeepSwingRunResult} wire shape, so the backtest-service worker persists
+   * it into the backtest lineage (a {@code backtest_runs} row + {@code backtest_trades}). Reuses {@link
+   * #computeAll} + {@link #report}, so the job numbers ARE the numbers the direct
+   * {@code /swing-backtest/compare} endpoint reports for the same variant. Headline metrics map from
+   * the RS-priority NET portfolio (the realistic-live estimate). {@code variant} defaults to the
+   * primary full-filter variant; an unknown variant throws (422 at the endpoint).
+   */
+  public DeepSwingRunResult runForJob(LocalDate from, String variant) {
+    String v = (variant == null || variant.isBlank()) ? PRIMARY_VARIANT : variant;
+    List<String> names = jobVariants().stream().map(Variant::name).toList();
+    if (!names.contains(v)) {
+      throw new IllegalArgumentException(
+          "unknown Minervini deep-swing variant '" + v + "'; valid: " + names);
     }
-    List<SweepCell> sweep = turnoverSweep(all);
-    List<SlotCell> slotSweep = slotSweep(all);
-    RotationResult rotation = rotation(all, weekly);
-    log.info(
-        "minervini swing backtest: {} symbols, {}, rotations {}, from {}",
-        scanned,
-        reports.stream().map(r -> r.variant() + " " + r.totalTrades()).reduce((a, b) -> a + ", " + b).orElse(""),
-        rotation.rotations(),
-        from);
-    return new BacktestResult(
-        "completed", from, runAt, reports, sweep, slotSweep, rotation,
-        "candles@1d ~11y over " + slots + " concurrent slots; variants isolate a weekly cross-sectional"
-            + " RS-rank≥" + fmt(rsMin) + " gate and a ₹" + fmt(turnoverFloor) + "/day turnover floor;"
-            + " open-at-end positions dropped; portfolio is net-of-cost; survivorship-biased.");
+    Computed c = computeAll(from, this::readClosesBatched, this::readSeriesBatched);
+    String runAt = nowIso();
+    Report rep = report(v, from, runAt, c.scanned(), c.all());
+    List<DeepSwingTrade> trades =
+        c.all().stream()
+            .filter(t -> t.variant().equals(v))
+            .map(MinerviniBacktestService::toDeepSwingTrade)
+            .toList();
+    PortfolioStat net = rep.portfolioRsPriorityNet();
+    SetupStat allSetup =
+        rep.setups().stream().filter(s -> "ALL".equals(s.setup())).findFirst().orElse(null);
+    return new DeepSwingRunResult(
+        "minervini",
+        v,
+        from,
+        runAt,
+        c.scanned(),
+        BigDecimal.valueOf(costs.capital()),
+        net.totalReturnPct(),
+        net.cagrPct(),
+        net.maxDrawdownPct(),
+        net.sharpe(),
+        net.tradesTaken(),
+        net.tradesSkipped(),
+        allSetup == null ? z() : allSetup.winRatePct(),
+        allSetup == null ? z() : allSetup.profitFactor(),
+        objectMapper.valueToTree(rep),
+        trades);
+  }
+
+  /** Maps one Minervini trade to the shared DEEP_SWING wire trade (a NaN RS-rank rides as {@code null}). */
+  private static DeepSwingTrade toDeepSwingTrade(BtTrade t) {
+    return new DeepSwingTrade(
+        t.symbol(),
+        t.setup(),
+        t.entryDate(),
+        BigDecimal.valueOf(t.entryPrice()),
+        t.exitDate(),
+        BigDecimal.valueOf(t.exitPrice()),
+        BigDecimal.valueOf(t.pnlPct()),
+        t.barsHeld(),
+        t.exitReason(),
+        Double.isNaN(t.rsRankAtEntry()) ? null : BigDecimal.valueOf(t.rsRankAtEntry()));
   }
 
   /** v7 slot sweep: the RS-priority portfolio at 8/12/16/20/24 slots, gross + net. */

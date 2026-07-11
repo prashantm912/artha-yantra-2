@@ -148,6 +148,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/screener/deep-swing/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["run_2"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/options/stock-chain/warm": {
         parameters: {
             query?: never;
@@ -2212,6 +2228,55 @@ export interface components {
             meanExcessReturnPct?: number;
             medianReturnPct?: number;
         };
+        DeepSwingRunRequest: {
+            family?: string;
+            /** Format: date */
+            from?: string;
+            variant?: string;
+        };
+        DeepSwingRunResponse: {
+            engineSha?: string;
+            engineImage?: string;
+            result?: components["schemas"]["DeepSwingRunResult"];
+        };
+        DeepSwingRunResult: {
+            family?: string;
+            variant?: string;
+            /** Format: date */
+            fromDate?: string;
+            runAt?: string;
+            /** Format: int32 */
+            symbolsScanned?: number;
+            capital?: number;
+            totalReturnPct?: number;
+            cagrPct?: number;
+            maxDrawdownPct?: number;
+            sharpe?: number;
+            /** Format: int32 */
+            tradesTaken?: number;
+            /** Format: int32 */
+            tradesSkipped?: number;
+            winRatePct?: number;
+            profitFactor?: number;
+            report?: components["schemas"]["JsonNode"];
+            trades?: components["schemas"]["DeepSwingTrade"][];
+        };
+        DeepSwingTrade: {
+            symbol?: string;
+            setup?: string;
+            /** Format: date */
+            entryDate?: string;
+            entryPrice?: number;
+            /** Format: date */
+            exitDate?: string;
+            exitPrice?: number;
+            pnlPct?: number;
+            /** Format: int32 */
+            barsHeld?: number;
+            exitReason?: string;
+            rsRankAtEntry?: number;
+        };
+        JsonNode: unknown;
         WarmStatus: {
             underlying?: string;
             /** Format: date */
@@ -4132,6 +4197,39 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ScreenResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_2: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeepSwingRunRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["DeepSwingRunResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

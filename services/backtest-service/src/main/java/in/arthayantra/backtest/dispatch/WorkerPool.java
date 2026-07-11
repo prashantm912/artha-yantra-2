@@ -47,12 +47,19 @@ public class WorkerPool {
   private final JobRepository repository;
   private final BacktestRunner runner;
   private final ProgressPublisher progress;
+  private final JobStreamDispatcher dispatcher;
   private final int configuredWorkers;
   private final boolean enabled;
   private final int reservedInteractive;
   private final String consumer;
   private final AtomicInteger busy = new AtomicInteger();
   private final AtomicInteger trials = new AtomicInteger();
+  // Audit P0-3: at most ONE deep-swing job in flight (market-data's SwingBacktestGate is a single
+  // permit anyway — serializing here turns the second job's would-be 409 failure into orderly
+  // queueing) and it COUNTS AGAINST the trial budget (B16), so a minutes-long deep-sim can never
+  // occupy the interactive-reserved slots.
+  private final java.util.concurrent.atomic.AtomicBoolean deepSwingBusy =
+      new java.util.concurrent.atomic.AtomicBoolean();
 
   private volatile boolean running;
   private ExecutorService pool;
@@ -63,6 +70,7 @@ public class WorkerPool {
       JobRepository repository,
       BacktestRunner runner,
       ProgressPublisher progress,
+      JobStreamDispatcher dispatcher,
       @Value("${artha.backtest.workers:0}") int configuredWorkers,
       @Value("${artha.backtest.worker-pool-enabled:true}") boolean enabled,
       @Value("${artha.backtest.interactive-reserved:1}") int reservedInteractive) {
@@ -70,6 +78,7 @@ public class WorkerPool {
     this.repository = repository;
     this.runner = runner;
     this.progress = progress;
+    this.dispatcher = dispatcher;
     this.configuredWorkers = configuredWorkers;
     this.enabled = enabled;
     this.reservedInteractive = Math.max(0, reservedInteractive);
@@ -126,6 +135,34 @@ public class WorkerPool {
   /** Releases a trial slot reserved by {@link #tryReserveTrialSlot()}. */
   void releaseTrialSlot() {
     trials.decrementAndGet();
+  }
+
+  /**
+   * Atomically reserves the DEEP_SWING budget (audit P0-3): the single deep-swing in-flight slot AND
+   * one slot of the trial (batch) budget — so trials + the deep-swing together never exceed {@link
+   * #maxTrialWorkers()}, keeping the {@code interactive-reserved} slots free while a minutes-long
+   * deep-sim runs. Both or neither.
+   */
+  boolean tryReserveDeepSwingBudget() {
+    if (!deepSwingBusy.compareAndSet(false, true)) {
+      return false;
+    }
+    if (!tryReserveTrialSlot()) {
+      deepSwingBusy.set(false);
+      return false;
+    }
+    return true;
+  }
+
+  /** Releases the budget reserved by {@link #tryReserveDeepSwingBudget()}. */
+  void releaseDeepSwingBudget() {
+    releaseTrialSlot();
+    deepSwingBusy.set(false);
+  }
+
+  /** Whether a deep-swing job currently holds the single in-flight slot (gauge / test hook). */
+  boolean deepSwingInFlight() {
+    return deepSwingBusy.get();
   }
 
   /** Starts the platform-thread pool reading the backtest stream. */
@@ -208,23 +245,67 @@ public class WorkerPool {
     process(record, SOURCES.get(0));
   }
 
+  /** Backoff before re-dispatching a budget-refused DEEP_SWING entry (a sim run is minutes). */
+  private static final long DEEP_SWING_REQUEUE_BACKOFF_MS = 3_000;
+
   /** Processes one record off a given source, acking to that source's group. */
   public void process(MapRecord<String, Object, Object> record, StreamSource source) {
     Object raw = record.getValue().get("jobId");
     UUID jobId = parseJobId(raw);
+    boolean ack = true;
     try {
-      if (jobId != null && repository.claim(jobId, consumer)) {
-        busy.incrementAndGet();
-        try {
-          runClaimed(jobId);
-        } finally {
-          busy.decrementAndGet();
-        }
+      if (jobId == null) {
+        return;
       }
-      // else: not queued (duplicate / running elsewhere / terminal) -> drop
+      // Audit P0-3: a DEEP_SWING job is gated on the deep-swing budget BEFORE the claim — it counts
+      // against the batch (trial) budget and is serialized to one in flight. When the budget is full
+      // the entry is put BACK on the stream (and this one acked) so the job stays authoritative
+      // 'queued' and is retried later, instead of failing on market-data's busy 409 or occupying an
+      // interactive-reserved slot for the sim's whole runtime.
+      Job job = repository.find(jobId).orElse(null);
+      if (job == null) {
+        return; // row gone (pruned) -> drop
+      }
+      if (job.kind() == in.arthayantra.backtest.jobs.JobKind.DEEP_SWING) {
+        if (!tryReserveDeepSwingBudget()) {
+          sleepQuiet(DEEP_SWING_REQUEUE_BACKOFF_MS); // throttle while the running sim holds the slot
+          try {
+            dispatcher.dispatchBacktest(jobId);
+          } catch (RuntimeException redisBlip) {
+            // Keep the ORIGINAL entry un-acked (PEL) rather than acking a job that now has no
+            // stream entry — either way it heals at the next boot (drain + re-dispatch from the
+            // authoritative table), but the PEL entry stays visible to stream monitoring.
+            ack = false;
+            log.warn("deep-swing requeue dispatch failed for {}: {}", jobId, redisBlip.toString());
+          }
+          return;
+        }
+        try {
+          claimAndRun(jobId);
+        } finally {
+          releaseDeepSwingBudget();
+        }
+        return;
+      }
+      claimAndRun(jobId);
     } finally {
-      acknowledge(record, source);
+      if (ack) {
+        acknowledge(record, source);
+      }
     }
+  }
+
+  /** Conditional claim + run (the pre-P0-3 body of {@link #process}); losing the claim drops. */
+  private void claimAndRun(UUID jobId) {
+    if (repository.claim(jobId, consumer)) {
+      busy.incrementAndGet();
+      try {
+        runClaimed(jobId);
+      } finally {
+        busy.decrementAndGet();
+      }
+    }
+    // else: not queued (duplicate / running elsewhere / terminal) -> drop
   }
 
   private void runClaimed(UUID jobId) {
@@ -276,8 +357,12 @@ public class WorkerPool {
   }
 
   private void sleepQuiet() {
+    sleepQuiet(500);
+  }
+
+  private void sleepQuiet(long millis) {
     try {
-      Thread.sleep(500);
+      Thread.sleep(millis);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
     }

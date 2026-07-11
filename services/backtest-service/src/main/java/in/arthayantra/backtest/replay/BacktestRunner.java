@@ -73,6 +73,7 @@ public class BacktestRunner {
   private final TrialResultPublisher trialResults;
   private final MarketDataClient marketData;
   private final in.arthayantra.backtest.replay.counterfactual.CounterfactualService counterfactual;
+  private final in.arthayantra.backtest.replay.deepswing.DeepSwingService deepSwing;
 
   /** Wires the replay collaborators. */
   public BacktestRunner(
@@ -91,7 +92,8 @@ public class BacktestRunner {
       BenchmarkAnalyzer benchmarkAnalyzer,
       TrialResultPublisher trialResults,
       MarketDataClient marketData,
-      in.arthayantra.backtest.replay.counterfactual.CounterfactualService counterfactual) {
+      in.arthayantra.backtest.replay.counterfactual.CounterfactualService counterfactual,
+      in.arthayantra.backtest.replay.deepswing.DeepSwingService deepSwing) {
     this.versions = versions;
     this.candleReader = candleReader;
     this.replayEngine = replayEngine;
@@ -108,6 +110,7 @@ public class BacktestRunner {
     this.trialResults = trialResults;
     this.marketData = marketData;
     this.counterfactual = counterfactual;
+    this.deepSwing = deepSwing;
   }
 
   /** Runs the job; throws {@link JobCancelledException} on cancel and other exceptions on failure. */
@@ -117,6 +120,13 @@ public class BacktestRunner {
     // pool + queue as a BACKTEST; never reaches the TRIAL result-publish branch below.
     if (job.kind() == JobKind.COUNTERFACTUAL) {
       counterfactual.run(job, progress, cancelled);
+      return;
+    }
+    // Audit P0-3: a DEEP_SWING job carries no strategy replay either — route it to the deep-swing
+    // service (which calls market-data's deep-sim over HTTP and persists the run + trades into the
+    // shared backtest lineage) and return before any strategy resolve/compile.
+    if (job.kind() == JobKind.DEEP_SWING) {
+      deepSwing.run(job, progress, cancelled);
       return;
     }
     JsonNode request = job.request();

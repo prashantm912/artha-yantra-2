@@ -20,7 +20,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/backtests/counterfactual": {
+    "/api/v1/backtests/deep-swing": {
         parameters: {
             query?: never;
             header?: never;
@@ -30,6 +30,22 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["submit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backtests/counterfactual": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["submit_1"];
         delete?: never;
         options?: never;
         head?: never;
@@ -318,6 +334,15 @@ export interface components {
         StressOverrides: {
             slippageMultiplier?: number;
         };
+        DeepSwingRunRequest: {
+            family?: string;
+            from?: string;
+            variant?: string;
+        };
+        DeepSwingSubmitResponse: {
+            jobId?: string;
+            status?: string;
+        };
         CounterfactualRunRequest: {
             from?: string;
             to?: string;
@@ -510,6 +535,39 @@ export interface operations {
         };
     };
     submit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeepSwingRunRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["DeepSwingSubmitResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    submit_1: {
         parameters: {
             query?: never;
             header?: never;

@@ -159,23 +159,24 @@ public class JobRepository {
    * sweep thread (a separate container a backtest restart does NOT orphan): without the kind filter a
    * restart hijacked a live sweep row, replayed it as a plain backtest and marked the sweep
    * completed under the optimizer (audit P1-10). COUNTERFACTUAL rides this service's own worker pool
-   * (EVO E3 item 9), so a crash orphans it exactly like a BACKTEST — it must re-queue too. Returns the
-   * count.
+   * (EVO E3 item 9), so a crash orphans it exactly like a BACKTEST — it must re-queue too. DEEP_SWING
+   * (audit P0-3) rides the same worker pool, so it re-queues on the same terms. Returns the count.
    */
   public int requeueStaleRunning() {
     return jdbc.update(
         "UPDATE jobs SET status='queued', worker_id=NULL, started_at=NULL"
-            + " WHERE status='running' AND kind IN ('BACKTEST','TRIAL','COUNTERFACTUAL')");
+            + " WHERE status='running' AND kind IN ('BACKTEST','TRIAL','COUNTERFACTUAL','DEEP_SWING')");
   }
 
   /**
-   * Ids of queued BACKTEST/TRIAL/COUNTERFACTUAL jobs — re-dispatched on startup (never OPTIMIZATION
-   * rows). COUNTERFACTUAL rides the same jobs.backtest stream (EVO E3 item 9), so a queued
-   * counterfactual job must survive a crash the same way.
+   * Ids of queued BACKTEST/TRIAL/COUNTERFACTUAL/DEEP_SWING jobs — re-dispatched on startup (never
+   * OPTIMIZATION rows). COUNTERFACTUAL (EVO E3 item 9) + DEEP_SWING (audit P0-3) ride the same
+   * jobs.backtest stream, so a queued one must survive a crash the same way.
    */
   public List<UUID> findQueuedIds() {
     return jdbc.query(
-        "SELECT id FROM jobs WHERE status='queued' AND kind IN ('BACKTEST','TRIAL','COUNTERFACTUAL')"
+        "SELECT id FROM jobs WHERE status='queued'"
+            + " AND kind IN ('BACKTEST','TRIAL','COUNTERFACTUAL','DEEP_SWING')"
             + " ORDER BY created_at",
         (rs, n) -> UUID.fromString(rs.getString("id")));
   }

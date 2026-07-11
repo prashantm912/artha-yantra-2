@@ -55,6 +55,13 @@ artha:
     # RATE_LIMIT_QUEUE once this many BACKTEST jobs are already queued (backpressure). Trials are
     # counted separately; a solo owner never approaches this.
     max-queued: ${ARTHA_BACKTEST_MAX_QUEUED:500}
+    # Audit P0-3 — the DEEP_SWING worker's synchronous market-data deep-sim call runs MINUTES (a
+    # full ~11y universe sim), far beyond the shared spring.http.client 180s read timeout, so its
+    # dedicated client carries its own budget. Plain values (Spring-property overridable); no env
+    # passthrough, so the #653 placeholder-mismatch class stays impossible.
+    deep-swing:
+      connect-timeout-ms: 5000
+      read-timeout-ms: 900000
 
 management:
   endpoints:

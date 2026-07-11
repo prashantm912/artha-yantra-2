@@ -10,11 +10,11 @@ import redis
 from fastapi import FastAPI
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from app import api, evolution, insights, stress
+from app import api, evolution, insights, reconciliation, stress
 from app.backtest_client import BacktestClient
 from app.errors import ApiError, api_error_handler, invalid_path_handler
 from app.path_grammar import InvalidParameterPath
-from app.repos import EvoRepo, JobsRepo, TrialsRepo
+from app.repos import EvoRepo, JobsRepo, LiveEvidenceRepo, ReconciliationRepo, TrialsRepo
 from app.service import SweepService
 from app.settings import Settings
 from app.strategy_client import StrategyClient
@@ -134,6 +134,17 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         backtest_client=backtest_client,
     )
 
+    # Backtest-vs-live reconciliation (§12 E3 item 7 / §7): re-simulate the EXACT version over the
+    # EXACT lived window (purpose reconcile), pair against live paper trades, persist the gap
+    # vector + gapZ + verdict + diagnosis. Its own reconciliation-store repo (backtest schema) + a
+    # read-only live-evidence repo (strategy schema — cross-schema reads as `artha`); reuses the
+    # backtest client to submit the re-sim + read its run. No autonomy, no scoring wiring (item 10).
+    app.state.reconciliation = reconciliation.ReconciliationService(
+        repo_factory=lambda: ReconciliationRepo(open_conn()),
+        live_factory=lambda: LiveEvidenceRepo(open_conn()),
+        backtest_client=backtest_client,
+    )
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "UP"}
@@ -142,6 +153,7 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(evolution.router)
     app.include_router(insights.router)
     app.include_router(stress.router)
+    app.include_router(reconciliation.router)
     Instrumentator().instrument(app).expose(app, endpoint="/metrics")
     return app
 

@@ -1,5 +1,9 @@
 # Golden feature: A9/A7 [FP-6] btst pre-close evaluation - once per day at
 # pre_close_at against the deterministic pre-close daily view; at_close fill.
+# P0-5: the pre-close bar OPENS a tracked position and the exit_rules below run at each
+# subsequent pre-close bar, so the carry EXITS next-session (time_stop max_holding_days:1
+# ⇒ one trading day held). Fill semantics: at_close on both legs — enter at day-N pre-close
+# close, exit at day-(N+1) pre-close close, so the position is held across the overnight gap.
 schema: strategy-schema/v1
 id: golden-btst-preclose
 name: "Golden BTST Preclose"

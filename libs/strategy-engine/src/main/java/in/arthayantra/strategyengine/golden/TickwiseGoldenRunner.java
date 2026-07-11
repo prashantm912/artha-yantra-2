@@ -33,6 +33,12 @@ import java.util.function.IntConsumer;
  * at the pre-close clock against the deterministic pre-close DAILY view; exit_intrabar
  * strategies evaluate LEVEL exits on every closed 1m bar. The Stage D replay engine must
  * reproduce the emitted events byte-identically through the same serialization.
+ *
+ * <p>BTST exit caveat (P0-5, 2026-07-12): this runner IS the reference for btst exit semantics
+ * (exit_rules evaluated at each subsequent pre-close daily bar, close→close fills) — the live
+ * SignalEngine does not yet emit btst exits (its pre-close clock is entry-only); the live port is
+ * a tracked follow-up (chip task_3e95fade). Until it lands, btst exits are sim-ahead-of-live by
+ * design, not a parity break.
  */
 public final class TickwiseGoldenRunner {
 
@@ -208,19 +214,36 @@ public final class TickwiseGoldenRunner {
       }
 
       if (btst) {
-        // A9 [FP-6]: evaluate once per day at the pre-close clock on the assembled daily view
+        // A9 [FP-6] / P0-5: evaluate once per day at the pre-close clock on the assembled daily view.
+        // The pre-close bar OPENS a tracked position (at_close fill — held across the overnight gap that
+        // is the whole point of BTST) and the strategy's exit_rules are evaluated at each SUBSEQUENT
+        // pre-close bar, so the carry EXITS next-session (e.g. time_stop max_holding_days:1 fires one
+        // trading day later) instead of degenerating to a single end-of-data force-close (audit B1).
+        // Same exit-before-entry ordering as the coarse-primary path; re-entry allowed once flat.
         LocalTime barClose = bar.bucketStart().toLocalTime().plusMinutes(1);
         if (!preCloseDone && !barClose.isBefore(preCloseAt)) {
           preCloseDone = true;
           primary.append(preCloseDailyBar(dayBuffer));
-          Optional<EntryEvaluator.Evaluation> evaluation =
-              EntryEvaluator.evaluate(definition, bank, primary.size() - 1);
-          if (evaluation.isPresent() && evaluation.get().entry() && gate.entryAllowed(barTime, barDay)) {
-            events.add(
-                entryEvent(
-                    bar.bucketStart(),
-                    evaluation.get(),
-                    entryLevels(bank, primary, primary.size() - 1)));
+          int index = primary.size() - 1;
+          if (open != null) {
+            Optional<ExitEvaluator.ExitDecision> exit =
+                ExitEvaluator.evaluate(
+                    definition, bank,
+                    new ExitEvaluator.Position(
+                        open.direction(), open.entryPrice(), open.entryPrimaryIndex()),
+                    index, open.firedTiers());
+            if (exit.isPresent()) {
+              open = applyExit(open, exit.get(), bar.bucketStart(), events);
+            }
+          }
+          if (open == null) {
+            Optional<EntryEvaluator.Evaluation> evaluation =
+                EntryEvaluator.evaluate(definition, bank, index);
+            if (evaluation.isPresent() && evaluation.get().entry() && gate.entryAllowed(barTime, barDay)) {
+              events.add(
+                  entryEvent(bar.bucketStart(), evaluation.get(), entryLevels(bank, primary, index)));
+              open = openPosition(primary, index, live1m.size() - 1, evaluation.get());
+            }
           }
         }
         continue;

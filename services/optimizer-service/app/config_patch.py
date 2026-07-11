@@ -80,7 +80,7 @@ def _set_gate_constant(config: dict[str, Any], lhs: str, value: Any, path: str) 
     """Rewrites the sole gate comparison whose LHS is ``lhs`` to ``lhs op <value>`` (EVO row 21),
     mirroring backtest-service's ``TrialOverrides``. Resolves iff exactly one literal-RHS comparison
     carries this LHS — zero or many is a loud non-resolve."""
-    if not isinstance(value, (int, float)) or isinstance(value, bool):
+    if not isinstance(value, int | float) or isinstance(value, bool):
         raise InvalidParameterPath(f"gate-constant override must be numeric: {path!r}")
     gate = config.get("entry_rules", {}).get("gate")
     _require(_count_gate_literals(gate, lhs) == 1, path)

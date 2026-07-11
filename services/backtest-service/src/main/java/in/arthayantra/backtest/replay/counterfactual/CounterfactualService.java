@@ -56,6 +56,13 @@ import org.springframework.stereotype.Service;
  * {@link PremiumExitEvaluator} + the shared {@code FillSimulator} — no wall-clock, no randomness, so the
  * same request yields byte-identical variant metrics. Intraday-scoped: each entry is replayed from its
  * {@code entryTime} to that day's {@link #SESSION_CLOSE} IST (the END_OF_DATA square-off backstop).
+ *
+ * <p><b>No expiry settlement (P1-11 / audit B6).</b> Unlike the multi-day {@code OptionsPremiumReplay}
+ * hold, this tool squares off at the ENTRY day's 15:30 IST off the last REAL captured premium, so it
+ * never carries a leg into the post-expiry stale-premium region that intrinsic settlement exists to
+ * fix — a same-day-expiry entry's 15:30 square-off is already the real observed near-settlement close.
+ * Forcing intrinsic here would misprice the intended intraday-scalp square-off, so it is deliberately
+ * absent.
  */
 @Service
 public class CounterfactualService {

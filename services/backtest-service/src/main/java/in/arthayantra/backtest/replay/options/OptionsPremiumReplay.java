@@ -12,9 +12,12 @@ import in.arthayantra.backtest.replay.options.OptionContractSelector.OptionContr
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.strategyengine.config.StrategyDefinition;
+import in.arthayantra.strategyengine.fills.FeeConstants;
 import in.arthayantra.strategyengine.fills.FillSimulator;
+import in.arthayantra.strategyengine.fills.FillSimulator.Fees;
 import in.arthayantra.strategyengine.fills.FillSimulator.Fill;
 import in.arthayantra.strategyengine.fills.FillSimulator.FillRequest;
+import in.arthayantra.strategyengine.fills.FillSimulator.Slippage;
 import in.arthayantra.strategyengine.fills.LtpSlippageV1;
 import in.arthayantra.strategyengine.fills.Side;
 import in.arthayantra.strategyengine.fills.TouchBasis;
@@ -26,6 +29,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -52,6 +56,7 @@ import org.springframework.stereotype.Component;
 public class OptionsPremiumReplay {
 
   private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
+  private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
   private final OptionContractSelector selector;
   private final CandlePremiumReader premiumReader;
@@ -808,15 +813,39 @@ public class OptionsPremiumReplay {
     int signalExitOffset = leg.exitIndex() - leg.entryIndex();
     PremiumExitEvaluator.Exit exit =
         PremiumExitEvaluator.evaluate(entryPremium, premiums, rules, signalExitOffset);
-    int exitIndex = leg.entryIndex() + exit.barOffset();
-    EngineCandle exitBar = underlying.get(exitIndex);
+    int exitOffset = exit.barOffset();
+    int exitIndex = leg.entryIndex() + exitOffset;
+    String exitReason = exit.reason();
 
     // Cost-inclusive fills via the shared FillSimulator: BUY at entry (cash out), SELL at exit (cash
     // in); net P&L = the two signed netValues summed (slippage + brokerage + statutory legs included).
     // The cost-stress slippageMultiplier (EVO §3.2.5) rides the CostConfig into the fill (1 = unstressed).
     CostConfig cost = CostConfig.optionDefaults(lot).withSlippageMultiplier(slippageMultiplier);
     Fill entryFill = fill(cost, Side.BUY, qty, entryPremium);
-    Fill exitFill = fill(cost, Side.SELL, qty, exit.premium());
+
+    // ---- Option expiry settlement (P1-11 / audit B6) ----
+    // When no premium-driven exit fires at or before the contract's expiry-day session close, the
+    // option ceases to exist and the premium carried forward past expiry is fiction. Settle the leg at
+    // INTRINSIC off the strike-reference's expiry-day close (CE max(0, spot−strike) / PE max(0,
+    // strike−spot)), through the shared FillSimulator with the EXERCISE STT leg (0.125% vs the 0.10%
+    // sell-side premium STT) and NO added slippage (a cash settlement crosses no spread) — mirroring the
+    // live/paper Phase-43B settlement so backtest ≡ paper. A NEW terminal cause OUTSIDE the
+    // PremiumExitEvaluator precedence (the exit-equivalence fixture + its evaluator rules are untouched):
+    // it fires only here in the replay loop when the hold outlives the contract. Legs that exit on or
+    // before the expiry close are byte-identical — a genuine market exit is never overwritten.
+    int expiryIdx = expiryCloseIndex(underlying, leg.entryIndex(), leg.exitIndex(), contract.expiry());
+    Fill exitFill;
+    if (exitIndex > expiryIdx) {
+      BigDecimal settlementSpot = strikeSpotAt(strikeRef, underlying.get(expiryIdx));
+      BigDecimal intrinsic = intrinsicValue(contract.optionType(), settlementSpot, contract.strike());
+      exitOffset = expiryIdx - leg.entryIndex();
+      exitIndex = expiryIdx;
+      exitReason = "EXPIRY_SETTLEMENT";
+      exitFill = settlementFill(cost, qty, intrinsic);
+    } else {
+      exitFill = fill(cost, Side.SELL, qty, exit.premium());
+    }
+    EngineCandle exitBar = underlying.get(exitIndex);
     BigDecimal pnl =
         entryFill.netValue().add(exitFill.netValue()).setScale(2, RoundingMode.HALF_UP);
     BigDecimal notional = entryPremium.multiply(BigDecimal.valueOf(qty));
@@ -836,8 +865,8 @@ public class OptionsPremiumReplay {
             exitFill.fillPrice(),
             pnl,
             pnlPct,
-            exit.reason(),
-            exit.barOffset(),
+            exitReason,
+            exitOffset,
             TouchBasis.CLOSE_EVAL,
             null,
             contract.exchange(),
@@ -845,7 +874,7 @@ public class OptionsPremiumReplay {
             level(entryPremium, rules.stopLossPct(), false),
             level(entryPremium, rules.takeProfitPct(), true));
 
-    List<BigDecimal> marks = new ArrayList<>(premiums.subList(0, exit.barOffset() + 1));
+    List<BigDecimal> marks = new ArrayList<>(premiums.subList(0, exitOffset + 1));
     return Optional.of(
         new LegResult(
             trade, leg.entryIndex(), exitIndex, qty, marks,
@@ -867,6 +896,64 @@ public class OptionsPremiumReplay {
             cost.brokerage(),
             cost.fees()),
         cost.slippageMultiplier());
+  }
+
+  /**
+   * The underlying-bar index of the contract's expiry-day session close — the LAST bar in
+   * {@code [entryIndex, signalExitIndex]} whose IST session date is on or before {@code expiry}. Bars
+   * are chronological, so the scan stops at the first bar past expiry. Returns {@code signalExitIndex}
+   * when the entire hold precedes expiry (the leg never outlives the contract ⇒ no settlement). The
+   * entry bar is always on or before expiry (the selector lists only expiries on/after the entry date),
+   * so the result is never below {@code entryIndex}.
+   */
+  private static int expiryCloseIndex(
+      List<EngineCandle> underlying, int entryIndex, int signalExitIndex, LocalDate expiry) {
+    int last = entryIndex;
+    for (int k = entryIndex; k <= signalExitIndex; k++) {
+      if (underlying.get(k).bucketStart().atZoneSameInstant(IST).toLocalDate().isAfter(expiry)) {
+        break;
+      }
+      last = k;
+    }
+    return last;
+  }
+
+  /**
+   * Index-option intrinsic vs the settlement spot, zero-floored — kept byte-identical to the shipped
+   * paper Phase-43B {@code PaperExpiryService.intrinsic} so a settled leg values the same in backtest
+   * and the paper ledger: CE = max(0, spot−strike), PE = max(0, strike−spot).
+   */
+  static BigDecimal intrinsicValue(String optionType, BigDecimal spot, BigDecimal strike) {
+    if (spot == null || strike == null) {
+      return BigDecimal.ZERO;
+    }
+    BigDecimal value = "CE".equals(optionType) ? spot.subtract(strike) : strike.subtract(spot);
+    return value.signum() > 0 ? value : BigDecimal.ZERO;
+  }
+
+  /**
+   * The expiry-settlement SELL fill: NO added slippage (a cash settlement crosses no spread) and the
+   * EXERCISE STT leg ({@link FeeConstants#STT_OPTION_EXERCISE} 0.125% on the intrinsic turnover, vs the
+   * 0.10% sell-side premium STT) — the exact shape of the shipped paper {@code
+   * PaperFillService.settlementFill}, so a settled leg costs identically in backtest and the paper
+   * ledger. The other legs (₹20/lot brokerage, exchange txn, GST, SEBI) ride the shared option cost
+   * stack; an OTM lapse (intrinsic 0) is a 0-turnover fill (STT 0) still carrying that flat per-lot
+   * brokerage, matching paper. Slippage-free regardless of the cost-stress multiplier (settlement is
+   * not an execution).
+   */
+  private Fill settlementFill(CostConfig cost, long qty, BigDecimal intrinsic) {
+    return fills.simulate(
+        new FillRequest(
+            Side.SELL,
+            qty,
+            cost.lotSize(),
+            intrinsic,
+            cost.instrumentClass(),
+            cost.tickSize(),
+            null,
+            Slippage.ticks(0),
+            cost.brokerage(),
+            new Fees(FeeConstants.STT_OPTION_EXERCISE, null, null, null, null)));
   }
 
   private static BigDecimal level(BigDecimal entry, BigDecimal pct, boolean up) {

@@ -384,6 +384,128 @@ class OptionsPremiumReplayTest {
     assertThat(OptionsPremiumReplay.registryUnderlying("NIFTY 50")).isEqualTo("NIFTY");
   }
 
+  // ---- P1-11 / audit B6: option expiry settlement ----
+
+  private static EngineCandle barAt(String iso, String close) {
+    BigDecimal c = new BigDecimal(close);
+    return new EngineCandle(OffsetDateTime.parse(iso), c, c, c, c, 0L);
+  }
+
+  private static EngineCandle premAt(String iso, String px) {
+    BigDecimal p = new BigDecimal(px);
+    return new EngineCandle(OffsetDateTime.parse(iso), p, p, p, p, 0L);
+  }
+
+  /** Entry 06-15, CE 25000 held across the 2026-06-16 expiry to a 06-17 signal exit (spans two days). */
+  private static List<EngineCandle> settlementUnderlying(String expiryCloseSpot) {
+    return List.of(
+        barAt("2026-06-15T09:15:00+05:30", "25050"), // entry, the day before expiry
+        barAt("2026-06-16T09:15:00+05:30", "25080"), // expiry day, morning
+        barAt("2026-06-16T15:29:00+05:30", expiryCloseSpot), // expiry-day CLOSE → settlement spot
+        barAt("2026-06-17T09:15:00+05:30", "25200"), // post-expiry (option no longer trades)
+        barAt("2026-06-17T09:16:00+05:30", "25200")); // post-expiry, the signal exit bar
+  }
+
+  private static OptionsPremiumReplay settlementReplay(List<EngineCandle> premiumCandles) {
+    CandleReader reader = mock(CandleReader.class);
+    when(reader.read(eq("NFO"), eq(CE_SYMBOL), eq("1m"), any(), any())).thenReturn(premiumCandles);
+    return new OptionsPremiumReplay(new OptionContractSelector(CATALOG), new CandlePremiumReader(reader));
+  }
+
+  private static final PremiumExitEvaluator.Rules SL20_TP35 =
+      new PremiumExitEvaluator.Rules(bd("20"), bd("35"), null, null, null);
+  private static final UniverseSpec BOTH_SIDES =
+      new UniverseSpec(ExpiryMode.NEAREST_WEEKLY, 0, Set.of("CE", "PE"));
+
+  @Test
+  void itmLegHeldPastExpirySettlesAtIntrinsicWithExerciseStt() {
+    // The CE premium is real only through the expiry-day close (80→95→100), then carried flat (the
+    // option no longer exists). No bracket fires and the signal exit is a day PAST expiry, so the leg
+    // must settle at INTRINSIC off the 06-16 close spot 25100 (max(0, 25100−25000)=100) — NOT the stale
+    // carried premium — with the exercise STT leg, at the expiry-day close bar.
+    OptionsPremiumReplay replay =
+        settlementReplay(
+            List.of(
+                premAt("2026-06-15T09:15:00+05:30", "80"),
+                premAt("2026-06-16T09:15:00+05:30", "95"),
+                premAt("2026-06-16T15:29:00+05:30", "100")));
+
+    Trade trade =
+        replay
+            .tradeForLeg(
+                1, settlementUnderlying("25100"), "NIFTY", new PairedLeg(false, 0, 4), BOTH_SIDES,
+                SL20_TP35, 15_000)
+            .orElseThrow();
+
+    assertThat(trade.exitReason()).isEqualTo("EXPIRY_SETTLEMENT");
+    assertThat(trade.exitPrice()).isEqualByComparingTo("100"); // intrinsic, settlement crosses no spread
+    assertThat(trade.exitTs()).isEqualTo(OffsetDateTime.parse("2026-06-16T15:29:00+05:30"));
+    assertThat(trade.barsHeld()).isEqualTo(2); // settled at bar 2, not the offset-4 signal exit
+    assertThat(trade.qty()).isEqualTo(130); // floor(15000/(80×65)) = 2 lots
+    // entry 80.05 (1-tick) → settle 100 intrinsic; exit STT is the EXERCISE rate 0.125% (16.25, vs the
+    // 0.10% sell-side 13.00) + ₹20/lot brokerage + txn/GST/SEBI → net pnl +2472.84.
+    assertThat(trade.pnl()).isEqualByComparingTo("2472.84");
+  }
+
+  @Test
+  void otmLegHeldPastExpiryLapsesWorthlessAtZeroIntrinsic() {
+    // Same hold, but the 06-16 close spot 24900 is BELOW the 25000 CE strike → intrinsic 0: the option
+    // expires worthless. The trader loses the entry cost + the settlement's flat per-lot brokerage.
+    OptionsPremiumReplay replay =
+        settlementReplay(
+            List.of(
+                premAt("2026-06-15T09:15:00+05:30", "80"),
+                premAt("2026-06-16T09:15:00+05:30", "95"),
+                premAt("2026-06-16T15:29:00+05:30", "100")));
+
+    Trade trade =
+        replay
+            .tradeForLeg(
+                1, settlementUnderlying("24900"), "NIFTY", new PairedLeg(false, 0, 4), BOTH_SIDES,
+                SL20_TP35, 15_000)
+            .orElseThrow();
+
+    assertThat(trade.exitReason()).isEqualTo("EXPIRY_SETTLEMENT");
+    assertThat(trade.exitPrice()).isEqualByComparingTo("0"); // OTM → worthless
+    assertThat(trade.pnl()).isEqualByComparingTo("-10505.53"); // ≈ the whole entry outlay lost
+    // sanity: the ITM settlement above beats the worthless OTM lapse by the intrinsic minus exercise STT.
+    assertThat(trade.pnl()).isLessThan(bd("2472.84"));
+  }
+
+  @Test
+  void marketExitOnTheExpiryCloseBarIsNotOverwrittenBySettlement() {
+    // The additive boundary: a genuine premium-driven exit that fires AT the expiry-day close (TP at
+    // offset 2, the 15:29 bar) is NOT a settlement — it books the observed 110 premium (fill 109.95,
+    // sell-side STT), reason TAKE_PROFIT, exactly as before P1-11. Only a hold that OUTLIVES the close
+    // settles at intrinsic.
+    OptionsPremiumReplay replay =
+        settlementReplay(
+            List.of(
+                premAt("2026-06-15T09:15:00+05:30", "80"),
+                premAt("2026-06-16T09:15:00+05:30", "95"),
+                premAt("2026-06-16T15:29:00+05:30", "110"))); // hits the +35% target (108) at the close
+
+    Trade trade =
+        replay
+            .tradeForLeg(
+                1, settlementUnderlying("25100"), "NIFTY", new PairedLeg(false, 0, 4), BOTH_SIDES,
+                SL20_TP35, 15_000)
+            .orElseThrow();
+
+    assertThat(trade.exitReason()).isEqualTo("TAKE_PROFIT");
+    assertThat(trade.exitPrice()).isEqualByComparingTo("109.95"); // normal 1-tick sell, not settlement
+    assertThat(trade.exitTs()).isEqualTo(OffsetDateTime.parse("2026-06-16T15:29:00+05:30"));
+    assertThat(trade.barsHeld()).isEqualTo(2);
+  }
+
+  @Test
+  void intrinsicValueIsCePeAwareAndZeroFloored() {
+    assertThat(OptionsPremiumReplay.intrinsicValue("CE", bd("25100"), bd("25000"))).isEqualByComparingTo("100");
+    assertThat(OptionsPremiumReplay.intrinsicValue("CE", bd("24900"), bd("25000"))).isEqualByComparingTo("0");
+    assertThat(OptionsPremiumReplay.intrinsicValue("PE", bd("24900"), bd("25000"))).isEqualByComparingTo("100");
+    assertThat(OptionsPremiumReplay.intrinsicValue("PE", bd("25100"), bd("25000"))).isEqualByComparingTo("0");
+  }
+
   private static BigDecimal bd(String v) {
     return new BigDecimal(v);
   }

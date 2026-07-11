@@ -42,6 +42,7 @@ public class SignalPublisher {
       String slug,
       String version,
       String checksum,
+      String book,
       String exchange,
       String tradingsymbol,
       String interval,
@@ -61,6 +62,9 @@ public class SignalPublisher {
       payload.put("strategyId", slug);
       payload.put("version", version);
       payload.put("checksum", checksum);
+      // The paper BOOK (strategy family, Books.fromTags) so a book-filtered live view can drop a
+      // frame for another book — else every browser session merges every book's signals (audit M17).
+      payload.put("book", book);
       payload.put("exchange", exchange);
       payload.put("tradingsymbol", tradingsymbol);
       payload.put("interval", interval);

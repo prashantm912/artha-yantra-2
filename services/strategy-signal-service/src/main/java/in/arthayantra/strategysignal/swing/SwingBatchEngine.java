@@ -375,9 +375,9 @@ public class SwingBatchEngine {
       throw new IllegalStateException("canonical breakdown unparseable", e);
     }
     publisher.publish(
-        id, strat.versionId(), strat.name(), strat.slug(), strat.version(), strat.checksum(), EX,
-        c.symbol(), IV, "ENTRY", "BUY", entryPrice, stopLoss, target, eval.breakdown().composite(),
-        canonical, generatedAt);
+        id, strat.versionId(), strat.name(), strat.slug(), strat.version(), strat.checksum(),
+        doctrine.book(), EX, c.symbol(), IV, "ENTRY", "BUY", entryPrice, stopLoss, target,
+        eval.breakdown().composite(), canonical, generatedAt);
     events.publishEvent(
         new SignalEmitted(
             id, strat.versionId(), EX, c.symbol(), "BUY", entryPrice, stopLoss, target,
@@ -492,9 +492,9 @@ public class SwingBatchEngine {
               return newId;
             });
     publisher.publish(
-        id, strat.versionId(), strat.name(), strat.slug(), strat.version(), strat.checksum(), EX,
-        primary.tradingsymbol(), IV, "EXIT", "SELL", bar.close(), null, null, primary.compositeScore(),
-        primary.scoreBreakdown(), generatedAt);
+        id, strat.versionId(), strat.name(), strat.slug(), strat.version(), strat.checksum(),
+        doctrine.book(), EX, primary.tradingsymbol(), IV, "EXIT", "SELL", bar.close(), null, null,
+        primary.compositeScore(), primary.scoreBreakdown(), generatedAt);
     // Settle the paper position at the fresh DAILY-BAR close — the equities don't tick, so an LTP
     // close would book breakeven. Fire a close for EACH lot's linked signal so the shared averaged
     // position closes regardless of which lot's order opened it (closeForSignal is a CAS: first wins,

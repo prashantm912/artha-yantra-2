@@ -232,6 +232,9 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
       assertThat(payload.path("strategyId").asText()).isEqualTo("engine-it-momentum");
       assertThat(payload.path("version").asText()).isEqualTo("1.0.0");
       assertThat(payload.path("checksum").asText()).hasSize(64); // engine pinning triple
+      // M17: the frame carries the paper book (Books.fromTags) so a book-filtered live view can drop
+      // a frame for another book — no family tag on this strategy → OTHER.
+      assertThat(payload.path("book").asText()).isEqualTo(Books.OTHER);
 
       // generated_at is the entry BAR's bucket instant — deterministic, in the live-bar window
       // (NOT wall-clock now(), which is ~60 min ahead) — and the row and channel payload agree.

@@ -5243,6 +5243,91 @@
         }
       }
     },
+    "/api/v1/market/context/options-digest" : {
+      "get" : {
+        "tags" : [ "market-context-controller" ],
+        "operationId" : "optionsDigest",
+        "parameters" : [ {
+          "name" : "mode",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "name",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "date",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "expiry",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/OptionsDigest"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/context/day-context" : {
+      "get" : {
+        "tags" : [ "market-context-controller" ],
+        "operationId" : "dayContext",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DayContext"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/connecting-dots" : {
       "get" : {
         "tags" : [ "connecting-dots-controller" ],
@@ -9410,6 +9495,345 @@
           },
           "error" : {
             "type" : "string"
+          }
+        }
+      },
+      "ActiveStrikeMigration" : {
+        "type" : "object",
+        "properties" : {
+          "nowTop" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "openTop" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "entered" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "exited" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "changedCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "AtmIv" : {
+        "type" : "object",
+        "properties" : {
+          "iv" : {
+            "type" : "number"
+          },
+          "rank" : {
+            "type" : "number"
+          },
+          "percentile" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "windowSessions" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "insufficientHistory" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "MaxPain" : {
+        "type" : "object",
+        "properties" : {
+          "now" : {
+            "type" : "number"
+          },
+          "atOpen" : {
+            "type" : "number"
+          },
+          "drift" : {
+            "type" : "number"
+          }
+        }
+      },
+      "OiStructure" : {
+        "type" : "object",
+        "properties" : {
+          "verdict" : {
+            "type" : "string",
+            "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
+          },
+          "spotDelta" : {
+            "type" : "number"
+          },
+          "oiChange" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "OptionsDigest" : {
+        "type" : "object",
+        "properties" : {
+          "underlying" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "pcr" : {
+            "$ref" : "#/components/schemas/Pcr"
+          },
+          "maxPain" : {
+            "$ref" : "#/components/schemas/MaxPain"
+          },
+          "oiGainers" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/StrikeMove"
+            }
+          },
+          "oiLosers" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/StrikeMove"
+            }
+          },
+          "activeStrikes" : {
+            "$ref" : "#/components/schemas/ActiveStrikeMigration"
+          },
+          "atmStraddle" : {
+            "$ref" : "#/components/schemas/Straddle"
+          },
+          "atmIv" : {
+            "$ref" : "#/components/schemas/AtmIv"
+          },
+          "oiStructure" : {
+            "$ref" : "#/components/schemas/OiStructure"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "dataTrust" : {
+            "type" : "string"
+          },
+          "trustReasons" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "Pcr" : {
+        "type" : "object",
+        "properties" : {
+          "now" : {
+            "type" : "number"
+          },
+          "atOpen" : {
+            "type" : "number"
+          },
+          "priorEod" : {
+            "type" : "number"
+          },
+          "deltaVsOpen" : {
+            "type" : "number"
+          },
+          "deltaVsPriorEod" : {
+            "type" : "number"
+          }
+        }
+      },
+      "Straddle" : {
+        "type" : "object",
+        "properties" : {
+          "atmStrike" : {
+            "type" : "number"
+          },
+          "now" : {
+            "type" : "number"
+          },
+          "atOpen" : {
+            "type" : "number"
+          },
+          "deltaPct" : {
+            "type" : "number"
+          }
+        }
+      },
+      "DayContext" : {
+        "type" : "object",
+        "properties" : {
+          "tradeDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "sessionPhase" : {
+            "type" : "string"
+          },
+          "holiday" : {
+            "$ref" : "#/components/schemas/HolidayProximity"
+          },
+          "options" : {
+            "$ref" : "#/components/schemas/OptionsDigest"
+          },
+          "vix" : {
+            "$ref" : "#/components/schemas/Vix"
+          },
+          "overnightCues" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/GlobalCue"
+            }
+          },
+          "indexPriceAction" : {
+            "$ref" : "#/components/schemas/IndexPriceAction"
+          },
+          "ingestTrust" : {
+            "$ref" : "#/components/schemas/IngestTrust"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "notes" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "GlobalCue" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "ltp" : {
+            "type" : "number"
+          },
+          "changePct" : {
+            "type" : "number"
+          }
+        }
+      },
+      "HolidayProximity" : {
+        "type" : "object",
+        "properties" : {
+          "holidayToday" : {
+            "type" : "boolean"
+          },
+          "nextHoliday" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "nextHolidayName" : {
+            "type" : "string"
+          },
+          "daysToNextHoliday" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "IndexPriceAction" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "gapOpenPct" : {
+            "type" : "number"
+          },
+          "dayRange" : {
+            "type" : "number"
+          },
+          "avgRange20" : {
+            "type" : "number"
+          },
+          "rangeVsAvg" : {
+            "type" : "number"
+          },
+          "direction" : {
+            "type" : "string"
+          },
+          "rangeState" : {
+            "type" : "string"
+          },
+          "asOfDate" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        }
+      },
+      "IngestTrust" : {
+        "type" : "object",
+        "properties" : {
+          "overall" : {
+            "type" : "string"
+          },
+          "sources" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SourceTrust"
+            }
+          }
+        }
+      },
+      "SourceTrust" : {
+        "type" : "object",
+        "properties" : {
+          "source" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "lastRunStatus" : {
+            "type" : "string"
+          },
+          "lastRunAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "stale" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "Vix" : {
+        "type" : "object",
+        "properties" : {
+          "level" : {
+            "type" : "number"
+          },
+          "change" : {
+            "type" : "number"
+          },
+          "changePct" : {
+            "type" : "number"
+          },
+          "band" : {
+            "type" : "string"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
           }
         }
       },

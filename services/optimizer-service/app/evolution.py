@@ -289,6 +289,31 @@ class ScoredSweep:
     truncated: bool
 
 
+def attach_reconciliations(
+    candidates: list[dict[str, Any]], recon_repo: Any
+) -> list[dict[str, Any]]:
+    """E4 item-10 closure (design §7.1.4 / roadmap §12 item 10): for each candidate carrying a lived
+    ``versionId``, fetch the LATEST applicable reconciliation for that version and attach it as the
+    ``reconciliation`` dict that ``scoring.score_cohort`` already consumes — the §7.2 live-gap gate
+    (verdict DIVERGENT → hard-fail, #738) and the ``live_alignment`` component then fire end-to-end.
+
+    "latest applicable (version, window §7.1.4)" = the newest reconciliation row for the version
+    (``ReconciliationRepo.list_by_version`` is created_at DESC — the current rolling 4-week window,
+    §7.3); a version with no reconciliation attaches ``None`` (scoring treats it as sim-only —
+    live_gap SKIPPED). Candidates WITHOUT a versionId are left untouched (byte-identical to the
+    pre-item-10 retro path). The attached row is the repo read-envelope shape — verdict / gapZ /
+    gap.mode / pairedTrades / evidenceFloorMet / diagnosis — exactly what scoring reads. Mutates in
+    place and returns the list. scoring stays PURE (it only reads the dict, never the DB — this is
+    the attach step, mirroring how the E2 stress orchestrator attaches ``costResilience``)."""
+    for cand in candidates:
+        version_id = cand.get("versionId")
+        if not version_id:
+            continue
+        rows = recon_repo.list_by_version(version_id, 1, 0)
+        cand["reconciliation"] = rows[0] if rows else None
+    return candidates
+
+
 class RetroScoreService:
     """Applies the §6 scoring library to an EXISTING sweep. Assembles each COMPLETE trial's
     normalized metric bag from its ``optimization_trials`` row + its backtest run's OOS fold array
@@ -306,10 +331,15 @@ class RetroScoreService:
         jobs_factory: Callable[[], Any],
         trials_factory: Callable[[], Any],
         backtest_client: Any,
+        recon_factory: Callable[[], Any] | None = None,
     ) -> None:
         self._jobs_factory = jobs_factory
         self._trials_factory = trials_factory
         self._backtest = backtest_client
+        # E4 item-10 closure: the reconciliation-store repo factory. Optional so the retro read /
+        # recorder / stress paths (whose cohorts have no lived versionId) construct unchanged; when
+        # present it feeds the (version, window §7.1.4) attach in assemble_cohort.
+        self._recon_factory = recon_factory
 
     def count_trials(self, sweep_id: str) -> int:
         """One sweep's FULL trial count (every state — failed/pruned trials are still "looks" the
@@ -349,6 +379,7 @@ class RetroScoreService:
             jobs.close()
             trials.close()
         candidates = [self._assemble(row, metric) for row in rows]
+        self._attach_reconciliations(candidates)
         return AssembledCohort(
             job=job,
             objective=objective,
@@ -359,6 +390,21 @@ class RetroScoreService:
             n_trials=n_trials,
             truncated=len(rows) >= _COHORT_CAP,
         )
+
+    def _attach_reconciliations(self, candidates: list[dict[str, Any]]) -> None:
+        """E4 item-10 closure: for each candidate carrying a lived ``versionId``, attach its latest
+        applicable reconciliation as the ``reconciliation`` dict scoring.py already consumes (the
+        §7.2 live-gap gate / live_alignment component then fire off it). A no-op — and NO DB
+        connection opened — when no candidate carries a versionId (the retro read + recorder +
+        stress cohorts, whose trials have no lived version), so scoring is byte-identical. Guarded
+        on the injected recon factory so the 3-arg constructions are unaffected."""
+        if self._recon_factory is None or not any(c.get("versionId") for c in candidates):
+            return
+        recon = self._recon_factory()
+        try:
+            attach_reconciliations(candidates, recon)
+        finally:
+            recon.close()
 
     def score_sweep(self, sweep_id: str, prior_trials: int = 0) -> ScoredSweep:
         """Assemble + score an existing sweep's COMPLETE trials as a cohort — the shared core reused

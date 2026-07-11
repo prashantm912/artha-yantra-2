@@ -10,9 +10,10 @@ import redis
 from fastapi import FastAPI
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from app import api, evolution, insights, reconciliation, stress
+from app import api, evolution, insights, proposals, reconciliation, stress
 from app.backtest_client import BacktestClient
 from app.errors import ApiError, api_error_handler, invalid_path_handler
+from app.notify import NtfyClient
 from app.path_grammar import InvalidParameterPath
 from app.repos import EvoRepo, JobsRepo, LiveEvidenceRepo, ReconciliationRepo, TrialsRepo
 from app.service import SweepService
@@ -100,11 +101,14 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     app.state.evo = evolution.EvoReadService(repo_factory=lambda: EvoRepo(open_conn()))
 
     # Retro-scoring (§12 E1 item 2): the §6 scoring lib over an existing sweep's trials, read-only.
-    # Reuses the same jobs/trials factories + backtest client as the sweep service.
+    # Reuses the same jobs/trials factories + backtest client as the sweep service. The
+    # recon_factory (E4 item 10) feeds the (version, window §7.1.4) reconciliation attach in
+    # assemble_cohort — a no-op until a scored cohort carries lived versionIds (retro has none).
     app.state.retro = evolution.RetroScoreService(
         jobs_factory=lambda: JobsRepo(open_conn()),
         trials_factory=lambda: TrialsRepo(open_conn()),
         backtest_client=backtest_client,
+        recon_factory=lambda: ReconciliationRepo(open_conn()),
     )
 
     # Campaign/generation recorder (§12 E1 item 3): the evo WRITE surface — create a campaign, and
@@ -145,6 +149,15 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         backtest_client=backtest_client,
     )
 
+    # Proposals inbox (§12 E4 item 11 / §8): generate PUBLISH_PAPER proposals for candidates meeting
+    # the §8.2 bar, and serve the owner inbox (list / approve / reject). Substrate only — a decision
+    # marks the row; NOTHING self-arms (the publish action is slice 2). Its own EvoRepo factory + a
+    # fail-soft ntfy client (blank ARTHA_NTFY_TOPIC → no-op) for the one-per-new-proposal push.
+    app.state.proposals = proposals.ProposalService(
+        repo_factory=lambda: EvoRepo(open_conn()),
+        ntfy=NtfyClient(settings.ntfy_url, settings.ntfy_topic),
+    )
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "UP"}
@@ -154,6 +167,7 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(insights.router)
     app.include_router(stress.router)
     app.include_router(reconciliation.router)
+    app.include_router(proposals.router)
     Instrumentator().instrument(app).expose(app, endpoint="/metrics")
     return app
 

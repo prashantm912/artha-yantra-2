@@ -23,6 +23,14 @@ class BacktestClient:
         resp.raise_for_status()
         return resp.json()
 
+    def job_status(self, job_id: str) -> dict[str, Any]:
+        """One backtest job's status payload (``GET /jobs/{id}``): ``{status, resultRef, ...}``.
+        The E2 cost-stress drain polls this for a dispatched BACKTEST stress run — a completed run's
+        ``resultRef`` is the run id whose ``/results`` carries the stressed objective. Read-only."""
+        resp = self._client.get(f"{self._base}/api/v1/backtests/jobs/{job_id}")
+        resp.raise_for_status()
+        return resp.json()
+
     def results(self, run_id: str) -> dict[str, Any]:
         """The run-level results payload (§D.5 ``/results``): the ``metrics`` JSONB (totalReturn,
         maxDrawdown, sortino, expectancy, …), ``dataHash``, ``engineSha`` (P0-2 / #703), and the

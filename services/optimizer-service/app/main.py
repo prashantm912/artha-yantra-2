@@ -10,7 +10,7 @@ import redis
 from fastapi import FastAPI
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from app import api, evolution, insights
+from app import api, evolution, insights, stress
 from app.backtest_client import BacktestClient
 from app.errors import ApiError, api_error_handler, invalid_path_handler
 from app.path_grammar import InvalidParameterPath
@@ -72,6 +72,22 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     except Exception as exc:  # noqa: BLE001 - postgres may be down at boot in some envs
         log.warning("stranded-trial cleanup skipped: %s", exc)
 
+    # Boot reaper (EVO E2 cost-stress): a restart mid-stress-round kills the in-memory drain,
+    # stranding its generation at STRESSING — the durable 409 guard would then refuse every future
+    # stress POST. Flip orphans back to DONE so a re-POST reruns the round.
+    try:
+        evo_repo = EvoRepo(open_conn())
+        try:
+            orphaned_rounds = evo_repo.reap_stressing_generations()
+            if orphaned_rounds:
+                log.warning(
+                    "flipped %d orphaned STRESSING generation(s) to DONE at boot "
+                    "(restart mid-stress-round; re-POST /stress to rerun)", orphaned_rounds)
+        finally:
+            evo_repo.close()
+    except Exception as exc:  # noqa: BLE001 - postgres may be down at boot in some envs
+        log.warning("stress-round reaper skipped: %s", exc)
+
     app.state.sweeps = SweepService(
         strategy_client=StrategyClient(settings.strategy_signal_base),
         backtest_client=backtest_client,
@@ -106,6 +122,18 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         trials_factory=lambda: TrialsRepo(open_conn()),
     )
 
+    # Cost-stress orchestration (§12 E2 item 5): re-run a generation's top-K at 2×/4× slippage and
+    # re-score the cohort's cost_resilience. Reuses the retro scorer for cohort assembly, its own
+    # EvoRepo + JobsRepo factories for the evo writes / BACKTEST-job submission, the dispatcher for
+    # the backtest stream, and the backtest client to poll the runs + read stressed objectives.
+    app.state.stress = stress.StressService(
+        repo_factory=lambda: EvoRepo(open_conn()),
+        jobs_factory=lambda: JobsRepo(open_conn()),
+        scorer=app.state.retro,
+        dispatcher=dispatcher,
+        backtest_client=backtest_client,
+    )
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "UP"}
@@ -113,6 +141,7 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(api.router)
     app.include_router(evolution.router)
     app.include_router(insights.router)
+    app.include_router(stress.router)
     Instrumentator().instrument(app).expose(app, endpoint="/metrics")
     return app
 

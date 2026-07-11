@@ -13,6 +13,7 @@ from typing import Any
 import redis
 
 TRIALS_STREAM = "jobs.backtest.trials"
+BACKTEST_STREAM = "jobs.backtest"
 RESULTS_STREAM = "optimizations.results"
 RESULTS_GROUP = "cg-optuna"
 PROGRESS_CHANNEL = "jobs.progress"
@@ -48,6 +49,19 @@ class TrialDispatcher:
         self._redis.xadd(
             TRIALS_STREAM,
             {"jobId": str(trial_job_id)},
+            maxlen=self.STREAM_MAXLEN,
+            approximate=True,
+        )
+
+    def dispatch_backtest(self, job_id: str) -> None:
+        """XADDs a queued BACKTEST job id onto the single-run stream (``jobs.backtest``, group
+        ``cg-backtest``) — the E2 cost-stress re-runs (design §3.2.5). A stress run rides the SAME
+        transport backtest-service's own dispatcher uses for interactive runs; the pool claims
+        it off ``cg-backtest``, so a stress run takes an interactive worker slot (NOT the B16 trial
+        reservation) — by design, a stress run is a BACKTEST job, not a trial."""
+        self._redis.xadd(
+            BACKTEST_STREAM,
+            {"jobId": str(job_id)},
             maxlen=self.STREAM_MAXLEN,
             approximate=True,
         )

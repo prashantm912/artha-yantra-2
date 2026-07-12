@@ -89,6 +89,11 @@ SELECT
   br.completed_at                         AS completed_at,
   br.content_hash                         AS content_hash,
   br.dataset_epoch                        AS dataset_epoch,
-  br.evidence_policy                      AS evidence_policy
+  br.evidence_policy                      AS evidence_policy,
+  -- Review F2: traded option premium legs contribute bar-count only to content_hash (they are read
+  -- inside OptionsPremiumReplay, never held by the runner) — this runner-stamped flag (metrics JSONB,
+  -- present only when true) tells a comparability consumer that equality of the content-hash/epoch
+  -- axes does NOT guarantee premium-data equality for such runs. NULL = candle-path / pre-flag row.
+  (br.metrics ->> 'premiumContentUnverified')::boolean AS premium_content_unverified
 FROM backtest_runs br
 JOIN jobs j ON j.id = br.job_id;

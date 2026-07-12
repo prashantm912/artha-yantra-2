@@ -7,6 +7,9 @@ package in.arthayantra.backtest.experiments;
  * {@code evidencePolicy}) + the actor + the {@link CompareMetrics} cells. Runs are returned in the
  * caller's requested {@code runIds} order; ids that resolve to no completed run are simply absent.
  * {@code datasetEpoch} is the BIGINT epoch head as text (null on pre-V015 rows).
+ * {@code premiumContentUnverified} (review F2) is {@code true} when the run consumed traded-option
+ * premium legs, which contribute bar-count only to {@code contentHash} — equality of the content-hash
+ * axes does not guarantee premium-data equality for such runs; {@code null} = candle-path / pre-flag row.
  */
 public record ExperimentCompareRun(
     String runId,
@@ -20,6 +23,7 @@ public record ExperimentCompareRun(
     String contentHash,
     String datasetEpoch,
     String evidencePolicy,
+    Boolean premiumContentUnverified,
     String createdBy,
     String completedAt,
     CompareMetrics metrics) {}

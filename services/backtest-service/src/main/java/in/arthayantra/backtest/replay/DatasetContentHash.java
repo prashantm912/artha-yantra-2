@@ -27,6 +27,11 @@ import java.util.List;
  * checksum). {@code valueChecksum} for an in-memory series is itself a SHA-256 STREAMED over each bar's
  * {@code bucketEpochSeconds:open:high:low:close:volume:oi} (exact decimals via {@code toPlainString};
  * {@code oi} rendered {@code "none"} when null) in bucket order — bounded memory even for a year of 1m.
+ *
+ * <p><b>Consumer caveat (review F2).</b> Options premium series contribute bar-count only; equality of
+ * the content-hash axes does <b>not</b> guarantee premium-data equality. A run that consumed such legs
+ * is stamped {@code premiumContentUnverified=true} (metrics JSONB → provenance block + like-for-like
+ * response) so a ranking client can see the weaker claim instead of inferring a stronger one.
  */
 public final class DatasetContentHash {
 

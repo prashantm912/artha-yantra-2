@@ -79,7 +79,8 @@ public class JobsController {
         null, // premiumSource — resolved at execution
         null, // costClass — resolved at execution
         profile,
-        "PREFLIGHT_OK"); // submission ran auto-warm + coverage preflight before insert (else it 422s)
+        "PREFLIGHT_OK", // submission ran auto-warm + coverage preflight before insert (else it 422s)
+        null); // premiumContentUnverified — known only once the replay picks its option legs
   }
 
   /** Paged job list with optional status + strategyId filters. */

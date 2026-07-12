@@ -181,6 +181,8 @@ class DatasetEpochIntegrationTest extends BacktestIntegrationTestBase {
     assertThat(block.engineSha()).isEqualTo("engine-sha-it");
     assertThat(block.dataHash()).isEqualTo("data-hash");
     assertThat(block.profile()).isEqualTo("live");
+    // review F2: no runner stamp on this seeded (empty-metrics) run ⇒ verified/candle reads false
+    assertThat(block.premiumContentUnverified()).isFalse();
   }
 
   @Test
@@ -205,5 +207,30 @@ class DatasetEpochIntegrationTest extends BacktestIntegrationTestBase {
             new DatasetEpochRequest(
                 "bhavcopy_fill", List.of("INFY"), "NSE", null, null, "1d", null, null));
     assertThat(ok.reason()).isEqualTo("BHAVCOPY_FILL");
+  }
+
+  // Review F4: a malformed window bound is a caller error — 422 VALIDATION_FAILED, never a 500
+  // (DateTimeParseException must not escape to the catch-all).
+  @Test
+  void controllerRejectsAMalformedWindowWith422() {
+    DatasetComparabilityController controller = new DatasetComparabilityController(service);
+    assertThatThrownBy(
+            () ->
+                controller.recordEpoch(
+                    new DatasetEpochRequest(
+                        "MANUAL", null, null, "not-a-date", null, null, null, null)))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("windowStart/windowEnd")
+        .extracting(e -> ((ApiException) e).httpStatus())
+        .isEqualTo(422);
+    // and a malformed END bound too (both bounds route through the same parse)
+    assertThatThrownBy(
+            () ->
+                controller.recordEpoch(
+                    new DatasetEpochRequest(
+                        "MANUAL", null, null, null, "2026-13-45T99:00:00", null, null, null)))
+        .isInstanceOf(ApiException.class)
+        .extracting(e -> ((ApiException) e).httpStatus())
+        .isEqualTo(422);
   }
 }

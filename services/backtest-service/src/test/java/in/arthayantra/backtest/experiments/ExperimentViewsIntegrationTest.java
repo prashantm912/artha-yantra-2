@@ -55,6 +55,28 @@ class ExperimentViewsIntegrationTest extends BacktestIntegrationTestBase {
       String createdBy,
       BigDecimal totalReturn,
       String cagr) {
+    return seed(
+        kind, parentJobId, strategyId, strategyVersion, strategyVersionId, engineSha, dataHash,
+        universeChecksum, premiumSource, createdBy, totalReturn, cagr,
+        DatasetProvenance.none(), false);
+  }
+
+  /** Full-control seed: dataset provenance + the review-F2 premium flag (runner-stamped when true). */
+  private static UUID seed(
+      JobKind kind,
+      UUID parentJobId,
+      String strategyId,
+      String strategyVersion,
+      UUID strategyVersionId,
+      String engineSha,
+      String dataHash,
+      String universeChecksum,
+      PremiumSource premiumSource,
+      String createdBy,
+      BigDecimal totalReturn,
+      String cagr,
+      DatasetProvenance provenance,
+      boolean premiumContentUnverified) {
     ObjectNode request = MAPPER.createObjectNode();
     request.put("strategyId", strategyId);
     request.put("strategyVersion", strategyVersion);
@@ -67,6 +89,9 @@ class ExperimentViewsIntegrationTest extends BacktestIntegrationTestBase {
 
     ObjectNode full = MAPPER.createObjectNode();
     full.put("cagr", cagr);
+    if (premiumContentUnverified) {
+      full.put("premiumContentUnverified", true); // the BacktestRunner stamp (only-when-true)
+    }
     Metrics metrics =
         new Metrics(
             totalReturn,
@@ -100,7 +125,7 @@ class ExperimentViewsIntegrationTest extends BacktestIntegrationTestBase {
         premiumSource,
         null,
         null,
-        DatasetProvenance.none(),
+        provenance,
         createdBy);
   }
 
@@ -225,5 +250,55 @@ class ExperimentViewsIntegrationTest extends BacktestIntegrationTestBase {
     assertThat(res.runs()).isEmpty();
     // A degenerate (empty) set is trivially like-for-like.
     assertThat(res.likeForLike().dataHashMatch()).isTrue();
+  }
+
+  // Review F3 + F2: the two roadmap-#30 axes treat NULL as UNKNOWN (any NULL ⇒ axis false — a set of
+  // pre-V015 rows must never pass the refuse-to-rank gate), and the count-only option-premium caveat
+  // surfaces per run + set-level on the like-for-like verdict.
+  @Test
+  void newAxesTreatNullAsUnknownAndSurfaceThePremiumCaveat() {
+    String strategyId = "d4-f3-" + UUID.randomUUID();
+    UUID version = UUID.randomUUID();
+    DatasetProvenance stamped =
+        new DatasetProvenance(
+            "c-same", 3L, in.arthayantra.backtest.provenance.EvidencePolicy.SIM_FIRST);
+    UUID runA =
+        seed(JobKind.BACKTEST, null, strategyId, "1.0.0", version, "sha-f3", "h-f3", "u-f3",
+            PremiumSource.NA, "owner", new BigDecimal("1.00"), "1.00", stamped, false);
+    UUID runB =
+        seed(JobKind.BACKTEST, null, strategyId, "1.0.0", version, "sha-f3", "h-f3", "u-f3",
+            PremiumSource.CANDLE_1M, "owner", new BigDecimal("2.00"), "2.00", stamped, true);
+    UUID runNull = // pre-V015 shape: no content hash / epoch / policy
+        seed(JobKind.BACKTEST, null, strategyId, "1.0.0", version, "sha-f3", "h-f3", "u-f3",
+            PremiumSource.NA, "owner", new BigDecimal("3.00"), "3.00");
+
+    // Identically-stamped runs ARE like-for-like on the new axes; runB's count-only premium legs
+    // surface per-run AND set-level.
+    ExperimentCompareResponse both = controller().compare(List.of(runA, runB));
+    assertThat(both.likeForLike().contentHashMatch()).isTrue();
+    assertThat(both.likeForLike().datasetEpochMatch()).isTrue();
+    assertThat(both.likeForLike().premiumContentUnverified()).isTrue();
+    assertThat(both.runs().get(0).premiumContentUnverified()).isNull(); // no stamp ⇒ NULL in the view
+    assertThat(both.runs().get(1).premiumContentUnverified()).isTrue();
+    assertThat(both.runs().get(0).contentHash()).isEqualTo("c-same");
+    assertThat(both.runs().get(0).datasetEpoch()).isEqualTo("3");
+
+    // A verified-only set carries no premium caveat.
+    ExperimentCompareResponse verifiedOnly = controller().compare(List.of(runA));
+    assertThat(verifiedOnly.likeForLike().premiumContentUnverified()).isFalse();
+
+    // One NULL run in the set fails BOTH new axes (the legacy axes still read NULL as a value).
+    ExperimentCompareResponse mixed = controller().compare(List.of(runA, runNull));
+    assertThat(mixed.likeForLike().contentHashMatch()).isFalse();
+    assertThat(mixed.likeForLike().datasetEpochMatch()).isFalse();
+    assertThat(mixed.likeForLike().dataHashMatch()).isTrue(); // legacy convention unchanged
+
+    // Even two all-NULL runs fail: unknown content is never comparable.
+    UUID runNull2 =
+        seed(JobKind.BACKTEST, null, strategyId, "1.0.0", version, "sha-f3", "h-f3", "u-f3",
+            PremiumSource.NA, "owner", new BigDecimal("4.00"), "4.00");
+    ExperimentCompareResponse nulls = controller().compare(List.of(runNull, runNull2));
+    assertThat(nulls.likeForLike().contentHashMatch()).isFalse();
+    assertThat(nulls.likeForLike().datasetEpochMatch()).isFalse();
   }
 }

@@ -67,6 +67,7 @@ public class ExperimentRepository {
               rs.getString("content_hash"),
               rs.getString("dataset_epoch"),
               rs.getString("evidence_policy"),
+              rs.getObject("premium_content_unverified", Boolean.class),
               rs.getString("created_by"),
               rs.getString("completed_at"),
               new CompareMetrics(
@@ -90,7 +91,8 @@ public class ExperimentRepository {
 
   private static final String COMPARE_COLS =
       "run_id, strategy_version_id, strategy_id, strategy_version, data_hash, universe_checksum, "
-          + "engine_sha, premium_source, content_hash, dataset_epoch, evidence_policy, created_by, "
+          + "engine_sha, premium_source, content_hash, dataset_epoch, evidence_policy, "
+          + "premium_content_unverified, created_by, "
           + "completed_at, total_return, cagr, sharpe, sortino, "
           + "max_drawdown, win_rate, profit_factor, alpha, beta, information_ratio, trade_count";
 

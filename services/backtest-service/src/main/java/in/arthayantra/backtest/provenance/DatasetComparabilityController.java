@@ -37,8 +37,9 @@ public class DatasetComparabilityController {
   /**
    * Records a data-rewrite epoch (§11.3) — called by whoever rewrote candle data (a CA re-adjust /
    * authoritative re-fetch / backfill job, or the owner) so runs executed before it become detectably
-   * stale. 422 on an unknown {@code reason}. The recorded row (with its assigned monotonic id) is
-   * returned.
+   * stale. 422 on an unknown {@code reason} or a malformed {@code windowStart}/{@code windowEnd}
+   * (review F4 — never a 500 through the catch-all). The recorded row (with its assigned monotonic
+   * id) is returned.
    */
   @PostMapping("/dataset-epochs")
   public DatasetEpoch recordEpoch(@RequestBody DatasetEpochRequest request) {
@@ -59,7 +60,15 @@ public class DatasetComparabilityController {
             request.interval(),
             request.jobLink(),
             request.note());
-    return service.record(normalized, "owner");
+    try {
+      return service.record(normalized, "owner");
+    } catch (java.time.format.DateTimeParseException e) {
+      throw new ApiException(
+          422,
+          ErrorCodes.VALIDATION_FAILED,
+          "windowStart/windowEnd must be an ISO date (yyyy-MM-dd) or offset date-time; got "
+              + e.getParsedString());
+    }
   }
 
   /** The recorded epochs, newest first, + the current head (bounded page). */

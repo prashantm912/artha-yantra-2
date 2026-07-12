@@ -38,6 +38,7 @@ public class RunProvenanceRepository {
       String universeChecksum,
       String premiumSource,
       String costClass,
+      boolean premiumContentUnverified,
       String exchange,
       String tradingsymbol,
       OffsetDateTime startTs,
@@ -64,6 +65,8 @@ public class RunProvenanceRepository {
                   rs.getString("universe_checksum"),
                   rs.getString("premium_source"),
                   text(metrics, "costClass"),
+                  // review F2: runner-stamped only when true — absent reads false (verified/candle).
+                  metrics != null && metrics.path("premiumContentUnverified").asBoolean(false),
                   rs.getString("exchange"),
                   rs.getString("tradingsymbol"),
                   rs.getObject("start_ts", OffsetDateTime.class),

@@ -192,6 +192,13 @@ public class BacktestRunner {
     // the byte-identical close-basis default (this is a candle-path knob; the premium path ignores it).
     boolean oneMinuteCovered = !"bar_hl_worstof".equals(definition.session().touchBasis());
 
+    // Audit P1-1 / R2 (review F1, TOCTOU): snapshot the dataset-epoch head BEFORE the first candle
+    // read (and before the auto-warm, which itself triggers authoritative fetch/upserts). A rewrite
+    // recorded MID-replay then carries an id ABOVE this snapshot, so the run reads STALE afterwards —
+    // the safe false-positive direction. Reading head() after the replay would stamp that mid-replay
+    // epoch as already-observed and the run would falsely read FRESH on data the rewrite superseded.
+    long datasetEpochHead = datasetEpochs.head();
+
     // Auto-warm every series this run reads (primary 1m + each context (instrument, timeframe) +
     // the benchmark daily) into the shared store via market-data's cache-first GET BEFORE the reads
     // below. Backtest replay never fetches on demand, so without this a fresh/uncovered window reads
@@ -360,17 +367,28 @@ public class BacktestRunner {
                 result.trades(), from, to));
 
     // Audit P1-1 / R2 dataset comparability: the CONTENT-STABLE fingerprint (fetched_at-free — folds
-    // the actual OHLCV of the in-memory consumed series), the epoch HEAD observed at execution (a later
-    // data-rewrite touching this run's scope makes it detectably stale — the re-run policy), and the
-    // family evidence policy (§1.2 — whether these sim numbers are a ranking plane at all). All three
-    // ride jobs/runs tables only; NO engine record is touched, so goldens/parity stay byte-identical.
+    // the actual OHLCV of the in-memory consumed series), the epoch HEAD snapshotted BEFORE the first
+    // candle read (review F1 — a mid-replay rewrite reads stale, never falsely fresh), and the family
+    // evidence policy (§1.2 — whether these sim numbers are a ranking plane at all). All three ride
+    // jobs/runs tables only; NO engine record is touched, so goldens/parity stay byte-identical.
+    List<DatasetContentHash.Series> contentLegs =
+        contentSeries(
+            signal, strikeRef, strikeRef1m, primary1m, contexts, optionsStrategy,
+            result.trades(), from, to);
+    // Review F2: traded option premium legs are COUNT-ONLY in the content hash (their series are read
+    // inside OptionsPremiumReplay, never held here), so a premium correction that preserves bar count
+    // is invisible to the hash. Stamp that limitation as provenance the moment it applies — the
+    // consumer-facing "equality of these axes does not guarantee premium-data equality" flag. Only
+    // when true (no new key on candle-path runs — metrics stay byte-identical).
+    boolean premiumContentUnverified =
+        contentLegs.stream().anyMatch(s -> "count".equals(s.valueChecksum()));
+    if (premiumContentUnverified) {
+      m.full().put("premiumContentUnverified", true);
+    }
     DatasetProvenance datasetProvenance =
         new DatasetProvenance(
-            DatasetContentHash.of(
-                contentSeries(
-                    signal, strikeRef, strikeRef1m, primary1m, contexts, optionsStrategy,
-                    result.trades(), from, to)),
-            datasetEpochs.head(),
+            DatasetContentHash.of(contentLegs),
+            datasetEpochHead,
             EvidencePolicy.forConfig(config));
 
     UUID runId =

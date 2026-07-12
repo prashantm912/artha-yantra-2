@@ -21,6 +21,10 @@ package in.arthayantra.backtest.provenance;
  *   <li>{@code costClass} — the statutory cost stack the net numbers were priced under (P1-2).
  *   <li>{@code profile} — {@code live} | {@code mock} (mock runs are never ranked).
  *   <li>{@code warmStatus} — the submission-time auto-warm/preflight outcome ({@code null} on run reads).
+ *   <li>{@code premiumContentUnverified} (review F2) — {@code true} iff the run consumed traded-option
+ *       premium legs: those series contribute bar-count only to {@code contentHash}, so equality of the
+ *       content-hash/epoch axes does not guarantee premium-data equality for such a run. {@code null}
+ *       at submission (unknown until the replay runs).
  * </ul>
  */
 public record ProvenanceBlock(
@@ -35,4 +39,5 @@ public record ProvenanceBlock(
     String premiumSource,
     String costClass,
     String profile,
-    String warmStatus) {}
+    String warmStatus,
+    Boolean premiumContentUnverified) {}

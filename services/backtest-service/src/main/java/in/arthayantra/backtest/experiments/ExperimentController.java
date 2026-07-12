@@ -66,7 +66,12 @@ public class ExperimentController {
     return new ExperimentCompareResponse(runs, likeForLike(runs));
   }
 
-  /** True on an axis iff every compared run shares one value (a NULL is its own value). */
+  /**
+   * True on a legacy axis iff every compared run shares one value (a NULL is its own value — the FE
+   * banner convention). The two roadmap-#30 axes are STRICTER (review F3): a NULL there means UNKNOWN
+   * content, and unknown is never comparable — any NULL {@code contentHash}/{@code datasetEpoch} in the
+   * set makes that axis {@code false}, so a set of pre-V015 rows can't pass the refuse-to-rank gate.
+   */
   private static LikeForLike likeForLike(List<ExperimentCompareRun> runs) {
     return new LikeForLike(
         allSame(runs, ExperimentCompareRun::dataHash),
@@ -75,8 +80,11 @@ public class ExperimentController {
         allSame(runs, ExperimentCompareRun::premiumSource),
         // roadmap #30: the content-stable data axis + the epoch-scope axis — a ranking client refuses a
         // set that is not like-for-like on (engineSha, contentHash, datasetEpoch) unless it re-runs.
-        allSame(runs, ExperimentCompareRun::contentHash),
-        allSame(runs, ExperimentCompareRun::datasetEpoch));
+        allSameNonNull(runs, ExperimentCompareRun::contentHash),
+        allSameNonNull(runs, ExperimentCompareRun::datasetEpoch),
+        // review F2: any compared run whose content hash carries count-only option-premium legs makes
+        // the whole set's content-equality claim weaker — surface it beside the flags it qualifies.
+        runs.stream().anyMatch(r -> Boolean.TRUE.equals(r.premiumContentUnverified())));
   }
 
   private static boolean allSame(
@@ -85,6 +93,20 @@ public class ExperimentController {
     for (ExperimentCompareRun run : runs) {
       String value = axis.apply(run);
       distinct.add(value == null ? " null" : value);
+    }
+    return distinct.size() <= 1;
+  }
+
+  /** Like {@link #allSame} but any NULL fails the axis (unknown ≠ comparable); empty set stays true. */
+  private static boolean allSameNonNull(
+      List<ExperimentCompareRun> runs, Function<ExperimentCompareRun, String> axis) {
+    Set<String> distinct = new HashSet<>();
+    for (ExperimentCompareRun run : runs) {
+      String value = axis.apply(run);
+      if (value == null) {
+        return false;
+      }
+      distinct.add(value);
     }
     return distinct.size() <= 1;
   }

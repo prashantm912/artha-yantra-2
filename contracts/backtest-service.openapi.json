@@ -1434,6 +1434,9 @@
           },
           "warmStatus" : {
             "type" : "string"
+          },
+          "premiumContentUnverified" : {
+            "type" : "boolean"
           }
         }
       },
@@ -1654,6 +1657,9 @@
           "evidencePolicy" : {
             "type" : "string"
           },
+          "premiumContentUnverified" : {
+            "type" : "boolean"
+          },
           "createdBy" : {
             "type" : "string"
           },
@@ -1684,6 +1690,9 @@
             "type" : "boolean"
           },
           "datasetEpochMatch" : {
+            "type" : "boolean"
+          },
+          "premiumContentUnverified" : {
             "type" : "boolean"
           }
         }

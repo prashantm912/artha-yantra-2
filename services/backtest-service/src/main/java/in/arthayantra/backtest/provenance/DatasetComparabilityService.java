@@ -73,7 +73,8 @@ public class DatasetComparabilityService {
                     r.premiumSource(),
                     r.costClass(),
                     profile,
-                    null)); // warmStatus is a submission-time field; not persisted per run
+                    null, // warmStatus is a submission-time field; not persisted per run
+                    r.premiumContentUnverified()));
   }
 
   /**

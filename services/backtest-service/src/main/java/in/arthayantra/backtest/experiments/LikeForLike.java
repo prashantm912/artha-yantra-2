@@ -20,7 +20,12 @@ package in.arthayantra.backtest.experiments;
  * dataHashMatch} can, so it is the axis a ranking client should require. {@code datasetEpochMatch} is the
  * cheap epoch-scope axis: runs sharing an epoch head executed against the same ledger state. The audit's
  * re-run policy is "same engine SHA + same content hash + same epoch, else re-run the stale side before
- * ranking".
+ * ranking". <b>Unlike the four legacy axes above, these two treat NULL as UNKNOWN, not as a value</b>
+ * (review F3): any compared run with a NULL {@code contentHash} / {@code datasetEpoch} (pre-V015 rows,
+ * deep-swing rows) makes that axis {@code false} — a set whose data content is unknown must never pass
+ * the refuse-to-rank gate. {@code premiumContentUnverified} (review F2) is {@code true} when ANY compared
+ * run consumed traded-option premium legs, which contribute bar-count only to the content hash — for such
+ * a set, equality of these axes does not guarantee premium-data equality.
  */
 public record LikeForLike(
     boolean dataHashMatch,
@@ -28,4 +33,5 @@ public record LikeForLike(
     boolean engineShaMatch,
     boolean premiumSourceMatch,
     boolean contentHashMatch,
-    boolean datasetEpochMatch) {}
+    boolean datasetEpochMatch,
+    boolean premiumContentUnverified) {}

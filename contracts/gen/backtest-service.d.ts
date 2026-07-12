@@ -476,6 +476,7 @@ export interface components {
             costClass?: string;
             profile?: string;
             warmStatus?: string;
+            premiumContentUnverified?: boolean;
         };
         RunComparability: {
             runId?: string;
@@ -552,6 +553,7 @@ export interface components {
             contentHash?: string;
             datasetEpoch?: string;
             evidencePolicy?: string;
+            premiumContentUnverified?: boolean;
             createdBy?: string;
             completedAt?: string;
             metrics?: components["schemas"]["CompareMetrics"];
@@ -563,6 +565,7 @@ export interface components {
             premiumSourceMatch?: boolean;
             contentHashMatch?: boolean;
             datasetEpochMatch?: boolean;
+            premiumContentUnverified?: boolean;
         };
         DatasetEpochListResponse: {
             epochs?: components["schemas"]["DatasetEpoch"][];

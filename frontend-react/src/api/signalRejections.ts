@@ -151,6 +151,44 @@ export function useShadowSummary(from: string | null = null, to: string | null =
   });
 }
 
+/** One gate-input dot's current verdict (the DotHealthCanary.DotState record). */
+export interface DotState {
+  /** The Connect-the-Dots dot whose input this probes (e.g. `breadth`, `iv_rank`, `vix`). */
+  dot: string;
+  /** True when the dot's input was present in at least one of today's newest rejections. */
+  alive: boolean;
+  /** True when the dot is on the `required-dots` list — expected alive today (a dead one pages). */
+  required: boolean;
+  /** Human liveness detail ("input live in the last N rejections" / "input dead across N" / "no rejections yet today"). */
+  detail: string;
+}
+
+/**
+ * Per-DOT gate-input liveness over TODAY's newest rejections (roadmap F4 v2). `asOf` is the evaluation
+ * time (IST offset), `session` whether the market is open, `rowsInspected` the sample size (0 = the gate
+ * hasn't evaluated any bar yet today, so no dot can be judged).
+ */
+export interface DotHealth {
+  asOf: string;
+  session: boolean;
+  rowsInspected: number;
+  dots: DotState[];
+}
+
+/**
+ * Per-DOT gate-input liveness — which Connect-the-Dots inputs are live vs dead, and which are REQUIRED
+ * alive. A dead input silently re-caps the composite (the 0.765-ceiling class the forensics found months
+ * late), so this is the owner's pre-market dead-dot check. It always inspects TODAY's rejections,
+ * independent of the page's date filter; polls slowly during the session.
+ */
+export function useDotHealth() {
+  return useQuery({
+    queryKey: [KEY, 'dot-health'],
+    queryFn: () => apiFetch<DotHealth>('/signal-rejections/dot-health'),
+    refetchInterval: 60_000,
+  });
+}
+
 /** The per-rail block rollup (which condition blocks most) over the same optional window. */
 export function useRejectionRailCounts(
   strategyVersionId: string | null = null,

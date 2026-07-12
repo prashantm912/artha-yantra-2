@@ -12,7 +12,9 @@ import {
   useSignalRejections,
   useRejectionRailCounts,
   useShadowSummary,
+  useDotHealth,
   type Num,
+  type DotState,
   type SignalRejectionDto,
 } from '../../api/signalRejections.ts';
 
@@ -60,6 +62,97 @@ function Margin({ value }: { value: Num }) {
   return <span className={cls}>{n >= 0 ? '+' : ''}{fmtNum(value)}</span>;
 }
 
+/** IST day + time for the dot-health as-of stamp. */
+function fmtAsOf(iso: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(iso));
+}
+
+/**
+ * One gate-input dot's verdict card: the WORD (Live / Dead) plus a colour — green live, red for a dead
+ * REQUIRED input (the alarm), amber for a dead OPTIONAL input (contributes nothing but not alarming).
+ * Colour is never the sole cue — the word and the detail text always carry the state.
+ */
+function DotChip({ dot }: { dot: DotState }) {
+  const verdict = dot.alive ? 'Live' : 'Dead';
+  const textTone = dot.alive ? 'text-bull' : dot.required ? 'text-bear' : 'text-warn';
+  const dotTone = dot.alive ? 'bg-bull' : dot.required ? 'bg-bear' : 'bg-warn';
+  return (
+    <div className="rounded-md border border-ay-border bg-surface-0 px-2.5 py-1.5" title={dot.detail}>
+      <div className="flex items-center gap-1.5">
+        <span aria-hidden="true" className={cn('size-2 rounded-full', dotTone)} />
+        <span className="font-medium text-ay-text">{dot.dot}</span>
+        {dot.required && (
+          <span className="rounded bg-surface-2 px-1 py-0.5 text-[10px] uppercase tracking-wide text-ay-muted">
+            required
+          </span>
+        )}
+      </div>
+      <div className="mt-0.5 text-caption">
+        <span className={cn('font-semibold', textTone)}>{verdict}</span>
+        <span className="text-ay-muted"> · {dot.detail}</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The pre-market dead-dot check (roadmap F4 v2): per Connect-the-Dots gate input, live vs dead over
+ * TODAY's newest rejections, and which are REQUIRED alive. A dead REQUIRED input silently re-caps the
+ * composite; a dead OPTIONAL input just contributes nothing. Always reflects today, NOT the date filter
+ * below. Secondary panel — a load/error here never blocks the rejections table.
+ */
+function DotHealthPanel() {
+  const q = useDotHealth();
+  const health = q.data;
+
+  return (
+    <section
+      className="mb-4 rounded-lg border border-ay-border bg-surface-1 p-3"
+      aria-label="Gate-input health (today)"
+    >
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <h2 className="text-sm font-semibold text-ay-text">
+          Gate-input health <span className="font-normal text-ay-muted">· today</span>
+        </h2>
+        {health && (
+          <span className="text-caption text-ay-muted">
+            {health.session ? 'in session' : 'market closed'} · {health.rowsInspected} rejection
+            {health.rowsInspected === 1 ? '' : 's'} inspected · as of {fmtAsOf(health.asOf)} IST
+          </span>
+        )}
+      </div>
+
+      {q.isLoading && <p className="text-caption text-ay-muted">Loading dot health…</p>}
+      {q.isError && <p className="text-caption text-ay-muted">Dot health unavailable right now.</p>}
+      {health && health.rowsInspected === 0 && (
+        <p className="text-caption text-ay-muted">
+          No rejections yet today — dot liveness can&apos;t be judged until the gate has evaluated a bar.
+        </p>
+      )}
+      {health && health.rowsInspected > 0 && (
+        <>
+          <div className="flex flex-wrap gap-2">
+            {health.dots.map((d) => (
+              <DotChip key={d.dot} dot={d} />
+            ))}
+          </div>
+          <p className="mt-2 text-caption text-ay-muted">
+            A dead <span className="font-medium text-bear">required</span> input silently caps the
+            composite; a dead <span className="font-medium text-warn">optional</span> input just
+            contributes nothing.
+          </p>
+        </>
+      )}
+    </section>
+  );
+}
+
 const PAGE_SIZE = 200;
 
 export function RejectionsPage() {
@@ -93,6 +186,8 @@ export function RejectionsPage() {
         subtitle="Every scalper entry the live confluence gate blocked — the failing rail, its margin, and the full breakdown"
         help="When a scalper's chart entry fires but the §12.3 confluence gate returns no decision, the entry is blocked and recorded here. Each row shows the FIRST failing rail and how far its operand sat from the threshold; expand a row for the rail-by-rail checklist, the dot-by-dot confluence score, and the raw OI/macro/chart inputs. Live-only — backtests never run the gate."
       />
+
+      <DotHealthPanel />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <DateInput

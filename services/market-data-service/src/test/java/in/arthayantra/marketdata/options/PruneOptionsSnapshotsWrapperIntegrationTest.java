@@ -93,7 +93,7 @@ class PruneOptionsSnapshotsWrapperIntegrationTest extends MarketDataIntegrationT
     jdbc.update(
         "INSERT INTO options_chain_snapshots"
             + " (ts, underlying, expiry, strike, option_type, tradingsymbol)"
-            + " VALUES (?, ?, ?, ?, ?, ?)",
+            + " VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
         ts, UL, LocalDate.of(2027, 1, 28), new BigDecimal("20000.00"), "CE", "PRUNE-WRAP");
   }
 

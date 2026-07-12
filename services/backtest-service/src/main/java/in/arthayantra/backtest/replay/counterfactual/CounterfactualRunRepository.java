@@ -77,11 +77,17 @@ public class CounterfactualRunRepository {
         .findFirst();
   }
 
-  /** The run id produced by a job (for the {@code resultRef} on the job-status payload). */
+  /**
+   * The run id produced by a job (for the {@code resultRef} on the job-status payload). {@code
+   * uq_counterfactual_runs_job} already caps this at one row per job, but the ordering makes the
+   * "latest run wins" intent explicit and stays deterministic even if a future migration relaxes the
+   * uniqueness (the {@code completed_at} tiebreak returns the most-recently-completed run, {@code id}
+   * breaks a same-timestamp tie so {@code findFirst} is never arbitrary).
+   */
   public Optional<UUID> findRunIdByJobId(UUID jobId) {
     return jdbc
         .query(
-            "SELECT id FROM counterfactual_runs WHERE job_id=?",
+            "SELECT id FROM counterfactual_runs WHERE job_id=? ORDER BY completed_at DESC, id DESC",
             (rs, n) -> UUID.fromString(rs.getString("id")),
             jobId)
         .stream()

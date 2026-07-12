@@ -8,13 +8,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import in.arthayantra.backtest.client.StrategyVersionClient;
 import in.arthayantra.backtest.jobs.Job;
+import in.arthayantra.backtest.jobs.JobKind;
 import in.arthayantra.backtest.jobs.JobRepository;
 import in.arthayantra.backtest.replay.BacktestRunner;
 import in.arthayantra.backtest.testsupport.BacktestIntegrationTestBase;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -207,6 +210,34 @@ class CounterfactualIntegrationTest extends BacktestIntegrationTestBase {
                 .content(requestBody(symbol)))
         .andExpect(status().is(422))
         .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+  }
+
+  // findRunIdByJobId must resolve THIS job's run under multi-row shared-DB state (the singleton IT DB
+  // accumulates runs from every method) and must return the CURRENT run after a crash-recovery re-run
+  // replaces it — guards the resolver contract the ORDER BY completed_at DESC, id DESC + the
+  // uq_counterfactual_runs_job DELETE-by-job replace both underwrite (never an arbitrary row).
+  @Test
+  void findRunIdByJobIdResolvesTheJobsOwnCurrentRun() {
+    ObjectNode emptyRequest = objectMapper.createObjectNode();
+    UUID jobA =
+        jobs.insertQueued(JobKind.COUNTERFACTUAL, null, null, emptyRequest, "cf-order-A", "owner").id();
+    UUID jobB =
+        jobs.insertQueued(JobKind.COUNTERFACTUAL, null, null, emptyRequest, "cf-order-B", "owner").id();
+    OffsetDateTime from = OffsetDateTime.parse("2026-06-16T00:00:00+05:30");
+    OffsetDateTime to = OffsetDateTime.parse("2026-06-17T00:00:00+05:30");
+
+    UUID runA = cfRuns.insert(jobA, from, to, 1, List.of(), "owner");
+    UUID runB = cfRuns.insert(jobB, from, to, 1, List.of(), "owner");
+    assertThat(cfRuns.findRunIdByJobId(jobA)).contains(runA);
+    assertThat(cfRuns.findRunIdByJobId(jobB)).contains(runB);
+
+    // Crash-recovery re-run: insert() DELETEs-by-job then INSERTs a fresh id. The resolver must return
+    // the CURRENT run, the superseded id must no longer resolve, and jobB stays untouched.
+    UUID runA2 = cfRuns.insert(jobA, from, to, 1, List.of(), "owner");
+    assertThat(runA2).isNotEqualTo(runA);
+    assertThat(cfRuns.findRunIdByJobId(jobA)).contains(runA2);
+    assertThat(cfRuns.findResult(runA)).isEmpty();
+    assertThat(cfRuns.findRunIdByJobId(jobB)).contains(runB);
   }
 
   private JsonNode variant(JsonNode result, String name) {

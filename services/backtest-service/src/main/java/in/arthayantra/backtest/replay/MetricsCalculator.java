@@ -233,22 +233,32 @@ public final class MetricsCalculator {
 
   /**
    * Trade frequency in trades per trading SESSION: {@code tradeCount / sessions}, where {@code
-   * sessions = totalBars / barsPerSession} and {@code barsPerSession = periodsPerYear(interval) /
-   * 252} (the same per-interval constant Sharpe scaling uses — bars exist only within sessions, so
-   * the primary-bar count divided by bars-per-session is the session count). A {@code 1d} run reads
-   * trades/day (barsPerSession == 1); a {@code 1m} run reads trades/session (375 1m bars == one
-   * session). Deterministic (pure function of tradeCount, totalBars, interval); {@code 0} on an
-   * empty window (no bars).
+   * sessions = totalBars / barsPerSession(interval)}. A {@code 1d} run reads trades/day
+   * (barsPerSession == 1); a {@code 1m} run reads trades/session (375 1m bars == one session); a
+   * {@code 3m} run reads trades over 125 bars/session (375 trading minutes / 3). Deterministic (pure
+   * function of tradeCount, totalBars, interval); {@code 0} on an empty window (no bars).
    */
   private static BigDecimal tradeFrequency(int tradeCount, long totalBars, String interval) {
     if (totalBars == 0) {
       return BigDecimal.ZERO.setScale(SCALE);
     }
-    double sessions = totalBars / (periodsPerYear(interval) / 252.0);
+    double sessions = totalBars / barsPerSession(interval);
     if (sessions <= 0) {
       return BigDecimal.ZERO.setScale(SCALE);
     }
     return bd(tradeCount / sessions);
+  }
+
+  /**
+   * Primary bars per trading session (375 IST minutes). Derived from {@link #periodsPerYear} for
+   * every interval it enumerates (1m→375, 5m→75, 15m→25, 1h→6.25, 1d→1, 1w→52/252) — byte-identical
+   * to the prior inline {@code periodsPerYear(interval) / 252.0}. {@code 3m} was absent from {@code
+   * periodsPerYear} until chip task_c7132464: it silently fell to the {@code default 252}, collapsing
+   * barsPerSession to 1 ({@code tradeFrequency} read trades-per-BAR, ~125× the true per-session rate,
+   * #721 / chip task_547656bf) and annualizing 3m Sharpe/Sortino as if 3m bars were daily bars.
+   */
+  private static double barsPerSession(String interval) {
+    return periodsPerYear(interval) / 252.0;
   }
 
   /**
@@ -275,6 +285,7 @@ public final class MetricsCalculator {
   private static double periodsPerYear(String interval) {
     return switch (interval) {
       case "1m" -> 252.0 * 375;
+      case "3m" -> 252.0 * 125; // 375 trading minutes / 3 (chip task_c7132464)
       case "5m" -> 252.0 * 75;
       case "15m" -> 252.0 * 25;
       case "1h" -> 252.0 * 375 / 60;

@@ -265,7 +265,8 @@ public class RunRepository {
             "SELECT br.metrics, br.equity_curve, br.drawdown_curve, br.benchmark_curve, br.data_hash, "
                 + "br.seed, br.premium_source, br.universe_checksum, br.exchange, br.tradingsymbol, "
                 + "br.completed_at, br.engine_sha, br.engine_image, "
-                + "j.request->>'strategyId' AS strategy_id "
+                + "j.request->>'strategyId' AS strategy_id, "
+                + "j.request->>'universeAsOf' AS universe_as_of "
                 + "FROM backtest_runs br LEFT JOIN jobs j ON j.id = br.job_id WHERE br.id=?",
             (rs, n) -> {
               Map<String, Object> out = new LinkedHashMap<>();
@@ -289,6 +290,11 @@ public class RunRepository {
               // runs (differing universe_checksum) beside the dataHash mismatch. NULL for explicit
               // single-instrument / unpinned universes — the compare banner ignores NULLs.
               out.put("universeChecksum", rs.getString("universe_checksum"));
+              // task_03b9f52d / task_9062b5f1: the resolved universe's asOf — the funnel-CHOSEN screen
+              // date for the swing funnel modes (which persisted screen fed the pinned universe), the
+              // constituents asOf for index_constituents, else NULL. Read from the joined job request
+              // JSONB (no dedicated column), it makes a weekend/holiday funnel run interpretable here.
+              out.put("universeAsOf", rs.getString("universe_as_of"));
               // Audit P0-2 / R1: the engine CODE identity this run executed under — the git SHA +
               // build image baked into the worker jar. NULL on pre-V008 rows and on a jar built
               // without git.properties (mock/test). Lets a longitudinal comparison tell a strategy

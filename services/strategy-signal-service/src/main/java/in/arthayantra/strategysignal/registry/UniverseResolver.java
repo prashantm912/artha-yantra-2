@@ -70,8 +70,10 @@ public class UniverseResolver {
   private ResolvedUniverse resolveMinerviniFunnel(JsonNode universe) {
     boolean onDeck = !"buyable".equals(universe.path("bucket").asText("buyable_on_deck"));
     List<Constituent> items = new ArrayList<>();
+    String asOf = null;
     try {
       JsonNode funnel = get("/api/v1/market/screener/minervini/funnel");
+      asOf = funnelScreenDate(funnel);
       collectFunnel(funnel.path("immediatelyBuyable"), items);
       if (onDeck) {
         collectFunnel(funnel.path("onDeck"), items);
@@ -79,7 +81,7 @@ public class UniverseResolver {
     } catch (ApiException unavailable) {
       // funnel down / no screen yet -> pin empty (nothing to evaluate this session)
     }
-    return new ResolvedUniverse("minervini_funnel", null, items, checksum(items), null);
+    return new ResolvedUniverse("minervini_funnel", asOf, items, checksum(items), null);
   }
 
   /**
@@ -92,8 +94,10 @@ public class UniverseResolver {
   private ResolvedUniverse resolveManasAroraFunnel(JsonNode universe) {
     boolean onDeck = !"buyable".equals(universe.path("bucket").asText("buyable_on_deck"));
     List<Constituent> items = new ArrayList<>();
+    String asOf = null;
     try {
       JsonNode funnel = get("/api/v1/market/screener/manas-arora/funnel");
+      asOf = funnelScreenDate(funnel);
       collectFunnel(funnel.path("immediatelyBuyable"), items);
       if (onDeck) {
         collectFunnel(funnel.path("onDeck"), items);
@@ -101,7 +105,21 @@ public class UniverseResolver {
     } catch (ApiException unavailable) {
       // funnel down / no screen yet -> pin empty (nothing to evaluate this session)
     }
-    return new ResolvedUniverse("manas_arora_funnel", null, items, checksum(items), null);
+    return new ResolvedUniverse("manas_arora_funnel", asOf, items, checksum(items), null);
+  }
+
+  /**
+   * The funnel response's {@code screenDate} (an IST trading date, e.g. {@code "2026-07-10"}) — which
+   * point-in-time screen the funnel resolved AS OF, propagated into {@link ResolvedUniverse#asOf} so
+   * backtest run provenance can record which persisted screen fed the pinned universe. Market-data's
+   * funnel endpoint defaults to its LATEST PERSISTED screen date (never today), so a weekend/holiday
+   * submission pins the last real trading day's screen. Returns {@code null} when the funnel carries no
+   * date (no screen has ever run — the empty-lists case); guarded by {@code isTextual()} so a JSON
+   * {@code null} node never leaks the literal string {@code "null"} into {@code asOf}.
+   */
+  private static String funnelScreenDate(JsonNode funnel) {
+    JsonNode screenDate = funnel.path("screenDate");
+    return screenDate.isTextual() ? screenDate.asText() : null;
   }
 
   /** Appends each funnel row's symbol as an NSE-EQ constituent (dedup-safe). */

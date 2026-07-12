@@ -55,6 +55,11 @@ class RunRepositoryIntegrationTest extends BacktestIntegrationTestBase {
   }
 
   private static UUID insertRun(EngineIdentity identity, String createdBy) {
+    return insertRunForJob(identity, newJobId(), createdBy);
+  }
+
+  /** Inserts a run hanging off {@code jobId} (so a test can control the joined job request JSONB). */
+  private static UUID insertRunForJob(EngineIdentity identity, UUID jobId, String createdBy) {
     RunRepository runs = new RunRepository(jdbc, MAPPER, identity);
     ReplayResult result =
         new ReplayResult(
@@ -65,7 +70,7 @@ class RunRepositoryIntegrationTest extends BacktestIntegrationTestBase {
             BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
             BigDecimal.ZERO, BigDecimal.ZERO, 0, MAPPER.createObjectNode());
     return runs.insert(
-        newJobId(),
+        jobId,
         UUID.randomUUID(),
         "NSE",
         "NIFTY 50",
@@ -83,6 +88,20 @@ class RunRepositoryIntegrationTest extends BacktestIntegrationTestBase {
         null,
         null,
         createdBy);
+  }
+
+  /** A queued job whose request JSONB carries the given universeAsOf (a funnel-chosen screen date). */
+  private static UUID newJobIdWithUniverseAsOf(String asOf) {
+    JobRepository jobs =
+        new JobRepository(jdbc, MAPPER, EngineIdentity.of("job-sha", "backtest-service:it"));
+    return jobs.insertQueued(
+            JobKind.BACKTEST,
+            null,
+            UUID.randomUUID(),
+            MAPPER.createObjectNode().put("strategyId", "asof-it").put("universeAsOf", asOf),
+            UUID.randomUUID().toString(),
+            "owner")
+        .id();
   }
 
   @Test
@@ -118,5 +137,21 @@ class RunRepositoryIntegrationTest extends BacktestIntegrationTestBase {
         new RunRepository(jdbc, MAPPER, EngineIdentity.of(null, null)).findResult(runId).orElseThrow();
     assertThat(results.get("engineSha")).isNull();
     assertThat(results.get("engineImage")).isNull();
+    // A non-funnel run's job request carries no universeAsOf → the results read surfaces NULL, never
+    // a spurious value (task_03b9f52d / task_9062b5f1).
+    assertThat(results.get("universeAsOf")).isNull();
+  }
+
+  // task_03b9f52d / task_9062b5f1: a funnel-mode submission stamps the chosen screen date into the job
+  // request JSONB (JobsService); findResult joins the job and surfaces it as universeAsOf on the run
+  // read (GET /api/v1/backtests/{runId}/results), making a weekend/holiday funnel run interpretable.
+  @Test
+  void resultsEchoesTheFunnelUniverseAsOfFromTheJobRequest() {
+    UUID jobId = newJobIdWithUniverseAsOf("2026-07-10");
+    UUID runId = insertRunForJob(EngineIdentity.of(null, null), jobId, "owner");
+
+    Map<String, Object> results =
+        new RunRepository(jdbc, MAPPER, EngineIdentity.of(null, null)).findResult(runId).orElseThrow();
+    assertThat(results.get("universeAsOf")).isEqualTo("2026-07-10");
   }
 }

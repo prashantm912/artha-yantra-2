@@ -165,9 +165,13 @@ public class JobsService {
     // B9 (EVO §13 row 19): the swing FUNNEL modes (manas_arora_funnel / minervini_funnel) join the
     // same pin-by-copy path so Manas/Minervini SIM_FIRST trials become runnable through the job
     // pipeline (they were 0-runnable — the runner threw "needs an explicit single-instrument
-    // universe"). The strategy-signal resolver returns TODAY's screen (the live funnel endpoint is
-    // NOT point-in-time), so a windowed funnel backtest runs a STATIC universe pinned as-of
-    // submission — a documented divergence from the day-varying live funnel. The runner is
+    // universe"). The strategy-signal resolver reads market-data's funnel, which serves the LATEST
+    // PERSISTED screen date (ManasController/MinerviniController.defaultReadDate = latestScreenDate(),
+    // NOT today — the endpoint is not point-in-time-windowed), so a windowed funnel backtest runs a
+    // STATIC universe pinned as-of that chosen screen date — a documented divergence from the
+    // day-varying live funnel. That chosen screen date rides through as the resolved universe's asOf
+    // and is stamped into run provenance (universeAsOf) below, so a weekend/holiday submission is
+    // interpretable (the pinned screen is the last real trading day's, never today). The runner is
     // single-signal-instrument, so replay signals on the funnel's TOP-ranked pick (per-name
     // expectancy); portfolio/slot effects across the whole funnel are validated at the paper stage.
     String universeMode = v.config().path("universe").path("mode").asText("explicit");
@@ -181,6 +185,16 @@ public class JobsService {
       if (universe != null) {
         request.set("universe", universe.path("items"));
         request.put("universeChecksum", universe.path("checksum").asText());
+        // task_03b9f52d / task_9062b5f1: record the resolved universe's asOf into run provenance — for
+        // the funnel modes this is the funnel-CHOSEN screen date (an IST trading date), for
+        // index_constituents the constituents asOf; NULL/absent for the futures modes. Rides the request
+        // JSONB (no migration), which RunRepository.findResult surfaces on the run read as
+        // /{runId}/results.universeAsOf — so a weekend/holiday funnel submission (which screen fed the
+        // pinned universe) is interpretable after the fact. isTextual() guards a JSON null node.
+        JsonNode universeAsOf = universe.path("asOf");
+        if (universeAsOf.isTextual()) {
+          request.put("universeAsOf", universeAsOf.asText());
+        }
       }
       // An empty funnel (off-hours / fresh screen / no passers this session) has nothing to signal
       // on — fail CLEAN at submission with a 4xx rather than letting the worker throw mid-replay

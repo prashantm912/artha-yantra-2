@@ -215,6 +215,7 @@ class FakeStrategy:
         config: dict[str, Any],
         existing: list[dict[str, Any]] | None = None,
         create_conflict: bool = False,
+        archive_fails: bool = False,
     ) -> None:
         self._config = config
         self.drafts: list[dict[str, Any]] = []
@@ -223,11 +224,14 @@ class FakeStrategy:
         for row in existing or []:
             self._registry[row["id"]] = dict(row)
         self._create_conflict = create_conflict
+        # slice-3 fail-soft archive path: force the archive call to raise (a registry fault).
+        self._archive_fails = archive_fails
         self.created: list[dict[str, Any]] = []
         self.published: list[str] = []
-        # slice-3 PROMOTE / ROLLBACK surface: registered shadow-variant counterfactuals + rollbacks.
+        # slice-3 PROMOTE / ROLLBACK surface: counterfactuals + rollbacks + archived clone ids.
         self.shadow_variants: list[dict[str, Any]] = []
         self.rollbacks: list[dict[str, Any]] = []
+        self.archived: list[str] = []
         self._seq = 0
 
     def _row(self, strategy_id: str) -> dict[str, Any]:
@@ -345,6 +349,20 @@ class FakeStrategy:
         }
         self.shadow_variants.append(row)
         return row
+
+    def archive(self, strategy_id: str) -> dict[str, Any]:
+        """Mirrors StrategyClient.archive: mark the strategy archived (engine unloads). The
+        ``archive_fails`` fixture raises instead — the fail-soft promote path must absorb it."""
+        if self._archive_fails:
+            request = httpx.Request(
+                "POST", f"http://strategy-signal/api/v1/strategies/{strategy_id}/archive"
+            )
+            response = httpx.Response(500, json={"message": "boom"}, request=request)
+            raise httpx.HTTPStatusError("boom", request=request, response=response)
+        row = self._row(strategy_id)
+        row["status"] = "archived"
+        self.archived.append(strategy_id)
+        return {"id": strategy_id, "status": "archived"}
 
 
 class FakeBacktest:

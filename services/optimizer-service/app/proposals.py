@@ -165,8 +165,9 @@ class AssessmentResponse(BaseModel):
 class PromotionResult(BaseModel):
     """The result of executing an APPROVED PROMOTE proposal (§8.2): the candidate's config published
     onto the BASE strategy (champion pointer moved) + the demoted-champion counterfactual that was
-    registered to accrue live comparator P&L. No real-order path is touched (paper/live-signal
-    only)."""
+    registered to accrue live comparator P&L + the archive outcome for the candidate's now-redundant
+    evo PAPER clone (fail-soft — ``cloneArchive.warning`` when it could not be archived). No
+    real-order path is touched (paper/live-signal only)."""
 
     proposalId: str
     campaignId: str
@@ -176,6 +177,7 @@ class PromotionResult(BaseModel):
     demotedChampionVersionId: str | None = None
     demotedChampionVersion: str | None = None
     counterfactual: dict[str, Any]
+    cloneArchive: dict[str, Any] | None = None
     candidateState: str
     note: str
 
@@ -1031,18 +1033,23 @@ class ProposalService:
 
     def _check_family_cap(self, family: str | None) -> None:
         """§1.4.3: refuse to publish past the per-family evo-paper cap (default 2). Counts PUBLISHED
-        registry strategies tagged ``evo`` whose tags include this family (the family book)."""
+        registry strategies tagged ``evo`` whose tags include this family (the family book) —
+        EXCLUDING demoted-champion counterfactuals (the ``counterfactual`` tag): their 6-week
+        retention is design-MANDATED (§8.2), so it must not consume the budget that governs NEW
+        candidate clones (else one promote jams the family at the cap)."""
         evo_clones = self._strategy.list_strategies(tag=_EVO_TAG, status="published")
         family_lower = (family or "").lower()
-        live = [
-            s for s in evo_clones
-            if family_lower and family_lower in [str(t).lower() for t in (s.get("tags") or [])]
-        ]
+        live = []
+        for s in evo_clones:
+            tags_lower = [str(t).lower() for t in (s.get("tags") or [])]
+            if family_lower and family_lower in tags_lower and _CF_TAG not in tags_lower:
+                live.append(s)
         if len(live) >= self._evo_paper_cap:
             raise ApiError(
                 409, "EVO_PAPER_CAP_REACHED",
                 f"family {family!r} already has {len(live)} live evo paper clone(s) — the §1.4.3 "
-                f"cap is {self._evo_paper_cap}; retire/archive one before publishing another",
+                f"cap is {self._evo_paper_cap}; retire/archive one before publishing another "
+                "(demoted-champion counterfactuals are exempt — mandated retention)",
             )
 
     def _create_and_publish(
@@ -1164,13 +1171,18 @@ class ProposalService:
 
     def _execute_promote(self, ctx: dict[str, Any], actor: str | None) -> PromotionResult:
         """§8.2 PROMOTE: publish the candidate's config onto the BASE strategy (champion pointer
-        moves) and register the demoted-champion counterfactual so its P&L accrues live. The
+        moves), register the demoted-champion counterfactual so its P&L accrues live, and archive
+        the candidate's now-redundant evo PAPER clone ("closing/retiring archives the clone" —
+        fail-soft: an archive failure only stamps a warning, the promote already succeeded). The
         candidate advances TAKE_ELIGIBLE→PROMOTED; the campaign champion pointer moves. No
         real-order path is touched (paper/live-signal only)."""
         self._guard_not_executed(ctx["proposal"], "promotion")
         candidate = ctx["candidate"]
         campaign = ctx["campaign"]
         base_id = self._resolve_base_strategy_id(ctx)
+        # The candidate's own evo PAPER clone (to archive after the champion move) — its strategy
+        # id lives on the prior PUBLISH_PAPER proposal's execution stamp. Read BEFORE any HTTP.
+        clone_strategy_id = self._find_candidate_clone_id(candidate["id"])
 
         # The DEMOTED champion = the base strategy's CURRENT published version, captured BEFORE the
         # candidate is published onto it (config + version UUID + semver — the rollback target).
@@ -1207,10 +1219,51 @@ class ProposalService:
         counterfactual = self._register_counterfactual(
             campaign, demoted_config, demoted_semver, candidate, created_by
         )
+        # Archive the candidate's now-redundant evo PAPER clone (§8.2 "closing/retiring archives
+        # the clone") — fail-soft AFTER the champion move: a failure stamps a warning, never a 502.
+        clone_archive = self._archive_candidate_clone(clone_strategy_id)
         return self._stamp_promotion(
             ctx, base_id, new_champion_version_id, demoted_version_id, demoted_semver,
-            counterfactual, actor,
+            counterfactual, clone_archive, actor,
         )
+
+    def _find_candidate_clone_id(self, candidate_id: str) -> str | None:
+        """The candidate's own evo PAPER clone strategy id — stamped on its prior PUBLISH_PAPER
+        proposal's ``execution.clonedStrategyId`` (slice 2). ``None`` when the lineage is absent
+        (e.g. a directly-seeded candidate) — archive then degrades to a warning, never a failure."""
+        repo = self._repo_factory()
+        try:
+            prior = repo.find_latest_proposal(candidate_id, _PUBLISH_PAPER)
+        finally:
+            repo.close()
+        execution = ((prior or {}).get("evidence") or {}).get("execution") or {}
+        clone_id = execution.get("clonedStrategyId")
+        return str(clone_id) if clone_id else None
+
+    def _archive_candidate_clone(self, clone_strategy_id: str | None) -> dict[str, Any]:
+        """Archive the candidate's redundant evo PAPER clone, FAIL-SOFT: the promote itself already
+        succeeded, so an archive failure (or an unknown clone id) returns a warning block that is
+        stamped on the promotion evidence + noted in the response — never a 5xx."""
+        if not clone_strategy_id:
+            return {
+                "archived": False,
+                "warning": (
+                    "no PUBLISH_PAPER execution lineage on the candidate — its evo clone strategy "
+                    "id is unknown; archive the redundant clone manually"
+                ),
+            }
+        try:
+            self._strategy.archive(clone_strategy_id)
+        except httpx.HTTPError as exc:
+            return {
+                "archived": False,
+                "clonedStrategyId": clone_strategy_id,
+                "warning": (
+                    f"archiving the redundant evo clone failed ({exc}) — the promote itself "
+                    "succeeded; archive the clone manually"
+                ),
+            }
+        return {"archived": True, "clonedStrategyId": clone_strategy_id}
 
     def _publish_onto_base(
         self, base_id: str, config: dict[str, Any], candidate: dict[str, Any], created_by: str
@@ -1312,11 +1365,13 @@ class ProposalService:
         demoted_version_id: str | None,
         demoted_semver: str | None,
         counterfactual: dict[str, Any],
+        clone_archive: dict[str, Any],
         actor: str | None,
     ) -> PromotionResult:
         """Advance the candidate TAKE_ELIGIBLE→PROMOTED (version_id = the new champion version),
         move the campaign champion pointer, and stamp the ``promotion`` evidence (incl. the rollback
-        target: base + demoted-champion version) onto the proposal (append-only)."""
+        target: base + demoted-champion version, and the clone-archive outcome) onto the proposal
+        (append-only)."""
         proposal = ctx["proposal"]
         candidate = ctx["candidate"]
         campaign = ctx["campaign"]
@@ -1327,6 +1382,7 @@ class ProposalService:
             "demotedChampionVersionId": demoted_version_id,
             "demotedChampionVersion": demoted_semver,
             "counterfactual": counterfactual,
+            "cloneArchive": clone_archive,
             "retentionNote": _COUNTERFACTUAL_RETENTION,
             "executedBy": actor,
         }
@@ -1338,6 +1394,10 @@ class ProposalService:
             repo.update_campaign_champion(campaign["id"], new_champion_version_id)
         finally:
             repo.close()
+        if clone_archive.get("archived"):
+            archive_note = "The redundant evo PAPER clone was archived (engine unloads it)."
+        else:
+            archive_note = f"WARNING: {clone_archive.get('warning')}"
         return PromotionResult(
             proposalId=proposal["id"],
             campaignId=proposal["campaignId"],
@@ -1347,11 +1407,13 @@ class ProposalService:
             demotedChampionVersionId=demoted_version_id,
             demotedChampionVersion=demoted_semver,
             counterfactual=counterfactual,
+            cloneArchive=clone_archive,
             candidateState="PROMOTED",
             note=(
                 "published the candidate onto the base strategy — the champion pointer moved. The "
                 "demoted champion runs as the rollback counterfactual "
-                f"({counterfactual.get('mode')}) for 6 weeks (§8.2). No real-order path touched."
+                f"({counterfactual.get('mode')}) for 6 weeks (§8.2). {archive_note} "
+                "No real-order path touched."
             ),
         )
 

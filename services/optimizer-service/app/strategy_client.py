@@ -145,6 +145,15 @@ class StrategyClient:
         resp.raise_for_status()
         return resp.json()
 
+    def archive(self, strategy_id: str) -> dict[str, Any]:
+        """POST /api/v1/strategies/{id}/archive — archive a strategy (the signal engine unloads it;
+        existing archive semantics). EVO E4 PROMOTE (§8.2 "closing/retiring archives the clone")
+        archives the candidate's now-redundant evo PAPER clone after its config is published onto
+        the base strategy."""
+        resp = self._client.post(f"{self._base}/api/v1/strategies/{strategy_id}/archive")
+        resp.raise_for_status()
+        return resp.json()
+
     def register_shadow_variant(
         self,
         name: str,

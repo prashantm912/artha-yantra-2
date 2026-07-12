@@ -168,13 +168,15 @@ def test_full_state_machine_walk_on_fixture(capsys):
     paper_cand = next(c for c in cand if c["state"] == "TAKE_ELIGIBLE")
     assert paper_cand["scorecard"]["takeEligible"]["gates"]
 
-    # 6. PROMOTE: approve -> execute (TAKE_ELIGIBLE -> PROMOTED, champion moves, counterfactual)
+    # 6. PROMOTE: approve -> execute (TAKE_ELIGIBLE -> PROMOTED, champion moves, counterfactual
+    # registered, the now-redundant evo PAPER clone archived)
     client.post(f"/api/v1/evolution/proposals/{promote_id}/approve")
     pr = client.post(f"/api/v1/evolution/proposals/{promote_id}/execute").json()
     trace.append(
         f"6. PROMOTE       -> candidate {pr['candidateState']}, champion -> "
         f"{pr['championVersionId']}, counterfactual={pr['counterfactual']['mode']} "
-        f"(demoted {pr['demotedChampionVersion']})"
+        f"(demoted {pr['demotedChampionVersion']}), clone archived="
+        f"{pr['cloneArchive']['archived']}"
     )
     assert pr["candidateState"] == "PROMOTED"
     assert pr["baseStrategyId"] == _STRATEGY_ID
@@ -184,6 +186,9 @@ def test_full_state_machine_walk_on_fixture(capsys):
     assert camp["championVersionId"] == pr["championVersionId"]
     cf_created = [c for c in strategy.created if "evo-cf" in c["config"]["id"]]
     assert len(cf_created) == 1 and cf_created[0]["config"]["tags"][-1] == "counterfactual"
+    # the candidate's own evo PAPER clone (step 3) is now redundant — archived
+    assert strategy.archived == [ex["clonedStrategyId"]]
+    assert pr["cloneArchive"] == {"archived": True, "clonedStrategyId": ex["clonedStrategyId"]}
 
     promoted_version_id = pr["championVersionId"]
 
@@ -331,7 +336,8 @@ def test_take_eligible_unwired_is_500():
 
 # --- PROMOTE execute direct paths ---------------------------------------------------------------
 
-def _promote_seed(repo, *, policy="SIM_FIRST", cand_state="TAKE_ELIGIBLE", executed=False):
+def _promote_seed(repo, *, policy="SIM_FIRST", cand_state="TAKE_ELIGIBLE", executed=False,
+                  with_clone_lineage=True):
     repo.campaigns.append(_campaign(policy=policy))
     repo.generations[_CAMPAIGN_ID] = [{
         "id": "gen-1", "campaignId": _CAMPAIGN_ID, "n": 1, "proposal": None,
@@ -339,11 +345,20 @@ def _promote_seed(repo, *, policy="SIM_FIRST", cand_state="TAKE_ELIGIBLE", execu
         "status": "DONE", "startedAt": None, "finishedAt": None}]
     repo.candidates[_CAMPAIGN_ID] = [_paper_candidate(cid="c-te", version_id="ver-clone",
                                                       state=cand_state)]
+    if with_clone_lineage:
+        # the prior slice-2 PUBLISH_PAPER proposal whose execution stamp carries the candidate's
+        # own evo clone strategy id — the archive-on-promote source.
+        repo.proposals.append({
+            "_seq": 1, "id": "pp-1", "campaignId": _CAMPAIGN_ID, "candidateId": "c-te",
+            "kind": "PUBLISH_PAPER", "status": "APPROVED", "actor": "owner", "decidedAt": None,
+            "expiresAt": None, "createdAt": "2026-07-10T00:00:00+00:00",
+            "evidence": {"execution": {"executed": True, "clonedStrategyId": "clone-old",
+                                       "clonedSlug": "base--evo-g1-old"}}})
     evidence = {"kind": "PROMOTE", "candidateId": "c-te"}
     if executed:
         evidence["promotion"] = {"executed": True, "championVersionId": "old"}
     repo.proposals.append({
-        "_seq": 1, "id": "prop-1", "campaignId": _CAMPAIGN_ID, "candidateId": "c-te",
+        "_seq": 2, "id": "prop-1", "campaignId": _CAMPAIGN_ID, "candidateId": "c-te",
         "kind": "PROMOTE", "evidence": evidence, "status": "APPROVED", "actor": "owner",
         "decidedAt": None, "expiresAt": None, "createdAt": "2026-07-11T00:00:00+00:00"})
     return "prop-1"
@@ -379,6 +394,41 @@ def test_promote_execute_swing_moves_champion_and_retains_paper_counterfactual()
     # candidate PROMOTED + campaign champion moved
     assert repo.candidates[_CAMPAIGN_ID][0]["state"] == "PROMOTED"
     assert repo.campaigns[0]["championVersionId"] == f"ver-{_STRATEGY_ID}"
+    # the candidate's now-redundant evo PAPER clone was archived (§8.2 archive semantics)
+    assert strategy.archived == ["clone-old"]
+    assert body["cloneArchive"] == {"archived": True, "clonedStrategyId": "clone-old"}
+
+
+def test_promote_execute_archive_failure_is_fail_soft():
+    # an archive fault must NEVER fail the promote (the champion already moved) — the response
+    # succeeds and carries the warning in cloneArchive + the note; the evidence stamps it too.
+    repo = FakeEvoRepo()
+    strategy = FakeStrategy(_CONFIG, archive_fails=True)
+    pid = _promote_seed(repo)
+    client = _exec_app(repo, strategy)
+    resp = client.post(f"/api/v1/evolution/proposals/{pid}/execute")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["candidateState"] == "PROMOTED"
+    assert body["cloneArchive"]["archived"] is False
+    assert "archive the clone manually" in body["cloneArchive"]["warning"]
+    assert "WARNING" in body["note"]
+    assert strategy.archived == []
+    prop = next(p for p in repo.proposals if p["id"] == pid)
+    assert prop["evidence"]["promotion"]["cloneArchive"]["archived"] is False
+
+
+def test_promote_execute_without_clone_lineage_warns_and_succeeds():
+    # no prior PUBLISH_PAPER execution stamp (directly-seeded candidate) → the clone id is unknown;
+    # archive degrades to a warning, the promote still succeeds.
+    repo, strategy = FakeEvoRepo(), FakeStrategy(_CONFIG)
+    pid = _promote_seed(repo, with_clone_lineage=False)
+    client = _exec_app(repo, strategy)
+    body = client.post(f"/api/v1/evolution/proposals/{pid}/execute").json()
+    assert body["candidateState"] == "PROMOTED"
+    assert body["cloneArchive"]["archived"] is False
+    assert "lineage" in body["cloneArchive"]["warning"]
+    assert strategy.archived == []
 
 
 def test_promote_execute_scalper_registers_shadow_variant_counterfactual():

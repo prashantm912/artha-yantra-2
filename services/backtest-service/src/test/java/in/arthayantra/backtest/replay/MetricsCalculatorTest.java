@@ -109,6 +109,63 @@ class MetricsCalculatorTest {
   }
 
   @Test
+  void tradeFrequencyOnA3mPrimaryUsesA125BarSession() {
+    // #721 regression (chip task_547656bf): 3m was absent from the interval table and fell through to
+    // barsPerSession == 1, so tradeFrequency read trades-per-BAR (~125x the true rate). 125 3m bars ==
+    // one session (375 trading minutes / 3), so 3 trades over 125 bars == 3.0 trades per session
+    // (pre-fix this read 3 / 125 == 0.024000).
+    List<EquityPoint> equity =
+        List.of(
+            new EquityPoint(T0, new BigDecimal("100000")),
+            new EquityPoint(T1, new BigDecimal("101000")));
+    List<Trade> trades =
+        List.of(
+            closedTrade(1, "100", "101", "1"),
+            closedTrade(1, "100", "101", "1"),
+            closedTrade(1, "100", "101", "1"));
+    MetricsCalculator.Metrics m =
+        calc.compute(trades, equity, INITIAL, new BigDecimal("101000"), "3m", 125L, 50L);
+
+    assertThat(m.full().get("tradeFrequency").asText()).isEqualTo("3.000000");
+  }
+
+  @Test
+  void tradeFrequencyPreservesTheEnumeratedIntervalDivisors() {
+    // The 3m carve-out must not perturb the intervals periodsPerYear already enumerates: 5m == 75
+    // bars/session and 1h == 6.25 bars/session (375/60), byte-identical to the prior derivation.
+    List<EquityPoint> equity =
+        List.of(
+            new EquityPoint(T0, new BigDecimal("100000")),
+            new EquityPoint(T1, new BigDecimal("101000")));
+    List<Trade> three =
+        List.of(
+            closedTrade(1, "100", "101", "1"),
+            closedTrade(1, "100", "101", "1"),
+            closedTrade(1, "100", "101", "1"));
+    // 5m: 150 bars / 75 == 2 sessions; 3 trades / 2 == 1.5.
+    assertThat(
+            calc.compute(three, equity, INITIAL, new BigDecimal("101000"), "5m", 150L, 50L)
+                .full()
+                .get("tradeFrequency")
+                .asText())
+        .isEqualTo("1.500000");
+    // 1h: 25 bars / 6.25 == 4 sessions; 1 trade / 4 == 0.25 (pins 6.25, NOT 7).
+    assertThat(
+            calc.compute(
+                    List.of(closedTrade(1, "100", "101", "1")),
+                    equity,
+                    INITIAL,
+                    new BigDecimal("101000"),
+                    "1h",
+                    25L,
+                    10L)
+                .full()
+                .get("tradeFrequency")
+                .asText())
+        .isEqualTo("0.250000");
+  }
+
+  @Test
   void turnoverCountsAnOpenAtEndTradesEntryLegOnly() {
     // One closed trade (entry+exit fills) + one open-at-end trade (entry fill only, no exit).
     // fills = |100*10|+|120*10| + |200*5| = 1000+1200+1000 = 3200.

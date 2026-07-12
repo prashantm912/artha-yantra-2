@@ -136,6 +136,7 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         scorer=app.state.retro,
         dispatcher=dispatcher,
         backtest_client=backtest_client,
+        max_concurrent=settings.stress_max_concurrent_jobs,
     )
 
     # Backtest-vs-live reconciliation (§12 E3 item 7 / §7): re-simulate the EXACT version over the

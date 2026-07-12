@@ -332,6 +332,84 @@ def test_collect_reads_objectives_and_degrades_failed_run():
     assert outcomes["cand-0"][4.0] == (None, None)
 
 
+class _ConcurrencyProbe:
+    """Plays BOTH the dispatcher and the backtest-client, sharing an in-flight set so the test can
+    assert the stress-dispatch cap. A run completes only on its SECOND poll, so dispatched runs
+    genuinely overlap in flight; every dispatch records the peak simultaneous in-flight count."""
+
+    def __init__(self, metric: str = _METRIC) -> None:
+        self._metric = metric
+        self.backtests: list[str] = []  # dispatch order (dispatcher role)
+        self.trials: list[str] = []
+        self._outstanding: set[str] = set()
+        self._polls: dict[str, int] = {}
+        self.peak_in_flight = 0
+
+    # --- dispatcher role ---
+    def dispatch_backtest(self, job_id: str) -> None:
+        self.backtests.append(str(job_id))
+        self._outstanding.add(str(job_id))
+        self.peak_in_flight = max(self.peak_in_flight, len(self._outstanding))
+
+    def dispatch(self, job_id: str) -> None:  # a stress round must NEVER touch the trial stream
+        self.trials.append(str(job_id))
+
+    # --- backtest-client role ---
+    def job_status(self, job_id: str) -> dict[str, Any]:
+        self._polls[job_id] = self._polls.get(job_id, 0) + 1
+        if self._polls[job_id] < 2:
+            return {"status": "running", "resultRef": None}  # still in flight this pass
+        self._outstanding.discard(str(job_id))
+        return {"status": "completed", "resultRef": f"sr-{job_id}"}
+
+    def results(self, run_id: str) -> dict[str, Any]:
+        return {"metrics": {self._metric: 0.5}}
+
+
+def test_collect_caps_concurrent_in_flight_and_advances_on_completion():
+    # The chip's invariant: N runs, cap 2 → never > 2 dispatched-and-not-yet-terminal at once, and a
+    # completion advances the queue (all N eventually dispatch + resolve). Runs ride the interactive
+    # stream, which B16 does not protect, so this cap is the only starvation guard.
+    probe = _ConcurrencyProbe()
+    svc = StressService(
+        repo_factory=lambda: FakeEvoRepo(),
+        jobs_factory=lambda: FakeJobs(),
+        scorer=None,
+        dispatcher=probe,
+        backtest_client=probe,
+        poll_interval=0.0,
+        poll_timeout=2.0,
+        max_concurrent=2,
+    )
+    pending = {f"j{i}": (f"cand-{i}", 2.0) for i in range(6)}
+    outcomes = svc._collect(_ctx("sweep-1", []), pending)
+
+    assert probe.peak_in_flight == 2  # never > the cap in flight (and the cap was reached)
+    assert sorted(probe.backtests) == sorted(pending)  # all 6 eventually dispatched (advanced)
+    assert probe.trials == []  # the trial stream is never touched
+    resolved = [obj for cand in outcomes.values() for obj, _run in cand.values()]
+    assert resolved == [0.5] * 6  # every run drained to a completed objective
+
+
+def test_collect_never_exceeds_cap_of_one():
+    # cap 1 fully serializes the round — one run in flight at a time, still draining every cand.
+    probe = _ConcurrencyProbe()
+    svc = StressService(
+        repo_factory=lambda: FakeEvoRepo(),
+        jobs_factory=lambda: FakeJobs(),
+        scorer=None,
+        dispatcher=probe,
+        backtest_client=probe,
+        poll_interval=0.0,
+        poll_timeout=2.0,
+        max_concurrent=1,
+    )
+    pending = {f"j{i}": (f"cand-{i}", 2.0) for i in range(4)}
+    svc._collect(_ctx("sweep-1", []), pending)
+    assert probe.peak_in_flight == 1
+    assert len(probe.backtests) == 4
+
+
 # ================================================================================================
 # rescore: attach slopes, re-score, persist atomically
 # ================================================================================================

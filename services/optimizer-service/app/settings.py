@@ -29,6 +29,7 @@ class Settings:
     ntfy_url: str
     ntfy_topic: str
     evo_paper_cap: int
+    stress_max_concurrent_jobs: int
 
     @property
     def conninfo(self) -> str:
@@ -57,4 +58,10 @@ class Settings:
             ntfy_topic=os.environ.get("ARTHA_NTFY_TOPIC", ""),
             # §1.4.3 safety invariant: <= 2 concurrent evo paper strategies per family book.
             evo_paper_cap=int(os.environ.get("ARTHA_EVO_PAPER_CAP", "2")),
+            # Cost-stress dispatch reservation: max stress BACKTEST runs in flight at once, so a
+            # plateau round can't flood the interactive worker pool (composes with backtest-service
+            # B16). Default 2 leaves headroom on any pool with 3+ workers.
+            stress_max_concurrent_jobs=int(
+                os.environ.get("ARTHA_STRESS_MAX_CONCURRENT_JOBS", "2")
+            ),
         )

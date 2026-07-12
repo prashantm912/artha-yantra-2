@@ -1,7 +1,33 @@
 // Typed fetch wrapper (master plan §20 / §10.2): same-origin `/api/v1`, XSRF echo, the D8 error
 // envelope → ApiError, and the {items} list helper. Replaces Angular's HttpClient + error.interceptor.
 
+import { toast } from 'sonner';
+
 const BASE = '/api/v1';
+
+// The shared CSV-export standard's loud-truncation headers (libs/common-web CsvExport): the server
+// clips a download at a row cap and says so via these headers rather than a silently short file.
+// Same-origin through the gateway, so fetch reads them without any Access-Control-Expose-Headers.
+const HEADER_TRUNCATED = 'X-Result-Truncated';
+const HEADER_ROWS = 'X-Result-Rows';
+
+/**
+ * Surfaces the server's loud-truncation contract to the user: when an export response carries
+ * `X-Result-Truncated: true`, a warning toast names how many rows actually made the file
+ * (`X-Result-Rows` = the row cap). No-op when the header is absent or false. Called from every
+ * export download path so a clipped export is never silent (A9 residual / task_f12c165f).
+ */
+export function warnIfExportTruncated(res: Response): void {
+  if (res.headers.get(HEADER_TRUNCATED) !== 'true') return;
+  const rows = Number(res.headers.get(HEADER_ROWS));
+  const message =
+    Number.isFinite(rows) && rows > 0
+      ? `Export truncated to ${rows.toLocaleString()} rows`
+      : 'Export truncated at the server row cap';
+  toast.warning(message, {
+    description: 'The row cap was reached — some rows were left out of the download.',
+  });
+}
 
 export interface ApiErrorBody {
   code?: string;
@@ -131,6 +157,7 @@ export async function downloadFile(path: string): Promise<void> {
       envelope.details,
     );
   }
+  warnIfExportTruncated(res);
   const dispo = res.headers.get('content-disposition') ?? '';
   const match = dispo.match(/filename="?([^"]+)"?/);
   const filename = match ? match[1] : 'export.csv';

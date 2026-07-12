@@ -58,6 +58,24 @@ export function useCreateJournal() {
   });
 }
 
+/** The mutable fields of an entry — links are immutable after create (the BE PUT ignores link columns). */
+export interface JournalEdit {
+  note: string;
+  tags: string[];
+  disciplineRating?: number | null;
+  emotionRating?: number | null;
+}
+
+/** Edit an entry's note / tags / ratings via the PUT path (links stay as set at create). */
+export function useUpdateJournal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: JournalEdit }) =>
+      apiFetch<JournalEntry>(`/journal/${id}`, { method: 'PUT', json: body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [KEY] }),
+  });
+}
+
 export function useDeleteJournal() {
   const qc = useQueryClient();
   return useMutation({

@@ -6,6 +6,7 @@ import { Skeleton } from '../../components/Skeletons.tsx';
 import { LoadBeat, BeatBlock } from '../../components/LoadBeat.tsx';
 import {
   useGraduationBoard,
+  useGraduationPromotions,
   type Criterion,
   type StrategyGraduation,
 } from '../../api/graduation.ts';
@@ -62,8 +63,12 @@ function Money({ value }: { value: string }) {
 
 export function GraduationPage() {
   const board = useGraduationBoard();
+  const promotions = useGraduationPromotions();
   const rows = board.data?.strategies ?? [];
   const th = board.data?.thresholds;
+  const promos = promotions.data ?? [];
+  // Board rows carry the display name/slug; the promotions row is id-keyed — join for a friendly label.
+  const labelById = new Map(rows.map((s) => [s.strategyId, s]));
 
   return (
     <LoadBeat>
@@ -79,6 +84,51 @@ export function GraduationPage() {
           expectancy &gt; {formatDecimal(th.minExpectancy, 2)} · max DD ≤{' '}
           {formatDecimal(th.maxDrawdownPct, 2)}%
         </p>
+      )}
+
+      {promos.length > 0 && (
+        <section className="mb-4">
+          <h2 className="mb-2 flex flex-wrap items-center gap-2 text-sm font-semibold text-ay-text">
+            <span className="rounded px-1.5 py-0.5 text-xs font-semibold text-bull ring-1 ring-bull/40">
+              Graduated
+            </span>
+            <span className="text-ay-muted">strategies the F7 evaluator has marked graduated</span>
+          </h2>
+          <BeatBlock className="overflow-auto rounded-lg border border-ay-border">
+            <table className="w-full border-collapse text-sm">
+              <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
+                <tr>
+                  <th className="px-2 py-2 font-medium">Strategy</th>
+                  <th className="px-2 py-2 font-medium">Graduated at</th>
+                  <th className="px-2 py-2 text-right font-medium">Trades</th>
+                  <th className="px-2 py-2 text-right font-medium">Expectancy</th>
+                  <th className="px-2 py-2 text-right font-medium">Sharpe</th>
+                  <th className="px-2 py-2 text-right font-medium">Max DD</th>
+                </tr>
+              </thead>
+              <tbody>
+                {promos.map((p) => {
+                  const s = labelById.get(p.strategyId);
+                  return (
+                    <tr key={`${p.strategyId}:${p.graduatedAt}`} className="border-t border-ay-border">
+                      <td className="px-2 py-2">
+                        <div className="font-medium text-ay-text">{s?.name ?? p.strategyId}</div>
+                        {s?.slug && <div className="text-xs text-ay-muted">{s.slug}</div>}
+                      </td>
+                      <td className="px-2 py-2 tabular-nums">
+                        {p.graduatedAt ? p.graduatedAt.slice(0, 10) : '—'}
+                      </td>
+                      <td className="px-2 py-2 text-right tabular-nums">{p.trades}</td>
+                      <td className="px-2 py-2 text-right tabular-nums">{fmt(p.expectancy, 2)}</td>
+                      <td className="px-2 py-2 text-right tabular-nums">{fmt(p.sharpe, 2)}</td>
+                      <td className="px-2 py-2 text-right tabular-nums">{fmt(p.maxDrawdownPct, 2)}%</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </BeatBlock>
+        </section>
       )}
 
       <QueryState

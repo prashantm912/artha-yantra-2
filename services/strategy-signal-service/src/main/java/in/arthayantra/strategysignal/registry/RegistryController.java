@@ -51,6 +51,12 @@ public class RegistryController {
   /** Notification toggle body (Phase 41). */
   public record NotificationRequest(Boolean enabled, String channel) {}
 
+  /** Clone body — the new strategy's display name + slug (the config {@code id}). */
+  public record CloneRequest(String name, String slug) {}
+
+  /** {items}-enveloped lifecycle history (GET /{id}/audit). */
+  public record AuditLogResponse(List<StrategyRepository.AuditRow> items) {}
+
   private final RegistryService service;
 
   /** Wires the registry service. */
@@ -149,6 +155,36 @@ public class RegistryController {
   public Map<String, Object> notifications(
       @PathVariable UUID id, @RequestBody NotificationRequest request) {
     return service.updateNotifications(id, Boolean.TRUE.equals(request.enabled()), request.channel());
+  }
+
+  /** Arm the strategy for the live signal engine (master kill-switch ON). */
+  @PostMapping("/{id}/enable")
+  public RegistryService.ToggleResult enable(@PathVariable UUID id) {
+    return service.setEnabled(id, true);
+  }
+
+  /** Disarm the strategy — the live engine unloads it (master kill-switch OFF). */
+  @PostMapping("/{id}/disable")
+  public RegistryService.ToggleResult disable(@PathVariable UUID id) {
+    return service.setEnabled(id, false);
+  }
+
+  /** Append-only lifecycle-history timeline (create/edit/publish/rollback/archive/enable/disable). */
+  @GetMapping("/{id}/audit")
+  public AuditLogResponse audit(
+      @PathVariable UUID id,
+      @RequestParam(defaultValue = "100") int limit,
+      @RequestParam(defaultValue = "0") int offset) {
+    return new AuditLogResponse(
+        service.auditLog(id, Math.min(Math.max(limit, 1), 500), Math.max(offset, 0)));
+  }
+
+  /** Clone the latest config into a new draft strategy (409 on a duplicate slug/name). */
+  @PostMapping("/{id}/clone")
+  public ResponseEntity<RegistryService.CloneResult> clone(
+      @PathVariable UUID id, @RequestBody CloneRequest request) {
+    return ResponseEntity.status(HttpStatus.CREATED)
+        .body(service.clone(id, request.name(), request.slug()));
   }
 
   /** Server-side structured diff. */

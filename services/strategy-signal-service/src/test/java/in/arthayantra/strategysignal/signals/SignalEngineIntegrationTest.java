@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategysignal.registry.MarketDataInstrumentClient;
 import in.arthayantra.strategysignal.registry.RegistryService;
+import in.arthayantra.strategysignal.registry.StrategyRepository;
 import in.arthayantra.strategysignal.testsupport.StrategySignalIntegrationTestBase;
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -153,6 +154,7 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
       """;
 
   @Autowired private RegistryService registryService;
+  @Autowired private StrategyRepository repository;
   @Autowired private SignalEngine engine;
   @Autowired private SignalRepository signals;
   @Autowired private StringRedisTemplate redis;
@@ -307,6 +309,46 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
 
     assertThat(engine.loadedVersions()).doesNotContainKey("engine-it-swing"); // skipped, by design
     assertThat(engine.publishedSetDrifted()).isFalse(); // ...yet the reconcile sees NO drift → no loop
+  }
+
+  @Test
+  @Order(5)
+  void togglingEnabledArmsDisarmsTheEngineWritesAuditAndReconcileConverges() {
+    // Phase-2 slice D (app-platform audit §2.7): the enabled-toggle is the master kill-switch the
+    // reconcile filters on (enabled && publishedVersionId). Trace: publish → loaded → DISABLE →
+    // audit row + unloaded + reconcile CONVERGES (must not regress the #579 loop) → ENABLE → reloaded.
+    UUID id =
+        (UUID)
+            registryService
+                .create(
+                    "Engine IT Toggle", null, null,
+                    STRATEGY_YAML
+                        .replace("id: engine-it-momentum", "id: engine-it-toggle")
+                        .replace("name: \"Engine IT Momentum\"", "name: \"Engine IT Toggle\""))
+                .get("id");
+    registryService.publish(id, null, null);
+    engine.reload();
+    assertThat(engine.loadedSlugs()).contains("engine-it-toggle"); // enabled + published → loaded
+
+    // DISABLE via the real service path: writes a DISABLE audit row + emits strategy.changed.
+    registryService.setEnabled(id, false);
+    assertThat(repository.auditLog(id, 50, 0))
+        .extracting(StrategyRepository.AuditRow::action)
+        .contains("DISABLE");
+    // Deterministic reconcile: reload reads the COMMITTED enabled=false, the filter drops it, and the
+    // drift predicate converges against the fresh snapshot (loaded==published==without-it — no #579 loop).
+    engine.reload();
+    assertThat(engine.loadedSlugs()).doesNotContain("engine-it-toggle");
+    assertThat(engine.publishedSetDrifted()).isFalse();
+
+    // RE-ENABLE reloads it back and again converges.
+    registryService.setEnabled(id, true);
+    assertThat(repository.auditLog(id, 50, 0))
+        .extracting(StrategyRepository.AuditRow::action)
+        .contains("ENABLE");
+    engine.reload();
+    assertThat(engine.loadedSlugs()).contains("engine-it-toggle");
+    assertThat(engine.publishedSetDrifted()).isFalse();
   }
 
   private void publishBar(String tradingsymbol, OffsetDateTime bucket, BigDecimal close)

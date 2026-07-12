@@ -4,14 +4,41 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const publish = vi.fn();
+const setEnabled = vi.fn();
 
 vi.mock('../../api/strategies.ts', () => ({
-  useStrategyDetail: () => ({ data: { id: 's1', name: 'EMA Cross', status: 'draft', version: '1.3.0' } }),
+  useStrategyDetail: () => ({
+    data: { id: 's1', name: 'EMA Cross', status: 'draft', version: '1.3.0', enabled: true },
+  }),
   useStrategyVersions: () => ({
     data: {
       items: [
         { version: '1.3.0', status: 'draft', checksum: 'aaaa111122', createdAt: '2026-06-23' },
         { version: '1.1.0', status: 'published', checksum: 'bbbb333344', createdAt: '2026-06-20' },
+      ],
+    },
+  }),
+  useStrategyAudit: () => ({
+    data: {
+      items: [
+        {
+          id: 3,
+          action: 'ENABLE',
+          fromVersion: null,
+          toVersion: null,
+          diffSummary: 'enabled — armed for the live signal engine',
+          actor: 'owner',
+          createdAt: '2026-06-24T10:15:00Z',
+        },
+        {
+          id: 2,
+          action: 'PUBLISH',
+          fromVersion: '1.0.0',
+          toVersion: '1.1.0',
+          diffSummary: 'published 1.1.0',
+          actor: 'owner',
+          createdAt: '2026-06-20T09:00:00Z',
+        },
       ],
     },
   }),
@@ -25,6 +52,8 @@ vi.mock('../../api/strategies.ts', () => ({
   useStressWindow: () => ({ data: { from: '2026-05-01', to: '2026-06-20' } }),
   usePublish: () => ({ mutate: publish, isPending: false }),
   useRollback: () => ({ mutate: vi.fn() }),
+  useSetEnabled: () => ({ mutate: setEnabled, isPending: false }),
+  useCloneStrategy: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 import { StrategyVersionsPage } from './StrategyVersionsPage.tsx';
@@ -54,5 +83,22 @@ describe('StrategyVersionsPage', () => {
     expect(screen.getByText('Publish version')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
     expect(publish).toHaveBeenCalled();
+  });
+
+  it('renders the lifecycle timeline and confirm-gates the enabled toggle and clone', () => {
+    renderPage();
+    // the audit timeline renders lifecycle rows (newest-first)
+    expect(screen.getByText('Lifecycle history')).toBeInTheDocument();
+    expect(screen.getByText('Published')).toBeInTheDocument();
+    expect(screen.getByText(/armed for the live signal engine/)).toBeInTheDocument();
+
+    // disabling opens a confirm dialog that spells out the live-evaluation consequence
+    fireEvent.click(screen.getByRole('button', { name: 'Disable' }));
+    expect(screen.getByRole('heading', { name: 'Disable strategy' })).toBeInTheDocument();
+    expect(screen.getByText(/disarms live evaluation/)).toBeInTheDocument();
+
+    // the clone action opens its own dialog
+    fireEvent.click(screen.getByText('Clone…'));
+    expect(screen.getByRole('heading', { name: 'Clone strategy' })).toBeInTheDocument();
   });
 });

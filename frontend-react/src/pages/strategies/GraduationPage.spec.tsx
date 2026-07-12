@@ -50,6 +50,20 @@ vi.mock('../../api/graduation.ts', () => ({
     isLoading: false,
     isError: false,
   }),
+  // a graduated strategy no longer on the current board → renders via its id fallback (keeps the
+  // board-row name assertions unique).
+  useGraduationPromotions: () => ({
+    data: [
+      {
+        strategyId: 's3',
+        graduatedAt: '2026-07-01T00:00:00Z',
+        trades: 30,
+        expectancy: '45.0000',
+        sharpe: '1.2000',
+        maxDrawdownPct: '10.0000',
+      },
+    ],
+  }),
 }));
 
 import { GraduationPage } from './GraduationPage.tsx';
@@ -78,5 +92,13 @@ describe('GraduationPage', () => {
     expect(screen.getByText(/PF ≥ 1.30/)).toBeInTheDocument();
     // one dot per criterion, per strategy (4 + 4 = 8)
     expect(screen.getAllByLabelText(/pass|fail/).length).toBe(8);
+  });
+
+  it('surfaces the GRADUATED promotions section', () => {
+    renderPage();
+    expect(screen.getByText('Graduated')).toBeInTheDocument();
+    // the promotion row for a strategy off the current board renders via its id fallback + snapshot
+    expect(screen.getByText('s3')).toBeInTheDocument();
+    expect(screen.getByText('2026-07-01')).toBeInTheDocument();
   });
 });

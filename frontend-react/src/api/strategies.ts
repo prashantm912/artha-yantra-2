@@ -18,9 +18,22 @@ export interface StrategySummary {
   publishedVersionId?: string | null;
   status: string;
   tags: string[];
+  /** Master kill-switch: the live engine loads a strategy only when enabled AND published. */
+  enabled?: boolean;
   updatedAt?: string;
   notificationsEnabled?: boolean;
   notificationChannel?: string | null;
+}
+
+/** One row of the append-only lifecycle timeline (`GET /{id}/audit`). */
+export interface AuditEntry {
+  id: number;
+  action: 'CREATE' | 'UPDATE_DRAFT' | 'PUBLISH' | 'ROLLBACK' | 'ARCHIVE' | 'ENABLE' | 'DISABLE';
+  fromVersion?: string | null;
+  toVersion?: string | null;
+  diffSummary?: string | null;
+  actor: string;
+  createdAt: string;
 }
 
 /** Latest-backtest summary for a strategy version (`GET /backtests/summary`). */
@@ -101,7 +114,19 @@ export function useBacktestSummaries(versionIds: string[]) {
 export function useStrategyDetail(id: string) {
   return useQuery({
     queryKey: ['strategy', id, 'detail'],
-    queryFn: () => apiFetch<{ id: string; name: string; status: string; version: string }>(`/strategies/${id}`),
+    queryFn: () =>
+      apiFetch<{ id: string; name: string; status: string; version: string; enabled: boolean }>(
+        `/strategies/${id}`,
+      ),
+    enabled: !!id,
+  });
+}
+
+/** The append-only lifecycle timeline for one strategy (`GET /{id}/audit`), newest first. */
+export function useStrategyAudit(id: string) {
+  return useQuery({
+    queryKey: ['strategy', id, 'audit'],
+    queryFn: () => apiFetch<{ items: AuditEntry[] }>(`/strategies/${id}/audit`),
     enabled: !!id,
   });
 }
@@ -188,6 +213,32 @@ export function useArchive(id: string) {
   const invalidate = useInvalidate(id);
   return useMutation({
     mutationFn: () => apiFetch(`/strategies/${id}/archive`, { method: 'POST', json: {} }),
+    onSuccess: invalidate,
+  });
+}
+
+/** Arm / disarm the strategy for the LIVE signal engine (master kill-switch). */
+export function useSetEnabled(id: string) {
+  const invalidate = useInvalidate(id);
+  return useMutation({
+    mutationFn: (enabled: boolean) =>
+      apiFetch<{ id: string; enabled: boolean }>(
+        `/strategies/${id}/${enabled ? 'enable' : 'disable'}`,
+        { method: 'POST', json: {} },
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+/** Clone the latest config into a new draft strategy (409 on a duplicate slug/name). */
+export function useCloneStrategy(id: string) {
+  const invalidate = useInvalidate(id);
+  return useMutation({
+    mutationFn: (body: { name: string; slug: string }) =>
+      apiFetch<{ id: string; slug: string; version: string; status: string }>(
+        `/strategies/${id}/clone`,
+        { method: 'POST', json: body },
+      ),
     onSuccess: invalidate,
   });
 }

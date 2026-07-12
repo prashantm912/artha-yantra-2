@@ -36,6 +36,16 @@ public class StrategyRepository {
       boolean notificationsEnabled,
       String notificationChannel) {}
 
+  /** One strategy_audit_log row (the lifecycle-history read; append-only by grant). */
+  public record AuditRow(
+      long id,
+      String action,
+      String fromVersion,
+      String toVersion,
+      String diffSummary,
+      String actor,
+      OffsetDateTime createdAt) {}
+
   /** strategy_versions row. */
   public record VersionRow(
       UUID id,
@@ -224,6 +234,17 @@ public class StrategyRepository {
   }
 
   /**
+   * Flips the {@code enabled} master kill-switch on the strategy IDENTITY row (app-platform audit
+   * §2.7). Orthogonal to the versioned config — it never touches strategy_versions, so no D18
+   * checksum changes. The live engine's reconcile filters on {@code enabled && published_version_id}
+   * (SignalEngine), so this is what arms/disarms live evaluation.
+   */
+  public void updateEnabled(UUID strategyId, boolean enabled) {
+    jdbc.update(
+        "UPDATE strategies SET enabled = ?, updated_at = now() WHERE id = ?", enabled, strategyId);
+  }
+
+  /**
    * Toggles notification opt-in on the strategy IDENTITY row (Phase 41). This is orthogonal to the
    * versioned config — it never touches strategy_versions, so no D18 checksum changes.
    */
@@ -263,6 +284,26 @@ public class StrategyRepository {
         """,
         String.class,
         strategyId);
+  }
+
+  /** The full lifecycle-history timeline, newest first (GET /{id}/audit). */
+  public List<AuditRow> auditLog(UUID strategyId, int limit, int offset) {
+    return jdbc.query(
+        """
+        SELECT id, action, from_version, to_version, diff_summary, actor, created_at
+        FROM strategy_audit_log WHERE strategy_id = ?
+        ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?
+        """,
+        (rs, rowNum) ->
+            new AuditRow(
+                rs.getLong("id"),
+                rs.getString("action"),
+                rs.getString("from_version"),
+                rs.getString("to_version"),
+                rs.getString("diff_summary"),
+                rs.getString("actor"),
+                rs.getObject("created_at", OffsetDateTime.class)),
+        strategyId, limit, offset);
   }
 
   private StrategyRow strategyRow(ResultSet rs, int rowNum) throws SQLException {

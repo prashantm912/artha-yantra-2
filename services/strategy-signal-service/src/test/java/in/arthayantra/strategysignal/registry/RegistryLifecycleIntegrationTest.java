@@ -456,6 +456,111 @@ class RegistryLifecycleIntegrationTest extends StrategySignalIntegrationTestBase
         .isEqualTo(archivesAfterFirst);
   }
 
+  @Test
+  @Order(30)
+  void enableDisableToggleWritesAuditRowsIsIdempotentAndReadsBack() throws Exception {
+    UUID id =
+        (UUID)
+            service
+                .create(
+                    "Toggle Walk", null, null,
+                    BASE_YAML
+                        .replace("id: lifecycle-walk", "id: toggle-walk")
+                        .replace("name: \"Lifecycle Walk\"", "name: \"Toggle Walk\""))
+                .get("id");
+    assertThat(repository.findById(id).orElseThrow().enabled()).isTrue(); // identity-row default
+
+    // DISABLE via REST → {enabled:false} + a DISABLE audit row on the append-only log
+    mockMvc
+        .perform(MockMvcRequestBuilders.post("/api/v1/strategies/" + id + "/disable"))
+        .andExpect(MockMvcResultMatchers.status().isOk())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.enabled").value(false));
+    assertThat(repository.findById(id).orElseThrow().enabled()).isFalse();
+
+    // idempotent: a second disable is a no-op — it must NOT append a phantom DISABLE row
+    long disablesAfterFirst =
+        repository.auditLog(id, 100, 0).stream().filter(r -> "DISABLE".equals(r.action())).count();
+    service.setEnabled(id, false);
+    assertThat(
+            repository.auditLog(id, 100, 0).stream()
+                .filter(r -> "DISABLE".equals(r.action()))
+                .count())
+        .isEqualTo(disablesAfterFirst);
+
+    // ENABLE via REST → {enabled:true} + an ENABLE audit row
+    mockMvc
+        .perform(MockMvcRequestBuilders.post("/api/v1/strategies/" + id + "/enable"))
+        .andExpect(MockMvcResultMatchers.status().isOk())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.enabled").value(true));
+    assertThat(repository.auditLog(id, 100, 0))
+        .extracting(StrategyRepository.AuditRow::action)
+        .contains("ENABLE", "DISABLE");
+
+    // GET /{id}/audit → the {items} lifecycle timeline, newest first (ENABLE is the latest action)
+    mockMvc
+        .perform(MockMvcRequestBuilders.get("/api/v1/strategies/" + id + "/audit"))
+        .andExpect(MockMvcResultMatchers.status().isOk())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.items[0].action").value("ENABLE"))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.items[0].actor").value("owner"));
+  }
+
+  @Test
+  @Order(31)
+  void cloneCopiesLatestConfigIntoANewDraftAnd409sOnDuplicates() throws Exception {
+    UUID source =
+        (UUID)
+            service
+                .create(
+                    "Clone Source", "orig desc", List.of("clonetag"),
+                    BASE_YAML
+                        .replace("id: lifecycle-walk", "id: clone-source")
+                        .replace("name: \"Lifecycle Walk\"", "name: \"Clone Source\""))
+                .get("id");
+
+    RegistryService.CloneResult clone = service.clone(source, "Clone Target", "clone-target");
+    assertThat(clone.slug()).isEqualTo("clone-target");
+    assertThat(clone.version()).isEqualTo("1.0.0");
+    assertThat(clone.status()).isEqualTo("draft");
+
+    // a distinct new strategy: new id, new name, rewritten config id, tags + description carried over
+    StrategyRepository.StrategyRow cloned = repository.findBySlug("clone-target").orElseThrow();
+    assertThat(cloned.id()).isNotEqualTo(source);
+    assertThat(cloned.name()).isEqualTo("Clone Target");
+    assertThat(cloned.tags()).containsExactly("clonetag");
+    assertThat(cloned.description()).isEqualTo("orig desc");
+    StrategyRepository.VersionRow clonedLatest =
+        repository.latestVersion(cloned.id()).orElseThrow();
+    assertThat(clonedLatest.status()).isEqualTo("draft");
+    assertThat(clonedLatest.config().path("id").asText()).isEqualTo("clone-target");
+    assertThat(clonedLatest.config().path("name").asText()).isEqualTo("Clone Target");
+
+    // duplicate slug → 409 (honest CONFLICT_SLUG_EXISTS from the reused create() guard)
+    assertThatThrownBy(() -> service.clone(source, "Distinct Name", "clone-target"))
+        .isInstanceOfSatisfying(
+            ApiException.class,
+            e -> {
+              assertThat(e.httpStatus()).isEqualTo(409);
+              assertThat(e.code()).isEqualTo(ErrorCodes.CONFLICT_SLUG_EXISTS);
+            });
+    // duplicate name → 409 too
+    assertThatThrownBy(() -> service.clone(source, "Clone Target", "distinct-slug"))
+        .isInstanceOfSatisfying(
+            ApiException.class, e -> assertThat(e.httpStatus()).isEqualTo(409));
+
+    // the REST surface returns 201 CREATED with the typed CloneResult
+    String body =
+        new com.fasterxml.jackson.databind.ObjectMapper()
+            .writeValueAsString(Map.of("name", "Clone Rest", "slug", "clone-rest"));
+    mockMvc
+        .perform(
+            MockMvcRequestBuilders.post("/api/v1/strategies/" + source + "/clone")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+        .andExpect(MockMvcResultMatchers.status().isCreated())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.slug").value("clone-rest"))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.status").value("draft"));
+  }
+
   private static java.nio.file.Path locateSchemaResource() {
     Path dir = Path.of("").toAbsolutePath();
     while (dir != null) {

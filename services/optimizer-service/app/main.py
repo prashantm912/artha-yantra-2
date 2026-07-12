@@ -10,7 +10,7 @@ import redis
 from fastapi import FastAPI
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from app import api, evolution, insights, proposals, reconciliation, stress
+from app import ablation, api, evolution, insights, proposals, reconciliation, stress, suggesters
 from app.backtest_client import BacktestClient
 from app.errors import ApiError, api_error_handler, invalid_path_handler
 from app.notify import NtfyClient
@@ -20,6 +20,7 @@ from app.service import SweepService
 from app.settings import Settings
 from app.strategy_client import StrategyClient
 from app.streams import TrialDispatcher
+from app.structure_repos import StructureRepo
 
 logging.basicConfig(level=logging.INFO, format='{"level":"%(levelname)s","msg":"%(message)s"}')
 log = logging.getLogger("optimizer")
@@ -172,6 +173,20 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         recon_factory=lambda: ReconciliationRepo(open_conn()),
     )
 
+    # Structure experimentation (§12 E5): the ablation protocol + gate-candidate suggesters. Both
+    # read/write the E5 tables (evo_ablations / evo_graveyard, V016) + the REVIEW_GATE evo_proposals
+    # via their own StructureRepo (its own module — the E5 slice touches no existing repo). The
+    # ablation stream evaluates paired structure mutations, buries rejections in the graveyard, and
+    # emits a REVIEW_GATE proposal for an IS-only rejection; the suggesters emit gate-candidate
+    # REVIEW_GATE proposals (regime-gate emit-only — regimes frozen, §5.1.2), suppressing any
+    # already-graveyarded structure. NOTHING self-arms.
+    app.state.ablation = ablation.AblationService(
+        repo_factory=lambda: StructureRepo(open_conn())
+    )
+    app.state.suggesters = suggesters.SuggesterService(
+        repo_factory=lambda: StructureRepo(open_conn())
+    )
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "UP"}
@@ -182,6 +197,8 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(stress.router)
     app.include_router(reconciliation.router)
     app.include_router(proposals.router)
+    app.include_router(ablation.router)
+    app.include_router(suggesters.router)
     Instrumentator().instrument(app).expose(app, endpoint="/metrics")
     return app
 

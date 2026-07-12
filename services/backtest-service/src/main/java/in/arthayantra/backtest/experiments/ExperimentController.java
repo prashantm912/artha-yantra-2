@@ -72,7 +72,11 @@ public class ExperimentController {
         allSame(runs, ExperimentCompareRun::dataHash),
         allSame(runs, ExperimentCompareRun::universeChecksum),
         allSame(runs, ExperimentCompareRun::engineSha),
-        allSame(runs, ExperimentCompareRun::premiumSource));
+        allSame(runs, ExperimentCompareRun::premiumSource),
+        // roadmap #30: the content-stable data axis + the epoch-scope axis — a ranking client refuses a
+        // set that is not like-for-like on (engineSha, contentHash, datasetEpoch) unless it re-runs.
+        allSame(runs, ExperimentCompareRun::contentHash),
+        allSame(runs, ExperimentCompareRun::datasetEpoch));
   }
 
   private static boolean allSame(

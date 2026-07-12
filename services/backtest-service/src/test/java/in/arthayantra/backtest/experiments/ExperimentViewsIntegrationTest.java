@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import in.arthayantra.backtest.jobs.EngineIdentity;
 import in.arthayantra.backtest.jobs.JobKind;
 import in.arthayantra.backtest.jobs.JobRepository;
+import in.arthayantra.backtest.provenance.DatasetProvenance;
 import in.arthayantra.backtest.replay.MetricsCalculator.Metrics;
 import in.arthayantra.backtest.replay.ReplayResult;
 import in.arthayantra.backtest.replay.RunRepository;
@@ -99,6 +100,7 @@ class ExperimentViewsIntegrationTest extends BacktestIntegrationTestBase {
         premiumSource,
         null,
         null,
+        DatasetProvenance.none(),
         createdBy);
   }
 

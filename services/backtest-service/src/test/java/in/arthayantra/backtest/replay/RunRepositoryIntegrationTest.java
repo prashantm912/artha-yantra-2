@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.backtest.jobs.EngineIdentity;
 import in.arthayantra.backtest.jobs.JobKind;
 import in.arthayantra.backtest.jobs.JobRepository;
+import in.arthayantra.backtest.provenance.DatasetProvenance;
+import in.arthayantra.backtest.provenance.EvidencePolicy;
 import in.arthayantra.backtest.replay.MetricsCalculator.Metrics;
 import in.arthayantra.backtest.replay.options.PremiumSource;
 import in.arthayantra.backtest.testsupport.BacktestIntegrationTestBase;
@@ -55,11 +57,21 @@ class RunRepositoryIntegrationTest extends BacktestIntegrationTestBase {
   }
 
   private static UUID insertRun(EngineIdentity identity, String createdBy) {
-    return insertRunForJob(identity, newJobId(), createdBy);
+    return insertRun(identity, createdBy, DatasetProvenance.none());
+  }
+
+  private static UUID insertRun(
+      EngineIdentity identity, String createdBy, DatasetProvenance datasetProvenance) {
+    return insertRunForJob(identity, newJobId(), createdBy, datasetProvenance);
   }
 
   /** Inserts a run hanging off {@code jobId} (so a test can control the joined job request JSONB). */
   private static UUID insertRunForJob(EngineIdentity identity, UUID jobId, String createdBy) {
+    return insertRunForJob(identity, jobId, createdBy, DatasetProvenance.none());
+  }
+
+  private static UUID insertRunForJob(
+      EngineIdentity identity, UUID jobId, String createdBy, DatasetProvenance datasetProvenance) {
     RunRepository runs = new RunRepository(jdbc, MAPPER, identity);
     ReplayResult result =
         new ReplayResult(
@@ -87,6 +99,7 @@ class RunRepositoryIntegrationTest extends BacktestIntegrationTestBase {
         PremiumSource.NA,
         null,
         null,
+        datasetProvenance,
         createdBy);
   }
 
@@ -125,6 +138,24 @@ class RunRepositoryIntegrationTest extends BacktestIntegrationTestBase {
     UUID runId = insertRun(EngineIdentity.of(null, null), "optimizer:sweep-7");
     assertThat(jdbc.queryForObject("SELECT created_by FROM backtest_runs WHERE id=?", String.class, runId))
         .isEqualTo("optimizer:sweep-7");
+  }
+
+  // Audit P1-1 / R2: a run row carries the content-stable hash + the dataset epoch head + the family
+  // evidence policy (V015); DatasetProvenance.none() persists all three NULL (byte-behavior for the
+  // other tests, which use the default helper).
+  @Test
+  void runRowCarriesDatasetProvenance() {
+    UUID runId =
+        insertRun(
+            EngineIdentity.of(null, null),
+            "owner",
+            new DatasetProvenance("content-abc123", 5L, EvidencePolicy.SIM_FIRST));
+    assertThat(jdbc.queryForObject("SELECT content_hash FROM backtest_runs WHERE id=?", String.class, runId))
+        .isEqualTo("content-abc123");
+    assertThat(jdbc.queryForObject("SELECT dataset_epoch FROM backtest_runs WHERE id=?", Long.class, runId))
+        .isEqualTo(5L);
+    assertThat(jdbc.queryForObject("SELECT evidence_policy FROM backtest_runs WHERE id=?", String.class, runId))
+        .isEqualTo("SIM_FIRST");
   }
 
   @Test

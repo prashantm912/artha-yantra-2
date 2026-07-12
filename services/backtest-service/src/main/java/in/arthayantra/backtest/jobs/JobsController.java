@@ -1,5 +1,7 @@
 package in.arthayantra.backtest.jobs;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import in.arthayantra.backtest.provenance.ProvenanceBlock;
 import in.arthayantra.backtest.replay.RunRepository;
 import in.arthayantra.backtest.replay.counterfactual.CounterfactualRunRepository;
 import in.arthayantra.common.web.http.ArthaHeaders;
@@ -8,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.slf4j.MDC;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -26,21 +29,57 @@ public class JobsController {
   private final JobsService service;
   private final RunRepository runs;
   private final CounterfactualRunRepository counterfactualRuns;
+  private final EngineIdentity engineIdentity;
+  private final String profile;
 
-  /** Wires the service + run repositories (for the resultRef). */
+  /** Wires the service + run repositories (for the resultRef) + the engine identity + runtime profile. */
   public JobsController(
-      JobsService service, RunRepository runs, CounterfactualRunRepository counterfactualRuns) {
+      JobsService service,
+      RunRepository runs,
+      CounterfactualRunRepository counterfactualRuns,
+      EngineIdentity engineIdentity,
+      @Value("${spring.profiles.active:}") String activeProfiles) {
     this.service = service;
     this.runs = runs;
     this.counterfactualRuns = counterfactualRuns;
+    this.engineIdentity = engineIdentity;
+    this.profile = activeProfiles != null && activeProfiles.contains("mock") ? "mock" : "live";
   }
 
-  /** Submit a backtest → 202 with the jobId (§D.5). */
+  /**
+   * Submit a backtest → 202 with the jobId (§D.5) + the as-submitted provenance block (roadmap #22a):
+   * the engine identity + config checksum + pinned universe + profile known at submission (the content
+   * hash / dataset epoch / evidence policy are resolved when the worker executes the run and are read
+   * from {@code GET /runs/{id}/provenance}). {@code ResponseEntity<Map>} is NOT a ratchet-counted Map
+   * return; the provenance VALUE is a typed record.
+   */
   @PostMapping("/run")
   public ResponseEntity<Map<String, Object>> run(@RequestBody BacktestRunRequest request) {
     Job job = service.submit(request, MDC.get(ArthaHeaders.MDC_REQUEST_ID));
     return ResponseEntity.accepted()
-        .body(Map.of("jobId", job.id().toString(), "status", job.status().db()));
+        .body(
+            Map.of(
+                "jobId", job.id().toString(),
+                "status", job.status().db(),
+                "provenance", submissionProvenance(job)));
+  }
+
+  /** The partial, as-submitted provenance block — the fields known before the worker runs the replay. */
+  private ProvenanceBlock submissionProvenance(Job job) {
+    JsonNode req = job.request();
+    return new ProvenanceBlock(
+        engineIdentity.sha(),
+        engineIdentity.image(),
+        req == null ? null : req.path("strategyChecksum").asText(null),
+        null, // dataHash — resolved at execution
+        null, // contentHash — resolved at execution
+        null, // datasetEpoch — the head stamped at execution
+        null, // evidencePolicy — derived from the config at execution
+        req == null ? null : req.path("universeChecksum").asText(null),
+        null, // premiumSource — resolved at execution
+        null, // costClass — resolved at execution
+        profile,
+        "PREFLIGHT_OK"); // submission ran auto-warm + coverage preflight before insert (else it 422s)
   }
 
   /** Paged job list with optional status + strategyId filters. */

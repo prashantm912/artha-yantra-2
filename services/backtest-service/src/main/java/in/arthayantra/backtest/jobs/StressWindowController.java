@@ -3,6 +3,7 @@ package in.arthayantra.backtest.jobs;
 import com.fasterxml.jackson.databind.JsonNode;
 import in.arthayantra.backtest.client.StrategyVersionClient;
 import in.arthayantra.backtest.client.StrategyVersionClient.ResolvedVersion;
+import in.arthayantra.backtest.provenance.EvidencePolicy;
 import in.arthayantra.backtest.replay.CandleReader;
 import java.time.OffsetDateTime;
 import java.util.Map;
@@ -35,11 +36,29 @@ public class StressWindowController {
     this.candleReader = candleReader;
   }
 
-  /** The suggested clean stress window for a strategy. */
+  /**
+   * The suggested clean stress window for a strategy, plus its family {@code evidencePolicy} (roadmap
+   * #22b): a StressGuard-aware optimizer client reads the policy to know whether a clean SIM holdout
+   * window is even a ranking plane — SIM_FIRST families route final validation through this window,
+   * LIVE_FIRST families treat any sim as smoke-only, so the clean-window pick is advisory for them.
+   */
   @GetMapping("/stress-window")
   public Map<String, Object> stressWindow(@RequestParam String strategyId) {
     OffsetDateTime latestCandle = latestCachedCandle(strategyId);
-    return stressGuard.suggestCleanWindow(strategyId, latestCandle);
+    Map<String, Object> window = stressGuard.suggestCleanWindow(strategyId, latestCandle);
+    window.put("evidencePolicy", evidencePolicy(strategyId));
+    return window;
+  }
+
+  /** The strategy's structural evidence policy, fail-soft ({@code null} when unresolvable). */
+  private String evidencePolicy(String strategyId) {
+    try {
+      ResolvedVersion v = versions.resolve(strategyId, null);
+      JsonNode config = v == null ? null : v.config();
+      return config == null ? null : EvidencePolicy.forConfig(config).name();
+    } catch (RuntimeException e) {
+      return null;
+    }
   }
 
   /**

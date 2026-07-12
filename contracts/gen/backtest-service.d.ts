@@ -36,6 +36,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/backtests/dataset-epochs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["epochs"];
+        put?: never;
+        post: operations["recordEpoch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/backtests/counterfactual": {
         parameters: {
             query?: never;
@@ -228,6 +244,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/backtests/runs/{runId}/provenance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["provenance"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backtests/runs/{runId}/comparability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["comparability"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/backtests/jobs": {
         parameters: {
             query?: never;
@@ -343,6 +391,30 @@ export interface components {
             jobId?: string;
             status?: string;
         };
+        DatasetEpochRequest: {
+            reason?: string;
+            symbols?: string[];
+            exchange?: string;
+            windowStart?: string;
+            windowEnd?: string;
+            interval?: string;
+            jobLink?: string;
+            note?: string;
+        };
+        DatasetEpoch: {
+            /** Format: int64 */
+            id?: number;
+            reason?: string;
+            symbols?: string[];
+            exchange?: string;
+            windowStart?: string;
+            windowEnd?: string;
+            interval?: string;
+            jobLink?: string;
+            source?: string;
+            note?: string;
+            createdAt?: string;
+        };
         CounterfactualRunRequest: {
             from?: string;
             to?: string;
@@ -389,6 +461,33 @@ export interface components {
             avgBarsHeld?: number;
             meetsReliabilityBar?: boolean;
             grade?: string;
+        };
+        ProvenanceBlock: {
+            engineSha?: string;
+            engineImage?: string;
+            configHash?: string;
+            dataHash?: string;
+            contentHash?: string;
+            /** Format: int64 */
+            datasetEpoch?: number;
+            evidencePolicy?: string;
+            universeChecksum?: string;
+            premiumSource?: string;
+            costClass?: string;
+            profile?: string;
+            warmStatus?: string;
+        };
+        RunComparability: {
+            runId?: string;
+            /** Format: int64 */
+            datasetEpochAtRun?: number;
+            /** Format: int64 */
+            currentEpoch?: number;
+            stale?: boolean;
+            contentHash?: string;
+            engineSha?: string;
+            evidencePolicy?: string;
+            staleEpochs?: components["schemas"]["DatasetEpoch"][];
         };
         ExperimentListResponse: {
             items?: components["schemas"]["ExperimentSummary"][];
@@ -450,6 +549,9 @@ export interface components {
             universeChecksum?: string;
             engineSha?: string;
             premiumSource?: string;
+            contentHash?: string;
+            datasetEpoch?: string;
+            evidencePolicy?: string;
             createdBy?: string;
             completedAt?: string;
             metrics?: components["schemas"]["CompareMetrics"];
@@ -459,6 +561,13 @@ export interface components {
             universeMatch?: boolean;
             engineShaMatch?: boolean;
             premiumSourceMatch?: boolean;
+            contentHashMatch?: boolean;
+            datasetEpochMatch?: boolean;
+        };
+        DatasetEpochListResponse: {
+            epochs?: components["schemas"]["DatasetEpoch"][];
+            /** Format: int64 */
+            head?: number;
         };
         CounterfactualResult: {
             runId?: string;
@@ -554,6 +663,71 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["DeepSwingSubmitResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    epochs: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["DatasetEpochListResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    recordEpoch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DatasetEpochRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["DatasetEpoch"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -960,6 +1134,68 @@ export interface operations {
                     "*/*": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    provenance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ProvenanceBlock"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    comparability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["RunComparability"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

@@ -30,9 +30,33 @@
       "422"
     ]
   },
+  "GET /api/v1/evolution/campaigns/{campaign_id}/ablations": {
+    "params": [
+      "campaign_id",
+      "limit",
+      "offset"
+    ],
+    "requestBody": false,
+    "responses": [
+      "200",
+      "422"
+    ]
+  },
   "GET /api/v1/evolution/campaigns/{campaign_id}/candidates": {
     "params": [
       "campaign_id"
+    ],
+    "requestBody": false,
+    "responses": [
+      "200",
+      "422"
+    ]
+  },
+  "GET /api/v1/evolution/campaigns/{campaign_id}/graveyard": {
+    "params": [
+      "campaign_id",
+      "limit",
+      "offset"
     ],
     "requestBody": false,
     "responses": [
@@ -174,8 +198,28 @@
       "200"
     ]
   },
+  "POST /api/v1/evolution/ablations/{ablation_id}/evaluate": {
+    "params": [
+      "ablation_id"
+    ],
+    "requestBody": true,
+    "responses": [
+      "200",
+      "422"
+    ]
+  },
   "POST /api/v1/evolution/campaigns": {
     "params": [],
+    "requestBody": true,
+    "responses": [
+      "201",
+      "422"
+    ]
+  },
+  "POST /api/v1/evolution/campaigns/{campaign_id}/ablations": {
+    "params": [
+      "campaign_id"
+    ],
     "requestBody": true,
     "responses": [
       "201",
@@ -238,6 +282,16 @@
       "campaign_id"
     ],
     "requestBody": false,
+    "responses": [
+      "200",
+      "422"
+    ]
+  },
+  "POST /api/v1/evolution/campaigns/{campaign_id}/suggestions": {
+    "params": [
+      "campaign_id"
+    ],
+    "requestBody": true,
     "responses": [
       "200",
       "422"

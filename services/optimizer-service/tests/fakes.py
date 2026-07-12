@@ -215,6 +215,7 @@ class FakeStrategy:
         config: dict[str, Any],
         existing: list[dict[str, Any]] | None = None,
         create_conflict: bool = False,
+        archive_fails: bool = False,
     ) -> None:
         self._config = config
         self.drafts: list[dict[str, Any]] = []
@@ -223,9 +224,31 @@ class FakeStrategy:
         for row in existing or []:
             self._registry[row["id"]] = dict(row)
         self._create_conflict = create_conflict
+        # slice-3 fail-soft archive path: force the archive call to raise (a registry fault).
+        self._archive_fails = archive_fails
         self.created: list[dict[str, Any]] = []
         self.published: list[str] = []
+        # slice-3 PROMOTE / ROLLBACK surface: counterfactuals + rollbacks + archived clone ids.
+        self.shadow_variants: list[dict[str, Any]] = []
+        self.rollbacks: list[dict[str, Any]] = []
+        self.archived: list[str] = []
         self._seq = 0
+
+    def _row(self, strategy_id: str) -> dict[str, Any]:
+        """The registry row for a strategy id — lazily materialized for a BASE strategy id that was
+        never created via ``create`` (the PROMOTE/ROLLBACK target), seeded from the base config so
+        ``detail`` returns its champion config + a ``champ-`` version id (distinct from a later
+        published ``ver-`` id)."""
+        row = self._registry.get(strategy_id)
+        if row is None:
+            row = {
+                "id": strategy_id, "slug": self._config.get("id"),
+                "name": self._config.get("name"), "tags": self._config.get("tags") or [],
+                "status": "published", "versionId": f"champ-{strategy_id}", "version": "1.0.0",
+                "config": self._config,
+            }
+            self._registry[strategy_id] = row
+        return row
 
     def version_config(self, strategy_id: str, version: str) -> dict[str, Any]:
         return self._config
@@ -239,6 +262,9 @@ class FakeStrategy:
         self.drafts.append(
             {"strategyId": strategy_id, "config": config, "notes": notes, "createdBy": created_by}
         )
+        row = self._row(strategy_id)
+        row["config"] = config
+        row["status"] = "draft"
         return {"version": "1.1.0", "status": "draft"}
 
     def create(
@@ -271,18 +297,18 @@ class FakeStrategy:
     def publish(
         self, strategy_id: str, target_version: str | None = None, notes: str | None = None
     ) -> dict[str, Any]:
-        row = self._registry[strategy_id]
+        row = self._row(strategy_id)
         row["status"] = "published"
         row["versionId"] = f"ver-{strategy_id}"
         self.published.append(strategy_id)
         return {"id": strategy_id, "version": row["version"], "status": "published"}
 
     def detail(self, strategy_id: str) -> dict[str, Any]:
-        row = self._registry[strategy_id]
+        row = self._row(strategy_id)
         return {
             "id": strategy_id, "versionId": row["versionId"], "version": row["version"],
             "status": row["status"], "slug": row["slug"], "name": row["name"],
-            "tags": row["tags"],
+            "tags": row["tags"], "config": row.get("config"),
         }
 
     def list_strategies(
@@ -293,6 +319,50 @@ class FakeStrategy:
             if (tag is None or tag in (r.get("tags") or []))
             and (status is None or r.get("status") == status)
         ]
+
+    def rollback(
+        self, strategy_id: str, version: str, and_publish: bool = True
+    ) -> dict[str, Any]:
+        """Mirrors StrategyClient.rollback: copy-forward the base to ``version`` and republish."""
+        row = self._row(strategy_id)
+        row["status"] = "published" if and_publish else "draft"
+        row["version"] = version
+        row["versionId"] = f"rb-{strategy_id}"
+        self.rollbacks.append(
+            {"strategyId": strategy_id, "version": version, "andPublish": and_publish}
+        )
+        return {"id": strategy_id, "version": version, "status": row["status"]}
+
+    def register_shadow_variant(
+        self,
+        name: str,
+        campaign_id: str | None,
+        spec: dict[str, Any],
+        created_by: str | None = None,
+    ) -> dict[str, Any]:
+        """Mirrors StrategyClient.register_shadow_variant: record the variant + return a created
+        row (id from the sequence, like the real ShadowVariantView)."""
+        self._seq += 1
+        row = {
+            "id": f"variant-{self._seq}", "name": name, "campaignId": campaign_id,
+            "spec": spec, "enabled": True, "createdBy": created_by,
+        }
+        self.shadow_variants.append(row)
+        return row
+
+    def archive(self, strategy_id: str) -> dict[str, Any]:
+        """Mirrors StrategyClient.archive: mark the strategy archived (engine unloads). The
+        ``archive_fails`` fixture raises instead — the fail-soft promote path must absorb it."""
+        if self._archive_fails:
+            request = httpx.Request(
+                "POST", f"http://strategy-signal/api/v1/strategies/{strategy_id}/archive"
+            )
+            response = httpx.Response(500, json={"message": "boom"}, request=request)
+            raise httpx.HTTPStatusError("boom", request=request, response=response)
+        row = self._row(strategy_id)
+        row["status"] = "archived"
+        self.archived.append(strategy_id)
+        return {"id": strategy_id, "status": "archived"}
 
 
 class FakeBacktest:
@@ -590,6 +660,48 @@ class FakeEvoRepo:
                 r["evidence"] = evidence
                 return _strip_seq(r)
         return None
+
+    # --- E4 slice 3: RETIRE acks + PROMOTE lineage + champion pointer ---------------------------
+
+    def find_latest_proposal(self, candidate_id: str, kind: str) -> dict[str, Any] | None:
+        """Mirrors EvoRepo.find_latest_proposal: newest (candidate, kind) proposal in ANY status."""
+        matches = [
+            r for r in self.proposals if r["candidateId"] == candidate_id and r["kind"] == kind
+        ]
+        matches.sort(key=lambda r: r["_seq"], reverse=True)
+        return _strip_seq(matches[0]) if matches else None
+
+    def insert_acknowledged_proposal(
+        self,
+        campaign_id: str,
+        candidate_id: str | None,
+        kind: str,
+        evidence: dict[str, Any] | None,
+        actor: str,
+    ) -> dict[str, Any]:
+        """Mirrors EvoRepo.insert_acknowledged_proposal: an already-decided (APPROVED) row with the
+        machine actor + a synthesized decided_at (the RETIRE acknowledge-row)."""
+        self._seq += 1
+        row = {
+            "_seq": self._seq, "id": f"prop-{self._seq}", "campaignId": campaign_id,
+            "candidateId": candidate_id, "kind": kind, "evidence": evidence, "status": "APPROVED",
+            "actor": actor, "decidedAt": "2026-07-12T00:00:00+00:00",
+            "expiresAt": "2026-07-19T00:00:00+00:00", "createdAt": "2026-07-12T00:00:00+00:00",
+        }
+        self.proposals.append(row)
+        return _strip_seq(row)
+
+    def update_campaign_champion(
+        self, campaign_id: str, version_id: str | None
+    ) -> dict[str, Any] | None:
+        """Mirrors EvoRepo.update_campaign_champion: move the champion pointer (PROMOTE forward,
+        ROLLBACK back)."""
+        campaign = self.get_campaign(campaign_id)
+        if campaign is None:
+            return None
+        campaign["championVersionId"] = version_id
+        campaign["updatedAt"] = "2026-07-12T00:00:00+00:00"
+        return dict(campaign)
 
     def close(self) -> None:
         pass

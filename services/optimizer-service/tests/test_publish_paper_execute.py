@@ -215,6 +215,21 @@ def test_execute_cap_counts_only_the_same_family():
     assert len(strategy.created) == 1
 
 
+def test_execute_cap_exempts_demoted_champion_counterfactuals():
+    # §1.4.3 cap governs NEW candidate clones only: a demoted-champion counterfactual (the
+    # `counterfactual` tag — §8.2 MANDATES its 6-week retention) must not consume a budget slot,
+    # so 1 candidate clone + 1 counterfactual in the family leaves room at cap 2.
+    repo, jobs = FakeEvoRepo(), FakeJobs()
+    cf_clone = _existing_evo_clone("evo-cf")
+    cf_clone["tags"] = ["manas-arora", "evo", "counterfactual"]
+    strategy = FakeStrategy(_CONFIG, existing=[_existing_evo_clone("evo-a"), cf_clone])
+    client = _app(repo, jobs, FakeTrials(), FakeBacktest(folds=[]), strategy, cap=2)
+    pid = _seed(repo, jobs)
+    resp = client.post(f"/api/v1/evolution/proposals/{pid}/execute")
+    assert resp.status_code == 200, resp.text
+    assert len(strategy.created) == 1
+
+
 def test_execute_resolves_the_base_config_when_the_sweep_pins_no_version():
     # a sweep that omitted strategyVersion (optimizer pinned latest) → execute resolves the base
     # config via the registry's current resolution, not a hard version fetch.
@@ -257,10 +272,12 @@ def test_execute_is_not_double_publishable():
     assert strategy.created == []
 
 
-def test_execute_rejects_a_non_publish_paper_kind():
+def test_execute_rejects_a_non_executable_kind():
+    # RETIRE rows are auto-APPROVED acknowledge items, never executed (PROMOTE/ROLLBACK ARE
+    # executable as of slice 3, so the unexecutable case is now RETIRE).
     repo, jobs = FakeEvoRepo(), FakeJobs()
     client = _app(repo, jobs, FakeTrials(), FakeBacktest(folds=[]), FakeStrategy(_CONFIG))
-    pid = _seed(repo, jobs, kind="PROMOTE")
+    pid = _seed(repo, jobs, kind="RETIRE")
     resp = client.post(f"/api/v1/evolution/proposals/{pid}/execute")
     assert resp.status_code == 422
     assert resp.json()["code"] == "PROPOSAL_KIND_NOT_EXECUTABLE"

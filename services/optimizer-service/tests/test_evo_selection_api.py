@@ -178,6 +178,35 @@ def test_select_default_top_k_promotes_all_rankable():
     assert body["survivors"] == 3 and body["retired"] == 0
 
 
+# --- §8.2 RETIRE acknowledge-rows (slice 3) -----------------------------------------------------
+
+def test_retired_candidates_get_auto_approved_retire_acks():
+    repo = FakeEvoRepo(
+        campaigns=[_campaign()],
+        generations={_CAMPAIGN_ID: [_gen()]},
+        candidates={_CAMPAIGN_ID: [
+            _cand("c-hi", robust=2.0, trial=0),
+            _cand("c-lo", robust=1.0, trial=1),
+            _cand("c-fail", robust=9.9, rankable=False, trial=2,
+                  gates=[{"id": "drawdown_cap", "status": "FAIL"}]),
+        ]},
+    )
+    client = _client(repo)
+    body = _select(client, top_k=1).json()
+    # c-lo (dominated) + c-fail (gate FAIL) retire -> two auto-APPROVED RETIRE acknowledge-rows
+    assert body["retired"] == 2 and body["retireAcks"] == 2
+    acks = [p for p in repo.proposals if p["kind"] == "RETIRE"]
+    assert len(acks) == 2
+    for ack in acks:
+        assert ack["status"] == "APPROVED"
+        assert ack["actor"] == f"evo:{_CAMPAIGN_ID}"
+        assert ack["evidence"]["decision"] == "RETIRED" and ack["evidence"]["reason"]
+    # idempotent: a re-select finds the existing acks and mints none
+    second = _select(client, top_k=1).json()
+    assert second["retireAcks"] == 0
+    assert len([p for p in repo.proposals if p["kind"] == "RETIRE"]) == 2
+
+
 def test_select_unknown_campaign_is_404():
     client = _client(FakeEvoRepo())
     resp = _select(client)

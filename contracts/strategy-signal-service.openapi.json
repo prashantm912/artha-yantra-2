@@ -1380,6 +1380,52 @@
         }
       }
     },
+    "/api/v1/insights/{id}/act" : {
+      "post" : {
+        "tags" : [ "insight-controller" ],
+        "operationId" : "act",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ActRequest"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ActResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/insights/{id}/ack" : {
       "post" : {
         "tags" : [ "insight-controller" ],
@@ -3034,6 +3080,43 @@
         }
       }
     },
+    "/api/v1/insights/strategy-dossier/{strategyId}" : {
+      "get" : {
+        "tags" : [ "insight-controller" ],
+        "operationId" : "strategyDossier",
+        "parameters" : [ {
+          "name" : "strategyId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Dossier"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/insights/notification-events" : {
       "get" : {
         "tags" : [ "insight-controller" ],
@@ -3138,6 +3221,46 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/FiredVsRejectedResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/insights/compare" : {
+      "get" : {
+        "tags" : [ "insight-controller" ],
+        "operationId" : "compare",
+        "parameters" : [ {
+          "name" : "signalIds",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "array",
+            "items" : {
+              "type" : "integer",
+              "format" : "int64"
+            }
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CompareResult"
                 }
               }
             }
@@ -3857,6 +3980,105 @@
           },
           "status" : {
             "type" : "string"
+          }
+        }
+      },
+      "ActRequest" : {
+        "type" : "object",
+        "properties" : {
+          "action" : {
+            "type" : "string"
+          },
+          "qty" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "ActResponse" : {
+        "type" : "object",
+        "properties" : {
+          "insightId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "action" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "targetMethod" : {
+            "type" : "string"
+          },
+          "targetEndpoint" : {
+            "type" : "string"
+          },
+          "ticket" : {
+            "$ref" : "#/components/schemas/TicketPrefill"
+          },
+          "journal" : {
+            "$ref" : "#/components/schemas/JournalDraft"
+          },
+          "instrument" : {
+            "type" : "string"
+          },
+          "sellDecisionId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "note" : {
+            "type" : "string"
+          }
+        }
+      },
+      "JournalDraft" : {
+        "type" : "object",
+        "properties" : {
+          "signalId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "paperPositionId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "tags" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "note" : {
+            "type" : "string"
+          }
+        }
+      },
+      "TicketPrefill" : {
+        "type" : "object",
+        "properties" : {
+          "signalId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "exchange" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "side" : {
+            "type" : "string"
+          },
+          "qty" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "stopLoss" : {
+            "type" : "number"
+          },
+          "target" : {
+            "type" : "number"
           }
         }
       },
@@ -4738,6 +4960,116 @@
           }
         }
       },
+      "CrossingEntry" : {
+        "type" : "object",
+        "properties" : {
+          "at" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "severity" : {
+            "type" : "string"
+          },
+          "title" : {
+            "type" : "string"
+          }
+        }
+      },
+      "Dossier" : {
+        "type" : "object",
+        "properties" : {
+          "strategyId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "slug" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "enabled" : {
+            "type" : "boolean"
+          },
+          "stage" : {
+            "type" : "string"
+          },
+          "criteria" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Criterion"
+            }
+          },
+          "graduatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "crossingTimeline" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/CrossingEntry"
+            }
+          },
+          "rejectionProfile" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/RailCount"
+            }
+          },
+          "openSellDecisions" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/OpenSell"
+            }
+          },
+          "asOf" : {
+            "type" : "string"
+          },
+          "notes" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "OpenSell" : {
+        "type" : "object",
+        "properties" : {
+          "sellDecisionId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "runDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "symbol" : {
+            "type" : "string"
+          },
+          "verdict" : {
+            "type" : "string"
+          },
+          "unrealizedPct" : {
+            "type" : "number"
+          },
+          "acknowledged" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "RailCount" : {
+        "type" : "object",
+        "properties" : {
+          "rail" : {
+            "type" : "string"
+          },
+          "count" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
       "NotificationEventRow" : {
         "type" : "object",
         "properties" : {
@@ -4924,6 +5256,110 @@
           "generatedAt" : {
             "type" : "string",
             "format" : "date-time"
+          }
+        }
+      },
+      "CompareColumn" : {
+        "type" : "object",
+        "properties" : {
+          "signalId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "side" : {
+            "type" : "string"
+          },
+          "family" : {
+            "type" : "string"
+          },
+          "book" : {
+            "type" : "string"
+          },
+          "priority" : {
+            "type" : "number"
+          },
+          "band" : {
+            "type" : "string"
+          },
+          "components" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ComponentPoint"
+            }
+          },
+          "optionLegCost" : {
+            "type" : "number"
+          },
+          "marginEstimate" : {
+            "type" : "string"
+          },
+          "riskReward" : {
+            "type" : "number"
+          },
+          "entryPrice" : {
+            "type" : "number"
+          },
+          "stopLoss" : {
+            "type" : "number"
+          },
+          "target" : {
+            "type" : "number"
+          },
+          "dataTrust" : {
+            "type" : "string"
+          },
+          "trustReasons" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "scored" : {
+            "type" : "string"
+          }
+        }
+      },
+      "CompareResult" : {
+        "type" : "object",
+        "properties" : {
+          "session" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "booksDiffer" : {
+            "type" : "boolean"
+          },
+          "differsMost" : {
+            "type" : "string"
+          },
+          "columns" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/CompareColumn"
+            }
+          },
+          "notes" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "ComponentPoint" : {
+        "type" : "object",
+        "properties" : {
+          "key" : {
+            "type" : "string"
+          },
+          "points" : {
+            "type" : "number"
+          },
+          "c" : {
+            "type" : "number"
           }
         }
       },

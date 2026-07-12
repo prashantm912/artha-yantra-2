@@ -61,7 +61,7 @@ class InsightGoldenTest {
   /** Runs every generator over its fixture context and concatenates the candidates in a fixed order. */
   private List<InsightCandidate> generate() {
     InsightProperties props =
-        new InsightProperties(null, null, null, null, null, null, null, null); // all defaults
+        new InsightProperties(null, null, null, null, null, null, null, null, null, null); // all defaults
     SignalPriorityGenerator priority = new SignalPriorityGenerator(props);
     DataTrustGenerator trust = new DataTrustGenerator();
     RiskHeatGenerator risk = new RiskHeatGenerator(props);
@@ -73,6 +73,8 @@ class InsightGoldenTest {
     HygieneGenerator hygiene = new HygieneGenerator(props);
     ExpiryEventGenerator expiry = new ExpiryEventGenerator();
     QualityReportGenerator quality = new QualityReportGenerator(props);
+    StrategyEvidenceGenerator strategyEvidence = new StrategyEvidenceGenerator();
+    SellDecisionGenerator sellDecision = new SellDecisionGenerator(props);
 
     List<InsightCandidate> out = new ArrayList<>();
     // I1 generators.
@@ -94,7 +96,73 @@ class InsightGoldenTest {
     // I2 — T-1 expiry + weekly quality report.
     out.addAll(expiry.generate(GenerationContext.forExpiry(fixtureExpiry(), NOW)));
     out.addAll(quality.generate(GenerationContext.forQuality(fixtureQuality(), NOW)));
+    // I3 — strategy-evidence (snapshot + crossings) + sell-decision.
+    out.addAll(
+        strategyEvidence.generate(GenerationContext.forStrategyEvidence(fixtureStrategyEvidence(), NOW)));
+    out.addAll(sellDecision.generate(GenerationContext.forSellDecision(fixtureSellDecision(), NOW)));
     return out;
+  }
+
+  /**
+   * A strategy-evidence input: one strategy that crossed UP (PF passes + stage → TAKE_ELIGIBLE), one
+   * that dropped DOWN (trades + PF fail, stage → PAPER), and one first-seen (no prior → snapshot only).
+   */
+  private StrategyEvidenceInputs fixtureStrategyEvidence() {
+    java.util.UUID a = java.util.UUID.fromString("00000000-0000-0000-0000-0000000000a1");
+    java.util.UUID b = java.util.UUID.fromString("00000000-0000-0000-0000-0000000000b2");
+    java.util.UUID c = java.util.UUID.fromString("00000000-0000-0000-0000-0000000000c3");
+    StrategyEvidenceInputs.BoardRow rowA =
+        new StrategyEvidenceInputs.BoardRow(
+            a, "manas-arora-breakout", "Manas Breakout", "TAKE_ELIGIBLE", 22,
+            new BigDecimal("1.35"), new BigDecimal("0.50"), new BigDecimal("12"), criteria(true, true, true, true));
+    StrategyEvidenceInputs.BoardRow rowB =
+        new StrategyEvidenceInputs.BoardRow(
+            b, "manas-arora-vcp", "Manas VCP", "PAPER", 18,
+            new BigDecimal("1.10"), new BigDecimal("0.10"), new BigDecimal("20"), criteria(false, false, true, true));
+    StrategyEvidenceInputs.BoardRow rowC =
+        new StrategyEvidenceInputs.BoardRow(
+            c, "siva-vwap-breakout", "Siva VWAP", "PAPER", 30,
+            new BigDecimal("1.20"), new BigDecimal("0.05"), new BigDecimal("22"), criteria(true, false, true, true));
+    java.util.Map<java.util.UUID, StrategyEvidenceInputs.PriorSnapshot> yesterday =
+        new java.util.LinkedHashMap<>();
+    yesterday.put(a, new StrategyEvidenceInputs.PriorSnapshot("PAPER", pass(true, false, true, true)));
+    yesterday.put(b, new StrategyEvidenceInputs.PriorSnapshot("TAKE_ELIGIBLE", pass(true, true, true, true)));
+    return new StrategyEvidenceInputs(
+        java.time.LocalDate.parse("2026-07-12"), List.of(rowA, rowB, rowC), yesterday, java.util.Set.of(a));
+  }
+
+  /** A sell-decision input: a fresh SELL (NOTICE) + an un-acked SELL two sessions old (WARN escalation). */
+  private SellDecisionInputs fixtureSellDecision() {
+    return new SellDecisionInputs(
+        java.time.LocalDate.parse("2026-07-12"),
+        List.of(
+            new SellDecisionInputs.SellRow(
+                5001L, "manas-arora", java.time.LocalDate.parse("2026-07-12"), 7001L, "NSE", "SBCL",
+                "manas-arora-breakout", "SELL (stop 2xATR breached)", "stop 2xATR breached",
+                new BigDecimal("100"), new BigDecimal("104.2"), new BigDecimal("4.2"), 0L),
+            new SellDecisionInputs.SellRow(
+                5002L, "minervini", java.time.LocalDate.parse("2026-07-10"), 7002L, "NSE", "TCS",
+                "minervini-vcp", "SELL (50-DMA break)", "50-DMA break",
+                new BigDecimal("3000"), new BigDecimal("2850"), new BigDecimal("-5.0"), 2L)));
+  }
+
+  private static List<StrategyEvidenceInputs.Criterion> criteria(
+      boolean trades, boolean pf, boolean expectancy, boolean maxDd) {
+    return List.of(
+        new StrategyEvidenceInputs.Criterion("trades", ">= 20", trades ? "22" : "18", trades),
+        new StrategyEvidenceInputs.Criterion("profitFactor", ">= 1.3", pf ? "1.35" : "1.10", pf),
+        new StrategyEvidenceInputs.Criterion("expectancy", "> 0", "0.5", expectancy),
+        new StrategyEvidenceInputs.Criterion("maxDrawdownPct", "<= 25", maxDd ? "12" : "27", maxDd));
+  }
+
+  private static java.util.Map<String, Boolean> pass(
+      boolean trades, boolean pf, boolean expectancy, boolean maxDd) {
+    java.util.Map<String, Boolean> m = new java.util.LinkedHashMap<>();
+    m.put("trades", trades);
+    m.put("profitFactor", pf);
+    m.put("expectancy", expectancy);
+    m.put("maxDrawdownPct", maxDd);
+    return m;
   }
 
   /** A market context: one options shift crossing all four thresholds + an ELEVATED/WIDE regime. */

@@ -94,4 +94,24 @@ public class InsightSweeper {
       log.warn("insight quality report failed: {}", e.toString());
     }
   }
+
+  /** 21:10-IST strategy-evidence sweep — STRATEGY_EVIDENCE, after the 21:00 graduation eval (§5.2). */
+  @Scheduled(cron = "${artha.insights.strategy-evidence-cron:0 10 21 * * MON-FRI}", zone = "Asia/Kolkata")
+  public void strategyEvidenceSweep() {
+    try {
+      engine.runStrategyEvidenceSweep();
+    } catch (RuntimeException e) {
+      log.warn("insight strategy-evidence sweep failed: {}", e.toString());
+    }
+  }
+
+  /** 21:15-IST sell-decision sweep — SELL_DECISION, after the 20:05 swing batch persists V037 (§5.3). */
+  @Scheduled(cron = "${artha.insights.sell-decision-cron:0 15 21 * * MON-FRI}", zone = "Asia/Kolkata")
+  public void sellDecisionSweep() {
+    try {
+      engine.runSellDecisionSweep();
+    } catch (RuntimeException e) {
+      log.warn("insight sell-decision sweep failed: {}", e.toString());
+    }
+  }
 }

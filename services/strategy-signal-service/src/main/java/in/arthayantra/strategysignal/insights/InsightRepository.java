@@ -259,6 +259,37 @@ public class InsightRepository {
         cfg.windowDays(), actRate, generated, suppressed == null ? 0 : suppressed, topKeys, perType);
   }
 
+  /**
+   * The most recent suppressed-INFO STRATEGY_EVIDENCE snapshot per strategy scope, generated strictly
+   * before {@code before} (§5.2 "yesterday's snapshot"). Keyed by the strategy UUID parsed from the
+   * {@code strategy:<id>} scope; the value is the snapshot's evidence JSON (the reader parses the
+   * stage + criterion pass-map back out of it). Used by the 21:10 sweep to detect crossings with NO
+   * new table — the always-written snapshot IS the durable baseline.
+   */
+  public Map<UUID, JsonNode> latestStrategyEvidenceSnapshots(OffsetDateTime before) {
+    Map<UUID, JsonNode> out = new LinkedHashMap<>();
+    jdbc.query(
+        """
+        SELECT DISTINCT ON (scope) scope, evidence
+        FROM insights
+        WHERE type = 'STRATEGY_EVIDENCE' AND dedupe_key LIKE 'STRATEGY_EVIDENCE_SNAP:%'
+          AND generated_at < ?
+        ORDER BY scope, generated_at DESC
+        """,
+        rs -> {
+          String scope = rs.getString("scope");
+          if (scope != null && scope.startsWith("strategy:")) {
+            try {
+              out.put(UUID.fromString(scope.substring("strategy:".length())), readTree(rs.getString("evidence")));
+            } catch (IllegalArgumentException ignored) {
+              // a non-UUID strategy scope can't be a graduation snapshot — skip it defensively
+            }
+          }
+        },
+        before);
+    return out;
+  }
+
   /** UPSERTs owner feedback on an insight (§2.4 / §10.2). */
   public void upsertFeedback(UUID insightId, String verdict, String note) {
     jdbc.update(

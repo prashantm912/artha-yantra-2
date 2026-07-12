@@ -12,11 +12,21 @@
  * {@code notifier←signals} direction: {@code signals}/{@code paper} must never import {@code
  * insights}, so no cycle — {@code ModularityTest} covers it). Reads market-data health rails over
  * REST via {@link in.arthayantra.strategysignal.insights.ContextClient} (the {@code MarketOiClient}
- * structural precedent). Per-book risk heat is a read-only SQL view of the persisted paper margin
- * annotations — the {@code insights} module never imports or mutates the {@code paper} module.
+ * structural precedent). Per-book risk heat, rejections, portfolio, sell-decisions and the strategy
+ * snapshot rows are read-only same-schema SQL views (the {@code BookHeatReader} precedent: SQL is not
+ * a Java import) — the module never MUTATES any of them. The ONE deliberate cross-module read edge is
+ * {@link in.arthayantra.strategysignal.insights.StrategyEvidenceReader} consuming
+ * {@code paper.GraduationService#board()} read-only: re-deriving the graduation money-math (PF /
+ * expectancy / drawdown walk) in SQL would be a divergence risk on a money surface (§0 "no
+ * re-scoring"), so I3 reuses the board rather than copies it. This is a one-way edge (paper never
+ * imports insights → acyclic, {@code ModularityTest}-verified).
  *
- * <p><b>I1 is SHADOW mode.</b> Insights are rows + read APIs only — NO ntfy/Telegram/WS delivery
- * (that arms in I3/I4). Three generators ship: {@code SIGNAL_PRIORITY}, {@code DATA_TRUST},
- * {@code RISK_HEAT} — all display-only.
+ * <p><b>Delivery is SHADOW by default.</b> Insights are rows + read APIs; the I3 {@code insights} WS
+ * channel ({@link in.arthayantra.strategysignal.insights.InsightPublisher}) is gated on
+ * {@code artha.insights.delivery.ws} (default FALSE) — nothing pushes until the owner arms it (Stage 1,
+ * §10.3); ntfy/Telegram floors are I4. Generators shipped: I1 {@code SIGNAL_PRIORITY}/{@code
+ * DATA_TRUST}/{@code RISK_HEAT}; I2 context/rejection/hygiene/expiry breadth; I3 {@code
+ * STRATEGY_EVIDENCE} + {@code SELL_DECISION}. I3 also adds the PROPOSE {@code /act} (prefill /
+ * idempotent-instruction + audit, never places an order), {@code /compare}, and the strategy dossier.
  */
 package in.arthayantra.strategysignal.insights;

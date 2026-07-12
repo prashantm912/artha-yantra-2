@@ -24,7 +24,8 @@ public interface InsightGenerator {
    * the engine can run every generator per trigger without branching. Built by the engine per trigger:
    * the {@code SignalEmitted} listener supplies {@code signal} + {@code trust}; each sweep supplies the
    * one bundle its generators read (I1: {@code trust} / {@code bookHeats}; I2: {@code market} /
-   * {@code rejections} / {@code hygiene} / {@code expiry} / {@code staleTick} / {@code quality}).
+   * {@code rejections} / {@code hygiene} / {@code expiry} / {@code staleTick} / {@code quality}; I3:
+   * {@code strategyEvidence} / {@code sellDecision}).
    */
   record GenerationContext(
       SignalPriorityInputs signal,
@@ -36,16 +37,18 @@ public interface InsightGenerator {
       ExpirySnapshot expiry,
       StaleTickSnapshot staleTick,
       QualityStats quality,
+      StrategyEvidenceInputs strategyEvidence,
+      SellDecisionInputs sellDecision,
       OffsetDateTime now) {
 
     /** Context for the on-emit signal-priority trigger. */
     public static GenerationContext forSignal(SignalPriorityInputs signal, OffsetDateTime now) {
-      return new GenerationContext(signal, null, List.of(), null, null, null, null, null, null, now);
+      return new GenerationContext(signal, null, List.of(), null, null, null, null, null, null, null, null, now);
     }
 
     /** Context for the data-trust sweep. */
     public static GenerationContext forTrust(TrustSnapshot trust, OffsetDateTime now) {
-      return new GenerationContext(null, trust, List.of(), null, null, null, null, null, null, now);
+      return new GenerationContext(null, trust, List.of(), null, null, null, null, null, null, null, null, now);
     }
 
     /** Context for the risk-heat sweep (RISK_HEAT + RISK_STALE_TICK share the 5-min risk sweep). */
@@ -53,30 +56,47 @@ public interface InsightGenerator {
         List<BookHeat> bookHeats, StaleTickSnapshot staleTick, OffsetDateTime now) {
       return new GenerationContext(
           null, null, bookHeats == null ? List.of() : bookHeats, null, null, null, null, staleTick,
-          null, now);
+          null, null, null, now);
     }
 
     /** Context for the 15-min context sweep (CONTEXT_SHIFT + MARKET_STRUCTURE + REJECTION_NEARMISS). */
     public static GenerationContext forContext(
         MarketContext market, RejectionScan rejections, OffsetDateTime now) {
-      return new GenerationContext(null, null, List.of(), market, rejections, null, null, null, null, now);
+      return new GenerationContext(
+          null, null, List.of(), market, rejections, null, null, null, null, null, null, now);
     }
 
     /** Context for the EOD sweep (REJECTION_RAIL_TREND + HYGIENE). */
     public static GenerationContext forEod(
         RejectionScan rejections, HygieneInputs hygiene, OffsetDateTime now) {
       return new GenerationContext(
-          null, null, List.of(), null, rejections, hygiene, null, null, null, now);
+          null, null, List.of(), null, rejections, hygiene, null, null, null, null, null, now);
     }
 
     /** Context for the T-1 expiry sweep (EXPIRY_EVENT). */
     public static GenerationContext forExpiry(ExpirySnapshot expiry, OffsetDateTime now) {
-      return new GenerationContext(null, null, List.of(), null, null, null, expiry, null, null, now);
+      return new GenerationContext(
+          null, null, List.of(), null, null, null, expiry, null, null, null, null, now);
     }
 
     /** Context for the weekly quality-report job (QUALITY_REPORT). */
     public static GenerationContext forQuality(QualityStats quality, OffsetDateTime now) {
-      return new GenerationContext(null, null, List.of(), null, null, null, null, null, quality, now);
+      return new GenerationContext(
+          null, null, List.of(), null, null, null, null, null, quality, null, null, now);
+    }
+
+    /** Context for the 21:10 strategy-evidence sweep (STRATEGY_EVIDENCE, §5.2). */
+    public static GenerationContext forStrategyEvidence(
+        StrategyEvidenceInputs strategyEvidence, OffsetDateTime now) {
+      return new GenerationContext(
+          null, null, List.of(), null, null, null, null, null, null, strategyEvidence, null, now);
+    }
+
+    /** Context for the post-batch sell-decision sweep (SELL_DECISION, §5.3). */
+    public static GenerationContext forSellDecision(
+        SellDecisionInputs sellDecision, OffsetDateTime now) {
+      return new GenerationContext(
+          null, null, List.of(), null, null, null, null, null, null, null, sellDecision, now);
     }
   }
 }

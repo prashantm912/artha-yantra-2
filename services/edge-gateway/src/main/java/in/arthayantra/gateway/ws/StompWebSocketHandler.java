@@ -193,7 +193,7 @@ public class StompWebSocketHandler implements WebSocketHandler {
           StompFrame.of(
                   "ERROR",
                   Map.of("message", "invalid subscription"),
-                  "destination must be /topic/{ticks.*|candles.1m.*|signals|signals.status|paper.events|options.chain|jobs/*|system}")
+                  "destination must be /topic/{ticks.*|candles.1m.*|signals|signals.status|paper.events|insights|options.chain|jobs/*|system}")
               .serialize());
       return;
     }
@@ -287,11 +287,13 @@ public class StompWebSocketHandler implements WebSocketHandler {
         channel.startsWith("ticks.")
             || channel.startsWith("candles.1m.")
             || channel.equals("signals")
-            // §9.3: the WS bridge allowlist grows by exactly these two — the §7.2.1 signal-status
-            // transition frames and the §7.2.2 paper-position lifecycle events. Both are low-rate,
-            // every-message-matters (non-conflatable, so they ride the passthrough path).
+            // §9.3: the WS bridge allowlist grows by exactly these — the §7.2.1 signal-status
+            // transition frames, the §7.2.2 paper-position lifecycle events, and the INT-layer
+            // insight frames (delivery-flag-gated on the producer side, default OFF). All are
+            // low-rate, every-message-matters (non-conflatable, so they ride the passthrough path).
             || channel.equals("signals.status")
             || channel.equals("paper.events")
+            || channel.equals("insights")
             || channel.equals("options.chain")
             || channel.equals("jobs.progress");
     return allowed ? channel : null;

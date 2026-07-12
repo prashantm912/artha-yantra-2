@@ -404,6 +404,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/insights/{id}/act": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["act"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/insights/{id}/ack": {
         parameters: {
             query?: never;
@@ -996,6 +1012,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/insights/strategy-dossier/{strategyId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["strategyDossier"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/insights/notification-events": {
         parameters: {
             query?: never;
@@ -1036,6 +1068,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["firedVsRejected"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/insights/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["compare"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1328,6 +1376,44 @@ export interface components {
             /** Format: uuid */
             id?: string;
             status?: string;
+        };
+        ActRequest: {
+            action?: string;
+            /** Format: int64 */
+            qty?: number;
+        };
+        ActResponse: {
+            /** Format: uuid */
+            insightId?: string;
+            action?: string;
+            status?: string;
+            targetMethod?: string;
+            targetEndpoint?: string;
+            ticket?: components["schemas"]["TicketPrefill"];
+            journal?: components["schemas"]["JournalDraft"];
+            instrument?: string;
+            /** Format: int64 */
+            sellDecisionId?: number;
+            note?: string;
+        };
+        JournalDraft: {
+            /** Format: int64 */
+            signalId?: number;
+            /** Format: int64 */
+            paperPositionId?: number;
+            tags?: string[];
+            note?: string;
+        };
+        TicketPrefill: {
+            /** Format: int64 */
+            signalId?: number;
+            exchange?: string;
+            tradingsymbol?: string;
+            side?: string;
+            /** Format: int64 */
+            qty?: number;
+            stopLoss?: number;
+            target?: number;
         };
         NotificationRequest: {
             enabled?: boolean;
@@ -1652,6 +1738,43 @@ export interface components {
             /** Format: int64 */
             suppressed?: number;
         };
+        CrossingEntry: {
+            /** Format: date-time */
+            at?: string;
+            severity?: string;
+            title?: string;
+        };
+        Dossier: {
+            /** Format: uuid */
+            strategyId?: string;
+            slug?: string;
+            name?: string;
+            enabled?: boolean;
+            stage?: string;
+            criteria?: components["schemas"]["Criterion"][];
+            /** Format: date-time */
+            graduatedAt?: string;
+            crossingTimeline?: components["schemas"]["CrossingEntry"][];
+            rejectionProfile?: components["schemas"]["RailCount"][];
+            openSellDecisions?: components["schemas"]["OpenSell"][];
+            asOf?: string;
+            notes?: string[];
+        };
+        OpenSell: {
+            /** Format: int64 */
+            sellDecisionId?: number;
+            /** Format: date */
+            runDate?: string;
+            symbol?: string;
+            verdict?: string;
+            unrealizedPct?: number;
+            acknowledged?: boolean;
+        };
+        RailCount: {
+            rail?: string;
+            /** Format: int64 */
+            count?: number;
+        };
         NotificationEventRow: {
             /** Format: int64 */
             id?: number;
@@ -1724,6 +1847,39 @@ export interface components {
             dotTotal?: number;
             /** Format: date-time */
             generatedAt?: string;
+        };
+        CompareColumn: {
+            /** Format: int64 */
+            signalId?: number;
+            tradingsymbol?: string;
+            side?: string;
+            family?: string;
+            book?: string;
+            priority?: number;
+            band?: string;
+            components?: components["schemas"]["ComponentPoint"][];
+            optionLegCost?: number;
+            marginEstimate?: string;
+            riskReward?: number;
+            entryPrice?: number;
+            stopLoss?: number;
+            target?: number;
+            dataTrust?: string;
+            trustReasons?: string[];
+            scored?: string;
+        };
+        CompareResult: {
+            /** Format: date */
+            session?: string;
+            booksDiffer?: boolean;
+            differsMost?: string;
+            columns?: components["schemas"]["CompareColumn"][];
+            notes?: string[];
+        };
+        ComponentPoint: {
+            key?: string;
+            points?: number;
+            c?: number;
         };
         ErrorResponse: {
             code?: string;
@@ -2856,6 +3012,41 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["TriageResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    act: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ActRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ActResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -4080,6 +4271,37 @@ export interface operations {
             };
         };
     };
+    strategyDossier: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategyId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["Dossier"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     notificationEvents: {
         parameters: {
             query?: {
@@ -4161,6 +4383,37 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["FiredVsRejectedResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    compare: {
+        parameters: {
+            query: {
+                signalIds: number[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["CompareResult"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

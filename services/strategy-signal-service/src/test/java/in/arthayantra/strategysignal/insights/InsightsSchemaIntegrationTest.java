@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.strategysignal.signals.SignalEmitted;
 import in.arthayantra.strategysignal.testsupport.StrategySignalIntegrationTestBase;
 import java.math.BigDecimal;
@@ -222,6 +223,191 @@ class InsightsSchemaIntegrationTest extends StrategySignalIntegrationTestBase {
     assertThat(resp.rejected()).isEmpty();
     assertThat(resp.contrast().firedCount()).isZero();
     assertThat(resp.contrast().rejectedCount()).isZero();
+  }
+
+  @Test
+  void i3StrategyEvidenceSweepIsFailSoftAndSellDecisionSweepWritesAnInsight() {
+    // The strategy-evidence sweep reads GraduationService.board() over the real (draft-only) live set +
+    // yesterday's snapshots — must not throw even with an empty board (the cross-module read edge works).
+    engine.runStrategyEvidenceSweep();
+
+    // Seed an unacknowledged SELL row → the sell-decision sweep turns it into a SELL_DECISION insight
+    // (proves the sell_decisions SQL read + generator + persist end-to-end).
+    long sig = SIGNAL_SEQ.incrementAndGet();
+    jdbc.update(
+        "INSERT INTO sell_decisions (book, run_date, signal_id, exchange, symbol, still_buyable,"
+            + " selling_now, verdict) VALUES ('minervini', CURRENT_DATE, ?, 'NSE', 'TESTSELL', false,"
+            + " true, 'SELL (test 2xATR)')",
+        sig);
+    engine.runSellDecisionSweep();
+    assertThat(repository.list("SELL_DECISION", null, "OPEN", "book:minervini", null, null, false, 200, 0))
+        .anyMatch(i -> i.dedupeKey().startsWith("SELL_DECISION:"));
+  }
+
+  @Test
+  void actPathTrustGatesBlockedAndDegradedAndAcksInModule() {
+    // BLOCKED insight → /act refuses ALL actions (422 DATA_STALE): advice never outruns its data.
+    Insight blocked = signalInsight("signal:" + SIGNAL_SEQ.incrementAndGet(), "BLOCKED");
+    repository.insertOrRefresh(blocked);
+    assertThatThrownBy(() -> controller.act(blocked.id(), new InsightController.ActRequest("ACK", null)))
+        .isInstanceOf(ApiException.class)
+        .satisfies(e -> assertThat(((ApiException) e).httpStatus()).isEqualTo(422));
+
+    // DEGRADED insight → the order-placing OPEN_TICKET prefill is trust-gated off (422); ACK is allowed.
+    Insight degraded = signalInsight("signal:" + SIGNAL_SEQ.incrementAndGet(), "DEGRADED");
+    repository.insertOrRefresh(degraded);
+    assertThatThrownBy(
+            () -> controller.act(degraded.id(), new InsightController.ActRequest("OPEN_TICKET", null)))
+        .isInstanceOf(ApiException.class)
+        .satisfies(e -> assertThat(((ApiException) e).httpStatus()).isEqualTo(422));
+
+    InsightController.ActResponse acked =
+        controller.act(degraded.id(), new InsightController.ActRequest("ACK", null));
+    assertThat(acked.status()).isEqualTo("DONE");
+    assertThat(repository.get(degraded.id()).orElseThrow().status()).isEqualTo("ACKED");
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT count(*) FROM insight_actions WHERE insight_id = ? AND action = 'ACK'",
+                Integer.class, degraded.id()))
+        .isEqualTo(1);
+  }
+
+  @Test
+  void actOpenTicketReturnsAPrefillAndWritesTheActionTrail() {
+    UUID versionId = seededVersionId();
+    long sig = seedSignal(versionId, OffsetDateTime.now());
+    Insight in = signalInsight("signal:" + sig, "OK");
+    repository.insertOrRefresh(in);
+
+    // OPEN_TICKET returns a PREFILL (NEVER places the order) + writes the insight_actions trail (§2.4).
+    InsightController.ActResponse resp =
+        controller.act(in.id(), new InsightController.ActRequest("OPEN_TICKET", 150L));
+    assertThat(resp.status()).isEqualTo("PREFILL");
+    assertThat(resp.targetMethod()).isEqualTo("POST");
+    assertThat(resp.targetEndpoint()).isEqualTo("/api/v1/paper/orders");
+    assertThat(resp.ticket()).isNotNull();
+    assertThat(resp.ticket().signalId()).isEqualTo(sig);
+    assertThat(resp.ticket().qty()).isEqualTo(150L); // the body qty override rode through
+    assertThat(repository.get(in.id()).orElseThrow().status()).isEqualTo("ACTED");
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT count(*) FROM insight_actions WHERE insight_id = ? AND action = 'OPEN_TICKET'",
+                Integer.class, in.id()))
+        .isEqualTo(1);
+  }
+
+  @Test
+  void compareGuardsSessionsAndAssemblesColumns() {
+    // Comparability guards (§4.1): < 2 ids and 2 non-existent ids both 422.
+    assertThatThrownBy(() -> controller.compare(List.of(1L))).isInstanceOf(ApiException.class);
+    assertThatThrownBy(() -> controller.compare(List.of(999_000_001L, 999_000_002L)))
+        .isInstanceOf(ApiException.class);
+
+    UUID versionId = seededVersionId();
+    OffsetDateTime now = OffsetDateTime.now();
+    long a = seedSignal(versionId, now);
+    long b = seedSignal(versionId, now);
+    SignalCompareReader.CompareResult res = controller.compare(List.of(a, b));
+    assertThat(res.columns()).hasSize(2);
+    assertThat(res.columns()).allMatch(c -> "NO_INSIGHT".equals(c.scored()) || "SCORED".equals(c.scored()));
+
+    // Different IST sessions refuse (422): a today-signal vs a two-days-ago signal.
+    long old = seedSignal(versionId, now.minusDays(2));
+    assertThatThrownBy(() -> controller.compare(List.of(a, old))).isInstanceOf(ApiException.class);
+  }
+
+  @Test
+  void actCoversTheRemainingProposeBranches() {
+    UUID versionId = seededVersionId();
+    long sig = seedSignal(versionId, OffsetDateTime.now());
+    Insight signalScoped = signalInsight("signal:" + sig, "OK");
+    repository.insertOrRefresh(signalScoped);
+
+    // TAKE_SIGNAL → PREFILL targeting the EXISTING /signals/{id}/taken (never opens the position here).
+    InsightController.ActResponse take =
+        controller.act(signalScoped.id(), new InsightController.ActRequest("TAKE_SIGNAL", null));
+    assertThat(take.status()).isEqualTo("PREFILL");
+    assertThat(take.targetEndpoint()).isEqualTo("/api/v1/signals/" + sig + "/taken");
+
+    // JOURNAL_DRAFT_ACCEPT → PREFILL targeting /journal with the signal linked.
+    Insight forJournal = signalInsight("signal:" + sig, "OK");
+    repository.insertOrRefresh(forJournal);
+    InsightController.ActResponse journal =
+        controller.act(forJournal.id(), new InsightController.ActRequest("JOURNAL_DRAFT_ACCEPT", null));
+    assertThat(journal.status()).isEqualTo("PREFILL");
+    assertThat(journal.targetEndpoint()).isEqualTo("/api/v1/journal");
+    assertThat(journal.journal().signalId()).isEqualTo(sig);
+
+    // ADD_WATCHLIST → PROPOSED with the resolved instrument (from the signal's leg).
+    Insight forWatch = signalInsight("signal:" + sig, "OK");
+    repository.insertOrRefresh(forWatch);
+    InsightController.ActResponse watch =
+        controller.act(forWatch.id(), new InsightController.ActRequest("ADD_WATCHLIST", null));
+    assertThat(watch.status()).isEqualTo("PROPOSED");
+    assertThat(watch.instrument()).isNotBlank();
+
+    // DISMISS + MUTE_TYPE → in-module DONE writes.
+    Insight forDismiss = signalInsight("signal:" + sig, "OK");
+    repository.insertOrRefresh(forDismiss);
+    assertThat(controller.act(forDismiss.id(), new InsightController.ActRequest("DISMISS", null)).status())
+        .isEqualTo("DONE");
+    assertThat(repository.get(forDismiss.id()).orElseThrow().status()).isEqualTo("DISMISSED");
+    Insight forMute = signalInsight("signal:" + sig, "OK");
+    repository.insertOrRefresh(forMute);
+    assertThat(controller.act(forMute.id(), new InsightController.ActRequest("MUTE_TYPE", null)).status())
+        .isEqualTo("DONE");
+
+    // ACK_SELL_DECISION → PROPOSED targeting the EXISTING sell-decision acknowledge endpoint.
+    var sellEvidence =
+        objectMapper.valueToTree(
+            List.of(
+                new Evidence(
+                    "verdict", "SELL (test)",
+                    new Evidence.Source("/api/v1/signals/sell-decisions", null, "2026-07-12"),
+                    java.util.Map.of("sellDecisionId", 5099L, "signalId", 7099L))));
+    Insight sellInsight =
+        new Insight(
+            UUID.randomUUID(), OffsetDateTime.now(), "SELL_DECISION", "WARN", "book:minervini",
+            "TCS — SELL", "e", sellEvidence, null, null, "OK", List.of(), "SELL_DECISION:5099",
+            null, false, "OPEN", null, "dev", "h");
+    repository.insertOrRefresh(sellInsight);
+    InsightController.ActResponse sellAck =
+        controller.act(sellInsight.id(), new InsightController.ActRequest("ACK_SELL_DECISION", null));
+    assertThat(sellAck.status()).isEqualTo("PROPOSED");
+    assertThat(sellAck.targetEndpoint()).isEqualTo("/api/v1/signals/sell-decisions/5099/ack");
+    assertThat(sellAck.sellDecisionId()).isEqualTo(5099L);
+  }
+
+  @Test
+  void strategyDossierAssemblesForAnUnlistedStrategy() {
+    StrategyEvidenceReader.Dossier d = controller.strategyDossier(UUID.randomUUID());
+    assertThat(d.stage()).isEqualTo("UNLISTED");
+    assertThat(d.criteria()).isEmpty();
+    assertThat(d.notes()).isNotEmpty();
+  }
+
+  /** A signal-scoped SIGNAL_PRIORITY insight with a given trust state (for the /act trust-gate tests). */
+  private Insight signalInsight(String scope, String dataTrust) {
+    var ev = objectMapper.valueToTree(List.of(Evidence.of("label", "value")));
+    return new Insight(
+        UUID.randomUUID(), OffsetDateTime.now(), "SIGNAL_PRIORITY", "WARN", scope, "t", "e", ev,
+        new BigDecimal("70.00"), null, dataTrust, List.of("reason"),
+        "SIGNAL_PRIORITY:" + scope + ":" + UUID.randomUUID(), null, false, "OPEN", null, "dev", "h");
+  }
+
+  /** Any real seeded strategy version id (the repeatable sample) — satisfies the signals FK. */
+  private UUID seededVersionId() {
+    return jdbc.queryForObject("SELECT id FROM strategy_versions LIMIT 1", UUID.class);
+  }
+
+  /** Seeds one minimal signal row for the compare / ticket-prefill reads; returns its id. */
+  private long seedSignal(UUID versionId, OffsetDateTime generatedAt) {
+    return jdbc.queryForObject(
+        "INSERT INTO signals (strategy_version_id, exchange, tradingsymbol, \"interval\", signal_type,"
+            + " side, entry_price, stop_loss, target, composite_score, score_breakdown, suggested_qty,"
+            + " generated_at) VALUES (?, 'NFO', 'TESTCE', '3m', 'ENTRY', 'BUY', 100, 90, 130, 0.81,"
+            + " '{}'::jsonb, 75, ?) RETURNING id",
+        Long.class, versionId, generatedAt);
   }
 
   private Insight insight(String dedupe, String title, BigDecimal priority) {

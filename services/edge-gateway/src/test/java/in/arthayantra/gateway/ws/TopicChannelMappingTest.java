@@ -22,4 +22,10 @@ class TopicChannelMappingTest {
     assertThat(StompWebSocketHandler.channelFor("/topic/signals.status")).isEqualTo("signals.status");
     assertThat(StompWebSocketHandler.channelFor("/topic/paper.events")).isEqualTo("paper.events");
   }
+
+  /** INT §9.3: the intelligence-layer insight channel is the WS bridge allowlist +1 (delivery-gated). */
+  @Test
+  void insightsChannelIsAllowlisted() {
+    assertThat(StompWebSocketHandler.channelFor("/topic/insights")).isEqualTo("insights");
+  }
 }

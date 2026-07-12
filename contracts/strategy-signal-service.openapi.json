@@ -2581,6 +2581,76 @@
         }
       }
     },
+    "/api/v1/paper/events" : {
+      "get" : {
+        "tags" : [ "paper-controller" ],
+        "operationId" : "events",
+        "parameters" : [ {
+          "name" : "positionId",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }, {
+          "name" : "book",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "day",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        }, {
+          "name" : "limit",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 100
+          }
+        }, {
+          "name" : "offset",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 0
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PaperEventsResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/orders/tradebook" : {
       "get" : {
         "tags" : [ "orders-controller" ],
@@ -4145,6 +4215,59 @@
           "asOf" : {
             "type" : "string",
             "format" : "date-time"
+          }
+        }
+      },
+      "PaperEventDto" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "positionId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "kind" : {
+            "type" : "string"
+          },
+          "book" : {
+            "type" : "string"
+          },
+          "exchange" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "side" : {
+            "type" : "string"
+          },
+          "qty" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "reason" : {
+            "type" : "string"
+          },
+          "realizedPnl" : {
+            "type" : "string"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "PaperEventsResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PaperEventDto"
+            }
           }
         }
       },

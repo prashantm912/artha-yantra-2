@@ -166,9 +166,26 @@ export function useSignalDetail(id: number | null) {
 }
 
 /**
+ * A `/topic/signals.status` frame (audit §7.2.1): a status-transition PATCH, never a full signal. It
+ * carries just enough to update a cached row's status in place on take/dismiss/expire.
+ */
+export interface SignalStatusFrame {
+  id: number;
+  status: SignalDto['status'];
+  book?: string;
+  prevStatus?: string | null;
+  at?: string;
+}
+
+/**
  * Subscribes the active query to the `/topic/signals` channel: each frame is merged into the cache
  * (newest first, deduped by id, ring-bounded). A frame whose status no longer matches the active
  * filter only updates a row already shown (status transition); a reconnect re-fetches the snapshot.
+ *
+ * Also subscribes to `/topic/signals.status` (audit §7.2.1): a transition PATCH updates the matching
+ * cached row's status IN PLACE (take/dismiss/expire) so a live tab never goes stale. It never inserts
+ * — a frame for a row not on this page is a no-op — so a signal that transitions off-view is simply
+ * healed by the next snapshot, and the M17 book guard drops a frame for another book.
  */
 export function useSignalsLive(
   status: string | null,
@@ -207,11 +224,32 @@ export function useSignalsLive(
         return { items: [sig, ...without].slice(0, SIGNAL_RING_LIMIT) };
       });
     };
+    const patchStatus = (body: string) => {
+      let f: SignalStatusFrame;
+      try {
+        f = JSON.parse(body) as SignalStatusFrame;
+      } catch {
+        return; // unparseable frame — the REST snapshot heals
+      }
+      // Same M17 book guard. The id-match below is already book-safe (a foreign row can't be on this
+      // page), so this only saves the cache write for a frame we could never apply.
+      if (book && f.book && f.book !== book) {
+        return;
+      }
+      qc.setQueryData<SignalPage>([SIGNALS_KEY, status, from, to, 0, book], (prev) => {
+        if (!prev) return prev;
+        // PATCH the row's status in place; a transition that drops it out of the active filter keeps
+        // it visible (matching the full-frame merge above) until the next snapshot heals.
+        return { items: prev.items.map((i) => (i.id === f.id ? { ...i, status: f.status } : i)) };
+      });
+    };
     const offTopic = wsClient.topic('/topic/signals', merge);
+    const offStatus = wsClient.topic('/topic/signals.status', patchStatus);
     // reconnect gap-heal rides the app-wide debounced invalidation in main.tsx — a per-hook
     // invalidation here was a redundant second refetch of the same key
     return () => {
       offTopic();
+      offStatus();
     };
   }, [qc, status, from, to, live, book]);
 }

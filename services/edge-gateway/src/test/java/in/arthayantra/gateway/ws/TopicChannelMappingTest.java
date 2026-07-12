@@ -15,4 +15,11 @@ class TopicChannelMappingTest {
     assertThat(StompWebSocketHandler.channelFor("/topic/jobs/abc")).isEqualTo("jobs.progress");
     assertThat(StompWebSocketHandler.channelFor("/topic/anything-else")).isNull();
   }
+
+  /** §9.3: the bridge allowlist grows by exactly these two Phase-2A channels (audit §7.2.1/§7.2.2). */
+  @Test
+  void phase2aEventChannelsAreAllowlisted() {
+    assertThat(StompWebSocketHandler.channelFor("/topic/signals.status")).isEqualTo("signals.status");
+    assertThat(StompWebSocketHandler.channelFor("/topic/paper.events")).isEqualTo("paper.events");
+  }
 }

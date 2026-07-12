@@ -805,6 +805,11 @@ public class SignalEngine {
     // must still EXIT on Friday; only a fresh Friday ENTRY is skipped below). An active carry is never
     // ALSO re-opened on the same clock (return after the sweep — conservative vs the sim's same-bar
     // re-entry). Live-only — the golden replay never runs preCloseClock, so vectors stay byte-identical.
+    // Roll-orphaning corner (review LOW, accepted 2026-07-12): activeEntry is keyed (versionId,
+    // exchange, tradingsymbol) — if the ~08:40 futures roll re-resolves the universe to a NEW front
+    // contract, a carry anchored on the PRIOR contract's symbol is no longer reached by this sweep
+    // (the old symbol left the universe). Out of scope here; the orphan's operative exits remain the
+    // paper leg's premium brackets (PaperBracketEvaluator) + the 21:15 paper reconcilers.
     Optional<SignalRepository.SignalRow> activeCarry =
         signals.activeEntry(
             strategy.versionId(), instrument.exchange(), instrument.tradingsymbol());
@@ -865,12 +870,26 @@ public class SignalEngine {
    * The BTST exit sweep (P0-5 live port of {@code TickwiseGoldenRunner}'s btst branch): evaluate the
    * strategy's exit_rules against the pre-close DAILY series — one bar per session — exactly as the sim
    * does, so a live carry exits close→close (a {@code time_stop max_holding_days:1} fires one trading day
-   * after entry) and a {@code premium_pct} stop reads the same bars. The sim repurposes the
-   * primaryTimeframe-keyed series to HOLD the pre-close daily bars, so its {@code bank.primarySeries()}
-   * IS that daily series; this mirrors that with a provider that maps the primary timeframe to
-   * {@code daily} (non-primary indicator timeframes — e.g. a 1h bias — resolve through the live store,
-   * already refreshed by the caller). The entry anchor is the daily bar at or before the signal's
-   * {@code generated_at} (the entry session's bar); the direction is the HELD side
+   * after entry).
+   *
+   * <p><b>PARITY BOUNDARY (review MED, 2026-07-12):</b> sim-vs-live equivalence holds ONLY for exit
+   * types that read the persisted {@code entryPrice} + today's appended pre-close bar — {@code
+   * time_stop} and the percent-of-entry level rules ({@code premium_pct}/{@code percent} stop/take).
+   * Price-HISTORY-reading types ({@code atr_multiple}, {@code trailing_stop}, {@code square_off},
+   * {@code r_multiple}, {@code signal_exit}) would compute off DIFFERENT bars sim-vs-live — the sim's
+   * primary holds synthetic 15:20 pre-close daily bars while the live {@code 1d} series holds native
+   * ~15:30 cagg/bhavcopy bars — and would drift SILENTLY. {@code BtstExitRuleParityBoundaryTest}
+   * fences the btst YAMLs to the safe set so an out-of-set rule fails loudly, not as reconciliation
+   * noise. Note also: the {@code premium_pct} stop evaluated HERE runs on the INDEX-FUTURE series and
+   * is effectively inert live (it would need a 50% index move); the REAL 50%-premium stop on the
+   * option leg rides the paper bracket levels ({@code PaperSignalListener.premiumBrackets} →
+   * {@code PaperBracketEvaluator} — the live counterpart of the sim's {@code PremiumExitEvaluator}).
+   *
+   * <p>The sim repurposes the primaryTimeframe-keyed series to HOLD the pre-close daily bars, so its
+   * {@code bank.primarySeries()} IS that daily series; this mirrors that with a provider that maps the
+   * primary timeframe to {@code daily} (non-primary indicator timeframes — e.g. a 1h bias — resolve
+   * through the live store, already refreshed by the caller). The entry anchor is the daily bar at or
+   * before the signal's {@code generated_at} (the entry session's bar); the direction is the HELD side
    * ({@link #scalperPositionDirection}). Emits the EXIT (which closes the linked paper position via
    * {@code SignalExited}) only when a rule fires. Live-only — never runs on the deterministic replay.
    */

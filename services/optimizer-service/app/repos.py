@@ -414,7 +414,7 @@ _PROPOSAL_COLS = (
     "created_at"
 )
 
-# The V018 autonomy-scheduler columns, appended after _CAMPAIGN_COLS in the scheduler reads/writes.
+# The V017 autonomy-scheduler columns, appended after _CAMPAIGN_COLS in the scheduler reads/writes.
 _SCHED_COLS = "scheduler_state, pending_sweep_job_id, last_scheduled_at"
 
 
@@ -854,10 +854,10 @@ class EvoRepo:
         self._conn.commit()
         return _campaign_row(row) if row is not None else None
 
-    # --- E6 item 16: autonomy-scheduler durable state (V018) -------------------------------------
+    # --- E6 item 16: autonomy-scheduler durable state (V017) -------------------------------------
     # The scheduler's per-campaign state lives in three columns ISOLATED behind these methods (the
     # E1 _campaign_row envelope is intentionally untouched — the autonomy sub-state is a separate
-    # axis, §V018). Everything here is written ONLY by the scheduler, which requires the default-OFF
+    # axis, §V017). Everything here is written ONLY by the scheduler, which requires the default-OFF
     # ARTHA_EVO_SCHEDULER_ENABLED flag; nothing self-arms.
 
     def list_active_scheduler_targets(self) -> list[dict[str, Any]]:
@@ -888,11 +888,15 @@ class EvoRepo:
         """Record that the scheduler LAUNCHED a generation's sweep: scheduler_state→EVALUATING,
         pending_sweep_job_id set, last_scheduled_at stamped (the cadence anchor — the app-clock the
         scheduler passes, so cadence math is deterministic under an injected clock, never a surprise
-        DB now()). ``updated_at`` maintained explicitly (DDL default fires on INSERT)."""
+        DB now()). CONDITIONAL on no sweep already pending (``pending_sweep_job_id IS NULL``) — the
+        DB backstop behind the in-process tick lock: a competing claim matches 0 rows and returns
+        None (the caller treats it as claim-lost and skips), so two writers can never double-launch
+        a campaign (adversarial review finding 1). ``updated_at`` maintained explicitly."""
         with self._conn.cursor() as cur:
             cur.execute(
                 "UPDATE evo_campaigns SET scheduler_state='EVALUATING', pending_sweep_job_id=%s, "
-                "last_scheduled_at=%s, updated_at=now() WHERE id=%s "
+                "last_scheduled_at=%s, updated_at=now() "
+                "WHERE id=%s AND pending_sweep_job_id IS NULL "
                 f"RETURNING {_CAMPAIGN_COLS}, {_SCHED_COLS}",
                 (sweep_job_id, scheduled_at, campaign_id),
             )
@@ -901,12 +905,13 @@ class EvoRepo:
         return _scheduler_target_row(row) if row is not None else None
 
     def resolve_pending_sweep(
-        self, campaign_id: str, next_state: str
+        self, campaign_id: str, next_state: str | None
     ) -> dict[str, Any] | None:
-        """Clear the in-flight sweep and set the next autonomy state — called after the sweep's
-        generation is recorded (IDLE → ready for the next generation, or EXHAUSTED → budget spent)
-        and after a FAILED sweep (IDLE → the campaign re-launches next tick, §11 durable-resume).
-        ``last_scheduled_at`` stays the cadence anchor. ``updated_at`` maintained explicitly."""
+        """Clear the in-flight sweep and set the next autonomy state — called after the generation
+        finishes (IDLE → ready for the next one, or EXHAUSTED → budget spent), after a FAILED sweep
+        (IDLE → relaunch next tick, §11 durable-resume), and by /scheduler/withdraw (``None`` →
+        NOT-ENROLLED, pending abandoned — the sweep completes as an ordinary sweep, recordable
+        manually). ``last_scheduled_at`` stays the cadence anchor. ``updated_at`` maintained."""
         with self._conn.cursor() as cur:
             cur.execute(
                 "UPDATE evo_campaigns SET scheduler_state=%s, pending_sweep_job_id=NULL, "
@@ -919,8 +924,9 @@ class EvoRepo:
         return _scheduler_target_row(row) if row is not None else None
 
     def set_scheduler_state(self, campaign_id: str, state: str) -> dict[str, Any] | None:
-        """Set the autonomy sub-state WITHOUT touching the pending sweep — used to mark an idle
-        campaign EXHAUSTED when its budget is already spent (no sweep to clear)."""
+        """Set the autonomy sub-state WITHOUT touching the pending sweep — the ENROLL write
+        (NULL/EXHAUSTED → IDLE), the EXHAUSTED mark on an idle over-budget campaign, and the
+        EVALUATING→PROBING→STRESSING mid-generation transitions (pending stays pinned)."""
         with self._conn.cursor() as cur:
             cur.execute(
                 "UPDATE evo_campaigns SET scheduler_state=%s, updated_at=now() WHERE id=%s "
@@ -950,7 +956,7 @@ class EvoRepo:
 
 
 def _scheduler_target_row(r: tuple) -> dict[str, Any]:
-    """The campaign read-envelope PLUS the three V018 scheduler columns (appended after
+    """The campaign read-envelope PLUS the three V017 scheduler columns (appended after
     _CAMPAIGN_COLS in the SELECT). Reuses _campaign_row for the base 11 columns so the campaign
     shape stays defined in exactly one place."""
     base = _campaign_row(r[:11])

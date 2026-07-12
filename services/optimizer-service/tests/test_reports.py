@@ -81,6 +81,10 @@ def test_report_summarizes_generations_and_scores():
     assert generation["candidateCount"] == 4
     assert generation["survivorCount"] == 2
     assert generation["bestRobustScore"] is not None
+    # §1.3 comparability provenance surfaces per generation (lifted from the sweep's run evidence)
+    assert generation["engineSha"] == "sha-1"
+    assert generation["dataEpoch"] == {"dataHash": "hash-1"}
+    assert generation["searchSpaceHash"] is None
 
 
 def test_report_candidate_states_and_survivors():
@@ -88,6 +92,9 @@ def test_report_candidate_states_and_survivors():
     body = _report(repo, campaign_id)
     assert body["candidateStates"] == {"SURVIVOR": 2, "RETIRED": 2}
     assert body["survivors"] == 2
+    # both survivors have no consumed holdout — the owner's cue to trigger the holdout runs (the
+    # autonomous scheduler will not mint their PUBLISH_PAPER proposals until then, §6.1)
+    assert body["holdoutPendingSurvivors"] == 2
 
 
 def test_report_graveyard_carries_retire_reasons():
@@ -121,6 +128,7 @@ def test_report_budget_spend_and_scheduler_state():
     assert budget["generationsUsed"] == 1
     assert budget["maxTrialsPerGen"] == 10
     assert budget["holdoutTouches"] == 3
+    assert budget["holdoutTouchesUsed"] == 0    # no candidate carries a consumed holdout yet
     assert budget["candidatesScored"] == 3
     assert budget["schedulerState"] == "EVALUATING"
     assert budget["pendingSweepJobId"] == "22222222-2222-2222-2222-222222222222"

@@ -28,7 +28,9 @@ _SURVIVOR_STATES = frozenset({"SURVIVOR", "PAPER", "TAKE_ELIGIBLE", "PROMOTED"})
 
 class GenerationSummary(BaseModel):
     """One generation's roll-up: how many candidates it scored, how many survived selection, its
-    cost-stress touch count, and its best RobustScore (the plateau leader)."""
+    cost-stress touch count, its best RobustScore (the plateau leader), and the §1.3 comparability
+    provenance (engineSha / dataEpoch / searchSpaceHash — rankings must refuse to compare across a
+    differing engine SHA or data epoch, so the report surfaces them per generation)."""
 
     n: int
     status: str | None = None
@@ -36,20 +38,25 @@ class GenerationSummary(BaseModel):
     survivorCount: int
     stressTouches: int
     bestRobustScore: float | None = None
+    engineSha: str | None = None
+    dataEpoch: dict[str, Any] | None = None
+    searchSpaceHash: str | None = None
     startedAt: str | None = None
     finishedAt: str | None = None
 
 
 class BudgetSpend(BaseModel):
-    """The campaign's budget caps vs. what has been spent, plus the scheduler sub-state (V018).
-    ``holdoutTouches`` is the configured cap; ``stressTouchesUsed`` is the realized cost-stress
-    touch count summed across generations (the enforced holdout/stress budget, §1.4.2)."""
+    """The campaign's budget caps vs. what has been spent, plus the scheduler sub-state (V017).
+    ``holdoutTouches`` is the configured cap; ``holdoutTouchesUsed`` is the realized spend (one per
+    candidate carrying a consumed ``holdout_run_id`` — the §1.4.2 one-shot budget);
+    ``stressTouchesUsed`` is the realized cost-stress touch count summed across generations."""
 
     maxGenerations: int | None = None
     generationsUsed: int
     maxTrialsPerGen: int | None = None
     cadenceSeconds: int | None = None
     holdoutTouches: int | None = None
+    holdoutTouchesUsed: int
     stressTouchesUsed: int
     candidatesScored: int
     schedulerState: str | None = None
@@ -88,6 +95,10 @@ class CampaignReport(BaseModel):
     generations: list[GenerationSummary]
     candidateStates: dict[str, int]
     survivors: int
+    # SURVIVORs whose one-shot holdout is not yet consumed: the autonomous scheduler will NOT mint
+    # their PUBLISH_PAPER proposals (require_holdout, §6.1) — this count is the owner's cue to
+    # trigger the holdout runs (the holdout stays owner-triggered; its budget is never auto-spent).
+    holdoutPendingSurvivors: int
     proposals: list[ProposalTally]
     graveyard: list[GraveyardEntry]
 
@@ -138,6 +149,7 @@ class CampaignReportService:
                 maxTrialsPerGen=_int(budget_cfg.get("maxTrialsPerGen")),
                 cadenceSeconds=_int(budget_cfg.get("cadenceSeconds")),
                 holdoutTouches=_int(budget_cfg.get("holdoutTouches")),
+                holdoutTouchesUsed=sum(1 for c in candidates if c.get("holdoutRunId")),
                 stressTouchesUsed=stress_used,
                 candidatesScored=len(candidates),
                 schedulerState=campaign.get("schedulerState"),
@@ -147,6 +159,10 @@ class CampaignReportService:
             generations=generation_summaries,
             candidateStates=dict(state_census),
             survivors=sum(1 for c in candidates if c.get("state") in _SURVIVOR_STATES),
+            holdoutPendingSurvivors=sum(
+                1 for c in candidates
+                if c.get("state") == "SURVIVOR" and not c.get("holdoutRunId")
+            ),
             proposals=_proposal_tallies(proposals),
             graveyard=_graveyard(candidates, gen_n_by_id),
         )
@@ -174,6 +190,9 @@ def _generation_summary(
         survivorCount=sum(1 for c in candidates if c.get("state") in _SURVIVOR_STATES),
         stressTouches=int(generation.get("stressTouches") or 0),
         bestRobustScore=max(present) if present else None,
+        engineSha=generation.get("engineSha"),
+        dataEpoch=generation.get("dataEpoch"),
+        searchSpaceHash=generation.get("searchSpaceHash"),
         startedAt=generation.get("startedAt"),
         finishedAt=generation.get("finishedAt"),
     )

@@ -579,6 +579,9 @@ services:
       # only; nothing self-arms/self-publishes.
       ARTHA_EVO_SCHEDULER_ENABLED: ${ARTHA_EVO_SCHEDULER_ENABLED:-false}
       ARTHA_EVO_SCHEDULER_INTERVAL_SECONDS: ${ARTHA_EVO_SCHEDULER_INTERVAL_SECONDS:-300}
+      # §1.4.6 compute fairness: max scheduler-launched generations in flight across ALL campaigns
+      # (default 1 — serial; owner-launched sweeps are not counted). Same exact-name #653 rule.
+      ARTHA_EVO_MAX_CONCURRENT_SWEEPS: ${ARTHA_EVO_MAX_CONCURRENT_SWEEPS:-1}
     secrets: [postgres_password]
     depends_on:
       flyway-init:

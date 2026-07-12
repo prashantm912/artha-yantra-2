@@ -615,10 +615,17 @@ class ProposalService:
         self._live_factory = live_factory
         self._recon_factory = recon_factory
 
-    def generate_for_campaign(self, campaign_id: str) -> GenerateProposalsResponse:
+    def generate_for_campaign(
+        self, campaign_id: str, require_holdout: bool = False
+    ) -> GenerateProposalsResponse:
         """Generate/refresh PUBLISH_PAPER proposals for every eligible candidate in the campaign.
         Idempotent: one OPEN proposal per (candidate, kind) — an existing OPEN one is REFRESHED in
-        place (no duplicate, no second ntfy); a new one is minted + ntfy'd. 404 unknown campaign."""
+        place (no duplicate, no second ntfy); a new one is minted + ntfy'd. A candidate whose latest
+        proposal is APPROVED-awaiting-execute is SKIPPED (the approve→execute gap must not re-mint a
+        fresh PENDING every pass — adversarial review finding 3). ``require_holdout=True`` (the E6
+        autonomous scheduler's mode) additionally skips candidates whose one-shot holdout is not yet
+        consumed — the §6.1 holdout bar must never degrade to a caveat on an autonomous mint; the
+        owner-triggered endpoint keeps the permissive default. 404 unknown campaign."""
         repo = self._repo_factory()
         new_alerts: list[tuple[dict[str, Any], dict[str, Any]]] = []
         try:
@@ -637,11 +644,18 @@ class ProposalService:
                 )
                 if not eligible:
                     continue
+                if require_holdout and not cand.get("holdoutRunId"):
+                    continue  # holdout pending — surfaced by the campaign report, never auto-minted
                 evidence = _evidence_card(cand, campaign, champion_score, pending)
                 existing = repo.find_open_proposal(cand["id"], _PUBLISH_PAPER)
                 if existing is not None:
                     refreshed.append(repo.refresh_proposal_evidence(existing["id"], evidence))
                 else:
+                    latest = repo.find_latest_proposal(cand["id"], _PUBLISH_PAPER)
+                    if latest is not None and latest.get("status") == "APPROVED":
+                        # approved but not yet executed (execute flips the candidate to PAPER, which
+                        # exits eligibility) — minting again would duplicate the owner's inbox item.
+                        continue
                     row = repo.insert_proposal(campaign_id, cand["id"], _PUBLISH_PAPER, evidence)
                     generated.append(row)
                     new_alerts.append((campaign, evidence))

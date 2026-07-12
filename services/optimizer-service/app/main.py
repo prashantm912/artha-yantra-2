@@ -199,17 +199,23 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     )
 
     # Autonomy scheduler (§12 E6 item 16): ORCHESTRATES the E1–E4 services — launch a generation's
-    # sweep, record/score/select a completed one, mint proposals — advancing each ACTIVE campaign by
-    # one step per tick. It duplicates none of their logic; it holds the durable per-campaign state
-    # machine (V018) via its own EvoRepo factory, and reuses the already-built sweeps / recorder
-    # (evo_writer) / proposals services. NOTHING self-arms or self-publishes (§1.4.1) — it advances
-    # research only; publish/promote stay owner-clicked (the proposal execute path). The background
-    # DRIVER is DEFAULT-OFF: it starts below only when ARTHA_EVO_SCHEDULER_ENABLED is armed.
+    # sweep, submit neighbor probes, record/score, dispatch the cost-stress round, select survivors,
+    # mint proposals + run the §7.3 live watch — advancing each ENROLLED + ACTIVE campaign by one
+    # step per tick. It duplicates none of their logic; it holds the durable per-campaign state
+    # machine (V017) via its own EvoRepo factory, and reuses the already-built sweeps / recorder
+    # (evo_writer) / stress / proposals services (+ a trials factory for probe-drain detection).
+    # NOTHING self-arms or self-publishes (§1.4.1) — it advances research only; publish/promote stay
+    # owner-clicked (the proposal execute path). TWO owner gates: the global driver flag below AND
+    # per-campaign enrollment (POST /campaigns/{id}/scheduler/enroll — arming the flag alone
+    # advances nothing). The §1.4.6 in-flight cap (default 1) keeps campaign compute serial.
     app.state.scheduler = scheduler.SchedulerService(
         repo_factory=lambda: EvoRepo(open_conn()),
         sweeps=app.state.sweeps,
         recorder=app.state.evo_writer,
         proposals=app.state.proposals,
+        trials_factory=lambda: TrialsRepo(open_conn()),
+        stress=app.state.stress,
+        max_concurrent_sweeps=settings.evo_max_concurrent_sweeps,
     )
 
     # Per-campaign report (§12 E6 item 16 / §8.3): read-only aggregation — generations, scores,

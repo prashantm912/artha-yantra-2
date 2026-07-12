@@ -32,6 +32,7 @@ class Settings:
     stress_max_concurrent_jobs: int
     scheduler_enabled: bool
     scheduler_interval_seconds: int
+    evo_max_concurrent_sweeps: int
 
     @property
     def conninfo(self) -> str:
@@ -77,6 +78,13 @@ class Settings:
             # a separate budget knob (budget.cadenceSeconds).
             scheduler_interval_seconds=int(
                 os.environ.get("ARTHA_EVO_SCHEDULER_INTERVAL_SECONDS", "300")
+            ),
+            # §1.4.6 compute fairness: at most this many scheduler-LAUNCHED generations in flight
+            # across ALL campaigns (default 1 — strictly serial campaign compute; the shared cores-2
+            # worker pool also serves the owner's interactive backtests). Owner-launched sweeps are
+            # not counted — the cap governs autonomy only.
+            evo_max_concurrent_sweeps=int(
+                os.environ.get("ARTHA_EVO_MAX_CONCURRENT_SWEEPS", "1")
             ),
         )
 

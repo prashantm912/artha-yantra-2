@@ -17,10 +17,11 @@ authority is the OpenAlgo/React master plan; the design authority is `docs/desig
 ## Active — forward-work plans (`superpowers/plans/`)
 *(The master plan above is the authority; these are the only open plans after the 2026-07-02 archive sweep.)*
 - `2026-07-02-remaining-items.md` — the **single forward ledger of everything still open** across the
-  whole platform: 1 net-new build (Phase-5 Minervini screener), the owner-gated items, next-session
-  verifies, scheduled maintenance (CD-2 calendar refresh), the deferred-by-design list and the
-  consolidated WON'T-DO record. **Read this FIRST when picking the next thing to do.** Supersedes the
-  archived `2026-06-30-remaining-build-inventory.md`.
+  whole platform: the current build frontier is the later increments of the two design programs (EVO
+  E5/E6, INT I3-FE/I4) plus APP Phase 4 / FID Phase-2–4 remainder (§0 groups C/D), then the owner-gated
+  items, next-session verifies, scheduled maintenance (CD-2 calendar refresh), the deferred-by-design
+  list and the consolidated WON'T-DO record. **Read this FIRST when picking the next thing to do.**
+  Supersedes the archived `2026-06-30-remaining-build-inventory.md`.
 - `2026-06-30-live-signal-analysis-runbook.md` — the standing procedure for analysing ~1 month of
   live-paper scalper trades into the E9 band + per-scalper keep/cut/tune (counterfactual replay on real
   captured premium). Runs when the owner has gathered the data.
@@ -30,10 +31,11 @@ authority is the OpenAlgo/React master plan; the design authority is `docs/desig
 - `2026-07-10-strategy-evolution-engine-design.md` + `2026-07-10-intelligence-layer-design.md` — the
   two design authorities (slow research loop / fast decision loop), each consuming one 2026-07-10 audit
   as its fixed input: `docs/audits/2026-07-10-research-fidelity-audit.md` (evolution) and
-  `docs/audits/2026-07-10-app-platform-audit.md` (intelligence). The **shared E0/I1 build prerequisites
-  shipped 2026-07-11 (#683–#717** — both audits carry a §-appended fix-log; the designs each carry a
-  dated Status block), so both engines are now **buildable but still unbuilt** — owner sequences which
-  goes first. Build gating: each doc's §13 + Status block + the ledger rows
+  `docs/audits/2026-07-10-app-platform-audit.md` (intelligence). The shared E0/I1 build prerequisites
+  shipped 2026-07-11 (#683–#717) and **both engines are now substantially BUILT + LIVE — evolution
+  through E4, intelligence through I3-backend (2026-07-11/12, #720–#782)**; both audits carry §-appended
+  fix-logs and the designs each carry a dated Status block. The remaining frontier (EVO E5/E6, INT
+  I3-FE/I4) is the ledger's §0 group C. Build gating: each doc's §13 + Status block + the ledger rows
   `evolution-engine` / `intelligence-layer`.
 - `superpowers/plans/archive/` — everything completed / decided / superseded, each with an ARCHIVED
   status banner. **2026-07-10 sweep added:** the full **Minervini SEPA set** (implementation plan +

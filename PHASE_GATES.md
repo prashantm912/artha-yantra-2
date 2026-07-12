@@ -90,6 +90,17 @@ pre-announced). Fix-logs appended to both 2026-07-10 audits. **Net-new frontier 
 owner sequences which engine builds first — evolution E1 and intelligence I1 are both
 buildable; neither is started, neither self-arms.** Detail: `docs/superpowers/plans/2026-07-02-remaining-items.md`.
 
+**2026-07-12 — both design programs are substantially BUILT + LIVE; the frontier moves to their later increments.** The
+2026-07-12 run shipped **#736–#782 over 5 deploy rounds** (final live @ `6f1556d8`). **Evolution: E1→E4 LIVE** (experiment
+model + scoring #720–#723, search upgrades #725–#729, live-evidence integration #731–#740, proposals/promotion pipeline
+#760/#767/#774). **Intelligence: I1→I3-backend LIVE** (insights module + digests + feed #742/#745/#752, context/rejection
+intelligence #765/#766, actions/compare/evidence backend #778). **App-platform Phase 2 COMPLETE** (#769–#773) **+ Phase 3
+substantial** (#776/#777/#780); A10 snapshot-prune scheduled (#749). The **research-fidelity audit is closed for every
+startable P0/P1** (#750–#764). **3 flags ARMED live:** paper heat-cap enforcement, graduation marker, notifications on ALL 45
+published strategies. **New frontier (all owner-sequenced):** EVO E5/E6, INT I3-FE/I4 (delivery arming owner-gated), APP
+Phase 4 (ledger D3) + the FID Phase-2–4 remainder (D4) + the D2 Phase-3 residue. Nothing self-arms. Detail:
+`docs/superpowers/plans/2026-07-02-remaining-items.md` §0 groups C/D.
+
 **Scalper engine → 100% (2026-06-28):** the S24 incorporation is closed (debloated operative doc + W3 drift
 tags + W4 gates + 2b infra, all BUILT/inert). Finishing the engine to "nothing-deferred" is now tracked in
 the consolidated roadmap [`docs/superpowers/plans/archive/2026-06-28-scalper-to-100-roadmap.md`](docs/superpowers/plans/archive/2026-06-28-scalper-to-100-roadmap.md)

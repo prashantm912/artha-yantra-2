@@ -23,6 +23,19 @@ listed in §13 — the P1-Phase-2 push frames (rows 7–8) and `sell_decisions` 
 NOT yet shipped, so the I1 display-only parts are unblocked but I3 actions/SELL_DECISION wait.
 Nothing here self-arms; the build is NOT started. Design content below is unchanged.
 
+**Status (2026-07-12).** The layer is now substantially **BUILT + LIVE**. **I1** (insights module +
+day-context/options digests + `market_context_days` + `/insights` feed/Focus in shadow mode) → **#742 /
+#745 / #752**. **I2** (context breadth + rejection intelligence: futures/equity/FII digests +
+expiry-compare + the three new equity folds + the CONTEXT_SHIFT/REJECTION_NEARMISS/HYGIENE/EXPIRY
+generators + fired-vs-rejected Stage-1 + quality report) → **#765 / #766**. **I3 backend** (PROPOSE `/act`,
+signal-compare endpoint + view, STRATEGY_EVIDENCE/SELL_DECISION + dossier, WS `insights` channel) →
+**#778** — all merged + deployed + live-verified. **Every named §13 dependency is satisfied:** row 5
+`ingest_runs` → #686, row 6 V1/V3 paper guards → #687/#694, row 7 `signals.status`+`paper.events` → #773,
+row 8 `sell_decisions` → #772, row 12 Manas `rs_rank` API → #736, row 18 gateway allowlist → #742, row 19
+fired-side rail side-channel → #763, row 20 `notification_events` migration → #742. **Remaining = I3-FE**
+(the compare/dossier/act views over #778's endpoints) **+ I4** (delivery arming + calibration, owner-gated).
+Nothing here self-arms.
+
 ---
 
 ## 0. Reading guide + hard boundaries
@@ -751,7 +764,7 @@ Tiers per house rules (clean / HOLD / owner-gated). P1-Phase-n dependencies name
 layer's phases are I1–I4. Nothing here changes engine/backtest behavior; HOLD applies
 where live paper flow or push channels are touched.
 
-**I1 — Foundations (after P1-Phase-1; ~1.5 weeks)**
+**I1 — Foundations (after P1-Phase-1; ~1.5 weeks) — SHIPPED 2026-07-12 #742/#745/#752**
 `insights`/`insight_actions`/`insight_feedback` migrations + module skeleton + engine/
 registry/TrustService (clean) · day-context + options-digest endpoints + `market_context_days`
 EOD job registered in `ingest_runs` (clean) · SIGNAL_PRIORITY + DATA_TRUST + RISK_HEAT
@@ -760,7 +773,7 @@ nullable-`strategy_id`/`insight_id` migration (§13 row 20) (clean) · `/insight
 page + explain drawer + Focus panel in shadow mode (clean) · golden insight test +
 fixtures (clean).
 
-**I2 — Context breadth + rejection intelligence (~1.5 weeks)**
+**I2 — Context breadth + rejection intelligence (~1.5 weeks) — SHIPPED 2026-07-12 #765/#766**
 futures/equity/fii digests + expiry-compare + the three named NEW equity folds (above-MA
 counts, universe delivery-z, sector date-param) (clean) · CONTEXT_SHIFT/MARKET_STRUCTURE/
 REJECTION_NEARMISS/RAIL_TREND/HYGIENE/EXPIRY_EVENT generators (clean) · RISK_STALE_TICK
@@ -768,7 +781,7 @@ REJECTION_NEARMISS/RAIL_TREND/HYGIENE/EXPIRY_EVENT generators (clean) · RISK_ST
 ContextStrip on the §6.3 pages + trust chips (clean) · fired-vs-rejected Stage-1 contrast
 endpoint + view (clean; Stage 2 waits on §13 row 19) · quality-report job (clean).
 
-**I3 — Actions + compare + strategy evidence (needs P1-Phase-2 events/UI; ~2 weeks)**
+**I3 — Actions + compare + strategy evidence (needs P1-Phase-2 events/UI; ~2 weeks) — backend SHIPPED 2026-07-12 #778; FE half (I3-FE) remains**
 PROPOSE actions (`/act`, ticket prefill, dismiss-batch, watchlist add) — HOLD (touches
 live paper flow via existing endpoints) · signal compare endpoint + view (clean) ·
 STRATEGY_EVIDENCE + SELL_DECISION generators + dossier + graduation-page integration

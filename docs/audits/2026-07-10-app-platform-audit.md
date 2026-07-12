@@ -722,6 +722,8 @@ The exact artifacts Prompt 2 must consume. **EXISTS** = usable today at the cite
 enveloped, `limit/offset` paginated unless noted; money rides as strings; timestamps ISO
 with offset (key cross-source maps by instant, never offset).
 
+> **Prompt 2 (intelligence layer) built 2026-07-11/12 — see its design §12** (`docs/superpowers/plans/2026-07-10-intelligence-layer-design.md`); the inputs enumerated below are recorded as-consumed. Per-input build status: the §12/§13 fix logs below + the design's Status blocks.
+
 1. **Signal schema** — EXISTS. `strategy.signals` (V003 + V006 `suggested_qty` + V009
    `scalper_detail` JSONB); `GET /signals` (filters: status/from/to/book/exchange/
    tradingsymbol/strategyVersionId), `GET /signals/{id}` (score_breakdown = frozen
@@ -865,9 +867,32 @@ is an append-only log — the findings above are unchanged.
 
 Shipped alongside from the sibling fidelity/evolution program (not app-platform V-rows, noted for cross-reference): the worker-pool concurrency/queue cap the audit flagged via `fidelity A9`/§5.5 landed as **B16 · #717** (interactive-reserved CAS budget + `429 RATE_LIMIT_QUEUE`), so a runaway sweep can no longer starve interactive backtests.
 
-### Still OPEN (not touched this pass)
+## 13. Fix log (2026-07-12 implementation pass)
 
-- **Validation rows** — **V6** OI outlier guard, **V7** snapshot-OI vs candle-OI cross-source, **V8** bhavcopy-close vs Kite-1d, **V10** screener/analytics engine-version stamps (also fidelity), **V11** reference-JSON staleness (needs the §9.4 reference tables first). All are §10 **Phase 3** items except V11 (Phase 4).
-- **Phase-1 remainder** — schedule `prune_options_snapshots` (owner-gated; owner picks the horizon).
-- **Phase 2** (workflow chains) — signal-status push frames, `paper.events`, position-detail pane, journal link pickers, strategy `enabled` endpoint + audit-log read, graduation-promotions display, `sell_decisions` persistence, dot-health panel. Note the **notification center** (§6.1) is superseded by the intelligence-layer design's `/insights` feed (I1), not a standalone build.
-- **Phase 3** (analytics depth + freshness) and **Phase 4** (platform planes: unified jobs console, reference-data tables + CRUD, `user_prefs`/saved views/cmdk, DataTable adoption wave, Map-return burn-down, event-schema registry, alert-rules page, multi-window pane extension) — all OPEN.
+The 2026-07-12 run (Opus builders, Fable audit/merge; the #736–#782 wave) closed the
+Phase-1 remainder plus the entire Phase-2 workflow-chain block and most of Phase 3, alongside
+the paper/signal MED fixes. Migrations `strategy V036/V037/V038` + `marketdata V044/V045`
+applied + probed live (5 deploy rounds; final @ `6f1556d8`). Append-only log — the findings
+above are unchanged.
+
+### Addressed this pass
+
+| Finding (§/V) | Item · PR | Outcome |
+|---|---|---|
+| **Phase-1 remainder** — schedule `prune_options_snapshots` | A10 · #749 | 365-day retention prune scheduled on `options_chain_snapshots`. |
+| **Phase 2 slice A** — signal-status push + `paper.events` | #773 | `signals.status` frames (AFTER_COMMIT) + `paper_events` channel/table/endpoint (V038) — the INT-I3 push unblockers. |
+| **Phase 2 slice B** — position detail + brackets + trade-chain | #771 | position-detail pane + PATCH brackets (HOLD, discriminating IT) + trade-chain drawer. |
+| **Phase 2 slice C** — ticket book/qty + `sell_decisions` | #772 | book selector + qty override on tickets + durable `sell_decisions` persistence (V037) with ack. |
+| **Phase 2 slice D** — strategy ops | #769 | `enabled` toggle (both-direction regression proof) + audit-log reader + clone + promotions display (V036). |
+| **Phase 2 slice E** — journal + dot-health | #770 | journal link pickers + edit UI + dot-health panel on rejections (a11y PASS). |
+| **Phase 3 slice A** — freshness envelope | #777 | `DataFreshness` envelope (14 records) + `FreshnessBadge` on 11 pages. |
+| **Phase 3 slice B** — chain depth | #776 | chain time-travel + IV smile + premium-decay series + strike drill-down. |
+| **Phase 3 slice C** — screener + breadth + margin | #780 | screener dates/diff/attrition + breadth materialization (V044) + CSV export standard + SPAN margin tie-in + V6/V7/V8 data checks (V045 quarantine). |
+| **M1/M16** paper meds | #739 | margin-heat per-book + loud >20-leg refusal (M1); books-scoped governor startup seed (M16). |
+| **M17** signal book field | #737 | `book` stamped on signal STOMP frames. |
+| **M18/M28** cockpit + e2e | #741 | honest cockpit paper-panel book framing (M18) + e2e specs for the new pages (M28). |
+
+### Still OPEN (after the 2026-07-12 pass)
+
+- **Validation rows** — **V10** screener/analytics engine-version stamps (also fidelity) · **V11** reference-JSON staleness (needs the §9.4 reference tables first, Phase 4). *(V6/V7/V8 closed via #780.)*
+- **Phase 4** (platform planes) — unified jobs console, reference-data tables + CRUD, `user_prefs`/saved views/cmdk, DataTable adoption wave, Map-return burn-down, event-schema registry, alert-rules page, multi-window pane extension. Plus Phase-3 residue: page auto-poll policy (owner picks), remaining CSV FE buttons, per-underlying DataHealth granularity.

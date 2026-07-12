@@ -824,11 +824,33 @@ Shipped extras (not on the §10 gap list; widen the tunable/contract surface Pro
   partial-bucket poison). A backtest-vs-live comparison for a 1h-primary strategy is
   phase-shifted by 30 min. Fix chip `task_1b85c64f` filed; not yet addressed.
 
-### Still OPEN (not touched this pass)
+## 15. Fix log (2026-07-12 implementation pass)
 
-- **P0:** P0-3 swing-pipeline lineage · P0-4 screener CA adjustment (prior-audit H6) · P0-5 BTST exit simulation.
-- **P1:** P1-1 dataset comparability (content hash + `dataset_epochs`) · P1-2 costs knob + instrument class · P1-3 candle-path exit-reason attribution · P1-4 order-event model · P1-5 quote capture at fill · **P1-6** (only the L5 exit-path half landed via A3 — the standalone stale-tick position mark is open) · P1-7 flag/config snapshot at decision time · P1-8 accepted-signal context symmetry · P1-9 daily-context lookahead · P1-10 intrabar touch realism · P1-11 option expiry settlement. *(§10 runs P1-1..P1-11; there is no P1-12 row.)*
-- **P2:** P2-2 run tags/notes/saved views · P2-3 export · P2-4 data-quality artifact · P2-5 latency instrumentation · P2-6 dividends + PIT constituents · P2-7 margin feasibility · P2-8 backtest decision traces. *(P2-1 closed above.)*
+The 2026-07-12 run (Opus builders, Fable audit/merge; the #736–#782 wave) closed the
+remaining P0 lineage/CA/BTST holes plus the P1 execution-realism residue this audit ranked
+next. All merged + deployed (5 deploy rounds; final live @ `6f1556d8`). Append-only log —
+§1–§13 above are unchanged.
+
+### Addressed this pass
+
+| Finding | PR | Outcome |
+|---|---|---|
+| **P0-3 / §5** swing-pipeline lineage | #764 | `DEEP_SWING` job kind — the Manas/Minervini deep-sims now run through the job pipeline (real run-row lineage), not a side script. |
+| **P0-4 / H6** screener + geometry CA adjustment | #757 (+ Equity-Returns plane #761) | CA-adjusted price plane feeds the live screeners + geometry; the analytics returns plane is CA-adjusted too. Live screen rows no longer read raw-split prices. |
+| **P0-5** BTST position + exit simulation | #759 | pre-close position opened + `exit_rules` evaluated at subsequent pre-closes (close→close convention recorded). Live BTST intraday-exit realism = chip `task_3e95fade`. |
+| **P1-2** costs knob + instrument-class costing | #756 | validated `costs` knob on the candle path + instrument-class costing (B18). |
+| **P1-8** accepted-signal context symmetry | #763 | fired-side per-rail diagnostic side-channel (shape-mirrors `signal_rejections.diagnostic`; parity-safe additive). |
+| **P1-9** daily-context lookahead | #755 | end-gate context advancement pinned to COMPLETED buckets (was already gated; hardened + test-pinned). |
+| **P1-10** intrabar touch realism | #762 | opt-in `touch_basis: bar_hl_worstof` intrabar exit realism + per-run basis provenance. |
+| **P1-11** option expiry settlement | #753 | legs held past expiry settle at intrinsic + exercise STT. |
+| **D7** backtest 1d context/benchmark → native daily | #754 | 1d context + benchmark reads routed to the dense native-daily path (aligns with the warmup path). |
+| **F2** no-rerun / N+1 deep-sim reads | #750 | batched the N+1 candle reads in the Manas + Minervini deep-sim backtests. |
+
+### Still OPEN (after the 2026-07-12 pass)
+
+- **P1:** P1-1 dataset comparability (content hash + `dataset_epochs`) · P1-3 candle-path exit-reason attribution · P1-4 order-event model · P1-5 quote capture at fill · **P1-6** (only the L5 exit-path half landed via A3 — the standalone stale-tick position mark is open) · P1-7 flag/config snapshot at decision time.
+- **P2:** P2-2 run tags/notes/saved views · P2-3 export · P2-4 data-quality artifact · P2-5 latency instrumentation · P2-6 dividends + PIT constituents · P2-7 margin feasibility · P2-8 backtest decision traces. *(P2-1 closed 2026-07-11.)*
+- The backtest-vs-live 1h rollup phase-gap chip `task_1b85c64f` (§14 NEW finding) — still not addressed.
 
 ---
 

@@ -40,6 +40,19 @@ awaits the owner's program-sequencing call (evolution vs. the intelligence layer
 E6-autonomy pre-decisions this design flags. Nothing here self-arms; the evo engine build is
 NOT started. Design content below is unchanged.
 
+**Status (2026-07-12).** The engine is now substantially **BUILT + LIVE** through E4. **E1** (experiment
+model + scoring on existing data: `evo_*` tables + read APIs, RobustScore/metric library + retro-scoring,
+campaign/generation recorder) → **#720–#723**. **E2** (search upgrades: neighbor probes, cost-stress
+`stressOverrides` + degradation slope, deflated-Sharpe multiplicity gate + DOF penalties) → **#725–#729**.
+**E3** (live-evidence integration: reconciliation computer, runtime shadow-variant registration [the one
+HOLD, owner-approved], counterfactual-replay job, live-gap gate + `fillTiming` wave-2 pin) → **#731–#740**.
+**E4** (proposals, approvals, promotion pipeline: `evo_proposals` inbox + ntfy, PUBLISH_PAPER,
+TAKE_ELIGIBLE/PROMOTE/ROLLBACK + demoted-champion counterfactual) → **#760 / #767 / #774** — all merged +
+deployed + live-verified. **Remaining = E5** (structure experimentation: ablation protocol +
+gate-candidate suggesters) **then E6** (autonomy scheduler + FE suite; owner-gated arming, plus the parked
+regime-gate Stage-D amendment + authored Manas `backtest.optimize` block pre-decisions). Nothing here
+self-arms; autonomy is still switched on last (E6).
+
 ---
 
 ## 1. Optimization engine design
@@ -870,14 +883,14 @@ campaigns), **row 20** (regime-label vocabulary fix — gates the regime-coverag
 hard gate). Everything else degrades gracefully (§13 table; P1-3 is deliberately
 DEGRADED — explainability starts entry-side-only).
 
-**E1 — experiment model + scoring on existing data [~1.5 wk, clean]**
+**E1 — experiment model + scoring on existing data [~1.5 wk, clean] — SHIPPED 2026-07-11 #720–#723**
 1. `evo_*` migrations + typed read APIs (campaigns/candidates read-only first).
 2. Scoring library (§6 gates + RobustScore + metric adds: recovery/turnover/frequency)
    applied **retroactively to existing sweeps** — verify: the historical Manas/scalper
    sweeps re-rank sensibly, plateau winners surface, scorecards render.
 3. Campaign/generation recorder wrapping a manually-triggered sweep (no autonomy yet).
 
-**E2 — search upgrades [~1.5 wk, clean]**
+**E2 — search upgrades [~1.5 wk, clean] — SHIPPED 2026-07-11 #725–#729**
 4. Neighbor-probe submission for top-K (`plateauObjective` becomes estimated).
 5. Cost-stress re-runs: the backtest-service `stressOverrides` request field (the
    path grammar cannot reach fills/costs — §3.2.5) + 2×/4× orchestration + degradation
@@ -885,7 +898,7 @@ DEGRADED — explainability starts entry-side-only).
 6. Deflated-Sharpe multiplicity gate; DOF penalties; importance/brittleness insights
    endpoints. Verify: a deliberately overfit toy sweep is rejected by the gates.
 
-**E3 — live-evidence integration [~2 wk, clean + one HOLD]**
+**E3 — live-evidence integration [~2 wk, clean + one HOLD] — SHIPPED 2026-07-12 #731–#740**
 7. Reconciliation computer + `purpose: reconcile` + reconciliations API (clean).
 8. Runtime shadow-variant registration API (HOLD — touches the live engine's shadow
    path; adversarial review) + campaign wiring for LIVE_FIRST. Optional second HOLD
@@ -895,7 +908,7 @@ DEGRADED — explainability starts entry-side-only).
 10. Live-gap gate + DIVERGENT checklist in scoring. Verify: champion-vs-itself
     reconciliation reads aligned (gapZ ≈ 0) over a known-clean window.
 
-**E4 — proposals, approvals, promotion pipeline [~1.5 wk, HOLD-heavy]**
+**E4 — proposals, approvals, promotion pipeline [~1.5 wk, HOLD-heavy] — SHIPPED 2026-07-12 #760/#767/#774**
 11. `evo_proposals` + inbox API + ntfy (clean).
 12. PUBLISH_PAPER flow: approve → publish to evo lane with caps (HOLD — changes
     live-paper behavior).

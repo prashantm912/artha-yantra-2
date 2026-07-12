@@ -30,7 +30,8 @@ class ManasControllerDefaultDateTest {
         mock(ManasGeometryService.class),
         mock(ManasSetupsRepository.class),
         funnelService,
-        mock(ManasAroraBacktestService.class));
+        mock(ManasAroraBacktestService.class),
+        mock(in.arthayantra.marketdata.screener.ScreenerHistoryRepository.class));
   }
 
   @Test

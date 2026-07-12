@@ -1,5 +1,8 @@
 package in.arthayantra.marketdata.screener.minervini;
 
+import in.arthayantra.marketdata.screener.ScreenerHistory;
+import in.arthayantra.marketdata.screener.ScreenerHistoryRepository;
+import in.arthayantra.marketdata.screener.ScreenerHistoryRepository.Family;
 import in.arthayantra.marketdata.screener.minervini.geometry.VcpFootprint;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -101,6 +104,7 @@ public class MinerviniController {
   private final MinerviniFunnelService funnelService;
   private final MinerviniHitRateService hitRateService;
   private final MinerviniBacktestService backtestService;
+  private final ScreenerHistoryRepository history;
 
   /** Wires the screener + screen/geometry repositories + the funnel + hit-rate + backtest services. */
   public MinerviniController(
@@ -110,7 +114,8 @@ public class MinerviniController {
       MinerviniSetupsRepository setupsRepo,
       MinerviniFunnelService funnelService,
       MinerviniHitRateService hitRateService,
-      MinerviniBacktestService backtestService) {
+      MinerviniBacktestService backtestService,
+      ScreenerHistoryRepository history) {
     this.screener = screener;
     this.repo = repo;
     this.geometryService = geometryService;
@@ -118,6 +123,7 @@ public class MinerviniController {
     this.funnelService = funnelService;
     this.hitRateService = hitRateService;
     this.backtestService = backtestService;
+    this.history = history;
   }
 
   /**
@@ -240,6 +246,53 @@ public class MinerviniController {
       return new MinerviniFunnelService.Funnel(null, null, List.of(), List.of(), List.of());
     }
     return funnelService.funnel(date);
+  }
+
+  /**
+   * The recent persisted screen dates (newest first, default 30) + per-date scanned/passer counts —
+   * the date-picker source for the screener time-machine (audit §6.7). Only dates that actually ran a
+   * screen appear, so the picker never offers a day with no data.
+   */
+  @GetMapping("/dates")
+  public ScreenerHistory.ScreenDatesResponse dates(@RequestParam(defaultValue = "30") int limit) {
+    return new ScreenerHistory.ScreenDatesResponse(
+        history.recentDates(Family.MINERVINI, Math.min(Math.max(1, limit), 250)));
+  }
+
+  /**
+   * The day-over-day passer diff (audit §6.7): names that entered / left the all-gates-pass set
+   * between {@code prior} and {@code asOf}. Defaults: {@code asOf} = the latest screen, {@code prior} =
+   * the screen date immediately before it (null ⇒ the earliest screen, so everything is "entered").
+   */
+  @GetMapping("/diff")
+  public ScreenerHistory.ScreenDiff diff(
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate prior) {
+    LocalDate date = asOf != null ? asOf : defaultReadDate();
+    if (date == null) {
+      return new ScreenerHistory.ScreenDiff(null, null, 0, 0, List.of(), List.of());
+    }
+    LocalDate baseline = prior != null ? prior : history.priorScreenDate(Family.MINERVINI, date);
+    return history.diff(Family.MINERVINI, date, baseline);
+  }
+
+  /**
+   * The funnel stage-attrition for a screen date (audit §6.7 "scanned → per-gate → buyable"): the
+   * scanned count, per-individual-gate pass counts, the all-gates-pass count, and how those passers
+   * split across the funnel's buyable / on-deck / watch buckets.
+   */
+  @GetMapping("/attrition")
+  public ScreenerHistory.FunnelAttrition attrition(
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
+    LocalDate date = asOf != null ? asOf : defaultReadDate();
+    if (date == null) {
+      return new ScreenerHistory.FunnelAttrition(null, 0, List.of(), 0, 0, 0, 0);
+    }
+    ScreenerHistory.AttritionCounts counts = history.attrition(Family.MINERVINI, date);
+    MinerviniFunnelService.Funnel funnel = funnelService.funnel(date);
+    return new ScreenerHistory.FunnelAttrition(
+        date, counts.scanned(), counts.gates(), counts.passesAll(),
+        funnel.immediatelyBuyable().size(), funnel.onDeck().size(), funnel.watch().size());
   }
 
   /**

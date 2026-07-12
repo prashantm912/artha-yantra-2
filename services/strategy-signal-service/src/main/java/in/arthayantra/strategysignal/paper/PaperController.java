@@ -1,5 +1,6 @@
 package in.arthayantra.strategysignal.paper;
 
+import in.arthayantra.common.web.csv.CsvExport;
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.strategysignal.paper.PaperEventRepository.PaperEventRow;
@@ -140,6 +141,35 @@ public class PaperController {
         symbol == null ? null : symbol.contains(":") ? symbol.substring(symbol.indexOf(':') + 1) : symbol;
     return Map.of(
         "items", paper.trades(book, from, to, tradingsymbol, limit, offset), "limit", limit, "offset", offset);
+  }
+
+  /**
+   * The closed-trade ledger as a CSV download (audit §10 Phase-3 CSV export standard). Same filters as
+   * {@link #trades}; loud truncation via the shared {@link CsvExport} headers.
+   */
+  @GetMapping("/trades/export")
+  public ResponseEntity<byte[]> tradesExport(
+      @RequestParam(required = false) String book,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+          OffsetDateTime from,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+          OffsetDateTime to,
+      @RequestParam(required = false) String symbol) {
+    String tradingsymbol =
+        symbol == null ? null : symbol.contains(":") ? symbol.substring(symbol.indexOf(':') + 1) : symbol;
+    List<PaperService.TradeDto> rows =
+        paper.trades(book, from, to, tradingsymbol, CsvExport.DEFAULT_MAX_ROWS + 1, 0);
+    CsvExport.Writer w =
+        CsvExport.writer(
+            CsvExport.DEFAULT_MAX_ROWS,
+            "id", "exchange", "tradingsymbol", "side", "qty", "avg_entry_price", "realized_pnl",
+            "opened_at", "closed_at");
+    for (PaperService.TradeDto t : rows) {
+      w.row(
+          t.id(), t.exchange(), t.tradingsymbol(), t.side(), t.qty(), t.avgEntryPrice(),
+          t.realizedPnl(), t.openedAt(), t.closedAt());
+    }
+    return w.download("paper_trades.csv");
   }
 
   /** Daily equity + win rate / expectancy for a book ({@code book} absent → all books). */

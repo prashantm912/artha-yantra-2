@@ -1,5 +1,6 @@
 package in.arthayantra.strategysignal.journal;
 
+import in.arthayantra.common.web.csv.CsvExport;
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.error.NotFoundException;
@@ -62,6 +63,36 @@ public class JournalController {
       @RequestParam(defaultValue = "0") int offset) {
     List<Entry> items = repository.list(tag, from, to, minRating, linkedTo, limit, offset);
     return Map.of("items", items, "limit", limit, "offset", offset);
+  }
+
+  /**
+   * The filtered journal as a CSV download (audit §10 Phase-3 CSV export standard). Same filters as
+   * {@link #list}; {@code tags} are joined with {@code |}. Loud truncation via the shared {@link
+   * CsvExport} headers.
+   */
+  @GetMapping("/export")
+  public ResponseEntity<byte[]> export(
+      @RequestParam(required = false) String tag,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+          OffsetDateTime from,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+          OffsetDateTime to,
+      @RequestParam(required = false) Integer minRating,
+      @RequestParam(required = false) String linkedTo) {
+    List<Entry> rows =
+        repository.list(tag, from, to, minRating, linkedTo, CsvExport.DEFAULT_MAX_ROWS + 1, 0);
+    CsvExport.Writer w =
+        CsvExport.writer(
+            CsvExport.DEFAULT_MAX_ROWS,
+            "id", "created_at", "updated_at", "signal_id", "paper_position_id", "backtest_run_id",
+            "backtest_trade_id", "discipline_rating", "emotion_rating", "tags", "note");
+    for (Entry e : rows) {
+      w.row(
+          e.id(), e.createdAt(), e.updatedAt(), e.signalId(), e.paperPositionId(), e.backtestRunId(),
+          e.backtestTradeId(), e.disciplineRating(), e.emotionRating(),
+          e.tags() == null ? "" : String.join("|", e.tags()), e.note());
+    }
+    return w.download("journal.csv");
   }
 
   /** Create — validates same-schema link targets exist (unknown id → 422). */

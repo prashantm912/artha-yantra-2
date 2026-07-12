@@ -1,0 +1,16 @@
+-- App-platform audit 2026-07-10 §8 V6 (Phase-3): the OI-outlier quarantine flag. Raw OI prints flow
+-- straight into the spurt / heatmap / sentiment / trending folds with no plausibility guard, so one
+-- garbage tick (a 20x single-bucket OI jump, or a negative OI) silently skews every OI page that
+-- session. This flag lets the capture path mark an implausible row and the OI-fold reader skip it.
+--
+-- Writer: OptionsSnapshotService flags rows post-insert (OiOutlierDetector, a per-row ΔOI plausibility
+-- test on the already-stored oi + oi_change); reader: OptionsSnapshotReader appends `AND (quarantined
+-- IS NOT TRUE)` to every snapshot-fold WHERE clause. Default (NULL) = not quarantined, so every
+-- existing row and every normal capture is unaffected — the guard only ever REMOVES gross outliers.
+--
+-- Compressed-hypertable-safe ADD COLUMN (the V023 source-column precedent): a NULLABLE column with NO
+-- inline DEFAULT and NO CHECK — all three would rewrite the compressed chunks. `quarantined IS NOT
+-- TRUE` treats the NULL on old/compressed rows as "not quarantined", so no backfill is needed.
+--
+-- The marketdata schema is owned by `artha` (admin V001), so no explicit GRANT is needed here.
+ALTER TABLE options_chain_snapshots ADD COLUMN quarantined BOOLEAN;

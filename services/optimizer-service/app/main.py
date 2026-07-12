@@ -10,7 +10,18 @@ import redis
 from fastapi import FastAPI
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from app import ablation, api, evolution, insights, proposals, reconciliation, stress, suggesters
+from app import (
+    ablation,
+    api,
+    evolution,
+    insights,
+    proposals,
+    reconciliation,
+    reports,
+    scheduler,
+    stress,
+    suggesters,
+)
 from app.backtest_client import BacktestClient
 from app.errors import ApiError, api_error_handler, invalid_path_handler
 from app.notify import NtfyClient
@@ -187,6 +198,24 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         repo_factory=lambda: StructureRepo(open_conn())
     )
 
+    # Autonomy scheduler (§12 E6 item 16): ORCHESTRATES the E1–E4 services — launch a generation's
+    # sweep, record/score/select a completed one, mint proposals — advancing each ACTIVE campaign by
+    # one step per tick. It duplicates none of their logic; it holds the durable per-campaign state
+    # machine (V018) via its own EvoRepo factory, and reuses the already-built sweeps / recorder
+    # (evo_writer) / proposals services. NOTHING self-arms or self-publishes (§1.4.1) — it advances
+    # research only; publish/promote stay owner-clicked (the proposal execute path). The background
+    # DRIVER is DEFAULT-OFF: it starts below only when ARTHA_EVO_SCHEDULER_ENABLED is armed.
+    app.state.scheduler = scheduler.SchedulerService(
+        repo_factory=lambda: EvoRepo(open_conn()),
+        sweeps=app.state.sweeps,
+        recorder=app.state.evo_writer,
+        proposals=app.state.proposals,
+    )
+
+    # Per-campaign report (§12 E6 item 16 / §8.3): read-only aggregation — generations, scores,
+    # survivors, proposals, budget spend, graveyard. Its own read-only EvoRepo factory.
+    app.state.reports = reports.CampaignReportService(repo_factory=lambda: EvoRepo(open_conn()))
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "UP"}
@@ -199,7 +228,27 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(proposals.router)
     app.include_router(ablation.router)
     app.include_router(suggesters.router)
+    app.include_router(scheduler.router)
+    app.include_router(reports.router)
     Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+
+    # Arm the background scheduler driver ONLY when explicitly enabled (owner-gated .env flip →
+    # the compose passthrough of the SAME name). Default OFF → dormant: campaigns then advance only
+    # via the owner-triggered POST /scheduler/tick. Even armed, the driver advances research only.
+    if settings.scheduler_enabled:
+        driver = scheduler.SchedulerDriver(app.state.scheduler, settings.scheduler_interval_seconds)
+        driver.start()
+        app.state.scheduler_driver = driver
+        log.warning(
+            "evo scheduler ARMED (ARTHA_EVO_SCHEDULER_ENABLED=true) — advancing ACTIVE campaigns "
+            "every %ds; research only, nothing self-arms/self-publishes",
+            settings.scheduler_interval_seconds,
+        )
+    else:
+        log.info(
+            "evo scheduler DISABLED (ARTHA_EVO_SCHEDULER_ENABLED unset/false) — no autonomous "
+            "advancement; use POST /api/v1/evolution/scheduler/tick for a supervised step"
+        )
     return app
 
 

@@ -414,6 +414,9 @@ _PROPOSAL_COLS = (
     "created_at"
 )
 
+# The V018 autonomy-scheduler columns, appended after _CAMPAIGN_COLS in the scheduler reads/writes.
+_SCHED_COLS = "scheduler_state, pending_sweep_job_id, last_scheduled_at"
+
 
 class EvoRepo:
     """Read-only access to the evolution experiment model (``evo_*`` tables, backtest
@@ -850,6 +853,111 @@ class EvoRepo:
             row = cur.fetchone()
         self._conn.commit()
         return _campaign_row(row) if row is not None else None
+
+    # --- E6 item 16: autonomy-scheduler durable state (V018) -------------------------------------
+    # The scheduler's per-campaign state lives in three columns ISOLATED behind these methods (the
+    # E1 _campaign_row envelope is intentionally untouched — the autonomy sub-state is a separate
+    # axis, §V018). Everything here is written ONLY by the scheduler, which requires the default-OFF
+    # ARTHA_EVO_SCHEDULER_ENABLED flag; nothing self-arms.
+
+    def list_active_scheduler_targets(self) -> list[dict[str, Any]]:
+        """Every ACTIVE campaign the scheduler may advance, with its autonomy sub-state. PAUSED and
+        CLOSED campaigns are excluded (the owner lifecycle gates autonomy). One query — the table is
+        a handful of rows, so no index/pagination is warranted."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_CAMPAIGN_COLS}, {_SCHED_COLS} "
+                "FROM evo_campaigns WHERE status='ACTIVE' ORDER BY created_at"
+            )
+            rows = cur.fetchall()
+        return [_scheduler_target_row(r) for r in rows]
+
+    def get_scheduler_row(self, campaign_id: str) -> dict[str, Any] | None:
+        """One campaign's scheduler sub-state (the report reads it). None → unknown campaign."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_CAMPAIGN_COLS}, {_SCHED_COLS} FROM evo_campaigns WHERE id=%s",
+                (campaign_id,),
+            )
+            row = cur.fetchone()
+        return _scheduler_target_row(row) if row is not None else None
+
+    def claim_pending_sweep(
+        self, campaign_id: str, sweep_job_id: str, scheduled_at: Any
+    ) -> dict[str, Any] | None:
+        """Record that the scheduler LAUNCHED a generation's sweep: scheduler_state→EVALUATING,
+        pending_sweep_job_id set, last_scheduled_at stamped (the cadence anchor — the app-clock the
+        scheduler passes, so cadence math is deterministic under an injected clock, never a surprise
+        DB now()). ``updated_at`` maintained explicitly (DDL default fires on INSERT)."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "UPDATE evo_campaigns SET scheduler_state='EVALUATING', pending_sweep_job_id=%s, "
+                "last_scheduled_at=%s, updated_at=now() WHERE id=%s "
+                f"RETURNING {_CAMPAIGN_COLS}, {_SCHED_COLS}",
+                (sweep_job_id, scheduled_at, campaign_id),
+            )
+            row = cur.fetchone()
+        self._conn.commit()
+        return _scheduler_target_row(row) if row is not None else None
+
+    def resolve_pending_sweep(
+        self, campaign_id: str, next_state: str
+    ) -> dict[str, Any] | None:
+        """Clear the in-flight sweep and set the next autonomy state — called after the sweep's
+        generation is recorded (IDLE → ready for the next generation, or EXHAUSTED → budget spent)
+        and after a FAILED sweep (IDLE → the campaign re-launches next tick, §11 durable-resume).
+        ``last_scheduled_at`` stays the cadence anchor. ``updated_at`` maintained explicitly."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "UPDATE evo_campaigns SET scheduler_state=%s, pending_sweep_job_id=NULL, "
+                "updated_at=now() WHERE id=%s "
+                f"RETURNING {_CAMPAIGN_COLS}, {_SCHED_COLS}",
+                (next_state, campaign_id),
+            )
+            row = cur.fetchone()
+        self._conn.commit()
+        return _scheduler_target_row(row) if row is not None else None
+
+    def set_scheduler_state(self, campaign_id: str, state: str) -> dict[str, Any] | None:
+        """Set the autonomy sub-state WITHOUT touching the pending sweep — used to mark an idle
+        campaign EXHAUSTED when its budget is already spent (no sweep to clear)."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "UPDATE evo_campaigns SET scheduler_state=%s, updated_at=now() WHERE id=%s "
+                f"RETURNING {_CAMPAIGN_COLS}, {_SCHED_COLS}",
+                (state, campaign_id),
+            )
+            row = cur.fetchone()
+        self._conn.commit()
+        return _scheduler_target_row(row) if row is not None else None
+
+    def expire_pending_proposals(self) -> list[dict[str, Any]]:
+        """The §8.2 proposal-expiry sweep: flip every PENDING proposal past its ``expires_at``
+        (DB-clock-anchored 7-day window, set at insert) to EXPIRED, stamping actor='evo:expiry' +
+        decided_at=now(). DB-clock (``now()``) is the single source of truth — the clock that set
+        ``expires_at``, so no Python wall-clock is trusted. Idempotent (an EXPIRED row no longer
+        matches). Returns the rows expired THIS sweep (the count/log). Append-only table: an UPDATE
+        of status, never a delete (V011:107)."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "UPDATE evo_proposals SET status='EXPIRED', actor='evo:expiry', decided_at=now() "
+                "WHERE status='PENDING' AND expires_at IS NOT NULL AND expires_at < now() "
+                f"RETURNING {_PROPOSAL_COLS}"
+            )
+            rows = cur.fetchall()
+        self._conn.commit()
+        return [_proposal_row(r) for r in rows]
+
+
+def _scheduler_target_row(r: tuple) -> dict[str, Any]:
+    """The campaign read-envelope PLUS the three V018 scheduler columns (appended after
+    _CAMPAIGN_COLS in the SELECT). Reuses _campaign_row for the base 11 columns so the campaign
+    shape stays defined in exactly one place."""
+    base = _campaign_row(r[:11])
+    base["schedulerState"] = r[11]
+    base["pendingSweepJobId"] = _uuid(r[12])
+    base["lastScheduledAt"] = _ts(r[13])
+    return base
 
 
 def _reconciliation_row(r: tuple) -> dict[str, Any]:

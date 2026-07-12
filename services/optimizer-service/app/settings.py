@@ -30,6 +30,8 @@ class Settings:
     ntfy_topic: str
     evo_paper_cap: int
     stress_max_concurrent_jobs: int
+    scheduler_enabled: bool
+    scheduler_interval_seconds: int
 
     @property
     def conninfo(self) -> str:
@@ -64,4 +66,26 @@ class Settings:
             stress_max_concurrent_jobs=int(
                 os.environ.get("ARTHA_STRESS_MAX_CONCURRENT_JOBS", "2")
             ),
+            # E6 item 16 autonomy scheduler — DEFAULT OFF. When false (the default), NO background
+            # driver starts: campaigns advance ONLY via the owner-triggered POST /scheduler/tick.
+            # Arming is owner-gated (a live .env flip → the compose passthrough of the SAME name,
+            # ARTHA_EVO_SCHEDULER_ENABLED). NOTHING self-arms/self-publishes even when true — the
+            # scheduler advances research (sweeps/scoring/proposals) only (§1.4.1).
+            scheduler_enabled=_env_bool("ARTHA_EVO_SCHEDULER_ENABLED", default=False),
+            # The background driver's poll cadence (only read when scheduler_enabled). Each tick
+            # advances every ACTIVE campaign by at most one step; per-campaign generation cadence is
+            # a separate budget knob (budget.cadenceSeconds).
+            scheduler_interval_seconds=int(
+                os.environ.get("ARTHA_EVO_SCHEDULER_INTERVAL_SECONDS", "300")
+            ),
         )
+
+
+def _env_bool(name: str, *, default: bool) -> bool:
+    """Parse a boolean env flag ('1'/'true'/'yes'/'on', case-insensitive → True). An unset/blank var
+    falls to ``default`` — the autonomy flag defaults OFF, so a missing passthrough stays dormant,
+    never accidentally armed."""
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}

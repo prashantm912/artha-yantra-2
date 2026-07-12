@@ -30,18 +30,6 @@
       "422"
     ]
   },
-  "GET /api/v1/evolution/campaigns/{campaign_id}/ablations": {
-    "params": [
-      "campaign_id",
-      "limit",
-      "offset"
-    ],
-    "requestBody": false,
-    "responses": [
-      "200",
-      "422"
-    ]
-  },
   "GET /api/v1/evolution/campaigns/{campaign_id}/candidates": {
     "params": [
       "campaign_id"
@@ -52,11 +40,9 @@
       "422"
     ]
   },
-  "GET /api/v1/evolution/campaigns/{campaign_id}/graveyard": {
+  "GET /api/v1/evolution/campaigns/{campaign_id}/report": {
     "params": [
-      "campaign_id",
-      "limit",
-      "offset"
+      "campaign_id"
     ],
     "requestBody": false,
     "responses": [
@@ -181,28 +167,8 @@
       "200"
     ]
   },
-  "POST /api/v1/evolution/ablations/{ablation_id}/evaluate": {
-    "params": [
-      "ablation_id"
-    ],
-    "requestBody": true,
-    "responses": [
-      "200",
-      "422"
-    ]
-  },
   "POST /api/v1/evolution/campaigns": {
     "params": [],
-    "requestBody": true,
-    "responses": [
-      "201",
-      "422"
-    ]
-  },
-  "POST /api/v1/evolution/campaigns/{campaign_id}/ablations": {
-    "params": [
-      "campaign_id"
-    ],
     "requestBody": true,
     "responses": [
       "201",
@@ -250,16 +216,6 @@
       "422"
     ]
   },
-  "POST /api/v1/evolution/campaigns/{campaign_id}/suggestions": {
-    "params": [
-      "campaign_id"
-    ],
-    "requestBody": true,
-    "responses": [
-      "200",
-      "422"
-    ]
-  },
   "POST /api/v1/evolution/campaigns/{campaign_id}/take-eligible": {
     "params": [
       "campaign_id"
@@ -278,6 +234,13 @@
     "responses": [
       "202",
       "422"
+    ]
+  },
+  "POST /api/v1/evolution/proposals/expire": {
+    "params": [],
+    "requestBody": false,
+    "responses": [
+      "200"
     ]
   },
   "POST /api/v1/evolution/proposals/{proposal_id}/approve": {
@@ -316,6 +279,13 @@
     "responses": [
       "202",
       "422"
+    ]
+  },
+  "POST /api/v1/evolution/scheduler/tick": {
+    "params": [],
+    "requestBody": false,
+    "responses": [
+      "200"
     ]
   },
   "POST /api/v1/optimizations/run": {

@@ -84,6 +84,7 @@ public class JournalController {
   @PutMapping("/{id}")
   public Entry update(@PathVariable long id, @RequestBody JournalBody body) {
     get(id); // 404 if missing
+    validateRatings(body); // links are immutable on update, but the 1–5 rating range still applies
     repository.update(id, toInput(body));
     return get(id);
   }
@@ -105,6 +106,10 @@ public class JournalController {
       throw new ApiException(
           422, ErrorCodes.VALIDATION_FAILED, "paperPositionId " + body.paperPositionId() + " does not exist");
     }
+    validateRatings(body);
+  }
+
+  private void validateRatings(JournalBody body) {
     if (body.disciplineRating() != null && (body.disciplineRating() < 1 || body.disciplineRating() > 5)) {
       throw new ApiException(422, ErrorCodes.VALIDATION_FAILED, "disciplineRating must be 1–5");
     }

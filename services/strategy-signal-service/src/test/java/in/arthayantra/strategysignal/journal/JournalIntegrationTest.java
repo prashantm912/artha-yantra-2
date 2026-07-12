@@ -72,6 +72,36 @@ class JournalIntegrationTest extends StrategySignalIntegrationTestBase {
   }
 
   @Test
+  void updateRejectsOutOfRangeRatings() throws Exception {
+    // The PUT path used to skip the 1–5 range check the create path had (chip task_fab9e823) — a
+    // hand-crafted PUT could store rating 0/6. Both bounds now 422 on update.
+    String tag = "rt-" + UUID.randomUUID();
+    String created =
+        mockMvc
+            .perform(
+                post("/api/v1/journal")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(json(Map.of("note", "range check", "tags", List.of(tag)))))
+            .andExpect(status().isCreated())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+    long id = com.fasterxml.jackson.databind.json.JsonMapper.builder().build().readTree(created).path("id").asLong();
+    mockMvc
+        .perform(
+            put("/api/v1/journal/" + id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(Map.of("note", "range check", "tags", List.of(tag), "disciplineRating", 0))))
+        .andExpect(status().isUnprocessableEntity());
+    mockMvc
+        .perform(
+            put("/api/v1/journal/" + id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(Map.of("note", "range check", "tags", List.of(tag), "emotionRating", 6))))
+        .andExpect(status().isUnprocessableEntity());
+  }
+
+  @Test
   void softBacktestReferencesAreStoredWithoutACrossSchemaFk() throws Exception {
     String tag = "bt-" + UUID.randomUUID();
     // a backtest_run_id that exists in NO schema — accepted because it is a plain soft reference

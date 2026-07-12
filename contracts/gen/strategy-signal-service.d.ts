@@ -788,6 +788,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/paper/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["events"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/orders/tradebook": {
         parameters: {
             query?: never;
@@ -1377,6 +1393,26 @@ export interface components {
             pricedLegs?: number;
             /** Format: date-time */
             asOf?: string;
+        };
+        PaperEventDto: {
+            /** Format: int64 */
+            id?: number;
+            /** Format: int64 */
+            positionId?: number;
+            kind?: string;
+            book?: string;
+            exchange?: string;
+            tradingsymbol?: string;
+            side?: string;
+            /** Format: int64 */
+            qty?: number;
+            reason?: string;
+            realizedPnl?: string;
+            /** Format: date-time */
+            createdAt?: string;
+        };
+        PaperEventsResponse: {
+            items?: components["schemas"]["PaperEventDto"][];
         };
         Funds: {
             status?: string;
@@ -3440,6 +3476,41 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["MarginHeat"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    events: {
+        parameters: {
+            query?: {
+                positionId?: number;
+                book?: string;
+                day?: string;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PaperEventsResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

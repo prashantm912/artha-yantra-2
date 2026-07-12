@@ -10,6 +10,7 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -43,11 +44,14 @@ public class SignalRepository {
 
   private final JdbcTemplate jdbc;
   private final ObjectMapper objectMapper;
+  private final ApplicationEventPublisher events;
 
-  /** Wires the strategy datasource. */
-  public SignalRepository(JdbcTemplate jdbc, ObjectMapper objectMapper) {
+  /** Wires the strategy datasource + the status-change event publisher (audit §7.2.1). */
+  public SignalRepository(
+      JdbcTemplate jdbc, ObjectMapper objectMapper, ApplicationEventPublisher events) {
     this.jdbc = jdbc;
     this.objectMapper = objectMapper;
+    this.events = events;
   }
 
   /** Persists one signal; returns its id. */
@@ -175,16 +179,54 @@ public class SignalRepository {
         .findFirst();
   }
 
-  /** Lifecycle transition; returns false when the row is missing. */
-  public boolean transition(long id, String status) {
-    return jdbc.update("UPDATE signals SET status = ? WHERE id = ?", status, id) > 0;
+  /**
+   * The paper BOOK for a signal id — the originating strategy's first recognised family tag ({@link
+   * Books#fromTags}), else {@link Books#OTHER}. Resolved by {@link SignalStatusListener} to stamp the
+   * §7.2.1 status frame so a book-filtered live view can drop a frame for another book (the M17 rule).
+   * A missing signal / null tags fall back to {@code OTHER} (the frame stays valid; the FE just can't
+   * early-drop it).
+   */
+  public String bookForSignal(long id) {
+    return jdbc
+        .query(
+            "SELECT st.tags FROM signals s"
+                + " JOIN strategy_versions sv ON sv.id = s.strategy_version_id"
+                + " JOIN strategies st ON st.id = sv.strategy_id"
+                + " WHERE s.id = ?",
+            (rs, n) -> {
+              java.sql.Array arr = rs.getArray("tags");
+              return arr == null
+                  ? Books.OTHER
+                  : Books.fromTags(java.util.Arrays.asList((String[]) arr.getArray()));
+            },
+            id)
+        .stream()
+        .findFirst()
+        .orElse(Books.OTHER);
   }
 
-  /** Guarded lifecycle transition — updates only when the row is still in {@code from}. */
+  /** Lifecycle transition; returns false when the row is missing. Emits a §7.2.1 status event on success. */
+  public boolean transition(long id, String status) {
+    boolean changed = jdbc.update("UPDATE signals SET status = ? WHERE id = ?", status, id) > 0;
+    if (changed) {
+      // prevStatus unknown on the unguarded path (would need an extra read); the frame is informational.
+      events.publishEvent(new SignalStatusChanged(id, null, status));
+    }
+    return changed;
+  }
+
+  /**
+   * Guarded lifecycle transition — updates only when the row is still in {@code from}. Emits a
+   * §7.2.1 status event ONLY when this call actually flipped the row (a lost CAS is a silent no-op,
+   * so a double-take / already-transitioned signal never double-publishes).
+   */
   public boolean transitionIf(long id, String from, String to) {
-    return jdbc.update(
-            "UPDATE signals SET status = ? WHERE id = ? AND status = ?", to, id, from)
-        > 0;
+    boolean changed =
+        jdbc.update("UPDATE signals SET status = ? WHERE id = ? AND status = ?", to, id, from) > 0;
+    if (changed) {
+      events.publishEvent(new SignalStatusChanged(id, from, to));
+    }
+    return changed;
   }
 
   /**
@@ -217,11 +259,20 @@ public class SignalRepository {
    * other (intraday / null-style) ACTIVE row expires as before.
    */
   public int expireAllActive() {
-    return jdbc.update(
-        "UPDATE signals SET status = 'EXPIRED' WHERE status = 'ACTIVE'"
-            + " AND strategy_version_id NOT IN ("
-            + "   SELECT sv.id FROM strategy_versions sv"
-            + "   WHERE sv.config->'risk'->'session'->>'style' = 'swing')");
+    // RETURNING id so each swept signal emits its own §7.2.1 status frame (ACTIVE→EXPIRED) — the
+    // 15:45 sweep is exactly the transition a live cockpit tab must see to clear its ACTIVE list.
+    List<Long> expired =
+        jdbc.queryForList(
+            "UPDATE signals SET status = 'EXPIRED' WHERE status = 'ACTIVE'"
+                + " AND strategy_version_id NOT IN ("
+                + "   SELECT sv.id FROM strategy_versions sv"
+                + "   WHERE sv.config->'risk'->'session'->>'style' = 'swing')"
+                + " RETURNING id",
+            Long.class);
+    for (Long id : expired) {
+      events.publishEvent(new SignalStatusChanged(id, "ACTIVE", "EXPIRED"));
+    }
+    return expired.size();
   }
 
   private SignalRow row(ResultSet rs, int rowNum) throws SQLException {

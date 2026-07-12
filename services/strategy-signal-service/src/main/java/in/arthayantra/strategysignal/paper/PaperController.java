@@ -2,8 +2,11 @@ package in.arthayantra.strategysignal.paper;
 
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
+import in.arthayantra.strategysignal.paper.PaperEventRepository.PaperEventRow;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Map;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
@@ -48,21 +51,47 @@ public class PaperController {
   /** Owner edit of the starting capital for a book. */
   public record AccountBody(BigDecimal startingCapital, String book) {}
 
+  /**
+   * One paper-position lifecycle event (audit §7.2.2). {@code realizedPnl} rides as a string
+   * (money-as-string convention); it and {@code reason} are null on an OPENED event.
+   */
+  public record PaperEventDto(
+      long id,
+      long positionId,
+      String kind,
+      String book,
+      String exchange,
+      String tradingsymbol,
+      String side,
+      long qty,
+      String reason,
+      String realizedPnl,
+      OffsetDateTime createdAt) {}
+
+  /** The {@code items} envelope for {@code GET /events} — a typed record, never a Map (contract gate). */
+  public record PaperEventsResponse(List<PaperEventDto> items) {}
+
   private final PaperService paper;
   private final PaperAccountService account;
   private final InstrumentMetaClient instruments;
   private final PaperAdminAuditLedger adminAudit;
+  private final PaperEventRepository events;
 
-  /** Wires the ledger + account services + the instrument-meta lookup + the admin-audit trail (V14). */
+  /**
+   * Wires the ledger + account services + the instrument-meta lookup + the admin-audit trail (V14) +
+   * the lifecycle-event ledger (§7.2.2).
+   */
   public PaperController(
       PaperService paper,
       PaperAccountService account,
       InstrumentMetaClient instruments,
-      PaperAdminAuditLedger adminAudit) {
+      PaperAdminAuditLedger adminAudit,
+      PaperEventRepository events) {
     this.paper = paper;
     this.account = account;
     this.instruments = instruments;
     this.adminAudit = adminAudit;
+    this.events = events;
   }
 
   /** The account header for a book ({@code book} absent → the aggregate across all books). */
@@ -113,6 +142,35 @@ public class PaperController {
   @GetMapping("/pnl")
   public Map<String, Object> pnl(@RequestParam(required = false) String book) {
     return paper.pnl(book);
+  }
+
+  /**
+   * The append-only paper-position lifecycle events (OPENED / CLOSED / BRACKET_HIT / SETTLED), newest
+   * first — audit §7.2.2. Filters: {@code positionId} (the trade-chain / position-detail read),
+   * {@code book}, and {@code day} (an IST calendar date, bounded by explicit +05:30 instants). The
+   * live counterpart is the {@code /topic/paper.events} channel the FE hook appends from.
+   */
+  @GetMapping("/events")
+  public PaperEventsResponse events(
+      @RequestParam(required = false) Long positionId,
+      @RequestParam(required = false) String book,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate day,
+      @RequestParam(defaultValue = "100") int limit,
+      @RequestParam(defaultValue = "0") int offset) {
+    int boundedLimit = Math.min(Math.max(limit, 1), 500);
+    int boundedOffset = Math.max(offset, 0);
+    List<PaperEventDto> items =
+        events.query(positionId, book, day, boundedLimit, boundedOffset).stream()
+            .map(PaperController::eventDto)
+            .toList();
+    return new PaperEventsResponse(items);
+  }
+
+  private static PaperEventDto eventDto(PaperEventRow row) {
+    return new PaperEventDto(
+        row.id(), row.positionId(), row.kind(), row.book(), row.exchange(), row.tradingsymbol(),
+        row.side(), row.qty(), row.reason(),
+        row.realizedPnl() == null ? null : row.realizedPnl().toPlainString(), row.createdAt());
   }
 
   /**

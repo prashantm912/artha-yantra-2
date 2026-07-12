@@ -10,8 +10,10 @@
 // omitted → today's all-books aggregate. The capital + risk mutations REQUIRE a book (the BE 400s a
 // blank one); reset accepts an optional book (omitted → all books).
 
+import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from './client.ts';
+import { wsClient } from '../lib/wsClient.ts';
 
 /** A per-family paper book — its own capital, risk config, positions and signals. */
 export type PaperBook = 'scalper' | 'minervini' | 'manas-arora';
@@ -219,4 +221,85 @@ export function useUpdateRisk(book?: string) {
 /** True when a named risk limit is enabled. */
 export function riskEnabled(items: RiskSetting[] | undefined, key: string): boolean {
   return items?.find((r) => r.key === key)?.value?.['enabled'] === true;
+}
+
+// Paper-position lifecycle events (app-platform audit §7.2.2). An append-only stream of what happened
+// to a position — OPENED / CLOSED / BRACKET_HIT / SETTLED — served by GET /paper/events and pushed live
+// on /topic/paper.events. Kept GENERIC on purpose: the trade-chain + position-detail builders (a later
+// slice) consume these hooks with a positionId; a book/day view uses the other filters.
+
+/** One paper-position lifecycle event. `reason`/`realizedPnl` are null on an OPENED event. */
+export interface PaperEvent {
+  id: number;
+  positionId: number;
+  kind: 'OPENED' | 'CLOSED' | 'BRACKET_HIT' | 'SETTLED';
+  book: string;
+  exchange: string;
+  tradingsymbol: string;
+  side: 'BUY' | 'SELL';
+  qty: number;
+  reason: string | null;
+  realizedPnl: string | null;
+  createdAt: string;
+}
+
+/** Event-read filters (all optional, ANDed server-side). `day` is an IST calendar date (YYYY-MM-DD). */
+export interface PaperEventsFilter {
+  positionId?: number;
+  book?: string;
+  day?: string;
+}
+
+const PAPER_EVENTS = 'paper-events';
+
+function paperEventsKey(f: PaperEventsFilter) {
+  return [PAPER_EVENTS, f.positionId ?? null, f.book ?? null, f.day ?? null] as const;
+}
+
+/** REST page of lifecycle events for a filter (position-detail / trade-chain / day view). */
+export function usePaperEvents(filter: PaperEventsFilter = {}) {
+  return useQuery({
+    queryKey: paperEventsKey(filter),
+    queryFn: () => {
+      const params = new URLSearchParams({ limit: '200' });
+      if (filter.positionId != null) params.set('positionId', String(filter.positionId));
+      if (filter.book) params.set('book', filter.book);
+      if (filter.day) params.set('day', filter.day);
+      return apiFetch<{ items: PaperEvent[] }>(`/paper/events?${params.toString()}`);
+    },
+  });
+}
+
+/**
+ * Live-appends `/topic/paper.events` frames into the {@link usePaperEvents} cache for the SAME filter
+ * — newest-first, deduped by id. A frame that doesn't match the position/book filter is dropped. A
+ * live event is always "today", so pass `live=false` when viewing a historical `day` (a static past
+ * snapshot must not gain a live row), mirroring `useSignalsLive`.
+ */
+export function usePaperEventsLive(filter: PaperEventsFilter = {}, live = true) {
+  const qc = useQueryClient();
+  const { positionId, book, day } = filter;
+  useEffect(() => {
+    if (!live) return;
+    const append = (body: string) => {
+      let ev: PaperEvent;
+      try {
+        ev = JSON.parse(body) as PaperEvent;
+      } catch {
+        return; // unparseable frame — the REST snapshot heals
+      }
+      if (positionId != null && ev.positionId !== positionId) return;
+      if (book && ev.book !== book) return;
+      qc.setQueryData<{ items: PaperEvent[] }>(
+        [PAPER_EVENTS, positionId ?? null, book ?? null, day ?? null],
+        (prev) => {
+          const items = prev?.items ?? [];
+          if (items.some((i) => i.id === ev.id)) return prev; // dedupe a re-delivered frame
+          return { items: [ev, ...items] };
+        },
+      );
+    };
+    const off = wsClient.topic('/topic/paper.events', append);
+    return () => off();
+  }, [qc, positionId, book, day, live]);
 }

@@ -1,7 +1,9 @@
 import type { ReactNode } from 'react';
 import { useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { cn } from '../lib/cn.ts';
 import { useCenterRowInScroll } from '../lib/scrollToCenter.ts';
+import { optionsChartPath } from '../lib/optionsLinks.ts';
 import type { Density } from '../lib/density.ts';
 import {
   compareDecimal,
@@ -142,6 +144,8 @@ interface OptionsChainTableProps {
   /** Row density (§4.2/Q4): comfortable `py-1` vs compact `py-0.5`. Defaults to the scalper compact. */
   density?: Density;
   emptyMessage?: string;
+  /** Link each strike to that contract's Options Chart (drill-down, audit §6.3). Off by default. */
+  linkStrikeToChart?: boolean;
 }
 
 interface SideMax {
@@ -174,9 +178,25 @@ export function OptionsChainTable({
   optionalKeys,
   density = 'compact',
   emptyMessage = 'No chain for this selection.',
+  linkStrikeToChart = false,
 }: OptionsChainTableProps) {
   // Per-row cell padding only (headers stay py-1); compact is the scalper default.
   const cellPad = density === 'compact' ? 'py-0.5' : 'py-1';
+  // The strike drill-down: a Link to that strike's Options Chart, or the plain number.
+  // Underlined at rest (an inline link needs a non-colour cue — axe link-in-text-block); the ATM row
+  // keeps text-ay-text (accent on the warn tint fails 4.5:1 on oipulse-red/light — a11y review HIGH).
+  const strikeCell = (strike: string, isAtm = false): ReactNode =>
+    linkStrikeToChart ? (
+      <Link
+        to={optionsChartPath(strike)}
+        className={isAtm ? 'text-ay-text underline hover:text-accent' : 'text-accent underline'}
+        title="Open this strike in the Options Chart"
+      >
+        {strike}
+      </Link>
+    ) : (
+      strike
+    );
   const enabledOptional = useMemo(
     () => OPTIONAL_COLUMNS.filter((c) => optionalKeys.includes(c.key)),
     [optionalKeys],
@@ -323,7 +343,7 @@ export function OptionsChainTable({
                     className={cn('px-2 text-center font-semibold', cellPad)}
                     style={isAtm ? atmStyle : undefined}
                   >
-                    {row.strike}
+                    {strikeCell(row.strike, isAtm)}
                     {isAtm && <span className="ay-sr-only"> at the money</span>}
                   </td>
                   {putColumns.map((c) => (
@@ -372,7 +392,7 @@ export function OptionsChainTable({
               style={isAtm ? atmStyle : undefined}
             >
               <div className="mb-1 flex items-center justify-between font-semibold text-ay-text">
-                <span>Strike {row.strike}</span>
+                <span>Strike {strikeCell(row.strike)}</span>
                 <span className="text-xs text-ay-muted">PCR {rowPcr(row)}</span>
               </div>
               <div className="grid grid-cols-2 gap-2 text-xs">

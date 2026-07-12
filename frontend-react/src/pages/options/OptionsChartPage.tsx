@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { formatDecimal } from '../../lib/decimal.ts';
 import { nearestStrike } from '../../lib/strikes.ts';
 import { CandlestickChart } from 'lucide-react';
@@ -38,8 +39,11 @@ export function OptionsChartPage() {
   const spot = chainQ.data?.spot ?? null;
   const atm = useMemo(() => nearestStrike(strikes, spot), [strikes, spot]);
 
+  // Drill-down deep link (chain / heatmap / spurt → ?strike=) seeds the initial strike; the ATM effect
+  // below only overrides it once the chain loads IF that strike isn't a listed strike (honest fallback).
+  const [params] = useSearchParams();
   const [intervalMin, setIntervalMin] = useState(3);
-  const [strike, setStrike] = useState<string | null>(null);
+  const [strike, setStrike] = useState<string | null>(() => params.get('strike'));
   const [show, setShow] = useState('both-h');
 
   // Default the strike to ATM once the chain loads (and re-default if it moved).

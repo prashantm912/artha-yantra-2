@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { OiHeatmap } from '../../api/types.ts';
 
@@ -35,7 +36,9 @@ function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <OiHeatmapPage />
+      <MemoryRouter>
+        <OiHeatmapPage />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }

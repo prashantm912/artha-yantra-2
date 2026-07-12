@@ -86,6 +86,12 @@ const FuturesOiChartPage = lazy(() =>
 const OptionsChartPage = lazy(() =>
   import('./pages/options/OptionsChartPage.tsx').then((m) => ({ default: m.OptionsChartPage })),
 );
+const IvSmilePage = lazy(() =>
+  import('./pages/options/IvSmilePage.tsx').then((m) => ({ default: m.IvSmilePage })),
+);
+const PremiumDecayPage = lazy(() =>
+  import('./pages/options/PremiumDecayPage.tsx').then((m) => ({ default: m.PremiumDecayPage })),
+);
 const MultipleOiChartPage = lazy(() =>
   import('./pages/options/MultipleOiChartPage.tsx').then((m) => ({ default: m.MultipleOiChartPage })),
 );
@@ -238,6 +244,8 @@ export function App() {
           <Route path="/options/active-strikes" element={<Lazy><ActiveStrikesPage /></Lazy>} />
           <Route path="/options/active-strikes-iv" element={<Lazy><ActiveStrikesIvPage /></Lazy>} />
           <Route path="/options/options-chart" element={<Lazy><OptionsChartPage /></Lazy>} />
+          <Route path="/options/iv-smile" element={<Lazy><IvSmilePage /></Lazy>} />
+          <Route path="/options/premium-decay" element={<Lazy><PremiumDecayPage /></Lazy>} />
           <Route path="/options/multiple-oi-chart" element={<Lazy><MultipleOiChartPage /></Lazy>} />
           <Route path="/options/oi-chart" element={<Lazy><OptionsOiChartPage /></Lazy>} />
           <Route path="/options/oi-heatmap" element={<Lazy><OiHeatmapPage /></Lazy>} />

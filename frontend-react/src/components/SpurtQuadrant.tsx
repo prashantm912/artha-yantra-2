@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { cn } from '../lib/cn.ts';
 import { formatDecimal } from '../lib/decimal.ts';
+import { optionsChartPath } from '../lib/optionsLinks.ts';
 import type { SpurtRow } from '../api/types.ts';
 import { ValueDeltaCell } from './atoms/ValueDeltaCell.tsx';
 
@@ -15,9 +17,11 @@ interface SpurtQuadrantProps {
   title: string;
   subtitle: string;
   rows: SpurtRow[];
+  /** Link each strike to that contract's Options Chart (drill-down, audit §6.3). Off by default. */
+  linkStrikeToChart?: boolean;
 }
 
-export function SpurtQuadrant({ title, subtitle, rows }: SpurtQuadrantProps) {
+export function SpurtQuadrant({ title, subtitle, rows, linkStrikeToChart = false }: SpurtQuadrantProps) {
   const sorted = useMemo(
     () => [...rows].sort((a, b) => Math.abs(b.oiChange) - Math.abs(a.oiChange)),
     [rows],
@@ -65,7 +69,19 @@ export function SpurtQuadrant({ title, subtitle, rows }: SpurtQuadrantProps) {
                   key={`${r.strike}-${r.optionType}`}
                   className="border-t border-ay-border text-ay-text"
                 >
-                  <td className="px-2 py-1 text-left tabular-nums">{r.strike}</td>
+                  <td className="px-2 py-1 text-left tabular-nums">
+                    {linkStrikeToChart ? (
+                      <Link
+                        to={optionsChartPath(r.strike)}
+                        className="text-accent hover:underline"
+                        title="Open this strike in the Options Chart"
+                      >
+                        {r.strike}
+                      </Link>
+                    ) : (
+                      r.strike
+                    )}
+                  </td>
                   <td className="px-2 py-1 text-left">{r.optionType}</td>
                   <td className="px-2 py-1 text-right tabular-nums">{dec(r.ltp, 2)}</td>
                   <td className="px-2 py-1 text-right tabular-nums text-ay-muted">{dec(r.prevLtp, 2)}</td>

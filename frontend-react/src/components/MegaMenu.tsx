@@ -52,6 +52,7 @@ const SECTIONS: MenuSection[] = [
       { label: 'Trending OI - PA', to: '/options/trending-oi-pa' }, // Wave 3 — + premium (PA) columns
       { label: 'Big OI Movement', to: '/options/big-oi-movement' }, // Wave 2
       { label: 'Options Premium', to: '/options/options-premium' }, // Wave 2
+      { label: 'Premium Decay', to: '/options/premium-decay' }, // Phase 3B — ATM straddle decay (/premium-series)
       { label: 'Straddle Chart', to: '/options/straddle-chart' }, // combined CE+PE premium candles (§20.7.6)
       { label: 'Calendar Spread', to: '/options/calendar-spread' }, // (near − far) premium-differential candles
       { label: 'Options Chart', to: '/options/options-chart' }, // Wave 3 — per-leg premium candle + OI line
@@ -64,6 +65,7 @@ const SECTIONS: MenuSection[] = [
       { label: 'Interval-wise OI', to: '/options/interval-wise-oi' }, // Wave 3 — top OI movers ×15m/60m/daily
       { label: 'Active Strikes OI', to: '/options/active-strikes' }, // Wave 3 — OI + Sentiment series
       { label: 'Active Strikes IV', to: '/options/active-strikes-iv' }, // Wave 3 — IV + price series
+      { label: 'IV Smile', to: '/options/iv-smile' }, // Phase 3B — strike-vs-IV skew from the chain
     ],
   },
   {

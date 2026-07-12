@@ -1,9 +1,14 @@
+import { useEffect, useState } from 'react';
 import { Grid3x3 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useOiHeatmap } from '../../api/oiAnalytics.ts';
+import { cn } from '../../lib/cn.ts';
+import { optionsChartPath } from '../../lib/optionsLinks.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
+import { Select } from '../../components/atoms/Select.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { CallOiHeatmap, PutOiHeatmap } from '../../components/OiHeatmapChart.tsx';
@@ -24,6 +29,16 @@ export function OiHeatmapPage() {
   const data = q.data ?? null;
   const hasGrid = !!data && data.buckets.length > 0 && data.strikes.length > 0;
 
+  // Strike drill-down (audit §6.3): the heatmap is a canvas, so a keyboard-accessible strike picker +
+  // link stands in for a per-cell link — pick a strike, jump to its Options Chart. Seeds to the ATM
+  // (the server centres the grid on the ATM, so the middle strike is the closest listed strike).
+  const [chartStrike, setChartStrike] = useState<string | null>(null);
+  useEffect(() => {
+    if (hasGrid && (!chartStrike || !data!.strikes.includes(chartStrike))) {
+      setChartStrike(data!.strikes[Math.floor(data!.strikes.length / 2)]);
+    }
+  }, [hasGrid, data, chartStrike]);
+
   return (
     <LoadBeat>
       <PageHeader
@@ -34,6 +49,33 @@ export function OiHeatmapPage() {
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry showInterval allowedIntervals={HEATMAP_INTERVALS} />
         <GoButton onClick={() => q.refetch()} loading={q.isFetching} />
+        {hasGrid && (
+          <div className="flex items-center gap-1">
+            <Select
+              ariaLabel="Chart a strike"
+              title="Open a strike's Call + Put premium chart"
+              value={chartStrike}
+              options={data!.strikes}
+              onChange={setChartStrike}
+              placeholder="Strike"
+            />
+            <Link
+              to={optionsChartPath(chartStrike ?? '')}
+              aria-disabled={!chartStrike}
+              tabIndex={chartStrike ? 0 : -1}
+              onClick={(ev) => {
+                if (!chartStrike) ev.preventDefault();
+              }}
+              title="Open this strike in the Options Chart"
+              className={cn(
+                'inline-flex h-9 items-center rounded-md border border-ay-border bg-surface-2 px-3 text-sm text-accent hover:underline',
+                !chartStrike && 'pointer-events-none opacity-50',
+              )}
+            >
+              Chart
+            </Link>
+          </div>
+        )}
       </div>
 
       <BeatStrip className="card shadow-e1 mb-4 flex flex-wrap items-center gap-2" aria-live="polite">

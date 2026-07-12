@@ -572,6 +572,16 @@ services:
       # Blank ARTHA_NTFY_TOPIC → the client no-ops (mock needs no ntfy config).
       ARTHA_NTFY_TOPIC: ${ARTHA_NTFY_TOPIC:-}
       ARTHA_NTFY_URL: ${ARTHA_NTFY_URL:-https://ntfy.sh}
+      # EVO E6 item 16 autonomy scheduler — DEFAULT OFF (dormant): no background driver starts, and
+      # campaigns advance only via the owner-triggered POST /scheduler/tick. Arming is owner-gated —
+      # flip ARTHA_EVO_SCHEDULER_ENABLED=true in the live .env (the passthrough name matches the var
+      # the service reads EXACTLY, per the #653 rule). Even armed, the scheduler advances research
+      # only; nothing self-arms/self-publishes.
+      ARTHA_EVO_SCHEDULER_ENABLED: ${ARTHA_EVO_SCHEDULER_ENABLED:-false}
+      ARTHA_EVO_SCHEDULER_INTERVAL_SECONDS: ${ARTHA_EVO_SCHEDULER_INTERVAL_SECONDS:-300}
+      # §1.4.6 compute fairness: max scheduler-launched generations in flight across ALL campaigns
+      # (default 1 — serial; owner-launched sweeps are not counted). Same exact-name #653 rule.
+      ARTHA_EVO_MAX_CONCURRENT_SWEEPS: ${ARTHA_EVO_MAX_CONCURRENT_SWEEPS:-1}
     secrets: [postgres_password]
     depends_on:
       flyway-init:

@@ -64,6 +64,16 @@
       "422"
     ]
   },
+  "GET /api/v1/evolution/campaigns/{campaign_id}/report": {
+    "params": [
+      "campaign_id"
+    ],
+    "requestBody": false,
+    "responses": [
+      "200",
+      "422"
+    ]
+  },
   "GET /api/v1/evolution/insights/{sweep_job_id}": {
     "params": [
       "sweep_job_id"
@@ -108,6 +118,13 @@
     "responses": [
       "200",
       "422"
+    ]
+  },
+  "GET /api/v1/evolution/scheduler/status": {
+    "params": [],
+    "requestBody": false,
+    "responses": [
+      "200"
     ]
   },
   "GET /api/v1/optimizations/jobs": {
@@ -250,6 +267,26 @@
       "422"
     ]
   },
+  "POST /api/v1/evolution/campaigns/{campaign_id}/scheduler/enroll": {
+    "params": [
+      "campaign_id"
+    ],
+    "requestBody": false,
+    "responses": [
+      "200",
+      "422"
+    ]
+  },
+  "POST /api/v1/evolution/campaigns/{campaign_id}/scheduler/withdraw": {
+    "params": [
+      "campaign_id"
+    ],
+    "requestBody": false,
+    "responses": [
+      "200",
+      "422"
+    ]
+  },
   "POST /api/v1/evolution/campaigns/{campaign_id}/suggestions": {
     "params": [
       "campaign_id"
@@ -278,6 +315,13 @@
     "responses": [
       "202",
       "422"
+    ]
+  },
+  "POST /api/v1/evolution/proposals/expire": {
+    "params": [],
+    "requestBody": false,
+    "responses": [
+      "200"
     ]
   },
   "POST /api/v1/evolution/proposals/{proposal_id}/approve": {
@@ -316,6 +360,13 @@
     "responses": [
       "202",
       "422"
+    ]
+  },
+  "POST /api/v1/evolution/scheduler/tick": {
+    "params": [],
+    "requestBody": false,
+    "responses": [
+      "200"
     ]
   },
   "POST /api/v1/optimizations/run": {

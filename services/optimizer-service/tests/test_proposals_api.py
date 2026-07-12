@@ -260,12 +260,23 @@ def test_decide_unknown_proposal_is_404():
 
 
 def test_a_decided_proposal_is_excluded_from_regeneration_open_check():
-    # After a proposal is APPROVED, a regeneration mints a FRESH proposal (the OPEN check only sees
-    # PENDING rows — a terminal decision never blocks a new proposal for the same candidate).
+    # SEMANTICS UPDATED by the E6 adversarial review (finding 3): an APPROVED-awaiting-execute
+    # proposal now BLOCKS a re-mint for the same (candidate, kind) — the owner already said yes;
+    # a fresh PENDING every regeneration would duplicate the inbox item across the approve→execute
+    # gap. REJECTED/EXPIRED remain non-blocking (a fresh mint is legal — E4 semantics preserved).
     repo = FakeEvoRepo(campaigns=[_campaign()], candidates={_CAMPAIGN_ID: [_cand("c-surv")]})
     client = _client(repo)
     pid = _seed_one(client)
     client.post(f"/api/v1/evolution/proposals/{pid}/approve")
     regen = client.post(f"/api/v1/evolution/campaigns/{_CAMPAIGN_ID}/proposals").json()
-    assert regen["generated"] == 1  # a new PENDING proposal, not a refresh of the APPROVED one
-    assert len(repo.proposals) == 2
+    assert regen["generated"] == 0 and regen["refreshed"] == 0  # approved → no duplicate mint
+    assert len(repo.proposals) == 1
+
+    # a REJECTED decision does NOT block: reject-equivalent path minting stays legal
+    repo2 = FakeEvoRepo(campaigns=[_campaign()], candidates={_CAMPAIGN_ID: [_cand("c-surv")]})
+    client2 = _client(repo2)
+    pid2 = _seed_one(client2)
+    client2.post(f"/api/v1/evolution/proposals/{pid2}/reject")
+    regen2 = client2.post(f"/api/v1/evolution/campaigns/{_CAMPAIGN_ID}/proposals").json()
+    assert regen2["generated"] == 1
+    assert len(repo2.proposals) == 2

@@ -74,8 +74,8 @@ describe('JournalPage', () => {
   it('reveals a link picker when a link type is chosen on the new-entry form', () => {
     renderPage();
     // No picker until a link type is chosen (free entry is the default).
-    expect(screen.queryByLabelText('Signal to link')).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Link entry to'), { target: { value: 'signal' } });
-    expect(screen.getByLabelText('Signal to link')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Pick a signal to link')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Link to (optional)'), { target: { value: 'signal' } });
+    expect(screen.getByLabelText('Pick a signal to link')).toBeInTheDocument();
   });
 });

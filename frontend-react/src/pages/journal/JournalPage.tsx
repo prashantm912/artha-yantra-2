@@ -60,7 +60,7 @@ function SignalPicker({ value, onChange }: { value: string; onChange: (v: string
       value={value || null}
       options={options}
       onChange={onChange}
-      ariaLabel="Signal to link"
+      ariaLabel="Pick a signal to link"
       placeholder={q.isLoading ? 'Loading signals…' : options.length ? 'Pick a signal' : 'No recent signals'}
       title="Link this entry to one of your recent signals."
       className={pickerCls}
@@ -96,7 +96,7 @@ function PaperPicker({ value, onChange }: { value: string; onChange: (v: string)
       value={value || null}
       options={options}
       onChange={onChange}
-      ariaLabel="Paper trade to link"
+      ariaLabel="Pick a paper trade to link"
       placeholder={loading ? 'Loading paper trades…' : options.length ? 'Pick a paper trade' : 'No paper trades'}
       title="Link this entry to one of your paper positions or closed trades."
       className={pickerCls}
@@ -119,7 +119,7 @@ function BacktestPicker({ value, onChange }: { value: string; onChange: (v: stri
       value={value || null}
       options={options}
       onChange={onChange}
-      ariaLabel="Backtest run to link"
+      ariaLabel="Pick a backtest run to link"
       placeholder={q.isLoading ? 'Loading runs…' : options.length ? 'Pick a completed run' : 'No completed runs'}
       title="Link this entry to a completed backtest run."
       className={pickerCls}
@@ -191,6 +191,12 @@ export function JournalPage() {
           ? { paperPositionId: Number(linkId) }
           : {};
     create.mutate({ ...base, ...link }, { onSuccess: resetForm });
+  };
+
+  // Keyboard flow (a11y review LOW): the row swap unmounts the focused control — return focus to the
+  // row's Edit button after save/cancel (the edit-note input autoFocuses on mount for the way in).
+  const restoreEditFocus = (id: number) => {
+    requestAnimationFrame(() => document.getElementById(`journal-edit-${id}`)?.focus());
   };
 
   const startEdit = (e: JournalEntry) => {
@@ -268,7 +274,7 @@ export function JournalPage() {
                 setLinkId('');
                 setLinkError(null);
               }}
-              ariaLabel="Link entry to"
+              ariaLabel="Link to (optional)"
               title="Optionally attach this entry to a signal, paper trade or backtest run."
               className="w-full sm:w-48"
             />
@@ -317,7 +323,7 @@ export function JournalPage() {
                   editingId === e.id ? (
                     <tr key={e.id} className="border-t border-ay-border bg-surface-1/40">
                       <td className="px-2 py-2">
-                        <input value={editNote} onChange={(ev) => setEditNote(ev.target.value)} aria-label="Edit note" className={`${inputCls} w-full`} />
+                        <input autoFocus value={editNote} onChange={(ev) => setEditNote(ev.target.value)} aria-label="Edit note" className={`${inputCls} w-full`} />
                       </td>
                       <td className="px-2 py-2">
                         <input value={editTags} onChange={(ev) => setEditTags(ev.target.value)} aria-label="Edit tags" placeholder="comma-sep" className={`${inputCls} w-full sm:w-40`} />
@@ -332,8 +338,8 @@ export function JournalPage() {
                       <td className="px-2 py-2 tabular-nums">{e.createdAt?.slice(0, 10)}</td>
                       <td className="px-2 py-2 text-right">
                         <div className="flex justify-end gap-2">
-                          <button type="button" onClick={() => saveEdit(e.id)} disabled={!editNote.trim() || update.isPending} className="px-1.5 text-xs font-medium text-accent hover:underline disabled:opacity-50">Save</button>
-                          <button type="button" onClick={() => setEditingId(null)} className="px-1.5 text-xs text-ay-muted hover:underline">Cancel</button>
+                          <button type="button" onClick={() => { saveEdit(e.id); restoreEditFocus(e.id); }} disabled={!editNote.trim() || update.isPending} className="px-1.5 text-xs font-medium text-accent hover:underline disabled:opacity-50">Save</button>
+                          <button type="button" onClick={() => { setEditingId(null); restoreEditFocus(e.id); }} className="px-1.5 text-xs text-ay-muted hover:underline">Cancel</button>
                         </div>
                       </td>
                     </tr>
@@ -353,7 +359,7 @@ export function JournalPage() {
                       <td className="px-2 py-2 tabular-nums">{e.createdAt?.slice(0, 10)}</td>
                       <td className="px-2 py-2 text-right">
                         <div className="flex justify-end gap-2">
-                          <button type="button" onClick={() => startEdit(e)} title="Edit this entry's note, tags and ratings." className="px-1.5 text-xs text-accent hover:underline">
+                          <button type="button" id={`journal-edit-${e.id}`} onClick={() => startEdit(e)} title="Edit this entry's note, tags and ratings." className="px-1.5 text-xs text-accent hover:underline">
                             Edit
                           </button>
                           <button type="button" onClick={() => { if (window.confirm('Delete this journal entry? This cannot be undone.')) remove.mutate(e.id); }} className="px-1.5 text-xs text-bear hover:underline">

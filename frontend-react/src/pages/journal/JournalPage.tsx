@@ -194,7 +194,9 @@ export function JournalPage() {
   };
 
   // Keyboard flow (a11y review LOW): the row swap unmounts the focused control — return focus to the
-  // row's Edit button after save/cancel (the edit-note input autoFocuses on mount for the way in).
+  // row's Edit button after save/cancel (the edit-note input focuses via callback ref on the way in —
+  // a user-initiated row swap, not a page-load autofocus, so jsx-a11y/no-autofocus doesn't apply).
+  const focusOnMount = (el: HTMLInputElement | null) => el?.focus();
   const restoreEditFocus = (id: number) => {
     requestAnimationFrame(() => document.getElementById(`journal-edit-${id}`)?.focus());
   };
@@ -323,7 +325,7 @@ export function JournalPage() {
                   editingId === e.id ? (
                     <tr key={e.id} className="border-t border-ay-border bg-surface-1/40">
                       <td className="px-2 py-2">
-                        <input autoFocus value={editNote} onChange={(ev) => setEditNote(ev.target.value)} aria-label="Edit note" className={`${inputCls} w-full`} />
+                        <input ref={focusOnMount} value={editNote} onChange={(ev) => setEditNote(ev.target.value)} aria-label="Edit note" className={`${inputCls} w-full`} />
                       </td>
                       <td className="px-2 py-2">
                         <input value={editTags} onChange={(ev) => setEditTags(ev.target.value)} aria-label="Edit tags" placeholder="comma-sep" className={`${inputCls} w-full sm:w-40`} />

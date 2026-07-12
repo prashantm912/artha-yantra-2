@@ -95,5 +95,8 @@ describe('JournalPage', () => {
     expect((screen.getByLabelText('Note') as HTMLInputElement).value).toBe('Draft from insight');
     expect((screen.getByLabelText('Tags') as HTMLInputElement).value).toBe('insight');
     expect(screen.getByLabelText('Pick a signal to link')).toBeInTheDocument();
+    // Focus lands on the seeded Note input (user-initiated nav) — the prefill is not a silent
+    // below-the-fold change for keyboard/SR users.
+    expect(screen.getByLabelText('Note')).toHaveFocus();
   });
 });

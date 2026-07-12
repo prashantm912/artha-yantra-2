@@ -112,19 +112,32 @@ describe('InsightActions', () => {
     expect(dest).toContain('draftSignalId=42');
   });
 
-  it('BLOCKED data trust disables every action with the reason on the button', () => {
+  it('BLOCKED data trust gates every action — aria-disabled (still focusable) with the reason described, click no-ops', async () => {
     renderActions({ ...SIGNAL, dataTrust: 'BLOCKED' });
     const take = screen.getByRole('button', { name: 'Take → ticket' });
     const mute = screen.getByRole('button', { name: 'Mute type' });
-    expect(take).toBeDisabled();
-    expect(mute).toBeDisabled();
-    expect(take).toHaveAttribute('title', expect.stringContaining('BLOCKED'));
+    // aria-disabled, NOT natively disabled — the button stays in the tab order / a11y tree.
+    expect(take).toHaveAttribute('aria-disabled', 'true');
+    expect(mute).toHaveAttribute('aria-disabled', 'true');
+    expect(take).not.toBeDisabled();
+    expect(mute).not.toBeDisabled();
+    // The WHY is programmatically associated via aria-describedby.
+    expect(take).toHaveAccessibleDescription(/BLOCKED/);
+    expect(mute).toHaveAccessibleDescription(/BLOCKED/);
+    // Activating a gated button is a no-op — /act is never called, nothing navigates.
+    await userEvent.click(take);
+    expect(apiFetch).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
   });
 
-  it('DEGRADED data trust disables only the order prefill, not journal/mute', () => {
+  it('DEGRADED data trust gates only the order prefill, not journal/mute', () => {
     renderActions({ ...SIGNAL, dataTrust: 'DEGRADED' });
-    expect(screen.getByRole('button', { name: 'Take → ticket' })).toBeDisabled();
+    const take = screen.getByRole('button', { name: 'Take → ticket' });
+    expect(take).toHaveAttribute('aria-disabled', 'true');
+    expect(take).toHaveAccessibleDescription(/DEGRADED/);
+    expect(screen.getByRole('button', { name: 'Draft journal' })).not.toHaveAttribute('aria-disabled');
     expect(screen.getByRole('button', { name: 'Draft journal' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Mute type' })).not.toHaveAttribute('aria-disabled');
     expect(screen.getByRole('button', { name: 'Mute type' })).toBeEnabled();
   });
 

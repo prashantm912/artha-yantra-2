@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Select } from '../../components/atoms/Select.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
@@ -159,6 +159,10 @@ export function JournalPage() {
 
   // INT-I3 draft-accept: seed the new-entry form from an insight JOURNAL_DRAFT_ACCEPT deep link, then
   // clear the params so a refresh/back doesn't re-seed a stale draft (the OrderPrefillTicket pattern).
+  // Focus moves to the seeded Note input — a user-INITIATED navigation, not a page-load autofocus
+  // (jsx-a11y/no-autofocus doesn't apply), so keyboard/SR users land on the prefill instead of a
+  // silent below-the-fold form.
+  const noteRef = useRef<HTMLInputElement | null>(null);
   const [draftParams, setDraftParams] = useSearchParams();
   useEffect(() => {
     const draftSignalId = draftParams.get('draftSignalId');
@@ -172,6 +176,7 @@ export function JournalPage() {
       setLinkId(draftSignalId);
     }
     setDraftParams(new URLSearchParams(), { replace: true });
+    noteRef.current?.focus();
   }, [draftParams, setDraftParams]);
 
   const resetForm = () => {
@@ -261,7 +266,7 @@ export function JournalPage() {
         <div className="flex flex-wrap items-end gap-2">
           <label className="flex flex-1 flex-col gap-1">
             <span className="text-xs text-ay-muted">Note</span>
-            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="What happened / what to improve" aria-label="Note" title="The diary note — what happened and what to do differently next time." className={inputCls} />
+            <input ref={noteRef} value={note} onChange={(e) => setNote(e.target.value)} placeholder="What happened / what to improve" aria-label="Note" title="The diary note — what happened and what to do differently next time." className={inputCls} />
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs text-ay-muted">Tags (comma-sep)</span>

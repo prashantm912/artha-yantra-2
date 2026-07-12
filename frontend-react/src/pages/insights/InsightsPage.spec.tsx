@@ -124,4 +124,15 @@ describe('InsightsPage', () => {
       ),
     ).toBe(true);
   });
+
+  it('Compare stays aria-disabled (focusable, reason described) until 2–6 signal rows are selected', async () => {
+    renderPage();
+    await screen.findByRole('button', { name: /NIFTY 25200 CE scalp/ });
+    // One signal-scoped row selected → below the 2-minimum: gated but still reachable.
+    await userEvent.click(screen.getByLabelText('Select insight: NIFTY 25200 CE scalp — priority 82'));
+    const compare = screen.getByRole('button', { name: /Compare/ });
+    expect(compare).toHaveAttribute('aria-disabled', 'true');
+    expect(compare).not.toBeDisabled();
+    expect(compare).toHaveAccessibleDescription(/2–6 signal-scoped insights/);
+  });
 });

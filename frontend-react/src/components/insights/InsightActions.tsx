@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useId, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { BellOff, FileText, Receipt, ShieldCheck } from 'lucide-react';
@@ -22,9 +22,11 @@ import {
 // governed UI (the /orders paper ticket, the /journal new-entry form) with the fields pre-seeded, so the
 // manual-checks gate + risk governor + XSRF ride the real mutation path; a PROPOSED response is completed
 // against the existing endpoint; DONE (mute) is an in-module idempotent write. Trust-gating is enforced
-// client-side (§7.4): a BLOCKED insight disables ALL actions, a DEGRADED insight disables the order
-// prefills — with the reason on the disabled button — and the 422 the backend still returns on a raced
-// gate change is surfaced inline (never swallowed).
+// client-side (§7.4): a BLOCKED insight gates ALL actions, a DEGRADED insight gates the order prefills.
+// A gated button is aria-disabled (NOT natively disabled) so it stays in the tab order and the a11y
+// tree, with the reason wired via aria-describedby to an sr-only span — screen-reader/keyboard users
+// learn WHY the money-adjacent action is off; the click no-ops. The 422 the backend still returns on a
+// raced gate change is surfaced inline (never swallowed).
 
 const ICONS: Partial<Record<ProposeAction, typeof Receipt>> = {
   OPEN_TICKET: Receipt,
@@ -72,6 +74,9 @@ export function InsightActions({ insight, only, size = 'sm', onActed }: InsightA
   const navigate = useNavigate();
   const qc = useQueryClient();
   const act = useAct();
+  // Per-instance id prefix for the gate-reason spans — the same insight can render in the drawer AND a
+  // Focus row simultaneously, so a bare insight.id would collide.
+  const uid = useId();
   // ACK_SELL_DECISION returns a PROPOSED instruction the browser completes against the EXISTING
   // sell-decision acknowledge endpoint (a governed swing endpoint — XSRF rides via apiFetch).
   const completeSellAck = useMutation({
@@ -122,19 +127,35 @@ export function InsightActions({ insight, only, size = 'sm', onActed }: InsightA
         {specs.map((spec) => {
           const gated = actionGate(insight, spec);
           const Icon = ICONS[spec.action];
+          const gateId = gated != null ? `${uid}-${spec.action}-gate` : undefined;
           return (
-            <Button
-              key={spec.action}
-              variant="outline"
-              size={size}
-              icon={Icon}
-              disabled={gated != null || busy}
-              loading={busy && act.variables?.action === spec.action}
-              title={gated ?? undefined}
-              onClick={() => run(spec)}
-            >
-              {spec.label}
-            </Button>
+            <Fragment key={spec.action}>
+              <Button
+                variant="outline"
+                size={size}
+                icon={Icon}
+                // Gated = aria-disabled, NOT natively disabled: the button stays focusable so
+                // keyboard/SR users can reach it and hear the reason (aria-describedby); the click
+                // no-ops. Only a transient busy state disables natively (no reason to convey).
+                aria-disabled={gated != null || undefined}
+                aria-describedby={gateId}
+                disabled={gated == null && busy}
+                loading={busy && act.variables?.action === spec.action}
+                title={gated ?? undefined}
+                className={gated != null ? 'opacity-50' : undefined}
+                onClick={() => {
+                  if (gated != null) return;
+                  run(spec);
+                }}
+              >
+                {spec.label}
+              </Button>
+              {gated != null && (
+                <span id={gateId} className="ay-sr-only">
+                  {gated}
+                </span>
+              )}
+            </Fragment>
           );
         })}
       </div>

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bell, GitCompareArrows } from 'lucide-react';
 import { cn } from '../../lib/cn.ts';
@@ -33,6 +33,9 @@ import { useSavedViews, type SavedView } from './savedViews.ts';
 // drawer. The PROPOSE take/ticket one-clicks and the WS live-merge are I3.
 
 const PAGE_SIZE = 100;
+
+/** Why the Compare bulk action is gated (aria-describedby text + hover title). */
+const COMPARE_GATE_REASON = 'Select 2–6 signal-scoped insights to compare their setups side by side.';
 
 function fmtTime(iso: string): string {
   return new Intl.DateTimeFormat('en-GB', {
@@ -70,6 +73,7 @@ export function InsightsPage() {
   const dismiss = useDismissInsight();
   const navigate = useNavigate();
   const { views, save, remove } = useSavedViews();
+  const compareGateId = useId();
 
   const q = useInsights({
     type: type || null,
@@ -245,20 +249,25 @@ export function InsightsPage() {
         <div className="mb-3 flex items-center gap-2 rounded-md border border-ay-border bg-surface-2/40 px-3 py-2 text-body-sm">
           <span className="text-ay-muted">{selectedRows.size} selected</span>
           <span className="ml-auto flex gap-2">
+            {/* Gated = aria-disabled (stays focusable) + the reason via aria-describedby, matching
+                the InsightActions pattern; openCompare already no-ops when !canCompare. */}
             <Button
               variant="outline"
               size="sm"
               icon={GitCompareArrows}
-              disabled={!canCompare}
-              title={
-                canCompare
-                  ? undefined
-                  : 'Select 2–6 signal-scoped insights to compare their setups side by side.'
-              }
+              aria-disabled={!canCompare || undefined}
+              aria-describedby={canCompare ? undefined : compareGateId}
+              title={canCompare ? undefined : COMPARE_GATE_REASON}
+              className={canCompare ? undefined : 'opacity-50'}
               onClick={openCompare}
             >
               Compare{selectedSignalIds.length > 0 ? ` (${selectedSignalIds.length})` : ''}
             </Button>
+            {!canCompare && (
+              <span id={compareGateId} className="ay-sr-only">
+                {COMPARE_GATE_REASON}
+              </span>
+            )}
             <Button variant="outline" size="sm" disabled={ack.isPending} onClick={bulkAck}>
               Ack selected
             </Button>

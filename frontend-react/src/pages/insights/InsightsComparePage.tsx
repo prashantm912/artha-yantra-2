@@ -24,7 +24,8 @@ function parseIds(params: URLSearchParams): number[] {
   const out: number[] = [];
   for (const s of raw) {
     const n = Number(s.trim());
-    if (Number.isFinite(n) && n > 0 && !out.includes(n)) out.push(n);
+    // Integer-only: signal ids are int64 rows — "1.5" must not slip through to the backend.
+    if (Number.isInteger(n) && n > 0 && !out.includes(n)) out.push(n);
   }
   return out;
 }
@@ -107,9 +108,9 @@ function CompareMatrix({ data }: { data: CompareResult }) {
         <table className="w-full text-sm">
           <thead className="bg-surface-1 text-left text-xs text-ay-muted">
             <tr>
-              <th className="sticky left-0 z-10 bg-surface-1 px-3 py-2 font-medium">Metric</th>
+              <th scope="col" className="sticky left-0 z-10 bg-surface-1 px-3 py-2 font-medium">Metric</th>
               {columns.map((c) => (
-                <th key={c.signalId} className="px-3 py-2 text-right font-medium">
+                <th key={c.signalId} scope="col" className="px-3 py-2 text-right font-medium">
                   <Link to={`/charts?symbol=${c.tradingsymbol ?? ''}`} className="text-ay-text hover:text-accent">
                     {c.tradingsymbol ?? `#${c.signalId}`}
                   </Link>

@@ -85,6 +85,11 @@ fixture state-machine walk; counterfactuals cap-exempt, redundant clone archived
 ALL DONE → EVO next = E5).** Remaining startables: INT-I3 (NOW unblocked — D1 events/UI landed), EVO-E5,
 D2/D3/D4 phases, F5 signal-analysis backlog (owner), owner rows. Monday watches unchanged + NEW: first scalper fire populates fired_diagnostic (C4),
 20:05 batch writes the first F3 probe rows, funnel-pin weekend edge re-verify (task_03b9f52d).
+**WAVE 7 LANDED 2026-07-12 ~13:00 IST (#776–#780 + #779, deploy round 5 @ 6f1556d8): INT-I3 BACKEND COMPLETE #778
+(PROPOSE /act — server writes the audit trail, the owner's browser performs the real governed call; signal compare;
+strategy dossier; STRATEGY_EVIDENCE + SELL_DECISION generators; WS insights channel flag-OFF) → the intelligence
+program is I1+I2+I3-backend done; D2 Phase 3 substantially done (see the D2 row); chip task_fab9e823 fixed #779.
+Next startables: I3-FE half (compare/dossier/act views), I4 (owner-gated arming), EVO-E5, D3/D4, D2 residue.**
 Live behavioural notes a new session must know: B1 makes Monday 2026-07-13 a CALIBRATION session
 (entries UP + wider stops expected — judge on `ay_signal_partial_bucket_mismatch_total`, not entry
 count; E8 re-tune consumes the clean sessions); A3 changed exit semantics (settle = last REAL tick

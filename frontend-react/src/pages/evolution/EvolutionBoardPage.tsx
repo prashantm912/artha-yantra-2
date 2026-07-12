@@ -78,7 +78,7 @@ function CampaignCard({ campaign, pending }: { campaign: Campaign; pending: numb
 
 export function EvolutionBoardPage() {
   const campaignsQ = useCampaigns();
-  const pendingQ = useProposals({ status: 'PENDING' });
+  const pendingQ = useProposals({ status: 'PENDING', limit: 200 });
 
   const pendingByCampaign = useMemo(() => {
     const m = new Map<string, number>();

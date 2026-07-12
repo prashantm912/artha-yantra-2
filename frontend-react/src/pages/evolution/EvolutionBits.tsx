@@ -128,7 +128,7 @@ export function GateChip({ gate }: { gate: GateResult }) {
       className={cn('inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] ring-1', tone)}
     >
       <span className="font-medium">{label}</span>
-      <span className="opacity-80">{gate.status}</span>
+      <span>{gate.status}</span>
     </span>
   );
 }

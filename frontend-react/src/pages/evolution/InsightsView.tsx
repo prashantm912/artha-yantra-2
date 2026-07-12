@@ -122,7 +122,7 @@ export function InsightsView({ generations, candidates }: InsightsViewProps) {
         {(data) => (
           <div className="flex flex-col gap-6">
             {data.notes.length > 0 && (
-              <ul className="flex items-start gap-2 rounded-md border border-ay-border bg-surface-2/40 px-3 py-2 text-[11px] text-ay-muted">
+              <div className="flex items-start gap-2 rounded-md border border-ay-border bg-surface-2/40 px-3 py-2 text-[11px] text-ay-muted">
                 <Lightbulb aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
                 <span>
                   {data.notes.map((n, i) => (
@@ -131,7 +131,7 @@ export function InsightsView({ generations, candidates }: InsightsViewProps) {
                     </span>
                   ))}
                 </span>
-              </ul>
+              </div>
             )}
 
             {/* Parameter-importance tornado (§3.4). */}
@@ -165,21 +165,23 @@ export function InsightsView({ generations, candidates }: InsightsViewProps) {
               {data.brittleness.length === 0 ? (
                 <p className="text-caption text-ay-muted">No brittleness signal available.</p>
               ) : (
-                <table className="w-full text-xs">
-                  <thead className="text-left text-ay-muted">
-                    <tr>
-                      <th className="py-1 pr-2 font-medium">Parameter</th>
-                      <th className="py-1 pr-2 text-right font-medium">Importance</th>
-                      <th className="py-1 pr-2 text-right font-medium">Local variance</th>
-                      <th className="py-1 text-right font-medium">Verdict</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.brittleness.map((b) => (
-                      <BrittlenessRow key={b.param} item={b} />
-                    ))}
-                  </tbody>
-                </table>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead className="text-left text-ay-muted">
+                      <tr>
+                        <th className="py-1 pr-2 font-medium">Parameter</th>
+                        <th className="py-1 pr-2 text-right font-medium">Importance</th>
+                        <th className="py-1 pr-2 text-right font-medium">Local variance</th>
+                        <th className="py-1 text-right font-medium">Verdict</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.brittleness.map((b) => (
+                        <BrittlenessRow key={b.param} item={b} />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </section>
 

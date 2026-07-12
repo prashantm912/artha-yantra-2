@@ -230,21 +230,23 @@ export function CandidateCardDrawer({ candidate, open, onOpenChange }: Candidate
                     <p className="text-caption text-ay-muted">No live-gap panel on this scorecard yet.</p>
                   )}
                   {versionId && reconItems.length > 0 && (
-                    <table className="mt-2 w-full text-xs">
-                      <thead className="text-left text-ay-muted">
-                        <tr>
-                          <th className="py-1 pr-2 font-medium">Verdict</th>
-                          <th className="py-1 pr-2 text-right font-medium">gapZ</th>
-                          <th className="py-1 pr-2 text-right font-medium">Pairs</th>
-                          <th className="py-1 text-right font-medium">Window</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {reconItems.map((r) => (
-                          <ReconRow key={r.id} r={r} />
-                        ))}
-                      </tbody>
-                    </table>
+                    <div className="mt-2 overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead className="text-left text-ay-muted">
+                          <tr>
+                            <th className="py-1 pr-2 font-medium">Verdict</th>
+                            <th className="py-1 pr-2 text-right font-medium">gapZ</th>
+                            <th className="py-1 pr-2 text-right font-medium">Pairs</th>
+                            <th className="py-1 text-right font-medium">Window</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {reconItems.map((r) => (
+                            <ReconRow key={r.id} r={r} />
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   )}
                 </Section>
               )}

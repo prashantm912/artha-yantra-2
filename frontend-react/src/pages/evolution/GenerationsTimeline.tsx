@@ -81,9 +81,10 @@ export function GenerationsTimeline({
                   <dd className="tabular-nums text-ay-text">{shortId(g.searchSpaceHash)}</dd>
                 </div>
                 <div className="col-span-2 sm:col-span-4">
-                  <dt className="text-ay-muted">
+                  <dt className="sr-only">Timing</dt>
+                  <dd className="text-ay-muted">
                     Started {fmtIstTime(g.startedAt)} · finished {fmtIstTime(g.finishedAt)}
-                  </dt>
+                  </dd>
                 </div>
               </dl>
               {preRegistered && (

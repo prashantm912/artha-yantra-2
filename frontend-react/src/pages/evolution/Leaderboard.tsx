@@ -134,6 +134,7 @@ export function Leaderboard({
                     <td className="px-2 py-1.5">
                       <button
                         type="button"
+                        aria-label={`Open scorecard for candidate ${c.id.slice(0, 8)}`}
                         onClick={(e) => {
                           e.stopPropagation();
                           onOpen(c);

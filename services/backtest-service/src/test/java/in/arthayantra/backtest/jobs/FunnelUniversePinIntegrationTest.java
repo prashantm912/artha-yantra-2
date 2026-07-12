@@ -80,8 +80,8 @@ class FunnelUniversePinIntegrationTest extends BacktestIntegrationTestBase {
         .thenReturn(
             Optional.of(
                 objectMapper.readTree(
-                    "{\"mode\":\"manas_arora_funnel\",\"checksum\":\"pin-abc\",\"items\":["
-                        + "{\"exchange\":\"NSE\",\"tradingsymbol\":\"RELIANCE\"},"
+                    "{\"mode\":\"manas_arora_funnel\",\"asOf\":\"2026-07-10\",\"checksum\":\"pin-abc\","
+                        + "\"items\":[{\"exchange\":\"NSE\",\"tradingsymbol\":\"RELIANCE\"},"
                         + "{\"exchange\":\"NSE\",\"tradingsymbol\":\"TCS\"}]}")));
 
     String jobId = submit(FUNNEL);
@@ -94,6 +94,9 @@ class FunnelUniversePinIntegrationTest extends BacktestIntegrationTestBase {
     assertThat(pinned.get(0).path("exchange").asText()).isEqualTo("NSE");
     assertThat(pinned.get(0).path("tradingsymbol").asText()).isEqualTo("RELIANCE");
     assertThat(request.path("universeChecksum").asText()).isEqualTo("pin-abc");
+    // task_03b9f52d / task_9062b5f1: the funnel-chosen screen date is stamped into run provenance so
+    // a windowed funnel submission records WHICH persisted screen fed the pinned universe.
+    assertThat(request.path("universeAsOf").asText()).isEqualTo("2026-07-10");
   }
 
   @Test

@@ -13,6 +13,9 @@ import in.arthayantra.backtest.dispatch.ReplayStub;
 import in.arthayantra.backtest.dispatch.TrialResultPublisher;
 import in.arthayantra.backtest.jobs.Job;
 import in.arthayantra.backtest.jobs.JobKind;
+import in.arthayantra.backtest.provenance.DatasetEpochRepository;
+import in.arthayantra.backtest.provenance.DatasetProvenance;
+import in.arthayantra.backtest.provenance.EvidencePolicy;
 import in.arthayantra.backtest.regime.BenchmarkSeries;
 import in.arthayantra.backtest.regime.RegimeLabel;
 import in.arthayantra.backtest.regime.RegimeLabeler;
@@ -74,6 +77,7 @@ public class BacktestRunner {
   private final MarketDataClient marketData;
   private final in.arthayantra.backtest.replay.counterfactual.CounterfactualService counterfactual;
   private final in.arthayantra.backtest.replay.deepswing.DeepSwingService deepSwing;
+  private final DatasetEpochRepository datasetEpochs;
 
   /** Wires the replay collaborators. */
   public BacktestRunner(
@@ -93,7 +97,8 @@ public class BacktestRunner {
       TrialResultPublisher trialResults,
       MarketDataClient marketData,
       in.arthayantra.backtest.replay.counterfactual.CounterfactualService counterfactual,
-      in.arthayantra.backtest.replay.deepswing.DeepSwingService deepSwing) {
+      in.arthayantra.backtest.replay.deepswing.DeepSwingService deepSwing,
+      DatasetEpochRepository datasetEpochs) {
     this.versions = versions;
     this.candleReader = candleReader;
     this.replayEngine = replayEngine;
@@ -111,6 +116,7 @@ public class BacktestRunner {
     this.marketData = marketData;
     this.counterfactual = counterfactual;
     this.deepSwing = deepSwing;
+    this.datasetEpochs = datasetEpochs;
   }
 
   /** Runs the job; throws {@link JobCancelledException} on cancel and other exceptions on failure. */
@@ -185,6 +191,13 @@ public class BacktestRunner {
     // ReplayEngine run the conservative touch overlay on the entry-time stops/targets. Absent ⇒ true ⇒
     // the byte-identical close-basis default (this is a candle-path knob; the premium path ignores it).
     boolean oneMinuteCovered = !"bar_hl_worstof".equals(definition.session().touchBasis());
+
+    // Audit P1-1 / R2 (review F1, TOCTOU): snapshot the dataset-epoch head BEFORE the first candle
+    // read (and before the auto-warm, which itself triggers authoritative fetch/upserts). A rewrite
+    // recorded MID-replay then carries an id ABOVE this snapshot, so the run reads STALE afterwards —
+    // the safe false-positive direction. Reading head() after the replay would stamp that mid-replay
+    // epoch as already-observed and the run would falsely read FRESH on data the rewrite superseded.
+    long datasetEpochHead = datasetEpochs.head();
 
     // Auto-warm every series this run reads (primary 1m + each context (instrument, timeframe) +
     // the benchmark daily) into the shared store via market-data's cache-first GET BEFORE the reads
@@ -353,6 +366,31 @@ public class BacktestRunner {
             extraSeriesLegs(signal, strikeRef, strikeRef1m, contexts, optionsStrategy,
                 result.trades(), from, to));
 
+    // Audit P1-1 / R2 dataset comparability: the CONTENT-STABLE fingerprint (fetched_at-free — folds
+    // the actual OHLCV of the in-memory consumed series), the epoch HEAD snapshotted BEFORE the first
+    // candle read (review F1 — a mid-replay rewrite reads stale, never falsely fresh), and the family
+    // evidence policy (§1.2 — whether these sim numbers are a ranking plane at all). All three ride
+    // jobs/runs tables only; NO engine record is touched, so goldens/parity stay byte-identical.
+    List<DatasetContentHash.Series> contentLegs =
+        contentSeries(
+            signal, strikeRef, strikeRef1m, primary1m, contexts, optionsStrategy,
+            result.trades(), from, to);
+    // Review F2: traded option premium legs are COUNT-ONLY in the content hash (their series are read
+    // inside OptionsPremiumReplay, never held here), so a premium correction that preserves bar count
+    // is invisible to the hash. Stamp that limitation as provenance the moment it applies — the
+    // consumer-facing "equality of these axes does not guarantee premium-data equality" flag. Only
+    // when true (no new key on candle-path runs — metrics stay byte-identical).
+    boolean premiumContentUnverified =
+        contentLegs.stream().anyMatch(s -> "count".equals(s.valueChecksum()));
+    if (premiumContentUnverified) {
+      m.full().put("premiumContentUnverified", true);
+    }
+    DatasetProvenance datasetProvenance =
+        new DatasetProvenance(
+            DatasetContentHash.of(contentLegs),
+            datasetEpochHead,
+            EvidencePolicy.forConfig(config));
+
     UUID runId =
         runs.insert(
             job.id(),
@@ -372,6 +410,7 @@ public class BacktestRunner {
             premiumSource,
             folds,
             benchmark,
+            datasetProvenance,
             // Audit T3 / EVO §13 row 4: the run inherits its job's actor — a run exists on behalf of
             // whoever submitted the job (owner backtest, or optimizer:{sweepId} for a TRIAL).
             job.createdBy());
@@ -448,6 +487,57 @@ public class BacktestRunner {
       }
     }
     return legs;
+  }
+
+  /**
+   * The ordered content-hash series legs (audit P1-1 / R2), parallel to {@link #extraSeriesLegs} but
+   * carrying a fetched_at-FREE value checksum for every series the runner holds in memory: the primary
+   * 1m (first), the decoupled strike-reference (options path), and each context series — so the content
+   * hash changes iff a bar's OHLCV/OI changes and is identical across a value-identical re-fetch. Each
+   * traded option contract's premium series is NOT held in memory (it is read inside OptionsPremiumReplay),
+   * so it contributes a COUNT-ONLY leg — a documented weaker leg whose content drift is instead caught by
+   * the epoch ledger + the primary's own checksum. TreeMap-sorted option legs keep the order stable.
+   */
+  private List<DatasetContentHash.Series> contentSeries(
+      SeriesKey signal,
+      SeriesKey strikeRef,
+      List<EngineCandle> strikeRef1m,
+      List<EngineCandle> primary1m,
+      Map<SeriesKey, List<EngineCandle>> contexts,
+      boolean optionsStrategy,
+      List<Trade> trades,
+      OffsetDateTime from,
+      OffsetDateTime to) {
+    List<DatasetContentHash.Series> series = new ArrayList<>();
+    series.add(
+        DatasetContentHash.Series.withCandles(
+            signal.exchange(), signal.tradingsymbol(), "1m", primary1m));
+    if (optionsStrategy && !strikeRef.equals(signal)) {
+      series.add(
+          DatasetContentHash.Series.withCandles(
+              strikeRef.exchange(), strikeRef.tradingsymbol(), "1m", strikeRef1m));
+    }
+    for (Map.Entry<SeriesKey, List<EngineCandle>> e : contexts.entrySet()) {
+      SeriesKey k = e.getKey();
+      series.add(
+          DatasetContentHash.Series.withCandles(
+              k.exchange(), k.tradingsymbol(), k.interval(), e.getValue()));
+    }
+    if (optionsStrategy) {
+      Map<String, Trade> byContract = new TreeMap<>();
+      for (Trade t : trades) {
+        byContract.putIfAbsent(t.exchange() + "|" + t.tradingsymbol(), t);
+      }
+      for (Trade t : byContract.values()) {
+        series.add(
+            DatasetContentHash.Series.countOnly(
+                t.exchange(),
+                t.tradingsymbol(),
+                "1m",
+                candleReader.count1mBuckets(t.exchange(), t.tradingsymbol(), from, to)));
+      }
+    }
+    return series;
   }
 
   /** The per-fold OOS objective (OOS sharpe) array for the pruner; empty for a full-window trial. */

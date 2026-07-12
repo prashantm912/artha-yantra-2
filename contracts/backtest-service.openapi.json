@@ -83,6 +83,89 @@
         }
       }
     },
+    "/api/v1/backtests/dataset-epochs" : {
+      "get" : {
+        "tags" : [ "dataset-comparability-controller" ],
+        "operationId" : "epochs",
+        "parameters" : [ {
+          "name" : "limit",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 50
+          }
+        }, {
+          "name" : "offset",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 0
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DatasetEpochListResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post" : {
+        "tags" : [ "dataset-comparability-controller" ],
+        "operationId" : "recordEpoch",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/DatasetEpochRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DatasetEpoch"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/backtests/counterfactual" : {
       "post" : {
         "tags" : [ "counterfactual-controller" ],
@@ -636,6 +719,80 @@
         }
       }
     },
+    "/api/v1/backtests/runs/{runId}/provenance" : {
+      "get" : {
+        "tags" : [ "dataset-comparability-controller" ],
+        "operationId" : "provenance",
+        "parameters" : [ {
+          "name" : "runId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProvenanceBlock"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backtests/runs/{runId}/comparability" : {
+      "get" : {
+        "tags" : [ "dataset-comparability-controller" ],
+        "operationId" : "comparability",
+        "parameters" : [ {
+          "name" : "runId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RunComparability"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/backtests/jobs" : {
       "get" : {
         "tags" : [ "jobs-controller" ],
@@ -1033,6 +1190,80 @@
           }
         }
       },
+      "DatasetEpochRequest" : {
+        "type" : "object",
+        "properties" : {
+          "reason" : {
+            "type" : "string"
+          },
+          "symbols" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "exchange" : {
+            "type" : "string"
+          },
+          "windowStart" : {
+            "type" : "string"
+          },
+          "windowEnd" : {
+            "type" : "string"
+          },
+          "interval" : {
+            "type" : "string"
+          },
+          "jobLink" : {
+            "type" : "string"
+          },
+          "note" : {
+            "type" : "string"
+          }
+        }
+      },
+      "DatasetEpoch" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "reason" : {
+            "type" : "string"
+          },
+          "symbols" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "exchange" : {
+            "type" : "string"
+          },
+          "windowStart" : {
+            "type" : "string"
+          },
+          "windowEnd" : {
+            "type" : "string"
+          },
+          "interval" : {
+            "type" : "string"
+          },
+          "jobLink" : {
+            "type" : "string"
+          },
+          "source" : {
+            "type" : "string"
+          },
+          "note" : {
+            "type" : "string"
+          },
+          "createdAt" : {
+            "type" : "string"
+          }
+        }
+      },
       "CounterfactualRunRequest" : {
         "type" : "object",
         "properties" : {
@@ -1161,6 +1392,85 @@
           },
           "grade" : {
             "type" : "string"
+          }
+        }
+      },
+      "ProvenanceBlock" : {
+        "type" : "object",
+        "properties" : {
+          "engineSha" : {
+            "type" : "string"
+          },
+          "engineImage" : {
+            "type" : "string"
+          },
+          "configHash" : {
+            "type" : "string"
+          },
+          "dataHash" : {
+            "type" : "string"
+          },
+          "contentHash" : {
+            "type" : "string"
+          },
+          "datasetEpoch" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "evidencePolicy" : {
+            "type" : "string"
+          },
+          "universeChecksum" : {
+            "type" : "string"
+          },
+          "premiumSource" : {
+            "type" : "string"
+          },
+          "costClass" : {
+            "type" : "string"
+          },
+          "profile" : {
+            "type" : "string"
+          },
+          "warmStatus" : {
+            "type" : "string"
+          },
+          "premiumContentUnverified" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "RunComparability" : {
+        "type" : "object",
+        "properties" : {
+          "runId" : {
+            "type" : "string"
+          },
+          "datasetEpochAtRun" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "currentEpoch" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "stale" : {
+            "type" : "boolean"
+          },
+          "contentHash" : {
+            "type" : "string"
+          },
+          "engineSha" : {
+            "type" : "string"
+          },
+          "evidencePolicy" : {
+            "type" : "string"
+          },
+          "staleEpochs" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/DatasetEpoch"
+            }
           }
         }
       },
@@ -1338,6 +1648,18 @@
           "premiumSource" : {
             "type" : "string"
           },
+          "contentHash" : {
+            "type" : "string"
+          },
+          "datasetEpoch" : {
+            "type" : "string"
+          },
+          "evidencePolicy" : {
+            "type" : "string"
+          },
+          "premiumContentUnverified" : {
+            "type" : "boolean"
+          },
           "createdBy" : {
             "type" : "string"
           },
@@ -1363,6 +1685,30 @@
           },
           "premiumSourceMatch" : {
             "type" : "boolean"
+          },
+          "contentHashMatch" : {
+            "type" : "boolean"
+          },
+          "datasetEpochMatch" : {
+            "type" : "boolean"
+          },
+          "premiumContentUnverified" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "DatasetEpochListResponse" : {
+        "type" : "object",
+        "properties" : {
+          "epochs" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/DatasetEpoch"
+            }
+          },
+          "head" : {
+            "type" : "integer",
+            "format" : "int64"
           }
         }
       },

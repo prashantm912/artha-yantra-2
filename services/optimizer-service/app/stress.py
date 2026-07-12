@@ -72,6 +72,16 @@ _MAX_MULT = 100.0  # matches backtest-service JobsService.validatedSlippageMulti
 _POLL_INTERVAL_SECONDS = 3.0
 _POLL_TIMEOUT_SECONDS = 1800.0  # 30 min — a stress round is small; a slow run degrades, never hangs
 
+# Stress-side worker reservation (B16 composes with this): a stress run rides the INTERACTIVE
+# backtest stream (streams.py dispatch_backtest → cg-backtest), which the backtest-service B16
+# trial reservation does NOT protect — so without a cap here a plateau round (up to topK ×
+# multipliers = 20 × 4 = 80 jobs) could flood every worker and starve the owner's interactive
+# backtests. This bounds the round's IN-FLIGHT dispatches; the drain refills a slot only as a run
+# terminates, so the two layers stack: B16 keeps interactive slots free from trials, this keeps
+# them free from stress runs. Env-tunable via ARTHA_STRESS_MAX_CONCURRENT_JOBS; the default of 2
+# leaves headroom on any pool with ≥ 3 workers (max(1, cores-2) on this box).
+_DEFAULT_MAX_CONCURRENT = 2
+
 _TERMINAL_NO_RESULT = {"failed", "cancelled"}
 
 # Appended to a candidate's STORED card when the round's re-assembly saw different evidence than the
@@ -239,6 +249,7 @@ class StressService:
         backtest_client: Any,
         poll_interval: float = _POLL_INTERVAL_SECONDS,
         poll_timeout: float = _POLL_TIMEOUT_SECONDS,
+        max_concurrent: int = _DEFAULT_MAX_CONCURRENT,
     ) -> None:
         self._repo_factory = repo_factory
         self._jobs_factory = jobs_factory
@@ -247,6 +258,8 @@ class StressService:
         self._backtest = backtest_client
         self._poll_interval = poll_interval
         self._poll_timeout = poll_timeout
+        # Max stress runs dispatched-and-not-yet-terminal at once (see _DEFAULT_MAX_CONCURRENT).
+        self._max_concurrent = max(1, max_concurrent)
         self._in_flight: set[str] = set()
         self._lock = threading.Lock()
 
@@ -360,6 +373,11 @@ class StressService:
             sweep_job = jobs.get(sweep_id) or {}
             objective = (sweep_job.get("request") or {}).get("objective", {})
             metric = _primary_objective(objective)[0]
+            # INSERT every run's BACKTEST row up front (so the 202 receipt carries all jobIds and
+            # its `dispatched` count is stable), but DEFER the stream dispatch to the bounded drain
+            # — the jobs are XADDed at most self._max_concurrent at a time as slots free (_collect),
+            # so the round never floods the interactive worker pool. `pending`'s insertion order IS
+            # the dispatch order the drain drains in.
             pending: dict[str, tuple[str, float]] = {}
             descriptors: list[dict[str, Any]] = []
             for cand in top:
@@ -369,7 +387,6 @@ class StressService:
                     job_id = jobs.insert_backtest(
                         sweep_id, request, created_by=f"optimizer:{sweep_id}:stress"
                     )
-                    self._dispatcher.dispatch_backtest(job_id)
                     pending[str(job_id)] = (cand["id"], multiplier)
                     runs.append({"multiplier": multiplier, "jobId": str(job_id)})
                 descriptors.append(
@@ -427,38 +444,58 @@ class StressService:
     def _collect(
         self, context: _RoundContext, pending: dict[str, tuple[str, float]]
     ) -> dict[str, dict[float, tuple[float | None, str | None]]]:
-        """Poll each dispatched BACKTEST stress run to a terminal state, reading the stressed
-        objective off a completed run and degrading a failed/cancelled/timed-out one to a MISSING
-        point (``(None, None)``). Bounded by ``_poll_timeout`` so one dead run never hangs it.
+        """Dispatch the round's BACKTEST stress runs with BOUNDED concurrency, then poll each to a
+        terminal state — reading the stressed objective off a completed run and degrading a
+        failed/cancelled/timed-out one to a MISSING point (``(None, None)``).
+
+        At most ``self._max_concurrent`` runs are ever dispatched-and-not-yet-terminal at once: the
+        round rides the interactive backtest stream (streams.py), which the backtest-service B16
+        trial reservation does NOT protect, so an uncapped fan-out could occupy every worker and
+        starve the owner's interactive backtests. Each terminal run frees a slot and the next queued
+        run is dispatched — the queue drains gradually instead of flooding. ``pending``'s insertion
+        order is the dispatch order. Bounded by ``_poll_timeout`` so one dead run never hangs it.
         Returns ``{candidate_id: {multiplier: (objective, run_id)}}``."""
         outcomes: dict[str, dict[float, tuple[float | None, str | None]]] = {
             cand_id: {} for cand_id, _ in pending.values()
         }
-        remaining = dict(pending)
+        waiting = list(pending)  # inserted-but-not-yet-dispatched job ids, in dispatch order
+        in_flight: set[str] = set()
+
+        def record(job_id: str, objective: float | None, run_id: str | None) -> None:
+            cand_id, multiplier = pending[job_id]
+            outcomes[cand_id][multiplier] = (objective, run_id)
+
+        def fill() -> None:  # dispatch queued runs up to the concurrency cap
+            while waiting and len(in_flight) < self._max_concurrent:
+                job_id = waiting.pop(0)
+                self._dispatcher.dispatch_backtest(job_id)
+                in_flight.add(job_id)
+
+        fill()
         deadline = time.monotonic() + self._poll_timeout
-        while remaining and time.monotonic() < deadline:
+        while in_flight and time.monotonic() < deadline:
             progressed = False
-            for job_id in list(remaining):
+            for job_id in list(in_flight):
                 status = self._safe_job_status(job_id)
                 if status is None:
                     continue  # transient read error — retried next pass
                 state = status.get("status")
                 if state == "completed":
-                    cand_id, multiplier = remaining.pop(job_id)
+                    in_flight.discard(job_id)
                     run_id = status.get("resultRef")
-                    outcomes[cand_id][multiplier] = (
-                        self._run_objective(run_id, context.metric),
-                        run_id,
-                    )
+                    record(job_id, self._run_objective(run_id, context.metric), run_id)
                     progressed = True
                 elif state in _TERMINAL_NO_RESULT:
-                    cand_id, multiplier = remaining.pop(job_id)
-                    outcomes[cand_id][multiplier] = (None, None)  # missing point
+                    in_flight.discard(job_id)
+                    record(job_id, None, None)  # missing point
                     progressed = True
-            if remaining and not progressed:
+            if progressed:
+                fill()  # a slot (or several) freed → advance the queue
+            elif in_flight:
                 time.sleep(self._poll_interval)
-        for _job_id, (cand_id, multiplier) in remaining.items():  # timed out → missing point
-            outcomes[cand_id][multiplier] = (None, None)
+        # Timed out (or read-wedged): every run still in flight OR never dispatched → missing point.
+        for job_id in list(in_flight) + waiting:
+            record(job_id, None, None)
         return outcomes
 
     def _rescore(

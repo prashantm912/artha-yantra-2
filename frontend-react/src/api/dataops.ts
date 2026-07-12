@@ -3,7 +3,7 @@
 // /api/v1/market/**). Status/quota hooks poll (no WS topic for the backfill); coverage is on-demand.
 
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
-import { apiFetch, listItems } from './client.ts';
+import { apiFetch, listItems, warnIfExportTruncated } from './client.ts';
 
 // ---- wire types ----------------------------------------------------------------------------
 
@@ -226,6 +226,7 @@ async function download(path: string, body: unknown, filename: string): Promise<
   if (!res.ok) {
     throw new Error(`export failed (HTTP ${res.status})`);
   }
+  warnIfExportTruncated(res);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

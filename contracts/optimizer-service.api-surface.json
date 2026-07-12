@@ -175,6 +175,17 @@
       "422"
     ]
   },
+  "POST /api/v1/evolution/campaigns/{campaign_id}/generations/{n}/select": {
+    "params": [
+      "campaign_id",
+      "n"
+    ],
+    "requestBody": true,
+    "responses": [
+      "200",
+      "422"
+    ]
+  },
   "POST /api/v1/evolution/campaigns/{campaign_id}/proposals": {
     "params": [
       "campaign_id"
@@ -196,6 +207,16 @@
     ]
   },
   "POST /api/v1/evolution/proposals/{proposal_id}/approve": {
+    "params": [
+      "proposal_id"
+    ],
+    "requestBody": true,
+    "responses": [
+      "200",
+      "422"
+    ]
+  },
+  "POST /api/v1/evolution/proposals/{proposal_id}/execute": {
     "params": [
       "proposal_id"
     ],

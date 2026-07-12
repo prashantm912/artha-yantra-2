@@ -562,6 +562,40 @@ class GenerationRecorded(GenerationModel):
     candidatesRecorded: int
 
 
+# --- E4 slice-2 selection (SCORED→SURVIVOR, §8.1 / §12 item 12) -----------------------------------
+# The per-generation SELECT step: promote a generation's SCORED candidates to SURVIVOR (the
+# gate-passing top-K by RobustScore) or RETIRE the rest (hard-gate FAIL or dominated/below-top-K),
+# recording the rationale on each candidate's scorecard. Pure ranking over already-scored cards — no
+# scoring, no registry writes, no autonomy. SURVIVOR is exactly the state the slice-1 PUBLISH_PAPER
+# generator predicates on, so selection makes that generator live end-to-end (record → score →
+# select → generate). The §8.2 near-champion / holdout bars stay a PROPOSAL-time filter (slice 1).
+
+# A candidate is re-selectable only from these states — SCORED (fresh) or a prior SURVIVOR/RETIRED
+# (a re-run recomputes deterministically). A candidate that has ADVANCED past selection
+# (PAPER/TAKE_ELIGIBLE/PROMOTED/ROLLED_BACK — it has live evidence accruing) is NEVER demoted by a
+# re-select: it is excluded from both the ranking and any state write.
+_SELECTABLE_STATES = frozenset({"SCORED", "SURVIVOR", "RETIRED"})
+
+# The design pins survivors as the "plateau top-K, typically <= 15/gen" (§1.3 control loop step 4).
+_DEFAULT_TOP_K = 15
+_MAX_TOP_K = 50
+
+
+class SelectionResult(BaseModel):
+    """The outcome of one SELECT pass over a generation: the survivor/retired split, how many rows
+    actually changed (idempotent re-run → 0), and the affected candidate rows (updated state +
+    the ``selection`` rationale now on each scorecard)."""
+
+    campaignId: str
+    generationN: int
+    generationId: str
+    topK: int
+    survivors: int
+    retired: int
+    updated: int
+    items: list[CandidateModel] = []
+
+
 class EvoRecorderService:
     """Records a manually-triggered sweep as a campaign generation. Two writes: ``create_campaign``
     (a new ACTIVE campaign) and ``record_generation`` (score an existing sweep's cohort → one
@@ -704,6 +738,127 @@ class EvoRecorderService:
             repo.close()
         return GenerationRecorded(**gen, candidatesRecorded=len(candidate_rows))
 
+    def select_survivors(
+        self, campaign_id: str, n: int, top_k: int
+    ) -> SelectionResult:
+        """Promote generation ``n``'s SCORED candidates → SURVIVOR (gate-passing top-K by
+        RobustScore) / RETIRED (§8.1). Idempotent: a re-run recomputes the same split and writes
+        only rows whose state OR rationale changed. Candidates already advanced past selection
+        (PAPER/…/PROMOTED) are untouched — never demoted. 404 unknown campaign / generation."""
+        top_k = min(max(top_k, 1), _MAX_TOP_K)
+        repo = self._repo_factory()
+        try:
+            if repo.get_campaign(campaign_id) is None:
+                raise ApiError(404, "NOT_FOUND_CAMPAIGN", f"no campaign {campaign_id}")
+            generation = repo.get_generation_by_n(campaign_id, n)
+            if generation is None:
+                raise ApiError(
+                    404, "NOT_FOUND_GENERATION",
+                    f"campaign {campaign_id} has no generation {n}",
+                )
+            generation_id = generation["id"]
+            candidates = repo.list_candidates_for_generation(generation_id)
+            decisions = _decide_selection(candidates, top_k, n)
+            updated: list[dict[str, Any]] = []
+            for decision in decisions:
+                if decision["changed"]:
+                    row = repo.update_candidate_selection(
+                        decision["candidateId"], decision["state"], decision["scorecard"]
+                    )
+                    if row is not None:
+                        updated.append(row)
+        finally:
+            repo.close()
+        return SelectionResult(
+            campaignId=campaign_id,
+            generationN=n,
+            generationId=generation_id,
+            topK=top_k,
+            survivors=sum(1 for d in decisions if d["state"] == "SURVIVOR"),
+            retired=sum(1 for d in decisions if d["state"] == "RETIRED"),
+            updated=len(updated),
+            items=[CandidateModel(**r) for r in updated],
+        )
+
+
+def _decide_selection(
+    candidates: list[dict[str, Any]], top_k: int, n: int
+) -> list[dict[str, Any]]:
+    """Pure §8.1 selection over a generation's candidates. SELECTABLE = SCORED/SURVIVOR/RETIRED
+    (advanced-state candidates are skipped entirely). Among the selectable, RANKABLE = no hard-gate
+    FAIL (scoring's ``rankable``) AND a RobustScore present; rank those by RobustScore desc, keep
+    the top-K as SURVIVOR and RETIRE the rest (dominated); non-rankable → RETIRED (gate-fail).
+    Returns one decision per selectable candidate: the new state, the scorecard with the
+    ``selection`` rationale added, and whether it CHANGED (drives the idempotent write)."""
+    selectable = [c for c in candidates if c.get("state") in _SELECTABLE_STATES]
+    ranked = sorted((c for c in selectable if _is_rankable(c)), key=_selection_sort_key)
+    rank_by_id = {c["id"]: position for position, c in enumerate(ranked, start=1)}
+    rankable_count = len(ranked)
+
+    decisions: list[dict[str, Any]] = []
+    for cand in selectable:
+        scorecard = cand.get("scorecard") or {}
+        robust = _num(scorecard.get("robustScore"))
+        rank = rank_by_id.get(cand["id"])
+        if rank is not None:
+            if rank <= top_k:
+                state = "SURVIVOR"
+                reason = f"top-{top_k} by RobustScore (rank {rank}/{rankable_count})"
+            else:
+                state = "RETIRED"
+                reason = (
+                    f"dominated: RobustScore rank {rank}/{rankable_count} beyond top-{top_k}"
+                )
+        else:
+            state = "RETIRED"
+            reason = _retire_reason(scorecard, robust)
+        selection = {
+            "decision": state,
+            "reason": reason,
+            "rank": rank,
+            "rankableCohort": rankable_count,
+            "topK": top_k,
+            "generationN": n,
+            "robustScore": robust,
+        }
+        new_scorecard = {**scorecard, "selection": selection}
+        changed = state != cand.get("state") or scorecard.get("selection") != selection
+        decisions.append(
+            {
+                "candidateId": cand["id"],
+                "state": state,
+                "scorecard": new_scorecard,
+                "changed": changed,
+            }
+        )
+    return decisions
+
+
+def _is_rankable(cand: dict[str, Any]) -> bool:
+    """RANKABLE for selection = scoring's ``rankable`` (no hard-gate FAIL) AND a RobustScore present
+    to sort on (a rankable card with a missing score can't be ranked — it retires)."""
+    scorecard = cand.get("scorecard") or {}
+    return bool(scorecard.get("rankable")) and _num(scorecard.get("robustScore")) is not None
+
+
+def _selection_sort_key(cand: dict[str, Any]) -> tuple[float, float, str]:
+    """RobustScore desc, then trialNumber asc, then candidate id — deterministic across re-runs
+    (mirrors scoring's rank tiebreak on trialNumber)."""
+    scorecard = cand.get("scorecard") or {}
+    robust = _num(scorecard.get("robustScore")) or 0.0
+    trial = scorecard.get("trialNumber")
+    trial_key = float(trial) if isinstance(trial, int | float) else float("inf")
+    return (-robust, trial_key, str(cand.get("id")))
+
+
+def _retire_reason(scorecard: dict[str, Any], robust: float | None) -> str:
+    failed = [g.get("id") for g in scorecard.get("gates") or [] if g.get("status") == "FAIL"]
+    if failed:
+        return f"hard-gate FAIL: {', '.join(str(g) for g in failed)}"
+    if robust is None:
+        return "not rankable: no RobustScore in the scorecard"
+    return "not rankable"
+
 
 def _writer(request: Request) -> EvoRecorderService:
     return request.app.state.evo_writer
@@ -727,6 +882,23 @@ def record_generation(
     candidate scorecards. 404 unknown campaign / sweep; 409 if the sweep is already recorded; 422 if
     the campaign's evidence policy forbids sim scoring (SIM_BLOCKED)."""
     return _writer(request).record_generation(campaign_id, body)
+
+
+@router.post(
+    "/campaigns/{campaign_id}/generations/{n}/select",
+    response_model=SelectionResult,
+)
+def select_survivors(
+    campaign_id: str, n: int, request: Request, body: dict[str, Any] | None = None
+) -> SelectionResult:
+    """Run the §8.1 SELECT step over generation ``n``: promote the gate-passing top-K candidates by
+    RobustScore to SURVIVOR and RETIRE the rest, recording the rationale on each scorecard. Body
+    ``{topK}`` optional (default 15, bounded 1..50). Idempotent — a re-run recomputes the same split
+    and writes only rows that changed. 404 unknown campaign / generation. NOTHING self-arms:
+    SURVIVOR only makes a candidate ELIGIBLE for a PUBLISH_PAPER proposal; the owner still approves
+    and executes it."""
+    top_k = int((body or {}).get("topK") or _DEFAULT_TOP_K)
+    return _writer(request).select_survivors(campaign_id, n, top_k)
 
 
 # --- fold/run metric-bag helpers (assembly only; the scoring math lives in scoring.py) ----------

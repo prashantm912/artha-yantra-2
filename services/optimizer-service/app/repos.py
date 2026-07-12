@@ -720,6 +720,78 @@ class EvoRepo:
         self._conn.commit()
         return _proposal_row(row) if row is not None else None
 
+    # --- E4 slice 2: selection (SCORED→SURVIVOR) + PUBLISH_PAPER execute (§8.1 / §12 item 12) -----
+
+    def get_generation_by_n(self, campaign_id: str, n: int) -> dict[str, Any] | None:
+        """One generation resolved by (campaign_id, n) — the SELECT endpoint's path key
+        (uq_evo_generations_campaign_n, V011). None → the service maps it to a 404."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_GENERATION_COLS} FROM evo_generations WHERE campaign_id=%s AND n=%s",
+                (campaign_id, n),
+            )
+            row = cur.fetchone()
+        return _generation_row(row) if row is not None else None
+
+    def get_candidate(self, candidate_id: str) -> dict[str, Any] | None:
+        """One candidate by id (the PUBLISH_PAPER execute path resolves a proposal's candidate)."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_CANDIDATE_COLS} FROM evo_candidates WHERE id=%s", (candidate_id,)
+            )
+            row = cur.fetchone()
+        return _candidate_row(row) if row is not None else None
+
+    def update_candidate_selection(
+        self, candidate_id: str, state: str, scorecard: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        """The SCORED→SURVIVOR/RETIRED write: set the selected ``state`` and re-store the scorecard
+        (now carrying the ``selection`` rationale sub-object). ``updated_at`` is set explicitly
+        (the DDL default fires on INSERT only — a state change must maintain it, V011:74-76).
+        RETURNs the row so the response can echo the affected candidates."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "UPDATE evo_candidates SET state=%s, scorecard=%s::jsonb, updated_at=now() "
+                f"WHERE id=%s RETURNING {_CANDIDATE_COLS}",
+                (state, json.dumps(scorecard), candidate_id),
+            )
+            row = cur.fetchone()
+        self._conn.commit()
+        return _candidate_row(row) if row is not None else None
+
+    def update_candidate_publish(
+        self, candidate_id: str, version_id: str | None, state: str
+    ) -> dict[str, Any] | None:
+        """After the sibling clone is published (§8.2): link the candidate to the clone's published
+        version (``version_id`` — the live-evidence FK signals key off, §2.1) and advance its state
+        (SURVIVOR→PAPER). ``updated_at`` maintained explicitly. RETURNs the updated row."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "UPDATE evo_candidates SET version_id=%s, state=%s, updated_at=now() "
+                f"WHERE id=%s RETURNING {_CANDIDATE_COLS}",
+                (version_id, state, candidate_id),
+            )
+            row = cur.fetchone()
+        self._conn.commit()
+        return _candidate_row(row) if row is not None else None
+
+    def record_proposal_execution(
+        self, proposal_id: str, evidence: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        """Stamp the executed clone's linkage back onto the APPROVED proposal's evidence card (the
+        ``execution`` sub-object). Guarded to APPROVED — a PUBLISH_PAPER execute only runs on an
+        already-approved proposal (the service validates that first; this is the durable backstop).
+        An UPDATE of the evidence JSONB, never a row removal (append-only table)."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "UPDATE evo_proposals SET evidence=%s::jsonb "
+                f"WHERE id=%s AND status='APPROVED' RETURNING {_PROPOSAL_COLS}",
+                (_jsonb(evidence), proposal_id),
+            )
+            row = cur.fetchone()
+        self._conn.commit()
+        return _proposal_row(row) if row is not None else None
+
 
 def _reconciliation_row(r: tuple) -> dict[str, Any]:
     return {

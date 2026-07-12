@@ -149,13 +149,19 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         backtest_client=backtest_client,
     )
 
-    # Proposals inbox (§12 E4 item 11 / §8): generate PUBLISH_PAPER proposals for candidates meeting
-    # the §8.2 bar, and serve the owner inbox (list / approve / reject). Substrate only — a decision
-    # marks the row; NOTHING self-arms (the publish action is slice 2). Its own EvoRepo factory + a
-    # fail-soft ntfy client (blank ARTHA_NTFY_TOPIC → no-op) for the one-per-new-proposal push.
+    # Proposals inbox + the PUBLISH_PAPER action (§12 E4 items 11-12 / §8): generate PUBLISH_PAPER
+    # proposals for candidates meeting the §8.2 bar, serve the owner inbox (list/approve/reject),
+    # and — on an APPROVED proposal via the explicit owner-clicked /execute — create + publish the
+    # §8.2 sibling evo paper-lane clone (NOTHING self-arms; no scheduler). Its own EvoRepo factory,
+    # a fail-soft ntfy client (blank ARTHA_NTFY_TOPIC → no-op), the strategy-signal registry client
+    # (create + publish the clone, service-to-service), the jobs factory (read the candidate's sweep
+    # for the base config), and the §1.4.3 per-family evo-paper cap.
     app.state.proposals = proposals.ProposalService(
         repo_factory=lambda: EvoRepo(open_conn()),
         ntfy=NtfyClient(settings.ntfy_url, settings.ntfy_topic),
+        strategy_client=StrategyClient(settings.strategy_signal_base),
+        jobs_factory=lambda: JobsRepo(open_conn()),
+        evo_paper_cap=settings.evo_paper_cap,
     )
 
     @app.get("/health")

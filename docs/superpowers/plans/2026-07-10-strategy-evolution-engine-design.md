@@ -79,7 +79,7 @@ audit §12 #22b):
 |---|---|---|---|---|
 | **SIM_FIRST** | Manas, Minervini swing/momentum | Walk-forward backtests on `candles`@1d (job pipeline, 1d primary is parity-supported) + holdout | Forward paper (slow accrual; months-long holds can't be forward-tuned) | Deep history exists (~11 y); live gates ≈ sim gates for swing; house doctrine "swing = backtest-driven" |
 | **LIVE_FIRST** | All intraday Siva options scalpers | Shadow-book challenger variants + paper book + counterfactual replay on captured premium/chain | Backtest as *functional smoke only* (never for ranking) | The ~30-rail confluence gate is live-only; OI/Dow/IV muted on derived history; house rule "armed ≈ 0 backtest trades is an artifact — judge on live" (audit §2 flags, §3 L11) |
-| **SIM_BLOCKED** | BTST (Siva) | Paper/live evidence only; **no sim ranking at all** until audit P0-5 lands | — | BTST exits are not simulated — a multi-day run degenerates to one trade (audit B1). Ranking BTST variants on backtests today would be ranking noise. |
+| **SIM_BLOCKED** | BTST (Siva) | ~~Paper/live evidence only; no sim ranking at all until audit P0-5 lands~~ **P0-5 LANDED 2026-07-12 (#759) → per the mechanics below, BTST flips to LIVE_FIRST-with-sim-smoke** (sim convention recorded: close→close fills; live exit sweep pending chip task_3e95fade) | — | BTST exits ARE now simulated (positions open at pre-close, exit_rules evaluate at subsequent pre-closes); ranking stays live-evidence-led |
 
 The engine refuses to score a candidate on an evidence plane its policy forbids — this
 is a hard rule, not a warning.

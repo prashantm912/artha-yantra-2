@@ -1,6 +1,6 @@
 """Postgres access for the EVO E5 structure-experimentation tables (design §5 / §8.3, roadmap §12
 items 14-15): ``evo_ablations`` (the pre-registered ablation protocol ledger) and ``evo_graveyard``
-(the persistent rejection dedup index) — both V017, backtest schema. Also the thin READS the
+(the persistent rejection dedup index) — both V016, backtest schema. Also the thin READS the
 ablation + suggester services need for validation (``evo_campaigns`` / ``evo_candidates``) and the
 REVIEW_GATE writes onto the EXISTING ``evo_proposals`` table (the ablation IS-only rejection + the
 §5.1.2 suggester suggestions land there — kind REVIEW_GATE is already in V011's CHECK).
@@ -98,7 +98,7 @@ def _proposal_row(r: tuple) -> dict[str, Any]:
 class StructureRepo:
     """Read/write access to the E5 structure-experimentation model. The optimizer is the sole evo
     writer + single-process, so the read-then-write idempotency checks below have no competing
-    writer; the DB UNIQUE indexes (V017) are the hard backstop."""
+    writer; the DB UNIQUE indexes (V016) are the hard backstop."""
 
     def __init__(self, conn: psycopg.Connection) -> None:
         self._conn = conn
@@ -132,8 +132,9 @@ class StructureRepo:
         self, campaign_id: str, parent_candidate_id: str | None, fingerprint: str
     ) -> dict[str, Any] | None:
         """The existing ablation for (campaign, parent, fingerprint), or None — the pre-registration
-        idempotency check (the uq_evo_ablations_campaign_parent_fp index is the hard backstop). A
-        NULL parent uses IS NOT DISTINCT FROM so the campaign-level hypothesis dedups too."""
+        idempotency check. The uq_evo_ablations_campaign_parent_fp index (V016, UNIQUE NULLS NOT
+        DISTINCT) is the hard backstop INCLUDING NULL-parent campaign-level hypotheses; this read
+        matches its semantics with IS NOT DISTINCT FROM."""
         with self._conn.cursor() as cur:
             cur.execute(
                 f"SELECT {_ABLATION_COLS} FROM evo_ablations "

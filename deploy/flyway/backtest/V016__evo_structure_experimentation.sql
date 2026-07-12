@@ -41,7 +41,12 @@ CREATE TABLE evo_ablations (
   verdict             TEXT                                 -- NULL until evaluated; then one of:
                         CHECK (verdict IN ('ACCEPTED', 'REJECTED_IS_ONLY', 'REJECTED_NO_LIFT',
                                            'REJECTED_TRADE_STARVATION', 'REJECTED_REGIME',
-                                           'REJECTED_DOF')),
+                                           'REJECTED_DOF', 'REJECTED_INCOMPLETE_EVIDENCE')),
+                                                           -- REJECTED_INCOMPLETE_EVIDENCE = the
+                                                           --   fail-closed ACCEPT refusal (§5.2
+                                                           --   "requires ALL of"): trade/regime/DOF
+                                                           --   evidence missing → never ACCEPTED;
+                                                           --   NOT buried (nothing was disproven)
   evaluation          JSONB,                               -- §5.2 paired-lift result (perFoldLift, pairedP,
                                                            --   isLift/oosLift, regimeLift, tradeRetention, gates)
   created_by          TEXT,                                -- audit actor (T3)
@@ -61,11 +66,12 @@ CREATE TABLE evo_graveyard (
   buried_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Pre-registration idempotency: one live PRE_REGISTERED ablation per (campaign, parent, fingerprint).
--- NULL parent_candidate_id rows are distinct under Postgres NULL semantics (a campaign-level
--- hypothesis) — the graveyard's own UNIQUE is the campaign-wide dedup that matters.
+-- Pre-registration idempotency: one ablation per (campaign, parent, fingerprint). NULLS NOT
+-- DISTINCT (pg17) so NULL-parent campaign-level hypotheses are ALSO uniquely enforced — under
+-- default NULL semantics two NULL-parent rows with the same fingerprint would both insert, and the
+-- app-level IS-NOT-DISTINCT-FROM check would have no DB backstop.
 CREATE UNIQUE INDEX uq_evo_ablations_campaign_parent_fp
-  ON evo_ablations (campaign_id, parent_candidate_id, fingerprint);
+  ON evo_ablations (campaign_id, parent_candidate_id, fingerprint) NULLS NOT DISTINCT;
 CREATE INDEX idx_evo_ablations_campaign ON evo_ablations (campaign_id);
 
 -- The load-bearing "never re-proposed silently" guarantee (§8.3): one grave per structure per

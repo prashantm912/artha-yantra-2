@@ -13,10 +13,16 @@ changes, so they get their OWN stream with stricter rules (design §5). This mod
     > 0 with paired p < 0.10; lift ≥ 0 in ≥ 2 of the 3 majority regimes; trade retention ≥ 70%;
     survives the DOF penalty. The keystone is the **IS-only-lift auto-reject**: a candidate whose
     lift exists ONLY in-sample (IS lift > 0 but OOS lift ≤ 0) is rejected + RECORDED (institutional
-    memory against snooping) with verdict REJECTED_IS_ONLY.
-  * On ANY rejection, the structure is BURIED in the graveyard (idempotent) so the gate-candidate
-    suggesters (§5.1.2) never re-propose it; a REJECTED_IS_ONLY rejection ALSO emits a REVIEW_GATE
-    proposal (the §5.2 "recorded so the same gate isn't re-proposed next quarter" inbox trail).
+    memory against snooping) with verdict REJECTED_IS_ONLY. ACCEPT is **FAIL-CLOSED** (§5.2
+    "requires ALL of"): the trade / regime / DOF evidence must be PRESENT and PASSING on both
+    sides — missing evidence yields REJECTED_INCOMPLETE_EVIDENCE, never an ACCEPT. Rejections may
+    still fire on partial evidence (a disproof needs only its own inputs).
+  * A DISPROOF rejection (IS-only / no-lift / starvation / regime / DOF) BURIES the structure in
+    the graveyard (idempotent) so the gate-candidate suggesters (§5.1.2) never re-propose it; a
+    REJECTED_IS_ONLY rejection ALSO emits a REVIEW_GATE proposal (the §5.2 "recorded so the same
+    gate isn't re-proposed next quarter" inbox trail). REJECTED_INCOMPLETE_EVIDENCE does NOT bury —
+    nothing was disproven; the hypothesis stays re-testable (a next-generation parent re-registers
+    cleanly).
 
 NOTHING self-arms — an ACCEPTED ablation records its verdict; composing it into a candidate is the
 owner-gated proposal path (§5.3 / E4), not this stream.
@@ -49,13 +55,22 @@ _TRADE_RETENTION_MIN = 0.70   # a gate that deletes ≥30% of the sample "wins" 
 _REGIME_TOP_N = 3             # the "3 majority regime labels" the lift must generalize across
 _REGIME_MIN_NONNEG = 2        # lift ≥ 0 in ≥ 2 of them (not UP_QUIET-only)
 
-# The verdict vocabulary (mirrors the V017 evo_ablations.verdict CHECK).
+# The verdict vocabulary (mirrors the V016 evo_ablations.verdict CHECK — keep in lockstep).
 _ACCEPTED = "ACCEPTED"
 _REJECTED_IS_ONLY = "REJECTED_IS_ONLY"
 _REJECTED_NO_LIFT = "REJECTED_NO_LIFT"
 _REJECTED_TRADE_STARVATION = "REJECTED_TRADE_STARVATION"
 _REJECTED_REGIME = "REJECTED_REGIME"
 _REJECTED_DOF = "REJECTED_DOF"
+_REJECTED_INCOMPLETE_EVIDENCE = "REJECTED_INCOMPLETE_EVIDENCE"
+
+# The DISPROOF verdicts — these bury the structure (§8.3 never-re-proposed). Deliberately excludes
+# REJECTED_INCOMPLETE_EVIDENCE: missing evidence disproves nothing, so burying it would permanently
+# suppress a hypothesis that was never actually tested.
+_BURYING_VERDICTS = frozenset({
+    _REJECTED_IS_ONLY, _REJECTED_NO_LIFT, _REJECTED_TRADE_STARVATION,
+    _REJECTED_REGIME, _REJECTED_DOF,
+})
 
 _REVIEW_GATE = "REVIEW_GATE"
 
@@ -247,10 +262,15 @@ def _trade_retention_gate(
 def _dof_gate(parent_score: float | None, candidate_score: float | None) -> dict[str, Any]:
     """The §5.2 / §6.2 DOF gate: the added structure gate costs 0.06 RobustScore (DOF penalty), so
     the gated candidate's net RobustScore must still be ≥ the parent's ("the robustness gain pays
-    for the added knob"). The scores passed in are already net of penalties (scoring.py computes
-    them). SKIPPED (with a caveat — never a fabricated pass) when either score is absent; a SKIPPED
-    DOF does NOT block ACCEPT (the other four gates are authoritative), matching the house
-    degrade-honest doctrine."""
+    for the added knob").
+
+    CALLER CONTRACT: both scores MUST be NET RobustScores — already net of ALL scoring.py
+    penalties, including the candidate side's 0.06 structure-gate DOF charge (score_cohort applies
+    it via the candidate's ``structureGateCount``). This gate only COMPARES the nets; passing a raw
+    (pre-penalty) candidate score would double-count nothing but silently un-charge the DOF.
+
+    SKIPPED (with a caveat — never a fabricated pass) when either score is absent; a SKIPPED gate
+    makes the verdict REJECTED_INCOMPLETE_EVIDENCE upstream (fail-closed ACCEPT, §5.2)."""
     if parent_score is None or candidate_score is None:
         return {"id": "dof", "status": "SKIPPED", "value": None,
                 "note": "parent/candidate RobustScore not both supplied — DOF gate not verified"}
@@ -271,10 +291,15 @@ def evaluate_ablation(
       3. trade-retention gate FAIL                 → REJECTED_TRADE_STARVATION
       4. regime-generalization gate FAIL           → REJECTED_REGIME
       5. DOF gate FAIL                             → REJECTED_DOF
+      6. any of trade/regime/DOF SKIPPED           → REJECTED_INCOMPLETE_EVIDENCE
       else                                         → ACCEPTED
 
-    A SKIPPED gate (absent input) never blocks ACCEPT and never fabricates a pass — it is recorded
-    with its reason (degrade-honest)."""
+    ACCEPT is FAIL-CLOSED (§5.2 "acceptance requires ALL of" — adversarial finding #1): an
+    oos-only evidence bag, or a regime bag with < 2 shared labels (the UP_QUIET-only bypass), can
+    never ACCEPT — the SKIPPED gates are recorded (``missingEvidence`` + per-gate notes) and the
+    verdict is REJECTED_INCOMPLETE_EVIDENCE. Rejections (rules 1-5) still fire on partial evidence
+    — a disproof needs only its own inputs. INCOMPLETE is not a disproof: it is recorded but NOT
+    buried (see ``_BURYING_VERDICTS``)."""
     p_oos = [float(v) for v in parent["oosFoldReturns"]]
     c_oos = [float(v) for v in candidate["oosFoldReturns"]]
     oos_diffs = [c - p for p, c in zip(p_oos, c_oos, strict=True)]
@@ -292,6 +317,7 @@ def evaluate_ablation(
     dof = _dof_gate(parent.get("robustScore"), candidate.get("robustScore"))
     gates = [lift, trade, regime, dof]
 
+    missing = [g["id"] for g in (trade, regime, dof) if g["status"] == "SKIPPED"]
     if is_only:
         verdict = _REJECTED_IS_ONLY
     elif lift["status"] == "FAIL":
@@ -302,6 +328,9 @@ def evaluate_ablation(
         verdict = _REJECTED_REGIME
     elif dof["status"] == "FAIL":
         verdict = _REJECTED_DOF
+    elif missing:
+        # fail-closed ACCEPT (§5.2 "requires ALL of"): every criterion must be PRESENT and passing.
+        verdict = _REJECTED_INCOMPLETE_EVIDENCE
     else:
         verdict = _ACCEPTED
 
@@ -317,6 +346,7 @@ def evaluate_ablation(
         "regimeLift": regime_lift,
         "tradeRetention": _round(retention),
         "gates": gates,
+        "missingEvidence": missing,
         "caveats": caveats,
     }
     return verdict, evaluation
@@ -337,7 +367,7 @@ def _paired_is_lift(
 
 
 class AblationModel(BaseModel):
-    """One ``evo_ablations`` row (V017) — the pre-registered structure-mutation hypothesis + (once
+    """One ``evo_ablations`` row (V016) — the pre-registered structure-mutation hypothesis + (once
     evaluated) its verdict/evaluation."""
 
     id: str
@@ -368,7 +398,7 @@ class EvaluatedAblation(AblationModel):
 
 
 class GraveyardModel(BaseModel):
-    """One ``evo_graveyard`` row (V017) — a buried structure. Its ``fingerprint`` is what the
+    """One ``evo_graveyard`` row (V016) — a buried structure. Its ``fingerprint`` is what the
     suggesters check to never re-propose it (§8.3)."""
 
     id: str
@@ -439,8 +469,17 @@ class AblationService:
         ``{parent, candidate}`` each an evidence block (oosFoldReturns [+ optional isFoldReturns /
         regimeFoldReturns / tradeCount / robustScore]). 400 missing evidence; 422 the two OOS fold
         series are not paired (differing lengths); 404 unknown ablation; 409 already evaluated. A
-        rejection buries the structure (idempotent) so the suggesters never re-propose it; a
-        REJECTED_IS_ONLY additionally mints a REVIEW_GATE proposal (institutional memory)."""
+        DISPROOF rejection buries the structure (idempotent) so the suggesters never re-propose it;
+        a REJECTED_IS_ONLY additionally mints a REVIEW_GATE proposal (institutional memory);
+        REJECTED_INCOMPLETE_EVIDENCE (fail-closed ACCEPT) is recorded but buries nothing.
+
+        WRITE ORDER (adversarial finding #2 — the writes are separate commits, not one
+        transaction): bury FIRST, review-gate SECOND, and the verdict stamp (PRE_REGISTERED →
+        EVALUATED) LAST — the stamp is the COMMIT POINT. bury + the review-gate are idempotent, so
+        a crash before the stamp leaves the row PRE_REGISTERED and a clean re-POST re-runs the
+        whole evaluation; the graveyard can therefore never LAG a recorded rejection (the old
+        verdict-first order could record EVALUATED, crash, and leave a rejected structure
+        un-buried + 409-bricked — re-proposable forever with no heal path)."""
         parent = _evidence(body.get("parent"), "parent")
         candidate = _evidence(body.get("candidate"), "candidate")
         if len(parent["oosFoldReturns"]) != len(candidate["oosFoldReturns"]):
@@ -450,8 +489,6 @@ class AblationService:
                 f"folds, §5.2): got {len(parent['oosFoldReturns'])} vs "
                 f"{len(candidate['oosFoldReturns'])}",
             )
-        if not parent["oosFoldReturns"]:
-            raise ApiError(422, "FOLDS_NOT_PAIRED", "oosFoldReturns is empty — no folds to pair")
 
         repo = self._repo_factory()
         try:
@@ -466,23 +503,27 @@ class AblationService:
                 )
 
             verdict, evaluation = evaluate_ablation(parent, candidate)
-            updated = repo.update_ablation_verdict(ablation_id, verdict, evaluation)
-            if updated is None:
-                # The PRE_REGISTERED guard matched nothing — a concurrent evaluate won the race.
-                raise ApiError(
-                    409, "ABLATION_ALREADY_EVALUATED",
-                    f"ablation {ablation_id} was evaluated concurrently — verdict already written",
-                )
 
+            # Side effects BEFORE the commit-point stamp (both idempotent — safe to re-run).
             buried = False
             proposal_id = None
-            if verdict != _ACCEPTED:
+            if verdict in _BURYING_VERDICTS:
                 buried = repo.bury(
                     ablation["campaignId"], ablation_id, ablation["fingerprint"],
                     ablation["mutation"] or {}, verdict, evaluation,
                 )
-                if verdict == _REJECTED_IS_ONLY:
-                    proposal_id = self._record_is_only(repo, ablation, evaluation)
+            if verdict == _REJECTED_IS_ONLY:
+                proposal_id = self._record_is_only(repo, ablation, evaluation)
+
+            # The commit point: PRE_REGISTERED → EVALUATED, written exactly once. None here means a
+            # concurrent evaluate won the race after our early check — its deterministic verdict is
+            # identical and our bury/review-gate writes were idempotent no-ops on top of its own.
+            updated = repo.update_ablation_verdict(ablation_id, verdict, evaluation)
+            if updated is None:
+                raise ApiError(
+                    409, "ABLATION_ALREADY_EVALUATED",
+                    f"ablation {ablation_id} was evaluated concurrently — verdict already written",
+                )
         finally:
             repo.close()
 
@@ -553,7 +594,8 @@ class AblationService:
 
 def _evidence(raw: Any, side: str) -> dict[str, Any]:
     """Validate + normalize one side's evidence block. ``oosFoldReturns`` (a non-empty numeric list)
-    is required; the rest are optional (absent → the corresponding gate SKIPs honestly)."""
+    is required; the rest may be absent — the corresponding gate then SKIPs, which blocks ACCEPT
+    (fail-closed → REJECTED_INCOMPLETE_EVIDENCE) but still allows the rejection verdicts."""
     if not isinstance(raw, dict):
         raise ApiError(400, "VALIDATION_FAILED", f"missing required field: {side}")
     oos = raw.get("oosFoldReturns")
@@ -582,6 +624,13 @@ def _verdict_note(verdict: str, buried: bool) -> str:
             "ACCEPTED — the structure gate paid for its added DOF (§5.2). Composing it into a "
             "named candidate variant is the owner-gated proposal path (§5.3), not this stream; "
             "nothing self-arms."
+        )
+    if verdict == _REJECTED_INCOMPLETE_EVIDENCE:
+        return (
+            "REJECTED_INCOMPLETE_EVIDENCE — §5.2 acceptance requires EVERY criterion present and "
+            "passing (fail-closed): trade/regime/DOF evidence was missing, so ACCEPT is refused. "
+            "NOT buried — nothing was disproven; re-test with complete paired evidence (a "
+            "next-generation parent re-registers cleanly)."
         )
     tail = " and buried in the graveyard" if buried else " (already buried — no new grave)"
     if verdict == _REJECTED_IS_ONLY:
@@ -622,8 +671,10 @@ def evaluate_ablation_endpoint(
     ablation_id: str, body: dict[str, Any], request: Request
 ) -> EvaluatedAblation:
     """Evaluate a pre-registered ablation against paired identical-fold evidence (§5.2). Body
-    ``{parent, candidate}``. Rejections bury the structure (never re-proposed); a REJECTED_IS_ONLY
-    also mints a REVIEW_GATE proposal. 400/422 bad evidence; 404 unknown; 409 already evaluated."""
+    ``{parent, candidate}``. ACCEPT is fail-closed (incomplete trade/regime/DOF evidence →
+    REJECTED_INCOMPLETE_EVIDENCE, recorded but not buried); disproof rejections bury the structure
+    (never re-proposed) and a REJECTED_IS_ONLY also mints a REVIEW_GATE proposal. 400/422 bad
+    evidence; 404 unknown; 409 already evaluated."""
     return _service(request).evaluate(ablation_id, body)
 
 

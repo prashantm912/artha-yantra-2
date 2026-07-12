@@ -174,7 +174,7 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     )
 
     # Structure experimentation (§12 E5): the ablation protocol + gate-candidate suggesters. Both
-    # read/write the E5 tables (evo_ablations / evo_graveyard, V017) + the REVIEW_GATE evo_proposals
+    # read/write the E5 tables (evo_ablations / evo_graveyard, V016) + the REVIEW_GATE evo_proposals
     # via their own StructureRepo (its own module — the E5 slice touches no existing repo). The
     # ablation stream evaluates paired structure mutations, buries rejections in the graveyard, and
     # emits a REVIEW_GATE proposal for an IS-only rejection; the suggesters emit gate-candidate

@@ -1,12 +1,15 @@
 """EVO E5 — the pre-registered ablation protocol (design §5.2 / §12 item 14).
 
 Covers the paired-evaluation math (deterministic Student-t p-value + the five §5.2 acceptance
-gates), the verdict priority, and the API flow through a TestClient over AblationService +
-FakeStructureRepo: pre-registration + idempotency, the IS-only auto-reject that buries the structure
-AND records a REVIEW_GATE proposal (institutional memory), and the graveyard's "never re-proposed
-silently" 409. The DESIGN VERIFY GOAL (a) — a known-noise indicator is rejected by the paired
-evaluation — is ``test_known_noise_indicator_rejected_*`` below."""
+gates), the verdict priority (incl. the FAIL-CLOSED accept — incomplete trade/regime/DOF evidence
+can never ACCEPT, adversarial finding #1), and the API flow through a TestClient over
+AblationService + FakeStructureRepo: pre-registration + idempotency, the IS-only auto-reject that
+buries the structure AND records a REVIEW_GATE proposal (institutional memory), the graveyard's
+"never re-proposed silently" 409, and the crash-heal write ordering (verdict stamp LAST — finding
+#2). The DESIGN VERIFY GOAL (a) — a known-noise indicator is rejected by the paired evaluation — is
+``test_known_noise_indicator_rejected_*`` below."""
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -146,23 +149,38 @@ def test_evaluate_rejects_regime_dependence():
 
 
 def test_evaluate_rejects_when_dof_penalty_not_paid():
-    # lift passes but the gated candidate's net RobustScore is below the parent's — the added DOF
-    # was not paid for. (No regime/trade evidence → those gates SKIP, do not block.)
+    # lift passes but the gated candidate's NET RobustScore is below the parent's — the added DOF
+    # was not paid for. A DOF FAIL is a disproof: it outranks the incomplete-evidence verdict even
+    # though the regime/trade gates SKIP here.
     parent = {"oosFoldReturns": [0.05, 0.05, 0.05, 0.05], "robustScore": 1.0}
     candidate = {"oosFoldReturns": [0.09, 0.10, 0.095, 0.098], "robustScore": 0.9}
     verdict, evaluation = evaluate_ablation(parent, candidate)
     assert verdict == "REJECTED_DOF"
 
 
-def test_evaluate_skipped_gates_do_not_block_accept():
-    # only OOS folds supplied — the regime/trade/DOF gates SKIP honestly and do NOT block ACCEPT.
+def test_oos_only_evidence_cannot_accept():
+    # adversarial finding #1 (fail-closed §5.2 "requires ALL of"): a positive, significant OOS lift
+    # with NO trade/regime/DOF evidence must NOT accept — REJECTED_INCOMPLETE_EVIDENCE, with the
+    # SKIPPED gates listed and their reasons recorded.
     parent = {"oosFoldReturns": [0.05, 0.05, 0.05, 0.05]}
     candidate = {"oosFoldReturns": [0.09, 0.10, 0.095, 0.098]}
     verdict, evaluation = evaluate_ablation(parent, candidate)
-    assert verdict == "ACCEPTED"
+    assert verdict == "REJECTED_INCOMPLETE_EVIDENCE"
+    assert evaluation["missingEvidence"] == ["trade_retention", "regime_generalization", "dof"]
     skipped = {g["id"] for g in evaluation["gates"] if g["status"] == "SKIPPED"}
     assert skipped == {"regime_generalization", "trade_retention", "dof"}
     assert evaluation["caveats"]  # each SKIP records its reason
+
+
+def test_single_regime_evidence_cannot_accept():
+    # the verified bypass from the review: UP_QUIET-only regime evidence used to SKIP the regime
+    # gate and ACCEPT — fail-closed now (trade + DOF present and passing, regime coverage < 2
+    # shared labels → REJECTED_INCOMPLETE_EVIDENCE).
+    parent = dict(_acc_parent(), regimeFoldReturns={"UP_QUIET": [0.05, 0.06]})
+    candidate = dict(_acc_candidate(), regimeFoldReturns={"UP_QUIET": [0.07, 0.08]})
+    verdict, evaluation = evaluate_ablation(parent, candidate)
+    assert verdict == "REJECTED_INCOMPLETE_EVIDENCE"
+    assert evaluation["missingEvidence"] == ["regime_generalization"]
 
 
 # --- registration API ---------------------------------------------------------------------------
@@ -297,3 +315,75 @@ def test_evaluate_unknown_ablation_is_404():
     repo = FakeStructureRepo(campaigns=[_campaign()])
     resp = _evaluate(_client(repo), "abl-none", _acc_parent(), _acc_candidate())
     assert resp.status_code == 404
+
+
+def test_evaluate_incomplete_evidence_records_but_does_not_bury():
+    # fail-closed ACCEPT end-to-end: oos-only evidence records REJECTED_INCOMPLETE_EVIDENCE
+    # (EVALUATED, write-once) but buries NOTHING — the structure was never disproven, so the
+    # graveyard (and the suggesters' suppression) must not swallow it.
+    repo = FakeStructureRepo(campaigns=[_campaign()])
+    client = _client(repo)
+    ablation_id = _register(client).json()["id"]
+    resp = _evaluate(
+        client, ablation_id,
+        {"oosFoldReturns": [0.05, 0.05, 0.05, 0.05]},
+        {"oosFoldReturns": [0.09, 0.10, 0.095, 0.098]},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["verdict"] == "REJECTED_INCOMPLETE_EVIDENCE"
+    assert body["status"] == "EVALUATED"
+    assert body["buried"] is False
+    assert body["reviewGateProposalId"] is None
+    assert repo.graveyard == []
+    assert "NOT buried" in body["note"]
+
+
+# --- crash-heal write ordering (adversarial finding #2) ------------------------------------------
+
+
+class _CrashBeforeVerdictRepo(FakeStructureRepo):
+    """Simulates a crash AFTER the bury + review-gate writes but BEFORE the verdict stamp (the
+    writes are separate commits in prod — the stamp is the commit point and goes LAST)."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.crash_next_verdict_write = False
+
+    def update_ablation_verdict(self, ablation_id, verdict, evaluation):
+        if self.crash_next_verdict_write:
+            self.crash_next_verdict_write = False
+            raise RuntimeError("simulated crash before the verdict stamp")
+        return super().update_ablation_verdict(ablation_id, verdict, evaluation)
+
+
+def test_crash_before_verdict_stamp_heals_on_repost():
+    # finding #2: with the old verdict-first order, a crash after the stamp left a REJECTED
+    # structure EVALUATED but NOT in the graveyard — re-POST 409-bricked, suggesters re-proposed it
+    # forever. New order: bury/review-gate first (idempotent), stamp LAST — a crash before the
+    # stamp leaves the row PRE_REGISTERED, and a clean re-POST re-runs the whole evaluation.
+    repo = _CrashBeforeVerdictRepo(campaigns=[_campaign()])
+    client = _client(repo)
+    ablation_id = _register(client).json()["id"]
+    parent = {"oosFoldReturns": [0.05, 0.05, 0.05, 0.05],
+              "isFoldReturns": [0.05, 0.05, 0.05, 0.05]}
+    candidate = {"oosFoldReturns": [0.04, 0.05, 0.05, 0.04],
+                 "isFoldReturns": [0.09, 0.10, 0.09, 0.10]}  # IS-only rejection
+
+    repo.crash_next_verdict_write = True
+    with pytest.raises(RuntimeError):
+        _evaluate(client, ablation_id, parent, candidate)
+
+    # the partial failure already buried + recorded the REVIEW_GATE, and the row stayed
+    # PRE_REGISTERED (re-runnable) — never EVALUATED-without-a-grave
+    assert len(repo.graveyard) == 1
+    assert repo.get_ablation(ablation_id)["status"] == "PRE_REGISTERED"
+
+    resp = _evaluate(client, ablation_id, parent, candidate)  # the heal: a clean re-POST
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["verdict"] == "REJECTED_IS_ONLY" and body["status"] == "EVALUATED"
+    assert body["buried"] is False  # already buried by the interrupted attempt — no second grave
+    assert body["reviewGateProposalId"] is not None
+    assert len(repo.graveyard) == 1
+    assert len([p for p in repo.proposals if p["kind"] == "REVIEW_GATE"]) == 1

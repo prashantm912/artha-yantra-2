@@ -45,11 +45,32 @@ export interface GraduationBoard {
   asOf: string;
 }
 
+/** One GRADUATED strategy (F7): the marker + the metrics snapshot captured at graduation. */
+export interface Promotion {
+  strategyId: string;
+  graduatedAt: string;
+  trades: number;
+  expectancy: string;
+  sharpe: string;
+  maxDrawdownPct: string;
+}
+
 const GRADUATION = 'graduation';
 
 export function useGraduationBoard() {
   return useQuery({
     queryKey: [GRADUATION, 'board'],
     queryFn: () => apiFetch<GraduationBoard>('/strategies/graduation'),
+  });
+}
+
+/**
+ * The strategies the F7 evaluator has marked GRADUATED, newest first (`GET /graduation/promotions`).
+ * A BARE array on the wire (a documented envelope exception), measurement-only.
+ */
+export function useGraduationPromotions() {
+  return useQuery({
+    queryKey: [GRADUATION, 'promotions'],
+    queryFn: () => apiFetch<Promotion[]>('/strategies/graduation/promotions'),
   });
 }

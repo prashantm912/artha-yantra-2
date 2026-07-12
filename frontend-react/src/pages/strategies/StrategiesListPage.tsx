@@ -158,8 +158,18 @@ export function StrategiesListPage() {
                 <tr className="border-t border-ay-border">
                   <td className="px-2 py-2 font-medium">{s.name}</td>
                   <td className="px-2 py-2">
-                    <span className={cn('rounded px-1.5 py-0.5 text-xs font-semibold ring-1', statusTone(s.status))}>
-                      {s.status}
+                    <span className="flex flex-wrap items-center gap-1">
+                      <span className={cn('rounded px-1.5 py-0.5 text-xs font-semibold ring-1', statusTone(s.status))}>
+                        {s.status}
+                      </span>
+                      {s.enabled === false && (
+                        <span
+                          title="Disabled — the live signal engine will not evaluate this strategy (toggle it from its version history)."
+                          className="rounded px-1.5 py-0.5 text-xs font-semibold text-warn ring-1 ring-warn/40"
+                        >
+                          off
+                        </span>
+                      )}
                     </span>
                   </td>
                   <td className="px-2 py-2 tabular-nums">{s.publishedVersion ?? s.currentVersion ?? '—'}</td>

@@ -30,6 +30,12 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class RegistryService {
 
+  /** Result of an enable/disable toggle — the strategy id and its new enabled state. */
+  public record ToggleResult(UUID id, boolean enabled) {}
+
+  /** Result of a clone — the new strategy's id + slug and its fresh draft version + status. */
+  public record CloneResult(UUID id, String slug, String version, String status) {}
+
   private final StrategyRepository repository;
   private final MarketDataInstrumentClient instrumentClient;
   private final StrategyChangedPublisher changedPublisher;
@@ -88,6 +94,35 @@ public class RegistryService {
     response.put("status", "draft");
     response.put("checksum", parsed.checksum());
     return response;
+  }
+
+  /**
+   * POST /{id}/clone — copy the strategy's LATEST config into a brand-new DRAFT strategy under a new
+   * slug + name (app-platform audit §2.7 / §6.12). The source's top-level {@code id}/{@code name}/
+   * {@code version} are rewritten in the YAML (author formatting + comments otherwise preserved) and
+   * the result is fed through {@link #create} — so the clone rides the SAME validation and the SAME
+   * 409-on-duplicate-slug-or-name guard (the conflict surfaces honestly). The clone is a fresh draft:
+   * nothing is published, enabled defaults TRUE (the identity-row default) but the engine ignores it
+   * until a version is published. Tags + description carry over from the source.
+   */
+  @Transactional
+  public CloneResult clone(UUID id, String name, String slug) {
+    StrategyRepository.StrategyRow source = strategyOrThrow(id);
+    StrategyRepository.VersionRow latest =
+        repository.latestVersion(id).orElseThrow(() -> versionNotFound("latest"));
+    String clonedYaml = rewriteIdentity(latest.configYaml(), slug, name);
+    // Guard the text rewrite: if the source YAML did not carry a top-level `id:` at column 0 the
+    // regex would leave the source slug in place and create() would 409 with a MISLEADING "slug
+    // exists" for the WRONG slug. Fail closed with the honest reason instead.
+    if (!slug.equals(parseOrThrow(clonedYaml).config().path("id").asText())) {
+      throw new ApiException(
+          422, ErrorCodes.VALIDATION_FAILED,
+          "could not set the clone id to '" + slug + "' — the source config has no top-level id");
+    }
+    Map<String, Object> created = create(name, source.description(), source.tags(), clonedYaml);
+    return new CloneResult(
+        (UUID) created.get("id"), slug, (String) created.get("version"),
+        (String) created.get("status"));
   }
 
   /**
@@ -243,6 +278,39 @@ public class RegistryService {
       changedPublisher.publish(id, strategy.slug(), "ARCHIVE", archivedVersion);
     }
     return Map.of("id", id, "status", "archived");
+  }
+
+  /**
+   * POST /{id}/enable | /{id}/disable — flip the master kill-switch the live signal engine reconcile
+   * arms from (it loads {@code enabled && publishedVersionId != null}). Writes an ENABLE/DISABLE
+   * audit row and, when the strategy is PUBLISHED, emits {@code strategy.changed} so the engine
+   * hot-swaps at the next bar boundary (an unpublished strategy is neither loaded nor unloaded, so it
+   * emits nothing — matching {@link #archive}'s "only on a real transition" discipline and avoiding a
+   * phantom reload). Idempotent: a no-op flip returns the current state WITHOUT appending an audit row
+   * (the log is append-only — a no-op ENABLE would permanently pollute the history).
+   */
+  @Transactional
+  public ToggleResult setEnabled(UUID id, boolean enabled) {
+    StrategyRepository.StrategyRow strategy = strategyOrThrow(id);
+    if (strategy.enabled() == enabled) {
+      return new ToggleResult(id, enabled);
+    }
+    repository.updateEnabled(id, enabled);
+    repository.audit(
+        id, enabled ? "ENABLE" : "DISABLE", null, null,
+        enabled
+            ? "enabled — armed for the live signal engine"
+            : "disabled — unloaded from the live signal engine",
+        "owner");
+    if (strategy.publishedVersionId() != null) {
+      String publishedVersion =
+          repository.findVersionById(strategy.publishedVersionId())
+              .map(StrategyRepository.VersionRow::version)
+              .orElse(null);
+      changedPublisher.publish(
+          id, strategy.slug(), enabled ? "ENABLE" : "DISABLE", publishedVersion);
+    }
+    return new ToggleResult(id, enabled);
   }
 
   /**
@@ -486,7 +554,38 @@ public class RegistryService {
     return items;
   }
 
+  /** GET /{id}/audit — the append-only lifecycle-history timeline, newest first. */
+  public List<StrategyRepository.AuditRow> auditLog(UUID id, int limit, int offset) {
+    strategyOrThrow(id);
+    return repository.auditLog(id, limit, offset);
+  }
+
   // ---- internals -------------------------------------------------------
+
+  /**
+   * Rewrites the top-level {@code id}/{@code name}/{@code version} scalars in a config YAML for a
+   * clone, preserving all other bytes (comments, formatting). Only column-0 keys match ({@code (?m)^…}
+   * — nested indicator {@code name:} lines are indented / inside flow-mappings), so exactly the three
+   * document-level fields are replaced; {@code version} resets to {@code 1.0.0} to match the fresh
+   * draft the registry mints. A source without a top-level {@code name:}/{@code version:} simply keeps
+   * it absent (the clone guard in {@link #clone} enforces the mandatory {@code id} rewrite).
+   */
+  private static String rewriteIdentity(String yaml, String slug, String name) {
+    String out =
+        yaml.replaceFirst(
+            "(?m)^id:.*$", java.util.regex.Matcher.quoteReplacement("id: " + slug));
+    out =
+        out.replaceFirst(
+            "(?m)^name:.*$",
+            java.util.regex.Matcher.quoteReplacement("name: " + yamlDoubleQuote(name)));
+    out = out.replaceFirst("(?m)^version:.*$", "version: 1.0.0");
+    return out;
+  }
+
+  /** Wraps a scalar as a double-quoted YAML string, escaping backslashes and double-quotes. */
+  private static String yamlDoubleQuote(String value) {
+    return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+  }
 
   private StrategyRepository.StrategyRow strategyOrThrow(UUID id) {
     return repository.findById(id)

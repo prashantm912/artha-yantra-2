@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
+import { toast } from 'sonner';
 import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
@@ -7,12 +8,16 @@ import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import {
+  useCloneStrategy,
   usePublish,
   useRollback,
+  useSetEnabled,
+  useStrategyAudit,
   useStrategyDetail,
   useStrategyDiff,
   useStrategyVersions,
   useStressWindow,
+  type AuditEntry,
 } from '../../api/strategies.ts';
 
 // /strategies/:id/versions (master plan §20 parity, E-11 screen 6): the immutable version timeline,
@@ -26,17 +31,77 @@ function statusTone(status: string): string {
   return 'text-warn ring-warn/40';
 }
 
+const AUDIT_LABELS: Record<AuditEntry['action'], string> = {
+  CREATE: 'Created',
+  UPDATE_DRAFT: 'Draft saved',
+  PUBLISH: 'Published',
+  ROLLBACK: 'Rolled back',
+  ARCHIVE: 'Archived',
+  ENABLE: 'Enabled',
+  DISABLE: 'Disabled',
+};
+
+function auditLabel(action: AuditEntry['action']): string {
+  return AUDIT_LABELS[action] ?? action;
+}
+
+function auditTone(action: AuditEntry['action']): string {
+  if (action === 'PUBLISH' || action === 'ENABLE') return 'text-bull ring-bull/40';
+  if (action === 'ARCHIVE' || action === 'DISABLE') return 'text-warn ring-warn/40';
+  return 'text-ay-muted ring-ay-border';
+}
+
 export function StrategyVersionsPage() {
   const { id = '' } = useParams();
+  const navigate = useNavigate();
   const detail = useStrategyDetail(id);
   const versions = useStrategyVersions(id);
+  const audit = useStrategyAudit(id);
   const publish = usePublish(id);
   const rollback = useRollback(id);
+  const setEnabled = useSetEnabled(id);
+  const clone = useCloneStrategy(id);
 
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [publishOpen, setPublishOpen] = useState(false);
   const [notes, setNotes] = useState('');
+  const [toggleOpen, setToggleOpen] = useState(false);
+  const [cloneOpen, setCloneOpen] = useState(false);
+  const [cloneName, setCloneName] = useState('');
+  const [cloneSlug, setCloneSlug] = useState('');
+
+  // The engine loads a strategy only when enabled AND published; default true until detail loads.
+  const enabled = detail.data?.enabled ?? true;
+  const strategyName = detail.data?.name ?? 'Strategy';
+
+  const doToggle = () => {
+    setEnabled.mutate(!enabled, {
+      onSuccess: (res) => {
+        toast.success(
+          res.enabled
+            ? `${strategyName} armed — the live engine will evaluate it`
+            : `${strategyName} disarmed — the live engine will stop evaluating it`,
+        );
+        setToggleOpen(false);
+      },
+    });
+  };
+
+  const doClone = () => {
+    clone.mutate(
+      { name: cloneName.trim(), slug: cloneSlug.trim() },
+      {
+        onSuccess: (res) => {
+          toast.success(`Cloned to ${res.slug} (draft ${res.version})`);
+          setCloneOpen(false);
+          setCloneName('');
+          setCloneSlug('');
+          navigate(`/strategies/${res.id}/versions`);
+        },
+      },
+    );
+  };
 
   const rows = useMemo(() => versions.data?.items ?? [], [versions.data]);
   const versionList = useMemo(() => rows.map((v) => v.version), [rows]);
@@ -72,9 +137,41 @@ export function StrategyVersionsPage() {
         title="Strategy versions"
         help="The immutable version history of this strategy; compare any two versions, publish a draft to the live engine, or roll back to an earlier one."
       />
-      <div className="mb-3 flex items-center gap-2">
-        <strong>{detail.data?.name ?? 'Strategy'} — versions</strong>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <strong>{strategyName} — versions</strong>
+        <span
+          className={cn(
+            'rounded px-1.5 py-0.5 text-xs font-semibold ring-1',
+            enabled ? 'text-bull ring-bull/40' : 'text-ay-muted ring-ay-border',
+          )}
+          title={
+            enabled
+              ? 'Armed: the live signal engine loads this strategy (when a version is published).'
+              : 'Disarmed: the live signal engine will NOT evaluate this strategy.'
+          }
+        >
+          {enabled ? 'Enabled' : 'Disabled'}
+        </span>
         <div className="flex-1" />
+        <button
+          type="button"
+          onClick={() => setToggleOpen(true)}
+          title="Arm or disarm this strategy for the live signal engine."
+          className={cn(
+            'h-9 rounded-md border px-4 text-sm font-medium hover:border-accent',
+            enabled ? 'border-ay-border text-warn' : 'border-ay-border text-bull',
+          )}
+        >
+          {enabled ? 'Disable' : 'Enable'}
+        </button>
+        <button
+          type="button"
+          onClick={() => setCloneOpen(true)}
+          title="Copy this strategy's latest config into a new draft strategy."
+          className="h-9 rounded-md border border-ay-border px-4 text-sm font-medium hover:border-accent"
+        >
+          Clone…
+        </button>
         <button
           type="button"
           onClick={() => setPublishOpen(true)}
@@ -178,6 +275,50 @@ export function StrategyVersionsPage() {
         </section>
       </div>
 
+      <section className="mt-6 min-w-0">
+        <h2 className="mb-2 text-sm font-semibold text-ay-text">Lifecycle history</h2>
+        <QueryState
+          query={audit}
+          isEmpty={() => (audit.data?.items?.length ?? 0) === 0}
+          empty={{ title: 'No lifecycle events yet.' }}
+          errorTitle="Couldn't load the lifecycle history"
+          skeleton={<Skeleton variant="table-rows" rows={4} cols={1} />}
+        >
+          {() => (
+            <BeatBlock className="overflow-auto rounded-lg border border-ay-border">
+              <ol className="divide-y divide-ay-border text-sm">
+                {(audit.data?.items ?? []).map((e) => (
+                  <li
+                    key={e.id}
+                    className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-3 py-2"
+                  >
+                    <span
+                      className={cn(
+                        'rounded px-1.5 py-0.5 text-xs font-semibold ring-1',
+                        auditTone(e.action),
+                      )}
+                    >
+                      {auditLabel(e.action)}
+                    </span>
+                    <span className="min-w-0 truncate text-xs text-ay-muted" title={e.diffSummary ?? undefined}>
+                      {(e.fromVersion || e.toVersion) && (
+                        <span className="mr-2 tabular-nums text-ay-text">
+                          {e.fromVersion ?? '∅'} → {e.toVersion ?? '∅'}
+                        </span>
+                      )}
+                      {e.diffSummary}
+                    </span>
+                    <span className="whitespace-nowrap text-xs text-ay-muted">
+                      {e.actor} · {e.createdAt ? e.createdAt.slice(0, 19).replace('T', ' ') : '—'}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </BeatBlock>
+          )}
+        </QueryState>
+      </section>
+
       {publishOpen && (
         <div className="fixed inset-0 z-30 grid place-items-center bg-black/40 p-4">
           <div className="w-full max-w-xl rounded-lg border border-ay-border bg-surface-1 p-4 shadow-xl">
@@ -214,6 +355,97 @@ export function StrategyVersionsPage() {
                 className="h-9 rounded-md bg-accent px-4 text-sm font-medium text-surface-0 hover:opacity-90 disabled:opacity-50"
               >
                 Publish
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toggleOpen && (
+        <div className="fixed inset-0 z-30 grid place-items-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-lg border border-ay-border bg-surface-1 p-4 shadow-xl">
+            <h2 className="mb-2 text-base font-semibold">{enabled ? 'Disable' : 'Enable'} strategy</h2>
+            <p className="mb-4 text-sm">
+              {enabled ? (
+                <>
+                  This <strong>disarms live evaluation</strong>: the signal engine unloads{' '}
+                  <strong>{strategyName}</strong> at the next bar boundary and stops evaluating it.
+                </>
+              ) : (
+                <>
+                  This <strong>arms live evaluation</strong>: the signal engine loads{' '}
+                  <strong>{strategyName}</strong> and evaluates it on every bar (when a version is
+                  published).
+                </>
+              )}
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setToggleOpen(false)}
+                className="h-9 rounded-md border border-ay-border px-4 text-sm hover:border-accent"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={doToggle}
+                disabled={setEnabled.isPending}
+                className={cn(
+                  'h-9 rounded-md px-4 text-sm font-medium text-surface-0 hover:opacity-90 disabled:opacity-50',
+                  enabled ? 'bg-warn' : 'bg-accent',
+                )}
+              >
+                {enabled ? 'Disable' : 'Enable'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {cloneOpen && (
+        <div className="fixed inset-0 z-30 grid place-items-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-lg border border-ay-border bg-surface-1 p-4 shadow-xl">
+            <h2 className="mb-2 text-base font-semibold">Clone strategy</h2>
+            <p className="mb-3 text-sm text-ay-muted">
+              Copies the latest config of <strong>{strategyName}</strong> into a new draft strategy.
+              Nothing is published — publish the clone when you're ready.
+            </p>
+            <label className="mb-1 block text-xs font-medium text-ay-muted" htmlFor="clone-name">
+              Name
+            </label>
+            <input
+              id="clone-name"
+              value={cloneName}
+              onChange={(e) => setCloneName(e.target.value)}
+              placeholder="My Strategy (copy)"
+              className="mb-3 w-full rounded-md border border-ay-border bg-surface-1 px-3 py-2 text-sm text-ay-text"
+            />
+            <label className="mb-1 block text-xs font-medium text-ay-muted" htmlFor="clone-slug">
+              Slug (config id)
+            </label>
+            <input
+              id="clone-slug"
+              value={cloneSlug}
+              onChange={(e) => setCloneSlug(e.target.value)}
+              placeholder="my-strategy-copy"
+              className="mb-4 w-full rounded-md border border-ay-border bg-surface-1 px-3 py-2 font-mono text-sm text-ay-text"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setCloneOpen(false)}
+                className="h-9 rounded-md border border-ay-border px-4 text-sm hover:border-accent"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={doClone}
+                disabled={clone.isPending || !cloneName.trim() || !cloneSlug.trim()}
+                className="h-9 rounded-md bg-accent px-4 text-sm font-medium text-surface-0 hover:opacity-90 disabled:opacity-50"
+              >
+                Clone
               </button>
             </div>
           </div>
